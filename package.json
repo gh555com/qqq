@@ -1,0 +1,71 @@
+{
+  "name": "qqq",
+  "displayName": "qqq",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "activationEvents": [
+    "*",
+    "onCommand:qqq.q1",
+    "onCommand:qqq.toggleBlockMode"
+  ],
+  "main": "./src/qqq.js",
+  "contributes": {
+    "configuration": [
+      {
+        "title": "QQQ 扩展设置",
+        "properties": {
+          "qqq.showHistoryRecycleBin": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否在文件导航中显示历史回收站。"
+          }
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "qqq.q1",
+        "title": "q1"
+      },
+      {
+        "command": "qqq.toggleBlockMode",
+        "title": "切换块模式"
+      },
+      {
+        "command": "qqq.q2",
+        "title": "q2"
+      },
+      {
+        "command": "qqq.saveAsDialog",
+        "title": "qqq: 新建文件..."
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "qqq.q1",
+        "key": "ctrl+v",
+        "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "qqq.q1",
+        "key": "cmd+v",
+        "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "qqq.q2",
+        "key": "f2",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ]
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository",
+    "publish": "vsce publish",
+    "test": "echo \"Running tests...\" && exit 0"
+  },
+  "dependencies": {
+    "sharp": "^0.34.4"
+  }
+}
