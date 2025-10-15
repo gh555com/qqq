@@ -1,0 +1,45 @@
+# Node 依赖
+node_modules/
+package-lock.json
+
+# 日志文件
+*.log
+E:/r/qqq.log
+
+# VSCode 设置
+.vscode/
+.vscode-test/
+
+# 构建输出
+out/
+dist/
+*.vsix
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*~
+
+# 测试文件
+test-config-fix.js
+
+# 配置文件（个人配置）
+E:/r/pz.ini
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.idea/
+*.swp
+*.swo

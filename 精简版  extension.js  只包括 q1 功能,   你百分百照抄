@@ -1,0 +1,1242 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const vscode = require("vscode");
+// 窗口焦点控制开关：1-保持焦点，0-不强制焦点
+const forceFocusWindow = 0;
+const cp = require("child_process");
+const path = require("path");
+const fs = require("fs");
+let sharp;
+
+try {
+    sharp = require('sharp');
+} catch (e) {
+    sharp = null;
+    console.log('Sharp库未安装，无法调整图片尺寸');
+}
+
+const LOG_PATH = "D:\\view\\p\\kp.log";
+const BASE_DIR = "D:\\view\\p\\";
+
+// 日志
+function logMessage(message, level = "WARN") {
+    if (level !== "ERROR" && level !== "WARN") return;
+    const ts = new Date().toISOString();
+    const line = `[${ts}] [${level}] ${message}\n`;
+    try {
+        fs.mkdirSync("D:\\view\\p", { recursive: true });
+        fs.appendFileSync(LOG_PATH, line);
+    } catch (e) {
+        console.error("日志写入失败:", e);
+    }
+}
+
+// -------- q1 粘贴逻辑 --------
+// 通用Python脚本执行函数
+function runPythonScript(additionalEnv = {}) {
+    const scriptPath = path.join(__dirname, "kp.py");
+    if (!fs.existsSync(scriptPath)) {
+        logMessage("脚本不存在: " + scriptPath, "ERROR");
+        vscode.window.showErrorMessage("脚本不存在");
+        return;
+    }
+
+    // 合并基础环境变量和额外环境变量
+    const env = {
+        ...process.env,
+        PYTHONIOENCODING: "utf-8",
+        ...additionalEnv
+    };
+
+    const child = cp.spawn("python", [scriptPath], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: env
+    });
+
+    let stdout = "";
+    let stderr = "";
+    // 明确指定 UTF-8 编码
+    child.stdout.on("data", d => stdout += d.toString("utf8"));
+    child.stderr.on("data", d => stderr += d.toString("utf8"));
+
+    child.on("close", code => {
+        if (stderr) logMessage("Python stderr: " + stderr, "WARN");
+        if (code !== 0) {
+            logMessage("退出码 " + code, "ERROR");
+            vscode.window.showErrorMessage("执行失败 " + code);
+            return;
+        }
+        try {
+            const result = JSON.parse(stdout.trim());
+            handleResult(result);
+        } catch (e) {
+            logMessage("JSON解析失败: " + e.message, "ERROR");
+        }
+    });
+}
+
+// 初始粘贴命令函数
+function executeClipboardCommand() {
+    runPythonScript();
+}
+
+function handleResult(result) {
+    if (result.error) {
+        logMessage("处理失败: " + result.error, "ERROR");
+        vscode.window.showErrorMessage(result.error);
+        return;
+    }
+    const ed = vscode.window.activeTextEditor;
+    switch (result.type) {
+        case "folder_text":
+            // 处理文件夹路径，直接插入文本，不做任何修饰
+            if (ed) {
+                ed.edit(edit => edit.insert(ed.selection.active, result.text));
+            }
+            break;
+        case "text":
+            if (ed) {
+                ed.edit(edit => edit.insert(ed.selection.active, result.text)).then(() => {
+                    setTimeout(() => renderImages(ed), 50);
+                });
+            }
+            break;
+        case "image":
+            if (ed) {
+                ed.edit(edit => edit.insert(ed.selection.active, `[${result.path}]`)).then(() => {
+                    setTimeout(() => renderImages(ed), 50);
+                });
+            }
+            break;
+        case "file":
+            if (result.files && result.files.length > 0) {
+                if (ed) {
+                    // 插入所有文件的标识符，无论什么格式
+                    const fileMarkers = result.files.map(f => `[${f}]`).join('\n');
+                    ed.edit(edit => edit.insert(ed.selection.active, fileMarkers)).then(() => {
+                        setTimeout(() => renderImages(ed), 50);
+                    });
+                }
+                vscode.window.showInformationMessage("文件已复制 " + result.files.length);
+            }
+            break;
+        case "binary":
+            vscode.window.showInformationMessage("二进制已保存 " + path.basename(result.path));
+            break;
+        case "cancelled":
+            // 用户取消了粘贴操作
+            vscode.window.showInformationMessage("粘贴已取消");
+            break;
+        default:
+            vscode.window.showWarningMessage("未知内容");
+    }
+}
+
+// -------- Decoration & CodeLens --------
+let blockMode = false;
+let decorationType;
+
+// 清理装饰的函数
+function clearDecorations() {
+    if (decorationType) {
+        try { decorationType.dispose(); } catch (e) { }
+        decorationType = null;
+    }
+}
+
+// 异步处理图片渲染
+async function renderImages(editor) {
+    if (!editor) return;
+
+    // 清理旧装饰
+    clearDecorations();
+
+    // 创建新的装饰类型
+    decorationType = vscode.window.createTextEditorDecorationType({});
+    const decos = [];
+    const regex = /\[([A-Za-z]:[\\\/]view[\\\/]p[\\\/][^\[\]]+)\]/gi;
+
+    // 只处理可视区域内的文本
+    const visibleRanges = editor.visibleRanges;
+    if (!visibleRanges || visibleRanges.length === 0) return;
+
+    for (const range of visibleRanges) {
+        // 获取可视区域内的文本
+        const text = editor.document.getText(range);
+
+        // 重置正则表达式的lastIndex
+        regex.lastIndex = 0;
+        let match;
+
+        while ((match = regex.exec(text))) {
+            // 计算匹配项在文档中的实际位置
+            const offsetInVisibleRange = editor.document.offsetAt(range.start) + match.index;
+            const pos = editor.document.positionAt(offsetInVisibleRange);
+            const endPos = pos.translate(0, match[0].length);
+            const decoRange = new vscode.Range(pos, endPos);
+
+            const absPath = match[1].replace(/\//g, '\\');
+
+            // 检查文件是否存在 - 不记录不存在的文件日志，避免日志堆积
+            if (!fs.existsSync(absPath)) {
+                continue;
+            }
+
+            const ext = path.extname(absPath).toLowerCase();
+
+            const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif'].includes(ext);
+
+            // 创建装饰对象
+            const deco = {
+                range: decoRange,
+                renderOptions: {}
+            };
+
+            // 所有资源类型统一处理方式，保持原始文字显示
+            if (isImage) {
+                try {
+                    if (sharp) {
+                        // 统一目标尺寸：512x288
+                        const TARGET_WIDTH = 512;
+                        const TARGET_HEIGHT = 288;
+
+                        // 获取图片的MIME类型
+                        let mime;
+                        if (ext === '.jpg' || ext === '.jpeg') {
+                            mime = 'jpeg';
+                        } else if (ext === '.gif') {
+                            mime = 'gif';
+                        } else if (ext === '.webp') {
+                            mime = 'webp';
+                        } else {
+                            mime = 'png';
+                        }
+
+                        // 统一目标尺寸：512x288
+                        // 原图小于此尺寸时，保留原图大小并在四周填充透明像素
+                        // 原图大于此尺寸时，等比缩放到适应此尺寸
+                        const buffer = await sharp(absPath)
+                            .resize(TARGET_WIDTH, TARGET_HEIGHT, {
+                                fit: 'contain', // 保持原图比例，在目标尺寸内完全显示
+                                position: 'center', // 居中显示
+                                background: { r: 0, g: 0, b: 0, alpha: 0 } // 透明背景填充
+                            })
+                            .toBuffer();
+
+                        const base64 = buffer.toString('base64');
+                        const dataUri = vscode.Uri.parse(`data:image/${mime};base64,${base64}`);
+
+                        // 设置图片装饰选项 - 512x288图片区域，516x292虚线框，橙黄色背景
+                        // 调整为绝对靠左显示
+                        deco.renderOptions.after = {
+                            contentIconPath: dataUri,
+                            margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px", // 负左边距让图片更靠左
+                            height: '294px',
+                            width: '518px',
+                            // 使用padding和backgroundColor来创建橙黄色背景和虚线框效果
+                            padding: '2px',
+                            border: '1px dashed #888',
+                            backgroundColor: '#fff3cd', // 橙黄色背景色
+                            display: 'block',
+                            position: 'relative' // 使图片相对于其正常位置定位
+                        };
+                    } else {
+                        // 如果没有sharp库，使用原始方式显示
+                        deco.renderOptions.after = {
+                            contentIconPath: vscode.Uri.file(absPath),
+                            margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px", // 负左边距让图片更靠左
+                            height: blockMode ? "auto" : "148px",
+                            width: "auto",
+                            border: '1px dashed #888',
+                            backgroundColor: 'rgba(230, 230, 250, 0.2)',
+                            display: 'block',
+                            position: 'relative' // 使图片相对于其正常位置定位
+                        };
+                    }
+                } catch (error) {
+                    logMessage("处理图片失败: " + error.message, "WARN");
+                    // 出错时使用原始方式显示
+                    deco.renderOptions.after = {
+                        contentIconPath: vscode.Uri.file(absPath),
+                        margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px", // 负左边距让图片更靠左
+                        height: blockMode ? "auto" : "148px",
+                        width: "auto",
+                        border: '1px dashed #888',
+                        backgroundColor: 'rgba(230, 230, 250, 0.2)',
+                        display: 'block',
+                        position: 'relative' // 使图片相对于其正常位置定位
+                    };
+                }
+            } else {
+                // 非图片文件只添加简单装饰，不隐藏原始文字
+                deco.renderOptions.textDecoration = 'underline wavy #888';
+                deco.renderOptions.backgroundColor = 'rgba(230, 230, 250, 0.1)';
+                // 确保字符串显示在正确的位置
+                deco.renderOptions.fontSize = '14px';
+                deco.renderOptions.lineHeight = '1.2';
+                deco.renderOptions.display = 'block';
+            }
+
+            decos.push(deco);
+        }
+    }
+
+    // 应用装饰
+    editor.setDecorations(decorationType, decos);
+}
+
+class FileCodeLensProvider {
+    provideCodeLenses(document) {
+        const lenses = [];
+        const regex = /\[([A-Za-z]:[\\\/]view[\\\/]p[\\\/][^\[\]]+)\]/gi;
+        const text = document.getText();
+        let match;
+
+        while ((match = regex.exec(text))) {
+            const pos = document.positionAt(match.index);
+            const range = new vscode.Range(pos, pos);
+            const absPath = match[1].replace(/\//g, '\\');
+
+            // 检查文件是否存在
+            if (fs.existsSync(absPath)) {
+                lenses.push(new vscode.CodeLens(range, {
+                    title: blockMode ? "qqq" : "aaa",
+                    command: "qqq.openFile",
+                    arguments: [absPath]
+                }));
+            }
+        }
+        return lenses;
+    }
+}
+
+// -------- 渲染优化相关函数 --------
+// 防抖处理函数，避免短时间内多次触发渲染
+// 添加冷却时间机制：正在执行渲染时忽略新的触发
+function debounceRender(editor, delay = 100) {
+    // 如果正在执行渲染，忽略新的触发
+    if (debounceRender.isProcessing) {
+        return;
+    }
+
+    clearTimeout(debounceRender.timer);
+    debounceRender.timer = setTimeout(() => {
+        if (editor && !editor.document.isClosed) {
+            // 标记为正在处理
+            debounceRender.isProcessing = true;
+
+            // 执行渲染，并在完成后取消处理标记
+            Promise.resolve().then(() => {
+                renderImages(editor);
+            }).finally(() => {
+                // 确保无论成功失败都会取消处理标记
+                setTimeout(() => {
+                    debounceRender.isProcessing = false;
+                }, 50); // 小延迟确保渲染完成
+            });
+        }
+    }, delay);
+}
+
+// 初始化处理状态标志
+debounceRender.isProcessing = false;
+
+// 批量渲染可见编辑器
+function renderVisibleEditors(delay = 50) {
+    const editors = vscode.window.visibleTextEditors;
+    if (editors && editors.length) {
+        editors.forEach(ed => {
+            debounceRender(ed, delay);
+        });
+    }
+}
+
+// -------- 配置文件处理函数 --------
+// 读取最近保存的目录
+function getRecentDirectories() {
+    const configPath = 'E:\\r\\pz.ini';
+    const recentDirs = [];
+
+    try {
+        if (!fs.existsSync(configPath)) {
+            // 创建目录和配置文件
+            fs.mkdirSync(path.dirname(configPath), { recursive: true });
+            fs.writeFileSync(configPath, '[qqq]\nrecent_dirs=\n', 'utf8');
+            return recentDirs;
+        }
+
+        const content = fs.readFileSync(configPath, 'utf8');
+        const qqqSection = content.match(/\[qqq\]([\s\S]*?)(\[|$)/);
+
+        if (qqqSection && qqqSection[1]) {
+            const recentMatch = qqqSection[1].match(/recent_dirs=(.*)/);
+            if (recentMatch && recentMatch[1]) {
+                recentDirs.push(...recentMatch[1].split(',').filter(dir => dir && fs.existsSync(dir)).slice(0, 10));
+            }
+        }
+    } catch (error) {
+        logMessage('读取配置文件失败: ' + error.message, 'ERROR');
+    }
+
+    return recentDirs;
+}
+
+// 保存最近使用的目录
+function saveRecentDirectory(directory) {
+    const configPath = 'E:\\r\\pz.ini';
+
+    try {
+        if (!fs.existsSync(configPath)) {
+            fs.mkdirSync(path.dirname(configPath), { recursive: true });
+            fs.writeFileSync(configPath, `[qqq]\nrecent_dirs=${directory}\n`, 'utf8');
+            return;
+        }
+
+        let content = fs.readFileSync(configPath, 'utf8');
+        let qqqSection = content.match(/\[qqq\]([\s\S]*?)(\[|$)/);
+        let recentDirs = [];
+
+        if (qqqSection && qqqSection[1]) {
+            const recentMatch = qqqSection[1].match(/recent_dirs=(.*)/);
+            if (recentMatch && recentMatch[1]) {
+                recentDirs = recentMatch[1].split(',').filter(dir => dir && dir !== directory);
+            }
+        }
+
+        // 添加新目录到开头并限制为10个
+        recentDirs.unshift(directory);
+        recentDirs = recentDirs.slice(0, 10);
+
+        const recentDirsStr = recentDirs.join(',');
+
+        if (qqqSection) {
+            // 替换现有的recent_dirs行
+            const newQqqSection = qqqSection[1].replace(/recent_dirs=.*$/m, `recent_dirs=${recentDirsStr}`);
+            content = content.replace(/\[qqq\]([\s\S]*?)(\[|$)/, `[qqq]${newQqqSection}$2`);
+        } else {
+            // 添加新的qqq节
+            content += `\n[qqq]\nrecent_dirs=${recentDirsStr}\n`;
+        }
+
+        fs.writeFileSync(configPath, content, 'utf8');
+    } catch (error) {
+        logMessage('保存配置文件失败: ' + error.message, 'ERROR');
+    }
+}
+
+// 获取驱动器列表（Windows系统）
+function getDrives() {
+    const drives = [];
+
+    if (process.platform === 'win32') {
+        try {
+            const child = cp.spawnSync('wmic', ['logicaldisk', 'get', 'caption'], { encoding: 'utf8' });
+            const output = child.stdout;
+
+            // 解析输出，获取驱动器列表
+            const lines = output.split('\n');
+            for (const line of lines) {
+                const driveMatch = line.match(/([A-Z]:)/);
+                if (driveMatch) {
+                    drives.push(driveMatch[1]);
+                }
+            }
+        } catch (error) {
+            logMessage('获取驱动器列表失败: ' + error.message, 'ERROR');
+            // 默认添加C盘
+            drives.push('C:');
+        }
+    } else {
+        // 非Windows系统，默认添加根目录
+        drives.push('/');
+    }
+
+    return drives;
+}
+
+// 获取目录树结构
+function getDirectoryStructure(dirPath, depth = 0, maxDepth = 2) {
+    const structure = {
+        path: dirPath,
+        name: path.basename(dirPath),
+        isDir: true,
+        children: []
+    };
+
+    if (depth >= maxDepth) {
+        return structure;
+    }
+
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        const dirEntries = entries.filter(entry => entry.isDirectory());
+
+        for (const dirEntry of dirEntries) {
+            try {
+                const childPath = path.join(dirPath, dirEntry.name);
+                const childStat = fs.statSync(childPath);
+                if (childStat.isDirectory()) {
+                    structure.children.push(getDirectoryStructure(childPath, depth + 1, maxDepth));
+                }
+            } catch (error) {
+                // 忽略无法访问的目录
+            }
+        }
+    } catch (error) {
+        logMessage(`读取目录结构失败: ${dirPath}`, 'ERROR');
+    }
+
+    return structure;
+}
+
+// 获取目录内容
+function getDirectoryContents(dirPath) {
+    const contents = {
+        dirs: [],
+        files: []
+    };
+
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+            const entryPath = path.join(dirPath, entry.name);
+
+            try {
+                const stat = fs.statSync(entryPath);
+
+                if (entry.isDirectory()) {
+                    contents.dirs.push({
+                        name: entry.name,
+                        path: entryPath,
+                        isDir: true,
+                        size: stat.size,
+                        mtime: stat.mtime.toISOString()
+                    });
+                } else {
+                    contents.files.push({
+                        name: entry.name,
+                        path: entryPath,
+                        isDir: false,
+                        size: stat.size,
+                        mtime: stat.mtime.toISOString()
+                    });
+                }
+            } catch (error) {
+                // 忽略无法访问的文件/目录
+            }
+        }
+
+        // 排序：文件夹在前，按名称排序
+        contents.dirs.sort((a, b) => a.name.localeCompare(b.name));
+        contents.files.sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+        logMessage(`读取目录内容失败: ${dirPath}`, 'ERROR');
+    }
+
+    return contents;
+}
+
+// -------- 自定义另存为对话框 --------
+function showSaveAsDialog() {
+    const recentDirs = getRecentDirectories();
+    let currentPath = recentDirs.length > 0 ? recentDirs[0] : process.env.USERPROFILE || 'C:\\';
+
+    // 确保当前路径存在
+    try {
+        if (!fs.existsSync(currentPath)) {
+            currentPath = process.env.USERPROFILE || 'C:\\';
+        }
+    } catch (error) {
+        currentPath = process.env.USERPROFILE || 'C:\\';
+    }
+
+    // 创建Webview面板
+    const panel = vscode.window.createWebviewPanel(
+        'saveAsDialog',
+        'qqq new 新建',
+        vscode.ViewColumn.Active,
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            enableFindWidget: true,
+            enableCommandUris: true
+        }
+    );
+
+    // 设置面板尺寸
+    panel.iconPath = vscode.Uri.file(path.join(__filename, '..', 'icon.png'));
+
+    // 根据开关决定是否启用窗口保持焦点功能
+    if (forceFocusWindow === 1) {
+        panel.onDidChangeViewState(() => {
+            if (panel.viewColumn) {
+                panel.reveal(panel.viewColumn, false);
+            }
+        });
+    }
+
+    // 生成HTML内容
+    function getWebviewContent() {
+        const drives = getDrives();
+        const directoryContents = getDirectoryContents(currentPath);
+
+        return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>qqq new 新建</title>
+    <style>
+        /* 全局样式重置 */
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            background-color: #f8f9fa;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #dee2e6;
+        }
+
+        /* 容器使用固定宽度 */
+        .container {
+            display: flex;
+            flex: 1;
+            width: 100%;
+            max-width: 100%;
+            background-color: #fff;
+        }
+
+        /* 左侧导航栏 */
+        .sidebar {
+            width: 200px;
+            background-color: #fff;
+            border-right: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 10px;
+            font-weight: bold;
+            background-color: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .nav-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .nav-item:hover {
+            background-color: #e3f2fd;
+        }
+
+        .nav-item.active {
+            background-color: #bbdefb;
+        }
+
+        /* 主内容区 - 最重要的改变是移除max-width并确保正确的溢出行为 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        /* 最近保存目录 */
+        .recent-section {
+            padding: 10px;
+            background-color: #fff;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .recent-header {
+            font-weight: bold;
+            margin-bottom: 2px;
+            font-size: 13px;
+            color: #666;
+        }
+        .recent-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0px;
+        }
+        .recent-item {
+            padding: 2px 8px;
+            background-color: #e9ecef;
+            border-radius: 0px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            margin: 0;
+        }
+        .recent-item:hover {
+            background-color: #dee2e6;
+        }
+        /* 地址栏 */
+        .address-bar {
+            padding: 10px;
+            background-color: #fff;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .address-input {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ced4da;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        /* 文件列表 - 确保有明确的滚动条 */
+        .file-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            overflow-x: auto;
+            /* 确保滚动条始终可见 */
+            scrollbar-width: thin;
+            scrollbar-color: #888 #f1f1f1;
+        }
+
+        /* 滚动条样式 */
+        .file-list-container::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        .file-list-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .file-list-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 5px;
+        }
+
+        .file-list-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .file-item {
+            padding: 2px 8px;
+            cursor: pointer;
+            border-radius: 0px;
+            display: flex;
+            align-items: center;
+            margin: 0;
+            min-height: 20px;
+        }
+        .file-item:hover {
+            background-color: #e3f2fd;
+        }
+        .file-icon {
+            margin-right: 8px;
+        }
+        .file-name {
+            flex: 1;
+        }
+        /* 底部操作区 */
+        .footer {
+            padding: 10px;
+            background-color: #fff;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .filename-input-container {
+            flex: 1;
+            margin-right: 10px;
+        }
+        .filename-label {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 3px;
+            display: block;
+        }
+        .filename-input {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ced4da;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        .button {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .save-button {
+            background-color: #0078d4;
+            color: white;
+        }
+        .cancel-button {
+            background-color: #f4f4f4;
+            color: #333;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧导航栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">文件导航</div>
+            <!-- 驱动器 -->
+            ${drives.map(drive => `
+            <button class="nav-item" onclick="navigateTo('${drive}')">${drive}</button>
+            `).join('')}
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 最近保存目录 -->
+                <div class="recent-section">
+                    <div class="recent-list">
+                        ${recentDirs.map(dir => `
+                        <div class="recent-item" onclick="navigateTo('${dir.replace(/\\/g, '\\\\')}')">${dir}</div>
+                        `).join('')}
+                    </div>
+                </div>
+
+            <!-- 地址栏 -->
+            <div class="address-bar">
+                <input type="text" id="addressInput" class="address-input" value="${currentPath}" onkeydown="handleAddressInputKeyDown(event)">
+            </div>
+
+            <!-- 文件列表 -->
+            <div class="file-list-container" id="fileList">
+                <!-- 上级目录 -->
+                ${currentPath !== '\\' && currentPath !== currentPath.split('\\')[0] + '\\' ? `
+                <div class="file-item" onclick="navigateTo('${path.dirname(currentPath).replace(/\\/g, '\\\\')}')">
+                    <span class="file-icon">📁</span>
+                    <span class="file-name">..</span>
+                </div>
+                ` : ''}
+
+                <!-- 文件夹 -->
+                ${directoryContents.dirs.map(dir => `
+                <div class="file-item" onclick="navigateTo('${dir.path.replace(/\\/g, '\\\\')}')">
+                    <span class="file-icon">📁</span>
+                    <span class="file-name">${dir.name}</span>
+                </div>
+                `).join('')}
+
+                <!-- 文件 -->
+                ${directoryContents.files.map(file => `
+                <div class="file-item">
+                    <span class="file-icon">📄</span>
+                    <span class="file-name">${file.name}</span>
+                </div>
+                `).join('')}
+            </div>
+
+            <!-- 底部操作区 -->
+            <div class="footer">
+                <div class="filename-input-container">
+                    <input type="text" id="filenameInput" class="filename-input" onkeydown="handleFilenameInputKeyDown(event)">
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <button class="button save-button" onclick="saveFile()">文件</button>
+                    <button class="button cancel-button" onclick="createFolder()">文件夹</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 获取VS Code API对象
+        const vscode = acquireVsCodeApi();
+
+        // 初始化时聚焦文件名输入框
+        document.addEventListener('DOMContentLoaded', () => {
+            const filenameInput = document.getElementById('filenameInput');
+            filenameInput.focus();
+        });
+
+        // 导航到指定路径
+        function navigateTo(path) {
+            // 确保路径正确转义
+            vscode.postMessage({ command: 'navigate', path: path });
+        }
+
+        // 处理地址输入框的回车键
+        function handleAddressInputKeyDown(event) {
+            if (event.key === 'Enter') {
+                const path = event.target.value;
+                vscode.postMessage({ command: 'navigate', path: path });
+            }
+        }
+
+        // 处理文件名输入框的回车键
+        function handleFilenameInputKeyDown(event) {
+            if (event.key === 'Enter') {
+                saveFile();
+            }
+        }
+
+        // 保存文件
+        function saveFile() {
+            const filename = document.getElementById('filenameInput').value.trim();
+            if (filename) {
+                vscode.postMessage({ command: 'save', filename: filename });
+            } else {
+                alert('请输入文件名');
+            }
+        }
+
+        // 取消操作
+        function cancel() {
+            vscode.postMessage({ command: 'cancel' });
+        }
+
+        // 监听VSCode消息
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'update') {
+                document.getElementById('addressInput').value = message.currentPath;
+                document.getElementById('fileList').innerHTML = message.fileListHtml;
+            }
+            else if (message.command === 'clearFilenameInput') {
+                document.getElementById('filenameInput').value = '';
+                document.getElementById('filenameInput').focus();
+            }
+        });
+
+        // 处理键盘事件
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && event.ctrlKey) {
+                saveFile();
+            }
+
+        });
+
+        // 创建文件夹
+        function createFolder() {
+            const folderName = document.getElementById('filenameInput').value.trim();
+            if (folderName) {
+                vscode.postMessage({ command: 'createFolder', folderName: folderName });
+            } else {
+                alert('请输入文件夹名');
+            }
+        }
+    </script>
+</body>
+</html>
+        `;
+    }
+
+    // 设置Webview内容
+    panel.webview.html = getWebviewContent();
+
+    // 处理Webview消息
+    panel.webview.onDidReceiveMessage(message => {
+        switch (message.command) {
+            case 'navigate':
+                try {
+                    let newPath = message.path;
+                    // 确保路径格式正确，修复Windows路径问题
+                    if (process.platform === 'win32') {
+                        // 处理驱动器路径，确保以\\结尾
+                        if (newPath.match(/^[A-Z]:$/i)) {
+                            newPath = newPath + '\\';
+                        }
+                    }
+
+                    if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
+                        currentPath = newPath;
+                        // 更新Webview内容
+                        const directoryContents = getDirectoryContents(currentPath);
+
+                        // 生成文件列表HTML
+                        let fileListHtml = '';
+
+                        // 添加上级目录
+                        if (currentPath !== '\\' && currentPath !== currentPath.split('\\')[0] + '\\') {
+                            fileListHtml += `
+                            <div class="file-item" onclick="navigateTo('${path.dirname(currentPath).replace(/\\/g, '\\\\')}')">
+                                <span class="file-icon">📁</span>
+                                <span class="file-name">..</span>
+                            </div>
+                            `;
+                        }
+
+                        // 添加文件夹
+                        directoryContents.dirs.forEach(dir => {
+                            fileListHtml += `
+                            <div class="file-item" onclick="navigateTo('${dir.path.replace(/\\/g, '\\\\')}')">
+                                <span class="file-icon">📁</span>
+                                <span class="file-name">${dir.name}</span>
+                            </div>
+                            `;
+                        });
+
+                        // 添加文件
+                        directoryContents.files.forEach(file => {
+                            fileListHtml += `
+                            <div class="file-item">
+                                <span class="file-icon">📄</span>
+                                <span class="file-name">${file.name}</span>
+                            </div>
+                            `;
+                        });
+
+                        // 发送更新消息
+                        panel.webview.postMessage({
+                            command: 'update',
+                            currentPath: currentPath,
+                            fileListHtml: fileListHtml
+                        });
+                    } else {
+                        vscode.window.showErrorMessage('无效的目录路径: ' + newPath);
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage('导航失败: ' + error.message);
+                    logMessage('导航失败: ' + error.message, 'ERROR');
+                }
+                break;
+
+            case 'save':
+                const fileName = message.filename;
+                const fullFilePath = path.join(currentPath, fileName);
+
+                try {
+                    // 保存最近目录
+                    saveRecentDirectory(currentPath);
+
+                    // 检查文件是否已存在
+                    if (fs.existsSync(fullFilePath)) {
+                        // 显示确认对话框
+                        vscode.window.showWarningMessage(
+                            `文件 "${fileName}" 已存在，是否覆盖？`,
+                            { modal: true },
+                            '是',
+                            '否'
+                        ).then(answer => {
+                            if (answer === '是') {
+                                // 创建带有199个换行的文件
+                                const content = '\n'.repeat(199);
+                                fs.writeFileSync(fullFilePath, content, 'utf8');
+
+                                // 关闭对话框
+                                panel.dispose();
+
+                                // 在VSCode中打开创建的文件
+                                vscode.workspace.openTextDocument(fullFilePath)
+                                    .then(doc => vscode.window.showTextDocument(doc));
+                            }
+                        });
+                    } else {
+                        // 文件不存在，直接创建
+                        const content = '\n'.repeat(199);
+                        fs.writeFileSync(fullFilePath, content, 'utf8');
+
+                        // 关闭对话框
+                        panel.dispose();
+
+                        // 在VSCode中打开创建的文件
+                        vscode.workspace.openTextDocument(fullFilePath)
+                            .then(doc => vscode.window.showTextDocument(doc));
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage('创建文件失败: ' + error.message);
+                    logMessage('创建文件失败: ' + error.message, 'ERROR');
+                }
+                break;
+
+            case 'createFolder':
+                const folderName = message.folderName;
+                const newFolderPath = path.join(currentPath, folderName);
+
+                try {
+                    if (!fs.existsSync(newFolderPath)) {
+                        fs.mkdirSync(newFolderPath);
+
+                        // 更新Webview内容以显示新创建的文件夹
+                        const directoryContents = getDirectoryContents(currentPath);
+                        let fileListHtml = '';
+
+                        // 添加上级目录
+                        if (currentPath !== '\\' && currentPath !== currentPath.split('\\')[0] + '\\') {
+                            fileListHtml += `
+                            <div class="file-item" onclick="navigateTo('${path.dirname(currentPath).replace(/\\/g, '\\\\')}')">
+                                <span class="file-icon">📁</span>
+                                <span class="file-name">..</span>
+                            </div>
+                            `;
+                        }
+
+                        // 添加文件夹
+                        directoryContents.dirs.forEach(dir => {
+                            fileListHtml += `
+                            <div class="file-item" onclick="navigateTo('${dir.path.replace(/\\/g, '\\\\')}')">
+                                <span class="file-icon">📁</span>
+                                <span class="file-name">${dir.name}</span>
+                            </div>
+                            `;
+                        });
+
+                        // 添加文件
+                        directoryContents.files.forEach(file => {
+                            fileListHtml += `
+                            <div class="file-item">
+                                <span class="file-icon">📄</span>
+                                <span class="file-name">${file.name}</span>
+                            </div>
+                            `;
+                        });
+
+                        // 发送更新消息
+                        panel.webview.postMessage({
+                            command: 'update',
+                            currentPath: currentPath,
+                            fileListHtml: fileListHtml
+                        });
+
+                        // 清空文件名输入框
+                        panel.webview.postMessage({
+                            command: 'clearFilenameInput'
+                        });
+
+                        vscode.window.showInformationMessage(`文件夹 "${folderName}" 创建成功`);
+                    } else {
+                        vscode.window.showErrorMessage(`文件夹 "${folderName}" 已存在`);
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage('创建文件夹失败: ' + error.message);
+                    logMessage('创建文件夹失败: ' + error.message, 'ERROR');
+                }
+                break;
+
+            case 'cancel':
+                panel.dispose();
+                break;
+        }
+    });
+
+    // 处理面板关闭
+    panel.onDidDispose(() => {
+        // 清理资源
+    });
+}
+
+// -------- activate --------
+function activate(context) {
+    context.subscriptions.push(
+        vscode.commands.registerCommand("qqq.kp", executeClipboardCommand),
+        vscode.commands.registerCommand("qqq.kp2", () => {
+            blockMode = !blockMode;
+            const ed = vscode.window.activeTextEditor;
+            if (ed) renderImages(ed);
+        }),
+        vscode.commands.registerCommand("qqq.openFile", (filePath) => {
+            if (!fs.existsSync(filePath)) {
+                vscode.window.showErrorMessage("文件不存在: " + filePath);
+                return;
+            }
+            try {
+                // 使用更可靠的方式打开文件，确保中文路径正确处理
+                if (process.platform === 'win32') {
+                    // Windows平台使用start命令
+                    cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+                } else if (process.platform === 'darwin') {
+                    // macOS平台使用open命令
+                    cp.exec(`open "${filePath}"`);
+                } else {
+                    // Linux及其他平台使用xdg-open命令
+                    cp.exec(`xdg-open "${filePath}"`);
+                }
+            } catch (error) {
+                // 如果上述方法失败，尝试使用VSCode的openExternal
+                vscode.env.openExternal(vscode.Uri.file(filePath));
+            }
+        }),
+        vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog),
+        vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
+
+        // 切换活动编辑器
+        vscode.window.onDidChangeActiveTextEditor(editor => {
+            if (editor) {
+                debounceRender(editor, 100);
+            }
+        }),
+
+        // 可见编辑器范围改变时
+        vscode.window.onDidChangeTextEditorVisibleRanges(event => {
+            debounceRender(event.textEditor, 50);
+        }),
+
+
+        // 文档内容改变时（编辑）
+        vscode.workspace.onDidChangeTextDocument(event => {
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor && activeEditor.document === event.document) {
+                debounceRender(activeEditor, 260);
+            }
+        }),
+
+    );
+
+    // 初始化渲染：单次延迟确保编辑器完全加载
+    setTimeout(() => {
+        renderVisibleEditors(0);
+    }, 100);
+}
+
+function deactivate() {
+    clearDecorations();
+}
+
+module.exports = { activate, deactivate };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
