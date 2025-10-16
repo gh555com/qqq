@@ -51,11 +51,7 @@
 
 		/* 左侧导航栏 - 固定位置 */
 		.sidebar {
-			width: {
-					{
-					SIDEBAR_WIDTH
-				}
-			}
+			width: {{SIDEBAR_WIDTH}}
 
 			px;
 			background-color: #fff;
@@ -76,30 +72,28 @@
 
 		/* 可拖动的分割线 */
 		.sidebar-resizer {
-			width: 4px;
-			background-color: transparent;
+			width: 8px;
+			background-color: #e0e0e0;
 			position: fixed;
 
-			left: {
-					{
-					SIDEBAR_WIDTH
-				}
-			}
+			left: {{SIDEBAR_WIDTH}}
 
 			px;
 			top: 0;
 			bottom: 60px;
 			z-index: 30;
+			cursor: ew-resize;
+			transition: background-color 0.2s, width 0.2s;
 		}
 
 		.sidebar-resizer:hover {
-			background-color: #ccc;
-			width: var(--sidebar-resizer-width);
+			background-color: #999;
+			width: 8px;
 		}
 
 		.sidebar-resizer.active {
-			background-color: #999;
-			width: var(--sidebar-resizer-width);
+			background-color: #666;
+			width: 8px;
 		}
 
 		.sidebar-header {
@@ -147,11 +141,7 @@
 			overflow-x: hidden;
 			position: absolute;
 
-			left: {
-					{
-					SIDEBAR_WIDTH
-				}
-			}
+			left: {{SIDEBAR_WIDTH}}
 
 			px;
 			/* 侧边栏宽度 */
@@ -181,11 +171,7 @@
 			display: flex;
 			flex-direction: column;
 
-			gap: {
-					{
-					LINE_SPACING
-				}
-			}
+			gap: {{LINE_SPACING}}
 
 			px;
 		}
@@ -313,11 +299,7 @@
 			display: flex;
 			align-items: center;
 
-			margin: {
-					{
-					LINE_SPACING
-				}
-			}
+			margin: {{LINE_SPACING}}
 
 			px 0;
 			min-height: 20px;
@@ -667,211 +649,10 @@
 			<span>Refresh size</span>
 		</div>
 	</div>
-
 	<script>
-		// 获取VS Code API对象
-		const vscode = acquireVsCodeApi();
-		const sizeMode = '{{SIZE_MODE}}';
-		let currentPath = '{{CURRENT_PATH_JS}}';
+    {{INLINE_SCRIPT}}
+</script>
 
-		// 初始化时聚焦文件名输入框
-		document.addEventListener('DOMContentLoaded', () => {
-			const filenameInput = document.getElementById('filenameInput');
-			filenameInput.focus();
-
-			// 首次加载后，更新文件列表 (extension会发送update消息)
-			updateResourceExplorer();
-
-			// [FIXED] 添加对文件列表空白区域的点击监听，用于取消选中
-			document.getElementById('fileList').addEventListener('click', (event) => {
-				if (event.target === event.currentTarget) {
-					const prevSelected = document.querySelector('.file-item.selected');
-					if (prevSelected) {
-						// 如果有重命名框，先取消重命名
-						const renameInput = prevSelected.querySelector('.rename-input');
-						if (renameInput) {
-							cancelRename(prevSelected);
-						}
-						prevSelected.classList.remove('selected');
-					}
-					selectedItem = null;
-				}
-			});
-		});
-
-		// 导航到指定路径 (侧边栏、最近目录、回收站、地址栏回车)
-		function navigateTo(path) {
-			// 确保路径正确转义
-			vscode.postMessage({ command: 'navigate', path: path });
-		}
-
-		// 导航进入文件夹 (文件列表中的文件夹名称区域)
-		function navigateIntoFolder(path) {
-			// 确保路径正确转义
-			vscode.postMessage({ command: 'navigate', path: path });
-		}
-
-		// 处理地址输入框的回车键
-		function handleAddressInputKeyDown(event) {
-			if (event.key === 'Enter') {
-				const path = event.target.value;
-				vscode.postMessage({ command: 'navigate', path: path });
-			}
-		}
-
-		// 当前焦点元素类型 (保持不变)
-		let currentFocusType = 'filenameInput';
-
-		// 监听焦点事件，更新焦点类型
-		document.addEventListener('focusin', (event) => {
-			updateFocusType(event.target);
-		});
-
-		// 添加焦点失去事件处理，确保输入框失去焦点时能正确更新焦点状态
-		document.addEventListener('focusout', (event) => {
-			if (event.target.id === 'filenameInput' || event.target.id === 'addressInput' || event.target.classList.contains('rename-input')) {
-				// 延迟一下，让新的焦点元素有时间获取焦点
-				setTimeout(() => {
-					// 如果新的焦点不在输入框上，更新焦点类型
-					const activeElement = document.activeElement;
-					if (activeElement.id !== 'filenameInput' && activeElement.id !== 'addressInput' && !activeElement.classList.contains('rename-input')) {
-						updateFocusType(activeElement);
-					}
-				}, 0);
-			}
-		});
-
-		// 添加点击事件处理，确保点击非输入框区域时能正确更新焦点状态
-		document.addEventListener('click', (event) => {
-			// 隐藏所有右键菜单
-			hideAllContextMenus();
-
-			// 如果点击的不是输入框，并且当前焦点状态还是input，则更新焦点类型
-			if ((event.target.id !== 'filenameInput' && event.target.id !== 'addressInput' && !event.target.classList.contains('rename-input')) &&
-				currentFocusType === 'input') {
-				updateFocusType(event.target);
-			}
-		});
-
-		// 更新焦点类型的辅助函数 (修改：增加对 rename-input 的识别)
-		function updateFocusType(element) {
-			if (element.id === 'filenameInput' || element.id === 'addressInput' || element.classList.contains('rename-input')) {
-				currentFocusType = 'input'; // 焦点在输入框
-			} else if (element.classList.contains('file-list-container') ||
-				element.classList.contains('file-item') ||
-				element.closest('.file-list-container')) {
-				currentFocusType = 'fileList'; // 焦点在文件列表区
-			} else if (element.classList.contains('sidebar') ||
-				element.classList.contains('nav-item') ||
-				element.closest('.sidebar')) {
-				currentFocusType = 'sidebar'; // 焦点在侧边栏
-			} else if (element.classList.contains('recent-section') ||
-				element.classList.contains('recent-item') ||
-				element.closest('.recent-section')) {
-				currentFocusType = 'recentSection'; // 焦点在最近保存区
-			} else {
-				currentFocusType = 'other'; // 其他区域
-			}
-		}
-
-		// 处理文件名输入框的键盘事件 (保持不变)
-		function handleFilenameInputKeyDown(event) {
-			if (event.key === 'Enter') {
-				saveFile();
-			}
-		}
-
-		// 保存文件 (保持不变)
-		function saveFile() {
-			const filename = document.getElementById('filenameInput').value.trim();
-			if (filename) {
-				// 获取当前的pin状态
-				const pinButton = document.getElementById('pinButton');
-				const pinBox = pinButton.querySelector('.pin-box');
-				const isPinned = pinBox.classList.contains('pinned');
-
-				vscode.postMessage({
-					command: 'save',
-					filename: filename,
-					isPinned: isPinned,
-					openInCurrentGroup: !isPinned // 常驻时在右侧打开，不常驻时在当前组打开
-				});
-
-				// 在常驻状态下，清空文件名输入框，方便继续新建文件
-				if (isPinned) {
-					document.getElementById('filenameInput').value = '';
-					// 让文件名输入框保持焦点
-					document.getElementById('filenameInput').focus();
-				}
-			} else {
-				alert('请输入文件名');
-			}
-		}
-
-		// 切换pin状态 (保持不变)
-		function togglePin() {
-			const pinButton = document.getElementById('pinButton');
-			const pinBox = pinButton.querySelector('.pin-box');
-			const pinCheckbox = pinButton.querySelector('.pin-checkbox');
-
-			// 获取当前状态
-			const isCurrentlyPinned = pinBox.classList.contains('pinned');
-			const newPinState = !isCurrentlyPinned;
-
-			// 更新样式和显示
-			if (newPinState) {
-				pinBox.classList.add('pinned');
-				pinCheckbox.textContent = '✓';
-			} else {
-				pinBox.classList.remove('pinned');
-				pinCheckbox.textContent = '□';
-			}
-
-			// 保存pin状态到VS Code
-			vscode.postMessage({
-				command: 'togglePin',
-				isPinned: newPinState
-			});
-		}
-
-		// 从最近目录中移除并添加到回收站 (保持不变)
-		function removeFromRecent(path) {
-			vscode.postMessage({ command: 'removeFromRecent', path: path });
-		}
-
-		// 取消操作 (保持不变)
-		function cancel() {
-			vscode.postMessage({ command: 'cancel' });
-		}
-
-		// 刷新当前目录的大小显示
-		function refreshSizeDisplay() {
-			const fileList = document.getElementById('fileList');
-			const items = fileList.querySelectorAll('.file-item');
-
-			items.forEach(item => {
-				const szArea = item.querySelector('.sz-area');
-				const size = item.dataset.size;
-				const type = item.dataset.type;
-
-				if (szArea) {
-					// [FIXED] 刷新时，也显示等待点
-					if (type === 'file' && sizeMode !== 'none') {
-						szArea.textContent = '    •    ';
-					} else {
-						szArea.textContent = ''; // 清空文件夹的大小
-					}
-					vscode.postMessage({
-						command: 'requestSize',
-						path: item.dataset.path,
-						type: type
-					});
-				}
-			});
-		}
-
-		{ { INLINE_SCRIPT } }
-	</script>
 </body>
 
 </html>

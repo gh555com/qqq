@@ -964,9 +964,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         }
 
         function handleContextMenuAction(action) {
+            console.log('[webview] handleContextMenuAction 被调用:', action, '当前选中项:', selectedItem);
             const itemForAction = selectedItem;
             hideAllContextMenus();
-            if (!itemForAction) return;
+            if (!itemForAction) {
+                console.log('[webview] 没有选中项，放弃操作');
+                return;
+            }
 
             switch(action) {
                 case 'rename':
@@ -976,6 +980,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                     performOpenAction(itemForAction);
                     break;
                 case 'delete':
+                    console.log('[webview] 执行删除操作:', itemForAction);
                     performDeleteAction(itemForAction);
                     break;
                 case 'kode':
@@ -999,6 +1004,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 e.preventDefault();
                 e.stopPropagation();
                 const action = e.currentTarget.dataset.action;
+                console.log('[webview] 右键菜单项点击:', action);
                 handleContextMenuAction(action);
             });
         });
@@ -1176,7 +1182,13 @@ function getWebviewContent(currentPath) {
 
 	// 读取 HTML 模板
 	const templatePath = path.join(__dirname, "q2.html");
+	console.log('[q2.js] 读取模板路径:', templatePath);
 	let htmlTemplate = fs.readFileSync(templatePath, "utf8");
+
+	// 检查 INLINE_SCRIPT 占位符格式
+	const hasCorrectPlaceholder = htmlTemplate.includes('{{INLINE_SCRIPT}}');
+	const hasWrongPlaceholder = htmlTemplate.includes('{ { INLINE_SCRIPT } }');
+	console.log('[q2.js] 模板占位符检查:', { hasCorrectPlaceholder, hasWrongPlaceholder });
 
 	// 生成驱动器列表 HTML
 	const drivesHtml = drives
@@ -1850,6 +1862,7 @@ function showSaveAsDialog() {
 			case "deleteToRecycleBin":
 				try {
 					const itemPath = message.path;
+					console.log('[q2.js] 开始删除:', itemPath);
 
 					if (fs.existsSync(itemPath)) {
 						saveRecentDirectory(currentPath);
@@ -1876,19 +1889,41 @@ function showSaveAsDialog() {
 									}
 								};
 
-								cp.exec(deleteCommand(process.platform), (error) => {
+								const cmd = deleteCommand(process.platform);
+								console.log('[q2.js] 执行删除命令:', cmd);
+
+								cp.exec(cmd, (error, stdout, stderr) => {
 									if (error) {
+										console.log('[q2.js] 删除失败:', error.message);
+										console.log('[q2.js] stderr:', stderr);
 										vscode.window.showErrorMessage(
 											"删除失败，请确保回收站工具已安装: " + error.message,
 										);
 										logMessage("删除项目失败: " + error.message, "ERROR");
-										setTimeout(() => refreshWebview(), 300);
+										setTimeout(() => refreshWebview(), 1500);
 										reject(error);
 									} else {
+										console.log('[q2.js] 删除命令已发送');
+										// Windows 的 InvokeVerb('delete') 会弹出确认对话框
+										// 轮询检查文件是否真的被删除
+										const checkInterval = setInterval(() => {
+											if (!fs.existsSync(itemPath)) {
+												clearInterval(checkInterval);
+												console.log('[q2.js] 文件已被删除，刷新界面');
+												refreshWebview();
+												resolve();
+											}
+										}, 200); // 每 200ms 检查一次
+
+										// 10 秒超时，防止用户取消删除
 										setTimeout(() => {
-											refreshWebview();
-											resolve();
-										}, 300);
+											if (fs.existsSync(itemPath)) {
+												clearInterval(checkInterval);
+												console.log('[q2.js] 删除超时或用户取消，刷新界面');
+												refreshWebview();
+												resolve();
+											}
+										}, 10000);
 									}
 								});
 							});
@@ -1906,10 +1941,12 @@ function showSaveAsDialog() {
 							});
 						});
 					} else {
+						console.log('[q2.js] 要删除的项目不存在:', itemPath);
 						vscode.window.showErrorMessage("要删除的项目不存在: " + itemPath);
 						refreshWebview();
 					}
 				} catch (error) {
+					console.log('[q2.js] 删除异常:', error.message);
 					vscode.window.showErrorMessage("删除项目失败: " + error.message);
 					logMessage("删除项目失败: " + error.message, "ERROR");
 				}

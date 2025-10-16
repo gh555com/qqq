@@ -1,0 +1,82 @@
+out/:1 
+        
+        
+       Failed to load resource: net::ERR_FILE_NOT_FOUND
+workbench.desktop.main.js:70 [Intervention] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: vscode-file://vscode-app/e:/s/d/qoder/resources/app/out/media/iconfont.woff?t=1752045825627
+workbench.desktop.main.js:25675 [Extension Host] STOPPED on first line for debugging on port 53138
+_tryFindDebugPort @ workbench.desktop.main.js:25675
+workbench.desktop.main.js:35  INFO Started local extension host with pid 12368.
+workbench.desktop.main.js:35  INFO ComputeTargetPlatform: win32-x64
+workbench.desktop.main.js:35  WARN Skipping extension /E:/s/d/qoder/f/e/theme-solarized-light in favour of the builtin extension /e:/s/d/qoder/resources/app/extensions/theme-solarized-light.
+warn @ workbench.desktop.main.js:35
+workbench.desktop.main.js:35  INFO 正在 e:\s\wol\py\q3 处加载开发扩展程序
+workbench.desktop.main.js:705 Overwriting extension <<copilot-instructions.md>> to now point to mime <<text/x-instructions>>
+(anonymous) @ workbench.desktop.main.js:705
+out/:1 
+        
+        
+       Failed to load resource: net::ERR_FILE_NOT_FOUND
+workbench.desktop.main.js:25675 Extension Host
+workbench.desktop.main.js:25675 Debugger attached.
+workbench.desktop.main.js:1294 [Extension Host] qqq 扩展激活中... (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] q1 module: Object (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] q2 module: Object (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] q1.activate 执行完成 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] q2.activate 执行完成 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] 所有命令注册完成 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:35  INFO Language client is ready
+workbench.desktop.main.js:1294 [Extension Host] Git environment validation failed for branch change listener Object (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] get current branch error: No workspace found (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:35  INFO Successfully synced configuration to client.
+workbench.desktop.main.js:35  INFO Client listening on port 58510
+workbench.desktop.main.js:35  INFO Profile client is ready
+workbench.desktop.main.js:35  INFO Agent is ready
+workbench.desktop.main.js:35  INFO Remote WebSocket connected, syncing configuration to go client...
+workbench.desktop.main.js:25060 [ChatSessionService] No history data found for session: 9495fae0-19ab-4789-b0ef-f1c49907607c
+loadHistorySession @ workbench.desktop.main.js:25060
+workbench.desktop.main.js:35  INFO Successfully synced configuration to client.
+workbench.desktop.main.js:35  INFO Configuration synced to go client after remote WebSocket connected.
+workbench.desktop.main.js:35  INFO [perf] Render performance baseline is 36ms
+workbench.desktop.main.js:25921 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+mountTo @ workbench.desktop.main.js:25921
+workbench.desktop.main.js:1294 [Extension Host] [q2.js] 读取模板路径: e:\s\wol\py\q3\src\q2.html (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] [q2.js] 模板占位符检查: Object (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+VM7:2 Uncaught ReferenceError: INLINE_SCRIPT is not defined
+    at <anonymous>:2:7
+    at index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1062:23
+workbench.desktop.main.js:1294 [Extension Host] updateResourceExplorer: 开始更新，currentPath = E:\s\wol\py\qqq\24 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] directoryContents: Object (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] updateResourceExplorer: 发送 update 消息，items = 4 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] fileListHtml 预览: 
+                <div class="file-item folder" data-path="E:\\s\\wol\\py\\qqq" data-name=".." data-type="folder">
+                    <div class="file-select-area" onclick="selectItem(event, 'folder', (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+workbench.desktop.main.js:1294 [Extension Host] updateResourceExplorer: update 消息已发送 (at console.<anonymous> (file:///e:/s/d/qoder/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:172:28704))
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:67225)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:67508)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:66612)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:66920)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:64772)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:64882)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:64544)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:64882)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLButtonElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:63656)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLButtonElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:63834)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLButtonElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:63567)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: navigateTo is not defined
+    at HTMLButtonElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:63834)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: togglePin is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:68366)
+index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1 Uncaught ReferenceError: togglePin is not defined
+    at HTMLDivElement.onclick (index.html?id=76db729f-349e-4f7f-ab47-9edd79063891&parentId=14&origin=c8561a0d-70bc-4a12-8976-028703ce2a68&swVersion=4&extensionId=qqq.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app:1:68366)
+workbench.desktop.main.js:25921 使用标准开发工具调试基于 iFrame 的 Web 视图
