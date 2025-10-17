@@ -769,9 +769,11 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             }
             else if (message.command === 'restoreDeletedItem') {
                 // 恢复被删除但实际删除失败的项
+                console.log('[webview] 恢复删除失败的项目:', message.path);
                 const itemElement = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
                 if (itemElement) {
-                    itemElement.style.display = '';
+                    itemElement.style.opacity = '';
+                    itemElement.style.pointerEvents = '';
                 }
             }
         });
@@ -945,13 +947,17 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         function performDeleteAction(itemToDelete) {
             if (!itemToDelete) return;
 
-            // 直接从界面移除元素，不显示进度条
+            console.log('[webview] 准备删除项目:', itemToDelete.path);
+
+            // 直接从界面移除元素，提供即时反馈
             const itemElement = document.querySelector(\`.file-item[data-path="\${itemToDelete.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
             if (itemElement) {
-                itemElement.style.display = 'none';
+                // 添加删除中的样式
+                itemElement.style.opacity = '0.5';
+                itemElement.style.pointerEvents = 'none';
             }
 
-            // 发送删除命令，但不显示进度条
+            // 发送删除命令
             vscode.postMessage({
                 command: 'quickDeleteToRecycleBin',
                 path: itemToDelete.path,
@@ -995,13 +1001,23 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         }
 
         function handleContextMenuAction(action) {
-            console.log('[webview] handleContextMenuAction 被调用:', action, '当前选中项:', selectedItem);
-            const itemForAction = selectedItem;
+            // ✅ 核心修改：直接从菜单元素获取操作目标
+            const contextMenu = document.getElementById('itemContextMenu');
+            const itemForAction = {
+                path: contextMenu.dataset.path,
+                name: contextMenu.dataset.name,
+                type: contextMenu.dataset.type
+            };
+
             hideAllContextMenus();
-            if (!itemForAction) {
-                console.log('[webview] 没有选中项，放弃操作');
+
+            // 检查从菜单获取的数据是否有效
+            if (!itemForAction || !itemForAction.path) {
+                console.log('[webview] 无法从右键菜单获取有效操作项，放弃操作');
                 return;
             }
+            
+            console.log('[webview] handleContextMenuAction 被调用:', action, '操作项:', itemForAction);
 
             switch(action) {
                 case 'rename':
@@ -1052,7 +1068,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 const itemName = itemElement.dataset.name;
                 const itemType = itemElement.dataset.type;
 
+                // 依然调用 selectItem 来保证UI选中效果
                 selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
+
+                // ✅ 核心修改：将当前项的信息直接绑定到菜单上
+                itemContextMenu.dataset.path = itemPath;
+                itemContextMenu.dataset.name = itemName;
+                itemContextMenu.dataset.type = itemType;
 
                 itemContextMenu.style.left = e.clientX + 'px';
                 itemContextMenu.style.top = e.clientY + 'px';
@@ -1909,55 +1931,7 @@ function showSaveAsDialog() {
 						fileSizeCache = {};
 						sizeCalculationPromises = {};
 
-						// 直接执行删除命令，不显示进度条
-						const deleteCommand = (platform) => {
-							if (platform === "win32") {
-								const psScript = `& { (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemPath.replace(/'/g, "''")}').InvokeVerb('delete') }`;
-								const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
-								return `powershell -NoProfile -EncodedCommand ${encodedScript}`;
-							} else if (platform === "darwin") {
-								return `trash "${itemPath.replace(/"/g, '\\"')}"`;
-							} else {
-								return `gvfs-trash "${itemPath.replace(/"/g, '\\"')}"`;
-							}
-						};
-
-						const cmd = deleteCommand(process.platform);
-						console.log('[q2.js] 执行快速删除命令:', cmd);
-
-						cp.exec(cmd, (error, stdout, stderr) => {
-							if (error) {
-								console.log('[q2.js] 快速删除失败:', error.message);
-								console.log('[q2.js] stderr:', stderr);
-								// 如果删除失败，恢复界面元素显示
-								panel.webview.postMessage({
-									command: 'restoreDeletedItem',
-									path: itemPath
-								});
-							} else {
-								console.log('[q2.js] 快速删除命令已发送');
-								// 简短延迟后刷新界面
-								setTimeout(() => refreshWebview(), 500);
-							}
-						});
-					} else {
-						console.log('[q2.js] 要删除的项目不存在:', itemPath);
-					}
-				} catch (error) {
-					console.log('[q2.js] 快速删除异常:', error.message);
-				}
-				break;
-
-			case "deleteToRecycleBin":
-				try {
-					const itemPath = message.path;
-					console.log('[q2.js] 开始删除:', itemPath);
-
-					if (fs.existsSync(itemPath)) {
-						saveRecentDirectory(currentPath);
-						fileSizeCache = {};
-						sizeCalculationPromises = {};
-
+						// 显示快速进度条
 						vscode.window.withProgress({
 							location: vscode.ProgressLocation.Notification,
 							title: "正在移至回收站...",
@@ -1966,6 +1940,7 @@ function showSaveAsDialog() {
 							progress.report({ message: path.basename(itemPath) });
 
 							return new Promise((resolve, reject) => {
+								// 直接执行删除命令
 								const deleteCommand = (platform) => {
 									if (platform === "win32") {
 										const psScript = `& { (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemPath.replace(/'/g, "''")}').InvokeVerb('delete') }`;
@@ -1979,65 +1954,53 @@ function showSaveAsDialog() {
 								};
 
 								const cmd = deleteCommand(process.platform);
-								console.log('[q2.js] 执行删除命令:', cmd);
+								console.log('[q2.js] 执行快速删除命令:', cmd);
 
 								cp.exec(cmd, (error, stdout, stderr) => {
 									if (error) {
-										console.log('[q2.js] 删除失败:', error.message);
+										console.log('[q2.js] 快速删除失败:', error.message);
 										console.log('[q2.js] stderr:', stderr);
-										vscode.window.showErrorMessage(
-											"删除失败，请确保回收站工具已安装: " + error.message,
-										);
-										logMessage("删除项目失败: " + error.message, "ERROR");
-										setTimeout(() => refreshWebview(), 1500);
+										// 如果删除失败，恢复界面元素显示
+										panel.webview.postMessage({
+											command: 'restoreDeletedItem',
+											path: itemPath
+										});
 										reject(error);
 									} else {
-										console.log('[q2.js] 删除命令已发送');
-										// Windows 的 InvokeVerb('delete') 会弹出确认对话框
-										// 轮询检查文件是否真的被删除
-										const checkInterval = setInterval(() => {
-											if (!fs.existsSync(itemPath)) {
-												clearInterval(checkInterval);
-												console.log('[q2.js] 文件已被删除，刷新界面');
-												refreshWebview();
-												resolve();
-											}
-										}, 200); // 每 200ms 检查一次
-
-										// 10 秒超时，防止用户取消删除
+										console.log('[q2.js] 快速删除命令已发送');
+										// 延迟后刷新界面，确保删除操作完成
 										setTimeout(() => {
-											if (fs.existsSync(itemPath)) {
-												clearInterval(checkInterval);
-												console.log('[q2.js] 删除超时或用户取消，刷新界面');
-												refreshWebview();
-												resolve();
-											}
-										}, 10000);
+											refreshWebview();
+											resolve();
+										}, 300); // 适中的延迟时间，确保删除完成
 									}
 								});
 							});
 						}).then(() => {
+							// 显示"已删除"状态
 							vscode.window.withProgress({
 								location: vscode.ProgressLocation.Notification,
-								title: `${itemPath} 已删除`,
+								title: `${path.basename(itemPath)} 已删除`,
 								cancellable: false
 							}, () => {
 								return new Promise(resolve => {
 									setTimeout(() => {
 										resolve();
-									}, 3000);
+									}, 3000); // 显示3秒
 								});
 							});
+						}).catch(error => {
+							// 删除失败时显示错误消息
+							vscode.window.showErrorMessage(`删除失败: ${error.message}`);
 						});
 					} else {
 						console.log('[q2.js] 要删除的项目不存在:', itemPath);
-						vscode.window.showErrorMessage("要删除的项目不存在: " + itemPath);
+						// 如果文件不存在，也要刷新界面
 						refreshWebview();
 					}
 				} catch (error) {
-					console.log('[q2.js] 删除异常:', error.message);
-					vscode.window.showErrorMessage("删除项目失败: " + error.message);
-					logMessage("删除项目失败: " + error.message, "ERROR");
+					console.log('[q2.js] 快速删除异常:', error.message);
+					vscode.window.showErrorMessage(`删除异常: ${error.message}`);
 				}
 				break;
 		}
