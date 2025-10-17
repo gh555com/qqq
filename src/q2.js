@@ -41,6 +41,41 @@ let sizeCalculationPromises = {};
 // 默认大小显示模式：none, m, k, b
 let sizeMode = "none";
 
+// ==================== 辅助转义函数 (关键修复) ====================
+
+/**
+ * 转义字符串以安全地插入到 HTML 属性值中 (双引号属性，如 `value="..."`)
+ * @param {string} str - 原始字符串
+ * @returns {string} - 转义后的字符串
+ */
+function escapeHtmlAttribute(str) {
+	if (typeof str !== 'string') str = String(str);
+	return str
+		.replace(/&/g, '&amp;') // 必须最先转义 &
+		.replace(/"/g, '&quot;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+}
+
+/**
+ * 转义字符串以安全地插入到 JavaScript 单引号字符串字面量中 (例如 `onclick="myFunc('...')"` 或 `let x = '...'`)
+ * 这是导致问题的核心函数，必须确保它正确无误。
+ * @param {string} str - 原始字符串
+ * @returns {string} - 转义后的字符串
+ */
+function escapeJsStringLiteral(str) {
+	if (typeof str !== 'string') str = String(str);
+	// 顺序很重要：先转义反斜杠，再转义单引号，避免对已转义的反斜杠再次转义
+	return str
+		.replace(/\\/g, '\\\\') // 转义反斜杠: \ -> \\
+		.replace(/'/g, "\\'")   // 转义单引号: ' -> \'
+		.replace(/\n/g, '\\n')  // 转义换行符
+		.replace(/\r/g, '\\r')  // 转义回车符
+		.replace(/\t/g, '\\t')  // 转义制表符
+		.replace(/\u2028/g, '\\u2028') // 行分隔符
+		.replace(/\u2029/g, '\\u2029'); // 段落分隔符
+}
+
 // ==================== 文件大小处理函数 ====================
 
 /**
@@ -560,12 +595,19 @@ function getDirectoryContents(dirPath) {
 
 /**
  * 生成 Webview JavaScript 代码
+ * @param {string} currentSizeMode - 当前大小显示模式
+ * @param {string} currentPath - 当前路径
  */
 function generateWebviewScript(currentSizeMode, currentPath) {
+	// 核心修复点：将 currentPath 和 currentSizeMode 转义为 JavaScript 字符串字面量
+	const escapedCurrentPathForJsLiteral = escapeJsStringLiteral(currentPath);
+	const escapedSizeModeForJsLiteral = escapeJsStringLiteral(currentSizeMode);
+
+	// 使用模板字面量，所有动态内容都必须经过转义
 	return `
         const vscode = acquireVsCodeApi();
-        const sizeMode = '${currentSizeMode}';
-        let currentPath = '${currentPath.replace(/\\/g, "\\\\")}';
+        const sizeMode = '${escapedSizeModeForJsLiteral}';
+        let currentPath = '${escapedCurrentPathForJsLiteral}';
 
         document.addEventListener('DOMContentLoaded', () => {
             const filenameInput = document.getElementById('filenameInput');
@@ -686,10 +728,10 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             if (newPinState) {
                 pinBox.classList.add('pinned');
-                pinCheckbox.textContent = '\u2713';
+                pinCheckbox.textContent = '\\u2713';
             } else {
                 pinBox.classList.remove('pinned');
-                pinCheckbox.textContent = '\u25a1';
+                pinCheckbox.textContent = '\\u25a1';
             }
 
             vscode.postMessage({
@@ -716,7 +758,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
                 if (szArea) {
                     if (type === 'file' && sizeMode !== 'none') {
-                        szArea.textContent = '    \u2022    ';
+                        szArea.textContent = '    \\u2022    ';
                     } else {
                         szArea.textContent = '';
                     }
@@ -731,25 +773,15 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
         window.addEventListener('message', event => {
             const message = event.data;
-            console.log('webview 收到消息:', message.command);
 
             if (message.command === 'update') {
-                console.log('webview: 处理 update 消息');
-                console.log('  currentPath:', message.currentPath);
-                console.log('  fileListHtml 长度:', message.fileListHtml.length);
-                console.log('  items 数量:', message.items.length);
-
                 document.getElementById('addressInput').value = message.currentPath;
                 document.getElementById('fileList').innerHTML = message.fileListHtml;
-
-                console.log('webview: fileList innerHTML 已设置');
-
                 requestFileSizeUpdates(message.items);
-
-                console.log('webview: update 处理完成');
             }
             else if (message.command === 'updateSize') {
-                const item = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"].\${message.type}\`);
+                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${message.type}\`);
                 if (item) {
                     const szArea = item.querySelector('.sz-area');
                     if (szArea) {
@@ -768,9 +800,8 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 refreshSizeDisplay();
             }
             else if (message.command === 'restoreDeletedItem') {
-                // 恢复被删除但实际删除失败的项
-                console.log('[webview] 恢复删除失败的项目:', message.path);
-                const itemElement = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
+                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
                 if (itemElement) {
                     itemElement.style.opacity = '';
                     itemElement.style.pointerEvents = '';
@@ -784,12 +815,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             items.forEach(item => {
                 if (item.name === '..') return;
 
-                const itemElement = document.querySelector(\`.file-item[data-path="\${item.path.replace(/\\\\/g, '\\\\\\\\')}"].\${item.type}\`);
+                const safePathSelector = item.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${item.type}\`);
                 if (itemElement) {
                     const szArea = itemElement.querySelector('.sz-area');
                     if (szArea) {
                         if (item.type === 'file') {
-                            szArea.textContent = '    \u2022    ';
+                            szArea.textContent = '    \\u2022    ';
                         }
                     }
                 }
@@ -834,7 +866,8 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         let renameBlurHandler = null;
 
         function startRename(itemPath, itemName, itemType) {
-            const itemElement = document.querySelector(\`.file-item[data-path="\${itemPath.replace(/\\\\/g, '\\\\\\\\')}"\`);
+            const safePathSelector = itemPath.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
             if (!itemElement) return;
 
             selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
@@ -889,7 +922,6 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             input.addEventListener('blur', renameBlurHandler);
 
             itemElement.dataset.originalContent = originalContent;
-            itemElement.dataset.keyDownHandler = handleKeyDown;
         }
 
         function commitRename(itemElement, oldPath, itemType, newName) {
@@ -947,17 +979,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         function performDeleteAction(itemToDelete) {
             if (!itemToDelete) return;
 
-            console.log('[webview] 准备删除项目:', itemToDelete.path);
-
-            // 直接从界面移除元素，提供即时反馈
-            const itemElement = document.querySelector(\`.file-item[data-path="\${itemToDelete.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
+            const safePathSelector = itemToDelete.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
             if (itemElement) {
-                // 添加删除中的样式
                 itemElement.style.opacity = '0.5';
                 itemElement.style.pointerEvents = 'none';
             }
 
-            // 发送删除命令
             vscode.postMessage({
                 command: 'quickDeleteToRecycleBin',
                 path: itemToDelete.path,
@@ -986,11 +1014,12 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
         function performSizeAction(itemToRefresh) {
             if (!itemToRefresh) return;
-            const item = document.querySelector(\`.file-item[data-path="\${itemToRefresh.path.replace(/\\\\/g, '\\\\\\\\')}"   ]\`);
+            const safePathSelector = itemToRefresh.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+            const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"]\`);
             if (item) {
                 const szArea = item.querySelector('.sz-area');
                 if (szArea) {
-                    szArea.textContent = '    \u2022    ';
+                    szArea.textContent = '    \\u2022    ';
                 }
             }
             vscode.postMessage({
@@ -1001,7 +1030,6 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         }
 
         function handleContextMenuAction(action) {
-            // ✅ 核心修改：直接从菜单元素获取操作目标
             const contextMenu = document.getElementById('itemContextMenu');
             const itemForAction = {
                 path: contextMenu.dataset.path,
@@ -1011,31 +1039,16 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             hideAllContextMenus();
 
-            // 检查从菜单获取的数据是否有效
             if (!itemForAction || !itemForAction.path) {
-                console.log('[webview] 无法从右键菜单获取有效操作项，放弃操作');
                 return;
             }
-            
-            console.log('[webview] handleContextMenuAction 被调用:', action, '操作项:', itemForAction);
 
             switch(action) {
-                case 'rename':
-                    performEditAction(itemForAction);
-                    break;
-                case 'open':
-                    performOpenAction(itemForAction);
-                    break;
-                case 'delete':
-                    console.log('[webview] 执行删除操作:', itemForAction);
-                    performDeleteAction(itemForAction);
-                    break;
-                case 'kode':
-                    performKodeAction(itemForAction);
-                    break;
-                case 'size':
-                    performSizeAction(itemForAction);
-                    break;
+                case 'rename': performEditAction(itemForAction); break;
+                case 'open': performOpenAction(itemForAction); break;
+                case 'delete': performDeleteAction(itemForAction); break;
+                case 'kode': performKodeAction(itemForAction); break;
+                case 'size': performSizeAction(itemForAction); break;
             }
         }
 
@@ -1051,7 +1064,6 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 e.preventDefault();
                 e.stopPropagation();
                 const action = e.currentTarget.dataset.action;
-                console.log('[webview] 右键菜单项点击:', action);
                 handleContextMenuAction(action);
             });
         });
@@ -1068,10 +1080,8 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 const itemName = itemElement.dataset.name;
                 const itemType = itemElement.dataset.type;
 
-                // 依然调用 selectItem 来保证UI选中效果
                 selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
 
-                // ✅ 核心修改：将当前项的信息直接绑定到菜单上
                 itemContextMenu.dataset.path = itemPath;
                 itemContextMenu.dataset.name = itemName;
                 itemContextMenu.dataset.type = itemType;
@@ -1138,12 +1148,9 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         let startWidth = 0;
 
         if (sidebarResizer && sidebar && mainContent) {
-            // 初始化分割线位置，从HTML中获取配置的宽度
-            // 使用getComputedStyle获取实际应用的宽度值
             const computedStyle = getComputedStyle(sidebar);
             const sidebarWidth = parseInt(computedStyle.width) || 100;
 
-            // 确保分割线和主内容区的位置与侧边栏宽度一致
             sidebarResizer.style.left = sidebarWidth + 'px';
             mainContent.style.left = sidebarWidth + 'px';
 
@@ -1157,10 +1164,8 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             document.addEventListener('mousemove', (e) => {
                 if (!isResizing) return;
-
                 let newWidth = startWidth + (e.clientX - startX);
                 newWidth = Math.max(50, Math.min(500, newWidth));
-
                 sidebar.style.width = newWidth + 'px';
                 sidebarResizer.style.left = newWidth + 'px';
                 mainContent.style.left = newWidth + 'px';
@@ -1168,11 +1173,9 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             document.addEventListener('mouseup', () => {
                 if (!isResizing) return;
-
                 isResizing = false;
                 sidebarResizer.classList.remove('active');
                 document.body.style.userSelect = '';
-
                 const newWidth = parseInt(sidebar.style.width) || 100;
                 vscode.postMessage({
                     command: 'saveSidebarWidth',
@@ -1200,9 +1203,8 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         }
 
         function updateResourceExplorer() {
-            // 触发初始化，请求 extension 发送 update 消息
-            // 这个函数在 DOMContentLoaded 时被调用
-            // extension 会自动调用 updateResourceExplorer() 并发送 update 消息
+            // This function is a stub in the webview.
+            // The extension will send an 'update' message which triggers the real update.
         }
     `;
 }
@@ -1244,19 +1246,19 @@ function getWebviewContent(currentPath) {
 
 	// 读取 HTML 模板
 	const templatePath = path.join(__dirname, "q2.html");
-	console.log('[q2.js] 读取模板路径:', templatePath);
-	let htmlTemplate = fs.readFileSync(templatePath, "utf8");
-
-	// 检查 INLINE_SCRIPT 占位符格式
-	const hasCorrectPlaceholder = htmlTemplate.includes('{{INLINE_SCRIPT}}');
-	const hasWrongPlaceholder = htmlTemplate.includes('{ { INLINE_SCRIPT } }');
-	console.log('[q2.js] 模板占位符检查:', { hasCorrectPlaceholder, hasWrongPlaceholder });
+	let htmlTemplate = '';
+	try {
+		htmlTemplate = fs.readFileSync(templatePath, "utf8");
+	} catch (error) {
+		logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+		return `<h1>错误: 无法加载 q2.html 模板</h1><p>${error.message}</p>`;
+	}
 
 	// 生成驱动器列表 HTML
 	const drivesHtml = drives
 		.map(
 			(drive) => `
-            <button class="nav-item" onclick="navigateTo('${drive}')">${drive}</button>
+            <button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(drive)}')">${escapeHtmlAttribute(drive)}</button>
             `,
 		)
 		.join("");
@@ -1270,7 +1272,7 @@ function getWebviewContent(currentPath) {
             ${safeRecycleBin
 			.map(
 				(dir) => `
-            <div class="recycle-item" onclick="navigateTo('${dir.replace(/\\/g, "\\\\")}')">${dir}</div>
+            <div class="recycle-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">${escapeHtmlAttribute(dir)}</div>
             `,
 			)
 			.join("")}
@@ -1283,35 +1285,37 @@ function getWebviewContent(currentPath) {
 		.reverse()
 		.map(
 			(dir) => `
-            <div class="recent-item" onclick="navigateTo('${dir.replace(/\\/g, "\\\\")}')">
-                <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${dir.replace(/\\/g, "\\\\")}')">×</span>
-                <span>${dir}</span>
+            <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
+                <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${escapeJsStringLiteral(dir)}')">×</span>
+                <span>${escapeHtmlAttribute(dir)}</span>
             </div>
             `,
 		)
 		.join("");
 
-	// 生成内联脚本（从 extension.js 提取的完整脚本）
+	// 生成内联脚本
 	const inlineScript = generateWebviewScript(currentSizeMode, currentPath);
 
 	// 替换所有占位符
-	htmlTemplate = htmlTemplate.replace(/\{\{SIDEBAR_WIDTH\}\}/g, SIDEBAR_WIDTH);
-	htmlTemplate = htmlTemplate.replace(/\{\{LINE_SPACING\}\}/g, LINE_SPACING);
-	htmlTemplate = htmlTemplate.replace(/\{\{DRIVES_HTML\}\}/g, drivesHtml);
-	htmlTemplate = htmlTemplate.replace(/\{\{RECYCLE_BIN_HTML\}\}/g, recycleBinHtml);
-	htmlTemplate = htmlTemplate.replace(/\{\{RECENT_DIRS_HTML\}\}/g, recentDirsHtml);
-	htmlTemplate = htmlTemplate.replace(/\{\{CURRENT_PATH\}\}/g, currentPath);
-	htmlTemplate = htmlTemplate.replace(/\{\{CURRENT_PATH_JS\}\}/g, currentPath.replace(/\\/g, "\\\\"));
-	htmlTemplate = htmlTemplate.replace(/\{\{SIZE_MODE\}\}/g, currentSizeMode);
-	htmlTemplate = htmlTemplate.replace(/\{\{PIN_CLASS\}\}/g, isPinned ? "pinned" : "");
-	htmlTemplate = htmlTemplate.replace(/\{\{PIN_CHECKBOX\}\}/g, isPinned ? "✓" : "□");
-	htmlTemplate = htmlTemplate.replace(/\{\{SIZE_MODE_NONE_CLASS\}\}/g, currentSizeMode === "none" ? "selected" : "");
-	htmlTemplate = htmlTemplate.replace(/\{\{SIZE_MODE_M_CLASS\}\}/g, currentSizeMode === "m" ? "selected" : "");
-	htmlTemplate = htmlTemplate.replace(/\{\{SIZE_MODE_K_CLASS\}\}/g, currentSizeMode === "k" ? "selected" : "");
-	htmlTemplate = htmlTemplate.replace(/\{\{SIZE_MODE_B_CLASS\}\}/g, currentSizeMode === "b" ? "selected" : "");
-	htmlTemplate = htmlTemplate.replace(/\{\{INLINE_SCRIPT\}\}/g, inlineScript);
+	let finalHtml = htmlTemplate;
+	finalHtml = finalHtml.replace(/\{\{SIDEBAR_WIDTH\}\}/g, SIDEBAR_WIDTH);
+	finalHtml = finalHtml.replace(/\{\{LINE_SPACING\}\}/g, LINE_SPACING);
+	finalHtml = finalHtml.replace(/\{\{DRIVES_HTML\}\}/g, drivesHtml);
+	finalHtml = finalHtml.replace(/\{\{RECYCLE_BIN_HTML\}\}/g, recycleBinHtml);
+	finalHtml = finalHtml.replace(/\{\{RECENT_DIRS_HTML\}\}/g, recentDirsHtml);
+	finalHtml = finalHtml.replace(/\{\{CURRENT_PATH\}\}/g, escapeHtmlAttribute(currentPath));
+	finalHtml = finalHtml.replace(/\{\{PIN_CLASS\}\}/g, isPinned ? "pinned" : "");
+	finalHtml = finalHtml.replace(/\{\{PIN_CHECKBOX\}\}/g, isPinned ? "✓" : "□");
+	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_NONE_CLASS\}\}/g, currentSizeMode === "none" ? "selected" : "");
+	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_M_CLASS\}\}/g, currentSizeMode === "m" ? "selected" : "");
+	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_K_CLASS\}\}/g, currentSizeMode === "k" ? "selected" : "");
+	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_B_CLASS\}\}/g, currentSizeMode === "b" ? "selected" : "");
 
-	return htmlTemplate;
+	// 关键：替换脚本占位符。确保 </script> 不会出现在 inlineScript 字符串中
+	const safeInlineScript = inlineScript.replace(/<\/script>/gi, '<\\/script>');
+	finalHtml = finalHtml.replace('{{INLINE_SCRIPT}}', safeInlineScript);
+
+	return finalHtml;
 }
 
 // ==================== 主对话框函数 ====================
@@ -1320,7 +1324,7 @@ function getWebviewContent(currentPath) {
  * 显示自定义另存为对话框
  */
 function showSaveAsDialog() {
-	// 单窗口控制：如果已有面板存在且未被销毁，则显示现有面板
+	// 单窗口控制
 	if (activePanel !== null) {
 		if (usePanelReveal === 1) {
 			activePanel.reveal();
@@ -1328,7 +1332,7 @@ function showSaveAsDialog() {
 		return;
 	}
 
-	// 每次打开对话框都重新读取配置，确保 sizeMode 状态是新的
+	// 每次打开对话框都重新读取配置
 	const config = getConfig();
 	const recentDirs = config.recentDirs;
 	let currentPath =
@@ -1353,27 +1357,17 @@ function showSaveAsDialog() {
 		{
 			enableScripts: true,
 			retainContextWhenHidden: true,
-			enableFindWidget: true,
-			enableCommandUris: true,
 		},
 	);
 
-	// 保存面板引用
 	activePanel = panel;
 
-	// 设置面板图标（路径调整：从 src/ 跳到上级 assets/）
+	// 设置面板图标
 	const iconPath = path.join(__dirname, "..", "assets", "icon.png");
 	if (fs.existsSync(iconPath)) {
 		panel.iconPath = vscode.Uri.file(iconPath);
 	}
 
-	panel.onDidChangeViewState(() => {
-		if (usePanelReveal === 1 && panel.viewColumn) {
-			panel.reveal(panel.viewColumn, false);
-		}
-	});
-
-	// 监听面板销毁事件，重置activePanel
 	panel.onDidDispose(() => {
 		activePanel = null;
 	});
@@ -1382,98 +1376,64 @@ function showSaveAsDialog() {
 	function updateResourceExplorer() {
 		try {
 			if (!panel || panel.disposed) {
-				console.log('updateResourceExplorer: panel is disposed or null');
 				return;
 			}
 
-			console.log('updateResourceExplorer: 开始更新，currentPath =', currentPath);
-
 			const directoryContents = getDirectoryContents(currentPath);
 			const items = [];
-
 			let fileListHtml = "";
-			const currentSizeMode = getConfig().sizeMode;
-
-			console.log('directoryContents:', {
-				dirs: directoryContents.dirs.length,
-				files: directoryContents.files.length
-			});
 
 			// 添加上级目录
 			if (
-				currentPath !== "\\" &&
-				currentPath !== currentPath.split("\\")[0] + "\\"
+				currentPath.length > 3 && // 避免 C:\
+				path.dirname(currentPath) !== currentPath
 			) {
-				const parentPath = path.dirname(currentPath).replace(/\\/g, "\\\\");
-				const parentItem = {
-					path: path.dirname(currentPath),
-					name: "..",
-					type: "folder",
-				};
+				const parentPath = path.dirname(currentPath);
+				const parentItem = { path: parentPath, name: "..", type: "folder" };
 				items.push(parentItem);
 
-				const szAreaHtml = `<div class="sz-area"></div>`;
-
 				fileListHtml += `
-                <div class="file-item folder" data-path="${parentPath}" data-name=".." data-type="folder">
-                    <div class="file-select-area" onclick="selectItem(event, 'folder', '${parentPath}', '..')">
-                        ${szAreaHtml}
+                <div class="file-item folder" data-path="${escapeHtmlAttribute(parentPath)}" data-name=".." data-type="folder">
+                    <div class="file-select-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(parentPath)}', '..')">
+                        <div class="sz-area"></div>
                         <span class="file-icon">📁</span>
                     </div>
-                    <div class="folder-name-area" onclick="navigateIntoFolder('${parentPath}')">
+                    <div class="folder-name-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(parentPath)}', '..'); navigateIntoFolder('${escapeJsStringLiteral(parentPath)}')">
                         <span class="file-name">..</span>
                     </div>
-                </div>
-                `;
+                </div>`;
 			}
+
 
 			// 添加文件夹
 			directoryContents.dirs.forEach((dir) => {
-				const safePath = dir.path.replace(/\\/g, "\\\\");
-				const safeName = dir.name.replace(/'/g, "\\'");
-				const item = { path: dir.path, name: dir.name, type: "folder" };
-				items.push(item);
-
-				const szAreaHtml = `<div class="sz-area"></div>`;
-
+				items.push({ path: dir.path, name: dir.name, type: "folder" });
 				fileListHtml += `
-                <div class="file-item folder" data-path="${safePath}" data-name="${safeName}" data-type="folder">
-                    <div class="file-select-area" onclick="selectItem(event, 'folder', '${safePath}', '${safeName}')">
-                        ${szAreaHtml}
+                <div class="file-item folder" data-path="${escapeHtmlAttribute(dir.path)}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder">
+                    <div class="file-select-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(dir.path)}', '${escapeJsStringLiteral(dir.name)}')">
+                        <div class="sz-area"></div>
                         <span class="file-icon">📁</span>
                     </div>
-                    <div class="folder-name-area" onclick="selectItem(event, 'folder', '${safePath}', '${safeName}'); navigateIntoFolder('${safePath}')">
-                        <span class="file-name">${dir.name}</span>
+                    <div class="folder-name-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(dir.path)}', '${escapeJsStringLiteral(dir.name)}'); navigateIntoFolder('${escapeJsStringLiteral(dir.path)}')">
+                        <span class="file-name">${escapeHtmlAttribute(dir.name)}</span>
                     </div>
-                </div>
-                `;
+                </div>`;
 			});
 
 			// 添加文件
 			directoryContents.files.forEach((file) => {
-				const safePath = file.path.replace(/\\/g, "\\\\");
-				const safeName = file.name.replace(/'/g, "\\'");
-				const item = { path: file.path, name: file.name, type: "file" };
-				items.push(item);
-
-				const szAreaHtml = `<div class="sz-area"></div>`;
-
+				items.push({ path: file.path, name: file.name, type: "file" });
 				fileListHtml += `
-                <div class="file-item file" data-path="${safePath}" data-name="${safeName}" data-type="file">
-                    <div class="file-select-area" onclick="selectItem(event, 'file', '${safePath}', '${safeName}')">
-                        ${szAreaHtml}
+                <div class="file-item file" data-path="${escapeHtmlAttribute(file.path)}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file">
+                    <div class="file-select-area" onclick="selectItem(event, 'file', '${escapeJsStringLiteral(file.path)}', '${escapeJsStringLiteral(file.name)}')">
+                        <div class="sz-area"></div>
                         <span class="file-icon">📄</span>
                     </div>
-                    <div class="file-name-area" onclick="selectItem(event, 'file', '${safePath}', '${safeName}')">
-                        <span class="file-name">${file.name}</span>
+                    <div class="file-name-area" onclick="selectItem(event, 'file', '${escapeJsStringLiteral(file.path)}', '${escapeJsStringLiteral(file.name)}');">
+                        <span class="file-name">${escapeHtmlAttribute(file.name)}</span>
                     </div>
-                </div>
-                `;
+                </div>`;
 			});
-
-			// 发送更新消息
-			console.log('updateResourceExplorer: 发送 update 消息，items =', items.length);
-			console.log('fileListHtml 预览:', fileListHtml.substring(0, 200));
 
 			panel.webview.postMessage({
 				command: "update",
@@ -1481,8 +1441,6 @@ function showSaveAsDialog() {
 				fileListHtml: fileListHtml,
 				items: items,
 			});
-
-			console.log('updateResourceExplorer: update 消息已发送');
 		} catch (error) {
 			logMessage(`更新资源展示区失败: ${error}`, "ERROR");
 		}
@@ -1491,7 +1449,9 @@ function showSaveAsDialog() {
 	// 统一的Webview刷新函数
 	function refreshWebview() {
 		if (panel && !panel.disposed) {
+			// 重新生成整个HTML内容，确保所有变量最新
 			panel.webview.html = getWebviewContent(currentPath);
+			// 延迟确保HTML渲染完成再更新文件列表
 			setTimeout(() => updateResourceExplorer(), 100);
 		}
 	}
@@ -1503,162 +1463,72 @@ function showSaveAsDialog() {
 
 		switch (message.command) {
 			case "removeFromRecent":
-				try {
-					const pathToRemove = message.path;
-					const updated = removeAndRecycleRecentDirectory(pathToRemove);
-					if (updated) {
-						refreshWebview();
-					}
-				} catch (error) {
-					logMessage(`移除最近目录失败: ${error}`, "ERROR");
+				if (removeAndRecycleRecentDirectory(message.path)) {
+					refreshWebview();
 				}
 				break;
 
 			case "setSizeMode":
-				try {
-					const newMode = message.mode;
-					const config = getConfig();
-					saveConfig(
-						config.recentDirs,
-						config.lineSpacing,
-						config.sidebarWidth,
-						config.recycleBin,
-						config.isPinned,
-						newMode,
-					);
-					refreshWebview();
-					fileSizeCache = {};
-					sizeCalculationPromises = {};
-				} catch (error) {
-					logMessage(`保存 sizeMode 失败: ${error}`, "ERROR");
-				}
+				saveConfig(
+					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth,
+					currentConfig.recycleBin, currentConfig.isPinned, message.mode
+				);
+				fileSizeCache = {};
+				sizeCalculationPromises = {};
+				refreshWebview();
 				break;
 
 			case "requestSize":
-				const { path: itemPath, type: itemType } = message;
-				if (currentSizeMode === "none") {
-					break;
-				}
-
-				if (itemType === "folder" && sizeCalculationPromises[itemPath]) {
-					panel.webview.postMessage({
-						command: "updateSize",
-						path: itemPath,
-						type: itemType,
-						sizeDisplay: "    •    ",
-					});
-				}
-
-				getFileSizeDisplayAsync(itemPath, itemType === "file", currentSizeMode)
-					.then((display) => {
+				if (currentSizeMode === "none") break;
+				getFileSizeDisplayAsync(message.path, message.type === "file", currentSizeMode)
+					.then(display => {
 						if (panel && !panel.disposed) {
 							panel.webview.postMessage({
-								command: "updateSize",
-								path: itemPath,
-								type: itemType,
-								sizeDisplay: display,
+								command: "updateSize", path: message.path, type: message.type, sizeDisplay: display
 							});
 						}
 					})
-					.catch((e) =>
-						logMessage(
-							`异步获取文件大小失败: ${itemPath} - ${e.message}`,
-							"ERROR",
-						),
-					);
+					.catch(e => logMessage(`异步获取文件大小失败: ${message.path} - ${e.message}`, "ERROR"));
 				break;
 
 			case "refreshSize":
-				try {
-					const { path: itemToRefresh, type: itemTypeToRefresh } = message;
-					const statsKey = `${itemToRefresh}:${itemTypeToRefresh === "folder" ? "dir" : "file"}`;
-
-					delete fileSizeCache[statsKey];
-					if (itemTypeToRefresh === "folder") {
-						delete sizeCalculationPromises[itemToRefresh];
-					}
-
-					if (itemTypeToRefresh === "folder") {
-						const promise = calculateFolderSizeRecursive(itemToRefresh);
-						sizeCalculationPromises[itemToRefresh] = promise;
-
-						promise
-							.then((totalSize) => {
-								const formatted = formatFileSize(totalSize, sizeMode);
-								const { size, unit } = formatted;
-								let spacesToFill = 0;
-								if (unit === "m") spacesToFill = 0;
-								else if (unit === "k") spacesToFill = 3;
-								else if (unit === "b") spacesToFill = 6;
-								const displayString =
-									" ".repeat(spacesToFill) + size + " " + unit;
-								fileSizeCache[statsKey] = {
-									size: totalSize,
-									unit: unit,
-									display: displayString,
-									isFolderTotal: true,
-								};
-								if (panel && !panel.disposed) {
-									panel.webview.postMessage({
-										command: "updateSize",
-										path: itemToRefresh,
-										type: "folder",
-										sizeDisplay: displayString,
-									});
-								}
-							})
-							.catch((e) =>
-								logMessage(
-									`刷新文件夹大小失败: ${itemToRefresh} - ${e.message}`,
-									"ERROR",
-								),
-							)
-							.finally(() => {
-								delete sizeCalculationPromises[itemToRefresh];
-							});
-					} else {
-						getFileSizeDisplayAsync(itemToRefresh, true, currentSizeMode)
-							.then((display) => {
-								if (panel && !panel.disposed) {
-									panel.webview.postMessage({
-										command: "updateSize",
-										path: itemToRefresh,
-										type: "file",
-										sizeDisplay: display,
-									});
-								}
-							})
-							.catch((e) =>
-								logMessage(
-									`刷新文件大小失败: ${itemToRefresh} - ${e.message}`,
-									"ERROR",
-								),
-							);
-					}
-				} catch (error) {
-					logMessage(`刷新大小时出错: ${error.message}`, "ERROR");
+				const { path: itemToRefresh, type: itemTypeToRefresh } = message;
+				const statsKey = `${itemToRefresh}:${itemTypeToRefresh === "folder" ? "dir" : "file"}`;
+				delete fileSizeCache[statsKey];
+				if (itemTypeToRefresh === "folder") {
+					delete sizeCalculationPromises[itemToRefresh];
+					calculateFolderSizeRecursive(itemToRefresh).then(totalSize => {
+						const { size, unit } = formatFileSize(totalSize, sizeMode);
+						let spacesToFill = (unit === "k" ? 3 : (unit === "b" ? 6 : 0));
+						const displayString = " ".repeat(spacesToFill) + size + " " + unit;
+						fileSizeCache[statsKey] = { size: totalSize, unit: unit, display: displayString, isFolderTotal: true };
+						if (panel && !panel.disposed) {
+							panel.webview.postMessage({ command: "updateSize", path: itemToRefresh, type: "folder", sizeDisplay: displayString });
+						}
+					}).catch(e => logMessage(`刷新文件夹大小失败: ${itemToRefresh} - ${e.message}`, "ERROR"));
+				} else {
+					getFileSizeDisplayAsync(itemToRefresh, true, currentSizeMode).then(display => {
+						if (panel && !panel.disposed) {
+							panel.webview.postMessage({ command: "updateSize", path: itemToRefresh, type: "file", sizeDisplay: display });
+						}
+					}).catch(e => logMessage(`刷新文件大小失败: ${itemToRefresh} - ${e.message}`, "ERROR"));
 				}
 				break;
 
 			case "renameItem":
 				try {
-					const { oldPath, newName, itemType } = message;
-					const oldDir = path.dirname(oldPath);
-					const newPath = path.join(oldDir, newName);
-
+					const { oldPath, newName } = message;
+					const newPath = path.join(path.dirname(oldPath), newName);
 					if (fs.existsSync(newPath)) {
-						vscode.window.showErrorMessage(
-							`重命名失败：目标位置已存在同名${itemType === "file" ? "文件" : "文件夹"}。`,
-						);
+						vscode.window.showErrorMessage(`重命名失败：目标位置已存在同名项。`);
 						refreshWebview();
-						break;
+					} else {
+						fs.renameSync(oldPath, newPath);
+						saveRecentDirectory(path.dirname(oldPath));
+						fileSizeCache = {};
+						sizeCalculationPromises = {};
+						setTimeout(() => refreshWebview(), 100);
 					}
-
-					fs.renameSync(oldPath, newPath);
-					saveRecentDirectory(oldDir);
-					fileSizeCache = {};
-					sizeCalculationPromises = {};
-					setTimeout(() => refreshWebview(), 100);
 				} catch (error) {
 					vscode.window.showErrorMessage("重命名失败: " + error.message);
 					logMessage("重命名失败: " + error.message, "ERROR");
@@ -1669,12 +1539,9 @@ function showSaveAsDialog() {
 			case "navigate":
 				try {
 					let newPath = message.path;
-					if (process.platform === "win32") {
-						if (newPath.match(/^[A-Z]:$/i)) {
-							newPath = newPath + "\\";
-						}
+					if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) {
+						newPath += "\\";
 					}
-
 					if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
 						currentPath = newPath;
 						refreshWebview();
@@ -1683,158 +1550,63 @@ function showSaveAsDialog() {
 					}
 				} catch (error) {
 					vscode.window.showErrorMessage("导航失败: " + error.message);
-					logMessage("导航失败: " + error.message, "ERROR");
 				}
 				break;
 
 			case "navigateUp":
-				try {
-					if (
-						currentPath !== "\\" &&
-						currentPath !== currentPath.split("\\")[0] + "\\"
-					) {
-						currentPath = path.dirname(currentPath);
-						refreshWebview();
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("向上导航失败: " + error.message);
-					logMessage("向上导航失败: " + error.message, "ERROR");
+				const parentDir = path.dirname(currentPath);
+				if (parentDir !== currentPath) {
+					currentPath = parentDir;
+					refreshWebview();
 				}
 				break;
 
 			case "saveSidebarWidth":
-				try {
-					const width = message.width;
-					const config = getConfig();
-					saveConfig(
-						config.recentDirs,
-						config.lineSpacing,
-						width,
-						config.recycleBin,
-						config.isPinned,
-						config.sizeMode,
-					);
-				} catch (error) {
-					logMessage(`保存侧边栏宽度失败: ${error}`, "ERROR");
-				}
+				saveConfig(
+					currentConfig.recentDirs, currentConfig.lineSpacing, message.width,
+					currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode
+				);
 				break;
 
 			case "togglePin":
-				try {
-					const isPinned = message.isPinned;
-					const config = getConfig();
-					saveConfig(
-						config.recentDirs,
-						config.lineSpacing,
-						config.sidebarWidth,
-						config.recycleBin,
-						isPinned,
-						config.sizeMode,
-					);
-				} catch (error) {
-					logMessage(`保存pin状态失败: ${error}`, "ERROR");
-				}
+				saveConfig(
+					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth,
+					currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode
+				);
 				break;
 
 			case "save":
-				const fileName = message.filename;
-				const fullFilePath = path.join(currentPath, fileName);
-				const isPinned = message.isPinned || false;
+				const { filename, isPinned, openInCurrentGroup } = message;
+				const fullFilePath = path.join(currentPath, filename);
+				saveRecentDirectory(currentPath);
+				fileSizeCache = {};
 
-				try {
-					saveRecentDirectory(currentPath);
-					fileSizeCache = {};
+				const createFileAction = () => {
+					fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
+					if (!isPinned) panel.dispose(); else refreshWebview();
+					vscode.workspace.openTextDocument(fullFilePath).then(doc => {
+						vscode.window.showTextDocument(doc, openInCurrentGroup ? undefined : vscode.ViewColumn.Beside);
+					});
+				};
 
-					if (fs.existsSync(fullFilePath)) {
-						const stats = fs.statSync(fullFilePath);
-						if (stats.isFile()) {
-							vscode.window
-								.showWarningMessage(
-									`文件 "${fileName}" 已存在，是否覆盖？`,
-									{ modal: true },
-									{ title: "是", isCloseAffordance: false },
-									{ title: "否", isCloseAffordance: true },
-								)
-								.then((answer) => {
-									if (answer?.title === "是") {
-										const content = "\n".repeat(199);
-										fs.writeFileSync(fullFilePath, content, "utf8");
-
-										if (!isPinned) {
-											panel.dispose();
-										} else {
-											refreshWebview();
-										}
-
-										const viewColumn = message.openInCurrentGroup
-											? undefined
-											: vscode.ViewColumn.Beside;
-										vscode.workspace
-											.openTextDocument(fullFilePath)
-											.then((doc) => {
-												vscode.window.showTextDocument(doc, viewColumn);
-											});
-									}
-								});
-						} else {
-							vscode.window.showErrorMessage(
-								`无法创建文件 "${fileName}"，因为同名文件夹已存在`,
-							);
-						}
-					} else {
-						const content = "\n".repeat(199);
-						fs.writeFileSync(fullFilePath, content, "utf8");
-
-						if (!isPinned) {
-							panel.dispose();
-						}
-
-						const viewColumn = message.openInCurrentGroup
-							? undefined
-							: vscode.ViewColumn.Beside;
-						vscode.workspace.openTextDocument(fullFilePath).then((doc) => {
-							vscode.window.showTextDocument(doc, viewColumn);
-							if (isPinned) {
-								setTimeout(() => refreshWebview(), 100);
-							}
-						});
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("创建文件失败: " + error.message);
-					logMessage("创建文件失败: " + error.message, "ERROR");
+				if (fs.existsSync(fullFilePath)) {
+					vscode.window.showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
+						.then(answer => { if (answer === "是") createFileAction(); });
+				} else {
+					createFileAction();
 				}
 				break;
 
 			case "createFolder":
-				const folderName = message.folderName;
-				const newFolderPath = path.join(currentPath, folderName);
-
-				try {
-					if (fs.existsSync(newFolderPath)) {
-						const stats = fs.statSync(newFolderPath);
-						if (stats.isDirectory()) {
-							vscode.window.showErrorMessage(`文件夹 "${folderName}" 已存在`);
-						} else {
-							vscode.window.showErrorMessage(
-								`无法创建文件夹 "${folderName}"，因为同名文件已存在`,
-							);
-						}
-					} else {
-						fs.mkdirSync(newFolderPath);
-						saveRecentDirectory(currentPath);
-						fileSizeCache = {};
-						vscode.window.showInformationMessage(
-							`文件夹 "${folderName}" 创建成功`,
-						);
-
-						setTimeout(() => refreshWebview(), 100);
-						if (panel && !panel.disposed) {
-							panel.webview.postMessage({ command: "clearFilenameInput" });
-						}
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("创建文件夹失败: " + error.message);
-					logMessage("创建文件夹失败: " + error.message, "ERROR");
+				const newFolderPath = path.join(currentPath, message.folderName);
+				if (fs.existsSync(newFolderPath)) {
+					vscode.window.showErrorMessage(`无法创建，"${message.folderName}" 已存在。`);
+				} else {
+					fs.mkdirSync(newFolderPath);
+					saveRecentDirectory(currentPath);
+					fileSizeCache = {};
+					refreshWebview();
+					if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilenameInput" });
 				}
 				break;
 
@@ -1843,186 +1615,69 @@ function showSaveAsDialog() {
 				break;
 
 			case "editFile":
-				try {
-					const filePath = message.path;
-					const isPinned = message.isPinned || false;
-
-					if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-						saveRecentDirectory(path.dirname(filePath));
-						const viewColumn = message.openInCurrentGroup
-							? undefined
-							: vscode.ViewColumn.Beside;
-
-						vscode.workspace.openTextDocument(filePath).then((doc) => {
-							vscode.window.showTextDocument(doc, viewColumn);
-							if (!isPinned) {
-								panel.dispose();
-							} else {
-								refreshWebview();
-							}
-						});
-					} else {
-						vscode.window.showErrorMessage("无效的文件路径: " + filePath);
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("打开文件失败: " + error.message);
-					logMessage("打开文件失败: " + error.message, "ERROR");
-				}
+				saveRecentDirectory(path.dirname(message.path));
+				vscode.workspace.openTextDocument(message.path).then(doc => {
+					vscode.window.showTextDocument(doc, message.openInCurrentGroup ? undefined : vscode.ViewColumn.Beside);
+					if (!message.isPinned) panel.dispose(); else refreshWebview();
+				});
 				break;
 
 			case "openFolderInNewWindow":
-				try {
-					const folderPath = message.path;
-
-					if (
-						fs.existsSync(folderPath) &&
-						fs.statSync(folderPath).isDirectory()
-					) {
-						saveRecentDirectory(folderPath);
-						vscode.commands.executeCommand(
-							"vscode.openFolder",
-							vscode.Uri.file(folderPath),
-							{ forceNewWindow: true },
-						);
-						refreshWebview();
-					} else {
-						vscode.window.showErrorMessage("无效的文件夹路径: " + folderPath);
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("打开文件夹失败: " + error.message);
-					logMessage("打开文件夹失败: " + error.message, "ERROR");
-				}
+				saveRecentDirectory(message.path);
+				vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(message.path), { forceNewWindow: true });
+				refreshWebview();
 				break;
 
 			case "openWithDefaultApp":
-				try {
-					const itemPath = message.path;
-					const itemType = message.type;
-
-					if (fs.existsSync(itemPath)) {
-						const dirToSave =
-							itemType === "folder" ? itemPath : path.dirname(itemPath);
-						saveRecentDirectory(dirToSave);
-
-						if (process.platform === "win32") {
-							cp.exec(`start "" "${itemPath.replace(/"/g, '""')}"`);
-						} else if (process.platform === "darwin") {
-							cp.exec(`open "${itemPath}"`);
-						} else {
-							cp.exec(`xdg-open "${itemPath}"`);
-						}
-						refreshWebview();
-					} else {
-						vscode.window.showErrorMessage("无效的路径: " + itemPath);
-					}
-				} catch (error) {
-					vscode.window.showErrorMessage("打开项目失败: " + error.message);
-					logMessage("打开项目失败: " + error.message, "ERROR");
-				}
+				saveRecentDirectory(message.type === 'folder' ? message.path : path.dirname(message.path));
+				const command = process.platform === 'win32' ? 'start ""' : (process.platform === 'darwin' ? 'open' : 'xdg-open');
+				cp.exec(`${command} "${message.path}"`);
+				refreshWebview();
 				break;
 
 			case "quickDeleteToRecycleBin":
-				try {
-					const itemPath = message.path;
-					console.log('[q2.js] 开始快速删除:', itemPath);
-
-					if (fs.existsSync(itemPath)) {
-						saveRecentDirectory(currentPath);
-						fileSizeCache = {};
-						sizeCalculationPromises = {};
-
-						// 显示快速进度条
-						vscode.window.withProgress({
-							location: vscode.ProgressLocation.Notification,
-							title: "正在移至回收站...",
-							cancellable: false
-						}, (progress) => {
-							progress.report({ message: path.basename(itemPath) });
-
-							return new Promise((resolve, reject) => {
-								// 直接执行删除命令
-								const deleteCommand = (platform) => {
-									if (platform === "win32") {
-										const psScript = `& { (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemPath.replace(/'/g, "''")}').InvokeVerb('delete') }`;
-										const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
-										return `powershell -NoProfile -EncodedCommand ${encodedScript}`;
-									} else if (platform === "darwin") {
-										return `trash "${itemPath.replace(/"/g, '\\"')}"`;
-									} else {
-										return `gvfs-trash "${itemPath.replace(/"/g, '\\"')}"`;
-									}
-								};
-
-								const cmd = deleteCommand(process.platform);
-								console.log('[q2.js] 执行快速删除命令:', cmd);
-
-								cp.exec(cmd, (error, stdout, stderr) => {
-									if (error) {
-										console.log('[q2.js] 快速删除失败:', error.message);
-										console.log('[q2.js] stderr:', stderr);
-										// 如果删除失败，恢复界面元素显示
-										panel.webview.postMessage({
-											command: 'restoreDeletedItem',
-											path: itemPath
-										});
-										reject(error);
-									} else {
-										console.log('[q2.js] 快速删除命令已发送');
-										// 延迟后刷新界面，确保删除操作完成
-										setTimeout(() => {
-											refreshWebview();
-											resolve();
-										}, 300); // 适中的延迟时间，确保删除完成
-									}
-								});
+				const itemToDelete = message.path;
+				if (fs.existsSync(itemToDelete)) {
+					saveRecentDirectory(currentPath);
+					fileSizeCache = {};
+					sizeCalculationPromises = {};
+					vscode.window.withProgress({
+						location: vscode.ProgressLocation.Notification,
+						title: `正在将 ${path.basename(itemToDelete)} 移至回收站...`,
+						cancellable: false
+					}, () => {
+						return new Promise((resolve, reject) => {
+							const psScript = `(New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemToDelete.replace(/'/g, "''")}').InvokeVerb('delete')`;
+							const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
+							cp.exec(`powershell -NoProfile -EncodedCommand ${encodedScript}`, (error, stdout, stderr) => {
+								if (error) {
+									logMessage(`删除失败: ${itemToDelete} - ${stderr}`, "ERROR");
+									panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
+									reject(new Error(stderr || error.message));
+								} else {
+									setTimeout(() => { refreshWebview(); resolve(); }, 300);
+								}
 							});
-						}).then(() => {
-							// 显示"已删除"状态
-							vscode.window.withProgress({
-								location: vscode.ProgressLocation.Notification,
-								title: `${path.basename(itemPath)} 已删除`,
-								cancellable: false
-							}, () => {
-								return new Promise(resolve => {
-									setTimeout(() => {
-										resolve();
-									}, 3000); // 显示3秒
-								});
-							});
-						}).catch(error => {
-							// 删除失败时显示错误消息
-							vscode.window.showErrorMessage(`删除失败: ${error.message}`);
 						});
-					} else {
-						console.log('[q2.js] 要删除的项目不存在:', itemPath);
-						// 如果文件不存在，也要刷新界面
-						refreshWebview();
-					}
-				} catch (error) {
-					console.log('[q2.js] 快速删除异常:', error.message);
-					vscode.window.showErrorMessage(`删除异常: ${error.message}`);
+					}).then(undefined, error => {
+						vscode.window.showErrorMessage(`删除失败: ${error.message}`);
+					});
+				} else {
+					vscode.window.showWarningMessage(`删除失败：项目不存在。`);
+					refreshWebview();
 				}
 				break;
 		}
 	});
 
-	// 处理面板关闭
-	panel.onDidDispose(() => {
-		activePanel = null;
-	});
-
-	// 首次打开时调用，以填充文件列表
-	panel.webview.html = getWebviewContent(currentPath);
-	setTimeout(() => updateResourceExplorer(), 100);
+	// 首次打开时加载内容
+	refreshWebview();
 }
 
 // ==================== 模块激活 ====================
 
 function activate(context) {
-	// 首次读取配置，设置全局 sizeMode
-	getConfig();
-
-	// 注册命令
+	getConfig(); // 初始化配置
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
 		vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog),
