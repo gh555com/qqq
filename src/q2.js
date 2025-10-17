@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const trash = require("trash"); // ✅ 1. 引入 trash 包
 
 // ==================== q2 模块变量 ====================
 
@@ -32,7 +33,7 @@ function logMessage(message, level = "WARN") {
 let activePanel = null;
 
 // 面板焦点控制开关：0-不使用panel.reveal，1-使用panel.reveal
-const usePanelReveal = 0;
+const usePanelReveal = 1;
 
 // 文件大小缓存 (键为完整路径，值为 {size: number, unit: string, isFolderTotal: boolean})
 let fileSizeCache = {};
@@ -1578,23 +1579,52 @@ function showSaveAsDialog() {
 			case "save":
 				const { filename, isPinned, openInCurrentGroup } = message;
 				const fullFilePath = path.join(currentPath, filename);
-				saveRecentDirectory(currentPath);
-				fileSizeCache = {};
 
 				const createFileAction = () => {
-					fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
-					if (!isPinned) panel.dispose(); else refreshWebview();
-					vscode.workspace.openTextDocument(fullFilePath).then(doc => {
-						vscode.window.showTextDocument(doc, openInCurrentGroup ? undefined : vscode.ViewColumn.Beside);
-					});
+					try {
+						// 再次确认，以防万一
+						if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
+							vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+							return;
+						}
+
+						fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
+
+						saveRecentDirectory(currentPath); // 仅在成功创建后保存
+						fileSizeCache = {};
+
+						if (!isPinned) {
+							panel.dispose();
+						} else {
+							refreshWebview();
+						}
+
+						vscode.workspace.openTextDocument(fullFilePath).then(doc => {
+							vscode.window.showTextDocument(doc, openInCurrentGroup ? undefined : vscode.ViewColumn.Beside);
+						});
+
+					} catch (error) {
+						logMessage(`创建文件失败: ${error.message}`, "ERROR");
+						vscode.window.showErrorMessage(`创建文件失败: ${error.message}`);
+					}
 				};
 
 				if (fs.existsSync(fullFilePath)) {
-					vscode.window.showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
-						.then(answer => { if (answer === "是") createFileAction(); });
+					const stats = fs.statSync(fullFilePath);
+					if (stats.isDirectory()) {
+						vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+					} else {
+						vscode.window.showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
+							.then(answer => {
+								if (answer === "是") {
+									createFileAction();
+								}
+							});
+					}
 				} else {
 					createFileAction();
 				}
+
 				break;
 
 			case "createFolder":
@@ -1635,7 +1665,7 @@ function showSaveAsDialog() {
 				refreshWebview();
 				break;
 
-			case "quickDeleteToRecycleBin":
+			case "quickDeleteToRecycleBin": // ✅ 2. 这是主要修改区域
 				const itemToDelete = message.path;
 				if (fs.existsSync(itemToDelete)) {
 					saveRecentDirectory(currentPath);
@@ -1646,21 +1676,24 @@ function showSaveAsDialog() {
 						title: `正在将 ${path.basename(itemToDelete)} 移至回收站...`,
 						cancellable: false
 					}, () => {
-						return new Promise((resolve, reject) => {
-							const psScript = `(New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemToDelete.replace(/'/g, "''")}').InvokeVerb('delete')`;
-							const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
-							cp.exec(`powershell -NoProfile -EncodedCommand ${encodedScript}`, (error, stdout, stderr) => {
-								if (error) {
-									logMessage(`删除失败: ${itemToDelete} - ${stderr}`, "ERROR");
-									panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
-									reject(new Error(stderr || error.message));
-								} else {
-									setTimeout(() => { refreshWebview(); resolve(); }, 300);
-								}
-							});
+						// ✅ 3. 将 Promise 的回调改为 async 函数，以便使用 await
+						return new Promise(async (resolve, reject) => {
+							try {
+								// ✅ 4. 调用 trash()，它会处理好所有平台的回收站逻辑
+								await trash([itemToDelete]);
+								// 成功后，延迟刷新界面，确保文件系统已更新
+								setTimeout(() => { refreshWebview(); resolve(); }, 300);
+							} catch (error) {
+								// ✅ 5. 统一的错误处理
+								logMessage(`移至回收站失败: ${itemToDelete} - ${error.message}`, "ERROR");
+								// 如果失败，通知 webview 恢复条目的显示状态
+								panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
+								reject(error); // 将错误传递给 withProgress
+							}
 						});
 					}).then(undefined, error => {
-						vscode.window.showErrorMessage(`删除失败: ${error.message}`);
+						// withProgress 的第二个回调函数用于捕获 reject 的错误
+						vscode.window.showErrorMessage(`移至回收站失败: ${error.message}`);
 					});
 				} else {
 					vscode.window.showWarningMessage(`删除失败：项目不存在。`);

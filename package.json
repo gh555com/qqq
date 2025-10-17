@@ -63,16 +63,17 @@
     ]
   },
   "scripts": {
-    "package": "vsce package --allow-missing-repository",
-    "publish": "vsce publish",
+    "package": "@vscode/vsce package --allow-missing-repository",
+    "publish": "@vscode/vsce publish",
     "test": "echo \"Running tests...\" && exit 0"
   },
   "dependencies": {
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "trash": "^8.1.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.70.0",
     "@types/node": "^18.0.0",
-    "vsce": "^2.15.0"
+    "@types/vscode": "^1.70.0",
+    "@vscode/vsce": "^3.6.2"
   }
 }
