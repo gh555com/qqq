@@ -11,8 +11,26 @@ try {
 	console.log("Sharp库未安装，无法调整图片尺寸");
 }
 
-// 从qqq导入公共配置
-const { logMessage, LOG_PATH, BASE_DIR } = require('./qqq');
+// 公共配置常量
+const LOG_PATH = "D:\\view\\p\\kp.log";
+const BASE_DIR = "D:\\view\\p\\";
+
+/**
+ * 日志记录函数
+ * @param {string} message - 日志消息
+ * @param {string} level - 日志级别 (ERROR, WARN)
+ */
+function logMessage(message, level = "WARN") {
+	if (level !== "ERROR" && level !== "WARN") return;
+	const ts = new Date().toISOString();
+	const line = `[${ts}] [${level}] ${message}\n`;
+	try {
+		fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+		fs.appendFileSync(LOG_PATH, line);
+	} catch (e) {
+		console.error("日志写入失败:", e);
+	}
+}
 
 // q1 模块变量
 let blockMode = false;

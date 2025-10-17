@@ -3,10 +3,30 @@ const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-// 从主模块导入公共配置和工具
-const { LOG_PATH, BASE_DIR, CONFIG_PATH, SIZE_CONFIG_KEY, logMessage } = require('./qqq');
-
 // ==================== q2 模块变量 ====================
+
+// 公共配置常量
+const LOG_PATH = "D:\\view\\p\\kp.log";
+const BASE_DIR = "D:\\view\\p\\";
+const CONFIG_PATH = "E:\\r\\pz.ini";
+const SIZE_CONFIG_KEY = "size_mode";
+
+/**
+ * 日志记录函数
+ * @param {string} message - 日志消息
+ * @param {string} level - 日志级别 (ERROR, WARN)
+ */
+function logMessage(message, level = "WARN") {
+	if (level !== "ERROR" && level !== "WARN") return;
+	const ts = new Date().toISOString();
+	const line = `[${ts}] [${level}] ${message}\n`;
+	try {
+		fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+		fs.appendFileSync(LOG_PATH, line);
+	} catch (e) {
+		console.error("日志写入失败:", e);
+	}
+}
 
 // 全局变量，用于跟踪是否已打开一个窗口
 let activePanel = null;
@@ -729,7 +749,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 console.log('webview: update 处理完成');
             }
             else if (message.command === 'updateSize') {
-                const item = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"   ].\${message.type}\`);
+                const item = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"].\${message.type}\`);
                 if (item) {
                     const szArea = item.querySelector('.sz-area');
                     if (szArea) {
@@ -747,6 +767,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             else if (message.command === 'refreshSizes') {
                 refreshSizeDisplay();
             }
+            else if (message.command === 'restoreDeletedItem') {
+                // 恢复被删除但实际删除失败的项
+                const itemElement = document.querySelector(\`.file-item[data-path="\${message.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
+                if (itemElement) {
+                    itemElement.style.display = '';
+                }
+            }
         });
 
         function requestFileSizeUpdates(items) {
@@ -755,7 +782,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             items.forEach(item => {
                 if (item.name === '..') return;
 
-                const itemElement = document.querySelector(\`.file-item[data-path="\${item.path.replace(/\\\\/g, '\\\\\\\\')}"   ].\${item.type}\`);
+                const itemElement = document.querySelector(\`.file-item[data-path="\${item.path.replace(/\\\\/g, '\\\\\\\\')}"].\${item.type}\`);
                 if (itemElement) {
                     const szArea = itemElement.querySelector('.sz-area');
                     if (szArea) {
@@ -805,7 +832,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         let renameBlurHandler = null;
 
         function startRename(itemPath, itemName, itemType) {
-            const itemElement = document.querySelector(\`.file-item[data-path="\${itemPath.replace(/\\\\/g, '\\\\\\\\')}"   ]\`);
+            const itemElement = document.querySelector(\`.file-item[data-path="\${itemPath.replace(/\\\\/g, '\\\\\\\\')}"\`);
             if (!itemElement) return;
 
             selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
@@ -917,12 +944,16 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
         function performDeleteAction(itemToDelete) {
             if (!itemToDelete) return;
-            const itemElement = document.querySelector(\`.file-item[data-path="\${itemToDelete.path.replace(/\\\\/g, '\\\\\\\\')}"   ]\`);
+
+            // 直接从界面移除元素，不显示进度条
+            const itemElement = document.querySelector(\`.file-item[data-path="\${itemToDelete.path.replace(/\\\\/g, '\\\\\\\\')}"\`);
             if (itemElement) {
                 itemElement.style.display = 'none';
             }
+
+            // 发送删除命令，但不显示进度条
             vscode.postMessage({
-                command: 'deleteToRecycleBin',
+                command: 'quickDeleteToRecycleBin',
                 path: itemToDelete.path,
                 type: itemToDelete.type
             });
@@ -1085,6 +1116,15 @@ function generateWebviewScript(currentSizeMode, currentPath) {
         let startWidth = 0;
 
         if (sidebarResizer && sidebar && mainContent) {
+            // 初始化分割线位置，从HTML中获取配置的宽度
+            // 使用getComputedStyle获取实际应用的宽度值
+            const computedStyle = getComputedStyle(sidebar);
+            const sidebarWidth = parseInt(computedStyle.width) || 100;
+
+            // 确保分割线和主内容区的位置与侧边栏宽度一致
+            sidebarResizer.style.left = sidebarWidth + 'px';
+            mainContent.style.left = sidebarWidth + 'px';
+
             sidebarResizer.addEventListener('mousedown', (e) => {
                 isResizing = true;
                 startX = e.clientX;
@@ -1856,6 +1896,55 @@ function showSaveAsDialog() {
 				} catch (error) {
 					vscode.window.showErrorMessage("打开项目失败: " + error.message);
 					logMessage("打开项目失败: " + error.message, "ERROR");
+				}
+				break;
+
+			case "quickDeleteToRecycleBin":
+				try {
+					const itemPath = message.path;
+					console.log('[q2.js] 开始快速删除:', itemPath);
+
+					if (fs.existsSync(itemPath)) {
+						saveRecentDirectory(currentPath);
+						fileSizeCache = {};
+						sizeCalculationPromises = {};
+
+						// 直接执行删除命令，不显示进度条
+						const deleteCommand = (platform) => {
+							if (platform === "win32") {
+								const psScript = `& { (New-Object -ComObject Shell.Application).Namespace(0).ParseName('${itemPath.replace(/'/g, "''")}').InvokeVerb('delete') }`;
+								const encodedScript = Buffer.from(psScript, "utf16le").toString("base64");
+								return `powershell -NoProfile -EncodedCommand ${encodedScript}`;
+							} else if (platform === "darwin") {
+								return `trash "${itemPath.replace(/"/g, '\\"')}"`;
+							} else {
+								return `gvfs-trash "${itemPath.replace(/"/g, '\\"')}"`;
+							}
+						};
+
+						const cmd = deleteCommand(process.platform);
+						console.log('[q2.js] 执行快速删除命令:', cmd);
+
+						cp.exec(cmd, (error, stdout, stderr) => {
+							if (error) {
+								console.log('[q2.js] 快速删除失败:', error.message);
+								console.log('[q2.js] stderr:', stderr);
+								// 如果删除失败，恢复界面元素显示
+								panel.webview.postMessage({
+									command: 'restoreDeletedItem',
+									path: itemPath
+								});
+							} else {
+								console.log('[q2.js] 快速删除命令已发送');
+								// 简短延迟后刷新界面
+								setTimeout(() => refreshWebview(), 500);
+							}
+						});
+					} else {
+						console.log('[q2.js] 要删除的项目不存在:', itemPath);
+					}
+				} catch (error) {
+					console.log('[q2.js] 快速删除异常:', error.message);
 				}
 				break;
 
