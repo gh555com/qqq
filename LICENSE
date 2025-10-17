@@ -1,0 +1,393 @@
+我们坚信开源的力量，它能建立信任并促进技术透明。同时，我们也珍视并致力于保护我们在用户体验设计和软件性能优化上投入的巨大创造性劳动。为此，本项目采用一种双重许可模式。
+
+I. 核心代码：GNU通用公共许可证 v3.0 (GPLv3)
+
+本仓库中所有构成软件功能的源代码文件（例如 .py, .js, .ts 等），包括但不限于其算法、数据结构和性能优化实现，均采用 GNU通用公共许可证 v3.0 (GPLv3)
+ 进行授权。
+
+这意味着：
+
+开放与自由： 您可以自由地运行、研究、分享和修改本软件的代码。
+
+回馈义务： 如果您修改了代码或在其基础上创建了衍生作品，并选择分发该作品，那么您的整个衍生作品也必须采用 GPLv3 许可证进行开源。
+
+这一选择旨在确保我们的性能优化成果能够永远留在开源社区，防止任何形式的闭源商业化滥用。
+
+II. 品牌与视觉设计：专有商业许可
+
+与源代码不同，本项目所有非代码的创意与设计资产均为 [您的名字或公司名] 的专有财产，并受版权法严格保护，保留所有权利 (All Rights Reserved)。
+
+这些受保护的资产明确包括：
+
+用户界面 (UI) 布局： 元素的组织、定位和尺寸关系。
+
+交互模式与视觉流程： 用户的操作路径、反馈机制、动画效果以及功能间的导航方式。
+
+视觉资产： CSS样式文件、图标、图片、配色方案以及自定义字体。
+
+整体商业外观 (Total Trade Dress)： 即软件给用户带来的整体“外观和感觉 (Look and Feel)”。
+
+我们投入了大量心血来创造独特、精妙且高效的用户体验，这些创意资产未在 GPLv3 许可下授权。
+
+简而言之 (In Short)
+关于...	您可以做什么 (What you CAN do)	您不可以做什么 (What you CANNOT do)
+功能代码	Fork 代码，学习性能优化，构建您自己的开源 GPLv3 项目。	将我们的代码用于您自己的闭源商业产品中。
+界面设计	学习我们的设计理念。	在您的项目中抄袭、复制或模仿我们的 UI 布局和交互模式。
+使用条款
+
+允许： 您可以自由地 Fork 本项目的代码库，学习其架构和性能优化实现，并在 GPLv3 协议的约束下，构建您自己的、具有完全不同视觉设计和交互体验的应用程序。
+
+禁止： 未经我们明确的书面授权，严禁在您的项目中直接使用或在视觉上模仿我们的用户界面布局、交互模式、CSS 样式或任何其他构成我们“整体商业外观”的元素。
+
+禁止： 严禁创建与“创作者工具集约中心”官方版本在视觉和交互上“混淆性相似 (Confusingly Similar)”的衍生产品。换句话说，您不能仅仅更换一个名字或颜色，就发布一个让用户误以为是官方出品或官方授权的软件。
+
+我们的目标是： 在实现代码完全透明、安全可信的同时，坚决捍卫我们作为设计者和优化者的核心知识产权价值，确保我们产品的独特性和品牌识别度。
+
+Disclaimer: This license is provided in both English and Chinese. In case of any conflict or discrepancy between the two versions, the English version shall prevail.
+
+免责声明： 本许可协议同时提供英文与中文版本。如果两个版本之间存在任何冲突或不一致之处，应以英文版本为准。
+
+
+好的，完全没有问题。
+
+将所有要素整合起来，形成一份专业、清晰、中英双语对照的完整软件许可协议，可以直接放入您项目的 `README.md` 或专门的 `LICENSE.md` 文件中。这份协议结构严谨，意图明确，能最大程度地实现您“代码开源、设计专有”的目标。
+
+---
+
+### **Creator Hub Licensing Agreement / 创作者工具集约中心许可协议**
+
+`Copyright (c) 2025 [Your Name or Company Name]. All Rights Reserved.`
+
+`Copyright (c) 2025 [您的名字或公司名]. 保留所有权利。`
+
+---
+
+We believe in the power of open source to build trust and promote technical transparency. At the same time, we cherish and are committed to protecting the immense creative labor invested in our user experience design and software performance optimization. To this end, this project adopts a dual-licensing model.
+
+我们坚信开源的力量，它能建立信任并促进技术透明。同时，我们也珍视并致力于保护我们在用户体验设计和软件性能优化上投入的巨大创造性劳动。为此，本项目采用一种双重许可模式。
+
+---
+
+#### **I. Core Code: GNU General Public License v3.0 (GPLv3)**
+
+All source code files that constitute the software's functionality (e.g., `.py`, `.js`, `.ts` files), including but not limited to their algorithms, data structures, and performance optimization implementations, are licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+本仓库中所有构成软件功能的**源代码文件**（例如 `.py`, `.js`, `.ts` 等），包括但不限于其算法、数据结构和性能优化实现，均采用 **[GNU通用公共许可证 v3.0 (GPLv3)](https://www.gnu.org/licenses/gpl-3.0.html)** 进行授权。
+
+This means:
+这意味着：
+
+* **Openness and Freedom:** You are free to run, study, share, and modify the software's code.
+  **开放与自由：** 您可以自由地运行、研究、分享和修改本软件的代码。
+
+* **Obligation to Share Alike:** If you modify the code or create a derivative work based on it and choose to distribute that work, your entire derivative work **must** also be licensed under the GPLv3.
+  **回馈义务：** 如果您修改了代码或在其基础上创建了衍生作品，并选择分发该作品，那么您的整个衍生作品也**必须**采用 GPLv3 许可证进行开源。
+
+This choice is intended to ensure that our performance optimization achievements remain permanently within the open-source community and to prevent any form of closed-source commercial misuse.
+
+这一选择旨在确保我们的性能优化成果能够永远留在开源社区，防止任何形式的闭源商业化滥用。
+
+---
+
+#### **II. Brand & Visual Design: Proprietary Commercial License**
+
+Unlike the source code, all non-code **creative and design assets** of this project are the **exclusive property of \[Your Name or Company Name], are protected by copyright law, and all rights are reserved.**
+
+与源代码不同，本项目所有非代码的**创意与设计资产**均为 **\[您的名字或公司名] 的专有财产，并受版权法严格保护，保留所有权利 (All Rights Reserved)。**
+
+These protected assets explicitly include:
+这些受保护的资产明确包括：
+
+* **User Interface (UI) Layout:** The organization, positioning, and dimensional relationships of elements.
+  **用户界面 (UI) 布局：** 元素的组织、定位和尺寸关系。
+
+* **Interaction Patterns & Visual Flow:** User operational paths, feedback mechanisms, animation effects, and navigation between functions.
+  **交互模式与视觉流程：** 用户的操作路径、反馈机制、动画效果以及功能间的导航方式。
+
+* **Visual Assets:** CSS style files, icons, images, color schemes, and custom fonts.
+  **视觉资产：** CSS样式文件、图标、图片、配色方案以及自定义字体。
+
+* **Total Trade Dress:** The overall "look and feel" that the software presents to the user.
+  **整体商业外观 (Total Trade Dress)：** 即软件给用户带来的整体“外观和感觉 (Look and Feel)”。
+
+We have invested significant effort in creating a unique, sophisticated, and efficient user experience. These creative assets are **not** licensed under the GPLv3.
+
+我们投入了大量心血来创造独特、精妙且高效的用户体验，这些创意资产**未**在 GPLv3 许可下授权。
+
+---
+
+#### **In Short / 简而言之**
+
+\| Regarding...--
+
+### **Creator Hub Licensing Agreement / 创作者工具集约中心许可协议**
+
+`Copyright (c) 2025 [Your Name or Company Name]. All Rights Reserved.`
+
+`Copyright (c) 2025 [您的名字或公司名]. 保留所有权利。`
+
+---
+
+We believe in the power of open source to build trust and promote technical transparency. At the same time, we cherish and are committed to protecting the immense creative labor invested in our user experience design and software performance optimization. To this end, this project adopts a dual-licensing model.
+
+我们坚信开源的力量，它能建立信任并促进技术透明。同时，我们也珍视并致力于保护我们在用户体验设计和软件性能优化上投入的巨大创造性劳动。为此，本项目采用一种双重许可模式。
+
+---
+
+#### **I. Core Code: GNU General Public License v3.0 (GPLv3)**
+
+All source code files that constitute the software's functionality (e.g., `.py`, `.js`, `.ts` files), including but not limited to their algorithms, data structures, and performance optimization implementations, are licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+本仓库中所有构成软件功能的**源代码文件**（例如 `.py`, `.js`, `.ts` 等），包括但不限于其算法、数据结构和性能优化实现，均采用 **[GNU通用公共许可证 v3.0 (GPLv3)](https://www.gnu.org/licenses/gpl-3.0.html)** 进行授权。
+
+This means:
+这意味着：
+
+* **Openness and Freedom:** You are free to run, study, share, and modify the software's code.
+  **开放与自由：** 您可以自由地运行、研究、分享和修改本软件的代码。
+
+* **Obligation to Share Alike:** If you modify the code or create a derivative work based on it and choose to distribute that work, your entire derivative work **must** also be licensed under the GPLv3.
+  **回馈义务：** 如果您修改了代码或在其基础上创建了衍生作品，并选择分发该作品，那么您的整个衍生作品也**必须**采用 GPLv3 许可证进行开源。
+
+This choice is intended to ensure that our performance optimization achievements remain permanently within the open-source community and to prevent any form of closed-source commercial misuse.
+
+这一选择旨在确保我们的性能优化成果能够永远留在开源社区，防止任何形式的闭源商业化滥用。
+
+---
+
+#### **II. Brand & Visual Design: Proprietary Commercial License**
+
+Unlike the source code, all non-code **creative and design assets** of this project are the **exclusive property of \[Your Name or Company Name], are protected by copyright law, and all rights are reserved.**
+
+与源代码不同，本项目所有非代码的**创意与设计资产**均为 **\[您的名字或公司名] 的专有财产，并受版权法严格保护，保留所有权利 (All Rights Reserved)。**
+
+These protected assets explicitly include:
+这些受保护的资产明确包括：
+
+* **User Interface (UI) Layout:** The organization, positioning, and dimensional relationships of elements.
+  **用户界面 (UI) 布局：** 元素的组织、定位和尺寸关系。
+
+* **Interaction Patterns & Visual Flow:** User operational paths, feedback mechanisms, animation effects, and navigation between functions.
+  **交互模式与视觉流程：** 用户的操作路径、反馈机制、动画效果以及功能间的导航方式。
+
+* **Visual Assets:** CSS style files, icons, images, color schemes, and custom fonts.
+  **视觉资产：** CSS样式文件、图标、图片、配色方案以及自定义字体。
+
+* **Total Trade Dress:** The overall "look and feel" that the software presents to the user.
+  **整体商业外观 (Total Trade Dress)：** 即软件给用户带来的整体“外观和感觉 (Look and Feel)”。
+
+We have invested significant effort in creating a unique, sophisticated, and efficient user experience. These creative assets are **not** licensed under the GPLv3.
+
+我们投入了大量心血来创造独特、精妙且高效的用户体验，这些创意资产**未**在 GPLv3 许可下授权。
+
+---
+
+#### **In Short / 简而言之**
+
+| Regarding...<br>关于...            | What you CAN do<br>您可以做什么                                                                                                                | What you CANNOT do<br>您不可以做什么                                                                                        |
+| :------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------- |
+| **Functional Code**<br>**功能代码**  | Fork the code, study the performance optimizations, and build your own open-source GPLv3 project. <br> Fork 代码，学习性能优化，构建您自己的开源 GPLv3 项目。 | Use our code in your own closed-source commercial products.<br>将我们的代码用于您自己的闭源商业产品中。                                  |
+| **Interface Design**<br>**界面设计** | Learn from our design philosophy.<br>学习我们的设计理念。                                                                                          | Copy, replicate, or imitate our UI layout and interaction patterns in your project.<br>在您的项目中抄袭、复制或模仿我们的 UI 布局和交互模式。 |
+
+---
+
+#### **Terms of Use / 使用条款**
+
+* **ALLOWED:** You are free to fork this project's codebase to study its architecture and performance implementations and, under the constraints of the GPLv3 license, build your own applications that have a **completely different visual design and user experience**.
+  **允许：** 您可以自由地 Fork 本项目的代码库，学习其架构和性能优化实现，并在 GPLv3 协议的约束下，构建您自己的、具有**完全不同视觉设计和交互体验**的应用程序。
+
+* \*\*PRO**PROHIBITED:** Without our express written permission, you are **strictly forbidden** from directly using or visually imitating our user interface layouts, interaction patterns, CSS styles, or any other elements that constitute our "Total Trade Dress" in your project.
+  **禁止：** 未经我们明确的书面授权，**严禁**在您的项目中直接使用或在视觉上模仿我们的用户界面布局、交互模式、CSS 样式或任何其他构成我们“整体商业外观”的元素。
+
+* **PROHIBITED:** You are **strictly forbidden** from creating derivative products that are "confusingly similar" in visual and interactive aspects to the official version of "Creator Hub". In other words, you cannot simply change a name or color and release a piece of software that could mislead users into believing it is an official product or officially endorsed.
+  **禁止：** **严禁**创建与“创作者工具集約中心”官方版本在视觉和交互上“混淆性相似 (Confusingly Similar)”的衍生产品。换句话说，您不能仅仅更换一个名字或颜色，就发布一个让用户误以为是官方出品或官方授权的软件。
+
+---
+
+#### **Our Goal / 我们的目标**
+
+Our goal is to achieve full code transparency, making it secure and trustworthy, while resolutely defending our core intellectual property value as designers and optimizers to ensure the uniqueness and brand identity of our product.
+
+我们的目标是：在实现代码完全透明、安全可信的同时，坚决捍卫我们作为设计者和优化者的核心知识产权价值，确保我们产品的独特性和品牌识别度。
+
+---
+
+> **Disclaimer:** This license is provided in both English and Chinese. In case of any conflict or discrepancy between the two versions, **the English version shall prevail.**
+>
+> **免责声明：** 本许可协议同时提供英文与中文版本。如果两个版本之间存在任何冲突或不一致之处，**应以英文版本为准。**
+
+
+
+
+
+  Source-Available Reference License / 源码可见参考许可证
+
+Copyright (c) 2025 [Your Name or Company Name]. All Rights Reserved.
+
+Copyright (c) 2025 [您的名字或公司名]. 保留所有权利。
+
+ENGLISH VERSION
+
+This software is licensed under a Source-Available Reference License. The source code is made available to the public for the primary purposes of transparency and security auditing.
+
+1. GRANT OF RIGHTS.
+[Your Name or Company Name] grants you a non-exclusive, royalty-free, worldwide right to view, inspect, and reference the source code of this SOFTWARE.
+
+2. RESTRICTIONS - WHAT YOU CANNOT DO.
+This license does NOT grant you any rights to:
+a) Use: You may not run, execute, or otherwise use the source code to operate the software. A separate license, typically granted by downloading the official binary release, is required for use.
+b) Modify: You may not modify, adapt, or create derivative works based on the source code.
+c) Distribute: You may not copy, redistribute, sublicense, or share the source code with any third party.
+d) Commercialize: You may not use the source code for any commercial purposes.
+
+3. INTELLECTUAL PROPERTY.
+All right, title, and interest in and to the SOFTWARE, including its source code and visual design, are and will remain the exclusive property of [Your Name or Company Name]. This is not an open-source license.
+
+中文版本 (CHINESE VERSION)
+
+本软件采用“源码可见参考许可证”进行授权。公开源代码的主要目的是为了实现技术透明化和安全审计。
+
+1. 权利授予。
+[您的名字或公司名] 授予您一项非排他性的、免版税的、全球性的权利，以查看、检查和参考本软件的源代码。
+
+2. 限制条款 - 您不可以做什么。
+本许可证未授予您以下任何权利：
+a) 使用： 您不得运行、执行或以任何方式使用此源代码来操作本软件。软件的“使用权”需要通过下载官方发布的二进制可执行文件等方式另行获取。
+b) 修改： 您不得修改、改编或基于此源代码创作衍生作品。
+c) 分发： 您不得复制、再分发、再许可或与任何第三方分享此源代码。
+d) 商业化： 您不得将此源代码用于任何商业目的。
+
+3. 知识产权。
+本软件（包括其源代码和视觉设计）的所有权利、所有权和利益，现在以及将来，均完全归 [您的名字或公司名] 所有。这不是一份开源许可证。
+
+Disclaimer: This license is provided in both English and Chinese. In case of any conflict or discrepancy between the two versions, the English version shall prevail.
+
+免免责声明： 本许可证同时提供英文与中文版本。如果两个版本之间存在任何冲突或不一致之处，应以英文版本为准。
+
+
+English Version
+
+PREAMBLE: Our goal is: While achieving complete code transparency, security, and trustworthiness, we firmly defend our core intellectual property value as designers and optimizers, ensuring the uniqueness and brand recognition of our product. This license grants limited rights to access and use the source code for personal non-commercial purposes, promoting openness while strictly safeguarding our proprietary designs and user experiences.
+
+Part I: Source Code License Grant (Source-Available License)
+
+DEFINITIONS.
+a) "You" refers to the individual or entity accessing the Source Code.
+b) "[Licensor]" refers to [Your Name or Company Name].
+c) "Reference" means to view and read the Source Code for understanding its functionality, architecture, and implementation.
+d) "Source Code" means the source code for the Creator Hub software made publicly available.
+
+GRANT OF LICENSE.
+The Licensor grants You a limited, non-exclusive, non-transferable, revocable license to:
+a) Use and Compile: Download, compile, run, and execute the Source Code.
+b) Modify: Create modifications and derivative works of the Source Code.
+c) Reference: View and read the Source Code for understanding its functionality, architecture, and implementation.
+
+All the above rights are granted for Your personal, non-commercial use ONLY, aligning with our transparency goals without compromising intellectual property.
+
+RESTRICTIONS AND PROHIBITIONS.
+All rights not expressly granted are reserved by the Licensor. You are strictly prohibited from:
+a) Commercial Use: Using the Source Code, in whole or in part, as part of any commercial product, service, or for any fee-based activity.
+b) Redistribution: Redistributing, sublicensing, or selling the Source Code or any compiled binaries derived from it.
+c) Distributing: You may not distribute, copy, publish, sublicense, or share the Source Code, in whole or in part.
+d) Removing Notices: You may not remove or alter any copyright notices or other proprietary markings on the Source Code.
+
+This is a Source-Available license, not an open-source license, to prevent misuse while maintaining code visibility.
+
+Part II: Proprietary Design & User Experience License (All Rights Reserved)
+
+RESERVATION OF RIGHTS.
+Notwithstanding the rights granted to the Source Code in Part I, all design, branding, and user experience assets ("Protected Assets") are the exclusive property of the Licensor and are protected by copyright and trade dress law. All Rights Are Reserved, ensuring our product's distinct identity.
+
+PROTECTED ASSETS.
+These protected assets explicitly include:
+
+User Interface (UI) Layout: The organization, positioning, and dimensional relationships of elements.
+
+Interaction Patterns & Visual Flow: User operational paths, feedback mechanisms, animation effects, and navigation between functions.
+
+Visual Assets: CSS style files, icons, images, color schemes, and custom fonts.
+
+Total Trade Dress: The overall "look and feel" that the software presents to the user.
+
+We have invested significant effort in creating a unique, sophisticated, and efficient user experience. These creative assets are not licensed, defending our core IP as optimizers.
+
+STRICT PROHIBITION ON IMITATION.
+You may NOT, under any circumstances, use, copy, imitate, or incorporate any of the Protected Assets into any other software, whether for commercial or non-commercial purposes. You are expressly forbidden from creating a product that is "confusingly similar" in its look, feel, or user experience to the official Creator Hub software, preserving brand recognition.
+
+GENERAL TERMS
+
+NO WARRANTY.
+The software and its Source Code are provided "AS IS," without warranty of any kind.
+
+TERMINATION.
+This license will terminate automatically if you breach any of its terms.
+
+INTELLECTUAL PROPERTY.
+The Source Code and the Software are licensed, not sold. All right, title, and interest in and to the Source Code, the Software, and all associated intellectual property (including copyrights, trademarks, and trade secrets) are and will remain the exclusive property of the Licensor, upholding our design and optimization values.
+
+Disclaimer: This license is provided in both English and Chinese. In case of any conflict or discrepancy between the two versions, the English version shall prevail.
+
+Chinese Version
+
+序言： 我们的目标是： 在实现代码完全透明、安全可信的同时，坚决捍卫我们作为设计者和优化者的核心知识产权价值，确保我们产品的独特性和品牌识别度。本许可授予有限权利，用于个人非商业目的访问和使用源代码，促进开放性，同时严格保护我们的专有设计和用户体验。
+
+Part I: 源代码许可授予 (Source-Available License)
+
+定义。
+a) “您”指访问源代码的个人或实体。
+b) “[许可方]”指[您的名字或公司名]。
+c) “参考”意味着查看和阅读源代码，以理解其功能、架构和实现。
+d) “源代码”指 Creator Hub 软件的公开源代码。
+
+许可授予。
+许可方授予您有限的、非独占的、不可转让的、可撤销的许可，用于：
+a) 使用和编译：下载、编译、运行和执行源代码。
+b) 修改：创建源代码的修改和衍生作品。
+c) 参考：查看和阅读源代码，以理解其功能、架构和实现。
+
+上述所有权利仅授予您的个人、非商业用途，与我们的透明目标一致，而不损害知识产权。
+
+限制和禁止。
+所有未明确授予的权利由许可方保留。您被严格禁止：
+a) 商业使用：将源代码全部或部分用于任何商业产品、服务或收费活动。
+b) 重新分发：重新分发、再许可或出售源代码或从中派生的任何编译二进制文件。
+c) 分发：不得分发、复制、发布、再许可或共享源代码的全部或部分。
+d) 移除通知：不得移除或更改源代码上的任何版权通知或其他专有标记。
+
+这是一个源代码可用许可，不是开源许可，以防滥用同时保持代码可见性。
+
+Part II: 专有设计与用户体验许可 (All Rights Reserved)
+
+权利保留。
+尽管 Part I 中授予了源代码的权利，但所有设计、品牌和用户体验资产（“受保护资产”）均为许可方的专有财产，并受版权和商业外观法保护。所有权利保留，确保我们产品的独特身份。
+
+受保护资产。
+这些受保护的资产明确包括：
+
+用户界面 (UI) 布局： 元素的组织、定位和尺寸关系。
+
+交互模式与视觉流程： 用户的操作路径、反馈机制、动画效果以及功能间的导航方式。
+
+视觉资产： CSS样式文件、图标、图片、配色方案以及自定义字体。
+
+整体商业外观 (Total Trade Dress)： 即软件给用户带来的整体“外观和感觉 (Look and Feel)”。
+
+我们投入了大量心血来创造独特、精妙且高效的用户体验，这些创意资产未 授权，捍卫我们作为优化者的核心IP。
+
+严格禁止模仿。
+在任何情况下，您不得使用、复制、模仿或将任何受保护资产纳入任何其他软件，无论商业还是非商业用途。您被明确禁止创建在外观、感觉或用户体验上与官方 Creator Hub 软件“混淆性相似”的产品，维护品牌识别度。
+
+一般条款
+
+无保证。
+软件及其源代码按“现状”提供，不提供任何种类的保证。
+
+终止。
+如果您违反任何条款，本许可将自动终止。
+
+知识产权。
+源代码和软件是许可的，不是出售的。源代码、软件以及所有相关知识产权（包括版权、商标和商业秘密）的所有权利、所有权和利益均为并将保持许可方的专有财产，坚持我们的设计和优化价值。
+
+免责声明： 本许可协议同时提供英文与中文版本。如果两个版本之间存在任何冲突或不一致之处，应以英文版本为准。
+

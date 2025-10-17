@@ -1,6 +1,7 @@
 {
   "name": "qqq",
   "displayName": "qqq",
+  "publisher": "qqq",
   "version": "1.0.0",
   "engines": {
     "vscode": "^1.70.0"
@@ -8,6 +9,7 @@
   "activationEvents": [
     "*",
     "onCommand:qqq.q1",
+    "onCommand:qqq.q2",
     "onCommand:qqq.toggleBlockMode"
   ],
   "main": "./src/qqq.js",
@@ -67,5 +69,10 @@
   },
   "dependencies": {
     "sharp": "^0.34.4"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.70.0",
+    "@types/node": "^18.0.0",
+    "vsce": "^2.15.0"
   }
 }

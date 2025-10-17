@@ -3,34 +3,34 @@
 import sys, os, json, time, platform, subprocess
 from pathlib import Path
 from datetime import datetime
+import random
+import concurrent.futures # 新增：用于多线程并行计算
 
 # 固定输出目录
 OUTPUT_DIR = Path("D:/view/p")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-import random
-
 def get_timestamp_filename(ext=".png"):
     """生成时间戳文件名：年月日星期几毫秒随机字母时分秒"""
     now = datetime.now()
-    
+
     # 获取年月日
     date_part = now.strftime("%Y.%m.%d")
-    
+
     # 获取星期几（一、二、三、四、五、六、日）
     weekdays = ['一', '二', '三', '四', '五', '六', '日']
     weekday_part = weekdays[now.weekday()]
-    
+
     # 获取毫秒
     millisecond_part = f"{now.microsecond//1000:03d}"
-    
+
     # 生成随机两个字母，不能是l、i、s、a、m、c、b、f、t（大小写形式都排除）
     # 字母g可以使用，但不能同时出现两个g（包括小写g和大写G的组合也不允许）
     # 排除的字母列表（转换为小写以便比较）
     excluded_chars = ['l', 'i', 's', 'a', 'm', 'c', 'b', 'f', 't']
     # 创建有效字符列表：包含所有未被排除的大小写字母
     valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' if c.lower() not in excluded_chars]
-    
+
     # 生成第一个随机字符
     first_char = random.choice(valid_chars)
     # 生成第二个随机字符，如果第一个字符是g（不管大小写），则第二个字符不能是g（不管大小写）
@@ -40,12 +40,12 @@ def get_timestamp_filename(ext=".png"):
         second_char = random.choice(valid_chars_without_g)
     else:
         second_char = random.choice(valid_chars)
-    
+
     random_chars = first_char + second_char
-    
+
     # 获取时分秒
     time_part = now.strftime("%H.%M.%S")
-    
+
     # 组合所有部分
     filename = f"{date_part}{weekday_part}{millisecond_part}{random_chars} {time_part}{ext}"
     return filename
@@ -115,6 +115,68 @@ def save_bytes(data: bytes, is_image=False, original_ext=".bin"):
     with open(path, "wb") as f:
         f.write(data)
     return str(path)
+
+# --- 新增文件大小计算功能 ---
+def _get_path_size(path):
+    """
+    辅助函数：计算单个文件或目录的大小。
+    此函数将在ThreadPoolExecutor中执行。
+    """
+    if not os.path.exists(path):
+        return 0
+
+    if os.path.isfile(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    elif os.path.isdir(path):
+        dir_size = 0
+        for dirpath, _, filenames in os.walk(path):
+            for f in filenames:
+                file_path = os.path.join(dirpath, f)
+                try:
+                    dir_size += os.path.getsize(file_path)
+                except OSError:
+                    pass # 忽略无法访问的文件
+        return dir_size
+    return 0
+
+def calculate_total_size_sync(file_paths):
+    """
+    核心优化功能：使用多线程并行计算文件和文件夹的总大小。
+    利用ThreadPoolExecutor来并发执行文件I/O操作。
+    """
+    total_size = 0
+    # 为I/O密集型任务设置较多的工作线程，以充分利用磁盘带宽
+    # GIL在文件I/O时会释放，允许真正的并行I/O
+    max_workers = os.cpu_count() * 2 if os.cpu_count() else 8 # 至少8个线程，或者CPU核心数的两倍
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交每个路径的计算任务
+        future_to_path = {executor.submit(_get_path_size, path): path for path in file_paths}
+
+        # 收集结果
+        for future in concurrent.futures.as_completed(future_to_path):
+            try:
+                total_size += future.result()
+            except Exception as exc:
+                # 可以选择记录异常，但在这里为了稳健性选择忽略单个文件/目录的计算错误
+                sys.stderr.write(f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
+    return total_size
+
+def get_total_size_cli_interface(paths_to_calculate):
+    """
+    CLI 接口：从外部（如 Node.js）调用以计算给定路径的总大小。
+    结果通过标准输出 JSON 格式返回。
+    """
+    try:
+        total_size = calculate_total_size_sync(paths_to_calculate)
+        print(json.dumps({"success": True, "total_size": total_size}, ensure_ascii=False))
+    except Exception as e:
+        # 如果是计算总大小过程中出现未捕获的全局性错误
+        print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        sys.exit(1) # 以非零状态码退出表示失败
+# --- 文件大小计算功能结束 ---
 
 def handle_windows():
     try:
@@ -513,19 +575,28 @@ def handle_linux():
     return {"type": "unknown"}
 
 def main():
-    try:
-        sysname = platform.system()
-        if sysname == "Windows":
-            res = handle_windows()
-        elif sysname == "Darwin":
-            res = handle_macos()
-        elif sysname == "Linux":
-            res = handle_linux()
-        else:
-            res = {"type": "unknown"}
-        print(json.dumps(res, ensure_ascii=False))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+    # 检查第一个命令行参数是否为 "get_size"
+    if len(sys.argv) > 1 and sys.argv[1] == "get_size":
+        # 如果是，则将后续参数作为路径列表传递给文件大小计算接口
+        paths_to_calculate = sys.argv[2:]
+        get_total_size_cli_interface(paths_to_calculate)
+    else:
+        # 否则，执行原有的剪贴板处理逻辑
+        try:
+            sysname = platform.system()
+            if sysname == "Windows":
+                res = handle_windows()
+            elif sysname == "Darwin":
+                res = handle_macos()
+            elif sysname == "Linux":
+                res = handle_linux()
+            else:
+                res = {"type": "unknown"}
+            print(json.dumps(res, ensure_ascii=False))
+        except Exception as e:
+            # 捕获剪贴板处理过程中的全局错误
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+            sys.exit(1) # 以非零状态码退出表示失败
 
 if __name__ == "__main__":
     main()
