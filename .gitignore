@@ -1,14 +1,11 @@
 # Node 依赖
 node_modules/
-package-lock.json
 
 # 日志文件
 *.log
 E:/r/qqq.log
 
 # VSCode 设置
-.vscode/
-.vscode-test/
 
 # 构建输出
 out/
