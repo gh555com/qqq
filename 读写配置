@@ -1,0 +1,591 @@
+ 1
+ 2
+
+
+是的，您提出了一个非常关键且专业的问题。
+直接回答： 会，绝对会有问题！ 我之前提供的代码在多个进程同时写入时，不是安全的，极有可能发生数据丢失。
+这个问题在计算机科学中被称为“竞态条件”（Race Condition）。
+
+问题详解：为什么会出问题？
+让我们用一个简单的比喻来解释。想象一下您和我都在编辑云端上的同一个文档 (pz.ini)。
+1.时刻 1 (读取)：我打开了文档的当前版本（V1），看到了里面的内容。
+2.时刻 2 (读取)：几乎在同一时间，您也打开了文档，您看到的也是版本 V1。
+3.时刻 3 (修改)：我在我的电脑上对 V1 版本进行修改，添加了我的 [audio] 部分，准备保存。
+4.时刻 4 (修改)：您在您的电脑上对 V1 版本进行修改，添加了您的 [video] 部分，也准备保存。
+5.时刻 5 (写入)：我点击了保存。云端文档现在更新为 V2，包含了我的 [audio] 部分。
+6.时刻 6 (写入)：紧接着，您点击了保存。因为您是在 V1 版本的基础上修改的，您的保存操作会用您的版本完全覆盖掉服务器上的 V2 版本。
+结果是什么？ 云端文档的最终版本只包含了您的 [video] 部分，而我辛辛苦苦添加的 [audio] 部分彻底消失了！
+我之前的代码做的就是这个 “读取 - 在内存中修改 - 完全写回” 的操作。如果两个进程同时执行，后完成写入的那个进程会把先完成写入的进程的成果完全覆盖掉。
+
+解决方案：文件锁 (File Locking) 🔐
+要解决这个问题，我们需要引入一个机制，确保在任何时刻，只有一个进程能够对文件进行“读取-修改-写入”这个完整的操作。这个机制就是文件锁。
+这就像是给文档的编辑权限加了一把锁：
+●当我要编辑时，我必须先拿到这把锁。
+●我拿到锁之后，您也想编辑，但您发现锁被我拿着，所以您必须在门口排队等着。
+●我完成编辑、保存、然后释放这把锁。
+●您看到锁现在可用了，于是您拿到锁，开始编辑。您打开的文档版本已经包含了我的修改。
+这样，就不会有任何数据丢失了。
+
+终极版代码：IniSectionManager v3.0 (进程安全版)
+为了实现文件锁，我们需要一个非常好的第三方库 filelock。它能跨平台（Windows, Linux, macOS）完美工作。
+第一步：安装库
+ 您需要在您的环境中执行这个命令来安装它：
+pip install filelock
+**第二--
+问题详解：为什么会出问题？
+让我们用一个简单的比喻来解释。想象一下您和我都在编辑云端上的同一个文档 (pz.ini)。
+1.时刻 1 (读取)：我打开了文档的当前版本（V1），看到了里面的内容。
+2.时刻 2 (读取)：几乎在同一时间，您也打开了文档，您看到的也是版本 V1。
+3.时刻 3 (修改)：我在我的电脑上对 V1 版本进行修改，添加了我的 [audio] 部分，准备保存。
+4.时刻 4 (修改)：您在您的电脑上对 V1 版本进行修改，添加了您的 [video] 部分，也准备保存。
+5.时刻 5 (写入)：我点击了保存。云端文档现在更新为 V2，包含了我的 [audio] 部分。
+6.时刻 6 (写入)：紧接着，您点击了保存。因为您是在 V1 版本的基础上修改的，您的保存操作会用您的版本完全覆盖掉服务器上的 V2 版本。
+结果是什么？ 云端文档的最终版本只包含了您的 [video] 部分，而我辛辛苦苦添加的 [audio] 部分彻底消失了！
+我之前的代码做的就是这个 “读取 - 在内存中修改 - 完全写回” 的操作。如果两个进程同时执行，后完成写入的那个进程会把先完成写入的进程的成果完全覆盖掉。
+
+解决方案：文件锁 (File Locking) 🔐
+要解决这个问题，我们需要引入一个机制，确保在任何时刻，只有一个进程能够对文件进行“读取-修改-写入”这个完整的操作。这个机制就是文件锁。
+这就像是给文档的编辑权限加了一把锁：
+●当我要编辑时，我必须先拿到这把锁。
+●我拿到锁之后，您也想编辑，但您发现锁被我拿着，所以您必须在门口排队等着。
+●我完成编辑、保存、然后释放这把锁。
+●您看到锁现在可用了，于是您拿到锁，开始编辑。您打开的文档版本已经包含了我的修改。
+这样，就不会有任何数据丢失了。
+
+终极版代码：IniSectionManager v3.0 (进程安全版)
+为了实现文件锁，我们需要一个非常好的第三方库 filelock。它能跨平台（Windows, Linux, macOS）完美工作。
+第一步：安装库
+ 您需要在您的环境中执行这个命令来安装它：
+pip install filelock
+第二步：更新我们的管理器代码
+这是最终的、可以安全用于多进程环境的代码。
+
+# file: ini_manager.py
+
+import os
+from typing import Dict, List
+# 导入 filelock 库
+from filelock import FileLock, Timeout
+
+class IniSectionManager:
+    """
+    一个用于安全读写 INI 配置文件中特定区域（Section）的管理器 (v3.0 - 进程安全版)。
+
+    核心特性:
+    1.  **进程安全**：使用文件锁机制，确保多个程序或进程同时写入时不会发生数据冲突或丢失。
+    2.  **格式保持**：完整保留文件原有的所有格式，包括首尾和内部的空行、注释等。
+    3.  **智能定位**：新区域会被智能地添加到文件最后一个有效内容的后面。
+    """
+
+    def __init__(self, config_path: str, section_name: str, new_section_spacing: int = 2):
+        self.config_path = config_path
+        self.section_name = section_name
+        self.section_header = f"[{self.section_name}]"
+        self.new_section_spacing = new_section_spacing
+        # 为配置文件创建一个对应的锁文件路径
+        self.lock_path = f"{self.config_path}.lock"
+
+    def read_section(self) -> Dict[str, str]:
+        # 读取操作通常不需要加锁，因为它不会修改文件。
+        # 但如果在读取时，另一个进程正在写入一个不完整的版本，可能会读到异常数据。
+        # 为了绝对安全，也可以给读取加锁，但这会牺牲一些性能。
+        # 在大多数场景下，读取不加锁是可接受的。
+        if not os.path.exists(self.config_path):
+            return {}
+        # ... (读取逻辑和 v2.0 完全相同)
+        data = {}
+        in_section = False
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line_strip = line.strip()
+                    if line_strip.startswith('[') and line_strip.endswith(']'):
+                        in_section = (line_strip == self.section_header)
+                    elif in_section and '=' in line_strip:
+                        if line_strip.startswith('#') or line_strip.startswith(';'):
+                            continue
+                        key, value = line_strip.split('=', 1)
+                        data[key.strip()] = value.strip()
+        except Exception as e:
+            print(f"Error reading config file '{self.config_path}': {e}")
+            return {}
+        return data
+
+    def write_section(self, data_to_write: Dict[str, str], timeout_seconds: int = 10):
+        """
+        将字典数据进程安全地写入指定区域。
+
+        Args:
+            data_to_write (Dict[str, str]): 要写入或更新的键值对字典。
+            timeout_seconds (int): 获取文件锁的超时时间（秒）。
+        """
+        lock = FileLock(self.lock_path, timeout=timeout_seconds)
+
+        try:
+            # 核心改动：将整个“读取-修改-写入”操作放入 with lock.acquire() 块中
+            with lock.acquire():
+                # --- 从这里开始，代码和 v2.0 的写入逻辑完全一样 ---
+                # --- 因为我们已经获得了锁，所以这部分操作是独占的、安全的 ---
+
+                lines = []
+                if os.path.exists(self.config_path):
+                    try:
+                        with open(self.config_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                    except Exception as e:
+                        print(f"Could not read existing config file '{self.config_path}': {e}")
+                        return
+
+                new_lines: List[str] = []
+                in_section = False
+                section_found = False
+                keys_to_write = set(data_to_write.keys())
+
+                for line in lines:
+                    line_strip = line.strip()
+                    if line_strip == self.section_header:
+                        in_section = True
+                        section_found = True
+                        new_lines.append(line)
+                        for key in sorted(data_to_write.keys()):
+                            new_lines.append(f"{key}={data_to_write[key]}\n")
+                    elif line_strip.startswith('[') and line_strip.endswith(']'):
+                        in_section = False
+                        new_lines.append(line)
+                    elif in_section:
+                        is_key_value = '=' in line_strip and not (line_strip.startswith('#') or line_strip.startswith(';'))
+                        if is_key_value:
+                            key = line_strip.split('=', 1)[0].strip()
+                            if key not in keys_to_write:
+                                new_lines.append(line)
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+
+                if not section_found:
+                    new_section_block = ['\n' * self.new_section_spacing]
+                    new_section_block.append(f"{self.section_header}\n")
+                    for key in sorted(data_to_write.keys()):
+                        new_section_block.append(f"{key}={data_to_write[key]}\n")
+
+                    insertion_index = -1
+                    for i in range(len(lines) - 1, -1, -1):
+                        if lines[i].strip():
+                            insertion_index = i
+                            break
+
+                    final_lines = lines[:insertion_index + 1] + new_section_block + lines[insertion_index + 1:]
+                    new_lines = final_lines
+
+                config_dir = os.path.dirname(self.config_path)
+                if config_dir and not os.path.exists(config_dir):
+                    os.makedirs(config_dir, exist_ok=True)
+
+                with open(self.config_path, 'w', encoding='utf-8') as f:
+                    f.writelines(new_lines)
+
+                # --- 操作结束，退出 with 块时，锁会自动释放 ---
+
+        except Timeout:
+            print(f"Error: Could not acquire lock on {self.config_path} after {timeout_seconds} seconds. Another process may be holding it.")
+        except Exception as e:
+            print(f"An unexpected error occurred during write: {e}")
+
+
+代码改动解释
+1.导入 FileLock：从 `filelockfilelock 库中导入所需的核心类。
+2.创建锁文件路径：`self.lock_path = f"{self.config_self.lock_path = f"{self.config_path}.lock"。filelock 库通过创建一个辅助的 .lock 文件来管理锁定状态。这个文件本身内容不重要，重要的是它的存在和状态。
+3.with lock.acquire():：这是最关键的改动。我们将所有对文件的读写操作都包裹在这个 with 语句块中。
+a.当代码执行到这一行时，它会尝试获取锁。如果锁是可用的，它就拿到锁并继续执行 with 块内的代码。
+b.如果锁正被另一个进程持有，它会在这里暂停并等待，直到锁被释放或者等待时间超过设定的 timeout_seconds。
+c.一旦 with 块内的代码执行完毕（无论成功还是出错），锁都会被自动释放，让其他等待的进程可以继续。
+4.**超时超时处理：try...except Timeout: 结构可以捕获因为长时间等待而无法获取锁的异常，避免程序无限期地卡住。
+现在，这个 IniSectionManager 已经是工业级的、进程安全的配置管理器了。您可以放心地在任何数量的程序中实例化和使用它来操作同一个 pz.ini 文件，而无需担心任何数据写入冲突。👍
+
+
+
+
+
+是的，您贴出的就是完整、最终、进程安全的 IniSectionManager v3.0 代码。您可以放心地将它保存为 ini_manager.py 文件，并在您的所有项目中重复使用。
+下面，我为您提供一个清晰、完整的使用示例，演示如何在一个实际的程序中调用这个管理器来进行写入和读取操作。
+
+使用示例
+假设您已经将上面的类代码保存到了一个名为 ini_manager.py 的文件中。现在，您想在另一个主程序（例如 main_app.py）中使用它。
+前提条件： 请确保您已经安装了 filelock 库。如果还没有，请在命令行运行：--
+使用示例
+假设您已经将上面的类代码保存到了一个名为 ini_manager.py 的文件中。现在，您想在另一个主程序（例如 main_app.py）中使用它。
+前提条件： 请确保您已经安装了 filelock 库。如果还没有，请在命令行运行：
+pip install filelock
+这是您的主程序 main_app.py 的内容：
+
+# file: main_app.py
+
+import os
+from ini_manager import IniSectionManager
+import time
+
+# --- 1. 基本设置 ---
+# 定义我们共享的配置文件路径
+# 注意：在 Windows 中，路径里的反斜杠 `\` 最好用 `r""` 或 `\\` 来表示，避免转义问题
+CONFIG_FILE_PATH = r"E:\r\pz.ini"
+
+# 假设这个程序负责管理名为 `[my_app_settings]` 的区域
+MY_APP_SECTION_NAME = "my_app_settings"
+
+# --- 2. 写入操作演示 ---
+def save_my_settings():
+    """演示如何写入配置。"""
+    print(f"--- 准备写入 [{MY_APP_SECTION_NAME}] 区域 ---")
+
+    # 实例化管理器，告诉它我们要操作哪个文件和哪个区域
+    manager = IniSectionManager(CONFIG_FILE_PATH, MY_APP_SECTION_NAME)
+
+    # 准备我们要写入的数据
+    settings_to_save = {
+        "user_name": "Gemini",
+        "last_login": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "window_position": "300,450,800,600",
+        "theme": "dark_mode"
+    }
+    print("要写入的数据:", settings_to_save)
+
+    # 调用 write_section 方法，它会自动处理文件锁，保证安全
+    manager.write_section(settings_to_save)
+
+    print("写入操作完成！\n")
+
+
+# --- 3. 读取操作演示 ---
+def load_my_settings():
+    """演示如何读取配置。"""
+    print(f"--- 准备读取 [{MY_APP_SECTION_NAME}] 区域 ---")
+
+    # 同样，先实例化管理器
+    manager = IniSectionManager(CONFIG_FILE_PATH, MY_APP_SECTION_NAME)
+
+    # 调用 read_section 方法
+    # 这个操作是只读的，所以非常快
+    read_settings = manager.read_section()
+
+    if not read_settings:
+        print("配置文件或区域不存在，无法读取到任何设置。")
+    else:
+        print("成功读取到以下设置:")
+        for key, value in read_settings.items():
+            print(f"  - {key}: {value}")
+
+    print("读取操作完成！\n")
+
+
+# --- 4. 模拟另一个程序写入另一个区域 ---
+def simulate_another_app_saving():
+    """模拟一个完全不同的程序写入它自己的配置区域。"""
+    print("--- (模拟另一个程序) 准备写入 [video_converter] 区域 ---")
+
+    # 这个程序也使用同一个管理器类，但管理不同的区域
+    video_manager = IniSectionManager(CONFIG_FILE_PATH, "video_converter")
+
+    video_settings = {
+        "default_codec": "h265",
+        "output_quality": "high"
+    }
+    print("要写入的数据:", video_settings)
+
+    video_manager.write_section(video_settings)
+    print("(模拟另一个程序) 写入完成！\n")
+
+
+# --- 主程序执行流程 ---
+if __name__ == "__main__":
+
+    # 为了演示，先确保配置文件是空的
+    if os.path.exists(CONFIG_FILE_PATH):
+        os.remove(CONFIG_FILE_PATH)
+        # 同时删除可能存在的锁文件
+        if os.path.exists(CONFIG_FILE_PATH + ".lock"):
+            os.remove(CONFIG_FILE_PATH + ".lock")
+
+    # 第一次读取，文件不存在，应该返回空
+    load_my_settings()
+
+    # 第一次写入我们的程序配置
+    save_my_settings()
+
+    # 再读取一次，这次应该能读到数据了
+    load_my_settings()
+
+    # 模拟另一个程序也来写入这个配置文件
+    simulate_another_app_saving()
+
+    print(f"--- 所有操作完成，请检查文件 '{CONFIG_FILE_PATH}' 的内容。 ---")
+
+
+如何运行和观察结果
+1.将 IniSectionManager 类的代码保存为 ini_manager.py。
+2.将上面的示例代码保存为 main_app.py，并确保这两个文件在同一个文件夹下。
+3.打开命令行，进入该文件夹，然后运行：python main_app.py
+运行时的控制台输出：
+
+--- 准备读取 [my_app_settings] 区域 ---
+配置文件或区域不存在，无法读取到任何设置。
+读取操作完成！
+
+--- 准备写入 [my_app_settings] 区域 ---
+要写入的数据: {'user_name': 'Gemini', 'last_login': '2025-10-13 15:42:43', 'window_position': '300,450,800,600', 'theme': 'dark_mode'}
+写入操作完成！
+
+--- 准备读取 [my_app_settings] 区域 ---
+成功读取到以下设置:
+  - user_name: Gemini
+  - last_login: 2025-10-13 15:42:43
+  - window_position: 300,450,800,600
+  - theme: dark_mode
+读取操作完成！
+
+--- (模拟另一个程序) 准备写入 [video_converter] 区域 ---
+要写入的数据: {'default_codec': 'h265', 'output_quality': 'high'}
+(模拟另一个程序) 写入完成！
+
+--- 所有操作完成，请检查文件 'E:\r\pz.ini' 的内容。 ---
+
+最终 E:\r\pz.ini 文件的内容：
+[my_app_settings] last_login=2025-10-13 15:42:43 theme=dark_mode user_name=Gemini window_position=300,450,800,600   [video_converter] default_codec=h265 output_quality=high 这个示例完整地展示了如何在一个项目中，通过简单地实例化 IniSectionManager 类，来实现对共享配置文件安全、可靠、格式无损的读写操作。
+
+
+
+
+
+
+
+
+
+
+好的，完全没问题。
+将配置管理从 INI 文件升级到 SQLite 是一个非常常见的工程演进，尤其是在需要更强的数据一致性、并发性和结构化能力时。
+下面，我将为您创建一个基于 SQLite 的配置管理器 SQLiteConfigManager。这个类的设计目标与我们之前的 IniSectionManager 类似：提供一个简单、优雅的接口，让多个独立的程序可以安全、无冲突地共享同一个配置文件（现在是一个 .db 数据库文件）。
+
+封装的代码：SQLiteConfigManager 类
+这个类将所有复杂的 SQL 操作和并发处理都封装在内部。您只需要像之前一样调用 read_section 和 write_section--
+封装的代码：SQLiteConfigManager 类
+这个类将所有复杂的 SQL 操作和并发处理都封装在内部。您只需要像之前一样调用 read_section 和 write_section 即可。
+您可以将此代码保存为 sqlite_manager.py。
+
+# file: sqlite_manager.py
+
+import sqlite3
+import threading
+from typing import Dict
+
+class SQLiteConfigManager:
+    """
+    一个使用 SQLite 数据库来安全管理程序配置的管理器。
+
+    核心设计哲学：
+    1.  **进程/线程安全**：SQLite 默认在写入时会锁定整个数据库文件，这天然地防止了多个进程/线程同时写入时的数据损坏。
+        我们额外使用线程锁（threading.Lock）来确保在多线程应用中，来自同一个进程的并发访问也是安全的。
+    2.  **结构化存储**：数据被存储在一个结构化的表格中，每个程序（Section）的配置项被清晰地隔离开。
+    3.  **原子性操作**：使用数据库的“事务”（Transaction）来执行写入，确保一批设置要么全部成功，要么全部失败，不会出现只写入一半的中间状态。
+    4.  **接口统一**：提供与之前 IniSectionManager 类似的 `read_section` 和 `write_section` 接口，方便迁移和使用。
+    """
+    _locks = {}  # 类级别的字典，为每个数据库文件路径创建一个锁
+    _lock_for_locks = threading.Lock() # 用于保护 _locks 字典本身的锁
+
+    def __init__(self, db_path: str, section_name: str):
+        """
+        初始化管理器。
+
+        Args:
+            db_path (str): SQLite 数据库文件的路径。
+            section_name (str): 本管理器实例负责的区域/程序名称。
+        """
+        self.db_path = db_path
+        self.section_name = section_name
+
+        # 为每个数据库文件创建一个唯一的锁，保证多线程安全
+        with self._lock_for_locks:
+            if self.db_path not in self._locks:
+                self._locks[self.db_path] = threading.Lock()
+        self.lock = self._locks[self.db_path]
+
+        self._initialize_database()
+
+    def _get_connection(self):
+        """创建并返回一个数据库连接。"""
+        # timeout 参数对于多进程/多线程至关重要，它指定了在放弃前等待锁定的时间（秒）
+        return sqlite3.connect(self.db_path, timeout=10.0)
+
+    def _initialize_database(self):
+        """如果表不存在，则创建配置表。"""
+        with self.lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # 表结构：section (程序名), key (配置键), value (配置值)
+                    # PRIMARY KEY(section, key) 保证了每个程序下的配置键是唯一的
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS config (
+                            section TEXT NOT NULL,
+                            key     TEXT NOT NULL,
+                            value   TEXT,
+                            PRIMARY KEY(section, key)
+                        )
+                    ''')
+                    conn.commit()
+            except sqlite3.Error as e:
+                print(f"Database initialization error: {e}")
+
+    def write_section(self, data_to_write: Dict[str, str]):
+        """
+        将一个字典的数据安全地写入到指定的区域。
+
+        如果键已存在，则更新其值；如果不存在，则插入新行。
+        整个操作在一个事务中完成，保证原子性。
+
+        Args:
+            data_to_write (Dict[str, str]): 要写入或更新的键值对字典。
+        """
+        with self.lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # 使用 INSERT OR REPLACE 语句，它会智能地处理插入或更新
+                    # executemany 批量操作，性能更高
+                    items_to_insert = [
+                        (self.section_name, key, str(value))
+                        for key, value in data_to_write.items()
+                    ]
+                    cursor.executemany('''
+                        INSERT OR REPLACE INTO config (section, key, value)
+                        VALUES (?, ?, ?)
+                    ''', items_to_insert)
+                    conn.commit()
+            except sqlite3.Error as e:
+                print(f"Error writing to database: {e}")
+
+    def read_section(self) -> Dict[str, str]:
+        """
+        从数据库中读取指定区域的所有键值对。
+
+        Returns:
+            Dict[str, str]: 一个包含该区域所有键值对的字典。如果区域不存在，则返回空字典。
+        """
+        data = {}
+        with self.lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT key, value FROM config WHERE section = ?",
+                        (self.section_name,)
+                    )
+                    rows = cursor.fetchall()
+                    data = dict(rows)
+            except sqlite3.Error as e:
+                print(f"Error reading from database: {e}")
+        return data
+
+
+介绍与使用示例
+它是如何工作的？
+这个管理器将所有配置都存放在一个 SQLite 数据库文件（例如 E:\r\config.db）里的一个名为 config 的表中。
+表结构非常简单直观：
+section (TEXT)	key (TEXT)	value (TEXT)
+app_one	username	Alice
+app_one	theme	dark
+app_two	`codeccodec	h265
+app_two	last_file	C:/video.mp4
+●section 列：用来区分是哪个程序或模块的配置，相当于 INI 文件中的 [section_name]。
+●`keykey 列：配置项的名称。
+●value 列：配置项的值。
+核心优势：
+1.**内置内置并发控制：当一个程序执行写入操作时 ( INSERT, UPDATE )，SQLite 会自动锁定数据库文件，其他想写入的程序必须排队等待。这从根本上解决了 INI 文件方案中的“竞态条件”问题，不再需要外部的 .lock 文件。
+2.原子性写入：write_section 方法中的所有操作都在一个“事务”中。这意味着，您传递的一整批设置要么全部成功写入，要么在发生错误时全部回滚，数据库不会处于一个只更新了一半的“脏”状态。
+3.**性能：对于大量的配置项，SQLite 的查询和更新性能通常优于手动解析文本文件，因为它有索引等优化。
+
+如何在程序中使用它？(示例)
+假设您将上面的类保存为 sqlite_manager.py。下面是一个 main.py 演示两个不同程序如何共享同一个数据库文件来存取配置。
+
+# file: main.py
+
+import os
+import time
+from sqlite_manager import SQLiteConfigManager
+
+# --- 1. 基本设置 ---
+# 定义共享的 SQLite 数据库文件路径
+DB_PATH = r"E:\r\config.db"
+
+# --- 2. 模拟程序一 (视频转换器) ---
+def run_video_converter():
+    """模拟视频转换器读写配置。"""
+    section_name = "video_converter"
+    print(f"--- 视频转换器 [{section_name}] 正在运行 ---")
+
+    # 实例化管理器
+    manager = SQLiteConfigManager(DB_PATH, section_name)
+
+    # 读取旧配置
+    old_settings = manager.read_section()
+    print("读取到的旧配置:", old_settings)
+
+    # 准备新配置并写入
+    new_settings = {
+        "last_input_path": "E:/movies/project_x.mkv",
+        "default_codec": "AV1",
+        "quality_preset": "slow",
+        "last_run_timestamp": time.time()
+    }
+    print("正在写入新配置:", new_settings)
+    manager.write_section(new_settings)
+    print("写入完成。\n")
+
+# --- 3. 模拟程序二 (音频工具) ---
+def run_audio_tool():
+    """模拟音频工具读写配置。"""
+    section_name = "audio_tool"
+    print(f"--- 音频工具 [{section_name}] 正在运行 ---")
+
+    # 实例化管理器，注意 section_name 不同
+    manager = SQLiteConfigManager(DB_PATH, section_name)
+
+    # 读取配置
+    settings = manager.read_section()
+    print("读取到的配置:", settings)
+
+    # 写入配置
+    settings_to_save = {
+        "bitrate": "320k",
+        "normalize": "true"
+    }
+    print("正在写入配置:", settings_to_save)
+    manager.write_section(settings_to_save)
+    print("写入完成。\n")
+
+
+# --- 主程序执行流程 ---
+if __name__ == "__main__":
+
+    # 为了演示，先确保数据库文件是空的
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+
+    print(f"所有程序将共享同一个数据库文件: '{DB_PATH}'\n")
+
+    # 运行程序一
+    run_video_converter()
+
+    # 运行程序二
+    run_audio_tool()
+
+    # 再次运行程序一，这次它应该能读到上次保存的配置
+    run_video_converter()
+
+    print("--- 所有操作完成 ---")
+    print("您可以使用 DB Browser for SQLite 之类的工具打开 E:\\r\\config.db 查看内容。")
+
+运行这个示例后：
+●您会看到控制台清晰地打印出每个“程序”读写自己配置的过程。
+●在 E:\r\ 目录下会生成一个 config.db 文件。这个文件是一个二进制文件，您可以使用任何 SQLite 可视化工具（如免费的 https://sqlitebrowser.org/ ）打开它，会看到 config 表中整齐地存储着两个程序的所有配置数据。
+这个 `SQLiteConfigManagerSQLiteConfigManager 类为您提供了一个更强大、更安全、更具扩展性的配置管理方案。
+

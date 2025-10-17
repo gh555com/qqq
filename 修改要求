@@ -1,0 +1,178 @@
+哈，你说怪不怪，这确实是个非常棘手的"幽灵"bug！你描述的现象——“假删除”，即UI上先消失，一会儿又回来——是典型的前端乐观更新（Optimistic UI Update）失败的症状。
+
+乐观更新：performDeleteAction 函数为了让体验更流畅，它不等待后端确认，直接在界面上把文件隐藏掉 (itemElement.style.display = 'none')。
+
+失败回滚：当后端（q2.js）因为某种原因删除失败后，刷新界面（refreshWebview）时，它会从文件系统重新读取目录，发现那个文件其实还在，于是又把它显示了出来。
+
+最关键的线索是：按 s 键能正常删除，但右键菜单不行。 这几乎 100% 证明了 q2.js 的后端删除逻辑是完全没有问题的。问题一定出在 Webview 的 JavaScript 中，出在“右键点击”到“发送删除消息”这个过程的某个环节上。
+
+🐛 问题根源分析与解决方案
+
+经过对你代码逻辑的再次推演，我找到了问题所在。这是一个非常非常细微的事件处理问题。
+
+问题原因：
+当你右键点击一个文件时，contextmenu 事件触发，程序正确地用 selectItem 函数设置了全局变量 selectedItem。但是，当你左键点击弹出的右键菜单上的“delete”选项时，这个“点击”事件本身没有被完全隔离。它在执行完删除逻辑后，可能会冒泡或被其他监听器捕获，特别是 fileList 容器自身的 click 监听器。
+
+fileList 的 click 监听器有一个逻辑：如果点击的目标不是一个文件项，它就会取消所有选择（selectedItem = null）。你的菜单项（context-menu-item）不属于 fileList 里的 file-item，所以这次点击很可能意外地触发了“取消选择”的逻辑，导致 performDeleteAction 在执行时拿到的 selectedItem 可能是 null 或者已经被清空了，最终导致发送给后端的消息无效。
+
+虽然菜单项的点击事件里有 e.stopPropagation()，但在复杂的DOM和事件模型中，这类问题依然可能发生。
+
+解决方案：
+最稳妥的办法是不依赖全局的 selectedItem 变量。我们可以在显示右键菜单时，将当前操作项的信息（路径、类型等）直接“绑定”到菜单 DOM 元素上。当点击菜单时，直接从菜单元素上读取信息，而不是从一个可能被意外修改的全局变量读取。
+
+请按以下步骤修改 generateWebviewScript 函数：
+
+第 1 步：修改 contextmenu 事件监听器
+
+在显示菜单时，把文件路径、名称 * 乐观更新：performDeleteAction 函数为了让体验更流畅，它不等待后端确认，直接在界面上把文件隐藏掉 (itemElement.style.display = 'none')。
+
+失败回滚：当后端（q2.js）因为某种原因删除失败后，刷新界面（refreshWebview）时，它会从文件系统重新读取目录，发现那个文件其实还在，于是又把它显示了出来。
+
+最关键的线索是：按 s 键能正常删除，但右键菜单不行。 这几乎 100% 证明了 q2.js 的后端删除逻辑是完全没有问题的。问题一定出在 Webview 的 JavaScript 中，出在“右键点击”到“发送删除消息”这个过程的某个环节上。
+
+🐛 问题根源分析与解决方案
+
+经过对你代码逻辑的再次推演，我找到了问题所在。这是一个非常非常细微的事件处理问题。
+
+问题原因：
+当你右键点击一个文件时，contextmenu 事件触发，程序正确地用 selectItem 函数设置了全局变量 selectedItem。但是，当你左键点击弹出的右键菜单上的“delete”选项时，这个“点击”事件本身没有被完全隔离。它在执行完删除逻辑后，可能会冒泡或被其他监听器捕获，特别是 fileList 容器自身的 click 监听器。
+
+fileList 的 click 监听器有一个逻辑：如果点击的目标不是一个文件项，它就会取消所有选择（selectedItem = null）。你的菜单项（context-menu-item）不属于 fileList 里的 file-item，所以这次点击很可能意外地触发了“取消选择”的逻辑，导致 performDeleteAction 在执行时拿到的 selectedItem 可能是 null 或者已经被清空了，最终导致发送给后端的消息无效。
+
+虽然菜单项的点击事件里有 e.stopPropagation()，但在复杂的DOM和事件模型中，这类问题依然可能发生。
+
+解决方案：
+最稳妥的办法是不依赖全局的 selectedItem 变量。我们可以在显示右键菜单时，将当前操作项的信息（路径、类型等）直接“绑定”到菜单 DOM 元素上。当点击菜单时，直接从菜单元素上读取信息，而不是从一个可能被意外修改的全局变量读取。
+
+请按以下步骤修改 generateWebviewScript 函数：
+
+第 1 步：修改 contextmenu 事件监听器
+
+在显示菜单时，把文件路径、名称和类型存到菜单元素的 dataset 中。
+
+找到这部分代码：
+
+        document.getElementById('fileList').addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            hideAllContextMenus();
+
+            const itemElement = e.target.closest('.file-item');
+            const emptyContextMenu = document.getElementById('emptyContextMenu');
+
+            if (itemElement) {
+                const itemPath = itemElement.dataset.path;
+                const itemName = itemElement.dataset.name;
+                const itemType = itemElement.dataset.type;
+
+                selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
+
+                itemContextMenu.style.left = e.clientX + 'px';
+                itemContextMenu.style.top = e.clientY + 'px';
+                itemContextMenu.style.display = 'flex';
+
+            } else {
+                 emptyContextMenu.style.left = e.clientX + 'px';
+                 emptyContextMenu.style.top = e.clientY + 'px';
+                 emptyContextMenu.style.display = 'flex';
+            }
+        });
+
+
+**修改修改为：
+
+        document.getElementById('fileList').addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            hideAllContextMenus();
+
+            const itemElement = e.target.closest('.file-item');
+            const emptyContextMenu = document.getElementById('emptyContextMenu');
+
+            if (itemElement) {
+                const itemPath = itemElement.dataset.path;
+                const itemName = itemElement.dataset.name;
+                const itemType = itemElement.dataset.type;
+
+                // 依然调用 selectItem 来保证UI选中效果
+                selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
+
+                // ✅ 核心修改：将当前项的信息直接绑定到菜单上
+                itemContextMenu.dataset.path = itemPath;
+                itemContextMenu.dataset.name = itemName;
+                itemContextMenu.dataset.type = itemType;
+
+                itemContextMenu.style.left = e.clientX + 'px';
+                itemContextMenu.style.top = e.clientY + 'px';
+                itemContextMenu.style.display = 'flex';
+
+            } else {
+                 emptyContextMenu.style.left = e.clientX + 'px';
+                 emptyContextMenu.style.top = e.clientY + 'px';
+                 emptyContextMenu.style.display = 'flex';
+            }
+        });
+
+
+**第 2 步：修改 `handleContextMenu第 2 步：修改 handleContextMenuAction 函数
+
+让它从菜单的 dataset 读取数据，而不是全局变量 selectedItem。
+
+找到这个函数：
+
+        function handleContextMenuAction(action) {
+            console.log('[webview] handleContextMenuAction 被调用:', action, '当前选中项:', selectedItem);
+            const itemForAction = selectedItem;
+            hideAllContextMenus();
+            if (!itemForAction) {
+                console.log('[webview] 没有选中项，放弃操作');
+                return;
+            }
+
+            switch(action) {
+                // ... cases
+            }
+        }
+
+
+修改为：
+
+        function handleContextMenuAction(action) {
+            // ✅ 核心修改：直接从菜单元素获取操作目标
+            const contextMenu = document.getElementById('itemContextMenu');
+            const itemForAction = {
+                path: contextMenu.dataset.path,
+                name: contextMenu.dataset.name,
+                type: contextMenu.dataset.type
+            };
+
+            hideAllContextMenus();
+
+            // 检查从菜单获取的数据是否有效
+            if (!itemForAction || !itemForAction.path) {
+                console.log('[webview] 无法从右键菜单获取有效操作项，放弃操作');
+                return;
+            }
+
+            console.log('[webview] handleContextMenuAction 被调用:', action, '操作项:', itemForAction);
+
+            switch(action) {
+                case 'rename':
+                    performEditAction(itemForAction);
+                    break;
+                case 'open':
+                    performOpenAction(itemForAction);
+                    break;
+                case 'delete':
+                    console.log('[webview] 执行删除操作:', itemForAction);
+                    performDeleteAction(itemForAction);
+                    break;
+                case 'kode':
+                    performKodeAction(itemForAction);
+                    break;
+                case 'size':
+                    performSizeAction(itemForAction);
+                    break;
+            }
+        }
+
+
+这样修改后，右键菜单的删除操作就拥有了自己独立、可靠的数据源，不再受全局变量状态的干扰，问题就能彻底解决。

@@ -1,0 +1,155 @@
+代码重构工作记录
+==================
+
+## 目标
+将 extension.js 拆分为模块化结构，保持功能和界面100%一致
+
+## 步骤记录
+
+[✅ 已完成] 步骤1: 创建工作记录文件
+[✅ 已完成] 步骤2: 创建 src/qqq.js（入口 + 公共工具）
+[✅ 已完成] 步骤3: 创建 src/q1.js（粘贴/Decoration/CodeLens功能）
+[✅ 已完成] 步骤4: 创建 src/q2.html（webview HTML 模板）
+[✅ 已完成] 步骤5: 创建 src/q2.js（saveAsDialog 完整功能）
+
+## 最终成果
+
+✅ **src/qqq.js** (67行)
+   - 公共配置导出（LOG_PATH, BASE_DIR, CONFIG_PATH等）
+   - 日志工具函数 logMessage
+   - 激活 q1 和 q2 模块
+
+✅ **src/q1.js** (333行)
+   - Python 脚本执行
+   - 图片渲染和装饰（sharp库支持）
+   - CodeLens 提供器
+   - 打开文件命令
+   - 所有 Decoration 相关功能
+
+✅ **src/q2.html** (526行)
+   - 完整的 HTML 结构
+   - 完整的 CSS 样式
+   - 使用占位符系统（{{VARIABLE}}）
+   - 无内联 JavaScript
+   - 无内联样式（全部在 <style> 中）
+
+✅ **src/q2.js** (1900+行)
+   - 文件大小处理（格式化、递归计算、异步获取）
+   - 配置管理（读取、保存、最近目录、回收站）
+   - 辅助函数（驱动器列表、目录内容）
+   - Webview 脚本生成（663行完整前端逻辑）
+   - HTML 模板加载（从 q2.html 读取并替换变量）
+   - 主对话框函数（面板创建、状态管理）
+   - 完整消息处理（16个 case：导航、重命名、删除、创建等）
+   - **关键**：杜绝了所有 `return \`<!DOCTYPE html>\`` 形式的内联 HTML
+
+✅ **package.json**
+   - main 入口已更新为 "src/qqq.js"
+   - 命令已注册（qqq.q1, qqq.q2, qqq.saveAsDialog）
+
+## 架构亮点
+
+🎯 **HTML 完全分离**
+   - HTML 存储在独立的 q2.html 文件中
+   - 使用占位符系统动态替换变量
+   - q2.js 保持干净，无内联 HTML 模板
+
+🎯 **模块职责清晰**
+   - qqq.js：公共工具和入口
+   - q1.js：文件操作和装饰
+   - q2.js：文件导航和创建
+   - q2.html：UI 模板
+
+## 下一步
+
+[✅ 已完成] 创建 assets/ 目录并移动 icon.png
+[✅ 已完成] 创建通用配置管理类 ConfigManager.js
+[✅ 已完成] 修复配置分隔符问题（分号→逗号）
+[✅ 已完成] 项目初始化（npm install，133个包）
+[✅ 已完成] 添加开发依赖（@types/vscode, @types/node, vsce）
+[✅ 已完成] 创建 .vscodeignore 优化打包
+[待测试] 验证功能完整性（按 F5 启动调试）
+[待测试] 确认界面显示正常（历史区、文件列表、侧边栏拖动）
+[待执行] 最终清理（可选删除 extension.js）
+
+## 问题修复记录
+
+[2025-10-15] **修复界面空白问题**
+
+问题描述：
+- 界面完全空白（黄色背景）
+- 历史区不显示
+- 文件列表不显示
+- 侧边栏拖动失效
+
+根本原因：
+- src/q2.js 中配置分隔符使用了分号(;)
+- extension.js 原始代码使用的是逗号(,)
+- 导致配置读取失败，数组为空
+
+修复方案：
+- 修改 src/q2.js 第 197 行：.split(",")  // recent_dirs
+- 修改 src/q2.js 第 234 行：.split(",")  // recycle_bin
+- 修改 src/q2.js 第 283-287 行：.join(",")  // 保存配置
+
+[2025-10-15] **紧急修复界面乱码问题**
+
+致命错误 1：缺少 vscode 模块导入
+- 位置：src/q2.js 第 1 行
+- 修复：添加 const vscode = require("vscode");
+- 影响：所有 vscode API 调用失败，扩展崩溃
+
+致命错误 2：HTML 占位符被破坏
+- 位置：src/q2.html 多处
+- 问题：{{ SIDEBAR_WIDTH }} 被格式化为 { { SIDEBAR_WIDTH } }
+- 修复：删除并重新创建 q2.html
+- 验证：verify-placeholders.js 测试通过 ✅
+- 影响：CSS 无法解析，界面完全混乱
+
+[2025-10-15] **完全恢复 Q1 功能**
+
+问题：q1 Decorator 功能完全失效
+- renderImages 函数异步逻辑错误
+- sharp 库调用没有 await 处理
+- decorationType 管理混乱
+
+解决方案：**删除旧 q1.js，完全按 extension.js 原始结构重建**
+- ✅ 粘贴图片功能
+- ✅ Decorator 超赞的显示效果
+- ✅ CodeLens Provider
+- ✅ 防抖渲染机制
+- ✅ 结构超简单，与原来一模一样
+
+新 q1.js: 386 行，与 extension.js 完全一致 ✅
+
+✅ **src/ConfigManager.js** (201行)
+   - 通用 INI 配置文件管理类
+   - 支持多程序共享 E:\r\pz.ini
+   - Section 隔离，格式保留
+   - 提供 get/set/update/readSection/writeSection 方法
+
+📄 **文档创建**
+   - 问题修复报告.md（详细分析+修复方案）
+   - ConfigManager使用指南.md（完整 API 文档+示例）
+   - 项目初始化报告.md（依赖安装+结构验证）
+   - 初始化检查清单.md（测试步骤+故障排查）
+
+## 项目初始化详情 [2025-10-15]
+
+✅ **依赖包安装**
+   - 执行 npm install 成功
+   - 安装 133 个包（用时 ~57 秒）
+   - sharp@0.34.4（图片处理核心库）
+   - @types/vscode@1.70.0（VSCode API 类型）
+   - @types/node@18.0.0（Node.js 类型）
+   - vsce@2.15.0（扩展打包工具）
+
+✅ **开发环境优化**
+   - 创建 .vscodeignore（打包优化配置）
+   - 更新 package.json（添加 devDependencies）
+   - 验证模块加载（ConfigManager 测试通过）
+
+⚠️ **安全提示**
+   - 检测到 2 个中等严重性漏洞（传递依赖）
+   - 可选修复：npm audit fix
+   - 不影响当前功能
