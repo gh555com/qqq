@@ -119,28 +119,33 @@ def save_bytes(data: bytes, is_image=False, original_ext=".bin"):
 # --- 新增文件大小计算功能 ---
 def _get_path_size(path):
     """
-    辅助函数：计算单个文件或目录的大小。
-    此函数将在ThreadPoolExecutor中执行。
+    优化版本：计算单个文件或目录的大小
+    - 使用os.scandir()代替os.walk()，性能更好
+    - 减少系统调用次数，提高效率
     """
-    if not os.path.exists(path):
-        return 0
-
-    if os.path.isfile(path):
-        try:
+    try:
+        if os.path.isfile(path):
             return os.path.getsize(path)
-        except OSError:
+        elif os.path.isdir(path):
+            total_size = 0
+            try:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_file(follow_symlinks=False):
+                                total_size += entry.stat(follow_symlinks=False).st_size
+                            elif entry.is_dir(follow_symlinks=False):
+                                # 递归计算子目录大小
+                                total_size += _get_path_size(entry.path)
+                        except (OSError, PermissionError):
+                            continue
+            except (OSError, PermissionError):
+                pass
+            return total_size
+        else:
             return 0
-    elif os.path.isdir(path):
-        dir_size = 0
-        for dirpath, _, filenames in os.walk(path):
-            for f in filenames:
-                file_path = os.path.join(dirpath, f)
-                try:
-                    dir_size += os.path.getsize(file_path)
-                except OSError:
-                    pass # 忽略无法访问的文件
-        return dir_size
-    return 0
+    except (OSError, PermissionError):
+        return 0
 
 def calculate_total_size_sync(file_paths):
     """
@@ -168,9 +173,29 @@ def get_total_size_cli_interface(paths_to_calculate):
     """
     CLI 接口：从外部（如 Node.js）调用以计算给定路径的总大小。
     结果通过标准输出 JSON 格式返回。
+    优化：减少计算时间，限制最大工作线程数避免过多竞争。
     """
+    if not paths_to_calculate:
+        print(json.dumps({"success": False, "error": "未提供路径"}, ensure_ascii=False))
+        sys.exit(1)
+    
+    # 限制最大工作线程数，避免过多线程竞争
+    max_workers = min(4, len(paths_to_calculate))  # 最多4个线程
+    
     try:
-        total_size = calculate_total_size_sync(paths_to_calculate)
+        # 优化：直接使用并行计算，而不是包装在另一个函数中
+        total_size = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交每个路径的计算任务
+            future_to_path = {executor.submit(_get_path_size, path): path for path in paths_to_calculate}
+            
+            # 收集结果
+            for future in concurrent.futures.as_completed(future_to_path):
+                try:
+                    total_size += future.result()
+                except Exception as exc:
+                    sys.stderr.write(f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
+        
         print(json.dumps({"success": True, "total_size": total_size}, ensure_ascii=False))
     except Exception as e:
         # 如果是计算总大小过程中出现未捕获的全局性错误

@@ -22,6 +22,39 @@
 		* {
 			box-sizing: border-box;
 		}
+		
+		/* 禁止文本选择 */
+		body, .sidebar, .main-content, .file-list-container, .file-item, 
+		.sz-area, .file-select-area, .folder-name-area, .file-name-area,
+		.recent-item, .recycle-item, .nav-item, .context-menu-item, 
+		.context-menu-empty-item, .address-bar {
+			-webkit-user-select: none;
+			-moz-user-select: none;
+			-ms-user-select: none;
+			user-select: none;
+		}
+		
+		/* 允许输入框选择文本 */
+		input, textarea {
+			-webkit-user-select: text;
+			-moz-user-select: text;
+			-ms-user-select: text;
+			user-select: text;
+		}
+		
+		/* 自定义省略号样式 - 下靠下的三个点 */
+		.custom-ellipsis {
+			display: inline-block;
+			position: relative;
+			vertical-align: bottom;
+			margin: 0 2px;
+		}
+		
+		.custom-ellipsis::after {
+			content: '...';
+			position: relative;
+			top: 2px; /* 向下偏移 */
+		}
 
 		html,
 		body {
@@ -307,9 +340,10 @@
 
 		/* SZ 区域样式 (新增) */
 		.sz-area {
-			/* 固定宽度，紧贴图标 */
+			/* 恢复原始宽度，同时扩展点击区域 */
 			width: var(--sz-area-width);
 			height: 100%;
+			min-height: 20px;
 			/* 字体设置为斜体，等宽 */
 			font-style: italic;
 			font-family: monospace;
@@ -321,8 +355,34 @@
 			flex-shrink: 0;
 			white-space: pre;
 			/* 保持空格 */
-			cursor: default;
-			/* 确保该区域是点击选择的一部分 */
+			cursor: pointer;
+			/* 改为pointer以确保点击事件响应 */
+			z-index: 10;
+			/* 确保点击区域在最上层 */
+			position: relative;
+			/* 确保z-index生效 */
+			display: inline-block;
+			/* 确保元素有明确的尺寸 */
+			user-select: none;
+			/* 防止文本选择干扰点击 */
+			-webkit-user-select: none;
+			/* 兼容WebKit浏览器 */
+			-moz-user-select: none;
+			/* 兼容Firefox */
+			-ms-user-select: none;
+			/* 兼容IE/Edge */
+			/* 使用伪元素扩展点击区域 */
+		}
+		
+		/* 使用伪元素扩展点击区域到整个file-select-area */
+		.sz-area::before {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: -8px; /* 向左扩展到分割线 */
+			right: -24px; /* 向右扩展到文件夹图标 */
+			bottom: 0;
+			z-index: -1; /* 在sz区域内容下方 */
 		}
 
 		/* 选中操作区 */
@@ -330,7 +390,7 @@
 			display: flex;
 			align-items: center;
 			padding: 2px 4px 2px 8px;
-			/* 左侧留出更多点击空间 */
+			/* 恢复原始左侧padding */
 			cursor: pointer;
 			/* 启用手型 */
 			flex-shrink: 0;
@@ -636,9 +696,6 @@
 		<div class="context-menu-item" data-action="kode" data-shortcut="e">
 			<span>kode</span>
 			<span class="context-menu-shortcut">= "e"</span>
-		</div>
-		<div class="context-menu-item" data-action="size">
-			<span>Refresh size</span>
 		</div>
 	</div>
 	<script>

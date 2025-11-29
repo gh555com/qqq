@@ -1,8 +1,9 @@
 const vscode = require("vscode");
-const cp = require("child_process");
+const cp = require("child_process"); // child_process 本身已引入
+const { spawn } = require("child_process"); // ✅ 1. 显式引入 spawn 以便使用
 const path = require("path");
 const fs = require("fs");
-const trash = require("trash"); // ✅ 1. 引入 trash 包
+const trash = require("trash");
 
 // ==================== q2 模块变量 ====================
 
@@ -35,12 +36,95 @@ let activePanel = null;
 // 面板焦点控制开关：0-不使用panel.reveal，1-使用panel.reveal
 const usePanelReveal = 1;
 
-// 文件大小缓存 (键为完整路径，值为 {size: number, unit: string, isFolderTotal: boolean})
-let fileSizeCache = {};
-// 正在进行的异步计算，防止重复计算（键为文件夹路径）
-let sizeCalculationPromises = {};
 // 默认大小显示模式：none, m, k, b
 let sizeMode = "none";
+
+// ==================== 文件夹大小查询任务管理系统 ====================
+
+/**
+ * 文件夹大小查询任务跟踪系统
+ * 用于跟踪和终止正在进行的文件夹大小计算任务
+ */
+const folderSizeTasks = {
+	// 存储所有正在进行的任务
+	tasks: new Map(),
+	
+	// 任务ID计数器
+	taskIdCounter: 0,
+	
+	/**
+	 * 添加新任务
+	 * @param {string} folderPath - 文件夹路径
+	 * @param {object} pyProcess - Python子进程对象
+	 * @returns {number} 任务ID
+	 */
+	addTask: function(folderPath, pyProcess) {
+		const taskId = ++this.taskIdCounter;
+		this.tasks.set(taskId, {
+			id: taskId,
+			folderPath: folderPath,
+			process: pyProcess,
+			startTime: Date.now()
+		});
+		return taskId;
+	},
+	
+	/**
+	 * 移除任务
+	 * @param {number} taskId - 任务ID
+	 */
+	removeTask: function(taskId) {
+		if (this.tasks.has(taskId)) {
+			this.tasks.delete(taskId);
+		}
+	},
+	
+	/**
+	 * 终止指定任务
+	 * @param {number} taskId - 任务ID
+	 */
+	terminateTask: function(taskId) {
+		if (this.tasks.has(taskId)) {
+			const task = this.tasks.get(taskId);
+			try {
+				// 终止Python子进程
+				task.process.kill('SIGTERM');
+			} catch (error) {
+				logMessage(`终止任务 ${taskId} 失败: ${error.message}`, "ERROR");
+			}
+			// 从任务列表中移除
+			this.removeTask(taskId);
+		}
+	},
+	
+	/**
+	 * 终止所有任务
+	 */
+	terminateAllTasks: function() {
+		const taskIds = Array.from(this.tasks.keys());
+		taskIds.forEach(taskId => {
+			this.terminateTask(taskId);
+		});
+		logMessage(`已终止 ${taskIds.length} 个文件夹大小查询任务`, "WARN");
+	},
+	
+	/**
+	 * 获取当前任务数量
+	 * @returns {number} 任务数量
+	 */
+	getTaskCount: function() {
+		return this.tasks.size;
+	},
+	
+	/**
+	 * 获取任务信息
+	 * @param {number} taskId - 任务ID
+	 * @returns {object|null} 任务信息
+	 */
+	getTask: function(taskId) {
+		return this.tasks.get(taskId) || null;
+	}
+};
 
 // ==================== 辅助转义函数 (关键修复) ====================
 
@@ -76,6 +160,111 @@ function escapeJsStringLiteral(str) {
 		.replace(/\u2028/g, '\\u2028') // 行分隔符
 		.replace(/\u2029/g, '\\u2029'); // 段落分隔符
 }
+
+// ==================== 文件占用检测系统 ====================
+
+/**
+ * 检测文件或文件夹是否被占用，并找出占用它的进程
+ * @param {string} filePath - 要检测的文件或文件夹路径
+ * @returns {Promise<Object>} - 返回检测结果，包含是否被占用和占用进程信息
+ */
+/**
+ * 获取更详细的错误信息，包括文件占用情况
+ * @param {string} filePath - 文件或文件夹路径
+ * @param {Error} error - 原始错误对象
+ * @param {string} operation - 操作类型（删除/重命名）
+ * @returns {Promise<string>} - 返回详细的错误信息
+ */
+async function getDetailedErrorMessage(filePath, error, operation) {
+	// 对于所有删除失败的情况，统一返回文件被占用的信息
+	return `${operation}失败：文件正被占用。`;
+}
+
+// ==================== Python 接口函数 (核心新增) ====================
+
+/**
+ * ✅ 3. 新增: 通过调用 Python 脚本异步计算给定文件/文件夹路径的总大小。
+ * @param {string[]} paths - 要计算大小的文件或文件夹路径数组。
+ * @returns {Promise<number>} - 解析为总字节大小的 Promise。
+ */
+function getSizeFromPython(paths) {
+	return new Promise((resolve, reject) => {
+		// 在 Windows 上可能是 'python' 或 'python.exe'
+		// 在 macOS/Linux 上可能是 'python' 或 'python3'
+		const pythonExecutable = 'python';
+		// 假设 kp.py 和 q2.js 在同一目录下
+		const scriptPath = path.join(__dirname, 'kp.py');
+
+		// 构造子进程命令：python kp.py get_size path1 path2 ...
+		const args = ['get_size', ...paths];
+
+		// 添加超时处理，防止长时间无响应
+		const timeout = setTimeout(() => {
+			if (taskId) {
+				folderSizeTasks.terminateTask(taskId);
+			}
+			reject(new Error('Python脚本执行超时'));
+		}, 30000); // 30秒超时
+
+		const pyProcess = spawn(pythonExecutable, [scriptPath, ...args], {
+			// 优化进程启动选项
+			stdio: ['ignore', 'pipe', 'pipe'],
+			detached: false,
+			windowsHide: true
+		});
+
+		// 将任务添加到任务管理系统
+		const taskId = folderSizeTasks.addTask(paths[0], pyProcess);
+
+		let stdoutData = '';
+		let stderrData = '';
+
+		// 监听 Python 脚本的标准输出
+		pyProcess.stdout.on('data', (data) => {
+			stdoutData += data.toString();
+		});
+
+		// 监听 Python 脚本的标准错误输出 (用于调试)
+		pyProcess.stderr.on('data', (data) => {
+			stderrData += data.toString();
+		});
+
+		// 监听子进程关闭事件
+		pyProcess.on('close', (code) => {
+			clearTimeout(timeout); // 清除超时计时器
+			// 任务完成，从任务列表中移除
+			folderSizeTasks.removeTask(taskId);
+			
+			if (code === 0) {
+				// 脚本成功执行
+				try {
+					const result = JSON.parse(stdoutData.trim());
+					if (result.success) {
+						resolve(result.total_size);
+					} else {
+						// Python 脚本内部逻辑失败 (JSON 中有 error 字段)
+						reject(new Error(`Python脚本执行失败: ${result.error || '未知错误'}`));
+					}
+				} catch (parseError) {
+					// 解析 JSON 输出失败
+					reject(new Error(`解析Python输出失败: ${parseError.message}\nOutput: ${stdoutData}`));
+				}
+			} else {
+				// Python 脚本以非零代码退出，表示运行时错误
+				reject(new Error(`Python脚本以非零代码 ${code} 退出。\nStderr: ${stderrData}`));
+			}
+		});
+
+		// 监听子进程启动失败事件 (如 Python 解释器找不到)
+		pyProcess.on('error', (err) => {
+			clearTimeout(timeout); // 清除超时计时器
+			// 任务失败，从任务列表中移除
+			folderSizeTasks.removeTask(taskId);
+			reject(new Error(`启动Python进程失败: ${err.message}`));
+		});
+	});
+}
+
 
 // ==================== 文件大小处理函数 ====================
 
@@ -113,109 +302,104 @@ function formatFileSize(bytes, mode) {
 	return { size, unit };
 }
 
+
 /**
- * 递归计算文件夹大小
- * @param {string} folderPath - 文件夹路径
- * @returns {Promise<number>} - 总字节数
+ * ❌ 4. 移除原生的递归计算函数
+ * function calculateFolderSizeRecursive(folderPath) { ... }
  */
-function calculateFolderSizeRecursive(folderPath) {
-	return new Promise((resolve) => {
-		let totalSize = 0;
 
-		try {
-			const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-
-			const promises = [];
-
-			for (const entry of entries) {
-				const entryPath = path.join(folderPath, entry.name);
-
-				try {
-					if (entry.isDirectory()) {
-						// 递归计算子文件夹大小
-						promises.push(calculateFolderSizeRecursive(entryPath));
-					} else {
-						// 累加文件大小
-						const stat = fs.statSync(entryPath);
-						totalSize += stat.size;
-					}
-				} catch (error) {
-					// 忽略无法访问的文件/目录
-				}
-			}
-
-			// 等待所有子文件夹大小计算完成
-			Promise.all(promises).then((sizes) => {
-				sizes.forEach((size) => (totalSize += size));
-				resolve(totalSize);
-			});
-		} catch (error) {
-			// 如果无法读取文件夹，返回0
-			resolve(0);
-		}
-	});
-}
 
 /**
- * 异步获取文件大小显示字符串
+ * 将回调风格的getFileSizeDisplayAsync转换为Promise风格（用于兼容现有代码）
  * @param {string} itemPath - 文件或文件夹路径
- * @param {boolean} isFile - 是否为文件
  * @param {string} mode - 显示模式
  * @returns {Promise<string>} - 格式化后的大小字符串
  */
-function getFileSizeDisplayAsync(itemPath, isFile, mode) {
-	return new Promise((resolve, reject) => {
-		const statsKey = `${itemPath}:${isFile ? "file" : "dir"}`;
-
-		// 检查缓存
-		if (fileSizeCache[statsKey]) {
-			resolve(fileSizeCache[statsKey].display);
-			return;
-		}
-
-		// none 模式直接返回空字符串
-		if (mode === "none") {
-			resolve("");
-			return;
-		}
-
-		// 获取文件大小
-		let size = 0;
-		try {
-			const stat = fs.statSync(itemPath);
-			size = stat.size;
-		} catch (error) {
-			reject(error);
-			return;
-		}
-
-		// 格式化文件大小
-		const { size: displaySize, unit: displayUnit } = formatFileSize(size, mode);
-
-		// 计算需要填充的空格数（右对齐）
-		let spacesToFill = 0;
-		if (displayUnit === "m") {
-			spacesToFill = 0;
-		} else if (displayUnit === "k") {
-			spacesToFill = 3;
-		} else if (displayUnit === "b") {
-			spacesToFill = 6;
-		}
-
-		// 生成最终显示字符串： [基准空格][数值][空格][单位]
-		const finalDisplay =
-			" ".repeat(spacesToFill) + displaySize + " " + displayUnit;
-
-		// 缓存结果
-		fileSizeCache[statsKey] = {
-			size: size,
-			unit: unit,
-			display: finalDisplay,
-			isFolderTotal: false,
-		};
-		resolve(finalDisplay);
+function getFileSizeDisplayAsyncPromise(itemPath, mode) {
+	return new Promise((resolve) => {
+		getFileSizeDisplayAsync(itemPath, mode, (result) => {
+			resolve(result);
+		});
 	});
 }
+
+/**
+ * ✅ 5. 重构: 异步获取文件大小显示字符串, 文件使用fs.stat()，文件夹使用Python接口
+ * @param {string} itemPath - 文件或文件夹路径
+ * @param {string} mode - 显示模式
+ * @param {function(string): void} callback - 回调函数，接收格式化后的大小字符串
+ */
+function getFileSizeDisplayAsync(itemPath, mode, callback) {
+	// 'none' 模式直接返回空字符串
+	if (mode === "none") {
+		callback("");
+		return;
+	}
+
+	// 检查是文件还是文件夹
+	fs.stat(itemPath, (err, stats) => {
+		if (err) {
+			// 如果文件/文件夹不存在，返回错误指示符
+			logMessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
+			callback(" ...err ");
+			return;
+		}
+
+		// 根据类型选择计算方法
+		if (stats.isFile()) {
+			// 文件：直接使用已获取的stats.size
+			const sizeInBytes = stats.size;
+			
+			// 格式化文件大小
+			const { size: displaySize, unit: displayUnit } = formatFileSize(sizeInBytes, mode);
+
+			// 计算需要填充的空格数（右对齐）
+			let spacesToFill = 0;
+			if (displayUnit === "m") {
+				spacesToFill = 0;
+			} else if (displayUnit === "k") {
+				spacesToFill = 3;
+			} else if (displayUnit === "b") {
+				spacesToFill = 6;
+			}
+
+			// 生成最终显示字符串： [基准空格][数值][空格][单位]
+			const finalDisplay =
+				" ".repeat(spacesToFill) + displaySize + " " + displayUnit;
+
+			callback(finalDisplay);
+		} else {
+			// 文件夹：调用 Python 接口
+			getSizeFromPython([itemPath])
+				.then(sizeInBytes => {
+					// 格式化文件大小
+					const { size: displaySize, unit: displayUnit } = formatFileSize(sizeInBytes, mode);
+
+					// 计算需要填充的空格数（右对齐）
+					let spacesToFill = 0;
+					if (displayUnit === "m") {
+						spacesToFill = 0;
+					} else if (displayUnit === "k") {
+						spacesToFill = 3;
+					} else if (displayUnit === "b") {
+						spacesToFill = 6;
+					}
+
+					// 生成最终显示字符串： [基准空格][数值][空格][单位]
+					const finalDisplay =
+						" ".repeat(spacesToFill) + displaySize + " " + displayUnit;
+
+					callback(finalDisplay);
+				})
+				.catch(error => {
+					// 如果计算失败，记录日志并返回一个错误指示符
+					logMessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
+					callback(" ...err ");
+				});
+		}
+	});
+}
+
 
 // ==================== 配置文件处理函数 ====================
 
@@ -757,8 +941,11 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 const szArea = item.querySelector('.sz-area');
                 const type = item.dataset.type;
 
+                // 只对文件（不包括文件夹）获取大小
+                if (type !== 'file') return;
+
                 if (szArea) {
-                    if (type === 'file' && sizeMode !== 'none') {
+                    if (sizeMode !== 'none') {
                         szArea.textContent = '    \\u2022    ';
                     } else {
                         szArea.textContent = '';
@@ -815,15 +1002,16 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             items.forEach(item => {
                 if (item.name === '..') return;
+                
+                // 只对文件（不包括文件夹）获取大小
+                if (item.type !== 'file') return;
 
                 const safePathSelector = item.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
                 const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${item.type}\`);
                 if (itemElement) {
                     const szArea = itemElement.querySelector('.sz-area');
                     if (szArea) {
-                        if (item.type === 'file') {
-                            szArea.textContent = '    \\u2022    ';
-                        }
+                        szArea.textContent = '    \\u2022    ';
                     }
                 }
 
@@ -860,6 +1048,15 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 path: path,
                 name: name
             };
+
+            // 只有文件类型才自动更新大小，文件夹不自动更新
+            if (type === 'file') {
+                vscode.postMessage({
+                    command: 'requestSize',
+                    path: path,
+                    type: type
+                });
+            }
 
             currentFocusType = 'fileList';
         }
@@ -1071,6 +1268,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
         document.getElementById('fileList').addEventListener('contextmenu', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             hideAllContextMenus();
 
             const itemElement = e.target.closest('.file-item');
@@ -1082,6 +1280,22 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 const itemType = itemElement.dataset.type;
 
                 selectItem({ currentTarget: itemElement.querySelector('.file-select-area'), stopPropagation: () => {} }, itemType, itemPath, itemName);
+
+                // 对于文件夹，右键时也要获取大小
+                if (itemType === 'folder') {
+                    // 先显示加载指示器
+                    const szArea = itemElement.querySelector('.sz-area');
+                    if (szArea) {
+                        szArea.textContent = '    •    ';
+                    }
+                    
+                    // 然后发送请求获取大小
+                    vscode.postMessage({
+                        command: 'requestSize',
+                        path: itemPath,
+                        type: itemType
+                    });
+                }
 
                 itemContextMenu.dataset.path = itemPath;
                 itemContextMenu.dataset.name = itemName;
@@ -1095,6 +1309,15 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                  emptyContextMenu.style.left = e.clientX + 'px';
                  emptyContextMenu.style.top = e.clientY + 'px';
                  emptyContextMenu.style.display = 'flex';
+            }
+        });
+        
+        // 禁止整个文档的右键菜单
+        document.addEventListener('contextmenu', (e) => {
+            // 如果点击的不是文件列表区域，则阻止默认右键菜单
+            if (!e.target.closest('#fileList')) {
+                e.preventDefault();
+                e.stopPropagation();
             }
         });
 
@@ -1131,6 +1354,11 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 event.preventDefault();
                 event.stopPropagation();
                 performKodeAction(selectedItem);
+            }
+            // 禁用Ctrl+A等选择快捷键
+            else if (event.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) {
+                event.preventDefault();
+                event.stopPropagation();
             }
         });
 
@@ -1370,6 +1598,8 @@ function showSaveAsDialog() {
 	}
 
 	panel.onDidDispose(() => {
+		// 终止所有文件夹大小查询任务
+		folderSizeTasks.terminateAllTasks();
 		activePanel = null;
 	});
 
@@ -1396,7 +1626,7 @@ function showSaveAsDialog() {
 				fileListHtml += `
                 <div class="file-item folder" data-path="${escapeHtmlAttribute(parentPath)}" data-name=".." data-type="folder">
                     <div class="file-select-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(parentPath)}', '..')">
-                        <div class="sz-area"></div>
+                        <div class="sz-area" onclick="event.stopPropagation(); event.preventDefault(); event.cancelBubble = true; selectItem(event, 'folder', '${escapeJsStringLiteral(parentPath)}', '..'); const szArea = this; szArea.textContent = '    •    '; vscode.postMessage({command: 'requestSize', path: '${escapeJsStringLiteral(parentPath)}', type: 'folder'});"></div>
                         <span class="file-icon">📁</span>
                     </div>
                     <div class="folder-name-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(parentPath)}', '..'); navigateIntoFolder('${escapeJsStringLiteral(parentPath)}')">
@@ -1412,7 +1642,7 @@ function showSaveAsDialog() {
 				fileListHtml += `
                 <div class="file-item folder" data-path="${escapeHtmlAttribute(dir.path)}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder">
                     <div class="file-select-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(dir.path)}', '${escapeJsStringLiteral(dir.name)}')">
-                        <div class="sz-area"></div>
+                        <div class="sz-area" onclick="event.stopPropagation(); event.preventDefault(); event.cancelBubble = true; selectItem(event, 'folder', '${escapeJsStringLiteral(dir.path)}', '${escapeJsStringLiteral(dir.name)}'); const szArea = this; szArea.textContent = '    •    '; vscode.postMessage({command: 'requestSize', path: '${escapeJsStringLiteral(dir.path)}', type: 'folder'});"></div>
                         <span class="file-icon">📁</span>
                     </div>
                     <div class="folder-name-area" onclick="selectItem(event, 'folder', '${escapeJsStringLiteral(dir.path)}', '${escapeJsStringLiteral(dir.name)}'); navigateIntoFolder('${escapeJsStringLiteral(dir.path)}')">
@@ -1458,7 +1688,7 @@ function showSaveAsDialog() {
 	}
 
 	// Webview消息处理
-	panel.webview.onDidReceiveMessage((message) => {
+	panel.webview.onDidReceiveMessage(async (message) => { // ✅ 6. 将回调设为 async
 		const currentConfig = getConfig();
 		const currentSizeMode = currentConfig.sizeMode;
 
@@ -1474,45 +1704,37 @@ function showSaveAsDialog() {
 					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth,
 					currentConfig.recycleBin, currentConfig.isPinned, message.mode
 				);
-				fileSizeCache = {};
-				sizeCalculationPromises = {};
 				refreshWebview();
 				break;
 
-			case "requestSize":
+			case "requestSize": // ✅ 7. 重构 requestSize
 				if (currentSizeMode === "none") break;
-				getFileSizeDisplayAsync(message.path, message.type === "file", currentSizeMode)
-					.then(display => {
-						if (panel && !panel.disposed) {
-							panel.webview.postMessage({
-								command: "updateSize", path: message.path, type: message.type, sizeDisplay: display
-							});
-						}
-					})
-					.catch(e => logMessage(`异步获取文件大小失败: ${message.path} - ${e.message}`, "ERROR"));
+				try {
+					const display = await getFileSizeDisplayAsyncPromise(message.path, currentSizeMode);
+					if (panel && !panel.disposed) {
+						panel.webview.postMessage({
+							command: "updateSize", path: message.path, type: message.type, sizeDisplay: display
+						});
+					}
+				} catch (e) {
+					// 错误已在 getFileSizeDisplayAsync 内部记录
+				}
 				break;
 
-			case "refreshSize":
+			case "refreshSize": // ✅ 8. 重构 refreshSize
+				if (currentSizeMode === "none") break;
 				const { path: itemToRefresh, type: itemTypeToRefresh } = message;
-				const statsKey = `${itemToRefresh}:${itemTypeToRefresh === "folder" ? "dir" : "file"}`;
-				delete fileSizeCache[statsKey];
-				if (itemTypeToRefresh === "folder") {
-					delete sizeCalculationPromises[itemToRefresh];
-					calculateFolderSizeRecursive(itemToRefresh).then(totalSize => {
-						const { size, unit } = formatFileSize(totalSize, sizeMode);
-						let spacesToFill = (unit === "k" ? 3 : (unit === "b" ? 6 : 0));
-						const displayString = " ".repeat(spacesToFill) + size + " " + unit;
-						fileSizeCache[statsKey] = { size: totalSize, unit: unit, display: displayString, isFolderTotal: true };
-						if (panel && !panel.disposed) {
-							panel.webview.postMessage({ command: "updateSize", path: itemToRefresh, type: "folder", sizeDisplay: displayString });
-						}
-					}).catch(e => logMessage(`刷新文件夹大小失败: ${itemToRefresh} - ${e.message}`, "ERROR"));
-				} else {
-					getFileSizeDisplayAsync(itemToRefresh, true, currentSizeMode).then(display => {
-						if (panel && !panel.disposed) {
-							panel.webview.postMessage({ command: "updateSize", path: itemToRefresh, type: "file", sizeDisplay: display });
-						}
-					}).catch(e => logMessage(`刷新文件大小失败: ${itemToRefresh} - ${e.message}`, "ERROR"));
+
+				try {
+					// 重新计算并更新
+					const display = await getFileSizeDisplayAsyncPromise(itemToRefresh, currentSizeMode);
+					if (panel && !panel.disposed) {
+						panel.webview.postMessage({
+							command: "updateSize", path: itemToRefresh, type: itemTypeToRefresh, sizeDisplay: display
+						});
+					}
+				} catch (e) {
+					// 错误已在 getFileSizeDisplayAsync 内部记录
 				}
 				break;
 
@@ -1526,19 +1748,24 @@ function showSaveAsDialog() {
 					} else {
 						fs.renameSync(oldPath, newPath);
 						saveRecentDirectory(path.dirname(oldPath));
-						fileSizeCache = {};
-						sizeCalculationPromises = {};
 						setTimeout(() => refreshWebview(), 100);
 					}
 				} catch (error) {
-					vscode.window.showErrorMessage("重命名失败: " + error.message);
 					logMessage("重命名失败: " + error.message, "ERROR");
+					
+					// 获取详细的错误信息
+					getDetailedErrorMessage(message.oldPath, error, "重命名").then(detailedError => {
+						vscode.window.showErrorMessage(detailedError);
+					});
 					refreshWebview();
 				}
 				break;
 
 			case "navigate":
 				try {
+					// 终止所有文件夹大小查询任务
+					folderSizeTasks.terminateAllTasks();
+					
 					let newPath = message.path;
 					if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) {
 						newPath += "\\";
@@ -1555,6 +1782,9 @@ function showSaveAsDialog() {
 				break;
 
 			case "navigateUp":
+				// 终止所有文件夹大小查询任务
+				folderSizeTasks.terminateAllTasks();
+				
 				const parentDir = path.dirname(currentPath);
 				if (parentDir !== currentPath) {
 					currentPath = parentDir;
@@ -1591,7 +1821,6 @@ function showSaveAsDialog() {
 						fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
 
 						saveRecentDirectory(currentPath); // 仅在成功创建后保存
-						fileSizeCache = {};
 
 						if (!isPinned) {
 							panel.dispose();
@@ -1634,7 +1863,6 @@ function showSaveAsDialog() {
 				} else {
 					fs.mkdirSync(newFolderPath);
 					saveRecentDirectory(currentPath);
-					fileSizeCache = {};
 					refreshWebview();
 					if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilenameInput" });
 				}
@@ -1665,36 +1893,47 @@ function showSaveAsDialog() {
 				refreshWebview();
 				break;
 
-			case "quickDeleteToRecycleBin": // ✅ 2. 这是主要修改区域
+			case "quickDeleteToRecycleBin":
 				const itemToDelete = message.path;
 				if (fs.existsSync(itemToDelete)) {
 					saveRecentDirectory(currentPath);
-					fileSizeCache = {};
-					sizeCalculationPromises = {};
-					vscode.window.withProgress({
-						location: vscode.ProgressLocation.Notification,
-						title: `正在将 ${path.basename(itemToDelete)} 移至回收站...`,
-						cancellable: false
-					}, () => {
-						// ✅ 3. 将 Promise 的回调改为 async 函数，以便使用 await
-						return new Promise(async (resolve, reject) => {
-							try {
-								// ✅ 4. 调用 trash()，它会处理好所有平台的回收站逻辑
-								await trash([itemToDelete]);
-								// 成功后，延迟刷新界面，确保文件系统已更新
-								setTimeout(() => { refreshWebview(); resolve(); }, 300);
-							} catch (error) {
-								// ✅ 5. 统一的错误处理
-								logMessage(`移至回收站失败: ${itemToDelete} - ${error.message}`, "ERROR");
-								// 如果失败，通知 webview 恢复条目的显示状态
-								panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
-								reject(error); // 将错误传递给 withProgress
+					
+					// 直接执行删除，不显示进度
+					(async () => {
+						try {
+							await trash([itemToDelete]);
+							setTimeout(() => { refreshWebview(); }, 300);
+							
+							// 格式化路径，如果超过61个字符则截断
+							let displayPath = itemToDelete;
+							if (itemToDelete.length > 61) {
+								displayPath = itemToDelete.substring(0, 28) + "⋯" + itemToDelete.substring(itemToDelete.length - 28);
 							}
-						});
-					}).then(undefined, error => {
-						// withProgress 的第二个回调函数用于捕获 reject 的错误
-						vscode.window.showErrorMessage(`移至回收站失败: ${error.message}`);
-					});
+							
+							// 显示成功消息，停留11秒
+							const successMessage = `${displayPath} 已移至回收站`;
+							vscode.window.showInformationMessage(successMessage);
+							
+							// 11秒后自动清除消息
+							setTimeout(() => {
+								// VSCode API 没有直接清除消息的方法，但可以通过显示一个空消息来替代
+								// 这里我们不做任何操作，让消息自然消失
+							}, 11000);
+						} catch (error) {
+							logMessage(`移至回收站失败: ${itemToDelete} - ${error.message}`, "ERROR");
+							panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
+							
+							// 显示失败消息，停留11秒
+							const errorMessage = "删除失败：文件正被占用。";
+							vscode.window.showErrorMessage(errorMessage);
+							
+							// 11秒后自动清除消息
+							setTimeout(() => {
+								// VSCode API 没有直接清除消息的方法，但可以通过显示一个空消息来替代
+								// 这里我们不做任何操作，让消息自然消失
+							}, 11000);
+						}
+					})();
 				} else {
 					vscode.window.showWarningMessage(`删除失败：项目不存在。`);
 					refreshWebview();
