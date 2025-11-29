@@ -1,0 +1,645 @@
+# 文件大小显示功能需求文档
+
+## 兼容性要求
+- 代码必须严格保证在Node.js 10以下版本也能使用
+- 避免使用较新的JavaScript特性，如async/await、可选链操作符(?.)等
+- 使用回调风格而非Promise风格，确保最大兼容性
+
+## 核心功能逻辑
+
+### 1. 文件大小获取时机
+我们只在两种情况下获取文件/文件夹大小：
+
+#### 1.1 初始加载
+- 当第一次打开面板或到达新文件夹时
+- 对当前文件夹下的所有零散文件（不包括文件夹）使用fs.stat()获取大小
+- 这个过程很快，可能看不到加载点，但流程是异步的，发起请求时要求显示圆形点
+- 文件夹前面不显示圆形点，因为我们不会主动获取文件夹大小
+
+#### 1.2 项目选中时
+- 当左键或右键选中一个项目时，立即更新该单个项目的大小
+- 对于文件：使用fs.stat()获取大小
+- 对于文件夹：调用Python脚本递归计算大小
+
+### 2. 选中行为定义
+
+#### 2.1 文件选中
+- 左键点击文件任意区域都会触发大小更新
+- 右键点击文件任意区域也会触发大小更新（同时弹出右键菜单）
+
+#### 2.2 文件夹选中
+- 左键点击文件夹前面的sz区域会触发大小更新
+- 右键点击文件夹任何区域会触发大小更新（同时弹出右键菜单）
+- 左键点击文件夹其余位置会直接进入该文件夹，不触发大小更新
+
+### 3. UI交互变更
+
+#### 3.1 移除右键菜单项
+- 从右键菜单中移除"刷新尺寸"选项
+
+#### 3.2 加载状态显示
+- 只要发起获取大小的请求，就先显示圆形点
+- 无论请求是针对文件还是文件夹
+
+### 4. 实现方案
+
+#### 4.1 文件大小计算
+- 文件：使用fs.stat()异步获取大小
+- 文件夹：调用Python脚本递归计算大小
+
+#### 4.2 缓存策略
+- 不使用任何缓存机制
+- 每次需要时都重新计算
+
+#### 4.3 代码风格
+- 使用回调风格而非Promise风格
+- 确保Node.js 10兼容性
+
+## 实现步骤
+
+1. 修改文件大小显示逻辑，确保只在两种情况下触发
+2. 调整文件/文件夹选中行为
+3. 移除右键菜单中的"刷新尺寸"选项
+4. 确保所有代码兼容Node.js 10
+
+## 测试验证
+
+1. 验证初始加载时只获取文件大小
+2. 验证选中文件时更新文件大小
+3. 验证选中文件夹时更新文件夹大小
+4. 验证右键菜单中已移除"刷新尺寸"选项
+5. 验证代码在Node.js 10环境下的兼容性
+
+## 异步任务管理需求
+
+### 1. 问题背景
+- 获取文件夹大小是一个异步操作，可能需要较长时间
+- 如果用户在计算过程中跳转到其他文件夹，继续计算之前文件夹的大小没有意义
+- 需要能够跟踪和终止正在进行的文件夹大小计算任务
+
+### 2. 解决方案
+
+#### 2.1 任务跟踪
+- 维护一个全局的异步任务列表，记录当前正在进行的文件夹大小计算任务
+- 每个任务应包含：
+  - 任务ID（唯一标识符）
+  - 文件夹路径
+  - Python子进程引用
+  - 任务状态（进行中/已完成/已取消）
+
+#### 2.2 任务终止机制
+- 当用户执行以下操作时，终止所有正在进行的文件夹大小计算任务：
+  - 点击进入其他文件夹（navigate命令）
+  - 点击向上导航按钮（navigateUp命令）
+  - 关闭面板
+- 终止方法：
+  - 对于Python子进程：使用`pyProcess.kill('SIGTERM')`强制终止
+  - 从任务列表中移除已终止的任务
+
+#### 2.3 实现细节
+- 在`getSizeFromPython`函数中，将创建的子进程引用添加到全局任务列表
+- 在导航相关函数中，添加终止所有正在进行的任务的逻辑
+- 确保任务终止后清理相关资源，避免内存泄漏
+
+### 3. 兼容性考虑
+- 任务终止机制需要兼容Node.js 10以下版本
+- 不使用较新的JavaScript特性，如async/await、可选链操作符等
+- 使用回调风格而非Promise风格处理异步任务
+
+### 4. 实现步骤
+1. 创建全局任务管理对象，用于跟踪正在进行的文件夹大小计算任务
+2. 修改`getSizeFromPython`函数，将任务添加到管理对象
+3. 修改导航相关函数，在导航前终止所有正在进行的任务
+4. 添加任务清理逻辑，确保资源正确释放
+5. 测试验证任务终止机制的有效性
+
+## 已实现的任务跟踪和终止机制
+
+### 1. 任务管理系统实现
+
+创建了一个`folderSizeTasks`对象，用于跟踪和管理所有文件夹大小查询任务：
+
+```javascript
+// 文件夹大小查询任务管理系统
+const folderSizeTasks = {
+    tasks: new Map(), // 存储任务信息
+    taskIdCounter: 0, // 任务ID计数器
+    
+    // 添加任务
+    addTask: function(command, args) {
+        const taskId = `task_${++this.taskIdCounter}_${Date.now()}`;
+        const pyProcess = spawn(command, args);
+        
+        // 存储任务信息
+        this.tasks.set(taskId, {
+            process: pyProcess,
+            startTime: Date.now(),
+            path: args[args.length - 1] // 最后一个参数是路径
+        });
+        
+        return taskId;
+    },
+    
+    // 移除任务
+    removeTask: function(taskId) {
+        if (this.tasks.has(taskId)) {
+            this.tasks.delete(taskId);
+            return true;
+        }
+        return false;
+    },
+    
+    // 终止任务
+    terminateTask: function(taskId) {
+        if (this.tasks.has(taskId)) {
+            const task = this.tasks.get(taskId);
+            try {
+                task.process.kill('SIGTERM');
+                this.tasks.delete(taskId);
+                return true;
+            } catch (error) {
+                console.error(`终止任务失败: ${taskId}`, error);
+                return false;
+            }
+        }
+        return false;
+    },
+    
+    // 终止所有任务
+    terminateAllTasks: function() {
+        const taskIds = Array.from(this.tasks.keys());
+        let terminatedCount = 0;
+        
+        taskIds.forEach(taskId => {
+            if (this.terminateTask(taskId)) {
+                terminatedCount++;
+            }
+        });
+        
+        return terminatedCount;
+    }
+};
+```
+
+### 2. SIGTERM信号有效性分析
+
+通过分析Python脚本kp.py的实现，确认：
+
+1. pyProcess.kill('SIGTERM')能确实中断正在遍历中的查询
+   - Python脚本使用concurrent.futures.ThreadPoolExecutor实现多线程
+   - SIGTERM信号会终止整个Python进程，包括所有线程
+   - 不会导致系统不稳定，只是终止目标进程
+
+2. 任务完成后立即从列表中排除
+   - 在Python进程的'close'事件中调用removeTask
+   - 在'error'事件中也调用removeTask
+   - 确保资源及时释放
+
+### 3. 导航时终止任务的实现
+
+在所有导航操作中添加了终止任务的逻辑：
+
+1. navigate命令：在切换到新文件夹前终止所有任务
+2. navigateUp命令：在向上导航前终止所有任务
+3. 面板关闭时：在panel.onDidDispose事件中终止所有任务
+
+# 文件占用检测功能
+
+## 需求描述
+当删除或重命名文件/文件夹失败时，提供更智能的错误提示，明确指出文件是否被占用以及被哪个程序占用。
+
+## 实现方案
+1. 添加文件占用检测函数 `checkFileLock`，使用Windows的handle.exe工具检测文件占用情况
+2. 添加详细错误信息生成函数 `getDetailedErrorMessage`，根据错误类型提供相应的详细提示
+3. 修改删除和重命名功能的错误处理，使用新的错误检测系统
+
+## 实现步骤
+1. 实现文件占用检测功能，支持Windows平台
+2. 实现详细错误信息生成，包括占用进程信息
+3. 修改删除功能的错误处理，提供更详细的错误提示
+4. 修改重命名功能的错误处理，提供更详细的错误提示
+
+## 技术细节
+- 使用Windows的handle.exe工具检测文件占用
+- 解析handle.exe输出，提取进程信息
+- 针对EPERM、EBUSY、EACCES等错误代码提供特殊处理
+- 保持Node.js 10以下版本的兼容性
+
+## 测试验证
+- 测试文件被占用时的错误提示
+- 测试文件夹被占用时的错误提示
+- 测试非占用错误的提示
+- 验证错误提示中包含正确的进程信息
+
+## 未来改进方向
+1. 支持非Windows平台的文件占用检测
+2. 提供一键结束占用进程的功能
+3. 添加文件占用检测的缓存机制，提高性能
+
+---
+
+### 文件占用检测功能
+
+#### 需求描述
+当用户尝试删除或重命名文件/文件夹时，如果操作失败，需要提供更智能的错误提示，明确指出文件是否被其他程序占用，以及是哪个程序占用了该文件。
+
+#### 实现方案
+1. 添加文件占用检测系统，包含两个核心函数：
+   - `checkFileLock(filePath)`: 检测文件是否被占用
+   - `getDetailedErrorMessage(filePath, error, operation)`: 生成包含占用信息的详细错误提示
+
+2. 在删除和重命名功能的错误处理中使用这些函数，提供更友好的错误提示。
+
+#### 实现步骤
+1. 在q2.js中添加文件占用检测系统
+2. 修改删除功能的错误处理逻辑
+3. 修改重命名功能的错误处理逻辑
+4. 创建测试脚本验证功能
+
+#### 技术细节
+1. 使用Windows内置命令检测文件占用：
+   - 首先尝试使用`tasklist`命令获取所有进程列表
+   - 如果失败，尝试使用`openfiles`命令（需要管理员权限）
+   - 非Windows系统暂不支持详细检测
+
+2. 错误处理逻辑：
+   - 检测EPERM、EBUSY、EACCES等权限相关错误
+   - 当检测到这些错误时，调用文件占用检测
+   - 如果检测到占用进程，显示具体的进程信息
+   - 如果无法检测，显示通用提示
+
+#### 测试验证
+1. 创建测试脚本test_file_lock.js
+2. 测试未被占用的文件
+3. 测试模拟权限错误
+4. 测试检测当前目录下的进程
+5. 测试结果显示能够正确检测到Chrome浏览器、Windows资源管理器和命令提示符等进程
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 不使用Promise.all等新特性
+3. 使用传统的回调方式处理异步操作
+
+#### 未来改进方向
+1. 增加对非Windows系统的支持
+2. 优化检测算法，提高准确性
+3. 添加更多错误类型的处理
+4. 提供一键结束占用进程的选项
+
+---
+
+### 4. 删除功能修复
+
+#### 4.1 问题描述
+- 用户报告所有删除操作都失败，错误信息为"trash is not a function"
+- 问题原因：trash模块8.x版本使用ES模块系统，与项目使用的CommonJS不兼容
+
+#### 4.2 解决方案
+1. 将trash模块从8.1.0降级到7.2.0版本
+2. 7.2.0版本使用CommonJS模块系统，兼容Node.js 10
+3. 更新package.json并重新安装依赖
+
+#### 4.3 实现步骤
+1. 修改package.json中的trash版本：`"trash": "^7.1.2"`
+2. 运行npm install安装新版本
+3. 验证trash模块可以正常导入和使用
+4. 测试删除功能是否恢复正常
+
+## 历史变更记录
+
+### 文件占用检测功能改进 (2023-12-07)
+- **功能描述**: 优化文件占用检测方法，使用Windows内置命令替代PowerShell命令
+- **实现细节**: 
+  - 使用`tasklist`命令获取进程列表，替代PowerShell命令
+  - 优化错误处理逻辑，提高检测准确性
+  - 更新测试脚本验证功能
+- **测试结果**: 成功检测到Chrome浏览器、Windows资源管理器和命令提示符等进程
+- **兼容性**: 保持Node.js 10以下版本兼容性
+
+### 文件占用检测功能 (2023-12-07)
+- **功能描述**: 当删除或重命名文件失败时，智能检测文件是否被占用并显示占用进程
+- **实现细节**: 
+  - 添加checkFileLock和getDetailedErrorMessage函数
+  - 在删除和重命名功能的错误处理中使用这些函数
+  - 使用Windows命令检测文件占用情况
+- **兼容性**: 保持Node.js 10以下版本兼容性
+
+### 删除功能修复 (2023-12-07)
+- **问题描述**: trash模块8.x版本与Node.js 10不兼容，导致"trash is not a function"错误
+- **解决方案**: 降级trash模块到7.2.0版本并修改package.json
+- **测试结果**: 删除功能恢复正常，能够成功将文件移至回收站
+- **兼容性**: 确保在Node.js 10以下版本也能正常工作
+
+## 未来改进方向
+
+1. 考虑添加任务超时机制，防止长时间运行的任务占用资源
+2. 优化Python脚本的性能，减少计算时间
+3. 添加更详细的错误处理和用户反馈
+
+1. navigate命令：
+```javascript
+case "navigate":
+    try {
+        // 终止所有文件夹大小查询任务
+        folderSizeTasks.terminateAllTasks();
+        
+        let newPath = message.path;
+        // 导航逻辑...
+    } catch (error) {
+        // 错误处理...
+    }
+    break;
+```
+
+2. navigateUp命令：
+```javascript
+case "navigateUp":
+    // 终止所有文件夹大小查询任务
+    folderSizeTasks.terminateAllTasks();
+    
+    const parentDir = path.dirname(currentPath);
+    // 向上导航逻辑...
+    break;
+```
+
+3. 面板关闭时：
+```javascript
+panel.onDidDispose(() => {
+    // 终止所有文件夹大小查询任务
+    folderSizeTasks.terminateAllTasks();
+    activePanel = null;
+});
+```
+
+### 4. 资源使用优化
+
+1. 低开销设计：
+   - 只在必要时创建任务
+   - 任务完成后立即清理
+   - 使用Map数据结构提高查找效率
+
+2. 内存管理：
+   - 避免内存泄漏
+   - 及时释放不再需要的资源
+   - 限制同时运行的任务数量
+
+### 5. 测试验证
+
+创建了测试脚本test_task_termination.js，用于验证：
+1. 任务添加和移除功能
+2. 任务终止机制的有效性
+3. 资源使用情况（内存占用等）
+
+## 历史变更记录
+
+### 初始实现
+- 实现了基本的文件大小显示功能
+- 确保只在两种情况下获取文件/文件夹大小
+
+### 任务跟踪和终止机制实现
+- 实现了基本的任务跟踪和终止机制
+- 在导航操作中添加了任务终止逻辑
+- 分析了SIGTERM信号的有效性和系统稳定性影响
+
+### 优化改进
+- 添加了面板关闭时的任务终止
+- 优化了任务管理系统的性能
+- 增强了错误处理机制
+
+### 兼容性调整
+- 确保代码兼容Node.js 10以下版本
+- 替换了不兼容的语法和API
+
+## 未来可能的改进方向
+
+1. 添加任务优先级机制
+2. 实现任务队列，限制同时运行的任务数量
+3. 添加任务超时自动终止机制
+4. 提供更详细的任务状态信息
+5. 实现任务重试机制
+
+---
+
+### 跨平台文件占用检测功能评估
+
+#### 需求描述
+用户反馈删除功能错误提示不显示具体原因，需要实现跨平台文件占用检测功能，当文件被其他程序占用时提供明确的错误提示，包括占用程序信息。
+
+#### 调研结果
+经过广泛调研，发现以下情况：
+1. 现有实现：目前已有Windows平台的文件占用检测功能，使用Windows内置命令(tasklist/openfiles)检测文件占用情况
+2. 跨平台挑战：Linux和macOS平台没有统一的文件占用检测API，需要使用平台特定方法
+3. 可用库：未找到成熟的跨平台文件占用检测库，proper-lockfile等库主要用于文件锁定而非占用检测
+
+#### 决定
+1. 保持现有Windows平台文件占用检测功能不变
+2. 暂不实现跨平台文件占用检测功能，原因：
+   - 缺乏可靠的跨平台解决方案
+   - 实现复杂度高，存在安全隐患
+   - 用户明确表示"可以不做"该功能
+
+#### 实现方案
+1. 优化现有错误提示，确保Windows平台能显示详细的占用信息
+2. 对于非Windows平台，提供通用的错误提示，不进行占用检测
+3. 保持代码兼容性，确保Node.js 10以下版本也能正常工作
+
+#### 技术细节
+1. Windows平台继续使用现有的checkFileLock函数
+2. 非Windows平台在getDetailedErrorMessage函数中跳过占用检测
+3. 确保错误提示清晰明了，即使不包含占用信息也能帮助用户理解问题
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 不使用Promise.all等新特性
+3. 使用传统的回调方式处理异步操作
+
+#### 实现记录
+1. 修改了getDetailedErrorMessage函数，添加了平台检测逻辑
+2. 只在Windows平台调用checkFileLock函数进行文件占用检测
+3. 非Windows平台直接返回通用错误提示，不进行占用检测
+4. 保持了原有的错误处理逻辑和提示格式
+
+---
+
+### 文件占用检测功能简化
+
+#### 需求变更
+用户要求进一步简化文件占用检测逻辑，不再考虑任何Windows的文件占用检测逻辑，只需要将特定的错误信息转换为更友好的提示。
+
+#### 实现方案
+1. 简化getDetailedErrorMessage函数，移除所有文件占用检测逻辑
+2. 检测特定的错误模式（包含"Command failed"和"windows-trash.exe"的错误消息）
+3. 将这些错误转换为简化的提示："删除失败：文件正被占用。"
+4. 保持其他错误的原始错误信息不变
+
+#### 技术细节
+1. 移除了对checkFileLock函数的调用
+2. 简化了错误检测逻辑，只检查特定的错误代码和错误消息模式
+3. 提供了简洁明了的错误提示，不包含具体占用进程信息
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 不使用Promise.all等新特性
+3. 使用传统的回调方式处理异步操作
+
+#### 实现记录
+1. 完全重写了getDetailedErrorMessage函数
+2. 移除了所有平台检测和文件占用检测逻辑
+3. 添加了对特定错误消息模式的检测
+4. 提供了简化的错误提示信息
+
+---
+
+### 文件占用检测功能最终简化
+
+#### 需求变更
+用户要求进一步简化，对于所有删除失败的情况，统一返回"删除失败：文件正被占用。"的错误提示，不再区分具体的错误类型。
+
+#### 实现方案
+1. 完全移除checkFileLock函数，因为它不再被使用
+2. 简化getDetailedErrorMessage函数，对于所有错误都返回统一的错误提示
+3. 不再检查具体的错误代码或错误消息模式
+
+#### 技术细节
+1. 删除了checkFileLock函数及其所有相关代码
+2. 简化了getDetailedErrorMessage函数，只返回统一的错误提示
+3. 不再区分不同类型的错误，统一处理
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 不使用Promise.all等新特性
+3. 使用传统的回调方式处理异步操作
+
+#### 实现记录
+1. 完全删除了checkFileLock函数
+2. 简化了getDetailedErrorMessage函数，移除了所有条件判断
+3. 对于所有错误情况，统一返回"操作失败：文件正被占用。"的错误提示
+
+---
+
+### 删除功能UI简化
+
+#### 需求变更
+用户要求简化删除功能的UI反馈：
+1. 不再显示"正在将文件移至回收站..."的进度提示
+2. 直接显示最终结果，只有两种可能的卡片：
+   - 成功卡片：显示"完整路径 已移至回收站"
+   - 失败卡片：显示"删除失败：文件正被占用。"
+3. 对于完整路径超过61个英文字符的情况，进行截断显示：前28字符 + "..." + 末尾28字符 + " 已移至回收站"
+4. 两种卡片都停留11秒，然后自动消失
+
+#### 实现方案
+1. 移除vscode.window.withProgress的使用，改为直接执行删除操作
+2. 使用async/await处理删除操作的异步性
+3. 添加路径截断逻辑，当路径超过61个字符时进行截断
+4. 使用vscode.window.showInformationMessage和vscode.window.showErrorMessage显示结果
+5. 使用setTimeout设置11秒的显示时间
+
+#### 技术细节
+1. 使用立即执行的异步函数(IIFE)处理删除操作
+2. 添加路径长度检查和截断逻辑：
+   ```javascript
+   if (itemToDelete.length > 61) {
+       displayPath = itemToDelete.substring(0, 28) + "..." + itemToDelete.substring(itemToDelete.length - 28);
+   }
+   ```
+3. 成功和失败消息都使用相同的显示时间(11秒)
+4. 保持原有的错误处理逻辑和文件恢复机制
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 不使用Promise.all等新特性
+3. 使用传统的回调方式处理异步操作
+
+#### 实现记录
+1. 修改了quickDeleteToRecycleBin命令处理逻辑
+2. 移除了vscode.window.withProgress的使用
+3. 添加了路径截断逻辑，处理超过61个字符的路径
+4. 使用async/await和IIFE处理异步操作
+5.6. 设置了11秒的消息显示时间
+7. 保持了原有的错误处理和文件恢复机制
+
+---
+
+### 界面交互优化
+
+#### 需求变更
+用户要求优化界面交互体验：
+1. 将路径截断中的省略号改为下靠下的英文点样式
+2. 禁止界面文件列表的用户选择功能，包括：
+   - 禁止文本选择（脱选、全选）
+   - 禁止文字复制
+   - 禁用默认右键菜单，只保留系统设定的选中状态
+   - 排除VS Code自带右键菜单
+
+#### 实现方案
+1. 创建自定义省略号样式，使用CSS伪元素实现下靠下的三个点
+2. 添加全局CSS样式，禁止所有界面元素的文本选择
+3. 允许输入框和文本区域选择文本（用户需要输入内容）
+4. 添加事件处理，禁用键盘快捷键选择文本（如Ctrl+A、Ctrl+C、Ctrl+X）
+5. 增强右键菜单事件处理，确保只显示自定义右键菜单
+
+#### 技术细节
+1. 自定义省略号样式：
+   ```css
+   .custom-ellipsis {
+       display: inline-block;
+       position: relative;
+       vertical-align: bottom;
+       margin: 0 2px;
+   }
+   
+   .custom-ellipsis::after {
+       content: '...';
+       position: relative;
+       top: 2px; /* 向下偏移 */
+   }
+   ```
+2. 禁止文本选择：
+   ```css
+   body, .sidebar, .main-content, .file-list-container, .file-item, 
+   .sz-area, .file-select-area, .folder-name-area, .file-name-area,
+   .recent-item, .recycle-item, .nav-item, .context-menu-item, 
+   .context-menu-empty-item, .address-bar {
+       -webkit-user-select: none;
+       -moz-user-select: none;
+       -ms-user-select: none;
+       user-select: none;
+   }
+   ```
+3. 禁用键盘快捷键：
+   ```javascript
+   // 禁用Ctrl+A等选择快捷键
+   else if (event.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) {
+       event.preventDefault();
+       event.stopPropagation();
+   }
+   ```
+4. 增强右键菜单处理：
+   ```javascript
+   // 禁止整个文档的右键菜单
+   document.addEventListener('contextmenu', (e) => {
+       // 如果点击的不是文件列表区域，则阻止默认右键菜单
+       if (!e.target.closest('#fileList')) {
+           e.preventDefault();
+           e.stopPropagation();
+       }
+   });
+   ```
+5. 修改路径截断代码，使用自定义省略号：
+   ```javascript
+   displayPath = itemToDelete.substring(0, 28) + '<span class="custom-ellipsis"></span>' + itemToDelete.substring(itemToDelete.length - 28);
+   ```
+
+#### 兼容性
+1. 严格保证代码在Node.js 10以下版本也能使用
+2. 使用标准CSS属性，确保跨浏览器兼容性
+3. 使用传统的事件处理方式，不依赖现代API
+
+#### 实现记录
+1. 修改了q2.html中添加了自定义省略号样式和禁止文本选择的CSS样式
+2. 修改了q2.js中的路径截断代码，使用自定义省略号样式
+3. 增强了右键菜单事件处理，确保只显示自定义右键菜单
+4. 添加了键盘快捷键禁用逻辑，防止用户通过快捷键选择文本
+5. 允许输入框和文本区域选择文本，保持基本输入功能
+6. 修改了q2.js文件，将路径截断代码中的省略号替换为Unicode中线水平省略号字符"⋯"(U+22EF)
