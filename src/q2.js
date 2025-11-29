@@ -48,17 +48,17 @@ let sizeMode = "none";
 const folderSizeTasks = {
 	// 存储所有正在进行的任务
 	tasks: new Map(),
-	
+
 	// 任务ID计数器
 	taskIdCounter: 0,
-	
+
 	/**
 	 * 添加新任务
 	 * @param {string} folderPath - 文件夹路径
 	 * @param {object} pyProcess - Python子进程对象
 	 * @returns {number} 任务ID
 	 */
-	addTask: function(folderPath, pyProcess) {
+	addTask: function (folderPath, pyProcess) {
 		const taskId = ++this.taskIdCounter;
 		this.tasks.set(taskId, {
 			id: taskId,
@@ -68,22 +68,22 @@ const folderSizeTasks = {
 		});
 		return taskId;
 	},
-	
+
 	/**
 	 * 移除任务
 	 * @param {number} taskId - 任务ID
 	 */
-	removeTask: function(taskId) {
+	removeTask: function (taskId) {
 		if (this.tasks.has(taskId)) {
 			this.tasks.delete(taskId);
 		}
 	},
-	
+
 	/**
 	 * 终止指定任务
 	 * @param {number} taskId - 任务ID
 	 */
-	terminateTask: function(taskId) {
+	terminateTask: function (taskId) {
 		if (this.tasks.has(taskId)) {
 			const task = this.tasks.get(taskId);
 			try {
@@ -96,32 +96,32 @@ const folderSizeTasks = {
 			this.removeTask(taskId);
 		}
 	},
-	
+
 	/**
 	 * 终止所有任务
 	 */
-	terminateAllTasks: function() {
+	terminateAllTasks: function () {
 		const taskIds = Array.from(this.tasks.keys());
 		taskIds.forEach(taskId => {
 			this.terminateTask(taskId);
 		});
 		logMessage(`已终止 ${taskIds.length} 个文件夹大小查询任务`, "WARN");
 	},
-	
+
 	/**
 	 * 获取当前任务数量
 	 * @returns {number} 任务数量
 	 */
-	getTaskCount: function() {
+	getTaskCount: function () {
 		return this.tasks.size;
 	},
-	
+
 	/**
 	 * 获取任务信息
 	 * @param {number} taskId - 任务ID
 	 * @returns {object|null} 任务信息
 	 */
-	getTask: function(taskId) {
+	getTask: function (taskId) {
 		return this.tasks.get(taskId) || null;
 	}
 };
@@ -234,7 +234,7 @@ function getSizeFromPython(paths) {
 			clearTimeout(timeout); // 清除超时计时器
 			// 任务完成，从任务列表中移除
 			folderSizeTasks.removeTask(taskId);
-			
+
 			if (code === 0) {
 				// 脚本成功执行
 				try {
@@ -349,7 +349,7 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 		if (stats.isFile()) {
 			// 文件：直接使用已获取的stats.size
 			const sizeInBytes = stats.size;
-			
+
 			// 格式化文件大小
 			const { size: displaySize, unit: displayUnit } = formatFileSize(sizeInBytes, mode);
 
@@ -1002,7 +1002,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
             items.forEach(item => {
                 if (item.name === '..') return;
-                
+
                 // 只对文件（不包括文件夹）获取大小
                 if (item.type !== 'file') return;
 
@@ -1288,7 +1288,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                     if (szArea) {
                         szArea.textContent = '    •    ';
                     }
-                    
+
                     // 然后发送请求获取大小
                     vscode.postMessage({
                         command: 'requestSize',
@@ -1311,7 +1311,7 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                  emptyContextMenu.style.display = 'flex';
             }
         });
-        
+
         // 禁止整个文档的右键菜单
         document.addEventListener('contextmenu', (e) => {
             // 如果点击的不是文件列表区域，则阻止默认右键菜单
@@ -1527,22 +1527,27 @@ function getWebviewContent(currentPath) {
 
 	// 替换所有占位符
 	let finalHtml = htmlTemplate;
-	finalHtml = finalHtml.replace(/\{\{SIDEBAR_WIDTH\}\}/g, SIDEBAR_WIDTH);
-	finalHtml = finalHtml.replace(/\{\{LINE_SPACING\}\}/g, LINE_SPACING);
-	finalHtml = finalHtml.replace(/\{\{DRIVES_HTML\}\}/g, drivesHtml);
-	finalHtml = finalHtml.replace(/\{\{RECYCLE_BIN_HTML\}\}/g, recycleBinHtml);
-	finalHtml = finalHtml.replace(/\{\{RECENT_DIRS_HTML\}\}/g, recentDirsHtml);
-	finalHtml = finalHtml.replace(/\{\{CURRENT_PATH\}\}/g, escapeHtmlAttribute(currentPath));
-	finalHtml = finalHtml.replace(/\{\{PIN_CLASS\}\}/g, isPinned ? "pinned" : "");
-	finalHtml = finalHtml.replace(/\{\{PIN_CHECKBOX\}\}/g, isPinned ? "✓" : "□");
-	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_NONE_CLASS\}\}/g, currentSizeMode === "none" ? "selected" : "");
-	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_M_CLASS\}\}/g, currentSizeMode === "m" ? "selected" : "");
-	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_K_CLASS\}\}/g, currentSizeMode === "k" ? "selected" : "");
-	finalHtml = finalHtml.replace(/\{\{SIZE_MODE_B_CLASS\}\}/g, currentSizeMode === "b" ? "selected" : "");
+	// 使用 split-join 替换以避免 $ 符号导致的替换错误 (普通 replace 对 $ 有特殊处理)
+	finalHtml = finalHtml.split('{{SIDEBAR_WIDTH}}').join(SIDEBAR_WIDTH);
+	finalHtml = finalHtml.split('{{LINE_SPACING}}').join(LINE_SPACING);
+	finalHtml = finalHtml.split('{{DRIVES_HTML}}').join(drivesHtml);
+	finalHtml = finalHtml.split('{{RECYCLE_BIN_HTML}}').join(recycleBinHtml);
+	finalHtml = finalHtml.split('{{RECENT_DIRS_HTML}}').join(recentDirsHtml);
+	finalHtml = finalHtml.split('{{CURRENT_PATH}}').join(escapeHtmlAttribute(currentPath));
 
-	// 关键：替换脚本占位符。确保 </script> 不会出现在 inlineScript 字符串中
+	// 类名替换
+	finalHtml = finalHtml.split('{{PIN_CLASS}}').join(isPinned ? "pinned" : "");
+	finalHtml = finalHtml.split('{{PIN_CHECKBOX}}').join(isPinned ? "✓" : "□");
+	finalHtml = finalHtml.split('{{SIZE_MODE_NONE_CLASS}}').join(currentSizeMode === "none" ? "selected" : "");
+	finalHtml = finalHtml.split('{{SIZE_MODE_M_CLASS}}').join(currentSizeMode === "m" ? "selected" : "");
+	finalHtml = finalHtml.split('{{SIZE_MODE_K_CLASS}}').join(currentSizeMode === "k" ? "selected" : "");
+	finalHtml = finalHtml.split('{{SIZE_MODE_B_CLASS}}').join(currentSizeMode === "b" ? "selected" : "");
+
+	// 关键修复：确保 </script> 转义，并且使用 split/join 进行替换
+	// JavaScript replace(str, str) 如果第二个参数包含 $ 字符（你的脚本里全是 ${...}），会解析失败。
+	// 使用 split().join() 是最安全的替换大段代码的方法。
 	const safeInlineScript = inlineScript.replace(/<\/script>/gi, '<\\/script>');
-	finalHtml = finalHtml.replace('{{INLINE_SCRIPT}}', safeInlineScript);
+	finalHtml = finalHtml.split('{{INLINE_SCRIPT}}').join(safeInlineScript);
 
 	return finalHtml;
 }
@@ -1752,7 +1757,7 @@ function showSaveAsDialog() {
 					}
 				} catch (error) {
 					logMessage("重命名失败: " + error.message, "ERROR");
-					
+
 					// 获取详细的错误信息
 					getDetailedErrorMessage(message.oldPath, error, "重命名").then(detailedError => {
 						vscode.window.showErrorMessage(detailedError);
@@ -1765,7 +1770,7 @@ function showSaveAsDialog() {
 				try {
 					// 终止所有文件夹大小查询任务
 					folderSizeTasks.terminateAllTasks();
-					
+
 					let newPath = message.path;
 					if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) {
 						newPath += "\\";
@@ -1784,7 +1789,7 @@ function showSaveAsDialog() {
 			case "navigateUp":
 				// 终止所有文件夹大小查询任务
 				folderSizeTasks.terminateAllTasks();
-				
+
 				const parentDir = path.dirname(currentPath);
 				if (parentDir !== currentPath) {
 					currentPath = parentDir;
@@ -1897,23 +1902,23 @@ function showSaveAsDialog() {
 				const itemToDelete = message.path;
 				if (fs.existsSync(itemToDelete)) {
 					saveRecentDirectory(currentPath);
-					
+
 					// 直接执行删除，不显示进度
 					(async () => {
 						try {
 							await trash([itemToDelete]);
 							setTimeout(() => { refreshWebview(); }, 300);
-							
+
 							// 格式化路径，如果超过61个字符则截断
 							let displayPath = itemToDelete;
 							if (itemToDelete.length > 61) {
 								displayPath = itemToDelete.substring(0, 28) + "⋯" + itemToDelete.substring(itemToDelete.length - 28);
 							}
-							
+
 							// 显示成功消息，停留11秒
 							const successMessage = `${displayPath} 已移至回收站`;
 							vscode.window.showInformationMessage(successMessage);
-							
+
 							// 11秒后自动清除消息
 							setTimeout(() => {
 								// VSCode API 没有直接清除消息的方法，但可以通过显示一个空消息来替代
@@ -1922,11 +1927,11 @@ function showSaveAsDialog() {
 						} catch (error) {
 							logMessage(`移至回收站失败: ${itemToDelete} - ${error.message}`, "ERROR");
 							panel.webview.postMessage({ command: 'restoreDeletedItem', path: itemToDelete });
-							
+
 							// 显示失败消息，停留11秒
 							const errorMessage = "删除失败：文件正被占用。";
 							vscode.window.showErrorMessage(errorMessage);
-							
+
 							// 11秒后自动清除消息
 							setTimeout(() => {
 								// VSCode API 没有直接清除消息的方法，但可以通过显示一个空消息来替代
