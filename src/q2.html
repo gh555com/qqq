@@ -175,6 +175,10 @@
 			text-align: left;
 			font-size: 14px;
 			color: var(--text-primary);
+			/* 让左侧盘符文字在空间不足时出现省略号，配合 hover 提示 */
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
 		}
 
 		.nav-item:hover {
@@ -403,7 +407,8 @@
 			font-family: monospace;
 			font-size: 12px;
 			color: var(--text-dim);
-			text-align: left;
+			/* 改为整体右对齐，内部用空格做 k/b/m 的错峰列 */
+			text-align: right;
 			padding: 2px 0;
 			line-height: 1.2;
 			flex-shrink: 0;
@@ -650,6 +655,22 @@
 
 		.file-list-container {
 			flex: 1 1 auto;
+		}
+
+		/* 自定义 hover 路径提示框 */
+		.path-tooltip {
+			position: fixed;
+			z-index: 99999;
+			max-width: 600px;
+			background-color: var(--bg-highlight);
+			color: var(--text-primary);
+			border: 1px solid var(--border-strong);
+			border-radius: 3px;
+			padding: 4px 8px;
+			font-size: 12px;
+			white-space: pre-wrap;
+			box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+			pointer-events: none;
 		}
 	</style>
 </head>
