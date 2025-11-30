@@ -9,6 +9,7 @@ const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
 const CONFIG_PATH = "E:\\r\\pz.ini";
 const SIZE_CONFIG_KEY = "size_mode";
+const KBM_OVERLAP_KEY = "kbm_overlap";
 
 const UNSUPPORTED_KODE_EXTENSIONS = new Set([
 	".exe",
@@ -54,6 +55,7 @@ function logMessage(message, level = "WARN") {
 let activePanel = null;
 const usePanelReveal = 1;
 let sizeMode = "none";
+let kbmOverlap = 2; // kb/m/b 三列交叉参数（单位：字符宽度）
 
 const folderSizeTasks = {
 	tasks: new Map(),
@@ -180,18 +182,17 @@ function getSizeFromPython(paths) {
 }
 
 /**
- * 新的尺寸格式化逻辑：
- * - 始终先按 bytes 判定应该用 b/k/m
- *   - < 1024b  => b
- *   - 1024b ~ < 1m => k（bytes/1024 四舍五入）
- *   - >= 1m   => m（bytes/1024/1024 四舍五入）
+ * 尺寸格式化：
+ * - 单位判断（b/k/m）同原来
  * - mode:
  *   - none: 不显示
- *   - b: 所有文件都显示（b/k/m 各自一列）
- *   - k: 忽略 < 1024b，其余同上
- *   - m: 忽略 < 1024k，其余同上
- * - 使用一个总宽度字段，通过 3 个相互交叠的固定宽度段实现 m/k/b 的“错峰”排布：
- *   左侧 M，中间 K，右侧 B
+ *   - b: b/k/m 都显示
+ *   - k: 只显示 >=1k 的项目
+ *   - m: 只显示 >=1m 的项目
+ * - 三列顺序：左 M 中 K 右 B
+ * - 交叉参数 kbmOverlap:
+ *   - 0: 三列完全独立
+ *   - 1、2...: 后面的列向左“吃”前一列一些宽度（单位：字符宽度）
  */
 function formatFileSize(bytes, mode) {
 	if (mode === "none") {
@@ -209,7 +210,6 @@ function formatFileSize(bytes, mode) {
 		value = Math.round(bytes / 1024);
 	}
 
-	// 过滤条件
 	if (mode === "k" && bytes < 1024) {
 		return { text: "", show: false };
 	}
@@ -217,40 +217,39 @@ function formatFileSize(bytes, mode) {
 		return { text: "", show: false };
 	}
 
-	// 总宽度 11，三段：M 起点 0，K 起点 3，B 起点 6，每段宽度 5，互相交叠
-	const totalWidth = 11;
-	const buffer = new Array(totalWidth).fill(" ");
-	const segWidth = 5;
+	const segWidth = 5; // 每列宽度（字符数）
+	const ovRaw = parseInt(kbmOverlap, 10);
+	const overlapChars = Math.max(0, Math.min(segWidth - 1, isNaN(ovRaw) ? 0 : ovRaw));
 
-	const placeSegment = (str, startIndex) => {
-		const safeStr = String(str);
-		const fieldStart = startIndex;
-		const fieldEnd = Math.min(fieldStart + segWidth, totalWidth);
-		const availableWidth = fieldEnd - fieldStart;
-		if (availableWidth <= 0) return;
-
-		const len = Math.min(safeStr.length, availableWidth);
-		const writeStart = fieldEnd - len;
-		for (let i = 0; i < len; i++) {
-			buffer[writeStart + i] = safeStr[safeStr.length - len + i];
-		}
-	};
+	const totalWidth = segWidth * 3;
+	const chars = new Array(totalWidth).fill(" ");
 
 	const valueStr = String(value) + unit;
+	const padded = valueStr.padStart(segWidth, " ");
 
-	if (unit === "m") {
-		// m 左侧
-		placeSegment(valueStr, 0);
-	} else if (unit === "k") {
-		// k 中间
-		placeSegment(valueStr, 3);
-	} else {
-		// b 右侧
-		placeSegment(valueStr, 6);
+	function place(startIndex) {
+		let start = startIndex;
+		if (start < 0) start = 0;
+		if (start >= totalWidth) return;
+		for (let i = 0; i < segWidth && start + i < totalWidth; i++) {
+			chars[start + i] = padded[i];
+		}
 	}
 
-	const text = buffer.join("");
-	return { text, show: true };
+	// 三列起点：M 在最左，K 向左交叉 overlapChars，B 再往左交叉 overlapChars
+	const startM = 0;
+	const startK = segWidth - overlapChars;
+	const startB = segWidth * 2 - overlapChars * 2;
+
+	if (unit === "m") {
+		place(startM);
+	} else if (unit === "k") {
+		place(startK);
+	} else {
+		place(startB);
+	}
+
+	return { text: chars.join(""), show: true };
 }
 
 function getFileSizeDisplayAsyncPromise(itemPath, mode) {
@@ -285,7 +284,6 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 		if (stats.isFile()) {
 			handleSize(stats.size);
 		} else {
-			// 文件夹：仍然需要手动触发获取，但显示规则同文件
 			getSizeFromPython([itemPath])
 				.then(sizeInBytes => {
 					handleSize(sizeInBytes);
@@ -306,7 +304,8 @@ function getConfig() {
 		sidebarRatio: 0.2,
 		recycleBin: [],
 		isPinned: false,
-		sizeMode: "none"
+		sizeMode: "none",
+		kbmOverlap: 2
 	};
 	try {
 		if (!fs.existsSync(CONFIG_PATH)) return config;
@@ -324,11 +323,11 @@ function getConfig() {
 			}
 			const lineSpacingMatch = sectionContent.match(/line_spacing=(.+)/);
 			if (lineSpacingMatch) {
-				config.lineSpacing = parseInt(lineSpacingMatch[1].trim());
+				config.lineSpacing = parseInt(lineSpacingMatch[1].trim(), 10);
 			}
 			const sidebarWidthMatch = sectionContent.match(/sidebar_width=(.+)/);
 			if (sidebarWidthMatch) {
-				config.sidebarWidth = parseInt(sidebarWidthMatch[1].trim());
+				config.sidebarWidth = parseInt(sidebarWidthMatch[1].trim(), 10);
 			}
 			const sidebarRatioMatch = sectionContent.match(/sidebar_ratio=(.+)/);
 			if (sidebarRatioMatch) {
@@ -361,11 +360,19 @@ function getConfig() {
 					config.sizeMode = mode;
 				}
 			}
+			const overlapMatch = sectionContent.match(/kbm_overlap=(.+)/);
+			if (overlapMatch) {
+				const ov = parseInt(overlapMatch[1].trim(), 10);
+				if (!isNaN(ov) && ov >= 0 && ov <= 10) {
+					config.kbmOverlap = ov;
+				}
+			}
 		}
 	} catch (error) {
 		logMessage("读取配置文件失败: " + error.message, "ERROR");
 	}
 	sizeMode = config.sizeMode;
+	kbmOverlap = config.kbmOverlap;
 	return config;
 }
 
@@ -376,13 +383,17 @@ function saveConfig(
 	sidebarRatio,
 	recycleBin,
 	isPinned,
-	newSizeMode
+	newSizeMode,
+	newKbmOverlap
 ) {
 	try {
 		let content = "";
 		if (fs.existsSync(CONFIG_PATH)) {
 			content = fs.readFileSync(CONFIG_PATH, "utf8");
 		}
+		const nextSizeMode = newSizeMode || sizeMode || "none";
+		const nextOverlap = Number.isInteger(newKbmOverlap) ? newKbmOverlap : kbmOverlap;
+
 		const newConfigs = {
 			recent_dirs: recentDirs.join(","),
 			line_spacing: lineSpacing,
@@ -390,7 +401,8 @@ function saveConfig(
 			sidebar_ratio: sidebarRatio.toFixed(4),
 			recycle_bin: recycleBin.join(","),
 			is_pinned: isPinned ? "true" : "false",
-			[SIZE_CONFIG_KEY]: newSizeMode || "none"
+			[SIZE_CONFIG_KEY]: nextSizeMode,
+			[KBM_OVERLAP_KEY]: nextOverlap
 		};
 		const sectionContent = Object.entries(newConfigs)
 			.map(([k, v]) => `${k}=${v}`)
@@ -410,11 +422,13 @@ sidebar_ratio=${newConfigs.sidebar_ratio}
 recycle_bin=${newConfigs.recycle_bin}
 is_pinned=${newConfigs.is_pinned}
 ${SIZE_CONFIG_KEY}=${newConfigs[SIZE_CONFIG_KEY]}
+${KBM_OVERLAP_KEY}=${newConfigs[KBM_OVERLAP_KEY]}
 `;
 			content += newSection;
 		}
 		fs.writeFileSync(CONFIG_PATH, content, "utf8");
-		sizeMode = newSizeMode;
+		sizeMode = newConfigs[SIZE_CONFIG_KEY];
+		kbmOverlap = newConfigs[KBM_OVERLAP_KEY];
 	} catch (error) {
 		logMessage("保存配置文件失败: " + error.message, "ERROR");
 	}
@@ -443,7 +457,8 @@ function removeFromRecycleBin(directory) {
 			config.sidebarRatio,
 			newRecycleBin,
 			config.isPinned,
-			config.sizeMode
+			config.sizeMode,
+			config.kbmOverlap
 		);
 	}
 }
@@ -467,7 +482,8 @@ function addToRecycleBin(directory) {
 		config.sidebarRatio,
 		finalRecycleBin,
 		config.isPinned,
-		config.sizeMode
+		config.sizeMode,
+		config.kbmOverlap
 	);
 }
 
@@ -490,7 +506,8 @@ function saveRecentDirectory(directory) {
 		updatedConfig.sidebarRatio,
 		updatedConfig.recycleBin,
 		updatedConfig.isPinned,
-		updatedConfig.sizeMode
+		updatedConfig.sizeMode,
+		updatedConfig.kbmOverlap
 	);
 }
 
@@ -514,7 +531,8 @@ function removeAndRecycleRecentDirectory(directory) {
 			updatedConfig.sidebarRatio,
 			updatedConfig.recycleBin,
 			updatedConfig.isPinned,
-			updatedConfig.sizeMode
+			updatedConfig.sizeMode,
+			updatedConfig.kbmOverlap
 		);
 	}
 	return updated;
@@ -567,16 +585,13 @@ function getDirectoryContents(dirPath) {
 					});
 				}
 			} catch {
+				// ignore single entry error
 			}
 		}
-
-		// 对齐 VS Code 资源管理器：目录按名称排序，文件按名称排序
-		contents.dirs.sort((a, b) =>
-			a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
-		);
-		contents.files.sort((a, b) =>
-			a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
-		);
+		// 按名称排序（接近 VS Code 默认行为）
+		const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+		contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
+		contents.files.sort((a, b) => collator.compare(a.name, b.name));
 	} catch (error) {
 		logMessage(`读取目录内容失败: ${dirPath}`, "ERROR");
 	}
@@ -597,10 +612,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         const MIN_RESPONSIVE_WIDTH = 240;
         const MIN_TAG_WIDTH = 170;
         const ROW_HEIGHT = 22;
-        const PIN_HIDE_WIDTH = 360; // 从 300 调整为 360
+        const PIN_HIDE_WIDTH = 360;
         let baseRecentHeight = 0;
 
-        // 自定义路径 tooltip 相关
         let pathTooltipEl = null;
         let pathTooltipVisible = false;
 
@@ -654,7 +668,6 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             return element.scrollWidth > element.clientWidth + 1;
         }
 
-        // 左侧：盘符区和历史区，只有文字被省略时才显示 tooltip
         function handleSidebarTooltipHover(e) {
             const target = e.target.closest('.nav-item, .recycle-item');
             if (!target) {
@@ -674,7 +687,6 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             showPathTooltip(text, e.clientX, e.clientY);
         }
 
-        // 右侧：当 right 区域宽度 < 200px 时，hover 项目一律显示完整路径
         function handleMainTooltipHover(e) {
             const main = document.getElementById('mainContent');
             if (!main || main.clientWidth >= 200) {
@@ -732,7 +744,6 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 recentSection.style.display = '';
             }
 
-            // 根据真实内容高度决定是否需要滚动条，防止底部被截断
             const needScroll = mainContent.scrollHeight > mainContent.clientHeight + 1;
             mainContent.style.overflowY = needScroll ? 'auto' : 'hidden';
         }
@@ -747,7 +758,6 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             const saveButton = footer.querySelector('.save-button');
             const createFolderBtn = footer.querySelector('.cancel-button');
 
-            // 第一阶段：在 360px 以下先隐藏“长驻”按钮
             if (pinContainer) {
                 if (currentWidth < PIN_HIDE_WIDTH) {
                     pinContainer.style.display = 'none';
@@ -756,7 +766,6 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 }
             }
 
-            // 第二阶段：在 240px 以下再隐藏“新建文件”按钮
             if (currentWidth < MIN_RESPONSIVE_WIDTH) {
                 if (saveButton) saveButton.style.display = 'none';
                 if (createFolderBtn) createFolderBtn.style.display = 'block';
@@ -781,18 +790,8 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             const filenameInput = document.getElementById('filenameInput');
             filenameInput.focus();
             updateResourceExplorer();
-
             adjustSidebarByRatio();
 
-            // 左上角“关闭我”大按钮：点击关闭面板
-            const sidebarCloseButton = document.getElementById('sidebarCloseButton');
-            if (sidebarCloseButton) {
-                sidebarCloseButton.addEventListener('click', () => {
-                    vscode.postMessage({ command: 'closePanel' });
-                });
-            }
-
-            // 初始化 tooltip 监听
             ensurePathTooltip();
             const sidebarEl = document.querySelector('.sidebar');
             if (sidebarEl) {
@@ -841,14 +840,12 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 const isFolderNameArea = event.target.closest('.folder-name-area');
 
                 if (type === 'folder') {
-                    // 左侧区域（图标和其左边）用于选中并触发大小计算
                     if (isSelectArea && !isFolderNameArea) {
                         selectFileItem(fileItem, true);
                         currentFocusType = 'fileList';
                         return;
                     }
 
-                    // 右侧文字区域用于进入文件夹
                     if (isFolderNameArea) {
                         const path = fileItem.dataset.path;
                         vscode.postMessage({
@@ -859,13 +856,11 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                         return;
                     }
 
-                    // 其他区域默认只选中并触发大小计算
                     selectFileItem(fileItem, true);
                     currentFocusType = 'fileList';
                     return;
                 }
 
-                // 文件保持原有行为
                 selectFileItem(fileItem, type === 'file');
                 if (isSzArea) {
                     const path = fileItem.dataset.path;
@@ -895,7 +890,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio));
 
             sidebar.style.width = newWidth + 'px';
-           	resizer.style.left = newWidth + 'px';
+            resizer.style.left = newWidth + 'px';
             mainContent.style.left = newWidth + 'px';
         }
 
@@ -1166,7 +1161,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
             const prevSelected = document.querySelector('.file-item.selected');
             if (prevSelected && prevSelected !== itemElement) {
-               	const renameInput = prevSelected.querySelector('.rename-input');
+                const renameInput = prevSelected.querySelector('.rename-input');
                 if (renameInput) {
                     cancelRename(prevSelected);
                 }
@@ -1343,7 +1338,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
             hideAllContextMenus();
 
-           	if (!itemForAction || !itemForAction.path) {
+            if (!itemForAction || !itemForAction.path) {
                 return;
             }
 
@@ -1591,7 +1586,6 @@ function getWebviewContent(currentPath) {
 		)
 		.join("");
 
-	// 去掉“历史回收站”标题，只保留 divider + 列表
 	const recycleBinHtml = showRecycleBin
 		? `
         <div class="divider"></div>
@@ -1688,11 +1682,9 @@ function showSaveAsDialog() {
 
 	activePanel = panel;
 
-	// 智能选择打开目标分组：保证右侧最多开一组，并尽量往右堆
 	function getSmartShowOptions(openInCurrentGroup) {
 		const baseOptions = { preserveFocus: false };
 
-		// 兼容老版本 VS Code：没有 tabGroups 就退回原行为
 		if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
 			if (openInCurrentGroup) {
 				return baseOptions;
@@ -1724,25 +1716,21 @@ function showSaveAsDialog() {
 		let baseGroup = sorted.find(g => g.viewColumn === baseColumn) || sorted[0];
 		baseColumn = baseGroup.viewColumn;
 
-		// 尝试使用右侧最近的一组
 		const rightGroups = sorted.filter(g => g.viewColumn > baseColumn);
 		if (rightGroups.length > 0) {
 			return Object.assign({}, baseOptions, { viewColumn: rightGroups[0].viewColumn });
 		}
 
-		// 右侧没有分组时，如果还没到第三列，并且最大列小于三，则在右侧新开一组
 		const maxColumn = sorted[sorted.length - 1].viewColumn;
 		if (baseGroup.viewColumn < vscode.ViewColumn.Three && maxColumn < vscode.ViewColumn.Three) {
 			return Object.assign({}, baseOptions, { viewColumn: baseGroup.viewColumn + 1 });
 		}
 
-		// 实在不能在右侧开新组，则向左找最近的一组
 		const leftGroups = sorted.filter(g => g.viewColumn < baseColumn);
 		if (leftGroups.length > 0) {
 			return Object.assign({}, baseOptions, { viewColumn: leftGroups[leftGroups.length - 1].viewColumn });
 		}
 
-		// 左右都不行，只能覆盖当前组
 		return Object.assign({}, baseOptions, { viewColumn: baseColumn });
 	}
 
@@ -1862,7 +1850,8 @@ function showSaveAsDialog() {
 					currentConfig.sidebarRatio,
 					currentConfig.recycleBin,
 					currentConfig.isPinned,
-					message.mode
+					message.mode,
+					currentConfig.kbmOverlap
 				);
 				refreshWebview();
 				break;
@@ -1949,29 +1938,34 @@ function showSaveAsDialog() {
 
 			case "navigateUp":
 				folderSizeTasks.terminateAllTasks();
-				const parentDir = path.dirname(currentPath);
-				if (parentDir !== currentPath) {
-					currentPath = parentDir;
-					refreshWebview();
+				{
+					const parentDir = path.dirname(currentPath);
+					if (parentDir !== currentPath) {
+						currentPath = parentDir;
+						refreshWebview();
+					}
 				}
 				break;
 
 			case "saveSidebarRatio":
-				const newRatio = message.ratio;
-				saveConfig(
-					currentConfig.recentDirs,
-					currentConfig.lineSpacing,
-					currentConfig.sidebarWidth,
-					newRatio,
-					currentConfig.recycleBin,
-					currentConfig.isPinned,
-					currentConfig.sizeMode
-				);
-				if (panel && !panel.disposed) {
-					panel.webview.postMessage({
-						command: "updateSidebarRatio",
-						ratio: newRatio
-					});
+				{
+					const newRatio = message.ratio;
+					saveConfig(
+						currentConfig.recentDirs,
+						currentConfig.lineSpacing,
+						currentConfig.sidebarWidth,
+						newRatio,
+						currentConfig.recycleBin,
+						currentConfig.isPinned,
+						currentConfig.sizeMode,
+						currentConfig.kbmOverlap
+					);
+					if (panel && !panel.disposed) {
+						panel.webview.postMessage({
+							command: "updateSidebarRatio",
+							ratio: newRatio
+						});
+					}
 				}
 				break;
 
@@ -1986,7 +1980,8 @@ function showSaveAsDialog() {
 					currentConfig.sidebarRatio,
 					currentConfig.recycleBin,
 					message.isPinned,
-					currentConfig.sizeMode
+					currentConfig.sizeMode,
+					currentConfig.kbmOverlap
 				);
 				break;
 
@@ -2078,11 +2073,6 @@ function showSaveAsDialog() {
 				panel.dispose();
 				break;
 
-			// 左上角关闭按钮
-			case "closePanel":
-				panel.dispose();
-				break;
-
 			case "editFile":
 				saveRecentDirectory(path.dirname(message.path));
 
@@ -2091,7 +2081,6 @@ function showSaveAsDialog() {
 					if (UNSUPPORTED_KODE_EXTENSIONS.has(ext)) {
 						const displayName = path.basename(message.path);
 						const warnMessage = `该文件不支持在 VS Code 里打开: "${displayName}"`;
-						// 同时状态栏 + 弹窗提示
 						vscode.window.showWarningMessage(warnMessage);
 						vscode.window.setStatusBarMessage(warnMessage, 5000);
 						break;
@@ -2104,7 +2093,6 @@ function showSaveAsDialog() {
 						if (!message.isPinned) {
 							panel.dispose();
 						}
-						// isPinned 时不刷新 WebView，这样选中状态会保持
 					});
 				}).catch(error => {
 					logMessage("打开文件失败: " + error.message, "ERROR");
@@ -2128,14 +2116,16 @@ function showSaveAsDialog() {
 						? message.path
 						: path.dirname(message.path)
 				);
-				const command =
-					process.platform === "win32"
-						? 'start ""'
-						: process.platform === "darwin"
-							? "open"
-							: "xdg-open";
-				cp.exec(`${command} "${message.path}"`);
-				refreshWebview();
+				{
+					const command =
+						process.platform === "win32"
+							? 'start ""'
+							: process.platform === "darwin"
+								? "open"
+								: "xdg-open";
+					cp.exec(`${command} "${message.path}"`);
+					refreshWebview();
+				}
 				break;
 
 			case "quickDeleteToRecycleBin":
@@ -2162,13 +2152,8 @@ function showSaveAsDialog() {
 								}
 
 								const successMessage = `${displayPath} 已移至回收站`;
-								// 状态栏 + 弹出框双提示
-								vscode.window.showInformationMessage(
-									successMessage
-								);
+								vscode.window.showInformationMessage(successMessage);
 								vscode.window.setStatusBarMessage(successMessage, 5000);
-
-								setTimeout(() => { }, 11000);
 							} catch (error) {
 								logMessage(
 									`移至回收站失败: ${itemToDelete} - ${error.message}`,
@@ -2182,8 +2167,6 @@ function showSaveAsDialog() {
 								const errorMessage = "删除失败：文件正被占用。";
 								vscode.window.showErrorMessage(errorMessage);
 								vscode.window.setStatusBarMessage(errorMessage, 5000);
-
-								setTimeout(() => { }, 11000);
 							}
 						})();
 					} else {
