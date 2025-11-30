@@ -179,27 +179,64 @@ function getSizeFromPython(paths) {
 	});
 }
 
+/**
+ * 新的尺寸格式化逻辑：
+ * - 始终先按 bytes 判定应该用 b/k/m
+ *   - < 1024b  => b
+ *   - 1024b ~ < 1m => k（bytes/1024 四舍五入）
+ *   - >= 1m   => m（bytes/1024/1024 四舍五入）
+ * - mode:
+ *   - none: 不显示
+ *   - b: 所有文件都显示（b/k/m 各自一列）
+ *   - k: 忽略 < 1024b，其余同上
+ *   - m: 忽略 < 1024k，其余同上
+ * - 通过 3 个固定宽度段实现 k/b/m 三列的“错峰”排布
+ */
 function formatFileSize(bytes, mode) {
-	if (mode === "none") return { size: "", unit: "" };
-	let size, unit;
-	switch (mode) {
-		case "m":
-			size = (bytes / (1024 * 1024)).toFixed(0);
-			unit = "m";
-			break;
-		case "k":
-			size = (bytes / 1024).toFixed(0);
-			unit = "k";
-			break;
-		case "b":
-			size = bytes.toString();
-			unit = "b";
-			break;
-		default:
-			size = "";
-			unit = "";
+	if (mode === "none") {
+		return { text: "", show: false };
 	}
-	return { size, unit };
+
+	let unit = "b";
+	let value = bytes;
+
+	if (bytes >= 1024 * 1024) {
+		unit = "m";
+		value = Math.round(bytes / (1024 * 1024));
+	} else if (bytes >= 1024) {
+		unit = "k";
+		value = Math.round(bytes / 1024);
+	}
+
+	// 过滤条件
+	if (mode === "k" && bytes < 1024) {
+		return { text: "", show: false };
+	}
+	if (mode === "m" && bytes < 1024 * 1024) {
+		return { text: "", show: false };
+	}
+
+	// 三段：M 列 / K 列 / B 列，每段内部右对齐
+	const segWidthM = 5;
+	const segWidthK = 5;
+	const segWidthB = 5;
+
+	const valueStr = String(value) + unit;
+	let segM = " ".repeat(segWidthM);
+	let segK = " ".repeat(segWidthK);
+	let segB = " ".repeat(segWidthB);
+
+	if (unit === "m") {
+		segM = valueStr.padStart(segWidthM, " ");
+	} else if (unit === "k") {
+		segK = valueStr.padStart(segWidthK, " ");
+	} else {
+		segB = valueStr.padStart(segWidthB, " ");
+	}
+
+	// 组合为 "M 列 + K 列 + B 列"
+	const text = segM + segK + segB;
+	return { text, show: true };
 }
 
 function getFileSizeDisplayAsyncPromise(itemPath, mode) {
@@ -221,24 +258,23 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 			callback(" ...err ");
 			return;
 		}
+
+		const handleSize = (sizeInBytes) => {
+			const formatted = formatFileSize(sizeInBytes, mode);
+			if (!formatted.show) {
+				callback("");
+			} else {
+				callback(formatted.text);
+			}
+		};
+
 		if (stats.isFile()) {
-			const sizeInBytes = stats.size;
-			const { size: displaySize, unit: displayUnit } = formatFileSize(sizeInBytes, mode);
-			let spacesToFill = 0;
-			if (displayUnit === "k") spacesToFill = 3;
-			else if (displayUnit === "b") spacesToFill = 6;
-			const finalDisplay = " ".repeat(spacesToFill) + displaySize + " " + displayUnit;
-			callback(finalDisplay);
+			handleSize(stats.size);
 		} else {
+			// 文件夹：仍然需要手动触发获取，但显示规则同文件
 			getSizeFromPython([itemPath])
 				.then(sizeInBytes => {
-					const { size: displaySize, unit: displayUnit } = formatFileSize(sizeInBytes, mode);
-					let spacesToFill = 0;
-					if (displayUnit === "k") spacesToFill = 3;
-					else if (displayUnit === "b") spacesToFill = 6;
-					const finalDisplay =
-						" ".repeat(spacesToFill) + displaySize + " " + displayUnit;
-					callback(finalDisplay);
+					handleSize(sizeInBytes);
 				})
 				.catch(error => {
 					logMessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
@@ -544,6 +580,115 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         const PIN_HIDE_WIDTH = 360; // 从 300 调整为 360
         let baseRecentHeight = 0;
 
+        // 自定义路径 tooltip 相关
+        let pathTooltipEl = null;
+        let pathTooltipVisible = false;
+
+        function ensurePathTooltip() {
+            if (pathTooltipEl) return;
+            pathTooltipEl = document.createElement('div');
+            pathTooltipEl.id = 'pathTooltip';
+            pathTooltipEl.className = 'path-tooltip';
+            pathTooltipEl.style.display = 'none';
+            document.body.appendChild(pathTooltipEl);
+        }
+
+        function hidePathTooltip() {
+            if (pathTooltipEl) {
+                pathTooltipEl.style.display = 'none';
+            }
+            pathTooltipVisible = false;
+        }
+
+        function showPathTooltip(text, clientX, clientY) {
+            if (!text) {
+                hidePathTooltip();
+                return;
+            }
+            ensurePathTooltip();
+            pathTooltipEl.textContent = text;
+            const margin = 8;
+            let left = clientX + margin;
+            let top = clientY + margin;
+            pathTooltipEl.style.left = left + 'px';
+            pathTooltipEl.style.top = top + 'px';
+            pathTooltipEl.style.display = 'block';
+            pathTooltipVisible = true;
+
+            const rect = pathTooltipEl.getBoundingClientRect();
+            const vw = window.innerWidth || document.documentElement.clientWidth;
+            const vh = window.innerHeight || document.documentElement.clientHeight;
+
+            if (rect.right > vw - 4) {
+                left = Math.max(4, vw - rect.width - 4);
+                pathTooltipEl.style.left = left + 'px';
+            }
+            if (rect.bottom > vh - 4) {
+                top = Math.max(4, vh - rect.height - 4);
+                pathTooltipEl.style.top = top + 'px';
+            }
+        }
+
+        function isEllipsisActive(element) {
+            if (!element) return false;
+            return element.scrollWidth > element.clientWidth + 1;
+        }
+
+        // 左侧：盘符区和历史区，只有文字被省略时才显示 tooltip
+        function handleSidebarTooltipHover(e) {
+            const target = e.target.closest('.nav-item, .recycle-item');
+            if (!target) {
+                if (pathTooltipVisible) hidePathTooltip();
+                return;
+            }
+            if (!isEllipsisActive(target)) {
+                if (pathTooltipVisible) hidePathTooltip();
+                return;
+            }
+            let text = target.textContent || '';
+            text = text.trim();
+            if (!text) {
+                if (pathTooltipVisible) hidePathTooltip();
+                return;
+            }
+            showPathTooltip(text, e.clientX, e.clientY);
+        }
+
+        // 右侧：当 right 区域宽度 < 200px 时，hover 项目一律显示完整路径
+        function handleMainTooltipHover(e) {
+            const main = document.getElementById('mainContent');
+            if (!main || main.clientWidth >= 200) {
+                if (pathTooltipVisible) hidePathTooltip();
+                return;
+            }
+
+            let text = '';
+            const recentItem = e.target.closest('.recent-item');
+            if (recentItem) {
+                const span = recentItem.querySelector('span:not(.delete-button)');
+                if (span && span.textContent) {
+                    text = span.textContent;
+                } else {
+                    text = recentItem.textContent || '';
+                }
+                text = text.trim();
+            } else {
+                const fileItem = e.target.closest('.file-item');
+                if (fileItem) {
+                    text = fileItem.getAttribute('data-path') || '';
+                } else {
+                    if (pathTooltipVisible) hidePathTooltip();
+                    return;
+                }
+            }
+
+            if (!text) {
+                if (pathTooltipVisible) hidePathTooltip();
+                return;
+            }
+            showPathTooltip(text, e.clientX, e.clientY);
+        }
+
         function calculateAndAdjustScroll() {
             const recentSection = document.querySelector('.recent-section');
             const addressBar = document.querySelector('.address-bar');
@@ -618,6 +763,20 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             updateResourceExplorer();
 
             adjustSidebarByRatio();
+
+            // 初始化 tooltip 监听
+            ensurePathTooltip();
+            const sidebarEl = document.querySelector('.sidebar');
+            if (sidebarEl) {
+                sidebarEl.addEventListener('mousemove', handleSidebarTooltipHover);
+                sidebarEl.addEventListener('mouseleave', hidePathTooltip);
+            }
+            const mainEl = document.getElementById('mainContent');
+            if (mainEl) {
+                mainEl.addEventListener('mousemove', handleMainTooltipHover);
+                mainEl.addEventListener('mouseleave', hidePathTooltip);
+            }
+            document.addEventListener('scroll', hidePathTooltip, true);
 
             window.addEventListener('resize', () => {
                 adjustSidebarByRatio();
@@ -1899,6 +2058,7 @@ function showSaveAsDialog() {
 					if (UNSUPPORTED_KODE_EXTENSIONS.has(ext)) {
 						const displayName = path.basename(message.path);
 						const warnMessage = `该文件不支持在 VS Code 里打开: "${displayName}"`;
+						// 同时状态栏 + 弹窗提示
 						vscode.window.showWarningMessage(warnMessage);
 						vscode.window.setStatusBarMessage(warnMessage, 5000);
 						break;
