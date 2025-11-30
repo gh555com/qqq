@@ -150,7 +150,7 @@
 		}
 
 		.sidebar-resizer:hover {
-			background-color: var(--base1);
+			background-color: #ddca88;
 			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
@@ -159,12 +159,19 @@
 			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
+		/* 左上角关闭按钮 */
 		.sidebar-header {
-			padding: 10px;
+			padding: 0 10px;
 			font-weight: bold;
-			background-color: var(--bg-highlight);
+			background-color: #DEC987;
 			color: var(--text-primary);
-			border-bottom: 1px solid var(--border-strong);
+			border-bottom: none;
+			height: 51px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			cursor: pointer;
+			font-size: 24px; /* 放大叉号 */
 		}
 
 		.nav-item {
@@ -175,14 +182,13 @@
 			text-align: left;
 			font-size: 14px;
 			color: var(--text-primary);
-			/* 让左侧盘符文字在空间不足时出现省略号，配合 hover 提示 */
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
 		}
 
 		.nav-item:hover {
-			background-color: var(--bg-highlight);
+			background-color: #ddca88;
 		}
 
 		.nav-item.active {
@@ -259,8 +265,9 @@
 			position: relative;
 		}
 
+		/* 右侧上方“历史区” hover 颜色 */
 		.recent-item:hover {
-			background-color: var(--base1);
+			background-color: #ddca88;
 		}
 
 		.delete-button {
@@ -283,8 +290,10 @@
 			margin: 8px 0;
 		}
 
+		/* 历史回收站区域：去掉四周 padding/border，点击区域左右填满 */
 		.recycle-bin-section {
-			padding: 8px 10px;
+			padding: 0;
+			border: none;
 		}
 
 		.recycle-bin-header {
@@ -305,7 +314,7 @@
 		}
 
 		.recycle-item:hover {
-			background-color: var(--bg-highlight);
+			background-color: #ddca88;
 			color: var(--text-primary);
 		}
 
@@ -372,7 +381,7 @@
 		}
 
 		.file-item:hover {
-			background-color: var(--bg-highlight) !important;
+			background-color: #ddca88 !important;
 		}
 
 		.file-item.selected {
@@ -407,7 +416,6 @@
 			font-family: monospace;
 			font-size: 12px;
 			color: var(--text-dim);
-			/* 改为整体右对齐，内部用空格做 k/b/m 的错峰列 */
 			text-align: right;
 			padding: 2px 0;
 			line-height: 1.2;
@@ -522,7 +530,7 @@
 		}
 
 		.pin-box:hover {
-			background-color: #d3d1c4;
+			background-color: #ddca88;
 		}
 
 		.pin-box.pinned {
@@ -606,7 +614,7 @@
 		}
 
 		.context-menu-item:hover {
-			background-color: var(--bg-highlight);
+			background-color: #ddca88;
 		}
 
 		.context-menu-shortcut {
@@ -636,7 +644,7 @@
 		}
 
 		.context-menu-empty-item:hover {
-			background-color: var(--bg-highlight);
+			background-color: #ddca88;
 		}
 
 		.context-menu-empty-item.selected {
@@ -678,7 +686,7 @@
 <body>
 	<div class="container">
 		<div class="sidebar">
-			<div class="sidebar-header">文件导航</div>
+			<div class="sidebar-header" id="sidebarCloseButton">&times;</div>
 			{{DRIVES_HTML}}
 
 			{{RECYCLE_BIN_HTML}}
