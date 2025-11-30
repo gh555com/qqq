@@ -8,66 +8,50 @@
 		content="default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;">
 	<title>qqq new 新建</title>
 	<style>
-		/* Solarized Light Palette Definitions */
 		:root {
-			/* Solarized 核心变量 */
 			--base03: #002b36;
 			--base02: #073642;
 			--base01: #586e75;
 			--base00: #657b83;
-			/* 正文主要颜色 */
 			--base0: #839496;
 			--base1: #93a1a1;
-			/* 边框、次要文字 */
 			--base2: #eee8d5;
-			/* 背景高亮、头部背景 */
 			--base3: #fdf6e3;
-			/* 主背景色 */
 			--yellow: #b58900;
 			--orange: #cb4b16;
-			/* 强调/选中色 */
 			--red: #dc322f;
 			--magenta: #d33682;
 			--violet: #6c71c4;
 			--blue: #268bd2;
-			/* 按钮/链接 */
 			--cyan: #2aa198;
 			--green: #859900;
 
-			/* 功能性变量映射 */
 			--bg-color: var(--base3);
 			--bg-highlight: var(--base2);
 			--text-primary: var(--base00);
 			--text-secondary: var(--base01);
 			--text-dim: var(--base1);
 			--border-color: var(--base2);
-			/* 浅边框 */
 			--border-strong: var(--base1);
-			/* 深边框 */
 			--selection-bg: var(--orange);
 			--selection-text: var(--base3);
 			--button-primary: var(--blue);
 			--button-text: var(--base3);
 
-			/* 原有布局变量 */
 			--sidebar-resizer-width: 8px;
 			--sz-area-width: 96px;
 			--icon-area-width: 24px;
 
-			/* 新增：响应式阈值 */
-			--min-responsive-width: 200px;
+			--min-responsive-width: 240px;
 			--min-tag-width: 170px;
 		}
 
-		/* 全局样式重置 & 强制颜色模式 */
 		* {
 			box-sizing: border-box;
-			/* 关键：在高对比度模式下强制使用自定义颜色 */
 			forced-color-adjust: none;
 			-ms-high-contrast-adjust: none;
 		}
 
-		/* 禁止文本选择 */
 		body,
 		.sidebar,
 		.main-content,
@@ -89,7 +73,6 @@
 			user-select: none;
 		}
 
-		/* 允许输入框选择文本 */
 		input,
 		textarea {
 			-webkit-user-select: text;
@@ -98,7 +81,6 @@
 			user-select: text;
 		}
 
-		/* 自定义省略号样式 */
 		.custom-ellipsis {
 			display: inline-block;
 			position: relative;
@@ -120,18 +102,15 @@
 			height: 100%;
 			width: 100%;
 			background-color: var(--bg-color);
-			/* Solarized Base3 */
 			color: var(--text-primary);
-			/* Solarized Base00 */
 		}
 
 		body {
 			display: flex;
 			flex-direction: column;
-			border: 1px solid var(--border-strong);
+			border: none;
 		}
 
-		/* 容器 */
 		.container {
 			display: flex;
 			flex: 1;
@@ -141,11 +120,10 @@
 			position: relative;
 		}
 
-		/* 左侧导航栏 */
 		.sidebar {
 			width: {{SIDEBAR_WIDTH}}px;
 			background-color: var(--bg-color);
-			border-right: none; /* 去除细线边框，只保留粗分割线 */
+			border-right: none;
 			display: flex;
 			flex-direction: column;
 			overflow-y: auto;
@@ -158,11 +136,9 @@
 			transition: width 0.2s ease;
 		}
 
-		/* 可拖动的分割线 - 粗线，变色，支持记忆位置（JS控制） */
 		.sidebar-resizer {
 			width: var(--sidebar-resizer-width);
 			background-color: var(--base2);
-			/* Base2 */
 			position: fixed;
 			left: {{SIDEBAR_WIDTH}}px;
 			top: 0;
@@ -170,18 +146,16 @@
 			z-index: 30;
 			cursor: ew-resize;
 			transition: background-color 0.2s, width 0.2s;
-			border: none; /* 确保无细线 */
+			border: none;
 		}
 
 		.sidebar-resizer:hover {
 			background-color: var(--base1);
-			/* Base1 */
-			width: calc(var(--sidebar-resizer-width) * 1.5); /*  hover时稍粗 */
+			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
 		.sidebar-resizer.active {
 			background-color: var(--base00);
-			/* Base00 */
 			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
@@ -189,7 +163,6 @@
 			padding: 10px;
 			font-weight: bold;
 			background-color: var(--bg-highlight);
-			/* Base2 */
 			color: var(--text-primary);
 			border-bottom: 1px solid var(--border-strong);
 		}
@@ -206,50 +179,48 @@
 
 		.nav-item:hover {
 			background-color: var(--bg-highlight);
-			/* Base2 */
 		}
 
 		.nav-item.active {
 			background-color: var(--base1);
-			/* Base1 */
 			color: var(--base3);
 		}
 
-		/* 空状态提示样式 */
 		.empty-recycle-bin,
 		.empty-recent-section {
 			padding: 20px 10px;
 			color: var(--text-dim);
-			/* Base1 */
 			font-style: italic;
 			text-align: center;
 			font-size: 13px;
 		}
 
-		/* 主内容区 */
 		.main-content {
 			flex: 1;
 			display: flex;
 			flex-direction: column;
-			overflow-y: hidden;
+			overflow-y: auto;
 			overflow-x: hidden;
 			position: absolute;
 			left: {{SIDEBAR_WIDTH}}px;
 			right: 0;
 			top: 0;
-			bottom: 0;
+			bottom: 60px;
 			transition: left 0.2s ease;
 			background-color: var(--bg-color);
+			padding: 0;
+			margin: 0;
+			border: none;
+			min-height: 0;
 		}
 
-		/* 最近保存目录 - 上方历史区 */
 		.recent-section {
-			padding: 10px;
+			padding: 0;
 			background-color: var(--bg-color);
-			position: sticky;
-			top: 0;
-			z-index: 5;
-			border-bottom: 1px solid var(--border-color);
+			position: static;
+			z-index: 1;
+			border: none;
+			flex-shrink: 0;
 		}
 
 		.recent-header {
@@ -257,7 +228,7 @@
 			margin-bottom: 2px;
 			font-size: 13px;
 			color: var(--text-secondary);
-			/* Base01 */
+			padding: 10px;
 		}
 
 		.recent-list {
@@ -269,9 +240,8 @@
 		.recent-item {
 			padding: 2px 8px;
 			background-color: var(--bg-highlight);
-			/* Base2 */
 			color: var(--text-primary);
-			border-radius: 0px;
+			border-radius: 0;
 			font-size: 12px;
 			white-space: nowrap;
 			overflow: hidden;
@@ -281,16 +251,14 @@
 			line-height: 1.2;
 			display: flex;
 			align-items: center;
-			cursor: pointer; /* 确保可点击 */
-			position: relative; /* 用于hover效果 */
+			cursor: pointer;
+			position: relative;
 		}
 
-		/* 增强上方历史区的hover效果：底色选中 */
 		.recent-item:hover {
-			background-color: var(--base1); /* 更明显的底色选中效果 */
+			background-color: var(--base1);
 		}
 
-		/* 删除按钮样式 */
 		.delete-button {
 			margin-right: 6px;
 			padding: 0 4px;
@@ -303,17 +271,14 @@
 		.recent-item:hover .delete-button {
 			opacity: 1;
 			color: var(--red);
-			/* Solarized Red */
 		}
 
-		/* 分割线样式 */
 		.divider {
 			height: 1px;
 			background-color: var(--border-strong);
 			margin: 8px 0;
 		}
 
-		/* 回收站样式 */
 		.recycle-bin-section {
 			padding: 8px 10px;
 		}
@@ -340,12 +305,13 @@
 			color: var(--text-primary);
 		}
 
-		/* 地址栏 */
 		.address-bar {
-			padding: 10px;
+			padding: 0;
 			background-color: var(--bg-color);
 			position: static;
-			z-index: 4;
+			z-index: 1;
+			flex-shrink: 0;
+			border: none;
 		}
 
 		.address-input {
@@ -356,90 +322,79 @@
 			font-size: 14px;
 			background-color: var(--bg-color);
 			color: var(--text-primary);
+			box-sizing: border-box;
 		}
 
-		/* 文件列表 - 支持上下滚动条，实时计算高度 */
 		.file-list-container {
 			flex: 1;
-			overflow-y: auto; /* 启用垂直滚动 */
+			overflow: visible;
 			overflow-x: auto;
-			padding: 10px;
+			padding: 0 0 24px 0;
 			scrollbar-width: thin;
 			scrollbar-color: var(--base1) var(--base2);
-			/* Firefox 滚动条配色 */
-			margin-bottom: 60px;
-			padding-top: 10px;
-			min-height: 0; /* 允许flex收缩以触发滚动 */
+			margin: 0;
+			min-height: 0;
 		}
 
-		/* 滚动条样式 */
-		.file-list-container::-webkit-scrollbar {
+		.main-content::-webkit-scrollbar {
 			width: 10px;
 			height: 10px;
 		}
 
-		.file-list-container::-webkit-scrollbar-track {
+		.main-content::-webkit-scrollbar-track {
 			background: var(--bg-highlight);
-			/* Base2 */
 		}
 
-		.file-list-container::-webkit-scrollbar-thumb {
+		.main-content::-webkit-scrollbar-thumb {
 			background: var(--base1);
-			/* Base1 */
 			border-radius: 5px;
 		}
 
-		.file-list-container::-webkit-scrollbar-thumb:hover {
+		.main-content::-webkit-scrollbar-thumb:hover {
 			background: var(--base00);
-			/* Base00 */
 		}
 
-		/* 文件列表项通用样式 - 确保整个区域响应hover和点击 */
 		.file-item {
 			padding: 0;
-			border-radius: 0px;
+			border-radius: 0;
 			display: flex;
 			align-items: center;
 			margin: {{LINE_SPACING}}px 0;
 			min-height: 20px;
 			line-height: 1.2;
-			cursor: pointer; /* 整个项可点击 */
-			position: relative; /* 用于选中背景覆盖 */
-			overflow: hidden; /* 防止子元素溢出 */
+			cursor: pointer;
+			position: relative;
+			overflow: hidden;
 		}
 
-		/* Hover效果：整个背景色响应，确保无死区 */
 		.file-item:hover {
-			background-color: var(--bg-highlight) !important; /* 强制覆盖，确保4px下方也响应 */
+			background-color: var(--bg-highlight) !important;
 		}
 
-		/* 选中状态：完整橘红色矩形，覆盖整个项，修正拼接问题 */
 		.file-item.selected {
-			background-color: var(--selection-bg) !important; /* 完整矩形覆盖 */
+			background-color: var(--selection-bg) !important;
 			color: var(--selection-text);
 		}
 
-		/* 修正选中子元素：统一背景，确保无拼接缝隙 */
 		.file-item.selected .sz-area,
 		.file-item.selected .file-select-area,
 		.file-item.selected .folder-name-area,
 		.file-item.selected .file-name-area {
-			background-color: transparent !important; /* 子元素透明，让父级背景覆盖 */
+			background-color: transparent !important;
 			color: var(--selection-text);
-			padding-top: 2px; /* 左边粗一点：增加上内边距 */
+			padding-top: 2px;
 			padding-bottom: 2px;
 		}
 
 		.file-item.selected .file-name-area {
-			padding-top: 1px; /* 右边细一点：减少上内边距 */
+			padding-top: 1px;
 			padding-bottom: 1px;
 		}
 
 		.file-item.selected:hover {
-			background-color: var(--selection-bg) !important; /* 保持选中hover */
+			background-color: var(--selection-bg) !important;
 		}
 
-		/* SZ 区域样式 - 确保点击响应 */
 		.sz-area {
 			width: var(--sz-area-width);
 			height: 100%;
@@ -448,7 +403,6 @@
 			font-family: monospace;
 			font-size: 12px;
 			color: var(--text-dim);
-			/* Base1 */
 			text-align: left;
 			padding: 2px 0;
 			line-height: 1.2;
@@ -464,28 +418,15 @@
 			-ms-user-select: none;
 		}
 
-		.sz-area::before {
-			content: '';
-			position: absolute;
-			top: 0;
-			left: -8px;
-			right: -24px;
-			bottom: 0;
-			z-index: -1;
-			height: 100%; /* 确保全高覆盖，无4px死区 */
-		}
-
-		/* 选中操作区 - 确保点击全覆盖 */
 		.file-select-area {
 			display: flex;
 			align-items: center;
 			padding: 2px 4px 2px 8px;
 			cursor: pointer;
 			flex-shrink: 0;
-			height: 100%; /* 全高 */
+			height: 100%;
 		}
 
-		/* 文件夹名称导航区 */
 		.folder-name-area {
 			flex: 1;
 			padding: 2px 8px 2px 4px;
@@ -493,17 +434,16 @@
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
-			height: 100%; /* 全高，确保点击响应 */
+			height: 100%;
 		}
 
-		/* 文件名称区 */
 		.file-name-area {
 			flex: 1;
 			padding: 2px 8px;
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
-			height: 100%; /* 全高 */
+			height: 100%;
 		}
 
 		.file-icon {
@@ -515,7 +455,6 @@
 			flex: 1;
 		}
 
-		/* 底部操作区 - 响应式：宽度<200px时隐藏非核心组件 */
 		.footer {
 			position: fixed;
 			bottom: 0;
@@ -523,36 +462,32 @@
 			right: 0;
 			padding: 10px;
 			background-color: var(--bg-color);
-			/* Base3 */
 			border-top: 1px solid var(--border-strong);
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
 			z-index: 10;
 			box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.05);
-			gap: 10px; /* 响应式间距 */
+			gap: 10px;
 		}
 
-		/* 响应式：宽度小于200px时，隐藏长驻和编辑框，只保留新建按钮 */
 		@media (max-width: var(--min-responsive-width)) {
 			.pin-container {
-				display: none; /* 舍弃长驻 */
+				display: none;
+			}
+
+			.footer>div:last-child button:first-child {
+				display: none;
 			}
 
 			.filename-input-container {
-				display: none; /* 舍弃文件名编辑框 */
-			}
-
-			.footer > div:last-child {
-				flex: 1; /* 新建按钮占满 */
-				justify-content: flex-end;
+				flex: 1;
 			}
 		}
 
-		/* 进一步极限：宽度<170px时，只显示新建文件按钮，隐藏新建文件夹 */
 		@media (max-width: var(--min-tag-width)) {
-			.footer > div:last-child button:last-child {
-				display: none; /* 舍弃新建文件夹 */
+			.filename-input-container {
+				display: none;
 			}
 		}
 
@@ -562,7 +497,6 @@
 			position: relative;
 		}
 
-		/* 长驻按钮样式 */
 		.pin-container {
 			margin-right: 37px;
 			cursor: pointer;
@@ -577,7 +511,6 @@
 			padding: 5px 23px;
 			border-radius: 20px;
 			background-color: var(--bg-highlight);
-			/* Base2 */
 			transition: background-color 0.2s;
 			width: 96px;
 			color: var(--text-primary);
@@ -585,12 +518,10 @@
 
 		.pin-box:hover {
 			background-color: #d3d1c4;
-			/* Base2 稍暗版本 */
 		}
 
 		.pin-box.pinned {
 			background-color: var(--yellow);
-			/* Solarized Yellow */
 			color: var(--base3);
 		}
 
@@ -637,19 +568,15 @@
 
 		.save-button {
 			background-color: var(--button-primary);
-			/* Solarized Blue */
 			color: var(--button-text);
 		}
 
 		.cancel-button {
 			background-color: var(--bg-highlight);
-			/* Base2 */
 			color: var(--text-primary);
 			margin-left: 5px;
 		}
 
-
-		/* 右键菜单样式 */
 		.context-menu {
 			position: fixed;
 			background-color: var(--bg-color);
@@ -675,7 +602,6 @@
 
 		.context-menu-item:hover {
 			background-color: var(--bg-highlight);
-			/* Base2 */
 		}
 
 		.context-menu-shortcut {
@@ -684,7 +610,6 @@
 			margin-left: 20px;
 		}
 
-		/* 右键空白处菜单样式 */
 		.context-menu-empty {
 			position: fixed;
 			background-color: var(--bg-color);
@@ -707,23 +632,16 @@
 
 		.context-menu-empty-item:hover {
 			background-color: var(--bg-highlight);
-			/* Base2 */
 		}
 
 		.context-menu-empty-item.selected {
 			font-weight: bold;
 			background-color: var(--base1);
-			/* Base1 */
 			color: var(--base3);
 		}
 
-		/* 上下高度响应式：如果总高度超过容器，启用滚动（JS实时计算） */
-		.main-content {
-			min-height: 0; /* 允许收缩 */
-		}
-
 		.recent-section {
-			flex-shrink: 0; /* 固定高度，不收缩 */
+			flex-shrink: 0;
 		}
 
 		.address-bar {
@@ -731,7 +649,7 @@
 		}
 
 		.file-list-container {
-			flex: 1 1 auto; /* 允许增长和收缩 */
+			flex: 1 1 auto;
 		}
 	</style>
 </head>
@@ -759,7 +677,7 @@
 					onkeydown="handleAddressInputKeyDown(event)">
 			</div>
 
-			<div class="file-list-container" id="fileList" style="margin-bottom: 60px;">
+			<div class="file-list-container" id="fileList" style="margin: 0;">
 			</div>
 
 			<div class="footer">
