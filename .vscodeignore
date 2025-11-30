@@ -33,7 +33,7 @@ node_modules/**
 .DS_Store
 Thumbs.db
 
-# 编译输出（如果有）
+# 编译赢出（如果有）
 out/**
 dist/**
 

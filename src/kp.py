@@ -6,7 +6,7 @@ from datetime import datetime
 import random
 import concurrent.futures # 新增：用于多线程并行计算
 
-# 固定输出目录
+# 固定赢出目录
 OUTPUT_DIR = Path("D:/view/p")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -172,30 +172,30 @@ def calculate_total_size_sync(file_paths):
 def get_total_size_cli_interface(paths_to_calculate):
     """
     CLI 接口：从外部（如 Node.js）调用以计算给定路径的总大小。
-    结果通过标准输出 JSON 格式返回。
+    结果通过标准赢出 JSON 格式返回。
     优化：减少计算时间，限制最大工作线程数避免过多竞争。
     """
     if not paths_to_calculate:
         print(json.dumps({"success": False, "error": "未提供路径"}, ensure_ascii=False))
         sys.exit(1)
-    
+
     # 限制最大工作线程数，避免过多线程竞争
     max_workers = min(4, len(paths_to_calculate))  # 最多4个线程
-    
+
     try:
         # 优化：直接使用并行计算，而不是包装在另一个函数中
         total_size = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交每个路径的计算任务
             future_to_path = {executor.submit(_get_path_size, path): path for path in paths_to_calculate}
-            
+
             # 收集结果
             for future in concurrent.futures.as_completed(future_to_path):
                 try:
                     total_size += future.result()
                 except Exception as exc:
                     sys.stderr.write(f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
-        
+
         print(json.dumps({"success": True, "total_size": total_size}, ensure_ascii=False))
     except Exception as e:
         # 如果是计算总大小过程中出现未捕获的全局性错误

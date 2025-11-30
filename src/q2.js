@@ -404,13 +404,14 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 // ==================== 配置文件处理函数 ====================
 
 /**
- * 读取配置参数
+ * 读取配置参数 - 新增 sidebarRatio 支持比例记忆
  */
 function getConfig() {
 	const config = {
 		recentDirs: [],
 		lineSpacing: -2, // 默认行间距
-		sidebarWidth: 100, // 默认侧边栏宽度
+		sidebarWidth: 100, // 默认侧边栏绝对宽度（仅用于初始）
+		sidebarRatio: 0.2, // 默认比例 20%（新增：用于记忆位置）
 		recycleBin: [], // 历史回收站，最多60条记录
 		isPinned: false,
 		sizeMode: "none", // 默认不显示文件大小
@@ -443,10 +444,19 @@ function getConfig() {
 				config.lineSpacing = parseInt(lineSpacingMatch[1].trim());
 			}
 
-			// 解析 sidebar_width
+			// 解析 sidebar_width (旧字段，兼容)
 			const sidebarWidthMatch = sectionContent.match(/sidebar_width=(.+)/);
 			if (sidebarWidthMatch) {
 				config.sidebarWidth = parseInt(sidebarWidthMatch[1].trim());
+			}
+
+			// 新增：解析 sidebar_ratio
+			const sidebarRatioMatch = sectionContent.match(/sidebar_ratio=(.+)/);
+			if (sidebarRatioMatch) {
+				config.sidebarRatio = parseFloat(sidebarRatioMatch[1].trim());
+				if (isNaN(config.sidebarRatio) || config.sidebarRatio < 0.05 || config.sidebarRatio > 0.5) {
+					config.sidebarRatio = 0.2; // 回退默认
+				}
 			}
 
 			// 解析 recycle_bin
@@ -486,12 +496,13 @@ function getConfig() {
 }
 
 /**
- * 保存配置参数
+ * 保存配置参数 - 支持 sidebarRatio
  */
 function saveConfig(
 	recentDirs,
 	lineSpacing,
 	sidebarWidth,
+	sidebarRatio, // 新增参数
 	recycleBin,
 	isPinned,
 	newSizeMode
@@ -508,7 +519,8 @@ function saveConfig(
 		const newConfigs = {
 			recent_dirs: recentDirs.join(","),
 			line_spacing: lineSpacing,
-			sidebar_width: sidebarWidth,
+			sidebar_width: sidebarWidth, // 保留旧字段兼容
+			sidebar_ratio: sidebarRatio.toFixed(4), // 新增：保存比例
 			recycle_bin: recycleBin.join(","),
 			is_pinned: isPinned ? "true" : "false",
 			[SIZE_CONFIG_KEY]: newSizeMode || "none",
@@ -532,6 +544,7 @@ function saveConfig(
 recent_dirs=${newConfigs.recent_dirs}
 line_spacing=${newConfigs.line_spacing}
 sidebar_width=${newConfigs.sidebar_width}
+sidebar_ratio=${newConfigs.sidebar_ratio}
 recycle_bin=${newConfigs.recycle_bin}
 is_pinned=${newConfigs.is_pinned}
 ${SIZE_CONFIG_KEY}=${newConfigs[SIZE_CONFIG_KEY]}
@@ -572,11 +585,12 @@ function removeFromRecycleBin(directory) {
 	});
 
 	if (updated) {
-		// 保存更新后的配置 (传递 sizeMode)
+		// 保存更新后的配置 (传递 sizeMode 和 sidebarRatio)
 		saveConfig(
 			config.recentDirs,
 			config.lineSpacing,
 			config.sidebarWidth,
+			config.sidebarRatio,
 			newRecycleBin,
 			config.isPinned,
 			config.sizeMode,
@@ -608,11 +622,12 @@ function addToRecycleBin(directory) {
 	// 3. 限制为60条
 	const finalRecycleBin = newRecycleBin.slice(0, 60);
 
-	// 4. 保存更新后的配置 (传递 sizeMode)
+	// 4. 保存更新后的配置 (传递 sizeMode 和 sidebarRatio)
 	saveConfig(
 		config.recentDirs,
 		config.lineSpacing,
 		config.sidebarWidth,
+		config.sidebarRatio,
 		finalRecycleBin,
 		config.isPinned,
 		config.sizeMode,
@@ -647,12 +662,13 @@ function saveRecentDirectory(directory) {
 	recentDirs.unshift(directory);
 	const finalRecentDirs = recentDirs.slice(0, 10);
 
-	// 5. 保存更新后的配置 (传递 sizeMode)
+	// 5. 保存更新后的配置 (传递 sizeMode 和 sidebarRatio)
 	const updatedConfig = getConfig(); // 重新获取配置以包含最新的回收站状态
 	saveConfig(
 		finalRecentDirs,
 		updatedConfig.lineSpacing,
 		updatedConfig.sidebarWidth,
+		updatedConfig.sidebarRatio,
 		updatedConfig.recycleBin,
 		updatedConfig.isPinned,
 		updatedConfig.sizeMode,
@@ -685,6 +701,7 @@ function removeAndRecycleRecentDirectory(directory) {
 			newRecentDirs,
 			updatedConfig.lineSpacing,
 			updatedConfig.sidebarWidth,
+			updatedConfig.sidebarRatio,
 			updatedConfig.recycleBin,
 			updatedConfig.isPinned,
 			updatedConfig.sizeMode,
@@ -779,25 +796,114 @@ function getDirectoryContents(dirPath) {
 }
 
 /**
- * 生成 Webview JavaScript 代码
+ * 生成 Webview JavaScript 代码 - 新增比例调整、响应式、实时高度计算
  * @param {string} currentSizeMode - 当前大小显示模式
  * @param {string} currentPath - 当前路径
+ * @param {number} sidebarRatio - 当前侧边栏比例
  */
-function generateWebviewScript(currentSizeMode, currentPath) {
+function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 	// 核心修复点：将 currentPath 和 currentSizeMode 转义为 JavaScript 字符串字面量
 	const escapedCurrentPathForJsLiteral = escapeJsStringLiteral(currentPath);
 	const escapedSizeModeForJsLiteral = escapeJsStringLiteral(currentSizeMode);
+	const escapedSidebarRatio = sidebarRatio.toFixed(4);
 
 	// 使用模板字面量，所有动态内容都必须经过转义
 	return `
         const vscode = acquireVsCodeApi();
         const sizeMode = '${escapedSizeModeForJsLiteral}';
         let currentPath = '${escapedCurrentPathForJsLiteral}';
+        let sidebarRatio = ${escapedSidebarRatio}; // 初始比例
+
+        // 新增：响应式布局管理器
+        let resizeObserver = null;
+        const MIN_RESPONSIVE_WIDTH = 200; // 响应极限
+        const MIN_TAG_WIDTH = 170; // VS Code 标签下限
+        const ROW_HEIGHT = 22; // 估算每行高度（包括间距）
+
+        // 新增：实时高度计算函数
+        function calculateAndAdjustScroll() {
+            const recentSection = document.querySelector('.recent-section');
+            const fileList = document.getElementById('fileList');
+            const mainContent = document.getElementById('mainContent');
+
+            if (!recentSection || !fileList || !mainContent) return;
+
+            const recentHeight = recentSection.offsetHeight;
+            const addressHeight = 50; // 估算地址栏高度
+            const footerHeight = 60; // 底部固定
+            const availableHeight = mainContent.clientHeight - recentHeight - addressHeight - footerHeight;
+
+            const itemCount = fileList.children.length;
+            const estimatedContentHeight = itemCount * ROW_HEIGHT + 20; // + padding
+
+            // 如果内容高度 > 可用高度，确保滚动可见（CSS 已 auto，此处仅日志或微调）
+            if (estimatedContentHeight > availableHeight) {
+                fileList.style.overflowY = 'auto';
+                // 可选：发送消息通知扩展，但通常无需
+            } else {
+                fileList.style.overflowY = 'hidden';
+            }
+        }
+
+        // 新增：响应式宽度检查和调整
+        function checkAndApplyResponsive() {
+            const container = document.querySelector('.container');
+            if (!container) return;
+
+            const currentWidth = container.clientWidth;
+            const footer = document.querySelector('.footer');
+            const pinContainer = document.getElementById('pinButton');
+            const filenameContainer = document.querySelector('.filename-input-container');
+            const createFolderBtn = footer.querySelector('.cancel-button');
+
+            if (currentWidth < MIN_RESPONSIVE_WIDTH) {
+                // 极限模式1：隐藏长驻和编辑框，只保留新建文件
+                if (pinContainer) pinContainer.style.display = 'none';
+                if (filenameContainer) filenameContainer.style.display = 'none';
+                if (createFolderBtn) createFolderBtn.style.display = 'block'; // 暂保留，后续隐藏
+                footer.classList.add('responsive-narrow');
+            } else {
+                // 恢复正常
+                if (pinContainer) pinContainer.style.display = 'block';
+                if (filenameContainer) filenameContainer.style.display = 'block';
+                footer.classList.remove('responsive-narrow');
+            }
+
+            if (currentWidth < MIN_TAG_WIDTH) {
+                // 极限模式2：只显示新建文件，隐藏新建文件夹
+                if (createFolderBtn) createFolderBtn.style.display = 'none';
+                footer.classList.add('responsive-extreme');
+            } else {
+                footer.classList.remove('responsive-extreme');
+            }
+
+            // 同时计算上下高度
+            setTimeout(calculateAndAdjustScroll, 50); // 延迟确保DOM更新
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             const filenameInput = document.getElementById('filenameInput');
             filenameInput.focus();
             updateResourceExplorer();
+
+            // 新增：初始化比例调整
+            adjustSidebarByRatio();
+
+            // 新增：监听窗口/容器resize，实现响应式和比例适配
+            window.addEventListener('resize', () => {
+                adjustSidebarByRatio();
+                checkAndApplyResponsive();
+            });
+
+            // 使用ResizeObserver监听主容器变化（更精确）
+            const container = document.querySelector('.container');
+            if (container && 'ResizeObserver' in window) {
+                resizeObserver = new ResizeObserver(() => {
+                    adjustSidebarByRatio();
+                    checkAndApplyResponsive();
+                });
+                resizeObserver.observe(container);
+            }
 
             document.getElementById('fileList').addEventListener('click', (event) => {
                 if (event.target === event.currentTarget) {
@@ -812,7 +918,27 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                     selectedItem = null;
                 }
             });
+
+            // 新增：初始响应式检查
+            checkAndApplyResponsive();
         });
+
+        // 新增：根据比例调整侧边栏宽度
+        function adjustSidebarByRatio() {
+            const container = document.querySelector('.container');
+            const sidebar = document.querySelector('.sidebar');
+            const resizer = document.getElementById('sidebarResizer');
+            const mainContent = document.querySelector('.main-content');
+
+            if (!container || !sidebar || !resizer || !mainContent) return;
+
+            const totalWidth = container.clientWidth;
+            let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio)); // 限制范围
+
+            sidebar.style.width = newWidth + 'px';
+            resizer.style.left = newWidth + 'px';
+            mainContent.style.left = newWidth + 'px';
+        }
 
         function navigateTo(path) {
             vscode.postMessage({ command: 'navigate', path: path });
@@ -966,6 +1092,11 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 document.getElementById('addressInput').value = message.currentPath;
                 document.getElementById('fileList').innerHTML = message.fileListHtml;
                 requestFileSizeUpdates(message.items);
+                // 新增：更新后重新计算高度和响应式
+                setTimeout(() => {
+                    calculateAndAdjustScroll();
+                    checkAndApplyResponsive();
+                }, 100);
             }
             else if (message.command === 'updateSize') {
                 const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
@@ -994,6 +1125,11 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                     itemElement.style.opacity = '';
                     itemElement.style.pointerEvents = '';
                 }
+            }
+            // 新增：侧边栏比例更新消息
+            else if (message.command === 'updateSidebarRatio') {
+                sidebarRatio = message.ratio;
+                adjustSidebarByRatio();
             }
         });
 
@@ -1026,11 +1162,13 @@ function generateWebviewScript(currentSizeMode, currentPath) {
 
         let selectedItem = null;
 
+        // 修改：selectItem 确保整个区域响应点击，无死区
         function selectItem(event, type, path, name) {
             event.stopPropagation();
             hideAllContextMenus();
 
-            const item = event.currentTarget.closest('.file-item');
+            // 确保点击整个 file-item 区域（包括hover背景）
+            const item = event.currentTarget.closest('.file-item') || event.target.closest('.file-item');
             if (!item) return;
 
             const prevSelected = document.querySelector('.file-item.selected');
@@ -1369,32 +1507,37 @@ function generateWebviewScript(currentSizeMode, currentPath) {
             }
         });
 
+        // 修改：侧边栏拖动 - 计算并保存比例，而非绝对宽度
         const sidebarResizer = document.getElementById('sidebarResizer');
         const sidebar = document.querySelector('.sidebar');
         const mainContent = document.querySelector('.main-content');
         let isResizing = false;
         let startX = 0;
         let startWidth = 0;
+        let startTotalWidth = 0;
 
         if (sidebarResizer && sidebar && mainContent) {
-            const computedStyle = getComputedStyle(sidebar);
-            const sidebarWidth = parseInt(computedStyle.width) || 100;
-
-            sidebarResizer.style.left = sidebarWidth + 'px';
-            mainContent.style.left = sidebarWidth + 'px';
+            const container = document.querySelector('.container');
+            startTotalWidth = container ? container.clientWidth : window.innerWidth;
 
             sidebarResizer.addEventListener('mousedown', (e) => {
                 isResizing = true;
                 startX = e.clientX;
                 startWidth = sidebar.offsetWidth;
+                startTotalWidth = container ? container.clientWidth : window.innerWidth;
                 sidebarResizer.classList.add('active');
                 document.body.style.userSelect = 'none';
             });
 
             document.addEventListener('mousemove', (e) => {
                 if (!isResizing) return;
-                let newWidth = startWidth + (e.clientX - startX);
-                newWidth = Math.max(50, Math.min(500, newWidth));
+                const deltaX = e.clientX - startX;
+                let newWidth = startWidth + deltaX;
+                const totalWidth = container ? container.clientWidth : window.innerWidth;
+                const newRatio = Math.max(0.05, Math.min(0.5, newWidth / totalWidth)); // 限制比例 5%-50%
+                newWidth = totalWidth * newRatio;
+                newWidth = Math.max(50, Math.min(500, newWidth)); // 绝对限制
+
                 sidebar.style.width = newWidth + 'px';
                 sidebarResizer.style.left = newWidth + 'px';
                 mainContent.style.left = newWidth + 'px';
@@ -1405,11 +1548,19 @@ function generateWebviewScript(currentSizeMode, currentPath) {
                 isResizing = false;
                 sidebarResizer.classList.remove('active');
                 document.body.style.userSelect = '';
-                const newWidth = parseInt(sidebar.style.width) || 100;
+
+                const container = document.querySelector('.container');
+                const totalWidth = container ? container.clientWidth : window.innerWidth;
+                const finalWidth = parseInt(sidebar.style.width) || 100;
+                const newRatio = finalWidth / totalWidth;
+
+                // 发送比例到扩展保存
                 vscode.postMessage({
-                    command: 'saveSidebarWidth',
-                    width: newWidth
+                    command: 'saveSidebarRatio',
+                    ratio: newRatio
                 });
+
+                sidebarRatio = newRatio; // 更新本地
             });
 
             document.addEventListener('mouseleave', () => {
@@ -1448,7 +1599,8 @@ function getWebviewContent(currentPath) {
 	const drives = getDrives();
 
 	const LINE_SPACING = currentConfig.lineSpacing;
-	const SIDEBAR_WIDTH = currentConfig.sidebarWidth;
+	const SIDEBAR_WIDTH = currentConfig.sidebarWidth; // 初始绝对宽度
+	const SIDEBAR_RATIO = currentConfig.sidebarRatio; // 新增：比例
 	const currentRecentDirs = currentConfig.recentDirs;
 	const currentSizeMode = currentConfig.sizeMode;
 
@@ -1522,8 +1674,8 @@ function getWebviewContent(currentPath) {
 		)
 		.join("");
 
-	// 生成内联脚本
-	const inlineScript = generateWebviewScript(currentSizeMode, currentPath);
+	// 生成内联脚本 - 传入比例
+	const inlineScript = generateWebviewScript(currentSizeMode, currentPath, SIDEBAR_RATIO);
 
 	// 替换所有占位符
 	let finalHtml = htmlTemplate;
@@ -1559,9 +1711,9 @@ function getWebviewContent(currentPath) {
  */
 function showSaveAsDialog() {
 	// 单窗口控制
-	if (activePanel !== null) {
+	if (activePanel !== null && !activePanel.disposed) {
 		if (usePanelReveal === 1) {
-			activePanel.reveal();
+			activePanel.reveal(vscode.ViewColumn.Active);
 		}
 		return;
 	}
@@ -1706,7 +1858,7 @@ function showSaveAsDialog() {
 
 			case "setSizeMode":
 				saveConfig(
-					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth,
+					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio,
 					currentConfig.recycleBin, currentConfig.isPinned, message.mode
 				);
 				refreshWebview();
@@ -1797,16 +1949,26 @@ function showSaveAsDialog() {
 				}
 				break;
 
-			case "saveSidebarWidth":
+			// 新增：保存侧边栏比例
+			case "saveSidebarRatio":
+				const newRatio = message.ratio;
 				saveConfig(
-					currentConfig.recentDirs, currentConfig.lineSpacing, message.width,
+					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, newRatio,
 					currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode
 				);
+				// 通知 webview 更新比例
+				if (panel && !panel.disposed) {
+					panel.webview.postMessage({ command: 'updateSidebarRatio', ratio: newRatio });
+				}
+				break;
+
+			case "saveSidebarWidth": // 旧命令，兼容但忽略，转为比例
+				// 忽略绝对宽度保存，转而计算比例（但由于无总宽，暂不处理）
 				break;
 
 			case "togglePin":
 				saveConfig(
-					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth,
+					currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio,
 					currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode
 				);
 				break;
