@@ -190,7 +190,8 @@ function getSizeFromPython(paths) {
  *   - b: 所有文件都显示（b/k/m 各自一列）
  *   - k: 忽略 < 1024b，其余同上
  *   - m: 忽略 < 1024k，其余同上
- * - 通过 3 个固定宽度段实现 k/b/m 三列的“错峰”排布
+ * - 使用一个总宽度字段，通过 3 个相互交叠的固定宽度段实现 m/k/b 的“错峰”排布：
+ *   左侧 M，中间 K，右侧 B
  */
 function formatFileSize(bytes, mode) {
 	if (mode === "none") {
@@ -216,26 +217,39 @@ function formatFileSize(bytes, mode) {
 		return { text: "", show: false };
 	}
 
-	// 三段：M 列 / K 列 / B 列，每段内部右对齐
-	const segWidthM = 5;
-	const segWidthK = 5;
-	const segWidthB = 5;
+	// 总宽度 11，三段：M 起点 0，K 起点 3，B 起点 6，每段宽度 5，互相交叠
+	const totalWidth = 11;
+	const buffer = new Array(totalWidth).fill(" ");
+	const segWidth = 5;
+
+	const placeSegment = (str, startIndex) => {
+		const safeStr = String(str);
+		const fieldStart = startIndex;
+		const fieldEnd = Math.min(fieldStart + segWidth, totalWidth);
+		const availableWidth = fieldEnd - fieldStart;
+		if (availableWidth <= 0) return;
+
+		const len = Math.min(safeStr.length, availableWidth);
+		const writeStart = fieldEnd - len;
+		for (let i = 0; i < len; i++) {
+			buffer[writeStart + i] = safeStr[safeStr.length - len + i];
+		}
+	};
 
 	const valueStr = String(value) + unit;
-	let segM = " ".repeat(segWidthM);
-	let segK = " ".repeat(segWidthK);
-	let segB = " ".repeat(segWidthB);
 
 	if (unit === "m") {
-		segM = valueStr.padStart(segWidthM, " ");
+		// m 左侧
+		placeSegment(valueStr, 0);
 	} else if (unit === "k") {
-		segK = valueStr.padStart(segWidthK, " ");
+		// k 中间
+		placeSegment(valueStr, 3);
 	} else {
-		segB = valueStr.padStart(segWidthB, " ");
+		// b 右侧
+		placeSegment(valueStr, 6);
 	}
 
-	// 组合为 "M 列 + K 列 + B 列"
-	const text = segM + segK + segB;
+	const text = buffer.join("");
 	return { text, show: true };
 }
 
@@ -555,8 +569,14 @@ function getDirectoryContents(dirPath) {
 			} catch {
 			}
 		}
-		contents.dirs.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-		contents.files.sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+
+		// 对齐 VS Code 资源管理器：目录按名称排序，文件按名称排序
+		contents.dirs.sort((a, b) =>
+			a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+		);
+		contents.files.sort((a, b) =>
+			a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })
+		);
 	} catch (error) {
 		logMessage(`读取目录内容失败: ${dirPath}`, "ERROR");
 	}
@@ -764,6 +784,14 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
             adjustSidebarByRatio();
 
+            // 左上角“关闭我”大按钮：点击关闭面板
+            const sidebarCloseButton = document.getElementById('sidebarCloseButton');
+            if (sidebarCloseButton) {
+                sidebarCloseButton.addEventListener('click', () => {
+                    vscode.postMessage({ command: 'closePanel' });
+                });
+            }
+
             // 初始化 tooltip 监听
             ensurePathTooltip();
             const sidebarEl = document.querySelector('.sidebar');
@@ -867,7 +895,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio));
 
             sidebar.style.width = newWidth + 'px';
-            resizer.style.left = newWidth + 'px';
+           	resizer.style.left = newWidth + 'px';
             mainContent.style.left = newWidth + 'px';
         }
 
@@ -1138,7 +1166,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
             const prevSelected = document.querySelector('.file-item.selected');
             if (prevSelected && prevSelected !== itemElement) {
-                const renameInput = prevSelected.querySelector('.rename-input');
+               	const renameInput = prevSelected.querySelector('.rename-input');
                 if (renameInput) {
                     cancelRename(prevSelected);
                 }
@@ -1315,7 +1343,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
             hideAllContextMenus();
 
-            if (!itemForAction || !itemForAction.path) {
+           	if (!itemForAction || !itemForAction.path) {
                 return;
             }
 
@@ -1563,11 +1591,11 @@ function getWebviewContent(currentPath) {
 		)
 		.join("");
 
+	// 去掉“历史回收站”标题，只保留 divider + 列表
 	const recycleBinHtml = showRecycleBin
 		? `
         <div class="divider"></div>
         <div class="recycle-bin-section">
-            <div class="recycle-bin-header">历史回收站 (${safeRecycleBin.length}/60)</div>
             ${safeRecycleBin
 			.map(
 				dir => `
@@ -1786,7 +1814,7 @@ function showSaveAsDialog() {
 				)}" data-type="file">
                     <div class="file-select-area">
                         <div class="sz-area"></div>
-                        <span class="file-icon">📄</span>
+                        <span class="file-icon">🗎</span>
                     </div>
                     <div class="file-name-area">
                         <span class="file-name">${escapeHtmlAttribute(file.name)}</span>
@@ -2050,6 +2078,11 @@ function showSaveAsDialog() {
 				panel.dispose();
 				break;
 
+			// 左上角关闭按钮
+			case "closePanel":
+				panel.dispose();
+				break;
+
 			case "editFile":
 				saveRecentDirectory(path.dirname(message.path));
 
@@ -2129,9 +2162,11 @@ function showSaveAsDialog() {
 								}
 
 								const successMessage = `${displayPath} 已移至回收站`;
+								// 状态栏 + 弹出框双提示
 								vscode.window.showInformationMessage(
 									successMessage
 								);
+								vscode.window.setStatusBarMessage(successMessage, 5000);
 
 								setTimeout(() => { }, 11000);
 							} catch (error) {
@@ -2146,14 +2181,15 @@ function showSaveAsDialog() {
 
 								const errorMessage = "删除失败：文件正被占用。";
 								vscode.window.showErrorMessage(errorMessage);
+								vscode.window.setStatusBarMessage(errorMessage, 5000);
 
 								setTimeout(() => { }, 11000);
 							}
 						})();
 					} else {
-						vscode.window.showWarningMessage(
-							`删除失败：项目不存在。`
-						);
+						const warnMessage = `删除失败：项目不存在。`;
+						vscode.window.showWarningMessage(warnMessage);
+						vscode.window.setStatusBarMessage(warnMessage, 5000);
 						refreshWebview();
 					}
 				}
