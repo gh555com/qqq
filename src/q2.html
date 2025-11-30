@@ -5,7 +5,7 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta http-equiv="Content-Security-Policy"
-		content="default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;">
+		  content="default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;">
 	<title>qqq new 新建</title>
 	<style>
 		:root {
@@ -150,7 +150,7 @@
 		}
 
 		.sidebar-resizer:hover {
-			background-color: #ddca88;
+			background-color: var(--base1);
 			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
@@ -159,19 +159,26 @@
 			width: calc(var(--sidebar-resizer-width) * 1.5);
 		}
 
-		/* 左上角关闭按钮 */
+		/* 顶部大号关闭按钮 */
 		.sidebar-header {
-			padding: 0 10px;
-			font-weight: bold;
+			padding: 0;
+			height: 51px;
 			background-color: #DEC987;
 			color: var(--text-primary);
-			border-bottom: none;
-			height: 51px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
+			border-bottom: none;
 			cursor: pointer;
-			font-size: 24px; /* 放大叉号 */
+		}
+
+		.sidebar-header:hover {
+			background-color: #d4c079;
+		}
+
+		.sidebar-header .close-icon {
+			font-size: 24px; /* 放大两倍的叉 */
+			line-height: 1;
 		}
 
 		.nav-item {
@@ -188,7 +195,7 @@
 		}
 
 		.nav-item:hover {
-			background-color: #ddca88;
+			background-color: var(--bg-highlight);
 		}
 
 		.nav-item.active {
@@ -265,7 +272,7 @@
 			position: relative;
 		}
 
-		/* 右侧上方“历史区” hover 颜色 */
+		/* 右侧上方历史区 hover 特殊色 #ddca88 */
 		.recent-item:hover {
 			background-color: #ddca88;
 		}
@@ -290,31 +297,31 @@
 			margin: 8px 0;
 		}
 
-		/* 历史回收站区域：去掉四周 padding/border，点击区域左右填满 */
+		/* 历史回收站区域：去掉四周“空 border”，左右填满可点击 */
 		.recycle-bin-section {
 			padding: 0;
+			margin: 0;
 			border: none;
 		}
 
 		.recycle-bin-header {
-			font-size: 12px;
-			color: var(--text-secondary);
-			font-weight: normal;
-			margin-bottom: 4px;
+			display: none; /* 不再使用标题行 */
 		}
 
 		.recycle-item {
-			padding: 2px 8px;
+			padding: 3px 10px;
 			font-size: 11px;
 			color: var(--text-dim);
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
 			cursor: pointer;
+			width: 100%;
+			box-sizing: border-box;
 		}
 
 		.recycle-item:hover {
-			background-color: #ddca88;
+			background-color: var(--bg-highlight);
 			color: var(--text-primary);
 		}
 
@@ -381,7 +388,7 @@
 		}
 
 		.file-item:hover {
-			background-color: #ddca88 !important;
+			background-color: var(--bg-highlight) !important;
 		}
 
 		.file-item.selected {
@@ -530,7 +537,7 @@
 		}
 
 		.pin-box:hover {
-			background-color: #ddca88;
+			background-color: #d3d1c4;
 		}
 
 		.pin-box.pinned {
@@ -614,7 +621,7 @@
 		}
 
 		.context-menu-item:hover {
-			background-color: #ddca88;
+			background-color: var(--bg-highlight);
 		}
 
 		.context-menu-shortcut {
@@ -644,7 +651,7 @@
 		}
 
 		.context-menu-empty-item:hover {
-			background-color: #ddca88;
+			background-color: var(--bg-highlight);
 		}
 
 		.context-menu-empty-item.selected {
@@ -665,7 +672,6 @@
 			flex: 1 1 auto;
 		}
 
-		/* 自定义 hover 路径提示框 */
 		.path-tooltip {
 			position: fixed;
 			z-index: 99999;
@@ -686,7 +692,10 @@
 <body>
 	<div class="container">
 		<div class="sidebar">
-			<div class="sidebar-header" id="sidebarCloseButton">&times;</div>
+			<!-- 顶部大关闭按钮：点击等同关闭面板 -->
+			<div class="sidebar-header" onclick="cancel()" title="关闭当前面板">
+				<span class="close-icon">✕</span>
+			</div>
 			{{DRIVES_HTML}}
 
 			{{RECYCLE_BIN_HTML}}
@@ -703,7 +712,7 @@
 
 			<div class="address-bar">
 				<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}"
-					onkeydown="handleAddressInputKeyDown(event)">
+					   onkeydown="handleAddressInputKeyDown(event)">
 			</div>
 
 			<div class="file-list-container" id="fileList" style="margin: 0;">
@@ -718,7 +727,7 @@
 				</div>
 				<div class="filename-input-container">
 					<input type="text" id="filenameInput" class="filename-input"
-						onkeydown="handleFilenameInputKeyDown(event)">
+						   onkeydown="handleFilenameInputKeyDown(event)">
 				</div>
 				<div style="display: flex; gap: 15px;">
 					<button class="button save-button" onclick="saveFile()" title="新建文件">
@@ -740,13 +749,13 @@
 
 	<div id="emptyContextMenu" class="context-menu-empty">
 		<div class="context-menu-empty-item {{SIZE_MODE_NONE_CLASS}}" data-mode="none"
-			onclick="setSizeMode('none');refreshSizeDisplay();">none</div>
+			 onclick="setSizeMode('none');refreshSizeDisplay();">none</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_M_CLASS}}" data-mode="m"
-			onclick="setSizeMode('m');refreshSizeDisplay();">m</div>
+			 onclick="setSizeMode('m');refreshSizeDisplay();">m</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_K_CLASS}}" data-mode="k"
-			onclick="setSizeMode('k');refreshSizeDisplay();">k</div>
+			 onclick="setSizeMode('k');refreshSizeDisplay();">k</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_B_CLASS}}" data-mode="b"
-			onclick="setSizeMode('b');refreshSizeDisplay();">b</div>
+			 onclick="setSizeMode('b');refreshSizeDisplay();">b</div>
 	</div>
 
 	<div id="itemContextMenu" class="context-menu">
