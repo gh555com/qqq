@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -67,6 +67,8 @@
   "scripts": {
     "package": "@vscode/vsce package --allow-missing-repository",
     "publish": "@vscode/vsce publish",
+    "q": "@vscode/vsce publish patch --allow-star-activation",
+    "pub": "yes | vsce publish patch",
     "test": "echo \"Running tests...\" && exit 0"
   },
   "repository": {
@@ -100,6 +102,7 @@
     "붙여넣기",
     "image",
     "图片",
+    "粘贴图片",
     "画像",
     "bild",
     "이미지",
