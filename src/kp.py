@@ -1,14 +1,42 @@
 # kp.py
-# 固定保存路径到 D:\view\p，图片重命名为时间戳
-import sys, os, json, time, platform, subprocess
+# 接收参数作为保存路径，图片重命名为时间戳
+import sys
+import os
+import json
+import time
+import platform
+import subprocess
 from pathlib import Path
 from datetime import datetime
 import random
-import concurrent.futures # 新增：用于多线程并行计算
+import concurrent.futures
 
-# 固定赢出目录
-OUTPUT_DIR = Path("D:/view/p")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# 默认路径（仅作为兜底，正常情况应由 JS 传入）
+DEFAULT_OUTPUT_DIR = Path("D:/view/p")
+
+
+def resolve_output_dir():
+    """根据命令行参数解析输出目录"""
+    # 如果第一个参数不是 get_size，则认为是路径
+    if len(sys.argv) > 1 and sys.argv[1] != "get_size":
+        target = Path(sys.argv[1])
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except Exception:
+            return DEFAULT_OUTPUT_DIR
+    return DEFAULT_OUTPUT_DIR
+
+
+# 初始化全局 OUTPUT_DIR
+OUTPUT_DIR = resolve_output_dir()
+# 如果 resolve_output_dir 没有创建目录（兜底情况），这里再确保一次
+if not OUTPUT_DIR.exists():
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    except:
+        pass
+
 
 def get_timestamp_filename(ext=".png"):
     """生成时间戳文件名：年月日星期几毫秒随机字母时分秒"""
@@ -29,7 +57,8 @@ def get_timestamp_filename(ext=".png"):
     # 排除的字母列表（转换为小写以便比较）
     excluded_chars = ['l', 'i', 's', 'a', 'm', 'c', 'b', 'f', 't']
     # 创建有效字符列表：包含所有未被排除的大小写字母
-    valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' if c.lower() not in excluded_chars]
+    valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' if c.lower(
+    ) not in excluded_chars]
 
     # 生成第一个随机字符
     first_char = random.choice(valid_chars)
@@ -50,6 +79,7 @@ def get_timestamp_filename(ext=".png"):
     filename = f"{date_part}{weekday_part}{millisecond_part}{random_chars} {time_part}{ext}"
     return filename
 
+
 def guess_ext_by_magic(data: bytes):
     try:
         import magic
@@ -57,20 +87,32 @@ def guess_ext_by_magic(data: bytes):
         desc = m.from_buffer(data[:8192] if len(data) > 8192 else data)
         if desc:
             d = desc.lower()
-            if "png" in d: return ".png"
-            if "jpeg" in d or "jpg" in d: return ".jpg"
-            if "gif" in d: return ".gif"
-            if "pdf" in d: return ".pdf"
-            if "zip" in d: return ".zip"
-            if "mpeg" in d and "mp3" in d: return ".mp3"
-            if "mp4" in d or "iso media" in d: return ".mp4"
-            if "matroska" in d or "webm" in d: return ".mkv"
-            if "tiff" in d: return ".tif"
-            if "ico" in d: return ".ico"
-            if "webp" in d: return ".webp"
+            if "png" in d:
+                return ".png"
+            if "jpeg" in d or "jpg" in d:
+                return ".jpg"
+            if "gif" in d:
+                return ".gif"
+            if "pdf" in d:
+                return ".pdf"
+            if "zip" in d:
+                return ".zip"
+            if "mpeg" in d and "mp3" in d:
+                return ".mp3"
+            if "mp4" in d or "iso media" in d:
+                return ".mp4"
+            if "matroska" in d or "webm" in d:
+                return ".mkv"
+            if "tiff" in d:
+                return ".tif"
+            if "ico" in d:
+                return ".ico"
+            if "webp" in d:
+                return ".webp"
     except Exception:
         pass
     return guess_ext_by_magic_fallback(data)
+
 
 def guess_ext_by_magic_fallback(data: bytes):
     if not data:
@@ -97,10 +139,13 @@ def guess_ext_by_magic_fallback(data: bytes):
             return ext
     return ".bin"
 
+
 def is_image_format(ext):
     """判断是否为图片格式"""
-    image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tif', '.tiff', '.webp', '.ico', '.svg'}
+    image_exts = {'.png', '.jpg', '.jpeg', '.gif',
+                  '.bmp', '.tif', '.tiff', '.webp', '.ico', '.svg'}
     return ext.lower() in image_exts
+
 
 def save_bytes(data: bytes, is_image=False, original_ext=".bin"):
     """保存字节数据，图片用时间戳命名，其他保持原扩展名"""
@@ -108,7 +153,8 @@ def save_bytes(data: bytes, is_image=False, original_ext=".bin"):
         fname = get_timestamp_filename(original_ext)
     else:
         # 非图片保持原扩展名，但文件名还是用时间戳
-        ext = guess_ext_by_magic(data) if original_ext == ".bin" else original_ext
+        ext = guess_ext_by_magic(
+            data) if original_ext == ".bin" else original_ext
         fname = get_timestamp_filename(ext)
 
     path = OUTPUT_DIR / fname
@@ -117,6 +163,8 @@ def save_bytes(data: bytes, is_image=False, original_ext=".bin"):
     return str(path)
 
 # --- 新增文件大小计算功能 ---
+
+
 def _get_path_size(path):
     """
     优化版本：计算单个文件或目录的大小
@@ -133,7 +181,8 @@ def _get_path_size(path):
                     for entry in entries:
                         try:
                             if entry.is_file(follow_symlinks=False):
-                                total_size += entry.stat(follow_symlinks=False).st_size
+                                total_size += entry.stat(
+                                    follow_symlinks=False).st_size
                             elif entry.is_dir(follow_symlinks=False):
                                 # 递归计算子目录大小
                                 total_size += _get_path_size(entry.path)
@@ -147,6 +196,7 @@ def _get_path_size(path):
     except (OSError, PermissionError):
         return 0
 
+
 def calculate_total_size_sync(file_paths):
     """
     核心优化功能：使用多线程并行计算文件和文件夹的总大小。
@@ -155,10 +205,11 @@ def calculate_total_size_sync(file_paths):
     total_size = 0
     # 为I/O密集型任务设置较多的工作线程，以充分利用磁盘带宽
     # GIL在文件I/O时会释放，允许真正的并行I/O
-    max_workers = os.cpu_count() * 2 if os.cpu_count() else 8 # 至少8个线程，或者CPU核心数的两倍
+    max_workers = os.cpu_count() * 2 if os.cpu_count() else 8  # 至少8个线程，或者CPU核心数的两倍
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # 提交每个路径的计算任务
-        future_to_path = {executor.submit(_get_path_size, path): path for path in file_paths}
+        future_to_path = {executor.submit(
+            _get_path_size, path): path for path in file_paths}
 
         # 收集结果
         for future in concurrent.futures.as_completed(future_to_path):
@@ -166,8 +217,10 @@ def calculate_total_size_sync(file_paths):
                 total_size += future.result()
             except Exception as exc:
                 # 可以选择记录异常，但在这里为了稳健性选择忽略单个文件/目录的计算错误
-                sys.stderr.write(f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
+                sys.stderr.write(
+                    f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
     return total_size
+
 
 def get_total_size_cli_interface(paths_to_calculate):
     """
@@ -176,7 +229,8 @@ def get_total_size_cli_interface(paths_to_calculate):
     优化：减少计算时间，限制最大工作线程数避免过多竞争。
     """
     if not paths_to_calculate:
-        print(json.dumps({"success": False, "error": "未提供路径"}, ensure_ascii=False))
+        print(json.dumps(
+            {"success": False, "error": "未提供路径"}, ensure_ascii=False))
         sys.exit(1)
 
     # 限制最大工作线程数，避免过多线程竞争
@@ -187,21 +241,26 @@ def get_total_size_cli_interface(paths_to_calculate):
         total_size = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交每个路径的计算任务
-            future_to_path = {executor.submit(_get_path_size, path): path for path in paths_to_calculate}
+            future_to_path = {executor.submit(
+                _get_path_size, path): path for path in paths_to_calculate}
 
             # 收集结果
             for future in concurrent.futures.as_completed(future_to_path):
                 try:
                     total_size += future.result()
                 except Exception as exc:
-                    sys.stderr.write(f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
+                    sys.stderr.write(
+                        f"在计算路径 '{future_to_path[future]}' 大小时发生错误: {exc}\n")
 
-        print(json.dumps({"success": True, "total_size": total_size}, ensure_ascii=False))
+        print(json.dumps(
+            {"success": True, "total_size": total_size}, ensure_ascii=False))
     except Exception as e:
         # 如果是计算总大小过程中出现未捕获的全局性错误
-        print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
-        sys.exit(1) # 以非零状态码退出表示失败
+        print(json.dumps(
+            {"success": False, "error": str(e)}, ensure_ascii=False))
+        sys.exit(1)  # 以非零状态码退出表示失败
 # --- 文件大小计算功能结束 ---
+
 
 def handle_windows():
     try:
@@ -318,7 +377,8 @@ def handle_windows():
                         dialog.destroy()
 
                     # 添加消息标签并设置为可点击
-                    label = tk.Label(dialog, text=message, wraplength=380, padx=20, pady=10)
+                    label = tk.Label(dialog, text=message,
+                                     wraplength=380, padx=20, pady=10)
                     label.pack()
                     label.bind("<Button-1>", on_label_click)  # 绑定左键点击事件
 
@@ -341,9 +401,12 @@ def handle_windows():
 
                     # 设置相同宽度的按钮，并增加间距
                     button_width = 10
-                    tk.Button(button_frame, text="打开文件夹", width=button_width, command=on_open_folder).pack(side=tk.LEFT, padx=10)
-                    tk.Button(button_frame, text="谨慎 !盖之", width=button_width, command=on_overwrite).pack(side=tk.LEFT, padx=10)
-                    tk.Button(button_frame, text="取消", width=button_width, command=on_cancel).pack(side=tk.LEFT, padx=10)
+                    tk.Button(button_frame, text="打开文件夹", width=button_width,
+                              command=on_open_folder).pack(side=tk.LEFT, padx=10)
+                    tk.Button(button_frame, text="谨慎 !盖之", width=button_width,
+                              command=on_overwrite).pack(side=tk.LEFT, padx=10)
+                    tk.Button(button_frame, text="取消", width=button_width,
+                              command=on_cancel).pack(side=tk.LEFT, padx=10)
 
                     # 设置对话框模态
                     dialog.transient(root)
@@ -379,7 +442,8 @@ def handle_windows():
                         if sys.platform == 'win32':
                             if file_name:
                                 # Windows资源管理器打开并选中文件
-                                subprocess.Popen(['explorer.exe', '/select,', conflict_path])
+                                subprocess.Popen(
+                                    ['explorer.exe', '/select,', conflict_path])
                             else:
                                 os.startfile(folder_path)
                         elif sys.platform == 'darwin':
@@ -464,7 +528,8 @@ def handle_windows():
                         return {"type": "image", "path": str(path)}
                     except Exception:
                         # 无法转换，直接保存原始数据
-                        path = save_bytes(data, is_image=True, original_ext=".dib")
+                        path = save_bytes(data, is_image=True,
+                                          original_ext=".dib")
                         return {"type": "binary", "path": path}
         except Exception:
             pass
@@ -486,6 +551,7 @@ def handle_windows():
             pass
 
     return {"type": "unknown"}
+
 
 def read_hglobal_from_handle(handle):
     try:
@@ -526,6 +592,7 @@ def read_hglobal_from_handle(handle):
     except Exception:
         return None
 
+
 def enum_and_try_read_hglobal():
     try:
         import ctypes
@@ -557,6 +624,7 @@ def enum_and_try_read_hglobal():
         return None
     return None
 
+
 def handle_macos():
     try:
         import pyperclip
@@ -567,7 +635,8 @@ def handle_macos():
         pass
 
     try:
-        data = subprocess.check_output(["pbpaste", "-Prefer", "png"], stderr=subprocess.DEVNULL)
+        data = subprocess.check_output(
+            ["pbpaste", "-Prefer", "png"], stderr=subprocess.DEVNULL)
         if data:
             fname = get_timestamp_filename(".png")
             path = OUTPUT_DIR / fname
@@ -577,6 +646,7 @@ def handle_macos():
     except Exception:
         pass
     return {"type": "unknown"}
+
 
 def handle_linux():
     try:
@@ -588,7 +658,8 @@ def handle_linux():
         pass
 
     try:
-        data = subprocess.check_output(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], stderr=subprocess.DEVNULL)
+        data = subprocess.check_output(
+            ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], stderr=subprocess.DEVNULL)
         if data:
             fname = get_timestamp_filename(".png")
             path = OUTPUT_DIR / fname
@@ -598,6 +669,7 @@ def handle_linux():
     except Exception:
         pass
     return {"type": "unknown"}
+
 
 def main():
     # 检查第一个命令行参数是否为 "get_size"
@@ -621,7 +693,8 @@ def main():
         except Exception as e:
             # 捕获剪贴板处理过程中的全局错误
             print(json.dumps({"error": str(e)}, ensure_ascii=False))
-            sys.exit(1) # 以非零状态码退出表示失败
+            sys.exit(1)  # 以非零状态码退出表示失败
+
 
 if __name__ == "__main__":
     main()

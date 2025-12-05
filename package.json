@@ -12,7 +12,8 @@
     "*",
     "onCommand:qqq.q1",
     "onCommand:qqq.q2",
-    "onCommand:qqq.toggleBlockMode"
+    "onCommand:qqq.toggleBlockMode",
+    "onCommand:qqq.pure"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -31,7 +32,7 @@
     "commands": [
       {
         "command": "qqq.q1",
-        "title": "q1"
+        "title": "qqq: q1"
       },
       {
         "command": "qqq.toggleBlockMode",
@@ -39,11 +40,15 @@
       },
       {
         "command": "qqq.q2",
-        "title": "q2"
+        "title": "qqq: q2"
       },
       {
         "command": "qqq.saveAsDialog",
         "title": "qqq: 新建文件..."
+      },
+      {
+        "command": "qqq.pure",
+        "title": "qqq: pure"
       }
     ],
     "keybindings": [
