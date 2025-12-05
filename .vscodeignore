@@ -7,6 +7,9 @@
 .qoder/**
 .git/**
 
+# 防止套娃！忽略打包生成的安装包
+*.vsix  <--- 加上这一行！！！
+
 # 测试文件
 test-config-fix.js
 *.test.js
@@ -24,7 +27,7 @@ extension.js
 .DS_Store
 Thumbs.db
 
-# 编译赢出（如果有）
+# 编译输出
 out/**
 dist/**
 
