@@ -12,18 +12,8 @@ test-config-fix.js
 *.test.js
 *.spec.js
 
-# 文档（保留 README）
-重构完成报告.md
-功能测试清单.md
-问题修复报告.md
-ConfigManager使用指南.md
-已做滴工作步骤简要.txt
-
 # 原始备份文件
 extension.js
-
-# Node 模块（会自动处理）
-node_modules/**
 
 # 日志文件
 *.log
