@@ -1,16 +1,17 @@
-# HTML模板结构设计
+<!-- File: .qoder/repowiki/zh/content/Q2 文件导航功能/UI渲染与模板系统/HTML模板结构设计.md -->
+# HTML 模板结构设计
 
 <cite>
-**本文档引用文件**  
+**本文档引用文件**
 - [q2.html](file://src/q2.html)
 - [q2界面完全修复报告.md](file://q2界面完全修复报告.md)
 </cite>
 
 ## 目录
-1. [DOCTYPE声明与安全策略](#doctype声明与安全策略)  
-2. [响应式布局结构](#响应式布局结构)  
-3. [核心CSS类定位机制](#核心css类定位机制)  
-4. [语义化DOM结构](#语义化dom结构)  
+1. [DOCTYPE声明与安全策略](#doctype声明与安全策略)
+2. [响应式布局结构](#响应式布局结构)
+3. [核心CSS类定位机制](#核心css类定位机制)
+4. [语义化DOM结构](#语义化dom结构)
 5. [JavaScript绑定关系](#javascript绑定关系)
 
 ## DOCTYPE声明与安全策略
@@ -21,7 +22,7 @@
 - **视口配置**：`<meta name="viewport" content="width=device-width, initial-scale=1.0">`确保页面在不同设备上自适应缩放。
 - **内容安全策略（CSP）**：通过`Content-Security-Policy`严格限制资源加载，仅允许内联脚本和样式（`'unsafe-inline'`）以及VS Code WebView资源（`vscode-webview-resource:`），有效防止XSS攻击。
 
-**Section sources**  
+**Section sources**
 - [q2.html](file://src/q2.html#L1-L15)
 
 ## 响应式布局结构
@@ -34,7 +35,7 @@ HTML整体采用Flexbox布局实现响应式分层结构，由`<body>`的`flex-d
 
 该布局通过`flex: 1`和`overflow`属性的协同，确保中部区域占据剩余空间并实现内容滚动，而顶部和底部保持固定。
 
-**Section sources**  
+**Section sources**
 - [q2.html](file://src/q2.html#L16-L25)
 
 ## 核心CSS类定位机制
@@ -48,7 +49,7 @@ HTML整体采用Flexbox布局实现响应式分层结构，由`<body>`的`flex-d
 
 `position: fixed`与`position: absolute`的协同使用，实现了侧边栏、主内容区和页脚的分层固定，同时保证了布局的灵活性和响应性。
 
-**Section sources**  
+**Section sources**
 - [q2.html](file://src/q2.html#L30-L100)
 
 ## 语义化DOM结构
@@ -60,7 +61,7 @@ HTML整体采用Flexbox布局实现响应式分层结构，由`<body>`的`flex-d
 - **回收站**：位于`.recycle-bin-section`，通过`{{RECYCLE_BIN_HTML}}`占位符注入，显示历史删除的目录。
 - **文件列表容器**：`.file-list-container`（id="fileList"）是动态文件项的容器，其内部结构包含`.sz-area`（大小显示区）、`.file-select-area`（选择区）和`.folder-name-area`（文件夹名区），使用emoji图标`📁`和`📄`。
 
-**Section sources**  
+**Section sources**
 - [q2.html](file://src/q2.html#L101-L200)
 - [q2界面完全修复报告.md](file://q2界面完全修复报告.md#L0-L194)
 
@@ -75,6 +76,6 @@ HTML整体采用Flexbox布局实现响应式分层结构，由`<body>`的`flex-d
 
 此外，`{{INLINE_SCRIPT}}`占位符被`q2.js`中的完整JavaScript代码替换，注入了`selectItem`、`startRename`、`refreshSizeDisplay`等核心函数，实现了文件选中、重命名、右键菜单等全部交互逻辑。
 
-**Section sources**  
+**Section sources**
 - [q2.html](file://src/q2.html#L201-L300)
 - [q2界面完全修复报告.md](file://q2界面完全修复报告.md#L0-L194)

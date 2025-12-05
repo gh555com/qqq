@@ -1,3 +1,4 @@
+# File: package.json
 {
   "name": "qqq",
   "displayName": "qqq",
@@ -108,6 +109,18 @@
     "image",
     "图片",
     "粘贴图片",
+    "图片粘贴",
+    "貼り付け",
+    "写真",
+    "ペースト",
+    "画像を貼り付け",
+    "画像貼り付け",
+    "사진을 붙이다",
+    "사진붙이기",
+    "Bild einfügen",
+    "Bild-Einfügen",
+    "Coller Image",
+    "Collage Image",
     "画像",
     "bild",
     "이미지",

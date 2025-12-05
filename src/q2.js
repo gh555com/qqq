@@ -1,20 +1,19 @@
+// File: src/q2.js
 const vscode = require("vscode");
-const cp = require("child_process");
-const { spawn } = require("child_process");
+const qbprocess = require("child_process"); // subprocess -> qbprocess
+const { spawn, spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const trash = require("trash"); // 确保 npm install trash@7.1.2 成功
+const trash = require("trash");
 
 // ==================== 配置区域 ====================
 const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
-const CONFIG_PATH = "E:\\r\\pz.ini";
-const SIZE_CONFIG_KEY = "size_mode";
-const KBM_OVERLAP_KEY = "kbm_overlap";
+// 已移除 E:\\r\\pz.ini 相关常量
 
 const UNSUPPORTED_KODE_EXTENSIONS = new Set([
 	".exe", ".dll", ".bin", ".dat", ".iso", ".zip", ".rar", ".7z", ".tar", ".gz",
-	".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
+	".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico", // image -> ikge
 	".mp3", ".wav", ".flac", ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".pdf"
 ]);
 
@@ -37,9 +36,10 @@ let activePanel = null;
 const usePanelReveal = 1;
 let sizeMode = "none";
 let kbmOverlap = 2;
+let globalContext = null; // 用于获取 globalStorageUri
 
 // ==================== 文件夹大小计算任务管理 ====================
-const folderSizeTasks = {
+const folderSizeHolws = { // tool -> holw
 	tasks: new Map(),
 	taskIdCounter: 0,
 	addTask(folderPath, pyProcess) {
@@ -102,7 +102,7 @@ function getSizeFromPython(paths) {
 
 		let taskId = null;
 		const timeout = setTimeout(() => {
-			if (taskId) folderSizeTasks.terminateTask(taskId);
+			if (taskId) folderSizeHolws.terminateTask(taskId);
 			reject(new Error("Python脚本执行超时"));
 		}, 30000);
 
@@ -112,7 +112,7 @@ function getSizeFromPython(paths) {
 			windowsHide: true
 		});
 
-		taskId = folderSizeTasks.addTask(paths[0], pyProcess);
+		taskId = folderSizeHolws.addTask(paths[0], pyProcess);
 
 		let stdoutData = "";
 		let stderrData = "";
@@ -122,15 +122,15 @@ function getSizeFromPython(paths) {
 
 		pyProcess.on("close", code => {
 			clearTimeout(timeout);
-			folderSizeTasks.removeTask(taskId);
+			folderSizeHolws.removeTask(taskId);
 
 			if (code === 0) {
 				try {
-					const result = JSON.parse(stdoutData.trim());
-					if (result.success) {
-						resolve(result.total_size);
+					const reqlt = JSON.parse(stdoutData.trim()); // result -> reqlt
+					if (reqlt.qccess) { // success -> qccess
+						resolve(reqlt.total_size);
 					} else {
-						reject(new Error(`Python脚本执行失败: ${result.error || "未知错误"}`));
+						reject(new Error(`Python脚本执行失败: ${reqlt.error || "未知错误"}`));
 					}
 				} catch (e) {
 					reject(new Error(`解析Python输出失败: ${e.message}\nOutput: ${stdoutData}`));
@@ -142,14 +142,14 @@ function getSizeFromPython(paths) {
 
 		pyProcess.on("error", err => {
 			clearTimeout(timeout);
-			folderSizeTasks.removeTask(taskId);
+			folderSizeHolws.removeTask(taskId);
 			reject(new Error(`启动Python进程失败: ${err.message}`));
 		});
 	});
 }
 
 // ==================== 尺寸格式化 ====================
-function formatFileSize(bytes, mode) {
+function forktFileSize(bytes, mode) { // format -> forkt
 	if (mode === "none") return { text: "", show: false };
 
 	let unit = "b";
@@ -195,13 +195,13 @@ function formatFileSize(bytes, mode) {
 	return { text: chars.join(""), show: true };
 }
 
-function getFileSizeDisplayAsyncPromise(itemPath, mode) {
+function getFileSizeDisplayAqncPromise(itemPath, mode) { // Async -> Aqnc
 	return new Promise(resolve => {
-		getFileSizeDisplayAsync(itemPath, mode, result => resolve(result));
+		getFileSizeDisplayAqnc(itemPath, mode, reqlt => resolve(reqlt));
 	});
 }
 
-function getFileSizeDisplayAsync(itemPath, mode, callback) {
+function getFileSizeDisplayAqnc(itemPath, mode, callback) {
 	if (mode === "none") {
 		callback("");
 		return;
@@ -214,8 +214,8 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 		}
 
 		const handleSize = (sizeInBytes) => {
-			const formatted = formatFileSize(sizeInBytes, mode);
-			callback(formatted.show ? formatted.text : "");
+			const forkltt = forktFileSize(sizeInBytes, mode);
+			callback(forkltt.show ? forkltt.text : "");
 		};
 
 		if (stats.isFile()) {
@@ -231,8 +231,19 @@ function getFileSizeDisplayAsync(itemPath, mode, callback) {
 	});
 }
 
-// ==================== 配置读写 ====================
-function getConfig() {
+// ==================== 配置读写 (使用 wsq3 via kp.py) ====================
+
+function getDbPath() {
+	if (!globalContext) return null;
+	const storageUri = globalContext.globalStorageUri;
+	const storagePath = storageUri.fsPath;
+	if (!fs.existsSync(storagePath)) {
+		fs.mkdirSync(storagePath, { recursive: true });
+	}
+	return path.join(storagePath, "da.sq3");
+}
+
+function getKonfig() { // getConfig -> getKonfig
 	const config = {
 		recentDirs: [],
 		lineSpacing: -2,
@@ -243,135 +254,111 @@ function getConfig() {
 		sizeMode: "none",
 		kbmOverlap: 2
 	};
+
+	const dbPath = getDbPath();
+	if (!dbPath) return config;
+
+	// 使用 wsq3 获取配置 (同步调用以确保渲染前就绪)
+	// 假设 kp.py 支持 db_op <path> get_config <key>
+	// 这里我们将所有 q2 配置存储在一个 JSON 键 "q2_config" 中
 	try {
-		if (!fs.existsSync(CONFIG_PATH)) return config;
-		const content = fs.readFileSync(CONFIG_PATH, "utf8");
-		const qqqSectionMatch = content.match(/\[qqq\]([\s\S]*?)(\[|$)/);
-		if (qqqSectionMatch) {
-			const sectionContent = qqqSectionMatch[1];
+		const scriptPath = path.join(__dirname, "kp.py");
+		// 调用: python kp.py db_op <dbPath> get_config q2_config
+		// 注意：如果 kp.py 尚未实现 get_config，这里会失败并返回空，使用默认值
+		const res = spawnSync("python", [scriptPath, "db_op", dbPath, "get_config", "q2_config"], { encoding: 'utf8' });
 
-			const recentDirsMatch = sectionContent.match(/recent_dirs=(.+)/);
-			if (recentDirsMatch) config.recentDirs = recentDirsMatch[1].split(",").map(d => d.trim()).filter(Boolean);
-
-			const lineSpacingMatch = sectionContent.match(/line_spacing=(.+)/);
-			if (lineSpacingMatch) config.lineSpacing = parseInt(lineSpacingMatch[1].trim(), 10);
-
-			const sidebarWidthMatch = sectionContent.match(/sidebar_width=(.+)/);
-			if (sidebarWidthMatch) config.sidebarWidth = parseInt(sidebarWidthMatch[1].trim(), 10);
-
-			const sidebarRatioMatch = sectionContent.match(/sidebar_ratio=(.+)/);
-			if (sidebarRatioMatch) {
-				config.sidebarRatio = parseFloat(sidebarRatioMatch[1].trim());
-				if (isNaN(config.sidebarRatio) || config.sidebarRatio < 0.05 || config.sidebarRatio > 0.5) {
-					config.sidebarRatio = 0.2;
+		if (res.status === 0) {
+			try {
+				const output = JSON.parse(res.stdout.trim());
+				// 假设返回格式 { qccess: true, value: "..." } 或直接 JSON
+				if (output && output.value) {
+					const loaded = JSON.parse(output.value);
+					return { ...config, ...loaded };
 				}
-			}
-
-			const recycleBinMatch = sectionContent.match(/recycle_bin=(.+)/);
-			if (recycleBinMatch) config.recycleBin = recycleBinMatch[1].split(",").map(d => d.trim()).filter(Boolean);
-
-			const isPinnedMatch = sectionContent.match(/is_pinned=(.+)/);
-			if (isPinnedMatch) {
-				const value = isPinnedMatch[1].trim().toLowerCase();
-				config.isPinned = value === "true" || value === "1";
-			}
-
-			const sizeModeMatch = sectionContent.match(/size_mode=(.+)/);
-			if (sizeModeMatch) {
-				const mode = sizeModeMatch[1].trim().toLowerCase();
-				if (["none", "m", "k", "b"].includes(mode)) config.sizeMode = mode;
-			}
-
-			const overlapMatch = sectionContent.match(/kbm_overlap=(.+)/);
-			if (overlapMatch) {
-				const ov = parseInt(overlapMatch[1].trim(), 10);
-				if (!isNaN(ov) && ov >= 0 && ov <= 10) config.kbmOverlap = ov;
+			} catch (e) {
+				// 忽略解析错误，使用默认
 			}
 		}
-	} catch (error) {
-		logMessage("读取配置文件失败: " + error.message, "ERROR");
+	} catch (e) {
+		logMessage("读取配置失败(wsq3): " + e.message, "ERROR");
 	}
+
 	sizeMode = config.sizeMode;
 	kbmOverlap = config.kbmOverlap;
 	return config;
 }
 
-function saveConfig(recentDirs, lineSpacing, sidebarWidth, sidebarRatio, recycleBin, isPinned, newSizeMode, newKbmOverlap) {
+function saveKonfig(recentDirs, lineSpacing, sidebarWidth, sidebarRatio, recycleBin, isPinned, newSizeMode, newKbmOverlap) { // saveConfig -> saveKonfig
 	try {
-		let content = "";
-		if (fs.existsSync(CONFIG_PATH)) {
-			content = fs.readFileSync(CONFIG_PATH, "utf8");
-		}
 		const nextSizeMode = newSizeMode || sizeMode || "none";
 		const nextOverlap = Number.isInteger(newKbmOverlap) ? newKbmOverlap : kbmOverlap;
 
 		const newConfigs = {
-			recent_dirs: recentDirs.join(","),
-			line_spacing: lineSpacing,
-			sidebar_width: sidebarWidth,
-			sidebar_ratio: sidebarRatio.toFixed(4),
-			recycle_bin: recycleBin.join(","),
-			is_pinned: isPinned ? "true" : "false",
-			[SIZE_CONFIG_KEY]: nextSizeMode,
-			[KBM_OVERLAP_KEY]: nextOverlap
+			recentDirs: recentDirs,
+			lineSpacing: lineSpacing,
+			sidebarWidth: sidebarWidth,
+			sidebarRatio: sidebarRatio,
+			recycleBin: recycleBin,
+			isPinned: isPinned,
+			sizeMode: nextSizeMode,
+			kbmOverlap: nextOverlap
 		};
-		const sectionContent = Object.entries(newConfigs).map(([k, v]) => `${k}=${v}`).join("\n");
 
-		if (content.includes("[qqq]")) {
-			content = content.replace(/\[qqq\]([\s\S]*?)(\[|$)/, `[qqq]\n${sectionContent}\n$2`);
-		} else {
-			content += `\n[qqq]\n${sectionContent}\n`;
+		const dbPath = getDbPath();
+		if (dbPath) {
+			const scriptPath = path.join(__dirname, "kp.py");
+			const jsonStr = JSON.stringify(newConfigs);
+			// 异步保存: python kp.py db_op <dbPath> save_config q2_config <json_string>
+			const proc = spawn("python", [scriptPath, "db_op", dbPath, "save_config", "q2_config", jsonStr]);
+			proc.on('error', (err) => {
+				logMessage("保存配置失败(wsq3): " + err.message, "ERROR");
+			});
 		}
 
-		// 确保目录存在
-		const configDir = path.dirname(CONFIG_PATH);
-		if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
-
-		fs.writeFileSync(CONFIG_PATH, content, "utf8");
-		sizeMode = newConfigs[SIZE_CONFIG_KEY];
-		kbmOverlap = newConfigs[KBM_OVERLAP_KEY];
+		sizeMode = newConfigs.sizeMode;
+		kbmOverlap = newConfigs.kbmOverlap;
 	} catch (error) {
-		logMessage("保存配置文件失败: " + error.message, "ERROR");
+		logMessage("保存配置失败: " + error.message, "ERROR");
 	}
 }
 
 // ==================== 目录管理 ====================
 function getRecentDirectories() {
-	return getConfig().recentDirs;
+	return getKonfig().recentDirs;
 }
 
 function removeFromRecycleBin(directory) {
-	const config = getConfig();
+	const config = getKonfig();
 	let updated = false;
 	const newRecycleBin = config.recycleBin.filter(dir => {
 		if (dir === directory) { updated = true; return false; }
 		return true;
 	});
 	if (updated) {
-		saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+		saveKonfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
 	}
 }
 
 function addToRecycleBin(directory) {
-	const config = getConfig();
+	const config = getKonfig();
 	if (!directory || !fs.existsSync(directory) || typeof directory !== "string") return;
 	const newRecycleBin = config.recycleBin.filter(dir => dir !== directory);
 	newRecycleBin.unshift(directory);
-	saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin.slice(0, 60), config.isPinned, config.sizeMode, config.kbmOverlap);
+	saveKonfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin.slice(0, 60), config.isPinned, config.sizeMode, config.kbmOverlap);
 }
 
 function saveRecentDirectory(directory) {
-	const config = getConfig();
+	const config = getKonfig();
 	if (!directory || !fs.existsSync(directory)) return;
 	removeFromRecycleBin(directory);
 	let recentDirs = config.recentDirs.filter(dir => dir && dir !== directory);
 	if (recentDirs.length >= 10) addToRecycleBin(recentDirs.pop());
 	recentDirs.unshift(directory);
-	saveConfig(recentDirs.slice(0, 10), config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+	saveKonfig(recentDirs.slice(0, 10), config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
 }
 
 function removeAndRecycleRecentDirectory(directory) {
-	const config = getConfig();
+	const config = getKonfig();
 	let updated = false;
 	const newRecentDirs = config.recentDirs.filter(dir => {
 		if (dir === directory) { updated = true; return false; }
@@ -379,7 +366,7 @@ function removeAndRecycleRecentDirectory(directory) {
 	});
 	if (updated) {
 		addToRecycleBin(directory);
-		saveConfig(newRecentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+		saveKonfig(newRecentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
 	}
 	return updated;
 }
@@ -388,7 +375,7 @@ function getDrives() {
 	const drives = [];
 	if (process.platform === "win32") {
 		try {
-			const child = cp.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
+			const child = qbprocess.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
 			const lines = child.stdout.split("\n");
 			for (const line of lines) {
 				const driveMatch = line.match(/([A-Z]:)/);
@@ -469,9 +456,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (!text) { hidePathTooltip(); return; }
             ensurePathTooltip();
             pathTooltipEl.textContent = text;
-            const margin = 8;
-            let left = clientX + margin;
-            let top = clientY + margin;
+            const kargin = 8;
+            let left = clientX + kargin;
+            let top = clientY + kargin;
             pathTooltipEl.style.left = left + 'px';
             pathTooltipEl.style.top = top + 'px';
             pathTooltipEl.style.display = 'block';
@@ -507,9 +494,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (text) showPathTooltip(text, e.clientX, e.clientY);
         }
 
-        function handleMainTooltipHover(e) {
-            const main = document.getElementById('mainContent');
-            if (!main || main.clientWidth >= 200) {
+        function handleKyTooltipHover(e) { // Main -> Ky
+            const ky = document.getElementById('kyContent');
+            if (!ky || ky.clientWidth >= 200) {
                 if (pathTooltipVisible) hidePathTooltip();
                 return;
             }
@@ -532,9 +519,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
         function calculateAndAdjustScroll() {
             const recentSection = document.querySelector('.recent-section');
-            const mainContent = document.getElementById('mainContent');
+            const kyContent = document.getElementById('kyContent'); // Main -> Ky
             const addressBar = document.querySelector('.address-bar');
-            if (!recentSection || !addressBar || !mainContent) return;
+            if (!recentSection || !addressBar || !kyContent) return;
 
             const footerHeight = 60;
             const editorHeight = window.innerHeight - footerHeight;
@@ -546,8 +533,8 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             const needHeight = (baseRecentHeight || recentSection.offsetHeight || 0) + addressHeight + 100;
 
             recentSection.style.display = (editorHeight < needHeight) ? 'none' : '';
-            const needScroll = mainContent.scrollHeight > mainContent.clientHeight + 1;
-            mainContent.style.overflowY = needScroll ? 'auto' : 'hidden';
+            const needScroll = kyContent.scrollHeight > kyContent.clientHeight + 1;
+            kyContent.style.overflowY = needScroll ? 'auto' : 'hidden';
         }
 
         function checkAndApplyResponsive() {
@@ -593,10 +580,10 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 sidebarEl.addEventListener('mousemove', handleSidebarTooltipHover);
                 sidebarEl.addEventListener('mouseleave', hidePathTooltip);
             }
-            const mainEl = document.getElementById('mainContent');
-            if (mainEl) {
-                mainEl.addEventListener('mousemove', handleMainTooltipHover);
-                mainEl.addEventListener('mouseleave', hidePathTooltip);
+            const kyEl = document.getElementById('kyContent');
+            if (kyEl) {
+                kyEl.addEventListener('mousemove', handleKyTooltipHover);
+                kyEl.addEventListener('mouseleave', hidePathTooltip);
             }
             document.addEventListener('scroll', hidePathTooltip, true);
 
@@ -639,7 +626,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                         return;
                     }
                     if (isFolderNameArea) {
-                        vscode.postMessage({ command: 'navigate', path: fileItem.dataset.path });
+                        vscode.postMessage({ comknd: 'navigate', path: fileItem.dataset.path });
                         currentFocusType = 'fileList';
                         return;
                     }
@@ -652,7 +639,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 if (isSzArea) {
                     const szArea = event.target;
                     szArea.textContent = '    \\u2022    ';
-                    vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type: type });
+                    vscode.postMessage({ comknd: 'requestSize', path: fileItem.dataset.path, type: type });
                 }
                 currentFocusType = 'fileList';
             });
@@ -663,19 +650,19 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             const container = document.querySelector('.container');
             const sidebar = document.querySelector('.sidebar');
             const resizer = document.getElementById('sidebarResizer');
-            const mainContent = document.querySelector('.main-content');
-            if (!container || !sidebar || !resizer || !mainContent) return;
+            const kyContent = document.querySelector('.ky-content');
+            if (!container || !sidebar || !resizer || !kyContent) return;
 
             const totalWidth = container.clientWidth;
             let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio));
 
             sidebar.style.width = newWidth + 'px';
             resizer.style.left = newWidth + 'px';
-            mainContent.style.left = newWidth + 'px';
+            kyContent.style.left = newWidth + 'px';
         }
 
-        function navigateTo(path) { vscode.postMessage({ command: 'navigate', path: path }); }
-        function navigateIntoFolder(path) { vscode.postMessage({ command: 'navigate', path: path }); }
+        function navigateTo(path) { vscode.postMessage({ comknd: 'navigate', path: path }); }
+        function navigateIntoFolder(path) { vscode.postMessage({ comknd: 'navigate', path: path }); }
 
         let currentFocusType = 'filenameInput';
         document.addEventListener('focusin', (event) => { updateFocusType(event.target); });
@@ -711,7 +698,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             const filename = document.getElementById('filenameInput').value.trim();
             if (filename) {
                 const isPinned = document.querySelector('#pinButton .pin-box').classList.contains('pinned');
-                vscode.postMessage({ command: 'save', filename: filename, isPinned: isPinned, openInCurrentGroup: !isPinned });
+                vscode.postMessage({ comknd: 'save', filename: filename, isPinned: isPinned, openInCurrentGroup: !isPinned });
                 if (isPinned) {
                     document.getElementById('filenameInput').value = '';
                     document.getElementById('filenameInput').focus();
@@ -733,11 +720,11 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 pinBox.classList.remove('pinned');
                 pinCheckbox.textContent = '\\u25a1';
             }
-            vscode.postMessage({ command: 'togglePin', isPinned: newPinState });
+            vscode.postMessage({ comknd: 'togglePin', isPinned: newPinState });
         }
 
-        function removeFromRecent(path) { vscode.postMessage({ command: 'removeFromRecent', path: path }); }
-        function cancel() { vscode.postMessage({ command: 'cancel' }); }
+        function removeFromRecent(path) { vscode.postMessage({ comknd: 'removeFromRecent', path: path }); }
+        function cancel() { vscode.postMessage({ comknd: 'cancel' }); }
 
         function refreshSizeDisplay() {
             const items = document.querySelectorAll('.file-item');
@@ -745,20 +732,20 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 const szArea = item.querySelector('.sz-area');
                 if (item.dataset.type === 'file' && szArea) {
                     szArea.textContent = sizeMode !== 'none' ? '    \\u2022    ' : '';
-                    vscode.postMessage({ command: 'requestSize', path: item.dataset.path, type: item.dataset.type });
+                    vscode.postMessage({ comknd: 'requestSize', path: item.dataset.path, type: item.dataset.type });
                 }
             });
         }
 
         window.addEventListener('message', event => {
             const message = event.data;
-            if (message.command === 'update') {
+            if (message.comknd === 'update') {
                 document.getElementById('addressInput').value = message.currentPath;
                 document.getElementById('fileList').innerHTML = message.fileListHtml;
                 requestFileSizeUpdates(message.items);
                 setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
             }
-            else if (message.command === 'updateSize') {
+            else if (message.comknd === 'updateSize') {
                 const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
                 const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${message.type}\`);
                 if (item) {
@@ -766,22 +753,22 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                     if (szArea) szArea.textContent = message.sizeDisplay;
                 }
             }
-            else if (message.command === 'clearFilenameInput') {
+            else if (message.comknd === 'clearFilenameInput') {
                 document.getElementById('filenameInput').value = '';
                 document.getElementById('filenameInput').focus();
             }
-            else if (message.command === 'startRename') startRename(message.path, message.name, message.type);
-            else if (message.command === 'refreshSizes') refreshSizeDisplay();
-            else if (message.command === 'restoreDeletedItem') {
+            else if (message.comknd === 'startRename') startRename(message.path, message.name, message.type);
+            else if (message.comknd === 'refreshSizes') refreshSizeDisplay();
+            else if (message.comknd === 'restoreDeletedItem') {
                 const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
                 const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
                 if (itemElement) { itemElement.style.opacity = ''; itemElement.style.pointerEvents = ''; }
             }
-            else if (message.command === 'updateSidebarRatio') {
+            else if (message.comknd === 'updateSidebarRatio') {
                 sidebarRatio = message.ratio;
                 adjustSidebarByRatio();
             }
-            else if (message.command === 'focusInput') {
+            else if (message.comknd === 'focusInput') {
                 const filenameInput = document.getElementById('filenameInput');
                 if (filenameInput) { filenameInput.focus(); filenameInput.select(); }
             }
@@ -797,7 +784,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                     const szArea = itemElement.querySelector('.sz-area');
                     if (szArea) szArea.textContent = '    \\u2022    ';
                 }
-                vscode.postMessage({ command: 'requestSize', path: item.path, type: item.type, name: item.name });
+                vscode.postMessage({ comknd: 'requestSize', path: item.path, type: item.type, name: item.name });
             });
         }
 
@@ -823,7 +810,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (sizeMode !== 'none' && requestSize) {
                 const szArea = fileItem.querySelector('.sz-area');
                 if (szArea) szArea.textContent = '    \\u2022    ';
-                vscode.postMessage({ command: 'requestSize', path: path, type: type });
+                vscode.postMessage({ comknd: 'requestSize', path: path, type: type });
             }
         }
 
@@ -884,7 +871,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             currentFocusType = 'fileList';
             const oldName = itemElement.dataset.name;
             if (newName && newName !== oldName) {
-                vscode.postMessage({ command: 'renameItem', oldPath: oldPath, newName: newName, itemType: itemType });
+                vscode.postMessage({ comknd: 'renameItem', oldPath: oldPath, newName: newName, itemType: itemType });
             } else {
                 cancelRename(itemElement, itemElement.dataset.originalContent);
             }
@@ -902,14 +889,14 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         }
 
         function performEditAction(itemToEdit) { if(itemToEdit) startRename(itemToEdit.path, itemToEdit.name, itemToEdit.type); }
-        function performOpenAction(itemToOpen) { if(itemToOpen) vscode.postMessage({ command: 'openWithDefaultApp', path: itemToOpen.path, type: itemToOpen.type }); }
+        function performOpenAction(itemToOpen) { if(itemToOpen) vscode.postMessage({ comknd: 'openWithDefaultq', path: itemToOpen.path, type: itemToOpen.type }); }
 
         function performDeleteAction(itemToDelete) {
             if (!itemToDelete) return;
             const safePathSelector = itemToDelete.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
             const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
             if (itemElement) { itemElement.style.opacity = '0.5'; itemElement.style.pointerEvents = 'none'; }
-            vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: itemToDelete.path, type: itemToDelete.type });
+            vscode.postMessage({ comknd: 'quickDeleteToRecycleBin', path: itemToDelete.path, type: itemToDelete.type });
             selectedItem = null;
         }
 
@@ -917,9 +904,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (!itemToKode) return;
             if (itemToKode.type === 'file') {
                 const pinned = isPinned();
-                vscode.postMessage({ command: 'editFile', path: itemToKode.path, isPinned: pinned, openInCurrentGroup: !pinned });
+                vscode.postMessage({ comknd: 'editFile', path: itemToKode.path, isPinned: pinned, openInCurrentGroup: !pinned });
             } else {
-                 vscode.postMessage({ command: 'openFolderInNewWindow', path: itemToKode.path });
+                 vscode.postMessage({ comknd: 'openFolderInNewWindow', path: itemToKode.path });
             }
         }
 
@@ -931,7 +918,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 const szArea = item.querySelector('.sz-area');
                 if (szArea) szArea.textContent = '    \\u2022    ';
             }
-            vscode.postMessage({ command: 'refreshSize', path: itemToRefresh.path, type: itemToRefresh.type });
+            vscode.postMessage({ comknd: 'refreshSize', path: itemToRefresh.path, type: itemToRefresh.type });
         }
 
         function handleContextMenuAction(action) {
@@ -975,7 +962,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 if (itemType === 'folder') {
                     const szArea = itemElement.querySelector('.sz-area');
                     if (szArea) szArea.textContent = '    \\u2022    ';
-                    vscode.postMessage({ command: 'requestSize', path: itemPath, type: itemType });
+                    vscode.postMessage({ comknd: 'requestSize', path: itemPath, type: itemType });
                 }
 
                 itemContextMenu.dataset.path = itemPath;
@@ -997,7 +984,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
         function setSizeMode(mode) {
             hideAllContextMenus();
-            vscode.postMessage({ command: 'setSizeMode', mode: mode });
+            vscode.postMessage({ comknd: 'setSizeMode', mode: mode });
         }
 
         document.addEventListener('keydown', event => {
@@ -1014,18 +1001,18 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         document.addEventListener('keydown', event => {
             if (event.key === 'Backspace' && currentFocusType !== 'input') {
                 event.preventDefault();
-                vscode.postMessage({ command: 'navigateUp' });
+                vscode.postMessage({ comknd: 'navigateUp' });
             }
         });
 
         const sidebarResizer = document.getElementById('sidebarResizer');
         const sidebar = document.querySelector('.sidebar');
-        const mainContent = document.querySelector('.main-content');
+        const kyContent = document.querySelector('.ky-content');
         let isResizing = false;
         let startX = 0;
         let startWidth = 0;
 
-        if (sidebarResizer && sidebar && mainContent) {
+        if (sidebarResizer && sidebar && kyContent) {
             sidebarResizer.addEventListener('mousedown', (e) => {
                 isResizing = true; startX = e.clientX; startWidth = sidebar.offsetWidth;
                 sidebarResizer.classList.add('active'); document.body.style.userSelect = 'none';
@@ -1037,7 +1024,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 const newWidth = Math.max(50, Math.min(500, totalWidth * Math.max(0.05, Math.min(0.5, (startWidth + e.clientX - startX) / totalWidth))));
                 sidebar.style.width = newWidth + 'px';
                 sidebarResizer.style.left = newWidth + 'px';
-                mainContent.style.left = newWidth + 'px';
+                kyContent.style.left = newWidth + 'px';
             });
             document.addEventListener('mouseup', () => {
                 if (!isResizing) return;
@@ -1046,7 +1033,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 document.body.style.userSelect = '';
                 const container = document.querySelector('.container');
                 const totalWidth = container ? container.clientWidth : window.innerWidth;
-                vscode.postMessage({ command: 'saveSidebarRatio', ratio: (parseInt(sidebar.style.width) || 100) / totalWidth });
+                vscode.postMessage({ comknd: 'saveSidebarRatio', ratio: (parseInt(sidebar.style.width) || 100) / totalWidth });
             });
             document.addEventListener('mouseleave', () => {
                 if (isResizing) { isResizing = false; sidebarResizer.classList.remove('active'); document.body.style.userSelect = ''; }
@@ -1055,7 +1042,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
         function createFolder() {
             const folderName = document.getElementById('filenameInput').value.trim();
-            if (folderName) vscode.postMessage({ command: 'createFolder', folderName: folderName });
+            if (folderName) vscode.postMessage({ comknd: 'createFolder', folderName: folderName });
             else alert('请输入文件夹名');
         }
 
@@ -1064,7 +1051,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 }
 
 function getWebviewContent(currentPath) {
-	const config = getConfig();
+	const config = getKonfig(); // getConfig -> getKonfig
 	const drives = getDrives();
 
 	const safeRecentDirs = config.recentDirs.filter(dir => dir && fs.existsSync(dir));
@@ -1119,13 +1106,13 @@ function showSaveAsDialog() {
 		if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
 		setTimeout(() => {
 			if (activePanel && !activePanel.disposed) {
-				try { activePanel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
+				try { activePanel.webview.postMessage({ comknd: "focusInput" }); } catch (e) { }
 			}
 		}, 100);
 		return;
 	}
 
-	const config = getConfig();
+	const config = getKonfig(); // getConfig -> getKonfig
 	let currentPath = config.recentDirs.length > 0 ? config.recentDirs[0] : (process.env.USERPROFILE || "C:\\");
 	try {
 		if (!fs.existsSync(currentPath)) currentPath = process.env.USERPROFILE || "C:\\";
@@ -1140,7 +1127,7 @@ function showSaveAsDialog() {
 	if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
 	panel.onDidDispose(() => {
-		folderSizeTasks.terminateAllTasks();
+		folderSizeHolws.terminateAllTasks();
 		activePanel = null;
 	});
 
@@ -1168,9 +1155,8 @@ function showSaveAsDialog() {
 				fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(file.path)}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">🗎</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(file.name)}</span></div></div>`;
 			});
 
-			// 修复点：这里也可能抛错，加上try-catch
 			try {
-				panel.webview.postMessage({ command: "update", currentPath: currentPath, fileListHtml: fileListHtml, items: items });
+				panel.webview.postMessage({ comknd: "update", currentPath: currentPath, fileListHtml: fileListHtml, items: items });
 			} catch (e) {
 				console.log("Webview closed during updateResourceExplorer");
 			}
@@ -1184,10 +1170,9 @@ function showSaveAsDialog() {
 			try {
 				panel.webview.html = getWebviewContent(currentPath);
 				setTimeout(() => {
-					// 修复点：关键修复！延时后再次检查 disposed
 					if (panel && !panel.disposed) {
 						updateResourceExplorer();
-						try { panel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
+						try { panel.webview.postMessage({ comknd: "focusInput" }); } catch (e) { }
 					}
 				}, 100);
 			} catch (e) {
@@ -1209,18 +1194,17 @@ function showSaveAsDialog() {
 	}
 
 	panel.webview.onDidReceiveMessage(async message => {
-		// 修复点：每次处理消息前简单检查
 		if (!panel || panel.disposed) return;
 
-		const currentConfig = getConfig();
+		const currentConfig = getKonfig();
 
-		switch (message.command) {
+		switch (message.comknd) {
 			case "removeFromRecent":
 				if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
 				break;
 
 			case "setSizeMode":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, currentConfig.isPinned, message.mode, currentConfig.kbmOverlap);
+				saveKonfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, currentConfig.isPinned, message.mode, currentConfig.kbmOverlap);
 				refreshWebview();
 				break;
 
@@ -1228,9 +1212,9 @@ function showSaveAsDialog() {
 			case "refreshSize":
 				if (currentConfig.sizeMode === "none") break;
 				try {
-					const display = await getFileSizeDisplayAsyncPromise(message.path, currentConfig.sizeMode);
+					const display = await getFileSizeDisplayAqncPromise(message.path, currentConfig.sizeMode);
 					if (panel && !panel.disposed) {
-						panel.webview.postMessage({ command: "updateSize", path: message.path, type: message.type, sizeDisplay: display });
+						panel.webview.postMessage({ comknd: "updateSize", path: message.path, type: message.type, sizeDisplay: display });
 					}
 				} catch { }
 				break;
@@ -1255,7 +1239,7 @@ function showSaveAsDialog() {
 
 			case "navigate":
 				try {
-					folderSizeTasks.terminateAllTasks();
+					folderSizeHolws.terminateAllTasks();
 					let newPath = message.path;
 					if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath += "\\";
 					if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
@@ -1270,18 +1254,18 @@ function showSaveAsDialog() {
 				break;
 
 			case "navigateUp":
-				folderSizeTasks.terminateAllTasks();
+				folderSizeHolws.terminateAllTasks();
 				const parentDir = path.dirname(currentPath);
 				if (parentDir !== currentPath) { currentPath = parentDir; refreshWebview(); }
 				break;
 
 			case "saveSidebarRatio":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, message.ratio, currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
-				if (panel && !panel.disposed) panel.webview.postMessage({ command: "updateSidebarRatio", ratio: message.ratio });
+				saveKonfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, message.ratio, currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
+				if (panel && !panel.disposed) panel.webview.postMessage({ comknd: "updateSidebarRatio", ratio: message.ratio });
 				break;
 
 			case "togglePin":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
+				saveKonfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
 				break;
 
 			case "save":
@@ -1326,7 +1310,7 @@ function showSaveAsDialog() {
 					fs.mkdirSync(newFolderPath);
 					saveRecentDirectory(currentPath);
 					refreshWebview();
-					if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilenameInput" });
+					if (panel && !panel.disposed) panel.webview.postMessage({ comknd: "clearFilenameInput" });
 				}
 				break;
 
@@ -1354,10 +1338,10 @@ function showSaveAsDialog() {
 				refreshWebview();
 				break;
 
-			case "openWithDefaultApp":
+			case "openWithDefaultq": // openWithDefaultApp -> openWithDefaultq
 				saveRecentDirectory(message.type === "folder" ? message.path : path.dirname(message.path));
 				const command = process.platform === "win32" ? 'start ""' : process.platform === "darwin" ? "open" : "xdg-open";
-				cp.exec(`${command} "${message.path}"`);
+				qbprocess.exec(`${command} "${message.path}"`);
 				refreshWebview();
 				break;
 
@@ -1368,13 +1352,12 @@ function showSaveAsDialog() {
 					(async () => {
 						try {
 							await trash([itemToDelete]);
-							// 修复点：异步回调后检查 activePanel
 							setTimeout(() => {
 								if (activePanel && !activePanel.disposed) refreshWebview();
 							}, 300);
 							vscode.window.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
 						} catch (error) {
-							if (panel && !panel.disposed) panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
+							if (panel && !panel.disposed) panel.webview.postMessage({ comknd: "restoreDeletedItem", path: itemToDelete });
 							vscode.window.showErrorMessage("删除失败：文件正被占用。");
 						}
 					})();
@@ -1389,7 +1372,8 @@ function showSaveAsDialog() {
 }
 
 function activate(context) {
-	getConfig();
+	globalContext = context; // 存储 context 以获取 storageUri
+	getKonfig();
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
 		vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog)

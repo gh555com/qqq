@@ -1,7 +1,8 @@
+<!-- File: .qoder/repowiki/zh/content/故障排除/VSCode类型声明冲突解决.md -->
 # VSCode类型声明冲突解决
 
 <cite>
-**本文档引用的文件**  
+**本文档引用的文件**
 - [package.json](file://package.json)
 - [verify-vscode-declarations.js](file://verify-vscode-declarations.js)
 - [extension.js](file://extension.js)

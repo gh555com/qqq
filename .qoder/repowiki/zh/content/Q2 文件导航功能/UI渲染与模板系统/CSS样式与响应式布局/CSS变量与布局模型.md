@@ -1,7 +1,8 @@
-# CSS变量与布局模型
+<!-- File: .qoder/repowiki/zh/content/Q2 文件导航功能/UI渲染与模板系统/CSS样式与响应式布局/CSS变量与布局模型.md -->
+# CSS 变量与布局模型
 
 <cite>
-**本文档引用的文件**   
+**本文档引用的文件**
 - [q2.html](file://src/q2.html)
 </cite>
 
@@ -45,4 +46,5 @@
 这种尺寸继承关系通过CSS变量和JavaScript的协同工作，实现了高度的动态性和灵活性。侧边栏的宽度变化不仅影响自身的尺寸，还通过调整主内容区的`left`值，实现了主内容区的自动避让，确保了整体布局的协调一致。
 
 **Section sources**
+- [q2.html](file://src/q2.html#L50-L150)
 - [q2.html](file://src/q2.html#L50-L150)

@@ -1,3 +1,4 @@
+# File: README.md
 # QQQ VSCode 扩展
 
 一个功能强大的 VSCode 扩展，提供智能文件操作、图片预览和文件导航功能。
