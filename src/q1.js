@@ -13,7 +13,6 @@ try {
 
 // 公共配置常量
 const LOG_PATH = "D:\\view\\p\\kp.log";
-const BASE_DIR = "D:\\view\\p\\";
 
 /**
  * 日志记录函数
@@ -55,13 +54,30 @@ function runPythonScript(additionalEnv = {}) {
 		return;
 	}
 
+	// --- 核心修改：动态计算保存路径 ---
+	// 获取当前编辑器的文件路径，以确定保存目录
+	const editor = vscode.window.activeTextEditor;
+	let targetDir = "";
+	if (editor && !editor.document.isUntitled) {
+		const currentDocPath = editor.document.uri.fsPath;
+		// 获取当前文件所在的目录
+		const currentDir = path.dirname(currentDocPath);
+		// 拼接 qqq 文件夹
+		targetDir = path.join(currentDir, "qqq");
+	} else {
+		// 如果是未命名文件，暂时回退到旧逻辑，或者提示保存
+		targetDir = "D:\\view\\p";
+	}
+	// ------------------------------------
+
 	const env = {
 		...process.env,
 		PYTHONIOENCODING: "utf-8",
 		...additionalEnv,
 	};
 
-	const child = cp.spawn("python", [scriptPath], {
+	// 将计算出的 targetDir 传递给 Python
+	const child = cp.spawn("python", [scriptPath, targetDir], {
 		stdio: ["pipe", "pipe", "pipe"],
 		env: env,
 	});
@@ -150,7 +166,7 @@ function handleResult(result) {
 	}
 }
 
-// 异步处理图片渲染 - 与extension.js完全一致
+// 异步处理图片渲染
 async function renderImages(editor) {
 	if (!editor) return;
 
@@ -158,7 +174,10 @@ async function renderImages(editor) {
 
 	decorationType = vscode.window.createTextEditorDecorationType({});
 	const decos = [];
-	const regex = /\[([A-Za-z]:[\\\/]view[\\\/]p[\\\/][^\[\]]+)\]/gi;
+
+	// --- 核心修改：正则匹配范围扩大 ---
+	// 以前只匹配 view\p，现在匹配任何绝对路径，因为图片可能在 qqq 文件夹里
+	const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
 
 	const visibleRanges = editor.visibleRanges;
 	if (!visibleRanges || visibleRanges.length === 0) return;
@@ -285,7 +304,8 @@ async function renderImages(editor) {
 class FileCodeLensProvider {
 	provideCodeLenses(document) {
 		const lenses = [];
-		const regex = /\[([A-Za-z]:[\\\/]view[\\\/]p[\\\/][^\[\]]+)\]/gi;
+		// 正则也需要更新匹配所有路径
+		const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
 		const text = document.getText();
 		let match;
 
