@@ -4,6 +4,7 @@
 .vscode/**
 .vscode-test/**
 .gitignore
+.qoder/**
 .git/**
 
 # 测试文件
