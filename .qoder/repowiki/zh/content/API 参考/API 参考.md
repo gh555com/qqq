@@ -1,7 +1,8 @@
+<!-- File: .qoder/repowiki/zh/content/API 参考/API 参考.md -->
 # API 参考
 
 <cite>
-**本文档中引用的文件**   
+**本文档中引用的文件**
 - [package.json](file://package.json)
 - [extension.js](file://extension.js)
 - [src/qqq.js](file://src/qqq.js)
@@ -29,7 +30,7 @@
 ### qqq.q1
 - **Command ID**: `qqq.q1`
 - **标题**: `q1`
-- **快捷键绑定**: 
+- **快捷键绑定**:
   - `Ctrl+V` (Windows/Linux)
   - `Cmd+V` (macOS)
 - **触发条件 (when clause)**: `editorTextFocus && !editorReadonly`
@@ -106,13 +107,13 @@
 
 #### handleResult(result)
 - **功能**: 处理从 `kp.py` 脚本返回的结果，并根据结果类型执行相应操作（如插入文本、渲染图片等）。
-- **参数**: 
+- **参数**:
   - `result` (Object): 从 `kp.py` 返回的 JSON 对象，包含 `type` 字段（如 `text`, `image`, `file` 等）。
 - **返回值**: 无
 
 #### renderImages(editor)
 - **功能**: 异步渲染编辑器中的图片。它会查找文本中 `[路径]` 格式的标记，并将其渲染为内联图片。
-- **参数**: 
+- **参数**:
   - `editor` (vscode.TextEditor): 要渲染的文本编辑器实例。
 - **返回值**: 无
 
@@ -129,7 +130,7 @@
 
 #### 主要功能
 - **读取剪贴板**: 支持 Windows、macOS 和 Linux 平台。
-- **处理内容类型**: 
+- **处理内容类型**:
   - **文件路径**: 复制文件到固定目录 `D:/view/p`。
   - **文本**: 直接返回文本内容。
   - **图片**: 保存为 PNG 格式，文件名使用时间戳。
@@ -143,7 +144,7 @@
 
 #### showSaveAsDialog(context)
 - **功能**: 创建并显示“新建文件”Webview 面板。
-- **参数**: 
+- **参数**:
   - `context` (vscode.ExtensionContext): 扩展上下文。
 - **返回值**: 无
 
@@ -154,7 +155,7 @@
 
 #### getDirectoryContents(dirPath)
 - **功能**: 获取指定目录下的所有子目录和文件信息。
-- **参数**: 
+- **参数**:
   - `dirPath` (string): 目录的完整路径。
 - **返回值**: Object - 包含 `dirs` 和 `files` 数组的对象，每个条目包含名称、路径、类型和修改时间。
 
@@ -166,7 +167,7 @@
 
 #### 构造函数 (sectionName, configPath)
 - **功能**: 创建一个配置管理器实例。
-- **参数**: 
+- **参数**:
   - `sectionName` (string): 配置区域名称（如 `"qqq"`）。
   - `configPath` (string, 可选): 配置文件路径，默认为 `E:\r\pz.ini`。
 - **返回值**: ConfigManager 实例
@@ -178,27 +179,27 @@
 
 #### writeSection(data)
 - **功能**: 将键值对对象写入配置文件的指定区域，会覆盖该区域的所有现有配置。
-- **参数**: 
+- **参数**:
   - `data` (Object): 要写入的键值对对象。
 - **返回值**: 无
 
 #### get(key, defaultValue)
 - **功能**: 读取单个配置项的值。
-- **参数**: 
+- **参数**:
   - `key` (string): 配置项的键名。
   - `defaultValue` (*, 可选): 如果键不存在时返回的默认值。
 - **返回值**: * - 配置项的值。
 
 #### set(key, value)
 - **功能**: 设置单个配置项的值。
-- **参数**: 
+- **参数**:
   - `key` (string): 配置项的键名。
   - `value` (*): 要设置的值。
 - **返回值**: 无
 
 #### update(updates)
 - **功能**: 批量更新配置项，将新值合并到现有配置中，而非完全替换。
-- **参数**: 
+- **参数**:
   - `updates` (Object): 要更新的键值对对象。
 - **返回值**: 无
 
@@ -211,7 +212,7 @@
 ### 支持的消息类型 (从 Node.js 到 Webview)
 - **update**
   - **功能**: 更新 Webview 的文件列表和当前路径。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "update",
@@ -225,7 +226,7 @@
     ```
 - **updateSize**
   - **功能**: 更新单个文件或文件夹的大小显示。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "updateSize",
@@ -239,7 +240,7 @@
   - **数据格式**: `{ "command": "clearFilenameInput" }`
 - **startRename**
   - **功能**: 在指定文件/文件夹上启动重命名操作。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "startRename",
@@ -255,7 +256,7 @@
 ### 支持的消息类型 (从 Webview 到 Node.js)
 - **save**
   - **功能**: 保存新文件。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "save",
@@ -269,7 +270,7 @@
   - **数据格式**: `{ "command": "navigate", "path": "D:\\view\\p" }`
 - **requestSize**
   - **功能**: 请求获取文件或文件夹的大小。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "requestSize",
@@ -279,7 +280,7 @@
     ```
 - **renameItem**
   - **功能**: 重命名文件或文件夹。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "renameItem",
@@ -290,7 +291,7 @@
     ```
 - **deleteToRecycleBin**
   - **功能**: 将文件或文件夹移至回收站。
-  - **数据格式**: 
+  - **数据格式**:
     ```json
     {
       "command": "deleteToRecycleBin",

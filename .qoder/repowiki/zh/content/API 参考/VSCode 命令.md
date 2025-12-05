@@ -1,3 +1,4 @@
+<!-- File: .qoder/repowiki/zh/content/API 参考/VSCode 命令.md -->
 # VSCode 命令
 
 <cite>
@@ -61,7 +62,7 @@ qqq_js --> package_json
 ### qqq.q1 - 智能粘贴
 - **Command ID**: `qqq.q1`
 - **标题**: q1
-- **快捷键绑定**: 
+- **快捷键绑定**:
   - `Ctrl+V` (Windows/Linux)
   - `Cmd+V` (macOS)
 - **触发条件 (when clause)**: `editorTextFocus && !editorReadonly`
@@ -236,7 +237,7 @@ ShowError --> End
 ### 日志记录行为
 - **日志路径**: `D:\view\p\kp.log`
 - **日志级别**: ERROR, WARN
-- **记录内容**: 
+- **记录内容**:
   - 脚本不存在
   - Python stderr输出
   - 退出码非0

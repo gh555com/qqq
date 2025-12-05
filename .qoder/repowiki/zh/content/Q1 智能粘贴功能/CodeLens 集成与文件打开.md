@@ -1,7 +1,8 @@
+<!-- File: .qoder/repowiki/zh/content/Q1 智能粘贴功能/CodeLens 集成与文件打开.md -->
 # CodeLens 集成与文件打开
 
 <cite>
-**Referenced Files in This Document**   
+**Referenced Files in This Document**
 - [extension.js](file://extension.js)
 - [src/q1.js](file://src/q1.js)
 - [src/qqq.js](file://src/qqq.js)

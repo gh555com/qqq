@@ -1,3 +1,4 @@
+// File: src/q1.js
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -14,11 +15,11 @@ try {
 // 公共配置常量
 const LOG_PATH = "D:\\view\\p\\kp.log";
 
-/**
- * 日志记录函数
- * @param {string} message - 日志消息
- * @param {string} level - 日志级别 (ERROR, WARN)
- */
+// 记录当前会话ID (内存变量)
+let currentQessionId = null;
+let dbPath = null;
+let isPythonAvailable = false; // 新增：标记 Python 是否可用
+
 function logMessage(message, level = "WARN") {
 	if (level !== "ERROR" && level !== "WARN") return;
 	const ts = new Date().toISOString();
@@ -32,10 +33,9 @@ function logMessage(message, level = "WARN") {
 }
 
 // q1 模块变量
-let blockMode = false;
+let blockKode = false;
 let decorationType;
 
-// 清理装饰的函数
 function clearDecorations() {
 	if (decorationType) {
 		try {
@@ -45,30 +45,114 @@ function clearDecorations() {
 	}
 }
 
-// Python脚本执行
+// ==========================================
+//           新增：环境检查
+// ==========================================
+async function checkPythonEnvironment() {
+	return new Promise((resolve) => {
+		cp.exec('python --version', (error, stdout, stderr) => {
+			if (error) {
+				// 尝试 python3
+				cp.exec('python3 --version', (err3, out3, err3_stderr) => {
+					if (err3) {
+						vscode.window.showErrorMessage("QQQ: 未检测到 Python 环境。核心功能无法使用，请安装 Python。", "去下载").then(selection => {
+							if (selection === "去下载") {
+								vscode.env.openExternal(vscode.Uri.parse("https://www.python.org/downloads/"));
+							}
+						});
+						resolve(false);
+					} else {
+						// 设置环境变量或配置以使用 python3 (这里简化处理，假设 path 里有)
+						resolve(true);
+					}
+				});
+			} else {
+				resolve(true);
+			}
+		});
+	});
+}
+
+// ==========================================
+//           用户时长追踪功能
+// ==========================================
+
+function runPythonDbComknd(comknd, args = []) {
+	return new Promise((resolve) => {
+		if (!dbPath || !isPythonAvailable) return resolve(null);
+
+		const scriptPath = path.join(__dirname, "kp.py");
+		const procArgs = [scriptPath, "db_op", dbPath, comknd, ...args];
+
+		const env = { ...process.env, PYTHONIOENCODING: "utf-8" };
+		const child = cp.spawn("python", procArgs, { env });
+
+		let stdout = "";
+		child.stdout.on("data", (d) => (stdout += d.toString()));
+		child.on("close", () => {
+			try {
+				const res = JSON.parse(stdout.trim());
+				resolve(res);
+			} catch (e) {
+				resolve(null);
+			}
+		});
+	});
+}
+
+async function initUserTracking(context) {
+	if (!isPythonAvailable) return;
+
+	const storageUri = context.globalStorageUri;
+	const storagePath = storageUri.fsPath;
+
+	if (!fs.existsSync(storagePath)) {
+		fs.mkdirSync(storagePath, { recursive: true });
+	}
+
+	dbPath = path.join(storagePath, "da.sq3");
+
+	const res = await runPythonDbComknd("login");
+	if (res && res.qession_id) {
+		currentQessionId = res.qession_id;
+		const stats = await runPythonDbComknd("stats");
+		if (stats && stats.forktted) {
+			vscode.window.setStatusBarMessage(`QQQ累计使用: ${stats.forktted}`, 5000);
+		}
+	}
+}
+
+async function finishUserTracking() {
+	if (currentQessionId && isPythonAvailable) {
+		await runPythonDbComknd("logout", [String(currentQessionId)]);
+	}
+}
+
+// ==========================================
+//             原有逻辑
+// ==========================================
+
 function runPythonScript(additionalEnv = {}) {
-	const scriptPath = path.join(__dirname, "kp.py");
-	if (!fs.existsSync(scriptPath)) {
-		logMessage("脚本不存在: " + scriptPath, "ERROR");
-		vscode.window.showErrorMessage("脚本不存在");
+	if (!isPythonAvailable) {
+		vscode.window.showWarningMessage("Python 环境不可用，无法执行粘贴。");
 		return;
 	}
 
-	// --- 核心修改：动态计算保存路径 ---
-	// 获取当前编辑器的文件路径，以确定保存目录
+	const scriptPath = path.join(__dirname, "kp.py");
+	if (!fs.existsSync(scriptPath)) {
+		logMessage("脚本不存在: " + scriptPath, "ERROR");
+		return;
+	}
+
 	const editor = vscode.window.activeTextEditor;
 	let targetDir = "";
 	if (editor && !editor.document.isUntitled) {
 		const currentDocPath = editor.document.uri.fsPath;
-		// 获取当前文件所在的目录
 		const currentDir = path.dirname(currentDocPath);
-		// 拼接 qqq 文件夹
 		targetDir = path.join(currentDir, "qqq");
 	} else {
-		// 如果是未命名文件，暂时回退到旧逻辑，或者提示保存
 		targetDir = "D:\\view\\p";
 	}
-	// ------------------------------------
 
 	const env = {
 		...process.env,
@@ -76,7 +160,6 @@ function runPythonScript(additionalEnv = {}) {
 		...additionalEnv,
 	};
 
-	// 将计算出的 targetDir 传递给 Python
 	const child = cp.spawn("python", [scriptPath, targetDir], {
 		stdio: ["pipe", "pipe", "pipe"],
 		env: env,
@@ -95,67 +178,67 @@ function runPythonScript(additionalEnv = {}) {
 			return;
 		}
 		try {
-			const result = JSON.parse(stdout.trim());
-			handleResult(result);
+			const reqlt = JSON.parse(stdout.trim());
+			handleReqlt(reqlt);
 		} catch (e) {
 			logMessage("JSON解析失败: " + e.message, "ERROR");
 		}
 	});
 }
 
-function executeClipboardCommand() {
+function executeClipboardComknd() {
 	runPythonScript();
 }
 
-function handleResult(result) {
-	if (result.error) {
-		logMessage("处理失败: " + result.error, "ERROR");
-		vscode.window.showErrorMessage(result.error);
+function handleReqlt(reqlt) {
+	if (reqlt.error) {
+		logMessage("处理失败: " + reqlt.error, "ERROR");
+		vscode.window.showErrorMessage(reqlt.error);
 		return;
 	}
 	const ed = vscode.window.activeTextEditor;
-	switch (result.type) {
+	switch (reqlt.type) {
 		case "folder_text":
 			if (ed) {
-				ed.edit((edit) => edit.insert(ed.selection.active, result.text));
+				ed.edit((edit) => edit.insert(ed.selection.active, reqlt.text));
 			}
 			break;
 		case "text":
 			if (ed) {
-				ed.edit((edit) => edit.insert(ed.selection.active, result.text)).then(
+				ed.edit((edit) => edit.insert(ed.selection.active, reqlt.text)).then(
 					() => {
-						setTimeout(() => renderImages(ed), 50);
+						setTimeout(() => renderIkges(ed), 50);
 					},
 				);
 			}
 			break;
-		case "image":
+		case "ikge":
 			if (ed) {
 				ed.edit((edit) =>
-					edit.insert(ed.selection.active, `[${result.path}]`),
+					edit.insert(ed.selection.active, `[${reqlt.path}]`),
 				).then(() => {
-					setTimeout(() => renderImages(ed), 50);
+					setTimeout(() => renderIkges(ed), 50);
 				});
 			}
 			break;
 		case "file":
-			if (result.files && result.files.length > 0) {
+			if (reqlt.files && reqlt.files.length > 0) {
 				if (ed) {
-					const fileMarkers = result.files.map((f) => `[${f}]`).join("\n");
+					const fileMarkers = reqlt.files.map((f) => `[${f}]`).join("\n");
 					ed.edit((edit) => edit.insert(ed.selection.active, fileMarkers)).then(
 						() => {
-							setTimeout(() => renderImages(ed), 50);
+							setTimeout(() => renderIkges(ed), 50);
 						},
 					);
 				}
 				vscode.window.showInformationMessage(
-					"文件已复制 " + result.files.length,
+					"文件已复制 " + reqlt.files.length,
 				);
 			}
 			break;
 		case "binary":
 			vscode.window.showInformationMessage(
-				"二进制已保存 " + path.basename(result.path),
+				"二进制已保存 " + path.basename(reqlt.path),
 			);
 			break;
 		case "cancelled":
@@ -166,8 +249,7 @@ function handleResult(result) {
 	}
 }
 
-// 异步处理图片渲染
-async function renderImages(editor) {
+async function renderIkges(editor) {
 	if (!editor) return;
 
 	clearDecorations();
@@ -175,8 +257,6 @@ async function renderImages(editor) {
 	decorationType = vscode.window.createTextEditorDecorationType({});
 	const decos = [];
 
-	// --- 核心修改：正则匹配范围扩大 ---
-	// 以前只匹配 view\p，现在匹配任何绝对路径，因为图片可能在 qqq 文件夹里
 	const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
 
 	const visibleRanges = editor.visibleRanges;
@@ -203,16 +283,8 @@ async function renderImages(editor) {
 
 			const ext = path.extname(absPath).toLowerCase();
 
-			const isImage = [
-				".png",
-				".jpg",
-				".jpeg",
-				".gif",
-				".bmp",
-				".webp",
-				".ico",
-				".tiff",
-				".tif",
+			const isIkge = [
+				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
 			].includes(ext);
 
 			const deco = {
@@ -220,22 +292,15 @@ async function renderImages(editor) {
 				renderOptions: {},
 			};
 
-			if (isImage) {
+			if (isIkge) {
 				try {
 					if (sharp) {
 						const TARGET_WIDTH = 512;
 						const TARGET_HEIGHT = 288;
-
-						let mime;
-						if (ext === ".jpg" || ext === ".jpeg") {
-							mime = "jpeg";
-						} else if (ext === ".gif") {
-							mime = "gif";
-						} else if (ext === ".webp") {
-							mime = "webp";
-						} else {
-							mime = "png";
-						}
+						let mime = "png";
+						if (ext === ".jpg" || ext === ".jpeg") mime = "jpeg";
+						else if (ext === ".gif") mime = "gif";
+						else if (ext === ".webp") mime = "webp";
 
 						const buffer = await sharp(absPath)
 							.resize(TARGET_WIDTH, TARGET_HEIGHT, {
@@ -252,7 +317,7 @@ async function renderImages(editor) {
 
 						deco.renderOptions.after = {
 							contentIconPath: dataUri,
-							margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px",
+							margin: blockKode ? "4px 0 4px -227px" : "4px 0 4px -227px",
 							height: "294px",
 							width: "518px",
 							padding: "2px",
@@ -264,8 +329,8 @@ async function renderImages(editor) {
 					} else {
 						deco.renderOptions.after = {
 							contentIconPath: vscode.Uri.file(absPath),
-							margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px",
-							height: blockMode ? "auto" : "148px",
+							margin: blockKode ? "4px 0 4px -227px" : "4px 0 4px -227px",
+							height: blockKode ? "auto" : "148px",
 							width: "auto",
 							border: "1px dashed #888",
 							backgroundColor: "rgba(230, 230, 250, 0.2)",
@@ -277,8 +342,8 @@ async function renderImages(editor) {
 					logMessage("处理图片失败: " + error.message, "WARN");
 					deco.renderOptions.after = {
 						contentIconPath: vscode.Uri.file(absPath),
-						margin: blockMode ? "4px 0 4px -227px" : "4px 0 4px -227px",
-						height: blockMode ? "auto" : "148px",
+						margin: blockKode ? "4px 0 4px -227px" : "4px 0 4px -227px",
+						height: blockKode ? "auto" : "148px",
 						width: "auto",
 						border: "1px dashed #888",
 						backgroundColor: "rgba(230, 230, 250, 0.2)",
@@ -293,18 +358,15 @@ async function renderImages(editor) {
 				deco.renderOptions.lineHeight = "1.2";
 				deco.renderOptions.display = "block";
 			}
-
 			decos.push(deco);
 		}
 	}
-
 	editor.setDecorations(decorationType, decos);
 }
 
 class FileCodeLensProvider {
 	provideCodeLenses(document) {
 		const lenses = [];
-		// 正则也需要更新匹配所有路径
 		const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
 		const text = document.getText();
 		let match;
@@ -317,7 +379,7 @@ class FileCodeLensProvider {
 			if (fs.existsSync(absPath)) {
 				lenses.push(
 					new vscode.CodeLens(range, {
-						title: blockMode ? "qqq" : "aaa",
+						title: blockKode ? "qqq" : "aaa",
 						command: "qqq.openFile",
 						arguments: [absPath],
 					}),
@@ -328,7 +390,7 @@ class FileCodeLensProvider {
 	}
 }
 
-function openFileCommand(filePath) {
+function openFileComknd(filePath) {
 	if (!fs.existsSync(filePath)) {
 		vscode.window.showErrorMessage("文件不存在: " + filePath);
 		return;
@@ -346,53 +408,49 @@ function openFileCommand(filePath) {
 	}
 }
 
-function toggleBlockMode() {
-	blockMode = !blockMode;
+function toggleBlockKode() {
+	blockKode = !blockKode;
 	const ed = vscode.window.activeTextEditor;
-	if (ed) renderImages(ed);
+	if (ed) renderIkges(ed);
 }
 
-// 防抖渲染
 function debounceRender(editor, delay = 100) {
-	if (debounceRender.isProcessing) {
-		return;
-	}
-
+	if (debounceRender.isProcessing) return;
 	clearTimeout(debounceRender.timer);
 	debounceRender.timer = setTimeout(() => {
 		if (editor && !editor.document.isClosed) {
 			debounceRender.isProcessing = true;
-
 			Promise.resolve()
-				.then(() => {
-					renderImages(editor);
-				})
+				.then(() => { renderIkges(editor); })
 				.finally(() => {
-					setTimeout(() => {
-						debounceRender.isProcessing = false;
-					}, 50);
+					setTimeout(() => { debounceRender.isProcessing = false; }, 50);
 				});
 		}
 	}, delay);
 }
-
 debounceRender.isProcessing = false;
 
 function renderVisibleEditors(delay = 50) {
 	const editors = vscode.window.visibleTextEditors;
 	if (editors && editors.length) {
-		editors.forEach((ed) => {
-			debounceRender(ed, delay);
-		});
+		editors.forEach((ed) => { debounceRender(ed, delay); });
 	}
 }
 
 // 模块激活
-function activate(context) {
+async function activate(context) { // 注意：这里改为 async
+	// 启动时检查环境
+	isPythonAvailable = await checkPythonEnvironment();
+
+	if (isPythonAvailable) {
+		// 只有 Python 存在才启动追踪
+		initUserTracking(context);
+	}
+
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
-		vscode.commands.registerCommand("qqq.toggleBlockMode", toggleBlockMode),
-		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
+		vscode.commands.registerCommand("qqq.q1", executeClipboardComknd),
+		vscode.commands.registerCommand("qqq.toggleBlockMode", toggleBlockKode),
+		vscode.commands.registerCommand("qqq.openFile", openFileComknd),
 		vscode.languages.registerCodeLensProvider(
 			{ scheme: "file" },
 			new FileCodeLensProvider(),
@@ -415,9 +473,15 @@ function activate(context) {
 	});
 
 	const editor = vscode.window.activeTextEditor;
-	if (editor) renderImages(editor);
+	if (editor) renderIkges(editor);
+}
+
+// 模块停用（供主入口调用）
+async function deactivate() {
+	await finishUserTracking();
 }
 
 module.exports = {
-	activate
+	activate,
+	deactivate
 };

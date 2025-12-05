@@ -1,3 +1,4 @@
+# File: 时间参数提前
 主内容区左侧位置变化：transition: left 0.04s ease;
 侧边栏宽度变化：transition: width 0.04s ease;
 分割线背景色和宽度变化：transition: background-color 0.04s, width 0.04s;

@@ -1,7 +1,8 @@
+<!-- File: .qoder/repowiki/zh/content/Q2 文件导航功能/UI渲染与模板系统/内联脚本生成与注入/占位符注入与HTML集成.md -->
 # 占位符注入与HTML集成
 
 <cite>
-**Referenced Files in This Document**   
+**Referenced Files in This Document**
 - [src/q2.html](file://src/q2.html)
 - [src/q2.js](file://src/q2.js)
 - [q2界面完全修复报告.md](file://q2界面完全修复报告.md)
@@ -76,4 +77,5 @@
 
 **Section sources**
 - [src/q2.html](file://src/q2.html#L7-L12)
+- [src/q2.js](file://src/q2.js#L543-L1139)
 - [src/q2.js](file://src/q2.js#L543-L1139)

@@ -1,7 +1,8 @@
-# UI特性与用户交互
+<!-- File: .qoder/repowiki/zh/content/Q2 文件导航功能/UI特性与用户交互/UI特性与用户交互.md -->
+# UI 特性与用户交互
 
 <cite>
-**本文档引用文件**  
+**本文档引用文件**
 - [q2.js](file://src\q2.js)
 - [q2.html](file://src\q2.html)
 - [extension.js](file://extension.js)

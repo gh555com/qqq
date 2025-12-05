@@ -1,7 +1,8 @@
+<!-- File: .qoder/repowiki/zh/content/API 参考/Webview 消息通信.md -->
 # Webview 消息通信
 
 <cite>
-**Referenced Files in This Document**  
+**Referenced Files in This Document**
 - [q2.js](file://src/q2.js)
 - [q2.html](file://src/q2.html)
 </cite>
@@ -18,7 +19,7 @@
 
 该系统通过 VS Code 的 Webview API 实现前端（q2.html）与后端（q2.js）之间的双向通信。前端使用 `vscode.postMessage()` 发送消息，后端通过 `panel.webview.onDidReceiveMessage()` 监听消息并作出响应。后端也可主动向 Webview 发送更新消息以刷新界面状态。
 
-**Section sources**  
+**Section sources**
 - [q2.js](file://src/q2.js#L1626-L1947)
 
 ## 支持的消息类型与数据格式
@@ -39,7 +40,7 @@
 | startRename | 后端通知前端开始重命名 | `{ command: "startRename", path: string, name: string, type: "file"\|"folder" }` |
 | refreshSizes | 用户请求刷新所有大小显示 | `{ command: "refreshSizes" }` |
 
-**Section sources**  
+**Section sources**
 - [q2.js](file://src/q2.js#L535-L879)
 - [q2.js](file://src/q2.js#L1626-L1947)
 
@@ -58,7 +59,7 @@ Backend->>Webview : panel.webview.postMessage({command : "update"})
 Webview->>Webview : 更新界面
 ```
 
-**Diagram sources**  
+**Diagram sources**
 - [q2.js](file://src/q2.js#L535-L879)
 
 ### 后端接收消息（onDidReceiveMessage）
@@ -73,7 +74,7 @@ B --> |togglePin| E[切换固定状态]
 B --> |其他命令| F[执行对应逻辑]
 ```
 
-**Diagram sources**  
+**Diagram sources**
 - [q2.js](file://src/q2.js#L1626-L1947)
 
 ## 消息数据结构字段说明
@@ -91,7 +92,7 @@ B --> |其他命令| F[执行对应逻辑]
 | fileListHtml | string | 生成的文件列表HTML片段 |
 | items | array | 文件项元数据数组 |
 
-**Section sources**  
+**Section sources**
 - [q2.js](file://src/q2.js#L535-L879)
 - [q2.js](file://src/q2.js#L1626-L1947)
 
@@ -114,7 +115,7 @@ Backend->>Backend : openTextDocument()
 Backend->>User : 打开新文件
 ```
 
-**Diagram sources**  
+**Diagram sources**
 - [q2.js](file://src/q2.js#L1756-L1793)
 
 ## 错误处理与边界情况
@@ -128,6 +129,6 @@ Backend->>User : 打开新文件
 - **缓存机制**：使用 `fileSizeCache` 和 `sizeCalculationPromises` 避免重复计算
 - **焦点管理**：精确控制输入框与文件列表的焦点切换逻辑
 
-**Section sources**  
+**Section sources**
 - [q2.js](file://src/q2.js#L1626-L1947)
 - [q2.js](file://src/q2.js#L535-L879)

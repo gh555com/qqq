@@ -1,7 +1,8 @@
-# CSS样式与响应式布局
+<!-- File: .qoder/repowiki/zh/content/Q2 文件导航功能/UI渲染与模板系统/CSS样式与响应式布局/CSS样式与响应式布局.md -->
+# CSS 样式与响应式布局
 
 <cite>
-**Referenced Files in This Document**   
+**Referenced Files in This Document**
 - [q2.html](file://src/q2.html)
 - [q2界面完全修复报告.md](file://q2界面完全修复报告.md)
 </cite>

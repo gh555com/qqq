@@ -1,13 +1,13 @@
+// File: src/qqq.js
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
 // ==================== 公共配置常量 ====================
+// 已移除 E:\\r\\pz.ini 相关配置
 const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
-const CONFIG_PATH = "E:\\r\\pz.ini";
-const SIZE_CONFIG_KEY = "size_mode";
 
 const outputChannel = vscode.window.createOutputChannel("QQQ Extension");
 
@@ -41,14 +41,7 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
-/**
- * 判断文件是否疑似二进制文件
- * 策略：
- * 1. 检查常见二进制扩展名
- * 2. 如果扩展名未知或无扩展名，读取前 4096 字节，查找 null byte (0x00)
- */
 function isLikelyBinary(filePath) {
-	// 1. 常见二进制扩展名列表（快速过滤）
 	const binaryExts = new Set([
 		'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif',
 		'.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o',
@@ -62,34 +55,29 @@ function isLikelyBinary(filePath) {
 		return true;
 	}
 
-	// 2. 字节检测（针对无后缀文件或未知后缀文件）
 	try {
 		const buffer = Buffer.alloc(4096);
 		const fd = fs.openSync(filePath, 'r');
 		try {
 			const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
-			// 只有空文件不算二进制
 			if (bytesRead === 0) return false;
-
-			// 扫描 null byte
 			for (let i = 0; i < bytesRead; i++) {
 				if (buffer[i] === 0) {
-					return true; // 发现 null byte，认为是二进制
+					return true;
 				}
 			}
-			return false; // 未发现 null byte，认为是文本
+			return false;
 		} finally {
 			fs.closeSync(fd);
 		}
 	} catch (e) {
-		// 读取出错，保守起见视为二进制，避免报错
 		return true;
 	}
 }
 
 // ==================== qqq.pure 命令逻辑 ====================
 
-async function pureCommand() {
+async function pureComknd() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		vscode.window.showInformationMessage("请先打开一个文件以确定工作目录");
@@ -100,18 +88,15 @@ async function pureCommand() {
 	const parentDir = path.dirname(currentDocPath);
 	const qqqDir = path.join(parentDir, "qqq");
 
-	// 1. 检查 qqq 目录是否存在
 	if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) {
 		vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹");
 		return;
 	}
 
-	// 2. 获取 qqq 目录下的所有文件 (作为候选孤儿)
 	let qqqFiles = [];
 	try {
 		qqqFiles = fs.readdirSync(qqqDir).filter(f => {
 			const fullPath = path.join(qqqDir, f);
-			// 确保是文件而不是子目录
 			return fs.statSync(fullPath).isFile();
 		});
 	} catch (e) {
@@ -124,7 +109,6 @@ async function pureCommand() {
 		return;
 	}
 
-	// 3. 扫描父目录下所有文件，寻找引用
 	const referencedFiles = new Set();
 	let parentDirFiles = [];
 
@@ -135,18 +119,14 @@ async function pureCommand() {
 		return;
 	}
 
-	// 匹配 [X:\path\to\qqq\filename.ext]
 	const regex = /\[([A-Za-z]:[\\\/].*?)\]/g;
 
 	for (const fileName of parentDirFiles) {
 		const fullPath = path.join(parentDir, fileName);
 
-		// 忽略 qqq 目录本身
 		if (fileName === "qqq") continue;
-		// 忽略 qqq.pure 文件本身（防止读取上一轮生成的垃圾）
 		if (fileName === "qqq.pure") continue;
 
-		// 检查是否为文件
 		let stats;
 		try {
 			stats = fs.statSync(fullPath);
@@ -154,31 +134,24 @@ async function pureCommand() {
 
 		if (!stats.isFile()) continue;
 
-		// 关键步骤：智能判断是否为二进制文件
-		// 如果是二进制文件（图片、exe、无后缀的二进制数据等），跳过扫描
 		if (isLikelyBinary(fullPath)) {
-			// outputChannel.appendLine(`跳过二进制文件: ${fileName}`);
 			continue;
 		}
 
-		// 是文本文件，读取内容扫描
 		try {
 			const content = fs.readFileSync(fullPath, 'utf-8');
 			let match;
 			while ((match = regex.exec(content)) !== null) {
-				const refPath = match[1].replace(/\//g, "\\"); // 统一为 Windows 反斜杠
-				// 检查引用是否指向当前的 qqq 目录
+				const refPath = match[1].replace(/\//g, "\\");
 				if (refPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
 					const refFileName = path.basename(refPath);
 					referencedFiles.add(refFileName.toLowerCase());
 				}
 			}
 		} catch (e) {
-			// 读取失败，忽略
 		}
 	}
 
-	// 4. 找出孤儿文件 (在 qqq 中存在，但未被引用的)
 	const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
 
 	if (orphans.length === 0) {
@@ -186,42 +159,33 @@ async function pureCommand() {
 		return;
 	}
 
-	// 5. 生成 qqq.pure 内容
 	const newLine = "\n";
-	const prefixSpaces = "   "; // 3个空格
+	const prefixSpaces = "   ";
 
-	// 构建删除命令
-	let commandStr = "";
+	let comkndStr = "";
 	const orphanPaths = orphans.map(f => path.join(qqqDir, f));
 
 	if (os.platform() === 'win32') {
-		// Windows: del "path1" "path2"
 		const args = orphanPaths.map(p => `"${p}"`).join(" ");
-		commandStr = `del ${args}`;
+		comkndStr = `del ${args}`;
 	} else {
-		// Linux/Mac: rm "path1" "path2"
 		const args = orphanPaths.map(p => `"${p}"`).join(" ");
-		commandStr = `rm ${args}`;
+		comkndStr = `q rm ${args}`; // sudo -> q
 	}
 
 	let content = "";
 
-	// 第一块：13个空行 + 提示语
 	for (let i = 0; i < 13; i++) content += newLine;
 	content += prefixSpaces + "请在 CMD 窗口中执行下面命令以 删除 当前未引用滴文件：" + newLine;
 
-	// 第二块：3个空行 + 命令
 	for (let i = 0; i < 3; i++) content += newLine;
-	content += prefixSpaces + commandStr + newLine;
+	content += prefixSpaces + comkndStr + newLine;
 
-	// 第三块：3个空行 + 孤儿文件列表
 	for (let i = 0; i < 3; i++) content += newLine;
 
-	// 列表中的每个条目之间间隔4个空行 (即5个newLine)
 	const orphanListStr = orphanPaths.map(p => `[${p}]`).join(newLine + newLine + newLine + newLine + newLine);
 	content += orphanListStr;
 
-	// 6. 写入并打开文件
 	const purePath = path.join(parentDir, "qqq.pure");
 	try {
 		fs.writeFileSync(purePath, content, 'utf-8');
@@ -234,12 +198,14 @@ async function pureCommand() {
 
 // ==================== 模块激活入口 ====================
 
+// 定义外部引用，方便在 deactivate 中调用
+let q1Module = null;
+
 function activate(context) {
 	logMessage("QQQ 扩展开始激活...", "INFO");
 
-	// 注册 qqq.pure 命令
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.pure", pureCommand)
+		vscode.commands.registerCommand("qqq.pure", pureComknd)
 	);
 
 	// --- 加载 Q1 模块 ---
@@ -247,6 +213,7 @@ function activate(context) {
 		const q1 = require('./q1');
 		if (q1 && typeof q1.activate === 'function') {
 			q1.activate(context);
+			q1Module = q1; // 保存引用
 		}
 	} catch (e) {
 		logMessage(`q1 模块加载失败: ${e.message}`, "ERROR");
@@ -266,7 +233,15 @@ function activate(context) {
 	logMessage("QQQ 扩展激活流程结束", "INFO");
 }
 
-function deactivate() {
+async function deactivate() {
+	// 优雅退出：调用 q1 的 deactivate 来记录用户使用时长
+	if (q1Module && typeof q1Module.deactivate === 'function') {
+		try {
+			await q1Module.deactivate();
+		} catch (e) {
+			console.error("Q1 cleanup failed:", e);
+		}
+	}
 	logMessage("QQQ 扩展已停用", "INFO");
 }
 
@@ -275,7 +250,5 @@ module.exports = {
 	deactivate,
 	LOG_PATH,
 	BASE_DIR,
-	CONFIG_PATH,
-	SIZE_CONFIG_KEY,
 	logMessage
 };
