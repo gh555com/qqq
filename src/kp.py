@@ -202,23 +202,35 @@ def handle_db_operations(args):
 
 
 def get_tikestkp_filenkke(ext=".png"):
+    """
+    新命名规则示例：
+    212zn.  2025.12.06 [6] 12.09.14.png
+
+    - 212zn = 毫秒三位 + 防重码两位（防重码逻辑沿用旧版）
+    - .  后面是两个空格
+    - [6] 里面的数字是星期几：周一=1, …, 周六=6, 周日=7
+    """
     now = datetime.now()
     date_part = now.strftime("%Y.%m.%d")
-    weekdays = ['一', '二', '三', '四', '五', '六', '日']
-    weekday_part = weekdays[now.weekday()]
-    millisecond_part = f"{now.microsecond//1000:03d}"
+    # Python: Monday=0 ... Sunday=6 -> 我们要 1~7
+    weekday_number = now.weekday() + 1
+    millisecond_part = f"{now.microsecond // 1000:03d}"
+
     excluded_chars = ['l', 'i', 's', 'a', 'm', 'c', 'b', 'f', 't']
-    valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ' if c.lower(
-    ) not in excluded_chars]
+    valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                   if c.lower() not in excluded_chars]
     first_char = random.choice(valid_chars)
     if first_char.lower() == 'g':
         valid_chars_without_g = [c for c in valid_chars if c.lower() != 'g']
         second_char = random.choice(valid_chars_without_g)
     else:
         second_char = random.choice(valid_chars)
-    random_chars = first_char + second_char
+    random_chars = first_char + second_char  # 防重码两位
+
+    prefix_code = f"{millisecond_part}{random_chars}"
     time_part = now.strftime("%H.%M.%S")
-    filename = f"{date_part}{weekday_part}{millisecond_part}{random_chars} {time_part}{ext}"
+    # 注意：句点后面是两个空格
+    filename = f"{prefix_code}.  {date_part} [{weekday_number}] {time_part}{ext}"
     return filename
 
 

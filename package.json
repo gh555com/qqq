@@ -12,8 +12,8 @@
     "*",
     "onCommand:qqq.q1",
     "onCommand:qqq.q2",
-    "onCommand:qqq.toggleBlockMode",
-    "onCommand:qqq.pure"
+    "onCommand:qqq.pure",
+    "onCommand:qqq.allSettings"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -25,30 +25,23 @@
             "type": "boolean",
             "default": true,
             "description": "是否在文件导航中显示历史回收站。"
+          },
+          "qqq.previewOffset": {
+            "type": "number",
+            "default": 100,
+            "description": "图片/视频预览区域的水平偏移（单位 px）。100 为推荐默认值，数值越小越靠左，越大越靠右。"
           }
         }
       }
     ],
     "commands": [
       {
-        "command": "qqq.q1",
-        "title": "qqq: q1"
-      },
-      {
-        "command": "qqq.toggleBlockMode",
-        "title": "切换块模式"
-      },
-      {
-        "command": "qqq.q2",
-        "title": "qqq: q2"
-      },
-      {
-        "command": "qqq.saveAsDialog",
-        "title": "qqq: 新建文件..."
-      },
-      {
         "command": "qqq.pure",
         "title": "qqq: pure"
+      },
+      {
+        "command": "qqq.allSettings",
+        "title": "qqq: all settings"
       }
     ],
     "keybindings": [
@@ -194,7 +187,9 @@
   ],
   "dependencies": {
     "sharp": "^0.34.4",
-    "trash": "^7.1.2"
+    "trash": "^7.1.2",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/core": "0.12.6"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
