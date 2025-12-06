@@ -188,8 +188,8 @@
   "dependencies": {
     "sharp": "^0.34.4",
     "trash": "^7.1.2",
-    "@ffmpeg/ffmpeg": "^0.12.10",
-    "@ffmpeg/core": "0.12.6"
+    "@ffmpeg/ffmpeg": "0.9.1",
+    "@ffmpeg/core": "0.9.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
