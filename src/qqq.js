@@ -9,7 +9,7 @@ const os = require("os");
 const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
 
-const outputChannel = vscode.window.createOutputChannel("QQQ Extension");
+const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
 // ==================== 公共工具函数 ====================
 
@@ -43,11 +43,40 @@ function logMessage(message, level = "INFO") {
 
 function isLikelyBinary(filePath) {
 	const binaryExts = new Set([
-		'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif',
-		'.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o',
-		'.zip', '.tar', '.gz', '.7z', '.rar',
-		'.mp3', '.mp4', '.avi', '.mov', '.mkv', '.wav',
-		'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
+		".png",
+		".jpg",
+		".jpeg",
+		".gif",
+		".bmp",
+		".webp",
+		".ico",
+		".tiff",
+		".tif",
+		".exe",
+		".dll",
+		".so",
+		".dylib",
+		".bin",
+		".obj",
+		".o",
+		".zip",
+		".tar",
+		".gz",
+		".7z",
+		".rar",
+		".mp3",
+		".mp4",
+		".avi",
+		".mov",
+		".mkv",
+		".wav",
+		".pdf",
+		".doc",
+		".docx",
+		".xls",
+		".xlsx",
+		".ppt",
+		".pptx",
 	]);
 
 	const ext = path.extname(filePath).toLowerCase();
@@ -57,7 +86,7 @@ function isLikelyBinary(filePath) {
 
 	try {
 		const buffer = Buffer.alloc(4096);
-		const fd = fs.openSync(filePath, 'r');
+		const fd = fs.openSync(filePath, "r");
 		try {
 			const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
 			if (bytesRead === 0) return false;
@@ -95,10 +124,12 @@ async function pureComknd() {
 
 	let qqqFiles = [];
 	try {
-		qqqFiles = fs.readdirSync(qqqDir).filter(f => {
-			const fullPath = path.join(qqqDir, f);
-			return fs.statSync(fullPath).isFile();
-		});
+		qqqFiles = fs
+			.readdirSync(qqqDir)
+			.filter((f) => {
+				const fullPath = path.join(qqqDir, f);
+				return fs.statSync(fullPath).isFile();
+			});
 	} catch (e) {
 		vscode.window.showErrorMessage("读取 qqq 目录失败: " + e.message);
 		return;
@@ -130,7 +161,9 @@ async function pureComknd() {
 		let stats;
 		try {
 			stats = fs.statSync(fullPath);
-		} catch (e) { continue; }
+		} catch (e) {
+			continue;
+		}
 
 		if (!stats.isFile()) continue;
 
@@ -144,7 +177,7 @@ async function pureComknd() {
 		}
 
 		try {
-			const content = fs.readFileSync(fullPath, 'utf-8');
+			const content = fs.readFileSync(fullPath, "utf-8");
 			let match;
 			while ((match = regex.exec(content)) !== null) {
 				const refPath = match[1].replace(/\//g, "\\");
@@ -153,11 +186,12 @@ async function pureComknd() {
 					referencedFiles.add(refFileName.toLowerCase());
 				}
 			}
-		} catch (e) {
-		}
+		} catch (e) { }
 	}
 
-	const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
+	const orphans = qqqFiles.filter(
+		(f) => !referencedFiles.has(f.toLowerCase()),
+	);
 
 	if (orphans.length === 0) {
 		vscode.window.showInformationMessage("未发现孤儿文件");
@@ -168,32 +202,37 @@ async function pureComknd() {
 	const prefixSpaces = "   ";
 
 	let comkndStr = "";
-	const orphanPaths = orphans.map(f => path.join(qqqDir, f));
+	const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
 
-	if (os.platform() === 'win32') {
-		const args = orphanPaths.map(p => `"${p}"`).join(" ");
+	if (os.platform() === "win32") {
+		const args = orphanPaths.map((p) => `"${p}"`).join(" ");
 		comkndStr = `del ${args}`;
 	} else {
-		const args = orphanPaths.map(p => `"${p}"`).join(" ");
+		const args = orphanPaths.map((p) => `"${p}"`).join(" ");
 		comkndStr = `q rm ${args}`; // sudo -> q
 	}
 
 	let content = "";
 
 	for (let i = 0; i < 13; i++) content += newLine;
-	content += prefixSpaces + "请在 CMD 窗口中执行下面命令以 删除 当前未引用滴文件：" + newLine;
+	content +=
+		prefixSpaces +
+		"请在 CMD 窗口中执行下面命令以 删除 当前未引用滴文件：" +
+		newLine;
 
 	for (let i = 0; i < 3; i++) content += newLine;
 	content += prefixSpaces + comkndStr + newLine;
 
 	for (let i = 0; i < 3; i++) content += newLine;
 
-	const orphanListStr = orphanPaths.map(p => `[${p}]`).join(newLine + newLine + newLine + newLine + newLine);
+	const orphanListStr = orphanPaths
+		.map((p) => `[${p}]`)
+		.join(newLine + newLine + newLine + newLine + newLine);
 	content += orphanListStr;
 
 	const purePath = path.join(parentDir, "qqq.pure");
 	try {
-		fs.writeFileSync(purePath, content, 'utf-8');
+		fs.writeFileSync(purePath, content, "utf-8");
 		const doc = await vscode.workspace.openTextDocument(purePath);
 		await vscode.window.showTextDocument(doc);
 	} catch (e) {
@@ -207,47 +246,59 @@ async function pureComknd() {
 let q1Module = null;
 
 function activate(context) {
-	logMessage("QQQ 扩展开始激活...", "INFO");
+	logMessage("qqq 扩展开始激活...", "INFO");
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.pure", pureComknd)
+		// 只暴露 qqq.pure
+		vscode.commands.registerCommand("qqq.pure", pureComknd),
+
+		// 新增：qqq: all settings —— 打开当前扩展的设置页
+		vscode.commands.registerCommand("qqq.allSettings", () => {
+			// 等同于在扩展视图右键本扩展 -> 设置
+			vscode.commands.executeCommand(
+				"workbench.action.openSettings",
+				"@ext:gh555.qqq",
+			);
+		}),
 	);
 
-	// --- 加载 Q1 模块 ---
+	// --- 加载 Q1 模块（粘贴 + 预览） ---
 	try {
-		const q1 = require('./q1');
-		if (q1 && typeof q1.activate === 'function') {
+		const q1 = require("./q1");
+		if (q1 && typeof q1.activate === "function") {
 			q1.activate(context);
 			q1Module = q1; // 保存引用
 		}
 	} catch (e) {
 		logMessage(`q1 模块加载失败: ${e.message}`, "ERROR");
-		vscode.window.showErrorMessage(`QQQ插件警告: 粘贴功能启动失败。原因: ${e.message}`);
+		vscode.window.showErrorMessage(
+			`qqq 插件警告: 粘贴功能启动失败。原因: ${e.message}`,
+		);
 	}
 
 	// --- 加载 Q2 模块 ---
 	try {
-		const q2 = require('./q2');
-		if (q2 && typeof q2.activate === 'function') {
+		const q2 = require("./q2");
+		if (q2 && typeof q2.activate === "function") {
 			q2.activate(context);
 		}
 	} catch (e) {
 		logMessage(`q2 模块加载失败: ${e.message}`, "ERROR");
 	}
 
-	logMessage("QQQ 扩展激活流程结束", "INFO");
+	logMessage("qqq 扩展激活流程结束", "INFO");
 }
 
 async function deactivate() {
 	// 优雅退出：调用 q1 的 deactivate 来记录用户使用时长
-	if (q1Module && typeof q1Module.deactivate === 'function') {
+	if (q1Module && typeof q1Module.deactivate === "function") {
 		try {
 			await q1Module.deactivate();
 		} catch (e) {
 			console.error("Q1 cleanup failed:", e);
 		}
 	}
-	logMessage("QQQ 扩展已停用", "INFO");
+	logMessage("qqq 扩展已停用", "INFO");
 }
 
 module.exports = {
@@ -255,5 +306,5 @@ module.exports = {
 	deactivate,
 	LOG_PATH,
 	BASE_DIR,
-	logMessage
+	logMessage,
 };
