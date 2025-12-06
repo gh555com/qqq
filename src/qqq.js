@@ -134,6 +134,11 @@ async function pureComknd() {
 
 		if (!stats.isFile()) continue;
 
+		// 修改为严格匹配小写的 "qqq"
+		if (!fullPath.includes("qqq")) {
+			continue;
+		}
+
 		if (isLikelyBinary(fullPath)) {
 			continue;
 		}

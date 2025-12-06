@@ -1,4 +1,3 @@
-# File: README.md
 # QQQ VSCode 扩展
 
 一个功能强大的 VSCode 扩展，提供智能文件操作、图片预览和文件导航功能。
@@ -29,7 +28,13 @@
 - **可拖动侧边栏**：自定义导航栏宽度
 - **长驻模式**：保持对话框打开，连续创建文件
 
----
+---    No dual windows needed for image preview.
+
+
+        Image preview in one window (no more dual windows  needed ).
+
+
+
 
 ## 🚀 快速开始
 
