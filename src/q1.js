@@ -277,7 +277,8 @@ async function renderIkges(editor) {
 
 			const absPath = match[1].replace(/\//g, "\\");
 
-			if (!fs.existsSync(absPath)) {
+			// 修改为严格匹配小写的 "qqq"
+			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) {
 				continue;
 			}
 
@@ -376,7 +377,8 @@ class FileCodeLensProvider {
 			const range = new vscode.Range(pos, pos);
 			const absPath = match[1].replace(/\//g, "\\");
 
-			if (fs.existsSync(absPath)) {
+			// 修改为严格匹配小写的 "qqq"
+			if (fs.existsSync(absPath) && absPath.includes("qqq")) {
 				lenses.push(
 					new vscode.CodeLens(range, {
 						title: blockKode ? "qqq" : "aaa",
