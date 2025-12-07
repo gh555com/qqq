@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const sharp = require("sharp"); // 新增：用来获取图片原始尺寸
 
 // ffmpeg 原生二进制（自带）
 let ffmpegPath = null;
@@ -16,7 +17,8 @@ const PREVIEW_WIDTH = 512;
 const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6; // 额外边框像素（只用于展示尺寸）
 // 暖色背景：同时用于 ffmpeg 的 pad 和 VSCode 装饰背景，参考你“OK 相框”的感觉
-const PREVIEW_BG_COLOR = "#fef6e3";
+const PREVIEW_BG_COLOR = "#fef6e3";   // VSCode 装饰背景用
+const FFMPEG_BG_COLOR = "0xfef6e3";  // ffmpeg pad 用（不能带 #）
 
 // 尝试加载 @ffmpeg-installer/ffmpeg
 try {
@@ -70,6 +72,21 @@ const VIDEO_EXTS = new Set([
 // qqq 目录大小缓存： dirPath -> { size:number, timestamp:number }
 const qqqFolderSizeCache = new Map();
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000; // 10 秒缓存
+
+// 全局配置缓存（来自 VS Code 设置）
+let stretchSmallImages = true;        // qqq.stretchSmallImages
+let extremePerformanceMode = false;   // qqq.extremePerformance
+
+function refreshQqqConfig() {
+	try {
+		const config = vscode.workspace.getConfiguration("qqq");
+		stretchSmallImages = config.get("stretchSmallImages", true);
+		extremePerformanceMode = config.get("extremePerformance", false);
+	} catch (e) {
+		stretchSmallImages = true;
+		extremePerformanceMode = false;
+	}
+}
 
 function logMessage(message, level = "WARN") {
 	if (level !== "ERROR" && level !== "WARN") return;
@@ -142,6 +159,23 @@ function buildNewRawPath(oldRawPath, newFileName) {
 	return dirPart + newFileName;
 }
 
+// 使用 sharp 获取图片原始尺寸（用于“取消拉伸小图”模式）
+async function getImageDimensions(filePath) {
+	try {
+		const metadata = await sharp(filePath, { limitInputPixels: false }).metadata();
+		if (
+			metadata &&
+			typeof metadata.width === "number" &&
+			typeof metadata.height === "number"
+		) {
+			return { width: metadata.width, height: metadata.height };
+		}
+	} catch (e) {
+		logMessage("获取图片尺寸失败: " + e.message, "WARN");
+	}
+	return null;
+}
+
 // ==========================================
 //           ffmpeg 原生版：缩略图预览
 // ==========================================
@@ -198,13 +232,59 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 
 // ffmpeg 预览参数：
 // - 视频：粗暴 -ss 1 放在 -i 前面
-// - 图片/视频：scale=512:288:force_original_aspect_ratio=decrease + pad=512:288 + 暖色背景
-// - GIF：输出动图 gif，保持动画（不加 -frames:v 1）
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif) {
-	const vf = [
-		`scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease`,
-		`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${PREVIEW_BG_COLOR}`,
-	].join(",");
+// - 图片/视频：scale + pad 到 512×288，相框暖色背景
+// - GIF：
+//    * 普通模式：输出动图 gif，保持动画
+//    * 极限性能模式：当作普通图片，取首帧，输出 JPEG
+function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
+	const extreme = extremePerformanceMode;
+	const stretch = stretchSmallImages;
+
+	// 构造 scale + pad 规则
+	let vf;
+
+	// 基座：拉伸小图 / 视频，统一按 512×288 等比缩放后再 pad 到相框
+	// 取消拉伸小图时，只是换一套“目标尺寸”的计算，其余流程保持一致
+	if (stretch || isVideo) {
+		vf = [
+			`scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease`,
+			`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`,
+		].join(",");
+	} else {
+		// 不拉伸小图模式：
+		//   - 如果原始尺寸本来就不超过相框（512×288），则保持原尺寸，不放大
+		//   - 否则按相框规则等比缩小到能完整放入 512×288
+		let targetW = PREVIEW_WIDTH;
+		let targetH = PREVIEW_HEIGHT;
+
+		if (
+			origSize &&
+			typeof origSize.width === "number" &&
+			typeof origSize.height === "number"
+		) {
+			const ow = origSize.width;
+			const oh = origSize.height;
+
+			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
+				// 小图：目标尺寸 = 原始尺寸（不放大）
+				targetW = ow;
+				targetH = oh;
+			} else {
+				// 大图：在基座逻辑上按比例缩小，完整放入相框
+				const scale = Math.min(
+					PREVIEW_WIDTH / ow,
+					PREVIEW_HEIGHT / oh,
+				);
+				targetW = Math.max(1, Math.round(ow * scale));
+				targetH = Math.max(1, Math.round(oh * scale));
+			}
+		}
+
+		vf = [
+			`scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`,
+			`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`,
+		].join(",");
+	}
 
 	const args = [
 		"-hide_banner",
@@ -219,8 +299,25 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif) {
 
 	args.push("-i", filePath);
 
-	if (isGif) {
-		// GIF：保持动图，按我们的规则缩放+填充，再输出 GIF 到管道
+	if (extreme) {
+		// 极限性能模式：
+		// - 所有类型（图片 / GIF / 视频）统一输出单帧 JPEG（mjpeg）
+		// - GIF 直接取首帧，变成静态图，避免整段动图的解码与编码
+		args.push(
+			"-frames:v",
+			"1",
+			"-an",
+			"-sn",
+			"-vf",
+			vf,
+			"-f",
+			"image2pipe",
+			"-vcodec",
+			"mjpeg",
+			"pipe:1",
+		);
+	} else if (isGif) {
+		// 普通模式 GIF：保持动图
 		args.push(
 			"-vf",
 			vf,
@@ -253,6 +350,67 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 		return null;
 	}
 
+	const extreme = extremePerformanceMode;
+
+	// 对于“取消拉伸小图”模式，预先用 sharp 拿一次图片原始尺寸
+	let origSize = null;
+	if (!isVideo && !stretchSmallImages) {
+		origSize = await getImageDimensions(filePath);
+	}
+
+	// 极限性能模式：
+	//   - 完全信任缓存，不做文件 stat/mTime 检查
+	//   - 每个文件只生成一次缩略图
+	if (extreme) {
+		const cached = previewCache.get(filePath);
+		if (cached) {
+			return cached.buffer;
+		}
+
+		const ok = await ensureFfmpegAvailable();
+		if (!ok) {
+			return null;
+		}
+
+		return new Promise((resolve) => {
+			const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
+			const child = cp.spawn(ffmpegPath, args, {
+				windowsHide: true,
+			});
+
+			const chunks = [];
+			let stderr = "";
+
+			child.stdout.on("data", (d) => {
+				chunks.push(d);
+			});
+
+			child.stderr.on("data", (d) => {
+				stderr += d.toString();
+			});
+
+			child.on("error", (err) => {
+				console.log("调用 ffmpeg 生成预览失败:", err.message);
+				resolve(null);
+			});
+
+			child.on("close", () => {
+				if (!chunks.length) {
+					if (stderr) {
+						console.log("ffmpeg 预览 stderr:", stderr);
+					}
+					resolve(null);
+					return;
+				}
+				const buffer = Buffer.concat(chunks);
+				// 极限模式下不关心 mtime，写入 0 即可
+				setPreviewCache(filePath, buffer, 0);
+				resolve(buffer);
+			});
+		});
+	}
+
+	// 稳定模式：保留按 mtime 刷新缓存的逻辑
 	const ok = await ensureFfmpegAvailable();
 	if (!ok) {
 		return null;
@@ -272,7 +430,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	}
 
 	return new Promise((resolve) => {
-		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif);
+		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
 		const child = cp.spawn(ffmpegPath, args, {
 			windowsHide: true,
 		});
@@ -809,7 +967,13 @@ async function renderIkges(editor) {
 
 				if (previewBuffer) {
 					const base64 = previewBuffer.toString("base64");
-					const mime = isGif ? "image/gif" : "image/png";
+					let mime;
+					if (extremePerformanceMode) {
+						// 极限模式统一输出 JPEG
+						mime = "image/jpeg";
+					} else {
+						mime = isGif ? "image/gif" : "image/png";
+					}
 					const dataUri = vscode.Uri.parse(
 						`data:${mime};base64,${base64}`,
 					);
@@ -1207,6 +1371,9 @@ function renderVisibleEditors(delay = 50) {
 async function activate(context) {
 	extensionContext = context;
 
+	// 先读取一次全局配置（拉伸小图 / 极限性能）
+	refreshQqqConfig();
+
 	// 启动时检查 Python 环境
 	isPythonAvailable = await checkPythonEnvironment();
 	if (isPythonAvailable) {
@@ -1217,18 +1384,27 @@ async function activate(context) {
 	// 初始设置一下 CodeLens 前景色（默认认为不激活）
 	updateGlobalCodeLensColor(false);
 
-	// 配置变更时同步 previewOffset 到 globalState，并刷新预览
+	// 配置变更时同步 previewOffset / 全局开关，并刷新预览
 	vscode.workspace.onDidChangeConfiguration((event) => {
-		if (event.affectsConfiguration("qqq.previewOffset")) {
+		if (
+			event.affectsConfiguration("qqq.previewOffset") ||
+			event.affectsConfiguration("qqq.stretchSmallImages") ||
+			event.affectsConfiguration("qqq.extremePerformance")
+		) {
 			try {
 				const config = vscode.workspace.getConfiguration("qqq");
-				const newVal = config.get("previewOffset", 100);
-				if (extensionContext) {
-					extensionContext.globalState.update(
-						"qqq.previewOffset",
-						newVal,
-					);
+				if (event.affectsConfiguration("qqq.previewOffset")) {
+					const newVal = config.get("previewOffset", 100);
+					if (extensionContext) {
+						extensionContext.globalState.update(
+							"qqq.previewOffset",
+							newVal,
+						);
+					}
 				}
+				// 重新加载两个全局配置开关
+				refreshQqqConfig();
+				// 重新渲染当前所有可见编辑器
 				renderVisibleEditors();
 			} catch { }
 		}
