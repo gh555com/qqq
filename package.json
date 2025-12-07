@@ -63,10 +63,10 @@
     ]
   },
   "scripts": {
-    "package": "@vscode/vsce package --allow-missing-repository",
-    "publish": "@vscode/vsce publish",
-    "q": "@vscode/vsce publish patch --allow-star-activation",
-    "pub": "yes | vsce publish patch",
+    "package": "npx @vscode/vsce package --allow-missing-repository",
+    "publish": "npx @vscode/vsce publish",
+    "q": "npx @vscode/vsce publish patch --allow-star-activation",
+    "pub": "yes | npx vsce publish patch",
     "test": "echo \"Running tests...\" && exit 0"
   },
   "repository": {
@@ -186,7 +186,6 @@
     "생산성"
   ],
   "dependencies": {
-    "sharp": "^0.34.4",
     "trash": "^7.1.2",
     "@ffmpeg-installer/ffmpeg": "1.1.0"
   },
