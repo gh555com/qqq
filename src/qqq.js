@@ -150,7 +150,8 @@ async function pureComknd() {
 		return;
 	}
 
-	const regex = /\[([A-Za-z]:[\\\/].*?)\]/g;
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
+
 
 	for (const fileName of parentDirFiles) {
 		const fullPath = path.join(parentDir, fileName);
@@ -180,7 +181,7 @@ async function pureComknd() {
 			const content = fs.readFileSync(fullPath, "utf-8");
 			let match;
 			while ((match = regex.exec(content)) !== null) {
-				const refPath = match[1].replace(/\//g, "\\");
+				const refPath = match[0].slice(1, -1).replace(/\//g, "\\");
 				if (refPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
 					const refFileName = path.basename(refPath);
 					referencedFiles.add(refFileName.toLowerCase());
@@ -226,7 +227,7 @@ async function pureComknd() {
 	for (let i = 0; i < 3; i++) content += newLine;
 
 	const orphanListStr = orphanPaths
-		.map((p) => `[${p}]`)
+		.map((p) => `/${p}/`)
 		.join(newLine + newLine + newLine + newLine + newLine);
 	content += orphanListStr;
 
