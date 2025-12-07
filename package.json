@@ -186,9 +186,9 @@
     "생산성"
   ],
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "sharp": "^0.34.4",
-    "trash": "^7.1.2",
-    "@ffmpeg-installer/ffmpeg": "1.1.0"
+    "trash": "^7.1.2"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
