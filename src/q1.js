@@ -15,7 +15,8 @@ const previewCache = new Map();
 const PREVIEW_WIDTH = 512;
 const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6; // 额外边框像素（只用于展示尺寸）
-const PREVIEW_BG_COLOR = "#fef6e3"; // 暖色纯色背景
+// 暖色背景：同时用于 ffmpeg 的 pad 和 VSCode 装饰背景，参考你“OK 相框”的感觉
+const PREVIEW_BG_COLOR = "#fef6e3";
 
 // 尝试加载 @ffmpeg-installer/ffmpeg
 try {
@@ -195,15 +196,13 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 	previewCache.set(filePath, { buffer, mtimeMs });
 }
 
+// ffmpeg 预览参数：
+// - 视频：粗暴 -ss 1 放在 -i 前面
+// - 图片/视频：scale=512:288:force_original_aspect_ratio=decrease + pad=512:288 + 暖色背景
+// - GIF：输出动图 gif，保持动画（不加 -frames:v 1）
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif) {
-	// 只缩放“大图”，小于预览框的图片保持原尺寸，再 pad 到固定尺寸
-	const scaleExprW =
-		`if(lte(iw,${PREVIEW_WIDTH})*lte(ih,${PREVIEW_HEIGHT}),iw,${PREVIEW_WIDTH})`;
-	const scaleExprH =
-		`if(lte(iw,${PREVIEW_WIDTH})*lte(ih,${PREVIEW_HEIGHT}),ih,${PREVIEW_HEIGHT})`;
-
 	const vf = [
-		`scale=${scaleExprW}:${scaleExprH}:force_original_aspect_ratio=decrease`,
+		`scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease`,
 		`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${PREVIEW_BG_COLOR}`,
 	].join(",");
 
@@ -266,6 +265,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 		return null;
 	}
 
+	// 缩略图缓存：key = filePath，value 里带 mtimeMs
 	const cached = previewCache.get(filePath);
 	if (cached && cached.mtimeMs === stat.mtimeMs) {
 		return cached.buffer;
@@ -814,6 +814,7 @@ async function renderIkges(editor) {
 						`data:${mime};base64,${base64}`,
 					);
 
+					// 这里是“OK 相框布局”：512x288 内容 + padding + 虚线边框 + 暖色背景
 					deco.renderOptions.after = {
 						contentIconPath: dataUri,
 						margin: `4px 0 4px ${marginLeft}`,
@@ -821,19 +822,21 @@ async function renderIkges(editor) {
 						width: `${boxWidth}px`,
 						padding: "2px",
 						border: "1px dashed #888",
-						backgroundColor: "transparent",
+						backgroundColor: PREVIEW_BG_COLOR,
 						display: "block",
 						position: "relative",
 					};
 				} else if (isImage) {
 					// ffmpeg 不可用或失败时，图片兜底为直接展示原图（包括 GIF，保持动图）
+					// 但相框布局仍然保持一致（统一尺寸 + 虚线边框 + 暖色背景）
 					deco.renderOptions.after = {
 						contentIconPath: vscode.Uri.file(absPath),
 						margin: `4px 0 4px ${marginLeft}`,
-						height: "148px",
-						width: "auto",
+						height: `${boxHeight}px`,
+						width: `${boxWidth}px`,
+						padding: "2px",
 						border: "1px dashed #888",
-						backgroundColor: "rgba(230, 230, 250, 0.2)",
+						backgroundColor: PREVIEW_BG_COLOR,
 						display: "block",
 						position: "relative",
 					};
