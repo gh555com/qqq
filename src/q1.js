@@ -1,92 +1,34 @@
-// File: src/q1.js
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-let sharp;
-let ffmpeg = null;
-let ffmpegUtils = null;
-let ffmpegLoadingPromise = null;
+// ffmpeg 原生二进制（自带）
+let ffmpegPath = null;
+let ffmpegProbePromise = null;
 
-// 尝试加载 sharp
+// 预览缩略图缓存（图片 / 视频共用）：filePath -> { buffer, mtimeMs }
+const MAX_PREVIEW_CACHE = 50;
+const previewCache = new Map();
+
+// 统一的图片 / 视频预览尺寸 & 背景色
+const PREVIEW_WIDTH = 512;
+const PREVIEW_HEIGHT = 288;
+const PREVIEW_BORDER = 6; // 额外边框像素（只用于展示尺寸）
+// 暖色背景：同时用于 ffmpeg 的 pad 和 VSCode 装饰背景，参考你“OK 相框”的感觉
+const PREVIEW_BG_COLOR = "#fef6e3";
+
+// 尝试加载 @ffmpeg-installer/ffmpeg
 try {
-	sharp = require("sharp");
+	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+	ffmpegPath = ffmpegInstaller.path;
+	console.log("Using bundled ffmpeg binary:", ffmpegPath);
 } catch (e) {
-	sharp = null;
-	console.log("sharp 库未安装，无法调整图片尺寸 / 生成格子背景");
-}
-
-// 尝试加载 ffmpeg.wasm（用于视频封面）
-// 适配 @ffmpeg/ffmpeg + @ffmpeg/core@0.9.0
-try {
-	const { createFFmpeg, fetchFile } = require("@ffmpeg/ffmpeg");
-	let corePath;
-	try {
-		// 优先使用默认导出
-		corePath = require.resolve("@ffmpeg/core/dist/ffmpeg-core.js");
-	} catch (e1) {
-		console.log("Failed to resolve @ffmpeg/core/dist/ffmpeg-core.js:", e1.message);
-		try {
-			corePath = require.resolve("@ffmpeg/core");
-		} catch (e2) {
-			console.log("Failed to resolve @ffmpeg/core:", e2.message);
-			corePath = undefined;
-		}
-	}
-
-	console.log("Resolved corePath:", corePath);
-
-	if (corePath) {
-		// 使用更兼容的配置
-		ffmpeg = createFFmpeg({
-			log: false,
-			corePath: corePath,
-		});
-		ffmpegUtils = { fetchFile };
-		console.log("FFmpeg instance created successfully");
-
-		// 测试 FFmpeg 可用性
-		setTimeout(testFFmpegAvailability, 1000);
-	} else {
-		ffmpeg = null;
-		ffmpegUtils = null;
-		console.log("Could not resolve corePath, ffmpeg.wasm 未安装或加载失败，无法为视频生成封面");
-	}
-} catch (e) {
-	console.log("Failed to create FFmpeg instance:", e.message);
-	console.log("Stack trace:", e.stack);
-	ffmpeg = null;
-	ffmpegUtils = null;
-	console.log("ffmpeg.wasm 未安装或加载失败，无法为视频生成封面");
-}
-
-// 添加一个标志来跟踪 FFmpeg 是否可用
-let isFFmpegAvailable = false;
-
-// 添加一个简单的测试函数来验证 FFmpeg 是否能正常工作
-async function testFFmpegAvailability() {
-	console.log("Testing FFmpeg availability...");
-	if (!ffmpeg) {
-		console.log("FFmpeg instance is null");
-		isFFmpegAvailable = false;
-		return;
-	}
-
-	try {
-		const ready = await ensureFfmpegReady();
-		if (ready) {
-			console.log("FFmpeg is ready and available");
-			isFFmpegAvailable = true;
-		} else {
-			console.log("FFmpeg is not ready");
-			isFFmpegAvailable = false;
-		}
-	} catch (e) {
-		console.log("Error testing FFmpeg availability:", e.message);
-		console.log("Stack trace:", e.stack);
-		isFFmpegAvailable = false;
-	}
+	ffmpegPath = null;
+	console.log(
+		"未能加载 @ffmpeg-installer/ffmpeg，图片/视频预览将被禁用:",
+		e.message,
+	);
 }
 
 // 公共配置常量
@@ -201,88 +143,169 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 // ==========================================
-//           ffmpeg.wasm 视频封面
+//           ffmpeg 原生版：缩略图预览
 // ==========================================
 
-async function ensureFfmpegReady() {
-	// 首先检查 FFmpeg 实例是否存在
-	if (!ffmpeg) {
-		console.log("FFmpeg instance is null, cannot ensure readiness");
+async function ensureFfmpegAvailable() {
+	if (!ffmpegPath) {
 		return false;
 	}
-
-	// 如果已经有加载承诺，直接返回
-	if (ffmpegLoadingPromise) {
-		console.log("Returning existing FFmpeg loading promise");
-		return ffmpegLoadingPromise;
+	if (ffmpegProbePromise) {
+		return ffmpegProbePromise;
 	}
 
-	console.log("Creating new FFmpeg loading promise");
-	ffmpegLoadingPromise = (async () => {
-		try {
-			// 检查是否已经加载
-			if (!ffmpeg.isLoaded()) {
-				console.log("Loading FFmpeg...");
-				await ffmpeg.load();
-				console.log("FFmpeg loaded successfully");
-			} else {
-				console.log("FFmpeg already loaded");
-			}
-			return true;
-		} catch (e) {
-			console.log("ffmpeg 加载失败:", e);
-			console.log("Stack trace:", e.stack);
-			// 清除加载承诺，以便下次可以重试
-			ffmpegLoadingPromise = null;
-			return false;
-		}
-	})();
+	ffmpegProbePromise = new Promise((resolve) => {
+		const child = cp.spawn(ffmpegPath, ["-version"], {
+			windowsHide: true,
+		});
 
-	return ffmpegLoadingPromise;
+		let handled = false;
+
+		child.on("error", (err) => {
+			console.log("探测 ffmpeg 失败:", err.message);
+			ffmpegPath = null;
+			handled = true;
+			resolve(false);
+		});
+
+		child.on("close", (code) => {
+			if (handled) {
+				return;
+			}
+			if (code === 0) {
+				console.log("ffmpeg 探测成功，可以用于生成图片/视频预览");
+				resolve(true);
+			} else {
+				console.log("ffmpeg 探测失败，退出码:", code);
+				ffmpegPath = null;
+				resolve(false);
+			}
+		});
+	});
+
+	return ffmpegProbePromise;
 }
 
-async function extractVideoCoverBuffer(videoPath) {
-	console.log("Attempting to extract video cover for:", videoPath);
-	if (!ffmpeg || !ffmpegUtils) {
-		console.log("FFmpeg not available for video cover extraction");
-		return null;
+function setPreviewCache(filePath, buffer, mtimeMs) {
+	if (previewCache.size >= MAX_PREVIEW_CACHE) {
+		const firstKey = previewCache.keys().next().value;
+		if (firstKey !== undefined) {
+			previewCache.delete(firstKey);
+		}
 	}
-	const ready = await ensureFfmpegReady();
-	if (!ready) {
-		console.log("FFmpeg not ready for video cover extraction");
-		return null;
+	previewCache.set(filePath, { buffer, mtimeMs });
+}
+
+// ffmpeg 预览参数：
+// - 视频：粗暴 -ss 1 放在 -i 前面
+// - 图片/视频：scale=512:288:force_original_aspect_ratio=decrease + pad=512:288 + 暖色背景
+// - GIF：输出动图 gif，保持动画（不加 -frames:v 1）
+function buildFfmpegPreviewArgs(filePath, isVideo, isGif) {
+	const vf = [
+		`scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease`,
+		`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${PREVIEW_BG_COLOR}`,
+	].join(",");
+
+	const args = [
+		"-hide_banner",
+		"-loglevel",
+		"error",
+	];
+
+	// 视频先粗略 seek 到 1 秒附近，加速
+	if (isVideo) {
+		args.push("-ss", "1");
 	}
 
-	try {
-		const { fetchFile } = ffmpegUtils;
-		const inputName = "input_" + path.basename(videoPath);
-		const outputName = "cover.png";
+	args.push("-i", filePath);
 
-		console.log("Writing video file to FFmpeg FS");
-		ffmpeg.FS("writeFile", inputName, await fetchFile(videoPath));
-		// 简单策略：取 1 秒处的一帧作为封面
-		console.log("Executing FFmpeg command to extract cover");
-		await ffmpeg.run(
-			"-i",
-			inputName,
-			"-ss",
-			"00:00:01.000",
+	if (isGif) {
+		// GIF：保持动图，按我们的规则缩放+填充，再输出 GIF 到管道
+		args.push(
+			"-vf",
+			vf,
+			"-f",
+			"gif",
+			"pipe:1",
+		);
+	} else {
+		// 普通图片 / 视频：输出单帧 PNG
+		args.push(
 			"-frames:v",
 			"1",
-			outputName,
+			"-an",
+			"-sn",
+			"-vf",
+			vf,
+			"-f",
+			"image2pipe",
+			"-vcodec",
+			"png",
+			"pipe:1",
 		);
-		console.log("Reading cover image from FFmpeg FS");
-		const data = ffmpeg.FS("readFile", outputName);
-		ffmpeg.FS("unlink", inputName);
-		ffmpeg.FS("unlink", outputName);
+	}
 
-		console.log("Video cover extracted successfully");
-		return Buffer.from(data.buffer);
-	} catch (e) {
-		console.log("生成视频封面失败:", e);
-		console.log("Stack trace:", e.stack);
+	return args;
+}
+
+async function getPreviewBuffer(filePath, isVideo, isGif) {
+	if (!ffmpegPath) {
 		return null;
 	}
+
+	const ok = await ensureFfmpegAvailable();
+	if (!ok) {
+		return null;
+	}
+
+	let stat;
+	try {
+		stat = await fs.promises.stat(filePath);
+	} catch {
+		return null;
+	}
+
+	// 缩略图缓存：key = filePath，value 里带 mtimeMs
+	const cached = previewCache.get(filePath);
+	if (cached && cached.mtimeMs === stat.mtimeMs) {
+		return cached.buffer;
+	}
+
+	return new Promise((resolve) => {
+		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif);
+		const child = cp.spawn(ffmpegPath, args, {
+			windowsHide: true,
+		});
+
+		const chunks = [];
+		let stderr = "";
+
+		child.stdout.on("data", (d) => {
+			chunks.push(d);
+		});
+
+		child.stderr.on("data", (d) => {
+			stderr += d.toString();
+		});
+
+		child.on("error", (err) => {
+			console.log("调用 ffmpeg 生成预览失败:", err.message);
+			resolve(null);
+		});
+
+		child.on("close", () => {
+			if (!chunks.length) {
+				if (stderr) {
+					console.log("ffmpeg 预览 stderr:", stderr);
+				}
+				resolve(null);
+				return;
+			}
+			const buffer = Buffer.concat(chunks);
+			setPreviewCache(filePath, buffer, stat.mtimeMs);
+			resolve(buffer);
+		});
+	});
 }
 
 // ==========================================
@@ -562,7 +585,6 @@ function executeClipboardComknd() {
 function findLastImageOrVideoMarkerLine(document, position) {
 	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
 
-
 	for (let line = position.line - 1; line >= 0; line--) {
 		const text = document.lineAt(line).text;
 		let match;
@@ -720,51 +742,6 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//           生成格子背景（Solarized 暖色系）
-// ==========================================
-
-async function generateGridBackgroundBuffer(width, height) {
-	if (!sharp) return null;
-
-	// 采用小格子重复的棋盘格：A = #fef6e3, B = #e6e1cf
-	const tileSize = 16;
-	const colorA = "#fef6e3";
-	const colorB = "#e6e1cf";
-
-	const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <defs>
-    <pattern id="qqq-grid" x="0" y="0" width="${tileSize}" height="${tileSize}" patternUnits="userSpaceOnUse">
-      <rect x="0" y="0" width="${tileSize}" height="${tileSize}" fill="${colorA}" />
-      <rect x="0" y="0" width="${tileSize / 2}" height="${tileSize / 2}" fill="${colorB}" />
-      <rect x="${tileSize / 2}" y="${tileSize / 2}" width="${tileSize / 2}" height="${tileSize / 2}" fill="${colorB}" />
-    </pattern>
-  </defs>
-  <rect x="0" y="0" width="${width}" height="${height}" fill="url(#qqq-grid)" />
-</svg>
-`.trim();
-
-	const buffer = Buffer.from(svg, "utf8");
-
-	try {
-		return await sharp(buffer).png().toBuffer();
-	} catch (e) {
-		logMessage("生成格子背景失败: " + e.message, "WARN");
-		// 兜底：用纯色 A 填充
-		return await sharp({
-			create: {
-				width,
-				height,
-				channels: 3,
-				background: { r: 254, g: 246, b: 227 },
-			},
-		})
-			.png()
-			.toBuffer();
-	}
-}
-
-// ==========================================
 //              下区图片/视频渲染
 // ==========================================
 
@@ -781,11 +758,12 @@ async function renderIkges(editor) {
 	const decos = [];
 	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
 
-
 	const visibleRanges = editor.visibleRanges;
 	if (!visibleRanges || visibleRanges.length === 0) return;
 
 	const marginLeft = computeMarginLeft();
+	const boxWidth = PREVIEW_WIDTH + PREVIEW_BORDER;
+	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
 
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
@@ -810,15 +788,10 @@ async function renderIkges(editor) {
 			const ext = path.extname(absPath).toLowerCase();
 			const isImage = isImageExt(ext);
 			const isVideo = isVideoExt(ext);
+			const isGif = ext === ".gif";
 
-			// 下区现在只对「图片或视频封面」做渲染，普通文件不再做任何下区渲染
+			// 下区现在只对「图片或视频预览」做渲染，普通文件不再做任何下区渲染
 			if (!isImage && !isVideo) {
-				continue;
-			}
-
-			// 如果是视频文件，检查 FFmpeg 是否可用
-			if (isVideo && (!ffmpeg || !ffmpegUtils)) {
-				console.log("Skipping video cover rendering - FFmpeg not available");
 				continue;
 			}
 
@@ -828,94 +801,48 @@ async function renderIkges(editor) {
 			};
 
 			try {
-				let bufferForSharp = null;
+				let previewBuffer = null;
 
-				if (isVideo) {
-					// 生成视频封面
-					const coverBuffer = await extractVideoCoverBuffer(absPath);
-					if (!coverBuffer) {
-						// 无法生成封面就不渲染
-						continue;
-					}
-					bufferForSharp = coverBuffer;
+				if (ffmpegPath) {
+					previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
 				}
 
-				if (sharp) {
-					const TARGET_WIDTH = 512;
-					const TARGET_HEIGHT = 288;
-					let baseSharp;
-					if (bufferForSharp) {
-						baseSharp = sharp(bufferForSharp);
-					} else {
-						baseSharp = sharp(absPath);
-					}
-
-					// 先把原始图/封面 resize 为透明背景的 512x288
-					const resizedBuffer = await baseSharp
-						.resize(TARGET_WIDTH, TARGET_HEIGHT, {
-							fit: "contain",
-							position: "center",
-							background: { r: 0, g: 0, b: 0, alpha: 0 },
-						})
-						.png()
-						.toBuffer();
-
-					let finalBuffer = resizedBuffer;
-
-					// 用格子背景（Solarized 暖色系）作为统一背景
-					try {
-						const bgBuffer = await generateGridBackgroundBuffer(
-							TARGET_WIDTH + 6,
-							TARGET_HEIGHT + 6,
-						);
-						if (bgBuffer) {
-							const bg = sharp(bgBuffer);
-							finalBuffer = await bg
-								.composite([
-									{
-										input: resizedBuffer,
-										gravity: "center",
-									},
-								])
-								.png()
-								.toBuffer();
-						}
-					} catch (bgErr) {
-						logMessage("合成格子背景失败: " + bgErr.message, "WARN");
-					}
-
-					const base64 = finalBuffer.toString("base64");
+				if (previewBuffer) {
+					const base64 = previewBuffer.toString("base64");
+					const mime = isGif ? "image/gif" : "image/png";
 					const dataUri = vscode.Uri.parse(
-						`data:image/png;base64,${base64}`,
+						`data:${mime};base64,${base64}`,
 					);
 
+					// 这里是“OK 相框布局”：512x288 内容 + padding + 虚线边框 + 暖色背景
 					deco.renderOptions.after = {
 						contentIconPath: dataUri,
 						margin: `4px 0 4px ${marginLeft}`,
-						height: "294px",
-						width: "518px",
+						height: `${boxHeight}px`,
+						width: `${boxWidth}px`,
 						padding: "2px",
 						border: "1px dashed #888",
-						// 背景已经在 finalBuffer 里是棋盘格，这里保持透明即可
-						backgroundColor: "transparent",
+						backgroundColor: PREVIEW_BG_COLOR,
+						display: "block",
+						position: "relative",
+					};
+				} else if (isImage) {
+					// ffmpeg 不可用或失败时，图片兜底为直接展示原图（包括 GIF，保持动图）
+					// 但相框布局仍然保持一致（统一尺寸 + 虚线边框 + 暖色背景）
+					deco.renderOptions.after = {
+						contentIconPath: vscode.Uri.file(absPath),
+						margin: `4px 0 4px ${marginLeft}`,
+						height: `${boxHeight}px`,
+						width: `${boxWidth}px`,
+						padding: "2px",
+						border: "1px dashed #888",
+						backgroundColor: PREVIEW_BG_COLOR,
 						display: "block",
 						position: "relative",
 					};
 				} else {
-					// 无 sharp：尽力展示原图（不支持视频封面）
-					if (!isImage) {
-						continue;
-					}
-					deco.renderOptions.after = {
-						contentIconPath: vscode.Uri.file(absPath),
-						margin: `4px 0 4px ${marginLeft}`,
-						height: "148px",
-						width: "auto",
-						border: "1px dashed #888",
-						backgroundColor: "rgba(230, 230, 250, 0.2)",
-						display: "block",
-						position: "relative",
-					};
+					// 视频且无法生成封面，跳过
+					continue;
 				}
 			} catch (error) {
 				logMessage("处理图片/视频失败: " + error.message, "WARN");
@@ -1177,7 +1104,7 @@ async function renameFileComknd(rawPath, absPath) {
 	const currentName = path.basename(absPath);
 	const newName = await vscode.window.showInputBox({
 		title: "重命名粘贴文件",
-		prompt: 'rename  ',
+		prompt: "rename  ",
 		value: currentName,
 		ignoreFocusOut: true,
 		validateInput: (value) => {
@@ -1217,7 +1144,7 @@ async function renameFileComknd(rawPath, absPath) {
 	const ranges = [];
 	let match;
 	while ((match = regex.exec(fullText))) {
-		const startOffset = match.index + 1; // 跳过 '['
+		const startOffset = match.index + 1; // 跳过 '/'
 		const endOffset = startOffset + rawPath.length;
 		const startPos = doc.positionAt(startOffset);
 		const endPos = doc.positionAt(endOffset);
@@ -1252,7 +1179,7 @@ function debounceRender(editor, delay = 100) {
 			debounceRender.isProcessing = true;
 			Promise.resolve()
 				.then(() => {
-					renderIkges(editor);
+					return renderIkges(editor);
 				})
 				.finally(() => {
 					setTimeout(() => {
@@ -1319,33 +1246,32 @@ async function activate(context) {
 			{ scheme: "file" },
 			new FileCodeLensProvider(),
 		),
+		// 滚动 / 可见区域变化时，重新渲染图片
+		vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
+			debounceRender(event.textEditor);
+		}),
+		vscode.window.onDidChangeActiveTextEditor((editor) => {
+			if (editor) debounceRender(editor);
+			updateCodeLensColorForEditor(editor);
+		}),
+		vscode.workspace.onDidChangeTextDocument((event) => {
+			const editor = vscode.window.activeTextEditor;
+			if (editor && event.document === editor.document) {
+				debounceRender(editor);
+			}
+		}),
+		vscode.window.onDidChangeVisibleTextEditors(() => {
+			renderVisibleEditors();
+		}),
+		// 光标行改变时，更新 CodeLens 透明度
+		vscode.window.onDidChangeTextEditorSelection((event) => {
+			updateCodeLensColorForEditor(event.textEditor);
+		}),
+		// 主题变化时，更新 CodeLens 颜色
+		vscode.window.onDidChangeActiveColorTheme(() => {
+			updateCodeLensColorForEditor(vscode.window.activeTextEditor);
+		}),
 	);
-
-	vscode.window.onDidChangeActiveTextEditor((editor) => {
-		if (editor) debounceRender(editor);
-		updateCodeLensColorForEditor(editor);
-	});
-
-	vscode.workspace.onDidChangeTextDocument((event) => {
-		const editor = vscode.window.activeTextEditor;
-		if (editor && event.document === editor.document) {
-			debounceRender(editor);
-		}
-	});
-
-	vscode.window.onDidChangeVisibleTextEditors(() => {
-		renderVisibleEditors();
-	});
-
-	// 光标行改变时，更新 CodeLens 透明度
-	vscode.window.onDidChangeTextEditorSelection((event) => {
-		updateCodeLensColorForEditor(event.textEditor);
-	});
-
-	// 主题变化时，更新 CodeLens 颜色
-	vscode.window.onDidChangeActiveColorTheme(() => {
-		updateCodeLensColorForEditor(vscode.window.activeTextEditor);
-	});
 
 	const editor = vscode.window.activeTextEditor;
 	if (editor) renderIkges(editor);
