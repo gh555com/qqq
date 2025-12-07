@@ -5,9 +5,14 @@ const path = require("path");
 const fs = require("fs");
 
 let sharp;
-let ffmpeg = null;
-let ffmpegUtils = null;
-let ffmpegLoadingPromise = null;
+
+// ffmpeg 原生二进制（自带）
+let ffmpegPath = null;
+let ffmpegProbePromise = null;
+
+// 简单的封面缓存，避免对同一个视频反复跑 ffmpeg
+const MAX_VIDEO_COVER_CACHE = 50;
+const videoCoverCache = new Map();
 
 // 尝试加载 sharp
 try {
@@ -17,76 +22,17 @@ try {
 	console.log("sharp 库未安装，无法调整图片尺寸 / 生成格子背景");
 }
 
-// 尝试加载 ffmpeg.wasm（用于视频封面）
-// 适配 @ffmpeg/ffmpeg + @ffmpeg/core@0.9.0
+// 尝试加载 @ffmpeg-installer/ffmpeg（用于视频封面）
 try {
-	const { createFFmpeg, fetchFile } = require("@ffmpeg/ffmpeg");
-	let corePath;
-	try {
-		// 优先使用默认导出
-		corePath = require.resolve("@ffmpeg/core/dist/ffmpeg-core.js");
-	} catch (e1) {
-		console.log("Failed to resolve @ffmpeg/core/dist/ffmpeg-core.js:", e1.message);
-		try {
-			corePath = require.resolve("@ffmpeg/core");
-		} catch (e2) {
-			console.log("Failed to resolve @ffmpeg/core:", e2.message);
-			corePath = undefined;
-		}
-	}
-
-	console.log("Resolved corePath:", corePath);
-
-	if (corePath) {
-		// 使用更兼容的配置
-		ffmpeg = createFFmpeg({
-			log: false,
-			corePath: corePath,
-		});
-		ffmpegUtils = { fetchFile };
-		console.log("FFmpeg instance created successfully");
-
-		// 测试 FFmpeg 可用性
-		setTimeout(testFFmpegAvailability, 1000);
-	} else {
-		ffmpeg = null;
-		ffmpegUtils = null;
-		console.log("Could not resolve corePath, ffmpeg.wasm 未安装或加载失败，无法为视频生成封面");
-	}
+	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+	ffmpegPath = ffmpegInstaller.path;
+	console.log("Using bundled ffmpeg binary:", ffmpegPath);
 } catch (e) {
-	console.log("Failed to create FFmpeg instance:", e.message);
-	console.log("Stack trace:", e.stack);
-	ffmpeg = null;
-	ffmpegUtils = null;
-	console.log("ffmpeg.wasm 未安装或加载失败，无法为视频生成封面");
-}
-
-// 添加一个标志来跟踪 FFmpeg 是否可用
-let isFFmpegAvailable = false;
-
-// 添加一个简单的测试函数来验证 FFmpeg 是否能正常工作
-async function testFFmpegAvailability() {
-	console.log("Testing FFmpeg availability...");
-	if (!ffmpeg) {
-		console.log("FFmpeg instance is null");
-		isFFmpegAvailable = false;
-		return;
-	}
-
-	try {
-		const ready = await ensureFfmpegReady();
-		if (ready) {
-			console.log("FFmpeg is ready and available");
-			isFFmpegAvailable = true;
-		} else {
-			console.log("FFmpeg is not ready");
-			isFFmpegAvailable = false;
-		}
-	} catch (e) {
-		console.log("Error testing FFmpeg availability:", e.message);
-		console.log("Stack trace:", e.stack);
-		isFFmpegAvailable = false;
-	}
+	ffmpegPath = null;
+	console.log(
+		"未能加载 @ffmpeg-installer/ffmpeg，视频封面预览将被禁用:",
+		e.message,
+	);
 }
 
 // 公共配置常量
@@ -201,88 +147,138 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 // ==========================================
-//           ffmpeg.wasm 视频封面
+//           ffmpeg 原生版：视频封面
 // ==========================================
 
-async function ensureFfmpegReady() {
-	// 首先检查 FFmpeg 实例是否存在
-	if (!ffmpeg) {
-		console.log("FFmpeg instance is null, cannot ensure readiness");
+async function ensureFfmpegAvailable() {
+	if (!ffmpegPath) {
 		return false;
 	}
-
-	// 如果已经有加载承诺，直接返回
-	if (ffmpegLoadingPromise) {
-		console.log("Returning existing FFmpeg loading promise");
-		return ffmpegLoadingPromise;
+	if (ffmpegProbePromise) {
+		return ffmpegProbePromise;
 	}
 
-	console.log("Creating new FFmpeg loading promise");
-	ffmpegLoadingPromise = (async () => {
-		try {
-			// 检查是否已经加载
-			if (!ffmpeg.isLoaded()) {
-				console.log("Loading FFmpeg...");
-				await ffmpeg.load();
-				console.log("FFmpeg loaded successfully");
-			} else {
-				console.log("FFmpeg already loaded");
-			}
-			return true;
-		} catch (e) {
-			console.log("ffmpeg 加载失败:", e);
-			console.log("Stack trace:", e.stack);
-			// 清除加载承诺，以便下次可以重试
-			ffmpegLoadingPromise = null;
-			return false;
-		}
-	})();
+	ffmpegProbePromise = new Promise((resolve) => {
+		const child = cp.spawn(ffmpegPath, ["-version"], {
+			windowsHide: true,
+		});
 
-	return ffmpegLoadingPromise;
+		let handled = false;
+
+		child.on("error", (err) => {
+			console.log("探测 ffmpeg 失败:", err.message);
+			ffmpegPath = null;
+			handled = true;
+			resolve(false);
+		});
+
+		child.on("close", (code) => {
+			if (handled) {
+				return;
+			}
+			if (code === 0) {
+				console.log("ffmpeg 探测成功，可以用于生成视频封面");
+				resolve(true);
+			} else {
+				console.log("ffmpeg 探测失败，退出码:", code);
+				ffmpegPath = null;
+				resolve(false);
+			}
+		});
+	});
+
+	return ffmpegProbePromise;
+}
+
+function setVideoCoverCache(videoPath, buffer, mtimeMs) {
+	if (videoCoverCache.size >= MAX_VIDEO_COVER_CACHE) {
+		const firstKey = videoCoverCache.keys().next().value;
+		if (firstKey !== undefined) {
+			videoCoverCache.delete(firstKey);
+		}
+	}
+	videoCoverCache.set(videoPath, { buffer, mtimeMs });
 }
 
 async function extractVideoCoverBuffer(videoPath) {
 	console.log("Attempting to extract video cover for:", videoPath);
-	if (!ffmpeg || !ffmpegUtils) {
-		console.log("FFmpeg not available for video cover extraction");
-		return null;
-	}
-	const ready = await ensureFfmpegReady();
-	if (!ready) {
-		console.log("FFmpeg not ready for video cover extraction");
+
+	if (!ffmpegPath) {
+		console.log("ffmpegPath is null, skip video cover extraction");
 		return null;
 	}
 
+	const ok = await ensureFfmpegAvailable();
+	if (!ok) {
+		console.log("ffmpeg not available, skip video cover extraction");
+		return null;
+	}
+
+	// 先看缓存
 	try {
-		const { fetchFile } = ffmpegUtils;
-		const inputName = "input_" + path.basename(videoPath);
-		const outputName = "cover.png";
+		const stat = await fs.promises.stat(videoPath);
+		const cached = videoCoverCache.get(videoPath);
+		if (cached && cached.mtimeMs === stat.mtimeMs) {
+			return cached.buffer;
+		}
+	} catch (e) {
+		// stat 失败就不使用缓存
+	}
 
-		console.log("Writing video file to FFmpeg FS");
-		ffmpeg.FS("writeFile", inputName, await fetchFile(videoPath));
-		// 简单策略：取 1 秒处的一帧作为封面
-		console.log("Executing FFmpeg command to extract cover");
-		await ffmpeg.run(
-			"-i",
-			inputName,
+	return new Promise((resolve) => {
+		const args = [
+			"-hide_banner",
+			"-loglevel",
+			"error",
 			"-ss",
-			"00:00:01.000",
+			"1",
+			"-i",
+			videoPath,
 			"-frames:v",
 			"1",
-			outputName,
-		);
-		console.log("Reading cover image from FFmpeg FS");
-		const data = ffmpeg.FS("readFile", outputName);
-		ffmpeg.FS("unlink", inputName);
-		ffmpeg.FS("unlink", outputName);
+			"-f",
+			"image2pipe",
+			"-vcodec",
+			"png",
+			"pipe:1",
+		];
 
-		console.log("Video cover extracted successfully");
-		return Buffer.from(data.buffer);
-	} catch (e) {
-		console.log("生成视频封面失败:", e);
-		console.log("Stack trace:", e.stack);
-		return null;
-	}
+		const child = cp.spawn(ffmpegPath, args, {
+			windowsHide: true,
+		});
+
+		const chunks = [];
+		let stderr = "";
+
+		child.stdout.on("data", (d) => {
+			chunks.push(d);
+		});
+
+		child.stderr.on("data", (d) => {
+			stderr += d.toString();
+		});
+
+		child.on("error", (err) => {
+			console.log("调用 ffmpeg 生成视频封面失败:", err.message);
+			resolve(null);
+		});
+
+		child.on("close", async (code) => {
+			if (code !== 0 || chunks.length === 0) {
+				console.log("ffmpeg 退出码异常:", code, "stderr:", stderr);
+				resolve(null);
+				return;
+			}
+			const buffer = Buffer.concat(chunks);
+			try {
+				const stat = await fs.promises.stat(videoPath);
+				setVideoCoverCache(videoPath, buffer, stat.mtimeMs);
+			} catch (e) {
+				// stat 失败就不缓存
+			}
+			resolve(buffer);
+		});
+	});
 }
 
 // ==========================================
@@ -816,9 +812,11 @@ async function renderIkges(editor) {
 				continue;
 			}
 
-			// 如果是视频文件，检查 FFmpeg 是否可用
-			if (isVideo && (!ffmpeg || !ffmpegUtils)) {
-				console.log("Skipping video cover rendering - FFmpeg not available");
+			// 如果是视频文件，检查 ffmpeg 是否可用
+			if (isVideo && !ffmpegPath) {
+				console.log(
+					"Skipping video cover rendering - ffmpeg binary not available",
+				);
 				continue;
 			}
 
