@@ -560,13 +560,14 @@ function executeClipboardComknd() {
 // ==========================================
 
 function findLastImageOrVideoMarkerLine(document, position) {
-	const regex = /\[([A-Za-z]:[\\\/].*?)\]/g;
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
+
 
 	for (let line = position.line - 1; line >= 0; line--) {
 		const text = document.lineAt(line).text;
 		let match;
 		while ((match = regex.exec(text))) {
-			const rawPath = match[1];
+			const rawPath = match[0].slice(1, -1);
 			const ext = path.extname(rawPath || "").toLowerCase();
 			if (isImageOrVideoExt(ext)) {
 				return line;
@@ -643,7 +644,7 @@ function handleReqlt(reqlt) {
 			break;
 		}
 		case "ikge": {
-			const marker = `[${reqlt.path}]`;
+			const marker = `/${reqlt.path}/`;
 			const isImageOrVideo = true; // ikge 就是图片
 			const insertPos = ed.selection.active;
 			const insertion = buildInsertionTextForMarker(
@@ -670,7 +671,7 @@ function handleReqlt(reqlt) {
 				const filePath = reqlt.files[0];
 				const ext = path.extname(filePath || "").toLowerCase();
 				const isImageOrVideo = isImageOrVideoExt(ext);
-				const marker = `[${filePath}]`;
+				const marker = `/${filePath}/`;
 				const insertPos = ed.selection.active;
 				const insertion = buildInsertionTextForMarker(
 					ed,
@@ -686,11 +687,11 @@ function handleReqlt(reqlt) {
 				const document = ed.document;
 				const eol = getDocumentEOL(document);
 				const insertPos = ed.selection.active;
-				const firstMarker = `[${reqlt.files[0]}]`;
+				const firstMarker = `/${reqlt.files[0]}/`;
 				// 前面至少 1 空行，其余保持简单，每个一行
 				let text = eol + firstMarker;
 				for (let i = 1; i < reqlt.files.length; i++) {
-					text += eol + `[${reqlt.files[i]}]`;
+					text += eol + `/${reqlt.files[i]}/`;
 				}
 				ed.edit((edit) => edit.insert(insertPos, text)).then(() => {
 					reqlt.files.forEach((f) => invalidateFolderSizeCacheForPath(f));
@@ -778,7 +779,8 @@ async function renderIkges(editor) {
 	});
 
 	const decos = [];
-	const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
+
 
 	const visibleRanges = editor.visibleRanges;
 	if (!visibleRanges || visibleRanges.length === 0) return;
@@ -798,7 +800,7 @@ async function renderIkges(editor) {
 			const endPos = pos.translate(0, match[0].length);
 			const decoRange = new vscode.Range(pos, endPos);
 
-			const rawPath = match[1];
+			const rawPath = match[0].slice(1, -1);
 			const absPath = rawPath.replace(/\//g, "\\");
 			// 严格匹配小写 "qqq"
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) {
@@ -1044,7 +1046,8 @@ function updateCodeLensColorForEditor(editor) {
 class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		const lenses = [];
-		const regex = /\[([A-Za-z]:[\\\/].*?)\]/gi;
+		const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
+
 		const text = document.getText();
 		let match;
 
@@ -1055,7 +1058,7 @@ class FileCodeLensProvider {
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
 			const range = new vscode.Range(pos, pos);
-			const rawPath = match[1];
+			const rawPath = match[0].slice(1, -1);
 			const absPath = rawPath.replace(/\//g, "\\");
 
 			// 严格匹配小写 "qqq"
@@ -1088,21 +1091,21 @@ class FileCodeLensProvider {
 
 			// 按钮 1：📁qqq( 25m )  | 打开 qqq 文件夹并选中该文件
 			const lensOpenFolder = new vscode.CodeLens(range, {
-				title: `📁qqq( ${folderSizeStr} )  |`,
+				title: `✎( ${folderSizeStr}) 🗀qqq`,
 				command: "qqq.revealFileInFolder",
 				arguments: [absPath],
 			});
 
 			// 按钮 2：  rename  |  —— 重命名文件 + 文本里的匹配暗号
 			const lensRename = new vscode.CodeLens(range, {
-				title: "  rename  |",
+				title: "✎rename",
 				command: "qqq.renameFile",
 				arguments: [rawPath, absPath],
 			});
 
 			// 按钮 3：  ( 5k )(e:\...\qqq\212zn.  2025.12.06 [6] 12.09.14.png)
 			const lensOpenFile = new vscode.CodeLens(range, {
-				title: `  ( ${fileSizeStr} )(${absPath})`,
+				title: `✎( ${fileSizeStr})   ${absPath}`,
 				command: "qqq.openFile",
 				arguments: [absPath],
 			});
@@ -1174,7 +1177,7 @@ async function renameFileComknd(rawPath, absPath) {
 	const currentName = path.basename(absPath);
 	const newName = await vscode.window.showInputBox({
 		title: "重命名粘贴文件",
-		prompt: 'rename  （按“Enter”以确认或按"Esc”以取消）',
+		prompt: 'rename  ',
 		value: currentName,
 		ignoreFocusOut: true,
 		validateInput: (value) => {
@@ -1207,7 +1210,8 @@ async function renameFileComknd(rawPath, absPath) {
 	const doc = editor.document;
 	const fullText = doc.getText();
 	const escapedRawPath = rawPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	const regex = new RegExp(`\\[${escapedRawPath}\\]`, "g");
+	const regex = new RegExp(`\\/${escapedRawPath}\\/`, "g");
+
 	const newRawPath = buildNewRawPath(rawPath, trimmedName);
 
 	const ranges = [];
