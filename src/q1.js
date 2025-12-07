@@ -12,13 +12,16 @@ let ffmpegProbePromise = null;
 const MAX_PREVIEW_CACHE = 50;
 const previewCache = new Map();
 
-// 统一的图片 / 视频预览尺寸 & 背景色
+// 统一的图片 / 视频预览尺寸
 const PREVIEW_WIDTH = 512;
 const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6; // 额外边框像素（只用于展示尺寸）
-// 暖色背景：同时用于 ffmpeg 的 pad 和 VSCode 装饰背景，参考你“OK 相框”的感觉
-const PREVIEW_BG_COLOR = "#fef6e3";   // VSCode 装饰背景用
-const FFMPEG_BG_COLOR = "0xfef6e3";  // ffmpeg pad 用（不能带 #）
+
+// 相框背景色配置
+// PREVIEW_BG_COLOR: VSCode 装饰器 CSS 背景（作为兜底，或在 ffmpeg 处理前的一瞬间显示）
+// FFMPEG_BG_COLOR: 当 q1.png 不存在时，ffmpeg 降级使用的 pad 填充色
+const PREVIEW_BG_COLOR = "#fdf6e3";
+const FFMPEG_BG_COLOR = "0xfdf6e3";
 
 // 尝试加载 @ffmpeg-installer/ffmpeg
 try {
@@ -232,31 +235,25 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 
 // ffmpeg 预览参数：
 // - 视频：粗暴 -ss 1 放在 -i 前面
-// - 图片/视频：scale + pad 到 512×288，相框暖色背景
+// - 图片/视频：scale + overlay (如果 assets/q1.png 存在) 或 scale + pad
 // - GIF：
-//    * 普通模式：输出动图 gif，保持动画
+//    * 普通模式：输出动图 gif，保持动画（背景图循环）
 //    * 极限性能模式：当作普通图片，取首帧，输出 JPEG
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const extreme = extremePerformanceMode;
 	const stretch = stretchSmallImages;
 
-	// 构造 scale + pad 规则
-	let vf;
+	// 1. 计算目标缩放尺寸 (targetW, targetH)
+	//    无论是用 pad 还是 overlay，这部分计算逻辑是通用的
+	let targetW = PREVIEW_WIDTH;
+	let targetH = PREVIEW_HEIGHT;
 
-	// 基座：拉伸小图 / 视频，统一按 512×288 等比缩放后再 pad 到相框
-	// 取消拉伸小图时，只是换一套“目标尺寸”的计算，其余流程保持一致
 	if (stretch || isVideo) {
-		vf = [
-			`scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease`,
-			`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`,
-		].join(",");
+		// 拉伸小图 / 视频：目标就是填满 512x288（fit inside）
+		targetW = PREVIEW_WIDTH;
+		targetH = PREVIEW_HEIGHT;
 	} else {
-		// 不拉伸小图模式：
-		//   - 如果原始尺寸本来就不超过相框（512×288），则保持原尺寸，不放大
-		//   - 否则按相框规则等比缩小到能完整放入 512×288
-		let targetW = PREVIEW_WIDTH;
-		let targetH = PREVIEW_HEIGHT;
-
+		// 不拉伸小图：
 		if (
 			origSize &&
 			typeof origSize.width === "number" &&
@@ -266,11 +263,11 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 			const oh = origSize.height;
 
 			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
-				// 小图：目标尺寸 = 原始尺寸（不放大）
+				// 小图：保持原尺寸
 				targetW = ow;
 				targetH = oh;
 			} else {
-				// 大图：在基座逻辑上按比例缩小，完整放入相框
+				// 大图：按比例缩小至能完整放入框内
 				const scale = Math.min(
 					PREVIEW_WIDTH / ow,
 					PREVIEW_HEIGHT / oh,
@@ -279,65 +276,83 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 				targetH = Math.max(1, Math.round(oh * scale));
 			}
 		}
-
-		vf = [
-			`scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`,
-			`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`,
-		].join(",");
 	}
 
+	// 2. 检测相框背景图 assets/q1.png 是否存在
+	//    注意：src/q1.js 的 __dirname 通常在 /src，所以 assets 在 ../assets
+	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
+	const useImageBackground = fs.existsSync(bgImagePath);
+
+	// 3. 构造参数
 	const args = [
 		"-hide_banner",
 		"-loglevel",
 		"error",
 	];
 
-	// 视频先粗略 seek 到 1 秒附近，加速
+	// 视频先粗略 seek 到 1 秒附近
 	if (isVideo) {
 		args.push("-ss", "1");
 	}
 
+	// 输入 0: 原始内容
 	args.push("-i", filePath);
 
+	// Filter Complex 构造
+	let filterComplex = "";
+
+	if (useImageBackground) {
+		// === 方案 A: 使用图片背景 (Overlay) ===
+
+		// 输入 1: 背景图 (-loop 1 保证 GIF 播放时背景一直存在)
+		args.push("-loop", "1", "-i", bgImagePath);
+
+		// [0:v] 缩放 -> [scaled]
+		// [1:v] 背景
+		// Overlay: 把 [scaled] 居中叠加到 [1:v] 上
+		filterComplex = [
+			`[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease[scaled];`,
+			`[1:v][scaled]overlay=(W-w)/2:(H-h)/2:format=auto`
+		].join("");
+
+		args.push("-filter_complex", filterComplex);
+
+	} else {
+		// === 方案 B: 降级方案 (Pad 纯色) ===
+
+		// 单输入流，直接用 -vf
+		const vf = [
+			`scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`,
+			`pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`,
+		].join(",");
+
+		args.push("-vf", vf);
+	}
+
+	// 4. 输出控制
 	if (extreme) {
-		// 极限性能模式：
-		// - 所有类型（图片 / GIF / 视频）统一输出单帧 JPEG（mjpeg）
-		// - GIF 直接取首帧，变成静态图，避免整段动图的解码与编码
+		// 极限性能模式：统一输出单帧 JPEG (mjpeg)
 		args.push(
-			"-frames:v",
-			"1",
-			"-an",
-			"-sn",
-			"-vf",
-			vf,
-			"-f",
-			"image2pipe",
-			"-vcodec",
-			"mjpeg",
+			"-frames:v", "1",
+			"-an", "-sn",
+			"-f", "image2pipe",
+			"-vcodec", "mjpeg",
 			"pipe:1",
 		);
 	} else if (isGif) {
 		// 普通模式 GIF：保持动图
+		// 注意：如果用了 filter_complex，输出默认取滤镜链的最终输出
 		args.push(
-			"-vf",
-			vf,
-			"-f",
-			"gif",
+			"-f", "gif",
 			"pipe:1",
 		);
 	} else {
 		// 普通图片 / 视频：输出单帧 PNG
 		args.push(
-			"-frames:v",
-			"1",
-			"-an",
-			"-sn",
-			"-vf",
-			vf,
-			"-f",
-			"image2pipe",
-			"-vcodec",
-			"png",
+			"-frames:v", "1",
+			"-an", "-sn",
+			"-f", "image2pipe",
+			"-vcodec", "png",
 			"pipe:1",
 		);
 	}
@@ -492,13 +507,11 @@ function getPreviewOffset() {
 }
 
 // 把 previewOffset 映射到 margin-left
-// 需求：现在的 100，相当于之前的 0，整体再往左移 100px
-// 同时略微考虑字体大小：字号越大，整体再往右一点，避免过度左飘
 function computeMarginLeft() {
 	const value = getPreviewOffset();
 	const numeric = typeof value === "number" ? value : 100;
 
-	let marginLeft = -427 + numeric; // 原来是 -327 + numeric，这里整体再左移 100px
+	let marginLeft = -427 + numeric;
 
 	try {
 		const editorConfig = vscode.workspace.getConfiguration("editor");
@@ -769,10 +782,7 @@ function countBlankLinesBetween(document, startLine, endLine) {
 	return blank;
 }
 
-// 构造插入字符串：
-// 1. 插入前至少一个空行
-// 2. 如果是图片/视频，插入后再加 18 个空行
-// 3. 如果前一个图片/视频暗号到当前位置的空行 < 18，则在前面再补足
+// 构造插入字符串
 function buildInsertionTextForMarker(editor, insertPosition, markerText, isImageOrVideo) {
 	const document = editor.document;
 	const eol = getDocumentEOL(document);
@@ -844,9 +854,7 @@ function handleReqlt(reqlt) {
 				break;
 			}
 
-			// 多文件情况下，为了简单起见：
-			// - 如果只有 1 个文件，严格按规则插入
-			// - 如果多个文件，沿用旧逻辑（每个一行），只在前面补 1 个空行
+			// 多文件情况下
 			if (reqlt.files.length === 1) {
 				const filePath = reqlt.files[0];
 				const ext = path.extname(filePath || "").toLowerCase();
@@ -948,7 +956,7 @@ async function renderIkges(editor) {
 			const isVideo = isVideoExt(ext);
 			const isGif = ext === ".gif";
 
-			// 下区现在只对「图片或视频预览」做渲染，普通文件不再做任何下区渲染
+			// 下区现在只对「图片或视频预览」做渲染
 			if (!isImage && !isVideo) {
 				continue;
 			}
@@ -978,7 +986,7 @@ async function renderIkges(editor) {
 						`data:${mime};base64,${base64}`,
 					);
 
-					// 这里是“OK 相框布局”：512x288 内容 + padding + 虚线边框 + 暖色背景
+					// 这里是“OK 相框布局”
 					deco.renderOptions.after = {
 						contentIconPath: dataUri,
 						margin: `4px 0 4px ${marginLeft}`,
@@ -986,13 +994,12 @@ async function renderIkges(editor) {
 						width: `${boxWidth}px`,
 						padding: "2px",
 						border: "1px dashed #888",
-						backgroundColor: PREVIEW_BG_COLOR,
+						backgroundColor: PREVIEW_BG_COLOR, // 使用微调后的暖色
 						display: "block",
 						position: "relative",
 					};
 				} else if (isImage) {
-					// ffmpeg 不可用或失败时，图片兜底为直接展示原图（包括 GIF，保持动图）
-					// 但相框布局仍然保持一致（统一尺寸 + 虚线边框 + 暖色背景）
+					// ffmpeg 不可用兜底
 					deco.renderOptions.after = {
 						contentIconPath: vscode.Uri.file(absPath),
 						margin: `4px 0 4px ${marginLeft}`,
@@ -1180,21 +1187,21 @@ class FileCodeLensProvider {
 				}
 			} catch { }
 
-			// 按钮 1：📁qqq( 25m )  | 打开 qqq 文件夹并选中该文件
+			// 按钮 1：📁qqq( 25m )
 			const lensOpenFolder = new vscode.CodeLens(range, {
 				title: `✎( ${folderSizeStr}) 🗀qqq`,
 				command: "qqq.revealFileInFolder",
 				arguments: [absPath],
 			});
 
-			// 按钮 2：  rename  |  —— 重命名文件 + 文本里的匹配暗号
+			// 按钮 2：  rename
 			const lensRename = new vscode.CodeLens(range, {
 				title: "✎rename",
 				command: "qqq.renameFile",
 				arguments: [rawPath, absPath],
 			});
 
-			// 按钮 3：  ( 5k )(e:\...\qqq\212zn.  2025.12.06 [6] 12.09.14.png)
+			// 按钮 3：  ( 5k )(e:\...\qqq\212zn...)
 			const lensOpenFile = new vscode.CodeLens(range, {
 				title: `✎( ${fileSizeStr})   ${absPath}`,
 				command: "qqq.openFile",
@@ -1205,10 +1212,9 @@ class FileCodeLensProvider {
 			lensLines.add(pos.line);
 		}
 
-		// 记录该文档中所有 qqq CodeLens 所在的行号，用于控制透明度
+		// 记录该文档中所有 qqq CodeLens 所在的行号
 		lensLinesByDocUri.set(document.uri.toString(), lensLines);
 
-		// 触发一次颜色更新（比如一打开文档时）
 		updateCodeLensColorForEditor(vscode.window.activeTextEditor);
 
 		return lenses;
@@ -1237,7 +1243,7 @@ function openFileComknd(filePath) {
 	}
 }
 
-// 按钮 1：打开 qqq 文件夹并尽量选中文件
+// 按钮 1：打开 qqq 文件夹
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) {
 		vscode.window.showErrorMessage("文件不存在: " + filePath);
@@ -1248,10 +1254,8 @@ function revealFileInFolder(filePath) {
 			const cmd = `explorer /select,"${filePath.replace(/"/g, '""')}"`;
 			cp.exec(cmd);
 		} else if (process.platform === "darwin") {
-			// macOS：open -R 可以高亮选中文件
 			cp.exec(`open -R "${filePath}"`);
 		} else {
-			// Linux 桌面环境太多，统一退化为打开目录
 			const dir = path.dirname(filePath);
 			cp.exec(`xdg-open "${dir}"`);
 		}
@@ -1325,7 +1329,6 @@ async function renameFileComknd(rawPath, absPath) {
 		});
 	}
 
-	// 重命名后刷新预览 / 目录缓存
 	invalidateFolderSizeCacheForPath(newAbsPath);
 	renderVisibleEditors();
 	vscode.window.showInformationMessage("重命名成功");
@@ -1371,20 +1374,18 @@ function renderVisibleEditors(delay = 50) {
 async function activate(context) {
 	extensionContext = context;
 
-	// 先读取一次全局配置（拉伸小图 / 极限性能）
+	// 先读取一次全局配置
 	refreshQqqConfig();
 
 	// 启动时检查 Python 环境
 	isPythonAvailable = await checkPythonEnvironment();
 	if (isPythonAvailable) {
-		// 只有 Python 存在才启动追踪
 		initUserTracking(context);
 	}
 
-	// 初始设置一下 CodeLens 前景色（默认认为不激活）
 	updateGlobalCodeLensColor(false);
 
-	// 配置变更时同步 previewOffset / 全局开关，并刷新预览
+	// 配置变更时同步
 	vscode.workspace.onDidChangeConfiguration((event) => {
 		if (
 			event.affectsConfiguration("qqq.previewOffset") ||
@@ -1402,9 +1403,7 @@ async function activate(context) {
 						);
 					}
 				}
-				// 重新加载两个全局配置开关
 				refreshQqqConfig();
-				// 重新渲染当前所有可见编辑器
 				renderVisibleEditors();
 			} catch { }
 		}
@@ -1422,7 +1421,6 @@ async function activate(context) {
 			{ scheme: "file" },
 			new FileCodeLensProvider(),
 		),
-		// 滚动 / 可见区域变化时，重新渲染图片
 		vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
 			debounceRender(event.textEditor);
 		}),
@@ -1439,11 +1437,9 @@ async function activate(context) {
 		vscode.window.onDidChangeVisibleTextEditors(() => {
 			renderVisibleEditors();
 		}),
-		// 光标行改变时，更新 CodeLens 透明度
 		vscode.window.onDidChangeTextEditorSelection((event) => {
 			updateCodeLensColorForEditor(event.textEditor);
 		}),
-		// 主题变化时，更新 CodeLens 颜色
 		vscode.window.onDidChangeActiveColorTheme(() => {
 			updateCodeLensColorForEditor(vscode.window.activeTextEditor);
 		}),
