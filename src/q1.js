@@ -163,7 +163,7 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 	previewCache.set(filePath, { buffer, mtimeMs });
 }
 
-// ★ GIF 专用分支：移植代码2的简化 -vf 逻辑（统一 filter_complex + -map [out_v]，不加水印，直接 scale + pad 输出 gif）
+// ★ GIF 专用分支
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const stretch = stretchSmallImages;
 	let targetW = PREVIEW_WIDTH;
@@ -184,15 +184,12 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 		}
 	}
 
-	// ★★★ GIF 专用：统一 vf=scale+pad[out_v]，加 -filter_complex -map 强制尺寸（移植代码2，确保不崩） ★★★
+	// ★ GIF 优化：锁死尺寸 + 简化滤镜
 	if (isGif) {
-		// 计算 vf（统一 scale + pad，支持 stretchSmallImages）
 		let vf;
 		if (stretch || isVideo) {
-			// 拉伸模式：统一等比缩放到 512x288 后 pad
 			vf = `scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
 		} else {
-			// 不拉伸小图：小图保持原尺寸，大图等比缩小到相框内
 			let gifTargetW = PREVIEW_WIDTH;
 			let gifTargetH = PREVIEW_HEIGHT;
 			if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
@@ -212,18 +209,16 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 
 		const args = ["-hide_banner", "-loglevel", "error", "-i", filePath];
 		args.push("-filter_complex", vf);
-		args.push("-map", "[out_v]");  // ★ 强制输出处理后的流，防GIF野蛮生长
+		args.push("-map", "[out_v]");
 		if (extremePerformanceMode) {
-			// extreme 模式：GIF 取首帧，输出 mjpeg（简化，不动图）
 			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
 		} else {
-			// 普通模式：输出动图 gif
 			args.push("-f", "gif", "pipe:1");
 		}
 		return args;
 	}
 
-	// 非 GIF：保持原复杂 filter_complex 逻辑（支持背景/水印）
+	// 非 GIF
 	const args = ["-hide_banner", "-loglevel", "error"];
 	if (isVideo) args.push("-ss", "1");
 	args.push("-i", filePath);
@@ -232,7 +227,7 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
 	const useImageBackground = fs.existsSync(bgImagePath);
-	const useWatermark = fs.existsSync(watermarkPath);  // 非 GIF 加水印
+	const useWatermark = fs.existsSync(watermarkPath);
 
 	let streamIndex = 0;
 	const contentIdx = streamIndex++;
@@ -305,7 +300,6 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 		const child = cp.spawn(ffmpegPath, args, { windowsHide: true });
 
 		const chunks = [];
-		let stderr = "";
 		let resolved = false;
 
 		const timer = setTimeout(() => {
@@ -317,7 +311,9 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 		}, 6000);
 
 		child.stdout.on("data", (d) => chunks.push(d));
-		child.stderr.on("data", (d) => stderr += d.toString());
+
+		// ★【优化1】借鉴代码二：加回空监听，防止 stderr 缓冲区满导致进程 hang 住
+		child.stderr.on("data", () => { });
 
 		child.on("error", () => {
 			if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); }
@@ -332,13 +328,12 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				let mtime = 0;
 				try {
 					if (extremePerformanceMode) {
-						mtime = 0;  // ★ extreme下信任缓存，省stat IO
+						mtime = 0;
 					} else {
 						mtime = fs.statSync(filePath).mtimeMs;
 					}
 				} catch { }
 				setPreviewCache(filePath, buffer, mtime);
-				if (stderr && stderr.includes("error")) logMessage(stderr, "ERROR");  // ★ 只log error
 				resolve(buffer);
 			}
 		});
@@ -525,7 +520,6 @@ function countBlankLinesBetween(document, startLine, endLine) {
 	return blank;
 }
 
-// ★ 核心修改：粘贴时强制在暗号后面加一个换行符（eol），确保图片挂在下一行
 function buildInsertionTextForMarker(editor, insertPosition, markerText, isImageOrVideo) {
 	const document = editor.document;
 	const eol = getDocumentEOL(document);
@@ -539,9 +533,8 @@ function buildInsertionTextForMarker(editor, insertPosition, markerText, isImage
 	}
 	let insertion = eol.repeat(prefixLines) + markerText;
 	if (isImageOrVideo) {
-		// ★ 强制加一个换行符，确保下一行为空，用于挂载装饰
 		insertion += eol;
-		insertion += eol.repeat(17); // 总18行：1换行 + 17空白
+		insertion += eol.repeat(17);
 	}
 	return insertion;
 }
@@ -582,7 +575,8 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//  ★★★ 方案 B：0 长度 range + before + CSS背景 ★★★ (增强：唯一Key + 并发分块 + 版本强化 + 所有暗号100%透明隐藏)
+//  ★★★ 方案 B：0 长度 range + before + CSS背景 ★★★
+//  (增强：唯一Key + 并发分块 + 版本强化 + 所有暗号100%透明隐藏)
 // ==========================================
 
 async function renderIkges(editor) {
@@ -592,19 +586,17 @@ async function renderIkges(editor) {
 		return;
 	}
 
-	const myRenderVersion = ++currentRenderVersion;  // ★ 版本戳：防幽灵任务
+	const myRenderVersion = ++currentRenderVersion;
 
-	// ★ 初始化图片预览装饰器
 	if (!decorationType) {
 		decorationType = vscode.window.createTextEditorDecorationType({
-			isWholeLine: false  // 不是整行，我们精确控制
+			isWholeLine: false
 		});
 	}
 
-	// ★ 初始化暗号隐藏装饰器（font-size:1px + transparent + opacity:0，确保100%隐形）
 	if (!markerHideType) {
 		markerHideType = vscode.window.createTextEditorDecorationType({
-			textDecoration: 'color: transparent; font-size: 1px; opacity: 0;'  // ★ 百分百透明：多层保险
+			textDecoration: 'color: transparent; font-size: 1px; opacity: 0;'
 		});
 	}
 
@@ -613,9 +605,7 @@ async function renderIkges(editor) {
 		documentDecorationsMap.set(docUri, new Map());
 	}
 	const currentDocDecos = documentDecorationsMap.get(docUri);
-
-	// ★ 暗号隐藏缓存（per doc，全量覆盖所有暗号）
-	const currentHideDecos = new Map();  // temp map for hides
+	const currentHideDecos = new Map();
 
 	const visibleRanges = editor.visibleRanges;
 	if (!visibleRanges || !visibleRanges.length) return;
@@ -634,18 +624,21 @@ async function renderIkges(editor) {
 		while ((match = regex.exec(text))) {
 			const offset = editor.document.offsetAt(range.start) + match.index;
 			const pos = editor.document.positionAt(offset);
-			const endPos = editor.document.positionAt(offset + match[0].length);  // ★ 暗号range：pos to endPos
+			const endPos = editor.document.positionAt(offset + match[0].length);
 
-			// ★ 唯一Key：精确到位置，防一行多标记冲突（用于隐藏+预览）
 			const uniqueKey = `${pos.line}_${pos.character}`;
 
-			// ★ 新增：所有暗号立即隐藏（同步，无论类型：bat/exe/图片等）
+			// 无论是否渲染图片，隐藏暗号的装饰器都要记录
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
 
-			// ★ 只有图片/视频才推预览任务（其余跳过，但隐藏已生效）
+			// ★【优化2】借鉴代码二：先查内存缓存！命中则直接跳过后续昂贵的磁盘检查
+			if (currentDocDecos.has(uniqueKey)) continue;
+
 			const rawPath = match[0].slice(1, -1);
 			const absPath = rawPath.replace(/\//g, "\\");
+
+			// ★ IO 操作放这里（只有缓存没命中时才执行）
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const ext = path.extname(absPath).toLowerCase();
@@ -653,32 +646,25 @@ async function renderIkges(editor) {
 			const isVideo = isVideoExt(ext);
 			const isGif = ext === ".gif";
 
-			if (!isImage && !isVideo) continue;  // ★ 非图跳预览，但隐藏已加
+			if (!isImage && !isVideo) continue;
 
-			// ★ 核心：定位到暗号的下一行（由于加了换行符），用0长度range锚定行首
 			const targetLine = pos.line + 1;
 			if (targetLine >= editor.document.lineCount) continue;
-
-			// ★ 缓存命中：图层已有，跳过（持久化防重复）
-			if (currentDocDecos.has(uniqueKey)) continue;
 
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 
 			const task = async () => {
-				// ★ 版本检查：滚屏快，旧任务直接丢
 				if (currentRenderVersion !== myRenderVersion) return null;
 
 				try {
 					let previewBuffer = null;
 					if (ffmpegPath) {
 						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
-						// ★ 版本检查：await后再次防幽灵
 						if (currentRenderVersion !== myRenderVersion) return null;
 					}
 
 					const deco = { range: anchorRange, renderOptions: {} };
 
-					// ★★★ 方案 B 核心：before 挂载在0长度range上，使用absolute定位 ★★★
 					const baseStyle = {
 						position: 'absolute',
 						left: marginLeft,
@@ -688,7 +674,10 @@ async function renderIkges(editor) {
 						padding: "2px",
 						border: "1px dashed #888",
 						backgroundColor: PREVIEW_BG_COLOR,
-						zIndex: -1
+						zIndex: -1,
+						backgroundSize: 'contain',
+						backgroundRepeat: 'no-repeat',
+						backgroundPosition: 'center'
 					};
 
 					if (previewBuffer) {
@@ -704,9 +693,8 @@ async function renderIkges(editor) {
 								background-repeat: no-repeat;
 								background-position: center;`
 						};
-						return { key: uniqueKey, deco };  // ★ 返回完整deco对象
+						return { key: uniqueKey, deco };
 					} else if (isImage) {
-						// 无 FFmpeg 时的降级：直接用文件路径
 						const fileUri = vscode.Uri.file(absPath);
 						deco.renderOptions.before = {
 							contentIconPath: fileUri,
@@ -723,21 +711,17 @@ async function renderIkges(editor) {
 		}
 	}
 
-	// ★★★ 并发分块执行：限流ffmpeg，防OOM；每chunk版本check ★★★
 	if (tasks.length > 0) {
 		const results = [];
 		for (let i = 0; i < tasks.length; i += MAX_CONCURRENT_TASKS) {
-			// ★ 版本阻断：chunk前check
 			if (currentRenderVersion !== myRenderVersion) return;
 			const chunk = tasks.slice(i, i + MAX_CONCURRENT_TASKS);
 			const chunkResults = await Promise.all(chunk.map(t => t()));
 			results.push(...chunkResults);
 		}
 
-		// ★ 最终阻断
 		if (currentRenderVersion !== myRenderVersion) return;
 
-		// ★ 存入持久化缓存：全量图层，滚回瞬间显示
 		for (const res of results) {
 			if (res) {
 				currentDocDecos.set(res.key, res.deco);
@@ -745,10 +729,8 @@ async function renderIkges(editor) {
 		}
 	}
 
-	// ★ 全量提交：当前文档所有已渲染（无论可视区），防重算
 	editor.setDecorations(decorationType, Array.from(currentDocDecos.values()));
 
-	// ★ 提交隐藏装饰器（全量，所有暗号100%透明；滚回也隐）
 	if (currentHideDecos.size > 0) {
 		editor.setDecorations(markerHideType, Array.from(currentHideDecos.values()));
 	}
