@@ -1,67 +1,57 @@
-// File: src/q1.js
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
-const crypto = require("crypto"); // 新增：用于哈希校验
+const crypto = require("crypto");
 
 // ==================== 核心完整性配置 ====================
-// 硬编码的 SHA-256 哈希值
 const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
-let isCoreIntegretyValid = false; // 全局安全锁，默认锁死
+let isCoreIntegretyValid = false;
 
-// ffmpeg 原生二进制
+// ==================== 全局变量 ====================
 let ffmpegPath = null;
 let ffmpegProbePromise = null;
 
-// 预览缩略图缓存
-const MAX_PREVIEW_CACHE = 50;
+const MAX_PREVIEW_CACHE = 100;
 const previewCache = new Map();
+const documentDecorationsMap = new Map();
+let currentRenderVersion = 0;
 
-// 统一预览尺寸
+const MAX_CONCURRENT_TASKS = 8;
+const SCROLL_DEBOUNCE_MS = 200;
+
 const PREVIEW_WIDTH = 512;
 const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6;
+const PREVIEW_BG_COLOR = "#fef6e3";
+const FFMPEG_BG_COLOR = "0xfef6e3";
 
-// 颜色配置
-const PREVIEW_BG_COLOR = "#fdf6e3";
-const FFMPEG_BG_COLOR = "0xfdf6e3";
-
-// 尝试加载 @ffmpeg-installer/ffmpeg
 try {
 	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 	ffmpegPath = ffmpegInstaller.path;
 } catch (e) {
 	ffmpegPath = null;
-	console.log("未能加载 @ffmpeg-installer/ffmpeg:", e.message);
 }
 
 const LOG_PATH = "D:\\view\\p\\kp.log";
 
-// 运行时状态
 let currentQessionId = null;
 let dbPath = null;
 let isPythonAvailable = false;
 let decorationType;
 let extensionContext = null;
 
-// CodeLens 相关
 const lensLinesByDocUri = new Map();
 let lastCodeLensIsActive = false;
 let lastCodeLensColor = null;
 
-// 扩展名定义
-const IMAGE_EXTS = new Set([
-	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
-]);
-const VIDEO_EXTS = new Set([
-	".mp4", ".mkv", ".webm", ".avi", ".mov",
-]);
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"]);
+const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
 
-// 缓存与配置
 const qqqFolderSizeCache = new Map();
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
+
 let stretchSmallImages = true;
 let extremePerformanceMode = false;
 
@@ -83,56 +73,28 @@ function logMessage(message, level = "WARN") {
 	try {
 		fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
 		fs.appendFileSync(LOG_PATH, line);
-	} catch (e) {
-		console.error("日志写入失败:", e);
-	}
+	} catch (e) { }
 }
 
 function clearDecorations() {
 	if (decorationType) {
-		try {
-			decorationType.dispose();
-		} catch (e) { }
+		try { decorationType.dispose(); } catch (e) { }
 		decorationType = null;
 	}
+	documentDecorationsMap.clear();
 }
-
-// ==========================================
-//           安全校验函数 (新增)
-// ==========================================
 
 function verifySystemIntegrity() {
 	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
-
 	try {
-		if (!fs.existsSync(watermarkPath)) {
-			throw new Error("Core asset missing");
-		}
-
-		// 同步读取，只在启动时执行一次，性能可接受
+		if (!fs.existsSync(watermarkPath)) return false;
 		const buffer = fs.readFileSync(watermarkPath);
 		const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-
-		if (hash !== CORE_INTEGRITY_HASH) {
-			throw new Error("Integrity check failed");
-		}
-
-		isCoreIntegretyValid = true;
-		console.log("qqq system integrity verified.");
-		return true;
-
+		return hash === CORE_INTEGRITY_HASH;
 	} catch (e) {
-		isCoreIntegretyValid = false;
-		const msg = `qqq 扩展严重错误: 核心组件校验失败 (${e.message})。系统已挂起。`;
-		vscode.window.showErrorMessage(msg);
-		logMessage(msg, "ERROR");
 		return false;
 	}
 }
-
-// ==========================================
-//           工具函数：尺寸 / 路径
-// ==========================================
 
 function formatBytes(size) {
 	if (size == null || isNaN(size)) return "?";
@@ -168,31 +130,22 @@ async function getImageDimensions(filePath) {
 		if (metadata && typeof metadata.width === "number" && typeof metadata.height === "number") {
 			return { width: metadata.width, height: metadata.height };
 		}
-	} catch (e) {
-		logMessage("获取图片尺寸失败: " + e.message, "WARN");
-	}
+	} catch (e) { }
 	return null;
 }
 
 // ==========================================
-//           ffmpeg 原生版：缩略图预览
+//           FFmpeg
 // ==========================================
 
 async function ensureFfmpegAvailable() {
-	// 如果完整性校验失败，假装 ffmpeg 不可用
-	if (!isCoreIntegretyValid) return false;
-
 	if (!ffmpegPath) return false;
 	if (ffmpegProbePromise) return ffmpegProbePromise;
-
 	ffmpegProbePromise = new Promise((resolve) => {
 		const child = cp.spawn(ffmpegPath, ["-version"], { windowsHide: true });
 		let handled = false;
-		child.on("error", () => { ffmpegPath = null; handled = true; resolve(false); });
-		child.on("close", (code) => {
-			if (handled) return;
-			resolve(code === 0);
-		});
+		child.on("error", () => { handled = true; resolve(false); });
+		child.on("close", (code) => { if (!handled) resolve(code === 0); });
 	});
 	return ffmpegProbePromise;
 }
@@ -205,21 +158,13 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 	previewCache.set(filePath, { buffer, mtimeMs });
 }
 
-// 核心逻辑修改：加入 q2.gif 水印图层
+// ★ GIF 专用分支：移植代码2的简化 -vf 逻辑（不加水印，直接 scale + pad 输出 gif）
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
-	// 安全检查：如果校验失败，返回空参数，导致执行失败
-	if (!isCoreIntegretyValid) return [];
-
-	const extreme = extremePerformanceMode;
 	const stretch = stretchSmallImages;
-
 	let targetW = PREVIEW_WIDTH;
 	let targetH = PREVIEW_HEIGHT;
 
-	if (stretch || isVideo) {
-		targetW = PREVIEW_WIDTH;
-		targetH = PREVIEW_HEIGHT;
-	} else {
+	if (!stretch && !isVideo) {
 		if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
 			const ow = origSize.width;
 			const oh = origSize.height;
@@ -234,144 +179,160 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 		}
 	}
 
-	// 资源路径
-	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
-	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif"); // 水印路径
-	const useImageBackground = fs.existsSync(bgImagePath);
+	// ★★★ GIF 专用：简化流程，使用 -vf scale,pad -f gif（移植代码2，确保尺寸生效，不加水印/背景） ★★★
+	if (isGif) {
+		// 计算 vf（统一 scale + pad，支持 stretchSmallImages）
+		let vf;
+		if (stretch || isVideo) {
+			// 拉伸模式：统一等比缩放到 512x288 后 pad
+			vf = `scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`;
+		} else {
+			// 不拉伸小图：小图保持原尺寸，大图等比缩小到相框内
+			let gifTargetW = PREVIEW_WIDTH;
+			let gifTargetH = PREVIEW_HEIGHT;
+			if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
+				const ow = origSize.width;
+				const oh = origSize.height;
+				if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
+					gifTargetW = ow;
+					gifTargetH = oh;
+				} else {
+					const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
+					gifTargetW = Math.max(1, Math.round(ow * scale));
+					gifTargetH = Math.max(1, Math.round(oh * scale));
+				}
+			}
+			vf = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}`;
+		}
 
+		const args = ["-hide_banner", "-loglevel", "error", "-i", filePath];
+		if (extremePerformanceMode) {
+			// extreme 模式：GIF 取首帧，输出 mjpeg（简化，不动图）
+			args.push("-frames:v", "1", "-an", "-sn", "-vf", vf, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
+		} else {
+			// 普通模式：输出动图 gif
+			args.push("-vf", vf, "-f", "gif", "pipe:1");
+		}
+		return args;
+	}
+
+	// 非 GIF：保持原复杂 filter_complex 逻辑（支持背景/水印）
 	const args = ["-hide_banner", "-loglevel", "error"];
-
 	if (isVideo) args.push("-ss", "1");
-
-	// 输入 0: 原始内容
 	args.push("-i", filePath);
 
-	// 输入流索引跟踪
-	let streamIndex = 0; // 当前是 0
-	const contentIdx = streamIndex++;
+	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
+	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
+	const useImageBackground = fs.existsSync(bgImagePath);
+	const useWatermark = fs.existsSync(watermarkPath);  // 非 GIF 加水印
+
+	let streamIndex = 0;
+	const contentIdx = streamIndex++;
 	let bgIdx = -1;
+	let wmIdx = -1;
+
 	if (useImageBackground) {
-		// 输入 1 (如果存在): 背景图
 		args.push("-loop", "1", "-i", bgImagePath);
 		bgIdx = streamIndex++;
 	}
+	if (useWatermark) {
+		args.push("-ignore_loop", "0", "-i", watermarkPath);
+		wmIdx = streamIndex++;
+	}
 
-	// 输入 2 (或1): 水印图 (q2.gif)
-	// 强制 loop 保证动图时水印不消失
-	args.push("-ignore_loop", "0", "-i", watermarkPath);
-	const wmIdx = streamIndex++;
-
-	// 构建 Filter Complex
 	let fc = "";
 	let currentStream = "";
 
-	// 1. 处理原始内容缩放
 	if (useImageBackground) {
-		// 方案 A: 有背景图 -> Scale
 		fc += `[${contentIdx}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease[scaled];`;
-
-		// 2. 叠加到背景图
-		// [bg][scaled] -> [composed]
-		fc += `[${bgIdx}:v][scaled]overlay=(W-w)/2:(H-h)/2:format=auto[composed];`;
+		fc += `[${bgIdx}:v][scaled]overlay=(W-w)/2:(H-h)/2:format=auto[composed]`;
 		currentStream = "[composed]";
 	} else {
-		// 方案 B: 无背景图 -> Scale + Pad
-		// 直接处理输入流 0
 		fc += `[${contentIdx}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,`;
-		fc += `pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[padded];`;
+		fc += `pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[padded]`;
 		currentStream = "[padded]";
 	}
 
-	// 3. 叠加水印 (Top Layer)
-	// [currentStream][wm] -> output
-	// 水印居中叠加
-	fc += `${currentStream}[${wmIdx}:v]overlay=(W-w)/2:(H-h)/2:format=auto`;
+	if (useWatermark) {
+		fc += `;${currentStream}[${wmIdx}:v]overlay=(W-w)/2:(H-h)/2:format=auto[out_v]`;
+	} else {
+		fc += `;${currentStream}copy[out_v]`;
+	}
 
 	args.push("-filter_complex", fc);
+	args.push("-map", "[out_v]");
 
-	// 输出控制
-	if (extreme) {
-		args.push(
-			"-frames:v", "1", "-an", "-sn",
-			"-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"
-		);
-	} else if (isGif) {
-		args.push("-f", "gif", "pipe:1");
+	if (extremePerformanceMode) {
+		args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
 	} else {
-		args.push(
-			"-frames:v", "1", "-an", "-sn",
-			"-f", "image2pipe", "-vcodec", "png", "pipe:1"
-		);
+		args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
 	}
 
 	return args;
 }
 
 async function getPreviewBuffer(filePath, isVideo, isGif) {
-	// 熔断
-	if (!isCoreIntegretyValid) return null;
-
 	if (!ffmpegPath) return null;
 
-	const extreme = extremePerformanceMode;
 	let origSize = null;
 	if (!isVideo && !stretchSmallImages) {
 		origSize = await getImageDimensions(filePath);
 	}
 
-	if (extreme) {
+	if (extremePerformanceMode) {
 		const cached = previewCache.get(filePath);
 		if (cached) return cached.buffer;
-		const ok = await ensureFfmpegAvailable();
-		if (!ok) return null;
-
-		return new Promise((resolve) => {
-			const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
-			// 再次检查参数生成是否被熔断拦截
-			if (args.length === 0) { resolve(null); return; }
-
-			const child = cp.spawn(ffmpegPath, args, { windowsHide: true });
-			const chunks = [];
-			child.stdout.on("data", (d) => chunks.push(d));
-			child.on("error", () => resolve(null));
-			child.on("close", () => {
-				if (!chunks.length) { resolve(null); return; }
-				const buffer = Buffer.concat(chunks);
-				setPreviewCache(filePath, buffer, 0);
-				resolve(buffer);
-			});
-		});
+	} else {
+		let stat;
+		try { stat = await fs.promises.stat(filePath); } catch { return null; }
+		const cached = previewCache.get(filePath);
+		if (cached && cached.mtimeMs === stat.mtimeMs) return cached.buffer;
 	}
 
 	const ok = await ensureFfmpegAvailable();
 	if (!ok) return null;
 
-	let stat;
-	try { stat = await fs.promises.stat(filePath); } catch { return null; }
-
-	const cached = previewCache.get(filePath);
-	if (cached && cached.mtimeMs === stat.mtimeMs) return cached.buffer;
-
 	return new Promise((resolve) => {
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
-		if (args.length === 0) { resolve(null); return; }
-
 		const child = cp.spawn(ffmpegPath, args, { windowsHide: true });
+
 		const chunks = [];
+		let stderr = "";
+		let resolved = false;
+
+		const timer = setTimeout(() => {
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				resolve(null);
+			}
+		}, 6000);
+
 		child.stdout.on("data", (d) => chunks.push(d));
-		child.on("error", () => resolve(null));
+		child.stderr.on("data", (d) => stderr += d.toString());
+
+		child.on("error", () => {
+			if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); }
+		});
+
 		child.on("close", () => {
-			if (!chunks.length) { resolve(null); return; }
-			const buffer = Buffer.concat(chunks);
-			setPreviewCache(filePath, buffer, stat.mtimeMs);
-			resolve(buffer);
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+				if (!chunks.length) { resolve(null); return; }
+				const buffer = Buffer.concat(chunks);
+				let mtime = 0;
+				try { mtime = fs.statSync(filePath).mtimeMs; } catch { }
+				setPreviewCache(filePath, buffer, mtime);
+				resolve(buffer);
+			}
 		});
 	});
 }
 
 // ==========================================
-//           预览偏移（left/right 参数）
+//           位置计算
 // ==========================================
 
 function getPreviewOffset() {
@@ -394,7 +355,7 @@ function getPreviewOffset() {
 function computeMarginLeft() {
 	const value = getPreviewOffset();
 	const numeric = typeof value === "number" ? value : 100;
-	let marginLeft = -427 + numeric;
+	let marginLeft = numeric;
 	try {
 		const editorConfig = vscode.workspace.getConfiguration("editor");
 		const fontSize = editorConfig.get("fontSize", 14);
@@ -405,7 +366,7 @@ function computeMarginLeft() {
 }
 
 // ==========================================
-//           目录大小（调用 kp.py get_size）
+//           Python 交互
 // ==========================================
 
 function invalidateFolderSizeCacheForPath(filePath) {
@@ -420,10 +381,8 @@ function calculateFolderSizeWithPython(folderPath) {
 		if (!isPythonAvailable) return resolve(null);
 		const scriptPath = path.join(__dirname, "kp.py");
 		if (!fs.existsSync(scriptPath)) return resolve(null);
-
 		const env = { ...process.env, PYTHONIOENCODING: "utf-8" };
 		const child = cp.spawn("python", [scriptPath, "get_size", folderPath], { env });
-
 		let stdout = "";
 		child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
 		child.on("close", (code) => {
@@ -453,19 +412,13 @@ async function checkPythonEnvironment() {
 	return new Promise((resolve) => {
 		cp.exec("python --version", (error) => {
 			if (error) {
-				cp.exec("python3 --version", (err3) => {
-					resolve(!err3);
-				});
+				cp.exec("python3 --version", (err3) => resolve(!err3));
 			} else {
 				resolve(true);
 			}
 		});
 	});
 }
-
-// ==========================================
-//           用户时长追踪
-// ==========================================
 
 function runPythonDbComknd(comknd, args = []) {
 	return new Promise((resolve) => {
@@ -504,22 +457,17 @@ async function finishUserTracking() {
 	}
 }
 
-// ==========================================
-//             粘贴逻辑
-// ==========================================
-
 function runPythonScript(additionalEnv = {}) {
-	// 如果核心校验失败，禁止粘贴功能
 	if (!isCoreIntegretyValid) {
-		vscode.window.showErrorMessage("qqq system compromised. Action aborted.");
+		vscode.window.showErrorMessage("Integrity check failed.");
 		return;
 	}
-
 	if (!isPythonAvailable) {
 		vscode.window.showWarningMessage("Python 环境不可用。");
 		return;
 	}
 	const scriptPath = path.join(__dirname, "kp.py");
+	if (!fs.existsSync(scriptPath)) return;
 	const editor = vscode.window.activeTextEditor;
 	let targetDir = "D:\\view\\p";
 	if (editor && !editor.document.isUntitled) {
@@ -531,16 +479,19 @@ function runPythonScript(additionalEnv = {}) {
 	child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
 	child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
 	child.on("close", (code) => {
-		if (stderr) logMessage("Python stderr: " + stderr, "WARN");
 		if (code !== 0) {
 			vscode.window.showErrorMessage("执行失败 " + code);
 			return;
 		}
-		try { handleReqlt(JSON.parse(stdout.trim())); } catch (e) { logMessage("JSON Err: " + e.message, "ERROR"); }
+		try { handleReqlt(JSON.parse(stdout.trim())); } catch (e) { }
 	});
 }
 
 function executeClipboardComknd() { runPythonScript(); }
+
+// ==========================================
+//           粘贴 / 文本处理
+// ==========================================
 
 function findLastImageOrVideoMarkerLine(document, position) {
 	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
@@ -560,6 +511,7 @@ function countBlankLinesBetween(document, startLine, endLine) {
 	return blank;
 }
 
+// ★ 核心修改：粘贴时强制在暗号后面加一个换行符（eol），确保图片挂在下一行
 function buildInsertionTextForMarker(editor, insertPosition, markerText, isImageOrVideo) {
 	const document = editor.document;
 	const eol = getDocumentEOL(document);
@@ -572,7 +524,11 @@ function buildInsertionTextForMarker(editor, insertPosition, markerText, isImage
 		}
 	}
 	let insertion = eol.repeat(prefixLines) + markerText;
-	if (isImageOrVideo) insertion += eol.repeat(18);
+	if (isImageOrVideo) {
+		// ★ 强制加一个换行符，确保下一行为空，用于挂载装饰
+		insertion += eol;
+		insertion += eol.repeat(17); // 总18行：1换行 + 17空白
+	}
 	return insertion;
 }
 
@@ -580,71 +536,71 @@ function handleReqlt(reqlt) {
 	if (reqlt.error) { vscode.window.showErrorMessage(reqlt.error); return; }
 	const ed = vscode.window.activeTextEditor;
 	if (!ed) return;
-
-	const onDone = () => setTimeout(() => renderIkges(ed), 50);
+	const onDone = () => setTimeout(() => renderIkges(ed), 100);
 
 	if (reqlt.type === "folder_text") {
 		ed.edit(e => e.insert(ed.selection.active, reqlt.text));
 	} else if (reqlt.type === "text") {
 		ed.edit(e => e.insert(ed.selection.active, reqlt.text)).then(onDone);
-	} else if (reqlt.type === "ikge") {
-		const ins = buildInsertionTextForMarker(ed, ed.selection.active, `/${reqlt.path}/`, true);
+	} else if (reqlt.type === "ikge" || (reqlt.type === "file" && reqlt.files.length === 1)) {
+		const f = reqlt.path || reqlt.files[0];
+		const isVid = isImageOrVideoExt(path.extname(f));
+		const ins = buildInsertionTextForMarker(ed, ed.selection.active, `/${f}/`, isVid);
 		ed.edit(e => e.insert(ed.selection.active, ins)).then(() => {
-			invalidateFolderSizeCacheForPath(reqlt.path);
+			invalidateFolderSizeCacheForPath(f);
 			onDone();
 		});
-	} else if (reqlt.type === "file") {
-		if (!reqlt.files || !reqlt.files.length) return;
-		if (reqlt.files.length === 1) {
-			const f = reqlt.files[0];
-			const isVid = isImageOrVideoExt(path.extname(f));
-			const ins = buildInsertionTextForMarker(ed, ed.selection.active, `/${f}/`, isVid);
-			ed.edit(e => e.insert(ed.selection.active, ins)).then(() => {
-				invalidateFolderSizeCacheForPath(f);
-				onDone();
-			});
-		} else {
-			const eol = getDocumentEOL(ed.document);
-			let text = eol + reqlt.files.map(f => `/${f}/`).join(eol); // 简化
-			ed.edit(e => e.insert(ed.selection.active, text)).then(() => {
-				reqlt.files.forEach(f => invalidateFolderSizeCacheForPath(f));
-				onDone();
-			});
-		}
+	} else if (reqlt.type === "file" && reqlt.files.length > 1) {
+		const eol = getDocumentEOL(ed.document);
+		const first = `/${reqlt.files[0]}/`;
+		let text = eol + first;
+		for (let i = 1; i < reqlt.files.length; i++) text += eol + `/${reqlt.files[i]}/`;
+		ed.edit(e => e.insert(ed.selection.active, text)).then(() => {
+			reqlt.files.forEach(f => invalidateFolderSizeCacheForPath(f));
+			onDone();
+		});
 		vscode.window.showInformationMessage("文件已复制 " + reqlt.files.length);
 	} else if (reqlt.type === "binary") {
 		vscode.window.showInformationMessage("二进制已保存");
 	} else if (reqlt.type === "cancelled") {
 		vscode.window.showInformationMessage("粘贴已取消");
-	} else {
-		vscode.window.showWarningMessage("未知内容");
 	}
 }
 
 // ==========================================
-//              下区图片/视频渲染
+//  ★★★ 方案 B：0 长度 range + before + CSS背景 ★★★
 // ==========================================
 
 async function renderIkges(editor) {
 	if (!editor) return;
-
-	// 熔断检测：如果不合法，什么都不渲染
 	if (!isCoreIntegretyValid) {
 		clearDecorations();
 		return;
 	}
 
-	clearDecorations();
-	decorationType = vscode.window.createTextEditorDecorationType({ color: "transparent" });
+	const myRenderVersion = ++currentRenderVersion;
 
-	const decos = [];
-	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
+	if (!decorationType) {
+		decorationType = vscode.window.createTextEditorDecorationType({
+			isWholeLine: false  // 不是整行，我们精确控制
+		});
+	}
+
+	const docUri = editor.document.uri.toString();
+	if (!documentDecorationsMap.has(docUri)) {
+		documentDecorationsMap.set(docUri, new Map());
+	}
+	const currentDocDecos = documentDecorationsMap.get(docUri);
+
 	const visibleRanges = editor.visibleRanges;
 	if (!visibleRanges || !visibleRanges.length) return;
 
 	const marginLeft = computeMarginLeft();
 	const boxWidth = PREVIEW_WIDTH + PREVIEW_BORDER;
 	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
+
+	const tasks = [];
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
 
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
@@ -653,60 +609,112 @@ async function renderIkges(editor) {
 		while ((match = regex.exec(text))) {
 			const offset = editor.document.offsetAt(range.start) + match.index;
 			const pos = editor.document.positionAt(offset);
-			const endPos = pos.translate(0, match[0].length);
 
-			const absPath = match[0].slice(1, -1).replace(/\//g, "\\");
+			// ★ 核心：定位到暗号的下一行（由于加了换行符），用0长度range锚定行首
+			const targetLine = pos.line + 1;
+			if (targetLine >= editor.document.lineCount) continue;
+			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
+
+			// ★ 一行只认第一个暗号
+			const lineNum = targetLine;
+			if (currentDocDecos.has(lineNum)) continue;
+
+			const rawPath = match[0].slice(1, -1);
+			const absPath = rawPath.replace(/\//g, "\\");
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const ext = path.extname(absPath).toLowerCase();
 			const isImage = isImageExt(ext);
 			const isVideo = isVideoExt(ext);
+			const isGif = ext === ".gif";
+
 			if (!isImage && !isVideo) continue;
 
-			const deco = { range: new vscode.Range(pos, endPos), renderOptions: {} };
+			const task = async () => {
+				if (currentRenderVersion !== myRenderVersion) return null;
 
-			try {
-				let previewBuffer = null;
-				if (ffmpegPath) {
-					previewBuffer = await getPreviewBuffer(absPath, isVideo, ext === ".gif");
+				try {
+					let previewBuffer = null;
+					if (ffmpegPath) {
+						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
+					}
+
+					const deco = { range: anchorRange, renderOptions: {} };
+
+					// ★★★ 方案 B 核心：before 挂载在0长度range上，使用absolute定位 ★★★
+					const baseStyle = {
+						position: 'absolute',
+						left: marginLeft,
+						top: '0px',
+						width: `${boxWidth}px`,
+						height: `${boxHeight}px`,
+						padding: "2px",
+						border: "1px dashed #888",
+						backgroundColor: PREVIEW_BG_COLOR,
+						zIndex: -1
+					};
+
+					if (previewBuffer) {
+						const mime = extremePerformanceMode ? "image/jpeg" : (isGif ? "image/gif" : "image/png");
+						const b64 = previewBuffer.toString("base64");
+						deco.renderOptions.before = {
+							contentText: "",
+							...baseStyle,
+							textDecoration: `none;
+								display: inline-block;
+								background-image: url("data:${mime};base64,${b64}");
+								background-size: contain;
+								background-repeat: no-repeat;
+								background-position: center;`
+						};
+						return { key: lineNum, deco };
+					} else if (isImage) {
+						// 无 FFmpeg 时的降级：直接用文件路径
+						const fileUri = vscode.Uri.file(absPath);
+						deco.renderOptions.before = {
+							contentIconPath: fileUri,
+							...baseStyle
+						};
+						return { key: lineNum, deco };
+					}
+					return null;
+				} catch (e) {
+					return null;
 				}
-
-				const baseStyle = {
-					margin: `4px 0 4px ${marginLeft}`,
-					height: `${boxHeight}px`,
-					width: `${boxWidth}px`,
-					padding: "2px",
-					border: "1px dashed #888",
-					backgroundColor: PREVIEW_BG_COLOR,
-					display: "block",
-					position: "relative",
-				};
-
-				if (previewBuffer) {
-					const mime = extremePerformanceMode ? "image/jpeg" : (ext === ".gif" ? "image/gif" : "image/png");
-					const dataUri = vscode.Uri.parse(`data:${mime};base64,${previewBuffer.toString("base64")}`);
-					deco.renderOptions.after = { ...baseStyle, contentIconPath: dataUri };
-				} else if (isImage) {
-					deco.renderOptions.after = { ...baseStyle, contentIconPath: vscode.Uri.file(absPath) };
-				} else {
-					continue;
-				}
-			} catch (e) {
-				continue;
-			}
-			decos.push(deco);
+			};
+			tasks.push(task);
 		}
 	}
-	editor.setDecorations(decorationType, decos);
+
+	if (tasks.length > 0) {
+		const results = [];
+		for (let i = 0; i < tasks.length; i += MAX_CONCURRENT_TASKS) {
+			if (currentRenderVersion !== myRenderVersion) return;
+			const chunk = tasks.slice(i, i + MAX_CONCURRENT_TASKS);
+			const chunkResults = await Promise.all(chunk.map(t => t()));
+			results.push(...chunkResults);
+		}
+
+		if (currentRenderVersion !== myRenderVersion) return;
+
+		for (const res of results) {
+			if (res) {
+				currentDocDecos.set(res.key, res.deco);
+			}
+		}
+	}
+
+	editor.setDecorations(decorationType, Array.from(currentDocDecos.values()));
 }
 
 // ==========================================
-//           CodeLens 逻辑
+//           CodeLens
 // ==========================================
 
 function parseHexColorToRGB(hex) {
-	if (!hex || !hex.startsWith("#")) return null;
+	if (typeof hex !== "string") return null;
 	const s = hex.trim();
+	if (!s.startsWith("#")) return null;
 	if (s.length === 7) return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
 	if (s.length === 4) return [parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16), parseInt(s[3] + s[3], 16)];
 	return null;
@@ -725,11 +733,13 @@ function getEditorBackgroundRGB() {
 async function updateGlobalCodeLensColor(isActive) {
 	try {
 		const [bgR, bgG, bgB] = getEditorBackgroundRGB();
-		const alpha = isActive ? 1 : 0.086;
+		const alpha = isActive ? 1 : 22 / 255;
 		const color = `rgba(${255 - bgR}, ${255 - bgG}, ${255 - bgB}, ${alpha.toFixed(3)})`;
+
 		if (color === lastCodeLensColor && isActive === lastCodeLensIsActive) return;
 		lastCodeLensColor = color;
 		lastCodeLensIsActive = isActive;
+
 		const conf = vscode.workspace.getConfiguration("workbench");
 		const custom = conf.get("colorCustomizations") || {};
 		if (custom["editorCodeLens.foreground"] === color) return;
@@ -740,12 +750,12 @@ async function updateGlobalCodeLensColor(isActive) {
 function updateCodeLensColorForEditor(editor) {
 	if (!editor) { updateGlobalCodeLensColor(false); return; }
 	const set = lensLinesByDocUri.get(editor.document.uri.toString());
-	updateGlobalCodeLensColor(set && set.has(editor.selection.active.line));
+	const isActive = set && set.has(editor.selection.active.line);
+	updateGlobalCodeLensColor(isActive);
 }
 
 class FileCodeLensProvider {
 	async provideCodeLenses(document) {
-		// 熔断：校验失败时不提供 CodeLens
 		if (!isCoreIntegretyValid) return [];
 
 		const lenses = [];
@@ -757,7 +767,8 @@ class FileCodeLensProvider {
 
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
-			const absPath = match[0].slice(1, -1).replace(/\//g, "\\");
+			const rawPath = match[0].slice(1, -1);
+			const absPath = rawPath.replace(/\//g, "\\");
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const folder = path.dirname(absPath);
@@ -767,14 +778,28 @@ class FileCodeLensProvider {
 				folderSizeMap.set(folder, fSize);
 			}
 			const fSizeStr = formatBytes(fSize);
+
 			let fileSz = "?";
-			try { fileSz = formatBytes(fs.statSync(absPath).size); } catch { }
+			let tooltipText = "";
+			try {
+				const st = fs.statSync(absPath);
+				fileSz = formatBytes(st.size);
+				const bTime = new Date(st.birthtime).toLocaleString();
+				const mTime = new Date(st.mtime).toLocaleString();
+				tooltipText = `创建: ${bTime}\n修改: ${mTime}`;
+			} catch { }
 
 			const r = new vscode.Range(pos, pos);
+
 			lenses.push(
 				new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath] }),
-				new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [match[0].slice(1, -1), absPath] }),
-				new vscode.CodeLens(r, { title: `✎( ${fileSz})   ${absPath}`, command: "qqq.openFile", arguments: [absPath] })
+				new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
+				new vscode.CodeLens(r, {
+					title: `✎( ${fileSz})   ${absPath}`,
+					command: "qqq.openFile",
+					arguments: [absPath],
+					tooltip: tooltipText
+				})
 			);
 			lensLines.add(pos.line);
 		}
@@ -785,61 +810,74 @@ class FileCodeLensProvider {
 }
 
 // ==========================================
-//         命令实现
+//           命令
 // ==========================================
 
 function openFileComknd(filePath) {
 	if (!fs.existsSync(filePath)) return;
-	vscode.env.openExternal(vscode.Uri.file(filePath));
+	try {
+		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
+		else cp.exec(`xdg-open "${filePath}"`);
+	} catch {
+		vscode.env.openExternal(vscode.Uri.file(filePath));
+	}
 }
 
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
-	const cmd = process.platform === "win32" ? `explorer /select,"${filePath}"` : (process.platform === "darwin" ? `open -R "${filePath}"` : `xdg-open "${path.dirname(filePath)}"`);
-	cp.exec(cmd);
+	try {
+		if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
+		else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`);
+		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
+	} catch { }
 }
 
 async function renameFileComknd(rawPath, absPath) {
-	// 熔断保护
-	if (!isCoreIntegretyValid) return;
-
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
 	const currentName = path.basename(absPath);
 	const newName = await vscode.window.showInputBox({
-		title: "重命名粘贴文件", prompt: "rename  ", value: currentName, ignoreFocusOut: true,
+		title: "重命名粘贴文件",
+		prompt: "rename  ",
+		value: currentName,
+		ignoreFocusOut: true,
 		validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null
 	});
 	if (!newName || newName.trim() === currentName) return;
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
-
-	try { await fs.promises.rename(absPath, newAbs); } catch (e) { vscode.window.showErrorMessage(e.message); return; }
-
-	const doc = editor.document;
-	const newRaw = buildNewRawPath(rawPath, trimmed);
-	const reg = new RegExp(`\\/${rawPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\/`, "g");
-	const edits = [];
-	let m;
-	const txt = doc.getText();
-	while ((m = reg.exec(txt))) {
-		const s = doc.positionAt(m.index + 1);
-		const e = doc.positionAt(m.index + 1 + rawPath.length);
-		edits.push({ range: new vscode.Range(s, e), newText: newRaw });
+	try {
+		await fs.promises.rename(absPath, newAbs);
+	} catch (e) {
+		vscode.window.showErrorMessage(e.message);
+		return;
 	}
 
-	if (edits.length) {
-		await editor.edit(b => edits.forEach(x => b.replace(x.range, x.newText)));
+	const doc = editor.document;
+	const escaped = rawPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const regex = new RegExp(`\\/${escaped}\\/`, "g");
+	const newRaw = buildNewRawPath(rawPath, trimmed);
+	const ranges = [];
+	let m;
+	const txt = doc.getText();
+	while ((m = regex.exec(txt))) {
+		const s = doc.positionAt(m.index + 1);
+		const e = doc.positionAt(m.index + 1 + rawPath.length);
+		ranges.push(new vscode.Range(s, e));
+	}
+	if (ranges.length) {
+		await editor.edit(b => ranges.forEach(r => b.replace(r, newRaw)));
 	}
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
 }
 
 // ==========================================
-//          防抖渲染
+//           激活与销毁
 // ==========================================
 
-function debounceRender(editor, delay = 100) {
+function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
 	if (debounceRender.isProcessing) return;
 	clearTimeout(debounceRender.timer);
 	debounceRender.timer = setTimeout(() => {
@@ -856,19 +894,14 @@ function renderVisibleEditors(delay = 50) {
 	if (editors && editors.length) editors.forEach(e => debounceRender(e, delay));
 }
 
-// ==========================================
-//               模块激活
-// ==========================================
-
 async function activate(context) {
-	// 1. 最优先执行：核心完整性校验
-	// 如果 q2.gif 不存在或哈希不对，直接挂起，不注册后续事件或功能
-	const isSecure = verifySystemIntegrity();
-	if (!isSecure) {
-		return; // 优雅退出，功能完全失效
-	}
-
 	extensionContext = context;
+
+	isCoreIntegretyValid = verifySystemIntegrity();
+	console.log(`[QQQ] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
+
+	if (!isCoreIntegretyValid) return;
+
 	refreshQqqConfig();
 	isPythonAvailable = await checkPythonEnvironment();
 	if (isPythonAvailable) initUserTracking(context);
@@ -887,10 +920,20 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.renameFile", renameFileComknd),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 		vscode.window.onDidChangeTextEditorVisibleRanges(e => debounceRender(e.textEditor)),
-		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); updateCodeLensColorForEditor(e); }),
+		vscode.window.onDidChangeActiveTextEditor(e => {
+			if (e) debounceRender(e);
+			updateCodeLensColorForEditor(e);
+		}),
 		vscode.workspace.onDidChangeTextDocument(e => {
 			const ed = vscode.window.activeTextEditor;
 			if (ed && e.document === ed.document) debounceRender(ed);
+			// ★ 文档变动时清空该文档的装饰缓存，触发重算
+			if (e.document === ed?.document && e.contentChanges.length > 0) {
+				documentDecorationsMap.delete(e.document.uri.toString());
+			}
+		}),
+		vscode.workspace.onDidCloseTextDocument(doc => {
+			documentDecorationsMap.delete(doc.uri.toString());
 		}),
 		vscode.window.onDidChangeVisibleTextEditors(renderVisibleEditors),
 		vscode.window.onDidChangeTextEditorSelection(e => updateCodeLensColorForEditor(e.textEditor)),
@@ -902,6 +945,7 @@ async function activate(context) {
 }
 
 async function deactivate() {
+	clearDecorations();
 	await finishUserTracking();
 }
 
