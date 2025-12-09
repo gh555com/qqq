@@ -63,7 +63,8 @@ const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 // ★ 配置变量
 let stretchSmallImages = true;
 let extremePerformanceMode = false;
-let cleanFreakMode = false; // ★ 洁癖模式开关
+let cleanFreakMode = false;
+let lastGlobalCleanTime = 0; // 全局整理冷却计时器
 
 function refreshQqqConfig() {
 	try {
@@ -484,42 +485,126 @@ function runPythonScript(additionalEnv = {}) {
 function executeClipboardComknd() { runPythonScript(); }
 
 // ==========================================
-// ★★★ 智能整理核心算法 (Clean Freak) ★★★
+// ★★★ 核心：统一计算公式 ★★★
 // ==========================================
 
-// 计算需要多少个空行
-function calcIdealGap(isFramed) {
-	if (!isFramed) return 1; // 没相框的，至少1行
+function calculateBlankLinesN(isFramed) {
+	// 非相框暗号：统一为 1 行（保持紧凑，不使用大间距）
+	if (!isFramed) return 1;
 
 	try {
 		const config = vscode.workspace.getConfiguration('editor');
 		const fontSize = config.get('fontSize', 14);
-		const lineHeightMult = config.get('lineHeight', 0); // 0 means auto
+		const lineHeightMultiplier = config.get('lineHeight', 0);
+		// 若 lineHeight 为 0 (auto)，通常约为 1.35
+		const effectiveLineHeight = (lineHeightMultiplier === 0) ? 1.35 : lineHeightMultiplier;
 
-		// 估算行高像素。VSCode Auto 约等于 1.35倍 fontSize
-		const pixelPerLine = (lineHeightMult === 0) ? (fontSize * 1.35) : (fontSize * (lineHeightMult < 5 ? lineHeightMult : 1.2));
+		const pixelPerLine = fontSize * effectiveLineHeight;
+		const requiredHeight = PREVIEW_HEIGHT;
 
-		const requiredHeight = PREVIEW_HEIGHT + (PREVIEW_BORDER * 2) + 10; // 288 + 边框 + 缓冲
+		let baseN = Math.ceil(requiredHeight / pixelPerLine);
 
-		let n = Math.ceil(requiredHeight / pixelPerLine);
-		if (n < 6) n = 6; // 最小值保护
+		// 裕度：默认 2，最大 5
+		let extra = 2 + Math.floor((effectiveLineHeight - 1) * 3);
+		extra = Math.min(5, Math.max(2, extra));
+
+		let n = baseN + extra;
+
+		// 准许的最小间隔：改为 4
+		n = Math.max(4, n);
+
 		return n;
 	} catch (e) {
 		return 15; // 兜底
 	}
 }
 
-// 检查字符串是否是相框类型的暗号
-function isFramedMarker(text) {
-	if (!text) return false;
-	const match = /\/[a-z]:[^\/]*?qqq[^\/]*?\//i.exec(text);
-	if (!match) return false;
-	const raw = match[0].slice(1, -1);
-	return isImageOrVideoExt(path.extname(raw));
+// ==========================================
+// ★★★ 核心：全局整理逻辑 (Strict) ★★★
+// ==========================================
+
+// 生成全文档整理的 Edits（严格执行 N）
+function provideCleanlinessEdits(document) {
+	const edits = [];
+	const text = document.getText();
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
+	let match;
+
+	const markers = [];
+	while ((match = regex.exec(text))) {
+		markers.push({
+			text: match[0],
+			index: match.index
+		});
+	}
+
+	// 从下往上处理，防止坐标偏移
+	for (let i = markers.length - 1; i >= 0; i--) {
+		const m = markers[i];
+		const pos = document.positionAt(m.index);
+		const markerLine = pos.line;
+
+		const rawPath = m.text.slice(1, -1);
+		const isVidOrImg = isImageOrVideoExt(path.extname(rawPath));
+
+		// 获取统一公式计算出的 n
+		const n = calculateBlankLinesN(isVidOrImg);
+
+		// 探测下方实际空行
+		let currentBlanks = 0;
+		let nextContentLine = -1;
+
+		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
+			const lineText = document.lineAt(lineIdx).text;
+			if (lineText.trim() === "") {
+				currentBlanks++;
+			} else {
+				nextContentLine = lineIdx;
+				break;
+			}
+		}
+
+		// 严格执行：如果不等于 N，则调整（多退少补）
+		if (currentBlanks !== n) {
+			const eol = getDocumentEOL(document);
+			const idealString = eol.repeat(n);
+
+			const startReplaceRow = markerLine + 1;
+			const endReplaceRow = (nextContentLine === -1) ? document.lineCount : nextContentLine;
+
+			const range = new vscode.Range(
+				new vscode.Position(startReplaceRow, 0),
+				new vscode.Position(endReplaceRow, 0)
+			);
+
+			edits.push(vscode.TextEdit.replace(range, idealString));
+		}
+	}
+	return edits;
+}
+
+// 执行全局整理（带冷却）
+async function performGlobalClean(editor, force = false) {
+	if (!editor) return;
+
+	// 如果没有强制执行（命令调用），则检查配置和冷却时间
+	if (!force) {
+		if (!cleanFreakMode) return; // 洁癖没开，不执行
+		const now = Date.now();
+		if (now - lastGlobalCleanTime < 1000) return; // 1秒冷却
+		lastGlobalCleanTime = now;
+	}
+
+	const edits = provideCleanlinessEdits(editor.document);
+	if (edits.length > 0) {
+		await editor.edit(editBuilder => {
+			edits.forEach(e => editBuilder.replace(e.range, e.newText));
+		});
+	}
 }
 
 // ==========================================
-//           粘贴 / 文本处理 (重构版)
+//           粘贴 / 文本处理 (一致性局部整理)
 // ==========================================
 
 function handleReqlt(reqlt) {
@@ -533,41 +618,55 @@ function handleReqlt(reqlt) {
 	};
 
 	if (reqlt.type === "folder_text" || reqlt.type === "text") {
-		// 纯文本直接插入，不触发洁癖逻辑
 		ed.edit(e => e.insert(ed.selection.active, reqlt.text)).then(() => onDone());
 	}
 	else if (reqlt.type === "ikge" || reqlt.type === "file") {
-		// ★★★ 核心修改：批量/混合/智能粘贴逻辑 ★★★
 		const files = (reqlt.type === "ikge" || reqlt.files.length === 1)
 			? [reqlt.path || reqlt.files[0]]
 			: reqlt.files;
 
-		let insertionText = "";
 		const eol = getDocumentEOL(ed.document);
+		let prefixText = "";
 
-		// 1. 检查【上方】是否需要补空行
-		// 如果未开启洁癖模式，则保持原有行为（不做额外检查）
-		if (cleanFreakMode) {
-			const currentLineIdx = ed.selection.active.line;
-			if (currentLineIdx > 0) {
-				const lineAbove = ed.document.lineAt(currentLineIdx - 1);
-				if (!lineAbove.isEmptyOrWhitespace && isFramedMarker(lineAbove.text)) {
-					// 上一行是带框暗号，我们需要补足它下方的空隙
-					// 这里的逻辑稍微简化：因为我们无法轻易知道它下方实际有多少空行（光标可能贴着它）
-					// 我们假设光标紧贴着它，所以直接补 N 个空行在开头
-					// 如果中间已经有空行，用户可能需要手动保存来触发全局整理，或者这里可以做得更复杂去检测
-					// 为了性能和稳定性，这里我们假设光标位置是插入点，如果光标紧贴上一行，我们加 N 行
-					const gap = calcIdealGap(true);
-					insertionText += eol.repeat(gap);
-				}
-			}
-		} else {
-			// 旧逻辑兼容：如果不是洁癖模式，原有逻辑会在特定条件下加空行，这里简化处理，
-			// 因为旧逻辑比较混乱，我们统一：非洁癖模式下，开头不强制加大量空行，保持紧凑
-			insertionText += eol;
+		// --- 步骤 1: 向上检查 (局部整理) ---
+		// 无论是否洁癖模式，粘贴时都执行此唯一逻辑
+		const currentLineIdx = ed.selection.active.line;
+
+		// 往上找最近的非空行，看看是不是暗号
+		let lineAboveIdx = currentLineIdx - 1;
+		while (lineAboveIdx >= 0 && ed.document.lineAt(lineAboveIdx).text.trim() === "") {
+			lineAboveIdx--;
 		}
 
-		// 2. 构建【中间】及【下方】的文本
+		if (lineAboveIdx >= 0) {
+			const lineText = ed.document.lineAt(lineAboveIdx).text;
+			const match = /\/[a-z]:[^\/]*?qqq[^\/]*?\//i.exec(lineText);
+			if (match) {
+				const raw = match[0].slice(1, -1);
+				const isPrevFramed = isImageOrVideoExt(path.extname(raw));
+
+				// 计算已有的空行数
+				const existingGap = currentLineIdx - lineAboveIdx - 1;
+
+				let requiredGap = 0;
+				if (!isPrevFramed) {
+					// 上面是无框暗号 -> 保证至少 2 行
+					requiredGap = 2;
+				} else {
+					// 上面是相框 -> 计算 N
+					requiredGap = calculateBlankLinesN(true);
+				}
+
+				// 规则：若小于则补足，若大于等于则不动
+				if (existingGap < requiredGap) {
+					prefixText = eol.repeat(requiredGap - existingGap);
+				}
+			}
+		}
+
+		// --- 步骤 2: 构建自身及向下间隔 (局部整理) ---
+		let insertionText = prefixText;
+
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
 			const isVidOrImg = isImageOrVideoExt(path.extname(f));
@@ -575,16 +674,13 @@ function handleReqlt(reqlt) {
 			// 插入暗号
 			insertionText += `/${f}/`;
 
-			// 计算暗号下方的空行
-			let gapBelow = 1;
-			if (cleanFreakMode) {
-				gapBelow = calcIdealGap(isVidOrImg);
-			} else {
-				// 非洁癖模式原有逻辑：视频/图片给17行，其他给1行
-				if (isVidOrImg) gapBelow = 17;
-			}
+			// 计算该暗号下方需要的空行
+			// 始终使用统一公式，自己给自己下面补足空行
+			const gapBelow = calculateBlankLinesN(isVidOrImg);
 
-			insertionText += eol.repeat(gapBelow + 1); // +1 是因为最后一行也要换行
+			// 插入空行
+			// 注意：gapBelow 是纯空行数，为了换到下一行写内容（或文件结束），需要 +1 个 eol
+			insertionText += eol.repeat(gapBelow + 1);
 		}
 
 		ed.edit(e => e.insert(ed.selection.active, insertionText)).then(() => {
@@ -600,79 +696,7 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//  ★★★ 保存时全局整理 (Save Action) ★★★
-// ==========================================
-
-function provideWillSaveEdits(document) {
-	if (!cleanFreakMode) return [];
-
-	const edits = [];
-	const text = document.getText();
-	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
-	let match;
-
-	// 收集所有暗号信息
-	const markers = [];
-	while ((match = regex.exec(text))) {
-		markers.push({
-			text: match[0],
-			index: match.index,
-			length: match[0].length
-		});
-	}
-
-	// 从下往上处理，这是修改文档的最佳实践，防止坐标偏移
-	for (let i = markers.length - 1; i >= 0; i--) {
-		const m = markers[i];
-		const pos = document.positionAt(m.index);
-		const markerLine = pos.line;
-
-		const rawPath = m.text.slice(1, -1);
-		const isVidOrImg = isImageOrVideoExt(path.extname(rawPath));
-
-		// 1. 目标：需要的空行数
-		const n = calcIdealGap(isVidOrImg);
-
-		// 2. 探测：当前实际有多少空行
-		let currentBlanks = 0;
-		let nextContentLine = -1;
-
-		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-			const lineText = document.lineAt(lineIdx).text;
-			if (lineText.trim() === "") {
-				currentBlanks++;
-			} else {
-				nextContentLine = lineIdx;
-				break;
-			}
-		}
-
-		// 3. 决策：如果不一致，则替换
-		if (currentBlanks !== n) {
-			const eol = getDocumentEOL(document);
-			const idealString = eol.repeat(n);
-
-			// 确定替换范围：从 (markerLine + 1) 到 (nextContentLine 或文档末尾)
-			// 注意：我们只替换中间的“空行区域”，不动下一行有文字的内容
-			const startReplaceRow = markerLine + 1;
-			const endReplaceRow = (nextContentLine === -1) ? document.lineCount : nextContentLine;
-
-			// 如果范围也是空的(比如本来就没有空行)，Range(x,0, x,0) 就是插入
-			const range = new vscode.Range(
-				new vscode.Position(startReplaceRow, 0),
-				new vscode.Position(endReplaceRow, 0)
-			);
-
-			edits.push(vscode.TextEdit.replace(range, idealString));
-		}
-	}
-
-	return edits;
-}
-
-
-// ==========================================
-//           渲染主逻辑 (保持优化版)
+//           渲染主逻辑
 // ==========================================
 
 async function renderIkges(editor) {
@@ -1034,18 +1058,27 @@ async function activate(context) {
 			if (e.affectsConfiguration("qqq")) {
 				refreshQqqConfig();
 				renderVisibleEditors();
+				// 洁癖模式开启时，且配置变动，触发全局整理
+				if (cleanFreakMode) {
+					performGlobalClean(vscode.window.activeTextEditor);
+				}
 			}
 		}),
 		vscode.commands.registerCommand("qqq.q1", executeClipboardComknd),
 		vscode.commands.registerCommand("qqq.openFile", openFileComknd),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
 		vscode.commands.registerCommand("qqq.renameFile", renameFileComknd),
+		// ★ 新命令：Set In Order (手动触发全局整理)
+		vscode.commands.registerCommand("qqq.setInOrder", () => {
+			performGlobalClean(vscode.window.activeTextEditor, true);
+		}),
+
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 
-		// ★★★ 核心：在保存前触发洁癖全局整理 ★★★
+		// ★ 仅在洁癖模式开启时，保存才触发全局整理
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
-				const edits = provideWillSaveEdits(e.document);
+				const edits = provideCleanlinessEdits(e.document);
 				if (edits.length > 0) {
 					e.waitUntil(Promise.resolve(edits));
 				}

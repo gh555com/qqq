@@ -13,7 +13,8 @@
     "onCommand:qqq.q1",
     "onCommand:qqq.q2",
     "onCommand:qqq.pure",
-    "onCommand:qqq.allSettings"
+    "onCommand:qqq.allSettings",
+    "onCommand:qqq.setInOrder"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -52,6 +53,10 @@
       {
         "command": "qqq.allSettings",
         "title": "qqq: all settings"
+      },
+      {
+        "command": "qqq.setInOrder",
+        "title": "qqq: set in order (全局整理)"
       }
     ],
     "keybindings": [
