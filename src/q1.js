@@ -62,15 +62,18 @@ const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 
 let stretchSmallImages = true;
 let extremePerformanceMode = false;
+let cleanFreakMode = false;  // ★ 新增：洁癖模式
 
 function refreshQqqConfig() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
 		stretchSmallImages = config.get("stretchSmallImages", true);
 		extremePerformanceMode = config.get("extremePerformance", false);
+		cleanFreakMode = config.get("cleanFreak", false);  // ★ 新增：读取洁癖配置
 	} catch (e) {
 		stretchSmallImages = true;
 		extremePerformanceMode = false;
+		cleanFreakMode = false;
 	}
 }
 
@@ -354,37 +357,11 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 }
 
 // ==========================================
-//           位置计算
+//           位置计算（Offset 全删，固定 100px）
 // ==========================================
 
-function getPreviewOffset() {
-	try {
-		if (extensionContext) {
-			const stored = extensionContext.globalState.get("qqq.previewOffset");
-			if (typeof stored === "number") return stored;
-			const config = vscode.workspace.getConfiguration("qqq");
-			const fromConfig = config.get("previewOffset", 100);
-			extensionContext.globalState.update("qqq.previewOffset", fromConfig);
-			return fromConfig;
-		}
-		const config = vscode.workspace.getConfiguration("qqq");
-		return config.get("previewOffset", 100);
-	} catch {
-		return 100;
-	}
-}
-
 function computeMarginLeft() {
-	const value = getPreviewOffset();
-	const numeric = typeof value === "number" ? value : 100;
-	let marginLeft = numeric;
-	try {
-		const editorConfig = vscode.workspace.getConfiguration("editor");
-		const fontSize = editorConfig.get("fontSize", 14);
-		const delta = fontSize - 14;
-		marginLeft += delta * 2;
-	} catch { }
-	return `${marginLeft}px`;
+	return "100px";  // 固定 100px，无 Offset、无 fontSize delta
 }
 
 // ==========================================
@@ -512,44 +489,14 @@ function runPythonScript(additionalEnv = {}) {
 function executeClipboardComknd() { runPythonScript(); }
 
 // ==========================================
-//           粘贴 / 文本处理
+//           粘贴 / 文本处理（简化：无固定空行，插入后局部补前后）
 // ==========================================
 
-function findLastImageOrVideoMarkerLine(document, position) {
-	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
-	for (let line = position.line - 1; line >= 0; line--) {
-		const match = regex.exec(document.lineAt(line).text);
-		if (match && isImageOrVideoExt(path.extname(match[0].slice(1, -1) || ""))) return line;
-	}
-	return null;
-}
-
-function countBlankLinesBetween(document, startLine, endLine) {
-	let blank = 0;
-	if (endLine <= startLine + 1) return 0;
-	for (let i = startLine + 1; i < endLine; i++) {
-		if (document.lineAt(i).text.trim() === "") blank++;
-	}
-	return blank;
-}
-
+// ★ 简化：只返回 markerText + eol（无预加空行逻辑）
 function buildInsertionTextForMarker(editor, insertPosition, markerText, isImageOrVideo) {
 	const document = editor.document;
 	const eol = getDocumentEOL(document);
-	let prefixLines = 1;
-	if (isImageOrVideo) {
-		const lastLine = findLastImageOrVideoMarkerLine(document, insertPosition);
-		if (lastLine !== null) {
-			const blanks = countBlankLinesBetween(document, lastLine, insertPosition.line);
-			if (blanks < 18) prefixLines += (18 - blanks);
-		}
-	}
-	let insertion = eol.repeat(prefixLines) + markerText;
-	if (isImageOrVideo) {
-		insertion += eol;
-		insertion += eol.repeat(17);
-	}
-	return insertion;
+	return markerText + eol;  // 只加 marker + 1 eol，前后空行后续即时补
 }
 
 function handleReqlt(reqlt) {
@@ -566,17 +513,28 @@ function handleReqlt(reqlt) {
 		const f = reqlt.path || reqlt.files[0];
 		const isVid = isImageOrVideoExt(path.extname(f));
 		const ins = buildInsertionTextForMarker(ed, ed.selection.active, `/${f}/`, isVid);
-		ed.edit(e => e.insert(ed.selection.active, ins)).then(() => {
+		ed.edit(e => e.insert(ed.selection.active, ins)).then(async () => {
 			invalidateFolderSizeCacheForPath(f);
+			// ★ 粘贴后即时补这个新 marker 及其上方最近一个的间距
+			if (cleanFreakMode) {
+				await insertBlankLinesForNewMarker(ed, `/${f}/`, isVid);
+			}
 			onDone();
 		});
 	} else if (reqlt.type === "file" && reqlt.files.length > 1) {
 		const eol = getDocumentEOL(ed.document);
 		const first = `/${reqlt.files[0]}/`;
-		let text = eol + first;
+		let text = first;
 		for (let i = 1; i < reqlt.files.length; i++) text += eol + `/${reqlt.files[i]}/`;
-		ed.edit(e => e.insert(ed.selection.active, text)).then(() => {
+		ed.edit(e => e.insert(ed.selection.active, text)).then(async () => {
 			reqlt.files.forEach(f => invalidateFolderSizeCacheForPath(f));
+			// ★ 多文件：逐个补每个新 marker 及其上方最近一个的间距
+			if (cleanFreakMode) {
+				for (const f of reqlt.files) {
+					const isVid = isImageOrVideoExt(path.extname(f));
+					await insertBlankLinesForNewMarker(ed, `/${f}/`, isVid);
+				}
+			}
 			onDone();
 		});
 		vscode.window.showInformationMessage("文件已复制 " + reqlt.files.length);
@@ -585,6 +543,160 @@ function handleReqlt(reqlt) {
 	} else if (reqlt.type === "cancelled") {
 		vscode.window.showInformationMessage("粘贴已取消");
 	}
+}
+
+// ★ 新增：为新插入 marker 补其与上方最近 marker 的间距（粘贴专用，轻量，只管局部前后）
+async function insertBlankLinesForNewMarker(editor, markerText, isFramed) {
+	if (!cleanFreakMode || !editor) return;
+
+	const document = editor.document;
+	const regex = new RegExp(`\\/${markerText.replace(/[.*+?^${}()|[\]\\]/g, "\\\\$&")}\\/`);
+	const text = document.getText();
+	const match = regex.exec(text);
+	if (!match) return;
+
+	const startPos = document.positionAt(match.index);
+	const newMarkerLine = startPos.line;
+
+	// 找上方最近 marker（任意类型）
+	let prevMarkerLine = null;
+	const allRegex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
+	allRegex.lastIndex = 0;
+	let allMatch;
+	while ((allMatch = allRegex.exec(text)) !== null) {
+		if (document.positionAt(allMatch.index).line < newMarkerLine) {
+			prevMarkerLine = document.positionAt(allMatch.index).line;
+		} else {
+			break;
+		}
+	}
+
+	// 1. 处理新 marker 与下方内容间距（如果有下方非空行）
+	if (newMarkerLine < document.lineCount - 1) {
+		let nextLine = newMarkerLine + 1;
+		while (nextLine < document.lineCount && document.lineAt(nextLine).text.trim() === '') {
+			nextLine++;
+		}
+		if (nextLine < document.lineCount) {
+			const currentBlanksBelow = nextLine - newMarkerLine - 1;
+			const nBelow = isFramed ? calculateBlankLinesN(editor) : 1;
+			if (currentBlanksBelow < nBelow) {
+				const additionalBlanks = nBelow - currentBlanksBelow;
+				const eol = getDocumentEOL(document);
+				const insertText = eol.repeat(additionalBlanks);
+				const insertPos = document.lineAt(newMarkerLine + 1).range.start;
+				await editor.edit(editBuilder => editBuilder.insert(insertPos, insertText));
+				console.log(`[洁癖插入（粘贴-下方）] 新暗号 ${markerText} (行${newMarkerLine}), 当前空行${currentBlanksBelow} < n=${nBelow}, 插入${additionalBlanks}行`);
+			}
+		}
+	}
+
+	// 2. 处理上方最近 marker 与新 marker 间距（如果有上方 marker）
+	if (prevMarkerLine !== null) {
+		let gapStart = prevMarkerLine + 1;
+		while (gapStart < newMarkerLine && document.lineAt(gapStart).text.trim() === '') {
+			gapStart++;
+		}
+		const currentBlanksAbove = newMarkerLine - prevMarkerLine - 1;
+		const prevIsFramed = isImageOrVideoExt(path.extname(text.slice(prevMarkerLine * 100, (prevMarkerLine + 1) * 100).match(/\/[^\/]*?\//)?.[0]?.slice(1, -1) || ''));  // 粗估 ext
+		const nAbove = prevIsFramed ? calculateBlankLinesN(editor) : 1;  // 上方 marker 的 n（向下看）
+		if (currentBlanksAbove < nAbove) {
+			const additionalBlanks = nAbove - currentBlanksAbove;
+			const eol = getDocumentEOL(document);
+			const insertText = eol.repeat(additionalBlanks);
+			const insertPos = document.lineAt(prevMarkerLine + 1).range.start;
+			await editor.edit(editBuilder => editBuilder.insert(insertPos, insertText));
+			console.log(`[洁癖插入（粘贴-上方）] 上暗号 (行${prevMarkerLine}) 到新${markerText} (行${newMarkerLine}), 当前空行${currentBlanksAbove} < n=${nAbove}, 插入${additionalBlanks}行`);
+		}
+	}
+}
+
+// ==========================================
+// ★★★ 新增：洁癖（防遮挡）功能
+// ==========================================
+
+// 计算相框类型暗号下方所需空行数 n（瘦身版：裕度1-4 max，减1/4）
+function calculateBlankLinesN(editor) {
+	try {
+		const config = vscode.workspace.getConfiguration('editor');
+		const fontSize = config.get('fontSize', 14);
+		const lineHeightMultiplier = config.get('lineHeight', 1.2);  // 行高倍数
+		const pixelPerLine = fontSize * lineHeightMultiplier;
+		const requiredHeight = PREVIEW_HEIGHT;  // 纯288
+		let baseN = Math.ceil(requiredHeight / pixelPerLine);
+		// 裕度：以1为基础，线性到max4（基于lineHeight）
+		let extra = 1 + Math.floor((lineHeightMultiplier - 1) * 3);  // e.g., 1.0→1; 1.2→1+0.6≈1; 2.0→1+3=4
+		extra = Math.min(4, Math.max(1, extra));  // clamp 1-4
+		let n = baseN + extra;
+		n = Math.max(6, n);  // 最小6，避免极端
+
+		// ★ 调试 log：输出到控制台
+		console.log(`[洁癖 n 计算] fontSize=${fontSize}, lineHeight=${lineHeightMultiplier}, pixelPerLine=${pixelPerLine}, baseN=${baseN}, extra=${extra}, 最终n=${n}`);
+
+		return n;
+	} catch (e) {
+		console.log(`[洁癖 n 计算] 异常，使用默认12: ${e.message}`);
+		return 12;  // 默认，匹配瘦身后
+	}
+}
+
+// ★ 新增：保存前注入 TextEdit（全文档，从下往上批量处理）
+function provideWillSaveEdits(document) {
+	if (!cleanFreakMode || !document) return null;
+
+	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
+	const text = document.getText();
+	const matches = [];
+	let match;
+
+	while ((match = regex.exec(text)) !== null) {
+		const startPos = document.positionAt(match.index);
+		const rawPath = match[0].slice(1, -1);
+		const absPath = rawPath.replace(/\//g, "\\");
+		const ext = path.extname(absPath).toLowerCase();
+		const isFramed = isImageOrVideoExt(ext);  // 是否相框类型
+		matches.push({
+			line: startPos.line,
+			isFramed,
+			rawPath
+		});
+	}
+
+	// 从下往上排序处理
+	matches.sort((a, b) => b.line - a.line);
+
+	const edits = [];
+	const eol = getDocumentEOL(document);
+
+	for (const item of matches) {
+		const { line: markerLine, isFramed, rawPath } = item;
+		if (markerLine >= document.lineCount - 1) continue;  // 最后一行，无下方
+
+		let nextLine = markerLine + 1;
+		while (nextLine < document.lineCount && document.lineAt(nextLine).text.trim() === '') {
+			nextLine++;
+		}
+		if (nextLine >= document.lineCount) continue;  // 已到末尾
+
+		const currentBlanks = nextLine - markerLine - 1;
+		const n = isFramed ? calculateBlankLinesN({ document }) : 1;  // 模拟 editor
+
+		if (currentBlanks < n) {
+			const additionalBlanks = n - currentBlanks;
+			const insertText = eol.repeat(additionalBlanks);
+			const insertPos = document.lineAt(markerLine + 1).range.start;
+			const edit = new vscode.TextEdit(
+				new vscode.Range(insertPos, insertPos),
+				insertText
+			);
+			edits.push(edit);
+
+			// ★ 调试 log：输出每个暗号的注入详情
+			console.log(`[洁癖注入（保存）] 暗号 ${rawPath} (行${markerLine}), 当前空行${currentBlanks} < n=${n}, 注入${additionalBlanks}行`);
+		}
+	}
+
+	return edits.length > 0 ? edits : null;
 }
 
 // ==========================================
@@ -979,7 +1091,16 @@ async function activate(context) {
 		}),
 		vscode.window.onDidChangeVisibleTextEditors(renderVisibleEditors),
 		vscode.window.onDidChangeTextEditorSelection(e => updateCodeLensColorForEditor(e.textEditor)),
-		vscode.window.onDidChangeActiveColorTheme(() => updateCodeLensColorForEditor(vscode.window.activeTextEditor))
+		vscode.window.onDidChangeActiveColorTheme(() => updateCodeLensColorForEditor(vscode.window.activeTextEditor)),
+		// ★ 新增：保存前注入 TextEdit（onWillSaveTextDocument，批量原子修改）
+		vscode.workspace.onWillSaveTextDocument(e => {
+			if (cleanFreakMode) {
+				const edits = provideWillSaveEdits(e.document);
+				if (edits) {
+					e.waitUntil(Promise.resolve(edits));
+				}
+			}
+		})
 	);
 
 	const editor = vscode.window.activeTextEditor;
