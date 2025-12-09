@@ -26,11 +26,6 @@
             "default": true,
             "description": "是否在文件导航中显示历史回收站。"
           },
-          "qqq.previewOffset": {
-            "type": "number",
-            "default": 100,
-            "description": "图片/视频预览区域的水平偏移（单位 px）。100 为推荐默认值，数值越小越靠左，越大越靠右。"
-          },
           "qqq.stretchSmallImages": {
             "type": "boolean",
             "default": true,
@@ -40,6 +35,11 @@
             "type": "boolean",
             "default": false,
             "description": "启用极限性能模式：预览生成时尽可能减少计算量（例如将 GIF 预览为静态首帧，并放弃修改后图片的即时刷新），以换取更快的交互响应速度。"
+          },
+          "qqq.cleanFreak": {
+            "type": "boolean",
+            "default": false,
+            "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
           }
         }
       }
