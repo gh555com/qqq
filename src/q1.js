@@ -27,6 +27,13 @@ const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 const FFMPEG_BG_COLOR = "0xfef6e3";
 
+// ★★★ 新增：资源存在性缓存，消除“Micro IO” ★★★
+const assetsCache = {
+	checked: false,
+	bgExists: false,
+	wmExists: false
+};
+
 try {
 	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 	ffmpegPath = ffmpegInstaller.path;
@@ -226,8 +233,14 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
 	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
-	const useImageBackground = fs.existsSync(bgImagePath);
-	const useWatermark = fs.existsSync(watermarkPath);
+	// ★★★ 优化点：使用全局缓存，避免每次渲染都读硬盘 (Micro IO 优化) ★★★
+	if (!assetsCache.checked) {
+		assetsCache.bgExists = fs.existsSync(bgImagePath);
+		assetsCache.wmExists = fs.existsSync(watermarkPath);
+		assetsCache.checked = true;
+	}
+	const useImageBackground = assetsCache.bgExists;
+	const useWatermark = assetsCache.wmExists;
 
 	let streamIndex = 0;
 	const contentIdx = streamIndex++;
@@ -312,7 +325,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 
 		child.stdout.on("data", (d) => chunks.push(d));
 
-		// ★【优化1】借鉴代码二：加回空监听，防止 stderr 缓冲区满导致进程 hang 住
+		// ★【优化】借鉴代码二：加回空监听，防止 stderr 缓冲区满导致进程 hang 住
 		child.stderr.on("data", () => { });
 
 		child.on("error", () => {
@@ -632,7 +645,7 @@ async function renderIkges(editor) {
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
 
-			// ★【优化2】借鉴代码二：先查内存缓存！命中则直接跳过后续昂贵的磁盘检查
+			// ★【优化2】先查内存缓存！命中则直接跳过后续昂贵的磁盘检查
 			if (currentDocDecos.has(uniqueKey)) continue;
 
 			const rawPath = match[0].slice(1, -1);
