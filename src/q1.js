@@ -155,7 +155,7 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 // ==========================================
-//           身份识别模块 (Identity Module)
+//           身份识别模块
 // ==========================================
 
 function determineMediaType(codec, ext) {
@@ -266,7 +266,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 }
 
 // ==========================================
-//           GIF 时长解析 (从 Buffer 提取)
+//           GIF 时长解析
 // ==========================================
 
 function getGifDurationFromBuffer(buffer) {
@@ -369,35 +369,40 @@ function getGifDurationFromBuffer(buffer) {
 //           FFmpeg 预览
 // ==========================================
 
-function setPreviewCache(filePath, buffer, mtimeMs, gifDuration) {
+function setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize) {
 	if (previewCache.size >= MAX_PREVIEW_CACHE) {
 		const firstKey = previewCache.keys().next().value;
 		if (firstKey !== undefined) previewCache.delete(firstKey);
 	}
-	previewCache.set(filePath, { buffer, mtimeMs, gifDuration });
+	previewCache.set(filePath, { buffer, mtimeMs, gifDuration, outputSize });
 }
 
-// ★★★ 核心修复：统一使用 -ss -t 方式截取视频，并用 pad 固定输出尺寸 ★★★
+// ★★★ 核心修复：不用 pad，返回实际输出尺寸 ★★★
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
-	const stretch = enlargeSmallImages;
+	// ★★★ 计算目标尺寸（用于 scale） ★★★
+	let targetW = PREVIEW_WIDTH;
+	let targetH = PREVIEW_HEIGHT;
 
-	// ★★★ 计算内容区域的目标尺寸 ★★★
-	let contentW = PREVIEW_WIDTH;
-	let contentH = PREVIEW_HEIGHT;
+	const hasValidSize = origSize && typeof origSize.width === "number" && typeof origSize.height === "number";
 
-	if (!stretch && !isVideo) {
-		if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
-			const ow = origSize.width;
-			const oh = origSize.height;
+	if (hasValidSize) {
+		const ow = origSize.width;
+		const oh = origSize.height;
+
+		if (enlargeSmallImages || isVideo) {
+			// 放大模式 或 视频：缩放到容器能容纳的最大尺寸
+			const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
+			targetW = Math.max(1, Math.round(ow * scale));
+			targetH = Math.max(1, Math.round(oh * scale));
+		} else {
+			// 不放大模式：小图保持原尺寸，大图缩小
 			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
-				// 小图保持原尺寸
-				contentW = ow;
-				contentH = oh;
+				targetW = ow;
+				targetH = oh;
 			} else {
-				// 大图缩小
 				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-				contentW = Math.max(1, Math.round(ow * scale));
-				contentH = Math.max(1, Math.round(oh * scale));
+				targetW = Math.max(1, Math.round(ow * scale));
+				targetH = Math.max(1, Math.round(oh * scale));
 			}
 		}
 	}
@@ -405,34 +410,31 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	const args = ["-hide_banner", "-loglevel", "error"];
 
 	if (isVideo) {
-		// ★★★ 视频：统一使用 -ss -t 方式截取，确保流完整性 ★★★
+		// ★★★ 视频截取逻辑 ★★★
+		// 极限模式：从1秒处截取2秒，fps=8
+		// 普通模式：从1秒处截取4秒，fps=10（简化，保证循环）
 		let clipStart = 1;
-		let clipDuration = 4;
+		let clipDuration = extremePerformanceMode ? 2 : 4;
+		let fpsLimit = extremePerformanceMode ? 8 : 10;
 
-		if (extremePerformanceMode) {
-			clipDuration = 2;
-		} else {
-			const safeDuration = duration || 0;
-			if (safeDuration < 5) {
-				clipDuration = Math.min(4, Math.max(1, safeDuration - 1));
-			} else {
-				// 长视频也用简单剪切，取中间4秒
-				clipStart = Math.max(1, Math.floor(safeDuration / 2) - 2);
-				clipDuration = 4;
-			}
+		// 处理短视频
+		const safeDuration = duration || 0;
+		if (safeDuration > 0 && safeDuration < clipStart + clipDuration) {
+			clipStart = Math.max(0, safeDuration - clipDuration - 0.5);
+			if (clipStart < 0) clipStart = 0;
+			clipDuration = Math.min(clipDuration, safeDuration - clipStart);
 		}
 
 		args.push("-ss", String(clipStart), "-t", String(clipDuration), "-i", filePath);
 
-		const fpsLimit = extremePerformanceMode ? "fps=8" : "fps=10";
 		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
 
-		// ★★★ 关键：用 pad 固定输出尺寸为 512x288 ★★★
+		// ★★★ 不用 pad，只 scale ★★★
 		let filterComplex;
 		if (extremePerformanceMode) {
-			filterComplex = `[0:v]${fpsLimit},scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease:flags=${scaleFlags},pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
+			filterComplex = `[0:v]fps=${fpsLimit},scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`;
 		} else {
-			filterComplex = `[0:v]${fpsLimit},scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease:flags=${scaleFlags},pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`;
+			filterComplex = `[0:v]fps=${fpsLimit},scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`;
 		}
 
 		args.push("-filter_complex", filterComplex);
@@ -447,13 +449,14 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 		args.push("-i", filePath);
 
 		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
+		const fpsLimit = extremePerformanceMode ? 8 : 10;
 
-		// ★★★ 关键：用 pad 固定输出尺寸 ★★★
 		let filterComplex;
 		if (extremePerformanceMode) {
-			filterComplex = `[0:v]fps=8,scale=${contentW}:${contentH}:force_original_aspect_ratio=decrease:flags=${scaleFlags},pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
+			filterComplex = `[0:v]fps=${fpsLimit},scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`;
 		} else {
-			filterComplex = `[0:v]scale=${contentW}:${contentH}:force_original_aspect_ratio=decrease:flags=${scaleFlags},pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
+			// 普通模式保留原帧率
+			filterComplex = `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`;
 		}
 
 		args.push("-filter_complex", filterComplex);
@@ -465,9 +468,7 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 		args.push("-i", filePath);
 
 		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-
-		// ★★★ 关键：用 pad 固定输出尺寸 ★★★
-		const filterComplex = `[0:v]scale=${contentW}:${contentH}:force_original_aspect_ratio=decrease:flags=${scaleFlags},pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
+		const filterComplex = `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`;
 
 		args.push("-filter_complex", filterComplex);
 		args.push("-map", "[out_v]");
@@ -479,7 +480,7 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 		}
 	}
 
-	return args;
+	return { args, targetW, targetH };
 }
 
 async function getPreviewBuffer(filePath, isVideo, isGif) {
@@ -493,7 +494,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 		mtimeMs = st.mtimeMs;
 	} catch { return null; }
 
-	// ★★★ 始终获取媒体信息 ★★★
+	// 始终获取媒体信息
 	const info = await getMediaInfo(filePath, mtimeMs);
 	if (info) {
 		origSize = { width: info.width, height: info.height };
@@ -503,22 +504,21 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	// 检查缓存
 	if (extremePerformanceMode) {
 		const cached = previewCache.get(filePath);
-		if (cached) return { buffer: cached.buffer, gifDuration: cached.gifDuration };
+		if (cached) return { buffer: cached.buffer, gifDuration: cached.gifDuration, outputSize: cached.outputSize };
 	} else {
 		const cached = previewCache.get(filePath);
-		if (cached && cached.mtimeMs === mtimeMs) return { buffer: cached.buffer, gifDuration: cached.gifDuration };
+		if (cached && cached.mtimeMs === mtimeMs) return { buffer: cached.buffer, gifDuration: cached.gifDuration, outputSize: cached.outputSize };
 	}
 
 	const ok = await ensureFfmpegAvailable();
 	if (!ok) return null;
 
 	return new Promise((resolve) => {
-		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
+		const { args, targetW, targetH } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
 		const child = cp.spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let resolved = false;
 
-		// 防止 stderr 缓冲区满
 		child.stderr.on("data", () => { });
 
 		const timer = setTimeout(() => {
@@ -543,12 +543,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				let gifDuration = 0;
 
 				if (isVideo) {
-					// 视频：使用实际截取时长
-					if (extremePerformanceMode) {
-						gifDuration = 2.0;
-					} else {
-						gifDuration = Math.min(4.0, Math.max(1, (duration || 5) - 1));
-					}
+					gifDuration = extremePerformanceMode ? 2.0 : 4.0;
 				} else if (isGif) {
 					gifDuration = getGifDurationFromBuffer(buffer);
 					if (extremePerformanceMode && gifDuration > 2.5) {
@@ -556,8 +551,9 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 					}
 				}
 
-				setPreviewCache(filePath, buffer, mtimeMs, gifDuration);
-				resolve({ buffer, gifDuration });
+				const outputSize = { width: targetW, height: targetH };
+				setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize);
+				resolve({ buffer, gifDuration, outputSize });
 			}
 		});
 	});
@@ -1070,6 +1066,7 @@ async function renderIkges(editor) {
 
 					let contentUrl = "";
 					let actualGifDuration = 0;
+					let outputSize = null;
 
 					if (previewResult && previewResult.buffer) {
 						let mime = "image/png";
@@ -1082,6 +1079,8 @@ async function renderIkges(editor) {
 						if (previewResult.gifDuration && previewResult.gifDuration > 0) {
 							actualGifDuration = previewResult.gifDuration;
 						}
+
+						outputSize = previewResult.outputSize;
 					} else if (isImage && !isVideo && !isGif) {
 						const fileUri = vscode.Uri.file(absPath);
 						contentUrl = `url("${fileUri.toString()}")`;
@@ -1095,6 +1094,7 @@ async function renderIkges(editor) {
 						progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
 					}
 
+					// ★★★ 核心修复：格子背景 + 正确的 background-size ★★★
 					const gridSize = "20px 20px";
 					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
 
@@ -1103,6 +1103,7 @@ async function renderIkges(editor) {
 					let positions = [];
 					let repeats = [];
 
+					// Layer 1: Watermark
 					if (watermarkBase64) {
 						layers.push(`url("${watermarkBase64}")`);
 						sizes.push("contain");
@@ -1110,6 +1111,7 @@ async function renderIkges(editor) {
 						repeats.push("no-repeat");
 					}
 
+					// Layer 2: Progress Bar
 					if (progressBarUrl) {
 						layers.push(progressBarUrl);
 						sizes.push("512px 4px");
@@ -1117,11 +1119,18 @@ async function renderIkges(editor) {
 						repeats.push("no-repeat");
 					}
 
+					// Layer 3: Content
+					// ★★★ 关键：使用实际输出尺寸，而不是 contain ★★★
 					layers.push(contentUrl);
-					sizes.push("contain");
+					if (outputSize) {
+						sizes.push(`${outputSize.width}px ${outputSize.height}px`);
+					} else {
+						sizes.push("contain");
+					}
 					positions.push("center center");
 					repeats.push("no-repeat");
 
+					// Layer 4: Grid (底层)
 					layers.push(gridImage);
 					sizes.push(gridSize);
 					positions.push("0 0");
@@ -1522,5 +1531,4 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
-
 
