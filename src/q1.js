@@ -2,7 +2,6 @@ const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const sharp = require("sharp");
 const crypto = require("crypto");
 
 // ==================== 核心完整性配置 ====================
@@ -17,6 +16,10 @@ const MAX_PREVIEW_CACHE = 100;
 const previewCache = new Map();
 const documentDecorationsMap = new Map();
 let currentRenderVersion = 0;
+
+// ★★★ 媒体信息缓存 (彻底替代 Sharp) ★★★
+const resolutionCache = new Map();
+// Key: filePath, Value: { mtime: number, res: string, width: number, height: number, codec: string }
 
 const MAX_CONCURRENT_TASKS = 8;
 const SCROLL_DEBOUNCE_MS = 200;
@@ -64,7 +67,7 @@ const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 let stretchSmallImages = true;
 let extremePerformanceMode = false;
 let cleanFreakMode = false;
-let lastGlobalCleanTime = 0; // 全局整理冷却计时器
+let lastGlobalCleanTime = 0;
 
 function refreshQqqConfig() {
 	try {
@@ -77,16 +80,6 @@ function refreshQqqConfig() {
 		extremePerformanceMode = false;
 		cleanFreakMode = false;
 	}
-}
-
-function logMessage(message, level = "WARN") {
-	if (level !== "ERROR" && level !== "WARN") return;
-	const ts = new Date().toISOString();
-	const line = `[${ts}] [${level}] ${message}\n`;
-	try {
-		fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
-		fs.appendFileSync(LOG_PATH, line);
-	} catch (e) { }
 }
 
 function clearDecorations() {
@@ -141,18 +134,8 @@ function buildNewRawPath(oldRawPath, newFileName) {
 	return oldRawPath.slice(0, lastSlash + 1) + newFileName;
 }
 
-async function getImageDimensions(filePath) {
-	try {
-		const metadata = await sharp(filePath, { limitInputPixels: false }).metadata();
-		if (metadata && typeof metadata.width === "number" && typeof metadata.height === "number") {
-			return { width: metadata.width, height: metadata.height };
-		}
-	} catch (e) { }
-	return null;
-}
-
 // ==========================================
-//           FFmpeg
+//           FFmpeg 解析与分辨率获取
 // ==========================================
 
 async function ensureFfmpegAvailable() {
@@ -165,6 +148,55 @@ async function ensureFfmpegAvailable() {
 		child.on("close", (code) => { if (!handled) resolve(code === 0); });
 	});
 	return ffmpegProbePromise;
+}
+
+// ★ 全能媒体信息获取 (替代 sharp)
+async function getMediaInfo(filePath, mtimeMs) {
+	const cached = resolutionCache.get(filePath);
+	if (cached && cached.mtime === mtimeMs) {
+		return cached;
+	}
+
+	if (!ffmpegPath) return null;
+
+	return new Promise((resolve) => {
+		const child = cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
+		let stderr = "";
+		child.stderr.on("data", d => stderr += d.toString());
+		child.on("close", () => {
+			// 匹配分辨率
+			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
+			// 匹配编解码器
+			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
+
+			let info = { mtime: mtimeMs, res: null, width: null, height: null, codec: null };
+
+			if (resMatch) {
+				const w = parseInt(resMatch[1]);
+				const h = parseInt(resMatch[2]);
+				info.res = `${w}x${h}`;
+				info.width = w;
+				info.height = h;
+			}
+
+			if (codecMatch && codecMatch[1]) {
+				info.codec = codecMatch[1].trim();
+			}
+
+			resolutionCache.set(filePath, info);
+
+			if (resolutionCache.size > 200) {
+				const first = resolutionCache.keys().next().value;
+				resolutionCache.delete(first);
+			}
+			resolve(info.width ? info : null);
+		});
+
+		setTimeout(() => {
+			try { child.kill(); } catch { }
+			resolve(null);
+		}, 2000);
+	});
 }
 
 function setPreviewCache(filePath, buffer, mtimeMs) {
@@ -197,12 +229,12 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 
 	if (isGif) {
 		let vf;
-		if (stretch || isVideo) {
+		if (stretch || isVideo || !origSize) {
 			vf = `scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
 		} else {
 			let gifTargetW = PREVIEW_WIDTH;
 			let gifTargetH = PREVIEW_HEIGHT;
-			if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
+			if (origSize && origSize.width && origSize.height) {
 				const ow = origSize.width;
 				const oh = origSize.height;
 				if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
@@ -292,18 +324,23 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	if (!ffmpegPath) return null;
 
 	let origSize = null;
+	let mtimeMs = 0;
+	try {
+		const st = fs.statSync(filePath);
+		mtimeMs = st.mtimeMs;
+	} catch { return null; }
+
 	if (!isVideo && !stretchSmallImages) {
-		origSize = await getImageDimensions(filePath);
+		const info = await getMediaInfo(filePath, mtimeMs);
+		if (info) origSize = { width: info.width, height: info.height };
 	}
 
 	if (extremePerformanceMode) {
 		const cached = previewCache.get(filePath);
 		if (cached) return cached.buffer;
 	} else {
-		let stat;
-		try { stat = await fs.promises.stat(filePath); } catch { return null; }
 		const cached = previewCache.get(filePath);
-		if (cached && cached.mtimeMs === stat.mtimeMs) return cached.buffer;
+		if (cached && cached.mtimeMs === mtimeMs) return cached.buffer;
 	}
 
 	const ok = await ensureFfmpegAvailable();
@@ -337,15 +374,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				clearTimeout(timer);
 				if (!chunks.length) { resolve(null); return; }
 				const buffer = Buffer.concat(chunks);
-				let mtime = 0;
-				try {
-					if (extremePerformanceMode) {
-						mtime = 0;
-					} else {
-						mtime = fs.statSync(filePath).mtimeMs;
-					}
-				} catch { }
-				setPreviewCache(filePath, buffer, mtime);
+				setPreviewCache(filePath, buffer, mtimeMs);
 				resolve(buffer);
 			}
 		});
@@ -485,18 +514,14 @@ function runPythonScript(additionalEnv = {}) {
 function executeClipboardComknd() { runPythonScript(); }
 
 // ==========================================
-// ★★★ 核心：统一计算公式 ★★★
+//           核心：统一计算公式
 // ==========================================
 
-function calculateBlankLinesN(isFramed) {
-	// 非相框暗号：统一为 1 行（保持紧凑，不使用大间距）
-	if (!isFramed) return 1;
-
+function calculateBlankLinesN(isFramed, isLastItem = false) {
 	try {
 		const config = vscode.workspace.getConfiguration('editor');
 		const fontSize = config.get('fontSize', 14);
 		const lineHeightMultiplier = config.get('lineHeight', 0);
-		// 若 lineHeight 为 0 (auto)，通常约为 1.35
 		const effectiveLineHeight = (lineHeightMultiplier === 0) ? 1.35 : lineHeightMultiplier;
 
 		const pixelPerLine = fontSize * effectiveLineHeight;
@@ -504,26 +529,33 @@ function calculateBlankLinesN(isFramed) {
 
 		let baseN = Math.ceil(requiredHeight / pixelPerLine);
 
-		// 裕度：默认 2，最大 5
 		let extra = 2 + Math.floor((effectiveLineHeight - 1) * 3);
 		extra = Math.min(5, Math.max(2, extra));
 
 		let n = baseN + extra;
-
-		// 准许的最小间隔：改为 4
 		n = Math.max(4, n);
+
+		// 统一规则：最后一张且是相框，至少8行；其他情况，相框走N，非相框走2。
+		if (isLastItem) {
+			if (isFramed) {
+				n = Math.max(8, n);
+			} else {
+				n = 2;
+			}
+		} else {
+			if (!isFramed) n = 2;
+		}
 
 		return n;
 	} catch (e) {
-		return 15; // 兜底
+		return 15;
 	}
 }
 
 // ==========================================
-// ★★★ 核心：全局整理逻辑 (Strict) ★★★
+//           核心：全局整理逻辑 (Strict)
 // ==========================================
 
-// 生成全文档整理的 Edits（严格执行 N）
 function provideCleanlinessEdits(document) {
 	const edits = [];
 	const text = document.getText();
@@ -538,7 +570,6 @@ function provideCleanlinessEdits(document) {
 		});
 	}
 
-	// 从下往上处理，防止坐标偏移
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
 		const pos = document.positionAt(m.index);
@@ -547,10 +578,9 @@ function provideCleanlinessEdits(document) {
 		const rawPath = m.text.slice(1, -1);
 		const isVidOrImg = isImageOrVideoExt(path.extname(rawPath));
 
-		// 获取统一公式计算出的 n
-		const n = calculateBlankLinesN(isVidOrImg);
+		let isLastMarkerInDoc = (i === markers.length - 1);
+		const n = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
 
-		// 探测下方实际空行
 		let currentBlanks = 0;
 		let nextContentLine = -1;
 
@@ -564,7 +594,7 @@ function provideCleanlinessEdits(document) {
 			}
 		}
 
-		// 严格执行：如果不等于 N，则调整（多退少补）
+		// 严格执行替换 (Clean Freak)
 		if (currentBlanks !== n) {
 			const eol = getDocumentEOL(document);
 			const idealString = eol.repeat(n);
@@ -583,15 +613,12 @@ function provideCleanlinessEdits(document) {
 	return edits;
 }
 
-// 执行全局整理（带冷却）
 async function performGlobalClean(editor, force = false) {
 	if (!editor) return;
-
-	// 如果没有强制执行（命令调用），则检查配置和冷却时间
 	if (!force) {
-		if (!cleanFreakMode) return; // 洁癖没开，不执行
+		if (!cleanFreakMode) return;
 		const now = Date.now();
-		if (now - lastGlobalCleanTime < 1000) return; // 1秒冷却
+		if (now - lastGlobalCleanTime < 1000) return;
 		lastGlobalCleanTime = now;
 	}
 
@@ -604,7 +631,7 @@ async function performGlobalClean(editor, force = false) {
 }
 
 // ==========================================
-//           粘贴 / 文本处理 (一致性局部整理)
+//           粘贴 / 文本处理
 // ==========================================
 
 function handleReqlt(reqlt) {
@@ -628,59 +655,75 @@ function handleReqlt(reqlt) {
 		const eol = getDocumentEOL(ed.document);
 		let prefixText = "";
 
-		// --- 步骤 1: 向上检查 (局部整理) ---
-		// 无论是否洁癖模式，粘贴时都执行此唯一逻辑
 		const currentLineIdx = ed.selection.active.line;
 
-		// 往上找最近的非空行，看看是不是暗号
-		let lineAboveIdx = currentLineIdx - 1;
-		while (lineAboveIdx >= 0 && ed.document.lineAt(lineAboveIdx).text.trim() === "") {
-			lineAboveIdx--;
-		}
+		// --- 步骤 1: 向上回溯查找 ---
+		let contentLineIdx = -1;
+		let contentLineText = "";
 
-		if (lineAboveIdx >= 0) {
-			const lineText = ed.document.lineAt(lineAboveIdx).text;
-			const match = /\/[a-z]:[^\/]*?qqq[^\/]*?\//i.exec(lineText);
-			if (match) {
-				const raw = match[0].slice(1, -1);
-				const isPrevFramed = isImageOrVideoExt(path.extname(raw));
-
-				// 计算已有的空行数
-				const existingGap = currentLineIdx - lineAboveIdx - 1;
-
-				let requiredGap = 0;
-				if (!isPrevFramed) {
-					// 上面是无框暗号 -> 保证至少 2 行
-					requiredGap = 2;
-				} else {
-					// 上面是相框 -> 计算 N
-					requiredGap = calculateBlankLinesN(true);
-				}
-
-				// 规则：若小于则补足，若大于等于则不动
-				if (existingGap < requiredGap) {
-					prefixText = eol.repeat(requiredGap - existingGap);
-				}
+		for (let i = currentLineIdx - 1; i >= 0; i--) {
+			const t = ed.document.lineAt(i).text;
+			if (t.trim() !== "") {
+				contentLineIdx = i;
+				contentLineText = t;
+				break;
 			}
 		}
 
-		// --- 步骤 2: 构建自身及向下间隔 (局部整理) ---
+		if (contentLineIdx !== -1) {
+			const match = /\/[a-z]:[^\/]*?qqq[^\/]*?\//i.exec(contentLineText);
+			const existingGap = currentLineIdx - contentLineIdx - 1;
+
+			let requiredGap = 0;
+			if (match) {
+				const raw = match[0].slice(1, -1);
+				const isPrevFramed = isImageOrVideoExt(path.extname(raw));
+				requiredGap = calculateBlankLinesN(isPrevFramed, false);
+			} else {
+				requiredGap = 2;
+			}
+
+			if (existingGap < requiredGap) {
+				prefixText = eol.repeat(requiredGap - existingGap);
+			}
+		}
+
+		// --- 步骤 2: 构建中间内容 ---
 		let insertionText = prefixText;
 
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
 			const isVidOrImg = isImageOrVideoExt(path.extname(f));
+			const isLastItem = (i === files.length - 1);
 
-			// 插入暗号
 			insertionText += `/${f}/`;
 
-			// 计算该暗号下方需要的空行
-			// 始终使用统一公式，自己给自己下面补足空行
-			const gapBelow = calculateBlankLinesN(isVidOrImg);
+			if (!isLastItem) {
+				const gapBelow = calculateBlankLinesN(isVidOrImg, false);
+				insertionText += eol.repeat(gapBelow + 1);
+			} else {
+				// --- 步骤 3: 最后一个项目，向下侦测 ---
+				const requiredGapBelow = calculateBlankLinesN(isVidOrImg, true);
 
-			// 插入空行
-			// 注意：gapBelow 是纯空行数，为了换到下一行写内容（或文件结束），需要 +1 个 eol
-			insertionText += eol.repeat(gapBelow + 1);
+				let existingGapBelow = 0;
+				for (let j = currentLineIdx + 1; j < ed.document.lineCount; j++) {
+					const lineT = ed.document.lineAt(j).text;
+					if (lineT.trim() === "") {
+						existingGapBelow++;
+					} else {
+						break;
+					}
+				}
+
+				if (existingGapBelow < requiredGapBelow) {
+					const needed = requiredGapBelow - existingGapBelow;
+					insertionText += eol.repeat(Math.max(0, needed));
+				} else {
+					if (existingGapBelow === 0) {
+						insertionText += eol;
+					}
+				}
+			}
 		}
 
 		ed.edit(e => e.insert(ed.selection.active, insertionText)).then(() => {
@@ -804,11 +847,11 @@ async function renderIkges(editor) {
 							contentText: "",
 							...baseStyle,
 							textDecoration: `none;
-								display: inline-block;
-								background-image: url("data:${mime};base64,${b64}");
-								background-size: contain;
-								background-repeat: no-repeat;
-								background-position: center;`
+                                display: inline-block;
+                                background-image: url("data:${mime};base64,${b64}");
+                                background-size: contain;
+                                background-repeat: no-repeat;
+                                background-position: center;`
 						};
 						return { key: uniqueKey, deco };
 					} else if (isImage) {
@@ -911,6 +954,8 @@ class FileCodeLensProvider {
 		const folderSizeMap = new Map();
 		const lensLines = new Set();
 
+		const tasks = [];
+
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
 			const rawPath = match[0].slice(1, -1);
@@ -918,37 +963,76 @@ class FileCodeLensProvider {
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const folder = path.dirname(absPath);
-			let fSize = folderSizeMap.get(folder);
-			if (fSize === undefined) {
-				fSize = await getQqqFolderSize(folder);
-				folderSizeMap.set(folder, fSize);
-			}
-			const fSizeStr = formatBytes(fSize);
+			const ext = path.extname(absPath).toLowerCase();
+			const isVidOrImg = isImageOrVideoExt(ext);
+			const isVideo = isVideoExt(ext);
 
-			let fileSz = "?";
-			let tooltipText = "";
-			try {
-				const st = fs.statSync(absPath);
-				fileSz = formatBytes(st.size);
-				const bTime = new Date(st.birthtime).toLocaleString();
-				const mTime = new Date(st.mtime).toLocaleString();
-				tooltipText = `创建: ${bTime}\n修改: ${mTime}`;
-			} catch { }
+			tasks.push(async () => {
+				let fSize = folderSizeMap.get(folder);
+				if (fSize === undefined) {
+					fSize = await getQqqFolderSize(folder);
+					folderSizeMap.set(folder, fSize);
+				}
+				const fSizeStr = formatBytes(fSize);
 
-			const r = new vscode.Range(pos, pos);
+				let fileSz = "?";
+				let tooltipText = "";
+				let mtimeMs = 0;
+				try {
+					const st = fs.statSync(absPath);
+					fileSz = formatBytes(st.size);
+					const bTime = new Date(st.birthtime).toLocaleString();
+					const mTime = new Date(st.mtime).toLocaleString();
+					tooltipText = `创建: ${bTime}\n修改: ${mTime}`;
+					mtimeMs = st.mtimeMs;
+				} catch { }
 
-			lenses.push(
-				new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath] }),
-				new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
-				new vscode.CodeLens(r, {
-					title: `✎( ${fileSz})   ${absPath}`,
-					command: "qqq.openFile",
-					arguments: [absPath],
-					tooltip: tooltipText
-				})
-			);
+				let titleSuffix = "";
+				if (isVidOrImg) {
+					const info = await getMediaInfo(absPath, mtimeMs);
+					if (info && info.width && info.height) {
+						let scale = 1;
+						const MAX_W = PREVIEW_WIDTH;
+						const MAX_H = PREVIEW_HEIGHT;
+
+						if (isVideo || stretchSmallImages) {
+							scale = Math.min(MAX_W / info.width, MAX_H / info.height);
+						} else {
+							if (info.width <= MAX_W && info.height <= MAX_H) {
+								scale = 1;
+							} else {
+								scale = Math.min(MAX_W / info.width, MAX_H / info.height);
+							}
+						}
+
+						const pct = Math.round(scale * 100);
+						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
+
+						if (info.codec) {
+							tooltipText += `\n编解码器: ${info.codec}`;
+						}
+					}
+				}
+
+				const r = new vscode.Range(pos, pos);
+				return [
+					new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath] }),
+					new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
+					new vscode.CodeLens(r, {
+						title: `✎( ${fileSz})   ${absPath}${titleSuffix}`,
+						command: "qqq.openFile",
+						arguments: [absPath],
+						tooltip: tooltipText
+					})
+				];
+			});
+
 			lensLines.add(pos.line);
 		}
+
+		const results = await Promise.all(tasks.map(t => t()));
+		results.forEach(group => lenses.push(...group));
+
 		lensLinesByDocUri.set(document.uri.toString(), lensLines);
 		updateCodeLensColorForEditor(vscode.window.activeTextEditor);
 		return lenses;
@@ -1058,24 +1142,28 @@ async function activate(context) {
 			if (e.affectsConfiguration("qqq")) {
 				refreshQqqConfig();
 				renderVisibleEditors();
-				// 洁癖模式开启时，且配置变动，触发全局整理
+				if (cleanFreakMode) {
+					performGlobalClean(vscode.window.activeTextEditor);
+				}
+			}
+			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
+				refreshQqqConfig();
 				if (cleanFreakMode) {
 					performGlobalClean(vscode.window.activeTextEditor);
 				}
 			}
 		}),
+
 		vscode.commands.registerCommand("qqq.q1", executeClipboardComknd),
 		vscode.commands.registerCommand("qqq.openFile", openFileComknd),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
 		vscode.commands.registerCommand("qqq.renameFile", renameFileComknd),
-		// ★ 新命令：Set In Order (手动触发全局整理)
 		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
 
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 
-		// ★ 仅在洁癖模式开启时，保存才触发全局整理
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
 				const edits = provideCleanlinessEdits(e.document);
@@ -1100,7 +1188,13 @@ async function activate(context) {
 		vscode.workspace.onDidCloseTextDocument(doc => {
 			documentDecorationsMap.delete(doc.uri.toString());
 		}),
-		vscode.window.onDidChangeVisibleTextEditors(renderVisibleEditors),
+		// ★ 唯一移植的功能：布局改变时触发整理
+		vscode.window.onDidChangeVisibleTextEditors(editors => {
+			renderVisibleEditors();
+			if (cleanFreakMode) {
+				performGlobalClean(vscode.window.activeTextEditor);
+			}
+		}),
 		vscode.window.onDidChangeTextEditorSelection(e => updateCodeLensColorForEditor(e.textEditor)),
 		vscode.window.onDidChangeActiveColorTheme(() => updateCodeLensColorForEditor(vscode.window.activeTextEditor))
 	);
