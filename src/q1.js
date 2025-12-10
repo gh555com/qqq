@@ -211,8 +211,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 		child.on("close", () => {
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
-			// ★★★ 新增：解析时长 ★★★
-			// 格式通常为 Duration: 00:00:05.32
+			// 解析时长 Duration: 00:00:05.32
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
 			let info = {
@@ -221,7 +220,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 				width: null,
 				height: null,
 				codec: null,
-				duration: 0, // 新增：秒数
+				duration: 0,
 				type: "unknown"
 			};
 
@@ -275,11 +274,13 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 	previewCache.set(filePath, { buffer, mtimeMs });
 }
 
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
+// ★★★ 核心修改：所有视频一律生成 GIF ★★★
+function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	const stretch = stretchSmallImages;
 	let targetW = PREVIEW_WIDTH;
 	let targetH = PREVIEW_HEIGHT;
 
+	// 尺寸计算逻辑
 	if (!stretch && !isVideo) {
 		if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
 			const ow = origSize.width;
@@ -296,56 +297,104 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	}
 
 	const args = ["-hide_banner", "-loglevel", "error"];
-	if (isVideo) args.push("-ss", "1");
-	args.push("-i", filePath);
 
-	let fc = "";
-	let preFilter = "";
+	// 如果是视频，一律生成 GIF，且需要处理时间切片
+	if (isVideo) {
+		// ========== 视频处理逻辑 ==========
 
-	if (isGif) {
+		// 1. 输入文件
+		args.push("-i", filePath);
+
+		let filterComplex = "";
+		const fpsLimit = "fps=10"; // 限制帧率以减小体积
+		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+
 		if (extremePerformanceMode) {
+			// ★★★ 极致性能模式：从 1s 开始截取 2s ★★★
+			// 为了效率，重置 args，把 -ss 放到 input 之前
+			args.length = 0;
+			args.push("-hide_banner", "-loglevel", "error");
+			args.push("-ss", "1", "-t", "2", "-i", filePath);
+
+			filterComplex = `[0:v]${fpsLimit},${scaleFilter}[out_v]`;
+
+		} else {
+			// ★★★ 普通模式：分段采样 (3段 x 1.3s) ★★★
+			const safeDuration = duration || 0;
+
+			if (safeDuration < 5) {
+				// 短视频：直接从 1s 截取 4s
+				args.length = 0;
+				args.push("-hide_banner", "-loglevel", "error");
+				args.push("-ss", "1", "-t", "4", "-i", filePath);
+				filterComplex = `[0:v]${fpsLimit},${scaleFilter}[out_v]`;
+			} else {
+				// 长视频：使用 select 过滤器进行分段
+				const segmentLen = 1.3;
+				const start1 = 1.0;
+				const start2 = safeDuration / 2.0;
+				const start3 = Math.max(start1 + segmentLen + 0.1, safeDuration - segmentLen - 1.0); // 结尾前留1秒余量
+
+				// select 表达式
+				const selectExpr = `between(t,${start1},${start1 + segmentLen})+between(t,${start2},${start2 + segmentLen})+between(t,${start3},${start3 + segmentLen})`;
+
+				filterComplex = `[0:v]select='${selectExpr}',setpts=N/FRAME_RATE/TB,${fpsLimit},${scaleFilter}[out_v]`;
+			}
+		}
+
+		args.push("-filter_complex", filterComplex);
+		args.push("-map", "[out_v]");
+		// 强制输出 GIF
+		args.push("-an", "-sn", "-f", "gif", "pipe:1");
+
+	} else {
+		// ========== 图片/GIF 原图处理逻辑 ==========
+		args.push("-i", filePath);
+
+		let preFilter = "";
+		if (isGif && extremePerformanceMode) {
 			preFilter = "fps=10,";
 			args.push("-t", "2");
 		}
-	}
 
-	let scaleFilter = "";
-	if (isGif) {
-		let gifTargetW = targetW;
-		let gifTargetH = targetH;
-		if (!stretch && !isVideo && origSize && origSize.width && origSize.height) {
-			const ow = origSize.width;
-			const oh = origSize.height;
-			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
-				gifTargetW = ow;
-				gifTargetH = oh;
-			} else {
-				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-				gifTargetW = Math.max(1, Math.round(ow * scale));
-				gifTargetH = Math.max(1, Math.round(oh * scale));
+		let scaleFilter = "";
+		if (isGif) {
+			let gifTargetW = targetW;
+			let gifTargetH = targetH;
+			if (!stretch && origSize && origSize.width && origSize.height) {
+				const ow = origSize.width;
+				const oh = origSize.height;
+				if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
+					gifTargetW = ow;
+					gifTargetH = oh;
+				} else {
+					const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
+					gifTargetW = Math.max(1, Math.round(ow * scale));
+					gifTargetH = Math.max(1, Math.round(oh * scale));
+				}
 			}
-		}
-		if (stretch || isVideo || !origSize) {
-			gifTargetW = PREVIEW_WIDTH;
-			gifTargetH = PREVIEW_HEIGHT;
-		}
-		scaleFilter = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease`;
-	} else {
-		scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
-	}
-
-	fc = `[0:v]${preFilter}${scaleFilter}[out_v]`;
-
-	args.push("-filter_complex", fc);
-	args.push("-map", "[out_v]");
-
-	if (isGif) {
-		args.push("-an", "-sn", "-f", "gif", "pipe:1");
-	} else {
-		if (extremePerformanceMode) {
-			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
+			if (stretch || !origSize) {
+				gifTargetW = PREVIEW_WIDTH;
+				gifTargetH = PREVIEW_HEIGHT;
+			}
+			scaleFilter = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease`;
 		} else {
-			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
+			scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+		}
+
+		const fc = `[0:v]${preFilter}${scaleFilter}[out_v]`;
+		args.push("-filter_complex", fc);
+		args.push("-map", "[out_v]");
+
+		if (isGif) {
+			args.push("-an", "-sn", "-f", "gif", "pipe:1");
+		} else {
+			// 图片转图片
+			if (extremePerformanceMode) {
+				args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
+			} else {
+				args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
+			}
 		}
 	}
 
@@ -356,15 +405,20 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	if (!ffmpegPath) return null;
 
 	let origSize = null;
+	let duration = 0; // 新增：传递时长
 	let mtimeMs = 0;
 	try {
 		const st = fs.statSync(filePath);
 		mtimeMs = st.mtimeMs;
 	} catch { return null; }
 
-	if (!isVideo && !stretchSmallImages) {
+	// 无论是图片还是视频，我们现在都可能需要信息
+	if (isVideo || (!stretchSmallImages && !isVideo)) {
 		const info = await getMediaInfo(filePath, mtimeMs);
-		if (info) origSize = { width: info.width, height: info.height };
+		if (info) {
+			origSize = { width: info.width, height: info.height };
+			duration = info.duration;
+		}
 	}
 
 	if (extremePerformanceMode) {
@@ -379,7 +433,8 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	if (!ok) return null;
 
 	return new Promise((resolve) => {
-		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
+		// 传入 duration
+		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
 		const child = cp.spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
 		const chunks = [];
 		let resolved = false;
@@ -390,7 +445,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				try { child.kill(); } catch { }
 				resolve(null);
 			}
-		}, 10000);
+		}, 20000); // GIF 生成较慢，增加超时时间
 
 		child.stdout.on("data", (d) => chunks.push(d));
 		child.on("error", () => {
@@ -428,16 +483,9 @@ function calculateAspectRatioString(w, h) {
 
 // ★★★ 核心：动态生成进度条 SVG ★★★
 function createProgressSvg(durationSeconds) {
-	// 如果时长无效，或者太短，或者太长，给一个默认动画
 	if (!durationSeconds || durationSeconds <= 0) return null;
-
-	// 奶白色 (#fdf6e3)
 	const barColor = "#fdf6e3";
 	const bgColor = "black";
-
-	// SVG 尺寸: 512x4
-	// rect1: 背景全黑
-	// rect2: 进度条，宽度从 0 到 512
 	const svgStr = `
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="4" viewBox="0 0 512 4">
   <rect width="512" height="4" fill="${bgColor}" />
@@ -445,7 +493,6 @@ function createProgressSvg(durationSeconds) {
     <animate attributeName="width" from="0" to="512" dur="${durationSeconds}s" repeatCount="indefinite" />
   </rect>
 </svg>`.trim();
-
 	return "data:image/svg+xml;base64," + Buffer.from(svgStr).toString("base64");
 }
 
@@ -855,20 +902,37 @@ async function renderIkges(editor) {
 
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
+			// ★★★ 修改：不单纯依赖扩展名，处理伪装文件 ★★★
 			const ext = path.extname(absPath).toLowerCase();
-			const isImage = isImageExt(ext);
-			const isVideo = isVideoExt(ext);
-			const isGif = ext === ".gif";
+			let isImage = isImageExt(ext);
+			let isVideo = isVideoExt(ext);
+			let isGif = ext === ".gif";
 
-			if (!isImage && !isVideo) continue;
+			let mtimeMs = 0;
+			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+
+			// 如果不是标准扩展名，尝试探测（仅针对可能伪装的场景，或默认处理）
+			// 为了性能，如果已经判定为图片或视频，就不额外探测。
+			// 只有当扩展名未知时，才尝试获取 info 来判断。
+			let mediaInfo = null;
+
+			if (!isImage && !isVideo) {
+				// 尝试探测，也许是 .exe 伪装的视频
+				mediaInfo = await getMediaInfo(absPath, mtimeMs);
+				if (mediaInfo && mediaInfo.type === "video") {
+					isVideo = true;
+				} else if (mediaInfo && mediaInfo.type === "image") {
+					isImage = true;
+					if (mediaInfo.codec === "gif") isGif = true;
+				} else {
+					continue; // 真的不是媒体文件
+				}
+			}
 
 			const targetLine = pos.line + 1;
 			if (targetLine >= editor.document.lineCount) continue;
 
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-
-			let mtimeMs = 0;
-			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 
 			const task = async () => {
 				if (currentRenderVersion !== myRenderVersion) return null;
@@ -876,6 +940,7 @@ async function renderIkges(editor) {
 				try {
 					let previewBuffer = null;
 					if (ffmpegPath) {
+						// 只要是 video，现在也会生成 GIF buffer
 						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
 						if (currentRenderVersion !== myRenderVersion) return null;
 					}
@@ -885,12 +950,14 @@ async function renderIkges(editor) {
 					let contentUrl = "";
 					if (previewBuffer) {
 						let mime = "image/png";
-						if (isGif) mime = "image/gif";
+						// ★★★ 修改：如果是 Video，现在生成的 Buffer 也是 GIF ★★★
+						if (isGif || isVideo) mime = "image/gif";
 						else if (extremePerformanceMode) mime = "image/jpeg";
 
 						const b64 = previewBuffer.toString("base64");
 						contentUrl = `url("data:${mime};base64,${b64}")`;
-					} else if (isImage) {
+					} else if (isImage && !isVideo) {
+						// 静态图 fallback
 						const fileUri = vscode.Uri.file(absPath);
 						contentUrl = `url("${fileUri.toString()}")`;
 					}
@@ -900,21 +967,30 @@ async function renderIkges(editor) {
 					// ★★★ 2. 进度条层生成逻辑 ★★★
 					let progressBarUrl = null;
 
-					// 只有 GIF 且 (有Buffer或Image) 才显示进度条
-					if (isGif) {
+					// ★★★ 修改：GIF 和 Video 都显示进度条 ★★★
+					if (isGif || isVideo) {
 						let duration = 0;
-						if (extremePerformanceMode) {
-							// 极致模式：固定 2.0 秒
-							duration = 2.0;
-						} else {
-							// 普通模式：需要真实时长
-							let info = resolutionCache.get(absPath);
-							// 如果缓存里没有或者缓存过期，则尝试重新获取
-							if (!info || info.mtime !== mtimeMs || !info.duration) {
-								info = await getMediaInfo(absPath, mtimeMs);
+						if (isVideo) {
+							// 视频：
+							if (extremePerformanceMode) {
+								duration = 2.0; // 极限模式 GIF 时长
+							} else {
+								// 普通模式：4秒左右的 GIF 概览
+								duration = 4.0;
 							}
-							if (info && info.duration) {
-								duration = info.duration;
+						} else {
+							// 原生 GIF：
+							if (extremePerformanceMode) {
+								duration = 2.0;
+							} else {
+								// 如果还没获取 info，尝试获取
+								if (!mediaInfo) mediaInfo = resolutionCache.get(absPath);
+								if (!mediaInfo || mediaInfo.mtime !== mtimeMs || !mediaInfo.duration) {
+									mediaInfo = await getMediaInfo(absPath, mtimeMs);
+								}
+								if (mediaInfo && mediaInfo.duration) {
+									duration = mediaInfo.duration;
+								}
 							}
 						}
 
@@ -943,7 +1019,7 @@ async function renderIkges(editor) {
 						repeats.push("no-repeat");
 					}
 
-					// Layer 2: Progress Bar (GIF Only)
+					// Layer 2: Progress Bar (GIF/Video Only)
 					if (progressBarUrl) {
 						layers.push(progressBarUrl);
 						sizes.push("512px 4px"); // 强制大小
@@ -1145,7 +1221,6 @@ class FileCodeLensProvider {
 							tooltipText += `\n宽高比: ${arStr}`;
 						}
 
-						// ★★★ 新增：Tooltip 显示时长 ★★★
 						if (info.duration > 0) {
 							tooltipText += `\n时长: ${info.duration}s`;
 						}
