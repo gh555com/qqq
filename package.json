@@ -188,6 +188,7 @@
     "intelligent",
     "スマート",
     "fast",
+    "sharp",
     "快捷",
     "quick",
     "高速",
@@ -202,7 +203,6 @@
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "sharp": "^0.34.4",
     "trash": "^7.1.2"
   },
   "devDependencies": {
