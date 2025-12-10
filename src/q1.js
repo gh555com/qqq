@@ -19,7 +19,6 @@ let currentRenderVersion = 0;
 
 // ★★★ 媒体信息缓存 (替代 Sharp) ★★★
 const resolutionCache = new Map();
-// Key: filePath, Value: { mtime: number, res: string, width: number, height: number, codec: string }
 
 const MAX_CONCURRENT_TASKS = 8;
 const SCROLL_DEBOUNCE_MS = 200;
@@ -36,6 +35,10 @@ const assetsCache = {
 	bgExists: false,
 	wmExists: false
 };
+
+// ★★★ 新增：水印资源内存缓存 ★★★
+let watermarkBase64 = null;
+const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
 
 try {
 	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
@@ -82,6 +85,19 @@ function refreshQqqConfig() {
 	}
 }
 
+// ★★★ 启动时加载水印到内存 ★★★
+function loadWatermarkResource() {
+	try {
+		if (fs.existsSync(WATERMARK_PATH)) {
+			const buf = fs.readFileSync(WATERMARK_PATH);
+			// 预先拼接好 Data URI Header
+			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
+		}
+	} catch (e) {
+		watermarkBase64 = null;
+	}
+}
+
 function clearDecorations() {
 	if (decorationType) {
 		try { decorationType.dispose(); } catch (e) { }
@@ -95,10 +111,10 @@ function clearDecorations() {
 }
 
 function verifySystemIntegrity() {
-	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
+	// 校验依然使用磁盘文件，确保文件未被篡改
 	try {
-		if (!fs.existsSync(watermarkPath)) return false;
-		const buffer = fs.readFileSync(watermarkPath);
+		if (!fs.existsSync(WATERMARK_PATH)) return false;
+		const buffer = fs.readFileSync(WATERMARK_PATH);
 		const hash = crypto.createHash("sha256").update(buffer).digest("hex");
 		return hash === CORE_INTEGRITY_HASH;
 	} catch (e) {
@@ -159,11 +175,9 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (!ffmpegPath) return null;
 
 	return new Promise((resolve) => {
-		// -i 需要读取 stderr 获取信息，所以这里不能 ignore
 		const child = cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
 
-		// 限制读取长度防止内存溢出，但保留足够头部信息
 		child.stderr.on("data", d => {
 			if (stderr.length < 50000) {
 				stderr += d.toString();
@@ -236,94 +250,96 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 		}
 	}
 
-	if (isGif) {
-		let vf;
-		if (stretch || isVideo || !origSize) {
-			vf = `scale=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
-		} else {
-			let gifTargetW = PREVIEW_WIDTH;
-			let gifTargetH = PREVIEW_HEIGHT;
-			if (origSize && origSize.width && origSize.height) {
-				const ow = origSize.width;
-				const oh = origSize.height;
-				if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
-					gifTargetW = ow;
-					gifTargetH = oh;
-				} else {
-					const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-					gifTargetW = Math.max(1, Math.round(ow * scale));
-					gifTargetH = Math.max(1, Math.round(oh * scale));
-				}
-			}
-			vf = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
-		}
-
-		const args = ["-hide_banner", "-loglevel", "error", "-i", filePath];
-		args.push("-filter_complex", vf);
-		args.push("-map", "[out_v]");
-		if (extremePerformanceMode) {
-			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-		} else {
-			args.push("-f", "gif", "pipe:1");
-		}
-		return args;
-	}
-
+	// 1. 基础参数
 	const args = ["-hide_banner", "-loglevel", "error"];
-	if (isVideo) args.push("-ss", "1");
+	if (isVideo) args.push("-ss", "1"); // 视频跳过1秒做封面
 	args.push("-i", filePath);
 
+	// 2. 检查背景图 (q1.png - 格子背景/相框底图)
+	// 注意：这里只保留背景图 q1.png，彻底移除了水印 q2.gif 的输入
 	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
-	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
 	if (!assetsCache.checked) {
 		assetsCache.bgExists = fs.existsSync(bgImagePath);
-		assetsCache.wmExists = fs.existsSync(watermarkPath);
+		// assetsCache.wmExists 逻辑移除，水印改由 CSS 处理
 		assetsCache.checked = true;
 	}
 	const useImageBackground = assetsCache.bgExists;
-	const useWatermark = assetsCache.wmExists;
 
 	let streamIndex = 0;
 	const contentIdx = streamIndex++;
 	let bgIdx = -1;
-	let wmIdx = -1;
 
+	// 如果有背景图，作为第二个输入流
 	if (useImageBackground) {
 		args.push("-loop", "1", "-i", bgImagePath);
 		bgIdx = streamIndex++;
 	}
-	if (useWatermark) {
-		args.push("-ignore_loop", "0", "-i", watermarkPath);
-		wmIdx = streamIndex++;
-	}
 
+	// 3. 构建滤镜复杂图 (Filter Complex)
+	// 目标：Scale 内容 -> (可选) Overlay 到背景图 -> (可选) Pad 填充
 	let fc = "";
-	let currentStream = "";
 
+	// GIF 优化：限制帧率和时长，防止崩溃并提高速度
+	let preFilter = "";
+	if (isGif) {
+		preFilter = "fps=10,";
+		args.push("-t", "2");
+	}
+
+	// 3.1 缩放内容 (Scale)
+	if (isGif) {
+		let gifTargetW = targetW;
+		let gifTargetH = targetH;
+		if (!stretch && !isVideo && origSize && origSize.width && origSize.height) {
+			const ow = origSize.width;
+			const oh = origSize.height;
+			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
+				gifTargetW = ow;
+				gifTargetH = oh;
+			} else {
+				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
+				gifTargetW = Math.max(1, Math.round(ow * scale));
+				gifTargetH = Math.max(1, Math.round(oh * scale));
+			}
+		}
+		// 如果必须拉伸，覆盖上面的计算
+		if (stretch || isVideo || !origSize) {
+			gifTargetW = PREVIEW_WIDTH;
+			gifTargetH = PREVIEW_HEIGHT;
+		}
+
+		// GIF 的 Scaling
+		fc += `[${contentIdx}:v]${preFilter}scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease[scaled]`;
+	} else {
+		// 普通视频/图片的 Scaling
+		fc += `[${contentIdx}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease[scaled]`;
+	}
+
+	// 3.2 合成背景 (Overlay or Pad)
 	if (useImageBackground) {
-		fc += `[${contentIdx}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease[scaled];`;
-		fc += `[${bgIdx}:v][scaled]overlay=(W-w)/2:(H-h)/2:format=auto[composed]`;
-		currentStream = "[composed]";
+		// 有背景图 q1.png：将缩放后的内容叠加到背景图中心
+		// 这样保留了相框的纹理/格子
+		fc += `;[${bgIdx}:v][scaled]overlay=(W-w)/2:(H-h)/2:format=auto[out_v]`;
 	} else {
-		fc += `[${contentIdx}:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,`;
-		fc += `pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[padded]`;
-		currentStream = "[padded]";
+		// 无背景图：用颜色填充边框
+		fc += `,pad=${PREVIEW_WIDTH}:${PREVIEW_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=${FFMPEG_BG_COLOR}[out_v]`;
 	}
 
-	if (useWatermark) {
-		fc += `;${currentStream}[${wmIdx}:v]overlay=(W-w)/2:(H-h)/2:format=auto[out_v]`;
-	} else {
-		fc += `;${currentStream}copy[out_v]`;
-	}
+	// 注意：此处不再处理水印 [wmIdx]，水印已移交 CSS
 
 	args.push("-filter_complex", fc);
 	args.push("-map", "[out_v]");
 
+	// 4. 输出格式
 	if (extremePerformanceMode) {
 		args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
 	} else {
-		args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
+		if (isGif) {
+			args.push("-an", "-sn", "-f", "gif", "pipe:1");
+		} else {
+			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
+		}
 	}
 
 	return args;
@@ -358,7 +374,6 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	return new Promise((resolve) => {
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
 
-		// ★★★ 性能优化：ignore stderr，防止管道阻塞，且零内存开销
 		const child = cp.spawn(ffmpegPath, args, {
 			windowsHide: true,
 			stdio: ['ignore', 'pipe', 'ignore']
@@ -826,6 +841,7 @@ async function renderIkges(editor) {
 
 				try {
 					let previewBuffer = null;
+					// FFmpeg 生成的 Buffer 现在只包含内容+相框背景，不含水印
 					if (ffmpegPath) {
 						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
 						if (currentRenderVersion !== myRenderVersion) return null;
@@ -833,6 +849,41 @@ async function renderIkges(editor) {
 
 					const deco = { range: anchorRange, renderOptions: {} };
 
+					// 1. 确定底层内容（Content）的 CSS URL
+					let contentUrl = "";
+
+					if (previewBuffer) {
+						// 来自 FFmpeg (包含背景图q1.png或填充色)
+						const mime = extremePerformanceMode ? "image/jpeg" : (isGif ? "image/gif" : "image/png");
+						const b64 = previewBuffer.toString("base64");
+						contentUrl = `url("data:${mime};base64,${b64}")`;
+					} else if (isImage) {
+						// 静态普通图，直接读文件 (没有背景图q1.png，背景色为CSS定义)
+						const fileUri = vscode.Uri.file(absPath);
+						contentUrl = `url("${fileUri.toString()}")`;
+					}
+
+					if (!contentUrl) return null;
+
+					// 2. ★★★ CSS 渲染核心改动：水印合成 ★★★
+					let bgImageVal, bgSizeVal, bgPosVal, bgRepVal;
+
+					if (watermarkBase64) {
+						// 有水印：水印在上(First)，内容在下(Second)
+						// 这样无论内容是 GIF、视频截图还是普通图片，水印都会覆盖在上面
+						bgImageVal = `url("${watermarkBase64}"), ${contentUrl}`;
+						bgSizeVal = "contain, contain";
+						bgPosVal = "center, center";
+						bgRepVal = "no-repeat, no-repeat";
+					} else {
+						// 无水印 (fallback)
+						bgImageVal = contentUrl;
+						bgSizeVal = "contain";
+						bgPosVal = "center";
+						bgRepVal = "no-repeat";
+					}
+
+					// 3. 基础样式 (保留原有的边框、背景色等)
 					const baseStyle = {
 						position: 'absolute',
 						left: marginLeft,
@@ -842,35 +893,22 @@ async function renderIkges(editor) {
 						padding: "2px",
 						border: "1px dashed #888",
 						backgroundColor: PREVIEW_BG_COLOR,
-						zIndex: -1,
-						backgroundSize: 'contain',
-						backgroundRepeat: 'no-repeat',
-						backgroundPosition: 'center'
+						zIndex: -1
 					};
 
-					if (previewBuffer) {
-						const mime = extremePerformanceMode ? "image/jpeg" : (isGif ? "image/gif" : "image/png");
-						const b64 = previewBuffer.toString("base64");
-						deco.renderOptions.before = {
-							contentText: "",
-							...baseStyle,
-							textDecoration: `none;
-                                display: inline-block;
-                                background-image: url("data:${mime};base64,${b64}");
-                                background-size: contain;
-                                background-repeat: no-repeat;
-                                background-position: center;`
-						};
-						return { key: uniqueKey, deco };
-					} else if (isImage) {
-						const fileUri = vscode.Uri.file(absPath);
-						deco.renderOptions.before = {
-							contentIconPath: fileUri,
-							...baseStyle
-						};
-						return { key: uniqueKey, deco };
-					}
-					return null;
+					deco.renderOptions.before = {
+						contentText: "",
+						...baseStyle,
+						// 使用构造好的多重背景属性
+						textDecoration: `none;
+                            display: inline-block;
+                            background-image: ${bgImageVal};
+                            background-size: ${bgSizeVal};
+                            background-position: ${bgPosVal};
+                            background-repeat: ${bgRepVal};`
+					};
+
+					return { key: uniqueKey, deco };
 				} catch (e) {
 					return null;
 				}
@@ -1138,6 +1176,9 @@ async function activate(context) {
 	console.log(`[QQQ] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
 
 	if (!isCoreIntegretyValid) return;
+
+	// ★★★ 启动时加载水印 ★★★
+	loadWatermarkResource();
 
 	refreshQqqConfig();
 	isPythonAvailable = await checkPythonEnvironment();
