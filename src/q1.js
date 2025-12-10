@@ -17,7 +17,7 @@ const previewCache = new Map();
 const documentDecorationsMap = new Map();
 let currentRenderVersion = 0;
 
-// ★★★ 媒体信息缓存 (彻底替代 Sharp) ★★★
+// ★★★ 媒体信息缓存 (替代 Sharp) ★★★
 const resolutionCache = new Map();
 // Key: filePath, Value: { mtime: number, res: string, width: number, height: number, codec: string }
 
@@ -30,7 +30,7 @@ const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 const FFMPEG_BG_COLOR = "0xfef6e3";
 
-// ★★★ 资源存在性缓存 ★★★
+// ★★★ 资源存在性缓存 (IO优化) ★★★
 const assetsCache = {
 	checked: false,
 	bgExists: false,
@@ -135,8 +135,9 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 // ==========================================
-//           FFmpeg 解析与分辨率获取
+//           FFmpeg 解析 (getMediaInfo)
 // ==========================================
+// 这里必须读取 stderr 以获取信息，但添加了保护
 
 async function ensureFfmpegAvailable() {
 	if (!ffmpegPath) return false;
@@ -150,7 +151,6 @@ async function ensureFfmpegAvailable() {
 	return ffmpegProbePromise;
 }
 
-// ★ 全能媒体信息获取 (替代 sharp)
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) {
@@ -160,13 +160,20 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (!ffmpegPath) return null;
 
 	return new Promise((resolve) => {
+		// -i 操作必须读取 stderr
 		const child = cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
-		child.stderr.on("data", d => stderr += d.toString());
+
+		// 收集 stderr，用于正则解析
+		child.stderr.on("data", d => {
+			// 简单保护：防止读取过长数据导致内存波动，只要头部信息即可
+			if (stderr.length < 20000) {
+				stderr += d.toString();
+			}
+		});
+
 		child.on("close", () => {
-			// 匹配分辨率
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
-			// 匹配编解码器
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 
 			let info = { mtime: mtimeMs, res: null, width: null, height: null, codec: null };
@@ -192,12 +199,17 @@ async function getMediaInfo(filePath, mtimeMs) {
 			resolve(info.width ? info : null);
 		});
 
+		// 兜底超时
 		setTimeout(() => {
 			try { child.kill(); } catch { }
 			resolve(null);
 		}, 2000);
 	});
 }
+
+// ==========================================
+//           FFmpeg 预览 (getPreviewBuffer)
+// ==========================================
 
 function setPreviewCache(filePath, buffer, mtimeMs) {
 	if (previewCache.size >= MAX_PREVIEW_CACHE) {
@@ -267,6 +279,7 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
 	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
+	// 资源检查优化
 	if (!assetsCache.checked) {
 		assetsCache.bgExists = fs.existsSync(bgImagePath);
 		assetsCache.wmExists = fs.existsSync(watermarkPath);
@@ -348,7 +361,13 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 
 	return new Promise((resolve) => {
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
-		const child = cp.spawn(ffmpegPath, args, { windowsHide: true });
+
+		// ★★★ [终极优化]：stdio: ['ignore', 'pipe', 'ignore']
+		// 彻底丢弃 stderr，比空监听更高效，完全杜绝内存爆炸
+		const child = cp.spawn(ffmpegPath, args, {
+			windowsHide: true,
+			stdio: ['ignore', 'pipe', 'ignore']
+		});
 
 		const chunks = [];
 		let resolved = false;
@@ -361,8 +380,8 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 			}
 		}, 6000);
 
+		// 我们只需要 stdout (图片数据)
 		child.stdout.on("data", (d) => chunks.push(d));
-		child.stderr.on("data", () => { });
 
 		child.on("error", () => {
 			if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); }
@@ -535,7 +554,7 @@ function calculateBlankLinesN(isFramed, isLastItem = false) {
 		let n = baseN + extra;
 		n = Math.max(4, n);
 
-		// 统一规则：最后一张且是相框，至少8行；其他情况，相框走N，非相框走2。
+		// 统一规则
 		if (isLastItem) {
 			if (isFramed) {
 				n = Math.max(8, n);
@@ -594,7 +613,6 @@ function provideCleanlinessEdits(document) {
 			}
 		}
 
-		// 严格执行替换 (Clean Freak)
 		if (currentBlanks !== n) {
 			const eol = getDocumentEOL(document);
 			const idealString = eol.repeat(n);
@@ -657,7 +675,6 @@ function handleReqlt(reqlt) {
 
 		const currentLineIdx = ed.selection.active.line;
 
-		// --- 步骤 1: 向上回溯查找 ---
 		let contentLineIdx = -1;
 		let contentLineText = "";
 
@@ -688,7 +705,6 @@ function handleReqlt(reqlt) {
 			}
 		}
 
-		// --- 步骤 2: 构建中间内容 ---
 		let insertionText = prefixText;
 
 		for (let i = 0; i < files.length; i++) {
@@ -702,7 +718,7 @@ function handleReqlt(reqlt) {
 				const gapBelow = calculateBlankLinesN(isVidOrImg, false);
 				insertionText += eol.repeat(gapBelow + 1);
 			} else {
-				// --- 步骤 3: 最后一个项目，向下侦测 ---
+				// 最后一项处理
 				const requiredGapBelow = calculateBlankLinesN(isVidOrImg, true);
 
 				let existingGapBelow = 0;
@@ -739,7 +755,7 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//           渲染主逻辑
+//           渲染主逻辑 (移植优化后)
 // ==========================================
 
 async function renderIkges(editor) {
@@ -794,11 +810,13 @@ async function renderIkges(editor) {
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
 
+			// ★ 优化顺序：先查内存，命中则跳过
 			if (currentDocDecos.has(uniqueKey)) continue;
 
 			const rawPath = match[0].slice(1, -1);
 			const absPath = rawPath.replace(/\//g, "\\");
 
+			// 后查硬盘
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const ext = path.extname(absPath).toLowerCase();
@@ -1006,6 +1024,8 @@ class FileCodeLensProvider {
 						}
 
 						const pct = Math.round(scale * 100);
+
+						// ★ (128%) 格式调整
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
 
 						if (info.codec) {
@@ -1188,7 +1208,7 @@ async function activate(context) {
 		vscode.workspace.onDidCloseTextDocument(doc => {
 			documentDecorationsMap.delete(doc.uri.toString());
 		}),
-		// ★ 唯一移植的功能：布局改变时触发整理
+		// ★ 移植：布局/窗口变化时触发渲染和整理
 		vscode.window.onDidChangeVisibleTextEditors(editors => {
 			renderVisibleEditors();
 			if (cleanFreakMode) {
