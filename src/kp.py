@@ -205,14 +205,9 @@ def get_tikestkp_filenkke(ext=".png"):
     """
     新命名规则示例：
     212zn.  2025.12.06 [6] 12.09.14.png
-
-    - 212zn = 毫秒三位 + 防重码两位（防重码逻辑沿用旧版）
-    - .  后面是两个空格
-    - [6] 里面的数字是星期几：周一=1, …, 周六=6, 周日=7
     """
     now = datetime.now()
     date_part = now.strftime("%Y.%m.%d")
-    # Python: Monday=0 ... Sunday=6 -> 我们要 1~7
     weekday_number = now.weekday() + 1
     millisecond_part = f"{now.microsecond // 1000:03d}"
 
@@ -225,17 +220,15 @@ def get_tikestkp_filenkke(ext=".png"):
         second_char = random.choice(valid_chars_without_g)
     else:
         second_char = random.choice(valid_chars)
-    random_chars = first_char + second_char  # 防重码两位
+    random_chars = first_char + second_char
 
     prefix_code = f"{millisecond_part}{random_chars}"
     time_part = now.strftime("%H.%M.%S")
-    # 注意：句点后面是两个空格
     filename = f"{prefix_code}.  {date_part} [{weekday_number}] {time_part}{ext}"
     return filename
 
 
 def gqss_ext_by_kgic(data: bytes):
-    # 尝试引入 magic，失败则 fallback
     try:
         import magic as kgic
         m = kgic.Magic(mime=False)
@@ -308,57 +301,111 @@ def save_bytes(data: bytes, is_ikge=False, original_ext=".bin"):
     return str(path)
 
 
-def _get_path_size(path):
-    try:
-        if os.path.isfile(path):
-            return os.path.getsize(path)
-        elif os.path.isdir(path):
-            total_size = 0
-            try:
-                with os.scandir(path) as entries:
-                    for entry in entries:
-                        try:
-                            if entry.is_file(follow_symlinks=False):
-                                total_size += entry.stat(
-                                    follow_symlinks=False).st_size
-                            elif entry.is_dir(follow_symlinks=False):
-                                total_size += _get_path_size(entry.path)
-                        except (OSError, PermissionError):
-                            continue
-            except (OSError, PermissionError):
-                pass
-            return total_size
-        else:
-            return 0
-    except (OSError, PermissionError):
-        return 0
+# ==========================================
+#              大小与后缀统计逻辑 (Core)
+# ==========================================
 
-
-def calculate_total_size_qnc(file_paths):
+def get_directory_stats(path):
+    """
+    一次性计算：
+    1. 根目录下的后缀名分布 (Top-level only)
+    2. 整个目录树的总大小 (Recursive)
+    """
     total_size = 0
-    max_workers = os.cpu_count() * 2 if os.cpu_count() else 8
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_path = {executor.submit(
-            _get_path_size, path): path for path in file_paths}
-        for future in concurrent.futures.as_completed(future_to_path):
-            try:
-                total_size += future.result()
-            except Exception as exc:
-                qsq.stderr.write(f"Error: {exc}\n")
-    return total_size
+    ext_counts = {}
+    file_count = 0
+
+    # 纯递归计算大小函数（不涉及后缀统计）
+    def get_recursive_size(p):
+        s = 0
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            s += entry.stat().st_size
+                        elif entry.is_dir(follow_symlinks=False):
+                            s += get_recursive_size(entry.path)
+                    except:
+                        pass
+        except:
+            pass
+        return s
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    futures = []
+
+    try:
+        # ★ 关键优化：只在这一层 scandir 中同时做两件事
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        # 1. 累加大小
+                        size = entry.stat().st_size
+                        total_size += size
+                        file_count += 1
+
+                        # 2. 统计后缀 (仅限根目录文件)
+                        name = entry.name
+                        _, ext = os.path.splitext(name)
+                        if ext:
+                            # 去掉点，转小写 (如 ".PNG" -> "png")
+                            key = ext[1:].lower()
+                        else:
+                            # 无后缀用空字符串标记
+                            key = ""
+
+                        ext_counts[key] = ext_counts.get(key, 0) + 1
+
+                    elif entry.is_dir(follow_symlinks=False):
+                        # 子目录：扔给线程池去递归算大小 (不再统计后缀)
+                        futures.append(executor.submit(
+                            get_recursive_size, entry.path))
+                except OSError:
+                    pass
+
+        # 汇总子目录大小
+        for future in concurrent.futures.as_completed(futures):
+            total_size += future.result()
+
+    except Exception:
+        # 权限错误等忽略，返回部分结果
+        pass
+    finally:
+        executor.shutdown(wait=False)
+
+    return {
+        "qccess": True,
+        "total_size": total_size,
+        "ext_stats": ext_counts,
+        "file_count_root": file_count
+    }
 
 
 def get_total_size_cli_interface(paths_to_calculate):
+    # 此函数保留为了兼容性，但已被 JS 单路径调用模式取代
     if not paths_to_calculate:
         print(json.dumps(
             {"qccess": False, "error": "未提供路径"}, ensure_ascii=False))
         qsq.exit(1)
+
+    # 如果只有一个路径，直接调用增强版函数（虽然 CLI 可能还是调用的这个）
+    # 但 JS 现在用的是 "get_size" + 单个 path，走下面的 ky() 分支
+    # 这里处理多个路径的情况（旧逻辑）
     max_workers = min(4, len(paths_to_calculate))
     try:
         total_size = 0
+
+        def _get_path_size_simple(p):
+            if os.path.isfile(p):
+                return os.path.getsize(p)
+            # 复用上面的递归逻辑，但不统计 ext
+            return get_directory_stats(p)["total_size"]
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_path = {executor.submit(
-                _get_path_size, path): path for path in paths_to_calculate}
+                _get_path_size_simple, path): path for path in paths_to_calculate}
             for future in concurrent.futures.as_completed(future_to_path):
                 try:
                     total_size += future.result()
@@ -414,7 +461,6 @@ def handle_windows_pywin32(wcb, wcon):
                         fname = src.name
                         dst = OUTPUT_DIR / fname
                         if dst.exists():
-                            # 简单起见，这里不再弹窗，直接跳过或覆盖（为保持代码精简）
                             pass
                         import shutil
                         shutil.copy2(src, dst)
@@ -432,11 +478,9 @@ def handle_windows_pywin32(wcb, wcon):
         if wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
             dib = wcb.GetClipboardData(wcon.CF_DIB)
             wcb.CloseClipboard()
-            # 保存图片逻辑
             try:
                 from PIL import Image
                 import io
-                # DIB header parsing (simple)
                 data = bytes(dib)
                 bfType = b"BM"
                 bfSize = (len(data) + 14).to_bytes(4, "little")
@@ -471,7 +515,6 @@ def handle_windows_ctypes():
         if IsClipboardFormatAvailable(CF_HDROP):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
-                # 获取文件数量
                 count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
                 files = []
                 buf = ctypes.create_unicode_buffer(1024)
@@ -479,7 +522,6 @@ def handle_windows_ctypes():
                     DragQueryFileW(h_drop, i, buf, 1024)
                     files.append(buf.value)
 
-                # 处理文件逻辑 (复制一份精简版)
                 has_folders = False
                 folder_paths = []
                 for file_path in files:
@@ -533,7 +575,6 @@ def handle_windows_ctypes():
                 CloseClipboard()
                 if data:
                     try:
-                        # 同样的 PIL 逻辑
                         from PIL import Image
                         import io
                         bfType = b"BM"
@@ -554,7 +595,6 @@ def handle_windows_ctypes():
     finally:
         CloseClipboard()
 
-    # 4. 其他格式遍历
     return handle_windows_enum_fallback()
 
 
@@ -584,7 +624,6 @@ def handle_windows_enum_fallback():
 
 
 def handle_windows():
-    # 优先尝试 pywin32，因为它更成熟
     try:
         import win32clipboard as wcb
         import win32con as wcon
@@ -592,11 +631,10 @@ def handle_windows():
         if res:
             return res
     except ImportError:
-        pass  # pywin32 不存在，降级到 ctypes
+        pass
     except Exception:
-        pass  # 其他错误，尝试 ctypes
+        pass
 
-    # 尝试原生 ctypes 实现
     try:
         res = handle_windows_ctypes()
         if res:
@@ -654,8 +692,14 @@ def handle_linux():
 def ky():
     if len(qsq.argv) > 1:
         if qsq.argv[1] == "get_size":
-            paths_to_calculate = qsq.argv[2:]
-            get_total_size_cli_interface(paths_to_calculate)
+            # ★★★ 修改：如果只传了一个路径，调用增强版统计 ★★★
+            if len(qsq.argv) == 3:
+                res = get_directory_stats(qsq.argv[2])
+                print(json.dumps(res, ensure_ascii=False))
+            else:
+                # 兼容旧的多路径总和查询
+                paths_to_calculate = qsq.argv[2:]
+                get_total_size_cli_interface(paths_to_calculate)
             return
         elif qsq.argv[1] == "db_op":
             res = handle_db_operations(qsq.argv[2:])

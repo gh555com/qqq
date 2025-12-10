@@ -17,7 +17,6 @@ const previewCache = new Map();
 const documentDecorationsMap = new Map();
 let currentRenderVersion = 0;
 
-// ★★★ 媒体信息缓存 (替代 Sharp) ★★★
 const resolutionCache = new Map();
 
 const MAX_CONCURRENT_TASKS = 8;
@@ -29,14 +28,12 @@ const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 const FFMPEG_BG_COLOR = "0xfef6e3";
 
-// ★★★ 资源存在性缓存 (IO优化) ★★★
 const assetsCache = {
 	checked: false,
 	bgExists: false,
 	wmExists: false
 };
 
-// ★★★ 新增：水印资源内存缓存 ★★★
 let watermarkBase64 = null;
 const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
 
@@ -66,7 +63,6 @@ const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
 const qqqFolderSizeCache = new Map();
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 
-// ★ 配置变量
 let stretchSmallImages = true;
 let extremePerformanceMode = false;
 let cleanFreakMode = false;
@@ -85,12 +81,10 @@ function refreshQqqConfig() {
 	}
 }
 
-// ★★★ 启动时加载水印到内存 ★★★
 function loadWatermarkResource() {
 	try {
 		if (fs.existsSync(WATERMARK_PATH)) {
 			const buf = fs.readFileSync(WATERMARK_PATH);
-			// 预先拼接好 Data URI Header
 			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
 		}
 	} catch (e) {
@@ -111,7 +105,6 @@ function clearDecorations() {
 }
 
 function verifySystemIntegrity() {
-	// 校验依然使用磁盘文件，确保文件未被篡改
 	try {
 		if (!fs.existsSync(WATERMARK_PATH)) return false;
 		const buffer = fs.readFileSync(WATERMARK_PATH);
@@ -132,6 +125,18 @@ function formatBytes(size) {
 		unitIndex++;
 	}
 	return `${Math.round(value)}${units[unitIndex]}`;
+}
+
+// ★★★ 修改：时长格式化，大于等于60秒显示分钟 ★★★
+function formatDuration(seconds) {
+	if (seconds == null || isNaN(seconds) || seconds < 0) return "0s";
+	if (seconds >= 60) {
+		const mins = Math.floor(seconds / 60);
+		const secs = seconds % 60;
+		return `${mins}m + ${secs.toFixed(2)}s`;
+	} else {
+		return `${seconds.toFixed(2)}s`;
+	}
 }
 
 function isImageExt(ext) { return IMAGE_EXTS.has(ext.toLowerCase()); }
@@ -211,7 +216,6 @@ async function getMediaInfo(filePath, mtimeMs) {
 		child.on("close", () => {
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
-			// 解析时长 Duration: 00:00:05.32
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
 			let info = {
@@ -263,25 +267,140 @@ async function getMediaInfo(filePath, mtimeMs) {
 }
 
 // ==========================================
+//           GIF 时长解析 (从 Buffer 提取)
+// ==========================================
+
+function getGifDurationFromBuffer(buffer) {
+	if (!buffer || buffer.length < 13) return 0;
+
+	try {
+		let totalDelayCs = 0;
+		let i = 0;
+
+		const sig = buffer.slice(0, 6).toString('ascii');
+		if (sig !== 'GIF87a' && sig !== 'GIF89a') return 0;
+
+		i = 13;
+
+		const flags = buffer[10];
+		const hasGCT = (flags & 0x80) !== 0;
+		if (hasGCT) {
+			const gctSize = 3 * Math.pow(2, (flags & 0x07) + 1);
+			i += gctSize;
+		}
+
+		while (i < buffer.length - 1) {
+			const blockType = buffer[i];
+
+			if (blockType === 0x21) {
+				const extLabel = buffer[i + 1];
+
+				if (extLabel === 0xF9) {
+					if (i + 6 < buffer.length) {
+						const delayLow = buffer[i + 4];
+						const delayHigh = buffer[i + 5];
+						const delay = delayLow | (delayHigh << 8);
+						totalDelayCs += delay;
+					}
+					i += 8;
+				} else if (extLabel === 0xFF) {
+					i += 2;
+					const blockSize = buffer[i];
+					i += blockSize + 1;
+					while (i < buffer.length && buffer[i] !== 0) {
+						i += buffer[i] + 1;
+					}
+					i++;
+				} else if (extLabel === 0xFE) {
+					i += 2;
+					while (i < buffer.length && buffer[i] !== 0) {
+						i += buffer[i] + 1;
+					}
+					i++;
+				} else if (extLabel === 0x01) {
+					i += 2;
+					const blockSize = buffer[i];
+					i += blockSize + 1;
+					while (i < buffer.length && buffer[i] !== 0) {
+						i += buffer[i] + 1;
+					}
+					i++;
+				} else {
+					i += 2;
+					while (i < buffer.length && buffer[i] !== 0) {
+						i += buffer[i] + 1;
+					}
+					i++;
+				}
+			} else if (blockType === 0x2C) {
+				if (i + 10 > buffer.length) break;
+
+				const imgFlags = buffer[i + 9];
+				const hasLCT = (imgFlags & 0x80) !== 0;
+
+				i += 10;
+
+				if (hasLCT) {
+					const lctSize = 3 * Math.pow(2, (imgFlags & 0x07) + 1);
+					i += lctSize;
+				}
+
+				i++;
+
+				while (i < buffer.length && buffer[i] !== 0) {
+					i += buffer[i] + 1;
+				}
+				i++;
+
+			} else if (blockType === 0x3B) {
+				break;
+			} else {
+				i++;
+			}
+		}
+
+		return totalDelayCs / 100;
+
+	} catch (e) {
+		return 0;
+	}
+}
+
+// ==========================================
 //           FFmpeg 预览 (getPreviewBuffer)
 // ==========================================
 
-function setPreviewCache(filePath, buffer, mtimeMs) {
+function setPreviewCache(filePath, buffer, mtimeMs, gifDuration) {
 	if (previewCache.size >= MAX_PREVIEW_CACHE) {
 		const firstKey = previewCache.keys().next().value;
 		if (firstKey !== undefined) previewCache.delete(firstKey);
 	}
-	previewCache.set(filePath, { buffer, mtimeMs });
+	previewCache.set(filePath, { buffer, mtimeMs, gifDuration });
 }
 
-// ★★★ 核心修改：所有视频一律生成 GIF ★★★
+// ★★★ 核心：计算视频截取后的预期 GIF 时长 ★★★
+function calculateExpectedVideoDuration(origDuration, isExtremeMode) {
+	if (isExtremeMode) {
+		// 极限模式：从第1秒开始截取2秒
+		return 2.0;
+	} else {
+		if (origDuration < 5) {
+			// 短视频：从第1秒开始截取最多4秒
+			const available = Math.max(0, origDuration - 1);
+			return Math.min(4.0, available > 0 ? available : 4.0);
+		} else {
+			// 长视频：三段各1.3秒 = 3.9秒
+			return 3.9;
+		}
+	}
+}
+
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	const stretch = stretchSmallImages;
 	let targetW = PREVIEW_WIDTH;
 	let targetH = PREVIEW_HEIGHT;
 
-	// 尺寸计算逻辑
-	if (!stretch && !isVideo) {
+	if (!stretch) {
 		if (origSize && typeof origSize.width === "number" && typeof origSize.height === "number") {
 			const ow = origSize.width;
 			const oh = origSize.height;
@@ -298,103 +417,89 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 
 	const args = ["-hide_banner", "-loglevel", "error"];
 
-	// 如果是视频，一律生成 GIF，且需要处理时间切片
 	if (isVideo) {
-		// ========== 视频处理逻辑 ==========
-
-		// 1. 输入文件
-		args.push("-i", filePath);
-
+		// ★★★ 视频处理：必须截取并转为 GIF ★★★
 		let filterComplex = "";
-		const fpsLimit = "fps=10"; // 限制帧率以减小体积
-		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+		let fpsLimit = "fps=10";
+		if (extremePerformanceMode) fpsLimit = "fps=8";
+
+		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
+
+		let baseChain = "";
 
 		if (extremePerformanceMode) {
-			// ★★★ 极致性能模式：从 1s 开始截取 2s ★★★
-			// 为了效率，重置 args，把 -ss 放到 input 之前
-			args.length = 0;
-			args.push("-hide_banner", "-loglevel", "error");
+			// 极限模式：截取2秒
 			args.push("-ss", "1", "-t", "2", "-i", filePath);
-
-			filterComplex = `[0:v]${fpsLimit},${scaleFilter}[out_v]`;
-
+			baseChain = `[0:v]${fpsLimit}`;
 		} else {
-			// ★★★ 普通模式：分段采样 (3段 x 1.3s) ★★★
 			const safeDuration = duration || 0;
-
 			if (safeDuration < 5) {
-				// 短视频：直接从 1s 截取 4s
-				args.length = 0;
-				args.push("-hide_banner", "-loglevel", "error");
+				// 短视频：截取4秒
 				args.push("-ss", "1", "-t", "4", "-i", filePath);
-				filterComplex = `[0:v]${fpsLimit},${scaleFilter}[out_v]`;
+				baseChain = `[0:v]${fpsLimit}`;
 			} else {
-				// 长视频：使用 select 过滤器进行分段
+				// 长视频：智能三段采样
+				args.push("-i", filePath);
 				const segmentLen = 1.3;
 				const start1 = 1.0;
 				const start2 = safeDuration / 2.0;
-				const start3 = Math.max(start1 + segmentLen + 0.1, safeDuration - segmentLen - 1.0); // 结尾前留1秒余量
-
-				// select 表达式
+				const start3 = Math.max(start1 + segmentLen + 0.1, safeDuration - segmentLen - 1.0);
 				const selectExpr = `between(t,${start1},${start1 + segmentLen})+between(t,${start2},${start2 + segmentLen})+between(t,${start3},${start3 + segmentLen})`;
-
-				filterComplex = `[0:v]select='${selectExpr}',setpts=N/FRAME_RATE/TB,${fpsLimit},${scaleFilter}[out_v]`;
+				baseChain = `[0:v]select='${selectExpr}',setpts=N/FRAME_RATE/TB,${fpsLimit}`;
 			}
+		}
+
+		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
+
+		if (extremePerformanceMode) {
+			filterComplex = `${baseChain},${scaleFilter}[out_v]`;
+		} else {
+			filterComplex = `${baseChain},${scaleFilter},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle[out_v]`;
 		}
 
 		args.push("-filter_complex", filterComplex);
 		args.push("-map", "[out_v]");
-		// 强制输出 GIF
-		args.push("-an", "-sn", "-f", "gif", "pipe:1");
+		// ★★★ 修复：确保 GIF 循环 ★★★
+		args.push("-loop", "0", "-an", "-sn", "-f", "gif", "pipe:1");
 
-	} else {
-		// ========== 图片/GIF 原图处理逻辑 ==========
+	} else if (isGif) {
+		// ★★★ 原生 GIF：保留原汁原味，只做缩放 ★★★
 		args.push("-i", filePath);
 
-		let preFilter = "";
-		if (isGif && extremePerformanceMode) {
-			preFilter = "fps=10,";
-			args.push("-t", "2");
-		}
+		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
+		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
 
-		let scaleFilter = "";
-		if (isGif) {
-			let gifTargetW = targetW;
-			let gifTargetH = targetH;
-			if (!stretch && origSize && origSize.width && origSize.height) {
-				const ow = origSize.width;
-				const oh = origSize.height;
-				if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) {
-					gifTargetW = ow;
-					gifTargetH = oh;
-				} else {
-					const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-					gifTargetW = Math.max(1, Math.round(ow * scale));
-					gifTargetH = Math.max(1, Math.round(oh * scale));
-				}
-			}
-			if (stretch || !origSize) {
-				gifTargetW = PREVIEW_WIDTH;
-				gifTargetH = PREVIEW_HEIGHT;
-			}
-			scaleFilter = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease`;
+		let filterComplex = "";
+		if (extremePerformanceMode) {
+			// 极限模式：截取前2秒
+			filterComplex = `[0:v]fps=8,${scaleFilter}[out_v]`;
+			args.length = 3; // 重置
+			args.push("-t", "2", "-i", filePath);
+			args.push("-filter_complex", filterComplex);
 		} else {
-			scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+			// 普通模式：保留原帧率和时长
+			filterComplex = `[0:v]${scaleFilter}[out_v]`;
+			args.push("-filter_complex", filterComplex);
 		}
 
-		const fc = `[0:v]${preFilter}${scaleFilter}[out_v]`;
+		args.push("-map", "[out_v]");
+		args.push("-loop", "0", "-an", "-sn", "-f", "gif", "pipe:1");
+
+	} else {
+		// ★★★ 静态图片 ★★★
+		args.push("-i", filePath);
+
+		let scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
+		let scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
+
+		const fc = `[0:v]${scaleFilter}[out_v]`;
 		args.push("-filter_complex", fc);
 		args.push("-map", "[out_v]");
 
-		if (isGif) {
-			args.push("-an", "-sn", "-f", "gif", "pipe:1");
+		if (extremePerformanceMode) {
+			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
 		} else {
-			// 图片转图片
-			if (extremePerformanceMode) {
-				args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-			} else {
-				args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
-			}
+			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
 		}
 	}
 
@@ -405,35 +510,33 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	if (!ffmpegPath) return null;
 
 	let origSize = null;
-	let duration = 0; // 新增：传递时长
+	let duration = 0;
 	let mtimeMs = 0;
 	try {
 		const st = fs.statSync(filePath);
 		mtimeMs = st.mtimeMs;
 	} catch { return null; }
 
-	// 无论是图片还是视频，我们现在都可能需要信息
-	if (isVideo || (!stretchSmallImages && !isVideo)) {
-		const info = await getMediaInfo(filePath, mtimeMs);
-		if (info) {
-			origSize = { width: info.width, height: info.height };
-			duration = info.duration;
-		}
+	// 获取媒体信息
+	const info = await getMediaInfo(filePath, mtimeMs);
+	if (info) {
+		origSize = { width: info.width, height: info.height };
+		duration = info.duration;
 	}
 
+	// 检查缓存
 	if (extremePerformanceMode) {
 		const cached = previewCache.get(filePath);
-		if (cached) return cached.buffer;
+		if (cached) return { buffer: cached.buffer, gifDuration: cached.gifDuration };
 	} else {
 		const cached = previewCache.get(filePath);
-		if (cached && cached.mtimeMs === mtimeMs) return cached.buffer;
+		if (cached && cached.mtimeMs === mtimeMs) return { buffer: cached.buffer, gifDuration: cached.gifDuration };
 	}
 
 	const ok = await ensureFfmpegAvailable();
 	if (!ok) return null;
 
 	return new Promise((resolve) => {
-		// 传入 duration
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
 		const child = cp.spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
 		const chunks = [];
@@ -445,7 +548,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				try { child.kill(); } catch { }
 				resolve(null);
 			}
-		}, 20000); // GIF 生成较慢，增加超时时间
+		}, 20000);
 
 		child.stdout.on("data", (d) => chunks.push(d));
 		child.on("error", () => {
@@ -457,8 +560,23 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				clearTimeout(timer);
 				if (!chunks.length) { resolve(null); return; }
 				const buffer = Buffer.concat(chunks);
-				setPreviewCache(filePath, buffer, mtimeMs);
-				resolve(buffer);
+
+				let gifDuration = 0;
+
+				if (isVideo) {
+					// ★★★ 视频：使用预期计算的时长，而非解析 buffer ★★★
+					gifDuration = calculateExpectedVideoDuration(duration, extremePerformanceMode);
+				} else if (isGif) {
+					// ★★★ 原生 GIF：从 buffer 解析实际时长 ★★★
+					gifDuration = getGifDurationFromBuffer(buffer);
+					// 极限模式下 GIF 被截取为2秒
+					if (extremePerformanceMode && gifDuration > 2.5) {
+						gifDuration = 2.0;
+					}
+				}
+
+				setPreviewCache(filePath, buffer, mtimeMs, gifDuration);
+				resolve({ buffer, gifDuration });
 			}
 		});
 	});
@@ -470,18 +588,18 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 
 function computeMarginLeft() { return "100px"; }
 
+// ★★★ 修改：宽高比格式 16__9.1 ★★★
 function calculateAspectRatioString(w, h) {
 	if (!w || !h) return "";
 	if (w >= h) {
 		const r = (h / w) * 16;
-		return `16:${parseFloat(r.toFixed(1))}`;
+		return `16__${parseFloat(r.toFixed(1))}`;
 	} else {
 		const r = (w / h) * 16;
-		return `${parseFloat(r.toFixed(1))}:16`;
+		return `${parseFloat(r.toFixed(1))}__16`;
 	}
 }
 
-// ★★★ 核心：动态生成进度条 SVG ★★★
 function createProgressSvg(durationSeconds) {
 	if (!durationSeconds || durationSeconds <= 0) return null;
 	const barColor = "#fdf6e3";
@@ -489,8 +607,8 @@ function createProgressSvg(durationSeconds) {
 	const svgStr = `
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="4" viewBox="0 0 512 4">
   <rect width="512" height="4" fill="${bgColor}" />
-  <rect height="4" fill="${barColor}">
-    <animate attributeName="width" from="0" to="512" dur="${durationSeconds}s" repeatCount="indefinite" />
+  <rect width="0" height="4" fill="${barColor}">
+    <animate attributeName="width" from="0" to="512" dur="${durationSeconds.toFixed(3)}s" repeatCount="indefinite" fill="freeze" calcMode="linear" />
   </rect>
 </svg>`.trim();
 	return "data:image/svg+xml;base64," + Buffer.from(svgStr).toString("base64");
@@ -520,21 +638,54 @@ function calculateFolderSizeWithPython(folderPath) {
 			if (code !== 0) return resolve(null);
 			try {
 				const res = JSON.parse(stdout.trim());
-				if (res && res.qccess && typeof res.total_size === "number") resolve(res.total_size);
-				else resolve(null);
+				if (res && res.qccess) {
+					resolve({
+						size: res.total_size,
+						extStats: res.ext_stats,
+						fileCount: res.file_count_root
+					});
+				} else {
+					resolve(null);
+				}
 			} catch { resolve(null); }
 		});
 	});
 }
 
+// ★★★ 修改：文件统计格式 "18个文件：3_png; 11_jpg; 4_mp4; 1_; 3_null" ★★★
 async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = qqqFolderSizeCache.get(folderPath);
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.size;
-	const size = await calculateFolderSizeWithPython(folderPath);
-	if (typeof size === "number") {
-		qqqFolderSizeCache.set(folderPath, { size, timestamp: now });
-		return size;
+
+	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
+		return cached.data;
+	}
+
+	const data = await calculateFolderSizeWithPython(folderPath);
+	if (data) {
+		const parts = [];
+		let totalFiles = 0;
+		if (data.extStats) {
+			for (const [ext, count] of Object.entries(data.extStats)) {
+				totalFiles += count;
+				// ★★★ 格式：count_ext，无后缀时为 count_ ★★★
+				parts.push(`${count}_${ext}`);
+			}
+		}
+
+		// ★★★ 用 "; " 分隔 ★★★
+		const summaryStr = parts.length > 0
+			? `${totalFiles}个文件：${parts.join("; ")}`
+			: (data.fileCount > 0 ? `${data.fileCount}个文件`
+				: "空文件夹");
+
+		const cachedData = {
+			size: data.size,
+			summary: summaryStr
+		};
+
+		qqqFolderSizeCache.set(folderPath, { data: cachedData, timestamp: now });
+		return cachedData;
 	}
 	return null;
 }
@@ -902,7 +1053,6 @@ async function renderIkges(editor) {
 
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
-			// ★★★ 修改：不单纯依赖扩展名，处理伪装文件 ★★★
 			const ext = path.extname(absPath).toLowerCase();
 			let isImage = isImageExt(ext);
 			let isVideo = isVideoExt(ext);
@@ -911,13 +1061,9 @@ async function renderIkges(editor) {
 			let mtimeMs = 0;
 			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 
-			// 如果不是标准扩展名，尝试探测（仅针对可能伪装的场景，或默认处理）
-			// 为了性能，如果已经判定为图片或视频，就不额外探测。
-			// 只有当扩展名未知时，才尝试获取 info 来判断。
 			let mediaInfo = null;
 
 			if (!isImage && !isVideo) {
-				// 尝试探测，也许是 .exe 伪装的视频
 				mediaInfo = await getMediaInfo(absPath, mtimeMs);
 				if (mediaInfo && mediaInfo.type === "video") {
 					isVideo = true;
@@ -925,7 +1071,7 @@ async function renderIkges(editor) {
 					isImage = true;
 					if (mediaInfo.codec === "gif") isGif = true;
 				} else {
-					continue; // 真的不是媒体文件
+					continue;
 				}
 			}
 
@@ -938,70 +1084,40 @@ async function renderIkges(editor) {
 				if (currentRenderVersion !== myRenderVersion) return null;
 
 				try {
-					let previewBuffer = null;
+					let previewResult = null;
 					if (ffmpegPath) {
-						// 只要是 video，现在也会生成 GIF buffer
-						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
+						previewResult = await getPreviewBuffer(absPath, isVideo, isGif);
 						if (currentRenderVersion !== myRenderVersion) return null;
 					}
 
 					const deco = { range: anchorRange, renderOptions: {} };
 
 					let contentUrl = "";
-					if (previewBuffer) {
+					let actualGifDuration = 0;
+
+					if (previewResult && previewResult.buffer) {
 						let mime = "image/png";
-						// ★★★ 修改：如果是 Video，现在生成的 Buffer 也是 GIF ★★★
 						if (isGif || isVideo) mime = "image/gif";
 						else if (extremePerformanceMode) mime = "image/jpeg";
 
-						const b64 = previewBuffer.toString("base64");
+						const b64 = previewResult.buffer.toString("base64");
 						contentUrl = `url("data:${mime};base64,${b64}")`;
-					} else if (isImage && !isVideo) {
-						// 静态图 fallback
+
+						if (previewResult.gifDuration && previewResult.gifDuration > 0) {
+							actualGifDuration = previewResult.gifDuration;
+						}
+					} else if (isImage && !isVideo && !isGif) {
 						const fileUri = vscode.Uri.file(absPath);
 						contentUrl = `url("${fileUri.toString()}")`;
 					}
 
 					if (!contentUrl) return null;
 
-					// ★★★ 2. 进度条层生成逻辑 ★★★
 					let progressBarUrl = null;
 
-					// ★★★ 修改：GIF 和 Video 都显示进度条 ★★★
-					if (isGif || isVideo) {
-						let duration = 0;
-						if (isVideo) {
-							// 视频：
-							if (extremePerformanceMode) {
-								duration = 2.0; // 极限模式 GIF 时长
-							} else {
-								// 普通模式：4秒左右的 GIF 概览
-								duration = 4.0;
-							}
-						} else {
-							// 原生 GIF：
-							if (extremePerformanceMode) {
-								duration = 2.0;
-							} else {
-								// 如果还没获取 info，尝试获取
-								if (!mediaInfo) mediaInfo = resolutionCache.get(absPath);
-								if (!mediaInfo || mediaInfo.mtime !== mtimeMs || !mediaInfo.duration) {
-									mediaInfo = await getMediaInfo(absPath, mtimeMs);
-								}
-								if (mediaInfo && mediaInfo.duration) {
-									duration = mediaInfo.duration;
-								}
-							}
-						}
-
-						// 生成 SVG (如果获取到了有效时长)
-						if (duration > 0) {
-							progressBarUrl = `url("${createProgressSvg(duration)}")`;
-						}
+					if ((isGif || isVideo) && actualGifDuration > 0) {
+						progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
 					}
-
-					// ★★★ 3. CSS 多重背景层级堆叠 ★★★
-					// 顺序：水印(Top) -> 进度条 -> 内容 -> 格子(Bottom)
 
 					const gridSize = "20px 20px";
 					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
@@ -1011,7 +1127,6 @@ async function renderIkges(editor) {
 					let positions = [];
 					let repeats = [];
 
-					// Layer 1: Watermark
 					if (watermarkBase64) {
 						layers.push(`url("${watermarkBase64}")`);
 						sizes.push("contain");
@@ -1019,21 +1134,18 @@ async function renderIkges(editor) {
 						repeats.push("no-repeat");
 					}
 
-					// Layer 2: Progress Bar (GIF/Video Only)
 					if (progressBarUrl) {
 						layers.push(progressBarUrl);
-						sizes.push("512px 4px"); // 强制大小
-						positions.push("center bottom"); // 放在底部
+						sizes.push("512px 4px");
+						positions.push("center bottom");
 						repeats.push("no-repeat");
 					}
 
-					// Layer 3: Content
 					layers.push(contentUrl);
 					sizes.push("contain");
 					positions.push("center center");
 					repeats.push("no-repeat");
 
-					// Layer 4: Grid
 					layers.push(gridImage);
 					sizes.push(gridSize);
 					positions.push("0 0");
@@ -1140,7 +1252,7 @@ function updateCodeLensColorForEditor(editor) {
 	if (!editor) { updateGlobalCodeLensColor(false); return; }
 	const set = lensLinesByDocUri.get(editor.document.uri.toString());
 	const isActive = set && set.has(editor.selection.active.line);
-	updateCodeLensColorForEditor(isActive);
+	updateGlobalCodeLensColor(isActive);
 }
 
 class FileCodeLensProvider {
@@ -1151,7 +1263,6 @@ class FileCodeLensProvider {
 		const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//gi;
 		const text = document.getText();
 		let match;
-		const folderSizeMap = new Map();
 		const lensLines = new Set();
 
 		const tasks = [];
@@ -1168,12 +1279,11 @@ class FileCodeLensProvider {
 			const isVideoExtFlag = isVideoExt(ext);
 
 			tasks.push(async () => {
-				let fSize = folderSizeMap.get(folder);
-				if (fSize === undefined) {
-					fSize = await getQqqFolderSize(folder);
-					folderSizeMap.set(folder, fSize);
-				}
+				let folderData = await getQqqFolderSize(folder);
+
+				const fSize = folderData ? folderData.size : 0;
 				const fSizeStr = formatBytes(fSize);
+				const folderTooltip = folderData ? folderData.summary : undefined;
 
 				let fileSz = "?";
 				let tooltipText = "";
@@ -1216,13 +1326,15 @@ class FileCodeLensProvider {
 							tooltipText += `\n编解码器: ${info.codec}`;
 						}
 
+						// ★★★ 修改：宽高比格式 16__9.1 ★★★
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) {
-							tooltipText += `\n宽高比: ${arStr}`;
+							tooltipText += `\n宽高比：${arStr}`;
 						}
 
+						// ★★★ 修改：时长格式 "⌛原始时长：53m + 11.11s" ★★★
 						if (info.duration > 0) {
-							tooltipText += `\n时长: ${info.duration}s`;
+							tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 						}
 					}
 				}
@@ -1232,7 +1344,12 @@ class FileCodeLensProvider {
 
 				const r = new vscode.Range(pos, pos);
 				return [
-					new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath] }),
+					new vscode.CodeLens(r, {
+						title: `✎( ${fSizeStr}) 🗀qqq`,
+						command: "qqq.revealFileInFolder",
+						arguments: [absPath],
+						tooltip: folderTooltip
+					}),
 					new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
 					new vscode.CodeLens(r, {
 						title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
@@ -1428,3 +1545,4 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
