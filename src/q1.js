@@ -154,41 +154,27 @@ function buildNewRawPath(oldRawPath, newFileName) {
 //           身份识别模块 (Identity Module)
 // ==========================================
 
-// 基于 ffmpeg 识别的 codec 来判断真实类型
 function determineMediaType(codec, ext) {
 	if (!codec) {
-		// Fallback to extension if codec is unknown
 		const e = ext.toLowerCase();
 		if (e === ".gif") return "gif";
 		if (VIDEO_EXTS.has(e)) return "video";
 		if (IMAGE_EXTS.has(e)) return "image";
 		return "unknown";
 	}
-
 	const c = codec.toLowerCase();
-
 	if (c === "gif") return "gif";
-
-	// 常见图片编码
 	if (["png", "mjpeg", "webp", "bmp", "tiff", "jpeg", "jpg"].some(x => c.includes(x))) {
-		// 特例：mjpeg 在某些容器中被视为 video，但在我们的逻辑中通常是图片流或封面
-		// 如果扩展名强行是 mp4/mkv 且 codec 是 mjpeg，可能是个只有封面的视频，暂归为 video
-		// 但为了安全，如果 codec 明确是 png/bmp/tiff，肯定是图片
 		if (c.includes("mjpeg") && VIDEO_EXTS.has(ext.toLowerCase())) return "video";
 		return "image";
 	}
-
-	// 常见视频编码
 	const videoCodecs = [
 		"h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2video",
 		"prores", "wmv", "flv", "theora", "vc1", "rv40"
 	];
 	if (videoCodecs.some(x => c.includes(x))) return "video";
-
-	// 兜底：根据后缀
 	if (VIDEO_EXTS.has(ext.toLowerCase())) return "video";
 	if (IMAGE_EXTS.has(ext.toLowerCase())) return "image";
-
 	return "unknown";
 }
 
@@ -223,10 +209,11 @@ async function getMediaInfo(filePath, mtimeMs) {
 		});
 
 		child.on("close", () => {
-			// 解析分辨率
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
-			// 解析编码器 (Codec)
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
+			// ★★★ 新增：解析时长 ★★★
+			// 格式通常为 Duration: 00:00:05.32
+			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
 			let info = {
 				mtime: mtimeMs,
@@ -234,7 +221,8 @@ async function getMediaInfo(filePath, mtimeMs) {
 				width: null,
 				height: null,
 				codec: null,
-				type: "unknown" // 新增字段：真实类型
+				duration: 0, // 新增：秒数
+				type: "unknown"
 			};
 
 			if (resMatch) {
@@ -249,7 +237,13 @@ async function getMediaInfo(filePath, mtimeMs) {
 				info.codec = codecMatch[1].trim();
 			}
 
-			// ★★★ 调用身份识别逻辑 ★★★
+			if (durMatch) {
+				const hours = parseFloat(durMatch[1]);
+				const mins = parseFloat(durMatch[2]);
+				const secs = parseFloat(durMatch[3]);
+				info.duration = hours * 3600 + mins * 60 + secs;
+			}
+
 			const ext = path.extname(filePath);
 			info.type = determineMediaType(info.codec, ext);
 
@@ -259,7 +253,6 @@ async function getMediaInfo(filePath, mtimeMs) {
 				const first = resolutionCache.keys().next().value;
 				resolutionCache.delete(first);
 			}
-			// 只要解析出了宽度，就认为信息有效
 			resolve(info.width ? info : null);
 		});
 
@@ -282,7 +275,6 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 	previewCache.set(filePath, { buffer, mtimeMs });
 }
 
-// ★★★ 核心修改：移除所有背景合成逻辑，GIF 始终输出动画 ★★★
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const stretch = stretchSmallImages;
 	let targetW = PREVIEW_WIDTH;
@@ -303,32 +295,20 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 		}
 	}
 
-	// 1. 基础参数
 	const args = ["-hide_banner", "-loglevel", "error"];
-
-	// ★ 视频跳过1秒做封面，但 GIF 保持从头开始（或后续剪裁）
 	if (isVideo) args.push("-ss", "1");
-
 	args.push("-i", filePath);
 
-	// 2. ★★★ 移除 q1.png 背景加载逻辑 ★★★
-
-	// 3. 构建滤镜 (Filter Complex)
-	// 只需要缩放，或者 fps 控制，不进行任何 overlay/pad
 	let fc = "";
 	let preFilter = "";
 
 	if (isGif) {
-		// ★★★ GIF 逻辑：
-		// 1. 如果极致性能模式：开启降帧 fps=10，并在输出时截断时长
-		// 2. 否则：保持原始帧率
 		if (extremePerformanceMode) {
 			preFilter = "fps=10,";
-			args.push("-t", "2"); // 限制时长 2秒
+			args.push("-t", "2");
 		}
 	}
 
-	// 缩放逻辑
 	let scaleFilter = "";
 	if (isGif) {
 		let gifTargetW = targetW;
@@ -349,7 +329,6 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 			gifTargetW = PREVIEW_WIDTH;
 			gifTargetH = PREVIEW_HEIGHT;
 		}
-		// 保持比例缩放，不做 padding
 		scaleFilter = `scale=${gifTargetW}:${gifTargetH}:force_original_aspect_ratio=decrease`;
 	} else {
 		scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
@@ -360,13 +339,9 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	args.push("-filter_complex", fc);
 	args.push("-map", "[out_v]");
 
-	// 4. 输出格式
 	if (isGif) {
-		// ★★★ GIF 无论是否性能模式，都输出 gif 格式以保持动画 ★★★
-		// 性能模式的优化体现在上面的 fps=10 和 -t 2
 		args.push("-an", "-sn", "-f", "gif", "pipe:1");
 	} else {
-		// 纯视频文件（非GIF），输出单帧封面 (mjpeg 还是 png 取决于性能模式)
 		if (extremePerformanceMode) {
 			args.push("-frames:v", "1", "-an", "-sn", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
 		} else {
@@ -405,12 +380,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 
 	return new Promise((resolve) => {
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
-
-		const child = cp.spawn(ffmpegPath, args, {
-			windowsHide: true,
-			stdio: ['ignore', 'pipe', 'ignore']
-		});
-
+		const child = cp.spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
 		const chunks = [];
 		let resolved = false;
 
@@ -420,14 +390,12 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				try { child.kill(); } catch { }
 				resolve(null);
 			}
-		}, 10000); // GIF 处理可能稍慢，放宽到10秒
+		}, 10000);
 
 		child.stdout.on("data", (d) => chunks.push(d));
-
 		child.on("error", () => {
 			if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); }
 		});
-
 		child.on("close", () => {
 			if (!resolved) {
 				resolved = true;
@@ -442,29 +410,43 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 }
 
 // ==========================================
-//           位置计算 & 宽高比计算
+//           工具函数
 // ==========================================
 
-function computeMarginLeft() {
-	return "100px";
-}
+function computeMarginLeft() { return "100px"; }
 
-// ★★★ 宽高比计算逻辑 (16:x 或 x:16) ★★★
 function calculateAspectRatioString(w, h) {
 	if (!w || !h) return "";
-	let ret = "";
 	if (w >= h) {
-		// 长大于宽，左边固定 16
 		const r = (h / w) * 16;
-		const right = parseFloat(r.toFixed(1)); // 四舍五入一位小数
-		ret = `16:${right}`;
+		return `16:${parseFloat(r.toFixed(1))}`;
 	} else {
-		// 长小于宽，右边固定 16
 		const r = (w / h) * 16;
-		const left = parseFloat(r.toFixed(1));
-		ret = `${left}:16`;
+		return `${parseFloat(r.toFixed(1))}:16`;
 	}
-	return ret;
+}
+
+// ★★★ 核心：动态生成进度条 SVG ★★★
+function createProgressSvg(durationSeconds) {
+	// 如果时长无效，或者太短，或者太长，给一个默认动画
+	if (!durationSeconds || durationSeconds <= 0) return null;
+
+	// 奶白色 (#fdf6e3)
+	const barColor = "#fdf6e3";
+	const bgColor = "black";
+
+	// SVG 尺寸: 512x4
+	// rect1: 背景全黑
+	// rect2: 进度条，宽度从 0 到 512
+	const svgStr = `
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="4" viewBox="0 0 512 4">
+  <rect width="512" height="4" fill="${bgColor}" />
+  <rect height="4" fill="${barColor}">
+    <animate attributeName="width" from="0" to="512" dur="${durationSeconds}s" repeatCount="indefinite" />
+  </rect>
+</svg>`.trim();
+
+	return "data:image/svg+xml;base64," + Buffer.from(svgStr).toString("base64");
 }
 
 // ==========================================
@@ -830,7 +812,6 @@ async function renderIkges(editor) {
 	}
 
 	if (!markerHideType) {
-		// ★★★ 修改：暗号固定 11px，完全透明 (不可见) ★★★
 		markerHideType = vscode.window.createTextEditorDecorationType({
 			textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;'
 		});
@@ -867,7 +848,6 @@ async function renderIkges(editor) {
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
 
-			// ★ 灵敏性优化 1：先查内存，减少无谓 IO
 			if (currentDocDecos.has(uniqueKey)) continue;
 
 			const rawPath = match[0].slice(1, -1);
@@ -887,12 +867,14 @@ async function renderIkges(editor) {
 
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 
+			let mtimeMs = 0;
+			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+
 			const task = async () => {
 				if (currentRenderVersion !== myRenderVersion) return null;
 
 				try {
 					let previewBuffer = null;
-					// FFmpeg 生成的 Buffer 现在只包含纯净的、缩放后的 GIF 或封面
 					if (ffmpegPath) {
 						previewBuffer = await getPreviewBuffer(absPath, isVideo, isGif);
 						if (currentRenderVersion !== myRenderVersion) return null;
@@ -900,12 +882,8 @@ async function renderIkges(editor) {
 
 					const deco = { range: anchorRange, renderOptions: {} };
 
-					// 1. 确定底层内容（Content）的 CSS URL
 					let contentUrl = "";
-
 					if (previewBuffer) {
-						// 来自 FFmpeg
-						// 注意：如果是GIF，现在输出的是 'image/gif'，如果是视频极速模式封面可能是 mjpeg
 						let mime = "image/png";
 						if (isGif) mime = "image/gif";
 						else if (extremePerformanceMode) mime = "image/jpeg";
@@ -913,38 +891,78 @@ async function renderIkges(editor) {
 						const b64 = previewBuffer.toString("base64");
 						contentUrl = `url("data:${mime};base64,${b64}")`;
 					} else if (isImage) {
-						// 静态普通图，直接读文件
 						const fileUri = vscode.Uri.file(absPath);
 						contentUrl = `url("${fileUri.toString()}")`;
 					}
 
 					if (!contentUrl) return null;
 
-					// 2. ★★★ CSS 多重背景渲染核心 ★★★
-					// 顺序：水印(最上) -> 内容(中间) -> 格子背景(最下)
+					// ★★★ 2. 进度条层生成逻辑 ★★★
+					let progressBarUrl = null;
 
-					// 构建格子背景 (CSS Conic Gradient 模拟透明度网格)
-					// 使用 #eee 和 #fff 模拟常见透明网格，或者根据要求使用自定义色
-					const gridSize = "20px 20px";
-					const gridImage = `conic-gradient(#eee 0.25turn, transparent 0.25turn 0.5turn, #eee 0.5turn 0.75turn, transparent 0.75turn)`;
+					// 只有 GIF 且 (有Buffer或Image) 才显示进度条
+					if (isGif) {
+						let duration = 0;
+						if (extremePerformanceMode) {
+							// 极致模式：固定 2.0 秒
+							duration = 2.0;
+						} else {
+							// 普通模式：需要真实时长
+							let info = resolutionCache.get(absPath);
+							// 如果缓存里没有或者缓存过期，则尝试重新获取
+							if (!info || info.mtime !== mtimeMs || !info.duration) {
+								info = await getMediaInfo(absPath, mtimeMs);
+							}
+							if (info && info.duration) {
+								duration = info.duration;
+							}
+						}
 
-					let bgImageVal, bgSizeVal, bgPosVal, bgRepVal;
-
-					if (watermarkBase64) {
-						// 三层：水印, 内容, 格子
-						bgImageVal = `url("${watermarkBase64}"), ${contentUrl}, ${gridImage}`;
-						bgSizeVal = `contain, contain, ${gridSize}`;
-						bgPosVal = `center, center, 0 0`;
-						bgRepVal = `no-repeat, no-repeat, repeat`;
-					} else {
-						// 两层：内容, 格子
-						bgImageVal = `${contentUrl}, ${gridImage}`;
-						bgSizeVal = `contain, ${gridSize}`;
-						bgPosVal = `center, 0 0`;
-						bgRepVal = `no-repeat, repeat`;
+						// 生成 SVG (如果获取到了有效时长)
+						if (duration > 0) {
+							progressBarUrl = `url("${createProgressSvg(duration)}")`;
+						}
 					}
 
-					// 3. 基础样式
+					// ★★★ 3. CSS 多重背景层级堆叠 ★★★
+					// 顺序：水印(Top) -> 进度条 -> 内容 -> 格子(Bottom)
+
+					const gridSize = "20px 20px";
+					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
+
+					let layers = [];
+					let sizes = [];
+					let positions = [];
+					let repeats = [];
+
+					// Layer 1: Watermark
+					if (watermarkBase64) {
+						layers.push(`url("${watermarkBase64}")`);
+						sizes.push("contain");
+						positions.push("center center");
+						repeats.push("no-repeat");
+					}
+
+					// Layer 2: Progress Bar (GIF Only)
+					if (progressBarUrl) {
+						layers.push(progressBarUrl);
+						sizes.push("512px 4px"); // 强制大小
+						positions.push("center bottom"); // 放在底部
+						repeats.push("no-repeat");
+					}
+
+					// Layer 3: Content
+					layers.push(contentUrl);
+					sizes.push("contain");
+					positions.push("center center");
+					repeats.push("no-repeat");
+
+					// Layer 4: Grid
+					layers.push(gridImage);
+					sizes.push(gridSize);
+					positions.push("0 0");
+					repeats.push("repeat");
+
 					const baseStyle = {
 						position: 'absolute',
 						left: marginLeft,
@@ -953,20 +971,19 @@ async function renderIkges(editor) {
 						height: `${boxHeight}px`,
 						padding: "2px",
 						border: "1px dashed #888",
-						backgroundColor: PREVIEW_BG_COLOR, // 底色，在格子透明部分显示
+						backgroundColor: PREVIEW_BG_COLOR,
 						zIndex: -1
 					};
 
 					deco.renderOptions.before = {
 						contentText: "",
 						...baseStyle,
-						// 使用构造好的多重背景属性
 						textDecoration: `none;
                             display: inline-block;
-                            background-image: ${bgImageVal};
-                            background-size: ${bgSizeVal};
-                            background-position: ${bgPosVal};
-                            background-repeat: ${bgRepVal};`
+                            background-image: ${layers.join(", ")};
+                            background-size: ${sizes.join(", ")};
+                            background-position: ${positions.join(", ")};
+                            background-repeat: ${repeats.join(", ")};`
 					};
 
 					return { key: uniqueKey, deco };
@@ -1095,7 +1112,6 @@ class FileCodeLensProvider {
 				} catch { }
 
 				let titleSuffix = "";
-				// ★★★ 调用 getMediaInfo 以获取真实身份 ★★★
 				let isRealVideo = false;
 
 				if (isVidOrImg) {
@@ -1105,12 +1121,7 @@ class FileCodeLensProvider {
 						const MAX_W = PREVIEW_WIDTH;
 						const MAX_H = PREVIEW_HEIGHT;
 
-						// 判断真实类型
 						if (info.type === "video") isRealVideo = true;
-
-						// 如果扩展名是 video，但 ffmpeg 解析失败或没返回 type，也暂且当 video 处理以防万一
-						// 但根据 requirement, 我们 prefer actual decoding.
-						// info.type 默认为 'unknown', determineMediaType 会尽可能归类。
 
 						if (isRealVideo || isVideoExtFlag || stretchSmallImages) {
 							scale = Math.min(MAX_W / info.width, MAX_H / info.height);
@@ -1129,17 +1140,18 @@ class FileCodeLensProvider {
 							tooltipText += `\n编解码器: ${info.codec}`;
 						}
 
-						// ★★★ 新增：Tooltip 中添加宽高比行 ★★★
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) {
 							tooltipText += `\n宽高比: ${arStr}`;
 						}
+
+						// ★★★ 新增：Tooltip 显示时长 ★★★
+						if (info.duration > 0) {
+							tooltipText += `\n时长: ${info.duration}s`;
+						}
 					}
 				}
 
-				// ★★★ 图标与空格逻辑 ★★★
-				// 视频: ( 24m)🎬 e:\...  (去掉左空格，保留右空格)
-				// 其他: ( 24m)   e:\...  (保留左空格，即三个空格)
 				const iconPart = isRealVideo ? "🎬" : "";
 				const spacePart = isRealVideo ? " " : "   ";
 
@@ -1237,7 +1249,6 @@ async function renameFileComknd(rawPath, absPath) {
 // ==========================================
 
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
-	// ★ 灵敏性优化 2：移除 isProcessing 锁，只要有事件就允许更新 Timer
 	clearTimeout(debounceRender.timer);
 	debounceRender.timer = setTimeout(() => {
 		if (editor && !editor.document.isClosed) {
@@ -1259,7 +1270,6 @@ async function activate(context) {
 
 	if (!isCoreIntegretyValid) return;
 
-	// ★★★ 启动时加载水印 ★★★
 	loadWatermarkResource();
 
 	refreshQqqConfig();
@@ -1308,7 +1318,6 @@ async function activate(context) {
 			if (e) debounceRender(e);
 			updateCodeLensColorForEditor(e);
 		}),
-		// ★ 灵敏性优化 3：窗口获得焦点时，强制检查渲染
 		vscode.window.onDidChangeWindowState(e => {
 			if (e.focused) {
 				renderVisibleEditors();
