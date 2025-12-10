@@ -137,7 +137,6 @@ function buildNewRawPath(oldRawPath, newFileName) {
 // ==========================================
 //           FFmpeg 解析 (getMediaInfo)
 // ==========================================
-// 这里必须读取 stderr 以获取信息，但添加了保护
 
 async function ensureFfmpegAvailable() {
 	if (!ffmpegPath) return false;
@@ -160,14 +159,13 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (!ffmpegPath) return null;
 
 	return new Promise((resolve) => {
-		// -i 操作必须读取 stderr
+		// -i 需要读取 stderr 获取信息，所以这里不能 ignore
 		const child = cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
 
-		// 收集 stderr，用于正则解析
+		// 限制读取长度防止内存溢出，但保留足够头部信息
 		child.stderr.on("data", d => {
-			// 简单保护：防止读取过长数据导致内存波动，只要头部信息即可
-			if (stderr.length < 20000) {
+			if (stderr.length < 50000) {
 				stderr += d.toString();
 			}
 		});
@@ -199,7 +197,6 @@ async function getMediaInfo(filePath, mtimeMs) {
 			resolve(info.width ? info : null);
 		});
 
-		// 兜底超时
 		setTimeout(() => {
 			try { child.kill(); } catch { }
 			resolve(null);
@@ -279,7 +276,6 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
 	const bgImagePath = path.join(__dirname, "..", "assets", "q1.png");
 	const watermarkPath = path.join(__dirname, "..", "assets", "q2.gif");
 
-	// 资源检查优化
 	if (!assetsCache.checked) {
 		assetsCache.bgExists = fs.existsSync(bgImagePath);
 		assetsCache.wmExists = fs.existsSync(watermarkPath);
@@ -362,8 +358,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	return new Promise((resolve) => {
 		const args = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize);
 
-		// ★★★ [终极优化]：stdio: ['ignore', 'pipe', 'ignore']
-		// 彻底丢弃 stderr，比空监听更高效，完全杜绝内存爆炸
+		// ★★★ 性能优化：ignore stderr，防止管道阻塞，且零内存开销
 		const child = cp.spawn(ffmpegPath, args, {
 			windowsHide: true,
 			stdio: ['ignore', 'pipe', 'ignore']
@@ -380,7 +375,6 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 			}
 		}, 6000);
 
-		// 我们只需要 stdout (图片数据)
 		child.stdout.on("data", (d) => chunks.push(d));
 
 		child.on("error", () => {
@@ -554,7 +548,6 @@ function calculateBlankLinesN(isFramed, isLastItem = false) {
 		let n = baseN + extra;
 		n = Math.max(4, n);
 
-		// 统一规则
 		if (isLastItem) {
 			if (isFramed) {
 				n = Math.max(8, n);
@@ -718,9 +711,7 @@ function handleReqlt(reqlt) {
 				const gapBelow = calculateBlankLinesN(isVidOrImg, false);
 				insertionText += eol.repeat(gapBelow + 1);
 			} else {
-				// 最后一项处理
 				const requiredGapBelow = calculateBlankLinesN(isVidOrImg, true);
-
 				let existingGapBelow = 0;
 				for (let j = currentLineIdx + 1; j < ed.document.lineCount; j++) {
 					const lineT = ed.document.lineAt(j).text;
@@ -755,7 +746,7 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//           渲染主逻辑 (移植优化后)
+//           渲染主逻辑 (灵敏性 + IO优化)
 // ==========================================
 
 async function renderIkges(editor) {
@@ -810,13 +801,12 @@ async function renderIkges(editor) {
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
 
-			// ★ 优化顺序：先查内存，命中则跳过
+			// ★ 灵敏性优化 1：先查内存，减少无谓 IO
 			if (currentDocDecos.has(uniqueKey)) continue;
 
 			const rawPath = match[0].slice(1, -1);
 			const absPath = rawPath.replace(/\//g, "\\");
 
-			// 后查硬盘
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
 
 			const ext = path.extname(absPath).toLowerCase();
@@ -958,7 +948,7 @@ function updateCodeLensColorForEditor(editor) {
 	if (!editor) { updateGlobalCodeLensColor(false); return; }
 	const set = lensLinesByDocUri.get(editor.document.uri.toString());
 	const isActive = set && set.has(editor.selection.active.line);
-	updateGlobalCodeLensColor(isActive);
+	updateCodeLensColorForEditor(isActive);
 }
 
 class FileCodeLensProvider {
@@ -1024,8 +1014,6 @@ class FileCodeLensProvider {
 						}
 
 						const pct = Math.round(scale * 100);
-
-						// ★ (128%) 格式调整
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
 
 						if (info.codec) {
@@ -1124,20 +1112,19 @@ async function renameFileComknd(rawPath, absPath) {
 }
 
 // ==========================================
-//           激活与销毁
+//           激活与销毁 (灵敏性保证)
 // ==========================================
 
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
-	if (debounceRender.isProcessing) return;
+	// ★ 灵敏性优化 2：移除 isProcessing 锁，只要有事件就允许更新 Timer
+	// 之前这里有 check: if(isProcessing) return; 导致了事件丢失
 	clearTimeout(debounceRender.timer);
 	debounceRender.timer = setTimeout(() => {
 		if (editor && !editor.document.isClosed) {
-			debounceRender.isProcessing = true;
-			renderIkges(editor).finally(() => setTimeout(() => debounceRender.isProcessing = false, 50));
+			renderIkges(editor);
 		}
 	}, delay);
 }
-debounceRender.isProcessing = false;
 
 function renderVisibleEditors(delay = 50) {
 	const editors = vscode.window.visibleTextEditors;
@@ -1198,6 +1185,12 @@ async function activate(context) {
 			if (e) debounceRender(e);
 			updateCodeLensColorForEditor(e);
 		}),
+		// ★ 灵敏性优化 3：窗口获得焦点时，强制检查渲染
+		vscode.window.onDidChangeWindowState(e => {
+			if (e.focused) {
+				renderVisibleEditors();
+			}
+		}),
 		vscode.workspace.onDidChangeTextDocument(e => {
 			const ed = vscode.window.activeTextEditor;
 			if (ed && e.document === ed.document) debounceRender(ed);
@@ -1208,7 +1201,6 @@ async function activate(context) {
 		vscode.workspace.onDidCloseTextDocument(doc => {
 			documentDecorationsMap.delete(doc.uri.toString());
 		}),
-		// ★ 移植：布局/窗口变化时触发渲染和整理
 		vscode.window.onDidChangeVisibleTextEditors(editors => {
 			renderVisibleEditors();
 			if (cleanFreakMode) {
