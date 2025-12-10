@@ -27,10 +27,10 @@
             "default": true,
             "description": "是否在文件导航中显示历史回收站。"
           },
-          "qqq.stretchSmallImages": {
+          "qqq.enlargeSmallImages": {
             "type": "boolean",
             "default": true,
-            "description": "图片/视频预览时，小于相框（512×288）的图片是否拉伸以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+            "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           },
           "qqq.extremePerformance": {
             "type": "boolean",

@@ -63,16 +63,16 @@ const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
 const qqqFolderSizeCache = new Map();
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 
-let stretchSmallImages = true;
+let enlargeSmallImages = true;
 let extremePerformanceMode = false;
 
 function refreshQqqConfig() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
-		stretchSmallImages = config.get("stretchSmallImages", true);
+		enlargeSmallImages = config.get("enlargeSmallImages", true);
 		extremePerformanceMode = config.get("extremePerformance", false);
 	} catch (e) {
-		stretchSmallImages = true;
+		enlargeSmallImages = true;
 		extremePerformanceMode = false;
 	}
 }
@@ -175,7 +175,7 @@ function setPreviewCache(filePath, buffer, mtimeMs) {
 
 // ★ GIF 专用分支
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize) {
-	const stretch = stretchSmallImages;
+	const stretch = enlargeSmallImages;
 	let targetW = PREVIEW_WIDTH;
 	let targetH = PREVIEW_HEIGHT;
 
@@ -294,7 +294,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 	if (!ffmpegPath) return null;
 
 	let origSize = null;
-	if (!isVideo && !stretchSmallImages) {
+	if (!isVideo && !enlargeSmallImages) {
 		origSize = await getImageDimensions(filePath);
 	}
 
