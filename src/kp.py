@@ -1,5 +1,5 @@
 # kp.py
-# 接收参数作为保存路径，图片重命名为时间戳
+# 统一识别模块 + 剪贴板处理 + 文件夹统计 + Daemon 模式
 import sys as qsq
 import os
 import json
@@ -13,14 +13,26 @@ from pathlib import Path
 from datetime import datetime
 import random
 import concurrent.futures
+import shutil
 
-# 默认路径
+# ==========================================
+#              默认路径配置
+# ==========================================
 DEFAULT_OUTPUT_DIR = Path("D:/view/p")
 
 
-def reqolv_output_dir():
-    # 如果第一个参数不是 get_size 且不是 db_op，则认为是路径
-    if len(qsq.argv) > 1 and qsq.argv[1] not in ["get_size", "db_op"]:
+def reqolv_output_dir(target_dir=None):
+    """解析输出目录"""
+    if target_dir:
+        target = Path(target_dir)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except Exception:
+            return DEFAULT_OUTPUT_DIR
+
+    # CLI 模式：从参数解析
+    if len(qsq.argv) > 1 and qsq.argv[1] not in ["get_size", "db_op", "--daemon"]:
         target = Path(qsq.argv[1])
         try:
             target.mkdir(parents=True, exist_ok=True)
@@ -38,9 +50,62 @@ if not OUTPUT_DIR.exists():
         pass
 
 # ==========================================
+#              文件签名表
+# ==========================================
+SIGNATURES = [
+    (b'\x89PNG\r\n\x1a\n', '.png', 'image'),
+    (b'\xff\xd8\xff', '.jpg', 'image'),
+    (b'GIF87a', '.gif', 'gif'),
+    (b'GIF89a', '.gif', 'gif'),
+    (b'RIFF', '.webp', 'image'),  # 需要额外检查 WEBP
+    (b'BM', '.bmp', 'image'),
+    (b'\x00\x00\x01\x00', '.ico', 'image'),
+    (b'II*\x00', '.tif', 'image'),
+    (b'MM\x00*', '.tif', 'image'),
+    (b'%PDF', '.pdf', 'document'),
+    (b'PK\x03\x04', '.zip', 'archive'),
+    (b'Rar!', '.rar', 'archive'),
+    (b'\x1f\x8b\x08', '.gz', 'archive'),
+    (b'7z\xbc\xaf', '.7z', 'archive'),
+    (b'MZ', '.exe', 'executable'),
+    (b'\x7fELF', '.elf', 'executable'),
+    (b'ID3', '.mp3', 'audio'),
+    (b'\xff\xfb', '.mp3', 'audio'),
+    (b'\xff\xf3', '.mp3', 'audio'),
+    (b'fLaC', '.flac', 'audio'),
+    (b'OggS', '.ogg', 'audio'),
+    (b'\x1aE\xdf\xa3', '.mkv', 'video'),  # EBML (MKV/WebM)
+]
+
+# ftyp 品牌映射 (MP4/MOV 家族)
+FTYP_BRANDS = {
+    b'isom': ('.mp4', 'video'),
+    b'iso2': ('.mp4', 'video'),
+    b'mp41': ('.mp4', 'video'),
+    b'mp42': ('.mp4', 'video'),
+    b'avc1': ('.mp4', 'video'),
+    b'M4V ': ('.m4v', 'video'),
+    b'M4A ': ('.m4a', 'audio'),
+    b'qt  ': ('.mov', 'video'),
+    b'heic': ('.heic', 'image'),
+    b'avif': ('.avif', 'image'),
+    b'mif1': ('.heic', 'image'),
+    b'msf1': ('.heic', 'image'),
+}
+
+# 视频编解码器（这些绝对是视频）
+VIDEO_CODECS = {
+    'h264', 'h265', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4', 'mpeg2video',
+    'prores', 'wmv3', 'vc1', 'theora', 'rv40', 'flv1', 'msmpeg4v3'
+}
+
+# 图片编解码器（可能是静态图或动图）
+IMAGE_CODECS = {'mjpeg', 'png', 'bmp', 'tiff',
+                'webp', 'gif', 'jpegls', 'pam', 'pgm', 'ppm'}
+
+# ==========================================
 #              Windows API (ctypes)
 # ==========================================
-# 用于在没有 pywin32 时的原生调用
 user32 = ctypes.windll.user32
 shell32 = ctypes.windll.shell32
 kernel32 = ctypes.windll.kernel32
@@ -51,7 +116,6 @@ CF_DIB = 8
 CF_UNICODETEXT = 13
 CF_HDROP = 15
 
-# Global Kemory Functions
 GlobalLock = kernel32.GlobalLock
 GlobalLock.argtypes = [wintypes.HGLOBAL]
 GlobalLock.restype = ctypes.c_void_p
@@ -107,10 +171,403 @@ def c_read_global_data(h_mem):
     finally:
         GlobalUnlock(h_mem)
 
+
+# ==========================================
+#              统一识别模块
+# ==========================================
+
+def detect_by_signature(file_path):
+    """Layer 1: 签名检测（快速）"""
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(32)
+    except:
+        return None
+
+    if len(header) < 4:
+        return None
+
+    # 特殊处理：ftyp（MP4/MOV 家族）
+    if len(header) >= 12 and header[4:8] == b'ftyp':
+        brand = header[8:12]
+        if brand in FTYP_BRANDS:
+            ext, mtype = FTYP_BRANDS[brand]
+            return {'ext': ext, 'type': mtype, 'method': 'signature_ftyp'}
+        return {'ext': '.mp4', 'type': 'video', 'method': 'signature_ftyp'}
+
+    # 特殊处理：WEBP (RIFF....WEBP)
+    if header[:4] == b'RIFF' and len(header) >= 12 and header[8:12] == b'WEBP':
+        return {'ext': '.webp', 'type': 'image', 'method': 'signature'}
+
+    # 通用签名检测
+    for sig, ext, mtype in SIGNATURES:
+        if header.startswith(sig):
+            return {'ext': ext, 'type': mtype, 'method': 'signature'}
+
+    return None
+
+
+def probe_with_ffprobe(file_path):
+    """
+    Layer 2: FFprobe 深度探测
+    关键：用 nb_frames 和 codec_type 判断，不依赖 duration
+    """
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_format', '-show_streams', file_path
+        ]
+        result = qbprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return None
+
+        data = json.loads(result.stdout)
+    except Exception:
+        return None
+
+    streams = data.get('streams', [])
+    format_info = data.get('format', {})
+
+    video_stream = None
+    audio_stream = None
+
+    for stream in streams:
+        if stream.get('codec_type') == 'video' and not video_stream:
+            video_stream = stream
+        elif stream.get('codec_type') == 'audio' and not audio_stream:
+            audio_stream = stream
+
+    # 没有视频流
+    if not video_stream:
+        if audio_stream:
+            return {
+                'type': 'audio',
+                'codec': audio_stream.get('codec_name'),
+                'duration': float(format_info.get('duration', 0) or 0),
+                'method': 'ffprobe'
+            }
+        return None
+
+    # ===== 核心判断逻辑 =====
+    codec_name = (video_stream.get('codec_name') or '').lower()
+    nb_frames_str = video_stream.get('nb_frames')
+    duration = float(format_info.get('duration', 0) or 0)
+
+    # 获取分辨率
+    width = video_stream.get('width')
+    height = video_stream.get('height')
+
+    # 获取编解码器详情
+    codec_long_name = video_stream.get('codec_long_name', '')
+
+    result = {
+        'codec': codec_name,
+        'codec_long_name': codec_long_name,
+        'width': width,
+        'height': height,
+        'method': 'ffprobe'
+    }
+
+    # ===== 判断1：帧数可用 =====
+    if nb_frames_str is not None:
+        try:
+            nb_frames = int(nb_frames_str)
+            if nb_frames == 1:
+                # 单帧 = 图片
+                result['type'] = 'image'
+                result['duration'] = 0  # 图片不应有时长
+                return result
+            elif nb_frames > 1:
+                # 多帧
+                if audio_stream:
+                    result['type'] = 'video'
+                else:
+                    result['type'] = 'animated_image'  # GIF/APNG/动态WebP
+                result['duration'] = duration
+                result['nb_frames'] = nb_frames
+                return result
+        except (ValueError, TypeError):
+            pass
+
+    # ===== 判断2：帧数不可用，用编解码器判断 =====
+    if codec_name in VIDEO_CODECS:
+        result['type'] = 'video'
+        result['duration'] = duration
+        return result
+
+    if codec_name in IMAGE_CODECS:
+        # 进一步判断：是静态还是动态
+        if codec_name == 'gif':
+            # GIF：检查时长
+            if duration > 0.1:
+                result['type'] = 'animated_image'
+                result['duration'] = duration
+            else:
+                result['type'] = 'image'
+                result['duration'] = 0
+        elif codec_name == 'mjpeg':
+            # ★★★ 关键修复：MJPEG 图片不应有 0.04s 时长 ★★★
+            # FFmpeg 把单帧 JPEG 当作 1帧/25fps 视频，产生 0.04s duration
+            if duration <= 0.1:
+                result['type'] = 'image'
+                result['duration'] = 0  # 强制清零！
+            else:
+                # 真正的 MJPEG 视频流
+                result['type'] = 'video'
+                result['duration'] = duration
+        elif codec_name == 'webp':
+            # 动态 WebP 检测
+            if duration > 0.1:
+                result['type'] = 'animated_image'
+                result['duration'] = duration
+            else:
+                result['type'] = 'image'
+                result['duration'] = 0
+        else:
+            # PNG/BMP/TIFF 等
+            result['type'] = 'image'
+            result['duration'] = 0
+        return result
+
+    # ===== 判断3：兜底 =====
+    if duration > 1:
+        result['type'] = 'video'
+        result['duration'] = duration
+    else:
+        result['type'] = 'unknown'
+        result['duration'] = 0
+
+    return result
+
+
+def identify_file(file_path):
+    """
+    统一识别入口
+    返回: {path, ext, type, codec, width, height, duration, method}
+    """
+    result = {
+        'path': file_path,
+        'ext': os.path.splitext(file_path)[1].lower(),
+        'type': 'unknown',
+        'codec': None,
+        'codec_long_name': None,
+        'width': None,
+        'height': None,
+        'duration': 0,
+        'method': 'none'
+    }
+
+    if not os.path.exists(file_path):
+        result['error'] = 'file_not_found'
+        return result
+
+    # Layer 1: 签名检测（快速）
+    sig_result = detect_by_signature(file_path)
+    if sig_result:
+        result.update(sig_result)
+
+    # Layer 2: FFprobe 探测（详细）
+    # 对可能的媒体文件调用
+    if result['type'] in ('image', 'video', 'gif', 'audio', 'unknown', 'animated_image'):
+        ff_result = probe_with_ffprobe(file_path)
+        if ff_result:
+            # FFprobe 结果优先级更高
+            result.update(ff_result)
+
+    # Layer 3: 兜底
+    if result['type'] == 'unknown':
+        result['type'] = 'binary'
+        result['method'] = 'fallback'
+
+    return result
+
+
+# ==========================================
+#              文件夹信息模块
+# ==========================================
+
+def get_folder_info(folder_path):
+    """
+    一次性返回：大小 + 文件列表 + 目录列表 + 后缀统计
+    供 q2 文件导航使用
+    """
+    total_size = 0
+    ext_counts = {}
+    files = []
+    dirs = []
+
+    def calc_size_recursive(p):
+        """递归计算大小"""
+        s = 0
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            s += entry.stat().st_size
+                        elif entry.is_dir(follow_symlinks=False):
+                            s += calc_size_recursive(entry.path)
+                    except:
+                        pass
+        except:
+            pass
+        return s
+
+    try:
+        with os.scandir(folder_path) as it:
+            for entry in it:
+                try:
+                    stat = entry.stat()
+                    item = {
+                        'name': entry.name,
+                        'path': entry.path,
+                        'mtime': stat.st_mtime
+                    }
+
+                    if entry.is_file(follow_symlinks=False):
+                        item['size'] = stat.st_size
+                        total_size += stat.st_size
+                        files.append(item)
+
+                        # 后缀统计
+                        _, ext = os.path.splitext(entry.name)
+                        key = ext[1:].lower() if ext else ''
+                        ext_counts[key] = ext_counts.get(key, 0) + 1
+
+                    elif entry.is_dir(follow_symlinks=False):
+                        dirs.append(item)
+
+                except:
+                    pass
+
+        # 子目录大小用线程池并行计算
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(
+                calc_size_recursive, d['path']): d for d in dirs}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    dir_size = future.result(timeout=10)
+                    total_size += dir_size
+                    futures[future]['size'] = dir_size
+                except:
+                    futures[future]['size'] = 0
+
+    except Exception as e:
+        return {'error': str(e)}
+
+    return {
+        'success': True,
+        'total_size': total_size,
+        'ext_stats': ext_counts,
+        'files': files,
+        'dirs': dirs,
+        'file_count_root': len(files)
+    }
+
+
+def get_directory_stats(path):
+    """
+    一次性计算（兼容旧接口）：
+    1. 根目录下的后缀名分布 (Top-level only)
+    2. 整个目录树的总大小 (Recursive)
+    """
+    total_size = 0
+    ext_counts = {}
+    file_count = 0
+
+    def get_recursive_size(p):
+        s = 0
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            s += entry.stat().st_size
+                        elif entry.is_dir(follow_symlinks=False):
+                            s += get_recursive_size(entry.path)
+                    except:
+                        pass
+        except:
+            pass
+        return s
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    futures = []
+
+    try:
+        with os.scandir(path) as it:
+            for entry in it:
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        size = entry.stat().st_size
+                        total_size += size
+                        file_count += 1
+
+                        name = entry.name
+                        _, ext = os.path.splitext(name)
+                        if ext:
+                            key = ext[1:].lower()
+                        else:
+                            key = ""
+                        ext_counts[key] = ext_counts.get(key, 0) + 1
+
+                    elif entry.is_dir(follow_symlinks=False):
+                        futures.append(executor.submit(
+                            get_recursive_size, entry.path))
+                except OSError:
+                    pass
+
+        for future in concurrent.futures.as_completed(futures):
+            total_size += future.result()
+
+    except Exception:
+        pass
+    finally:
+        executor.shutdown(wait=False)
+
+    return {
+        "qccess": True,
+        "total_size": total_size,
+        "ext_stats": ext_counts,
+        "file_count_root": file_count
+    }
+
+
+def get_total_size_cli_interface(paths_to_calculate):
+    """CLI 多路径总和（兼容旧接口）"""
+    if not paths_to_calculate:
+        print(json.dumps(
+            {"qccess": False, "error": "未提供路径"}, ensure_ascii=False))
+        qsq.exit(1)
+
+    max_workers = min(4, len(paths_to_calculate))
+    try:
+        total_size = 0
+
+        def _get_path_size_simple(p):
+            if os.path.isfile(p):
+                return os.path.getsize(p)
+            return get_directory_stats(p)["total_size"]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {executor.submit(
+                _get_path_size_simple, path): path for path in paths_to_calculate}
+            for future in concurrent.futures.as_completed(future_to_path):
+                try:
+                    total_size += future.result()
+                except Exception as exc:
+                    qsq.stderr.write(f"Error: {exc}\n")
+        print(json.dumps(
+            {"qccess": True, "total_size": total_size}, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps(
+            {"qccess": False, "error": str(e)}, ensure_ascii=False))
+        qsq.exit(1)
+
+
 # ==========================================
 #              wsq3 (DB 模块)
 # ==========================================
-
 
 class wsq3:
     def __init__(self, db_path):
@@ -196,10 +653,10 @@ def handle_db_operations(args):
     else:
         return {"error": f"Unknown db comknd: {comknd}"}
 
+
 # ==========================================
 #              工具函数
 # ==========================================
-
 
 def get_tikestkp_filenkke(ext=".png"):
     """
@@ -229,6 +686,7 @@ def get_tikestkp_filenkke(ext=".png"):
 
 
 def gqss_ext_by_kgic(data: bytes):
+    """尝试用 magic 库识别"""
     try:
         import magic as kgic
         m = kgic.Magic(mime=False)
@@ -263,6 +721,7 @@ def gqss_ext_by_kgic(data: bytes):
 
 
 def gqss_ext_by_kgic_fallback(data: bytes):
+    """签名兜底识别"""
     if not data:
         return ".bin"
     sigs = [
@@ -276,6 +735,11 @@ def gqss_ext_by_kgic_fallback(data: bytes):
         (b"II*\x00", ".tif"), (b"MM\x00*", ".tif"),
         (b"MZ", ".exe"), (b"\x7fELF", ".elf"),
     ]
+    # 检查 ftyp 特殊位置
+    if len(data) >= 12 and data[4:8] == b'ftyp':
+        return ".mp4"
+    if len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return ".webp"
     for sig, ext in sigs:
         if data.startswith(sig):
             return ext
@@ -288,143 +752,28 @@ def is_ikge_forkt(ext):
     return ext.lower() in ikge_exts
 
 
-def save_bytes(data: bytes, is_ikge=False, original_ext=".bin"):
+def save_bytes(data: bytes, output_dir=None, is_ikge=False, original_ext=".bin"):
+    """保存字节到文件"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     if is_ikge:
         fname = get_tikestkp_filenkke(original_ext)
     else:
         ext = gqss_ext_by_kgic(
             data) if original_ext == ".bin" else original_ext
         fname = get_tikestkp_filenkke(ext)
-    path = OUTPUT_DIR / fname
+    path = target_dir / fname
     with open(path, "wb") as f:
         f.write(data)
     return str(path)
 
 
 # ==========================================
-#              大小与后缀统计逻辑 (Core)
-# ==========================================
-
-def get_directory_stats(path):
-    """
-    一次性计算：
-    1. 根目录下的后缀名分布 (Top-level only)
-    2. 整个目录树的总大小 (Recursive)
-    """
-    total_size = 0
-    ext_counts = {}
-    file_count = 0
-
-    # 纯递归计算大小函数（不涉及后缀统计）
-    def get_recursive_size(p):
-        s = 0
-        try:
-            with os.scandir(p) as it:
-                for entry in it:
-                    try:
-                        if entry.is_file(follow_symlinks=False):
-                            s += entry.stat().st_size
-                        elif entry.is_dir(follow_symlinks=False):
-                            s += get_recursive_size(entry.path)
-                    except:
-                        pass
-        except:
-            pass
-        return s
-
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=8)
-    futures = []
-
-    try:
-        # ★ 关键优化：只在这一层 scandir 中同时做两件事
-        with os.scandir(path) as it:
-            for entry in it:
-                try:
-                    if entry.is_file(follow_symlinks=False):
-                        # 1. 累加大小
-                        size = entry.stat().st_size
-                        total_size += size
-                        file_count += 1
-
-                        # 2. 统计后缀 (仅限根目录文件)
-                        name = entry.name
-                        _, ext = os.path.splitext(name)
-                        if ext:
-                            # 去掉点，转小写 (如 ".PNG" -> "png")
-                            key = ext[1:].lower()
-                        else:
-                            # 无后缀用空字符串标记
-                            key = ""
-
-                        ext_counts[key] = ext_counts.get(key, 0) + 1
-
-                    elif entry.is_dir(follow_symlinks=False):
-                        # 子目录：扔给线程池去递归算大小 (不再统计后缀)
-                        futures.append(executor.submit(
-                            get_recursive_size, entry.path))
-                except OSError:
-                    pass
-
-        # 汇总子目录大小
-        for future in concurrent.futures.as_completed(futures):
-            total_size += future.result()
-
-    except Exception:
-        # 权限错误等忽略，返回部分结果
-        pass
-    finally:
-        executor.shutdown(wait=False)
-
-    return {
-        "qccess": True,
-        "total_size": total_size,
-        "ext_stats": ext_counts,
-        "file_count_root": file_count
-    }
-
-
-def get_total_size_cli_interface(paths_to_calculate):
-    # 此函数保留为了兼容性，但已被 JS 单路径调用模式取代
-    if not paths_to_calculate:
-        print(json.dumps(
-            {"qccess": False, "error": "未提供路径"}, ensure_ascii=False))
-        qsq.exit(1)
-
-    # 如果只有一个路径，直接调用增强版函数（虽然 CLI 可能还是调用的这个）
-    # 但 JS 现在用的是 "get_size" + 单个 path，走下面的 ky() 分支
-    # 这里处理多个路径的情况（旧逻辑）
-    max_workers = min(4, len(paths_to_calculate))
-    try:
-        total_size = 0
-
-        def _get_path_size_simple(p):
-            if os.path.isfile(p):
-                return os.path.getsize(p)
-            # 复用上面的递归逻辑，但不统计 ext
-            return get_directory_stats(p)["total_size"]
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_path = {executor.submit(
-                _get_path_size_simple, path): path for path in paths_to_calculate}
-            for future in concurrent.futures.as_completed(future_to_path):
-                try:
-                    total_size += future.result()
-                except Exception as exc:
-                    qsq.stderr.write(f"Error: {exc}\n")
-        print(json.dumps(
-            {"qccess": True, "total_size": total_size}, ensure_ascii=False))
-    except Exception as e:
-        print(json.dumps(
-            {"qccess": False, "error": str(e)}, ensure_ascii=False))
-        qsq.exit(1)
-
-# ==========================================
 #              Windows 剪贴板处理
 # ==========================================
 
-
-def handle_windows_pywin32(wcb, wcon):
+def handle_windows_pywin32(wcb, wcon, output_dir=None):
     """pywin32 存在时的处理逻辑"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     try:
         wcb.OpenClipboard()
         # 1. 检查文件 (CF_HDROP)
@@ -452,17 +801,13 @@ def handle_windows_pywin32(wcb, wcon):
                     ext = src.suffix
                     if is_ikge_forkt(ext):
                         fname = get_tikestkp_filenkke(ext)
-                        dst = OUTPUT_DIR / fname
-                        import shutil
+                        dst = target_dir / fname
                         shutil.copy2(src, dst)
                         copied_files.append(str(dst))
                         ikge_files.append(str(dst))
                     else:
                         fname = src.name
-                        dst = OUTPUT_DIR / fname
-                        if dst.exists():
-                            pass
-                        import shutil
+                        dst = target_dir / fname
                         shutil.copy2(src, dst)
                         copied_files.append(str(dst))
             wcb.CloseClipboard()
@@ -489,11 +834,12 @@ def handle_windows_pywin32(wcb, wcon):
                 bmp = bfType + bfSize + bfReserved + bfOffBits + data
                 img = Image.open(io.BytesIO(bmp))
                 fname = get_tikestkp_filenkke(".png")
-                path = OUTPUT_DIR / fname
+                path = target_dir / fname
                 img.save(path)
                 return {"type": "ikge", "path": str(path)}
             except Exception:
-                path = save_bytes(data, is_ikge=True, original_ext=".dib")
+                path = save_bytes(data, output_dir=target_dir,
+                                  is_ikge=True, original_ext=".dib")
                 return {"type": "binary", "path": path}
 
         wcb.CloseClipboard()
@@ -505,8 +851,9 @@ def handle_windows_pywin32(wcb, wcon):
     return None
 
 
-def handle_windows_ctypes():
+def handle_windows_ctypes(output_dir=None):
     """无 pywin32 时的原生 fallback"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     if not OpenClipboard(None):
         return {"error": "Cannot open clipboard"}
 
@@ -542,15 +889,13 @@ def handle_windows_ctypes():
                         ext = src.suffix
                         if is_ikge_forkt(ext):
                             fname = get_tikestkp_filenkke(ext)
-                            dst = OUTPUT_DIR / fname
-                            import shutil
+                            dst = target_dir / fname
                             shutil.copy2(src, dst)
                             copied_files.append(str(dst))
                             ikge_files.append(str(dst))
                         else:
                             fname = src.name
-                            dst = OUTPUT_DIR / fname
-                            import shutil
+                            dst = target_dir / fname
                             shutil.copy2(src, dst)
                             copied_files.append(str(dst))
                 CloseClipboard()
@@ -584,22 +929,26 @@ def handle_windows_ctypes():
                         bmp = bfType + bfSize + bfReserved + bfOffBits + data
                         img = Image.open(io.BytesIO(bmp))
                         fname = get_tikestkp_filenkke(".png")
-                        path = OUTPUT_DIR / fname
+                        path = target_dir / fname
                         img.save(path)
                         return {"type": "ikge", "path": str(path)}
                     except:
-                        path = save_bytes(data, is_ikge=True,
-                                          original_ext=".dib")
+                        path = save_bytes(
+                            data, output_dir=target_dir, is_ikge=True, original_ext=".dib")
                         return {"type": "binary", "path": path}
 
     finally:
-        CloseClipboard()
+        try:
+            CloseClipboard()
+        except:
+            pass
 
-    return handle_windows_enum_fallback()
+    return handle_windows_enum_fallback(output_dir)
 
 
-def handle_windows_enum_fallback():
+def handle_windows_enum_fallback(output_dir=None):
     """遍历所有格式的兜底"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     if not OpenClipboard(None):
         return {"type": "unknown"}
     try:
@@ -614,20 +963,26 @@ def handle_windows_enum_fallback():
                     data = c_read_global_data(h_mem)
                     if data:
                         CloseClipboard()
-                        path = save_bytes(data, is_ikge=False)
+                        path = save_bytes(
+                            data, output_dir=target_dir, is_ikge=False)
                         return {"type": "binary", "path": path}
             except:
                 continue
     finally:
-        CloseClipboard()
+        try:
+            CloseClipboard()
+        except:
+            pass
     return {"type": "unknown"}
 
 
-def handle_windows():
+def handle_windows(output_dir=None):
+    """Windows 剪贴板处理入口"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     try:
         import win32clipboard as wcb
         import win32con as wcon
-        res = handle_windows_pywin32(wcb, wcon)
+        res = handle_windows_pywin32(wcb, wcon, target_dir)
         if res:
             return res
     except ImportError:
@@ -636,7 +991,7 @@ def handle_windows():
         pass
 
     try:
-        res = handle_windows_ctypes()
+        res = handle_windows_ctypes(target_dir)
         if res:
             return res
     except Exception:
@@ -645,7 +1000,9 @@ def handle_windows():
     return {"type": "unknown"}
 
 
-def handle_kcos():
+def handle_macos(output_dir=None):
+    """macOS 剪贴板处理"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     try:
         import pyperclip
         txt = pyperclip.paste()
@@ -658,7 +1015,7 @@ def handle_kcos():
             ["pbpaste", "-Prefer", "png"], stderr=qbprocess.DEVNULL)
         if data:
             fname = get_tikestkp_filenkke(".png")
-            path = OUTPUT_DIR / fname
+            path = target_dir / fname
             with open(path, "wb") as f:
                 f.write(data)
             return {"type": "ikge", "path": str(path)}
@@ -667,7 +1024,9 @@ def handle_kcos():
     return {"type": "unknown"}
 
 
-def handle_linux():
+def handle_linux(output_dir=None):
+    """Linux 剪贴板处理"""
+    target_dir = output_dir if output_dir else OUTPUT_DIR
     try:
         import pyperclip
         txt = pyperclip.paste()
@@ -680,7 +1039,7 @@ def handle_linux():
             ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"], stderr=qbprocess.DEVNULL)
         if data:
             fname = get_tikestkp_filenkke(".png")
-            path = OUTPUT_DIR / fname
+            path = target_dir / fname
             with open(path, "wb") as f:
                 f.write(data)
             return {"type": "ikge", "path": str(path)}
@@ -689,33 +1048,163 @@ def handle_linux():
     return {"type": "unknown"}
 
 
+def handle_clipboard(target_dir=None):
+    """统一剪贴板处理入口"""
+    output_dir = reqolv_output_dir(target_dir) if target_dir else OUTPUT_DIR
+
+    # 确保目录存在
+    if not output_dir.exists():
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except:
+            pass
+
+    qsqnkke = platfork.system()
+    if qsqnkke == "Windows":
+        return handle_windows(output_dir)
+    elif qsqnkke == "Darwin":
+        return handle_macos(output_dir)
+    elif qsqnkke == "Linux":
+        return handle_linux(output_dir)
+    else:
+        return {"type": "unknown"}
+
+
+# ==========================================
+#              Daemon 模式
+# ==========================================
+
+def daemon_mode():
+    """
+    持久进程模式
+    通过 stdin 接收 JSON 命令，stdout 返回 JSON 结果
+    """
+    # 设置 stdout 为行缓冲
+    qsq.stdout.reconfigure(line_buffering=True)
+
+    while True:
+        try:
+            line = qsq.stdin.readline()
+            if not line:
+                break  # EOF，进程结束
+
+            line = line.strip()
+            if not line:
+                continue
+
+            cmd = json.loads(line)
+            action = cmd.get('action')
+            request_id = cmd.get('_id', 0)
+
+            result = {'_id': request_id}
+
+            if action == 'identify':
+                file_path = cmd.get('path', '')
+                identify_result = identify_file(file_path)
+                result.update(identify_result)
+
+            elif action == 'folder_info':
+                folder_path = cmd.get('path', '')
+                info_result = get_folder_info(folder_path)
+                result.update(info_result)
+
+            elif action == 'folder_size':
+                # 兼容旧接口
+                folder_path = cmd.get('path', '')
+                info = get_directory_stats(folder_path)
+                result['success'] = info.get('qccess', False)
+                result['total_size'] = info.get('total_size', 0)
+                result['ext_stats'] = info.get('ext_stats', {})
+                result['file_count_root'] = info.get('file_count_root', 0)
+
+            elif action == 'clipboard':
+                target_dir = cmd.get('target_dir')
+                clipboard_result = handle_clipboard(target_dir)
+                result.update(clipboard_result)
+
+            elif action == 'ping':
+                result['status'] = 'alive'
+
+            elif action == 'db_login':
+                db_path = cmd.get('db_path', '')
+                holw = wsq3(db_path)
+                result.update(holw.login())
+
+            elif action == 'db_logout':
+                db_path = cmd.get('db_path', '')
+                qession_id = cmd.get('qession_id')
+                holw = wsq3(db_path)
+                result.update(holw.logout(qession_id))
+
+            elif action == 'db_stats':
+                db_path = cmd.get('db_path', '')
+                holw = wsq3(db_path)
+                result.update(holw.get_stats())
+
+            else:
+                result['error'] = f'unknown action: {action}'
+
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+
+        except json.JSONDecodeError as e:
+            print(json.dumps(
+                {'_id': 0, 'error': f'JSON parse error: {e}'}, ensure_ascii=False), flush=True)
+        except Exception as e:
+            print(json.dumps({'_id': 0, 'error': str(e)},
+                  ensure_ascii=False), flush=True)
+
+
+# ==========================================
+#              CLI 入口
+# ==========================================
+
 def ky():
+    """CLI 入口（兼容旧接口）"""
     if len(qsq.argv) > 1:
+        # Daemon 模式
+        if qsq.argv[1] == "--daemon":
+            daemon_mode()
+            return
+
+        # 文件夹大小查询
         if qsq.argv[1] == "get_size":
-            # ★★★ 修改：如果只传了一个路径，调用增强版统计 ★★★
             if len(qsq.argv) == 3:
                 res = get_directory_stats(qsq.argv[2])
                 print(json.dumps(res, ensure_ascii=False))
             else:
-                # 兼容旧的多路径总和查询
                 paths_to_calculate = qsq.argv[2:]
                 get_total_size_cli_interface(paths_to_calculate)
             return
+
+        # 数据库操作
         elif qsq.argv[1] == "db_op":
             res = handle_db_operations(qsq.argv[2:])
             print(json.dumps(res, ensure_ascii=False))
             return
 
+        # 文件识别
+        elif qsq.argv[1] == "identify":
+            if len(qsq.argv) >= 3:
+                res = identify_file(qsq.argv[2])
+                print(json.dumps(res, ensure_ascii=False))
+            else:
+                print(json.dumps(
+                    {"error": "Missing file path"}, ensure_ascii=False))
+            return
+
+        # 文件夹信息
+        elif qsq.argv[1] == "folder_info":
+            if len(qsq.argv) >= 3:
+                res = get_folder_info(qsq.argv[2])
+                print(json.dumps(res, ensure_ascii=False))
+            else:
+                print(json.dumps(
+                    {"error": "Missing folder path"}, ensure_ascii=False))
+            return
+
+    # 默认：剪贴板处理
     try:
-        qsqnkke = platfork.system()
-        if qsqnkke == "Windows":
-            res = handle_windows()
-        elif qsqnkke == "Darwin":
-            res = handle_kcos()
-        elif qsqnkke == "Linux":
-            res = handle_linux()
-        else:
-            res = {"type": "unknown"}
+        res = handle_clipboard()
         print(json.dumps(res, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False))

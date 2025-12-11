@@ -1,8 +1,12 @@
+// File: src/q1.js
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+
+// ==================== 从 qqq.js 导入 ====================
+const { pythonBridge, shouldShowDuration, logMessage } = require("./qqq");
 
 // ==================== 核心完整性配置 ====================
 const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
@@ -48,7 +52,6 @@ const LOG_PATH = "D:\\view\\p\\kp.log";
 
 let currentQessionId = null;
 let dbPath = null;
-let isPythonAvailable = false;
 let decorationType;
 let markerHideType;
 let extensionContext = null;
@@ -155,7 +158,7 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 // ==========================================
-//           身份识别模块
+//           身份识别模块（使用 Python Bridge）
 // ==========================================
 
 function determineMediaType(codec, ext) {
@@ -194,12 +197,45 @@ async function ensureFfmpegAvailable() {
 	return ffmpegProbePromise;
 }
 
+/**
+ * 获取媒体信息 - 使用 Python Bridge
+ */
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) {
 		return cached;
 	}
 
+	// ★★★ 使用 Python Bridge 进行统一识别 ★★★
+	try {
+		const result = await pythonBridge.identify(filePath);
+
+		if (result && !result.error && result.width) {
+			const info = {
+				mtime: mtimeMs,
+				res: `${result.width}x${result.height}`,
+				width: result.width,
+				height: result.height,
+				codec: result.codec,
+				codec_long_name: result.codec_long_name,
+				duration: result.duration || 0,
+				type: result.type || "unknown"
+			};
+
+			resolutionCache.set(filePath, info);
+
+			if (resolutionCache.size > 200) {
+				const first = resolutionCache.keys().next().value;
+				resolutionCache.delete(first);
+			}
+
+			return info;
+		}
+	} catch (e) {
+		// Python Bridge 失败，降级到 FFmpeg
+	}
+
+	// ★★★ 降级：直接使用 FFmpeg ★★★
 	if (!ffmpegPath) return null;
 
 	return new Promise((resolve) => {
@@ -243,11 +279,21 @@ async function getMediaInfo(filePath, mtimeMs) {
 				const hours = parseFloat(durMatch[1]);
 				const mins = parseFloat(durMatch[2]);
 				const secs = parseFloat(durMatch[3]);
-				info.duration = hours * 3600 + mins * 60 + secs;
+				const rawDuration = hours * 3600 + mins * 60 + secs;
+
+				// ★★★ 关键修复：MJPEG 图片不应有 0.04s 时长 ★★★
+				if (info.codec && info.codec.toLowerCase().includes('mjpeg') && rawDuration <= 0.1) {
+					info.duration = 0;
+					info.type = 'image';
+				} else {
+					info.duration = rawDuration;
+				}
 			}
 
 			const ext = path.extname(filePath);
-			info.type = determineMediaType(info.codec, ext);
+			if (info.type === "unknown") {
+				info.type = determineMediaType(info.codec, ext);
+			}
 
 			resolutionCache.set(filePath, info);
 
@@ -377,7 +423,6 @@ function setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize) {
 	previewCache.set(filePath, { buffer, mtimeMs, gifDuration, outputSize });
 }
 
-// ★★★ 核心修改：使用 concat 实现三段截取 + 循环 ★★★
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	let targetW = PREVIEW_WIDTH;
 	let targetH = PREVIEW_HEIGHT;
@@ -414,7 +459,6 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
 
 		if (extremePerformanceMode) {
-			// ===== 极限模式：从1秒处连续截取2秒 =====
 			let clipStart = 1;
 			let clipDuration = 2;
 
@@ -433,7 +477,6 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 			expectedGifDuration = clipDuration;
 
 		} else if (safeDuration < 5) {
-			// ===== 普通模式短视频（<5秒）：连续截取最多4秒 =====
 			let clipStart = Math.min(1, safeDuration * 0.1);
 			let clipDuration = Math.min(4, safeDuration - clipStart);
 
@@ -447,18 +490,15 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 			expectedGifDuration = clipDuration;
 
 		} else {
-			// ===== 普通模式长视频（>=5秒）：三段 concat =====
 			const segDuration = 1.3;
 			const seg1Start = 1;
 			const seg2Start = Math.floor(safeDuration / 2);
 			const seg3Start = Math.max(seg2Start + segDuration + 0.5, safeDuration - segDuration - 1);
 
-			// 三个独立输入，每个都用 -ss -t 精确截取
 			args.push("-ss", String(seg1Start), "-t", String(segDuration), "-i", filePath);
 			args.push("-ss", String(seg2Start), "-t", String(segDuration), "-i", filePath);
 			args.push("-ss", String(seg3Start), "-t", String(segDuration), "-i", filePath);
 
-			// concat filter 合并三段
 			const filterComplex =
 				`[0:v]fps=${fpsLimit},${scaleFilter}[v0];` +
 				`[1:v]fps=${fpsLimit},${scaleFilter}[v1];` +
@@ -471,11 +511,10 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 			args.push("-map", "[out_v]");
 			args.push("-f", "gif", "-loop", "0", "pipe:1");
 
-			expectedGifDuration = segDuration * 3; // 约3.9秒
+			expectedGifDuration = segDuration * 3;
 		}
 
 	} else if (isGif) {
-		// ★★★ 原生 GIF ★★★
 		if (extremePerformanceMode) {
 			args.push("-t", "2");
 		}
@@ -495,10 +534,9 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 		args.push("-map", "[out_v]");
 		args.push("-f", "gif", "-loop", "0", "pipe:1");
 
-		expectedGifDuration = 0; // 将从 buffer 解析
+		expectedGifDuration = 0;
 
 	} else {
-		// ★★★ 静态图片 ★★★
 		args.push("-i", filePath);
 
 		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
@@ -561,7 +599,7 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 				try { child.kill(); } catch { }
 				resolve(null);
 			}
-		}, 30000); // 三段处理可能需要更长时间
+		}, 30000);
 
 		child.stdout.on("data", (d) => chunks.push(d));
 		child.on("error", () => {
@@ -576,7 +614,6 @@ async function getPreviewBuffer(filePath, isVideo, isGif) {
 
 				let gifDuration = expectedGifDuration;
 
-				// 对于原生 GIF，从 buffer 解析实际时长
 				if (isGif && !isVideo) {
 					gifDuration = getGifDurationFromBuffer(buffer);
 					if (extremePerformanceMode && gifDuration > 2.5) {
@@ -624,7 +661,7 @@ function createProgressSvg(durationSeconds) {
 }
 
 // ==========================================
-//           Python 交互
+//           Python 交互（使用 Bridge）
 // ==========================================
 
 function invalidateFolderSizeCacheForPath(filePath) {
@@ -634,33 +671,9 @@ function invalidateFolderSizeCacheForPath(filePath) {
 	} catch { }
 }
 
-function calculateFolderSizeWithPython(folderPath) {
-	return new Promise((resolve) => {
-		if (!isPythonAvailable) return resolve(null);
-		const scriptPath = path.join(__dirname, "kp.py");
-		if (!fs.existsSync(scriptPath)) return resolve(null);
-		const env = { ...process.env, PYTHONIOENCODING: "utf-8" };
-		const child = cp.spawn("python", [scriptPath, "get_size", folderPath], { env });
-		let stdout = "";
-		child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
-		child.on("close", (code) => {
-			if (code !== 0) return resolve(null);
-			try {
-				const res = JSON.parse(stdout.trim());
-				if (res && res.qccess) {
-					resolve({
-						size: res.total_size,
-						extStats: res.ext_stats,
-						fileCount: res.file_count_root
-					});
-				} else {
-					resolve(null);
-				}
-			} catch { resolve(null); }
-		});
-	});
-}
-
+/**
+ * 获取 qqq 文件夹大小 - 使用 Python Bridge
+ */
 async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = qqqFolderSizeCache.get(folderPath);
@@ -669,112 +682,99 @@ async function getQqqFolderSize(folderPath) {
 		return cached.data;
 	}
 
-	const data = await calculateFolderSizeWithPython(folderPath);
-	if (data) {
-		const parts = [];
-		let totalFiles = 0;
-		if (data.extStats) {
-			for (const [ext, count] of Object.entries(data.extStats)) {
-				totalFiles += count;
-				parts.push(`${count}_${ext}`);
+	// ★★★ 使用 Python Bridge ★★★
+	try {
+		const result = await pythonBridge.getFolderInfo(folderPath);
+
+		if (result && result.success) {
+			const parts = [];
+			let totalFiles = 0;
+			if (result.ext_stats) {
+				for (const [ext, count] of Object.entries(result.ext_stats)) {
+					totalFiles += count;
+					parts.push(`${count}_${ext || '无后缀'}`);
+				}
 			}
+
+			const summaryStr = parts.length > 0
+				? `${totalFiles}个文件：${parts.join("; ")}`
+				: (result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹");
+
+			const cachedData = {
+				size: result.total_size,
+				summary: summaryStr
+			};
+
+			qqqFolderSizeCache.set(folderPath, { data: cachedData, timestamp: now });
+			return cachedData;
 		}
-
-		const summaryStr = parts.length > 0
-			? `${totalFiles}个文件：${parts.join("; ")}`
-			: (data.fileCount > 0 ? `${data.fileCount}个文件` : "空文件夹");
-
-		const cachedData = {
-			size: data.size,
-			summary: summaryStr
-		};
-
-		qqqFolderSizeCache.set(folderPath, { data: cachedData, timestamp: now });
-		return cachedData;
+	} catch (e) {
+		// Bridge 失败
 	}
+
 	return null;
 }
 
-async function checkPythonEnvironment() {
-	return new Promise((resolve) => {
-		cp.exec("python --version", (error) => {
-			if (error) {
-				cp.exec("python3 --version", (err3) => resolve(!err3));
-			} else {
-				resolve(true);
-			}
-		});
-	});
-}
-
-function runPythonDbComknd(comknd, args = []) {
-	return new Promise((resolve) => {
-		if (!dbPath || !isPythonAvailable) return resolve(null);
-		const scriptPath = path.join(__dirname, "kp.py");
-		const procArgs = [scriptPath, "db_op", dbPath, comknd, ...args];
-		const env = { ...process.env, PYTHONIOENCODING: "utf-8" };
-		const child = cp.spawn("python", procArgs, { env });
-		let stdout = "";
-		child.stdout.on("data", (d) => (stdout += d.toString()));
-		child.on("close", () => {
-			try { resolve(JSON.parse(stdout.trim())); } catch { resolve(null); }
-		});
-	});
-}
-
+/**
+ * 初始化用户追踪 - 使用 Python Bridge
+ */
 async function initUserTracking(context) {
-	if (!isPythonAvailable) return;
 	const storageUri = context.globalStorageUri;
 	const storagePath = storageUri.fsPath;
 	if (!fs.existsSync(storagePath)) fs.mkdirSync(storagePath, { recursive: true });
 	dbPath = path.join(storagePath, "da.sq3");
-	const res = await runPythonDbComknd("login");
-	if (res && res.qession_id) {
-		currentQessionId = res.qession_id;
-		const stats = await runPythonDbComknd("stats");
-		if (stats && stats.forktted) {
-			vscode.window.setStatusBarMessage(`qqq累计使用: ${stats.forktted}`, 5000);
+
+	try {
+		const res = await pythonBridge.call("db_login", { db_path: dbPath });
+		if (res && res.qession_id) {
+			currentQessionId = res.qession_id;
+			const stats = await pythonBridge.call("db_stats", { db_path: dbPath });
+			if (stats && stats.forktted) {
+				vscode.window.setStatusBarMessage(`qqq累计使用: ${stats.forktted}`, 5000);
+			}
 		}
+	} catch (e) {
+		// 忽略错误
 	}
 }
 
 async function finishUserTracking() {
-	if (currentQessionId && isPythonAvailable) {
-		await runPythonDbComknd("logout", [String(currentQessionId)]);
+	if (currentQessionId && dbPath) {
+		try {
+			await pythonBridge.call("db_logout", { db_path: dbPath, qession_id: currentQessionId });
+		} catch (e) {
+			// 忽略错误
+		}
 	}
 }
 
-function runPythonScript(additionalEnv = {}) {
+/**
+ * 执行剪贴板命令 - 使用 Python Bridge
+ */
+async function executeClipboardComknd() {
 	if (!isCoreIntegretyValid) {
 		vscode.window.showErrorMessage("Integrity check failed.");
 		return;
 	}
-	if (!isPythonAvailable) {
-		vscode.window.showWarningMessage("Python 环境不可用。");
-		return;
-	}
-	const scriptPath = path.join(__dirname, "kp.py");
-	if (!fs.existsSync(scriptPath)) return;
+
 	const editor = vscode.window.activeTextEditor;
 	let targetDir = "D:\\view\\p";
 	if (editor && !editor.document.isUntitled) {
 		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 	}
-	const env = { ...process.env, PYTHONIOENCODING: "utf-8", ...additionalEnv };
-	const child = cp.spawn("python", [scriptPath, targetDir], { stdio: ["pipe", "pipe", "pipe"], env });
-	let stdout = "", stderr = "";
-	child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
-	child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
-	child.on("close", (code) => {
-		if (code !== 0) {
-			vscode.window.showErrorMessage("执行失败 " + code);
+
+	// ★★★ 使用 Python Bridge ★★★
+	try {
+		const result = await pythonBridge.handleClipboard(targetDir);
+		if (result.error) {
+			vscode.window.showWarningMessage("剪贴板处理失败：" + result.error);
 			return;
 		}
-		try { handleReqlt(JSON.parse(stdout.trim())); } catch (e) { }
-	});
+		handleReqlt(result);
+	} catch (e) {
+		vscode.window.showErrorMessage("剪贴板处理异常：" + e.message);
+	}
 }
-
-function executeClipboardComknd() { runPythonScript(); }
 
 // ==========================================
 //           核心：统一计算公式
@@ -1336,6 +1336,9 @@ class FileCodeLensProvider {
 
 						if (info.codec) {
 							tooltipText += `\n编解码器: ${info.codec}`;
+							if (info.codec_long_name) {
+								tooltipText += ` (${info.codec_long_name})`;
+							}
 						}
 
 						const arStr = calculateAspectRatioString(info.width, info.height);
@@ -1343,7 +1346,8 @@ class FileCodeLensProvider {
 							tooltipText += `\n宽高比：${arStr}`;
 						}
 
-						if (info.duration > 0) {
+						// ★★★ 关键修复：使用 shouldShowDuration 判断 ★★★
+						if (shouldShowDuration(info)) {
 							tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 						}
 					}
@@ -1468,15 +1472,17 @@ async function activate(context) {
 	extensionContext = context;
 
 	isCoreIntegretyValid = verifySystemIntegrity();
-	console.log(`[QQQ] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
+	console.log(`[QQQ Q1] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
 
 	if (!isCoreIntegretyValid) return;
 
 	loadWatermarkResource();
 
 	refreshQqqConfig();
-	isPythonAvailable = await checkPythonEnvironment();
-	if (isPythonAvailable) initUserTracking(context);
+
+	// 使用 Python Bridge 初始化用户追踪
+	initUserTracking(context);
+
 	updateGlobalCodeLensColor(false);
 
 	context.subscriptions.push(
@@ -1558,7 +1564,3 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
-
-
-
-
