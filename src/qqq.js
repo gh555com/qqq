@@ -11,6 +11,10 @@ const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
 const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
+// ★★★ 核心正则：唯一真理源 ★★★
+// 允许斜杠内侧出现空格 \s*，解决格式化工具自动加空格的问题
+const QQQ_PATH_REGEX = /\/\s*[a-z]:[^\/]*?qqq[^\/]*?\s*\//gi;
+
 // ==================== 日志工具 ====================
 function ensureLogDir() {
 	try {
@@ -103,7 +107,6 @@ class PythonBridge {
 				this._handleCrash();
 			});
 
-			// 验证启动
 			setTimeout(async () => {
 				try {
 					const pong = await this.call("ping", {}, 2000);
@@ -123,13 +126,11 @@ class PythonBridge {
 
 	_handleCrash() {
 		this.process = null;
-
 		for (const [id, { resolve, timer }] of this.pending) {
 			clearTimeout(timer);
 			resolve({ error: "process_crashed" });
 		}
 		this.pending.clear();
-
 		if (this.restartCount < this.maxRestarts) {
 			this.restartCount++;
 			logMessage(`Python Bridge restart ${this.restartCount}/${this.maxRestarts}`, "WARN");
@@ -166,23 +167,10 @@ class PythonBridge {
 		});
 	}
 
-	// ===== 便捷方法 =====
-	async identify(filePath) {
-		return this.call("identify", { path: filePath });
-	}
-
-	async getFolderInfo(folderPath) {
-		return this.call("folder_info", { path: folderPath }, 15000);
-	}
-
-	async getFolderSize(folderPath) {
-		return this.call("folder_size", { path: folderPath }, 15000);
-	}
-
-	async handleClipboard(targetDir) {
-		return this.call("clipboard", { target_dir: targetDir }, 10000);
-	}
-
+	async identify(filePath) { return this.call("identify", { path: filePath }); }
+	async getFolderInfo(folderPath) { return this.call("folder_info", { path: folderPath }, 15000); }
+	async getFolderSize(folderPath) { return this.call("folder_size", { path: folderPath }, 15000); }
+	async handleClipboard(targetDir) { return this.call("clipboard", { target_dir: targetDir }, 10000); }
 	stop() {
 		if (this.process && !this.process.killed) {
 			try { this.process.kill(); } catch (e) { }
@@ -191,7 +179,6 @@ class PythonBridge {
 	}
 }
 
-// 全局单例
 const pythonBridge = new PythonBridge();
 
 // ==================== 公共工具函数 ====================
@@ -203,54 +190,35 @@ function isLikelyBinary(filePath) {
 		".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav",
 		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 	]);
-
 	const ext = path.extname(filePath).toLowerCase();
 	if (binaryExts.has(ext)) return true;
-
 	try {
 		const buffer = Buffer.alloc(4096);
 		const fd = fs.openSync(filePath, "r");
 		try {
 			const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
 			if (bytesRead === 0) return false;
-			for (let i = 0; i < bytesRead; i++) {
-				if (buffer[i] === 0) return true;
-			}
+			for (let i = 0; i < bytesRead; i++) { if (buffer[i] === 0) return true; }
 			return false;
-		} finally {
-			fs.closeSync(fd);
-		}
-	} catch (e) {
-		return true;
-	}
+		} finally { fs.closeSync(fd); }
+	} catch (e) { return true; }
 }
 
-/**
- * 判断是否应该显示时长
- * （只有真正的视频和动图才显示）
- */
 function shouldShowDuration(info) {
 	if (!info) return false;
-	return (info.type === "video" || info.type === "animated_image") &&
-		info.duration > 0.1;
+	return (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
 }
 
 // ==================== qqq.pure 命令 ====================
 async function pureCommand() {
 	const editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		vscode.window.showInformationMessage("请先打开一个文件以确定工作目录");
-		return;
-	}
+	if (!editor) { vscode.window.showInformationMessage("请先打开一个文件以确定工作目录"); return; }
 
 	const currentDocPath = editor.document.uri.fsPath;
 	const parentDir = path.dirname(currentDocPath);
 	const qqqDir = path.join(parentDir, "qqq");
 
-	if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) {
-		vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹");
-		return;
-	}
+	if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) { vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹"); return; }
 
 	let qqqFiles = [];
 	try {
@@ -258,39 +226,22 @@ async function pureCommand() {
 			const fullPath = path.join(qqqDir, f);
 			return fs.statSync(fullPath).isFile();
 		});
-	} catch (e) {
-		vscode.window.showErrorMessage("读取 qqq 目录失败: " + e.message);
-		return;
-	}
+	} catch (e) { vscode.window.showErrorMessage("读取 qqq 目录失败: " + e.message); return; }
 
-	if (qqqFiles.length === 0) {
-		vscode.window.showInformationMessage("qqq 文件夹是空的");
-		return;
-	}
+	if (qqqFiles.length === 0) { vscode.window.showInformationMessage("qqq 文件夹是空的"); return; }
 
 	const referencedFiles = new Set();
 	let parentDirFiles = [];
+	try { parentDirFiles = fs.readdirSync(parentDir); } catch (e) { vscode.window.showErrorMessage("读取当前目录失败: " + e.message); return; }
 
-	try {
-		parentDirFiles = fs.readdirSync(parentDir);
-	} catch (e) {
-		vscode.window.showErrorMessage("读取当前目录失败: " + e.message);
-		return;
-	}
-
-	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
+	// ★ 使用统一正则 (创建新实例以重置状态)
+	const regex = new RegExp(QQQ_PATH_REGEX);
 
 	for (const fileName of parentDirFiles) {
 		const fullPath = path.join(parentDir, fileName);
 		if (fileName === "qqq" || fileName === "qqq.pure") continue;
 
-		let stats;
-		try {
-			stats = fs.statSync(fullPath);
-		} catch (e) {
-			continue;
-		}
-
+		let stats; try { stats = fs.statSync(fullPath); } catch (e) { continue; }
 		if (!stats.isFile()) continue;
 		if (!fullPath.includes("qqq")) continue;
 		if (isLikelyBinary(fullPath)) continue;
@@ -298,8 +249,10 @@ async function pureCommand() {
 		try {
 			const content = fs.readFileSync(fullPath, "utf-8");
 			let match;
+			regex.lastIndex = 0; // 重置
 			while ((match = regex.exec(content)) !== null) {
-				const refPath = match[0].slice(1, -1).replace(/\//g, "\\");
+				// ★ 处理前后空格 trim
+				const refPath = match[0].slice(1, -1).trim().replace(/\//g, "\\");
 				if (refPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
 					const refFileName = path.basename(refPath);
 					referencedFiles.add(refFileName.toLowerCase());
@@ -309,15 +262,10 @@ async function pureCommand() {
 	}
 
 	const orphans = qqqFiles.filter((f) => !referencedFiles.has(f.toLowerCase()));
-
-	if (orphans.length === 0) {
-		vscode.window.showInformationMessage("未发现孤儿文件");
-		return;
-	}
+	if (orphans.length === 0) { vscode.window.showInformationMessage("未发现孤儿文件"); return; }
 
 	const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
 	let commandStr = "";
-
 	if (os.platform() === "win32") {
 		const args = orphanPaths.map((p) => `"${p}"`).join(" ");
 		commandStr = `del ${args}`;
@@ -338,82 +286,50 @@ async function pureCommand() {
 		fs.writeFileSync(purePath, content, "utf-8");
 		const doc = await vscode.workspace.openTextDocument(purePath);
 		await vscode.window.showTextDocument(doc);
-	} catch (e) {
-		vscode.window.showErrorMessage("无法生成 qqq.pure 文件: " + e.message);
-	}
+	} catch (e) { vscode.window.showErrorMessage("无法生成 qqq.pure 文件: " + e.message); }
 }
 
-// ==================== 模块引用 ====================
 let q1Module = null;
 let q2Module = null;
 
-// ==================== 激活入口 ====================
 async function activate(context) {
 	logMessage("qqq 扩展开始激活...", "INFO");
-
-	// 1. 先启动 Python Bridge
 	pythonBridge.start().then((ok) => {
-		if (ok) {
-			logMessage("Python Bridge 启动成功", "INFO");
-		} else {
-			logMessage("Python Bridge 启动失败，使用 JS 兜底", "WARN");
-		}
+		if (ok) logMessage("Python Bridge 启动成功", "INFO");
+		else logMessage("Python Bridge 启动失败，使用 JS 兜底", "WARN");
 	});
-
-	// 2. 注册命令
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.pure", pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		})
 	);
-
-	// 3. 加载子模块（此时 pythonBridge 已导出）
 	try {
 		q1Module = require("./q1");
-		if (q1Module && typeof q1Module.activate === "function") {
-			q1Module.activate(context);
-		}
-	} catch (e) {
-		logMessage(`q1 模块加载失败: ${e.message}`, "ERROR");
-		vscode.window.showErrorMessage(`qqq 粘贴功能启动失败: ${e.message}`);
-	}
-
+		if (q1Module && typeof q1Module.activate === "function") q1Module.activate(context);
+	} catch (e) { logMessage(`q1 模块加载失败: ${e.message}`, "ERROR"); vscode.window.showErrorMessage(`qqq 粘贴功能启动失败: ${e.message}`); }
 	try {
 		q2Module = require("./q2");
-		if (q2Module && typeof q2Module.activate === "function") {
-			q2Module.activate(context);
-		}
-	} catch (e) {
-		logMessage(`q2 模块加载失败: ${e.message}`, "ERROR");
-	}
-
+		if (q2Module && typeof q2Module.activate === "function") q2Module.activate(context);
+	} catch (e) { logMessage(`q2 模块加载失败: ${e.message}`, "ERROR"); }
 	logMessage("qqq 扩展激活完成", "INFO");
 }
 
 async function deactivate() {
-	// 停止 Python Bridge
 	pythonBridge.stop();
-
-	// 清理子模块
 	if (q1Module && typeof q1Module.deactivate === "function") {
-		try {
-			await q1Module.deactivate();
-		} catch (e) {
-			console.error("Q1 cleanup failed:", e);
-		}
+		try { await q1Module.deactivate(); } catch (e) { console.error("Q1 cleanup failed:", e); }
 	}
-
 	logMessage("qqq 扩展已停用", "INFO");
 }
 
-// ==================== 导出 ====================
 module.exports = {
 	activate,
 	deactivate,
-	pythonBridge,       // ★ 供 q1/q2 使用
-	shouldShowDuration, // ★ 供 q1 使用
+	pythonBridge,
+	shouldShowDuration,
 	logMessage,
 	LOG_PATH,
 	BASE_DIR,
+	QQQ_PATH_REGEX // ★ 导出正则
 };
