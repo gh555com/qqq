@@ -1,27 +1,23 @@
-// File: src/qqq.js
+// src/qqq.js
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const cp = require("child_process");
+const readline = require("readline");
 
-// ==================== 公共配置常量 ====================
-// 已移除 E:\\r\\pz.ini 相关配置
+// ==================== 公共配置 ====================
 const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
-
 const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
-// ==================== 公共工具函数 ====================
-
+// ==================== 日志工具 ====================
 function ensureLogDir() {
 	try {
 		const dir = path.dirname(LOG_PATH);
-		if (!fs.existsSync(dir)) {
-			fs.mkdirSync(dir, { recursive: true });
-		}
+		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 		return true;
 	} catch (e) {
-		outputChannel.appendLine(`[Error] 无法创建日志目录: ${e.message}`);
 		return false;
 	}
 }
@@ -32,57 +28,184 @@ function logMessage(message, level = "INFO") {
 	outputChannel.appendLine(line);
 	if (level === "ERROR" || level === "WARN") {
 		try {
-			if (ensureLogDir()) {
-				fs.appendFileSync(LOG_PATH, line + "\n");
+			if (ensureLogDir()) fs.appendFileSync(LOG_PATH, line + "\n");
+		} catch (e) { }
+	}
+}
+
+// ==================== Python Bridge ====================
+class PythonBridge {
+	constructor() {
+		this.process = null;
+		this.pending = new Map();
+		this.requestId = 0;
+		this.isStarting = false;
+		this.startPromise = null;
+		this.restartCount = 0;
+		this.maxRestarts = 3;
+	}
+
+	async start() {
+		if (this.process && !this.process.killed) return true;
+		if (this.isStarting) return this.startPromise;
+
+		this.isStarting = true;
+		this.startPromise = this._doStart();
+
+		try {
+			return await this.startPromise;
+		} finally {
+			this.isStarting = false;
+			this.startPromise = null;
+		}
+	}
+
+	async _doStart() {
+		return new Promise((resolve) => {
+			const scriptPath = path.join(__dirname, "kp.py");
+
+			this.process = cp.spawn("python", [scriptPath, "--daemon"], {
+				stdio: ["pipe", "pipe", "pipe"],
+				windowsHide: true
+			});
+
+			const rl = readline.createInterface({
+				input: this.process.stdout,
+				crlfDelay: Infinity
+			});
+
+			rl.on("line", (line) => {
+				try {
+					const result = JSON.parse(line);
+					const id = result._id;
+					if (this.pending.has(id)) {
+						const { resolve: res, timer } = this.pending.get(id);
+						clearTimeout(timer);
+						this.pending.delete(id);
+						res(result);
+					}
+				} catch (e) {
+					logMessage(`Python Bridge parse error: ${e}`, "ERROR");
+				}
+			});
+
+			this.process.stderr.on("data", (data) => {
+				logMessage(`Python stderr: ${data.toString()}`, "WARN");
+			});
+
+			this.process.on("error", (err) => {
+				logMessage(`Python process error: ${err}`, "ERROR");
+				this._handleCrash();
+			});
+
+			this.process.on("close", (code) => {
+				logMessage(`Python process closed: ${code}`, "WARN");
+				this._handleCrash();
+			});
+
+			// 验证启动
+			setTimeout(async () => {
+				try {
+					const pong = await this.call("ping", {}, 2000);
+					if (pong && pong.status === "alive") {
+						this.restartCount = 0;
+						logMessage("Python Bridge started", "INFO");
+						resolve(true);
+					} else {
+						resolve(false);
+					}
+				} catch (e) {
+					resolve(false);
+				}
+			}, 100);
+		});
+	}
+
+	_handleCrash() {
+		this.process = null;
+
+		for (const [id, { resolve, timer }] of this.pending) {
+			clearTimeout(timer);
+			resolve({ error: "process_crashed" });
+		}
+		this.pending.clear();
+
+		if (this.restartCount < this.maxRestarts) {
+			this.restartCount++;
+			logMessage(`Python Bridge restart ${this.restartCount}/${this.maxRestarts}`, "WARN");
+			setTimeout(() => this.start(), 500);
+		}
+	}
+
+	async call(action, params = {}, timeout = 5000) {
+		if (!this.process || this.process.killed) {
+			const started = await this.start();
+			if (!started) return { error: "python_not_available" };
+		}
+
+		const id = ++this.requestId;
+		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
+
+			this.pending.set(id, { resolve, timer });
+
+			try {
+				this.process.stdin.write(cmd);
+			} catch (e) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
 			}
-		} catch (e) {
-			console.error("本地日志写入失败:", e);
+		});
+	}
+
+	// ===== 便捷方法 =====
+	async identify(filePath) {
+		return this.call("identify", { path: filePath });
+	}
+
+	async getFolderInfo(folderPath) {
+		return this.call("folder_info", { path: folderPath }, 15000);
+	}
+
+	async getFolderSize(folderPath) {
+		return this.call("folder_size", { path: folderPath }, 15000);
+	}
+
+	async handleClipboard(targetDir) {
+		return this.call("clipboard", { target_dir: targetDir }, 10000);
+	}
+
+	stop() {
+		if (this.process && !this.process.killed) {
+			try { this.process.kill(); } catch (e) { }
+			this.process = null;
 		}
 	}
 }
 
+// 全局单例
+const pythonBridge = new PythonBridge();
+
+// ==================== 公共工具函数 ====================
 function isLikelyBinary(filePath) {
 	const binaryExts = new Set([
-		".png",
-		".jpg",
-		".jpeg",
-		".gif",
-		".bmp",
-		".webp",
-		".ico",
-		".tiff",
-		".tif",
-		".exe",
-		".dll",
-		".so",
-		".dylib",
-		".bin",
-		".obj",
-		".o",
-		".zip",
-		".tar",
-		".gz",
-		".7z",
-		".rar",
-		".mp3",
-		".mp4",
-		".avi",
-		".mov",
-		".mkv",
-		".wav",
-		".pdf",
-		".doc",
-		".docx",
-		".xls",
-		".xlsx",
-		".ppt",
-		".pptx",
+		".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
+		".exe", ".dll", ".so", ".dylib", ".bin", ".obj", ".o",
+		".zip", ".tar", ".gz", ".7z", ".rar",
+		".mp3", ".mp4", ".avi", ".mov", ".mkv", ".wav",
+		".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
 	]);
 
 	const ext = path.extname(filePath).toLowerCase();
-	if (binaryExts.has(ext)) {
-		return true;
-	}
+	if (binaryExts.has(ext)) return true;
 
 	try {
 		const buffer = Buffer.alloc(4096);
@@ -91,9 +214,7 @@ function isLikelyBinary(filePath) {
 			const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
 			if (bytesRead === 0) return false;
 			for (let i = 0; i < bytesRead; i++) {
-				if (buffer[i] === 0) {
-					return true;
-				}
+				if (buffer[i] === 0) return true;
 			}
 			return false;
 		} finally {
@@ -104,9 +225,18 @@ function isLikelyBinary(filePath) {
 	}
 }
 
-// ==================== qqq.pure 命令逻辑 ====================
+/**
+ * 判断是否应该显示时长
+ * （只有真正的视频和动图才显示）
+ */
+function shouldShowDuration(info) {
+	if (!info) return false;
+	return (info.type === "video" || info.type === "animated_image") &&
+		info.duration > 0.1;
+}
 
-async function pureComknd() {
+// ==================== qqq.pure 命令 ====================
+async function pureCommand() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		vscode.window.showInformationMessage("请先打开一个文件以确定工作目录");
@@ -124,12 +254,10 @@ async function pureComknd() {
 
 	let qqqFiles = [];
 	try {
-		qqqFiles = fs
-			.readdirSync(qqqDir)
-			.filter((f) => {
-				const fullPath = path.join(qqqDir, f);
-				return fs.statSync(fullPath).isFile();
-			});
+		qqqFiles = fs.readdirSync(qqqDir).filter((f) => {
+			const fullPath = path.join(qqqDir, f);
+			return fs.statSync(fullPath).isFile();
+		});
 	} catch (e) {
 		vscode.window.showErrorMessage("读取 qqq 目录失败: " + e.message);
 		return;
@@ -152,12 +280,9 @@ async function pureComknd() {
 
 	const regex = /\/[a-z]:[^\/]*?qqq[^\/]*?\//g;
 
-
 	for (const fileName of parentDirFiles) {
 		const fullPath = path.join(parentDir, fileName);
-
-		if (fileName === "qqq") continue;
-		if (fileName === "qqq.pure") continue;
+		if (fileName === "qqq" || fileName === "qqq.pure") continue;
 
 		let stats;
 		try {
@@ -167,15 +292,8 @@ async function pureComknd() {
 		}
 
 		if (!stats.isFile()) continue;
-
-		// 修改为严格匹配小写的 "qqq"
-		if (!fullPath.includes("qqq")) {
-			continue;
-		}
-
-		if (isLikelyBinary(fullPath)) {
-			continue;
-		}
+		if (!fullPath.includes("qqq")) continue;
+		if (isLikelyBinary(fullPath)) continue;
 
 		try {
 			const content = fs.readFileSync(fullPath, "utf-8");
@@ -190,46 +308,30 @@ async function pureComknd() {
 		} catch (e) { }
 	}
 
-	const orphans = qqqFiles.filter(
-		(f) => !referencedFiles.has(f.toLowerCase()),
-	);
+	const orphans = qqqFiles.filter((f) => !referencedFiles.has(f.toLowerCase()));
 
 	if (orphans.length === 0) {
 		vscode.window.showInformationMessage("未发现孤儿文件");
 		return;
 	}
 
-	const newLine = "\n";
-	const prefixSpaces = "   ";
-
-	let comkndStr = "";
 	const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
+	let commandStr = "";
 
 	if (os.platform() === "win32") {
 		const args = orphanPaths.map((p) => `"${p}"`).join(" ");
-		comkndStr = `del ${args}`;
+		commandStr = `del ${args}`;
 	} else {
 		const args = orphanPaths.map((p) => `"${p}"`).join(" ");
-		comkndStr = `q rm ${args}`; // sudo -> q
+		commandStr = `q rm ${args}`;
 	}
 
-	let content = "";
-
-	for (let i = 0; i < 13; i++) content += newLine;
-	content +=
-		prefixSpaces +
-		"请在 CMD 窗口中执行下面命令以 删除 当前未引用滴文件：" +
-		newLine;
-
-	for (let i = 0; i < 3; i++) content += newLine;
-	content += prefixSpaces + comkndStr + newLine;
-
-	for (let i = 0; i < 3; i++) content += newLine;
-
-	const orphanListStr = orphanPaths
-		.map((p) => `/${p}/`)
-		.join(newLine + newLine + newLine + newLine + newLine);
-	content += orphanListStr;
+	let content = "\n".repeat(13);
+	content += "   请在 CMD 窗口中执行下面命令以删除未引用的文件：\n";
+	content += "\n".repeat(3);
+	content += "   " + commandStr + "\n";
+	content += "\n".repeat(3);
+	content += orphanPaths.map((p) => `/${p}/`).join("\n\n\n\n\n");
 
 	const purePath = path.join(parentDir, "qqq.pure");
 	try {
@@ -241,57 +343,59 @@ async function pureComknd() {
 	}
 }
 
-// ==================== 模块激活入口 ====================
-
-// 定义外部引用，方便在 deactivate 中调用
+// ==================== 模块引用 ====================
 let q1Module = null;
+let q2Module = null;
 
-function activate(context) {
+// ==================== 激活入口 ====================
+async function activate(context) {
 	logMessage("qqq 扩展开始激活...", "INFO");
 
-	context.subscriptions.push(
-		// 只暴露 qqq.pure
-		vscode.commands.registerCommand("qqq.pure", pureComknd),
+	// 1. 先启动 Python Bridge
+	pythonBridge.start().then((ok) => {
+		if (ok) {
+			logMessage("Python Bridge 启动成功", "INFO");
+		} else {
+			logMessage("Python Bridge 启动失败，使用 JS 兜底", "WARN");
+		}
+	});
 
-		// 新增：qqq: all settings —— 打开当前扩展的设置页
+	// 2. 注册命令
+	context.subscriptions.push(
+		vscode.commands.registerCommand("qqq.pure", pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
-			// 等同于在扩展视图右键本扩展 -> 设置
-			vscode.commands.executeCommand(
-				"workbench.action.openSettings",
-				"@ext:gh555.qqq",
-			);
-		}),
+			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+		})
 	);
 
-	// --- 加载 Q1 模块（粘贴 + 预览） ---
+	// 3. 加载子模块（此时 pythonBridge 已导出）
 	try {
-		const q1 = require("./q1");
-		if (q1 && typeof q1.activate === "function") {
-			q1.activate(context);
-			q1Module = q1; // 保存引用
+		q1Module = require("./q1");
+		if (q1Module && typeof q1Module.activate === "function") {
+			q1Module.activate(context);
 		}
 	} catch (e) {
 		logMessage(`q1 模块加载失败: ${e.message}`, "ERROR");
-		vscode.window.showErrorMessage(
-			`qqq 插件警告: 粘贴功能启动失败。原因: ${e.message}`,
-		);
+		vscode.window.showErrorMessage(`qqq 粘贴功能启动失败: ${e.message}`);
 	}
 
-	// --- 加载 Q2 模块 ---
 	try {
-		const q2 = require("./q2");
-		if (q2 && typeof q2.activate === "function") {
-			q2.activate(context);
+		q2Module = require("./q2");
+		if (q2Module && typeof q2Module.activate === "function") {
+			q2Module.activate(context);
 		}
 	} catch (e) {
 		logMessage(`q2 模块加载失败: ${e.message}`, "ERROR");
 	}
 
-	logMessage("qqq 扩展激活流程结束", "INFO");
+	logMessage("qqq 扩展激活完成", "INFO");
 }
 
 async function deactivate() {
-	// 优雅退出：调用 q1 的 deactivate 来记录用户使用时长
+	// 停止 Python Bridge
+	pythonBridge.stop();
+
+	// 清理子模块
 	if (q1Module && typeof q1Module.deactivate === "function") {
 		try {
 			await q1Module.deactivate();
@@ -299,13 +403,17 @@ async function deactivate() {
 			console.error("Q1 cleanup failed:", e);
 		}
 	}
+
 	logMessage("qqq 扩展已停用", "INFO");
 }
 
+// ==================== 导出 ====================
 module.exports = {
 	activate,
 	deactivate,
+	pythonBridge,       // ★ 供 q1/q2 使用
+	shouldShowDuration, // ★ 供 q1 使用
+	logMessage,
 	LOG_PATH,
 	BASE_DIR,
-	logMessage,
 };

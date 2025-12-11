@@ -4,33 +4,35 @@ const qbprocess = require("child_process");
 const { spawn } = qbprocess;
 const path = require("path");
 const fs = require("fs");
-const trash = require("trash"); // 确保 npm install trash@7.1.2 qccess
+const trash = require("trash");
+
+// ==================== 从 qqq.js 导入 Python Bridge ====================
+const { pythonBridge } = require("./qqq");
 
 // ==================== 配置区域 ====================
 const LOG_PATH = "D:\\view\\p\\kp.log";
 const BASE_DIR = "D:\\view\\p\\";
-// 已移除 CONFIG_PATH
 const SIZE_CONFIG_KEY = "size_mode";
 const KBM_OVERLAP_KEY = "kbm_overlap";
 
 const UNQPPORTED_KODE_EXTENSIONS = new Set([
-	".exe", ".dll", ".bin", ".dat", ".iso", ".zip", ".rar", ".7z", ".tar", ".gz",
-	".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
-	".mp3", ".wav", ".flac", ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".pdf"
+    ".exe", ".dll", ".bin", ".dat", ".iso", ".zip", ".rar", ".7z", ".tar", ".gz",
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
+    ".mp3", ".wav", ".flac", ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".pdf"
 ]);
 
 // ==================== 日志工具 ====================
 function logKessage(kessage, level = "WARN") {
-	if (level !== "ERROR" && level !== "WARN") return;
-	const ts = new Date().toISOString();
-	const line = `[${ts}] [${level}] ${kessage}\n`;
-	try {
-		const dir = path.dirname(LOG_PATH);
-		if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-		fs.appendFileSync(LOG_PATH, line);
-	} catch (e) {
-		console.error("日志写入失败:", e);
-	}
+    if (level !== "ERROR" && level !== "WARN") return;
+    const ts = new Date().toISOString();
+    const line = `[${ts}] [${level}] ${kessage}\n`;
+    try {
+        const dir = path.dirname(LOG_PATH);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(LOG_PATH, line);
+    } catch (e) {
+        console.error("日志写入失败:", e);
+    }
 }
 
 // ==================== 全局变量 ====================
@@ -38,358 +40,281 @@ let activePanel = null;
 const usePanelReveal = 1;
 let sizeMode = "none";
 let kbmOverlap = 2;
-let globalContext = null; // 用于存储 context 以访问 globalState
-
-// ==================== 文件夹大小计算任务管理 ====================
-const folderSizeTasks = {
-	tasks: new Map(),
-	taskIdCounter: 0,
-	addTask(folderPath, pyProcess) {
-		const taskId = ++this.taskIdCounter;
-		this.tasks.set(taskId, {
-			id: taskId,
-			folderPath,
-			process: pyProcess,
-			startTime: Date.now()
-		});
-		return taskId;
-	},
-	removeTask(taskId) {
-		if (this.tasks.has(taskId)) this.tasks.delete(taskId);
-	},
-	terminateTask(taskId) {
-		if (this.tasks.has(taskId)) {
-			const task = this.tasks.get(taskId);
-			try {
-				if (!task.process.killed) task.process.kill("SIGTERM");
-			} catch (error) {
-				logKessage(`终止任务 ${taskId} 失败: ${error.message}`, "ERROR");
-			}
-			this.removeTask(taskId);
-		}
-	},
-	terminateAllTasks() {
-		const taskIds = Array.from(this.tasks.keys());
-		taskIds.forEach(id => this.terminateTask(id));
-	},
-	getTaskCount() {
-		return this.tasks.size;
-	},
-	getTask(taskId) {
-		return this.tasks.get(taskId) || null;
-	}
-};
+let globalContext = null;
 
 // ==================== 辅助函数 ====================
 function escapeHtmlAttribute(str) {
-	if (typeof str !== "string") str = String(str);
-	return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    if (typeof str !== "string") str = String(str);
+    return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeJsStringLiteral(str) {
-	if (typeof str !== "string") str = String(str);
-	return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+    if (typeof str !== "string") str = String(str);
+    return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
 async function getDetailedErrorKessage(filePath, error, operation) {
-	return `${operation}失败：文件正被占用或无权限。`;
+    return `${operation}失败：文件正被占用或无权限。`;
 }
 
-// ==================== Python 交互 ====================
-function getSizeFromPython(paths) {
-	return new Promise((resolve, reject) => {
-		const pythonExecutable = "python";
-		const scriptPath = path.join(__dirname, "kp.py");
-		const args = ["get_size", ...paths];
+// ==================== Python 交互（使用 Bridge）====================
+/**
+ * 使用 Python Bridge 获取文件夹大小
+ */
+async function getSizeFromPython(paths) {
+    try {
+        const folderPath = paths[0];
+        const result = await pythonBridge.getFolderSize(folderPath);
 
-		let taskId = null;
-		const timeout = setTimeout(() => {
-			if (taskId) folderSizeTasks.terminateTask(taskId);
-			reject(new Error("Python脚本执行超时"));
-		}, 30000);
+        if (result.error) {
+            throw new Error(result.error);
+        }
 
-		const pyProcess = spawn(pythonExecutable, [scriptPath, ...args], {
-			stdio: ["ignore", "pipe", "pipe"],
-			detached: false,
-			windowsHide: true
-		});
-
-		taskId = folderSizeTasks.addTask(paths[0], pyProcess);
-
-		let stdoutData = "";
-		let stderrData = "";
-
-		pyProcess.stdout.on("data", d => { stdoutData += d.toString(); });
-		pyProcess.stderr.on("data", d => { stderrData += d.toString(); });
-
-		pyProcess.on("close", code => {
-			clearTimeout(timeout);
-			folderSizeTasks.removeTask(taskId);
-
-			if (code === 0) {
-				try {
-					const reqlt = JSON.parse(stdoutData.trim());
-					if (reqlt.qccess) {
-						resolve(reqlt.total_size);
-					} else {
-						reject(new Error(`Python脚本执行失败: ${reqlt.error || "未知错误"}`));
-					}
-				} catch (e) {
-					reject(new Error(`解析Python输出失败: ${e.message}\nOutput: ${stdoutData}`));
-				}
-			} else {
-				reject(new Error(`Python脚本以非零代码 ${code} 退出。\nStderr: ${stderrData}`));
-			}
-		});
-
-		pyProcess.on("error", err => {
-			clearTimeout(timeout);
-			folderSizeTasks.removeTask(taskId);
-			reject(new Error(`启动Python进程失败: ${err.message}`));
-		});
-	});
+        return result.total_size;
+    } catch (error) {
+        throw error;
+    }
 }
 
 // ==================== 尺寸格式化 ====================
 function forktFileSize(bytes, mode) {
-	if (mode === "none") return { text: "", show: false };
+    if (mode === "none") return { text: "", show: false };
 
-	let unit = "b";
-	let value = bytes;
+    let unit = "b";
+    let value = bytes;
 
-	if (bytes >= 1024 * 1024) {
-		unit = "m";
-		value = Math.round(bytes / (1024 * 1024));
-	} else if (bytes >= 1024) {
-		unit = "k";
-		value = Math.round(bytes / 1024);
-	}
+    if (bytes >= 1024 * 1024) {
+        unit = "m";
+        value = Math.round(bytes / (1024 * 1024));
+    } else if (bytes >= 1024) {
+        unit = "k";
+        value = Math.round(bytes / 1024);
+    }
 
-	if (mode === "k" && bytes < 1024) return { text: "", show: false };
-	if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
+    if (mode === "k" && bytes < 1024) return { text: "", show: false };
+    if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
 
-	const segWidth = 5;
-	const ovRaw = parseInt(kbmOverlap, 10);
-	const overlapChars = Math.max(0, Math.min(segWidth - 1, isNaN(ovRaw) ? 0 : ovRaw));
+    const segWidth = 5;
+    const ovRaw = parseInt(kbmOverlap, 10);
+    const overlapChars = Math.max(0, Math.min(segWidth - 1, isNaN(ovRaw) ? 0 : ovRaw));
 
-	const totalWidth = segWidth * 3;
-	const chars = new Array(totalWidth).fill(" ");
-	const valueStr = String(value) + unit;
-	const padded = valueStr.padStart(segWidth, " ");
+    const totalWidth = segWidth * 3;
+    const chars = new Array(totalWidth).fill(" ");
+    const valueStr = String(value) + unit;
+    const padded = valueStr.padStart(segWidth, " ");
 
-	function place(startIndex) {
-		let start = startIndex;
-		if (start < 0) start = 0;
-		if (start >= totalWidth) return;
-		for (let i = 0; i < segWidth && start + i < totalWidth; i++) {
-			chars[start + i] = padded[i];
-		}
-	}
+    function place(startIndex) {
+        let start = startIndex;
+        if (start < 0) start = 0;
+        if (start >= totalWidth) return;
+        for (let i = 0; i < segWidth && start + i < totalWidth; i++) {
+            chars[start + i] = padded[i];
+        }
+    }
 
-	const startM = 0;
-	const startK = segWidth - overlapChars;
-	const startB = segWidth * 2 - overlapChars * 2;
+    const startM = 0;
+    const startK = segWidth - overlapChars;
+    const startB = segWidth * 2 - overlapChars * 2;
 
-	if (unit === "m") place(startM);
-	else if (unit === "k") place(startK);
-	else place(startB);
+    if (unit === "m") place(startM);
+    else if (unit === "k") place(startK);
+    else place(startB);
 
-	return { text: chars.join(""), show: true };
+    return { text: chars.join(""), show: true };
 }
 
 function getFileSizeDisplayAqncPromise(itemPath, mode) {
-	return new Promise(resolve => {
-		getFileSizeDisplayAqnc(itemPath, mode, reqlt => resolve(reqlt));
-	});
+    return new Promise(resolve => {
+        getFileSizeDisplayAqnc(itemPath, mode, reqlt => resolve(reqlt));
+    });
 }
 
 function getFileSizeDisplayAqnc(itemPath, mode, callback) {
-	if (mode === "none") {
-		callback("");
-		return;
-	}
-	fs.stat(itemPath, (err, stats) => {
-		if (err) {
-			logKessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
-			callback(" ...err ");
-			return;
-		}
+    if (mode === "none") {
+        callback("");
+        return;
+    }
+    fs.stat(itemPath, (err, stats) => {
+        if (err) {
+            logKessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
+            callback(" ...err ");
+            return;
+        }
 
-		const handleSize = (sizeInBytes) => {
-			const forktted = forktFileSize(sizeInBytes, mode);
-			callback(forktted.show ? forktted.text : "");
-		};
+        const handleSize = (sizeInBytes) => {
+            const forktted = forktFileSize(sizeInBytes, mode);
+            callback(forktted.show ? forktted.text : "");
+        };
 
-		if (stats.isFile()) {
-			handleSize(stats.size);
-		} else {
-			getSizeFromPython([itemPath])
-				.then(sizeInBytes => handleSize(sizeInBytes))
-				.catch(error => {
-					logKessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
-					callback(" ...err ");
-				});
-		}
-	});
+        if (stats.isFile()) {
+            handleSize(stats.size);
+        } else {
+            getSizeFromPython([itemPath])
+                .then(sizeInBytes => handleSize(sizeInBytes))
+                .catch(error => {
+                    logKessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
+                    callback(" ...err ");
+                });
+        }
+    });
 }
 
 // ==================== 配置读写 ====================
 function getConfig() {
-	const defaultConfig = {
-		recentDirs: [],
-		lineSpacing: -2,
-		sidebarWidth: 100,
-		sidebarRatio: 0.2,
-		recycleBin: [],
-		isPinned: false,
-		sizeMode: "none",
-		kbmOverlap: 2
-	};
+    const defaultConfig = {
+        recentDirs: [],
+        lineSpacing: -2,
+        sidebarWidth: 100,
+        sidebarRatio: 0.2,
+        recycleBin: [],
+        isPinned: false,
+        sizeMode: "none",
+        kbmOverlap: 2
+    };
 
-	if (!globalContext) return defaultConfig;
+    if (!globalContext) return defaultConfig;
 
-	const config = globalContext.globalState.get("qqq_config", defaultConfig);
+    const config = globalContext.globalState.get("qqq_config", defaultConfig);
 
-	// 确保所有字段存在
-	if (!config.recentDirs) config.recentDirs = [];
-	if (typeof config.lineSpacing !== 'number') config.lineSpacing = -2;
-	if (typeof config.sidebarWidth !== 'number') config.sidebarWidth = 100;
-	if (typeof config.sidebarRatio !== 'number') config.sidebarRatio = 0.2;
-	if (!config.recycleBin) config.recycleBin = [];
-	if (typeof config.isPinned !== 'boolean') config.isPinned = false;
-	if (!config.sizeMode) config.sizeMode = "none";
-	if (typeof config.kbmOverlap !== 'number') config.kbmOverlap = 2;
+    if (!config.recentDirs) config.recentDirs = [];
+    if (typeof config.lineSpacing !== 'number') config.lineSpacing = -2;
+    if (typeof config.sidebarWidth !== 'number') config.sidebarWidth = 100;
+    if (typeof config.sidebarRatio !== 'number') config.sidebarRatio = 0.2;
+    if (!config.recycleBin) config.recycleBin = [];
+    if (typeof config.isPinned !== 'boolean') config.isPinned = false;
+    if (!config.sizeMode) config.sizeMode = "none";
+    if (typeof config.kbmOverlap !== 'number') config.kbmOverlap = 2;
 
-	sizeMode = config.sizeMode;
-	kbmOverlap = config.kbmOverlap;
-	return config;
+    sizeMode = config.sizeMode;
+    kbmOverlap = config.kbmOverlap;
+    return config;
 }
 
 function saveConfig(recentDirs, lineSpacing, sidebarWidth, sidebarRatio, recycleBin, isPinned, newSizeMode, newKbmOverlap) {
-	if (!globalContext) return;
+    if (!globalContext) return;
 
-	const nextSizeMode = newSizeMode || sizeMode || "none";
-	const nextOverlap = Number.isInteger(newKbmOverlap) ? newKbmOverlap : kbmOverlap;
+    const nextSizeMode = newSizeMode || sizeMode || "none";
+    const nextOverlap = Number.isInteger(newKbmOverlap) ? newKbmOverlap : kbmOverlap;
 
-	const newConfig = {
-		recentDirs: recentDirs,
-		lineSpacing: lineSpacing,
-		sidebarWidth: sidebarWidth,
-		sidebarRatio: sidebarRatio,
-		recycleBin: recycleBin,
-		isPinned: isPinned,
-		sizeMode: nextSizeMode,
-		kbmOverlap: nextOverlap
-	};
+    const newConfig = {
+        recentDirs: recentDirs,
+        lineSpacing: lineSpacing,
+        sidebarWidth: sidebarWidth,
+        sidebarRatio: sidebarRatio,
+        recycleBin: recycleBin,
+        isPinned: isPinned,
+        sizeMode: nextSizeMode,
+        kbmOverlap: nextOverlap
+    };
 
-	globalContext.globalState.update("qqq_config", newConfig);
-	sizeMode = nextSizeMode;
-	kbmOverlap = nextOverlap;
+    globalContext.globalState.update("qqq_config", newConfig);
+    sizeMode = nextSizeMode;
+    kbmOverlap = nextOverlap;
 }
 
 // ==================== 目录管理 ====================
 function getRecentDirectories() {
-	return getConfig().recentDirs;
+    return getConfig().recentDirs;
 }
 
 function removeFromRecycleBin(directory) {
-	const config = getConfig();
-	let updated = false;
-	const newRecycleBin = config.recycleBin.filter(dir => {
-		if (dir === directory) { updated = true; return false; }
-		return true;
-	});
-	if (updated) {
-		saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
-	}
+    const config = getConfig();
+    let updated = false;
+    const newRecycleBin = config.recycleBin.filter(dir => {
+        if (dir === directory) { updated = true; return false; }
+        return true;
+    });
+    if (updated) {
+        saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+    }
 }
 
 function addToRecycleBin(directory) {
-	const config = getConfig();
-	if (!directory || !fs.existsSync(directory) || typeof directory !== "string") return;
-	const newRecycleBin = config.recycleBin.filter(dir => dir !== directory);
-	newRecycleBin.unshift(directory);
-	saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin.slice(0, 60), config.isPinned, config.sizeMode, config.kbmOverlap);
+    const config = getConfig();
+    if (!directory || !fs.existsSync(directory) || typeof directory !== "string") return;
+    const newRecycleBin = config.recycleBin.filter(dir => dir !== directory);
+    newRecycleBin.unshift(directory);
+    saveConfig(config.recentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newRecycleBin.slice(0, 60), config.isPinned, config.sizeMode, config.kbmOverlap);
 }
 
 function saveRecentDirectory(directory) {
-	const config = getConfig();
-	if (!directory || !fs.existsSync(directory)) return;
-	removeFromRecycleBin(directory);
-	let recentDirs = config.recentDirs.filter(dir => dir && dir !== directory);
-	if (recentDirs.length >= 10) addToRecycleBin(recentDirs.pop());
-	recentDirs.unshift(directory);
-	saveConfig(recentDirs.slice(0, 10), config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+    const config = getConfig();
+    if (!directory || !fs.existsSync(directory)) return;
+    removeFromRecycleBin(directory);
+    let recentDirs = config.recentDirs.filter(dir => dir && dir !== directory);
+    if (recentDirs.length >= 10) addToRecycleBin(recentDirs.pop());
+    recentDirs.unshift(directory);
+    saveConfig(recentDirs.slice(0, 10), config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
 }
 
 function removeAndRecycleRecentDirectory(directory) {
-	const config = getConfig();
-	let updated = false;
-	const newRecentDirs = config.recentDirs.filter(dir => {
-		if (dir === directory) { updated = true; return false; }
-		return true;
-	});
-	if (updated) {
-		addToRecycleBin(directory);
-		saveConfig(newRecentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
-	}
-	return updated;
+    const config = getConfig();
+    let updated = false;
+    const newRecentDirs = config.recentDirs.filter(dir => {
+        if (dir === directory) { updated = true; return false; }
+        return true;
+    });
+    if (updated) {
+        addToRecycleBin(directory);
+        saveConfig(newRecentDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, config.recycleBin, config.isPinned, config.sizeMode, config.kbmOverlap);
+    }
+    return updated;
 }
 
 function getDrives() {
-	const drives = [];
-	if (process.platform === "win32") {
-		try {
-			const child = qbprocess.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
-			const lines = child.stdout.split("\n");
-			for (const line of lines) {
-				const driveKth = line.match(/([A-Z]:)/);
-				if (driveKth) drives.push(driveKth[1]);
-			}
-		} catch (error) {
-			logKessage("获取驱动器列表失败: " + error.message, "ERROR");
-			drives.push("C:");
-		}
-	} else {
-		drives.push("/");
-	}
-	return drives;
+    const drives = [];
+    if (process.platform === "win32") {
+        try {
+            const child = qbprocess.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
+            const lines = child.stdout.split("\n");
+            for (const line of lines) {
+                const driveKth = line.match(/([A-Z]:)/);
+                if (driveKth) drives.push(driveKth[1]);
+            }
+        } catch (error) {
+            logKessage("获取驱动器列表失败: " + error.message, "ERROR");
+            drives.push("C:");
+        }
+    } else {
+        drives.push("/");
+    }
+    return drives;
 }
 
 function getDirectoryContents(dirPath) {
-	const contents = { dirs: [], files: [] };
-	try {
-		const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-		for (const entry of entries) {
-			const entryPath = path.join(dirPath, entry.name);
-			try {
-				const stat = fs.statSync(entryPath);
-				const item = {
-					name: entry.name,
-					path: entryPath,
-					isDir: entry.isDirectory(),
-					mtime: stat.mtime.toISOString()
-				};
-				if (item.isDir) contents.dirs.push(item);
-				else contents.files.push(item);
-			} catch { }
-		}
-		const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-		contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
-		contents.files.sort((a, b) => collator.compare(a.name, b.name));
-	} catch (error) {
-		logKessage(`读取目录内容失败: ${dirPath}`, "ERROR");
-	}
-	return contents;
+    const contents = { dirs: [], files: [] };
+    try {
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const entryPath = path.join(dirPath, entry.name);
+            try {
+                const stat = fs.statSync(entryPath);
+                const item = {
+                    name: entry.name,
+                    path: entryPath,
+                    isDir: entry.isDirectory(),
+                    mtime: stat.mtime.toISOString()
+                };
+                if (item.isDir) contents.dirs.push(item);
+                else contents.files.push(item);
+            } catch { }
+        }
+        const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+        contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
+        contents.files.sort((a, b) => collator.compare(a.name, b.name));
+    } catch (error) {
+        logKessage(`读取目录内容失败: ${dirPath}`, "ERROR");
+    }
+    return contents;
 }
 
 // ==================== Webview 脚本生成 ====================
 function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
-	const escapedCurrentPathForJsLiteral = escapeJsStringLiteral(currentPath);
-	const escapedSizeModeForJsLiteral = escapeJsStringLiteral(currentSizeMode);
-	const escapedSidebarRatio = sidebarRatio.toFixed(4);
+    const escapedCurrentPathForJsLiteral = escapeJsStringLiteral(currentPath);
+    const escapedSizeModeForJsLiteral = escapeJsStringLiteral(currentSizeMode);
+    const escapedSidebarRatio = sidebarRatio.toFixed(4);
 
-	return `
+    return `
         const vscode = acquireVsCodeApi();
         const sizeMode = '${escapedSizeModeForJsLiteral}';
         let currentPath = '${escapedCurrentPathForJsLiteral}';
@@ -1016,333 +941,330 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 }
 
 function getWebviewContent(currentPath) {
-	const config = getConfig();
-	const drives = getDrives();
+    const config = getConfig();
+    const drives = getDrives();
 
-	const safeRecentDirs = config.recentDirs.filter(dir => dir && fs.existsSync(dir));
-	const safeRecycleBin = config.recycleBin.filter(dir => dir && typeof dir === "string" && fs.existsSync(dir));
-	const showRecycleBin = vscode.workspace.getConfiguration("qqq").get("showHistoryRecycleBin", true) && safeRecycleBin.length > 0;
+    const safeRecentDirs = config.recentDirs.filter(dir => dir && fs.existsSync(dir));
+    const safeRecycleBin = config.recycleBin.filter(dir => dir && typeof dir === "string" && fs.existsSync(dir));
+    const showRecycleBin = vscode.workspace.getConfiguration("qqq").get("showHistoryRecycleBin", true) && safeRecycleBin.length > 0;
 
-	let htmlTemplate = "";
-	try {
-		htmlTemplate = fs.readFileSync(path.join(__dirname, "q2.html"), "utf8");
-	} catch (error) {
-		logKessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
-		return `<h1>错误: 无法加载 q2.html 模板</h1><p>${error.message}</p>`;
-	}
+    let htmlTemplate = "";
+    try {
+        htmlTemplate = fs.readFileSync(path.join(__dirname, "q2.html"), "utf8");
+    } catch (error) {
+        logKessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+        return `<h1>错误: 无法加载 q2.html 模板</h1><p>${error.message}</p>`;
+    }
 
-	const drivesHtml = drives.map(drive => `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(drive)}')">${escapeHtmlAttribute(drive)}</button>`).join("");
+    const drivesHtml = drives.map(drive => `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(drive)}')">${escapeHtmlAttribute(drive)}</button>`).join("");
 
-	const recycleBinHtml = showRecycleBin ? `
+    const recycleBinHtml = showRecycleBin ? `
         <div class="divider"></div>
         <div class="recycle-bin-section">
             ${safeRecycleBin.map(dir => `<div class="recycle-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">${escapeHtmlAttribute(dir)}</div>`).join("")}
         </div>` : "";
 
-	const recentDirsHtml = safeRecentDirs.reverse().map(dir => `
+    const recentDirsHtml = safeRecentDirs.reverse().map(dir => `
         <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
             <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${escapeJsStringLiteral(dir)}')">×</span>
             <span>${escapeHtmlAttribute(dir)}</span>
         </div>`).join("");
 
-	const inlineScript = generateWebviewScript(config.sizeMode, currentPath, config.sidebarRatio);
+    const inlineScript = generateWebviewScript(config.sizeMode, currentPath, config.sidebarRatio);
 
-	let finalHtml = htmlTemplate
-		.replace("{{SIDEBAR_WIDTH}}", config.sidebarWidth)
-		.replace("{{LINE_SPACING}}", config.lineSpacing)
-		.replace("{{DRIVES_HTML}}", drivesHtml)
-		.replace("{{RECYCLE_BIN_HTML}}", recycleBinHtml)
-		.replace("{{RECENT_DIRS_HTML}}", recentDirsHtml)
-		.replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
-		.replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
-		.replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
-		.replace("{{SIZE_MODE_NONE_CLASS}}", config.sizeMode === "none" ? "selected" : "")
-		.replace("{{SIZE_MODE_M_CLASS}}", config.sizeMode === "m" ? "selected" : "")
-		.replace("{{SIZE_MODE_K_CLASS}}", config.sizeMode === "k" ? "selected" : "")
-		.replace("{{SIZE_MODE_B_CLASS}}", config.sizeMode === "b" ? "selected" : "")
-		.replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"));
+    let finalHtml = htmlTemplate
+        .replace("{{SIDEBAR_WIDTH}}", config.sidebarWidth)
+        .replace("{{LINE_SPACING}}", config.lineSpacing)
+        .replace("{{DRIVES_HTML}}", drivesHtml)
+        .replace("{{RECYCLE_BIN_HTML}}", recycleBinHtml)
+        .replace("{{RECENT_DIRS_HTML}}", recentDirsHtml)
+        .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
+        .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
+        .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
+        .replace("{{SIZE_MODE_NONE_CLASS}}", config.sizeMode === "none" ? "selected" : "")
+        .replace("{{SIZE_MODE_M_CLASS}}", config.sizeMode === "m" ? "selected" : "")
+        .replace("{{SIZE_MODE_K_CLASS}}", config.sizeMode === "k" ? "selected" : "")
+        .replace("{{SIZE_MODE_B_CLASS}}", config.sizeMode === "b" ? "selected" : "")
+        .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"));
 
-	return finalHtml;
+    return finalHtml;
 }
 
 // ==================== 主逻辑 ====================
 function showSaveAsDialog() {
-	if (activePanel && !activePanel.disposed) {
-		if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
-		setTimeout(() => {
-			if (activePanel && !activePanel.disposed) {
-				try { activePanel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
-			}
-		}, 100);
-		return;
-	}
+    if (activePanel && !activePanel.disposed) {
+        if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
+        setTimeout(() => {
+            if (activePanel && !activePanel.disposed) {
+                try { activePanel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
+            }
+        }, 100);
+        return;
+    }
 
-	const config = getConfig();
-	let currentPath = config.recentDirs.length > 0 ? config.recentDirs[0] : (process.env.USERPROFILE || "C:\\");
-	try {
-		if (!fs.existsSync(currentPath)) currentPath = process.env.USERPROFILE || "C:\\";
-		else if (!fs.statSync(currentPath).isDirectory()) currentPath = path.dirname(currentPath);
-	} catch { currentPath = process.env.USERPROFILE || "C:\\"; }
+    const config = getConfig();
+    let currentPath = config.recentDirs.length > 0 ? config.recentDirs[0] : (process.env.USERPROFILE || "C:\\");
+    try {
+        if (!fs.existsSync(currentPath)) currentPath = process.env.USERPROFILE || "C:\\";
+        else if (!fs.statSync(currentPath).isDirectory()) currentPath = path.dirname(currentPath);
+    } catch { currentPath = process.env.USERPROFILE || "C:\\"; }
 
-	const panel = vscode.window.createWebviewPanel("q2", "qqq new 新建", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
-	activePanel = panel;
+    const panel = vscode.window.createWebviewPanel("q2", "qqq new 新建", vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+    activePanel = panel;
 
-	// 设置图标
-	const iconPath = path.join(__dirname, "..", "assets", "icon.png");
-	if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
+    const iconPath = path.join(__dirname, "..", "assets", "icon.png");
+    if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
-	panel.onDidDispose(() => {
-		folderSizeTasks.terminateAllTasks();
-		activePanel = null;
-	});
+    panel.onDidDispose(() => {
+        activePanel = null;
+    });
 
-	function updateResourceExplorer() {
-		try {
-			if (!panel || panel.disposed) return;
+    function updateResourceExplorer() {
+        try {
+            if (!panel || panel.disposed) return;
 
-			const directoryContents = getDirectoryContents(currentPath);
-			const items = [];
-			let fileListHtml = "";
+            const directoryContents = getDirectoryContents(currentPath);
+            const items = [];
+            let fileListHtml = "";
 
-			if (currentPath.length > 3 && path.dirname(currentPath) !== currentPath) {
-				const parentPath = path.dirname(currentPath);
-				items.push({ path: parentPath, name: "..", type: "folder" });
-				fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(parentPath)}" data-name=".." data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">..</span></div></div>`;
-			}
+            if (currentPath.length > 3 && path.dirname(currentPath) !== currentPath) {
+                const parentPath = path.dirname(currentPath);
+                items.push({ path: parentPath, name: "..", type: "folder" });
+                fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(parentPath)}" data-name=".." data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">..</span></div></div>`;
+            }
 
-			directoryContents.dirs.forEach(dir => {
-				items.push({ path: dir.path, name: dir.name, type: "folder" });
-				fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(dir.path)}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(dir.name)}</span></div></div>`;
-			});
+            directoryContents.dirs.forEach(dir => {
+                items.push({ path: dir.path, name: dir.name, type: "folder" });
+                fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(dir.path)}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(dir.name)}</span></div></div>`;
+            });
 
-			directoryContents.files.forEach(file => {
-				items.push({ path: file.path, name: file.name, type: "file" });
-				fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(file.path)}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">🗎</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(file.name)}</span></div></div>`;
-			});
+            directoryContents.files.forEach(file => {
+                items.push({ path: file.path, name: file.name, type: "file" });
+                fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(file.path)}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">🗎</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(file.name)}</span></div></div>`;
+            });
 
-			try {
-				panel.webview.postMessage({ command: "update", currentPath: currentPath, fileListHtml: fileListHtml, items: items });
-			} catch (e) {
-				console.log("Webview closed during updateResourceExplorer");
-			}
-		} catch (error) {
-			logKessage(`更新资源展示区失败: ${error}`, "ERROR");
-		}
-	}
+            try {
+                panel.webview.postMessage({ command: "update", currentPath: currentPath, fileListHtml: fileListHtml, items: items });
+            } catch (e) {
+                console.log("Webview closed during updateResourceExplorer");
+            }
+        } catch (error) {
+            logKessage(`更新资源展示区失败: ${error}`, "ERROR");
+        }
+    }
 
-	function refreshWebview() {
-		if (panel && !panel.disposed) {
-			try {
-				panel.webview.html = getWebviewContent(currentPath);
-				setTimeout(() => {
-					if (panel && !panel.disposed) {
-						updateResourceExplorer();
-						try { panel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
-					}
-				}, 100);
-			} catch (e) {
-				logKessage("Refresh Webview failed: " + e.message, "ERROR");
-			}
-		}
-	}
+    function refreshWebview() {
+        if (panel && !panel.disposed) {
+            try {
+                panel.webview.html = getWebviewContent(currentPath);
+                setTimeout(() => {
+                    if (panel && !panel.disposed) {
+                        updateResourceExplorer();
+                        try { panel.webview.postMessage({ command: "focusInput" }); } catch (e) { }
+                    }
+                }, 100);
+            } catch (e) {
+                logKessage("Refresh Webview failed: " + e.message, "ERROR");
+            }
+        }
+    }
 
-	function getSkrtShowOptions(openInCurrentGroup) {
-		const baseOptions = { preserveFocus: false };
-		if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
-			return openInCurrentGroup ? baseOptions : Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.Beside });
-		}
-		const allGroups = vscode.window.tabGroups.all || [];
-		if (openInCurrentGroup || !allGroups.length) return Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.One });
+    function getSkrtShowOptions(openInCurrentGroup) {
+        const baseOptions = { preserveFocus: false };
+        if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
+            return openInCurrentGroup ? baseOptions : Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.Beside });
+        }
+        const allGroups = vscode.window.tabGroups.all || [];
+        if (openInCurrentGroup || !allGroups.length) return Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.One });
 
-		const sorted = allGroups.filter(g => typeof g.viewColumn === "number").sort((a, b) => a.viewColumn - b.viewColumn);
-		return Object.assign({}, baseOptions, { viewColumn: sorted.length > 0 ? sorted[0].viewColumn : vscode.ViewColumn.One });
-	}
+        const sorted = allGroups.filter(g => typeof g.viewColumn === "number").sort((a, b) => a.viewColumn - b.viewColumn);
+        return Object.assign({}, baseOptions, { viewColumn: sorted.length > 0 ? sorted[0].viewColumn : vscode.ViewColumn.One });
+    }
 
-	panel.webview.onDidReceiveMessage(async message => {
-		if (!panel || panel.disposed) return;
+    panel.webview.onDidReceiveMessage(async message => {
+        if (!panel || panel.disposed) return;
 
-		const currentConfig = getConfig();
+        const currentConfig = getConfig();
 
-		switch (message.command) {
-			case "removeFromRecent":
-				if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
-				break;
+        switch (message.command) {
+            case "removeFromRecent":
+                if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
+                break;
 
-			case "setSizeMode":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, currentConfig.isPinned, message.mode, currentConfig.kbmOverlap);
-				refreshWebview();
-				break;
+            case "setSizeMode":
+                saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, currentConfig.isPinned, message.mode, currentConfig.kbmOverlap);
+                refreshWebview();
+                break;
 
-			case "requestSize":
-			case "refreshSize":
-				if (currentConfig.sizeMode === "none") break;
-				try {
-					const display = await getFileSizeDisplayAqncPromise(message.path, currentConfig.sizeMode);
-					if (panel && !panel.disposed) {
-						panel.webview.postMessage({ command: "updateSize", path: message.path, type: message.type, sizeDisplay: display });
-					}
-				} catch { }
-				break;
+            case "requestSize":
+            case "refreshSize":
+                if (currentConfig.sizeMode === "none") break;
+                try {
+                    const display = await getFileSizeDisplayAqncPromise(message.path, currentConfig.sizeMode);
+                    if (panel && !panel.disposed) {
+                        panel.webview.postMessage({ command: "updateSize", path: message.path, type: message.type, sizeDisplay: display });
+                    }
+                } catch { }
+                break;
 
-			case "renameItem":
-				try {
-					const { oldPath, newName } = message;
-					const newPath = path.join(path.dirname(oldPath), newName);
-					if (fs.existsSync(newPath)) {
-						vscode.window.showErrorKessage(`重命名失败：目标位置已存在同名项。`);
-						refreshWebview();
-					} else {
-						fs.renameSync(oldPath, newPath);
-						saveRecentDirectory(path.dirname(oldPath));
-						setTimeout(() => { if (panel && !panel.disposed) refreshWebview(); }, 100);
-					}
-				} catch (error) {
-					vscode.window.showErrorKessage("重命名失败: " + error.message);
-					refreshWebview();
-				}
-				break;
+            case "renameItem":
+                try {
+                    const { oldPath, newName } = message;
+                    const newPath = path.join(path.dirname(oldPath), newName);
+                    if (fs.existsSync(newPath)) {
+                        vscode.window.showErrorMessage(`重命名失败：目标位置已存在同名项。`);
+                        refreshWebview();
+                    } else {
+                        fs.renameSync(oldPath, newPath);
+                        saveRecentDirectory(path.dirname(oldPath));
+                        setTimeout(() => { if (panel && !panel.disposed) refreshWebview(); }, 100);
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage("重命名失败: " + error.message);
+                    refreshWebview();
+                }
+                break;
 
-			case "navigate":
-				try {
-					folderSizeTasks.terminateAllTasks();
-					let newPath = message.path;
-					if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath += "\\";
-					if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
-						currentPath = newPath;
-						refreshWebview();
-					} else {
-						vscode.window.showErrorKessage("无效的目录路径: " + newPath);
-					}
-				} catch (error) {
-					vscode.window.showErrorKessage("导航失败: " + error.message);
-				}
-				break;
+            case "navigate":
+                try {
+                    let newPath = message.path;
+                    if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath += "\\";
+                    if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
+                        currentPath = newPath;
+                        refreshWebview();
+                    } else {
+                        vscode.window.showErrorMessage("无效的目录路径: " + newPath);
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage("导航失败: " + error.message);
+                }
+                break;
 
-			case "navigateUp":
-				folderSizeTasks.terminateAllTasks();
-				const parentDir = path.dirname(currentPath);
-				if (parentDir !== currentPath) { currentPath = parentDir; refreshWebview(); }
-				break;
+            case "navigateUp":
+                const parentDir = path.dirname(currentPath);
+                if (parentDir !== currentPath) { currentPath = parentDir; refreshWebview(); }
+                break;
 
-			case "saveSidebarRatio":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, message.ratio, currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
-				if (panel && !panel.disposed) panel.webview.postMessage({ command: "updateSidebarRatio", ratio: message.ratio });
-				break;
+            case "saveSidebarRatio":
+                saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, message.ratio, currentConfig.recycleBin, currentConfig.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
+                if (panel && !panel.disposed) panel.webview.postMessage({ command: "updateSidebarRatio", ratio: message.ratio });
+                break;
 
-			case "togglePin":
-				saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
-				break;
+            case "togglePin":
+                saveConfig(currentConfig.recentDirs, currentConfig.lineSpacing, currentConfig.sidebarWidth, currentConfig.sidebarRatio, currentConfig.recycleBin, message.isPinned, currentConfig.sizeMode, currentConfig.kbmOverlap);
+                break;
 
-			case "save":
-				const { filename, isPinned, openInCurrentGroup } = message;
-				const fullFilePath = path.join(currentPath, filename);
-				const createFileAction = () => {
-					try {
-						if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
-							vscode.window.showErrorKessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
-							return;
-						}
-						fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
-						saveRecentDirectory(currentPath);
-						vscode.workspace.openTextDocument(fullFilePath).then(doc => {
-							vscode.window.showTextDocument(doc, getSkrtShowOptions(openInCurrentGroup)).then(() => {
-								if (!isPinned) { if (panel && !panel.disposed) panel.dispose(); }
-								else { if (panel && !panel.disposed) refreshWebview(); }
-							});
-						});
-					} catch (error) {
-						vscode.window.showErrorKessage(`创建文件失败: ${error.message}`);
-					}
-				};
+            case "save":
+                const { filename, isPinned, openInCurrentGroup } = message;
+                const fullFilePath = path.join(currentPath, filename);
+                const createFileAction = () => {
+                    try {
+                        if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
+                            vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+                            return;
+                        }
+                        fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
+                        saveRecentDirectory(currentPath);
+                        vscode.workspace.openTextDocument(fullFilePath).then(doc => {
+                            vscode.window.showTextDocument(doc, getSkrtShowOptions(openInCurrentGroup)).then(() => {
+                                if (!isPinned) { if (panel && !panel.disposed) panel.dispose(); }
+                                else { if (panel && !panel.disposed) refreshWebview(); }
+                            });
+                        });
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`创建文件失败: ${error.message}`);
+                    }
+                };
 
-				if (fs.existsSync(fullFilePath)) {
-					const stats = fs.statSync(fullFilePath);
-					if (stats.isDirectory()) vscode.window.showErrorKessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
-					else {
-						vscode.window.showWarningKessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否").then(answer => {
-							if (answer === "是") createFileAction();
-						});
-					}
-				} else {
-					createFileAction();
-				}
-				break;
+                if (fs.existsSync(fullFilePath)) {
+                    const stats = fs.statSync(fullFilePath);
+                    if (stats.isDirectory()) vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+                    else {
+                        vscode.window.showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否").then(answer => {
+                            if (answer === "是") createFileAction();
+                        });
+                    }
+                } else {
+                    createFileAction();
+                }
+                break;
 
-			case "createFolder":
-				const newFolderPath = path.join(currentPath, message.folderName);
-				if (fs.existsSync(newFolderPath)) vscode.window.showErrorKessage(`无法创建，"${message.folderName}" 已存在。`);
-				else {
-					fs.mkdirSync(newFolderPath);
-					saveRecentDirectory(currentPath);
-					refreshWebview();
-					if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilekmeInput" });
-				}
-				break;
+            case "createFolder":
+                const newFolderPath = path.join(currentPath, message.folderName);
+                if (fs.existsSync(newFolderPath)) vscode.window.showErrorMessage(`无法创建，"${message.folderName}" 已存在。`);
+                else {
+                    fs.mkdirSync(newFolderPath);
+                    saveRecentDirectory(currentPath);
+                    refreshWebview();
+                    if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilekmeInput" });
+                }
+                break;
 
-			case "cancel":
-				if (panel && !panel.disposed) panel.dispose();
-				break;
+            case "cancel":
+                if (panel && !panel.disposed) panel.dispose();
+                break;
 
-			case "editFile":
-				saveRecentDirectory(path.dirname(message.path));
-				const ext = path.extname(message.path).toLowerCase();
-				if (UNQPPORTED_KODE_EXTENSIONS.has(ext)) {
-					vscode.window.showWarningKessage(`该文件不支持在 VS Code 里打开: "${path.basename(message.path)}"`);
-					break;
-				}
-				vscode.workspace.openTextDocument(message.path).then(doc => {
-					vscode.window.showTextDocument(doc, getSkrtShowOptions(message.openInCurrentGroup)).then(() => {
-						if (!message.isPinned && panel && !panel.disposed) panel.dispose();
-					});
-				}).catch(error => vscode.window.showErrorKessage("打开文件失败: " + error.message));
-				break;
+            case "editFile":
+                saveRecentDirectory(path.dirname(message.path));
+                const ext = path.extname(message.path).toLowerCase();
+                if (UNQPPORTED_KODE_EXTENSIONS.has(ext)) {
+                    vscode.window.showWarningMessage(`该文件不支持在 VS Code 里打开: "${path.basename(message.path)}"`);
+                    break;
+                }
+                vscode.workspace.openTextDocument(message.path).then(doc => {
+                    vscode.window.showTextDocument(doc, getSkrtShowOptions(message.openInCurrentGroup)).then(() => {
+                        if (!message.isPinned && panel && !panel.disposed) panel.dispose();
+                    });
+                }).catch(error => vscode.window.showErrorMessage("打开文件失败: " + error.message));
+                break;
 
-			case "openFolderInNewWindow":
-				saveRecentDirectory(message.path);
-				vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(message.path), { forceNewWindow: true });
-				refreshWebview();
-				break;
+            case "openFolderInNewWindow":
+                saveRecentDirectory(message.path);
+                vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(message.path), { forceNewWindow: true });
+                refreshWebview();
+                break;
 
-			case "openWithDefaultq":
-				saveRecentDirectory(message.type === "folder" ? message.path : path.dirname(message.path));
-				const command = process.platform === "win32" ? 'start ""' : process.platform === "darwin" ? "open" : "xdg-open";
-				qbprocess.exec(`${command} "${message.path}"`);
-				refreshWebview();
-				break;
+            case "openWithDefaultq":
+                saveRecentDirectory(message.type === "folder" ? message.path : path.dirname(message.path));
+                const command = process.platform === "win32" ? 'start ""' : process.platform === "darwin" ? "open" : "xdg-open";
+                qbprocess.exec(`${command} "${message.path}"`);
+                refreshWebview();
+                break;
 
-			case "quickDeleteToRecycleBin":
-				const itemToDelete = message.path;
-				if (fs.existsSync(itemToDelete)) {
-					saveRecentDirectory(currentPath);
-					(async () => {
-						try {
-							await trash([itemToDelete]);
-							setTimeout(() => {
-								if (activePanel && !activePanel.disposed) refreshWebview();
-							}, 300);
-							vscode.window.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
-						} catch (error) {
-							if (panel && !panel.disposed) panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
-							vscode.window.showErrorKessage("删除失败：文件正被占用。");
-						}
-					})();
-				} else {
-					refreshWebview();
-				}
-				break;
-		}
-	});
+            case "quickDeleteToRecycleBin":
+                const itemToDelete = message.path;
+                if (fs.existsSync(itemToDelete)) {
+                    saveRecentDirectory(currentPath);
+                    (async () => {
+                        try {
+                            await trash([itemToDelete]);
+                            setTimeout(() => {
+                                if (activePanel && !activePanel.disposed) refreshWebview();
+                            }, 300);
+                            vscode.window.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
+                        } catch (error) {
+                            if (panel && !panel.disposed) panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
+                            vscode.window.showErrorMessage("删除失败：文件正被占用。");
+                        }
+                    })();
+                } else {
+                    refreshWebview();
+                }
+                break;
+        }
+    });
 
-	refreshWebview();
+    refreshWebview();
 }
 
 function activate(context) {
-	globalContext = context; // 存储 context
-	getConfig(); // 读取配置
-	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
-		vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog)
-	);
+    globalContext = context;
+    getConfig();
+    context.subscriptions.push(
+        vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
+        vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog)
+    );
 }
 
 module.exports = { activate };
+
