@@ -12,8 +12,9 @@ const BASE_DIR = "D:\\view\\p\\";
 const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
 // ★★★ 核心正则：唯一真理源 ★★★
-// 允许斜杠内侧出现空格 \s*，解决格式化工具自动加空格的问题
-const QQQ_PATH_REGEX = /\/\s*[a-z]:[^\/]*?qqq[^\/]*?\s*\//gi;
+// 匹配结构： /\ ... \/
+// 允许中间有空格
+const QQQ_PATH_REGEX = /\/\\\s*[a-z]:[^\/]*?qqq[^\/]*?\s*\\\//gi;
 
 // ==================== 日志工具 ====================
 function ensureLogDir() {
@@ -234,7 +235,6 @@ async function pureCommand() {
 	let parentDirFiles = [];
 	try { parentDirFiles = fs.readdirSync(parentDir); } catch (e) { vscode.window.showErrorMessage("读取当前目录失败: " + e.message); return; }
 
-	// ★ 使用统一正则 (创建新实例以重置状态)
 	const regex = new RegExp(QQQ_PATH_REGEX);
 
 	for (const fileName of parentDirFiles) {
@@ -251,8 +251,8 @@ async function pureCommand() {
 			let match;
 			regex.lastIndex = 0; // 重置
 			while ((match = regex.exec(content)) !== null) {
-				// ★ 处理前后空格 trim
-				const refPath = match[0].slice(1, -1).trim().replace(/\//g, "\\");
+				// 切片修正：/\... \/ 是 2 个字符
+				const refPath = match[0].slice(2, -2).trim().replace(/\//g, "\\");
 				if (refPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
 					const refFileName = path.basename(refPath);
 					referencedFiles.add(refFileName.toLowerCase());
@@ -279,7 +279,8 @@ async function pureCommand() {
 	content += "\n".repeat(3);
 	content += "   " + commandStr + "\n";
 	content += "\n".repeat(3);
-	content += orphanPaths.map((p) => `/${p}/`).join("\n\n\n\n\n");
+	// 写入格式 /\ ... \/
+	content += orphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
 
 	const purePath = path.join(parentDir, "qqq.pure");
 	try {
@@ -331,5 +332,5 @@ module.exports = {
 	logMessage,
 	LOG_PATH,
 	BASE_DIR,
-	QQQ_PATH_REGEX // ★ 导出正则
+	QQQ_PATH_REGEX
 };
