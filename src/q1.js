@@ -5,8 +5,6 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 
-// ==================== 从 qqq.js 导入 ====================
-// ★★★ 导入 QQQ_PATH_REGEX
 const { pythonBridge, shouldShowDuration, logMessage, QQQ_PATH_REGEX } = require("./qqq");
 
 // ==================== 核心完整性配置 ====================
@@ -303,10 +301,6 @@ function getGifDurationFromBuffer(buffer) {
 	} catch (e) { return 0; }
 }
 
-// ==========================================
-//           FFmpeg 预览
-// ==========================================
-
 function setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize) {
 	if (previewCache.size >= MAX_PREVIEW_CACHE) previewCache.delete(previewCache.keys().next().value);
 	previewCache.set(filePath, { buffer, mtimeMs, gifDuration, outputSize });
@@ -486,30 +480,50 @@ function calculateBlankLinesN(isFramed, isLastItem = false) {
 	} catch (e) { return 15; }
 }
 
-function provideCleanlinessEdits(document) {
-	const edits = []; const text = document.getText();
+// ==========================================
+//           洁癖整理逻辑 (升级版：强制隔离)
+// ==========================================
 
-	// ★ 使用统一正则
+function provideCleanlinessEdits(document) {
+	const edits = [];
+	const text = document.getText();
 	const regex = new RegExp(QQQ_PATH_REGEX);
+	const eol = getDocumentEOL(document);
 
 	let match; const markers = [];
 	while ((match = regex.exec(text))) markers.push({ text: match[0], index: match.index });
+
 	for (let i = markers.length - 1; i >= 0; i--) {
-		const m = markers[i]; const pos = document.positionAt(m.index); const markerLine = pos.line;
+		const m = markers[i];
+		const pos = document.positionAt(m.index);
+		const markerLine = pos.line;
 
-		// ★ 去除可能的空格
-		const rawPath = m.text.slice(1, -1).trim();
-
+		const rawPath = m.text.slice(2, -2).trim();
 		const isVidOrImg = isImageOrVideoExt(path.extname(rawPath));
+
+		// 1. 检查暗号本身是否独占一行 (去掉首尾空白后对比)
+		const lineText = document.lineAt(markerLine).text;
+		const matchText = m.text;
+
+		if (lineText.trim() !== matchText.trim()) {
+			const lineRange = document.lineAt(markerLine).range;
+			// 暴力清理：不管这行有什么，直接替换为干净的暗号，并在前后加换行
+			const cleanBlock = eol + matchText + eol;
+			edits.push(vscode.TextEdit.replace(lineRange, cleanBlock));
+			// 注意：替换整行后，后续空行检测可能不准，留给下一次触发
+			continue;
+		}
+
+		// 2. 下方空行逻辑
 		let isLastMarkerInDoc = (i === markers.length - 1);
 		const n = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
 		let currentBlanks = 0; let nextContentLine = -1;
 		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-			const lineText = document.lineAt(lineIdx).text;
-			if (lineText.trim() === "") currentBlanks++; else { nextContentLine = lineIdx; break; }
+			const lText = document.lineAt(lineIdx).text;
+			if (lText.trim() === "") currentBlanks++; else { nextContentLine = lineIdx; break; }
 		}
 		if (currentBlanks !== n) {
-			const eol = getDocumentEOL(document); const idealString = eol.repeat(n);
+			const idealString = eol.repeat(n);
 			const startReplaceRow = markerLine + 1; const endReplaceRow = (nextContentLine === -1) ? document.lineCount : nextContentLine;
 			const range = new vscode.Range(new vscode.Position(startReplaceRow, 0), new vscode.Position(endReplaceRow, 0));
 			edits.push(vscode.TextEdit.replace(range, idealString));
@@ -530,7 +544,7 @@ async function performGlobalClean(editor, force = false) {
 }
 
 // ==========================================
-//           粘贴逻辑 (回归简单逻辑，无强制前置空行)
+//           粘贴逻辑 (强制换行)
 // ==========================================
 
 function handleReqlt(reqlt) {
@@ -548,18 +562,17 @@ function handleReqlt(reqlt) {
 		const files = (reqlt.type === "ikge" || reqlt.files.length === 1) ? [reqlt.path || reqlt.files[0]] : reqlt.files;
 		const eol = getDocumentEOL(ed.document);
 
-		// 移除检测 needsLeadingNewline 的逻辑，直接清空前置换行
-		let insertionText = "";
+		// 强制前后都有换行，确保独立
+		let insertionText = eol;
 
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
 			const isVidOrImg = isImageOrVideoExt(path.extname(f));
 			const isLastItem = (i === files.length - 1);
 
-			// 仅在文件之间添加换行
 			if (i > 0) insertionText += eol;
 
-			insertionText += `/${f}/`;
+			insertionText += `/\\${f}\\/`;
 
 			if (!isLastItem) {
 				const gapBelow = calculateBlankLinesN(isVidOrImg, false);
@@ -570,6 +583,9 @@ function handleReqlt(reqlt) {
 			}
 		}
 
+		// 确保后面也有换行
+		insertionText += eol;
+
 		ed.edit(e => e.insert(ed.selection.active, insertionText)).then(() => {
 			if (files.length > 1) vscode.window.showInformationMessage("文件已复制 " + files.length);
 			onDone(files);
@@ -579,7 +595,7 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//           渲染主逻辑 (Single Line + after)
+//           渲染主逻辑 (after + 穿透 + 归零锚点)
 // ==========================================
 
 async function renderIkges(editor) {
@@ -602,7 +618,6 @@ async function renderIkges(editor) {
 	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
 	const tasks = [];
 
-	// ★ 使用统一正则
 	const regex = new RegExp(QQQ_PATH_REGEX);
 
 	for (const range of visibleRanges) {
@@ -618,8 +633,7 @@ async function renderIkges(editor) {
 			currentHideDecos.set(uniqueKey, hideDeco);
 			if (currentDocDecos.has(uniqueKey)) continue;
 
-			// ★ 去除空格
-			const rawPath = match[0].slice(1, -1).trim();
+			const rawPath = match[0].slice(2, -2).trim();
 
 			const absPath = rawPath.replace(/\//g, "\\");
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
@@ -635,7 +649,8 @@ async function renderIkges(editor) {
 				else continue;
 			}
 
-			// ============ 锚点回归当前行 ============
+			// ★★★ 归零锚点策略 ★★★
+			// 无论暗号前面有什么空格，相框永远锚定在行首 (Column 0)
 			const targetLine = pos.line;
 			if (targetLine >= editor.document.lineCount) continue;
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
@@ -683,10 +698,10 @@ async function renderIkges(editor) {
 						padding: "2px", border: "1px dashed #888", backgroundColor: PREVIEW_BG_COLOR, zIndex: -1
 					};
 
-					// ★★★ 使用 after ★★★
+					// ★★★ 使用 after + pointer-events: none (防止遮挡文字) ★★★
 					deco.renderOptions.after = {
 						contentText: "", ...baseStyle,
-						textDecoration: `none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
+						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
 					};
 					return { key: uniqueKey, deco };
 				} catch (e) { return null; }
@@ -746,16 +761,11 @@ function updateCodeLensColorForEditor(editor) {
 	updateCodeLensColorForEditor(isActive);
 }
 
-// ==========================================
-//           CodeLens Provider (使用统一正则)
-// ==========================================
-
 class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		if (!isCoreIntegretyValid) return [];
 
 		const lenses = [];
-		// ★ 使用统一正则
 		const regex = new RegExp(QQQ_PATH_REGEX);
 		const text = document.getText();
 		let match;
@@ -764,8 +774,7 @@ class FileCodeLensProvider {
 
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
-			// ★ 去除空格
-			const rawPath = match[0].slice(1, -1).trim();
+			const rawPath = match[0].slice(2, -2).trim();
 
 			const absPath = rawPath.replace(/\//g, "\\");
 			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
@@ -775,9 +784,7 @@ class FileCodeLensProvider {
 			const isVidOrImg = isImageOrVideoExt(ext);
 			const isVideoExtFlag = isVideoExt(ext);
 
-			// ============ 回归单行逻辑 ============
 			const targetLensLine = pos.line;
-			// ===================================
 
 			tasks.push(async () => {
 				let folderData = await getQqqFolderSize(folder);
@@ -861,20 +868,19 @@ async function renameFileComknd(rawPath, absPath) {
 	const doc = editor.document;
 	const escaped = rawPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-	// ★ 正则查找并替换
 	const regex = new RegExp(QQQ_PATH_REGEX);
 	const newRaw = buildNewRawPath(rawPath, trimmed);
 
 	const ranges = []; let m; const txt = doc.getText();
 	while ((m = regex.exec(txt))) {
-		const matchedRaw = m[0].slice(1, -1).trim();
+		const matchedRaw = m[0].slice(2, -2).trim();
 		if (matchedRaw === rawPath) {
 			const s = doc.positionAt(m.index);
 			const e = doc.positionAt(m.index + m[0].length);
 			ranges.push(new vscode.Range(s, e));
 		}
 	}
-	if (ranges.length) await editor.edit(b => ranges.forEach(r => b.replace(r, `/${newRaw}/`)));
+	if (ranges.length) await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
 	invalidateFolderSizeCacheForPath(newAbs); renderVisibleEditors();
 }
 
