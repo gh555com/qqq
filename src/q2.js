@@ -6,7 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const trash = require("trash");
 
-// ==================== 从 qqq.js 导入 ====================
+// ==================== 从 qqq.js 导入（四级回退已内置）====================
 const { getFolderInfo, logMessage } = require("./qqq");
 
 // ==================== 配置区域 ====================
@@ -20,69 +20,6 @@ const UNQPPORTED_KODE_EXTENSIONS = new Set([
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
     ".mp3", ".wav", ".flac", ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".pdf"
 ]);
-
-// ==================== Python 可用性检测 ====================
-let pythonAvailable = null; // null = 未检测, true/false = 检测结果
-let pythonPath = null;
-let pythonBridge = null;
-
-async function checkPythonAvailable() {
-    if (pythonAvailable !== null) return pythonAvailable;
-
-    // 尝试多个可能的 Python 路径
-    const pythonCandidates = ['python', 'python3', 'py'];
-
-    for (const candidate of pythonCandidates) {
-        try {
-            const result = await new Promise((resolve) => {
-                const child = qbprocess.spawn(candidate, ['--version'], {
-                    windowsHide: true,
-                    stdio: ['ignore', 'pipe', 'pipe']
-                });
-                let output = '';
-                child.stdout.on('data', d => output += d.toString());
-                child.stderr.on('data', d => output += d.toString());
-                child.on('close', code => {
-                    if (code === 0 && output.toLowerCase().includes('python')) {
-                        resolve(candidate);
-                    } else {
-                        resolve(null);
-                    }
-                });
-                child.on('error', () => resolve(null));
-                setTimeout(() => {
-                    try { child.kill(); } catch { }
-                    resolve(null);
-                }, 3000);
-            });
-
-            if (result) {
-                pythonPath = result;
-                pythonAvailable = true;
-                logMessage(`Python 检测成功: ${result}`, "INFO");
-
-                // 尝试加载 pythonBridge
-                try {
-                    const qqqModule = require("./qqq");
-                    if (qqqModule.pythonBridge) {
-                        pythonBridge = qqqModule.pythonBridge;
-                        logMessage("pythonBridge 加载成功", "INFO");
-                    }
-                } catch (e) {
-                    logMessage(`pythonBridge 加载失败: ${e.message}`, "WARN");
-                }
-
-                return true;
-            }
-        } catch (e) {
-            continue;
-        }
-    }
-
-    pythonAvailable = false;
-    logMessage("Python 不可用，将使用纯 JS 实现", "INFO");
-    return false;
-}
 
 // ==================== 日志工具 ====================
 function logKessage(kessage, level = "WARN") {
@@ -120,34 +57,12 @@ async function getDetailedErrorKessage(filePath, error, operation) {
     return `${operation}失败：文件正被占用或无权限。`;
 }
 
-// ==================== 文件夹大小获取（带回退逻辑）====================
+// ==================== 文件夹大小获取（使用 qqq.js 四级回退）====================
 /**
  * 获取文件夹大小
- * 优先使用 Python Bridge（如果可用），否则使用纯 JS 实现
+ * 通过 qqq.js 的 getFolderInfo 实现（内置 Python → Rust → Shell → JS 四级回退）
  */
-async function getSizeFromPython(paths) {
-    const folderPath = paths[0];
-
-    // 检测 Python 可用性（首次调用时）
-    if (pythonAvailable === null) {
-        await checkPythonAvailable();
-    }
-
-    // ★★★ 优先尝试 Python Bridge ★★★
-    if (pythonAvailable && pythonBridge) {
-        try {
-            const result = await pythonBridge.getFolderSize(folderPath);
-            if (result && !result.error) {
-                return result.total_size;
-            }
-            // Python 返回错误，回退到 JS
-            logMessage(`pythonBridge 返回错误: ${result.error}，回退到 JS`, "WARN");
-        } catch (error) {
-            logMessage(`pythonBridge 调用失败: ${error.message}，回退到 JS`, "WARN");
-        }
-    }
-
-    // ★★★ 回退：使用纯 JS 实现 ★★★
+async function getFolderSize(folderPath) {
     try {
         const result = await getFolderInfo(folderPath);
         if (result && result.success) {
@@ -158,6 +73,7 @@ async function getSizeFromPython(paths) {
         }
         throw new Error("未知错误");
     } catch (error) {
+        logKessage(`获取文件夹大小失败: ${folderPath} - ${error.message}`, "ERROR");
         throw error;
     }
 }
@@ -247,7 +163,7 @@ function getFileSizeDisplayAqnc(itemPath, mode, callback) {
         if (stats.isFile()) {
             handleSize(stats.size);
         } else {
-            getSizeFromPython([itemPath])
+            getFolderSize(itemPath)
                 .then(sizeInBytes => handleSize(sizeInBytes))
                 .catch(error => {
                     logKessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
@@ -685,7 +601,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         function saveFile() {
             const filename = document.getElementById('filekmeInput').value.trim();
             if (filename) {
-                    const isPinned = document.querySelector('#pinButton .pin-box').classList.contains('pinned');
+                const isPinned = document.querySelector('#pinButton .pin-box').classList.contains('pinned');
                 vscode.postMessage({ command: 'save', filename: filename, isPinned: isPinned, openInCurrentGroup: !isPinned });
                 if (isPinned) {
                     document.getElementById('filekmeInput').value = '';
@@ -748,7 +664,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             else if (message.command === 'startRename') startRename(message.path, message.name, message.type);
             else if (message.command === 'refreshSizes') refreshSizeDisplay();
             else if (message.command === 'restoreDeletedItem') {
-                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const safePathSelector = message.path.replace(/\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
                 const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
                 if (itemElement) { itemElement.style.opacity = ''; itemElement.style.pointerEvents = ''; }
             }
@@ -1360,16 +1276,8 @@ async function activate(context) {
     globalContext = context;
     getConfig();
 
-    // 预检测 Python 可用性（后台执行，不阻塞）
-    checkPythonAvailable().then(available => {
-        if (available) {
-            logMessage("Q2: Python 可用，将优先使用 pythonBridge", "INFO");
-        } else {
-            logMessage("Q2: Python 不可用，将使用纯 JS 实现", "INFO");
-        }
-    }).catch(() => {
-        logMessage("Q2: Python 检测失败，将使用纯 JS 实现", "WARN");
-    });
+    // 日志记录启动信息
+    logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退）", "INFO");
 
     context.subscriptions.push(
         vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
@@ -1385,3 +1293,4 @@ function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+

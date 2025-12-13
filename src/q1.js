@@ -57,7 +57,7 @@ let extremePerformanceMode = false;
 let cleanFreakMode = false;
 
 // ★★★ 占位符状态管理 ★★★
-const pendingTokens = new Map(); // token -> { editor, position, targetDir }
+const pendingTokens = new Map(); // token -> { editor, documentUri, targetDir }
 
 // ★★★ Loading 占位图 (Base64 内联) ★★★
 const LOADING_SVG = `data:image/svg+xml;base64,` + Buffer.from(`
@@ -185,6 +185,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) return cached;
 
+	// ★★★ 使用 qqq.js 的 identifyFile（四级回退）★★★
 	const result = await identifyFile(filePath);
 	if (result && !result.error && result.width) {
 		const info = {
@@ -199,6 +200,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 		return info;
 	}
 
+	// ★★★ 纯 JS 兜底：直接用 ffmpeg ★★★
 	if (!ffmpegPath) return null;
 
 	return new Promise((resolve) => {
@@ -417,6 +419,8 @@ async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = qqqFolderSizeCache.get(folderPath);
 	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
+
+	// ★★★ 使用 qqq.js 的 getFolderInfo（四级回退）★★★
 	const result = await getFolderInfo(folderPath);
 	if (result && result.success) {
 		const parts = []; let totalFiles = 0;
@@ -467,7 +471,7 @@ async function executeClipboardCommand() {
 	// 触发一次渲染，显示 loading 状态
 	debounceRender(editor, 10);
 
-	// ★★★ 后台异步处理媒体 ★★★
+	// ★★★ 后台异步处理媒体（四级回退）★★★
 	setImmediate(async () => {
 		try {
 			const result = await handleClipboardSlow(targetDir);
@@ -511,12 +515,13 @@ async function replacePendingMarker(token, result) {
 		replacement = "";
 	} else if (result.type === "folder_text") {
 		replacement = result.text;
-	} else if (result.type === "ikge") {
-		const relPath = path.relative(docDir, result.path).replace(/\//g, "\\");
-		const isVidOrImg = isImageOrVideoExt(path.extname(result.path));
+	} else if (result.type === "image" || result.type === "ikge") {
+		const filePath = result.path;
+		const relPath = path.relative(docDir, filePath).replace(/\//g, "\\");
+		const isVidOrImg = isImageOrVideoExt(path.extname(filePath));
 		const gapBelow = calculateBlankLinesN(isVidOrImg, true);
 		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
-		invalidateFolderSizeCacheForPath(result.path);
+		invalidateFolderSizeCacheForPath(filePath);
 	} else if (result.type === "file") {
 		const files = result.files;
 		for (let i = 0; i < files.length; i++) {
@@ -533,6 +538,8 @@ async function replacePendingMarker(token, result) {
 		if (files.length > 1) {
 			vscode.window.showInformationMessage("文件已复制 " + files.length);
 		}
+	} else if (result.type === "text") {
+		replacement = result.text;
 	}
 
 	// 替换占位符
@@ -1028,3 +1035,4 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
