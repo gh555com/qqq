@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 
+// ★★★ 引入正则，确保全局统一 ★★★
 const { pythonBridge, shouldShowDuration, logMessage, QQQ_PATH_REGEX } = require("./qqq");
 
 // ==================== 核心完整性配置 ====================
@@ -29,7 +30,6 @@ const PREVIEW_WIDTH = 512;
 const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
-const FFMPEG_BG_COLOR = "0xfef6e3";
 
 const assetsCache = {
 	checked: false,
@@ -55,9 +55,7 @@ let decorationType;
 let markerHideType;
 let extensionContext = null;
 
-const lensLinesByDocUri = new Map();
-let lastCodeLensIsActive = false;
-let lastCodeLensColor = null;
+// ★★★ 已移除所有 CodeLens 行号缓存与颜色逻辑 (lensLinesByDocUri 等) ★★★
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
@@ -148,6 +146,21 @@ function isImageOrVideoExt(ext) {
 }
 function getDocumentEOL(document) {
 	return document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+}
+
+// ★★★ 核心路径解析工具：处理相对路径/绝对路径 ★★★
+function resolvePathToAbsolute(docUri, rawPath) {
+	if (!rawPath) return null;
+	let cleanPath = rawPath.trim();
+	// 移除两端的目录分隔符
+	while (cleanPath.startsWith("\\") || cleanPath.startsWith("/")) cleanPath = cleanPath.slice(1);
+
+	// 如果已经是绝对路径，直接返回
+	if (path.isAbsolute(cleanPath)) return cleanPath;
+
+	// 相对路径：基于当前文档目录解析
+	const docDir = path.dirname(docUri.fsPath);
+	return path.resolve(docDir, cleanPath);
 }
 
 function buildNewRawPath(oldRawPath, newFileName) {
@@ -481,12 +494,13 @@ function calculateBlankLinesN(isFramed, isLastItem = false) {
 }
 
 // ==========================================
-//           洁癖整理逻辑 (升级版：强制隔离)
+//           洁癖整理逻辑 (纯净 + 横向隔离)
 // ==========================================
 
 function provideCleanlinessEdits(document) {
 	const edits = [];
 	const text = document.getText();
+	// ★★★ 使用统一正则 ★★★
 	const regex = new RegExp(QQQ_PATH_REGEX);
 	const eol = getDocumentEOL(document);
 
@@ -495,38 +509,58 @@ function provideCleanlinessEdits(document) {
 
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
-		const pos = document.positionAt(m.index);
-		const markerLine = pos.line;
+		const startPos = document.positionAt(m.index);
+		const endPos = document.positionAt(m.index + m.text.length);
+		const markerLine = startPos.line;
 
 		const rawPath = m.text.slice(2, -2).trim();
-		const isVidOrImg = isImageOrVideoExt(path.extname(rawPath));
 
-		// 1. 检查暗号本身是否独占一行 (去掉首尾空白后对比)
-		const lineText = document.lineAt(markerLine).text;
-		const matchText = m.text;
-
-		if (lineText.trim() !== matchText.trim()) {
-			const lineRange = document.lineAt(markerLine).range;
-			// 暴力清理：不管这行有什么，直接替换为干净的暗号，并在前后加换行
-			const cleanBlock = eol + matchText + eol;
-			edits.push(vscode.TextEdit.replace(lineRange, cleanBlock));
-			// 注意：替换整行后，后续空行检测可能不准，留给下一次触发
-			continue;
+		// ★★★ 解析相对路径为绝对路径 ★★★
+		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
+		let isVidOrImg = false;
+		if (absPath) {
+			isVidOrImg = isImageOrVideoExt(path.extname(absPath));
 		}
 
-		// 2. 下方空行逻辑
+		const lineObj = document.lineAt(markerLine);
+		const lineContent = lineObj.text;
+
+		// ★★★ 横向隔离逻辑 (核心要求) ★★★
+
+		// 1. 检查左侧：如果暗号不从行首开始 (index > 0)
+		//    (包括前面的空格，只要不是 startPos.character == 0，就说明这一行前面有东西)
+		//    必须插入换行，将暗号挤到下一行
+		if (startPos.character > 0) {
+			edits.push(vscode.TextEdit.insert(startPos, eol));
+		}
+
+		// 2. 检查右侧：如果暗号后面还有非空内容 (不包括纯换行，因为我们只处理当前行内容)
+		//    lineContent 是不包含换行符的
+		const suffix = lineContent.substring(endPos.character);
+		if (suffix.trim().length > 0) {
+			edits.push(vscode.TextEdit.insert(endPos, eol));
+		}
+
+		// ★★★ 纵向撑开逻辑 (只增不减) ★★★
 		let isLastMarkerInDoc = (i === markers.length - 1);
-		const n = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
-		let currentBlanks = 0; let nextContentLine = -1;
+		const neededLines = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
+
+		let existingBlanks = 0;
 		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
 			const lText = document.lineAt(lineIdx).text;
-			if (lText.trim() === "") currentBlanks++; else { nextContentLine = lineIdx; break; }
+			if (lText.trim() === "") {
+				existingBlanks++;
+			} else {
+				break;
+			}
 		}
-		if (currentBlanks !== n) {
-			const idealString = eol.repeat(n);
-			const startReplaceRow = markerLine + 1; const endReplaceRow = (nextContentLine === -1) ? document.lineCount : nextContentLine;
-			const range = new vscode.Range(new vscode.Position(startReplaceRow, 0), new vscode.Position(endReplaceRow, 0));
-			edits.push(vscode.TextEdit.replace(range, idealString));
+
+		if (existingBlanks < neededLines) {
+			const linesToAdd = neededLines - existingBlanks;
+			// 只有需要加行才加，绝不删除用户已有的空行
+			// 插入点：在当前行的末尾插入 (如果之前做了横向换行，TextEdit 会自动处理坐标)
+			const lineEndPos = lineObj.range.end;
+			edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
 		}
 	}
 	return edits;
@@ -534,17 +568,21 @@ function provideCleanlinessEdits(document) {
 
 async function performGlobalClean(editor, force = false) {
 	if (!editor) return;
-	if (!force) {
-		if (!cleanFreakMode) return;
-		const now = Date.now(); if (now - lastGlobalCleanTime < 1000) return;
-		lastGlobalCleanTime = now;
-	}
+	if (!force && !cleanFreakMode) return;
+
 	const edits = provideCleanlinessEdits(editor.document);
-	if (edits.length > 0) await editor.edit(editBuilder => { edits.forEach(e => editBuilder.replace(e.range, e.newText)); });
+	if (edits.length > 0) {
+		await editor.edit(editBuilder => {
+			edits.forEach(e => {
+				if (e.newText) editBuilder.insert(e.range.start, e.newText);
+				else editBuilder.replace(e.range, e.newText);
+			});
+		});
+	}
 }
 
 // ==========================================
-//           粘贴逻辑 (强制换行)
+//           粘贴逻辑 (写相对路径)
 // ==========================================
 
 function handleReqlt(reqlt) {
@@ -561,18 +599,24 @@ function handleReqlt(reqlt) {
 	else if (reqlt.type === "ikge" || reqlt.type === "file") {
 		const files = (reqlt.type === "ikge" || reqlt.files.length === 1) ? [reqlt.path || reqlt.files[0]] : reqlt.files;
 		const eol = getDocumentEOL(ed.document);
+		const docDir = path.dirname(ed.document.uri.fsPath);
 
-		// 强制前后都有换行，确保独立
 		let insertionText = eol;
 
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
+
+			// ★★★ 写入相对路径 ★★★
+			let relPath = path.relative(docDir, f);
+			// 确保路径分隔符一致性
+			relPath = relPath.replace(/\//g, "\\");
+
 			const isVidOrImg = isImageOrVideoExt(path.extname(f));
 			const isLastItem = (i === files.length - 1);
 
 			if (i > 0) insertionText += eol;
 
-			insertionText += `/\\${f}\\/`;
+			insertionText += `/\\${relPath}\\/`;
 
 			if (!isLastItem) {
 				const gapBelow = calculateBlankLinesN(isVidOrImg, false);
@@ -583,7 +627,6 @@ function handleReqlt(reqlt) {
 			}
 		}
 
-		// 确保后面也有换行
 		insertionText += eol;
 
 		ed.edit(e => e.insert(ed.selection.active, insertionText)).then(() => {
@@ -595,7 +638,7 @@ function handleReqlt(reqlt) {
 }
 
 // ==========================================
-//           渲染主逻辑 (after + 穿透 + 归零锚点)
+//           渲染主逻辑 (读取相对路径)
 // ==========================================
 
 async function renderIkges(editor) {
@@ -618,6 +661,7 @@ async function renderIkges(editor) {
 	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
 	const tasks = [];
 
+	// ★★★ 使用统一正则 ★★★
 	const regex = new RegExp(QQQ_PATH_REGEX);
 
 	for (const range of visibleRanges) {
@@ -635,8 +679,10 @@ async function renderIkges(editor) {
 
 			const rawPath = match[0].slice(2, -2).trim();
 
-			const absPath = rawPath.replace(/\//g, "\\");
-			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
+			// ★★★ 解析相对路径为绝对路径 ★★★
+			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath.replace(/\//g, "\\"));
+
+			if (!absPath || !fs.existsSync(absPath)) continue;
 
 			const ext = path.extname(absPath).toLowerCase();
 			let isImage = isImageExt(ext); let isVideo = isVideoExt(ext); let isGif = ext === ".gif";
@@ -649,8 +695,6 @@ async function renderIkges(editor) {
 				else continue;
 			}
 
-			// ★★★ 归零锚点策略 ★★★
-			// 无论暗号前面有什么空格，相框永远锚定在行首 (Column 0)
 			const targetLine = pos.line;
 			if (targetLine >= editor.document.lineCount) continue;
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
@@ -698,11 +742,14 @@ async function renderIkges(editor) {
 						padding: "2px", border: "1px dashed #888", backgroundColor: PREVIEW_BG_COLOR, zIndex: -1
 					};
 
-					// ★★★ 使用 after + pointer-events: none (防止遮挡文字) ★★★
 					deco.renderOptions.after = {
 						contentText: "", ...baseStyle,
 						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
 					};
+
+					deco.hoverMessage = new vscode.MarkdownString(`[打开图片](${vscode.Uri.file(absPath).toString()})`);
+					deco.hoverMessage.isTrusted = true;
+
 					return { key: uniqueKey, deco };
 				} catch (e) { return null; }
 			};
@@ -725,59 +772,25 @@ async function renderIkges(editor) {
 	if (currentHideDecos.size > 0) editor.setDecorations(markerHideType, Array.from(currentHideDecos.values()));
 }
 
-function parseHexColorToRGB(hex) {
-	if (typeof hex !== "string") return null;
-	const s = hex.trim();
-	if (!s.startsWith("#")) return null;
-	if (s.length === 7) return [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
-	if (s.length === 4) return [parseInt(s[1] + s[1], 16), parseInt(s[2] + s[2], 16), parseInt(s[3] + s[3], 16)];
-	return null;
-}
-function getEditorBackgroundRGB() {
-	try {
-		const bg = vscode.workspace.getConfiguration("workbench").get("colorCustomizations")?.["editor.background"];
-		const parsed = parseHexColorToRGB(bg); if (parsed) return parsed;
-	} catch { }
-	const kind = vscode.window.activeColorTheme.kind;
-	return (kind === vscode.ColorThemeKind.Dark || kind === vscode.ColorThemeKind.HighContrast) ? [30, 30, 30] : [255, 255, 255];
-}
-async function updateGlobalCodeLensColor(isActive) {
-	try {
-		const [bgR, bgG, bgB] = getEditorBackgroundRGB();
-		const alpha = isActive ? 1 : 22 / 255;
-		const color = `rgba(${255 - bgR}, ${255 - bgG}, ${255 - bgB}, ${alpha.toFixed(3)})`;
-		if (color === lastCodeLensColor && isActive === lastCodeLensIsActive) return;
-		lastCodeLensColor = color; lastCodeLensIsActive = isActive;
-		const conf = vscode.workspace.getConfiguration("workbench");
-		const custom = conf.get("colorCustomizations") || {};
-		if (custom["editorCodeLens.foreground"] === color) return;
-		await conf.update("colorCustomizations", { ...custom, "editorCodeLens.foreground": color }, vscode.ConfigurationTarget.Global);
-	} catch { }
-}
-function updateCodeLensColorForEditor(editor) {
-	if (!editor) { updateGlobalCodeLensColor(false); return; }
-	const set = lensLinesByDocUri.get(editor.document.uri.toString());
-	const isActive = set && set.has(editor.selection.active.line);
-	updateCodeLensColorForEditor(isActive);
-}
-
 class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		if (!isCoreIntegretyValid) return [];
 
 		const lenses = [];
+		// ★★★ 使用统一正则 ★★★
 		const regex = new RegExp(QQQ_PATH_REGEX);
 		const text = document.getText();
 		let match;
-		const lensLines = new Set();
 		const tasks = [];
 
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
 			const rawPath = match[0].slice(2, -2).trim();
 
-			const absPath = rawPath.replace(/\//g, "\\");
-			if (!fs.existsSync(absPath) || !absPath.includes("qqq")) continue;
+			// ★★★ Lens 显示绝对路径 (视觉需求) ★★★
+			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
+
+			if (!absPath || !fs.existsSync(absPath)) continue; // 路径无效则不显示 Lens
 
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
@@ -824,18 +837,15 @@ class FileCodeLensProvider {
 					}),
 					new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
 					new vscode.CodeLens(r, {
+						// 这里 absPath 保证了显示的是绝对路径
 						title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`, command: "qqq.openFile", arguments: [absPath], tooltip: tooltipText
 					})
 				];
 			});
-
-			lensLines.add(targetLensLine);
 		}
 
 		const results = await Promise.all(tasks.map(t => t()));
 		results.forEach(group => lenses.push(...group));
-		lensLinesByDocUri.set(document.uri.toString(), lensLines);
-		updateCodeLensColorForEditor(vscode.window.activeTextEditor);
 		return lenses;
 	}
 }
@@ -866,8 +876,8 @@ async function renameFileComknd(rawPath, absPath) {
 	const trimmed = newName.trim(); const newAbs = path.join(path.dirname(absPath), trimmed);
 	try { await fs.promises.rename(absPath, newAbs); } catch (e) { vscode.window.showErrorMessage(e.message); return; }
 	const doc = editor.document;
-	const escaped = rawPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+	// ★★★ 使用统一正则 ★★★
 	const regex = new RegExp(QQQ_PATH_REGEX);
 	const newRaw = buildNewRawPath(rawPath, trimmed);
 
@@ -896,7 +906,7 @@ async function activate(context) {
 	extensionContext = context;
 	isCoreIntegretyValid = verifySystemIntegrity(); console.log(`[QQQ Q1] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
 	if (!isCoreIntegretyValid) return;
-	loadWatermarkResource(); refreshQqqConfig(); initUserTracking(context); updateGlobalCodeLensColor(false);
+	loadWatermarkResource(); refreshQqqConfig(); initUserTracking(context);
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
@@ -918,7 +928,7 @@ async function activate(context) {
 			if (cleanFreakMode && e.document) { const edits = provideCleanlinessEdits(e.document); if (edits.length > 0) e.waitUntil(Promise.resolve(edits)); }
 		}),
 		vscode.window.onDidChangeTextEditorVisibleRanges(e => debounceRender(e.textEditor)),
-		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); updateCodeLensColorForEditor(e); }),
+		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); }),
 		vscode.window.onDidChangeWindowState(e => { if (e.focused) renderVisibleEditors(); }),
 		vscode.workspace.onDidChangeTextDocument(e => {
 			const ed = vscode.window.activeTextEditor; if (ed && e.document === ed.document) debounceRender(ed);
@@ -928,8 +938,6 @@ async function activate(context) {
 		vscode.window.onDidChangeVisibleTextEditors(editors => {
 			renderVisibleEditors(); if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 		}),
-		vscode.window.onDidChangeTextEditorSelection(e => updateCodeLensColorForEditor(e.textEditor)),
-		vscode.window.onDidChangeActiveColorTheme(() => updateCodeLensColorForEditor(vscode.window.activeTextEditor))
 	);
 	const editor = vscode.window.activeTextEditor; if (editor) renderIkges(editor);
 }
