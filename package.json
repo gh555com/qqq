@@ -219,7 +219,7 @@
     "生産性",
     "produktivität",
     "productivité",
-    "생産성"
+    "생산성"
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
