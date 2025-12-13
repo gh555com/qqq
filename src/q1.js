@@ -5,32 +5,16 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 
-// ★★★ 引用本地 qqq.js ★★★
 const {
-	identifyFile,
-	getFolderInfo,
-	handleClipboardFast,
-	handleClipboardSlow,
-	shouldShowDuration,
-	logMessage,
-	QQQ_PATH_REGEX,
-	PENDING_REGEX,
-	ffmpegPath,
-	finishUserTracking,
-	initUserTracking,
-	createPendingToken,
-	registerPendingJob,
-	resolvePendingJob
+	identifyFile, getFolderInfo, handleClipboardFast, handleClipboardSlow, shouldShowDuration, logMessage,
+	QQQ_PATH_REGEX, PENDING_REGEX, ffmpegPath, finishUserTracking, initUserTracking, createPendingToken,
+	getPreview, CACHE_CONFIG
 } = require("./qqq");
 
 const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
 let isCoreIntegretyValid = false;
 
-// ==================== 全局变量 ====================
 let ffmpegProbePromise = null;
-
-const MAX_PREVIEW_CACHE = 100;
-const previewCache = new Map();
 const documentDecorationsMap = new Map();
 let currentRenderVersion = 0;
 const resolutionCache = new Map();
@@ -42,7 +26,6 @@ const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
 const assetsCache = { checked: false, bgExists: false, wmExists: false };
-
 let watermarkBase64 = null;
 const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
 let decorationType, markerHideType, extensionContext = null;
@@ -55,24 +38,11 @@ const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
 let enlargeSmallImages = true;
 let extremePerformanceMode = false;
 let cleanFreakMode = false;
+let qualityMode = '1';
 
-// ★★★ 占位符状态管理 ★★★
-const pendingTokens = new Map(); // token -> { editor, documentUri, targetDir }
+const pendingTokens = new Map();
 
-// ★★★ Loading 占位图 (Base64 内联) ★★★
-const LOADING_SVG = `data:image/svg+xml;base64,` + Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">
-  <circle cx="20" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0s"/>
-  </circle>
-  <circle cx="60" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.33s"/>
-  </circle>
-  <circle cx="100" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.66s"/>
-  </circle>
-</svg>
-`).toString('base64');
+const LOADING_SVG = `data:image/svg+xml;base64,` + Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40"><circle cx="20" cy="20" r="8" fill="#888"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0s"/></circle><circle cx="60" cy="20" r="8" fill="#888"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.33s"/></circle><circle cx="100" cy="20" r="8" fill="#888"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.66s"/></circle></svg>`).toString('base64');
 
 function refreshQqqConfig() {
 	try {
@@ -80,21 +50,16 @@ function refreshQqqConfig() {
 		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
 		extremePerformanceMode = config.get("extremePerformance", false);
 		cleanFreakMode = config.get("cleanFreak", false);
-	} catch (e) {
-		enlargeSmallImages = true;
-		extremePerformanceMode = false;
-		cleanFreakMode = false;
-	}
+		const qm = config.get("qualityMode", "性能优先");
+		if (qm === "质量优先") qualityMode = '0';
+		else if (qm === "极限性能") qualityMode = '9';
+		else qualityMode = '1';
+	} catch (e) { enlargeSmallImages = true; extremePerformanceMode = false; cleanFreakMode = false; qualityMode = '1'; }
 }
 
 function loadWatermarkResource() {
-	try {
-		if (fs.existsSync(WATERMARK_PATH)) {
-			const buf = fs.readFileSync(WATERMARK_PATH);
-			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
-			assetsCache.wmExists = true;
-		}
-	} catch (e) { watermarkBase64 = null; }
+	try { if (fs.existsSync(WATERMARK_PATH)) { const buf = fs.readFileSync(WATERMARK_PATH); watermarkBase64 = "data:image/gif;base64," + buf.toString("base64"); assetsCache.wmExists = true; } }
+	catch (e) { watermarkBase64 = null; }
 	assetsCache.checked = true;
 }
 
@@ -105,29 +70,12 @@ function clearDecorations() {
 }
 
 function verifySystemIntegrity() {
-	try {
-		if (!fs.existsSync(WATERMARK_PATH)) return false;
-		const buffer = fs.readFileSync(WATERMARK_PATH);
-		const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-		return hash === CORE_INTEGRITY_HASH;
-	} catch (e) { return false; }
+	try { if (!fs.existsSync(WATERMARK_PATH)) return false; const buffer = fs.readFileSync(WATERMARK_PATH); const hash = crypto.createHash("sha256").update(buffer).digest("hex"); return hash === CORE_INTEGRITY_HASH; }
+	catch (e) { return false; }
 }
 
-function formatBytes(size) {
-	if (size == null || isNaN(size)) return "?";
-	const units = ["b", "k", "m", "g"]; let unitIndex = 0; let value = size;
-	while (value >= 1024 && unitIndex < units.length - 1) { value = value / 1024; unitIndex++; }
-	return `${Math.round(value)}${units[unitIndex]}`;
-}
-
-function formatDuration(seconds) {
-	if (seconds == null || isNaN(seconds) || seconds < 0) return "0s";
-	if (seconds >= 60) {
-		const mins = Math.floor(seconds / 60); const secs = seconds % 60;
-		return `${mins}m + ${secs.toFixed(2)}s`;
-	} else return `${seconds.toFixed(2)}s`;
-}
-
+function formatBytes(size) { if (size == null || isNaN(size)) return "?"; const units = ["b", "k", "m", "g"]; let unitIndex = 0; let value = size; while (value >= 1024 && unitIndex < units.length - 1) { value = value / 1024; unitIndex++; } return `${Math.round(value)}${units[unitIndex]}`; }
+function formatDuration(seconds) { if (seconds == null || isNaN(seconds) || seconds < 0) return "0s"; if (seconds >= 60) { const mins = Math.floor(seconds / 60); const secs = seconds % 60; return `${mins}m + ${secs.toFixed(2)}s`; } else return `${seconds.toFixed(2)}s`; }
 function isImageExt(ext) { return IMAGE_EXTS.has(ext.toLowerCase()); }
 function isVideoExt(ext) { return VIDEO_EXTS.has(ext.toLowerCase()); }
 function isImageOrVideoExt(ext) { const lower = ext.toLowerCase(); return IMAGE_EXTS.has(lower) || VIDEO_EXTS.has(lower); }
@@ -149,19 +97,10 @@ function buildNewRawPath(oldRawPath, newFileName) {
 }
 
 function determineMediaType(codec, ext) {
-	if (!codec) {
-		const e = ext.toLowerCase();
-		if (e === ".gif") return "gif";
-		if (VIDEO_EXTS.has(e)) return "video";
-		if (IMAGE_EXTS.has(e)) return "image";
-		return "unknown";
-	}
+	if (!codec) { const e = ext.toLowerCase(); if (e === ".gif") return "gif"; if (VIDEO_EXTS.has(e)) return "video"; if (IMAGE_EXTS.has(e)) return "image"; return "unknown"; }
 	const c = codec.toLowerCase();
 	if (c === "gif") return "gif";
-	if (["png", "mjpeg", "webp", "bmp", "tiff", "jpeg", "jpg"].some(x => c.includes(x))) {
-		if (c.includes("mjpeg") && VIDEO_EXTS.has(ext.toLowerCase())) return "video";
-		return "image";
-	}
+	if (["png", "mjpeg", "webp", "bmp", "tiff", "jpeg", "jpg"].some(x => c.includes(x))) { if (c.includes("mjpeg") && VIDEO_EXTS.has(ext.toLowerCase())) return "video"; return "image"; }
 	const videoCodecs = ["h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2video", "prores", "wmv", "flv", "theora", "vc1", "rv40"];
 	if (videoCodecs.some(x => c.includes(x))) return "video";
 	if (VIDEO_EXTS.has(ext.toLowerCase())) return "video";
@@ -184,25 +123,14 @@ async function ensureFfmpegAvailable() {
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) return cached;
-
-	// ★★★ 使用 qqq.js 的 identifyFile（四级回退）★★★
 	const result = await identifyFile(filePath);
 	if (result && !result.error && result.width) {
-		const info = {
-			mtime: mtimeMs,
-			res: `${result.width}x${result.height}`,
-			width: result.width, height: result.height,
-			codec: result.codec, codec_long_name: result.codec_long_name,
-			duration: result.duration || 0, type: result.type || "unknown"
-		};
+		const info = { mtime: mtimeMs, res: `${result.width}x${result.height}`, width: result.width, height: result.height, codec: result.codec, codec_long_name: result.codec_long_name, duration: result.duration || 0, type: result.type || "unknown" };
 		resolutionCache.set(filePath, info);
 		if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
 		return info;
 	}
-
-	// ★★★ 纯 JS 兜底：直接用 ffmpeg ★★★
 	if (!ffmpegPath) return null;
-
 	return new Promise((resolve) => {
 		const child = cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
@@ -212,18 +140,9 @@ async function getMediaInfo(filePath, mtimeMs) {
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 			let info = { mtime: mtimeMs, res: null, width: null, height: null, codec: null, duration: 0, type: "unknown" };
-			if (resMatch) {
-				const w = parseInt(resMatch[1]); const h = parseInt(resMatch[2]);
-				info.res = `${w}x${h}`; info.width = w; info.height = h;
-			}
+			if (resMatch) { const w = parseInt(resMatch[1]); const h = parseInt(resMatch[2]); info.res = `${w}x${h}`; info.width = w; info.height = h; }
 			if (codecMatch && codecMatch[1]) info.codec = codecMatch[1].trim();
-			if (durMatch) {
-				const hours = parseFloat(durMatch[1]), mins = parseFloat(durMatch[2]), secs = parseFloat(durMatch[3]);
-				const rawDuration = hours * 3600 + mins * 60 + secs;
-				if (info.codec && info.codec.toLowerCase().includes('mjpeg') && rawDuration <= 0.1) {
-					info.duration = 0; info.type = 'image';
-				} else { info.duration = rawDuration; }
-			}
+			if (durMatch) { const hours = parseFloat(durMatch[1]), mins = parseFloat(durMatch[2]), secs = parseFloat(durMatch[3]); const rawDuration = hours * 3600 + mins * 60 + secs; if (info.codec && info.codec.toLowerCase().includes('mjpeg') && rawDuration <= 0.1) { info.duration = 0; info.type = 'image'; } else { info.duration = rawDuration; } }
 			const ext = path.extname(filePath);
 			if (info.type === "unknown") info.type = determineMediaType(info.codec, ext);
 			resolutionCache.set(filePath, info);
@@ -231,169 +150,6 @@ async function getMediaInfo(filePath, mtimeMs) {
 			resolve(info.width ? info : null);
 		});
 		setTimeout(() => { try { child.kill(); } catch { } resolve(null); }, 2000);
-	});
-}
-
-function getGifDurationFromBuffer(buffer) {
-	if (!buffer || buffer.length < 13) return 0;
-	try {
-		let totalDelayCs = 0;
-		let i = 13;
-		const sig = buffer.slice(0, 6).toString('ascii');
-		if (sig !== 'GIF87a' && sig !== 'GIF89a') return 0;
-		const flags = buffer[10];
-		if ((flags & 0x80) !== 0) i += 3 * Math.pow(2, (flags & 0x07) + 1);
-
-		while (i < buffer.length - 1) {
-			const blockType = buffer[i];
-			if (blockType === 0x21) {
-				const extLabel = buffer[i + 1];
-				if (extLabel === 0xF9) {
-					if (i + 6 < buffer.length) { totalDelayCs += buffer[i + 4] | (buffer[i + 5] << 8); }
-					i += 8;
-				} else if (extLabel === 0xFF || extLabel === 0xFE || extLabel === 0x01) {
-					i += 2; let bs = buffer[i]; i += bs + 1;
-					while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				} else {
-					i += 2;
-					while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				}
-			} else if (blockType === 0x2C) {
-				if (i + 10 > buffer.length) break;
-				const imgFlags = buffer[i + 9];
-				i += 10;
-				if ((imgFlags & 0x80) !== 0) i += 3 * Math.pow(2, (imgFlags & 0x07) + 1);
-				i++;
-				while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-				i++;
-			} else if (blockType === 0x3B) break;
-			else i++;
-		}
-		return totalDelayCs / 100;
-	} catch (e) { return 0; }
-}
-
-function setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize) {
-	if (previewCache.size >= MAX_PREVIEW_CACHE) previewCache.delete(previewCache.keys().next().value);
-	previewCache.set(filePath, { buffer, mtimeMs, gifDuration, outputSize });
-}
-
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
-	let targetW = PREVIEW_WIDTH, targetH = PREVIEW_HEIGHT;
-	const hasValidSize = origSize && typeof origSize.width === "number";
-	if (hasValidSize) {
-		const ow = origSize.width, oh = origSize.height;
-		if (enlargeSmallImages || isVideo) {
-			const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-			targetW = Math.max(1, Math.round(ow * scale)); targetH = Math.max(1, Math.round(oh * scale));
-		} else {
-			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) { targetW = ow; targetH = oh; }
-			else {
-				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-				targetW = Math.max(1, Math.round(ow * scale)); targetH = Math.max(1, Math.round(oh * scale));
-			}
-		}
-	}
-	const args = ["-hide_banner", "-loglevel", "error"];
-	let expectedGifDuration = 0;
-
-	if (isVideo) {
-		const safeDuration = duration || 0;
-		const fpsLimit = extremePerformanceMode ? 8 : 10;
-		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-		const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
-
-		if (extremePerformanceMode) {
-			let clipStart = 1, clipDuration = 2;
-			if (safeDuration > 0 && safeDuration < clipStart + clipDuration) {
-				clipStart = Math.max(0, safeDuration - clipDuration - 0.5);
-				clipDuration = Math.min(clipDuration, safeDuration - clipStart);
-			}
-			args.push("-ss", String(clipStart), "-t", String(clipDuration), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDuration;
-		} else if (safeDuration < 5) {
-			let clipStart = Math.min(1, safeDuration * 0.1);
-			let clipDuration = Math.min(4, safeDuration - clipStart);
-			args.push("-ss", String(clipStart), "-t", String(clipDuration), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDuration;
-		} else {
-			const seg = 1.3;
-			const s1 = 1;
-			const s2 = Math.floor(safeDuration / 2);
-			const s3 = Math.max(s2 + seg + 0.5, safeDuration - seg - 1);
-			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = seg * 3;
-		}
-	} else if (isGif) {
-		if (extremePerformanceMode) args.push("-t", "2");
-		args.push("-i", filePath);
-		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-		const fpsLimit = extremePerformanceMode ? 8 : 10;
-		const f = extremePerformanceMode
-			? `[0:v]fps=${fpsLimit},scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`
-			: `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`;
-		args.push("-filter_complex", f, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-	} else {
-		args.push("-i", filePath);
-		const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-		args.push("-filter_complex", `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}[out_v]`, "-map", "[out_v]");
-		if (extremePerformanceMode) args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-		else args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
-	}
-	return { args, targetW, targetH, expectedGifDuration };
-}
-
-async function getPreviewBuffer(filePath, isVideo, isGif) {
-	if (!ffmpegPath) return null;
-	let origSize = null, duration = 0, mtimeMs = 0;
-	try { const st = fs.statSync(filePath); mtimeMs = st.mtimeMs; } catch { return null; }
-	const info = await getMediaInfo(filePath, mtimeMs);
-	if (info) { origSize = { width: info.width, height: info.height }; duration = info.duration; }
-
-	if (extremePerformanceMode) {
-		const c = previewCache.get(filePath);
-		if (c) return { buffer: c.buffer, gifDuration: c.gifDuration, outputSize: c.outputSize };
-	} else {
-		const c = previewCache.get(filePath);
-		if (c && c.mtimeMs === mtimeMs) return { buffer: c.buffer, gifDuration: c.gifDuration, outputSize: c.outputSize };
-	}
-
-	const ok = await ensureFfmpegAvailable();
-	if (!ok) return null;
-
-	return new Promise((resolve) => {
-		const { args, targetW, targetH, expectedGifDuration } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
-		const child = cp.spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-		const chunks = [];
-		let resolved = false;
-		child.stderr.on("data", () => { });
-		const timer = setTimeout(() => {
-			if (!resolved) { resolved = true; try { child.kill(); } catch { } resolve(null); }
-		}, 30000);
-		child.stdout.on("data", (d) => chunks.push(d));
-		child.on("error", () => { if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); } });
-		child.on("close", () => {
-			if (!resolved) {
-				resolved = true; clearTimeout(timer);
-				if (!chunks.length) { resolve(null); return; }
-				const buffer = Buffer.concat(chunks);
-				let gifDuration = expectedGifDuration;
-				if (isGif && !isVideo) {
-					gifDuration = getGifDurationFromBuffer(buffer);
-					if (extremePerformanceMode && gifDuration > 2.5) gifDuration = 2.0;
-				}
-				const outputSize = { width: targetW, height: targetH };
-				setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize);
-				resolve({ buffer, gifDuration, outputSize });
-			}
-		});
 	});
 }
 
@@ -411,16 +167,12 @@ function createProgressSvg(durationSeconds) {
 	return "data:image/svg+xml;base64," + Buffer.from(svgStr).toString("base64");
 }
 
-function invalidateFolderSizeCacheForPath(filePath) {
-	try { const dir = path.dirname(filePath); if (qqqFolderSizeCache.has(dir)) qqqFolderSizeCache.delete(dir); } catch { }
-}
+function invalidateFolderSizeCacheForPath(filePath) { try { const dir = path.dirname(filePath); if (qqqFolderSizeCache.has(dir)) qqqFolderSizeCache.delete(dir); } catch { } }
 
 async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = qqqFolderSizeCache.get(folderPath);
 	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
-
-	// ★★★ 使用 qqq.js 的 getFolderInfo（四级回退）★★★
 	const result = await getFolderInfo(folderPath);
 	if (result && result.success) {
 		const parts = []; let totalFiles = 0;
@@ -433,74 +185,43 @@ async function getQqqFolderSize(folderPath) {
 	return null;
 }
 
-// ★★★ 核心：Fast Path 粘贴命令 ★★★
 async function executeClipboardCommand() {
 	if (!isCoreIntegretyValid) { vscode.window.showErrorMessage("Integrity check failed."); return; }
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
 
 	let targetDir = "D:\\view\\p";
-	if (!editor.document.isUntitled) {
-		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
-	}
+	if (!editor.document.isUntitled) targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 
-	// ★★★ Fast Path: 纯文字粘贴 (<1ms) ★★★
 	const fastResult = await handleClipboardFast();
-	if (fastResult && fastResult.type === "text") {
-		// 直接插入文字，不做任何额外处理
-		await editor.edit(e => e.insert(editor.selection.active, fastResult.text));
-		return;
-	}
+	if (fastResult && fastResult.type === "text") { await editor.edit(e => e.insert(editor.selection.active, fastResult.text)); return; }
 
-	// ★★★ Slow Path: 媒体粘贴 - 先插入占位符 ★★★
 	const token = createPendingToken();
 	const eol = getDocumentEOL(editor.document);
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
-
-	// 立即插入占位符（用户感知 <5ms）
 	const insertPosition = editor.selection.active;
 	await editor.edit(e => e.insert(insertPosition, eol + pendingMarker + eol));
-
-	// 记录占位符位置
-	pendingTokens.set(token, {
-		editor: editor,
-		documentUri: editor.document.uri.toString(),
-		targetDir: targetDir
-	});
-
-	// 触发一次渲染，显示 loading 状态
+	pendingTokens.set(token, { editor: editor, documentUri: editor.document.uri.toString(), targetDir: targetDir });
 	debounceRender(editor, 10);
 
-	// ★★★ 后台异步处理媒体（四级回退）★★★
 	setImmediate(async () => {
-		try {
-			const result = await handleClipboardSlow(targetDir);
-			await replacePendingMarker(token, result);
-		} catch (e) {
-			logMessage(`媒体处理失败: ${e.message}`, "ERROR");
-			await replacePendingMarker(token, { type: "error", error: e.message });
-		}
+		try { const result = await handleClipboardSlow(targetDir); await replacePendingMarker(token, result); }
+		catch (e) { logMessage(`媒体处理失败: ${e.message}`, "ERROR"); await replacePendingMarker(token, { type: "error", error: e.message }); }
 	});
 }
 
-// ★★★ 替换占位符为真实内容 ★★★
 async function replacePendingMarker(token, result) {
 	const pending = pendingTokens.get(token);
 	if (!pending) return;
 	pendingTokens.delete(token);
-
-	// 查找当前打开的编辑器
-	let editor = vscode.window.visibleTextEditors.find(
-		e => e.document.uri.toString() === pending.documentUri
-	);
+	let editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === pending.documentUri);
 	if (!editor) return;
 
 	const doc = editor.document;
 	const text = doc.getText();
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
 	const markerIndex = text.indexOf(pendingMarker);
-
-	if (markerIndex === -1) return; // 占位符已被删除
+	if (markerIndex === -1) return;
 
 	const startPos = doc.positionAt(markerIndex);
 	const endPos = doc.positionAt(markerIndex + pendingMarker.length);
@@ -510,12 +231,9 @@ async function replacePendingMarker(token, result) {
 	const eol = getDocumentEOL(doc);
 	const docDir = path.dirname(doc.uri.fsPath);
 
-	if (result.type === "unknown" || result.type === "error") {
-		// 删除占位符
-		replacement = "";
-	} else if (result.type === "folder_text") {
-		replacement = result.text;
-	} else if (result.type === "image" || result.type === "ikge") {
+	if (result.type === "unknown" || result.type === "error") { replacement = ""; }
+	else if (result.type === "folder_text") { replacement = result.text; }
+	else if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
 		const relPath = path.relative(docDir, filePath).replace(/\//g, "\\");
 		const isVidOrImg = isImageOrVideoExt(path.extname(filePath));
@@ -535,19 +253,10 @@ async function replacePendingMarker(token, result) {
 			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
-		if (files.length > 1) {
-			vscode.window.showInformationMessage("文件已复制 " + files.length);
-		}
-	} else if (result.type === "text") {
-		replacement = result.text;
-	}
+		if (files.length > 1) vscode.window.showInformationMessage("文件已复制 " + files.length);
+	} else if (result.type === "text") { replacement = result.text; }
 
-	// 替换占位符
-	await editor.edit(editBuilder => {
-		editBuilder.replace(markerRange, replacement);
-	});
-
-	// 刷新渲染
+	await editor.edit(editBuilder => { editBuilder.replace(markerRange, replacement); });
 	setTimeout(() => renderImages(editor), 50);
 }
 
@@ -584,34 +293,21 @@ function provideCleanlinessEdits(document) {
 		const startPos = document.positionAt(m.index);
 		const endPos = document.positionAt(m.index + m.text.length);
 		const markerLine = startPos.line;
-
 		const rawPath = m.text.slice(2, -2).trim();
-		// 跳过 PENDING 占位符
 		if (rawPath.startsWith("__PENDING__:")) continue;
-
 		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 		let isVidOrImg = false;
 		if (absPath) isVidOrImg = isImageOrVideoExt(path.extname(absPath));
-
 		const lineObj = document.lineAt(markerLine);
 		const lineContent = lineObj.text;
-
 		if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
 		const suffix = lineContent.substring(endPos.character);
 		if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
-
 		let isLastMarkerInDoc = (i === markers.length - 1);
 		const neededLines = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
 		let existingBlanks = 0;
-		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-			if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
-			else break;
-		}
-		if (existingBlanks < neededLines) {
-			const linesToAdd = neededLines - existingBlanks;
-			const lineEndPos = lineObj.range.end;
-			edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
-		}
+		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) { if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++; else break; }
+		if (existingBlanks < neededLines) { const linesToAdd = neededLines - existingBlanks; const lineEndPos = lineObj.range.end; edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd))); }
 	}
 	return edits;
 }
@@ -620,17 +316,9 @@ async function performGlobalClean(editor, force = false) {
 	if (!editor) return;
 	if (!force && !cleanFreakMode) return;
 	const edits = provideCleanlinessEdits(editor.document);
-	if (edits.length > 0) {
-		await editor.edit(editBuilder => {
-			edits.forEach(e => {
-				if (e.newText) editBuilder.insert(e.range.start, e.newText);
-				else editBuilder.replace(e.range, e.newText);
-			});
-		});
-	}
+	if (edits.length > 0) { await editor.edit(editBuilder => { edits.forEach(e => { if (e.newText) editBuilder.insert(e.range.start, e.newText); else editBuilder.replace(e.range, e.newText); }); }); }
 }
 
-// ★★★ 渲染主逻辑（支持 PENDING 占位符）★★★
 async function renderImages(editor) {
 	if (!editor) return;
 	if (!isCoreIntegretyValid) { clearDecorations(); return; }
@@ -661,35 +349,17 @@ async function renderImages(editor) {
 			const pos = editor.document.positionAt(offset);
 			const endPos = editor.document.positionAt(offset + match[0].length);
 			const uniqueKey = `${pos.line}_${pos.character}`;
-
 			const hideDeco = { range: new vscode.Range(pos, endPos) };
 			currentHideDecos.set(uniqueKey, hideDeco);
-
 			const rawPath = match[0].slice(2, -2).trim();
 
-			// ★★★ 检测 PENDING 占位符，渲染 loading 状态 ★★★
 			if (rawPath.startsWith("__PENDING__:")) {
 				const targetLine = pos.line;
 				if (targetLine >= editor.document.lineCount) continue;
 				const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-
 				const loadingDeco = {
 					range: anchorRange,
-					renderOptions: {
-						after: {
-							contentText: "",
-							position: 'absolute',
-							left: marginLeft,
-							top: '0px',
-							width: `${boxWidth}px`,
-							height: `${boxHeight}px`,
-							padding: "2px",
-							border: "1px dashed #888",
-							backgroundColor: PREVIEW_BG_COLOR,
-							zIndex: -1,
-							textDecoration: `none; pointer-events: none; display: inline-block; background-image: url("${LOADING_SVG}"); background-size: 120px 40px; background-position: center center; background-repeat: no-repeat;`
-						}
-					}
+					renderOptions: { after: { contentText: "", position: 'absolute', left: marginLeft, top: '0px', width: `${boxWidth}px`, height: `${boxHeight}px`, padding: "2px", border: "1px dashed #888", backgroundColor: PREVIEW_BG_COLOR, zIndex: -1, textDecoration: `none; pointer-events: none; display: inline-block; background-image: url("${LOADING_SVG}"); background-size: 120px 40px; background-position: center center; background-repeat: no-repeat;` } }
 				};
 				currentDocDecos.set(uniqueKey, loadingDeco);
 				continue;
@@ -721,77 +391,33 @@ async function renderImages(editor) {
 			const task = async () => {
 				if (currentRenderVersion !== myRenderVersion) return null;
 				try {
-					let previewResult = null;
-					if (ffmpegPath) {
-						previewResult = await getPreviewBuffer(absPath, isVideo, isGif);
-						if (currentRenderVersion !== myRenderVersion) return null;
-					}
-					const deco = { range: anchorRange, renderOptions: {} };
-					let contentUrl = "";
-					let actualGifDuration = 0;
-					let outputSize = null;
+					const previewResult = await getPreview(absPath, qualityMode);
+					if (currentRenderVersion !== myRenderVersion) return null;
+					if (!previewResult || !previewResult.base64) return null;
 
-					if (previewResult && previewResult.buffer) {
-						let mime = "image/png";
-						if (isGif || isVideo) mime = "image/gif";
-						else if (extremePerformanceMode) mime = "image/jpeg";
-						const b64 = previewResult.buffer.toString("base64");
-						contentUrl = `url("data:${mime};base64,${b64}")`;
-						if (previewResult.gifDuration && previewResult.gifDuration > 0) actualGifDuration = previewResult.gifDuration;
-						outputSize = previewResult.outputSize;
-					} else if (isImage && !isVideo && !isGif) {
-						const fileUri = vscode.Uri.file(absPath);
-						contentUrl = `url("${fileUri.toString()}")`;
-					}
-					if (!contentUrl) return null;
+					const deco = { range: anchorRange, renderOptions: {} };
+					const contentUrl = `url("${previewResult.base64}")`;
+					const actualGifDuration = previewResult.meta?.gifDur || 0;
+					const outputSize = previewResult.meta ? { width: previewResult.meta.width, height: previewResult.meta.height } : null;
 
 					let progressBarUrl = null;
-					if ((isGif || isVideo) && actualGifDuration > 0) progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
+					if ((isGif || isVideo || previewResult.meta?.type === 'animated_image') && actualGifDuration > 0) progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
 
 					const gridSize = "20px 20px";
 					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
 
 					let layers = [], sizes = [], positions = [], repeats = [];
-
-					if (watermarkBase64) {
-						layers.push(`url("${watermarkBase64}")`);
-						sizes.push("contain");
-						positions.push("center center");
-						repeats.push("no-repeat");
-					}
-					if (progressBarUrl) {
-						layers.push(progressBarUrl);
-						sizes.push("512px 4px");
-						positions.push("center bottom");
-						repeats.push("no-repeat");
-					}
+					if (watermarkBase64) { layers.push(`url("${watermarkBase64}")`); sizes.push("contain"); positions.push("center center"); repeats.push("no-repeat"); }
+					if (progressBarUrl) { layers.push(progressBarUrl); sizes.push("512px 4px"); positions.push("center bottom"); repeats.push("no-repeat"); }
 					layers.push(contentUrl);
-					if (outputSize) sizes.push(`${outputSize.width}px ${outputSize.height}px`);
-					else sizes.push("contain");
+					sizes.push("contain");
 					positions.push("center center");
 					repeats.push("no-repeat");
-					layers.push(gridImage);
-					sizes.push(gridSize);
-					positions.push("0 0");
-					repeats.push("repeat");
+					layers.push(gridImage); sizes.push(gridSize); positions.push("0 0"); repeats.push("repeat");
 
-					deco.renderOptions.after = {
-						contentText: "",
-						position: 'absolute',
-						left: marginLeft,
-						top: '0px',
-						width: `${boxWidth}px`,
-						height: `${boxHeight}px`,
-						padding: "2px",
-						border: "1px dashed #888",
-						backgroundColor: PREVIEW_BG_COLOR,
-						zIndex: -1,
-						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
-					};
-
+					deco.renderOptions.after = { contentText: "", position: 'absolute', left: marginLeft, top: '0px', width: `${boxWidth}px`, height: `${boxHeight}px`, padding: "2px", border: "1px dashed #888", backgroundColor: PREVIEW_BG_COLOR, zIndex: -1, textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};` };
 					deco.hoverMessage = new vscode.MarkdownString(`[打开图片](${vscode.Uri.file(absPath).toString()})`);
 					deco.hoverMessage.isTrusted = true;
-
 					return { key: uniqueKey, deco };
 				} catch (e) { return null; }
 			};
@@ -826,13 +452,9 @@ class FileCodeLensProvider {
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
 			const rawPath = match[0].slice(2, -2).trim();
-
-			// 跳过 PENDING 占位符
 			if (rawPath.startsWith("__PENDING__:")) continue;
-
 			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 			if (!absPath || !fs.existsSync(absPath)) continue;
-
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
 			const isVidOrImg = isImageOrVideoExt(ext);
@@ -844,21 +466,9 @@ class FileCodeLensProvider {
 				const fSize = folderData ? folderData.size : 0;
 				const fSizeStr = formatBytes(fSize);
 				const folderTooltip = folderData ? folderData.summary : undefined;
-
-				let fileSz = "?";
-				let tooltipText = "";
-				let mtimeMs = 0;
-				try {
-					const st = fs.statSync(absPath);
-					fileSz = formatBytes(st.size);
-					const bTime = new Date(st.birthtime).toLocaleString();
-					const mTime = new Date(st.mtime).toLocaleString();
-					tooltipText = `创建: ${bTime}\n修改: ${mTime}`;
-					mtimeMs = st.mtimeMs;
-				} catch { }
-
-				let titleSuffix = "";
-				let isRealVideo = false;
+				let fileSz = "?"; let tooltipText = ""; let mtimeMs = 0;
+				try { const st = fs.statSync(absPath); fileSz = formatBytes(st.size); const bTime = new Date(st.birthtime).toLocaleString(); const mTime = new Date(st.mtime).toLocaleString(); tooltipText = `创建: ${bTime}\n修改: ${mTime}`; mtimeMs = st.mtimeMs; } catch { }
+				let titleSuffix = ""; let isRealVideo = false;
 				if (isVidOrImg) {
 					const info = await getMediaInfo(absPath, mtimeMs);
 					if (info && info.width && info.height) {
@@ -866,48 +476,24 @@ class FileCodeLensProvider {
 						const MAX_W = PREVIEW_WIDTH, MAX_H = PREVIEW_HEIGHT;
 						if (info.type === "video") isRealVideo = true;
 						if (isRealVideo || isVideoExtFlag || enlargeSmallImages) scale = Math.min(MAX_W / info.width, MAX_H / info.height);
-						else {
-							if (info.width <= MAX_W && info.height <= MAX_H) scale = 1;
-							else scale = Math.min(MAX_W / info.width, MAX_H / info.height);
-						}
+						else { if (info.width <= MAX_W && info.height <= MAX_H) scale = 1; else scale = Math.min(MAX_W / info.width, MAX_H / info.height); }
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-						if (info.codec) {
-							tooltipText += `\n编解码器: ${info.codec}`;
-							if (info.codec_long_name) tooltipText += ` (${info.codec_long_name})`;
-						}
+						if (info.codec) { tooltipText += `\n编解码器: ${info.codec}`; if (info.codec_long_name) tooltipText += ` (${info.codec_long_name})`; }
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
 						if (shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 					}
 				}
-
-				const iconPart = isRealVideo ? "🎬" : "";
-				const spacePart = isRealVideo ? " " : "   ";
+				const iconPart = isRealVideo ? "🎬" : ""; const spacePart = isRealVideo ? " " : "   ";
 				const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
-
 				return [
-					new vscode.CodeLens(r, {
-						title: `✎( ${fSizeStr}) 🗀qqq`,
-						command: "qqq.revealFileInFolder",
-						arguments: [absPath],
-						tooltip: folderTooltip
-					}),
-					new vscode.CodeLens(r, {
-						title: "✎rename",
-						command: "qqq.renameFile",
-						arguments: [rawPath, absPath]
-					}),
-					new vscode.CodeLens(r, {
-						title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-						command: "qqq.openFile",
-						arguments: [absPath],
-						tooltip: tooltipText
-					})
+					new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath], tooltip: folderTooltip }),
+					new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
+					new vscode.CodeLens(r, { title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`, command: "qqq.openFile", arguments: [absPath], tooltip: tooltipText })
 				];
 			});
 		}
-
 		const results = await Promise.all(tasks.map(t => t()));
 		results.forEach(group => lenses.push(...group));
 		return lenses;
@@ -916,33 +502,20 @@ class FileCodeLensProvider {
 
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
-	try {
-		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
-		else cp.exec(`xdg-open "${filePath}"`);
-	} catch { vscode.env.openExternal(vscode.Uri.file(filePath)); }
+	try { if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`); else if (process.platform === "darwin") cp.exec(`open "${filePath}"`); else cp.exec(`xdg-open "${filePath}"`); }
+	catch { vscode.env.openExternal(vscode.Uri.file(filePath)); }
 }
 
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
-	try {
-		if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`);
-		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
-	} catch { }
+	try { if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`); else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`); else cp.exec(`xdg-open "${path.dirname(filePath)}"`); } catch { }
 }
 
 async function renameFileCommand(rawPath, absPath) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
 	const currentName = path.basename(absPath);
-	const newName = await vscode.window.showInputBox({
-		title: "重命名粘贴文件",
-		prompt: "rename  ",
-		value: currentName,
-		ignoreFocusOut: true,
-		validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null
-	});
+	const newName = await vscode.window.showInputBox({ title: "重命名粘贴文件", prompt: "rename  ", value: currentName, ignoreFocusOut: true, validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null });
 	if (!newName || newName.trim() === currentName) return;
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
@@ -953,14 +526,7 @@ async function renameFileCommand(rawPath, absPath) {
 	const ranges = [];
 	let m;
 	const txt = doc.getText();
-	while ((m = regex.exec(txt))) {
-		const matchedRaw = m[0].slice(2, -2).trim();
-		if (matchedRaw === rawPath) {
-			const s = doc.positionAt(m.index);
-			const e = doc.positionAt(m.index + m[0].length);
-			ranges.push(new vscode.Range(s, e));
-		}
-	}
+	while ((m = regex.exec(txt))) { const matchedRaw = m[0].slice(2, -2).trim(); if (matchedRaw === rawPath) { const s = doc.positionAt(m.index); const e = doc.positionAt(m.index + m[0].length); ranges.push(new vscode.Range(s, e)); } }
 	if (ranges.length) await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
@@ -987,17 +553,8 @@ async function activate(context) {
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration("qqq")) {
-				refreshQqqConfig();
-				previewCache.clear();
-				documentDecorationsMap.clear();
-				renderVisibleEditors();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-			}
-			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
-				refreshQqqConfig();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-			}
+			if (e.affectsConfiguration("qqq")) { refreshQqqConfig(); documentDecorationsMap.clear(); renderVisibleEditors(); if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor); }
+			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) { refreshQqqConfig(); if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor); }
 		}),
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
@@ -1005,25 +562,13 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
 		vscode.commands.registerCommand("qqq.setInOrder", () => { performGlobalClean(vscode.window.activeTextEditor, true); }),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
-		vscode.workspace.onWillSaveTextDocument(e => {
-			if (cleanFreakMode && e.document) {
-				const edits = provideCleanlinessEdits(e.document);
-				if (edits.length > 0) e.waitUntil(Promise.resolve(edits));
-			}
-		}),
+		vscode.workspace.onWillSaveTextDocument(e => { if (cleanFreakMode && e.document) { const edits = provideCleanlinessEdits(e.document); if (edits.length > 0) e.waitUntil(Promise.resolve(edits)); } }),
 		vscode.window.onDidChangeTextEditorVisibleRanges(e => debounceRender(e.textEditor)),
 		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); }),
 		vscode.window.onDidChangeWindowState(e => { if (e.focused) renderVisibleEditors(); }),
-		vscode.workspace.onDidChangeTextDocument(e => {
-			const ed = vscode.window.activeTextEditor;
-			if (ed && e.document === ed.document) debounceRender(ed);
-			if (e.document === ed?.document && e.contentChanges.length > 0) documentDecorationsMap.delete(e.document.uri.toString());
-		}),
+		vscode.workspace.onDidChangeTextDocument(e => { const ed = vscode.window.activeTextEditor; if (ed && e.document === ed.document) debounceRender(ed); if (e.document === ed?.document && e.contentChanges.length > 0) documentDecorationsMap.delete(e.document.uri.toString()); }),
 		vscode.workspace.onDidCloseTextDocument(doc => { documentDecorationsMap.delete(doc.uri.toString()); }),
-		vscode.window.onDidChangeVisibleTextEditors(editors => {
-			renderVisibleEditors();
-			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-		}),
+		vscode.window.onDidChangeVisibleTextEditors(editors => { renderVisibleEditors(); if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor); }),
 	);
 	const editor = vscode.window.activeTextEditor;
 	if (editor) renderImages(editor);
@@ -1035,4 +580,3 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
-
