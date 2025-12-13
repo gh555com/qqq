@@ -1,4 +1,4 @@
-// src/qqq.js
+// File: src/qqq.js
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
@@ -13,8 +13,9 @@ const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
 // ★★★ 核心正则：唯一真理源 ★★★
 // 匹配结构： /\ ... \/
-// 允许中间有空格
-const QQQ_PATH_REGEX = /\/\\\s*[a-z]:[^\/]*?qqq[^\/]*?\s*\\\//gi;
+// 允许中间有空格，允许相对路径 (不再强制 [a-z]:)
+// 只要包含 qqq 即可
+const QQQ_PATH_REGEX = /\/\\\s*.*?qqq.*?\s*\\\//gi;
 
 // ==================== 日志工具 ====================
 function ensureLogDir() {
@@ -235,6 +236,7 @@ async function pureCommand() {
 	let parentDirFiles = [];
 	try { parentDirFiles = fs.readdirSync(parentDir); } catch (e) { vscode.window.showErrorMessage("读取当前目录失败: " + e.message); return; }
 
+	// 使用统一正则
 	const regex = new RegExp(QQQ_PATH_REGEX);
 
 	for (const fileName of parentDirFiles) {
@@ -251,10 +253,18 @@ async function pureCommand() {
 			let match;
 			regex.lastIndex = 0; // 重置
 			while ((match = regex.exec(content)) !== null) {
-				// 切片修正：/\... \/ 是 2 个字符
-				const refPath = match[0].slice(2, -2).trim().replace(/\//g, "\\");
-				if (refPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
-					const refFileName = path.basename(refPath);
+				const rawPath = match[0].slice(2, -2).trim();
+
+				// 兼容绝对路径和相对路径的匹配
+				// 如果是相对路径，我们需要把它转为绝对路径来判断
+				let absRefPath = rawPath;
+				if (!path.isAbsolute(rawPath)) {
+					absRefPath = path.join(parentDir, rawPath);
+				}
+				absRefPath = absRefPath.replace(/\//g, "\\");
+
+				if (absRefPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
+					const refFileName = path.basename(absRefPath);
 					referencedFiles.add(refFileName.toLowerCase());
 				}
 			}
@@ -334,3 +344,4 @@ module.exports = {
 	BASE_DIR,
 	QQQ_PATH_REGEX
 };
+
