@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const cp = require("child_process");
+const readline = require("readline");
 
 // ==================== 全局配置 ====================
 const LOG_PATH = "D:\\view\\p\\kp.log";
@@ -67,7 +68,7 @@ function finishUserTracking(context) {
 }
 
 // ==================== 占位符 Token 管理 ====================
-const pendingJobs = new Map(); // token -> { resolve, reject, targetDir, startTime }
+const pendingJobs = new Map();
 let tokenCounter = 0;
 
 function createPendingToken() {
@@ -82,13 +83,7 @@ function createPendingToken() {
 
 function registerPendingJob(token, targetDir) {
 	return new Promise((resolve, reject) => {
-		pendingJobs.set(token, {
-			resolve,
-			reject,
-			targetDir,
-			startTime: Date.now()
-		});
-		// 超时保护：30秒后自动清理
+		pendingJobs.set(token, { resolve, reject, targetDir, startTime: Date.now() });
 		setTimeout(() => {
 			if (pendingJobs.has(token)) {
 				pendingJobs.delete(token);
@@ -105,6 +100,711 @@ function resolvePendingJob(token, result) {
 		job.resolve(result);
 	}
 }
+
+// ==================== ★★★ Python Bridge (最高优先级) ★★★ ====================
+
+class PythonBridge {
+	constructor() {
+		this.process = null;
+		this.pending = new Map();
+		this.requestId = 0;
+		this.isStarting = false;
+		this.startPromise = null;
+		this.restartCount = 0;
+		this.maxRestarts = 3;
+		this.available = null; // null = 未检测, true/false = 检测结果
+	}
+
+	async start() {
+		if (this.process && !this.process.killed) return true;
+		if (this.isStarting) return this.startPromise;
+
+		this.isStarting = true;
+		this.startPromise = this._doStart();
+
+		try {
+			return await this.startPromise;
+		} finally {
+			this.isStarting = false;
+			this.startPromise = null;
+		}
+	}
+
+	async _doStart() {
+		return new Promise((resolve) => {
+			const scriptPath = path.join(__dirname, "kp.py");
+
+			// 检查 kp.py 是否存在
+			if (!fs.existsSync(scriptPath)) {
+				logMessage("kp.py not found, Python Bridge unavailable", "WARN");
+				this.available = false;
+				resolve(false);
+				return;
+			}
+
+			try {
+				this.process = cp.spawn("python", [scriptPath, "--daemon"], {
+					stdio: ["pipe", "pipe", "pipe"],
+					windowsHide: true
+				});
+
+				const rl = readline.createInterface({
+					input: this.process.stdout,
+					crlfDelay: Infinity
+				});
+
+				rl.on("line", (line) => {
+					try {
+						const result = JSON.parse(line);
+						const id = result._id;
+						if (this.pending.has(id)) {
+							const { resolve: res, timer } = this.pending.get(id);
+							clearTimeout(timer);
+							this.pending.delete(id);
+							res(result);
+						}
+					} catch (e) {
+						logMessage(`Python Bridge parse error: ${e}`, "ERROR");
+					}
+				});
+
+				this.process.stderr.on("data", (data) => {
+					logMessage(`Python stderr: ${data.toString()}`, "WARN");
+				});
+
+				this.process.on("error", (err) => {
+					logMessage(`Python process error: ${err}`, "ERROR");
+					this._handleCrash();
+				});
+
+				this.process.on("close", (code) => {
+					logMessage(`Python process closed: ${code}`, "WARN");
+					this._handleCrash();
+				});
+
+				// Ping 测试
+				setTimeout(async () => {
+					try {
+						const pong = await this.call("ping", {}, 2000);
+						if (pong && pong.status === "alive") {
+							this.restartCount = 0;
+							this.available = true;
+							logMessage("Python Bridge started", "INFO");
+							resolve(true);
+						} else {
+							this.available = false;
+							resolve(false);
+						}
+					} catch (e) {
+						this.available = false;
+						resolve(false);
+					}
+				}, 100);
+			} catch (e) {
+				logMessage(`Python spawn error: ${e}`, "ERROR");
+				this.available = false;
+				resolve(false);
+			}
+		});
+	}
+
+	_handleCrash() {
+		this.process = null;
+		for (const [id, { resolve, timer }] of this.pending) {
+			clearTimeout(timer);
+			resolve({ error: "process_crashed" });
+		}
+		this.pending.clear();
+
+		if (this.restartCount < this.maxRestarts) {
+			this.restartCount++;
+			logMessage(`Python Bridge restart ${this.restartCount}/${this.maxRestarts}`, "WARN");
+			setTimeout(() => this.start(), 500);
+		} else {
+			this.available = false;
+		}
+	}
+
+	async call(action, params = {}, timeout = 5000) {
+		if (this.available === false) {
+			return { error: "python_not_available" };
+		}
+
+		if (!this.process || this.process.killed) {
+			const started = await this.start();
+			if (!started) return { error: "python_not_available" };
+		}
+
+		const id = ++this.requestId;
+		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
+
+			this.pending.set(id, { resolve, timer });
+
+			try {
+				this.process.stdin.write(cmd);
+			} catch (e) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
+			}
+		});
+	}
+
+	async identify(filePath) {
+		return this.call("identify", { path: filePath });
+	}
+
+	async getFolderInfo(folderPath) {
+		return this.call("folder_info", { path: folderPath }, 15000);
+	}
+
+	async handleClipboard(targetDir) {
+		return this.call("clipboard", { target_dir: targetDir }, 10000);
+	}
+
+	isAvailable() {
+		return this.available === true;
+	}
+
+	stop() {
+		if (this.process && !this.process.killed) {
+			try { this.process.kill(); } catch (e) { }
+			this.process = null;
+		}
+	}
+}
+
+const pythonBridge = new PythonBridge();
+
+// ==================== ★★★ Rust Bridge ★★★ ====================
+
+class RustBridge {
+	constructor() {
+		this.process = null;
+		this.pending = new Map();
+		this.requestId = 0;
+		this.isStarting = false;
+		this.startPromise = null;
+		this.restartCount = 0;
+		this.maxRestarts = 3;
+		this.exePath = null;
+		this.available = null; // null = 未检测, true/false = 检测结果
+	}
+
+	_getExePath() {
+		if (this.exePath) return this.exePath;
+
+		const platform = process.platform;
+		const arch = process.arch;
+		let filename;
+
+		if (platform === 'win32') {
+			filename = arch === 'arm64' ? 'q_win_arm64.exe' : 'q_win_x64.exe';
+		} else if (platform === 'darwin') {
+			filename = arch === 'arm64' ? 'q_mac_arm64' : 'q_mac_x64';
+		} else {
+			filename = arch === 'arm64' ? 'q_linux_arm64' : 'q_linux_x64';
+		}
+
+		// 尝试多个可能的路径
+		const candidates = [
+			path.join(__dirname, '..', 'assets', filename),
+			path.join(__dirname, 'assets', filename),
+			path.join(__dirname, filename),
+		];
+
+		for (const candidate of candidates) {
+			if (fs.existsSync(candidate)) {
+				this.exePath = candidate;
+				return this.exePath;
+			}
+		}
+
+		return null;
+	}
+
+	async start() {
+		if (this.process && !this.process.killed) return true;
+		if (this.isStarting) return this.startPromise;
+
+		this.isStarting = true;
+		this.startPromise = this._doStart();
+
+		try {
+			return await this.startPromise;
+		} finally {
+			this.isStarting = false;
+			this.startPromise = null;
+		}
+	}
+
+	async _doStart() {
+		return new Promise((resolve) => {
+			const exePath = this._getExePath();
+			if (!exePath) {
+				logMessage("Rust daemon not found, falling back", "WARN");
+				this.available = false;
+				resolve(false);
+				return;
+			}
+
+			try {
+				this.process = cp.spawn(exePath, ["--daemon"], {
+					stdio: ["pipe", "pipe", "pipe"],
+					windowsHide: true
+				});
+
+				const rl = readline.createInterface({
+					input: this.process.stdout,
+					crlfDelay: Infinity
+				});
+
+				rl.on("line", (line) => {
+					try {
+						const result = JSON.parse(line);
+						const id = result._id;
+						if (this.pending.has(id)) {
+							const { resolve: res, timer } = this.pending.get(id);
+							clearTimeout(timer);
+							this.pending.delete(id);
+							res(result);
+						}
+					} catch (e) {
+						logMessage(`Rust Bridge parse error: ${e}`, "ERROR");
+					}
+				});
+
+				this.process.stderr.on("data", (data) => {
+					logMessage(`Rust stderr: ${data.toString()}`, "WARN");
+				});
+
+				this.process.on("error", (err) => {
+					logMessage(`Rust process error: ${err}`, "ERROR");
+					this._handleCrash();
+				});
+
+				this.process.on("close", (code) => {
+					logMessage(`Rust process closed: ${code}`, "WARN");
+					this._handleCrash();
+				});
+
+				// Ping 测试
+				setTimeout(async () => {
+					try {
+						const pong = await this.call("ping", {}, 2000);
+						if (pong && pong.status === "alive") {
+							this.restartCount = 0;
+							this.available = true;
+							logMessage("Rust Bridge started", "INFO");
+							resolve(true);
+						} else {
+							this.available = false;
+							resolve(false);
+						}
+					} catch (e) {
+						this.available = false;
+						resolve(false);
+					}
+				}, 100);
+			} catch (e) {
+				logMessage(`Rust spawn error: ${e}`, "ERROR");
+				this.available = false;
+				resolve(false);
+			}
+		});
+	}
+
+	_handleCrash() {
+		this.process = null;
+		for (const [id, { resolve, timer }] of this.pending) {
+			clearTimeout(timer);
+			resolve({ error: "process_crashed" });
+		}
+		this.pending.clear();
+
+		if (this.restartCount < this.maxRestarts) {
+			this.restartCount++;
+			logMessage(`Rust Bridge restart ${this.restartCount}/${this.maxRestarts}`, "WARN");
+			setTimeout(() => this.start(), 500);
+		} else {
+			this.available = false;
+		}
+	}
+
+	async call(action, params = {}, timeout = 5000) {
+		if (this.available === false) {
+			return { error: "rust_not_available" };
+		}
+
+		if (!this.process || this.process.killed) {
+			const started = await this.start();
+			if (!started) return { error: "rust_not_available" };
+		}
+
+		const id = ++this.requestId;
+		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
+
+			this.pending.set(id, { resolve, timer });
+
+			try {
+				this.process.stdin.write(cmd);
+			} catch (e) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
+			}
+		});
+	}
+
+	async identify(filePath) {
+		return this.call("identify", { path: filePath });
+	}
+
+	async getFolderInfo(folderPath) {
+		return this.call("folder_info", { path: folderPath }, 15000);
+	}
+
+	async handleClipboard(targetDir) {
+		return this.call("clipboard", { target_dir: targetDir }, 10000);
+	}
+
+	isAvailable() {
+		return this.available === true;
+	}
+
+	stop() {
+		if (this.process && !this.process.killed) {
+			try { this.process.kill(); } catch (e) { }
+			this.process = null;
+		}
+	}
+}
+
+const rustBridge = new RustBridge();
+
+// ==================== ★★★ 常驻 Shell Bridge (回退方案) ★★★ ====================
+
+class ShellBridge {
+	constructor() {
+		this.process = null;
+		this.pending = new Map();
+		this.requestId = 0;
+		this.isStarting = false;
+		this.startPromise = null;
+		this.available = null;
+		this.platform = process.platform;
+	}
+
+	async start() {
+		if (this.process && !this.process.killed) return true;
+		if (this.isStarting) return this.startPromise;
+
+		this.isStarting = true;
+		this.startPromise = this._doStart();
+
+		try {
+			return await this.startPromise;
+		} finally {
+			this.isStarting = false;
+			this.startPromise = null;
+		}
+	}
+
+	async _doStart() {
+		if (this.platform === 'win32') {
+			return this._startPowerShell();
+		} else if (this.platform === 'darwin') {
+			return this._startMacDaemon();
+		} else {
+			return this._startLinuxDaemon();
+		}
+	}
+
+	async _startPowerShell() {
+		return new Promise((resolve) => {
+			const psScript = `
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+function Process-Command {
+    param($cmd)
+    $result = @{ _id = $cmd._id }
+    try {
+        switch ($cmd.action) {
+            'ping' { $result.status = 'alive' }
+            'hasImage' { $result.value = [System.Windows.Forms.Clipboard]::ContainsImage() }
+            'hasFiles' { $result.value = [System.Windows.Forms.Clipboard]::ContainsFileDropList() }
+            'getFiles' {
+                $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+                $result.files = @()
+                if ($files) { foreach ($f in $files) { $result.files += $f } }
+            }
+            'saveImage' {
+                $img = [System.Windows.Forms.Clipboard]::GetImage()
+                if ($img) {
+                    $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png)
+                    $result.success = $true
+                } else { $result.success = $false }
+            }
+            default { $result.error = "unknown action" }
+        }
+    } catch { $result.error = $_.Exception.Message }
+    return $result
+}
+
+while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($line -eq $null) { break }
+    try {
+        $cmd = ConvertFrom-Json $line
+        $result = Process-Command $cmd
+        $result | ConvertTo-Json -Compress | Write-Host
+    } catch {
+        @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress | Write-Host
+    }
+}
+`;
+			try {
+				this.process = cp.spawn('powershell', [
+					'-NoProfile', '-NoLogo', '-NonInteractive',
+					'-ExecutionPolicy', 'Bypass',
+					'-Command', psScript
+				], {
+					stdio: ['pipe', 'pipe', 'pipe'],
+					windowsHide: true
+				});
+
+				this._setupProcessHandlers(resolve);
+			} catch (e) {
+				this.available = false;
+				resolve(false);
+			}
+		});
+	}
+
+	async _startMacDaemon() {
+		return new Promise((resolve) => {
+			// macOS: 使用 bash + osascript 组合
+			const bashScript = `
+#!/bin/bash
+while IFS= read -r line; do
+    action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null)
+    id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null)
+
+    case "$action" in
+        ping)
+            echo '{"_id":'$id',"status":"alive"}'
+            ;;
+        hasImage)
+            # 检查剪贴板是否有图片
+            if pngpaste - >/dev/null 2>&1; then
+                echo '{"_id":'$id',"value":true}'
+            else
+                echo '{"_id":'$id',"value":false}'
+            fi
+            ;;
+        saveImage)
+            dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null)
+            if pngpaste "$dest" 2>/dev/null; then
+                echo '{"_id":'$id',"success":true}'
+            else
+                echo '{"_id":'$id',"success":false}'
+            fi
+            ;;
+        *)
+            echo '{"_id":'$id',"error":"unknown action"}'
+            ;;
+    esac
+done
+`;
+			try {
+				this.process = cp.spawn('bash', ['-c', bashScript], {
+					stdio: ['pipe', 'pipe', 'pipe']
+				});
+				this._setupProcessHandlers(resolve);
+			} catch (e) {
+				this.available = false;
+				resolve(false);
+			}
+		});
+	}
+
+	async _startLinuxDaemon() {
+		return new Promise((resolve) => {
+			// Linux: 使用 bash + xclip
+			const bashScript = `
+#!/bin/bash
+while IFS= read -r line; do
+    action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null)
+    id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null)
+
+    case "$action" in
+        ping)
+            echo '{"_id":'$id',"status":"alive"}'
+            ;;
+        hasImage)
+            if xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then
+                echo '{"_id":'$id',"value":true}'
+            else
+                echo '{"_id":'$id',"value":false}'
+            fi
+            ;;
+        saveImage)
+            dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null)
+            if xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then
+                echo '{"_id":'$id',"success":true}'
+            else
+                echo '{"_id":'$id',"success":false}'
+            fi
+            ;;
+        *)
+            echo '{"_id":'$id',"error":"unknown action"}'
+            ;;
+    esac
+done
+`;
+			try {
+				this.process = cp.spawn('bash', ['-c', bashScript], {
+					stdio: ['pipe', 'pipe', 'pipe']
+				});
+				this._setupProcessHandlers(resolve);
+			} catch (e) {
+				this.available = false;
+				resolve(false);
+			}
+		});
+	}
+
+	_setupProcessHandlers(resolve) {
+		const rl = readline.createInterface({
+			input: this.process.stdout,
+			crlfDelay: Infinity
+		});
+
+		rl.on('line', (line) => {
+			try {
+				const result = JSON.parse(line);
+				const id = result._id;
+				if (this.pending.has(id)) {
+					const { resolve: res, timer } = this.pending.get(id);
+					clearTimeout(timer);
+					this.pending.delete(id);
+					res(result);
+				}
+			} catch (e) { }
+		});
+
+		this.process.on('error', () => {
+			this.available = false;
+			this.process = null;
+		});
+
+		this.process.on('close', () => {
+			this.process = null;
+		});
+
+		// 测试
+		setTimeout(async () => {
+			try {
+				const pong = await this.call('ping', {}, 3000);
+				if (pong && pong.status === 'alive') {
+					this.available = true;
+					logMessage(`Shell Bridge (${this.platform}) started`, "INFO");
+					resolve(true);
+				} else {
+					this.available = false;
+					resolve(false);
+				}
+			} catch (e) {
+				this.available = false;
+				resolve(false);
+			}
+		}, 500);
+	}
+
+	async call(action, params = {}, timeout = 5000) {
+		if (this.available === false) {
+			return { error: "shell_not_available" };
+		}
+
+		if (!this.process || this.process.killed) {
+			const started = await this.start();
+			if (!started) return { error: "shell_not_available" };
+		}
+
+		const id = ++this.requestId;
+		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
+
+			this.pending.set(id, { resolve, timer });
+
+			try {
+				this.process.stdin.write(cmd);
+			} catch (e) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
+			}
+		});
+	}
+
+	async hasImage() {
+		const result = await this.call('hasImage', {}, 2000);
+		return result.value === true;
+	}
+
+	async hasFiles() {
+		const result = await this.call('hasFiles', {}, 2000);
+		return result.value === true;
+	}
+
+	async getFiles() {
+		const result = await this.call('getFiles', {}, 3000);
+		return result.files || [];
+	}
+
+	async saveImage(destPath) {
+		const result = await this.call('saveImage', { path: destPath }, 5000);
+		return result.success === true;
+	}
+
+	isAvailable() {
+		return this.available === true;
+	}
+
+	stop() {
+		if (this.process && !this.process.killed) {
+			try { this.process.kill(); } catch (e) { }
+			this.process = null;
+		}
+	}
+}
+
+const shellBridge = new ShellBridge();
 
 // ==================== 媒体文件识别 ====================
 const SIGNATURES = [
@@ -182,6 +882,20 @@ async function probeFile(filePath) {
 
 async function identifyFile(filePath) {
 	if (!fs.existsSync(filePath)) return { error: "file_not_found" };
+
+	// ★★★ 优先级1：Python Bridge ★★★
+	if (pythonBridge.isAvailable()) {
+		const result = await pythonBridge.identify(filePath);
+		if (!result.error) return result;
+	}
+
+	// ★★★ 优先级2：Rust Bridge ★★★
+	if (rustBridge.isAvailable()) {
+		const result = await rustBridge.identify(filePath);
+		if (!result.error) return result;
+	}
+
+	// ★★★ 优先级3：纯 JS 回退 ★★★
 	let info = { type: 'unknown', ext: path.extname(filePath).toLowerCase() };
 	try {
 		const fd = fs.openSync(filePath, 'r');
@@ -191,6 +905,7 @@ async function identifyFile(filePath) {
 		const res = identifyBySignature(buffer);
 		if (res) info = { ...info, ...res };
 	} catch (e) { }
+
 	if (['video', 'image', 'gif', 'audio', 'unknown'].includes(info.type)) {
 		const ff = await probeFile(filePath);
 		if (ff && (ff.width || ff.duration > 0)) {
@@ -202,6 +917,19 @@ async function identifyFile(filePath) {
 
 // ==================== 文件夹统计 ====================
 async function getFolderInfo(folderPath) {
+	// ★★★ 优先级1：Python Bridge ★★★
+	if (pythonBridge.isAvailable()) {
+		const result = await pythonBridge.getFolderInfo(folderPath);
+		if (!result.error) return result;
+	}
+
+	// ★★★ 优先级2：Rust Bridge ★★★
+	if (rustBridge.isAvailable()) {
+		const result = await rustBridge.getFolderInfo(folderPath);
+		if (!result.error) return result;
+	}
+
+	// ★★★ 优先级3：纯 JS 回退 ★★★
 	if (!fs.existsSync(folderPath)) return { error: "not_found" };
 	let totalSize = 0;
 	let fileCount = 0;
@@ -263,12 +991,93 @@ async function handleClipboardFast() {
 	return null;
 }
 
-// ==================== ★★★ Slow Path：媒体处理（Worker 中执行）★★★ ====================
+// ==================== ★★★ Slow Path：媒体处理（四级回退）★★★ ====================
 async function handleClipboardSlow(targetDir) {
 	if (!fs.existsSync(targetDir)) {
 		fs.mkdirSync(targetDir, { recursive: true });
 	}
 
+	// ★★★ 优先级1：Python daemon ★★★
+	if (pythonBridge.isAvailable()) {
+		const result = await pythonBridge.handleClipboard(targetDir);
+		if (!result.error && result.type !== 'unknown') {
+			return result;
+		}
+		logMessage("Python clipboard failed, falling back to Rust", "WARN");
+	}
+
+	// ★★★ 优先级2：Rust daemon ★★★
+	if (rustBridge.isAvailable()) {
+		const result = await rustBridge.handleClipboard(targetDir);
+		if (!result.error && result.type !== 'unknown') {
+			return result;
+		}
+		logMessage("Rust clipboard failed, falling back to Shell", "WARN");
+	}
+
+	// ★★★ 优先级3：常驻 Shell daemon ★★★
+	if (shellBridge.isAvailable()) {
+		try {
+			const platform = process.platform;
+
+			if (platform === 'win32') {
+				// Windows: 检测文件
+				const hasFiles = await shellBridge.hasFiles();
+				if (hasFiles) {
+					const files = await shellBridge.getFiles();
+					if (files.length > 0) {
+						const folders = files.filter(f => {
+							try { return fs.statSync(f).isDirectory(); } catch { return false; }
+						});
+						if (folders.length > 0) {
+							return { type: "folder_text", text: folders.join('\n') };
+						}
+
+						const copied = [];
+						for (const f of files) {
+							try {
+								const ext = path.extname(f);
+								const isImg = isImageExtForClipboard(ext);
+								const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+								const dest = path.join(targetDir, fname);
+								fs.copyFileSync(f, dest);
+								copied.push(dest);
+							} catch (e) { logMessage(`复制文件失败: ${f} - ${e.message}`, "WARN"); }
+						}
+
+						if (copied.length === 1 && isImageExtForClipboard(path.extname(copied[0]))) {
+							return { type: "image", path: copied[0] };
+						}
+						if (copied.length > 0) {
+							return { type: "file", files: copied };
+						}
+					}
+				}
+			}
+
+			// 所有平台：检测图片
+			const hasImg = await shellBridge.hasImage();
+			if (hasImg) {
+				const fname = getTimestampFilename(".png");
+				const dest = path.join(targetDir, fname);
+				const saved = await shellBridge.saveImage(dest);
+				if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+					return { type: "image", path: dest };
+				}
+			}
+
+			logMessage("Shell clipboard failed, falling back to spawn", "WARN");
+		} catch (e) {
+			logMessage(`Shell clipboard error: ${e.message}`, "WARN");
+		}
+	}
+
+	// ★★★ 优先级4：每次 spawn (最慢的兜底) ★★★
+	return handleClipboardSlowFallback(targetDir);
+}
+
+// 最终兜底：每次 spawn PowerShell/pbpaste/xclip
+async function handleClipboardSlowFallback(targetDir) {
 	const platform = process.platform;
 
 	if (platform === 'win32') {
@@ -320,7 +1129,7 @@ async function handleClipboardSlow(targetDir) {
 				}
 
 				if (copied.length === 1 && isImageExtForClipboard(path.extname(copied[0]))) {
-					return { type: "ikge", path: copied[0] };
+					return { type: "image", path: copied[0] };
 				}
 				if (copied.length > 0) {
 					return { type: "file", files: copied };
@@ -358,13 +1167,8 @@ async function handleClipboardSlow(targetDir) {
 				setTimeout(() => { try { child.kill(); } catch { } resolve(false); }, 8000);
 			});
 
-			if (saved && fs.existsSync(dest)) {
-				try {
-					if (fs.statSync(dest).size > 0) {
-						return { type: "ikge", path: dest };
-					}
-					fs.unlinkSync(dest);
-				} catch { }
+			if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+				return { type: "image", path: dest };
 			}
 		}
 
@@ -378,11 +1182,11 @@ async function handleClipboardSlow(targetDir) {
 		const imgResult = await new Promise(resolve => {
 			cp.exec(`which pngpaste && pngpaste "${dest}" 2>/dev/null`, (err) => {
 				if (!err && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-					resolve({ type: "ikge", path: dest });
+					resolve({ type: "image", path: dest });
 				} else {
 					cp.exec(`pbpaste -Prefer png > "${dest}" 2>/dev/null`, (err2) => {
 						if (!err2 && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-							resolve({ type: "ikge", path: dest });
+							resolve({ type: "image", path: dest });
 						} else {
 							if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
 							resolve(null);
@@ -402,7 +1206,7 @@ async function handleClipboardSlow(targetDir) {
 		const imgResult = await new Promise(resolve => {
 			cp.exec(`xclip -selection clipboard -t image/png -o > "${dest}" 2>/dev/null`, (err) => {
 				if (!err && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-					resolve({ type: "ikge", path: dest });
+					resolve({ type: "image", path: dest });
 				} else {
 					if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
 					resolve(null);
@@ -416,10 +1220,8 @@ async function handleClipboardSlow(targetDir) {
 
 // ==================== 兼容旧接口 ====================
 async function handleClipboard(targetDir) {
-	// Fast path 优先
 	const fast = await handleClipboardFast();
 	if (fast) return fast;
-	// Slow path
 	return handleClipboardSlow(targetDir);
 }
 
@@ -541,7 +1343,30 @@ let q1Module = null;
 let q2Module = null;
 
 async function activate(context) {
-	logMessage("qqq 扩展开始激活 (Fast Path + Worker 架构)...", "INFO");
+	logMessage("qqq 扩展开始激活 (Python + Rust + Shell + JS 四级回退)...", "INFO");
+
+	// ★★★ 启动顺序：Python > Rust > Shell ★★★
+	pythonBridge.start().then((pyOk) => {
+		if (pyOk) {
+			logMessage("Python Bridge 启动成功 (最高优先级)", "INFO");
+		} else {
+			logMessage("Python Bridge 不可用，尝试 Rust", "WARN");
+			rustBridge.start().then((rsOk) => {
+				if (rsOk) {
+					logMessage("Rust Bridge 启动成功", "INFO");
+				} else {
+					logMessage("Rust Bridge 不可用，尝试 Shell", "WARN");
+					shellBridge.start().then((shOk) => {
+						if (shOk) {
+							logMessage("Shell Bridge 启动成功", "INFO");
+						} else {
+							logMessage("Shell Bridge 也不可用，使用纯 JS spawn 兜底", "WARN");
+						}
+					});
+				}
+			});
+		}
+	});
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.pure", pureCommand),
@@ -569,6 +1394,9 @@ async function activate(context) {
 }
 
 async function deactivate() {
+	pythonBridge.stop();
+	rustBridge.stop();
+	shellBridge.stop();
 	if (q1Module && typeof q1Module.deactivate === "function") {
 		try { await q1Module.deactivate(); } catch (e) { console.error("Q1 cleanup failed:", e); }
 	}
@@ -590,9 +1418,13 @@ module.exports = {
 	createPendingToken,
 	registerPendingJob,
 	resolvePendingJob,
+	pythonBridge,
+	rustBridge,
+	shellBridge,
 	LOG_PATH,
 	BASE_DIR,
 	QQQ_PATH_REGEX,
 	PENDING_REGEX,
 	ffmpegPath
 };
+
