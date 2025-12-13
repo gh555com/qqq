@@ -47,6 +47,14 @@
     ],
     "commands": [
       {
+        "command": "qqq.q1",
+        "title": "qqq: Paste (Ctrl+V)"
+      },
+      {
+        "command": "qqq.q2",
+        "title": "qqq: Navigate (F2)"
+      },
+      {
         "command": "qqq.pure",
         "title": "qqq: pure"
       },
@@ -57,6 +65,18 @@
       {
         "command": "qqq.setInOrder",
         "title": "qqq: set in order (全局整理)"
+      },
+      {
+        "command": "qqq.openFile",
+        "title": "qqq: open file"
+      },
+      {
+        "command": "qqq.revealFileInFolder",
+        "title": "qqq: reveal in folder"
+      },
+      {
+        "command": "qqq.renameFile",
+        "title": "qqq: rename file"
       }
     ],
     "keybindings": [
@@ -78,7 +98,7 @@
     ]
   },
   "scripts": {
-    "package": "npx @vscode/vsce package --allow-missing-repository",
+    "package": "npx @vscode/vsce package --allow-missing-repository --allow-star-activation",
     "publish": "npx @vscode/vsce publish",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
     "pub": "yes | npx vsce publish patch",
@@ -203,6 +223,8 @@
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "canvas": "^3.2.0",
+    "ffi-napi": "^4.0.3",
     "trash": "^7.1.2"
   },
   "devDependencies": {
