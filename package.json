@@ -14,7 +14,8 @@
     "onCommand:qqq.q2",
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
-    "onCommand:qqq.setInOrder"
+    "onCommand:qqq.setInOrder",
+    "onCommand:qqq.switchQualityMode"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -22,6 +23,21 @@
       {
         "title": "QQQ 扩展设置",
         "properties": {
+          "qqq.qualityMode": {
+            "type": "string",
+            "enum": [
+              "extreme",
+              "balanced",
+              "quality"
+            ],
+            "enumDescriptions": [
+              "极限性能 (q1): 单帧静图，最低画质，最快速度。视频输出JPG单帧，动图舍弃动画。",
+              "加速模式 (q2): 动画≤2秒，6fps，中等画质。平衡速度与效果。",
+              "最优模式 (q3): 动图保留原时长，视频4秒预览，15fps，高画质。"
+            ],
+            "default": "balanced",
+            "description": "预览缓存的画质模式。影响 qqq_cache 中生成的预览图质量和动画时长。"
+          },
           "qqq.showHistoryRecycleBin": {
             "type": "boolean",
             "default": true,
@@ -32,15 +48,10 @@
             "default": true,
             "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           },
-          "qqq.extremePerformance": {
-            "type": "boolean",
-            "default": false,
-            "description": "启用极限性能模式：预览生成时尽可能减少计算量（例如将 GIF 预览为静态首帧，并放弃修改后图片的即时刷新），以换取更快的交互响应速度。"
-          },
           "qqq.cleanFreak": {
             "type": "boolean",
             "default": false,
-            "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+            "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/\\path\\/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
           }
         }
       }
@@ -65,6 +76,10 @@
       {
         "command": "qqq.setInOrder",
         "title": "qqq: set in order (全局整理)"
+      },
+      {
+        "command": "qqq.switchQualityMode",
+        "title": "qqq: 切换画质模式"
       },
       {
         "command": "qqq.openFile",

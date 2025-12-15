@@ -1,13 +1,15 @@
 // src/q1.js
-// ★★★ 图片/视频处理专家：FFmpeg 参数、预览生成、渲染、CodeLens ★★★
-// ★★★ 新增：格式分类与透明检测系统 ★★★
+// ★★★ 图片/视频处理专家：三档画质系统 ★★★
+// q1: 极限性能 - 单帧，最低画质
+// q2: 加速模式 - 动画≤2s，6fps，中等画质
+// q3: 最优模式 - 原时长/4s视频，15fps，高画质
+// ★★★ 格式规则：JPG(不透明) / WebP(透明或动图) ★★★
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 
-// 从 qqq.js 导入核心接口
 const qqq = require("./qqq");
 
 const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
@@ -21,102 +23,58 @@ const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
-// ==================== ★★★ 格式分类系统 ★★★ ====================
+// ==================== ★★★ 三档画质参数 ★★★ ====================
+const QUALITY_PARAMS = {
+	// q1: 极限性能 - 单帧，最低画质
+	1: {
+		fps: 1,           // 单帧
+		maxDuration: 0,   // 不保留动画
+		webp: { quality: 22, compression: 2 },   // Low
+		jpg: { quality: 15 },                     // Low
+		scale: 'bilinear'
+	},
+	// q2: 加速模式 - 动画≤2s，6fps，中等画质
+	2: {
+		fps: 6,
+		maxDuration: 2,
+		webp: { quality: 35, compression: 4 },   // Balanced
+		jpg: { quality: 8 },                      // Mid
+		scale: 'bilinear'
+	},
+	// q3: 最优模式 - 保留原时长/4s视频，15fps，高画质
+	3: {
+		fps: 15,
+		maxDuration: 4,   // 视频最多4s
+		maxGifDuration: 999, // GIF保留原时长
+		webp: { quality: 75, compression: 6 },   // Best
+		jpg: { quality: 3 },                      // High
+		scale: 'fast_bilinear'
+	}
+};
 
-// Web 原生支持，可直接渲染（用于未来扩展，如跳过转码直接显示）
-const WEB_SAFE_FORMATS = new Set([
-	'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'svg'
-]);
+// ==================== ★★★ 透明能力检测 ★★★ ====================
 
-// 格式天生支持透明通道 → 输出 WebP 保留透明能力
+// 格式天生支持透明通道 → 输出 WebP
 const ALPHA_CAPABLE_FORMATS = new Set([
-	'png', 'apng',           // PNG 家族
-	'gif',                   // GIF（调色板透明）
-	'webp',                  // WebP（支持透明）
-	'avif',                  // AVIF（支持透明）
-	'tiff', 'tif',           // TIFF（支持透明）
-	'psd',                   // Photoshop
-	'ico',                   // 图标
-	'bmp',                   // 32位 BMP (RGBA) - 保守处理
-	'svg',                   // SVG 几乎全是透明背景
-	'heic', 'heif',          // HEIC/HEIF 容器层面可能携带 alpha
+	'png', 'apng', 'gif', 'webp', 'avif', 'tiff', 'tif',
+	'psd', 'ico', 'bmp', 'svg', 'heic', 'heif'
 ]);
 
-// 格式绝对不支持透明 → 输出 JPEG 更快更小
+// 格式绝对不支持透明 → 输出 JPG
 const OPAQUE_ONLY_FORMATS = new Set([
-	'jpg', 'jpeg',           // JPEG 绝对无透明通道
-	// 视频格式 - 绝对不透明，极限模式下走 JPEG 单帧
+	'jpg', 'jpeg',
 	'mp4', 'mkv', 'webm', 'avi', 'mov', 'flv', 'm4v', 'wmv', '3gp',
-	// RAW 格式 - 绝对不透明
-	'raw', 'dng', 'cr2', 'nef', 'arw', 'orf', 'rw2', 'pef', 'srw',
-	'dib',                   // DIB 通常无透明
+	'raw', 'dng', 'cr2', 'nef', 'arw', 'orf', 'rw2', 'pef', 'srw', 'dib'
 ]);
 
-/**
- * 判断文件格式的透明能力
- * @param {string} ext - 扩展名（含或不含点）
- * @returns {'opaque'|'alpha'|'unknown'}
- */
 function getTransparencyCapability(ext) {
 	const e = ext.toLowerCase().replace(/^\./, '');
 	if (OPAQUE_ONLY_FORMATS.has(e)) return 'opaque';
 	if (ALPHA_CAPABLE_FORMATS.has(e)) return 'alpha';
-	return 'unknown'; // 未知格式保守处理，当作可能透明
+	return 'unknown';
 }
 
-/**
- * 根据格式和模式决定最佳输出格式
- * @param {string} ext - 源文件扩展名
- * @param {boolean} isVideo - 是否为视频
- * @param {boolean} isAnimated - 是否为动图（GIF 或动态 WebP）
- * @param {boolean} extremeMode - 是否为极限性能模式
- * @returns {{format: 'gif'|'webp'|'jpeg'|'png', mime: string, outputExt: string}}
- */
-function decideOutputFormat(ext, isVideo, isAnimated, extremeMode) {
-	const capability = getTransparencyCapability(ext);
-
-	// 视频处理
-	if (isVideo) {
-		if (extremeMode) {
-			// 极限模式：视频用 JPEG 单帧，最快
-			return { format: 'jpeg', mime: 'image/jpeg', outputExt: 'jpg' };
-		} else {
-			// 正常模式：视频用 GIF 动图预览
-			return { format: 'gif', mime: 'image/gif', outputExt: 'gif' };
-		}
-	}
-
-	// 动图处理（GIF、APNG、动态 WebP）
-	if (isAnimated) {
-		if (extremeMode) {
-			// 极限模式：动图压缩为短 GIF
-			return { format: 'gif', mime: 'image/gif', outputExt: 'gif' };
-		} else {
-			// 正常模式：保持 GIF 格式
-			return { format: 'gif', mime: 'image/gif', outputExt: 'gif' };
-		}
-	}
-
-	// 静态图片处理
-	if (extremeMode) {
-		// 极限模式：不透明格式用 JPEG，透明/未知格式用 WebP
-		if (capability === 'opaque') {
-			return { format: 'jpeg', mime: 'image/jpeg', outputExt: 'jpg' };
-		} else {
-			// alpha 或 unknown：用 WebP（支持透明且压缩好）
-			return { format: 'webp', mime: 'image/webp', outputExt: 'webp' };
-		}
-	} else {
-		// 正常模式：不透明用 JPEG，透明/未知用 WebP
-		if (capability === 'opaque') {
-			return { format: 'jpeg', mime: 'image/jpeg', outputExt: 'jpg' };
-		} else {
-			return { format: 'webp', mime: 'image/webp', outputExt: 'webp' };
-		}
-	}
-}
-
-// ==================== 旧的格式集合（保持兼容）====================
+// ==================== 旧的格式集合 ====================
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg", ".heic", ".heif", ".avif", ".psd"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv", ".m4v", ".wmv", ".3gp"]);
 
@@ -131,9 +89,10 @@ const resolutionCache = new Map();
 const folderSizeCache = new Map();
 const pendingTokens = new Map();
 
-let enlargeSmallImages = true;
-let extremePerformanceMode = false;
+// ★★★ 当前画质模式（从配置读取）★★★
+let currentQualityMode = qqq.QUALITY_MODE.BALANCED; // 默认 q2
 let cleanFreakMode = false;
+let enlargeSmallImages = true;
 
 // 水印
 let watermarkBase64 = null;
@@ -171,12 +130,22 @@ function refreshConfig() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
 		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
-		extremePerformanceMode = config.get("extremePerformance", false);
 		cleanFreakMode = config.get("cleanFreak", false);
+
+		// ★★★ 读取画质模式配置 ★★★
+		const modeStr = config.get("qualityMode", "balanced");
+		if (modeStr === "extreme") currentQualityMode = qqq.QUALITY_MODE.EXTREME;
+		else if (modeStr === "quality") currentQualityMode = qqq.QUALITY_MODE.QUALITY;
+		else currentQualityMode = qqq.QUALITY_MODE.BALANCED;
+
+		// 兼容旧配置
+		if (config.get("extremePerformance", false)) {
+			currentQualityMode = qqq.QUALITY_MODE.EXTREME;
+		}
 	} catch (e) {
-		enlargeSmallImages = true;
-		extremePerformanceMode = false;
+		currentQualityMode = qqq.QUALITY_MODE.BALANCED;
 		cleanFreakMode = false;
+		enlargeSmallImages = true;
 	}
 }
 
@@ -223,7 +192,7 @@ function buildNewRawPath(oldRaw, newName) {
 	return lastSlash === -1 ? newName : oldRaw.slice(0, lastSlash + 1) + newName;
 }
 
-// ==================== FFprobe 探测（q1 自己处理）====================
+// ==================== FFprobe 探测 ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
@@ -281,54 +250,106 @@ async function getMediaInfo(filePath, mtimeMs) {
 	});
 }
 
-// ==================== 预览生成（FFmpeg 参数由 q1 控制）====================
+// ==================== ★★★ 视频黑屏跳过检测 ★★★ ====================
 
-function getGifDurationFromBuffer(buffer) {
-	if (!buffer || buffer.length < 13) return 0;
+async function findNonBlackFrame(filePath, maxSeek = 5) {
+	if (!qqq.ffmpegPath) return 0;
+
+	return new Promise((resolve) => {
+		// 使用 blackdetect 滤镜检测黑屏
+		const args = [
+			"-hide_banner", "-i", filePath,
+			"-vf", "blackdetect=d=0.1:pix_th=0.1",
+			"-t", String(maxSeek),
+			"-f", "null", "-"
+		];
+
+		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true });
+		let stderr = "";
+		child.stderr.on("data", d => { if (stderr.length < 50000) stderr += d.toString(); });
+		child.on("close", () => {
+			// 解析 black_end 时间
+			const match = /black_end:(\d+\.?\d*)/g.exec(stderr);
+			if (match) {
+				const blackEnd = parseFloat(match[1]);
+				resolve(Math.min(blackEnd + 0.1, maxSeek));
+			} else {
+				resolve(0); // 无黑屏，从0开始
+			}
+		});
+		child.on("error", () => resolve(0));
+		setTimeout(() => { try { child.kill(); } catch { } resolve(0); }, 3000);
+	});
+}
+
+// ==================== ★★★ 核心：FFmpeg 参数构建 ★★★ ====================
+
+function getWebpDurationFromBuffer(buffer) {
+	// WebP 动图时长解析（简化版，基于 ANIM 块）
+	if (!buffer || buffer.length < 30) return 0;
 	try {
-		let totalDelayCs = 0, i = 13;
-		const sig = buffer.slice(0, 6).toString('ascii');
-		if (sig !== 'GIF87a' && sig !== 'GIF89a') return 0;
-		const flags = buffer[10];
-		if ((flags & 0x80) !== 0) i += 3 * Math.pow(2, (flags & 0x07) + 1);
+		// RIFF....WEBP
+		if (buffer.slice(0, 4).toString() !== 'RIFF' || buffer.slice(8, 12).toString() !== 'WEBP') return 0;
 
-		while (i < buffer.length - 1) {
-			const blockType = buffer[i];
-			if (blockType === 0x21) {
-				const extLabel = buffer[i + 1];
-				if (extLabel === 0xF9) {
-					if (i + 6 < buffer.length) totalDelayCs += buffer[i + 4] | (buffer[i + 5] << 8);
-					i += 8;
-				} else {
-					i += 2;
-					while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
+		let i = 12;
+		let totalDuration = 0;
+		while (i < buffer.length - 8) {
+			const chunkType = buffer.slice(i, i + 4).toString();
+			const chunkSize = buffer.readUInt32LE(i + 4);
+
+			if (chunkType === 'ANMF') {
+				// ANMF 块的第 12-13 字节是帧时长（毫秒，小端）
+				if (i + 20 <= buffer.length) {
+					const frameDuration = buffer.readUInt16LE(i + 12);
+					totalDuration += frameDuration;
 				}
-			} else if (blockType === 0x2C) {
-				if (i + 10 > buffer.length) break;
-				const imgFlags = buffer[i + 9];
-				i += 10;
-				if ((imgFlags & 0x80) !== 0) i += 3 * Math.pow(2, (imgFlags & 0x07) + 1);
-				i++;
-				while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-				i++;
-			} else if (blockType === 0x3B) break;
-			else i++;
+			}
+
+			i += 8 + chunkSize + (chunkSize % 2); // 对齐到偶数
 		}
-		return totalDelayCs / 100;
+		return totalDuration / 1000;
 	} catch (e) { return 0; }
 }
 
 /**
- * ★★★ 核心重构：根据格式分类构建 FFmpeg 参数 ★★★
+ * ★★★ 三档画质核心参数构建 ★★★
  */
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
+async function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration, qualityMode) {
 	const ext = path.extname(filePath).toLowerCase();
-	const isAnimated = isGif || (isVideo === false && ext === '.webp' && duration > 0.1);
+	const params = QUALITY_PARAMS[qualityMode];
+	const capability = getTransparencyCapability(ext);
 
-	// ★★★ 使用格式分类系统决定输出格式 ★★★
-	const outputDecision = decideOutputFormat(ext, isVideo, isAnimated || isGif, extremePerformanceMode);
+	// 决定输出格式
+	const isAnimated = isGif || (ext === '.webp' && duration > 0.1);
+	let outputFormat, mime;
 
+	if (isVideo) {
+		if (qualityMode === qqq.QUALITY_MODE.EXTREME) {
+			// q1: 视频输出单帧 JPG
+			outputFormat = 'jpg';
+			mime = 'image/jpeg';
+		} else {
+			// q2/q3: 视频输出 WebP 动图
+			outputFormat = 'webp';
+			mime = 'image/webp';
+		}
+	} else if (isAnimated) {
+		// 动图一律输出 WebP
+		outputFormat = 'webp';
+		mime = 'image/webp';
+	} else {
+		// 静图：根据透明能力决定
+		if (capability === 'opaque') {
+			outputFormat = 'jpg';
+			mime = 'image/jpeg';
+		} else {
+			// alpha 或 unknown：用 WebP
+			outputFormat = 'webp';
+			mime = 'image/webp';
+		}
+	}
+
+	// 计算目标尺寸
 	let targetW = PREVIEW_WIDTH, targetH = PREVIEW_HEIGHT;
 	if (origSize?.width) {
 		const ow = origSize.width, oh = origSize.height;
@@ -345,75 +366,131 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 			}
 		}
 	}
+	// 确保宽高为偶数（某些编码器要求）
+	targetW = targetW % 2 === 0 ? targetW : targetW + 1;
+	targetH = targetH % 2 === 0 ? targetH : targetH + 1;
 
 	const args = ["-hide_banner", "-loglevel", "error"];
-	let expectedGifDuration = 0;
-	const fpsLimit = extremePerformanceMode ? 8 : 10;
-	const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
+	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${params.scale}`;
+	let expectedDuration = 0;
 
 	if (isVideo) {
 		const safeDur = duration || 0;
 
-		if (extremePerformanceMode) {
-			// ★★★ 极限模式视频：输出 JPEG 单帧 ★★★
-			let seekPos = Math.min(1, safeDur * 0.1);
-			args.push("-ss", String(seekPos), "-i", filePath);
-			args.push("-filter_complex", `[0:v]${scaleFilter}[out_v]`, "-map", "[out_v]");
-			args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "3", "pipe:1");
-			expectedGifDuration = 0;
-		} else if (safeDur < 5) {
-			// 短视频：完整 GIF 预览
-			let clipStart = Math.min(1, safeDur * 0.1);
-			let clipDur = Math.min(4, safeDur - clipStart);
-			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDur;
+		// ★★★ 跳过黑屏检测 ★★★
+		let startPos = await findNonBlackFrame(filePath, Math.min(5, safeDur * 0.3));
+
+		if (qualityMode === qqq.QUALITY_MODE.EXTREME) {
+			// q1: 单帧 JPG
+			args.push("-ss", String(startPos), "-i", filePath);
+			args.push("-vf", scaleFilter);
+			args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg");
+			args.push("-q:v", String(params.jpg.quality), "pipe:1");
+			expectedDuration = 0;
+		} else if (qualityMode === qqq.QUALITY_MODE.BALANCED) {
+			// q2: 最多2秒，6fps
+			const clipDur = Math.min(params.maxDuration, safeDur - startPos);
+			args.push("-ss", String(startPos), "-t", String(clipDur), "-i", filePath);
+			args.push("-vf", `fps=${params.fps},${scaleFilter}`);
+			args.push("-f", "webp", "-loop", "0");
+			args.push("-quality", String(params.webp.quality));
+			args.push("-compression_level", String(params.webp.compression));
+			args.push("pipe:1");
+			expectedDuration = clipDur;
 		} else {
-			// 长视频：三段拼接 GIF
-			const seg = 1.3;
-			const s1 = 1, s2 = Math.floor(safeDur / 2), s3 = Math.max(s2 + seg + 0.5, safeDur - seg - 1);
-			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = seg * 3;
+			// q3: 首中尾各1.33秒，共4秒，15fps
+			const seg = 1.33;
+			if (safeDur < 5) {
+				// 短视频：完整预览
+				const clipDur = Math.min(params.maxDuration, safeDur - startPos);
+				args.push("-ss", String(startPos), "-t", String(clipDur), "-i", filePath);
+				args.push("-vf", `fps=${params.fps},${scaleFilter}`);
+				args.push("-f", "webp", "-loop", "0");
+				args.push("-quality", String(params.webp.quality));
+				args.push("-compression_level", String(params.webp.compression));
+				args.push("pipe:1");
+				expectedDuration = clipDur;
+			} else {
+				// 长视频：三段拼接
+				const s1 = startPos;
+				const s2 = Math.floor(safeDur / 2);
+				const s3 = Math.max(s2 + seg + 0.5, safeDur - seg - 1);
+				args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
+				args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
+				args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
+				args.push("-filter_complex",
+					`[0:v]fps=${params.fps},${scaleFilter}[v0];` +
+					`[1:v]fps=${params.fps},${scaleFilter}[v1];` +
+					`[2:v]fps=${params.fps},${scaleFilter}[v2];` +
+					`[v0][v1][v2]concat=n=3:v=1:a=0[outv]`
+				);
+				args.push("-map", "[outv]", "-f", "webp", "-loop", "0");
+				args.push("-quality", String(params.webp.quality));
+				args.push("-compression_level", String(params.webp.compression));
+				args.push("pipe:1");
+				expectedDuration = seg * 3;
+			}
 		}
-	} else if (isGif || isAnimated) {
-		// 动图处理：保持 GIF 格式
-		if (extremePerformanceMode) args.push("-t", "2");
-		args.push("-i", filePath);
-		const f = extremePerformanceMode
-			? `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`
-			: `[0:v]${scaleFilter}[out_v]`;
-		args.push("-filter_complex", f, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
+	} else if (isAnimated) {
+		// 动图处理
+		if (qualityMode === qqq.QUALITY_MODE.EXTREME) {
+			// q1: 单帧 WebP（保留透明）
+			args.push("-i", filePath);
+			args.push("-vf", scaleFilter);
+			args.push("-frames:v", "1", "-f", "webp");
+			args.push("-quality", String(params.webp.quality));
+			args.push("-compression_level", String(params.webp.compression));
+			args.push("pipe:1");
+			expectedDuration = 0;
+		} else if (qualityMode === qqq.QUALITY_MODE.BALANCED) {
+			// q2: 最多2秒，6fps
+			args.push("-t", String(params.maxDuration), "-i", filePath);
+			args.push("-vf", `fps=${params.fps},${scaleFilter}`);
+			args.push("-f", "webp", "-loop", "0");
+			args.push("-quality", String(params.webp.quality));
+			args.push("-compression_level", String(params.webp.compression));
+			args.push("pipe:1");
+			expectedDuration = Math.min(params.maxDuration, duration || 2);
+		} else {
+			// q3: 保留原时长和fps
+			args.push("-i", filePath);
+			args.push("-vf", scaleFilter);
+			args.push("-f", "webp", "-loop", "0");
+			args.push("-quality", String(params.webp.quality));
+			args.push("-compression_level", String(params.webp.compression));
+			args.push("pipe:1");
+			expectedDuration = duration || 0;
+		}
 	} else {
-		// ★★★ 静态图片：根据透明能力决定输出格式 ★★★
+		// 静态图片
 		args.push("-i", filePath);
-		args.push("-filter_complex", `[0:v]${scaleFilter}[out_v]`, "-map", "[out_v]");
+		args.push("-vf", scaleFilter);
 		args.push("-frames:v", "1");
 
-		if (outputDecision.format === 'jpeg') {
-			// 不透明格式 → JPEG（更快更小）
-			args.push("-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "2", "pipe:1");
-		} else if (outputDecision.format === 'webp') {
-			// 可能透明格式 → WebP（保留透明能力）
-			args.push("-f", "webp", "-quality", "80", "-lossless", "0", "pipe:1");
+		if (outputFormat === 'jpg') {
+			args.push("-f", "image2pipe", "-vcodec", "mjpeg");
+			args.push("-q:v", String(params.jpg.quality), "pipe:1");
 		} else {
-			// 后备：PNG
-			args.push("-f", "image2pipe", "-vcodec", "png", "pipe:1");
+			args.push("-f", "webp");
+			args.push("-quality", String(params.webp.quality));
+			args.push("-compression_level", String(params.webp.compression));
+			args.push("pipe:1");
 		}
+		expectedDuration = 0;
 	}
 
 	return {
 		args,
 		targetW,
 		targetH,
-		expectedGifDuration,
-		outputFormat: outputDecision,
-		isAnimatedOutput: isVideo || isGif || isAnimated
+		expectedDuration,
+		outputFormat,
+		mime,
+		isAnimatedOutput: (isVideo || isAnimated) && qualityMode !== qqq.QUALITY_MODE.EXTREME
 	};
 }
+
+// ==================== 预览生成 ====================
 
 async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 	if (!qqq.ffmpegPath) return null;
@@ -422,33 +499,36 @@ async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
 
 	const ext = path.extname(filePath).toLowerCase();
-
-	// 检查磁盘缓存 - 根据输出格式决定 quality key
 	const info = await getMediaInfo(filePath, mtimeMs);
 	const duration = info?.duration || 0;
 	const isAnimated = isGif || (ext === '.webp' && duration > 0.1);
-	const outputDecision = decideOutputFormat(ext, isVideo, isAnimated || isGif, extremePerformanceMode);
 
-	// 缓存 key 包含输出格式信息
-	const quality = extremePerformanceMode
-		? `q0_${outputDecision.outputExt}`
-		: (isVideo ? "q2_gif" : `q1_${outputDecision.outputExt}`);
+	// 缓存 key: q1, q2, q3
+	const qualityKey = qqq.getQualityKey(currentQualityMode);
 
-	const cached = qqq.getCachedBuffer(contentId, quality);
+	// 检查磁盘缓存
+	const cached = qqq.getCachedBuffer(contentId, qualityKey);
 	if (cached) {
-		const gifDur = (isGif || isVideo) && !extremePerformanceMode ? getGifDurationFromBuffer(cached) : 0;
+		let cachedDuration = 0;
+		const cachedFormat = qqq.getCachedFormat(contentId, qualityKey);
+		if (cachedFormat === 'webp' && currentQualityMode !== qqq.QUALITY_MODE.EXTREME) {
+			cachedDuration = getWebpDurationFromBuffer(cached);
+		}
 		return {
 			buffer: cached,
-			gifDuration: gifDur,
+			duration: cachedDuration,
 			fromCache: true,
-			outputFormat: outputDecision
+			outputFormat: cachedFormat,
+			mime: cachedFormat === 'jpg' ? 'image/jpeg' : 'image/webp'
 		};
 	}
 
 	const origSize = info ? { width: info.width, height: info.height } : null;
 
-	return new Promise((resolve) => {
-		const { args, targetW, targetH, expectedGifDuration, outputFormat, isAnimatedOutput } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
+	return new Promise(async (resolve) => {
+		const buildResult = await buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration, currentQualityMode);
+		const { args, targetW, targetH, expectedDuration, outputFormat, mime, isAnimatedOutput } = buildResult;
+
 		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let resolved = false;
@@ -467,29 +547,30 @@ async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 				if (!chunks.length) { resolve(null); return; }
 
 				const buffer = Buffer.concat(chunks);
-				let gifDuration = expectedGifDuration;
+				let actualDuration = expectedDuration;
 
-				// 只有 GIF 格式才解析时长
-				if ((isGif || isAnimatedOutput) && outputFormat.format === 'gif') {
-					gifDuration = getGifDurationFromBuffer(buffer);
-					if (extremePerformanceMode && gifDuration > 2.5) gifDuration = 2.0;
+				// 解析 WebP 实际时长
+				if (outputFormat === 'webp' && isAnimatedOutput) {
+					actualDuration = getWebpDurationFromBuffer(buffer);
+					if (actualDuration <= 0) actualDuration = expectedDuration;
 				}
 
 				// 写入磁盘缓存
-				qqq.setCacheEntry(contentId, quality, buffer, {
+				qqq.setCacheEntry(contentId, qualityKey, buffer, {
 					width: targetW,
 					height: targetH,
 					type: isVideo ? 'video' : (isGif ? 'gif' : 'image'),
-					format: outputFormat.format,
-					gifDur: gifDuration,
+					format: outputFormat,
+					duration: actualDuration,
 					srcDuration: duration
 				});
 
 				resolve({
 					buffer,
-					gifDuration,
+					duration: actualDuration,
 					outputSize: { width: targetW, height: targetH },
-					outputFormat
+					outputFormat,
+					mime
 				});
 			}
 		});
@@ -606,7 +687,6 @@ async function renderImages(editor) {
 			if (targetLine >= editor.document.lineCount) continue;
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 
-			// 计算指纹
 			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
@@ -618,14 +698,12 @@ async function renderImages(editor) {
 
 					const deco = { range: anchorRange, renderOptions: {} };
 					let contentUrl = "";
-					let actualGifDuration = 0;
+					let actualDuration = 0;
 					let outputSize = null;
 
 					if (previewResult?.buffer) {
-						// ★★★ 根据实际输出格式设置 MIME ★★★
-						let mime = previewResult.outputFormat?.mime || "image/png";
-						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						if (previewResult.gifDuration > 0) actualGifDuration = previewResult.gifDuration;
+						contentUrl = `url("data:${previewResult.mime};base64,${previewResult.buffer.toString("base64")}")`;
+						if (previewResult.duration > 0) actualDuration = previewResult.duration;
 						outputSize = previewResult.outputSize;
 					} else if (isImage && !isVideo && !isGif) {
 						contentUrl = `url("${vscode.Uri.file(absPath).toString()}")`;
@@ -633,8 +711,8 @@ async function renderImages(editor) {
 					if (!contentUrl) return null;
 
 					let progressBarUrl = null;
-					if ((isGif || isVideo) && actualGifDuration > 0) {
-						progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
+					if (actualDuration > 0) {
+						progressBarUrl = `url("${createProgressSvg(actualDuration)}")`;
 					}
 
 					const gridSize = "20px 20px";
@@ -756,14 +834,12 @@ async function executeClipboardCommand() {
 		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 	}
 
-	// Fast Path: 纯文字
 	const fastResult = await qqq.handleClipboardFast();
 	if (fastResult?.type === "text") {
 		await editor.edit(e => e.insert(editor.selection.active, fastResult.text));
 		return;
 	}
 
-	// Slow Path: 媒体 - 先插入占位符
 	const token = qqq.createPendingToken();
 	const eol = getDocumentEOL(editor.document);
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
@@ -779,7 +855,6 @@ async function executeClipboardCommand() {
 
 	debounceRender(editor, 10);
 
-	// 后台处理媒体
 	setImmediate(async () => {
 		try {
 			const result = await qqq.handleClipboardSlow(targetDir);
@@ -949,7 +1024,6 @@ class FileCodeLensProvider {
 				const fSize = folderData?.size || 0;
 				const fSizeStr = formatBytes(fSize);
 				const folderTooltip = folderData?.summary;
-
 				let fileSz = "?";
 				let tooltipText = "";
 				let mtimeMs = 0;
@@ -984,13 +1058,17 @@ class FileCodeLensProvider {
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
 						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 
-						// ★★★ 显示透明能力信息 ★★★
+						// 透明能力信息
 						const capability = getTransparencyCapability(ext);
 						if (capability === 'alpha') {
 							tooltipText += `\n🎨 格式支持透明`;
 						} else if (capability === 'opaque') {
 							tooltipText += `\n🖼️ 格式不支持透明`;
 						}
+
+						// 当前画质模式
+						const modeNames = { 1: '极限性能', 2: '加速模式', 3: '最优模式' };
+						tooltipText += `\n⚙️ 缓存模式：${modeNames[currentQualityMode] || '未知'}`;
 					}
 				}
 
@@ -1109,7 +1187,7 @@ async function activate(context) {
 	extensionContext = context;
 	isCoreIntegrityValid = verifySystemIntegrity();
 	console.log(`[QQQ Q1] Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`);
-	console.log(`[QQQ Q1] 格式分类系统已加载:`);
+	console.log(`[QQQ Q1] 三档画质系统已加载`);
 	console.log(`  - ALPHA_CAPABLE: ${ALPHA_CAPABLE_FORMATS.size} 种格式`);
 	console.log(`  - OPAQUE_ONLY: ${OPAQUE_ONLY_FORMATS.size} 种格式`);
 
@@ -1121,8 +1199,13 @@ async function activate(context) {
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration("qqq")) {
+				const oldMode = currentQualityMode;
 				refreshConfig();
-				documentDecorationsMap.clear();
+				// 画质模式改变时清空装饰缓存，强制重新渲染
+				if (oldMode !== currentQualityMode) {
+					documentDecorationsMap.clear();
+					qqq.logMessage(`画质模式切换: q${oldMode} → q${currentQualityMode}`, "INFO");
+				}
 				renderVisibleEditors();
 				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
@@ -1137,6 +1220,24 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
 		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
+		}),
+		// ★★★ 新增：快速切换画质模式命令 ★★★
+		vscode.commands.registerCommand("qqq.switchQualityMode", async () => {
+			const modes = [
+				{ label: "🚀 极限性能 (q1)", description: "单帧，最低画质，最快速度", value: "extreme" },
+				{ label: "⚡ 加速模式 (q2)", description: "动画≤2s，6fps，中等画质", value: "balanced" },
+				{ label: "✨ 最优模式 (q3)", description: "保留原时长，15fps，高画质", value: "quality" }
+			];
+			const current = currentQualityMode === 1 ? "extreme" : (currentQualityMode === 3 ? "quality" : "balanced");
+			const picked = await vscode.window.showQuickPick(modes, {
+				placeHolder: `当前模式: ${modes.find(m => m.value === current)?.label}`,
+				title: "选择预览画质模式"
+			});
+			if (picked) {
+				const config = vscode.workspace.getConfiguration("qqq");
+				await config.update("qualityMode", picked.value, vscode.ConfigurationTarget.Global);
+				vscode.window.showInformationMessage(`已切换到 ${picked.label}`);
+			}
 		}),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 		vscode.workspace.onWillSaveTextDocument(e => {
@@ -1176,10 +1277,10 @@ async function deactivate() {
 module.exports = {
 	activate,
 	deactivate,
-	// ★★★ 导出格式分类系统供其他模块使用 ★★★
-	WEB_SAFE_FORMATS,
+	// 导出格式分类系统
 	ALPHA_CAPABLE_FORMATS,
 	OPAQUE_ONLY_FORMATS,
 	getTransparencyCapability,
-	decideOutputFormat
+	QUALITY_PARAMS
 };
+

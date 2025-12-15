@@ -1,6 +1,6 @@
 // src/qqq.js
 // ==========================================
-// ★★★ 中控大脑：惰性文件夹创建 + 严格 IO 调度 ★★★
+// ★★★ 中控大脑：三档画质模式 + 惰性文件夹创建 ★★★
 // ==========================================
 const vscode = require("vscode");
 const fs = require("fs");
@@ -27,6 +27,13 @@ const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
+// ★★★ 三档画质模式 ★★★
+const QUALITY_MODE = {
+	EXTREME: 1,    // q1: 极限性能 - 单帧，最低画质
+	BALANCED: 2,   // q2: 加速模式 - 动画最多2s，6fps，中等画质
+	QUALITY: 3     // q3: 最优模式 - 保留原时长/4s视频，高画质
+};
+
 // ==================== FFmpeg 路径 ====================
 let ffmpegPath = null;
 let ffprobePath = null;
@@ -40,6 +47,8 @@ try {
 let extensionContext = null;
 let cacheDir = null;
 let cacheMeta = null;
+let metaSaveTimer = null;
+const META_SAVE_DEBOUNCE = 500;
 
 // ==================== 日志工具 ====================
 function logMessage(message, level = "INFO") {
@@ -149,10 +158,17 @@ function loadCacheMeta() {
 }
 
 function saveCacheMeta() {
-	if (!cacheDir || !cacheMeta) return;
-	try {
-		fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2));
-	} catch (e) { }
+	// 防抖原子写
+	if (metaSaveTimer) clearTimeout(metaSaveTimer);
+	metaSaveTimer = setTimeout(() => {
+		if (!cacheDir || !cacheMeta) return;
+		try {
+			const metaPath = path.join(cacheDir, META_FILE_NAME);
+			const tmpPath = metaPath + '.tmp';
+			fs.writeFileSync(tmpPath, JSON.stringify(cacheMeta, null, 2));
+			fs.renameSync(tmpPath, metaPath);
+		} catch (e) { }
+	}, META_SAVE_DEBOUNCE);
 }
 
 function validateCache() {
@@ -164,7 +180,7 @@ function validateCache() {
 	try {
 		const files = fs.readdirSync(cacheDir);
 		for (const f of files) {
-			if (f === META_FILE_NAME) continue;
+			if (f === META_FILE_NAME || f.endsWith('.tmp')) continue;
 			actualFiles.add(f);
 		}
 	} catch (e) { }
@@ -250,26 +266,22 @@ function getCacheEntry(contentId) {
 }
 
 /**
- * ★★★ 修改：从 quality key 推断实际格式 ★★★
+ * ★★★ 三档缓存 key: q1, q2, q3 ★★★
  */
-function inferFormatFromQualityKey(quality) {
-	const q = quality.toLowerCase();
-	if (q.includes('gif')) return 'gif';
-	if (q.includes('webp')) return 'webp';
-	if (q.includes('jpg') || q.includes('jpeg')) return 'jpeg';
-	if (q.includes('png')) return 'png';
-	// 旧格式兼容：q0, q1, q2
-	if (q === 'q0') return 'jpeg';  // 极限模式默认
-	if (q === 'q1') return 'png';   // 静态图旧默认
-	if (q === 'q2') return 'gif';   // 视频旧默认
-	return 'unknown';
+function getQualityKey(mode) {
+	switch (mode) {
+		case QUALITY_MODE.EXTREME: return 'q1';
+		case QUALITY_MODE.BALANCED: return 'q2';
+		case QUALITY_MODE.QUALITY: return 'q3';
+		default: return 'q2';
+	}
 }
 
-function setCacheEntry(contentId, quality, buffer, meta) {
+function setCacheEntry(contentId, qualityKey, buffer, meta) {
 	if (!cacheDir || !cacheMeta) return null;
 	ensureCacheSpace(buffer.length);
 
-	const fileName = `${contentId}.${quality}`;
+	const fileName = `${contentId}.${qualityKey}`;
 	const filePath = path.join(cacheDir, fileName);
 	try {
 		fs.writeFileSync(filePath, buffer);
@@ -282,12 +294,9 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	}
 
 	const entry = cacheMeta.entries[contentId];
-
-	// ★★★ 使用 inferFormatFromQualityKey 正确推断格式 ★★★
-	const inferredFormat = inferFormatFromQualityKey(quality);
-	entry.qualities[quality] = {
+	entry.qualities[qualityKey] = {
 		size: buffer.length,
-		format: inferredFormat
+		format: meta?.format || 'unknown'
 	};
 
 	entry.atime = Date.now();
@@ -299,12 +308,12 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	return filePath;
 }
 
-function getCachedBuffer(contentId, quality) {
+function getCachedBuffer(contentId, qualityKey) {
 	if (!cacheDir || !cacheMeta) return null;
 	const entry = cacheMeta.entries[contentId];
-	if (!entry || !entry.qualities || !entry.qualities[quality]) return null;
+	if (!entry || !entry.qualities || !entry.qualities[qualityKey]) return null;
 
-	const fileName = `${contentId}.${quality}`;
+	const fileName = `${contentId}.${qualityKey}`;
 	const filePath = path.join(cacheDir, fileName);
 	try {
 		if (fs.existsSync(filePath)) {
@@ -313,20 +322,17 @@ function getCachedBuffer(contentId, quality) {
 		}
 	} catch (e) { }
 
-	delete entry.qualities[quality];
+	delete entry.qualities[qualityKey];
 	if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId];
 	saveCacheMeta();
 	return null;
 }
 
-/**
- * ★★★ 新增：获取缓存条目的格式信息 ★★★
- */
-function getCachedFormat(contentId, quality) {
+function getCachedFormat(contentId, qualityKey) {
 	if (!cacheMeta || !cacheMeta.entries[contentId]) return null;
 	const entry = cacheMeta.entries[contentId];
-	if (!entry.qualities || !entry.qualities[quality]) return null;
-	return entry.qualities[quality].format || inferFormatFromQualityKey(quality);
+	if (!entry.qualities || !entry.qualities[qualityKey]) return null;
+	return entry.qualities[qualityKey].format || 'unknown';
 }
 
 // ==================== ★★★ Daemon 桥接（四层回退）★★★ ====================
@@ -474,7 +480,6 @@ while ($true) { $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }
 
 // ==================== ★★★ 统一 IO 接口 ★★★ ====================
 
-// 辅助：惰性创建目录
 function ensureDir(dirPath) {
 	if (!fs.existsSync(dirPath)) {
 		try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) { }
@@ -490,23 +495,19 @@ async function handleClipboardFast() {
 }
 
 async function handleClipboardSlow(targetDir) {
-	// 优先级1：Python
 	if (pythonBridge.isAvailable()) {
 		const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 10000);
 		if (!res.error && res.type !== 'unknown') return res;
 	}
 
-	// 优先级2：Rust
 	if (rustBridge.isAvailable()) {
 		const res = await rustBridge.call("clipboard", { target_dir: targetDir }, 10000);
 		if (!res.error && res.type !== 'unknown') return res;
 	}
 
-	// 优先级3：Shell (PowerShell / Bash)
 	if (shellBridge.isAvailable()) {
 		try {
 			if (process.platform === 'win32') {
-				// 检查文件
 				const hasFiles = await shellBridge.call('hasFiles', {}, 2000);
 				if (hasFiles.value) {
 					const filesRes = await shellBridge.call('getFiles', {}, 3000);
@@ -537,7 +538,6 @@ async function handleClipboardSlow(targetDir) {
 				}
 			}
 
-			// 检查图片 (包含 DIB)
 			const hasImg = await shellBridge.call('hasImage', {}, 2000);
 			if (hasImg.value) {
 				const fname = getTimestampFilename(".png");
@@ -553,7 +553,6 @@ async function handleClipboardSlow(targetDir) {
 		} catch (e) { }
 	}
 
-	// 优先级4：Spawn Fallback
 	return handleClipboardSpawn(targetDir);
 }
 
@@ -637,7 +636,6 @@ async function handleClipboardSpawn(targetDir) {
 			if (fs.existsSync(tmpDest)) try { fs.unlinkSync(tmpDest); } catch { }
 		}
 	} else {
-		// Linux
 		const fname = getTimestampFilename(".png");
 		const dest = path.join(targetDir, fname);
 		try {
@@ -701,6 +699,7 @@ async function getFolderInfoJS(folderPath) {
 			}
 		} catch (e) { }
 	}
+
 	await walk(folderPath);
 	return { success: true, total_size: totalSize, file_count_root: fileCount, ext_stats: extStats };
 }
@@ -808,7 +807,17 @@ async function deactivate() {
 	rustBridge.stop();
 	shellBridge.stop();
 	finishUserTracking(extensionContext);
-	saveCacheMeta();
+	// 强制保存 meta
+	if (metaSaveTimer) {
+		clearTimeout(metaSaveTimer);
+		metaSaveTimer = null;
+	}
+	if (cacheDir && cacheMeta) {
+		try {
+			const metaPath = path.join(cacheDir, META_FILE_NAME);
+			fs.writeFileSync(metaPath, JSON.stringify(cacheMeta, null, 2));
+		} catch (e) { }
+	}
 	if (q1Module?.deactivate) try { await q1Module.deactivate(); } catch (e) { }
 	logMessage("qqq 扩展已停用", "INFO");
 }
@@ -821,7 +830,7 @@ module.exports = {
 	getTimestampFilename, isImageExtForClipboard, shouldShowDuration,
 	createPendingToken, registerPendingJob, resolvePendingJob,
 	initUserTracking, finishUserTracking,
-	// ★★★ 新增导出：格式推断函数 ★★★
-	inferFormatFromQualityKey,
+	// ★★★ 三档模式导出 ★★★
+	QUALITY_MODE, getQualityKey,
 };
 
