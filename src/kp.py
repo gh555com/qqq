@@ -1,6 +1,6 @@
 # src/kp.py
 # ==========================================
-#  A组增强版 Daemon - 加入了 IO 缓存优化
+#  A组增强版 Daemon - IO 缓存优化 + 惰性文件夹创建 + DIB 严格处理
 # ==========================================
 import sys
 import os
@@ -16,9 +16,8 @@ import random
 import concurrent.futures
 
 # ==========================================
-#              缓存配置 (优化新增)
+#              缓存配置
 # ==========================================
-# 缓存有效期（秒）。3秒内重复请求同一文件夹，直接返回内存结果，不读硬盘。
 FOLDER_INFO_CACHE_TTL = 3.0
 _folder_cache = {}
 
@@ -29,19 +28,23 @@ DEFAULT_OUTPUT_DIR = Path("D:/view/p")
 
 
 def resolve_output_dir(target_dir=None):
-    """解析输出目录"""
+    """解析输出目录对象，但不创建目录（惰性）"""
     if target_dir:
-        target = Path(target_dir)
-        try:
-            target.mkdir(parents=True, exist_ok=True)
-            return target
-        except Exception:
-            return DEFAULT_OUTPUT_DIR
+        return Path(target_dir)
     return DEFAULT_OUTPUT_DIR
 
 
+def ensure_parent(path_obj):
+    """确保父目录存在（在写入前一刻调用）"""
+    try:
+        if not path_obj.parent.exists():
+            path_obj.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+
 # ==========================================
-#              文件签名表（浅层识别）
+#              文件签名表
 # ==========================================
 SIGNATURES = [
     (b'\x89PNG\r\n\x1a\n', '.png'),
@@ -71,7 +74,7 @@ def guess_ext_by_magic(data: bytes) -> str:
     if not data or len(data) < 4:
         return ".bin"
 
-    # ftyp (MP4/MOV 家族)
+    # ftyp (MP4/MOV)
     if len(data) >= 12 and data[4:8] == b'ftyp':
         brand = data[8:12]
         if brand in (b'heic', b'avif', b'mif1', b'msf1'):
@@ -80,11 +83,10 @@ def guess_ext_by_magic(data: bytes) -> str:
             return ".m4a"
         return ".mp4"
 
-    # WEBP (RIFF....WEBP)
+    # WEBP
     if data[:4] == b'RIFF' and len(data) >= 12 and data[8:12] == b'WEBP':
         return ".webp"
 
-    # 通用签名检测
     for sig, ext in SIGNATURES:
         if data.startswith(sig):
             return ext
@@ -141,7 +143,6 @@ if platform.system() == "Windows":
 
 
 def read_global_data(h_mem):
-    """从全局句柄读取原始字节"""
     if not h_mem:
         return None
     ptr = GlobalLock(h_mem)
@@ -157,16 +158,12 @@ def read_global_data(h_mem):
     finally:
         GlobalUnlock(h_mem)
 
-
 # ==========================================
 #              工具函数
 # ==========================================
 
+
 def get_timestamp_filename(ext=".png"):
-    """
-    命名规则：
-    212zn.  2025.12.06 [6] 12.09.14.png
-    """
     now = datetime.now()
     date_part = now.strftime("%Y.%m.%d")
     weekday_number = now.weekday() + 1
@@ -194,19 +191,13 @@ def is_image_ext(ext):
                   '.bmp', '.tif', '.tiff', '.webp', '.ico', '.svg'}
     return ext.lower() in image_exts
 
+# ==========================================
+#              文件夹统计模块
+# ==========================================
 
-# ==========================================
-#              文件夹统计模块 (带缓存优化)
-# ==========================================
 
 def get_folder_info(folder_path):
-    """
-    一次性返回：大小 + 文件列表 + 目录列表 + 后缀统计
-    使用 os.scandir 提高性能，并增加了 TTL 缓存
-    """
     global _folder_cache
-
-    # 1. 检查缓存
     now_ts = time.time()
     if folder_path in _folder_cache:
         cached_entry = _folder_cache[folder_path]
@@ -219,7 +210,6 @@ def get_folder_info(folder_path):
     dirs = []
 
     def calc_size_recursive(p):
-        """递归计算大小（用 scandir）"""
         s = 0
         try:
             with os.scandir(p) as it:
@@ -240,29 +230,20 @@ def get_folder_info(folder_path):
             for entry in it:
                 try:
                     stat = entry.stat(follow_symlinks=False)
-                    item = {
-                        'name': entry.name,
-                        'path': entry.path,
-                        'mtime': stat.st_mtime
-                    }
-
+                    item = {'name': entry.name,
+                            'path': entry.path, 'mtime': stat.st_mtime}
                     if entry.is_file(follow_symlinks=False):
                         item['size'] = stat.st_size
                         total_size += stat.st_size
                         files.append(item)
-
-                        # 后缀统计
                         _, ext = os.path.splitext(entry.name)
                         key = ext[1:].lower() if ext else ''
                         ext_counts[key] = ext_counts.get(key, 0) + 1
-
                     elif entry.is_dir(follow_symlinks=False):
                         dirs.append(item)
-
                 except (OSError, PermissionError):
                     pass
 
-        # 子目录大小用线程池并行计算
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(
                 calc_size_recursive, d['path']): d for d in dirs}
@@ -286,88 +267,103 @@ def get_folder_info(folder_path):
         'file_count_root': len(files)
     }
 
-    # 2. 写入缓存
-    _folder_cache[folder_path] = {
-        'ts': now_ts,
-        'data': result_data
-    }
-
-    # 简单的垃圾回收：如果缓存太大，清空一次（防止长期运行内存泄漏）
+    _folder_cache[folder_path] = {'ts': now_ts, 'data': result_data}
     if len(_folder_cache) > 200:
         _folder_cache.clear()
 
     return result_data
 
-
 # ==========================================
 #              Windows 剪贴板处理
 # ==========================================
 
+
 def handle_windows_pywin32(wcb, wcon, output_dir):
-    """pywin32 存在时的处理逻辑"""
     try:
         wcb.OpenClipboard()
 
         # 1. 检查文件 (CF_HDROP)
         if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
             files = wcb.GetClipboardData(wcon.CF_HDROP)
-            has_folders = False
-            folder_paths = []
-            for file_path in files:
-                src = Path(file_path)
-                if src.exists():
-                    if src.is_dir():
-                        has_folders = True
-                        folder_paths.append(str(src))
-            if has_folders:
-                folder_text = '\n'.join(folder_paths)
-                wcb.CloseClipboard()
-                return {"type": "folder_text", "text": folder_text}
 
-            # 处理文件列表
-            copied_files = []
-            for file_path in files:
-                src = Path(file_path)
-                if src.exists() and src.is_file():
+            # 过滤存在的目录和文件
+            valid_dirs = []
+            valid_files = []
+            for fp in files:
+                p = Path(fp)
+                if p.exists():
+                    if p.is_dir():
+                        valid_dirs.append(str(p))
+                    elif p.is_file():
+                        valid_files.append(p)
+
+            if valid_dirs:
+                wcb.CloseClipboard()
+                return {"type": "folder_text", "text": '\n'.join(valid_dirs)}
+
+            if valid_files:
+                # 只有确认有文件要复制，才创建目录
+                copied_files = []
+                # 预先确保目录存在
+                if valid_files:
+                    # 随便取一个目标路径来确保父目录
+                    ensure_parent(output_dir / "dummy")
+
+                for src in valid_files:
                     ext = src.suffix
                     if is_image_ext(ext):
                         fname = get_timestamp_filename(ext)
                     else:
                         fname = src.name
                     dst = output_dir / fname
-                    shutil.copy2(src, dst)
-                    copied_files.append(str(dst))
-            wcb.CloseClipboard()
-            if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
-                return {"type": "image", "path": copied_files[0]}
-            return {"type": "file", "files": copied_files}
+
+                    try:
+                        shutil.copy2(src, dst)
+                        copied_files.append(str(dst))
+                    except:
+                        pass
+
+                wcb.CloseClipboard()
+                if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
+                    return {"type": "image", "path": copied_files[0]}
+                if copied_files:
+                    return {"type": "file", "files": copied_files}
+                return None
 
         # 2. 检查图片 (CF_DIB)
         if wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
-            dib = wcb.GetClipboardData(wcon.CF_DIB)
-            wcb.CloseClipboard()
             try:
+                # 关键修改：强制检查 PIL。如果没有 PIL，抛出 ImportError，
+                # 进入 except 块 -> 返回 None -> 触发 qqq.js 的 Shell 降级
                 from PIL import Image
                 import io
+            except ImportError:
+                wcb.CloseClipboard()
+                return None  # 优雅降级到 PowerShell
+
+            dib = wcb.GetClipboardData(wcon.CF_DIB)
+            wcb.CloseClipboard()
+
+            try:
                 data = bytes(dib)
                 bfType = b"BM"
                 bfSize = (len(data) + 14).to_bytes(4, "little")
                 bfReserved = (0).to_bytes(4, "little")
                 bfOffBits = (14 + 40).to_bytes(4, "little")
                 bmp = bfType + bfSize + bfReserved + bfOffBits + data
+
                 img = Image.open(io.BytesIO(bmp))
+
+                # 确认转换成功后，才创建目录
                 fname = get_timestamp_filename(".png")
                 path = output_dir / fname
+                ensure_parent(path)
+
                 img.save(path)
                 return {"type": "image", "path": str(path)}
             except Exception:
-                # 保存原始 DIB
-                ext = guess_ext_by_magic(data)
-                fname = get_timestamp_filename(ext)
-                path = output_dir / fname
-                with open(path, "wb") as f:
-                    f.write(data)
-                return {"type": "binary", "path": str(path)}
+                # 转换失败，不写 raw bytes，避免生成 .bin
+                return None
 
         wcb.CloseClipboard()
     except Exception:
@@ -379,12 +375,11 @@ def handle_windows_pywin32(wcb, wcon, output_dir):
 
 
 def handle_windows_ctypes(output_dir):
-    """无 pywin32 时的原生 fallback"""
     if not OpenClipboard(None):
         return {"error": "Cannot open clipboard"}
 
     try:
-        # 1. 检查文件 (CF_HDROP = 15)
+        # 1. 检查文件 (CF_HDROP)
         if IsClipboardFormatAvailable(CF_HDROP):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
@@ -395,62 +390,75 @@ def handle_windows_ctypes(output_dir):
                     DragQueryFileW(h_drop, i, buf, 1024)
                     files.append(buf.value)
 
-                has_folders = False
-                folder_paths = []
-                for file_path in files:
-                    src = Path(file_path)
-                    if src.exists() and src.is_dir():
-                        has_folders = True
-                        folder_paths.append(str(src))
+                valid_dirs = []
+                valid_files = []
+                for fp in files:
+                    p = Path(fp)
+                    if p.exists():
+                        if p.is_dir():
+                            valid_dirs.append(str(p))
+                        elif p.is_file():
+                            valid_files.append(p)
 
-                if has_folders:
+                if valid_dirs:
                     CloseClipboard()
-                    return {"type": "folder_text", "text": '\n'.join(folder_paths)}
+                    return {"type": "folder_text", "text": '\n'.join(valid_dirs)}
 
-                copied_files = []
-                for file_path in files:
-                    src = Path(file_path)
-                    if src.exists() and src.is_file():
+                if valid_files:
+                    ensure_parent(output_dir / "dummy")
+                    copied_files = []
+                    for src in valid_files:
                         ext = src.suffix
                         if is_image_ext(ext):
                             fname = get_timestamp_filename(ext)
                         else:
                             fname = src.name
                         dst = output_dir / fname
-                        shutil.copy2(src, dst)
-                        copied_files.append(str(dst))
-                CloseClipboard()
-                if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
-                    return {"type": "image", "path": copied_files[0]}
-                return {"type": "file", "files": copied_files}
+                        try:
+                            shutil.copy2(src, dst)
+                            copied_files.append(str(dst))
+                        except:
+                            pass
 
-        # 2. 检查图片 (CF_DIB = 8)
+                    CloseClipboard()
+                    if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
+                        return {"type": "image", "path": copied_files[0]}
+                    if copied_files:
+                        return {"type": "file", "files": copied_files}
+
+        # 2. 检查图片 (CF_DIB)
         if IsClipboardFormatAvailable(CF_DIB):
+            # 关键修改：检查 PIL，无 PIL 则放弃处理，让 Shell 接管
+            try:
+                from PIL import Image
+                import io
+            except ImportError:
+                CloseClipboard()
+                return None
+
             h_mem = GetClipboardData(CF_DIB)
             if h_mem:
                 data = read_global_data(h_mem)
                 CloseClipboard()
                 if data:
                     try:
-                        from PIL import Image
-                        import io
                         bfType = b"BM"
                         bfSize = (len(data) + 14).to_bytes(4, "little")
                         bfReserved = (0).to_bytes(4, "little")
                         bfOffBits = (14 + 40).to_bytes(4, "little")
                         bmp = bfType + bfSize + bfReserved + bfOffBits + data
+
                         img = Image.open(io.BytesIO(bmp))
+
                         fname = get_timestamp_filename(".png")
                         path = output_dir / fname
+                        ensure_parent(path)
+
                         img.save(path)
                         return {"type": "image", "path": str(path)}
                     except:
-                        ext = guess_ext_by_magic(data)
-                        fname = get_timestamp_filename(ext)
-                        path = output_dir / fname
-                        with open(path, "wb") as f:
-                            f.write(data)
-                        return {"type": "binary", "path": str(path)}
+                        # 转换失败，放弃，不写 bin
+                        return None
 
     finally:
         try:
@@ -462,7 +470,6 @@ def handle_windows_ctypes(output_dir):
 
 
 def handle_windows(output_dir):
-    """Windows 剪贴板处理入口"""
     try:
         import win32clipboard as wcb
         import win32con as wcon
@@ -485,78 +492,71 @@ def handle_windows(output_dir):
 
 
 def handle_macos(output_dir):
-    """macOS 剪贴板处理"""
     import subprocess
-
-    # 尝试 pngpaste
     fname = get_timestamp_filename(".png")
     path = output_dir / fname
-    try:
-        subprocess.run(["pngpaste", str(path)], check=True,
-                       capture_output=True, timeout=5)
-        if path.exists() and path.stat().st_size > 0:
-            return {"type": "image", "path": str(path)}
-    except:
-        pass
 
-    # 尝试 pbpaste
+    # 注意：这里我们不急着创建目录，因为不知道粘贴命令是否成功
+    # 但 subprocess 需要路径存在吗？
+    # pngpaste 需要父目录存在。
+    # 策略：先尝试运行，如果失败就不创建。但 pngpaste 没目录会报错。
+    # 更好的策略：先检查剪贴板内容类型（pbpaste -prefer png），如果有内容再创建。
+
+    # 尝试 pngpaste
     try:
-        data = subprocess.check_output(
-            ["pbpaste", "-Prefer", "png"], stderr=subprocess.DEVNULL, timeout=5)
-        if data:
+        # 预检：如果 pbpaste 没数据，就不创建目录
+        # 这里为了简化，我们先假设 ensure_parent 代价很低。
+        # 但为了解决“纯文本不创建文件夹”，我们需要更严谨。
+        # macOS 比较难预检而不产生副作用。
+        # 这里采用：先执行，如果成功生成了文件，那文件夹创建也合理。
+        # 如果失败，我们可能创建了一个空文件夹。
+        # 改进：先用 pbpaste 检查是否有 png 数据输出到 stdout
+
+        check_proc = subprocess.run(
+            ["pbpaste", "-Prefer", "png"], capture_output=True, timeout=2)
+        if check_proc.stdout and len(check_proc.stdout) > 0:
+            # 确认有数据，创建目录
+            ensure_parent(path)
             with open(path, "wb") as f:
-                f.write(data)
+                f.write(check_proc.stdout)
             if path.exists() and path.stat().st_size > 0:
                 return {"type": "image", "path": str(path)}
     except:
         pass
 
-    # 清理空文件
-    if path.exists():
-        try:
-            path.unlink()
-        except:
-            pass
-
     return {"type": "unknown"}
 
 
 def handle_linux(output_dir):
-    """Linux 剪贴板处理"""
     import subprocess
-
     fname = get_timestamp_filename(".png")
     path = output_dir / fname
 
     try:
-        with open(path, "wb") as f:
-            subprocess.run(
-                ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
-                stdout=f, stderr=subprocess.DEVNULL, check=True, timeout=5
-            )
-        if path.exists() and path.stat().st_size > 0:
-            return {"type": "image", "path": str(path)}
+        # xclip 预检
+        # xclip -selection clipboard -t TARGETS -o
+        targets_proc = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"],
+            capture_output=True, text=True, timeout=2
+        )
+        if "image/png" in targets_proc.stdout:
+            ensure_parent(path)
+            with open(path, "wb") as f:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
+                    stdout=f, stderr=subprocess.DEVNULL, check=True, timeout=5
+                )
+            if path.exists() and path.stat().st_size > 0:
+                return {"type": "image", "path": str(path)}
     except:
         pass
-
-    if path.exists():
-        try:
-            path.unlink()
-        except:
-            pass
 
     return {"type": "unknown"}
 
 
 def handle_clipboard(target_dir=None):
-    """统一剪贴板处理入口"""
     output_dir = resolve_output_dir(target_dir)
-
-    if not output_dir.exists():
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-        except:
-            pass
+    # 注意：这里移除了 output_dir.mkdir(...) 的调用
 
     sys_name = platform.system()
     if sys_name == "Windows":
@@ -568,24 +568,18 @@ def handle_clipboard(target_dir=None):
     else:
         return {"type": "unknown"}
 
-
 # ==========================================
 #              Daemon 模式
 # ==========================================
 
-def daemon_mode():
-    """
-    持久进程模式
-    只支持两个核心接口：clipboard 和 folder_info
-    """
-    sys.stdout.reconfigure(line_buffering=True)
 
+def daemon_mode():
+    sys.stdout.reconfigure(line_buffering=True)
     while True:
         try:
             line = sys.stdin.readline()
             if not line:
                 break
-
             line = line.strip()
             if not line:
                 continue
@@ -593,7 +587,6 @@ def daemon_mode():
             cmd = json.loads(line)
             action = cmd.get('action')
             request_id = cmd.get('_id', 0)
-
             result = {'_id': request_id}
 
             if action == 'ping':
@@ -602,7 +595,11 @@ def daemon_mode():
             elif action == 'clipboard':
                 target_dir = cmd.get('target_dir')
                 clipboard_result = handle_clipboard(target_dir)
-                result.update(clipboard_result)
+                if clipboard_result:
+                    result.update(clipboard_result)
+                else:
+                    # Explicitly return unknown if None returned
+                    result['type'] = 'unknown'
 
             elif action == 'folder_info':
                 folder_path = cmd.get('path', '')
@@ -614,37 +611,29 @@ def daemon_mode():
 
             print(json.dumps(result, ensure_ascii=False), flush=True)
 
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
             print(json.dumps(
-                {'_id': 0, 'error': f'JSON parse error: {e}'}, ensure_ascii=False), flush=True)
+                {'_id': 0, 'error': 'JSON parse error'}, ensure_ascii=False), flush=True)
         except Exception as e:
             print(json.dumps({'_id': 0, 'error': str(e)},
                   ensure_ascii=False), flush=True)
 
 
-# ==========================================
-#              CLI 入口
-# ==========================================
-
 def main():
-    """CLI 入口"""
     if len(sys.argv) > 1:
         if sys.argv[1] == "--daemon":
             daemon_mode()
             return
-
         if sys.argv[1] == "folder_info" and len(sys.argv) >= 3:
             res = get_folder_info(sys.argv[2])
             print(json.dumps(res, ensure_ascii=False))
             return
-
         if sys.argv[1] == "clipboard":
             target_dir = sys.argv[2] if len(sys.argv) >= 3 else None
             res = handle_clipboard(target_dir)
             print(json.dumps(res, ensure_ascii=False))
             return
 
-    # 默认：剪贴板处理
     try:
         res = handle_clipboard()
         print(json.dumps(res, ensure_ascii=False))
