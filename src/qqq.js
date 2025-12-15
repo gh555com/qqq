@@ -127,16 +127,207 @@ function computeFingerprint(filePath) {
 }
 
 // ==================== ★★★ 磁盘缓存管理 ★★★ ====================
-// (代码保持不变，省略以节省篇幅，逻辑未修改)
-function initCache(context) { cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME); if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true }); loadCacheMeta(); validateCache(); }
-function loadCacheMeta() { const metaPath = path.join(cacheDir, META_FILE_NAME); try { if (fs.existsSync(metaPath)) { cacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } else { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } } catch (e) { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } }
-function saveCacheMeta() { if (!cacheDir || !cacheMeta) return; try { fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2)); } catch (e) { } }
-function validateCache() { if (!cacheDir || !cacheMeta) return; let changed = false; let realSize = 0; let realCount = 0; const actualFiles = new Set(); try { const files = fs.readdirSync(cacheDir); for (const f of files) { if (f === META_FILE_NAME) continue; actualFiles.add(f); } } catch (e) { } for (const [contentId, entry] of Object.entries(cacheMeta.entries)) { if (!entry.qualities) continue; for (const [q, qInfo] of Object.entries(entry.qualities)) { const fileName = `${contentId}.${q}`; const filePath = path.join(cacheDir, fileName); if (!actualFiles.has(fileName)) { delete entry.qualities[q]; changed = true; } else { actualFiles.delete(fileName); try { const st = fs.statSync(filePath); realSize += st.size; realCount++; } catch (e) { } } } if (Object.keys(entry.qualities).length === 0) { delete cacheMeta.entries[contentId]; changed = true; } } for (const orphan of actualFiles) { try { fs.unlinkSync(path.join(cacheDir, orphan)); changed = true; } catch (e) { } } cacheMeta.stats.totalSize = realSize; cacheMeta.stats.fileCount = realCount; if (changed) saveCacheMeta(); }
-function ensureCacheSpace(neededBytes) { if (!cacheDir || !cacheMeta) return; if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return; const entries = []; for (const [contentId, entry] of Object.entries(cacheMeta.entries)) { entries.push({ contentId, atime: entry.atime || 0 }); } entries.sort((a, b) => a.atime - b.atime); while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) { const oldest = entries.shift(); evictEntry(oldest.contentId); } }
-function evictEntry(contentId) { const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities) return; for (const [q, qInfo] of Object.entries(entry.qualities)) { const fileName = `${contentId}.${q}`; try { const filePath = path.join(cacheDir, fileName); const st = fs.statSync(filePath); cacheMeta.stats.totalSize -= st.size; cacheMeta.stats.fileCount--; fs.unlinkSync(filePath); } catch (e) { } } delete cacheMeta.entries[contentId]; saveCacheMeta(); }
-function getCacheEntry(contentId) { if (!cacheMeta || !cacheMeta.entries[contentId]) { cacheMeta.stats.missCount++; return null; } const entry = cacheMeta.entries[contentId]; entry.atime = Date.now(); cacheMeta.stats.hitCount++; return entry; }
-function setCacheEntry(contentId, quality, buffer, meta) { if (!cacheDir || !cacheMeta) return null; ensureCacheSpace(buffer.length); const fileName = `${contentId}.${quality}`; const filePath = path.join(cacheDir, fileName); try { fs.writeFileSync(filePath, buffer); } catch (e) { return null; } if (!cacheMeta.entries[contentId]) { cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} }; } const entry = cacheMeta.entries[contentId]; entry.qualities[quality] = { size: buffer.length, format: quality.includes('gif') ? 'gif' : 'png' }; entry.atime = Date.now(); if (meta) Object.assign(entry.meta, meta); cacheMeta.stats.totalSize += buffer.length; cacheMeta.stats.fileCount++; saveCacheMeta(); return filePath; }
-function getCachedBuffer(contentId, quality) { if (!cacheDir || !cacheMeta) return null; const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities || !entry.qualities[quality]) return null; const fileName = `${contentId}.${quality}`; const filePath = path.join(cacheDir, fileName); try { if (fs.existsSync(filePath)) { entry.atime = Date.now(); return fs.readFileSync(filePath); } } catch (e) { } delete entry.qualities[quality]; if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId]; saveCacheMeta(); return null; }
+
+function initCache(context) {
+	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+	loadCacheMeta();
+	validateCache();
+}
+
+function loadCacheMeta() {
+	const metaPath = path.join(cacheDir, META_FILE_NAME);
+	try {
+		if (fs.existsSync(metaPath)) {
+			cacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+		} else {
+			cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} };
+		}
+	} catch (e) {
+		cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} };
+	}
+}
+
+function saveCacheMeta() {
+	if (!cacheDir || !cacheMeta) return;
+	try {
+		fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2));
+	} catch (e) { }
+}
+
+function validateCache() {
+	if (!cacheDir || !cacheMeta) return;
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+	try {
+		const files = fs.readdirSync(cacheDir);
+		for (const f of files) {
+			if (f === META_FILE_NAME) continue;
+			actualFiles.add(f);
+		}
+	} catch (e) { }
+
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry.qualities) continue;
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = fs.statSync(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) { }
+			}
+		}
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+
+	for (const orphan of actualFiles) {
+		try {
+			fs.unlinkSync(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+	if (changed) saveCacheMeta();
+}
+
+function ensureCacheSpace(neededBytes) {
+	if (!cacheDir || !cacheMeta) return;
+	if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return;
+
+	const entries = [];
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		entries.push({ contentId, atime: entry.atime || 0 });
+	}
+	entries.sort((a, b) => a.atime - b.atime);
+
+	while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) {
+		const oldest = entries.shift();
+		evictEntry(oldest.contentId);
+	}
+}
+
+function evictEntry(contentId) {
+	const entry = cacheMeta.entries[contentId];
+	if (!entry || !entry.qualities) return;
+
+	for (const [q, qInfo] of Object.entries(entry.qualities)) {
+		const fileName = `${contentId}.${q}`;
+		try {
+			const filePath = path.join(cacheDir, fileName);
+			const st = fs.statSync(filePath);
+			cacheMeta.stats.totalSize -= st.size;
+			cacheMeta.stats.fileCount--;
+			fs.unlinkSync(filePath);
+		} catch (e) { }
+	}
+	delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+}
+
+function getCacheEntry(contentId) {
+	if (!cacheMeta || !cacheMeta.entries[contentId]) {
+		cacheMeta.stats.missCount++;
+		return null;
+	}
+	const entry = cacheMeta.entries[contentId];
+	entry.atime = Date.now();
+	cacheMeta.stats.hitCount++;
+	return entry;
+}
+
+/**
+ * ★★★ 修改：从 quality key 推断实际格式 ★★★
+ */
+function inferFormatFromQualityKey(quality) {
+	const q = quality.toLowerCase();
+	if (q.includes('gif')) return 'gif';
+	if (q.includes('webp')) return 'webp';
+	if (q.includes('jpg') || q.includes('jpeg')) return 'jpeg';
+	if (q.includes('png')) return 'png';
+	// 旧格式兼容：q0, q1, q2
+	if (q === 'q0') return 'jpeg';  // 极限模式默认
+	if (q === 'q1') return 'png';   // 静态图旧默认
+	if (q === 'q2') return 'gif';   // 视频旧默认
+	return 'unknown';
+}
+
+function setCacheEntry(contentId, quality, buffer, meta) {
+	if (!cacheDir || !cacheMeta) return null;
+	ensureCacheSpace(buffer.length);
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+	try {
+		fs.writeFileSync(filePath, buffer);
+	} catch (e) {
+		return null;
+	}
+
+	if (!cacheMeta.entries[contentId]) {
+		cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} };
+	}
+
+	const entry = cacheMeta.entries[contentId];
+
+	// ★★★ 使用 inferFormatFromQualityKey 正确推断格式 ★★★
+	const inferredFormat = inferFormatFromQualityKey(quality);
+	entry.qualities[quality] = {
+		size: buffer.length,
+		format: inferredFormat
+	};
+
+	entry.atime = Date.now();
+	if (meta) Object.assign(entry.meta, meta);
+
+	cacheMeta.stats.totalSize += buffer.length;
+	cacheMeta.stats.fileCount++;
+	saveCacheMeta();
+	return filePath;
+}
+
+function getCachedBuffer(contentId, quality) {
+	if (!cacheDir || !cacheMeta) return null;
+	const entry = cacheMeta.entries[contentId];
+	if (!entry || !entry.qualities || !entry.qualities[quality]) return null;
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+	try {
+		if (fs.existsSync(filePath)) {
+			entry.atime = Date.now();
+			return fs.readFileSync(filePath);
+		}
+	} catch (e) { }
+
+	delete entry.qualities[quality];
+	if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+	return null;
+}
+
+/**
+ * ★★★ 新增：获取缓存条目的格式信息 ★★★
+ */
+function getCachedFormat(contentId, quality) {
+	if (!cacheMeta || !cacheMeta.entries[contentId]) return null;
+	const entry = cacheMeta.entries[contentId];
+	if (!entry.qualities || !entry.qualities[quality]) return null;
+	return entry.qualities[quality].format || inferFormatFromQualityKey(quality);
+}
 
 // ==================== ★★★ Daemon 桥接（四层回退）★★★ ====================
 
@@ -299,12 +490,7 @@ async function handleClipboardFast() {
 }
 
 async function handleClipboardSlow(targetDir) {
-	// 关键修改：移除此处的 fs.mkdirSync(targetDir)。
-	// 将目录创建推迟到确认有文件要保存时。
-
 	// 优先级1：Python
-	// Python 现在如果通过 ctypes 拿不到图且没有 PIL，会返回 unknown。
-	// Python 也被修改为惰性创建目录。
 	if (pythonBridge.isAvailable()) {
 		const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 10000);
 		if (!res.error && res.type !== 'unknown') return res;
@@ -317,7 +503,6 @@ async function handleClipboardSlow(targetDir) {
 	}
 
 	// 优先级3：Shell (PowerShell / Bash)
-	// 这里是 DIB 的完美归宿
 	if (shellBridge.isAvailable()) {
 		try {
 			if (process.platform === 'win32') {
@@ -328,14 +513,12 @@ async function handleClipboardSlow(targetDir) {
 					const files = filesRes.files || [];
 					const folders = files.filter(f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
 
-					// 如果是文件夹路径文本，不需要创建 qqq 目录
 					if (folders.length) return { type: "folder_text", text: folders.join('\n') };
 
 					const copied = [];
 					const validFiles = files.filter(f => fs.existsSync(f) && !fs.statSync(f).isDirectory());
 
 					if (validFiles.length > 0) {
-						// 确认有文件要写，才创建目录
 						ensureDir(targetDir);
 
 						for (const f of validFiles) {
@@ -360,10 +543,8 @@ async function handleClipboardSlow(targetDir) {
 				const fname = getTimestampFilename(".png");
 				const dest = path.join(targetDir, fname);
 
-				// 确认有图，创建目录
 				ensureDir(targetDir);
 
-				// PowerShell SaveImage 会自动处理 DIB -> PNG
 				const saved = await shellBridge.call('saveImage', { path: dest }, 5000);
 				if (saved.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
 					return { type: "image", path: dest };
@@ -416,7 +597,7 @@ async function handleClipboardSpawn(targetDir) {
 		if (hasImg) {
 			const fname = getTimestampFilename(".png");
 			const dest = path.join(targetDir, fname);
-			ensureDir(targetDir); // 惰性创建
+			ensureDir(targetDir);
 			const escapedPath = dest.replace(/'/g, "''");
 			const saved = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
 				`Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`], 'OK');
@@ -426,21 +607,15 @@ async function handleClipboardSpawn(targetDir) {
 		const fname = getTimestampFilename(".png");
 		const dest = path.join(targetDir, fname);
 
-		// ★★★ 修补缺口（仅此处改动）：macOS spawn fallback 也保持惰性，但确保能写成功 ★★★
-		// 做法：先写入临时目录（不要求 targetDir 存在），确认有内容后再创建 targetDir 并移动过去。
 		const tmpName = `qqq_${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
 		const tmpDest = path.join(os.tmpdir(), tmpName);
 
 		try {
-			// 先尝试写入临时文件
 			cp.execSync(`pngpaste "${tmpDest}" 2>/dev/null || pbpaste -Prefer png > "${tmpDest}" 2>/dev/null`, { timeout: 5000 });
 
-			// 如果临时文件生成成功且有内容，则说明确实是图片
 			if (fs.existsSync(tmpDest) && fs.statSync(tmpDest).size > 0) {
-				// 惰性创建真正目标目录
 				ensureDir(targetDir);
 
-				// 移动到目标路径（跨盘/权限异常时降级 copy+unlink）
 				try {
 					fs.renameSync(tmpDest, dest);
 				} catch (e) {
@@ -453,15 +628,12 @@ async function handleClipboardSpawn(targetDir) {
 				if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
 					return { type: "image", path: dest };
 				} else {
-					// 清理失败产物
 					if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
 				}
 			}
 
-			// 清理临时空文件
 			if (fs.existsSync(tmpDest)) try { fs.unlinkSync(tmpDest); } catch { }
 		} catch (e) {
-			// 清理临时文件
 			if (fs.existsSync(tmpDest)) try { fs.unlinkSync(tmpDest); } catch { }
 		}
 	} else {
@@ -469,7 +641,7 @@ async function handleClipboardSpawn(targetDir) {
 		const fname = getTimestampFilename(".png");
 		const dest = path.join(targetDir, fname);
 		try {
-			ensureDir(targetDir); // Linux 这里比较激进，先创建
+			ensureDir(targetDir);
 			cp.execSync(`xclip -selection clipboard -t image/png -o > "${dest}" 2>/dev/null`, { timeout: 5000 });
 			if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return { type: "image", path: dest };
 			else if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
@@ -548,7 +720,7 @@ function getTimestampFilename(ext) {
 	return `${ms}${c1}${c2}.  ${date} [${day}] ${time}${ext}`;
 }
 
-function isImageExtForClipboard(ext) { return ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif'].includes(ext.toLowerCase()); }
+function isImageExtForClipboard(ext) { return ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif', '.svg', '.heic', '.heif', '.avif', '.psd'].includes(ext.toLowerCase()); }
 function shouldShowDuration(info) { return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1; }
 
 // ==================== 占位符管理 ====================
@@ -598,7 +770,7 @@ async function pureCommand() {
 }
 
 function isLikelyBinary(filePath) {
-	const binExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.exe', '.dll', '.zip', '.tar', '.gz', '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.pdf', '.doc', '.docx']);
+	const binExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.exe', '.dll', '.zip', '.tar', '.gz', '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.pdf', '.doc', '.docx', '.heic', '.heif', '.avif', '.psd', '.tiff', '.tif']);
 	if (binExts.has(path.extname(filePath).toLowerCase())) return true;
 	try {
 		const buf = Buffer.alloc(4096);
@@ -644,9 +816,12 @@ async function deactivate() {
 module.exports = {
 	activate, deactivate,
 	QQQ_PATH_REGEX, PENDING_REGEX, ffmpegPath, ffprobePath, logMessage,
-	computeFingerprint, getCacheEntry, setCacheEntry, getCachedBuffer,
+	computeFingerprint, getCacheEntry, setCacheEntry, getCachedBuffer, getCachedFormat,
 	handleClipboardFast, handleClipboardSlow, getFolderInfo,
 	getTimestampFilename, isImageExtForClipboard, shouldShowDuration,
 	createPendingToken, registerPendingJob, resolvePendingJob,
 	initUserTracking, finishUserTracking,
+	// ★★★ 新增导出：格式推断函数 ★★★
+	inferFormatFromQualityKey,
 };
+
