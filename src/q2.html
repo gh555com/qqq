@@ -497,18 +497,18 @@
 				display: none;
 			}
 
-			.filekme-input-container {
+			.filename-input-container {
 				flex: 1;
 			}
 		}
 
 		@media (max-width: var(--min-tag-width)) {
-			.filekme-input-container {
+			.filename-input-container {
 				display: none;
 			}
 		}
 
-		.filekme-input-container {
+		.filename-input-container {
 			flex: 1;
 			margin-right: 10px;
 			position: relative;
@@ -558,7 +558,7 @@
 			text-align: center;
 		}
 
-		.filekme-input {
+		.filename-input {
 			width: 100%;
 			padding: 5px 5px 5px 6px;
 			border: 1px solid var(--border-strong);
@@ -568,7 +568,7 @@
 			color: var(--text-primary);
 		}
 
-		.filekme-label {
+		.filename-label {
 			font-size: 13px;
 			color: var(--text-secondary);
 			margin-bottom: 3px;
@@ -721,9 +721,9 @@
 						<span class="pin-checkbox">{{PIN_CHECKBOX}}</span>
 					</div>
 				</div>
-				<div class="filekme-input-container">
-					<input type="text" id="filekmeInput" class="filekme-input"
-						   onkeydown="handleFilekmeInputKeyDown(event)">
+				<div class="filename-input-container">
+					<input type="text" id="filenameInput" class="filename-input"
+						   onkeydown="handleFilenameInputKeyDown(event)">
 				</div>
 				<div style="display: flex; gap: 15px;">
 					<button class="button save-button" onclick="saveFile()" title="新建文件">
@@ -767,8 +767,8 @@
 			<span>delete</span>
 			<span class="context-menu-shortcut">= "s"</span>
 		</div>
-		<div class="context-menu-item" data-action="kode" data-shortcut="e">
-			<span>kode</span>
+		<div class="context-menu-item" data-action="code" data-shortcut="e">
+			<span>code</span>
 			<span class="context-menu-shortcut">= "e"</span>
 		</div>
 	</div>

@@ -219,12 +219,16 @@
     "生産性",
     "produktivität",
     "productivité",
-    "생산성"
+    "생산성",
+    "fingerprint",
+    "指纹",
+    "cache",
+    "缓存",
+    "daemon"
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "canvas": "^3.2.0",
-    "trash": "^7.1.2"
+    "trash": "^7.2.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

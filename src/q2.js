@@ -1,39 +1,23 @@
 // File: src/q2.js
+// ★★★ 文件管理器：Webview 界面 + 使用 qqq.js 四级回退 ★★★
 const vscode = require("vscode");
-const qbprocess = require("child_process");
-const { spawn } = qbprocess;
+const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const trash = require("trash");
 
-// ==================== 从 qqq.js 导入（四级回退已内置）====================
-const { getFolderInfo, logMessage } = require("./qqq");
+// ==================== 从 qqq.js 导入核心接口 ====================
+const qqq = require("./qqq");
 
-// ==================== 配置区域 ====================
-const LOG_PATH = "D:\\view\\p\\kp.log";
-const BASE_DIR = "D:\\view\\p\\";
+// ==================== 配置常量 ====================
 const SIZE_CONFIG_KEY = "size_mode";
 const KBM_OVERLAP_KEY = "kbm_overlap";
 
-const UNQPPORTED_KODE_EXTENSIONS = new Set([
+const UNSUPPORTED_CODE_EXTENSIONS = new Set([
     ".exe", ".dll", ".bin", ".dat", ".iso", ".zip", ".rar", ".7z", ".tar", ".gz",
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
     ".mp3", ".wav", ".flac", ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".pdf"
 ]);
-
-// ==================== 日志工具 ====================
-function logKessage(kessage, level = "WARN") {
-    if (level !== "ERROR" && level !== "WARN") return;
-    const ts = new Date().toISOString();
-    const line = `[${ts}] [${level}] ${kessage}\n`;
-    try {
-        const dir = path.dirname(LOG_PATH);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.appendFileSync(LOG_PATH, line);
-    } catch (e) {
-        console.error("日志写入失败:", e);
-    }
-}
 
 // ==================== 全局变量 ====================
 let activePanel = null;
@@ -53,18 +37,11 @@ function escapeJsStringLiteral(str) {
     return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
-async function getDetailedErrorKessage(filePath, error, operation) {
-    return `${operation}失败：文件正被占用或无权限。`;
-}
-
 // ==================== 文件夹大小获取（使用 qqq.js 四级回退）====================
-/**
- * 获取文件夹大小
- * 通过 qqq.js 的 getFolderInfo 实现（内置 Python → Rust → Shell → JS 四级回退）
- */
+
 async function getFolderSize(folderPath) {
     try {
-        const result = await getFolderInfo(folderPath);
+        const result = await qqq.getFolderInfo(folderPath);
         if (result && result.success) {
             return result.total_size;
         }
@@ -73,14 +50,11 @@ async function getFolderSize(folderPath) {
         }
         throw new Error("未知错误");
     } catch (error) {
-        logKessage(`获取文件夹大小失败: ${folderPath} - ${error.message}`, "ERROR");
+        qqq.logMessage(`获取文件夹大小失败: ${folderPath} - ${error.message}`, "ERROR");
         throw error;
     }
 }
 
-/**
- * 同步获取文件大小（用于单个文件）
- */
 function getFileSizeSync(filePath) {
     try {
         const stats = fs.statSync(filePath);
@@ -91,7 +65,8 @@ function getFileSizeSync(filePath) {
 }
 
 // ==================== 尺寸格式化 ====================
-function forktFileSize(bytes, mode) {
+
+function formatFileSize(bytes, mode) {
     if (mode === "none") return { text: "", show: false };
 
     let unit = "b";
@@ -137,43 +112,40 @@ function forktFileSize(bytes, mode) {
     return { text: chars.join(""), show: true };
 }
 
-function getFileSizeDisplayAqncPromise(itemPath, mode) {
+function getFileSizeDisplayAsync(itemPath, mode) {
     return new Promise(resolve => {
-        getFileSizeDisplayAqnc(itemPath, mode, reqlt => resolve(reqlt));
-    });
-}
-
-function getFileSizeDisplayAqnc(itemPath, mode, callback) {
-    if (mode === "none") {
-        callback("");
-        return;
-    }
-    fs.stat(itemPath, (err, stats) => {
-        if (err) {
-            logKessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
-            callback(" ...err ");
+        if (mode === "none") {
+            resolve("");
             return;
         }
+        fs.stat(itemPath, (err, stats) => {
+            if (err) {
+                qqq.logMessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
+                resolve(" ...err ");
+                return;
+            }
 
-        const handleSize = (sizeInBytes) => {
-            const forktted = forktFileSize(sizeInBytes, mode);
-            callback(forktted.show ? forktted.text : "");
-        };
+            const handleSize = (sizeInBytes) => {
+                const formatted = formatFileSize(sizeInBytes, mode);
+                resolve(formatted.show ? formatted.text : "");
+            };
 
-        if (stats.isFile()) {
-            handleSize(stats.size);
-        } else {
-            getFolderSize(itemPath)
-                .then(sizeInBytes => handleSize(sizeInBytes))
-                .catch(error => {
-                    logKessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
-                    callback(" ...err ");
-                });
-        }
+            if (stats.isFile()) {
+                handleSize(stats.size);
+            } else {
+                getFolderSize(itemPath)
+                    .then(sizeInBytes => handleSize(sizeInBytes))
+                    .catch(error => {
+                        qqq.logMessage(`计算大小失败: ${itemPath} - ${error.message}`, "ERROR");
+                        resolve(" ...err ");
+                    });
+            }
+        });
     });
 }
 
 // ==================== 配置读写 ====================
+
 function getConfig() {
     const defaultConfig = {
         recentDirs: [],
@@ -227,6 +199,7 @@ function saveConfig(recentDirs, lineSpacing, sidebarWidth, sidebarRatio, recycle
 }
 
 // ==================== 目录管理 ====================
+
 function getRecentDirectories() {
     return getConfig().recentDirs;
 }
@@ -279,14 +252,14 @@ function getDrives() {
     const drives = [];
     if (process.platform === "win32") {
         try {
-            const child = qbprocess.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
+            const child = cp.spawnSync("wmic", ["logicaldisk", "get", "caption"], { encoding: "utf8" });
             const lines = child.stdout.split("\n");
             for (const line of lines) {
-                const driveKth = line.match(/([A-Z]:)/);
-                if (driveKth) drives.push(driveKth[1]);
+                const driveMatch = line.match(/([A-Z]:)/);
+                if (driveMatch) drives.push(driveMatch[1]);
             }
         } catch (error) {
-            logKessage("获取驱动器列表失败: " + error.message, "ERROR");
+            qqq.logMessage("获取驱动器列表失败: " + error.message, "ERROR");
             drives.push("C:");
         }
     } else {
@@ -317,21 +290,22 @@ function getDirectoryContents(dirPath) {
         contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
         contents.files.sort((a, b) => collator.compare(a.name, b.name));
     } catch (error) {
-        logKessage(`读取目录内容失败: ${dirPath}`, "ERROR");
+        qqq.logMessage(`读取目录内容失败: ${dirPath}`, "ERROR");
     }
     return contents;
 }
 
 // ==================== Webview 脚本生成 ====================
+
 function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
-    const escapedCurrentPathForJsLiteral = escapeJsStringLiteral(currentPath);
-    const escapedSizeModeForJsLiteral = escapeJsStringLiteral(currentSizeMode);
+    const escapedCurrentPath = escapeJsStringLiteral(currentPath);
+    const escapedSizeMode = escapeJsStringLiteral(currentSizeMode);
     const escapedSidebarRatio = sidebarRatio.toFixed(4);
 
     return `
         const vscode = acquireVsCodeApi();
-        const sizeMode = '${escapedSizeModeForJsLiteral}';
-        let currentPath = '${escapedCurrentPathForJsLiteral}';
+        const sizeMode = '${escapedSizeMode}';
+        let currentPath = '${escapedCurrentPath}';
         let sidebarRatio = ${escapedSidebarRatio};
         let resizeObserver = null;
         const MIN_RESPONSIVE_WIDTH = 240;
@@ -473,8 +447,8 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            const filekmeInput = document.getElementById('filekmeInput');
-            filekmeInput.focus();
+            const filenameInput = document.getElementById('filenameInput');
+            filenameInput.focus();
             updateResourceExplorer();
             adjustSidebarByRatio();
             ensurePathTooltip();
@@ -568,13 +542,13 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         function navigateTo(path) { vscode.postMessage({ command: 'navigate', path: path }); }
         function navigateIntoFolder(path) { vscode.postMessage({ command: 'navigate', path: path }); }
 
-        let currentFocusType = 'filekmeInput';
+        let currentFocusType = 'filenameInput';
         document.addEventListener('focusin', (event) => { updateFocusType(event.target); });
         document.addEventListener('focusout', (event) => {
-            if (['filekmeInput', 'addressInput'].includes(event.target.id) || event.target.classList.contains('rename-input')) {
+            if (['filenameInput', 'addressInput'].includes(event.target.id) || event.target.classList.contains('rename-input')) {
                 setTimeout(() => {
                     const activeElement = document.activeElement;
-                    if (!['filekmeInput', 'addressInput'].includes(activeElement.id) && !activeElement.classList.contains('rename-input')) {
+                    if (!['filenameInput', 'addressInput'].includes(activeElement.id) && !activeElement.classList.contains('rename-input')) {
                         updateFocusType(activeElement);
                     }
                 }, 0);
@@ -583,29 +557,29 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
         document.addEventListener('click', (event) => {
             hideAllContextMenus();
-            if (!['filekmeInput', 'addressInput'].includes(event.target.id) && !event.target.classList.contains('rename-input') && currentFocusType === 'input') {
+            if (!['filenameInput', 'addressInput'].includes(event.target.id) && !event.target.classList.contains('rename-input') && currentFocusType === 'input') {
                 updateFocusType(event.target);
             }
         });
 
         function updateFocusType(element) {
-            if (['filekmeInput', 'addressInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
+            if (['filenameInput', 'addressInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
             else if (element.classList.contains('file-list-container') || element.closest('.file-list-container')) currentFocusType = 'fileList';
             else if (element.classList.contains('sidebar') || element.closest('.sidebar')) currentFocusType = 'sidebar';
             else if (element.classList.contains('recent-section') || element.closest('.recent-section')) currentFocusType = 'recentSection';
             else currentFocusType = 'other';
         }
 
-        function handleFilekmeInputKeyDown(event) { if (event.key === 'Enter') saveFile(); }
+        function handleFilenameInputKeyDown(event) { if (event.key === 'Enter') saveFile(); }
 
         function saveFile() {
-            const filename = document.getElementById('filekmeInput').value.trim();
+            const filename = document.getElementById('filenameInput').value.trim();
             if (filename) {
                 const isPinned = document.querySelector('#pinButton .pin-box').classList.contains('pinned');
                 vscode.postMessage({ command: 'save', filename: filename, isPinned: isPinned, openInCurrentGroup: !isPinned });
                 if (isPinned) {
-                    document.getElementById('filekmeInput').value = '';
-                    document.getElementById('filekmeInput').focus();
+                    document.getElementById('filenameInput').value = '';
+                    document.getElementById('filenameInput').focus();
                 }
             } else {
                 alert('请输入文件名');
@@ -650,22 +624,22 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
             }
             else if (message.command === 'updateSize') {
-                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
                 const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${message.type}\`);
                 if (item) {
                     const szArea = item.querySelector('.sz-area');
                     if (szArea) szArea.textContent = message.sizeDisplay;
                 }
             }
-            else if (message.command === 'clearFilekmeInput') {
-                document.getElementById('filekmeInput').value = '';
-                document.getElementById('filekmeInput').focus();
+            else if (message.command === 'clearFilenameInput') {
+                document.getElementById('filenameInput').value = '';
+                document.getElementById('filenameInput').focus();
             }
             else if (message.command === 'startRename') startRename(message.path, message.name, message.type);
             else if (message.command === 'refreshSizes') refreshSizeDisplay();
             else if (message.command === 'restoreDeletedItem') {
-                const safePathSelector = message.path.replace(/\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
-                const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
+                const safePathSelector = message.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+                const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"]\`);
                 if (itemElement) { itemElement.style.opacity = ''; itemElement.style.pointerEvents = ''; }
             }
             else if (message.command === 'updateSidebarRatio') {
@@ -673,8 +647,8 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 adjustSidebarByRatio();
             }
             else if (message.command === 'focusInput') {
-                const filekmeInput = document.getElementById('filekmeInput');
-                if (filekmeInput) { filekmeInput.focus(); filekmeInput.select(); }
+                const filenameInput = document.getElementById('filenameInput');
+                if (filenameInput) { filenameInput.focus(); filenameInput.select(); }
             }
         });
 
@@ -682,7 +656,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (sizeMode === 'none') return;
             items.forEach(item => {
                 if (item.name === '..' || item.type !== 'file') return;
-                const safePathSelector = item.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
+                const safePathSelector = item.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
                 const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"].\${item.type}\`);
                 if (itemElement) {
                     const szArea = itemElement.querySelector('.sz-area');
@@ -691,8 +665,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 vscode.postMessage({ command: 'requestSize', path: item.path, type: item.type, name: item.name });
             });
         }
-
-        let selectedItem = null;
+         let selectedItem = null;
         function isPinned() { return !!document.querySelector('#pinButton .pin-box.pinned'); }
 
         function selectFileItem(fileItem, requestSize) {
@@ -720,8 +693,8 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
 
         let renameBlurHandler = null;
         function startRename(itemPath, itemName, itemType) {
-            const safePathSelector = itemPath.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
-            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
+            const safePathSelector = itemPath.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"]\`);
             if (!itemElement) return;
 
             const prevSelected = document.querySelector('.file-item.selected');
@@ -793,31 +766,31 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         }
 
         function performEditAction(itemToEdit) { if(itemToEdit) startRename(itemToEdit.path, itemToEdit.name, itemToEdit.type); }
-        function performOpenAction(itemToOpen) { if(itemToOpen) vscode.postMessage({ command: 'openWithDefaultq', path: itemToOpen.path, type: itemToOpen.type }); }
+        function performOpenAction(itemToOpen) { if(itemToOpen) vscode.postMessage({ command: 'openWithDefault', path: itemToOpen.path, type: itemToOpen.type }); }
 
         function performDeleteAction(itemToDelete) {
             if (!itemToDelete) return;
-            const safePathSelector = itemToDelete.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
-            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
+            const safePathSelector = itemToDelete.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+            const itemElement = document.querySelector(\`.file-item[data-path="\${safePathSelector}"]\`);
             if (itemElement) { itemElement.style.opacity = '0.5'; itemElement.style.pointerEvents = 'none'; }
             vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: itemToDelete.path, type: itemToDelete.type });
             selectedItem = null;
         }
 
-        function performKodeAction(itemToKode) {
-            if (!itemToKode) return;
-            if (itemToKode.type === 'file') {
+        function performCodeAction(itemToCode) {
+            if (!itemToCode) return;
+            if (itemToCode.type === 'file') {
                 const pinned = isPinned();
-                vscode.postMessage({ command: 'editFile', path: itemToKode.path, isPinned: pinned, openInCurrentGroup: !pinned });
+                vscode.postMessage({ command: 'editFile', path: itemToCode.path, isPinned: pinned, openInCurrentGroup: !pinned });
             } else {
-                 vscode.postMessage({ command: 'openFolderInNewWindow', path: itemToKode.path });
+                vscode.postMessage({ command: 'openFolderInNewWindow', path: itemToCode.path });
             }
         }
 
         function performSizeAction(itemToRefresh) {
             if (!itemToRefresh) return;
-            const safePathSelector = itemToRefresh.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\"');
-            const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"\`);
+            const safePathSelector = itemToRefresh.path.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+            const item = document.querySelector(\`.file-item[data-path="\${safePathSelector}"]\`);
             if (item) {
                 const szArea = item.querySelector('.sz-area');
                 if (szArea) szArea.textContent = '    \\u2022    ';
@@ -834,7 +807,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 case 'rename': performEditAction(itemForAction); break;
                 case 'open': performOpenAction(itemForAction); break;
                 case 'delete': performDeleteAction(itemForAction); break;
-                case 'kode': performKodeAction(itemForAction); break;
+                case 'code': performCodeAction(itemForAction); break;
                 case 'size': performSizeAction(itemForAction); break;
             }
         }
@@ -876,9 +849,9 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
                 itemContextMenu.style.top = e.clientY + 'px';
                 itemContextMenu.style.display = 'flex';
             } else {
-                 emptyContextMenu.style.left = e.clientX + 'px';
-                 emptyContextMenu.style.top = e.clientY + 'px';
-                 emptyContextMenu.style.display = 'flex';
+                emptyContextMenu.style.left = e.clientX + 'px';
+                emptyContextMenu.style.top = e.clientY + 'px';
+                emptyContextMenu.style.display = 'flex';
             }
         });
 
@@ -899,7 +872,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
             if (key === 'q') { event.preventDefault(); event.stopPropagation(); performEditAction(selectedItem); }
             else if (key === 'w') { event.preventDefault(); event.stopPropagation(); performOpenAction(selectedItem); }
             else if (key === 's') { event.preventDefault(); event.stopPropagation(); performDeleteAction(selectedItem); }
-            else if (key === 'e') { event.preventDefault(); event.stopPropagation(); performKodeAction(selectedItem); }
+            else if (key === 'e') { event.preventDefault(); event.stopPropagation(); performCodeAction(selectedItem); }
         });
 
         document.addEventListener('keydown', event => {
@@ -945,7 +918,7 @@ function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
         }
 
         function createFolder() {
-            const folderName = document.getElementById('filekmeInput').value.trim();
+            const folderName = document.getElementById('filenameInput').value.trim();
             if (folderName) vscode.postMessage({ command: 'createFolder', folderName: folderName });
             else alert('请输入文件夹名');
         }
@@ -966,7 +939,7 @@ function getWebviewContent(currentPath) {
     try {
         htmlTemplate = fs.readFileSync(path.join(__dirname, "q2.html"), "utf8");
     } catch (error) {
-        logKessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+        qqq.logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
         return `<h1>错误: 无法加载 q2.html 模板</h1><p>${error.message}</p>`;
     }
 
@@ -1005,6 +978,7 @@ function getWebviewContent(currentPath) {
 }
 
 // ==================== 主逻辑 ====================
+
 function showSaveAsDialog() {
     if (activePanel && !activePanel.disposed) {
         if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
@@ -1063,7 +1037,7 @@ function showSaveAsDialog() {
                 console.log("Webview closed during updateResourceExplorer");
             }
         } catch (error) {
-            logKessage(`更新资源展示区失败: ${error}`, "ERROR");
+            qqq.logMessage(`更新资源展示区失败: ${error}`, "ERROR");
         }
     }
 
@@ -1078,12 +1052,12 @@ function showSaveAsDialog() {
                     }
                 }, 100);
             } catch (e) {
-                logKessage("Refresh Webview failed: " + e.message, "ERROR");
+                qqq.logMessage("Refresh Webview failed: " + e.message, "ERROR");
             }
         }
     }
 
-    function getSkrtShowOptions(openInCurrentGroup) {
+    function getShowOptions(openInCurrentGroup) {
         const baseOptions = { preserveFocus: false };
         if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
             return openInCurrentGroup ? baseOptions : Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.Beside });
@@ -1114,7 +1088,7 @@ function showSaveAsDialog() {
             case "refreshSize":
                 if (currentConfig.sizeMode === "none") break;
                 try {
-                    const display = await getFileSizeDisplayAqncPromise(message.path, currentConfig.sizeMode);
+                    const display = await getFileSizeDisplayAsync(message.path, currentConfig.sizeMode);
                     if (panel && !panel.disposed) {
                         panel.webview.postMessage({ command: "updateSize", path: message.path, type: message.type, sizeDisplay: display });
                     }
@@ -1180,7 +1154,7 @@ function showSaveAsDialog() {
                         fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
                         saveRecentDirectory(currentPath);
                         vscode.workspace.openTextDocument(fullFilePath).then(doc => {
-                            vscode.window.showTextDocument(doc, getSkrtShowOptions(openInCurrentGroup)).then(() => {
+                            vscode.window.showTextDocument(doc, getShowOptions(openInCurrentGroup)).then(() => {
                                 if (!isPinned) { if (panel && !panel.disposed) panel.dispose(); }
                                 else { if (panel && !panel.disposed) refreshWebview(); }
                             });
@@ -1210,7 +1184,7 @@ function showSaveAsDialog() {
                     fs.mkdirSync(newFolderPath);
                     saveRecentDirectory(currentPath);
                     refreshWebview();
-                    if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilekmeInput" });
+                    if (panel && !panel.disposed) panel.webview.postMessage({ command: "clearFilenameInput" });
                 }
                 break;
 
@@ -1221,12 +1195,12 @@ function showSaveAsDialog() {
             case "editFile":
                 saveRecentDirectory(path.dirname(message.path));
                 const ext = path.extname(message.path).toLowerCase();
-                if (UNQPPORTED_KODE_EXTENSIONS.has(ext)) {
+                if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
                     vscode.window.showWarningMessage(`该文件不支持在 VS Code 里打开: "${path.basename(message.path)}"`);
                     break;
                 }
                 vscode.workspace.openTextDocument(message.path).then(doc => {
-                    vscode.window.showTextDocument(doc, getSkrtShowOptions(message.openInCurrentGroup)).then(() => {
+                    vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
                         if (!message.isPinned && panel && !panel.disposed) panel.dispose();
                     });
                 }).catch(error => vscode.window.showErrorMessage("打开文件失败: " + error.message));
@@ -1238,10 +1212,10 @@ function showSaveAsDialog() {
                 refreshWebview();
                 break;
 
-            case "openWithDefaultq":
+            case "openWithDefault":
                 saveRecentDirectory(message.type === "folder" ? message.path : path.dirname(message.path));
                 const command = process.platform === "win32" ? 'start ""' : process.platform === "darwin" ? "open" : "xdg-open";
-                qbprocess.exec(`${command} "${message.path}"`);
+                cp.exec(`${command} "${message.path}"`);
                 refreshWebview();
                 break;
 
@@ -1272,12 +1246,12 @@ function showSaveAsDialog() {
 }
 
 // ==================== 扩展激活 ====================
+
 async function activate(context) {
     globalContext = context;
     getConfig();
 
-    // 日志记录启动信息
-    logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退）", "INFO");
+    qqq.logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退）", "INFO");
 
     context.subscriptions.push(
         vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
@@ -1293,4 +1267,3 @@ function deactivate() {
 }
 
 module.exports = { activate, deactivate };
-
