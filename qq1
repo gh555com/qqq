@@ -1,1042 +1,628 @@
-ky() // src/q1.js
-const vscode = require("vscode");
-const cp = require("child_process");
-const path = require("path");
-const fs = require("fs");
-const crypto = require("crypto");
-
-// ★★★ 引用本地 qqq.js ★★★
-const {
-	identifyFile,
-	getFolderInfo,
-	handleClipboardFast,
-	handleClipboardSlow,
-	shouldShowDuration,
-	logMessage,
-	QQQ_PATH_REGEX,
-	PENDING_REGEX,
-	ffmpegPath,
-	finishUserTracking,
-	initUserTracking,
-	createPendingToken,
-	registerPendingJob,
-	resolvePendingJob
-} = require("./qqq");
-
-const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
-let isCoreIntegretyValid = false;
-
-// == == == == == == == == == == 全局变量 == == == == == == == == == ==
-let ffmpegProbePromise = null;
-
-const MAX_PREVIEW_CACHE = 100;
-const previewCache = new Map();
-const documentDecorationsMap = new Map();
-let currentRenderVersion = 0;
-const resolutionCache = new Map();
-const MAX_CONCURRENT_TASKS = 8;
-const SCROLL_DEBOUNCE_MS = 200;
-const PREVIEW_WIDTH = 512;
-const PREVIEW_HEIGHT = 288;
-const PREVIEW_BORDER = 6;
-const PREVIEW_BG_COLOR = "#fef6e3";
-
-const assetsCache = {checked: false, bgExists: false, wmExists: false};
-
-let watermarkBase64 = null;
-const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
-let decorationType, markerHideType, extensionContext = null;
-
-const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"]);
-const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
-const qqqFolderSizeCache = new Map();
-const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-
-let enlargeSmallImages = true;
-let extremePerformanceMode = false;
-let cleanFreakMode = false;
-
-// ★★★ 占位符状态管理 ★★★
-const pendingTokens = new Map(); // token -> {editor, documentUri, targetDir}
-
-// ★★★ Loading 占位图(Base64 内联) ★★★
-const LOADING_SVG = `data: image/svg+xml; base64, ` + Buffer.from (`
-< svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40" >
-  < circle cx="20" cy="20" r="8" fill="#888" >
-    < animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0s"/>
-  < /circle >
-  < circle cx="60" cy="20" r="8" fill="#888" >
-    < animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.33s"/>
-  < /circle >
-  < circle cx="100" cy="20" r="8" fill="#888" >
-    < animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.66s"/>
-  < /circle >
-< / svg >
-`).toString('base64');
-
-function refreshQqqConfig() {
-	try {
-		const config = vscode.workspace.getConfiguration("qqq");
-		enlargeSmallImages = config.get(
-		    "enlargeSmallImages", config.get("stretchSmallImages", true));
-		extremePerformanceMode = config.get("extremePerformance", false);
-		cleanFreakMode = config.get("cleanFreak", false);
-	} catch(e) {
-		enlargeSmallImages = true;
-		extremePerformanceMode = false;
-		cleanFreakMode = false;
-	}
-}
-
-function loadWatermarkResource() {
-	try {
-		if (fs.existsSync(WATERMARK_PATH)) {
-			const buf = fs.readFileSync(WATERMARK_PATH);
-			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
-			assetsCache.wmExists = true;
-		}
-	} catch (e) {watermarkBase64 = null; }
-	assetsCache.checked = true;
-}
-
-function clearDecorations() {
-	if (decorationType) {try {decorationType.dispose(); } catch (e) {} decorationType = null; }
-	if (markerHideType) {try {markerHideType.dispose(); } catch (e) {} markerHideType = null; }
-	documentDecorationsMap.clear();
-}
-
-function verifySystemIntegrity() {
-	try {
-		if (!fs.existsSync(WATERMARK_PATH)) return false;
-		const buffer = fs.readFileSync(WATERMARK_PATH);
-		const hash = crypto.createHash("sha256").update(buffer).digest("hex");
-		return hash == = CORE_INTEGRITY_HASH;
-	} catch (e) {return false; }
-}
-
-function formatBytes(size) {
-	if (size == null | | isNaN(size)) return "?";
-	const units = ["b", "k", "m", "g"]; let unitIndex = 0; let value = size;
-	while (value >= 1024 & & unitIndex < units.length - 1) {value = value / 1024; unitIndex++;}
-	return `${Math.round(value)}${units[unitIndex]}`;
-}
-
-function formatDuration(seconds) {
-	if (seconds == null | | isNaN(seconds) | | seconds < 0) return "0s";
-	if (seconds >= 60) {
-		const mins = Math.floor(seconds / 60); const secs = seconds % 60;
-		return `${mins}m + ${secs.toFixed(2)}s`;
-	} else return `${seconds.toFixed(2)}s`;
-}
-
-function isImageExt(ext) {return IMAGE_EXTS.has(ext.toLowerCase()); }
-function isVideoExt(ext) {return VIDEO_EXTS.has(ext.toLowerCase()); }
-function isImageOrVideoExt(ext) {const lower = ext.toLowerCase(); return IMAGE_EXTS.has(lower) | | VIDEO_EXTS.has(lower);}
-function getDocumentEOL(document) {return document.eol == = vscode.EndOfLine.CRLF ? "\r\n": "\n"; }
-
-function resolvePathToAbsolute(docUri, rawPath) {
-	if (!rawPath) return null;
-	let cleanPath = rawPath.trim();
-	while (cleanPath.startsWith("\\") | | cleanPath.startsWith("/")) cleanPath = cleanPath.slice(1);
-	if (path.isAbsolute(cleanPath)) return cleanPath;
-	const docDir = path.dirname(docUri.fsPath);
-	return path.resolve(docDir, cleanPath);
-}
-
-function buildNewRawPath(oldRawPath, newFileName) {
-	const lastSlash = Math.max(oldRawPath.lastIndexOf("/"), oldRawPath.lastIndexOf("\\"));
-	if (lastSlash == = -1) return newFileName;
-	return oldRawPath.slice(0, lastSlash + 1) + newFileName;
-}
-
-function determineMediaType(codec, ext) {
-	if (!codec) {
-		const e = ext.toLowerCase();
-		if (e == = ".gif") return "gif";
-		if (VIDEO_EXTS.has(e)) return "video";
-		if (IMAGE_EXTS.has(e)) return "image";
-		return "unknown";
-	}
-	const c = codec.toLowerCase();
-	if (c == = "gif") return "gif";
-	if (["png", "mjpeg", "webp", "bmp", "tiff", "jpeg", "jpg"].some(x=> c.includes(x))) {
-		if (c.includes("mjpeg") & & VIDEO_EXTS.has(ext.toLowerCase())) return "video";
-		return "image";
-	}
-	const videoCodecs = ["h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2video", "prores", "wmv", "flv", "theora", "vc1", "rv40"];
-	if (videoCodecs.some(x=> c.includes(x))) return "video";
-	if (VIDEO_EXTS.has(ext.toLowerCase())) return "video";
-	if (IMAGE_EXTS.has(ext.toLowerCase())) return "image";
-	return "unknown";
-}
-
-async function ensureFfmpegAvailable() {
-	if (!ffmpegPath) return false;
-	if (ffmpegProbePromise) return ffmpegProbePromise;
-	ffmpegProbePromise = new Promise((resolve)=> {
-		const child= cp.spawn(ffmpegPath, ["-version"], {windowsHide: true});
-		let handled= false;
-		child.on("error", () = > {handled = true; resolve(false);});
-		child.on("close", (code) = > {if (!handled) resolve(code == = 0); });
-	});
-	return ffmpegProbePromise;
-}
-
-async function getMediaInfo(filePath, mtimeMs) {
-	const cached = resolutionCache.get(filePath);
-	if (cached & & cached.mtime === mtimeMs) return cached;
-
-	// ★★★ 使用 qqq.js 的 identifyFile（四级回退）★★★
-	const result = await identifyFile(filePath);
-	if (result & & !result.error & & result.width) {
-		const info = {
-			mtime: mtimeMs,
-			res: `${result.width}x${result.height}`,
-			width: result.width, height: result.height,
-			codec: result.codec, codec_long_name: result.codec_long_name,
-			duration: result.duration | | 0, type: result.type | | "unknown"
-		};
-		resolutionCache.set(filePath, info);
-		if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
-		return info;
-	}
-
-	// ★★★ 纯 JS 兜底：直接用 ffmpeg ★★★
-	if (!ffmpegPath) return null;
-
-	return new Promise((resolve)=> {
-		const child= cp.spawn(ffmpegPath, ["-hide_banner", "-i", filePath], {windowsHide: true});
-		let stderr= "";
-		child.stderr.on("data", d = > {if (stderr.length < 50000) stderr += d.toString();});
-		child.on("close", ()=> {
-			const resMatch= /Stream.*Video: .*, \s*(\d+)x(\d+)/i.exec(stderr);
-			const codecMatch = /Stream.*Video: \s*(.*?)(?: , |$)/i.exec(stderr);
-			const durMatch= /Duration: \s*(\d+): (\d+): (\d+(?: \.\d+)?)/i.exec(stderr);
-			let info= {mtime: mtimeMs, res: null, width: null, height: null, codec: null, duration: 0, type: "unknown"};
-			if (resMatch) {
-				const w= parseInt(resMatch[1]); const h = parseInt(resMatch[2]);
-				info.res= `${w}x${h}`; info.width = w; info.height = h;
-			}
-			if (codecMatch & & codecMatch[1]) info.codec = codecMatch[1].trim();
-			if (durMatch) {
-				const hours= parseFloat(durMatch[1]), mins = parseFloat(durMatch[2]), secs = parseFloat(durMatch[3]);
-				const rawDuration= hours * 3600 + mins * 60 + secs;
-				if (info.codec & & info.codec.toLowerCase().includes('mjpeg') & & rawDuration <= 0.1) {
-					info.duration= 0; info.type = 'image';
-				} else {info.duration = rawDuration; }
-			}
-			const ext= path.extname(filePath);
-			if (info.type == = "unknown") info.type = determineMediaType(info.codec, ext);
-			resolutionCache.set(filePath, info);
-			if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
-			resolve(info.width ? info: null);
-		});
-		setTimeout(() = > {try {child.kill();} catch {} resolve(null); }, 2000);
-	});
-}
-
-function getGifDurationFromBuffer(buffer) {
-	if (!buffer | | buffer.length < 13) return 0;
-	try {
-		let totalDelayCs = 0;
-		let i = 13;
-		const sig = buffer.slice(0, 6).toString('ascii');
-		if (sig != = 'GIF87a' & & sig != = 'GIF89a') return 0;
-		const flags = buffer[10];
-		if ((flags & 0x80) != = 0) i += 3 * Math.pow(2, (flags & 0x07) + 1);
-
-		while (i < buffer.length - 1) {
-			const blockType = buffer[i];
-			if (blockType == = 0x21) {
-				const extLabel = buffer[i + 1];
-				if (extLabel == = 0xF9) {
-					if (i + 6 < buffer.length) {totalDelayCs += buffer[i + 4] | (buffer[i + 5] << 8); }
-					i += 8;
-				} else if (extLabel == = 0xFF | | extLabel == = 0xFE | | extLabel == = 0x01) {
-					i += 2; let bs = buffer[i]; i += bs + 1;
-					while (i < buffer.length & & buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				} else {
-					i += 2;
-					while (i < buffer.length & & buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				}
-			} else if (blockType == = 0x2C) {
-				if (i + 10 > buffer.length) break ;
-				const imgFlags = buffer[i + 9];
-				i += 10;
-				if ((imgFlags & 0x80) != = 0) i += 3 * Math.pow(2, (imgFlags & 0x07) + 1);
-				i++;
-				while (i < buffer.length & & buffer[i] !== 0) i += buffer[i] + 1;
-				i++;
-			} else if (blockType == = 0x3B) break;
-			else i++;
-		}
-		return totalDelayCs / 100;
-	} catch (e) {return 0; }
-}
-
-function setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize) {
-	if (previewCache.size >= MAX_PREVIEW_CACHE) previewCache.delete(previewCache.keys().next().value);
-	previewCache.set(filePath, {buffer, mtimeMs, gifDuration, outputSize});
-}
-
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
-	let targetW = PREVIEW_WIDTH, targetH = PREVIEW_HEIGHT;
-	const hasValidSize = origSize & & typeof origSize.width == = "number";
-	if (hasValidSize) {
-		const ow = origSize.width, oh = origSize.height;
-		if (enlargeSmallImages | | isVideo) {
-			const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-			targetW = Math.max(1, Math.round(ow * scale)
-			                   ); targetH = Math.max(1, Math.round(oh * scale));
-		} else {
-			if (ow <= PREVIEW_WIDTH & & oh <= PREVIEW_HEIGHT) {targetW = ow; targetH = oh;}
-			else {
-				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-				targetW = Math.max(1, Math.round(ow * scale)
-				                   ); targetH = Math.max(1, Math.round(oh * scale));
-			}
-		}
-	}
-	const args = ["-hide_banner", "-loglevel", "error"];
-	let expectedGifDuration = 0;
-
-	if (isVideo) {
-		const safeDuration = duration | | 0;
-		const fpsLimit = extremePerformanceMode ? 8: 10;
-		const scaleFlags = extremePerformanceMode ? "neighbor": "bilinear";
-		const scaleFilter = `scale =${targetW}: ${targetH}: force_original_aspect_ratio = decrease: flags =${scaleFlags}`;
-
-		if (extremePerformanceMode) {
-			let clipStart = 1, clipDuration = 2;
-			if (safeDuration > 0 & & safeDuration < clipStart + clipDuration) {
-				clipStart = Math.max(0, safeDuration - clipDuration - 0.5);
-				clipDuration = Math.min(clipDuration, safeDuration - clipStart);
-			}
-			args.push("-ss", String(clipStart), "-t",
-			          String(clipDuration), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit}, ${scaleFilter}[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDuration;
-		} else if (safeDuration < 5) {
-			let clipStart = Math.min(1, safeDuration * 0.1);
-			let clipDuration = Math.min(4, safeDuration - clipStart);
-			args.push("-ss", String(clipStart), "-t",
-			          String(clipDuration), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit}, ${scaleFilter}, split[s0][s1]; [s0]palettegen=stats_mode=diff[p]; [s1][p]paletteuse=dither=bayer: bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDuration;
-		} else {
-			const seg = 1.3;
-			const s1 = 1;
-			const s2 = Math.floor(safeDuration / 2);
-			const s3 = Math.max(s2 + seg + 0.5, safeDuration - seg - 1);
-			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit}, ${scaleFilter}[v0]; [1:v]fps=${fpsLimit}, ${scaleFilter}[v1]; [2:v]fps=${fpsLimit}, ${scaleFilter}[v2]; [v0][v1][v2]concat=n=3: v=1: a=0, split[s0][s1]; [s0]palettegen=stats_mode=diff[p]; [s1][p]paletteuse=dither=bayer: bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = seg * 3;
-		}
-	} else if (isGif) {
-		if (extremePerformanceMode) args.push("-t", "2");
-		args.push("-i", filePath);
-		const scaleFlags = extremePerformanceMode ? "neighbor": "bilinear";
-		const fpsLimit = extremePerformanceMode ? 8: 10;
-		const f = extremePerformanceMode
-			? `[0:v]fps =${fpsLimit}, scale =${targetW}: ${targetH}: force_original_aspect_ratio = decrease: flags =${scaleFlags}[out_v]`: `[0:v]scale =${targetW}: ${targetH}: force_original_aspect_ratio = decrease: flags =${scaleFlags}[out_v]`;
-		args.push("-filter_complex", f, "-map",
-		          "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-	} else {
-		args.push("-i", filePath);
-		const scaleFlags = extremePerformanceMode ? "neighbor": "bilinear";
-		args.push("-filter_complex", `[0:v]scale=${targetW}: ${targetH}: force_original_aspect_ratio=decrease: flags=${scaleFlags}[out_v]`, "-map", "[out_v]");
-		if (extremePerformanceMode) args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-		else args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
-	}
-	return {args, targetW, targetH, expectedGifDuration};
-}
-
-async function getPreviewBuffer(filePath, isVideo, isGif) {
-	if (!ffmpegPath) return null;
-	let origSize = null, duration = 0, mtimeMs = 0;
-	try {const st = fs.statSync(filePath); mtimeMs = st.mtimeMs;} catch {return null; }
-	const info = await getMediaInfo(filePath, mtimeMs);
-	if (info) {origSize = {width: info.width, height: info.height}; duration = info.duration; }
-
-	if (extremePerformanceMode) {
-		const c = previewCache.get(filePath);
-		if (c) return {buffer: c.buffer, gifDuration: c.gifDuration, outputSize: c.outputSize};
-	} else {
-		const c = previewCache.get(filePath);
-		if (c & & c.mtimeMs === mtimeMs) return {buffer: c.buffer, gifDuration: c.gifDuration, outputSize: c.outputSize};
-	}
-
-	const ok = await ensureFfmpegAvailable();
-	if (!ok) return null;
-
-	return new Promise((resolve)=> {
-		const {args, targetW, targetH, expectedGifDuration}= buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
-		const child= cp.spawn(ffmpegPath, args, {windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']});
-		const chunks= [];
-		let resolved= false;
-		child.stderr.on("data", ()= > {});
-		const timer = setTimeout(() = > {
-			if (!resolved) {resolved = true; try {child.kill(); } catch {} resolve(null); }
-		}, 30000);
-		child.stdout.on("data", (d)=> chunks.push(d));
-		child.on("error", () = > {if (!resolved) {resolved = true; clearTimeout(timer); resolve(null); } });
-		child.on("close", ()=> {
-			if (!resolved) {
-				resolved= true; clearTimeout(timer);
-				if (!chunks.length) {resolve(null); return; }
-				const buffer= Buffer.concat(chunks);
-				let gifDuration= expectedGifDuration;
-				if (isGif & & !isVideo) {
-					gifDuration= getGifDurationFromBuffer(buffer);
-					if (extremePerformanceMode & & gifDuration > 2.5) gifDuration = 2.0;
-				}
-				const outputSize= {width: targetW, height: targetH};
-				setPreviewCache(filePath, buffer, mtimeMs, gifDuration, outputSize);
-				resolve({buffer, gifDuration, outputSize});
-			}
-		});
-	});
-}
-
-function computeMarginLeft() {return "100px"; }
-
-function calculateAspectRatioString(w, h) {
-	if (!w | | !h) return "";
-	if (w >= h) {const r = (h / w) * 16; return `16__${parseFloat(r.toFixed(1))}`; }
-	else {const r = (w / h) * 16; return `${parseFloat(r.toFixed(1))}__16`; }
-}
-
-function createProgressSvg(durationSeconds) {
-	if (!durationSeconds | | durationSeconds <= 0) return null;
-	const svgStr = `<svg xmlns = "http://www.w3.org/2000/svg" width = "512" height = "4" viewBox = "0 0 512 4" > <rect width = "512" height = "4" fill = "black" / > < rect width = "0" height = "4" fill = "#fdf6e3" > <animate attributeName = "width" from = "0" to = "512" dur = "${durationSeconds.toFixed(3)}s" repeatCount = "indefinite" fill = "freeze" calcMode = "linear" / > < /rect > </svg >`;
-	return "data:image/svg+xml;base64," + Buffer.from (svgStr).toString("base64");
-}
-
-function invalidateFolderSizeCacheForPath(filePath) {
-	try {const dir = path.dirname(filePath); if (qqqFolderSizeCache.has(dir)) qqqFolderSizeCache.delete(dir);} catch {}
-}
-
-async function getQqqFolderSize(folderPath) {
-	const now = Date.now();
-	const cached = qqqFolderSizeCache.get(folderPath);
-	if (cached & & now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
-
-	// ★★★ 使用 qqq.js 的 getFolderInfo（四级回退）★★★
-	const result = await getFolderInfo(folderPath);
-	if (result & & result.success) {
-		const parts = []; let totalFiles = 0;
-		if (result.ext_stats) for (const [ext, count] of Object.entries(result.ext_stats)) {totalFiles += count; parts.push(`${count}_${ext | | '无后缀'}`);}
-		const summaryStr = parts.length > 0 ? `${totalFiles}个文件：${parts.join("; ")}`: (result.file_count_root > 0 ? `${result.file_count_root}个文件`: "空文件夹");
-		const cachedData = {size: result.total_size, summary: summaryStr};
-		qqqFolderSizeCache.set(folderPath, {data: cachedData, timestamp: now});
-		return cachedData;
-	}
-	return null;
-}
-
-// ★★★ 核心：Fast Path 粘贴命令 ★★★
-async function executeClipboardCommand() {
-	if (!isCoreIntegretyValid) {vscode.window.showErrorMessage("Integrity check failed."); return; }
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) return ;
-
-	let targetDir = "D:\\view\\p";
-	if (!editor.document.isUntitled) {
-		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
-	}
-
-	// ★★★ Fast Path: 纯文字粘贴 (< 1ms) ★★★
-	const fastResult = await handleClipboardFast();
-	if (fastResult & & fastResult.type === "text") {
-		// 直接插入文字，不做任何额外处理
-		await editor.edit(e=> e.insert(editor.selection.active, fastResult.text));
-		return ;
-	}
-
-	// ★★★ Slow Path: 媒体粘贴 - 先插入占位符 ★★★
-	const token = createPendingToken();
-	const eol = getDocumentEOL(editor.document);
-	const pendingMarker = `/\\__PENDING__: ${token}__\\/`;
-
-	// 立即插入占位符（用户感知 < 5ms）
-	const insertPosition = editor.selection.active;
-	await editor.edit(e=> e.insert(insertPosition, eol + pendingMarker + eol));
-
-	// 记录占位符位置
-	pendingTokens.set(token, {
-		editor: editor,
-		documentUri: editor.document.uri.toString(),
-		targetDir: targetDir
-	});
-
-	// 触发一次渲染，显示 loading 状态
-	debounceRender(editor, 10);
-
-	// ★★★ 后台异步处理媒体（四级回退）★★★
-	setImmediate(async ()=> {
-		try {
-			const result= await handleClipboardSlow(targetDir);
-			await replacePendingMarker(token, result);
-		} catch(e) {
-			logMessage(`媒体处理失败: ${e.message}`, "ERROR");
-			await replacePendingMarker(token, {type: "error", error: e.message});
-		}
-	});
-}
-
-// ★★★ 替换占位符为真实内容 ★★★
-async function replacePendingMarker(token, result) {
-	const pending = pendingTokens.get(token);
-	if (!pending) return ;
-	pendingTokens.delete(token);
-
-	// 查找当前打开的编辑器
-	let editor = vscode.window.visibleTextEditors.find(
-		e= > e.document.uri.toString() == = pending.documentUri
-	);
-	if (!editor) return ;
-
-	const doc = editor.document;
-	const text = doc.getText();
-	const pendingMarker = `/\\__PENDING__: ${token}__\\/`;
-	const markerIndex = text.indexOf(pendingMarker);
-
-	if (markerIndex == = -1) return; // 占位符已被删除
-
-	const startPos = doc.positionAt(markerIndex);
-	const endPos = doc.positionAt(markerIndex + pendingMarker.length);
-	const markerRange = new vscode.Range(startPos, endPos);
-
-	let replacement = "";
-	const eol = getDocumentEOL(doc);
-	const docDir = path.dirname(doc.uri.fsPath);
-
-	if (result.type == = "unknown" | | result.type == = "error") {
-		// 删除占位符
-		replacement = "";
-	} else if (result.type == = "folder_text") {
-		replacement = result.text;
-	} else if (result.type == = "image" | | result.type == = "ikge") {
-		const filePath = result.path;
-		const relPath = path.relative(docDir, filePath).replace( /\//g, "\\");
-		const isVidOrImg = isImageOrVideoExt(path.extname(filePath));
-		const gapBelow = calculateBlankLinesN(isVidOrImg, true);
-		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
-		invalidateFolderSizeCacheForPath(filePath);
-	} else if (result.type == = "file") {
-		const files = result.files;
-		for (let i=0; i < files.length; i++) {
-			const f = files[i];
-			const relPath = path.relative(docDir, f).replace( /\//g, "\\");
-			const isVidOrImg = isImageOrVideoExt(path.extname(f));
-			const isLastItem = (i == = files.length - 1);
-			if (i > 0) replacement += eol;
-			replacement += `/\\${relPath}\\/`;
-			const gapBelow = calculateBlankLinesN(isVidOrImg, isLastItem);
-			replacement += eol.repeat(gapBelow);
-			invalidateFolderSizeCacheForPath(f);
-		}
-		if (files.length > 1) {
-			vscode.window.showInformationMessage("文件已复制 " + files.length);
-		}
-	} else if (result.type == = "text") {
-		replacement = result.text;
-	}
-
-	// 替换占位符
-	await editor.edit(editBuilder=> {
-		editBuilder.replace(markerRange, replacement);
-	});
-
-	// 刷新渲染
-	setTimeout(()=> renderImages(editor), 50);
-}
-
-function calculateBlankLinesN(isFramed, isLastItem=false) {
-	try {
-		const config = vscode.workspace.getConfiguration('editor');
-		const fontSize = config.get('fontSize', 14);
-		const lineHeightMultiplier = config.get('lineHeight', 0);
-		const effectiveLineHeight = (lineHeightMultiplier === 0) ? 1.35: lineHeightMultiplier;
-		const pixelPerLine = fontSize * effectiveLineHeight;
-		const requiredHeight = PREVIEW_HEIGHT;
-		let baseN = Math.ceil(requiredHeight / pixelPerLine);
-		let extra = 2 + Math.floor((effectiveLineHeight - 1) * 3);
-		extra = Math.min(5, Math.max(2, extra));
-		let n = baseN + extra;
-		n = Math.max(4, n);
-		if (isLastItem) {if (isFramed) n = Math.max(8, n); else n = 2; }
-		else {if (!isFramed) n = 2; }
-		return n;
-	} catch (e) {return 15; }
-}
-
-function provideCleanlinessEdits(document) {
-	const edits = [];
-	const text = document.getText();
-	const regex = new RegExp(QQQ_PATH_REGEX);
-	const eol = getDocumentEOL(document);
-	let match;
-	const markers = [];
-	while ((match=regex.exec(text))) markers.push({text: match[0], index: match.index});
-
-	for (let i=markers.length - 1; i >= 0; i--) {
-		const m = markers[i];
-		const startPos = document.positionAt(m.index);
-		const endPos = document.positionAt(m.index + m.text.length);
-		const markerLine = startPos.line;
-
-		const rawPath = m.text.slice(2, -2).trim();
-		// 跳过 PENDING 占位符
-		if (rawPath.startsWith("__PENDING__:")) continue ;
-
-		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace( /\//g, "\\"));
-		let isVidOrImg = false;
-		if (absPath) isVidOrImg = isImageOrVideoExt(path.extname(absPath));
-
-		const lineObj = document.lineAt(markerLine);
-		const lineContent = lineObj.text;
-
-		if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
-		const suffix = lineContent.substring(endPos.character);
-		if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
-
-		let isLastMarkerInDoc = (i == = markers.length - 1);
-		const neededLines = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
-		let existingBlanks = 0;
-		for (let lineIdx=markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-			if (document.lineAt(lineIdx).text.trim() == = "") existingBlanks++;
-			else break ;
-		}
-		if (existingBlanks < neededLines) {
-			const linesToAdd = neededLines - existingBlanks;
-			const lineEndPos = lineObj.range.end;
-			edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
-		}
-	}
-	return edits;
-}
-
-async function performGlobalClean(editor, force=false) {
-	if (!editor) return ;
-	if (!force & & !cleanFreakMode) return;
-	const edits = provideCleanlinessEdits(editor.document);
-	if (edits.length > 0) {
-		await editor.edit(editBuilder=> {
-			edits.forEach(e=> {
-				if (e.newText) editBuilder.insert(e.range.start, e.newText);
-				else editBuilder.replace(e.range, e.newText);
-			});
-		});
-	}
-}
-
-// ★★★ 渲染主逻辑（支持 PENDING 占位符）★★★
-async function renderImages(editor) {
-	if (!editor) return ;
-	if (!isCoreIntegretyValid) {clearDecorations(); return; }
-	const myRenderVersion = ++currentRenderVersion;
-
-	if (!decorationType) decorationType = vscode.window.createTextEditorDecorationType({isWholeLine: false});
-	if (!markerHideType) markerHideType = vscode.window.createTextEditorDecorationType({textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;'});
-
-	const docUri = editor.document.uri.toString();
-	if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
-	const currentDocDecos = documentDecorationsMap.get(docUri);
-	const currentHideDecos = new Map();
-	const visibleRanges = editor.visibleRanges;
-	if (!visibleRanges | | !visibleRanges.length) return;
-
-	const marginLeft = computeMarginLeft();
-	const boxWidth = PREVIEW_WIDTH + PREVIEW_BORDER;
-	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
-	const tasks = [];
-	const regex = new RegExp(QQQ_PATH_REGEX);
-
-	for (const range of visibleRanges) {
-		const text = editor.document.getText(range);
-		regex.lastIndex = 0;
-		let match;
-		while ((match=regex.exec(text))) {
-			const offset = editor.document.offsetAt(range.start) + match.index;
-			const pos = editor.document.positionAt(offset);
-			const endPos = editor.document.positionAt(offset + match[0].length);
-			const uniqueKey = `${pos.line}_${pos.character}`;
-
-			const hideDeco = {range: new vscode.Range(pos, endPos)};
-			currentHideDecos.set(uniqueKey, hideDeco);
-
-			const rawPath = match[0].slice(2, -2).trim();
-
-			// ★★★ 检测 PENDING 占位符，渲染 loading 状态 ★★★
-			if (rawPath.startsWith("__PENDING__:")) {
-				const targetLine = pos.line;
-				if (targetLine >= editor.document.lineCount) continue ;
-				const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-
-				const loadingDeco = {
-					range: anchorRange,
-					renderOptions: {
-						after: {
-							contentText: "",
-							position: 'absolute',
-							left: marginLeft,
-							top: '0px',
-							width: `${boxWidth}px`,
-							height: `${boxHeight}px`,
-							padding: "2px",
-							border: "1px dashed #888",
-							backgroundColor: PREVIEW_BG_COLOR,
-							zIndex: -1,
-							textDecoration: `none; pointer-events: none; display: inline-block; background-image: url("${LOADING_SVG}"); background-size: 120px 40px; background-position: center center; background-repeat: no-repeat; `
-						}
-					}
-				};
-				currentDocDecos.set(uniqueKey, loadingDeco);
-				continue ;
-			}
-
-			if (currentDocDecos.has(uniqueKey)) continue ;
-
-			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath.replace( /\//g, "\\"));
-			if (!absPath | | !fs.existsSync(absPath)) continue;
-
-			const ext = path.extname(absPath).toLowerCase();
-			let isImage = isImageExt(ext);
-			let isVideo = isVideoExt(ext);
-			let isGif = ext == = ".gif";
-			let mtimeMs = 0;
-			try {mtimeMs = fs.statSync(absPath).mtimeMs;} catch {}
-			let mediaInfo = null;
-			if (!isImage & & !isVideo) {
-				mediaInfo = await getMediaInfo(absPath, mtimeMs);
-				if (mediaInfo & & mediaInfo.type === "video") isVideo = true;
-				else if (mediaInfo & & mediaInfo.type == = "image") {isImage = true; if (mediaInfo.codec == = "gif") isGif = true;}
-				else continue ;
-			}
-
-			const targetLine = pos.line;
-			if (targetLine >= editor.document.lineCount) continue ;
-			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-
-			const task = async () = > {
-				if (currentRenderVersion != = myRenderVersion) return null;
-				try {
-					let previewResult = null;
-					if (ffmpegPath) {
-						previewResult = await getPreviewBuffer(absPath, isVideo, isGif);
-						if (currentRenderVersion != = myRenderVersion) return null;
-					}
-					const deco = {range: anchorRange, renderOptions: {}};
-					let contentUrl = "";
-					let actualGifDuration = 0;
-					let outputSize = null;
-
-					if (previewResult & & previewResult.buffer) {
-						let mime = "image/png";
-						if (isGif | | isVideo) mime = "image/gif";
-						else if (extremePerformanceMode) mime = "image/jpeg";
-						const b64 = previewResult.buffer.toString("base64");
-						contentUrl = `url("data:${mime};base64,${b64}")`;
-						if (previewResult.gifDuration & & previewResult.gifDuration > 0) actualGifDuration = previewResult.gifDuration;
-						outputSize = previewResult.outputSize;
-					} else if (isImage & & !isVideo & & !isGif) {
-						const fileUri = vscode.Uri.file(absPath);
-						contentUrl = `url("${fileUri.toString()}")`;
-					}
-					if (!contentUrl) return null;
-
-					let progressBarUrl = null;
-					if ((isGif | | isVideo) & & actualGifDuration > 0) progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
-
-					const gridSize = "20px 20px";
-					const gridImage = `conic-gradient(  # fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
-
-					let layers=[], sizes=[], positions=[], repeats=[];
-
-					if (watermarkBase64) {
-						layers.push(`url("${watermarkBase64}")`);
-						sizes.push("contain");
-						positions.push("center center");
-						repeats.push("no-repeat");
-					}
-					if (progressBarUrl) {
-						layers.push(progressBarUrl);
-						sizes.push("512px 4px");
-						positions.push("center bottom");
-						repeats.push("no-repeat");
-					}
-					layers.push(contentUrl);
-					if (outputSize) sizes.push(`${outputSize.width}px ${outputSize.height}px`);
-					else sizes.push("contain");
-					positions.push("center center");
-					repeats.push("no-repeat");
-					layers.push(gridImage);
-					sizes.push(gridSize);
-					positions.push("0 0");
-					repeats.push("repeat");
-
-					deco.renderOptions.after={
-						contentText: "",
-						position: 'absolute',
-						left: marginLeft,
-						top: '0px',
-						width: `${boxWidth}px`,
-						height: `${boxHeight}px`,
-						padding: "2px",
-						border: "1px dashed #888",
-						backgroundColor: PREVIEW_BG_COLOR,
-						zIndex: -1,
-						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")}; `
-					};
-
-					deco.hoverMessage=new vscode.MarkdownString(`[打开图片](${vscode.Uri.file(absPath).toString()})`);
-					deco.hoverMessage.isTrusted=true;
-
-					return {key: uniqueKey, deco};
-				} catch (e) {return null; }
-			};
-			tasks.push(task);
-		}
-	}
-
-	if (tasks.length > 0) {
-		const results= [];
-		for (let i=0; i < tasks.length; i += MAX_CONCURRENT_TASKS) {
-			if (currentRenderVersion != = myRenderVersion) return;
-			const chunk= tasks.slice(i, i + MAX_CONCURRENT_TASKS);
-			const chunkResults = await Promise.all(chunk.map(t = > t()));
-			results.push(...chunkResults);
-		}
-		if (currentRenderVersion != = myRenderVersion) return;
-		for (const res of results) {if (res) currentDocDecos.set(res.key, res.deco); }
-	}
-	editor.setDecorations(decorationType, Array.from (currentDocDecos.values()));
-	if (currentHideDecos.size > 0) editor.setDecorations(markerHideType, Array.from (currentHideDecos.values()));
-}
-
-class FileCodeLensProvider {
-	async provideCodeLenses(document) {
-		if (!isCoreIntegretyValid) return [];
-		const lenses= [];
-		const regex= new RegExp(QQQ_PATH_REGEX);
-		const text= document.getText();
-		let match;
-		const tasks= [];
-
-		while ((match=regex.exec(text))) {
-			const pos= document.positionAt(match.index);
-			const rawPath= match[0].slice(2, -2).trim();
-
-			// 跳过 PENDING 占位符
-			if (rawPath.startsWith("__PENDING__:")) continue ;
-
-			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace( /\//g, "\\"));
-			if (!absPath | | !fs.existsSync(absPath)) continue;
-
-			const folder= path.dirname(absPath);
-			const ext= path.extname(absPath).toLowerCase();
-			const isVidOrImg= isImageOrVideoExt(ext);
-			const isVideoExtFlag= isVideoExt(ext);
-			const targetLensLine= pos.line;
-
-			tasks.push(async ()=> {
-				let folderData= await getQqqFolderSize(folder);
-				const fSize = folderData ? folderData.size: 0;
-				const fSizeStr= formatBytes(fSize);
-				const folderTooltip = folderData ? folderData.summary: undefined;
-
-				let fileSz= "?";
-				let tooltipText= "";
-				let mtimeMs= 0;
-				try {
-					const st= fs.statSync(absPath);
-					fileSz= formatBytes(st.size);
-					const bTime= new Date(st.birthtime).toLocaleString();
-					const mTime= new Date(st.mtime).toLocaleString();
-					tooltipText= `创建: ${bTime}\n修改: ${mTime}`;
-					mtimeMs= st.mtimeMs;
-				} catch {}
-
-				let titleSuffix= "";
-				let isRealVideo= false;
-				if (isVidOrImg) {
-					const info= await getMediaInfo(absPath, mtimeMs);
-					if (info & & info.width & & info.height) {
-						let scale= 1;
-						const MAX_W= PREVIEW_WIDTH, MAX_H = PREVIEW_HEIGHT;
-						if (info.type == = "video") isRealVideo = true;
-						if (isRealVideo | | isVideoExtFlag | | enlargeSmallImages) scale= Math.min(MAX_W / info.width, MAX_H / info.height);
-						else {
-							if (info.width <= MAX_W & & info.height <= MAX_H) scale = 1;
-							else scale= Math.min(MAX_W / info.width, MAX_H / info.height);
-						}
-						const pct= Math.round(scale * 100);
-						titleSuffix = `   (${pct} %)  ${info.width}x${info.height}`;
-						if (info.codec) {
-							tooltipText += `\n编解码器: ${info.codec}`;
-							if (info.codec_long_name) tooltipText += ` (${info.codec_long_name})`;
-						}
-						const arStr= calculateAspectRatioString(info.width, info.height);
-						if (arStr) tooltipText += `\n宽高比：${arStr}`;
-						if (shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
-					}
-				}
-
-				const iconPart = isRealVideo ? "🎬": "";
-				const spacePart = isRealVideo ? " ": "   ";
-				const r= new vscode.Range(targetLensLine, 0, targetLensLine, 0);
-
-				return [
-					new vscode.CodeLens(r, {
-						title: `✎(${fSizeStr}) 🗀qqq`,
-						command: "qqq.revealFileInFolder",
-						arguments: [absPath],
-						tooltip: folderTooltip
-					}),
-					new vscode.CodeLens(r, {
-						title: "✎rename",
-						command: "qqq.renameFile",
-						arguments: [rawPath, absPath]
-					}),
-					new vscode.CodeLens(r, {
-						title: `✎(${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-						command: "qqq.openFile",
-						arguments: [absPath],
-						tooltip: tooltipText
-					})
-				];
-			});
-		}
-
-		const results = await Promise.all(tasks.map(t = > t()));
-		results.forEach(group=> lenses.push(...group));
-		return lenses;
-	}
-}
-
-function openFileCommand(filePath) {
-	if (!fs.existsSync(filePath)) return ;
-	try {
-		if (process.platform == = "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform == = "darwin") cp.exec(`open "${filePath}"`);
-		else cp.exec(`xdg-open "${filePath}"`);
-	} catch {vscode.env.openExternal(vscode.Uri.file(filePath)); }
-}
-
-function revealFileInFolder(filePath) {
-	if (!fs.existsSync(filePath)) return ;
-	try {
-		if (process.platform == = "win32") cp.exec(`explorer / select, "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform == = "darwin") cp.exec(`open - R "${filePath}"`);
-		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
-	} catch {}
-}
-
-async function renameFileCommand(rawPath, absPath) {
-	const editor= vscode.window.activeTextEditor;
-	if (!editor) return ;
-	const currentName= path.basename(absPath);
-	const newName= await vscode.window.showInputBox({
-		title: "重命名粘贴文件",
-		prompt: "rename  ",
-		value: currentName,
-		ignoreFocusOut: true,
-		validateInput: v = > (!v | | !v.trim()) ? "文件名不能为空": null
-	});
-	if (!newName | | newName.trim() == = currentName) return ;
-	const trimmed= newName.trim();
-	const newAbs= path.join(path.dirname(absPath), trimmed);
-	try {await fs.promises.rename(absPath, newAbs);} catch (e) {vscode.window.showErrorMessage(e.message); return; }
-	const doc= editor.document;
-	const regex= new RegExp(QQQ_PATH_REGEX);
-	const newRaw= buildNewRawPath(rawPath, trimmed);
-	const ranges= [];
-	let m;
-	const txt= doc.getText();
-	while ((m=regex.exec(txt))) {
-		const matchedRaw= m[0].slice(2, -2).trim();
-		if (matchedRaw == = rawPath) {
-			const s = doc.positionAt(m.index);
-			const e = doc.positionAt(m.index + m[0].length);
-			ranges.push(new vscode.Range(s, e));
-		}
-	}
-	if (ranges.length) await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
-	invalidateFolderSizeCacheForPath(newAbs);
-	renderVisibleEditors();
-}
-
-function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
-	clearTimeout(debounceRender.timer);
-	debounceRender.timer = setTimeout(() => { if (editor && !editor.document.isClosed) renderImages(editor); }, delay);
-}
-
-function renderVisibleEditors(delay = 50) {
-	const editors = vscode.window.visibleTextEditors;
-	if (editors && editors.length) editors.forEach(e => debounceRender(e, delay));
-}
-
-async function activate(context) {
-	extensionContext = context;
-	isCoreIntegretyValid = verifySystemIntegrity();
-	console.log(`[QQQ Q1] Integrity: ${isCoreIntegretyValid ? "PASSED" : "FAILED"}`);
-	if (!isCoreIntegretyValid) return;
-	loadWatermarkResource();
-	refreshQqqConfig();
-	initUserTracking(context);
-
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration("qqq")) {
-				refreshQqqConfig();
-				previewCache.clear();
-				documentDecorationsMap.clear();
-				renderVisibleEditors();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-			}
-			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
-				refreshQqqConfig();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-			}
-		}),
-		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
-		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
-		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.setInOrder", () => { performGlobalClean(vscode.window.activeTextEditor, true); }),
-		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
-		vscode.workspace.onWillSaveTextDocument(e => {
-			if (cleanFreakMode && e.document) {
-				const edits = provideCleanlinessEdits(e.document);
-				if (edits.length > 0) e.waitUntil(Promise.resolve(edits));
-			}
-		}),
-		vscode.window.onDidChangeTextEditorVisibleRanges(e => debounceRender(e.textEditor)),
-		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); }),
-		vscode.window.onDidChangeWindowState(e => { if (e.focused) renderVisibleEditors(); }),
-		vscode.workspace.onDidChangeTextDocument(e => {
-			const ed = vscode.window.activeTextEditor;
-			if (ed && e.document === ed.document) debounceRender(ed);
-			if (e.document === ed?.document && e.contentChanges.length > 0) documentDecorationsMap.delete(e.document.uri.toString());
-		}),
-		vscode.workspace.onDidCloseTextDocument(doc => { documentDecorationsMap.delete(doc.uri.toString()); }),
-		vscode.window.onDidChangeVisibleTextEditors(editors => {
-			renderVisibleEditors();
-			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-		}),
-	);
-	const editor = vscode.window.activeTextEditor;
-	if (editor) renderImages(editor);
-}
-
-async function deactivate() {
-	clearDecorations();
-	await finishUserTracking(extensionContext);
-}
-
-module.exports = { activate, deactivate };
+ 
+import sys
+import os
+import json
+import time
+import platform
+import shutil
+import ctypes
+from ctypes import wintypes
+from pathlib import Path
+from datetime import datetime
+import concurrent.futures
+import random
+    你之前给过两组 kp 滴代码, a：  # src/kp.py
+# 精简版 Daemon - 只做 JS 做不好的事：剪贴板 + 文件夹统计
+
+# ==========================================
+#              默认路径配置
+# ==========================================
+DEFAULT_OUTPUT_DIR = Path("D:/view/p")
+
+
+def resolve_output_dir(target_dir=None):
+    """解析输出目录"""
+    if target_dir:
+        target = Path(target_dir)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except Exception:
+            return DEFAULT_OUTPUT_DIR
+    return DEFAULT_OUTPUT_DIR
+
+
+# ==========================================
+#              文件签名表（浅层识别）
+# ==========================================
+SIGNATURES = [
+    (b'\x89PNG\r\n\x1a\n', '.png'),
+    (b'\xff\xd8\xff', '.jpg'),
+    (b'GIF87a', '.gif'),
+    (b'GIF89a', '.gif'),
+    (b'BM', '.bmp'),
+    (b'\x00\x00\x01\x00', '.ico'),
+    (b'II*\x00', '.tif'),
+    (b'MM\x00*', '.tif'),
+    (b'PK\x03\x04', '.zip'),
+    (b'Rar!', '.rar'),
+    (b'\x1f\x8b\x08', '.gz'),
+    (b'7z\xbc\xaf', '.7z'),
+    (b'MZ', '.exe'),
+    (b'\x7fELF', '.elf'),
+    (b'ID3', '.mp3'),
+    (b'\xff\xfb', '.mp3'),
+    (b'fLaC', '.flac'),
+    (b'OggS', '.ogg'),
+    (b'\x1aE\xdf\xa3', '.mkv'),
+]
+
+
+def guess_ext_by_magic(data: bytes) -> str:
+    """通过 Magic Number 猜测扩展名"""
+    if not data or len(data) < 4:
+        return ".bin"
+
+    # ftyp (MP4/MOV 家族)
+    if len(data) >= 12 and data[4:8] == b'ftyp':
+        brand = data[8:12]
+        if brand in (b'heic', b'avif', b'mif1', b'msf1'):
+            return ".heic"
+        if brand == b'M4A ':
+            return ".m4a"
+        return ".mp4"
+
+    # WEBP (RIFF....WEBP)
+    if data[:4] == b'RIFF' and len(data) >= 12 and data[8:12] == b'WEBP':
+        return ".webp"
+
+    # 通用签名检测
+    for sig, ext in SIGNATURES:
+        if data.startswith(sig):
+            return ext
+
+    return ".bin"
+
+
+# ==========================================
+#              Windows API (ctypes)
+# ==========================================
+if platform.system() == "Windows":
+    user32 = ctypes.windll.user32
+    shell32 = ctypes.windll.shell32
+    kernel32 = ctypes.windll.kernel32
+
+    CF_TEXT = 1
+    CF_BITMAP = 2
+    CF_DIB = 8
+    CF_UNICODETEXT = 13
+    CF_HDROP = 15
+
+    GlobalLock = kernel32.GlobalLock
+    GlobalLock.argtypes = [wintypes.HGLOBAL]
+    GlobalLock.restype = ctypes.c_void_p
+
+    GlobalUnlock = kernel32.GlobalUnlock
+    GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    GlobalUnlock.restype = wintypes.BOOL
+
+    GlobalSize = kernel32.GlobalSize
+    GlobalSize.argtypes = [wintypes.HGLOBAL]
+    GlobalSize.restype = ctypes.c_size_t
+
+    DragQueryFileW = shell32.DragQueryFileW
+    DragQueryFileW.argtypes = [wintypes.HGLOBAL,
+                               wintypes.UINT, ctypes.c_wchar_p, wintypes.UINT]
+    DragQueryFileW.restype = wintypes.UINT
+
+    OpenClipboard = user32.OpenClipboard
+    OpenClipboard.argtypes = [wintypes.HWND]
+    OpenClipboard.restype = wintypes.BOOL
+
+    CloseClipboard = user32.CloseClipboard
+    CloseClipboard.argtypes = []
+    CloseClipboard.restype = wintypes.BOOL
+
+    GetClipboardData = user32.GetClipboardData
+    GetClipboardData.argtypes = [wintypes.UINT]
+    GetClipboardData.restype = wintypes.HANDLE
+
+    IsClipboardFormatAvailable = user32.IsClipboardFormatAvailable
+    IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+    IsClipboardFormatAvailable.restype = wintypes.BOOL
+
+
+def read_global_data(h_mem):
+    """从全局句柄读取原始字节"""
+    if not h_mem:
+        return None
+    ptr = GlobalLock(h_mem)
+    if not ptr:
+        return None
+    try:
+        size = GlobalSize(h_mem)
+        if not size:
+            return None
+        buf = (ctypes.c_char * size)()
+        ctypes.memmove(buf, ptr, size)
+        return bytes(buf)
+    finally:
+        GlobalUnlock(h_mem)
+
+
+# ==========================================
+#              工具函数
+# ==========================================
+
+def get_timestamp_filename(ext=".png"):
+    """
+    命名规则：
+    212zn.  2025.12.06 [6] 12.09.14.png
+    """
+    now = datetime.now()
+    date_part = now.strftime("%Y.%m.%d")
+    weekday_number = now.weekday() + 1
+    millisecond_part = f"{now.microsecond // 1000:03d}"
+
+    excluded_chars = ['l', 'i', 's', 'a', 'm', 'c', 'b', 'f', 't']
+    valid_chars = [c for c in 'abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                   if c.lower() not in excluded_chars]
+    first_char = random.choice(valid_chars)
+    if first_char.lower() == 'g':
+        valid_chars_without_g = [c for c in valid_chars if c.lower() != 'g']
+        second_char = random.choice(valid_chars_without_g)
+    else:
+        second_char = random.choice(valid_chars)
+    random_chars = first_char + second_char
+
+    prefix_code = f"{millisecond_part}{random_chars}"
+    time_part = now.strftime("%H.%M.%S")
+    filename = f"{prefix_code}.  {date_part} [{weekday_number}] {time_part}{ext}"
+    return filename
+
+
+def is_image_ext(ext):
+    image_exts = {'.png', '.jpg', '.jpeg', '.gif',
+                  '.bmp', '.tif', '.tiff', '.webp', '.ico', '.svg'}
+    return ext.lower() in image_exts
+
+
+# ==========================================
+#              文件夹统计模块（用 os.scandir）
+# ==========================================
+
+def get_folder_info(folder_path):
+    """
+    一次性返回：大小 + 文件列表 + 目录列表 + 后缀统计
+    使用 os.scandir 提高性能
+    """
+    total_size = 0
+    ext_counts = {}
+    files = []
+    dirs = []
+
+    def calc_size_recursive(p):
+        """递归计算大小（用 scandir）"""
+        s = 0
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            s += entry.stat(follow_symlinks=False).st_size
+                        elif entry.is_dir(follow_symlinks=False):
+                            s += calc_size_recursive(entry.path)
+                    except (OSError, PermissionError):
+                        pass
+        except (OSError, PermissionError):
+            pass
+        return s
+
+    try:
+        with os.scandir(folder_path) as it:
+            for entry in it:
+                try:
+                    stat = entry.stat(follow_symlinks=False)
+                    item = {
+                        'name': entry.name,
+                        'path': entry.path,
+                        'mtime': stat.st_mtime
+                    }
+
+                    if entry.is_file(follow_symlinks=False):
+                        item['size'] = stat.st_size
+                        total_size += stat.st_size
+                        files.append(item)
+
+                        # 后缀统计
+                        _, ext = os.path.splitext(entry.name)
+                        key = ext[1:].lower() if ext else ''
+                        ext_counts[key] = ext_counts.get(key, 0) + 1
+
+                    elif entry.is_dir(follow_symlinks=False):
+                        dirs.append(item)
+
+                except (OSError, PermissionError):
+                    pass
+
+        # 子目录大小用线程池并行计算
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(
+                calc_size_recursive, d['path']): d for d in dirs}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    dir_size = future.result(timeout=30)
+                    total_size += dir_size
+                    futures[future]['size'] = dir_size
+                except Exception:
+                    futures[future]['size'] = 0
+
+    except Exception as e:
+        return {'error': str(e)}
+
+    return {
+        'success': True,
+        'total_size': total_size,
+        'ext_stats': ext_counts,
+        'files': files,
+        'dirs': dirs,
+        'file_count_root': len(files)
+    }
+
+
+# ==========================================
+#              Windows 剪贴板处理
+# ==========================================
+
+def handle_windows_pywin32(wcb, wcon, output_dir):
+    """pywin32 存在时的处理逻辑"""
+    try:
+        wcb.OpenClipboard()
+
+        # 1. 检查文件 (CF_HDROP)
+        if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
+            files = wcb.GetClipboardData(wcon.CF_HDROP)
+            has_folders = False
+            folder_paths = []
+            for file_path in files:
+                src = Path(file_path)
+                if src.exists():
+                    if src.is_dir():
+                        has_folders = True
+                        folder_paths.append(str(src))
+            if has_folders:
+                folder_text = '\n'.join(folder_paths)
+                wcb.CloseClipboard()
+                return {"type": "folder_text", "text": folder_text}
+
+            # 处理文件列表
+            copied_files = []
+            for file_path in files:
+                src = Path(file_path)
+                if src.exists() and src.is_file():
+                    ext = src.suffix
+                    if is_image_ext(ext):
+                        fname = get_timestamp_filename(ext)
+                    else:
+                        fname = src.name
+                    dst = output_dir / fname
+                    shutil.copy2(src, dst)
+                    copied_files.append(str(dst))
+            wcb.CloseClipboard()
+            if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
+                return {"type": "image", "path": copied_files[0]}
+            return {"type": "file", "files": copied_files}
+
+        # 2. 检查图片 (CF_DIB)
+        if wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
+            dib = wcb.GetClipboardData(wcon.CF_DIB)
+            wcb.CloseClipboard()
+            try:
+                from PIL import Image
+                import io
+                data = bytes(dib)
+                bfType = b"BM"
+                bfSize = (len(data) + 14).to_bytes(4, "little")
+                bfReserved = (0).to_bytes(4, "little")
+                bfOffBits = (14 + 40).to_bytes(4, "little")
+                bmp = bfType + bfSize + bfReserved + bfOffBits + data
+                img = Image.open(io.BytesIO(bmp))
+                fname = get_timestamp_filename(".png")
+                path = output_dir / fname
+                img.save(path)
+                return {"type": "image", "path": str(path)}
+            except Exception:
+                # 保存原始 DIB
+                ext = guess_ext_by_magic(data)
+                fname = get_timestamp_filename(ext)
+                path = output_dir / fname
+                with open(path, "wb") as f:
+                    f.write(data)
+                return {"type": "binary", "path": str(path)}
+
+        wcb.CloseClipboard()
+    except Exception:
+        try:
+            wcb.CloseClipboard()
+        except:
+            pass
+    return None
+
+
+def handle_windows_ctypes(output_dir):
+    """无 pywin32 时的原生 fallback"""
+    if not OpenClipboard(None):
+        return {"error": "Cannot open clipboard"}
+
+    try:
+        # 1. 检查文件 (CF_HDROP = 15)
+        if IsClipboardFormatAvailable(CF_HDROP):
+            h_drop = GetClipboardData(CF_HDROP)
+            if h_drop:
+                count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
+                files = []
+                buf = ctypes.create_unicode_buffer(1024)
+                for i in range(count):
+                    DragQueryFileW(h_drop, i, buf, 1024)
+                    files.append(buf.value)
+
+                has_folders = False
+                folder_paths = []
+                for file_path in files:
+                    src = Path(file_path)
+                    if src.exists() and src.is_dir():
+                        has_folders = True
+                        folder_paths.append(str(src))
+
+                if has_folders:
+                    CloseClipboard()
+                    return {"type": "folder_text", "text": '\n'.join(folder_paths)}
+
+                copied_files = []
+                for file_path in files:
+                    src = Path(file_path)
+                    if src.exists() and src.is_file():
+                        ext = src.suffix
+                        if is_image_ext(ext):
+                            fname = get_timestamp_filename(ext)
+                        else:
+                            fname = src.name
+                        dst = output_dir / fname
+                        shutil.copy2(src, dst)
+                        copied_files.append(str(dst))
+                CloseClipboard()
+                if len(copied_files) == 1 and is_image_ext(Path(copied_files[0]).suffix):
+                    return {"type": "image", "path": copied_files[0]}
+                return {"type": "file", "files": copied_files}
+
+        # 2. 检查图片 (CF_DIB = 8)
+        if IsClipboardFormatAvailable(CF_DIB):
+            h_mem = GetClipboardData(CF_DIB)
+            if h_mem:
+                data = read_global_data(h_mem)
+                CloseClipboard()
+                if data:
+                    try:
+                        from PIL import Image
+                        import io
+                        bfType = b"BM"
+                        bfSize = (len(data) + 14).to_bytes(4, "little")
+                        bfReserved = (0).to_bytes(4, "little")
+                        bfOffBits = (14 + 40).to_bytes(4, "little")
+                        bmp = bfType + bfSize + bfReserved + bfOffBits + data
+                        img = Image.open(io.BytesIO(bmp))
+                        fname = get_timestamp_filename(".png")
+                        path = output_dir / fname
+                        img.save(path)
+                        return {"type": "image", "path": str(path)}
+                    except:
+                        ext = guess_ext_by_magic(data)
+                        fname = get_timestamp_filename(ext)
+                        path = output_dir / fname
+                        with open(path, "wb") as f:
+                            f.write(data)
+                        return {"type": "binary", "path": str(path)}
+
+    finally:
+        try:
+            CloseClipboard()
+        except:
+            pass
+
+    return {"type": "unknown"}
+
+
+def handle_windows(output_dir):
+    """Windows 剪贴板处理入口"""
+    try:
+        import win32clipboard as wcb
+        import win32con as wcon
+        res = handle_windows_pywin32(wcb, wcon, output_dir)
+        if res:
+            return res
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    try:
+        res = handle_windows_ctypes(output_dir)
+        if res:
+            return res
+    except Exception:
+        pass
+
+    return {"type": "unknown"}
+
+
+def handle_macos(output_dir):
+    """macOS 剪贴板处理"""
+    import subprocess
+
+    # 尝试 pngpaste
+    fname = get_timestamp_filename(".png")
+    path = output_dir / fname
+    try:
+        subprocess.run(["pngpaste", str(path)], check=True,
+                       capture_output=True, timeout=5)
+        if path.exists() and path.stat().st_size > 0:
+            return {"type": "image", "path": str(path)}
+    except:
+        pass
+
+    # 尝试 pbpaste
+    try:
+        data = subprocess.check_output(
+            ["pbpaste", "-Prefer", "png"], stderr=subprocess.DEVNULL, timeout=5)
+        if data:
+            with open(path, "wb") as f:
+                f.write(data)
+            if path.exists() and path.stat().st_size > 0:
+                return {"type": "image", "path": str(path)}
+    except:
+        pass
+
+    # 清理空文件
+    if path.exists():
+        try:
+            path.unlink()
+        except:
+            pass
+
+    return {"type": "unknown"}
+
+
+def handle_linux(output_dir):
+    """Linux 剪贴板处理"""
+    import subprocess
+
+    fname = get_timestamp_filename(".png")
+    path = output_dir / fname
+
+    try:
+        with open(path, "wb") as f:
+            subprocess.run(
+                ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
+                stdout=f, stderr=subprocess.DEVNULL, check=True, timeout=5
+            )
+        if path.exists() and path.stat().st_size > 0:
+            return {"type": "image", "path": str(path)}
+    except:
+        pass
+
+    if path.exists():
+        try:
+            path.unlink()
+        except:
+            pass
+
+    return {"type": "unknown"}
+
+
+def handle_clipboard(target_dir=None):
+    """统一剪贴板处理入口"""
+    output_dir = resolve_output_dir(target_dir)
+
+    if not output_dir.exists():
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except:
+            pass
+
+    sys_name = platform.system()
+    if sys_name == "Windows":
+        return handle_windows(output_dir)
+    elif sys_name == "Darwin":
+        return handle_macos(output_dir)
+    elif sys_name == "Linux":
+        return handle_linux(output_dir)
+    else:
+        return {"type": "unknown"}
+
+
+# ==========================================
+#              Daemon 模式
+# ==========================================
+
+def daemon_mode():
+    """
+    持久进程模式
+    只支持两个核心接口：clipboard 和 folder_info
+    """
+    sys.stdout.reconfigure(line_buffering=True)
+
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            cmd = json.loads(line)
+            action = cmd.get('action')
+            request_id = cmd.get('_id', 0)
+
+            result = {'_id': request_id}
+
+            if action == 'ping':
+                result['status'] = 'alive'
+
+            elif action == 'clipboard':
+                target_dir = cmd.get('target_dir')
+                clipboard_result = handle_clipboard(target_dir)
+                result.update(clipboard_result)
+
+            elif action == 'folder_info':
+                folder_path = cmd.get('path', '')
+                info_result = get_folder_info(folder_path)
+                result.update(info_result)
+
+            else:
+                result['error'] = f'unknown action: {action}'
+
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+
+        except json.JSONDecodeError as e:
+            print(json.dumps(
+                {'_id': 0, 'error': f'JSON parse error: {e}'}, ensure_ascii=False), flush=True)
+        except Exception as e:
+            print(json.dumps({'_id': 0, 'error': str(e)},
+                  ensure_ascii=False), flush=True)
+
+
+# ==========================================
+#              CLI 入口
+# ==========================================
+
+def main():
+    """CLI 入口"""
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--daemon":
+            daemon_mode()
+            return
+
+        if sys.argv[1] == "folder_info" and len(sys.argv) >= 3:
+            res = get_folder_info(sys.argv[2])
+            print(json.dumps(res, ensure_ascii=False))
+            return
+
+        if sys.argv[1] == "clipboard":
+            target_dir = sys.argv[2] if len(sys.argv) >= 3 else None
+            res = handle_clipboard(target_dir)
+            print(json.dumps(res, ensure_ascii=False))
+            return
+
+    # 默认：剪贴板处理
+    try:
+        res = handle_clipboard()
+        print(json.dumps(res, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
