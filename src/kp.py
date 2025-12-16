@@ -192,6 +192,22 @@ def is_image_ext(ext):
     return ext.lower() in image_exts
 
 
+def save_image_as_png(img, path):
+    """
+    将 PIL Image 保存为无损 PNG（母版）
+    自动处理各种颜色模式，尽量保留透明通道
+    """
+    # 处理各种颜色模式，统一转换为 RGB 或 RGBA
+    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+        # 有透明通道或调色板透明，转 RGBA 保留透明
+        img = img.convert("RGBA")
+    elif img.mode not in ("RGB",):
+        # L, P, CMYK 等其他模式，转 RGB
+        img = img.convert("RGB")
+    # RGB 和 RGBA 直接保存
+    img.save(path, format="PNG", compress_level=6)
+
+
 # ==========================================
 #              文件夹统计模块
 # ==========================================
@@ -347,12 +363,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir):
                 path = output_dir / fname
                 ensure_parent(path)
 
-                # PNG 无损保存，尽量保留透明
-                if img.mode == "RGBA":
-                    img.save(path, format="PNG", compress_level=6)
-                else:
-                    img = img.convert("RGB")
-                    img.save(path, format="PNG", compress_level=6)
+                save_image_as_png(img, path)
 
                 return {"type": "image", "path": str(path)}
             except Exception:
@@ -372,7 +383,7 @@ def handle_windows_ctypes(output_dir):
         return {"error": "Cannot open clipboard"}
 
     try:
-        # 1. 检查文件 (CF_HDROP) - 物理复制
+        # 1. 检查文件 (CF_HDROP) - 物理复制，二进制完全一致
         if IsClipboardFormatAvailable(CF_HDROP):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
@@ -417,7 +428,7 @@ def handle_windows_ctypes(output_dir):
                     if copied_files:
                         return {"type": "file", "files": copied_files}
 
-        # 2. 检查图片 (CF_DIB) - 保存为无损 PNG
+        # 2. 检查图片 (CF_DIB) - 保存为无损 PNG（母版）
         if IsClipboardFormatAvailable(CF_DIB):
             try:
                 from PIL import Image
@@ -444,11 +455,7 @@ def handle_windows_ctypes(output_dir):
                         path = output_dir / fname
                         ensure_parent(path)
 
-                        if img.mode == "RGBA":
-                            img.save(path, format="PNG", compress_level=6)
-                        else:
-                            img = img.convert("RGB")
-                            img.save(path, format="PNG", compress_level=6)
+                        save_image_as_png(img, path)
 
                         return {"type": "image", "path": str(path)}
                     except:
