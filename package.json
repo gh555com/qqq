@@ -32,10 +32,35 @@
             "default": true,
             "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           },
-          "qqq.extremePerformance": {
-            "type": "boolean",
-            "default": false,
-            "description": "启用极限性能模式：预览生成时尽可能减少计算量（例如将 GIF 预览为静态首帧，并放弃修改后图片的即时刷新），以换取更快的交互响应速度。"
+          "qqq.performanceMode": {
+            "type": "string",
+            "default": "balanced",
+            "enum": [
+              "extreme",
+              "accelerated",
+              "balanced"
+            ],
+            "enumDescriptions": [
+              "极限性能：只保留首帧，质量35",
+              "加速模式：最多2秒动画，6fps，质量35",
+              "最优模式：保留完整动画，视频截取首中尾，质量70"
+            ],
+            "description": "性能模式：控制预览生成的质量和性能平衡。"
+          },
+          "qqq.frameSizeMode": {
+            "type": "string",
+            "default": "smart",
+            "enum": [
+              "large",
+              "small",
+              "smart"
+            ],
+            "enumDescriptions": [
+              "大相框：512x288",
+              "小相框：256x144",
+              "智能：根据图片尺寸自动选择相框"
+            ],
+            "description": "相框尺寸模式：控制预览图像的显示尺寸。"
           },
           "qqq.cleanFreak": {
             "type": "boolean",

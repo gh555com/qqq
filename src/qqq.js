@@ -79,19 +79,16 @@ function finishUserTracking(context) {
 }
 
 // ==================== ★★★ 指纹系统 ★★★ ====================
-
 function computeFingerprint(filePath) {
 	try {
 		const stat = fs.statSync(filePath);
 		const size = stat.size;
 		if (size === 0) return crypto.createHash('md5').update('empty:0').digest('hex');
-
 		const fd = fs.openSync(filePath, 'r');
 		const chunks = [];
 		const sizeBuf = Buffer.alloc(8);
 		sizeBuf.writeBigUInt64LE(BigInt(size));
 		chunks.push(sizeBuf);
-
 		try {
 			if (size <= FINGERPRINT_HEAD) {
 				const buf = Buffer.alloc(size);
@@ -127,29 +124,134 @@ function computeFingerprint(filePath) {
 }
 
 // ==================== ★★★ 磁盘缓存管理 ★★★ ====================
-function initCache(context) { cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME); if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true }); loadCacheMeta(); validateCache(); }
-function loadCacheMeta() { const metaPath = path.join(cacheDir, META_FILE_NAME); try { if (fs.existsSync(metaPath)) { cacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } else { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } } catch (e) { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } }
-function saveCacheMeta() { if (!cacheDir || !cacheMeta) return; try { fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2)); } catch (e) { } }
-function validateCache() { if (!cacheDir || !cacheMeta) return; let changed = false; let realSize = 0; let realCount = 0; const actualFiles = new Set(); try { const files = fs.readdirSync(cacheDir); for (const f of files) { if (f === META_FILE_NAME) continue; actualFiles.add(f); } } catch (e) { } for (const [contentId, entry] of Object.entries(cacheMeta.entries)) { if (!entry.qualities) continue; for (const [q, qInfo] of Object.entries(entry.qualities)) { const fileName = `${contentId}.${q}`; const filePath = path.join(cacheDir, fileName); if (!actualFiles.has(fileName)) { delete entry.qualities[q]; changed = true; } else { actualFiles.delete(fileName); try { const st = fs.statSync(filePath); realSize += st.size; realCount++; } catch (e) { } } } if (Object.keys(entry.qualities).length === 0) { delete cacheMeta.entries[contentId]; changed = true; } } for (const orphan of actualFiles) { try { fs.unlinkSync(path.join(cacheDir, orphan)); changed = true; } catch (e) { } } cacheMeta.stats.totalSize = realSize; cacheMeta.stats.fileCount = realCount; if (changed) saveCacheMeta(); }
-function ensureCacheSpace(neededBytes) { if (!cacheDir || !cacheMeta) return; if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return; const entries = []; for (const [contentId, entry] of Object.entries(cacheMeta.entries)) { entries.push({ contentId, atime: entry.atime || 0 }); } entries.sort((a, b) => a.atime - b.atime); while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) { const oldest = entries.shift(); evictEntry(oldest.contentId); } }
-function evictEntry(contentId) { const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities) return; for (const [q, qInfo] of Object.entries(entry.qualities)) { const fileName = `${contentId}.${q}`; try { const filePath = path.join(cacheDir, fileName); const st = fs.statSync(filePath); cacheMeta.stats.totalSize -= st.size; cacheMeta.stats.fileCount--; fs.unlinkSync(filePath); } catch (e) { } } delete cacheMeta.entries[contentId]; saveCacheMeta(); }
-function getCacheEntry(contentId) { if (!cacheMeta || !cacheMeta.entries[contentId]) { cacheMeta.stats.missCount++; return null; } const entry = cacheMeta.entries[contentId]; entry.atime = Date.now(); cacheMeta.stats.hitCount++; return entry; }
+function initCache(context) {
+	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+	loadCacheMeta();
+	validateCache();
+}
+
+function loadCacheMeta() {
+	const metaPath = path.join(cacheDir, META_FILE_NAME);
+	try {
+		if (fs.existsSync(metaPath)) {
+			cacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+		} else {
+			cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} };
+		}
+	} catch (e) {
+		cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} };
+	}
+}
+
+function saveCacheMeta() {
+	if (!cacheDir || !cacheMeta) return;
+	try {
+		fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2));
+	} catch (e) { }
+}
+
+function validateCache() {
+	if (!cacheDir || !cacheMeta) return;
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+	try {
+		const files = fs.readdirSync(cacheDir);
+		for (const f of files) {
+			if (f === META_FILE_NAME) continue;
+			actualFiles.add(f);
+		}
+	} catch (e) { }
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry.qualities) continue;
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = fs.statSync(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) { }
+			}
+		}
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+	for (const orphan of actualFiles) {
+		try {
+			fs.unlinkSync(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+	if (changed) saveCacheMeta();
+}
+
+function ensureCacheSpace(neededBytes) {
+	if (!cacheDir || !cacheMeta) return;
+	if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return;
+	const entries = [];
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		entries.push({ contentId, atime: entry.atime || 0 });
+	}
+	entries.sort((a, b) => a.atime - b.atime);
+	while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) {
+		const oldest = entries.shift();
+		evictEntry(oldest.contentId);
+	}
+}
+
+function evictEntry(contentId) {
+	const entry = cacheMeta.entries[contentId];
+	if (!entry || !entry.qualities) return;
+	for (const [q, qInfo] of Object.entries(entry.qualities)) {
+		const fileName = `${contentId}.${q}`;
+		try {
+			const filePath = path.join(cacheDir, fileName);
+			const st = fs.statSync(filePath);
+			cacheMeta.stats.totalSize -= st.size;
+			cacheMeta.stats.fileCount--;
+			fs.unlinkSync(filePath);
+		} catch (e) { }
+	}
+	delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+}
+
+function getCacheEntry(contentId) {
+	if (!cacheMeta || !cacheMeta.entries[contentId]) {
+		cacheMeta.stats.missCount++;
+		return null;
+	}
+	const entry = cacheMeta.entries[contentId];
+	entry.atime = Date.now();
+	cacheMeta.stats.hitCount++;
+	return entry;
+}
 
 function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!cacheDir || !cacheMeta) return null;
 	ensureCacheSpace(buffer.length);
 	const fileName = `${contentId}.${quality}`;
 	const filePath = path.join(cacheDir, fileName);
-	try { fs.writeFileSync(filePath, buffer); } catch (e) { return null; }
-	if (!cacheMeta.entries[contentId]) { cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} }; }
+	try {
+		fs.writeFileSync(filePath, buffer);
+	} catch (e) { return null; }
+	if (!cacheMeta.entries[contentId]) {
+		cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} };
+	}
 	const entry = cacheMeta.entries[contentId];
-
-	// ★ 改动：适配新的统一 WebP Key (例如 preview_w0_fill) ★
-	// 只要 key 包含 'w' 或者是 'preview'，我们都将其标记为 webp
-	const fmt = (quality.includes('webp') || quality.includes('_w') || quality.startsWith('w') || quality.startsWith('preview'))
-		? 'webp'
-		: (quality.includes('gif') ? 'gif' : 'png');
-
+	const fmt = (quality.includes('webp') || quality.includes('_w') || quality.startsWith('w') || quality.startsWith('preview') || quality.startsWith('s') || quality.startsWith('l')) ? 'webp' : (quality.includes('gif') ? 'gif' : 'png');
 	entry.qualities[quality] = { size: buffer.length, format: fmt };
 	entry.atime = Date.now();
 	if (meta) Object.assign(entry.meta, meta);
@@ -159,10 +261,25 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	return filePath;
 }
 
-function getCachedBuffer(contentId, quality) { if (!cacheDir || !cacheMeta) return null; const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities || !entry.qualities[quality]) return null; const fileName = `${contentId}.${quality}`; const filePath = path.join(cacheDir, fileName); try { if (fs.existsSync(filePath)) { entry.atime = Date.now(); return fs.readFileSync(filePath); } } catch (e) { } delete entry.qualities[quality]; if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId]; saveCacheMeta(); return null; }
+function getCachedBuffer(contentId, quality) {
+	if (!cacheDir || !cacheMeta) return null;
+	const entry = cacheMeta.entries[contentId];
+	if (!entry || !entry.qualities || !entry.qualities[quality]) return null;
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+	try {
+		if (fs.existsSync(filePath)) {
+			entry.atime = Date.now();
+			return fs.readFileSync(filePath);
+		}
+	} catch (e) { }
+	delete entry.qualities[quality];
+	if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+	return null;
+}
 
-// ==================== ★★★ Daemon 桥接（四层回退）★★★ ====================
-
+// ==================== ★★★ Daemon 桥接 ★★★ ====================
 class DaemonBridge {
 	constructor(name, startFn) {
 		this.name = name;
@@ -176,7 +293,6 @@ class DaemonBridge {
 		this.maxRestarts = 3;
 		this.available = null;
 	}
-
 	async start() {
 		if (this.process && !this.process.killed) return true;
 		if (this.isStarting) return this.startPromise;
@@ -184,7 +300,6 @@ class DaemonBridge {
 		this.startPromise = this.startFn(this);
 		try { return await this.startPromise; } finally { this.isStarting = false; this.startPromise = null; }
 	}
-
 	setupProcess(proc, resolve) {
 		this.process = proc;
 		const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
@@ -211,32 +326,60 @@ class DaemonBridge {
 					this.available = true;
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
-				} else { this.available = false; resolve(false); }
-			} catch (e) { this.available = false; resolve(false); }
+				} else {
+					this.available = false;
+					resolve(false);
+				}
+			} catch (e) {
+				this.available = false;
+				resolve(false);
+			}
 		}, 100);
 	}
-
 	_handleCrash() {
 		this.process = null;
-		for (const [id, { resolve, timer }] of this.pending) { clearTimeout(timer); resolve({ error: "process_crashed" }); }
+		for (const [id, { resolve, timer }] of this.pending) {
+			clearTimeout(timer);
+			resolve({ error: "process_crashed" });
+		}
 		this.pending.clear();
-		if (this.restartCount < this.maxRestarts) { this.restartCount++; setTimeout(() => this.start(), 500); } else { this.available = false; }
+		if (this.restartCount < this.maxRestarts) {
+			this.restartCount++;
+			setTimeout(() => this.start(), 500);
+		} else {
+			this.available = false;
+		}
 	}
-
 	async call(action, params = {}, timeout = 5000) {
 		if (this.available === false) return { error: `${this.name}_not_available` };
-		if (!this.process || this.process.killed) { const started = await this.start(); if (!started) return { error: `${this.name}_not_available` }; }
+		if (!this.process || this.process.killed) {
+			const started = await this.start();
+			if (!started) return { error: `${this.name}_not_available` };
+		}
 		const id = ++this.requestId;
 		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
 		return new Promise((resolve) => {
-			const timer = setTimeout(() => { if (this.pending.has(id)) { this.pending.delete(id); resolve({ error: "timeout" }); } }, timeout);
+			const timer = setTimeout(() => {
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
 			this.pending.set(id, { resolve, timer });
-			try { this.process.stdin.write(cmd); } catch (e) { clearTimeout(timer); this.pending.delete(id); resolve({ error: "write_error" }); }
+			try { this.process.stdin.write(cmd); } catch (e) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
+			}
 		});
 	}
-
 	isAvailable() { return this.available === true; }
-	stop() { if (this.process && !this.process.killed) { try { this.process.kill(); } catch (e) { } this.process = null; } }
+	stop() {
+		if (this.process && !this.process.killed) {
+			try { this.process.kill(); } catch (e) { }
+			this.process = null;
+		}
+	}
 }
 
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
@@ -278,7 +421,8 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-function Process-Command { param($cmd)
+function Process-Command {
+    param($cmd)
     $result = @{ _id = $cmd._id }
     try {
         switch ($cmd.action) {
@@ -292,12 +436,34 @@ function Process-Command { param($cmd)
     } catch { $result.error = $_.Exception.Message }
     return $result
 }
-while ($true) { $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }; try { $cmd = ConvertFrom-Json $line; $result = Process-Command $cmd; $result | ConvertTo-Json -Compress | Write-Host } catch { @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress | Write-Host } }`;
+while ($true) {
+    $line = [Console]::In.ReadLine();
+    if ($line -eq $null) { break };
+    try { $cmd = ConvertFrom-Json $line; $result = Process-Command $cmd; $result | ConvertTo-Json -Compress | Write-Host } catch { @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress | Write-Host }
+}`;
 			proc = cp.spawn('powershell', ['-NoProfile', '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psScript], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
 		} else {
-			const bashScript = platform === 'darwin'
-				? `while IFS= read -r line; do action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null); id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null); case "$action" in ping) echo '{"_id":'$id',"status":"alive"}' ;; hasImage) if pngpaste - >/dev/null 2>&1; then echo '{"_id":'$id',"value":true}'; else echo '{"_id":'$id',"value":false}'; fi ;; saveImage) dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null); if pngpaste "$dest" 2>/dev/null; then echo '{"_id":'$id',"success":true}'; else echo '{"_id":'$id',"success":false}'; fi ;; *) echo '{"_id":'$id',"error":"unknown action"}' ;; esac; done`
-				: `while IFS= read -r line; do action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null); id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null); case "$action" in ping) echo '{"_id":'$id',"status":"alive"}' ;; hasImage) if xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'$id',"value":true}'; else echo '{"_id":'$id',"value":false}'; fi ;; saveImage) dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null); if xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'$id',"success":true}'; else echo '{"_id":'$id',"success":false}'; fi ;; *) echo '{"_id":'$id',"error":"unknown action"}' ;; esac; done`;
+			const bashScript = platform === 'darwin' ? `
+while IFS= read -r line; do
+  action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null);
+  id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null);
+  case "$action" in
+    ping) echo '{"_id":'$id',"status":"alive"}' ;;
+    hasImage) if pngpaste - >/dev/null 2>&1; then echo '{"_id":'$id',"value":true}'; else echo '{"_id":'$id',"value":false}'; fi ;;
+    saveImage) dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null); if pngpaste "$dest" 2>/dev/null; then echo '{"_id":'$id',"success":true}'; else echo '{"_id":'$id',"success":false}'; fi ;;
+    *) echo '{"_id":'$id',"error":"unknown action"}' ;;
+  esac;
+done` : `
+while IFS= read -r line; do
+  action=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('action',''))" 2>/dev/null);
+  id=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('_id',0))" 2>/dev/null);
+  case "$action" in
+    ping) echo '{"_id":'$id',"status":"alive"}' ;;
+    hasImage) if xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'$id',"value":true}'; else echo '{"_id":'$id',"value":false}'; fi ;;
+    saveImage) dest=$(echo "$line" | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('path',''))" 2>/dev/null); if xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'$id',"success":true}'; else echo '{"_id":'$id',"success":false}'; fi ;;
+    *) echo '{"_id":'$id',"error":"unknown action"}' ;;
+  esac;
+done`;
 			proc = cp.spawn('bash', ['-c', bashScript], { stdio: ['pipe', 'pipe', 'pipe'] });
 		}
 		bridge.setupProcess(proc, resolve);
@@ -305,8 +471,6 @@ while ($true) { $line = [Console]::In.ReadLine(); if ($line -eq $null) { break }
 });
 
 // ==================== ★★★ 统一 IO 接口 ★★★ ====================
-
-// 辅助：惰性创建目录
 function ensureDir(dirPath) {
 	if (!fs.existsSync(dirPath)) {
 		try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) { }
@@ -322,45 +486,27 @@ async function handleClipboardFast() {
 }
 
 async function handleClipboardSlow(targetDir) {
-	// 关键修改：移除此处的 fs.mkdirSync(targetDir)。
-	// 将目录创建推迟到确认有文件要保存时。
-
-	// 优先级1：Python
-	// Python 现在如果通过 ctypes 拿不到图且没有 PIL，会返回 unknown。
-	// Python 也被修改为惰性创建目录。
 	if (pythonBridge.isAvailable()) {
 		const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 10000);
 		if (!res.error && res.type !== 'unknown') return res;
 	}
-
-	// 优先级2：Rust
 	if (rustBridge.isAvailable()) {
 		const res = await rustBridge.call("clipboard", { target_dir: targetDir }, 10000);
 		if (!res.error && res.type !== 'unknown') return res;
 	}
-
-	// 优先级3：Shell (PowerShell / Bash)
-	// 这里是 DIB 的完美归宿
 	if (shellBridge.isAvailable()) {
 		try {
 			if (process.platform === 'win32') {
-				// 检查文件
 				const hasFiles = await shellBridge.call('hasFiles', {}, 2000);
 				if (hasFiles.value) {
 					const filesRes = await shellBridge.call('getFiles', {}, 3000);
 					const files = filesRes.files || [];
 					const folders = files.filter(f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
-
-					// 如果是文件夹路径文本，不需要创建 qqq 目录
 					if (folders.length) return { type: "folder_text", text: folders.join('\n') };
-
-					const copied = [];
 					const validFiles = files.filter(f => fs.existsSync(f) && !fs.statSync(f).isDirectory());
-
 					if (validFiles.length > 0) {
-						// 确认有文件要写，才创建目录
-						ensureDir(targetDir);
-
+						ensureDir(targetDir); // 惰性创建
+						const copied = [];
 						for (const f of validFiles) {
 							try {
 								const ext = path.extname(f);
@@ -375,45 +521,31 @@ async function handleClipboardSlow(targetDir) {
 						if (copied.length) return { type: "file", files: copied };
 					}
 				}
-			}
-
-			// 检查图片 (包含 DIB)
-			const hasImg = await shellBridge.call('hasImage', {}, 2000);
-			if (hasImg.value) {
-				const fname = getTimestampFilename(".png");
-				const dest = path.join(targetDir, fname);
-
-				// 确认有图，创建目录
-				ensureDir(targetDir);
-
-				// PowerShell SaveImage 会自动处理 DIB -> PNG
-				const saved = await shellBridge.call('saveImage', { path: dest }, 5000);
-				if (saved.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-					return { type: "image", path: dest };
+				const hasImg = await shellBridge.call('hasImage', {}, 2000);
+				if (hasImg.value) {
+					const fname = getTimestampFilename(".png");
+					const dest = path.join(targetDir, fname);
+					ensureDir(targetDir); // 惰性创建
+					const saved = await shellBridge.call('saveImage', { path: dest }, 5000);
+					if (saved.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+						return { type: "image", path: dest };
+					}
 				}
 			}
 		} catch (e) { }
 	}
-
-	// 优先级4：Spawn Fallback
 	return handleClipboardSpawn(targetDir);
 }
 
 async function handleClipboardSpawn(targetDir) {
 	const platform = process.platform;
-
 	if (platform === 'win32') {
-		const hasFiles = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-			'Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsFileDropList()){"1"}else{"0"}'], '1');
-
+		const hasFiles = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsFileDropList()){"1"}else{"0"}'], '1');
 		if (hasFiles) {
-			const filesOutput = await spawnOutput('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-				`Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetFileDropList();if($f){foreach($i in $f){$i}}`]);
+			const filesOutput = await spawnOutput('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetFileDropList();if($f){foreach($i in $f){$i}}`]);
 			const files = filesOutput.split(/\r?\n/).map(s => s.trim()).filter(s => s && fs.existsSync(s));
-
 			const folders = files.filter(f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
 			if (folders.length) return { type: "folder_text", text: folders.join('\n') };
-
 			const validFiles = files.filter(f => !fs.statSync(f).isDirectory());
 			if (validFiles.length) {
 				ensureDir(targetDir);
@@ -432,38 +564,24 @@ async function handleClipboardSpawn(targetDir) {
 				if (copied.length) return { type: "file", files: copied };
 			}
 		}
-
-		const hasImg = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-			'Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsImage()){"1"}else{"0"}'], '1');
-
+		const hasImg = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsImage()){"1"}else{"0"}'], '1');
 		if (hasImg) {
 			const fname = getTimestampFilename(".png");
 			const dest = path.join(targetDir, fname);
-			ensureDir(targetDir); // 惰性创建
+			ensureDir(targetDir);
 			const escapedPath = dest.replace(/'/g, "''");
-			const saved = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-				`Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`], 'OK');
+			const saved = await spawnCheck('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`], 'OK');
 			if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) return { type: "image", path: dest };
 		}
 	} else if (platform === 'darwin') {
 		const fname = getTimestampFilename(".png");
 		const dest = path.join(targetDir, fname);
-
-		// ★★★ 修补缺口（仅此处改动）：macOS spawn fallback 也保持惰性，但确保能写成功 ★★★
-		// 做法：先写入临时目录（不要求 targetDir 存在），确认有内容后再创建 targetDir 并移动过去。
 		const tmpName = `qqq_${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
 		const tmpDest = path.join(os.tmpdir(), tmpName);
-
 		try {
-			// 先尝试写入临时文件
 			cp.execSync(`pngpaste "${tmpDest}" 2>/dev/null || pbpaste -Prefer png > "${tmpDest}" 2>/dev/null`, { timeout: 5000 });
-
-			// 如果临时文件生成成功且有内容，则说明确实是图片
 			if (fs.existsSync(tmpDest) && fs.statSync(tmpDest).size > 0) {
-				// 惰性创建真正目标目录
 				ensureDir(targetDir);
-
-				// 移动到目标路径（跨盘/权限异常时降级 copy+unlink）
 				try {
 					fs.renameSync(tmpDest, dest);
 				} catch (e) {
@@ -472,33 +590,23 @@ async function handleClipboardSpawn(targetDir) {
 						try { fs.unlinkSync(tmpDest); } catch { }
 					} catch (e2) { }
 				}
-
-				if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-					return { type: "image", path: dest };
-				} else {
-					// 清理失败产物
-					if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
-				}
+				if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return { type: "image", path: dest };
+				else if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
 			}
-
-			// 清理临时空文件
 			if (fs.existsSync(tmpDest)) try { fs.unlinkSync(tmpDest); } catch { }
 		} catch (e) {
-			// 清理临时文件
 			if (fs.existsSync(tmpDest)) try { fs.unlinkSync(tmpDest); } catch { }
 		}
 	} else {
-		// Linux
 		const fname = getTimestampFilename(".png");
 		const dest = path.join(targetDir, fname);
 		try {
-			ensureDir(targetDir); // Linux 这里比较激进，先创建
+			ensureDir(targetDir);
 			cp.execSync(`xclip -selection clipboard -t image/png -o > "${dest}" 2>/dev/null`, { timeout: 5000 });
 			if (fs.existsSync(dest) && fs.statSync(dest).size > 0) return { type: "image", path: dest };
 			else if (fs.existsSync(dest)) try { fs.unlinkSync(dest); } catch { }
 		} catch (e) { }
 	}
-
 	return { type: "unknown" };
 }
 
@@ -526,8 +634,14 @@ function spawnOutput(cmd, args) {
 
 // ==================== 文件夹信息 ====================
 async function getFolderInfo(folderPath) {
-	if (pythonBridge.isAvailable()) { const res = await pythonBridge.call("folder_info", { path: folderPath }, 15000); if (!res.error) return res; }
-	if (rustBridge.isAvailable()) { const res = await rustBridge.call("folder_info", { path: folderPath }, 15000); if (!res.error) return res; }
+	if (pythonBridge.isAvailable()) {
+		const res = await pythonBridge.call("folder_info", { path: folderPath }, 15000);
+		if (!res.error) return res;
+	}
+	if (rustBridge.isAvailable()) {
+		const res = await rustBridge.call("folder_info", { path: folderPath }, 15000);
+		if (!res.error) return res;
+	}
 	return getFolderInfoJS(folderPath);
 }
 
@@ -544,7 +658,8 @@ async function getFolderInfoJS(folderPath) {
 				else {
 					try {
 						const st = await fs.promises.stat(fullPath);
-						totalSize += st.size; fileCount++;
+						totalSize += st.size;
+						fileCount++;
 						const ext = path.extname(file.name).toLowerCase().replace('.', '') || 'no_ext';
 						extStats[ext] = (extStats[ext] || 0) + 1;
 					} catch (e) { }
@@ -568,18 +683,47 @@ function getTimestampFilename(ext) {
 	const c1 = valid[Math.floor(Math.random() * valid.length)];
 	let c2 = valid[Math.floor(Math.random() * valid.length)];
 	if (c1.toLowerCase() === 'g') c2 = valid.filter(c => c.toLowerCase() !== 'g')[Math.floor(Math.random() * (valid.length - 2))];
-	return `${ms}${c1}${c2}.  ${date} [${day}] ${time}${ext}`;
+	return `${ms}${c1}${c2}. ${date} [${day}] ${time}${ext}`;
 }
 
-function isImageExtForClipboard(ext) { return ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif'].includes(ext.toLowerCase()); }
-function shouldShowDuration(info) { return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1; }
+function isImageExtForClipboard(ext) {
+	return ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.tiff', '.tif'].includes(ext.toLowerCase());
+}
+
+function shouldShowDuration(info) {
+	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
+}
 
 // ==================== 占位符管理 ====================
 const pendingJobs = new Map();
 let tokenCounter = 0;
-function createPendingToken() { const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'; let token = ''; for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)]; return token + (++tokenCounter).toString(36); }
-function registerPendingJob(token, data) { return new Promise((resolve, reject) => { pendingJobs.set(token, { resolve, reject, ...data, startTime: Date.now() }); setTimeout(() => { if (pendingJobs.has(token)) { pendingJobs.delete(token); reject(new Error("timeout")); } }, 30000); }); }
-function resolvePendingJob(token, result) { const job = pendingJobs.get(token); if (job) { pendingJobs.delete(token); job.resolve(result); } }
+
+function createPendingToken() {
+	const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+	let token = '';
+	for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)];
+	return token + (++tokenCounter).toString(36);
+}
+
+function registerPendingJob(token, data) {
+	return new Promise((resolve, reject) => {
+		pendingJobs.set(token, { resolve, reject, ...data, startTime: Date.now() });
+		setTimeout(() => {
+			if (pendingJobs.has(token)) {
+				pendingJobs.delete(token);
+				reject(new Error("timeout"));
+			}
+		}, 30000);
+	});
+}
+
+function resolvePendingJob(token, result) {
+	const job = pendingJobs.get(token);
+	if (job) {
+		pendingJobs.delete(token);
+		job.resolve(result);
+	}
+}
 
 // ==================== qqq.pure 命令 ====================
 async function pureCommand() {
@@ -589,10 +733,12 @@ async function pureCommand() {
 	const parentDir = path.dirname(docPath);
 	const qqqDir = path.join(parentDir, "qqq");
 	if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) { vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹"); return; }
-	let qqqFiles = []; try { qqqFiles = fs.readdirSync(qqqDir).filter(f => fs.statSync(path.join(qqqDir, f)).isFile()); } catch (e) { vscode.window.showErrorMessage("读取 qqq 目录失败"); return; }
+	let qqqFiles = [];
+	try { qqqFiles = fs.readdirSync(qqqDir).filter(f => fs.statSync(path.join(qqqDir, f)).isFile()); } catch (e) { vscode.window.showErrorMessage("读取 qqq 目录失败"); return; }
 	if (!qqqFiles.length) { vscode.window.showInformationMessage("qqq 文件夹是空的"); return; }
 	const referencedFiles = new Set();
-	let parentFiles = []; try { parentFiles = fs.readdirSync(parentDir); } catch (e) { return; }
+	let parentFiles = [];
+	try { parentFiles = fs.readdirSync(parentDir); } catch (e) { return; }
 	const regex = new RegExp(QQQ_PATH_REGEX);
 	for (const fileName of parentFiles) {
 		const fullPath = path.join(parentDir, fileName);
@@ -601,12 +747,15 @@ async function pureCommand() {
 		if (isLikelyBinary(fullPath)) continue;
 		try {
 			const content = fs.readFileSync(fullPath, "utf-8");
-			let match; regex.lastIndex = 0;
+			let match;
+			regex.lastIndex = 0;
 			while ((match = regex.exec(content))) {
 				const rawPath = match[0].slice(2, -2).trim();
 				let absPath = path.isAbsolute(rawPath) ? rawPath : path.join(parentDir, rawPath);
 				absPath = absPath.replace(/\//g, "\\");
-				if (absPath.toLowerCase().startsWith(qqqDir.toLowerCase())) { referencedFiles.add(path.basename(absPath).toLowerCase()); }
+				if (absPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
+					referencedFiles.add(path.basename(absPath).toLowerCase());
+				}
 			}
 		} catch (e) { }
 	}
@@ -614,10 +763,14 @@ async function pureCommand() {
 	if (!orphans.length) { vscode.window.showInformationMessage("未发现孤儿文件"); return; }
 	const orphanPaths = orphans.map(f => path.join(qqqDir, f));
 	const cmdStr = os.platform() === "win32" ? `del ${orphanPaths.map(p => `"${p}"`).join(" ")}` : `rm ${orphanPaths.map(p => `"${p}"`).join(" ")}`;
-	let content = "\n".repeat(13) + "   请在终端中执行下面命令：\n\n\n   " + cmdStr + "\n\n\n";
+	let content = "\n".repeat(13) + " 请在终端中执行下面命令：\n\n\n " + cmdStr + "\n\n\n";
 	content += orphanPaths.map(p => `/\\${p}\\/`).join("\n\n\n\n\n");
 	const purePath = path.join(parentDir, "qqq.pure");
-	try { fs.writeFileSync(purePath, content, "utf-8"); const doc = await vscode.workspace.openTextDocument(purePath); await vscode.window.showTextDocument(doc); } catch (e) { vscode.window.showErrorMessage("无法生成 qqq.pure 文件"); }
+	try {
+		fs.writeFileSync(purePath, content, "utf-8");
+		const doc = await vscode.workspace.openTextDocument(purePath);
+		await vscode.window.showTextDocument(doc);
+	} catch (e) { vscode.window.showErrorMessage("无法生成 qqq.pure 文件"); }
 }
 
 function isLikelyBinary(filePath) {
@@ -626,13 +779,18 @@ function isLikelyBinary(filePath) {
 	try {
 		const buf = Buffer.alloc(4096);
 		const fd = fs.openSync(filePath, 'r');
-		try { const bytesRead = fs.readSync(fd, buf, 0, 4096, 0); for (let i = 0; i < bytesRead; i++) if (buf[i] === 0) return true; return false; } finally { fs.closeSync(fd); }
+		try {
+			const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+			for (let i = 0; i < bytesRead; i++) if (buf[i] === 0) return true;
+			return false;
+		} finally { fs.closeSync(fd); }
 	} catch (e) { return true; }
 }
 
 // ==================== 扩展激活 ====================
 let q1Module = null;
 let q2Module = null;
+
 async function activate(context) {
 	logMessage("qqq 扩展激活（中控模式）...", "INFO");
 	extensionContext = context;
@@ -648,9 +806,17 @@ async function activate(context) {
 			});
 		});
 	});
-	context.subscriptions.push(vscode.commands.registerCommand("qqq.pure", pureCommand), vscode.commands.registerCommand("qqq.allSettings", () => { vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq"); }));
-	try { q1Module = require("./q1"); if (q1Module?.activate) q1Module.activate(context); } catch (e) { logMessage(`q1 加载失败: ${e.message}`, "ERROR"); }
-	try { q2Module = require("./q2"); if (q2Module?.activate) q2Module.activate(context); } catch (e) { logMessage(`q2 加载失败: ${e.message}`, "ERROR"); }
+	context.subscriptions.push(vscode.commands.registerCommand("qqq.pure", pureCommand), vscode.commands.registerCommand("qqq.allSettings", () => {
+		vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+	}));
+	try {
+		q1Module = require("./q1");
+		if (q1Module?.activate) q1Module.activate(context);
+	} catch (e) { logMessage(`q1 加载失败: ${e.message}`, "ERROR"); }
+	try {
+		q2Module = require("./q2");
+		if (q2Module?.activate) q2Module.activate(context);
+	} catch (e) { logMessage(`q2 加载失败: ${e.message}`, "ERROR"); }
 	logMessage("qqq 扩展激活完成", "INFO");
 }
 
@@ -665,11 +831,26 @@ async function deactivate() {
 }
 
 module.exports = {
-	activate, deactivate,
-	QQQ_PATH_REGEX, PENDING_REGEX, ffmpegPath, ffprobePath, logMessage,
-	computeFingerprint, getCacheEntry, setCacheEntry, getCachedBuffer,
-	handleClipboardFast, handleClipboardSlow, getFolderInfo,
-	getTimestampFilename, isImageExtForClipboard, shouldShowDuration,
-	createPendingToken, registerPendingJob, resolvePendingJob,
-	initUserTracking, finishUserTracking,
+	activate,
+	deactivate,
+	QQQ_PATH_REGEX,
+	PENDING_REGEX,
+	ffmpegPath,
+	ffprobePath,
+	logMessage,
+	computeFingerprint,
+	getCacheEntry,
+	setCacheEntry,
+	getCachedBuffer,
+	handleClipboardFast,
+	handleClipboardSlow,
+	getFolderInfo,
+	getTimestampFilename,
+	isImageExtForClipboard,
+	shouldShowDuration,
+	createPendingToken,
+	registerPendingJob,
+	resolvePendingJob,
+	initUserTracking,
+	finishUserTracking,
 };
