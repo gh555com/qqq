@@ -1,5 +1,7 @@
 // src/q1.js
-// ★★★ 图片/视频处理专家：FFmpeg 参数、预览生成、渲染、CodeLens (WebP Native Edition + TempFile Fix) ★★★
+// ==========================================
+// ★★★ 统一 WebP 渲染管线 + 直读优化 + 动态 MIME ★★★
+// ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -21,8 +23,12 @@ const PREVIEW_HEIGHT = 288;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
-const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"]);
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
+
+// ★ 新增：可以直接读取无需转码的格式（静态）
+// 注意：不包含 GIF (防止大体积动图爆炸)，不包含 BMP/TIFF/ICO (浏览器兼容性差)
+const DIRECT_READ_EXTS = new Set([".png", ".jpg", ".jpeg", ".svg"]);
 
 // ==================== 全局状态 ====================
 let decorationType = null;
@@ -35,6 +41,7 @@ const resolutionCache = new Map();
 const folderSizeCache = new Map();
 const pendingTokens = new Map();
 
+// ★ 全局配置变量
 let enlargeSmallImages = true;
 let extremePerformanceMode = false;
 let cleanFreakMode = false;
@@ -127,7 +134,7 @@ function buildNewRawPath(oldRaw, newName) {
 	return lastSlash === -1 ? newName : oldRaw.slice(0, lastSlash + 1) + newName;
 }
 
-// ==================== FFprobe 探测 ====================
+// ==================== FFprobe 探测 (CodeLens 必需) ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
@@ -144,29 +151,36 @@ async function getMediaInfo(filePath, mtimeMs) {
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
-			let info = { mtime: mtimeMs, res: null, width: null, height: null, codec: null, codec_long_name: null, duration: 0, type: "unknown" };
+			let info = {
+				mtime: mtimeMs,
+				res: null, width: null, height: null,
+				codec: null, full_codec_desc: null,
+				duration: 0,
+				type: "unknown"
+			};
 
 			if (resMatch) {
 				const w = parseInt(resMatch[1]), h = parseInt(resMatch[2]);
 				info.res = `${w}x${h}`; info.width = w; info.height = h;
 			}
+
 			if (codecMatch?.[1]) {
-				const parts = codecMatch[1].split(/[,\s]+/);
+				info.full_codec_desc = codecMatch[1].trim();
+				const parts = info.full_codec_desc.split(/[,\s]+/);
 				info.codec = parts[0].trim();
-				if (parts.length > 1) info.codec_long_name = codecMatch[1].trim();
 			}
+
 			if (durMatch) {
 				const h = parseFloat(durMatch[1]), m = parseFloat(durMatch[2]), s = parseFloat(durMatch[3]);
 				info.duration = h * 3600 + m * 60 + s;
 			}
 
-			// 类型判断
 			if (info.codec) {
 				const c = info.codec.toLowerCase();
 				if (c.includes('mjpeg') && info.duration <= 0.1) { info.type = 'image'; info.duration = 0; }
-				else if (['png', 'bmp', 'tiff', 'jpeg'].some(x => c.includes(x))) info.type = 'image';
+				else if (['png', 'bmp', 'tiff', 'jpeg', 'webp', 'svg'].some(x => c.includes(x))) info.type = 'image';
 				else if (c.includes('gif')) info.type = info.duration > 0.1 ? 'animated_image' : 'image';
-				else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4', 'vp09', 'vp08'].some(x => c.includes(x))) info.type = 'video';
+				else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4'].some(x => c.includes(x))) info.type = 'video';
 			}
 			if (info.type === 'unknown') {
 				const ext = path.extname(filePath).toLowerCase();
@@ -183,7 +197,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 	});
 }
 
-// ==================== 预览生成（FFmpeg 转 WebP + TempFile）====================
+// ==================== 统一预览生成 (All -> WebP + Direct Read) ====================
 
 function getWebPDurationFromBuffer(buffer) {
 	if (!buffer || buffer.length < 12) return 0;
@@ -191,6 +205,7 @@ function getWebPDurationFromBuffer(buffer) {
 
 	let pos = 12;
 	let totalDurationMs = 0;
+	let frameCount = 0;
 
 	while (pos < buffer.length - 8) {
 		const chunkId = buffer.toString('ascii', pos, pos + 4);
@@ -198,6 +213,7 @@ function getWebPDurationFromBuffer(buffer) {
 		const nextChunkPos = pos + 8 + chunkSize + (chunkSize % 2);
 
 		if (chunkId === 'ANMF') {
+			frameCount++;
 			if (pos + 23 < buffer.length) {
 				const dur = buffer[pos + 20] | (buffer[pos + 21] << 8) | (buffer[pos + 22] << 16);
 				totalDurationMs += dur;
@@ -205,14 +221,15 @@ function getWebPDurationFromBuffer(buffer) {
 		}
 		pos = nextChunkPos;
 	}
-	return totalDurationMs / 1000;
+	return frameCount > 1 ? totalDurationMs / 1000 : 0;
 }
 
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
+function buildUnifiedWebPArgs(filePath, origSize, duration) {
 	let targetW = PREVIEW_WIDTH, targetH = PREVIEW_HEIGHT;
+
 	if (origSize?.width) {
 		const ow = origSize.width, oh = origSize.height;
-		if (enlargeSmallImages || isVideo) {
+		if (enlargeSmallImages || duration > 0.1) {
 			const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
 			targetW = Math.max(1, Math.round(ow * scale));
 			targetH = Math.max(1, Math.round(oh * scale));
@@ -229,126 +246,132 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	const args = ["-hide_banner", "-loglevel", "error"];
 	let expectedWebPDuration = 0;
 	const fpsLimit = extremePerformanceMode ? 8 : 10;
-	const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
 
-	// ★ 配置 WebP 编码参数，不再包含 pipe:1 ★
-	const webpEncodingArgs = [
+	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear`;
+	let vf = scaleFilter;
+
+	const isStatic = (duration <= 0.1);
+
+	if (isStatic) {
+		args.push("-i", filePath);
+		vf = `[0:v]${scaleFilter}[out_v]`;
+		args.push("-frames:v", "1");
+	} else {
+		if (duration < 5) {
+			let clipStart = Math.min(1, duration * 0.1);
+			let clipDur = Math.min(4, duration - clipStart);
+			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
+			vf = `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`;
+			expectedWebPDuration = clipDur;
+		} else {
+			const seg = 1.3;
+			const s1 = 1, s2 = Math.floor(duration / 2), s3 = Math.max(s2 + seg + 0.5, duration - seg - 1);
+			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
+			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
+			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
+			vf = `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`;
+			expectedWebPDuration = seg * 3;
+		}
+	}
+
+	args.push("-filter_complex", vf, "-map", "[out_v]");
+	args.push(
 		"-c:v", "libwebp",
 		"-lossless", "0",
-		"-compression_level", "4",
-		"-q:v", extremePerformanceMode ? "50" : "75",
+		"-compression_level", "0",
+		"-q:v", "75",
 		"-loop", "0",
 		"-an",
 		"-vsync", "0",
 		"-f", "webp"
-	];
-
-	if (isVideo) {
-		const safeDur = duration || 0;
-		if (extremePerformanceMode) {
-			let clipStart = 1, clipDur = 2;
-			if (safeDur > 0 && safeDur < clipStart + clipDur) {
-				clipStart = Math.max(0, safeDur - clipDur - 0.5);
-				clipDur = Math.min(clipDur, safeDur - clipStart);
-			}
-			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]");
-			expectedWebPDuration = clipDur;
-		} else if (safeDur < 5) {
-			let clipStart = Math.min(1, safeDur * 0.1);
-			let clipDur = Math.min(4, safeDur - clipStart);
-			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]");
-			expectedWebPDuration = clipDur;
-		} else {
-			const seg = 1.3;
-			const s1 = 1, s2 = Math.floor(safeDur / 2), s3 = Math.max(s2 + seg + 0.5, safeDur - seg - 1);
-			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
-			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`, "-map", "[out_v]");
-			expectedWebPDuration = seg * 3;
-		}
-		args.push(...webpEncodingArgs);
-
-	} else if (isGif) {
-		if (extremePerformanceMode) args.push("-t", "2");
-		args.push("-i", filePath);
-		const f = extremePerformanceMode
-			? `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`
-			: `[0:v]${scaleFilter}[out_v]`;
-		args.push("-filter_complex", f, "-map", "[out_v]", ...webpEncodingArgs);
-	} else {
-		args.push("-i", filePath);
-		args.push("-filter_complex", `[0:v]${scaleFilter}[out_v]`, "-map", "[out_v]");
-		if (extremePerformanceMode) args.push("-frames:v", "1", "-c:v", "mjpeg", "-f", "image2pipe");
-		else args.push("-frames:v", "1", "-c:v", "libwebp", "-lossless", "0", "-q:v", "80", "-f", "webp");
-	}
+	);
 
 	return { args, targetW, targetH, expectedWebPDuration };
 }
 
-async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
+async function getPreviewBuffer(filePath, contentId) {
 	if (!qqq.ffmpegPath) return null;
 
 	let mtimeMs = 0;
 	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
 
-	// 缓存键
-	const quality = extremePerformanceMode ? "w0" : (isVideo ? "w2" : "w1");
+	const fitMode = enlargeSmallImages ? "fill" : "orig";
+	const quality = `preview_w0_${fitMode}`;
 
+	// 先查缓存
 	const cached = qqq.getCachedBuffer(contentId, quality);
 	if (cached) {
-		const webpDur = (isGif || isVideo) ? getWebPDurationFromBuffer(cached) : 0;
+		const webpDur = getWebPDurationFromBuffer(cached);
 		return { buffer: cached, webpDuration: webpDur, fromCache: true };
 	}
 
+	// 获取信息
 	const info = await getMediaInfo(filePath, mtimeMs);
 	const origSize = info ? { width: info.width, height: info.height } : null;
 	const duration = info?.duration || 0;
+	const ext = path.extname(filePath).toLowerCase();
 
-	return new Promise((resolve) => {
-		const { args, targetW, targetH, expectedWebPDuration } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
+	// ==========================================
+	// ★★★ 优化策略：直读模式 (Direct Pass) ★★★
+	// 条件：静态 + 兼容格式 + 尺寸小
+	// ==========================================
+	const isDirectCompatible = DIRECT_READ_EXTS.has(ext) || (ext === '.webp' && duration <= 0.1);
+	const isSmallEnough = info && info.width <= PREVIEW_WIDTH && info.height <= PREVIEW_HEIGHT;
 
-		// ★ 关键修复：使用临时文件替代管道输出 ★
-		const usePipe = (extremePerformanceMode && !isVideo && !isGif); // 仅极速模式静态图用 Pipe (MJPEG)
-		let tempFile = null;
+	if (isDirectCompatible && isSmallEnough && duration <= 0.1) {
+		try {
+			const rawBuffer = fs.readFileSync(filePath);
 
-		if (usePipe) {
-			args.push("pipe:1");
-		} else {
-			// WebP 动画必须通过文件生成，否则 RIFF 头不完整导致浏览器无法显示
-			const rand = Math.random().toString(36).slice(2);
-			tempFile = path.join(os.tmpdir(), `qqq_p_${contentId}_${rand}.webp`);
-			args.push("-y", tempFile);
+			// 计算 CSS 显示尺寸 (处理 Enlarge Small Images)
+			// 如果直读，buffer 是原图大小。
+			// 如果需要放大，我们在这里算出放大后的目标尺寸，传给 renderImages 作为 outputSize
+			let finalCssW = info.width;
+			let finalCssH = info.height;
+
+			if (enlargeSmallImages) {
+				const scale = Math.min(PREVIEW_WIDTH / info.width, PREVIEW_HEIGHT / info.height);
+				finalCssW = Math.max(1, Math.round(info.width * scale));
+				finalCssH = Math.max(1, Math.round(info.height * scale));
+			}
+
+			// 直读模式不建议写入缓存，因为读原文件本身就是最快的 I/O
+			return {
+				buffer: rawBuffer,
+				webpDuration: 0,
+				outputSize: { width: finalCssW, height: finalCssH },
+				isDirect: true, // 标记：这是原文件
+				ext: ext        // 标记：原始后缀（用于判断 MIME）
+			};
+		} catch (e) {
+			// 失败则回退到 FFmpeg
 		}
+	}
 
-		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-		const chunks = [];
+	// ==========================================
+	// ★★★ 兜底策略：FFmpeg 转码 ★★★
+	// 适用于：视频、动图、大图、特殊格式
+	// ==========================================
+	return new Promise((resolve) => {
+		const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(filePath, origSize, duration);
+
+		const rand = Math.random().toString(36).slice(2);
+		const tempFile = path.join(os.tmpdir(), `qqq_uni_${contentId}_${rand}.webp`);
+
+		args.push("-y", tempFile);
+
+		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: 'ignore' });
+
 		let resolved = false;
+		const cleanup = () => { if (fs.existsSync(tempFile)) try { fs.unlinkSync(tempFile); } catch { } };
 
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				resolved = true;
 				try { child.kill(); } catch { }
-				if (tempFile && fs.existsSync(tempFile)) try { fs.unlinkSync(tempFile); } catch { }
+				cleanup();
 				resolve(null);
 			}
 		}, 30000);
-
-		if (usePipe) {
-			child.stdout.on("data", d => chunks.push(d));
-		}
-
-		child.on("error", () => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timer);
-				if (tempFile && fs.existsSync(tempFile)) try { fs.unlinkSync(tempFile); } catch { }
-				resolve(null);
-			}
-		});
 
 		child.on("close", () => {
 			if (!resolved) {
@@ -356,35 +379,39 @@ async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 				clearTimeout(timer);
 
 				let buffer = null;
-
-				// 读取结果
-				if (usePipe) {
-					if (chunks.length > 0) buffer = Buffer.concat(chunks);
-				} else {
-					if (tempFile && fs.existsSync(tempFile)) {
-						try {
-							buffer = fs.readFileSync(tempFile);
-							fs.unlinkSync(tempFile);
-						} catch (e) { buffer = null; }
+				try {
+					if (fs.existsSync(tempFile)) {
+						buffer = fs.readFileSync(tempFile);
 					}
-				}
+				} catch (e) { buffer = null; }
+
+				cleanup();
 
 				if (!buffer) { resolve(null); return; }
 
-				let webpDuration = expectedWebPDuration;
-				if (isGif && !isVideo) {
-					const detected = getWebPDurationFromBuffer(buffer);
-					if (detected > 0) webpDuration = detected;
-					if (extremePerformanceMode && webpDuration > 2.5) webpDuration = 2.0;
-				}
+				let finalDuration = expectedWebPDuration;
+				const detectedDur = getWebPDurationFromBuffer(buffer);
+				if (detectedDur > 0) finalDuration = detectedDur;
+				else if (duration <= 0.1) finalDuration = 0;
 
+				// 只有 FFmpeg 转码的结果才需要缓存
 				qqq.setCacheEntry(contentId, quality, buffer, {
 					width: targetW, height: targetH,
-					type: isVideo ? 'video' : (isGif ? 'gif' : 'image'),
-					webpDur: webpDuration, srcDuration: duration
+					type: 'webp_unified',
+					webpDur: finalDuration,
+					srcDuration: duration
 				});
 
-				resolve({ buffer, webpDuration, outputSize: { width: targetW, height: targetH } });
+				resolve({ buffer, webpDuration: finalDuration, outputSize: { width: targetW, height: targetH } });
+			}
+		});
+
+		child.on("error", () => {
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+				cleanup();
+				resolve(null);
 			}
 		});
 	});
@@ -459,7 +486,6 @@ async function renderImages(editor) {
 
 			const rawPath = match[0].slice(2, -2).trim();
 
-			// PENDING 占位符
 			if (rawPath.startsWith("__PENDING__:")) {
 				const loadingDeco = {
 					range: new vscode.Range(pos.line, 0, pos.line, 0),
@@ -483,30 +509,17 @@ async function renderImages(editor) {
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath.replace(/\//g, "\\"));
 			if (!absPath || !fs.existsSync(absPath)) continue;
 
-			const ext = path.extname(absPath).toLowerCase();
-			let isImage = isImageExt(ext), isVideo = isVideoExt(ext), isGif = ext === ".gif";
-			let mtimeMs = 0;
-			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-
-			if (!isImage && !isVideo) {
-				const info = await getMediaInfo(absPath, mtimeMs);
-				if (info?.type === "video") isVideo = true;
-				else if (info?.type === "image") { isImage = true; if (info.codec === "gif") isGif = true; }
-				else continue;
-			}
-
 			const targetLine = pos.line;
 			if (targetLine >= editor.document.lineCount) continue;
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 
-			// 计算指纹
 			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
 			tasks.push(async () => {
 				if (currentRenderVersion !== myVersion) return null;
 				try {
-					const previewResult = await getPreviewBuffer(absPath, isVideo, isGif, contentId);
+					const previewResult = await getPreviewBuffer(absPath, contentId);
 					if (currentRenderVersion !== myVersion) return null;
 
 					const deco = { range: anchorRange, renderOptions: {} };
@@ -515,19 +528,25 @@ async function renderImages(editor) {
 					let outputSize = null;
 
 					if (previewResult?.buffer) {
+						// ★ 动态计算 MIME 类型
 						let mime = "image/webp";
-						if (extremePerformanceMode && !isVideo && !isGif) mime = "image/jpeg";
+
+						// 如果是直读模式，根据后缀判断
+						if (previewResult.isDirect && previewResult.ext) {
+							const e = previewResult.ext;
+							if (e === '.png') mime = 'image/png';
+							else if (e === '.jpg' || e === '.jpeg') mime = 'image/jpeg';
+							else if (e === '.svg') mime = 'image/svg+xml';
+						}
 
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						if (previewResult.webpDuration > 0) actualWebPDuration = previewResult.webpDuration;
+						actualWebPDuration = previewResult.webpDuration;
 						outputSize = previewResult.outputSize;
-					} else if (isImage && !isVideo && !isGif) {
-						contentUrl = `url("${vscode.Uri.file(absPath).toString()}")`;
 					}
 					if (!contentUrl) return null;
 
 					let progressBarUrl = null;
-					if ((isGif || isVideo) && actualWebPDuration > 0) {
+					if (actualWebPDuration > 0) {
 						progressBarUrl = `url("${createProgressSvg(actualWebPDuration)}")`;
 					}
 
@@ -548,10 +567,12 @@ async function renderImages(editor) {
 						positions.push("center bottom");
 						repeats.push("no-repeat");
 					}
+
 					layers.push(contentUrl);
 					sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
 					positions.push("center center");
 					repeats.push("no-repeat");
+
 					layers.push(gridImage);
 					sizes.push(gridSize);
 					positions.push("0 0");
@@ -571,7 +592,7 @@ async function renderImages(editor) {
 						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
 					};
 
-					deco.hoverMessage = new vscode.MarkdownString(`[打开图片](${vscode.Uri.file(absPath).toString()})`);
+					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
 					deco.hoverMessage.isTrusted = true;
 
 					return { key: uniqueKey, deco };
@@ -650,14 +671,12 @@ async function executeClipboardCommand() {
 		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 	}
 
-	// Fast Path: 纯文字
 	const fastResult = await qqq.handleClipboardFast();
 	if (fastResult?.type === "text") {
 		await editor.edit(e => e.insert(editor.selection.active, fastResult.text));
 		return;
 	}
 
-	// Slow Path: 媒体 - 先插入占位符
 	const token = qqq.createPendingToken();
 	const eol = getDocumentEOL(editor.document);
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
@@ -673,7 +692,6 @@ async function executeClipboardCommand() {
 
 	debounceRender(editor, 10);
 
-	// 后台处理媒体
 	setImmediate(async () => {
 		try {
 			const result = await qqq.handleClipboardSlow(targetDir);
@@ -835,7 +853,6 @@ class FileCodeLensProvider {
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
 			const isVidOrImg = isImageOrVideoExt(ext);
-			const isVideoExtFlag = isVideoExt(ext);
 			const targetLensLine = pos.line;
 
 			tasks.push(async () => {
@@ -856,24 +873,34 @@ class FileCodeLensProvider {
 
 				let titleSuffix = "";
 				let isRealVideo = false;
+
+				// ★ CodeLens 核心展示逻辑 ★
 				if (isVidOrImg) {
 					const info = await getMediaInfo(absPath, mtimeMs);
 					if (info?.width && info?.height) {
 						let scale = 1;
 						const MAX_W = PREVIEW_WIDTH, MAX_H = PREVIEW_HEIGHT;
+
+						// 判定是否是"真实视频" (用于图标展示)
 						if (info.type === "video") isRealVideo = true;
-						if (isRealVideo || isVideoExtFlag || enlargeSmallImages) {
+
+						// 计算缩放比例
+						if (isRealVideo || info.duration > 0.1 || enlargeSmallImages) {
 							scale = Math.min(MAX_W / info.width, MAX_H / info.height);
 						} else {
 							if (info.width <= MAX_W && info.height <= MAX_H) scale = 1;
 							else scale = Math.min(MAX_W / info.width, MAX_H / info.height);
 						}
+
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-						if (info.codec) {
-							tooltipText += `\n编解码器: ${info.codec}`;
-							if (info.codec_long_name) tooltipText += ` (${info.codec_long_name})`;
+
+						// ★ 详细编码信息展示 (Tooltip) ★
+						const displayCodec = info.full_codec_desc || info.codec;
+						if (displayCodec) {
+							tooltipText += `\n编码: ${displayCodec}`;
 						}
+
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
 						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;

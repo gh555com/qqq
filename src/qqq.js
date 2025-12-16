@@ -144,9 +144,11 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!cacheMeta.entries[contentId]) { cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} }; }
 	const entry = cacheMeta.entries[contentId];
 
-	// ★ 改动：支持 WebP 格式记录 ★
-	// 如果 quality 包含 'w' (如 w1, w2) 或者 'webp'，则标记为 webp
-	const fmt = (quality.includes('webp') || quality.startsWith('w')) ? 'webp' : (quality.includes('gif') ? 'gif' : 'png');
+	// ★ 改动：适配新的统一 WebP Key (例如 preview_w0_fill) ★
+	// 只要 key 包含 'w' 或者是 'preview'，我们都将其标记为 webp
+	const fmt = (quality.includes('webp') || quality.includes('_w') || quality.startsWith('w') || quality.startsWith('preview'))
+		? 'webp'
+		: (quality.includes('gif') ? 'gif' : 'png');
 
 	entry.qualities[quality] = { size: buffer.length, format: fmt };
 	entry.atime = Date.now();
@@ -671,4 +673,3 @@ module.exports = {
 	createPendingToken, registerPendingJob, resolvePendingJob,
 	initUserTracking, finishUserTracking,
 };
-
