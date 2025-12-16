@@ -1,6 +1,7 @@
 # src/kp.py
 # ==========================================
 #  A组增强版 Daemon - IO 缓存优化 + 惰性文件夹创建 + DIB 严格处理
+#  修改：DIB 一律保存为无损 PNG（母版）
 # ==========================================
 import sys
 import os
@@ -158,11 +159,10 @@ def read_global_data(h_mem):
     finally:
         GlobalUnlock(h_mem)
 
+
 # ==========================================
 #              工具函数
 # ==========================================
-
-
 def get_timestamp_filename(ext=".png"):
     now = datetime.now()
     date_part = now.strftime("%Y.%m.%d")
@@ -191,11 +191,10 @@ def is_image_ext(ext):
                   '.bmp', '.tif', '.tiff', '.webp', '.ico', '.svg'}
     return ext.lower() in image_exts
 
+
 # ==========================================
 #              文件夹统计模块
 # ==========================================
-
-
 def get_folder_info(folder_path):
     global _folder_cache
     now_ts = time.time()
@@ -273,20 +272,18 @@ def get_folder_info(folder_path):
 
     return result_data
 
+
 # ==========================================
 #              Windows 剪贴板处理
 # ==========================================
-
-
 def handle_windows_pywin32(wcb, wcon, output_dir):
     try:
         wcb.OpenClipboard()
 
-        # 1. 检查文件 (CF_HDROP)
+        # 1. 检查文件 (CF_HDROP) - 物理复制，不转码
         if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
             files = wcb.GetClipboardData(wcon.CF_HDROP)
 
-            # 过滤存在的目录和文件
             valid_dirs = []
             valid_files = []
             for fp in files:
@@ -302,23 +299,16 @@ def handle_windows_pywin32(wcb, wcon, output_dir):
                 return {"type": "folder_text", "text": '\n'.join(valid_dirs)}
 
             if valid_files:
-                # 只有确认有文件要复制，才创建目录
                 copied_files = []
-                # 预先确保目录存在
-                if valid_files:
-                    # 随便取一个目标路径来确保父目录
-                    ensure_parent(output_dir / "dummy")
+                ensure_parent(output_dir / "dummy")
 
                 for src in valid_files:
                     ext = src.suffix
-                    if is_image_ext(ext):
-                        fname = get_timestamp_filename(ext)
-                    else:
-                        fname = src.name
+                    fname = get_timestamp_filename(
+                        ext) if is_image_ext(ext) else src.name
                     dst = output_dir / fname
-
                     try:
-                        shutil.copy2(src, dst)
+                        shutil.copy2(src, dst)  # 物理复制，二进制完全一致
                         copied_files.append(str(dst))
                     except:
                         pass
@@ -330,16 +320,14 @@ def handle_windows_pywin32(wcb, wcon, output_dir):
                     return {"type": "file", "files": copied_files}
                 return None
 
-        # 2. 检查图片 (CF_DIB)
+        # 2. 检查图片 (CF_DIB) - 保存为无损 PNG（母版）
         if wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
             try:
-                # 关键修改：强制检查 PIL。如果没有 PIL，抛出 ImportError，
-                # 进入 except 块 -> 返回 None -> 触发 qqq.js 的 Shell 降级
                 from PIL import Image
                 import io
             except ImportError:
                 wcb.CloseClipboard()
-                return None  # 优雅降级到 PowerShell
+                return None
 
             dib = wcb.GetClipboardData(wcon.CF_DIB)
             wcb.CloseClipboard()
@@ -354,15 +342,20 @@ def handle_windows_pywin32(wcb, wcon, output_dir):
 
                 img = Image.open(io.BytesIO(bmp))
 
-                # 确认转换成功后，才创建目录
+                # ★★★ 关键：DIB 一律保存为无损 PNG（母版）★★★
                 fname = get_timestamp_filename(".png")
                 path = output_dir / fname
                 ensure_parent(path)
 
-                img.save(path)
+                # PNG 无损保存，尽量保留透明
+                if img.mode == "RGBA":
+                    img.save(path, format="PNG", compress_level=6)
+                else:
+                    img = img.convert("RGB")
+                    img.save(path, format="PNG", compress_level=6)
+
                 return {"type": "image", "path": str(path)}
             except Exception:
-                # 转换失败，不写 raw bytes，避免生成 .bin
                 return None
 
         wcb.CloseClipboard()
@@ -379,7 +372,7 @@ def handle_windows_ctypes(output_dir):
         return {"error": "Cannot open clipboard"}
 
     try:
-        # 1. 检查文件 (CF_HDROP)
+        # 1. 检查文件 (CF_HDROP) - 物理复制
         if IsClipboardFormatAvailable(CF_HDROP):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
@@ -409,10 +402,8 @@ def handle_windows_ctypes(output_dir):
                     copied_files = []
                     for src in valid_files:
                         ext = src.suffix
-                        if is_image_ext(ext):
-                            fname = get_timestamp_filename(ext)
-                        else:
-                            fname = src.name
+                        fname = get_timestamp_filename(
+                            ext) if is_image_ext(ext) else src.name
                         dst = output_dir / fname
                         try:
                             shutil.copy2(src, dst)
@@ -426,9 +417,8 @@ def handle_windows_ctypes(output_dir):
                     if copied_files:
                         return {"type": "file", "files": copied_files}
 
-        # 2. 检查图片 (CF_DIB)
+        # 2. 检查图片 (CF_DIB) - 保存为无损 PNG
         if IsClipboardFormatAvailable(CF_DIB):
-            # 关键修改：检查 PIL，无 PIL 则放弃处理，让 Shell 接管
             try:
                 from PIL import Image
                 import io
@@ -454,10 +444,14 @@ def handle_windows_ctypes(output_dir):
                         path = output_dir / fname
                         ensure_parent(path)
 
-                        img.save(path)
+                        if img.mode == "RGBA":
+                            img.save(path, format="PNG", compress_level=6)
+                        else:
+                            img = img.convert("RGB")
+                            img.save(path, format="PNG", compress_level=6)
+
                         return {"type": "image", "path": str(path)}
                     except:
-                        # 转换失败，放弃，不写 bin
                         return None
 
     finally:
@@ -496,26 +490,10 @@ def handle_macos(output_dir):
     fname = get_timestamp_filename(".png")
     path = output_dir / fname
 
-    # 注意：这里我们不急着创建目录，因为不知道粘贴命令是否成功
-    # 但 subprocess 需要路径存在吗？
-    # pngpaste 需要父目录存在。
-    # 策略：先尝试运行，如果失败就不创建。但 pngpaste 没目录会报错。
-    # 更好的策略：先检查剪贴板内容类型（pbpaste -prefer png），如果有内容再创建。
-
-    # 尝试 pngpaste
     try:
-        # 预检：如果 pbpaste 没数据，就不创建目录
-        # 这里为了简化，我们先假设 ensure_parent 代价很低。
-        # 但为了解决“纯文本不创建文件夹”，我们需要更严谨。
-        # macOS 比较难预检而不产生副作用。
-        # 这里采用：先执行，如果成功生成了文件，那文件夹创建也合理。
-        # 如果失败，我们可能创建了一个空文件夹。
-        # 改进：先用 pbpaste 检查是否有 png 数据输出到 stdout
-
         check_proc = subprocess.run(
             ["pbpaste", "-Prefer", "png"], capture_output=True, timeout=2)
         if check_proc.stdout and len(check_proc.stdout) > 0:
-            # 确认有数据，创建目录
             ensure_parent(path)
             with open(path, "wb") as f:
                 f.write(check_proc.stdout)
@@ -533,8 +511,6 @@ def handle_linux(output_dir):
     path = output_dir / fname
 
     try:
-        # xclip 预检
-        # xclip -selection clipboard -t TARGETS -o
         targets_proc = subprocess.run(
             ["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"],
             capture_output=True, text=True, timeout=2
@@ -556,8 +532,6 @@ def handle_linux(output_dir):
 
 def handle_clipboard(target_dir=None):
     output_dir = resolve_output_dir(target_dir)
-    # 注意：这里移除了 output_dir.mkdir(...) 的调用
-
     sys_name = platform.system()
     if sys_name == "Windows":
         return handle_windows(output_dir)
@@ -568,11 +542,10 @@ def handle_clipboard(target_dir=None):
     else:
         return {"type": "unknown"}
 
+
 # ==========================================
 #              Daemon 模式
 # ==========================================
-
-
 def daemon_mode():
     sys.stdout.reconfigure(line_buffering=True)
     while True:
@@ -598,7 +571,6 @@ def daemon_mode():
                 if clipboard_result:
                     result.update(clipboard_result)
                 else:
-                    # Explicitly return unknown if None returned
                     result['type'] = 'unknown'
 
             elif action == 'folder_info':

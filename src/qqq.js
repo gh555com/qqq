@@ -1,6 +1,6 @@
 // src/qqq.js
 // ==========================================
-// ★★★ 中控大脑：惰性文件夹创建 + 严格 IO 调度 ★★★
+// ★★★ 中控大脑：惰性文件夹创建 + 严格 IO 调度 (WebP Edition) ★★★
 // ==========================================
 const vscode = require("vscode");
 const fs = require("fs");
@@ -127,7 +127,6 @@ function computeFingerprint(filePath) {
 }
 
 // ==================== ★★★ 磁盘缓存管理 ★★★ ====================
-// (代码保持不变，省略以节省篇幅，逻辑未修改)
 function initCache(context) { cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME); if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true }); loadCacheMeta(); validateCache(); }
 function loadCacheMeta() { const metaPath = path.join(cacheDir, META_FILE_NAME); try { if (fs.existsSync(metaPath)) { cacheMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } else { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } } catch (e) { cacheMeta = { entries: {}, stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 }, brokenFiles: {} }; } }
 function saveCacheMeta() { if (!cacheDir || !cacheMeta) return; try { fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2)); } catch (e) { } }
@@ -135,7 +134,29 @@ function validateCache() { if (!cacheDir || !cacheMeta) return; let changed = fa
 function ensureCacheSpace(neededBytes) { if (!cacheDir || !cacheMeta) return; if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return; const entries = []; for (const [contentId, entry] of Object.entries(cacheMeta.entries)) { entries.push({ contentId, atime: entry.atime || 0 }); } entries.sort((a, b) => a.atime - b.atime); while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) { const oldest = entries.shift(); evictEntry(oldest.contentId); } }
 function evictEntry(contentId) { const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities) return; for (const [q, qInfo] of Object.entries(entry.qualities)) { const fileName = `${contentId}.${q}`; try { const filePath = path.join(cacheDir, fileName); const st = fs.statSync(filePath); cacheMeta.stats.totalSize -= st.size; cacheMeta.stats.fileCount--; fs.unlinkSync(filePath); } catch (e) { } } delete cacheMeta.entries[contentId]; saveCacheMeta(); }
 function getCacheEntry(contentId) { if (!cacheMeta || !cacheMeta.entries[contentId]) { cacheMeta.stats.missCount++; return null; } const entry = cacheMeta.entries[contentId]; entry.atime = Date.now(); cacheMeta.stats.hitCount++; return entry; }
-function setCacheEntry(contentId, quality, buffer, meta) { if (!cacheDir || !cacheMeta) return null; ensureCacheSpace(buffer.length); const fileName = `${contentId}.${quality}`; const filePath = path.join(cacheDir, fileName); try { fs.writeFileSync(filePath, buffer); } catch (e) { return null; } if (!cacheMeta.entries[contentId]) { cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} }; } const entry = cacheMeta.entries[contentId]; entry.qualities[quality] = { size: buffer.length, format: quality.includes('gif') ? 'gif' : 'png' }; entry.atime = Date.now(); if (meta) Object.assign(entry.meta, meta); cacheMeta.stats.totalSize += buffer.length; cacheMeta.stats.fileCount++; saveCacheMeta(); return filePath; }
+
+function setCacheEntry(contentId, quality, buffer, meta) {
+	if (!cacheDir || !cacheMeta) return null;
+	ensureCacheSpace(buffer.length);
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+	try { fs.writeFileSync(filePath, buffer); } catch (e) { return null; }
+	if (!cacheMeta.entries[contentId]) { cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} }; }
+	const entry = cacheMeta.entries[contentId];
+
+	// ★ 改动：支持 WebP 格式记录 ★
+	// 如果 quality 包含 'w' (如 w1, w2) 或者 'webp'，则标记为 webp
+	const fmt = (quality.includes('webp') || quality.startsWith('w')) ? 'webp' : (quality.includes('gif') ? 'gif' : 'png');
+
+	entry.qualities[quality] = { size: buffer.length, format: fmt };
+	entry.atime = Date.now();
+	if (meta) Object.assign(entry.meta, meta);
+	cacheMeta.stats.totalSize += buffer.length;
+	cacheMeta.stats.fileCount++;
+	saveCacheMeta();
+	return filePath;
+}
+
 function getCachedBuffer(contentId, quality) { if (!cacheDir || !cacheMeta) return null; const entry = cacheMeta.entries[contentId]; if (!entry || !entry.qualities || !entry.qualities[quality]) return null; const fileName = `${contentId}.${quality}`; const filePath = path.join(cacheDir, fileName); try { if (fs.existsSync(filePath)) { entry.atime = Date.now(); return fs.readFileSync(filePath); } } catch (e) { } delete entry.qualities[quality]; if (Object.keys(entry.qualities).length === 0) delete cacheMeta.entries[contentId]; saveCacheMeta(); return null; }
 
 // ==================== ★★★ Daemon 桥接（四层回退）★★★ ====================
@@ -650,3 +671,4 @@ module.exports = {
 	createPendingToken, registerPendingJob, resolvePendingJob,
 	initUserTracking, finishUserTracking,
 };
+

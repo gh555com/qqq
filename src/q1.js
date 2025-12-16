@@ -1,10 +1,11 @@
 // src/q1.js
-// ★★★ 图片/视频处理专家：FFmpeg 参数、预览生成、渲染、CodeLens ★★★
+// ★★★ 图片/视频处理专家：FFmpeg 参数、预览生成、渲染、CodeLens (WebP Native Edition + TempFile Fix) ★★★
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const os = require("os");
 
 // 从 qqq.js 导入核心接口
 const qqq = require("./qqq");
@@ -126,7 +127,7 @@ function buildNewRawPath(oldRaw, newName) {
 	return lastSlash === -1 ? newName : oldRaw.slice(0, lastSlash + 1) + newName;
 }
 
-// ==================== FFprobe 探测（q1 自己处理）====================
+// ==================== FFprobe 探测 ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
@@ -165,7 +166,7 @@ async function getMediaInfo(filePath, mtimeMs) {
 				if (c.includes('mjpeg') && info.duration <= 0.1) { info.type = 'image'; info.duration = 0; }
 				else if (['png', 'bmp', 'tiff', 'jpeg'].some(x => c.includes(x))) info.type = 'image';
 				else if (c.includes('gif')) info.type = info.duration > 0.1 ? 'animated_image' : 'image';
-				else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4'].some(x => c.includes(x))) info.type = 'video';
+				else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4', 'vp09', 'vp08'].some(x => c.includes(x))) info.type = 'video';
 			}
 			if (info.type === 'unknown') {
 				const ext = path.extname(filePath).toLowerCase();
@@ -182,42 +183,29 @@ async function getMediaInfo(filePath, mtimeMs) {
 	});
 }
 
-// ==================== 预览生成（FFmpeg 参数由 q1 控制）====================
+// ==================== 预览生成（FFmpeg 转 WebP + TempFile）====================
 
-function getGifDurationFromBuffer(buffer) {
-	if (!buffer || buffer.length < 13) return 0;
-	try {
-		let totalDelayCs = 0, i = 13;
-		const sig = buffer.slice(0, 6).toString('ascii');
-		if (sig !== 'GIF87a' && sig !== 'GIF89a') return 0;
-		const flags = buffer[10];
-		if ((flags & 0x80) !== 0) i += 3 * Math.pow(2, (flags & 0x07) + 1);
+function getWebPDurationFromBuffer(buffer) {
+	if (!buffer || buffer.length < 12) return 0;
+	if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WEBP') return 0;
 
-		while (i < buffer.length - 1) {
-			const blockType = buffer[i];
-			if (blockType === 0x21) {
-				const extLabel = buffer[i + 1];
-				if (extLabel === 0xF9) {
-					if (i + 6 < buffer.length) totalDelayCs += buffer[i + 4] | (buffer[i + 5] << 8);
-					i += 8;
-				} else {
-					i += 2;
-					while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				}
-			} else if (blockType === 0x2C) {
-				if (i + 10 > buffer.length) break;
-				const imgFlags = buffer[i + 9];
-				i += 10;
-				if ((imgFlags & 0x80) !== 0) i += 3 * Math.pow(2, (imgFlags & 0x07) + 1);
-				i++;
-				while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-				i++;
-			} else if (blockType === 0x3B) break;
-			else i++;
+	let pos = 12;
+	let totalDurationMs = 0;
+
+	while (pos < buffer.length - 8) {
+		const chunkId = buffer.toString('ascii', pos, pos + 4);
+		const chunkSize = buffer.readUInt32LE(pos + 4);
+		const nextChunkPos = pos + 8 + chunkSize + (chunkSize % 2);
+
+		if (chunkId === 'ANMF') {
+			if (pos + 23 < buffer.length) {
+				const dur = buffer[pos + 20] | (buffer[pos + 21] << 8) | (buffer[pos + 22] << 16);
+				totalDurationMs += dur;
+			}
 		}
-		return totalDelayCs / 100;
-	} catch (e) { return 0; }
+		pos = nextChunkPos;
+	}
+	return totalDurationMs / 1000;
 }
 
 function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
@@ -239,10 +227,22 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 	}
 
 	const args = ["-hide_banner", "-loglevel", "error"];
-	let expectedGifDuration = 0;
+	let expectedWebPDuration = 0;
 	const fpsLimit = extremePerformanceMode ? 8 : 10;
 	const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
 	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
+
+	// ★ 配置 WebP 编码参数，不再包含 pipe:1 ★
+	const webpEncodingArgs = [
+		"-c:v", "libwebp",
+		"-lossless", "0",
+		"-compression_level", "4",
+		"-q:v", extremePerformanceMode ? "50" : "75",
+		"-loop", "0",
+		"-an",
+		"-vsync", "0",
+		"-f", "webp"
+	];
 
 	if (isVideo) {
 		const safeDur = duration || 0;
@@ -253,38 +253,40 @@ function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
 				clipDur = Math.min(clipDur, safeDur - clipStart);
 			}
 			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDur;
+			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]");
+			expectedWebPDuration = clipDur;
 		} else if (safeDur < 5) {
 			let clipStart = Math.min(1, safeDur * 0.1);
 			let clipDur = Math.min(4, safeDur - clipStart);
 			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDur;
+			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]");
+			expectedWebPDuration = clipDur;
 		} else {
 			const seg = 1.3;
 			const s1 = 1, s2 = Math.floor(safeDur / 2), s3 = Math.max(s2 + seg + 0.5, safeDur - seg - 1);
 			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = seg * 3;
+			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`, "-map", "[out_v]");
+			expectedWebPDuration = seg * 3;
 		}
+		args.push(...webpEncodingArgs);
+
 	} else if (isGif) {
 		if (extremePerformanceMode) args.push("-t", "2");
 		args.push("-i", filePath);
 		const f = extremePerformanceMode
 			? `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`
 			: `[0:v]${scaleFilter}[out_v]`;
-		args.push("-filter_complex", f, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
+		args.push("-filter_complex", f, "-map", "[out_v]", ...webpEncodingArgs);
 	} else {
 		args.push("-i", filePath);
 		args.push("-filter_complex", `[0:v]${scaleFilter}[out_v]`, "-map", "[out_v]");
-		if (extremePerformanceMode) args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-		else args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
+		if (extremePerformanceMode) args.push("-frames:v", "1", "-c:v", "mjpeg", "-f", "image2pipe");
+		else args.push("-frames:v", "1", "-c:v", "libwebp", "-lossless", "0", "-q:v", "80", "-f", "webp");
 	}
 
-	return { args, targetW, targetH, expectedGifDuration };
+	return { args, targetW, targetH, expectedWebPDuration };
 }
 
 async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
@@ -293,12 +295,13 @@ async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 	let mtimeMs = 0;
 	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
 
-	// 检查磁盘缓存
-	const quality = extremePerformanceMode ? "q0" : (isVideo ? "q2" : "q1");
+	// 缓存键
+	const quality = extremePerformanceMode ? "w0" : (isVideo ? "w2" : "w1");
+
 	const cached = qqq.getCachedBuffer(contentId, quality);
 	if (cached) {
-		const gifDur = (isGif || isVideo) ? getGifDurationFromBuffer(cached) : 0;
-		return { buffer: cached, gifDuration: gifDur, fromCache: true };
+		const webpDur = (isGif || isVideo) ? getWebPDurationFromBuffer(cached) : 0;
+		return { buffer: cached, webpDuration: webpDur, fromCache: true };
 	}
 
 	const info = await getMediaInfo(filePath, mtimeMs);
@@ -306,39 +309,82 @@ async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
 	const duration = info?.duration || 0;
 
 	return new Promise((resolve) => {
-		const { args, targetW, targetH, expectedGifDuration } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
+		const { args, targetW, targetH, expectedWebPDuration } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
+
+		// ★ 关键修复：使用临时文件替代管道输出 ★
+		const usePipe = (extremePerformanceMode && !isVideo && !isGif); // 仅极速模式静态图用 Pipe (MJPEG)
+		let tempFile = null;
+
+		if (usePipe) {
+			args.push("pipe:1");
+		} else {
+			// WebP 动画必须通过文件生成，否则 RIFF 头不完整导致浏览器无法显示
+			const rand = Math.random().toString(36).slice(2);
+			tempFile = path.join(os.tmpdir(), `qqq_p_${contentId}_${rand}.webp`);
+			args.push("-y", tempFile);
+		}
+
 		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let resolved = false;
 
 		const timer = setTimeout(() => {
-			if (!resolved) { resolved = true; try { child.kill(); } catch { } resolve(null); }
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				if (tempFile && fs.existsSync(tempFile)) try { fs.unlinkSync(tempFile); } catch { }
+				resolve(null);
+			}
 		}, 30000);
 
-		child.stdout.on("data", d => chunks.push(d));
-		child.stderr.on("data", () => { });
-		child.on("error", () => { if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); } });
+		if (usePipe) {
+			child.stdout.on("data", d => chunks.push(d));
+		}
+
+		child.on("error", () => {
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+				if (tempFile && fs.existsSync(tempFile)) try { fs.unlinkSync(tempFile); } catch { }
+				resolve(null);
+			}
+		});
+
 		child.on("close", () => {
 			if (!resolved) {
 				resolved = true;
 				clearTimeout(timer);
-				if (!chunks.length) { resolve(null); return; }
 
-				const buffer = Buffer.concat(chunks);
-				let gifDuration = expectedGifDuration;
-				if (isGif && !isVideo) {
-					gifDuration = getGifDurationFromBuffer(buffer);
-					if (extremePerformanceMode && gifDuration > 2.5) gifDuration = 2.0;
+				let buffer = null;
+
+				// 读取结果
+				if (usePipe) {
+					if (chunks.length > 0) buffer = Buffer.concat(chunks);
+				} else {
+					if (tempFile && fs.existsSync(tempFile)) {
+						try {
+							buffer = fs.readFileSync(tempFile);
+							fs.unlinkSync(tempFile);
+						} catch (e) { buffer = null; }
+					}
 				}
 
-				// 写入磁盘缓存
+				if (!buffer) { resolve(null); return; }
+
+				let webpDuration = expectedWebPDuration;
+				if (isGif && !isVideo) {
+					const detected = getWebPDurationFromBuffer(buffer);
+					if (detected > 0) webpDuration = detected;
+					if (extremePerformanceMode && webpDuration > 2.5) webpDuration = 2.0;
+				}
+
 				qqq.setCacheEntry(contentId, quality, buffer, {
 					width: targetW, height: targetH,
 					type: isVideo ? 'video' : (isGif ? 'gif' : 'image'),
-					gifDur: gifDuration, srcDuration: duration
+					webpDur: webpDuration, srcDuration: duration
 				});
 
-				resolve({ buffer, gifDuration, outputSize: { width: targetW, height: targetH } });
+				resolve({ buffer, webpDuration, outputSize: { width: targetW, height: targetH } });
 			}
 		});
 	});
@@ -465,15 +511,15 @@ async function renderImages(editor) {
 
 					const deco = { range: anchorRange, renderOptions: {} };
 					let contentUrl = "";
-					let actualGifDuration = 0;
+					let actualWebPDuration = 0;
 					let outputSize = null;
 
 					if (previewResult?.buffer) {
-						let mime = "image/png";
-						if (isGif || isVideo) mime = "image/gif";
-						else if (extremePerformanceMode) mime = "image/jpeg";
+						let mime = "image/webp";
+						if (extremePerformanceMode && !isVideo && !isGif) mime = "image/jpeg";
+
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						if (previewResult.gifDuration > 0) actualGifDuration = previewResult.gifDuration;
+						if (previewResult.webpDuration > 0) actualWebPDuration = previewResult.webpDuration;
 						outputSize = previewResult.outputSize;
 					} else if (isImage && !isVideo && !isGif) {
 						contentUrl = `url("${vscode.Uri.file(absPath).toString()}")`;
@@ -481,8 +527,8 @@ async function renderImages(editor) {
 					if (!contentUrl) return null;
 
 					let progressBarUrl = null;
-					if ((isGif || isVideo) && actualGifDuration > 0) {
-						progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
+					if ((isGif || isVideo) && actualWebPDuration > 0) {
+						progressBarUrl = `url("${createProgressSvg(actualWebPDuration)}")`;
 					}
 
 					const gridSize = "20px 20px";
@@ -1011,4 +1057,3 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
-
