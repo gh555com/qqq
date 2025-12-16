@@ -1021,6 +1021,7 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
+
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
