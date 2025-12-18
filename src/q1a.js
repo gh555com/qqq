@@ -1,6 +1,7 @@
 // src/q1a.js
 // ==========================================
-// ★★★ 导出 DOC 模块 (RTF格式，兼容 Office 2003) ★★★
+// ★★★ 导出文档模块 (支持 RTF/.doc 和 DOCX 双格式) ★★★
+// ★★★ 两种格式交付物完全一致，仅底层编码不同 ★★★
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -11,13 +12,69 @@ const os = require("os");
 
 const qqq = require("./qqq");
 
-// ==================== 导出常量 ====================
+// ★★★ 导入 docx 库 ★★★
+const docx = require("docx");
+const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    ImageRun,
+    TabStopPosition,
+    TabStopType,
+    convertInchesToTwip
+} = docx;
+
+// ==================== 常量 ====================
 
 const EXPORT_MAX_WIDTH = 512;
 const EXPORT_MAX_HEIGHT = 288;
+const FILENAME_MAX_LENGTH = 22;
+const MAX_CONCURRENT_EXPORTS = 3;
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg", ".ai", ".eps", ".cdr", ".psd"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
+
+const ExportFormat = {
+    RTF_DOC: "rtf_doc",
+    DOCX: "docx"
+};
+
+let activeExportCount = 0;
+const activeChildProcesses = new Map();
+let exportIdCounter = 0;
+
+// ==================== 子进程管理 ====================
+
+function createExportSession() {
+    const exportId = ++exportIdCounter;
+    activeChildProcesses.set(exportId, new Set());
+    return exportId;
+}
+
+function registerChildProcess(exportId, child) {
+    const set = activeChildProcesses.get(exportId);
+    if (set) {
+        set.add(child);
+        child.on("close", () => set.delete(child));
+        child.on("error", () => set.delete(child));
+    }
+}
+
+function cleanupExportSession(exportId) {
+    const set = activeChildProcesses.get(exportId);
+    if (set) {
+        for (const child of set) {
+            try {
+                if (!child.killed) {
+                    child.kill("SIGKILL");
+                }
+            } catch (e) { }
+        }
+        set.clear();
+        activeChildProcesses.delete(exportId);
+    }
+}
 
 // ==================== 辅助函数 ====================
 
@@ -33,6 +90,19 @@ function formatBytes(size) {
     }
 
     return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
+}
+
+function truncateFilename(filename, maxLength = FILENAME_MAX_LENGTH) {
+    if (!filename) return filename;
+
+    const ext = path.extname(filename);
+    const baseName = path.basename(filename, ext);
+
+    if (baseName.length <= maxLength) {
+        return filename;
+    }
+
+    return baseName.substring(0, maxLength) + "..." + ext;
 }
 
 function isMediaFile(ext) {
@@ -53,21 +123,30 @@ function resolvePathToAbsolute(docUri, rawPath) {
 }
 
 function computeFileSHA256(filePath) {
-    try {
-        const buffer = fs.readFileSync(filePath);
-        return crypto.createHash("sha256").update(buffer).digest("hex");
-    } catch {
-        return "无法计算";
-    }
+    return new Promise((resolve) => {
+        try {
+            const hash = crypto.createHash("sha256");
+            const stream = fs.createReadStream(filePath);
+
+            stream.on("data", chunk => hash.update(chunk));
+            stream.on("end", () => resolve(hash.digest("hex")));
+            stream.on("error", () => resolve("无法计算"));
+        } catch {
+            resolve("无法计算");
+        }
+    });
 }
 
 // ==================== 媒体信息获取 ====================
 
-async function getMediaInfo(filePath) {
+async function getMediaInfo(filePath, exportId) {
     if (!qqq.ffmpegPath) return null;
 
     return new Promise((resolve) => {
         const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
+
+        registerChildProcess(exportId, child);
+
         let stderr = "";
 
         child.stderr.on("data", d => {
@@ -108,23 +187,15 @@ async function getMediaInfo(filePath) {
     });
 }
 
-// ==================== GIF 转换（balanced 模式） ====================
+// ==================== PNG 转换（统一格式） ====================
 
-/**
- * 将媒体文件转换为 GIF（带透明通道）
- * 使用 balanced 模式的逻辑
- * @param {string} filePath - 源文件路径
- * @param {object} info - 媒体信息 {width, height, duration}
- * @returns {Promise<{buffer: Buffer, width: number, height: number} | null>}
- */
-async function convertMediaToGif(filePath, info) {
+async function convertMediaToPng(filePath, info, exportId) {
     if (!qqq.ffmpegPath) return null;
 
     const duration = info?.duration || 0;
     const origW = info?.width || 512;
     const origH = info?.height || 288;
 
-    // 计算输出尺寸：小于512保留原始，大于512适配到512x288内
     let targetW = origW;
     let targetH = origH;
 
@@ -134,60 +205,36 @@ async function convertMediaToGif(filePath, info) {
         targetH = Math.max(1, Math.round(origH * scale));
     }
 
-    // 确保尺寸为偶数（编码要求）
     targetW = targetW % 2 === 0 ? targetW : targetW + 1;
     targetH = targetH % 2 === 0 ? targetH : targetH + 1;
 
     return new Promise((resolve) => {
         const args = ["-hide_banner", "-loglevel", "error"];
-        const isStatic = duration <= 0.1;
-        const isGifLike = !isStatic && duration > 0.1 && duration < 10;
 
         const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
 
-        // ★★★ balanced 模式逻辑 ★★★
-        if (isStatic) {
-            // 静态图：单帧
-            args.push("-i", filePath);
-            args.push("-vf", `${scaleFilter},split[s0][s1];[s0]palettegen=reserve_transparent=on:transparency_color=ffffff[p];[s1][p]paletteuse=alpha_threshold=128`);
-            args.push("-frames:v", "1");
-        } else if (isGifLike) {
-            // 短动画（<10s）：保留全部帧
-            args.push("-i", filePath);
-            args.push("-vf", `${scaleFilter},split[s0][s1];[s0]palettegen=reserve_transparent=on:transparency_color=ffffff:stats_mode=diff[p];[s1][p]paletteuse=alpha_threshold=128:dither=bayer:bayer_scale=5`);
-        } else {
-            // 长视频（>=10s）：三段拼接
-            const seg = 1.33;
-            const s1 = 1;
-            const s2 = Math.floor(duration / 2);
-            const s3 = Math.max(s2 + seg + 0.5, duration - seg - 1);
-
-            args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
-            args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
-            args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-
-            args.push("-filter_complex",
-                `[0:v]fps=15,${scaleFilter}[v0];` +
-                `[1:v]fps=15,${scaleFilter}[v1];` +
-                `[2:v]fps=15,${scaleFilter}[v2];` +
-                `[v0][v1][v2]concat=n=3:v=1:a=0[vc];` +
-                `[vc]split[s0][s1];` +
-                `[s0]palettegen=reserve_transparent=on:transparency_color=ffffff:stats_mode=diff[p];` +
-                `[s1][p]paletteuse=alpha_threshold=128:dither=bayer:bayer_scale=5[out]`
-            );
-            args.push("-map", "[out]");
+        // ★★★ 统一逻辑：视频/动图取中间帧，静态图取第一帧 ★★★
+        if (duration > 0.5) {
+            const seekTime = Math.floor(duration / 2);
+            args.push("-ss", String(seekTime));
         }
 
-        args.push("-loop", "0", "-f", "gif");
+        args.push("-i", filePath);
+        args.push("-vf", scaleFilter);
+        args.push("-frames:v", "1");
+        args.push("-f", "image2");
+        args.push("-c:v", "png");
 
         const rand = Math.random().toString(36).slice(2);
-        const tempFile = path.join(os.tmpdir(), `qqq_export_${rand}.gif`);
+        const tempFile = path.join(os.tmpdir(), `qqq_export_${rand}.png`);
         args.push("-y", tempFile);
 
         const child = cp.spawn(qqq.ffmpegPath, args, {
             windowsHide: true,
             stdio: ['ignore', 'ignore', 'pipe']
         });
+
+        registerChildProcess(exportId, child);
 
         let resolved = false;
 
@@ -197,7 +244,7 @@ async function convertMediaToGif(filePath, info) {
                 try { child.kill(); } catch { }
                 resolve(null);
             }
-        }, 120000); // 导出允许2分钟
+        }, 60000);
 
         child.on("close", (code) => {
             if (!resolved) {
@@ -226,220 +273,355 @@ async function convertMediaToGif(filePath, info) {
     });
 }
 
-// ==================== RTF 生成器（兼容 Office 2003） ====================
+// ==================== RTF 生成器 ====================
 
-/**
- * 转义 RTF 特殊字符
- */
 function escapeRtf(text) {
     if (!text) return "";
 
     let result = "";
-    for (let i = 0; i < text.length; i++) {
-        const ch = text.charCodeAt(i);
 
-        if (ch === 0x5C) {
-            // 反斜杠 \
+    for (const char of text) {
+        const cp = char.codePointAt(0);
+
+        if (cp === 0x5C) {
             result += "\\\\";
-        } else if (ch === 0x7B) {
-            // 左花括号 {
+        } else if (cp === 0x7B) {
             result += "\\{";
-        } else if (ch === 0x7D) {
-            // 右花括号 }
+        } else if (cp === 0x7D) {
             result += "\\}";
-        } else if (ch === 0x0A) {
-            // 换行
+        } else if (cp === 0x0A) {
             result += "\\line ";
-        } else if (ch === 0x0D) {
-            // 回车（忽略，配合 \n 处理）
+        } else if (cp === 0x0D) {
             continue;
-        } else if (ch === 0x09) {
-            // Tab
+        } else if (cp === 0x09) {
             result += "\\tab ";
-        } else if (ch > 127) {
-            // 非 ASCII 字符：使用 Unicode 转义
-            result += `\\u${ch}?`;
+        } else if (cp > 127) {
+            if (cp > 0xFFFF) {
+                const hi = Math.floor((cp - 0x10000) / 0x400) + 0xD800;
+                const lo = ((cp - 0x10000) % 0x400) + 0xDC00;
+                const hiSigned = hi > 32767 ? hi - 65536 : hi;
+                const loSigned = lo > 32767 ? lo - 65536 : lo;
+                result += `\\u${hiSigned}?\\u${loSigned}?`;
+            } else {
+                const rtfCode = cp > 32767 ? cp - 65536 : cp;
+                result += `\\u${rtfCode}?`;
+            }
         } else {
-            result += text[i];
+            result += char;
         }
     }
 
     return result;
 }
 
-/**
- * 将 Buffer 转换为 RTF 十六进制字符串
- */
-function bufferToRtfHex(buffer) {
-    return buffer.toString('hex');
-}
-
-/**
- * 生成 RTF 图片块
- * @param {Buffer} gifBuffer - GIF 图片数据
- * @param {number} width - 图片宽度（像素）
- * @param {number} height - 图片高度（像素）
- * @returns {string} RTF 图片代码
- */
-function createRtfPicture(gifBuffer, width, height) {
-    // RTF 使用 twips 单位，1 inch = 1440 twips，假设 96 DPI
-    const twipsPerPixel = 15; // 1440 / 96 = 15
+function createRtfPicture(pngBuffer, width, height) {
+    const twipsPerPixel = 15;
     const picwgoal = Math.round(width * twipsPerPixel);
     const pichgoal = Math.round(height * twipsPerPixel);
 
-    const hexData = bufferToRtfHex(gifBuffer);
+    const hexData = pngBuffer.toString('hex');
 
-    // Office 2003 兼容的 GIF 嵌入方式
-    // 注意：\pict 后面直接用十六进制数据，不需要 \gifblip（某些版本不支持）
-    // 使用 \pngblip 或直接嵌入原始数据
-    return `{\\pict\\pngblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\n${hexData}\n}`;
+    return `{\\pict\\pngblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\r\n${hexData}\r\n}`;
 }
 
-/**
- * 生成完整的 RTF 文档
- */
 function generateRtfDocument(elements, attachments, title) {
     const parts = [];
 
-    // RTF 头部（ANSI + 简体中文代码页 936）
-    parts.push("{\\rtf1\\ansi\\ansicpg936\\deff0\\nouicompat\\deflang2052");
+    // ★★★ 简化：只用 Arial，只用黑色 ★★★
+    parts.push("{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033");
 
-    // 字体表
     parts.push("{\\fonttbl");
-    parts.push("{\\f0\\fnil\\fcharset134 \\u24494?\\u36719?\\u38597?\\u40657?;}"); // 微软雅黑
-    parts.push("{\\f1\\fnil\\fcharset134 \\u23435?\\u20307?;}"); // 宋体
-    parts.push("{\\f2\\fmodern\\fcharset0 Consolas;}");
+    parts.push("{\\f0\\fswiss\\fcharset0 Arial;}");
     parts.push("}");
 
-    // 颜色表
-    parts.push("{\\colortbl ;");
-    parts.push("\\red0\\green0\\blue0;");        // 1: 黑色
-    parts.push("\\red102\\green102\\blue102;");  // 2: 灰色 #666666
-    parts.push("\\red255\\green0\\blue0;");      // 3: 红色
-    parts.push("\\red136\\green136\\blue136;");  // 4: 分隔线灰色
-    parts.push("\\red240\\green240\\blue240;");  // 5: 表格背景
-    parts.push("}");
+    parts.push("{\\colortbl ;\\red0\\green0\\blue0;}");
 
-    // 文档属性
-    parts.push(`{\\*\\generator QQQ VSCode Extension;}`);
-
-    // 页面设置（A4，1英寸边距）
     parts.push("\\paperw11906\\paperh16838");
     parts.push("\\margl1440\\margr1440\\margt1440\\margb1440");
+    parts.push("\\widowctrl\\ftnbj\\aenddoc");
 
-    // 默认段落格式
-    parts.push("\\widowctrl\\ftnbj\\aenddoc\\trackmoves0\\trackformatting1");
-    parts.push("\\donotembedsysfont0\\relyonvml0\\donotembedlingdata1");
+    // 标题
+    if (title) {
+        parts.push(`\\pard\\ltrpar\\qc\\sb200\\sa400\\f0\\fs36\\b ${escapeRtf(title)}\\b0\\fs22\\par`);
+    }
 
-    // 开始文档内容
-    parts.push("\\pard\\plain\\f0\\fs22\\cf1");
+    parts.push("\\pard\\ltrpar\\plain\\f0\\fs22");
 
     // 内容
     for (const elem of elements) {
         if (elem.type === "text") {
-            // 文本段落：保留原始格式，包括空行
             const lines = elem.content.split(/\r?\n/);
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
+            for (const line of lines) {
                 if (line.length === 0) {
-                    // 空行
-                    parts.push("\\par");
+                    parts.push("\\pard\\ltrpar\\sa0\\par");
                 } else {
-                    parts.push(`${escapeRtf(line)}\\par`);
+                    parts.push(`\\pard\\ltrpar\\ql\\f0\\fs22 ${escapeRtf(line)}\\par`);
                 }
             }
         } else if (elem.type === "image") {
-            // 图片：居中显示
-            parts.push("\\pard\\qc\\sb200\\sa200");
+            if (elem.originalMark) {
+                parts.push(`\\pard\\ltrpar\\ql\\sb200\\sa100\\f0\\fs22 ${escapeRtf(elem.originalMark)}\\par`);
+            }
+
+            parts.push("\\pard\\ltrpar\\ql\\sa200");
             parts.push(elem.rtfPicture);
             parts.push("\\par");
 
-            // 图片说明（原始路径）
-            if (elem.caption) {
-                parts.push(`\\pard\\qc\\f0\\fs16\\cf2\\i ${escapeRtf(elem.caption)}\\i0\\cf1\\fs22\\par`);
-            }
-
-            // 恢复左对齐
-            parts.push("\\pard\\ql\\f0\\fs22\\cf1");
+            parts.push("\\pard\\ltrpar\\ql\\f0\\fs22");
         } else if (elem.type === "image_error") {
-            // 图片转换失败提示
-            parts.push(`\\pard\\cf3 [${escapeRtf("\\u23186?\\u20307?\\u36716?\\u25442?\\u22833?\\u36133?: " + elem.path)}]\\cf1\\par`);
+            parts.push(`\\pard\\ltrpar\\f0\\fs22 [${escapeRtf("媒体转换失败: " + elem.path)}]\\par`);
         }
     }
 
     // 附件索引
     if (attachments.length > 0) {
         // 分隔线
-        parts.push("\\pard\\sb600\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20 \\par");
+        parts.push("\\pard\\ltrpar\\sb600\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20 \\par");
 
         // 标题
-        parts.push("\\pard\\sb200\\sa300\\f0\\fs28\\b");
-        parts.push(`${escapeRtf("📁 附件索引")}`);
+        parts.push("\\pard\\ltrpar\\sb200\\sa200\\f0\\fs28\\b");
+        parts.push(escapeRtf("📁 附件索引"));
         parts.push("\\b0\\fs22\\par");
 
-        // 简单表格（使用制表符模拟）
-        parts.push("\\pard\\sb100\\sa60\\f0\\fs18\\b");
-        parts.push(`${escapeRtf("序号")}\\tab ${escapeRtf("文件名")}\\tab\\tab\\tab ${escapeRtf("类型")}\\tab ${escapeRtf("大小")}\\tab ${escapeRtf("SHA256（前16位）")}`);
+        // 表头（使用 \tab 对齐）
+        parts.push("\\pard\\ltrpar\\tx500\\tx4500\\tx5500\\tx6800\\sa100\\f0\\fs18\\b");
+        parts.push(escapeRtf("序号") + "\\tab " + escapeRtf("文件名") + "\\tab " + escapeRtf("类型") + "\\tab " + escapeRtf("大小") + "\\tab " + escapeRtf("SHA256（前16位）"));
         parts.push("\\b0\\par");
 
-        // 数据行
+        // 数据行（直接跟在表头后面，无分隔线）
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
             const shortHash = att.sha256.substring(0, 16) + "...";
-            parts.push(`${i + 1}\\tab ${escapeRtf(att.name)}\\tab\\tab\\tab ${escapeRtf(att.ext.toUpperCase())}\\tab ${escapeRtf(formatBytes(att.size))}\\tab \\f2\\fs14 ${escapeRtf(shortHash)}\\f0\\fs18\\par`);
+            const displayName = truncateFilename(att.name);
+
+            parts.push("\\pard\\ltrpar\\tx500\\tx4500\\tx5500\\tx6800\\sa60\\f0\\fs16");
+            parts.push(`${i + 1}\\tab ${escapeRtf(displayName)}\\tab ${escapeRtf(att.ext.toUpperCase())}\\tab ${escapeRtf(formatBytes(att.size))}\\tab ${escapeRtf(shortHash)}`);
+            parts.push("\\par");
         }
 
         // 完整 SHA256 列表
-        parts.push("\\pard\\sb300\\sa100\\f0\\fs18\\b");
-        parts.push(`${escapeRtf("完整 SHA256 哈希值：")}`);
+        parts.push("\\pard\\ltrpar\\sb300\\sa100\\f0\\fs18\\b");
+        parts.push(escapeRtf("完整 SHA256 哈希值："));
         parts.push("\\b0\\par");
 
         for (const att of attachments) {
-            parts.push(`\\pard\\sa40\\f0\\fs14 ${escapeRtf(att.name + ":")}\\par`);
-            parts.push(`\\pard\\li400\\sa80\\f2\\fs12\\cf2 ${escapeRtf(att.sha256)}\\cf1\\f0\\par`);
+            parts.push(`\\pard\\ltrpar\\sa40\\f0\\fs14 ${escapeRtf(att.name + ":")}\\par`);
+            parts.push(`\\pard\\ltrpar\\li400\\sa80\\f0\\fs12 ${escapeRtf(att.sha256)}\\par`);
         }
     }
 
-    // 结束文档
     parts.push("}");
 
     return parts.join("\r\n");
 }
 
+// ==================== DOCX 生成器 ====================
+
+// ★★★ Tab 位置常量（与 RTF 一致）★★★
+const TAB_POS_1 = 500;   // 序号后
+const TAB_POS_2 = 4500;  // 文件名后
+const TAB_POS_3 = 5500;  // 类型后
+const TAB_POS_4 = 6800;  // 大小后
+
+function generateDocxDocument(elements, attachments, title) {
+    const children = [];
+
+    // 标题
+    if (title) {
+        children.push(new Paragraph({
+            children: [new TextRun({ text: title, bold: true, size: 36, font: "Arial" })],
+            alignment: "center",
+            spacing: { before: 200, after: 400 }
+        }));
+    }
+
+    // 内容
+    for (const elem of elements) {
+        if (elem.type === "text") {
+            const lines = elem.content.split(/\r?\n/);
+            for (const line of lines) {
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: line, size: 22, font: "Arial" })],
+                    spacing: { after: 0 }
+                }));
+            }
+        } else if (elem.type === "image") {
+            if (elem.originalMark) {
+                children.push(new Paragraph({
+                    children: [new TextRun({ text: elem.originalMark, size: 22, font: "Arial" })],
+                    spacing: { before: 200, after: 100 }
+                }));
+            }
+
+            children.push(new Paragraph({
+                children: [
+                    new ImageRun({
+                        data: elem.imageBuffer,
+                        transformation: {
+                            width: elem.width,
+                            height: elem.height
+                        }
+                    })
+                ],
+                spacing: { after: 200 }
+            }));
+        } else if (elem.type === "image_error") {
+            children.push(new Paragraph({
+                children: [new TextRun({ text: `[媒体转换失败: ${elem.path}]`, size: 22, font: "Arial" })],
+                spacing: { after: 0 }
+            }));
+        }
+    }
+
+    // 附件索引
+    if (attachments.length > 0) {
+        // 分隔线
+        children.push(new Paragraph({
+            children: [new TextRun({ text: "─".repeat(60), size: 22, font: "Arial" })],
+            spacing: { before: 600, after: 200 }
+        }));
+
+        // 标题
+        children.push(new Paragraph({
+            children: [new TextRun({ text: "📁 附件索引", bold: true, size: 28, font: "Arial" })],
+            spacing: { before: 200, after: 200 }
+        }));
+
+        // ★★★ 表头（使用 Tab 对齐，与 RTF 一致）★★★
+        children.push(new Paragraph({
+            children: [
+                new TextRun({ text: "序号", bold: true, size: 18, font: "Arial" }),
+                new TextRun({ text: "\t", size: 18 }),
+                new TextRun({ text: "文件名", bold: true, size: 18, font: "Arial" }),
+                new TextRun({ text: "\t", size: 18 }),
+                new TextRun({ text: "类型", bold: true, size: 18, font: "Arial" }),
+                new TextRun({ text: "\t", size: 18 }),
+                new TextRun({ text: "大小", bold: true, size: 18, font: "Arial" }),
+                new TextRun({ text: "\t", size: 18 }),
+                new TextRun({ text: "SHA256（前16位）", bold: true, size: 18, font: "Arial" })
+            ],
+            tabStops: [
+                { type: TabStopType.LEFT, position: TAB_POS_1 },
+                { type: TabStopType.LEFT, position: TAB_POS_2 },
+                { type: TabStopType.LEFT, position: TAB_POS_3 },
+                { type: TabStopType.LEFT, position: TAB_POS_4 }
+            ],
+            spacing: { after: 100 }
+        }));
+
+        // 数据行
+        for (let i = 0; i < attachments.length; i++) {
+            const att = attachments[i];
+            const shortHash = att.sha256.substring(0, 16) + "...";
+            const displayName = truncateFilename(att.name);
+
+            children.push(new Paragraph({
+                children: [
+                    new TextRun({ text: String(i + 1), size: 16, font: "Arial" }),
+                    new TextRun({ text: "\t", size: 16 }),
+                    new TextRun({ text: displayName, size: 16, font: "Arial" }),
+                    new TextRun({ text: "\t", size: 16 }),
+                    new TextRun({ text: att.ext.toUpperCase(), size: 16, font: "Arial" }),
+                    new TextRun({ text: "\t", size: 16 }),
+                    new TextRun({ text: formatBytes(att.size), size: 16, font: "Arial" }),
+                    new TextRun({ text: "\t", size: 16 }),
+                    new TextRun({ text: shortHash, size: 16, font: "Arial" })
+                ],
+                tabStops: [
+                    { type: TabStopType.LEFT, position: TAB_POS_1 },
+                    { type: TabStopType.LEFT, position: TAB_POS_2 },
+                    { type: TabStopType.LEFT, position: TAB_POS_3 },
+                    { type: TabStopType.LEFT, position: TAB_POS_4 }
+                ],
+                spacing: { after: 60 }
+            }));
+        }
+
+        // 完整 SHA256 列表
+        children.push(new Paragraph({
+            children: [new TextRun({ text: "完整 SHA256 哈希值：", bold: true, size: 18, font: "Arial" })],
+            spacing: { before: 300, after: 100 }
+        }));
+
+        for (const att of attachments) {
+            children.push(new Paragraph({
+                children: [new TextRun({ text: `${att.name}:`, size: 14, font: "Arial" })],
+                spacing: { after: 40 }
+            }));
+            children.push(new Paragraph({
+                children: [new TextRun({ text: att.sha256, size: 12, font: "Arial" })],
+                indent: { left: convertInchesToTwip(0.3) },
+                spacing: { after: 80 }
+            }));
+        }
+    }
+
+    return new Document({
+        creator: "qqq extension",
+        title: title || "qqq 导出文档",
+        sections: [{
+            properties: {},
+            children: children
+        }]
+    });
+}
+
 // ==================== 导出命令 ====================
 
-/**
- * 导出文档命令（主入口）
- * @param {boolean} isCoreIntegrityValid - 完整性验证结果
- */
 async function executeExportDocCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
-        vscode.window.showErrorMessage("Integrity check failed.");
+        vscode.window.showErrorMessage("qqq: Integrity check failed.");
+        return;
+    }
+
+    if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
+        vscode.window.showWarningMessage(`qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
         return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage("没有打开的文档");
+        vscode.window.showWarningMessage("qqq: 没有打开的文档");
         return;
     }
 
     const document = editor.document;
     const docDir = document.isUntitled ? os.homedir() : path.dirname(document.uri.fsPath);
+    const docFullName = document.isUntitled ? "untitled.txt" : path.basename(document.uri.fsPath);
     const docBaseName = document.isUntitled ? "untitled" : path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
 
-    // 解析文档内容
-    const text = document.getText();
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+    // ★★★ 格式选择（RTF 为默认第一项）★★★
+    const formatChoice = await vscode.window.showQuickPick([
+        {
+            label: "$(file) Word 文档（兼容 Office 2003, RTF）(*.doc)",
+            description: "RTF 格式，兼容性最好",
+            format: ExportFormat.RTF_DOC
+        },
+        {
+            label: "$(file) Word 文档 (*.docx)",
+            description: "Office Open XML 格式，支持腾讯文档/Google Docs",
+            format: ExportFormat.DOCX
+        }
+    ], {
+        placeHolder: "选择导出格式",
+        title: "qqq: 导出文档格式"
+    });
 
-    // 收集所有元素
+    if (!formatChoice) {
+        return;
+    }
+
+    const selectedFormat = formatChoice.format;
+
+    const text = document.getText();
+    const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
+
     const rawElements = [];
     const attachments = [];
     let lastIndex = 0;
     let match;
 
     while ((match = regex.exec(text))) {
-        // 添加标记前的文本
         if (match.index > lastIndex) {
             const textBefore = text.substring(lastIndex, match.index);
             if (textBefore.length > 0) {
@@ -447,9 +629,9 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             }
         }
 
-        const rawPath = match[0].slice(2, -2).trim();
+        const originalMark = match[0];
+        const rawPath = originalMark.slice(2, -2).trim();
 
-        // 跳过 PENDING 标记
         if (!rawPath.startsWith("__PENDING__:")) {
             const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 
@@ -457,10 +639,14 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 const ext = path.extname(absPath).toLowerCase();
 
                 if (isMediaFile(ext)) {
-                    rawElements.push({ type: "media", path: absPath, rawPath: rawPath });
+                    rawElements.push({
+                        type: "media",
+                        path: absPath,
+                        rawPath: rawPath,
+                        originalMark: originalMark
+                    });
                 } else {
-                    // 非媒体文件：保留原始标记 + 记录到附件索引
-                    rawElements.push({ type: "text", content: match[0] });
+                    rawElements.push({ type: "text", content: originalMark });
 
                     try {
                         const stat = fs.statSync(absPath);
@@ -470,20 +656,18 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                             absPath: absPath,
                             ext: ext,
                             size: stat.size,
-                            sha256: computeFileSHA256(absPath)
+                            sha256: await computeFileSHA256(absPath)
                         });
                     } catch { }
                 }
             } else {
-                // 文件不存在，保留原始标记
-                rawElements.push({ type: "text", content: match[0] });
+                rawElements.push({ type: "text", content: originalMark });
             }
         }
 
         lastIndex = match.index + match[0].length;
     }
 
-    // 添加剩余文本
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
         if (remaining.length > 0) {
@@ -491,27 +675,37 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         }
     }
 
-    // 统计媒体数量
     const mediaCount = rawElements.filter(e => e.type === "media").length;
 
     if (rawElements.length === 0) {
-        vscode.window.showWarningMessage("文档为空，无法导出");
+        vscode.window.showWarningMessage("qqq: 文档为空，无法导出");
         return;
     }
 
-    // 开始导出
+    activeExportCount++;
+    const exportId = createExportSession();
+
+    const formatLabel = selectedFormat === ExportFormat.RTF_DOC ? "RTF" : "DOCX";
+
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: "正在导出文档...",
+        title: `qqq: 正在导出 ${formatLabel} 文档...`,
         cancellable: true
     }, async (progress, token) => {
+        token.onCancellationRequested(() => {
+            cleanupExportSession(exportId);
+        });
+
         try {
             const processedElements = [];
             let processedCount = 0;
 
+            // ★★★ 统一缓存：PNG buffer + 尺寸 ★★★
+            const conversionCache = new Map();
+
             for (const elem of rawElements) {
                 if (token.isCancellationRequested) {
-                    vscode.window.showWarningMessage("导出已取消");
+                    vscode.window.showWarningMessage("qqq: 导出已取消");
                     return;
                 }
 
@@ -525,19 +719,38 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                         increment: (1 / Math.max(1, mediaCount)) * 80
                     });
 
-                    // 获取媒体信息
-                    const info = await getMediaInfo(elem.path);
+                    const fingerprint = qqq.computeFingerprint(elem.path);
 
-                    // 转换为 GIF
-                    const gifResult = await convertMediaToGif(elem.path, info);
+                    let pngResult;
 
-                    if (gifResult?.buffer) {
-                        const rtfPicture = createRtfPicture(gifResult.buffer, gifResult.width, gifResult.height);
-                        processedElements.push({
-                            type: "image",
-                            rtfPicture: rtfPicture,
-                            caption: elem.rawPath
-                        });
+                    if (fingerprint && conversionCache.has(fingerprint)) {
+                        pngResult = conversionCache.get(fingerprint);
+                        qqq.logMessage(`复用缓存: ${path.basename(elem.path)} (指纹: ${fingerprint.substring(0, 8)}...)`, "INFO");
+                    } else {
+                        const info = await getMediaInfo(elem.path, exportId);
+                        pngResult = await convertMediaToPng(elem.path, info, exportId);
+
+                        if (pngResult && fingerprint) {
+                            conversionCache.set(fingerprint, pngResult);
+                        }
+                    }
+
+                    if (pngResult?.buffer) {
+                        if (selectedFormat === ExportFormat.RTF_DOC) {
+                            processedElements.push({
+                                type: "image",
+                                rtfPicture: createRtfPicture(pngResult.buffer, pngResult.width, pngResult.height),
+                                originalMark: elem.originalMark
+                            });
+                        } else {
+                            processedElements.push({
+                                type: "image",
+                                imageBuffer: pngResult.buffer,
+                                width: pngResult.width,
+                                height: pngResult.height,
+                                originalMark: elem.originalMark
+                            });
+                        }
                     } else {
                         processedElements.push({
                             type: "image_error",
@@ -547,45 +760,82 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
             }
 
-            progress.report({ message: "生成 RTF 文档...", increment: 10 });
+            if (token.isCancellationRequested) {
+                vscode.window.showWarningMessage("qqq: 导出已取消");
+                return;
+            }
 
-            // 生成 RTF 文档
-            const rtfContent = generateRtfDocument(processedElements, attachments, docBaseName);
+            progress.report({ message: `生成 ${formatLabel} 文档...`, increment: 10 });
+
+            let fileContent;
+            let fileExt;
+            let filterLabel;
+
+            if (selectedFormat === ExportFormat.RTF_DOC) {
+                fileContent = generateRtfDocument(processedElements, attachments, docFullName);
+                fileExt = ".doc";
+                filterLabel = "Word 文档（兼容 Office 2003, RTF）";
+            } else {
+                const docxDocument = generateDocxDocument(processedElements, attachments, docFullName);
+                fileContent = await Packer.toBuffer(docxDocument);
+                fileExt = ".docx";
+                filterLabel = "Word 文档";
+            }
 
             progress.report({ message: "保存文件...", increment: 10 });
 
-            // 保存文件
-            const defaultPath = path.join(docDir, `${docBaseName}_导出.doc`);
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(defaultPath),
-                filters: {
-                    "Word 文档 (兼容 Office 2003)": ["doc"]
+            const defaultExportPath = path.join(docDir, `${docBaseName}${fileExt}`);
+            let finalSavePath = defaultExportPath;
+
+            if (fs.existsSync(defaultExportPath)) {
+                const filters = {};
+                filters[filterLabel] = [fileExt.substring(1)];
+
+                const saveUri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(defaultExportPath),
+                    filters: filters
+                });
+
+                if (!saveUri) {
+                    vscode.window.showWarningMessage("qqq: 导出已取消");
+                    return;
+                }
+
+                finalSavePath = saveUri.fsPath;
+            }
+
+            if (selectedFormat === ExportFormat.RTF_DOC) {
+                fs.writeFileSync(finalSavePath, fileContent, 'utf8');
+            } else {
+                fs.writeFileSync(finalSavePath, fileContent);
+            }
+
+            const stats = fs.statSync(finalSavePath);
+            const fileSizeStr = formatBytes(stats.size);
+
+            const cacheHits = mediaCount - conversionCache.size;
+            if (cacheHits > 0) {
+                qqq.logMessage(`导出完成: ${mediaCount} 个媒体，${cacheHits} 个复用缓存`, "INFO");
+            }
+
+            vscode.window.showInformationMessage(
+                `qqq: 文档已导出 (${fileSizeStr}): ${path.basename(finalSavePath)}`,
+                "打开文件",
+                "打开文件夹"
+            ).then(choice => {
+                if (choice === "打开文件") {
+                    openFile(finalSavePath);
+                } else if (choice === "打开文件夹") {
+                    revealInFolder(finalSavePath);
                 }
             });
 
-            if (saveUri) {
-                // 写入文件（使用二进制写入，避免编码问题）
-                fs.writeFileSync(saveUri.fsPath, rtfContent, { encoding: 'utf8' });
-
-                const stats = fs.statSync(saveUri.fsPath);
-                const fileSizeStr = formatBytes(stats.size);
-
-                vscode.window.showInformationMessage(
-                    `文档已导出 (${fileSizeStr}): ${path.basename(saveUri.fsPath)}`,
-                    "打开文件",
-                    "打开文件夹"
-                ).then(choice => {
-                    if (choice === "打开文件") {
-                        openFile(saveUri.fsPath);
-                    } else if (choice === "打开文件夹") {
-                        revealInFolder(saveUri.fsPath);
-                    }
-                });
-            }
-
         } catch (e) {
             qqq.logMessage(`导出失败: ${e.message}\n${e.stack}`, "ERROR");
-            vscode.window.showErrorMessage(`导出失败: ${e.message}`);
+            vscode.window.showErrorMessage(`qqq: 导出失败: ${e.message}`);
+        } finally {
+            cleanupExportSession(exportId);
+            activeExportCount--;
         }
     });
 }
