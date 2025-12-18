@@ -1,7 +1,7 @@
 // src/q1a.js
 // ==========================================
-// ★★★ 导出文档模块 (支持 RTF/.doc 和 DOCX 双格式) ★★★
-// ★★★ 两种格式交付物完全一致，仅底层编码不同 ★★★
+// ★★★ 导出文档模块 (支持 RTF/.doc、DOCX、ZIP) ★★★
+// ★★★ 两种文档格式交付物完全一致，仅底层编码不同 ★★★
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -20,10 +20,12 @@ const {
     Paragraph,
     TextRun,
     ImageRun,
-    TabStopPosition,
     TabStopType,
     convertInchesToTwip
 } = docx;
+
+// ★★★ 导入 archiver 库 ★★★
+const archiver = require("archiver");
 
 // ==================== 常量 ====================
 
@@ -137,6 +139,20 @@ function computeFileSHA256(filePath) {
     });
 }
 
+/**
+ * ★★★ 生成导出成功消息（统一处理"不包含 qqq 韵味"）★★★
+ */
+function buildExportSuccessMessage(fileName, fileSize, hasQqqLinks) {
+    const sizeStr = formatBytes(fileSize);
+    let msg = `qqq: 文档已导出 (${sizeStr}): ${fileName}`;
+
+    if (!hasQqqLinks) {
+        msg += "，但，制品中不包含 qqq 滴韵味。";
+    }
+
+    return msg;
+}
+
 // ==================== 媒体信息获取 ====================
 
 async function getMediaInfo(filePath, exportId) {
@@ -213,7 +229,6 @@ async function convertMediaToPng(filePath, info, exportId) {
 
         const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
 
-        // ★★★ 统一逻辑：视频/动图取中间帧，静态图取第一帧 ★★★
         if (duration > 0.5) {
             const seekTime = Math.floor(duration / 2);
             args.push("-ss", String(seekTime));
@@ -327,7 +342,6 @@ function createRtfPicture(pngBuffer, width, height) {
 function generateRtfDocument(elements, attachments, title) {
     const parts = [];
 
-    // ★★★ 简化：只用 Arial，只用黑色 ★★★
     parts.push("{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033");
 
     parts.push("{\\fonttbl");
@@ -340,14 +354,12 @@ function generateRtfDocument(elements, attachments, title) {
     parts.push("\\margl1440\\margr1440\\margt1440\\margb1440");
     parts.push("\\widowctrl\\ftnbj\\aenddoc");
 
-    // 标题
     if (title) {
         parts.push(`\\pard\\ltrpar\\qc\\sb200\\sa400\\f0\\fs36\\b ${escapeRtf(title)}\\b0\\fs22\\par`);
     }
 
     parts.push("\\pard\\ltrpar\\plain\\f0\\fs22");
 
-    // 内容
     for (const elem of elements) {
         if (elem.type === "text") {
             const lines = elem.content.split(/\r?\n/);
@@ -373,22 +385,17 @@ function generateRtfDocument(elements, attachments, title) {
         }
     }
 
-    // 附件索引
     if (attachments.length > 0) {
-        // 分隔线
         parts.push("\\pard\\ltrpar\\sb600\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20 \\par");
 
-        // 标题
         parts.push("\\pard\\ltrpar\\sb200\\sa200\\f0\\fs28\\b");
         parts.push(escapeRtf("📁 附件索引"));
         parts.push("\\b0\\fs22\\par");
 
-        // 表头（使用 \tab 对齐）
         parts.push("\\pard\\ltrpar\\tx500\\tx4500\\tx5500\\tx6800\\sa100\\f0\\fs18\\b");
         parts.push(escapeRtf("序号") + "\\tab " + escapeRtf("文件名") + "\\tab " + escapeRtf("类型") + "\\tab " + escapeRtf("大小") + "\\tab " + escapeRtf("SHA256（前16位）"));
         parts.push("\\b0\\par");
 
-        // 数据行（直接跟在表头后面，无分隔线）
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
             const shortHash = att.sha256.substring(0, 16) + "...";
@@ -399,7 +406,6 @@ function generateRtfDocument(elements, attachments, title) {
             parts.push("\\par");
         }
 
-        // 完整 SHA256 列表
         parts.push("\\pard\\ltrpar\\sb300\\sa100\\f0\\fs18\\b");
         parts.push(escapeRtf("完整 SHA256 哈希值："));
         parts.push("\\b0\\par");
@@ -417,16 +423,14 @@ function generateRtfDocument(elements, attachments, title) {
 
 // ==================== DOCX 生成器 ====================
 
-// ★★★ Tab 位置常量（与 RTF 一致）★★★
-const TAB_POS_1 = 500;   // 序号后
-const TAB_POS_2 = 4500;  // 文件名后
-const TAB_POS_3 = 5500;  // 类型后
-const TAB_POS_4 = 6800;  // 大小后
+const TAB_POS_1 = 500;
+const TAB_POS_2 = 4500;
+const TAB_POS_3 = 5500;
+const TAB_POS_4 = 6800;
 
 function generateDocxDocument(elements, attachments, title) {
     const children = [];
 
-    // 标题
     if (title) {
         children.push(new Paragraph({
             children: [new TextRun({ text: title, bold: true, size: 36, font: "Arial" })],
@@ -435,7 +439,6 @@ function generateDocxDocument(elements, attachments, title) {
         }));
     }
 
-    // 内容
     for (const elem of elements) {
         if (elem.type === "text") {
             const lines = elem.content.split(/\r?\n/);
@@ -473,21 +476,17 @@ function generateDocxDocument(elements, attachments, title) {
         }
     }
 
-    // 附件索引
     if (attachments.length > 0) {
-        // 分隔线
         children.push(new Paragraph({
             children: [new TextRun({ text: "─".repeat(60), size: 22, font: "Arial" })],
             spacing: { before: 600, after: 200 }
         }));
 
-        // 标题
         children.push(new Paragraph({
             children: [new TextRun({ text: "📁 附件索引", bold: true, size: 28, font: "Arial" })],
             spacing: { before: 200, after: 200 }
         }));
 
-        // ★★★ 表头（使用 Tab 对齐，与 RTF 一致）★★★
         children.push(new Paragraph({
             children: [
                 new TextRun({ text: "序号", bold: true, size: 18, font: "Arial" }),
@@ -509,7 +508,6 @@ function generateDocxDocument(elements, attachments, title) {
             spacing: { after: 100 }
         }));
 
-        // 数据行
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
             const shortHash = att.sha256.substring(0, 16) + "...";
@@ -537,7 +535,6 @@ function generateDocxDocument(elements, attachments, title) {
             }));
         }
 
-        // 完整 SHA256 列表
         children.push(new Paragraph({
             children: [new TextRun({ text: "完整 SHA256 哈希值：", bold: true, size: 18, font: "Arial" })],
             spacing: { before: 300, after: 100 }
@@ -566,7 +563,54 @@ function generateDocxDocument(elements, attachments, title) {
     });
 }
 
-// ==================== 导出命令 ====================
+// ==================== 扫描 qqq 链接 ====================
+
+/**
+ * ★★★ 扫描文档中的 qqq 暗号链接，返回去重后的引用文件列表 ★★★
+ * @returns {{ hasQqqLinks: boolean, referencedFiles: Array<{ rawPath: string, absPath: string, relativePath: string }> }}
+ */
+function scanQqqLinks(documentUri, text) {
+    const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
+    const docDir = path.dirname(documentUri.fsPath);
+
+    const referencedFiles = [];
+    const seenPaths = new Set();
+
+    let match;
+    while ((match = regex.exec(text))) {
+        const originalMark = match[0];
+        const rawPath = originalMark.slice(2, -2).trim();
+
+        if (rawPath.startsWith("__PENDING__:")) {
+            continue;
+        }
+
+        const absPath = resolvePathToAbsolute(documentUri, rawPath.replace(/\//g, path.sep));
+
+        if (absPath && fs.existsSync(absPath) && !seenPaths.has(absPath)) {
+            seenPaths.add(absPath);
+
+            // 计算相对于文档目录的路径
+            let relativePath = path.relative(docDir, absPath);
+
+            // 确保使用正斜杠（zip 内部路径）
+            relativePath = relativePath.split(path.sep).join("/");
+
+            referencedFiles.push({
+                rawPath: rawPath,
+                absPath: absPath,
+                relativePath: relativePath
+            });
+        }
+    }
+
+    return {
+        hasQqqLinks: referencedFiles.length > 0,
+        referencedFiles: referencedFiles
+    };
+}
+
+// ==================== 导出 Doc 命令 ====================
 
 async function executeExportDocCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
@@ -590,7 +634,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const docFullName = document.isUntitled ? "untitled.txt" : path.basename(document.uri.fsPath);
     const docBaseName = document.isUntitled ? "untitled" : path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
 
-    // ★★★ 格式选择（RTF 为默认第一项）★★★
     const formatChoice = await vscode.window.showQuickPick([
         {
             label: "$(file) Word 文档（兼容 Office 2003, RTF）(*.doc)",
@@ -621,6 +664,9 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     let lastIndex = 0;
     let match;
 
+    // ★★★ 统计是否包含 qqq 链接 ★★★
+    let hasQqqLinks = false;
+
     while ((match = regex.exec(text))) {
         if (match.index > lastIndex) {
             const textBefore = text.substring(lastIndex, match.index);
@@ -636,6 +682,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 
             if (absPath && fs.existsSync(absPath)) {
+                hasQqqLinks = true; // ★★★ 发现有效的 qqq 链接 ★★★
+
                 const ext = path.extname(absPath).toLowerCase();
 
                 if (isMediaFile(ext)) {
@@ -700,7 +748,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             const processedElements = [];
             let processedCount = 0;
 
-            // ★★★ 统一缓存：PNG buffer + 尺寸 ★★★
             const conversionCache = new Map();
 
             for (const elem of rawElements) {
@@ -811,15 +858,16 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             }
 
             const stats = fs.statSync(finalSavePath);
-            const fileSizeStr = formatBytes(stats.size);
 
-            const cacheHits = mediaCount - conversionCache.size;
-            if (cacheHits > 0) {
-                qqq.logMessage(`导出完成: ${mediaCount} 个媒体，${cacheHits} 个复用缓存`, "INFO");
-            }
+            // ★★★ 使用统一的成功消息构建函数 ★★★
+            const successMsg = buildExportSuccessMessage(
+                path.basename(finalSavePath),
+                stats.size,
+                hasQqqLinks
+            );
 
             vscode.window.showInformationMessage(
-                `qqq: 文档已导出 (${fileSizeStr}): ${path.basename(finalSavePath)}`,
+                successMsg,
                 "打开文件",
                 "打开文件夹"
             ).then(choice => {
@@ -835,6 +883,235 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             vscode.window.showErrorMessage(`qqq: 导出失败: ${e.message}`);
         } finally {
             cleanupExportSession(exportId);
+            activeExportCount--;
+        }
+    });
+}
+
+// ==================== 导出 ZIP 命令 ====================
+
+/**
+ * ★★★ 导出 ZIP 命令 ★★★
+ * 将当前焦点文档及其引用的文件打包成 zip
+ */
+async function executeExportZipCommand(isCoreIntegrityValid) {
+    if (!isCoreIntegrityValid) {
+        vscode.window.showErrorMessage("qqq: Integrity check failed.");
+        return;
+    }
+
+    if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
+        vscode.window.showWarningMessage(`qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
+        return;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage("qqq: 没有打开的文档");
+        return;
+    }
+
+    const document = editor.document;
+
+    if (document.isUntitled) {
+        vscode.window.showWarningMessage("qqq: 请先保存文档后再导出 ZIP");
+        return;
+    }
+
+    const docPath = document.uri.fsPath;
+    const docDir = path.dirname(docPath);
+    const docFullName = path.basename(docPath);
+    const docBaseName = path.basename(docPath, path.extname(docPath));
+
+    const text = document.getText();
+
+    // ★★★ 扫描 qqq 链接 ★★★
+    const scanResult = scanQqqLinks(document.uri, text);
+
+    activeExportCount++;
+
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: "qqq: 正在导出 ZIP...",
+        cancellable: true
+    }, async (progress, token) => {
+        try {
+            progress.report({ message: "准备文件列表...", increment: 10 });
+
+            // ★★★ 确定保存路径 ★★★
+            const defaultZipPath = path.join(docDir, `${docBaseName}.zip`);
+            let finalZipPath = defaultZipPath;
+
+            if (fs.existsSync(defaultZipPath)) {
+                const saveUri = await vscode.window.showSaveDialog({
+                    defaultUri: vscode.Uri.file(defaultZipPath),
+                    filters: {
+                        "ZIP 压缩包": ["zip"]
+                    }
+                });
+
+                if (!saveUri) {
+                    vscode.window.showWarningMessage("qqq: 导出已取消");
+                    return;
+                }
+
+                finalZipPath = saveUri.fsPath;
+            }
+
+            if (token.isCancellationRequested) {
+                vscode.window.showWarningMessage("qqq: 导出已取消");
+                return;
+            }
+
+            progress.report({ message: "创建压缩包...", increment: 10 });
+
+            // ★★★ 创建 zip 文件 ★★★
+            await new Promise((resolve, reject) => {
+                const output = fs.createWriteStream(finalZipPath);
+                const archive = archiver("zip", {
+                    zlib: { level: 9 }  // 最高压缩级别
+                });
+
+                let resolved = false;
+
+                output.on("close", () => {
+                    if (!resolved) {
+                        resolved = true;
+                        resolve();
+                    }
+                });
+
+                output.on("error", (err) => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(err);
+                    }
+                });
+
+                archive.on("error", (err) => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(err);
+                    }
+                });
+
+                archive.on("warning", (err) => {
+                    if (err.code !== "ENOENT") {
+                        qqq.logMessage(`ZIP 警告: ${err.message}`, "WARN");
+                    }
+                });
+
+                // 监听进度
+                let totalBytes = 0;
+                let processedBytes = 0;
+
+                // 预先计算总大小
+                try {
+                    const docStat = fs.statSync(docPath);
+                    totalBytes += docStat.size;
+
+                    for (const file of scanResult.referencedFiles) {
+                        try {
+                            const stat = fs.statSync(file.absPath);
+                            totalBytes += stat.size;
+                        } catch { }
+                    }
+                } catch { }
+
+                archive.on("data", (chunk) => {
+                    processedBytes += chunk.length;
+                    if (totalBytes > 0) {
+                        const percent = Math.min(95, Math.round((processedBytes / totalBytes) * 70) + 20);
+                        progress.report({
+                            message: `压缩中... ${Math.round(processedBytes / 1024)} KB`,
+                            increment: 0
+                        });
+                    }
+                });
+
+                archive.pipe(output);
+
+                // ★★★ 添加焦点文档（原汁原味）★★★
+                archive.file(docPath, { name: docFullName });
+
+                // ★★★ 添加引用的文件（保持相对路径结构）★★★
+                for (const file of scanResult.referencedFiles) {
+                    try {
+                        if (fs.existsSync(file.absPath)) {
+                            const stat = fs.statSync(file.absPath);
+
+                            if (stat.isDirectory()) {
+                                // 如果是目录，递归添加整个目录
+                                archive.directory(file.absPath, file.relativePath);
+                            } else {
+                                // 如果是文件，直接添加
+                                archive.file(file.absPath, { name: file.relativePath });
+                            }
+                        }
+                    } catch (e) {
+                        qqq.logMessage(`添加文件失败: ${file.absPath} - ${e.message}`, "WARN");
+                    }
+                }
+
+                // 取消处理
+                token.onCancellationRequested(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        archive.abort();
+                        reject(new Error("用户取消"));
+                    }
+                });
+
+                archive.finalize();
+            });
+
+            if (token.isCancellationRequested) {
+                // 清理未完成的文件
+                try {
+                    if (fs.existsSync(finalZipPath)) {
+                        fs.unlinkSync(finalZipPath);
+                    }
+                } catch { }
+                vscode.window.showWarningMessage("qqq: 导出已取消");
+                return;
+            }
+
+            // ★★★ 获取最终文件大小并显示结果 ★★★
+            const stats = fs.statSync(finalZipPath);
+
+            const successMsg = buildExportSuccessMessage(
+                path.basename(finalZipPath),
+                stats.size,
+                scanResult.hasQqqLinks
+            );
+
+            const fileCount = scanResult.referencedFiles.length;
+            const detailMsg = scanResult.hasQqqLinks
+                ? `${successMsg}（包含 ${fileCount} 个引用文件）`
+                : successMsg;
+
+            vscode.window.showInformationMessage(
+                detailMsg,
+                "打开文件",
+                "打开文件夹"
+            ).then(choice => {
+                if (choice === "打开文件") {
+                    openFile(finalZipPath);
+                } else if (choice === "打开文件夹") {
+                    revealInFolder(finalZipPath);
+                }
+            });
+
+            qqq.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个文件`, "INFO");
+
+        } catch (e) {
+            if (e.message === "用户取消") {
+                vscode.window.showWarningMessage("qqq: 导出已取消");
+            } else {
+                qqq.logMessage(`ZIP 导出失败: ${e.message}\n${e.stack}`, "ERROR");
+                vscode.window.showErrorMessage(`qqq: ZIP 导出失败: ${e.message}`);
+            }
+        } finally {
             activeExportCount--;
         }
     });
@@ -875,5 +1152,7 @@ function revealInFolder(filePath) {
 // ==================== 模块导出 ====================
 
 module.exports = {
-    executeExportDocCommand
+    executeExportDocCommand,
+    executeExportZipCommand
 };
+
