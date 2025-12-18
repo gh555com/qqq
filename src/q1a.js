@@ -283,24 +283,16 @@ function bufferToRtfHex(buffer) {
  */
 function createRtfPicture(gifBuffer, width, height) {
     // RTF 使用 twips 单位，1 inch = 1440 twips，假设 96 DPI
-    // picwgoal/pichgoal 是目标尺寸（twips）
-    const twipsPerPixel = 1440 / 96; // 15
+    const twipsPerPixel = 15; // 1440 / 96 = 15
     const picwgoal = Math.round(width * twipsPerPixel);
     const pichgoal = Math.round(height * twipsPerPixel);
 
-    // 原始尺寸（用于 picw/pich，单位也是 twips 在某些解释中，但更常见是像素或 EMU）
-    // Office 2003 兼容：使用 picwgoal/pichgoal 即可
     const hexData = bufferToRtfHex(gifBuffer);
 
-    // ★★★ 使用 \pngblip 或 \jpegblip 不行，GIF 在 RTF 中需要用 \wmetafile 或直接嵌入 ★★★
-    // Office 2003 RTF 对 GIF 的原生支持有限，我们使用 \pict\emfblip 包装
-    // 更好的方案：直接用十六进制嵌入 GIF，标记为 \gifblip（某些版本支持）
-    // 最兼容方案：使用 \dibitmap 或直接嵌入
-
-    // Office 2003 实际上可以读取 \pict 中的原始图片数据
-    // 使用 \picscalex100\picscaley100 保持原始比例
-
-    return `{\\pict\\gifblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\n${hexData}\n}`;
+    // Office 2003 兼容的 GIF 嵌入方式
+    // 注意：\pict 后面直接用十六进制数据，不需要 \gifblip（某些版本不支持）
+    // 使用 \pngblip 或直接嵌入原始数据
+    return `{\\pict\\pngblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\n${hexData}\n}`;
 }
 
 /**
@@ -309,104 +301,109 @@ function createRtfPicture(gifBuffer, width, height) {
 function generateRtfDocument(elements, attachments, title) {
     const parts = [];
 
-    // RTF 头部
-    parts.push("{\\rtf1\\ansi\\ansicpg936\\deff0\\nouicompat\\deflang1033\\deflangfe2052");
+    // RTF 头部（ANSI + 简体中文代码页 936）
+    parts.push("{\\rtf1\\ansi\\ansicpg936\\deff0\\nouicompat\\deflang2052");
 
     // 字体表
     parts.push("{\\fonttbl");
-    parts.push("{\\f0\\fnil\\fcharset134 Microsoft YaHei;}");
-    parts.push("{\\f1\\fnil\\fcharset134 SimSun;}");
+    parts.push("{\\f0\\fnil\\fcharset134 \\u24494?\\u36719?\\u38597?\\u40657?;}"); // 微软雅黑
+    parts.push("{\\f1\\fnil\\fcharset134 \\u23435?\\u20307?;}"); // 宋体
     parts.push("{\\f2\\fmodern\\fcharset0 Consolas;}");
     parts.push("}");
 
     // 颜色表
     parts.push("{\\colortbl ;");
-    parts.push("\\red0\\green0\\blue0;");      // 1: 黑色
-    parts.push("\\red102\\green102\\blue102;"); // 2: 灰色 #666666
-    parts.push("\\red255\\green0\\blue0;");    // 3: 红色
-    parts.push("\\red136\\green136\\blue136;"); // 4: 分隔线灰色 #888888
+    parts.push("\\red0\\green0\\blue0;");        // 1: 黑色
+    parts.push("\\red102\\green102\\blue102;");  // 2: 灰色 #666666
+    parts.push("\\red255\\green0\\blue0;");      // 3: 红色
+    parts.push("\\red136\\green136\\blue136;");  // 4: 分隔线灰色
+    parts.push("\\red240\\green240\\blue240;");  // 5: 表格背景
     parts.push("}");
 
     // 文档属性
     parts.push(`{\\*\\generator QQQ VSCode Extension;}`);
-    parts.push(`{\\info{\\title ${escapeRtf(title)}}}`);
 
     // 页面设置（A4，1英寸边距）
     parts.push("\\paperw11906\\paperh16838");
     parts.push("\\margl1440\\margr1440\\margt1440\\margb1440");
 
-    // 默认字体和字号（11pt = 22 half-points）
-    parts.push("\\f0\\fs22\\cf1");
-    parts.push("\\pard\\sa120"); // 段后间距 120 twips
+    // 默认段落格式
+    parts.push("\\widowctrl\\ftnbj\\aenddoc\\trackmoves0\\trackformatting1");
+    parts.push("\\donotembedsysfont0\\relyonvml0\\donotembedlingdata1");
+
+    // 开始文档内容
+    parts.push("\\pard\\plain\\f0\\fs22\\cf1");
 
     // 内容
     for (const elem of elements) {
         if (elem.type === "text") {
-            // 文本段落
+            // 文本段落：保留原始格式，包括空行
             const lines = elem.content.split(/\r?\n/);
-            for (const line of lines) {
-                parts.push(`\\pard\\sa120\\f0\\fs22 ${escapeRtf(line)}\\par`);
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.length === 0) {
+                    // 空行
+                    parts.push("\\par");
+                } else {
+                    parts.push(`${escapeRtf(line)}\\par`);
+                }
             }
         } else if (elem.type === "image") {
-            // 图片
-            parts.push("\\pard\\qc\\sa200\\sb200"); // 居中，上下间距
+            // 图片：居中显示
+            parts.push("\\pard\\qc\\sb200\\sa200");
             parts.push(elem.rtfPicture);
             parts.push("\\par");
 
-            // 图片说明
+            // 图片说明（原始路径）
             if (elem.caption) {
-                parts.push(`\\pard\\qc\\sa240\\f0\\fs18\\cf2\\i ${escapeRtf("📎 " + elem.caption)}\\i0\\cf1\\par`);
+                parts.push(`\\pard\\qc\\f0\\fs16\\cf2\\i ${escapeRtf(elem.caption)}\\i0\\cf1\\fs22\\par`);
             }
+
+            // 恢复左对齐
+            parts.push("\\pard\\ql\\f0\\fs22\\cf1");
         } else if (elem.type === "image_error") {
-            // 图片转换失败
-            parts.push(`\\pard\\sa200\\f0\\fs22\\cf3 [${escapeRtf("媒体转换失败: " + elem.path)}]\\cf1\\par`);
+            // 图片转换失败提示
+            parts.push(`\\pard\\cf3 [${escapeRtf("\\u23186?\\u20307?\\u36716?\\u25442?\\u22833?\\u36133?: " + elem.path)}]\\cf1\\par`);
         }
     }
 
     // 附件索引
     if (attachments.length > 0) {
         // 分隔线
-        parts.push("\\pard\\sb400\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20\\cf4 \\cf1\\par");
+        parts.push("\\pard\\sb600\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20 \\par");
 
         // 标题
-        parts.push("\\pard\\sb200\\sa300\\f0\\fs32\\b \\u128193? ${escapeRtf("附件索引")}\\b0\\fs22\\par");
+        parts.push("\\pard\\sb200\\sa300\\f0\\fs28\\b");
+        parts.push(`${escapeRtf("📁 附件索引")}`);
+        parts.push("\\b0\\fs22\\par");
 
-        // 表格
-        parts.push("\\pard\\sa60");
-
-        // 表头
-        parts.push("\\trowd\\trqc");
-        parts.push("\\cellx800\\cellx3800\\cellx5000\\cellx6500\\cellx10500");
-        parts.push("\\intbl\\f0\\fs20\\b\\qc ${escapeRtf("序号")}\\cell");
-        parts.push("${escapeRtf("文件名")}\\cell");
-        parts.push("${escapeRtf("类型")}\\cell");
-        parts.push("${escapeRtf("大小")}\\cell");
-        parts.push("${escapeRtf("SHA256")}\\cell\\b0\\row");
+        // 简单表格（使用制表符模拟）
+        parts.push("\\pard\\sb100\\sa60\\f0\\fs18\\b");
+        parts.push(`${escapeRtf("序号")}\\tab ${escapeRtf("文件名")}\\tab\\tab\\tab ${escapeRtf("类型")}\\tab ${escapeRtf("大小")}\\tab ${escapeRtf("SHA256（前16位）")}`);
+        parts.push("\\b0\\par");
 
         // 数据行
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
-            parts.push("\\trowd\\trqc");
-            parts.push("\\cellx800\\cellx3800\\cellx5000\\cellx6500\\cellx10500");
-            parts.push(`\\intbl\\f0\\fs18\\qc ${i + 1}\\cell`);
-            parts.push(`${escapeRtf(att.name)}\\cell`);
-            parts.push(`${escapeRtf(att.ext.toUpperCase())}\\cell`);
-            parts.push(`${escapeRtf(formatBytes(att.size))}\\cell`);
-            parts.push(`\\f2\\fs14 ${escapeRtf(att.sha256.substring(0, 16) + "...")}\\f0\\fs18\\cell\\row`);
+            const shortHash = att.sha256.substring(0, 16) + "...";
+            parts.push(`${i + 1}\\tab ${escapeRtf(att.name)}\\tab\\tab\\tab ${escapeRtf(att.ext.toUpperCase())}\\tab ${escapeRtf(formatBytes(att.size))}\\tab \\f2\\fs14 ${escapeRtf(shortHash)}\\f0\\fs18\\par`);
         }
 
         // 完整 SHA256 列表
-        parts.push("\\pard\\sb300\\sa100\\f0\\fs20\\b ${escapeRtf("完整 SHA256 哈希值：")}\\b0\\par");
+        parts.push("\\pard\\sb300\\sa100\\f0\\fs18\\b");
+        parts.push(`${escapeRtf("完整 SHA256 哈希值：")}`);
+        parts.push("\\b0\\par");
 
         for (const att of attachments) {
-            parts.push(`\\pard\\sa60\\f0\\fs16 ${escapeRtf(att.name + ": ")}\\f2\\fs14\\cf2 ${escapeRtf(att.sha256)}\\cf1\\f0\\par`);
+            parts.push(`\\pard\\sa40\\f0\\fs14 ${escapeRtf(att.name + ":")}\\par`);
+            parts.push(`\\pard\\li400\\sa80\\f2\\fs12\\cf2 ${escapeRtf(att.sha256)}\\cf1\\f0\\par`);
         }
     }
 
-    // 结束
+    // 结束文档
     parts.push("}");
 
-    return parts.join("\n");
+    return parts.join("\r\n");
 }
 
 // ==================== 导出命令 ====================
@@ -428,8 +425,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     }
 
     const document = editor.document;
-    const docDir = path.dirname(document.uri.fsPath);
-    const docBaseName = path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
+    const docDir = document.isUntitled ? os.homedir() : path.dirname(document.uri.fsPath);
+    const docBaseName = document.isUntitled ? "untitled" : path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
 
     // 解析文档内容
     const text = document.getText();
@@ -445,7 +442,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         // 添加标记前的文本
         if (match.index > lastIndex) {
             const textBefore = text.substring(lastIndex, match.index);
-            if (textBefore.trim()) {
+            if (textBefore.length > 0) {
                 rawElements.push({ type: "text", content: textBefore });
             }
         }
@@ -489,13 +486,18 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     // 添加剩余文本
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
-        if (remaining.trim()) {
+        if (remaining.length > 0) {
             rawElements.push({ type: "text", content: remaining });
         }
     }
 
     // 统计媒体数量
     const mediaCount = rawElements.filter(e => e.type === "media").length;
+
+    if (rawElements.length === 0) {
+        vscode.window.showWarningMessage("文档为空，无法导出");
+        return;
+    }
 
     // 开始导出
     await vscode.window.withProgress({
@@ -562,8 +564,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             });
 
             if (saveUri) {
-                // 写入文件（使用 UTF-8 编码，RTF 头部指定了 ANSI + codepage 936）
-                fs.writeFileSync(saveUri.fsPath, rtfContent, 'utf8');
+                // 写入文件（使用二进制写入，避免编码问题）
+                fs.writeFileSync(saveUri.fsPath, rtfContent, { encoding: 'utf8' });
 
                 const stats = fs.statSync(saveUri.fsPath);
                 const fileSizeStr = formatBytes(stats.size);
