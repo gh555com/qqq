@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "3.0.0",
+  "version": "13.1.1",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -14,7 +14,8 @@
     "onCommand:qqq.q2",
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
-    "onCommand:qqq.setInOrder"
+    "onCommand:qqq.setInOrder",
+    "onCommand:qqq.exportDoc"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -32,10 +33,35 @@
             "default": true,
             "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           },
-          "qqq.extremePerformance": {
-            "type": "boolean",
-            "default": false,
-            "description": "启用极限性能模式：预览生成时尽可能减少计算量（例如将 GIF 预览为静态首帧，并放弃修改后图片的即时刷新），以换取更快的交互响应速度。"
+          "qqq.performanceMode": {
+            "type": "string",
+            "default": "balanced",
+            "enum": [
+              "extreme",
+              "accelerated",
+              "balanced"
+            ],
+            "enumDescriptions": [
+              "极限性能：只保留首帧，质量35",
+              "加速模式：最多2秒动画，6fps，质量35",
+              "最优模式：保留完整动画，视频截取首中尾，质量70"
+            ],
+            "description": "性能模式：控制预览生成的质量和性能平衡。"
+          },
+          "qqq.frameSizeMode": {
+            "type": "string",
+            "default": "smart",
+            "enum": [
+              "large",
+              "small",
+              "smart"
+            ],
+            "enumDescriptions": [
+              "大相框：512x288",
+              "小相框：256x144",
+              "智能：根据图片尺寸自动选择相框"
+            ],
+            "description": "相框尺寸模式：控制预览图像的显示尺寸。"
           },
           "qqq.cleanFreak": {
             "type": "boolean",
@@ -77,6 +103,10 @@
       {
         "command": "qqq.renameFile",
         "title": "qqq: rename file"
+      },
+      {
+        "command": "qqq.exportDoc",
+        "title": "qqq: 导出.doc"
       }
     ],
     "keybindings": [
@@ -94,6 +124,11 @@
         "command": "qqq.q2",
         "key": "f2",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "qqq.exportDoc",
+        "key": "ctrl+alt+p",
+        "when": "editorTextFocus"
       }
     ]
   },
@@ -221,6 +256,7 @@
     "productivité",
     "생산성",
     "fingerprint",
+    "q",
     "指纹",
     "cache",
     "缓存",
@@ -228,6 +264,8 @@
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "docx": "^8.5.0",
+    "docx-parser": "^0.2.1",
     "trash": "^7.2.0"
   },
   "devDependencies": {
