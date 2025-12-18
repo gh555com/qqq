@@ -1,13 +1,23 @@
 // src/q1.js
-// ★★★ 图片/视频处理专家：FFmpeg 参数、预览生成、渲染、CodeLens ★★★
+// ==========================================
+// ★★★ 转码兜底 + 错误日志 + 配置dispose + AI/PDF尝试 + 多编辑器独立防抖 + 导出DOC ★★★
+// ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const os = require("os");
 
-// 从 qqq.js 导入核心接口
 const qqq = require("./qqq");
+
+// ★★★ docx 库导入 ★★★
+let docx = null;
+try {
+	docx = require("docx");
+} catch (e) {
+	// 如果没安装，稍后会提示用户
+}
 
 const CORE_INTEGRITY_HASH = "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
 let isCoreIntegrityValid = false;
@@ -15,13 +25,31 @@ let isCoreIntegrityValid = false;
 // ==================== 配置常量 ====================
 const MAX_CONCURRENT_TASKS = 8;
 const SCROLL_DEBOUNCE_MS = 200;
-const PREVIEW_WIDTH = 512;
-const PREVIEW_HEIGHT = 288;
+const LARGE_PREVIEW_WIDTH = 512;
+const LARGE_PREVIEW_HEIGHT = 288;
+const SMALL_PREVIEW_WIDTH = 256;
+const SMALL_PREVIEW_HEIGHT = 144;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
-const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"]);
+// ★★★ 导出相关常量 ★★★
+const EXPORT_MAX_WIDTH = 512;
+const EXPORT_MAX_HEIGHT = 288;
+
+// ★★★ 进度条同步间隔（毫秒） ★★★
+const PROGRESS_SYNC_INTERVAL_MS = 3000;
+
+// ★★★ 兜底直读的格式白名单（浏览器能解码） ★★★
+const FALLBACK_DIRECT_READ_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
+
+// ★★★ 兜底直读的文件大小上限（4MB） ★★★
+const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
+
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg", ".ai", ".eps", ".cdr", ".psd"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
+
+// ★★★ 附件类型（非图片/视频，需要列入索引） ★★★
+const ATTACHMENT_EXTS = new Set([".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".7z", ".txt", ".json", ".xml", ".html", ".css", ".js", ".py", ".go", ".rs", ".c", ".cpp", ".h", ".md"]);
 
 // ==================== 全局状态 ====================
 let decorationType = null;
@@ -34,15 +62,23 @@ const resolutionCache = new Map();
 const folderSizeCache = new Map();
 const pendingTokens = new Map();
 
+// ★★★ 多编辑器独立防抖计时器 ★★★
+const editorDebounceTimers = new Map();
+
+// ★★★ 动画同步相关 ★★★
+let progressSyncTimer = null;
+const animatedDecorationKeys = new Map();
+
+// ★ 全局配置变量
 let enlargeSmallImages = true;
-let extremePerformanceMode = false;
+let performanceMode = "balanced";
+let frameSizeMode = "smart";
 let cleanFreakMode = false;
 
-// 水印
+// 水印与 Loading
 let watermarkBase64 = null;
 const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
 
-// Loading SVG
 const LOADING_SVG = `data:image/svg+xml;base64,` + Buffer.from(`
 <svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">
   <circle cx="20" cy="20" r="8" fill="#888"><animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0s"/></circle>
@@ -58,7 +94,9 @@ function verifySystemIntegrity() {
 		const buf = fs.readFileSync(WATERMARK_PATH);
 		const hash = crypto.createHash("sha256").update(buf).digest("hex");
 		return hash === CORE_INTEGRITY_HASH;
-	} catch (e) { return false; }
+	} catch (e) {
+		return false;
+	}
 }
 
 function loadWatermarkResource() {
@@ -67,66 +105,162 @@ function loadWatermarkResource() {
 			const buf = fs.readFileSync(WATERMARK_PATH);
 			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
 		}
-	} catch (e) { watermarkBase64 = null; }
+	} catch (e) {
+		watermarkBase64 = null;
+	}
 }
 
 function refreshConfig() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
 		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
-		extremePerformanceMode = config.get("extremePerformance", false);
+
+		const extremePerformance = config.get("extremePerformance", false);
+		if (extremePerformance) {
+			performanceMode = "extreme";
+		} else {
+			performanceMode = config.get("performanceMode", "balanced");
+		}
+
+		frameSizeMode = config.get("frameSizeMode", "smart");
 		cleanFreakMode = config.get("cleanFreak", false);
 	} catch (e) {
 		enlargeSmallImages = true;
-		extremePerformanceMode = false;
+		performanceMode = "balanced";
+		frameSizeMode = "smart";
 		cleanFreakMode = false;
 	}
 }
 
 function clearDecorations() {
-	if (decorationType) { try { decorationType.dispose(); } catch (e) { } decorationType = null; }
-	if (markerHideType) { try { markerHideType.dispose(); } catch (e) { } markerHideType = null; }
-	documentDecorationsMap.clear();
-}
-
-// ==================== 工具函数 ====================
-
-function formatBytes(size) {
-	if (size == null || isNaN(size)) return "?";
-	const units = ["b", "k", "m", "g"];
-	let idx = 0, val = size;
-	while (val >= 1024 && idx < units.length - 1) { val /= 1024; idx++; }
-	return `${Math.round(val)}${units[idx]}`;
-}
-
-function formatDuration(sec) {
-	if (sec == null || isNaN(sec) || sec < 0) return "0s";
-	if (sec >= 60) {
-		const m = Math.floor(sec / 60), s = sec % 60;
-		return `${m}m + ${s.toFixed(2)}s`;
+	if (decorationType) {
+		try { decorationType.dispose(); } catch (e) { }
+		decorationType = null;
 	}
-	return `${sec.toFixed(2)}s`;
+	if (markerHideType) {
+		try { markerHideType.dispose(); } catch (e) { }
+		markerHideType = null;
+	}
+	documentDecorationsMap.clear();
+	animatedDecorationKeys.clear();
 }
 
-function isImageExt(ext) { return IMAGE_EXTS.has(ext.toLowerCase()); }
-function isVideoExt(ext) { return VIDEO_EXTS.has(ext.toLowerCase()); }
-function isImageOrVideoExt(ext) { const e = ext.toLowerCase(); return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e); }
-function getDocumentEOL(doc) { return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n"; }
-
-function resolvePathToAbsolute(docUri, rawPath) {
-	if (!rawPath) return null;
-	let clean = rawPath.trim();
-	while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
-	if (path.isAbsolute(clean)) return clean;
-	return path.resolve(path.dirname(docUri.fsPath), clean);
+// ★★★ 清理编辑器防抖计时器 ★★★
+function clearEditorDebounceTimer(editorId) {
+	const timer = editorDebounceTimers.get(editorId);
+	if (timer) {
+		clearTimeout(timer);
+		editorDebounceTimers.delete(editorId);
+	}
 }
 
-function buildNewRawPath(oldRaw, newName) {
-	const lastSlash = Math.max(oldRaw.lastIndexOf("/"), oldRaw.lastIndexOf("\\"));
-	return lastSlash === -1 ? newName : oldRaw.slice(0, lastSlash + 1) + newName;
+function clearAllEditorDebounceTimers() {
+	for (const timer of editorDebounceTimers.values()) {
+		clearTimeout(timer);
+	}
+	editorDebounceTimers.clear();
 }
 
-// ==================== FFprobe 探测（q1 自己处理）====================
+// ==================== ★★★ 严重错误日志（限制大小） ★★★ ====================
+
+function logCriticalError(filePath, errorMsg) {
+	try {
+		if (!qqq.LOG_PATH) return;
+		const timestamp = new Date().toISOString();
+		const shortPath = filePath.length > 100 ? "..." + filePath.slice(-97) : filePath;
+		const shortErr = errorMsg.length > 500 ? errorMsg.slice(0, 500) + "..." : errorMsg;
+		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
+		fs.appendFileSync(qqq.LOG_PATH, logLine);
+	} catch (e) { }
+}
+
+// ==================== 进度条同步定时器 ★★★ ====================
+
+function startProgressSyncTimer() {
+	if (progressSyncTimer) return;
+
+	progressSyncTimer = setInterval(() => {
+		let hasAnimations = false;
+		for (const [, keys] of animatedDecorationKeys) {
+			if (keys.size > 0) {
+				hasAnimations = true;
+				break;
+			}
+		}
+
+		if (hasAnimations) {
+			forceResyncAnimatedDecorations();
+		}
+	}, PROGRESS_SYNC_INTERVAL_MS);
+}
+
+function stopProgressSyncTimer() {
+	if (progressSyncTimer) {
+		clearInterval(progressSyncTimer);
+		progressSyncTimer = null;
+	}
+}
+
+function forceResyncAnimatedDecorations() {
+	const editors = vscode.window.visibleTextEditors;
+
+	for (const editor of editors) {
+		const docUri = editor.document.uri.toString();
+		const animatedKeys = animatedDecorationKeys.get(docUri);
+
+		if (animatedKeys && animatedKeys.size > 0) {
+			const currentDecos = documentDecorationsMap.get(docUri);
+			if (currentDecos) {
+				for (const key of animatedKeys) {
+					currentDecos.delete(key);
+				}
+			}
+			animatedKeys.clear();
+			debounceRender(editor, 10);
+		}
+	}
+}
+
+// ==================== 统一 Frame 尺寸逻辑 ====================
+
+function getFrameConfig(info) {
+	let mode = "large";
+	let width = LARGE_PREVIEW_WIDTH;
+	let height = LARGE_PREVIEW_HEIGHT;
+
+	if (!info || !info.width || !info.height) {
+		if (frameSizeMode === "small") {
+			mode = "small";
+			width = SMALL_PREVIEW_WIDTH;
+			height = SMALL_PREVIEW_HEIGHT;
+		}
+	} else {
+		if (frameSizeMode === "small") {
+			mode = "small";
+			width = SMALL_PREVIEW_WIDTH;
+			height = SMALL_PREVIEW_HEIGHT;
+		} else if (frameSizeMode === "large") {
+			mode = "large";
+			width = LARGE_PREVIEW_WIDTH;
+			height = LARGE_PREVIEW_HEIGHT;
+		} else {
+			// smart 模式
+			if (info.width <= SMALL_PREVIEW_WIDTH && info.height <= SMALL_PREVIEW_HEIGHT) {
+				mode = "small";
+				width = SMALL_PREVIEW_WIDTH;
+				height = SMALL_PREVIEW_HEIGHT;
+			} else {
+				mode = "large";
+				width = LARGE_PREVIEW_WIDTH;
+				height = LARGE_PREVIEW_HEIGHT;
+			}
+		}
+	}
+
+	return { mode, width, height };
+}
+
+// ==================== FFprobe 探测 ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
@@ -137,297 +271,1285 @@ async function getMediaInfo(filePath, mtimeMs) {
 	return new Promise((resolve) => {
 		const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
-		child.stderr.on("data", d => { if (stderr.length < 50000) stderr += d.toString(); });
+
+		child.stderr.on("data", d => {
+			if (stderr.length < 50000) stderr += d.toString();
+		});
+
 		child.on("close", () => {
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
-			let info = { mtime: mtimeMs, res: null, width: null, height: null, codec: null, codec_long_name: null, duration: 0, type: "unknown" };
+			const ext = path.extname(filePath).toLowerCase();
+
+			let info = {
+				mtime: mtimeMs,
+				res: null,
+				width: null,
+				height: null,
+				codec: null,
+				full_codec_desc: null,
+				duration: 0,
+				type: "unknown",
+				isStaticImage: false,
+				isMjpegStatic: false,
+				needsConversion: false
+			};
 
 			if (resMatch) {
-				const w = parseInt(resMatch[1]), h = parseInt(resMatch[2]);
-				info.res = `${w}x${h}`; info.width = w; info.height = h;
+				const w = parseInt(resMatch[1]);
+				const h = parseInt(resMatch[2]);
+				info.res = `${w}x${h}`;
+				info.width = w;
+				info.height = h;
 			}
-			if (codecMatch?.[1]) {
-				const parts = codecMatch[1].split(/[,\s]+/);
-				info.codec = parts[0].trim();
-				if (parts.length > 1) info.codec_long_name = codecMatch[1].trim();
-			}
+
 			if (durMatch) {
-				const h = parseFloat(durMatch[1]), m = parseFloat(durMatch[2]), s = parseFloat(durMatch[3]);
+				const h = parseFloat(durMatch[1]);
+				const m = parseFloat(durMatch[2]);
+				const s = parseFloat(durMatch[3]);
 				info.duration = h * 3600 + m * 60 + s;
 			}
 
-			// 类型判断
-			if (info.codec) {
-				const c = info.codec.toLowerCase();
-				if (c.includes('mjpeg') && info.duration <= 0.1) { info.type = 'image'; info.duration = 0; }
-				else if (['png', 'bmp', 'tiff', 'jpeg'].some(x => c.includes(x))) info.type = 'image';
-				else if (c.includes('gif')) info.type = info.duration > 0.1 ? 'animated_image' : 'image';
-				else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4'].some(x => c.includes(x))) info.type = 'video';
+			if (codecMatch?.[1]) {
+				info.full_codec_desc = codecMatch[1].trim();
+				const parts = info.full_codec_desc.split(/[,\s]+/);
+				info.codec = parts[0].trim().toLowerCase();
 			}
+
+			const isStaticByDuration = info.duration <= 0.1;
+
+			if (info.codec) {
+				const c = info.codec;
+
+				if (c.includes('mjpeg') || c === 'jpeg') {
+					if (isStaticByDuration) {
+						info.type = 'image';
+						info.isStaticImage = true;
+						info.isMjpegStatic = true;
+					} else {
+						info.type = 'video';
+					}
+				} else if (['png', 'bmp', 'tiff', 'webp', 'svg', 'pdf'].some(x => c.includes(x))) {
+					info.type = 'image';
+					info.isStaticImage = isStaticByDuration;
+				} else if (c.includes('gif')) {
+					if (isStaticByDuration) {
+						info.type = 'image';
+						info.isStaticImage = true;
+					} else {
+						info.type = 'animated_image';
+					}
+				} else if (['h264', 'hevc', 'vp8', 'vp9', 'av1', 'mpeg4', 'mpeg2', 'mpeg1'].some(x => c.includes(x))) {
+					info.type = 'video';
+				}
+			}
+
 			if (info.type === 'unknown') {
-				const ext = path.extname(filePath).toLowerCase();
-				if (VIDEO_EXTS.has(ext)) info.type = 'video';
-				else if (IMAGE_EXTS.has(ext)) info.type = 'image';
+				if (VIDEO_EXTS.has(ext)) {
+					info.type = 'video';
+				} else if (IMAGE_EXTS.has(ext)) {
+					info.type = 'image';
+					info.isStaticImage = true;
+				}
+			}
+
+			// ★★★ AI/EPS/PSD/CDR：如果探测不到分辨率，给默认值并标记需要转换 ★★★
+			if (!info.width && ['.ai', '.eps', '.psd', '.cdr'].includes(ext)) {
+				info.type = 'image';
+				info.isStaticImage = true;
+				info.width = 512;
+				info.height = 512;
+				info.needsConversion = true;
 			}
 
 			resolutionCache.set(filePath, info);
-			if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
+
+			// 限制缓存大小
+			if (resolutionCache.size > 200) {
+				resolutionCache.delete(resolutionCache.keys().next().value);
+			}
+
 			resolve(info.width ? info : null);
 		});
+
 		child.on("error", () => resolve(null));
-		setTimeout(() => { try { child.kill(); } catch { } resolve(null); }, 5000);
+
+		setTimeout(() => {
+			try { child.kill(); } catch { }
+			resolve(null);
+		}, 5000);
 	});
 }
 
-// ==================== 预览生成（FFmpeg 参数由 q1 控制）====================
+// ==================== ★★★ 精确解析 WebP 时长 ★★★ ====================
 
-function getGifDurationFromBuffer(buffer) {
-	if (!buffer || buffer.length < 13) return 0;
-	try {
-		let totalDelayCs = 0, i = 13;
-		const sig = buffer.slice(0, 6).toString('ascii');
-		if (sig !== 'GIF87a' && sig !== 'GIF89a') return 0;
-		const flags = buffer[10];
-		if ((flags & 0x80) !== 0) i += 3 * Math.pow(2, (flags & 0x07) + 1);
+function getWebPDurationFromBuffer(buffer) {
+	if (!buffer || buffer.length < 12) return 0;
+	if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WEBP') return 0;
 
-		while (i < buffer.length - 1) {
-			const blockType = buffer[i];
-			if (blockType === 0x21) {
-				const extLabel = buffer[i + 1];
-				if (extLabel === 0xF9) {
-					if (i + 6 < buffer.length) totalDelayCs += buffer[i + 4] | (buffer[i + 5] << 8);
-					i += 8;
-				} else {
-					i += 2;
-					while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-					i++;
-				}
-			} else if (blockType === 0x2C) {
-				if (i + 10 > buffer.length) break;
-				const imgFlags = buffer[i + 9];
-				i += 10;
-				if ((imgFlags & 0x80) !== 0) i += 3 * Math.pow(2, (imgFlags & 0x07) + 1);
-				i++;
-				while (i < buffer.length && buffer[i] !== 0) i += buffer[i] + 1;
-				i++;
-			} else if (blockType === 0x3B) break;
-			else i++;
+	let pos = 12;
+	let totalDurationMs = 0;
+	let frameCount = 0;
+
+	while (pos < buffer.length - 8) {
+		const chunkId = buffer.toString('ascii', pos, pos + 4);
+		const chunkSize = buffer.readUInt32LE(pos + 4);
+		const nextChunkPos = pos + 8 + chunkSize + (chunkSize % 2);
+
+		if (chunkId === 'ANMF') {
+			frameCount++;
+			if (pos + 23 < buffer.length) {
+				const dur = buffer[pos + 20] | (buffer[pos + 21] << 8) | (buffer[pos + 22] << 16);
+				totalDurationMs += dur;
+			}
 		}
-		return totalDelayCs / 100;
-	} catch (e) { return 0; }
+
+		pos = nextChunkPos;
+	}
+
+	return frameCount > 1 ? totalDurationMs / 1000 : 0;
 }
 
-function buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration) {
-	let targetW = PREVIEW_WIDTH, targetH = PREVIEW_HEIGHT;
-	if (origSize?.width) {
-		const ow = origSize.width, oh = origSize.height;
-		if (enlargeSmallImages || isVideo) {
-			const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
+// ==================== 缓存策略与转码 ====================
+
+function determineCacheStrategy(filePath, info) {
+	const previewWidth = LARGE_PREVIEW_WIDTH;
+	const previewHeight = LARGE_PREVIEW_HEIGHT;
+
+	const ext = path.extname(filePath).toLowerCase();
+	let fileSize = 0;
+	try {
+		fileSize = fs.statSync(filePath).size;
+	} catch { }
+
+	const isStatic = info?.isStaticImage === true;
+	const isMjpegStatic = info?.isMjpegStatic === true;
+	const simpleFormats = ['.png', '.jpg', '.jpeg', '.svg'];
+	const canDirectRead = simpleFormats.includes(ext) || (ext === '.webp' && isStatic);
+
+	let shouldBypassCache = false;
+
+	if (isMjpegStatic) {
+		shouldBypassCache = true;
+	} else if (isStatic &&
+		canDirectRead &&
+		!info?.needsConversion &&
+		info?.width && info?.height &&
+		info.width <= 512 && info.height <= 512 &&
+		fileSize < 300 * 1024) {
+		shouldBypassCache = true;
+	}
+
+	let qualityLevel;
+	switch (performanceMode) {
+		case "extreme":
+			qualityLevel = 39;
+			break;
+		case "accelerated":
+			qualityLevel = 38;
+			break;
+		case "balanced":
+		default:
+			qualityLevel = 70;
+	}
+
+	const cacheKey = `${qualityLevel}`;
+
+	return { shouldBypassCache, previewWidth, previewHeight, cacheKey, qualityLevel, isMjpegStatic };
+}
+
+function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previewWidth, previewHeight) {
+	let targetW = previewWidth;
+	let targetH = previewHeight;
+
+	if (origSize?.width && !origSize?.needsConversion) {
+		const ow = origSize.width;
+		const oh = origSize.height;
+
+		if (ow > 512 || oh > 512) {
+			const scale = Math.min(previewWidth / ow, previewHeight / oh);
 			targetW = Math.max(1, Math.round(ow * scale));
 			targetH = Math.max(1, Math.round(oh * scale));
 		} else {
-			if (ow <= PREVIEW_WIDTH && oh <= PREVIEW_HEIGHT) { targetW = ow; targetH = oh; }
-			else {
-				const scale = Math.min(PREVIEW_WIDTH / ow, PREVIEW_HEIGHT / oh);
-				targetW = Math.max(1, Math.round(ow * scale));
-				targetH = Math.max(1, Math.round(oh * scale));
-			}
+			targetW = ow;
+			targetH = oh;
 		}
 	}
 
 	const args = ["-hide_banner", "-loglevel", "error"];
-	let expectedGifDuration = 0;
-	const fpsLimit = extremePerformanceMode ? 8 : 10;
-	const scaleFlags = extremePerformanceMode ? "neighbor" : "bilinear";
-	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=${scaleFlags}`;
+	let expectedWebPDuration = 0;
+	const isStatic = (duration <= 0.1);
+	const isGifLike = !isStatic && duration > 0.1 && duration < 10;
 
-	if (isVideo) {
-		const safeDur = duration || 0;
-		if (extremePerformanceMode) {
-			let clipStart = 1, clipDur = 2;
-			if (safeDur > 0 && safeDur < clipStart + clipDur) {
-				clipStart = Math.max(0, safeDur - clipDur - 0.5);
-				clipDur = Math.min(clipDur, safeDur - clipStart);
-			}
-			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDur;
-		} else if (safeDur < 5) {
-			let clipStart = Math.min(1, safeDur * 0.1);
-			let clipDur = Math.min(4, safeDur - clipStart);
-			args.push("-ss", String(clipStart), "-t", String(clipDur), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = clipDur;
+	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
+	let vf = scaleFilter;
+
+	if (performanceMode === "extreme") {
+		args.push("-ss", "0", "-i", filePath);
+		vf = `[0:v]${scaleFilter}[out_v]`;
+		args.push("-frames:v", "1");
+		expectedWebPDuration = 0;
+	} else if (performanceMode === "accelerated") {
+		args.push("-ss", "0", "-i", filePath);
+
+		if (isStatic) {
+			vf = `[0:v]${scaleFilter}[out_v]`;
+			args.push("-frames:v", "1");
+			expectedWebPDuration = 0;
 		} else {
-			const seg = 1.3;
-			const s1 = 1, s2 = Math.floor(safeDur / 2), s3 = Math.max(s2 + seg + 0.5, safeDur - seg - 1);
+			let clipDur = Math.min(2, duration);
+			if (duration > 2) {
+				let clipStart = Math.min(1, duration * 0.1);
+				clipDur = Math.min(2, duration - clipStart);
+				args.push("-ss", String(clipStart));
+			}
+			args.push("-t", String(clipDur));
+			vf = `[0:v]fps=6,${scaleFilter}[out_v]`;
+			expectedWebPDuration = clipDur;
+		}
+	} else {
+		// balanced 模式
+		if (isStatic) {
+			args.push("-ss", "0", "-i", filePath);
+			vf = `[0:v]${scaleFilter}[out_v]`;
+			args.push("-frames:v", "1");
+			expectedWebPDuration = 0;
+		} else if (isGifLike) {
+			args.push("-ss", "0", "-i", filePath);
+			vf = `[0:v]${scaleFilter}[out_v]`;
+			expectedWebPDuration = duration;
+		} else {
+			// 长视频：三段拼接
+			const seg = 1.33;
+			const s1 = 1;
+			const s2 = Math.floor(duration / 2);
+			const s3 = Math.max(s2 + seg + 0.5, duration - seg - 1);
+
 			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			args.push("-filter_complex", `[0:v]fps=${fpsLimit},${scaleFilter}[v0];[1:v]fps=${fpsLimit},${scaleFilter}[v1];[2:v]fps=${fpsLimit},${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5[out_v]`, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-			expectedGifDuration = seg * 3;
+
+			vf = `[0:v]fps=15,${scaleFilter}[v0];[1:v]fps=15,${scaleFilter}[v1];[2:v]fps=15,${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`;
+			expectedWebPDuration = seg * 3;
 		}
-	} else if (isGif) {
-		if (extremePerformanceMode) args.push("-t", "2");
-		args.push("-i", filePath);
-		const f = extremePerformanceMode
-			? `[0:v]fps=${fpsLimit},${scaleFilter}[out_v]`
-			: `[0:v]${scaleFilter}[out_v]`;
-		args.push("-filter_complex", f, "-map", "[out_v]", "-f", "gif", "-loop", "0", "pipe:1");
-	} else {
-		args.push("-i", filePath);
-		args.push("-filter_complex", `[0:v]${scaleFilter}[out_v]`, "-map", "[out_v]");
-		if (extremePerformanceMode) args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1");
-		else args.push("-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1");
 	}
 
-	return { args, targetW, targetH, expectedGifDuration };
+	args.push("-filter_complex", vf, "-map", "[out_v]");
+	args.push("-c:v", "libwebp", "-lossless", "0", "-compression_level", "0", "-q:v", String(qualityLevel), "-loop", "0", "-an", "-vsync", "0", "-f", "webp");
+
+	return { args, targetW, targetH, expectedWebPDuration };
 }
 
-async function getPreviewBuffer(filePath, isVideo, isGif, contentId) {
+// ★★★ 兜底直读辅助函数 ★★★
+function tryFallbackDirectRead(filePath, renderW, renderH, info) {
+	const ext = path.extname(filePath).toLowerCase();
+	if (!FALLBACK_DIRECT_READ_EXTS.has(ext)) return null;
+
+	try {
+		const st = fs.statSync(filePath);
+		if (st.size > FALLBACK_MAX_SIZE) return null;
+
+		const rawBuffer = fs.readFileSync(filePath);
+
+		let finalCssW = info?.width || renderW;
+		let finalCssH = info?.height || renderH;
+
+		if (info?.width && info?.height) {
+			if (enlargeSmallImages) {
+				const scale = Math.min(renderW / info.width, renderH / info.height);
+				finalCssW = Math.max(1, Math.round(info.width * scale));
+				finalCssH = Math.max(1, Math.round(info.height * scale));
+			} else {
+				if (info.width > renderW || info.height > renderH) {
+					const scale = Math.min(renderW / info.width, renderH / info.height);
+					finalCssW = Math.max(1, Math.round(info.width * scale));
+					finalCssH = Math.max(1, Math.round(info.height * scale));
+				} else {
+					finalCssW = info.width;
+					finalCssH = info.height;
+				}
+			}
+		}
+
+		return {
+			buffer: rawBuffer,
+			webpDuration: 0,
+			originalDuration: 0,
+			outputSize: { width: finalCssW, height: finalCssH },
+			isDirect: true,
+			ext: ext,
+			isFallback: true
+		};
+	} catch (e) {
+		return null;
+	}
+}
+
+async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!qqq.ffmpegPath) return null;
 
 	let mtimeMs = 0;
-	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
-
-	// 检查磁盘缓存
-	const quality = extremePerformanceMode ? "q0" : (isVideo ? "q2" : "q1");
-	const cached = qqq.getCachedBuffer(contentId, quality);
-	if (cached) {
-		const gifDur = (isGif || isVideo) ? getGifDurationFromBuffer(cached) : 0;
-		return { buffer: cached, gifDuration: gifDur, fromCache: true };
+	try {
+		mtimeMs = fs.statSync(filePath).mtimeMs;
+	} catch {
+		return null;
 	}
 
 	const info = await getMediaInfo(filePath, mtimeMs);
-	const origSize = info ? { width: info.width, height: info.height } : null;
-	const duration = info?.duration || 0;
+	const origSize = info ? { width: info.width, height: info.height, needsConversion: info.needsConversion } : null;
+	const originalDuration = info?.duration || 0;
 
+	const cacheStrategy = determineCacheStrategy(filePath, info);
+	const ext = path.extname(filePath).toLowerCase();
+
+	// ★★★ 1. MJPEG 静态图：强制直通读取原文件 ★★★
+	if (cacheStrategy.isMjpegStatic) {
+		try {
+			const rawBuffer = fs.readFileSync(filePath);
+			let finalCssW = info.width;
+			let finalCssH = info.height;
+
+			if (enlargeSmallImages) {
+				const scale = Math.min(renderW / info.width, renderH / info.height);
+				finalCssW = Math.max(1, Math.round(info.width * scale));
+				finalCssH = Math.max(1, Math.round(info.height * scale));
+			} else {
+				if (info.width > renderW || info.height > renderH) {
+					const scale = Math.min(renderW / info.width, renderH / info.height);
+					finalCssW = Math.max(1, Math.round(info.width * scale));
+					finalCssH = Math.max(1, Math.round(info.height * scale));
+				}
+			}
+
+			return {
+				buffer: rawBuffer,
+				webpDuration: 0,
+				originalDuration: 0,
+				outputSize: { width: finalCssW, height: finalCssH },
+				isDirect: true,
+				ext: '.jpg',
+				mimeType: 'image/jpeg'
+			};
+		} catch (e) {
+			qqq.logMessage(`MJPEG 直通读取失败: ${e.message}`, "ERROR");
+		}
+	}
+
+	// 2. 尝试读取缓存
+	if (!cacheStrategy.shouldBypassCache) {
+		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
+
+		if (cached) {
+			const cacheEntry = qqq.getCacheEntry(contentId);
+			const meta = cacheEntry?.qualities?.[cacheStrategy.cacheKey]?.meta || {};
+
+			const origWidth = meta.origWidth || info?.width || 0;
+			const origHeight = meta.origHeight || info?.height || 0;
+			const cachedOriginalDuration = meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
+
+			const webpDur = getWebPDurationFromBuffer(cached);
+
+			let finalCssW = origWidth;
+			let finalCssH = origHeight;
+
+			if (origWidth > 0 && origHeight > 0) {
+				if (enlargeSmallImages) {
+					const scale = Math.min(renderW / origWidth, renderH / origHeight);
+					finalCssW = Math.max(1, Math.round(origWidth * scale));
+					finalCssH = Math.max(1, Math.round(origHeight * scale));
+				} else {
+					if (origWidth <= renderW && origHeight <= renderH) {
+						finalCssW = origWidth;
+						finalCssH = origHeight;
+					} else {
+						const scale = Math.min(renderW / origWidth, renderH / origHeight);
+						finalCssW = Math.max(1, Math.round(origWidth * scale));
+						finalCssH = Math.max(1, Math.round(origHeight * scale));
+					}
+				}
+			} else {
+				finalCssW = renderW;
+				finalCssH = renderH;
+			}
+
+			return {
+				buffer: cached,
+				webpDuration: webpDur,
+				originalDuration: cachedOriginalDuration,
+				fromCache: true,
+				outputSize: { width: finalCssW, height: finalCssH },
+			};
+		}
+	}
+
+	// 3. 其他静态图直通读取
+	if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
+		try {
+			const rawBuffer = fs.readFileSync(filePath);
+			let finalCssW = info.width;
+			let finalCssH = info.height;
+
+			if (enlargeSmallImages) {
+				const scale = Math.min(renderW / info.width, renderH / info.height);
+				finalCssW = Math.max(1, Math.round(info.width * scale));
+				finalCssH = Math.max(1, Math.round(info.height * scale));
+			} else {
+				if (info.width > renderW || info.height > renderH) {
+					const scale = Math.min(renderW / info.width, renderH / info.height);
+					finalCssW = Math.max(1, Math.round(info.width * scale));
+					finalCssH = Math.max(1, Math.round(info.height * scale));
+				}
+			}
+
+			return {
+				buffer: rawBuffer,
+				webpDuration: 0,
+				originalDuration: originalDuration,
+				outputSize: { width: finalCssW, height: finalCssH },
+				isDirect: true,
+				ext: ext
+			};
+		} catch (e) { }
+	}
+
+	// 4. 转码生成
 	return new Promise((resolve) => {
-		const { args, targetW, targetH, expectedGifDuration } = buildFfmpegPreviewArgs(filePath, isVideo, isGif, origSize, duration);
-		const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-		const chunks = [];
+		const { args, targetW, targetH } = buildUnifiedWebPArgs(
+			filePath, origSize, originalDuration, cacheStrategy.qualityLevel,
+			cacheStrategy.previewWidth, cacheStrategy.previewHeight
+		);
+
+		const rand = Math.random().toString(36).slice(2);
+		const tempFile = path.join(os.tmpdir(), `qqq_uni_${contentId}_${rand}.webp`);
+		args.push("-y", tempFile);
+
+		// ★★★ 收集 stderr 用于错误日志 ★★★
+		const child = cp.spawn(qqq.ffmpegPath, args, {
+			windowsHide: true,
+			stdio: ['ignore', 'ignore', 'pipe']
+		});
+
+		let ffErr = "";
+		child.stderr?.on("data", d => {
+			if (ffErr.length < 2000) ffErr += d.toString();
+		});
+
 		let resolved = false;
 
+		const cleanup = () => {
+			if (fs.existsSync(tempFile)) {
+				try { fs.unlinkSync(tempFile); } catch { }
+			}
+		};
+
 		const timer = setTimeout(() => {
-			if (!resolved) { resolved = true; try { child.kill(); } catch { } resolve(null); }
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				cleanup();
+
+				const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
+				if (fallback) {
+					logCriticalError(filePath, "TIMEOUT(30s) - 使用兜底直读");
+					resolve(fallback);
+				} else {
+					logCriticalError(filePath, "TIMEOUT(30s) - 无法兜底");
+					resolve(null);
+				}
+			}
 		}, 30000);
 
-		child.stdout.on("data", d => chunks.push(d));
-		child.stderr.on("data", () => { });
-		child.on("error", () => { if (!resolved) { resolved = true; clearTimeout(timer); resolve(null); } });
-		child.on("close", () => {
+		child.on("close", (code) => {
 			if (!resolved) {
 				resolved = true;
 				clearTimeout(timer);
-				if (!chunks.length) { resolve(null); return; }
 
-				const buffer = Buffer.concat(chunks);
-				let gifDuration = expectedGifDuration;
-				if (isGif && !isVideo) {
-					gifDuration = getGifDurationFromBuffer(buffer);
-					if (extremePerformanceMode && gifDuration > 2.5) gifDuration = 2.0;
+				let buffer = null;
+				try {
+					if (fs.existsSync(tempFile)) {
+						buffer = fs.readFileSync(tempFile);
+					}
+				} catch (e) { }
+
+				cleanup();
+
+				if (!buffer) {
+					const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
+					if (fallback) {
+						if (ffErr.trim().length > 0) {
+							logCriticalError(filePath, `EXIT_CODE=${code}\n${ffErr}`);
+						}
+						resolve(fallback);
+						return;
+					} else {
+						if (ffErr.trim().length > 0) {
+							logCriticalError(filePath, `EXIT_CODE=${code} (无法兜底)\n${ffErr}`);
+						}
+						resolve(null);
+						return;
+					}
 				}
 
-				// 写入磁盘缓存
-				qqq.setCacheEntry(contentId, quality, buffer, {
-					width: targetW, height: targetH,
-					type: isVideo ? 'video' : (isGif ? 'gif' : 'image'),
-					gifDur: gifDuration, srcDuration: duration
+				const finalWebPDuration = getWebPDurationFromBuffer(buffer);
+
+				qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+					width: targetW,
+					height: targetH,
+					origWidth: origSize?.width || 0,
+					origHeight: origSize?.height || 0,
+					type: 'webp_unified',
+					webpDur: finalWebPDuration,
+					originalDuration: originalDuration
 				});
 
-				resolve({ buffer, gifDuration, outputSize: { width: targetW, height: targetH } });
+				let finalCssW = targetW;
+				let finalCssH = targetH;
+				const ow = origSize?.width || targetW;
+				const oh = origSize?.height || targetH;
+
+				if (ow > 0 && oh > 0) {
+					if (enlargeSmallImages) {
+						const scale = Math.min(renderW / ow, renderH / oh);
+						finalCssW = Math.max(1, Math.round(ow * scale));
+						finalCssH = Math.max(1, Math.round(oh * scale));
+					} else {
+						if (ow <= renderW && oh <= renderH) {
+							finalCssW = ow;
+							finalCssH = oh;
+						} else {
+							const scale = Math.min(renderW / ow, renderH / oh);
+							finalCssW = Math.max(1, Math.round(ow * scale));
+							finalCssH = Math.max(1, Math.round(oh * scale));
+						}
+					}
+				}
+
+				resolve({
+					buffer,
+					webpDuration: finalWebPDuration,
+					originalDuration: originalDuration,
+					outputSize: { width: finalCssW, height: finalCssH }
+				});
+			}
+		});
+
+		child.on("error", (err) => {
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+				cleanup();
+
+				const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
+				if (fallback) {
+					logCriticalError(filePath, `SPAWN_ERROR: ${err.message}`);
+					resolve(fallback);
+				} else {
+					logCriticalError(filePath, `SPAWN_ERROR (无法兜底): ${err.message}`);
+					resolve(null);
+				}
 			}
 		});
 	});
 }
 
-// ==================== 渲染 ====================
+// ==================== ★★★ 导出 DOC 功能 ★★★ ====================
 
-function computeMarginLeft() { return "100px"; }
+/**
+ * 将媒体文件转换为 GIF（带透明通道）
+ * 使用 balanced 模式的逻辑
+ */
+async function convertMediaToGif(filePath, info) {
+	if (!qqq.ffmpegPath) return null;
+
+	const duration = info?.duration || 0;
+	const origW = info?.width || 512;
+	const origH = info?.height || 288;
+
+	// 计算输出尺寸：小于512保留原始，大于512适配到512x288内
+	let targetW = origW;
+	let targetH = origH;
+
+	if (origW > EXPORT_MAX_WIDTH || origH > EXPORT_MAX_HEIGHT) {
+		const scale = Math.min(EXPORT_MAX_WIDTH / origW, EXPORT_MAX_HEIGHT / origH);
+		targetW = Math.max(1, Math.round(origW * scale));
+		targetH = Math.max(1, Math.round(origH * scale));
+	}
+
+	// 确保尺寸为偶数（GIF 编码要求）
+	targetW = targetW % 2 === 0 ? targetW : targetW + 1;
+	targetH = targetH % 2 === 0 ? targetH : targetH + 1;
+
+	return new Promise((resolve) => {
+		const args = ["-hide_banner", "-loglevel", "error"];
+		const isStatic = duration <= 0.1;
+		const isGifLike = !isStatic && duration > 0.1 && duration < 10;
+
+		// ★★★ 使用 balanced 模式逻辑 ★★★
+		if (isStatic) {
+			// 静态图：单帧
+			args.push("-i", filePath);
+			args.push("-vf", `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];[s0]palettegen=reserve_transparent=on:transparency_color=ffffff[p];[s1][p]paletteuse=alpha_threshold=128`);
+			args.push("-frames:v", "1");
+		} else if (isGifLike) {
+			// 短动画（<10s）：保留全部
+			args.push("-i", filePath);
+			args.push("-vf", `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];[s0]palettegen=reserve_transparent=on:transparency_color=ffffff:stats_mode=diff[p];[s1][p]paletteuse=alpha_threshold=128:dither=bayer:bayer_scale=5`);
+		} else {
+			// 长视频：三段拼接（balanced 模式）
+			const seg = 1.33;
+			const s1 = 1;
+			const s2 = Math.floor(duration / 2);
+			const s3 = Math.max(s2 + seg + 0.5, duration - seg - 1);
+
+			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
+			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
+			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
+
+			const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
+			args.push("-filter_complex",
+				`[0:v]fps=15,${scaleFilter}[v0];[1:v]fps=15,${scaleFilter}[v1];[2:v]fps=15,${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[vc];[vc]split[s0][s1];[s0]palettegen=reserve_transparent=on:transparency_color=ffffff:stats_mode=diff[p];[s1][p]paletteuse=alpha_threshold=128:dither=bayer:bayer_scale=5[out]`
+			);
+			args.push("-map", "[out]");
+		}
+
+		args.push("-loop", "0", "-f", "gif");
+
+		const rand = Math.random().toString(36).slice(2);
+		const tempFile = path.join(os.tmpdir(), `qqq_export_${rand}.gif`);
+		args.push("-y", tempFile);
+
+		const child = cp.spawn(qqq.ffmpegPath, args, {
+			windowsHide: true,
+			stdio: ['ignore', 'ignore', 'pipe']
+		});
+
+		let resolved = false;
+
+		const timer = setTimeout(() => {
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				resolve(null);
+			}
+		}, 60000); // 导出允许更长时间
+
+		child.on("close", (code) => {
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+
+				let buffer = null;
+				try {
+					if (fs.existsSync(tempFile)) {
+						buffer = fs.readFileSync(tempFile);
+						fs.unlinkSync(tempFile);
+					}
+				} catch { }
+
+				resolve(buffer ? { buffer, width: targetW, height: targetH } : null);
+			}
+		});
+
+		child.on("error", () => {
+			if (!resolved) {
+				resolved = true;
+				clearTimeout(timer);
+				resolve(null);
+			}
+		});
+	});
+}
+
+/**
+ * 计算文件的 SHA256 哈希
+ */
+function computeFileSHA256(filePath) {
+	try {
+		const buffer = fs.readFileSync(filePath);
+		return crypto.createHash("sha256").update(buffer).digest("hex");
+	} catch {
+		return "无法计算";
+	}
+}
+
+/**
+ * 判断是否为图片或视频（需要内嵌显示的媒体）
+ */
+function isMediaFile(ext) {
+	return IMAGE_EXTS.has(ext.toLowerCase()) || VIDEO_EXTS.has(ext.toLowerCase());
+}
+
+/**
+ * 判断是否为附件（非媒体文件）
+ */
+function isAttachmentFile(ext) {
+	const e = ext.toLowerCase();
+	return !IMAGE_EXTS.has(e) && !VIDEO_EXTS.has(e);
+}
+
+/**
+ * 导出文档命令
+ */
+async function executeExportDocCommand() {
+	if (!isCoreIntegrityValid) {
+		vscode.window.showErrorMessage("Integrity check failed.");
+		return;
+	}
+
+	// 检查 docx 库是否可用
+	if (!docx) {
+		const choice = await vscode.window.showErrorMessage(
+			"导出功能需要安装 docx 库。是否现在安装？",
+			"安装", "取消"
+		);
+		if (choice === "安装") {
+			const terminal = vscode.window.createTerminal("npm install");
+			terminal.show();
+			terminal.sendText("npm install docx --save");
+			vscode.window.showInformationMessage("安装完成后请重新加载窗口");
+		}
+		return;
+	}
+
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		vscode.window.showWarningMessage("没有打开的文档");
+		return;
+	}
+
+	const document = editor.document;
+	const docDir = path.dirname(document.uri.fsPath);
+	const docBaseName = path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
+
+	// 解析文档内容
+	const text = document.getText();
+	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+
+	// 收集所有元素（文本段落和媒体引用）
+	const elements = [];
+	const attachments = []; // 附件索引
+	let lastIndex = 0;
+	let match;
+
+	while ((match = regex.exec(text))) {
+		// 添加标记前的文本
+		if (match.index > lastIndex) {
+			const textBefore = text.substring(lastIndex, match.index);
+			if (textBefore.trim()) {
+				elements.push({ type: "text", content: textBefore });
+			}
+		}
+
+		const rawPath = match[0].slice(2, -2).trim();
+
+		// 跳过 PENDING 标记
+		if (!rawPath.startsWith("__PENDING__:")) {
+			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
+
+			if (absPath && fs.existsSync(absPath)) {
+				const ext = path.extname(absPath).toLowerCase();
+
+				if (isMediaFile(ext)) {
+					elements.push({ type: "media", path: absPath, rawPath: rawPath });
+				} else {
+					// 非媒体文件：记录到附件索引，同时在正文中保留原始标记
+					elements.push({ type: "text", content: match[0] });
+
+					try {
+						const stat = fs.statSync(absPath);
+						attachments.push({
+							name: path.basename(absPath),
+							path: rawPath,
+							absPath: absPath,
+							ext: ext,
+							size: stat.size,
+							sha256: computeFileSHA256(absPath)
+						});
+					} catch { }
+				}
+			} else {
+				// 文件不存在，保留原始标记
+				elements.push({ type: "text", content: match[0] });
+			}
+		}
+
+		lastIndex = match.index + match[0].length;
+	}
+
+	// 添加剩余文本
+	if (lastIndex < text.length) {
+		const remaining = text.substring(lastIndex);
+		if (remaining.trim()) {
+			elements.push({ type: "text", content: remaining });
+		}
+	}
+
+	// 开始导出
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "正在导出文档...",
+		cancellable: true
+	}, async (progress, token) => {
+		try {
+			const children = [];
+			let processedCount = 0;
+			const totalCount = elements.filter(e => e.type === "media").length;
+
+			for (const elem of elements) {
+				if (token.isCancellationRequested) {
+					vscode.window.showWarningMessage("导出已取消");
+					return;
+				}
+
+				if (elem.type === "text") {
+					// 文本段落：按行分割，保留原始格式
+					const lines = elem.content.split(/\r?\n/);
+
+					for (const line of lines) {
+						children.push(new docx.Paragraph({
+							children: [new docx.TextRun({
+								text: line,
+								font: "Microsoft YaHei",
+								size: 22 // 11pt
+							})],
+							spacing: { after: 120 }
+						}));
+					}
+				} else if (elem.type === "media") {
+					processedCount++;
+					progress.report({
+						message: `转换媒体 ${processedCount}/${totalCount}: ${path.basename(elem.path)}`,
+						increment: (1 / totalCount) * 80
+					});
+
+					// 获取媒体信息
+					let mtimeMs = 0;
+					try {
+						mtimeMs = fs.statSync(elem.path).mtimeMs;
+					} catch { }
+
+					const info = await getMediaInfo(elem.path, mtimeMs);
+
+					// 转换为 GIF
+					const gifResult = await convertMediaToGif(elem.path, info);
+
+					if (gifResult?.buffer) {
+						// 计算显示尺寸（英寸转 EMU）
+						const EMU_PER_INCH = 914400;
+						const DPI = 96;
+
+						const widthEmu = Math.round((gifResult.width / DPI) * EMU_PER_INCH);
+						const heightEmu = Math.round((gifResult.height / DPI) * EMU_PER_INCH);
+
+						children.push(new docx.Paragraph({
+							children: [
+								new docx.ImageRun({
+									data: gifResult.buffer,
+									transformation: {
+										width: widthEmu,
+										height: heightEmu
+									},
+									type: "gif"
+								})
+							],
+							spacing: { before: 200, after: 200 },
+							alignment: docx.AlignmentType.CENTER
+						}));
+
+						// 添加图片说明（文件名）
+						children.push(new docx.Paragraph({
+							children: [new docx.TextRun({
+								text: `📎 ${elem.rawPath}`,
+								font: "Microsoft YaHei",
+								size: 18,
+								color: "666666",
+								italics: true
+							})],
+							spacing: { after: 240 },
+							alignment: docx.AlignmentType.CENTER
+						}));
+					} else {
+						// 转换失败，显示占位符
+						children.push(new docx.Paragraph({
+							children: [new docx.TextRun({
+								text: `[媒体转换失败: ${elem.rawPath}]`,
+								font: "Microsoft YaHei",
+								size: 22,
+								color: "FF0000"
+							})],
+							spacing: { after: 200 }
+						}));
+					}
+				}
+			}
+
+			// ★★★ 添加附件索引 ★★★
+			if (attachments.length > 0) {
+				progress.report({ message: "生成附件索引...", increment: 10 });
+
+				// 分隔线
+				children.push(new docx.Paragraph({
+					children: [],
+					spacing: { before: 400, after: 200 },
+					border: {
+						bottom: { style: docx.BorderStyle.SINGLE, size: 6, color: "888888" }
+					}
+				}));
+
+				// 附件索引标题
+				children.push(new docx.Paragraph({
+					children: [new docx.TextRun({
+						text: "📁 附件索引",
+						font: "Microsoft YaHei",
+						size: 32,
+						bold: true
+					})],
+					spacing: { before: 200, after: 300 },
+					heading: docx.HeadingLevel.HEADING_1
+				}));
+
+				// 附件表格
+				const tableRows = [
+					// 表头
+					new docx.TableRow({
+						tableHeader: true,
+						children: [
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: "序号", bold: true, font: "Microsoft YaHei", size: 20 })]
+								})],
+								shading: { fill: "E0E0E0" },
+								width: { size: 800, type: docx.WidthType.DXA }
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: "文件名", bold: true, font: "Microsoft YaHei", size: 20 })]
+								})],
+								shading: { fill: "E0E0E0" },
+								width: { size: 3000, type: docx.WidthType.DXA }
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: "类型", bold: true, font: "Microsoft YaHei", size: 20 })]
+								})],
+								shading: { fill: "E0E0E0" },
+								width: { size: 1200, type: docx.WidthType.DXA }
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: "大小", bold: true, font: "Microsoft YaHei", size: 20 })]
+								})],
+								shading: { fill: "E0E0E0" },
+								width: { size: 1500, type: docx.WidthType.DXA }
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: "SHA256", bold: true, font: "Microsoft YaHei", size: 20 })]
+								})],
+								shading: { fill: "E0E0E0" },
+								width: { size: 4000, type: docx.WidthType.DXA }
+							})
+						]
+					})
+				];
+
+				// 附件行
+				for (let i = 0; i < attachments.length; i++) {
+					const att = attachments[i];
+					tableRows.push(new docx.TableRow({
+						children: [
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: String(i + 1), font: "Microsoft YaHei", size: 18 })]
+								})]
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: att.name, font: "Microsoft YaHei", size: 18 })]
+								})]
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: att.ext.toUpperCase(), font: "Microsoft YaHei", size: 18 })]
+								})]
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: formatBytes(att.size), font: "Microsoft YaHei", size: 18 })]
+								})]
+							}),
+							new docx.TableCell({
+								children: [new docx.Paragraph({
+									children: [new docx.TextRun({ text: att.sha256.substring(0, 16) + "...", font: "Consolas", size: 16 })]
+								})]
+							})
+						]
+					}));
+				}
+
+				children.push(new docx.Table({
+					rows: tableRows,
+					width: { size: 100, type: docx.WidthType.PERCENTAGE }
+				}));
+
+				// 完整 SHA256 列表
+				children.push(new docx.Paragraph({
+					children: [new docx.TextRun({
+						text: "完整 SHA256 哈希值：",
+						font: "Microsoft YaHei",
+						size: 20,
+						bold: true
+					})],
+					spacing: { before: 300, after: 100 }
+				}));
+
+				for (const att of attachments) {
+					children.push(new docx.Paragraph({
+						children: [
+							new docx.TextRun({ text: `${att.name}: `, font: "Microsoft YaHei", size: 16 }),
+							new docx.TextRun({ text: att.sha256, font: "Consolas", size: 14, color: "555555" })
+						],
+						spacing: { after: 60 }
+					}));
+				}
+			}
+
+			progress.report({ message: "生成文档...", increment: 10 });
+
+			// 创建文档
+			const doc = new docx.Document({
+				creator: "QQQ Extension",
+				title: docBaseName,
+				description: "Exported by QQQ VSCode Extension",
+				sections: [{
+					properties: {
+						page: {
+							margin: {
+								top: 1440,    // 1 inch
+								bottom: 1440,
+								left: 1440,
+								right: 1440
+							}
+						}
+					},
+					children: children
+				}]
+			});
+
+			// 生成文件
+			const buffer = await docx.Packer.toBuffer(doc);
+
+			// 保存文件
+			const defaultPath = path.join(docDir, `${docBaseName}_导出.docx`);
+			const saveUri = await vscode.window.showSaveDialog({
+				defaultUri: vscode.Uri.file(defaultPath),
+				filters: {
+					"Word 文档": ["docx"]
+				}
+			});
+
+			if (saveUri) {
+				fs.writeFileSync(saveUri.fsPath, buffer);
+				vscode.window.showInformationMessage(`文档已导出: ${saveUri.fsPath}`, "打开文件", "打开文件夹").then(choice => {
+					if (choice === "打开文件") {
+						openFileCommand(saveUri.fsPath);
+					} else if (choice === "打开文件夹") {
+						revealFileInFolder(saveUri.fsPath);
+					}
+				});
+			}
+
+		} catch (e) {
+			qqq.logMessage(`导出失败: ${e.message}`, "ERROR");
+			vscode.window.showErrorMessage(`导出失败: ${e.message}`);
+		}
+	});
+}
+
+// ==================== 渲染辅助 ====================
+
+function formatBytes(size) {
+	if (size == null || isNaN(size)) return "?";
+	const units = ["B", "KB", "MB", "GB"];
+	let idx = 0;
+	let val = size;
+
+	while (val >= 1024 && idx < units.length - 1) {
+		val /= 1024;
+		idx++;
+	}
+
+	return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
+}
+
+function formatDuration(sec) {
+	if (sec == null || isNaN(sec) || sec < 0) return "0s";
+
+	if (sec >= 60) {
+		const m = Math.floor(sec / 60);
+		const s = sec % 60;
+		return `${m}m + ${s.toFixed(2)}s`;
+	}
+
+	return `${sec.toFixed(2)}s`;
+}
+
+function isImageOrVideoExt(ext) {
+	const e = ext.toLowerCase();
+	return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e);
+}
+
+function getDocumentEOL(doc) {
+	return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+}
+
+function resolvePathToAbsolute(docUri, rawPath) {
+	if (!rawPath) return null;
+	let clean = rawPath.trim();
+
+	while (clean.startsWith("\\") || clean.startsWith("/")) {
+		clean = clean.slice(1);
+	}
+
+	if (path.isAbsolute(clean)) return clean;
+	return path.resolve(path.dirname(docUri.fsPath), clean);
+}
 
 function calculateAspectRatioString(w, h) {
 	if (!w || !h) return "";
-	if (w >= h) { const r = (h / w) * 16; return `16__${parseFloat(r.toFixed(1))}`; }
-	else { const r = (w / h) * 16; return `${parseFloat(r.toFixed(1))}__16`; }
+
+	if (w >= h) {
+		const r = (h / w) * 16;
+		return `16__${parseFloat(r.toFixed(1))}`;
+	} else {
+		const r = (w / h) * 16;
+		return `${parseFloat(r.toFixed(1))}__16`;
+	}
 }
 
-function createProgressSvg(durationSeconds) {
-	if (!durationSeconds || durationSeconds <= 0) return null;
-	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="4" viewBox="0 0 512 4"><rect width="512" height="4" fill="black"/><rect width="0" height="4" fill="#fdf6e3"><animate attributeName="width" from="0" to="512" dur="${durationSeconds.toFixed(3)}s" repeatCount="indefinite"/></rect></svg>`;
+function createProgressSvg(webpDuration, previewWidth) {
+	if (!webpDuration || webpDuration <= 0) return null;
+
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${previewWidth}" height="4" viewBox="0 0 ${previewWidth} 4"><rect width="${previewWidth}" height="4" fill="black"/><rect width="0" height="4" fill="#fdf6e3"><animate attributeName="width" from="0" to="${previewWidth}" dur="${webpDuration.toFixed(3)}s" repeatCount="indefinite"/></rect></svg>`;
+
 	return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 }
 
-function calculateBlankLinesN(isFramed, isLastItem = false) {
+function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	try {
 		const config = vscode.workspace.getConfiguration('editor');
 		const fontSize = config.get('fontSize', 14);
 		const lhMult = config.get('lineHeight', 0) || 1.35;
 		const pxPerLine = fontSize * lhMult;
-		let baseN = Math.ceil(PREVIEW_HEIGHT / pxPerLine);
+
+		const boxH = pxHeight + PREVIEW_BORDER;
+		let baseN = Math.ceil(boxH / pxPerLine);
+
 		let extra = 2 + Math.floor((lhMult - 1) * 3);
 		extra = Math.min(5, Math.max(2, extra));
+
 		let n = baseN + extra;
 		n = Math.max(4, n);
-		if (isLastItem) n = isFramed ? Math.max(8, n) : 2;
-		else if (!isFramed) n = 2;
+
+		if (isLastItem) {
+			n = Math.max(8, n);
+		}
+
 		return n;
-	} catch (e) { return 15; }
+	} catch (e) {
+		return 15;
+	}
 }
 
+// ==================== ★★★ 获取编辑器唯一标识 ★★★ ====================
+
+function getEditorId(editor) {
+	const docUri = editor.document.uri.toString();
+	const viewColumn = editor.viewColumn ?? 0;
+	return `${docUri}::${viewColumn}`;
+}
+
+// ==================== 主渲染逻辑 ====================
+
 async function renderImages(editor) {
-	if (!editor || !isCoreIntegrityValid) { clearDecorations(); return; }
+	if (!editor || !isCoreIntegrityValid) {
+		clearDecorations();
+		return;
+	}
+
 	const myVersion = ++currentRenderVersion;
 
-	if (!decorationType) decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
-	if (!markerHideType) markerHideType = vscode.window.createTextEditorDecorationType({ textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;' });
+	if (!decorationType) {
+		decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
+	}
+
+	if (!markerHideType) {
+		markerHideType = vscode.window.createTextEditorDecorationType({
+			textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;'
+		});
+	}
 
 	const docUri = editor.document.uri.toString();
-	if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
-	const currentDecos = documentDecorationsMap.get(docUri);
-	const hideDecos = new Map();
 
+	if (!documentDecorationsMap.has(docUri)) {
+		documentDecorationsMap.set(docUri, new Map());
+	}
+
+	if (!animatedDecorationKeys.has(docUri)) {
+		animatedDecorationKeys.set(docUri, new Set());
+	}
+
+	const currentDecos = documentDecorationsMap.get(docUri);
+	const animatedKeys = animatedDecorationKeys.get(docUri);
+	const hideDecos = new Map();
 	const visibleRanges = editor.visibleRanges;
+
 	if (!visibleRanges?.length) return;
 
-	const marginLeft = computeMarginLeft();
-	const boxWidth = PREVIEW_WIDTH + PREVIEW_BORDER;
-	const boxHeight = PREVIEW_HEIGHT + PREVIEW_BORDER;
+	const marginLeft = "100px";
+	const pathRegex = new RegExp(qqq.QQQ_PATH_REGEX);
 	const tasks = [];
-	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
 
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
-		regex.lastIndex = 0;
+		pathRegex.lastIndex = 0;
 		let match;
 
-		while ((match = regex.exec(text))) {
+		while ((match = pathRegex.exec(text))) {
 			const offset = editor.document.offsetAt(range.start) + match.index;
 			const pos = editor.document.positionAt(offset);
 			const endPos = editor.document.positionAt(offset + match[0].length);
 			const uniqueKey = `${pos.line}_${pos.character}`;
 
 			hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
-
 			const rawPath = match[0].slice(2, -2).trim();
 
-			// PENDING 占位符
 			if (rawPath.startsWith("__PENDING__:")) {
+				const { width: pW, height: pH } = getFrameConfig(null);
+				const boxWidth = pW + PREVIEW_BORDER;
+				const boxHeight = pH + PREVIEW_BORDER;
+
 				const loadingDeco = {
 					range: new vscode.Range(pos.line, 0, pos.line, 0),
 					renderOptions: {
 						after: {
 							contentText: "",
-							position: 'absolute', left: marginLeft, top: '0px',
-							width: `${boxWidth}px`, height: `${boxHeight}px`,
-							padding: "2px", border: "1px dashed #888",
-							backgroundColor: PREVIEW_BG_COLOR, zIndex: -1,
+							position: 'absolute',
+							left: marginLeft,
+							top: '0px',
+							width: `${boxWidth}px`,
+							height: `${boxHeight}px`,
+							padding: "2px",
+							border: "1px dashed #888",
+							backgroundColor: PREVIEW_BG_COLOR,
+							zIndex: -1,
 							textDecoration: `none; pointer-events: none; display: inline-block; background-image: url("${LOADING_SVG}"); background-size: 120px 40px; background-position: center center; background-repeat: no-repeat;`
 						}
 					}
 				};
+
 				currentDecos.set(uniqueKey, loadingDeco);
 				continue;
 			}
@@ -437,58 +1559,76 @@ async function renderImages(editor) {
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath.replace(/\//g, "\\"));
 			if (!absPath || !fs.existsSync(absPath)) continue;
 
-			const ext = path.extname(absPath).toLowerCase();
-			let isImage = isImageExt(ext), isVideo = isVideoExt(ext), isGif = ext === ".gif";
-			let mtimeMs = 0;
-			try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-
-			if (!isImage && !isVideo) {
-				const info = await getMediaInfo(absPath, mtimeMs);
-				if (info?.type === "video") isVideo = true;
-				else if (info?.type === "image") { isImage = true; if (info.codec === "gif") isGif = true; }
-				else continue;
-			}
-
 			const targetLine = pos.line;
 			if (targetLine >= editor.document.lineCount) continue;
-			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 
-			// 计算指纹
+			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
 			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
 			tasks.push(async () => {
 				if (currentRenderVersion !== myVersion) return null;
+
 				try {
-					const previewResult = await getPreviewBuffer(absPath, isVideo, isGif, contentId);
+					let mtimeMs = 0;
+					try {
+						mtimeMs = fs.statSync(absPath).mtimeMs;
+					} catch { }
+
+					const info = await getMediaInfo(absPath, mtimeMs);
+					const { width: previewWidth, height: previewHeight } = getFrameConfig(info);
+					const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+
 					if (currentRenderVersion !== myVersion) return null;
 
 					const deco = { range: anchorRange, renderOptions: {} };
 					let contentUrl = "";
-					let actualGifDuration = 0;
+					let webpDuration = 0;
 					let outputSize = null;
 
 					if (previewResult?.buffer) {
-						let mime = "image/png";
-						if (isGif || isVideo) mime = "image/gif";
-						else if (extremePerformanceMode) mime = "image/jpeg";
+						let mime = "image/webp";
+
+						if (previewResult.isDirect) {
+							if (previewResult.mimeType) {
+								mime = previewResult.mimeType;
+							} else if (previewResult.ext) {
+								const e = previewResult.ext;
+								if (e === '.png') mime = 'image/png';
+								else if (e === '.jpg' || e === '.jpeg') mime = 'image/jpeg';
+								else if (e === '.svg') mime = 'image/svg+xml';
+								else if (e === '.gif') mime = 'image/gif';
+								else if (e === '.webp') mime = 'image/webp';
+								else if (e === '.bmp') mime = 'image/bmp';
+								else if (e === '.ico') mime = 'image/x-icon';
+							}
+						}
+
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						if (previewResult.gifDuration > 0) actualGifDuration = previewResult.gifDuration;
+						webpDuration = previewResult.webpDuration || 0;
 						outputSize = previewResult.outputSize;
-					} else if (isImage && !isVideo && !isGif) {
-						contentUrl = `url("${vscode.Uri.file(absPath).toString()}")`;
 					}
+
 					if (!contentUrl) return null;
 
+					const boxWidth = previewWidth + PREVIEW_BORDER;
+					const boxHeight = previewHeight + PREVIEW_BORDER;
+
 					let progressBarUrl = null;
-					if ((isGif || isVideo) && actualGifDuration > 0) {
-						progressBarUrl = `url("${createProgressSvg(actualGifDuration)}")`;
+					let hasAnimation = false;
+
+					if (webpDuration > 0.1) {
+						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
+						hasAnimation = true;
 					}
 
 					const gridSize = "20px 20px";
 					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
 
-					let layers = [], sizes = [], positions = [], repeats = [];
+					let layers = [];
+					let sizes = [];
+					let positions = [];
+					let repeats = [];
 
 					if (watermarkBase64) {
 						layers.push(`url("${watermarkBase64}")`);
@@ -496,16 +1636,19 @@ async function renderImages(editor) {
 						positions.push("center center");
 						repeats.push("no-repeat");
 					}
+
 					if (progressBarUrl) {
 						layers.push(progressBarUrl);
-						sizes.push("512px 4px");
+						sizes.push(`${previewWidth}px 4px`);
 						positions.push("center bottom");
 						repeats.push("no-repeat");
 					}
+
 					layers.push(contentUrl);
 					sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
 					positions.push("center center");
 					repeats.push("no-repeat");
+
 					layers.push(gridImage);
 					sizes.push(gridSize);
 					positions.push("0 0");
@@ -525,67 +1668,49 @@ async function renderImages(editor) {
 						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
 					};
 
-					deco.hoverMessage = new vscode.MarkdownString(`[打开图片](${vscode.Uri.file(absPath).toString()})`);
+					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
 					deco.hoverMessage.isTrusted = true;
 
-					return { key: uniqueKey, deco };
-				} catch (e) { return null; }
+					return { key: uniqueKey, deco, hasAnimation };
+				} catch (e) {
+					return null;
+				}
 			});
 		}
 	}
 
 	if (tasks.length > 0) {
 		const results = [];
+
 		for (let i = 0; i < tasks.length; i += MAX_CONCURRENT_TASKS) {
 			if (currentRenderVersion !== myVersion) return;
+
 			const chunk = tasks.slice(i, i + MAX_CONCURRENT_TASKS);
 			const chunkResults = await Promise.all(chunk.map(t => t()));
 			results.push(...chunkResults);
 		}
+
 		if (currentRenderVersion !== myVersion) return;
+
 		for (const res of results) {
-			if (res) currentDecos.set(res.key, res.deco);
+			if (res) {
+				currentDecos.set(res.key, res.deco);
+				if (res.hasAnimation) {
+					animatedKeys.add(res.key);
+				}
+			}
 		}
+	}
+
+	if (animatedKeys.size > 0) {
+		startProgressSyncTimer();
 	}
 
 	editor.setDecorations(decorationType, Array.from(currentDecos.values()));
-	if (hideDecos.size > 0) editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
-}
 
-// ==================== 文件夹大小缓存 ====================
-
-const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-
-function invalidateFolderSizeCacheForPath(filePath) {
-	try {
-		const dir = path.dirname(filePath);
-		if (folderSizeCache.has(dir)) folderSizeCache.delete(dir);
-	} catch { }
-}
-
-async function getQqqFolderSize(folderPath) {
-	const now = Date.now();
-	const cached = folderSizeCache.get(folderPath);
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
-
-	const result = await qqq.getFolderInfo(folderPath);
-	if (result?.success) {
-		const parts = [];
-		let totalFiles = 0;
-		if (result.ext_stats) {
-			for (const [ext, count] of Object.entries(result.ext_stats)) {
-				totalFiles += count;
-				parts.push(`${count}_${ext || '无后缀'}`);
-			}
-		}
-		const summaryStr = parts.length > 0
-			? `${totalFiles}个文件：${parts.join("; ")}`
-			: (result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹");
-		const data = { size: result.total_size, summary: summaryStr };
-		folderSizeCache.set(folderPath, { data, timestamp: now });
-		return data;
+	if (hideDecos.size > 0) {
+		editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
 	}
-	return null;
 }
 
 // ==================== 粘贴命令 ====================
@@ -604,19 +1729,18 @@ async function executeClipboardCommand() {
 		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 	}
 
-	// Fast Path: 纯文字
 	const fastResult = await qqq.handleClipboardFast();
+
 	if (fastResult?.type === "text") {
 		await editor.edit(e => e.insert(editor.selection.active, fastResult.text));
 		return;
 	}
 
-	// Slow Path: 媒体 - 先插入占位符
 	const token = qqq.createPendingToken();
 	const eol = getDocumentEOL(editor.document);
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
-
 	const insertPosition = editor.selection.active;
+
 	await editor.edit(e => e.insert(insertPosition, eol + pendingMarker + eol));
 
 	pendingTokens.set(token, {
@@ -627,7 +1751,6 @@ async function executeClipboardCommand() {
 
 	debounceRender(editor, 10);
 
-	// 后台处理媒体
 	setImmediate(async () => {
 		try {
 			const result = await qqq.handleClipboardSlow(targetDir);
@@ -642,11 +1765,13 @@ async function executeClipboardCommand() {
 async function replacePendingMarker(token, result) {
 	const pending = pendingTokens.get(token);
 	if (!pending) return;
+
 	pendingTokens.delete(token);
 
 	let editor = vscode.window.visibleTextEditors.find(
 		e => e.document.uri.toString() === pending.documentUri
 	);
+
 	if (!editor) return;
 
 	const doc = editor.document;
@@ -664,35 +1789,56 @@ async function replacePendingMarker(token, result) {
 	const eol = getDocumentEOL(doc);
 	const docDir = path.dirname(doc.uri.fsPath);
 
-	if (result.type === "unknown" || result.type === "error") {
-		replacement = "";
-	} else if (result.type === "folder_text") {
-		replacement = result.text;
-	} else if (result.type === "image" || result.type === "ikge") {
+	if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
 		const relPath = path.relative(docDir, filePath).replace(/\//g, "\\");
-		const isVidOrImg = isImageOrVideoExt(path.extname(filePath));
-		const gapBelow = calculateBlankLinesN(isVidOrImg, true);
+
+		let pxHeight = LARGE_PREVIEW_HEIGHT;
+		try {
+			const info = await getMediaInfo(filePath, Date.now());
+			const { height } = getFrameConfig(info);
+			pxHeight = height;
+		} catch { }
+
+		const gapBelow = calculateBlankLinesExact(pxHeight, true);
 		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
+
 	} else if (result.type === "file") {
 		const files = result.files;
+
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
 			const relPath = path.relative(docDir, f).replace(/\//g, "\\");
-			const isVidOrImg = isImageOrVideoExt(path.extname(f));
+
+			let pxHeight = LARGE_PREVIEW_HEIGHT;
+			if (isImageOrVideoExt(path.extname(f))) {
+				try {
+					const info = await getMediaInfo(f, Date.now());
+					const { height } = getFrameConfig(info);
+					pxHeight = height;
+				} catch { }
+			}
+
 			const isLastItem = (i === files.length - 1);
 			if (i > 0) replacement += eol;
 			replacement += `/\\${relPath}\\/`;
-			const gapBelow = calculateBlankLinesN(isVidOrImg, isLastItem);
+
+			const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
 			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
+
 		if (files.length > 1) {
 			vscode.window.showInformationMessage("文件已复制 " + files.length);
 		}
+
+	} else if (result.type === "folder_text") {
+		replacement = result.text;
 	} else if (result.type === "text") {
 		replacement = result.text;
+	} else {
+		replacement = "";
 	}
 
 	await editor.edit(editBuilder => {
@@ -702,9 +1848,13 @@ async function replacePendingMarker(token, result) {
 	setTimeout(() => renderImages(editor), 50);
 }
 
-// ==================== 整洁模式 ====================
+// ==================== 整洁模式 (Clean Freak) ====================
 
-function provideCleanlinessEdits(document) {
+async function performGlobalClean(editor, force = false) {
+	if (!editor) return;
+	if (!force && !cleanFreakMode) return;
+
+	const document = editor.document;
 	const edits = [];
 	const text = document.getText();
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
@@ -721,46 +1871,69 @@ function provideCleanlinessEdits(document) {
 		const startPos = document.positionAt(m.index);
 		const endPos = document.positionAt(m.index + m.text.length);
 		const markerLine = startPos.line;
-
 		const rawPath = m.text.slice(2, -2).trim();
+
 		if (rawPath.startsWith("__PENDING__:")) continue;
 
 		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
-		let isVidOrImg = false;
-		if (absPath) isVidOrImg = isImageOrVideoExt(path.extname(absPath));
+		let pxHeight = 0;
+
+		if (absPath && fs.existsSync(absPath)) {
+			const ext = path.extname(absPath);
+			if (isImageOrVideoExt(ext)) {
+				try {
+					let mtimeMs = fs.statSync(absPath).mtimeMs;
+					const info = await getMediaInfo(absPath, mtimeMs);
+					const { height } = getFrameConfig(info);
+					pxHeight = height;
+				} catch {
+					const { height } = getFrameConfig(null);
+					pxHeight = height;
+				}
+			}
+		}
 
 		const lineObj = document.lineAt(markerLine);
 		const lineContent = lineObj.text;
 
-		if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
-		const suffix = lineContent.substring(endPos.character);
-		if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
-
-		let isLastMarkerInDoc = (i === markers.length - 1);
-		const neededLines = calculateBlankLinesN(isVidOrImg, isLastMarkerInDoc);
-		let existingBlanks = 0;
-		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-			if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
-			else break;
+		if (startPos.character > 0) {
+			edits.push(vscode.TextEdit.insert(startPos, eol));
 		}
-		if (existingBlanks < neededLines) {
-			const linesToAdd = neededLines - existingBlanks;
-			const lineEndPos = lineObj.range.end;
-			edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
+
+		const suffix = lineContent.substring(endPos.character);
+		if (suffix.trim().length > 0) {
+			edits.push(vscode.TextEdit.insert(endPos, eol));
+		}
+
+		if (pxHeight > 0) {
+			let isLastMarkerInDoc = (i === markers.length - 1);
+			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
+
+			let existingBlanks = 0;
+			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
+				if (document.lineAt(lineIdx).text.trim() === "") {
+					existingBlanks++;
+				} else {
+					break;
+				}
+			}
+
+			if (existingBlanks < neededLines) {
+				const linesToAdd = neededLines - existingBlanks;
+				const lineEndPos = lineObj.range.end;
+				edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
+			}
 		}
 	}
-	return edits;
-}
 
-async function performGlobalClean(editor, force = false) {
-	if (!editor) return;
-	if (!force && !cleanFreakMode) return;
-	const edits = provideCleanlinessEdits(editor.document);
 	if (edits.length > 0) {
 		await editor.edit(editBuilder => {
 			edits.forEach(e => {
-				if (e.newText) editBuilder.insert(e.range.start, e.newText);
-				else editBuilder.replace(e.range, e.newText);
+				if (e.newText) {
+					editBuilder.insert(e.range.start, e.newText);
+				} else {
+					editBuilder.replace(e.range, e.newText);
+				}
 			});
 		});
 	}
@@ -771,6 +1944,7 @@ async function performGlobalClean(editor, force = false) {
 class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid) return [];
+
 		const lenses = [];
 		const regex = new RegExp(qqq.QQQ_PATH_REGEX);
 		const text = document.getText();
@@ -789,18 +1963,17 @@ class FileCodeLensProvider {
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
 			const isVidOrImg = isImageOrVideoExt(ext);
-			const isVideoExtFlag = isVideoExt(ext);
 			const targetLensLine = pos.line;
 
 			tasks.push(async () => {
 				let folderData = await getQqqFolderSize(folder);
-				const fSize = folderData?.size || 0;
-				const fSizeStr = formatBytes(fSize);
+				const fSizeStr = formatBytes(folderData?.size || 0);
 				const folderTooltip = folderData?.summary;
 
 				let fileSz = "?";
 				let tooltipText = "";
 				let mtimeMs = 0;
+
 				try {
 					const st = fs.statSync(absPath);
 					fileSz = formatBytes(st.size);
@@ -810,27 +1983,38 @@ class FileCodeLensProvider {
 
 				let titleSuffix = "";
 				let isRealVideo = false;
+
 				if (isVidOrImg) {
 					const info = await getMediaInfo(absPath, mtimeMs);
+
 					if (info?.width && info?.height) {
-						let scale = 1;
-						const MAX_W = PREVIEW_WIDTH, MAX_H = PREVIEW_HEIGHT;
+						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
+
 						if (info.type === "video") isRealVideo = true;
-						if (isRealVideo || isVideoExtFlag || enlargeSmallImages) {
+
+						let scale = 1;
+						if (isRealVideo || info.duration > 0.1 || enlargeSmallImages) {
 							scale = Math.min(MAX_W / info.width, MAX_H / info.height);
 						} else {
-							if (info.width <= MAX_W && info.height <= MAX_H) scale = 1;
-							else scale = Math.min(MAX_W / info.width, MAX_H / info.height);
+							if (info.width <= MAX_W && info.height <= MAX_H) {
+								scale = 1;
+							} else {
+								scale = Math.min(MAX_W / info.width, MAX_H / info.height);
+							}
 						}
+
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-						if (info.codec) {
-							tooltipText += `\n编解码器: ${info.codec}`;
-							if (info.codec_long_name) tooltipText += ` (${info.codec_long_name})`;
-						}
+
+						const displayCodec = info.full_codec_desc || info.codec;
+						if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
+
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
-						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+
+						if (qqq.shouldShowDuration(info)) {
+							tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+						}
 					}
 				}
 
@@ -862,34 +2046,96 @@ class FileCodeLensProvider {
 
 		const results = await Promise.all(tasks.map(t => t()));
 		results.forEach(group => lenses.push(...group));
+
 		return lenses;
 	}
+}
+
+// ==================== 文件夹大小缓存 ====================
+
+const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
+
+function invalidateFolderSizeCacheForPath(filePath) {
+	try {
+		const dir = path.dirname(filePath);
+		if (folderSizeCache.has(dir)) {
+			folderSizeCache.delete(dir);
+		}
+	} catch { }
+}
+
+async function getQqqFolderSize(folderPath) {
+	const now = Date.now();
+	const cached = folderSizeCache.get(folderPath);
+
+	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
+		return cached.data;
+	}
+
+	const result = await qqq.getFolderInfo(folderPath);
+
+	if (result?.success) {
+		const parts = [];
+		let totalFiles = 0;
+
+		if (result.ext_stats) {
+			for (const [ext, count] of Object.entries(result.ext_stats)) {
+				totalFiles += count;
+				parts.push(`${count}_${ext || '无后缀'}`);
+			}
+		}
+
+		const summaryStr = parts.length > 0
+			? `${totalFiles}个文件：${parts.join("; ")}`
+			: (result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹");
+
+		const data = { size: result.total_size, summary: summaryStr };
+		folderSizeCache.set(folderPath, { data, timestamp: now });
+
+		return data;
+	}
+
+	return null;
 }
 
 // ==================== 命令 ====================
 
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
+
 	try {
-		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
-		else cp.exec(`xdg-open "${filePath}"`);
-	} catch { vscode.env.openExternal(vscode.Uri.file(filePath)); }
+		if (process.platform === "win32") {
+			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+		} else if (process.platform === "darwin") {
+			cp.exec(`open "${filePath}"`);
+		} else {
+			cp.exec(`xdg-open "${filePath}"`);
+		}
+	} catch {
+		vscode.env.openExternal(vscode.Uri.file(filePath));
+	}
 }
 
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
+
 	try {
-		if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`);
-		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
+		if (process.platform === "win32") {
+			cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
+		} else if (process.platform === "darwin") {
+			cp.exec(`open -R "${filePath}"`);
+		} else {
+			cp.exec(`xdg-open "${path.dirname(filePath)}"`);
+		}
 	} catch { }
 }
 
 async function renameFileCommand(rawPath, absPath) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
+
 	const currentName = path.basename(absPath);
+
 	const newName = await vscode.window.showInputBox({
 		title: "重命名粘贴文件",
 		prompt: "rename  ",
@@ -897,10 +2143,12 @@ async function renameFileCommand(rawPath, absPath) {
 		ignoreFocusOut: true,
 		validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null
 	});
+
 	if (!newName || newName.trim() === currentName) return;
 
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
+
 	try {
 		await fs.promises.rename(absPath, newAbs);
 	} catch (e) {
@@ -909,38 +2157,66 @@ async function renameFileCommand(rawPath, absPath) {
 	}
 
 	const doc = editor.document;
+	const newRaw = rawPath.includes('/')
+		? rawPath.substring(0, rawPath.lastIndexOf('/') + 1) + trimmed
+		: trimmed;
+
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
-	const newRaw = buildNewRawPath(rawPath, trimmed);
 	const ranges = [];
 	let m;
-	const txt = doc.getText();
-	while ((m = regex.exec(txt))) {
-		const matchedRaw = m[0].slice(2, -2).trim();
-		if (matchedRaw === rawPath) {
-			const s = doc.positionAt(m.index);
-			const e = doc.positionAt(m.index + m[0].length);
-			ranges.push(new vscode.Range(s, e));
+
+	while ((m = regex.exec(doc.getText()))) {
+		if (m[0].slice(2, -2).trim() === rawPath) {
+			ranges.push(new vscode.Range(
+				doc.positionAt(m.index),
+				doc.positionAt(m.index + m[0].length)
+			));
 		}
 	}
+
 	if (ranges.length) {
 		await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
 	}
+
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
 }
 
-// ==================== 防抖与渲染 ====================
+// ==================== ★★★ 多编辑器独立防抖 ★★★ ====================
 
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
-	clearTimeout(debounceRender.timer);
-	debounceRender.timer = setTimeout(() => {
-		if (editor && !editor.document.isClosed) renderImages(editor);
+	if (!editor || editor.document.isClosed) return;
+
+	const editorId = getEditorId(editor);
+
+	const existingTimer = editorDebounceTimers.get(editorId);
+	if (existingTimer) {
+		clearTimeout(existingTimer);
+	}
+
+	const timer = setTimeout(() => {
+		editorDebounceTimers.delete(editorId);
+
+		if (editor && !editor.document.isClosed) {
+			const stillVisible = vscode.window.visibleTextEditors.some(
+				e => getEditorId(e) === editorId
+			);
+
+			if (stillVisible) {
+				renderImages(editor);
+			}
+		}
 	}, delay);
+
+	editorDebounceTimers.set(editorId, timer);
 }
 
 function renderVisibleEditors(delay = 50) {
 	const editors = vscode.window.visibleTextEditors;
-	if (editors?.length) editors.forEach(e => debounceRender(e, delay));
+
+	if (editors?.length) {
+		editors.forEach(e => debounceRender(e, delay));
+	}
 }
 
 // ==================== 激活与停用 ====================
@@ -948,7 +2224,8 @@ function renderVisibleEditors(delay = 50) {
 async function activate(context) {
 	extensionContext = context;
 	isCoreIntegrityValid = verifySystemIntegrity();
-	console.log(`[QQQ Q1] Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`);
+
+	qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
 
 	if (!isCoreIntegrityValid) return;
 
@@ -959,15 +2236,23 @@ async function activate(context) {
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration("qqq")) {
 				refreshConfig();
-				documentDecorationsMap.clear();
+				clearDecorations();
 				renderVisibleEditors();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+
+				if (cleanFreakMode) {
+					performGlobalClean(vscode.window.activeTextEditor);
+				}
 			}
+
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+
+				if (cleanFreakMode) {
+					performGlobalClean(vscode.window.activeTextEditor);
+				}
 			}
 		}),
+
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
@@ -975,40 +2260,102 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
+
+		// ★★★ 导出 DOC 命令 ★★★
+		vscode.commands.registerCommand("qqq.exportDoc", executeExportDocCommand),
+
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
+
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
-				const edits = provideCleanlinessEdits(e.document);
-				if (edits.length > 0) e.waitUntil(Promise.resolve(edits));
+				performGlobalClean(
+					vscode.window.visibleTextEditors.find(ed => ed.document === e.document)
+				);
 			}
 		}),
-		vscode.window.onDidChangeTextEditorVisibleRanges(e => debounceRender(e.textEditor)),
-		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); }),
-		vscode.window.onDidChangeWindowState(e => { if (e.focused) renderVisibleEditors(); }),
+
+		vscode.window.onDidChangeTextEditorVisibleRanges(e => {
+			debounceRender(e.textEditor);
+		}),
+
+		vscode.window.onDidChangeActiveTextEditor(e => {
+			if (e) debounceRender(e);
+		}),
+
+		vscode.window.onDidChangeWindowState(e => {
+			if (e.focused) renderVisibleEditors();
+		}),
+
 		vscode.workspace.onDidChangeTextDocument(e => {
 			const ed = vscode.window.activeTextEditor;
-			if (ed && e.document === ed.document) debounceRender(ed);
+
+			if (ed && e.document === ed.document) {
+				debounceRender(ed);
+			}
+
 			if (e.document === ed?.document && e.contentChanges.length > 0) {
 				documentDecorationsMap.delete(e.document.uri.toString());
+				animatedDecorationKeys.delete(e.document.uri.toString());
 			}
 		}),
+
 		vscode.workspace.onDidCloseTextDocument(doc => {
-			documentDecorationsMap.delete(doc.uri.toString());
+			const docUri = doc.uri.toString();
+
+			documentDecorationsMap.delete(docUri);
+			animatedDecorationKeys.delete(docUri);
+
+			for (const [editorId, timer] of editorDebounceTimers.entries()) {
+				if (editorId.startsWith(docUri + "::")) {
+					clearTimeout(timer);
+					editorDebounceTimers.delete(editorId);
+				}
+			}
+
+			let hasAnyAnimations = false;
+			for (const [, keys] of animatedDecorationKeys) {
+				if (keys.size > 0) {
+					hasAnyAnimations = true;
+					break;
+				}
+			}
+
+			if (!hasAnyAnimations) {
+				stopProgressSyncTimer();
+			}
 		}),
-		vscode.window.onDidChangeVisibleTextEditors(editors => {
+
+		vscode.window.onDidChangeVisibleTextEditors((editors) => {
+			const visibleEditorIds = new Set(editors.map(e => getEditorId(e)));
+
+			for (const [editorId, timer] of editorDebounceTimers.entries()) {
+				if (!visibleEditorIds.has(editorId)) {
+					clearTimeout(timer);
+					editorDebounceTimers.delete(editorId);
+				}
+			}
+
 			renderVisibleEditors();
-			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+
+			if (cleanFreakMode) {
+				performGlobalClean(vscode.window.activeTextEditor);
+			}
 		}),
 	);
 
 	const editor = vscode.window.activeTextEditor;
-	if (editor) renderImages(editor);
+	if (editor) {
+		renderImages(editor);
+	}
 }
 
 async function deactivate() {
+	stopProgressSyncTimer();
+	clearAllEditorDebounceTimers();
 	clearDecorations();
 	await qqq.finishUserTracking(extensionContext);
 }
 
 module.exports = { activate, deactivate };
+
 
