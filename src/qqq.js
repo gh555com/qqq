@@ -1276,10 +1276,17 @@ module.exports = {
 
 // ==================== 全局未捕获异常处理 ====================
 process.on('uncaughtException', (error) => {
-	logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+	// 只记录 qqq 插件自身的错误
+	const stack = error.stack || '';
+	if (stack.includes('qqq')) {
+		logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+	}
 });
 
 process.on('unhandledRejection', (reason, promise) => {
+	// 只记录 qqq 插件自身的错误
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-	logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+	if (msg.includes('qqq')) {
+		logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+	}
 });
