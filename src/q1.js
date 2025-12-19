@@ -15,10 +15,17 @@ let isCoreIntegrityValid = false;
 // ==================== 配置常量 ====================
 const MAX_CONCURRENT_TASKS = 8;
 const SCROLL_DEBOUNCE_MS = 200;
+
+// ★★★ 缓存生成基准尺寸 (512x288) ★★★
+const CACHE_BASE_WIDTH = 512;
+const CACHE_BASE_HEIGHT = 288;
+
+// UI 显示尺寸配置
 const LARGE_PREVIEW_WIDTH = 512;
 const LARGE_PREVIEW_HEIGHT = 288;
 const SMALL_PREVIEW_WIDTH = 256;
 const SMALL_PREVIEW_HEIGHT = 144;
+
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
@@ -28,7 +35,6 @@ const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg", ".ai", ".eps", ".cdr", ".psd"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
 
-// Pipe 不可 seek 的错误关键词
 const PIPE_SEEK_ERROR_PATTERNS = [
 	"non seekable",
 	"seek not allowed",
@@ -43,7 +49,6 @@ let markerHideType = null;
 let extensionContext = null;
 let currentRenderVersion = 0;
 
-// ★★★ CodeLens Provider 实例 ★★★
 let codeLensProvider = null;
 
 const documentDecorationsMap = new Map();
@@ -114,7 +119,6 @@ function refreshConfig() {
 	}
 }
 
-// ★★★ 彻底清除装饰器 ★★★
 function clearDecorations() {
 	const editors = vscode.window.visibleTextEditors;
 	for (const editor of editors) {
@@ -133,14 +137,6 @@ function clearDecorations() {
 	documentDecorationsMap.clear();
 }
 
-function clearEditorDebounceTimer(editorId) {
-	const timer = editorDebounceTimers.get(editorId);
-	if (timer) {
-		clearTimeout(timer);
-		editorDebounceTimers.delete(editorId);
-	}
-}
-
 function clearAllEditorDebounceTimers() {
 	for (const timer of editorDebounceTimers.values()) {
 		clearTimeout(timer);
@@ -148,7 +144,7 @@ function clearAllEditorDebounceTimers() {
 	editorDebounceTimers.clear();
 }
 
-// ==================== 严重错误日志 ====================
+// ==================== 错误日志 ====================
 
 function logCriticalError(filePath, errorMsg) {
 	try {
@@ -161,9 +157,9 @@ function logCriticalError(filePath, errorMsg) {
 	} catch (e) { }
 }
 
-// ==================== 辅助函数 ====================
+// ==================== CSS 计算辅助 ====================
 
-// 统一缩放逻辑
+// 纯粹的 CSS 缩放计算，不影响缓存生成
 function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
 	if (!srcW || !srcH) {
 		return { width: boxW, height: boxH, scale: 1 };
@@ -189,7 +185,6 @@ function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
 	return { width: finalW, height: finalH, scale: s };
 }
 
-// 统一 MIME 推断
 function mimeFromExt(ext) {
 	switch ((ext || "").toLowerCase()) {
 		case ".png": return "image/png";
@@ -203,7 +198,6 @@ function mimeFromExt(ext) {
 	}
 }
 
-// 统一构建 After 样式
 function buildAfterStyle({ marginLeft, boxWidth, boxHeight, previewWidth, previewHeight, contentUrl, outputSize, progressBarUrl, watermarkBase64 }) {
 	const gridSize = "20px 20px";
 	const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
@@ -251,8 +245,7 @@ function buildAfterStyle({ marginLeft, boxWidth, boxHeight, previewWidth, previe
 	};
 }
 
-// ==================== 统一 Frame 尺寸逻辑 ====================
-
+// 决定相框大小 (UI Frame Size)，不影响缓存分辨率
 function getFrameConfig(info) {
 	let mode = "large";
 	let width = LARGE_PREVIEW_WIDTH;
@@ -285,11 +278,10 @@ function getFrameConfig(info) {
 			}
 		}
 	}
-
 	return { mode, width, height };
 }
 
-// ==================== FFprobe 探测 ====================
+// ==================== FFprobe ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
@@ -351,7 +343,6 @@ async function getMediaInfo(filePath, mtimeMs) {
 
 			if (info.codec) {
 				const c = info.codec;
-
 				if (c.includes('mjpeg') || c === 'jpeg') {
 					if (isStaticByDuration) {
 						info.type = 'image';
@@ -393,24 +384,18 @@ async function getMediaInfo(filePath, mtimeMs) {
 			}
 
 			resolutionCache.set(filePath, info);
-
-			if (resolutionCache.size > 200) {
-				resolutionCache.delete(resolutionCache.keys().next().value);
-			}
+			if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
 
 			resolve(info.width ? info : null);
 		});
 
 		child.on("error", () => resolve(null));
-
 		setTimeout(() => {
 			try { child.kill(); } catch { }
 			resolve(null);
 		}, 5000);
 	});
 }
-
-// ==================== 精确解析 WebP 时长 ====================
 
 function getWebPDurationFromBuffer(buffer) {
 	if (!buffer || buffer.length < 12) return 0;
@@ -432,35 +417,30 @@ function getWebPDurationFromBuffer(buffer) {
 				totalDurationMs += dur;
 			}
 		}
-
 		pos = nextChunkPos;
 	}
-
 	return frameCount > 1 ? totalDurationMs / 1000 : 0;
 }
 
-// ==================== 缓存策略与转码 ====================
+// ==================== 核心缓存策略 (修改版) ====================
 
-function determineCacheStrategy(filePath, info, targetW, targetH) {
-	const previewWidth = targetW;
-	const previewHeight = targetH;
-
+function determineCacheStrategy(filePath, info) {
 	const ext = path.extname(filePath).toLowerCase();
 	let fileSize = 0;
 	try {
 		fileSize = fs.statSync(filePath).size;
 	} catch { }
 
-	const isStatic = info?.isStaticImage === true;
+	const isStaticSource = info?.isStaticImage === true;
 	const isMjpegStatic = info?.isMjpegStatic === true;
 	const simpleFormats = ['.png', '.jpg', '.jpeg', '.svg'];
-	const canDirectRead = simpleFormats.includes(ext) || (ext === '.webp' && isStatic);
+	const canDirectRead = simpleFormats.includes(ext) || (ext === '.webp' && isStaticSource);
 
+	// 1. 绕过缓存逻辑 (直通)
 	let shouldBypassCache = false;
-
 	if (isMjpegStatic) {
 		shouldBypassCache = true;
-	} else if (isStatic &&
+	} else if (isStaticSource &&
 		canDirectRead &&
 		!info?.needsConversion &&
 		info?.width && info?.height &&
@@ -469,35 +449,47 @@ function determineCacheStrategy(filePath, info, targetW, targetH) {
 		shouldBypassCache = true;
 	}
 
-	let qualityLevel;
-	switch (performanceMode) {
-		case "extreme":
-			qualityLevel = 39;
-			break;
-		case "accelerated":
-			// ★ 修改 Accelerated 的 qualityLevel 以隔离旧缓存
-			qualityLevel = 37;
-			break;
-		case "balanced":
-		default:
-			qualityLevel = 70;
+	// 2. 确定质量 (71 vs 47)
+	let qualityLevel = 71; // Balanced 默认 71
+	if (performanceMode === "accelerated" || performanceMode === "extreme") {
+		qualityLevel = 47;
 	}
 
-	const cacheKey = `${qualityLevel}_${previewWidth}x${previewHeight}`;
+	// 3. 确定是否输出动图 (决定后缀 'q')
+	// 源是视频/动图 且 模式不是 Extreme -> 输出动图 -> 后缀加 'q'
+	// 源是视频/动图 但 模式是 Extreme -> 输出静图(单帧) -> 无后缀
+	// 源是静图 -> 输出静图 -> 无后缀
+	let isAnimatedOutput = false;
+	const isVideoOrGif = !isStaticSource && (info?.type === 'video' || info?.type === 'animated_image');
 
-	return { shouldBypassCache, previewWidth, previewHeight, cacheKey, qualityLevel, isMjpegStatic };
+	if (isVideoOrGif) {
+		if (performanceMode === "extreme") {
+			isAnimatedOutput = false; // Extreme 强制单帧
+		} else {
+			isAnimatedOutput = true; // Balanced/Accelerated 保留动画
+		}
+	}
+
+	// 构造 CacheKey: 71, 71q, 47, 47q
+	const suffix = isAnimatedOutput ? "q" : "";
+	const cacheKey = `${qualityLevel}${suffix}`;
+
+	return { shouldBypassCache, cacheKey, qualityLevel, isMjpegStatic, isAnimatedOutput };
 }
 
-function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previewWidth, previewHeight) {
-	let targetW = previewWidth;
-	let targetH = previewHeight;
+function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnimatedOutput) {
+	// 目标尺寸统一逻辑:
+	// 如果原图大于 512x288, 缩放到 512x288 (保持比例)
+	// 否则保持原图尺寸
+	let targetW = CACHE_BASE_WIDTH;
+	let targetH = CACHE_BASE_HEIGHT;
 
 	if (origSize?.width && !origSize?.needsConversion) {
 		const ow = origSize.width;
 		const oh = origSize.height;
 
-		if (ow > 512 || oh > 512) {
-			const scale = Math.min(previewWidth / ow, previewHeight / oh);
+		if (ow > CACHE_BASE_WIDTH || oh > CACHE_BASE_HEIGHT) {
+			const scale = Math.min(CACHE_BASE_WIDTH / ow, CACHE_BASE_HEIGHT / oh);
 			targetW = Math.max(1, Math.round(ow * scale));
 			targetH = Math.max(1, Math.round(oh * scale));
 		} else {
@@ -508,48 +500,45 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 
 	const args = ["-hide_banner", "-loglevel", "error"];
 	let expectedWebPDuration = 0;
-	const isStatic = (duration <= 0.1);
-	const isGifLike = !isStatic && duration > 0.1 && duration < 10;
+
+	// 源文件特征
+	const isSourceStatic = (duration <= 0.1);
+	const isSourceGifLike = !isSourceStatic && duration > 0.1 && duration < 10;
 
 	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
 	let vf = scaleFilter;
 
 	if (performanceMode === "extreme") {
+		// Extreme: 强制单帧 (47)
 		args.push("-ss", "0", "-i", filePath);
 		vf = `[0:v]${scaleFilter}[out_v]`;
 		args.push("-frames:v", "1");
 		expectedWebPDuration = 0;
+
 	} else if (performanceMode === "accelerated") {
-		// ★★★ 核心修复：彻底解决 Accelerated 进度条同步问题 ★★★
-		// 1. 输入限制：仅读取前 2 秒 (-t 2)。
-		// 2. 滤镜核心：fps=7 固定帧率，setpts=N/7/TB 强制重写时间戳为线性增长。
-		//    这确保了无论原视频帧率/时长如何，生成的帧间隔都是严格的 1/7 秒。
-		// 3. 输出限制：-frames:v 14 (即 7fps * 2s)。
-		if (isStatic) {
+		// Accelerated: 2秒 @ 7fps (47q)
+		if (isSourceStatic) {
 			args.push("-ss", "0", "-i", filePath);
 			vf = `[0:v]${scaleFilter}[out_v]`;
 			args.push("-frames:v", "1");
 			expectedWebPDuration = 0;
 		} else {
 			args.push("-ss", "0");
-			args.push("-t", "2"); // 强制只读取 2 秒
+			args.push("-t", "2");
 			args.push("-i", filePath);
-
 			vf = `[0:v]fps=7,setpts=N/7/TB,${scaleFilter}[out_v]`;
-
-			// 硬输出限制：7fps * 2s = 14帧
 			args.push("-frames:v", "14");
-
-			// 预期时长 2s (小于 2s 的视频实际时长会在 getPreviewBuffer 中通过 WebP 数据修正)
 			expectedWebPDuration = 2;
 		}
+
 	} else {
-		if (isStatic) {
+		// Balanced: 完整逻辑 (71q)
+		if (isSourceStatic) {
 			args.push("-ss", "0", "-i", filePath);
 			vf = `[0:v]${scaleFilter}[out_v]`;
 			args.push("-frames:v", "1");
 			expectedWebPDuration = 0;
-		} else if (isGifLike) {
+		} else if (isSourceGifLike) {
 			args.push("-ss", "0", "-i", filePath);
 			vf = `[0:v]${scaleFilter}[out_v]`;
 			expectedWebPDuration = duration;
@@ -558,11 +547,9 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 			const s1 = 1;
 			const s2 = Math.floor(duration / 2);
 			const s3 = Math.max(s2 + seg + 0.5, duration - seg - 1);
-
 			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-
 			vf = `[0:v]fps=15,${scaleFilter}[v0];[1:v]fps=15,${scaleFilter}[v1];[2:v]fps=15,${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`;
 			expectedWebPDuration = seg * 3;
 		}
@@ -574,48 +561,30 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 	return { args, targetW, targetH, expectedWebPDuration };
 }
 
-// ==================== 检测 Pipe Seek 错误 ====================
-
 function isPipeSeekError(stderr) {
 	const lowerStderr = stderr.toLowerCase();
 	return PIPE_SEEK_ERROR_PATTERNS.some(pattern => lowerStderr.includes(pattern.toLowerCase()));
 }
 
-// ==================== Pipe 直出转码（带文件回退 + 动画文件强制） ====================
-
 function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, isAnimated = false) {
 	return new Promise((resolve) => {
-		// ★ 动画内容直接走文件模式，因为 WebP Muxer 需要 Seek
 		if (isAnimated) {
 			runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 			return;
 		}
-
-		// 阶段1：静态图尝试 pipe:1 直出
 		const pipeArgs = [...args, "pipe:1"];
-
-		const child = cp.spawn(qqq.ffmpegPath, pipeArgs, {
-			windowsHide: true,
-			stdio: ['ignore', 'pipe', 'pipe']
-		});
-
+		const child = cp.spawn(qqq.ffmpegPath, pipeArgs, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 		const chunks = [];
 		let stderr = "";
 		let resolved = false;
 
-		child.stdout.on("data", chunk => {
-			chunks.push(chunk);
-		});
-
-		child.stderr.on("data", d => {
-			if (stderr.length < 64000) stderr += d.toString();
-		});
+		child.stdout.on("data", chunk => chunks.push(chunk));
+		child.stderr.on("data", d => { if (stderr.length < 64000) stderr += d.toString(); });
 
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				resolved = true;
 				try { child.kill(); } catch { }
-				// 超时也回退到文件
 				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 			}
 		}, timeoutMs);
@@ -623,96 +592,65 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
 		child.on("close", (code) => {
 			if (resolved) return;
 			clearTimeout(timer);
-
 			const buffer = chunks.length > 0 ? Buffer.concat(chunks) : null;
-
-			// 检查是否命中 pipe seek 错误，或输出为空
 			if (isPipeSeekError(stderr) || !buffer || buffer.length === 0) {
-				// 阶段2：回退到文件写入模式
 				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 				return;
 			}
-
-			if (buffer && buffer.length > 0) {
-				resolved = true;
-				resolve({ success: true, buffer, fromPipe: true });
-			} else {
-				resolved = true;
-				resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
-			}
+			resolved = true;
+			resolve({ success: true, buffer, fromPipe: true });
 		});
-
-		child.on("error", (err) => {
+		child.on("error", () => {
 			if (resolved) return;
 			clearTimeout(timer);
 			resolved = true;
-			// spawn 错误也尝试回退
 			runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 		});
 	});
 }
 
-// ==================== 文件写入模式（原子性 + 本地临时文件） ====================
-
 function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 	return new Promise((resolve) => {
-		// ★ 临时文件直接写在目标文件旁边，不使用系统临时目录
 		const tmpPath = cacheFilePath + ".tmp";
 		const fileArgs = [...args, "-y", tmpPath];
-
-		const child = cp.spawn(qqq.ffmpegPath, fileArgs, {
-			windowsHide: true,
-			stdio: ['ignore', 'ignore', 'pipe']
-		});
-
+		const child = cp.spawn(qqq.ffmpegPath, fileArgs, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
 		let stderr = "";
 		let resolved = false;
 
-		child.stderr.on("data", d => {
-			if (stderr.length < 64000) stderr += d.toString();
-		});
+		child.stderr.on("data", d => { if (stderr.length < 64000) stderr += d.toString(); });
 
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				resolved = true;
 				try { child.kill(); } catch { }
-				cleanup();
+				try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 				resolve({ success: false, error: "TIMEOUT_FILE", stderr });
 			}
 		}, timeoutMs);
-
-		const cleanup = () => {
-			try {
-				if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-			} catch { }
-		};
 
 		child.on("close", (code) => {
 			if (resolved) return;
 			clearTimeout(timer);
 			resolved = true;
-
 			if (code === 0 && fs.existsSync(tmpPath)) {
 				try {
-					// 原子性 rename
 					fs.renameSync(tmpPath, cacheFilePath);
 					const buffer = fs.readFileSync(cacheFilePath);
 					resolve({ success: true, buffer, fromFile: true, cacheFilePath });
 				} catch (e) {
-					cleanup();
+					try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 					resolve({ success: false, error: e.message, stderr });
 				}
 			} else {
-				cleanup();
+				try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 				resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
 			}
 		});
-
 		child.on("error", (err) => {
 			if (resolved) return;
 			clearTimeout(timer);
 			resolved = true;
-			cleanup();
+			try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 			resolve({ success: false, error: err.message, stderr });
 		});
 	});
@@ -721,13 +659,10 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 	const ext = path.extname(filePath).toLowerCase();
 	if (!FALLBACK_DIRECT_READ_EXTS.has(ext)) return null;
-
 	try {
 		const st = fs.statSync(filePath);
 		if (st.size > FALLBACK_MAX_SIZE) return null;
-
 		const rawBuffer = fs.readFileSync(filePath);
-
 		const { width: finalCssW, height: finalCssH } = fitIntoBox(
 			info?.width,
 			info?.height,
@@ -735,7 +670,6 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 			renderH,
 			enlargeSmallImages
 		);
-
 		return {
 			buffer: rawBuffer,
 			webpDuration: 0,
@@ -754,19 +688,16 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!qqq.ffmpegPath) return null;
 
 	let mtimeMs = 0;
-	try {
-		mtimeMs = fs.statSync(filePath).mtimeMs;
-	} catch {
-		return null;
-	}
+	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
 
 	const info = await getMediaInfo(filePath, mtimeMs);
 	const origSize = info ? { width: info.width, height: info.height, needsConversion: info.needsConversion } : null;
 	const originalDuration = info?.duration || 0;
-
-	const cacheStrategy = determineCacheStrategy(filePath, info, renderW, renderH);
 	const ext = path.extname(filePath).toLowerCase();
 
+	const cacheStrategy = determineCacheStrategy(filePath, info);
+
+	// 1. MJPEG 直通
 	if (cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -777,7 +708,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				renderH,
 				enlargeSmallImages
 			);
-
 			return {
 				buffer: rawBuffer,
 				webpDuration: 0,
@@ -787,26 +717,24 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				ext: '.jpg',
 				mimeType: 'image/jpeg'
 			};
-		} catch (e) {
-			qqq.logMessage(`MJPEG 直通读取失败: ${e.message}`, "ERROR");
-		}
+		} catch (e) { }
 	}
+
+	// 2. 尝试读取缓存
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
-
 		if (cached) {
 			const cacheEntry = qqq.getCacheEntry(contentId);
 			const meta = cacheEntry?.qualities?.[cacheStrategy.cacheKey]?.meta || {};
-
-			const origWidth = meta.origWidth || info?.width || 0;
-			const origHeight = meta.origHeight || info?.height || 0;
+			const cachedWidth = meta.width || info?.width || 0;
+			const cachedHeight = meta.height || info?.height || 0;
 			const cachedOriginalDuration = meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
-
 			const webpDur = getWebPDurationFromBuffer(cached);
 
+			// CSS 缩放: 缓存尺寸(512或更小) -> 相框尺寸(renderW/H)
 			const { width: finalCssW, height: finalCssH } = fitIntoBox(
-				origWidth,
-				origHeight,
+				cachedWidth,
+				cachedHeight,
 				renderW,
 				renderH,
 				enlargeSmallImages
@@ -824,6 +752,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 	}
 
+	// 3. 直读小文件
 	if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -834,7 +763,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				renderH,
 				enlargeSmallImages
 			);
-
 			return {
 				buffer: rawBuffer,
 				webpDuration: 0,
@@ -846,13 +774,14 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		} catch (e) { }
 	}
 
+	// 4. 生成新缓存 (尺寸固定为 <= 512x288)
 	const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(
-		filePath, origSize, originalDuration, cacheStrategy.qualityLevel,
-		cacheStrategy.previewWidth, cacheStrategy.previewHeight
+		filePath, origSize, originalDuration,
+		cacheStrategy.qualityLevel,
+		cacheStrategy.isAnimatedOutput
 	);
 
 	const isAnimated = expectedWebPDuration > 0.1;
-
 	const cacheDir = qqq.CACHE_DIR || path.join(os.tmpdir(), "qqq_cache");
 	if (!fs.existsSync(cacheDir)) {
 		try { fs.mkdirSync(cacheDir, { recursive: true }); } catch { }
@@ -865,17 +794,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		const buffer = result.buffer;
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
-		if (result.fromPipe) {
-			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
-				width: targetW,
-				height: targetH,
-				origWidth: origSize?.width || 0,
-				origHeight: origSize?.height || 0,
-				type: 'webp_unified',
-				webpDur: finalWebPDuration,
-				originalDuration: originalDuration
-			});
-		} else if (result.fromFile) {
+		if (result.fromPipe || result.fromFile) {
 			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
@@ -887,12 +806,10 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			});
 		}
 
-		const ow = origSize?.width || targetW;
-		const oh = origSize?.height || targetH;
-
+		// CSS 缩放: 新缓存尺寸 -> 相框尺寸
 		const { width: finalCssW, height: finalCssH } = fitIntoBox(
-			ow,
-			oh,
+			targetW,
+			targetH,
 			renderW,
 			renderH,
 			enlargeSmallImages
@@ -905,41 +822,30 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH }
 		};
 	} else {
-		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
-		if (fallback) {
-			logCriticalError(filePath, `${result.error} - 使用兜底直读\n${result.stderr || ''}`);
-			return fallback;
-		} else {
-			logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ''}`);
-			return null;
-		}
+		return tryFallbackDirectRead(filePath, renderW, renderH, info);
 	}
 }
 
-// ==================== 渲染辅助 ====================
+// ==================== 其他工具 ====================
 function formatBytes(size) {
 	if (size == null || isNaN(size)) return "?";
 	const units = ["B", "KB", "MB", "GB"];
 	let idx = 0;
 	let val = size;
-
 	while (val >= 1024 && idx < units.length - 1) {
 		val /= 1024;
 		idx++;
 	}
-
 	return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
 }
 
 function formatDuration(sec) {
 	if (sec == null || isNaN(sec) || sec < 0) return "0s";
-
 	if (sec >= 60) {
 		const m = Math.floor(sec / 60);
 		const s = sec % 60;
 		return `${m}m + ${s.toFixed(2)}s`;
 	}
-
 	return `${sec.toFixed(2)}s`;
 }
 
@@ -955,18 +861,13 @@ function getDocumentEOL(doc) {
 function resolvePathToAbsolute(docUri, rawPath) {
 	if (!rawPath) return null;
 	let clean = rawPath.trim();
-
-	while (clean.startsWith("\\") || clean.startsWith("/")) {
-		clean = clean.slice(1);
-	}
-
+	while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
 	if (path.isAbsolute(clean)) return clean;
 	return path.resolve(path.dirname(docUri.fsPath), clean);
 }
 
 function calculateAspectRatioString(w, h) {
 	if (!w || !h) return "";
-
 	if (w >= h) {
 		const r = (h / w) * 16;
 		return `16__${parseFloat(r.toFixed(1))}`;
@@ -978,12 +879,7 @@ function calculateAspectRatioString(w, h) {
 
 function createProgressSvg(webpDuration, previewWidth) {
 	if (!webpDuration || webpDuration <= 0) return null;
-
-	// ★★★ 修正: CSS 层面强制复位技巧 ★★★
-	// 注入时间戳注释，强制浏览器认为这是新图片，从而重置动画时间轴到 0s
-	const salt = Date.now();
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${previewWidth}" height="4" viewBox="0 0 ${previewWidth} 4"><rect width="${previewWidth}" height="4" fill="black"/><rect width="0" height="4" fill="#fdf6e3"><animate attributeName="width" from="0" to="${previewWidth}" dur="${webpDuration.toFixed(3)}s" repeatCount="indefinite"/></rect></svg>`;
-
 	return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 }
 
@@ -993,27 +889,18 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		const fontSize = config.get('fontSize', 14);
 		const lhMult = config.get('lineHeight', 0) || 1.35;
 		const pxPerLine = fontSize * lhMult;
-
 		const boxH = pxHeight + PREVIEW_BORDER;
 		let baseN = Math.ceil(boxH / pxPerLine);
-
 		let extra = 2 + Math.floor((lhMult - 1) * 3);
 		extra = Math.min(5, Math.max(2, extra));
-
 		let n = baseN + extra;
 		n = Math.max(4, n);
-
-		if (isLastItem) {
-			n = Math.max(8, n);
-		}
-
+		if (isLastItem) n = Math.max(8, n);
 		return n;
 	} catch (e) {
 		return 15;
 	}
 }
-
-// ==================== 获取编辑器唯一标识 ====================
 
 function getEditorId(editor) {
 	const docUri = editor.document.uri.toString();
@@ -1030,27 +917,15 @@ async function renderImages(editor) {
 	}
 
 	const myVersion = ++currentRenderVersion;
-
-	if (!decorationType) {
-		decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
-	}
-
-	if (!markerHideType) {
-		markerHideType = vscode.window.createTextEditorDecorationType({
-			textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;'
-		});
-	}
+	if (!decorationType) decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
+	if (!markerHideType) markerHideType = vscode.window.createTextEditorDecorationType({ textDecoration: 'none; font-size: 11px; color: transparent; opacity: 0;' });
 
 	const docUri = editor.document.uri.toString();
-
-	if (!documentDecorationsMap.has(docUri)) {
-		documentDecorationsMap.set(docUri, new Map());
-	}
+	if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
 
 	const currentDecos = documentDecorationsMap.get(docUri);
 	const hideDecos = new Map();
 	const visibleRanges = editor.visibleRanges;
-
 	if (!visibleRanges?.length) return;
 
 	const marginLeft = "100px";
@@ -1075,7 +950,6 @@ async function renderImages(editor) {
 				const { width: pW, height: pH } = getFrameConfig(null);
 				const boxWidth = pW + PREVIEW_BORDER;
 				const boxHeight = pH + PREVIEW_BORDER;
-
 				const loadingDeco = {
 					range: new vscode.Range(pos.line, 0, pos.line, 0),
 					renderOptions: {
@@ -1094,7 +968,6 @@ async function renderImages(editor) {
 						}
 					}
 				};
-
 				currentDecos.set(uniqueKey, loadingDeco);
 				continue;
 			}
@@ -1113,12 +986,9 @@ async function renderImages(editor) {
 
 			tasks.push(async () => {
 				if (currentRenderVersion !== myVersion) return null;
-
 				try {
 					let mtimeMs = 0;
-					try {
-						mtimeMs = fs.statSync(absPath).mtimeMs;
-					} catch { }
+					try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 
 					const info = await getMediaInfo(absPath, mtimeMs);
 					const { width: previewWidth, height: previewHeight } = getFrameConfig(info);
@@ -1133,13 +1003,11 @@ async function renderImages(editor) {
 
 					if (previewResult?.buffer) {
 						let mime = "image/webp";
-
 						if (previewResult.isDirect) {
 							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
 						} else if (previewResult.mimeType) {
 							mime = previewResult.mimeType;
 						}
-
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
 						webpDuration = previewResult.webpDuration || 0;
 						outputSize = previewResult.outputSize;
@@ -1149,12 +1017,8 @@ async function renderImages(editor) {
 
 					const boxWidth = previewWidth + PREVIEW_BORDER;
 					const boxHeight = previewHeight + PREVIEW_BORDER;
-
 					let progressBarUrl = null;
-
-					if (webpDuration > 0.1) {
-						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
-					}
+					if (webpDuration > 0.1) progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
 
 					deco.renderOptions.after = buildAfterStyle({
 						marginLeft,
@@ -1181,29 +1045,20 @@ async function renderImages(editor) {
 
 	if (tasks.length > 0) {
 		const results = [];
-
 		for (let i = 0; i < tasks.length; i += MAX_CONCURRENT_TASKS) {
 			if (currentRenderVersion !== myVersion) return;
-
 			const chunk = tasks.slice(i, i + MAX_CONCURRENT_TASKS);
 			const chunkResults = await Promise.all(chunk.map(t => t()));
 			results.push(...chunkResults);
 		}
-
 		if (currentRenderVersion !== myVersion) return;
-
 		for (const res of results) {
-			if (res) {
-				currentDecos.set(res.key, res.deco);
-			}
+			if (res) currentDecos.set(res.key, res.deco);
 		}
 	}
 
 	editor.setDecorations(decorationType, Array.from(currentDecos.values()));
-
-	if (hideDecos.size > 0) {
-		editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
-	}
+	if (hideDecos.size > 0) editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
 }
 
 // ==================== 粘贴命令 ====================
@@ -1223,7 +1078,6 @@ async function executeClipboardCommand() {
 	}
 
 	const fastResult = await qqq.handleClipboardFast();
-
 	if (fastResult?.type === "text") {
 		await editor.edit(e => e.insert(editor.selection.active, fastResult.text));
 		return;
@@ -1236,12 +1090,7 @@ async function executeClipboardCommand() {
 
 	await editor.edit(e => e.insert(insertPosition, eol + pendingMarker + eol));
 
-	pendingTokens.set(token, {
-		editor: editor,
-		documentUri: editor.document.uri.toString(),
-		targetDir: targetDir
-	});
-
+	pendingTokens.set(token, { editor: editor, documentUri: editor.document.uri.toString(), targetDir: targetDir });
 	debounceRender(editor, 10);
 
 	setImmediate(async () => {
@@ -1258,20 +1107,15 @@ async function executeClipboardCommand() {
 async function replacePendingMarker(token, result) {
 	const pending = pendingTokens.get(token);
 	if (!pending) return;
-
 	pendingTokens.delete(token);
 
-	let editor = vscode.window.visibleTextEditors.find(
-		e => e.document.uri.toString() === pending.documentUri
-	);
-
+	let editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === pending.documentUri);
 	if (!editor) return;
 
 	const doc = editor.document;
 	const text = doc.getText();
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
 	const markerIndex = text.indexOf(pendingMarker);
-
 	if (markerIndex === -1) return;
 
 	const startPos = doc.positionAt(markerIndex);
@@ -1285,25 +1129,21 @@ async function replacePendingMarker(token, result) {
 	if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
 		const relPath = path.relative(docDir, filePath).replace(/\//g, "\\");
-
 		let pxHeight = LARGE_PREVIEW_HEIGHT;
 		try {
 			const info = await getMediaInfo(filePath, Date.now());
 			const { height } = getFrameConfig(info);
 			pxHeight = height;
 		} catch { }
-
 		const gapBelow = calculateBlankLinesExact(pxHeight, true);
 		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
 
 	} else if (result.type === "file") {
 		const files = result.files;
-
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
 			const relPath = path.relative(docDir, f).replace(/\//g, "\\");
-
 			let pxHeight = LARGE_PREVIEW_HEIGHT;
 			if (isImageOrVideoExt(path.extname(f))) {
 				try {
@@ -1312,19 +1152,14 @@ async function replacePendingMarker(token, result) {
 					pxHeight = height;
 				} catch { }
 			}
-
 			const isLastItem = (i === files.length - 1);
 			if (i > 0) replacement += eol;
 			replacement += `/\\${relPath}\\/`;
-
 			const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
 			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
-
-		if (files.length > 1) {
-			vscode.window.showInformationMessage("文件已复制 " + files.length);
-		}
+		if (files.length > 1) vscode.window.showInformationMessage("文件已复制 " + files.length);
 
 	} else if (result.type === "folder_text") {
 		replacement = result.text;
@@ -1334,18 +1169,14 @@ async function replacePendingMarker(token, result) {
 		replacement = "";
 	}
 
-	await editor.edit(editBuilder => {
-		editBuilder.replace(markerRange, replacement);
-	});
-
+	await editor.edit(editBuilder => { editBuilder.replace(markerRange, replacement); });
 	setTimeout(() => renderImages(editor), 50);
 }
 
-// ==================== 整洁模式 (Clean Freak) ====================
+// ==================== 整洁模式 ====================
 
 async function provideCleanlinessEditsAsync(document) {
 	if (!document) return [];
-
 	const edits = [];
 	const text = document.getText();
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
@@ -1353,9 +1184,7 @@ async function provideCleanlinessEditsAsync(document) {
 	let match;
 	const markers = [];
 
-	while ((match = regex.exec(text))) {
-		markers.push({ text: match[0], index: match.index });
-	}
+	while ((match = regex.exec(text))) markers.push({ text: match[0], index: match.index });
 
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
@@ -1387,28 +1216,18 @@ async function provideCleanlinessEditsAsync(document) {
 		const lineObj = document.lineAt(markerLine);
 		const lineContent = lineObj.text;
 
-		if (startPos.character > 0) {
-			edits.push(vscode.TextEdit.insert(startPos, eol));
-		}
-
+		if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
 		const suffix = lineContent.substring(endPos.character);
-		if (suffix.trim().length > 0) {
-			edits.push(vscode.TextEdit.insert(endPos, eol));
-		}
+		if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
 
 		if (pxHeight > 0) {
 			let isLastMarkerInDoc = (i === markers.length - 1);
 			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
-
 			let existingBlanks = 0;
 			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-				if (document.lineAt(lineIdx).text.trim() === "") {
-					existingBlanks++;
-				} else {
-					break;
-				}
+				if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
+				else break;
 			}
-
 			if (existingBlanks < neededLines) {
 				const linesToAdd = neededLines - existingBlanks;
 				const lineEndPos = lineObj.range.end;
@@ -1416,23 +1235,18 @@ async function provideCleanlinessEditsAsync(document) {
 			}
 		}
 	}
-
 	return edits;
 }
 
 async function performGlobalClean(editor, force = false) {
 	if (!editor) return;
 	if (!force && !cleanFreakMode) return;
-
 	const edits = await provideCleanlinessEditsAsync(editor.document);
 	if (edits.length > 0) {
 		await editor.edit(editBuilder => {
 			edits.forEach(e => {
-				if (e.newText) {
-					editBuilder.insert(e.range.start, e.newText);
-				} else {
-					editBuilder.replace(e.range, e.newText);
-				}
+				if (e.newText) editBuilder.insert(e.range.start, e.newText);
+				else editBuilder.replace(e.range, e.newText);
 			});
 		});
 	}
@@ -1445,14 +1259,9 @@ class FileCodeLensProvider {
 		this._onDidChangeCodeLenses = new vscode.EventEmitter();
 		this.onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
 	}
-
-	refresh() {
-		this._onDidChangeCodeLenses.fire();
-	}
-
+	refresh() { this._onDidChangeCodeLenses.fire(); }
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid) return [];
-
 		const lenses = [];
 		const regex = new RegExp(qqq.QQQ_PATH_REGEX);
 		const text = document.getText();
@@ -1462,7 +1271,6 @@ class FileCodeLensProvider {
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
 			const rawPath = match[0].slice(2, -2).trim();
-
 			if (rawPath.startsWith("__PENDING__:")) continue;
 
 			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
@@ -1477,7 +1285,6 @@ class FileCodeLensProvider {
 				let folderData = await getQqqFolderSize(folder);
 				const fSizeStr = formatBytes(folderData?.size || 0);
 				const folderTooltip = folderData?.summary;
-
 				let fileSz = "?";
 				let tooltipText = "";
 				let mtimeMs = 0;
@@ -1494,26 +1301,17 @@ class FileCodeLensProvider {
 
 				if (isVidOrImg) {
 					const info = await getMediaInfo(absPath, mtimeMs);
-
 					if (info?.width && info?.height) {
 						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
-
 						if (info.type === "video") isRealVideo = true;
-
 						const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
-
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-
 						const displayCodec = info.full_codec_desc || info.codec;
 						if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
-
 						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
-
-						if (qqq.shouldShowDuration(info)) {
-							tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
-						}
+						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 					}
 				}
 
@@ -1522,78 +1320,44 @@ class FileCodeLensProvider {
 				const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
 				return [
-					new vscode.CodeLens(r, {
-						title: `✎( ${fSizeStr}) 🗀qqq`,
-						command: "qqq.revealFileInFolder",
-						arguments: [absPath],
-						tooltip: folderTooltip
-					}),
-					new vscode.CodeLens(r, {
-						title: "✎rename",
-						command: "qqq.renameFile",
-						arguments: [rawPath, absPath]
-					}),
-					new vscode.CodeLens(r, {
-						title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-						command: "qqq.openFile",
-						arguments: [absPath],
-						tooltip: tooltipText
-					})
+					new vscode.CodeLens(r, { title: `✎( ${fSizeStr}) 🗀qqq`, command: "qqq.revealFileInFolder", arguments: [absPath], tooltip: folderTooltip }),
+					new vscode.CodeLens(r, { title: "✎rename", command: "qqq.renameFile", arguments: [rawPath, absPath] }),
+					new vscode.CodeLens(r, { title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`, command: "qqq.openFile", arguments: [absPath], tooltip: tooltipText })
 				];
 			});
 		}
-
 		const results = await Promise.all(tasks.map(t => t()));
 		results.forEach(group => lenses.push(...group));
-
 		return lenses;
 	}
 }
 
-// ==================== 文件夹大小缓存 ====================
-
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-
 function invalidateFolderSizeCacheForPath(filePath) {
 	try {
 		const dir = path.dirname(filePath);
-		if (folderSizeCache.has(dir)) {
-			folderSizeCache.delete(dir);
-		}
+		if (folderSizeCache.has(dir)) folderSizeCache.delete(dir);
 	} catch { }
 }
-
 async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = folderSizeCache.get(folderPath);
-
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
-		return cached.data;
-	}
-
+	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
 	const result = await qqq.getFolderInfo(folderPath);
-
 	if (result?.success) {
 		const parts = [];
 		let totalFiles = 0;
-
 		if (result.ext_stats) {
 			for (const [ext, count] of Object.entries(result.ext_stats)) {
 				totalFiles += count;
 				parts.push(`${count}_${ext || '无后缀'}`);
 			}
 		}
-
-		const summaryStr = parts.length > 0
-			? `${totalFiles}个文件：${parts.join("; ")}`
-			: (result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹");
-
+		const summaryStr = parts.length > 0 ? `${totalFiles}个文件：${parts.join("; ")}` : (result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹");
 		const data = { size: result.total_size, summary: summaryStr };
 		folderSizeCache.set(folderPath, { data, timestamp: now });
-
 		return data;
 	}
-
 	return null;
 }
 
@@ -1601,120 +1365,63 @@ async function getQqqFolderSize(folderPath) {
 
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
-
 	try {
-		if (process.platform === "win32") {
-			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		} else if (process.platform === "darwin") {
-			cp.exec(`open "${filePath}"`);
-		} else {
-			cp.exec(`xdg-open "${filePath}"`);
-		}
-	} catch {
-		vscode.env.openExternal(vscode.Uri.file(filePath));
-	}
+		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
+		else cp.exec(`xdg-open "${filePath}"`);
+	} catch { vscode.env.openExternal(vscode.Uri.file(filePath)); }
 }
 
 function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
-
 	try {
-		if (process.platform === "win32") {
-			cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
-		} else if (process.platform === "darwin") {
-			cp.exec(`open -R "${filePath}"`);
-		} else {
-			cp.exec(`xdg-open "${path.dirname(filePath)}"`);
-		}
+		if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
+		else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`);
+		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
 	} catch { }
 }
 
 async function renameFileCommand(rawPath, absPath) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
-
 	const currentName = path.basename(absPath);
-
-	const newName = await vscode.window.showInputBox({
-		title: "重命名粘贴文件",
-		prompt: "rename  ",
-		value: currentName,
-		ignoreFocusOut: true,
-		validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null
-	});
-
+	const newName = await vscode.window.showInputBox({ title: "重命名粘贴文件", prompt: "rename  ", value: currentName, ignoreFocusOut: true, validateInput: v => (!v || !v.trim()) ? "文件名不能为空" : null });
 	if (!newName || newName.trim() === currentName) return;
-
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
-
-	try {
-		await fs.promises.rename(absPath, newAbs);
-	} catch (e) {
-		vscode.window.showErrorMessage(e.message);
-		return;
-	}
+	try { await fs.promises.rename(absPath, newAbs); } catch (e) { vscode.window.showErrorMessage(e.message); return; }
 
 	const doc = editor.document;
-	const newRaw = rawPath.includes('/')
-		? rawPath.substring(0, rawPath.lastIndexOf('/') + 1) + trimmed
-		: trimmed;
-
+	const newRaw = rawPath.includes('/') ? rawPath.substring(0, rawPath.lastIndexOf('/') + 1) + trimmed : trimmed;
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
 	const ranges = [];
 	let m;
-
 	while ((m = regex.exec(doc.getText()))) {
-		if (m[0].slice(2, -2).trim() === rawPath) {
-			ranges.push(new vscode.Range(
-				doc.positionAt(m.index),
-				doc.positionAt(m.index + m[0].length)
-			));
-		}
+		if (m[0].slice(2, -2).trim() === rawPath) ranges.push(new vscode.Range(doc.positionAt(m.index), doc.positionAt(m.index + m[0].length)));
 	}
-
-	if (ranges.length) {
-		await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
-	}
-
+	if (ranges.length) await editor.edit(b => ranges.forEach(r => b.replace(r, `/\\${newRaw}\\/`)));
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
 }
 
-// ==================== 多编辑器独立防抖 ====================
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
 	if (!editor || editor.document.isClosed) return;
-
 	const editorId = getEditorId(editor);
-
 	const existingTimer = editorDebounceTimers.get(editorId);
-	if (existingTimer) {
-		clearTimeout(existingTimer);
-	}
-
+	if (existingTimer) clearTimeout(existingTimer);
 	const timer = setTimeout(() => {
 		editorDebounceTimers.delete(editorId);
-
 		if (editor && !editor.document.isClosed) {
-			const stillVisible = vscode.window.visibleTextEditors.some(
-				e => getEditorId(e) === editorId
-			);
-
-			if (stillVisible) {
-				renderImages(editor);
-			}
+			const stillVisible = vscode.window.visibleTextEditors.some(e => getEditorId(e) === editorId);
+			if (stillVisible) renderImages(editor);
 		}
 	}, delay);
-
 	editorDebounceTimers.set(editorId, timer);
 }
 
 function renderVisibleEditors(delay = 50) {
 	const editors = vscode.window.visibleTextEditors;
-
-	if (editors?.length) {
-		editors.forEach(e => debounceRender(e, delay));
-	}
+	if (editors?.length) editors.forEach(e => debounceRender(e, delay));
 }
 
 // ==================== 激活与停用 ====================
@@ -1722,92 +1429,47 @@ function renderVisibleEditors(delay = 50) {
 async function activate(context) {
 	extensionContext = context;
 	isCoreIntegrityValid = verifySystemIntegrity();
-
 	qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
-
 	if (!isCoreIntegrityValid) return;
 
 	loadWatermarkResource();
 	refreshConfig();
-
 	codeLensProvider = new FileCodeLensProvider();
 
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration("qqq")) {
 				refreshConfig();
-
 				clearDecorations();
 				if (codeLensProvider) codeLensProvider.refresh();
 				renderVisibleEditors(10);
-
-				if (cleanFreakMode) {
-					performGlobalClean(vscode.window.activeTextEditor);
-				}
+				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
-
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
-
-				if (cleanFreakMode) {
-					performGlobalClean(vscode.window.activeTextEditor);
-				}
+				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
-
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
 		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.setInOrder", () => {
-			performGlobalClean(vscode.window.activeTextEditor, true);
-		}),
-
-		vscode.commands.registerCommand("qqq.exportDoc", () => {
-			q1a.executeExportDocCommand(isCoreIntegrityValid);
-		}),
-
-		vscode.commands.registerCommand("qqq.exportZip", () => {
-			q1a.executeExportZipCommand(isCoreIntegrityValid);
-		}),
-
+		vscode.commands.registerCommand("qqq.setInOrder", () => { performGlobalClean(vscode.window.activeTextEditor, true); }),
+		vscode.commands.registerCommand("qqq.exportDoc", () => { q1a.executeExportDocCommand(isCoreIntegrityValid); }),
+		vscode.commands.registerCommand("qqq.exportZip", () => { q1a.executeExportZipCommand(isCoreIntegrityValid); }),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
-
-		vscode.workspace.onWillSaveTextDocument(e => {
-			if (cleanFreakMode && e.document) {
-				e.waitUntil(provideCleanlinessEditsAsync(e.document));
-			}
-		}),
-
-		vscode.window.onDidChangeTextEditorVisibleRanges(e => {
-			debounceRender(e.textEditor);
-		}),
-
-		vscode.window.onDidChangeActiveTextEditor(e => {
-			if (e) debounceRender(e);
-		}),
-
-		vscode.window.onDidChangeWindowState(e => {
-			if (e.focused) renderVisibleEditors();
-		}),
-
+		vscode.workspace.onWillSaveTextDocument(e => { if (cleanFreakMode && e.document) e.waitUntil(provideCleanlinessEditsAsync(e.document)); }),
+		vscode.window.onDidChangeTextEditorVisibleRanges(e => { debounceRender(e.textEditor); }),
+		vscode.window.onDidChangeActiveTextEditor(e => { if (e) debounceRender(e); }),
+		vscode.window.onDidChangeWindowState(e => { if (e.focused) renderVisibleEditors(); }),
 		vscode.workspace.onDidChangeTextDocument(e => {
 			const ed = vscode.window.activeTextEditor;
-
-			if (ed && e.document === ed.document) {
-				debounceRender(ed);
-			}
-
-			if (e.document === ed?.document && e.contentChanges.length > 0) {
-				documentDecorationsMap.delete(e.document.uri.toString());
-			}
+			if (ed && e.document === ed.document) debounceRender(ed);
+			if (e.document === ed?.document && e.contentChanges.length > 0) documentDecorationsMap.delete(e.document.uri.toString());
 		}),
-
 		vscode.workspace.onDidCloseTextDocument(doc => {
 			const docUri = doc.uri.toString();
-
 			documentDecorationsMap.delete(docUri);
-
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
 				if (editorId.startsWith(docUri + "::")) {
 					clearTimeout(timer);
@@ -1815,29 +1477,21 @@ async function activate(context) {
 				}
 			}
 		}),
-
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			const visibleEditorIds = new Set(editors.map(e => getEditorId(e)));
-
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
 				if (!visibleEditorIds.has(editorId)) {
 					clearTimeout(timer);
 					editorDebounceTimers.delete(editorId);
 				}
 			}
-
 			renderVisibleEditors();
-
-			if (cleanFreakMode) {
-				performGlobalClean(vscode.window.activeTextEditor);
-			}
+			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 		}),
 	);
 
 	const editor = vscode.window.activeTextEditor;
-	if (editor) {
-		renderImages(editor);
-	}
+	if (editor) renderImages(editor);
 }
 
 async function deactivate() {
@@ -1847,3 +1501,6 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
+
+
