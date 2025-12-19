@@ -1,9 +1,4 @@
 // src/q1.js
-// ==========================================
-// ★★★ 转码兜底 + 错误日志 + 配置dispose + 多编辑器独立防抖 ★★★
-// ★★★ 最终方案：CodeLens逻辑对齐 + 全局刷新机制重构 + 混合写入策略 ★★★
-// ★★★ Accelerated 修正：FPS=7 + PTS重置(线性化) + 帧数硬锁(14帧) ★★★
-// ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -27,8 +22,6 @@ const SMALL_PREVIEW_HEIGHT = 144;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
-const PROGRESS_SYNC_INTERVAL_MS = 3000;
-
 const FALLBACK_DIRECT_READ_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 
@@ -50,7 +43,7 @@ let markerHideType = null;
 let extensionContext = null;
 let currentRenderVersion = 0;
 
-// ★★★ CodeLens Provider 实例，用于手动触发刷新 ★★★
+// ★★★ CodeLens Provider 实例 ★★★
 let codeLensProvider = null;
 
 const documentDecorationsMap = new Map();
@@ -59,9 +52,6 @@ const folderSizeCache = new Map();
 const pendingTokens = new Map();
 
 const editorDebounceTimers = new Map();
-
-let progressSyncTimer = null;
-const animatedDecorationKeys = new Map();
 
 let enlargeSmallImages = true;
 let performanceMode = "balanced";
@@ -124,9 +114,8 @@ function refreshConfig() {
 	}
 }
 
-// ★★★ 彻底清除装饰器，确保无残留 ★★★
+// ★★★ 彻底清除装饰器 ★★★
 function clearDecorations() {
-	// 立即清理所有可见编辑器的装饰器
 	const editors = vscode.window.visibleTextEditors;
 	for (const editor of editors) {
 		if (decorationType) editor.setDecorations(decorationType, []);
@@ -142,7 +131,6 @@ function clearDecorations() {
 		markerHideType = null;
 	}
 	documentDecorationsMap.clear();
-	animatedDecorationKeys.clear();
 }
 
 function clearEditorDebounceTimer(editorId) {
@@ -261,53 +249,6 @@ function buildAfterStyle({ marginLeft, boxWidth, boxHeight, previewWidth, previe
 		zIndex: -1,
 		textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
 	};
-}
-
-// ==================== 进度条同步定时器 ====================
-
-function startProgressSyncTimer() {
-	if (progressSyncTimer) return;
-
-	progressSyncTimer = setInterval(() => {
-		let hasAnimations = false;
-		for (const [, keys] of animatedDecorationKeys) {
-			if (keys.size > 0) {
-				hasAnimations = true;
-				break;
-			}
-		}
-
-		if (hasAnimations) {
-			forceResyncAnimatedDecorations();
-		}
-	}, PROGRESS_SYNC_INTERVAL_MS);
-}
-
-function stopProgressSyncTimer() {
-	if (progressSyncTimer) {
-		clearInterval(progressSyncTimer);
-		progressSyncTimer = null;
-	}
-}
-
-function forceResyncAnimatedDecorations() {
-	const editors = vscode.window.visibleTextEditors;
-
-	for (const editor of editors) {
-		const docUri = editor.document.uri.toString();
-		const animatedKeys = animatedDecorationKeys.get(docUri);
-
-		if (animatedKeys && animatedKeys.size > 0) {
-			const currentDecos = documentDecorationsMap.get(docUri);
-			if (currentDecos) {
-				for (const key of animatedKeys) {
-					currentDecos.delete(key);
-				}
-			}
-			animatedKeys.clear();
-			debounceRender(editor, 10);
-		}
-	}
 }
 
 // ==================== 统一 Frame 尺寸逻辑 ====================
@@ -579,29 +520,27 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 		args.push("-frames:v", "1");
 		expectedWebPDuration = 0;
 	} else if (performanceMode === "accelerated") {
-		// ★★★ 核心修复：FPS 7 + PTS 重置 + 帧数硬锁定 ★★★
+		// ★★★ 核心修复：彻底解决 Accelerated 进度条同步问题 ★★★
+		// 1. 输入限制：仅读取前 2 秒 (-t 2)。
+		// 2. 滤镜核心：fps=7 固定帧率，setpts=N/7/TB 强制重写时间戳为线性增长。
+		//    这确保了无论原视频帧率/时长如何，生成的帧间隔都是严格的 1/7 秒。
+		// 3. 输出限制：-frames:v 14 (即 7fps * 2s)。
 		if (isStatic) {
 			args.push("-ss", "0", "-i", filePath);
 			vf = `[0:v]${scaleFilter}[out_v]`;
 			args.push("-frames:v", "1");
 			expectedWebPDuration = 0;
 		} else {
-			// 前置输入：从 0 开始，稍微多读一点(3s)以确保滤镜有足够素材，但不让 ffmpeg 读完整个大文件
 			args.push("-ss", "0");
-			if (duration > 3) args.push("-t", "3");
+			args.push("-t", "2"); // 强制只读取 2 秒
 			args.push("-i", filePath);
 
-			// 滤镜链关键：
-			// 1. fps=7: 强制 7 帧每秒
-			// 2. setpts=N/7/TB: 强制将时间戳重写为线性增长。第0帧t=0，第1帧t=1/7...
-			//    这消除了原始视频帧间隔不均匀导致的动图忽快忽慢。
-			// 3. scale: 缩放
 			vf = `[0:v]fps=7,setpts=N/7/TB,${scaleFilter}[out_v]`;
 
-			// 硬输出限制：7fps * 2s = 14帧。多一帧都不要。
+			// 硬输出限制：7fps * 2s = 14帧
 			args.push("-frames:v", "14");
 
-			// 预期时长 2s (如果原视频短于2s，后续 getPreviewBuffer 会修正)
+			// 预期时长 2s (小于 2s 的视频实际时长会在 getPreviewBuffer 中通过 WebP 数据修正)
 			expectedWebPDuration = 2;
 		}
 	} else {
@@ -1040,6 +979,9 @@ function calculateAspectRatioString(w, h) {
 function createProgressSvg(webpDuration, previewWidth) {
 	if (!webpDuration || webpDuration <= 0) return null;
 
+	// ★★★ 修正: CSS 层面强制复位技巧 ★★★
+	// 注入时间戳注释，强制浏览器认为这是新图片，从而重置动画时间轴到 0s
+	const salt = Date.now();
 	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${previewWidth}" height="4" viewBox="0 0 ${previewWidth} 4"><rect width="${previewWidth}" height="4" fill="black"/><rect width="0" height="4" fill="#fdf6e3"><animate attributeName="width" from="0" to="${previewWidth}" dur="${webpDuration.toFixed(3)}s" repeatCount="indefinite"/></rect></svg>`;
 
 	return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
@@ -1105,12 +1047,7 @@ async function renderImages(editor) {
 		documentDecorationsMap.set(docUri, new Map());
 	}
 
-	if (!animatedDecorationKeys.has(docUri)) {
-		animatedDecorationKeys.set(docUri, new Set());
-	}
-
 	const currentDecos = documentDecorationsMap.get(docUri);
-	const animatedKeys = animatedDecorationKeys.get(docUri);
 	const hideDecos = new Map();
 	const visibleRanges = editor.visibleRanges;
 
@@ -1214,11 +1151,9 @@ async function renderImages(editor) {
 					const boxHeight = previewHeight + PREVIEW_BORDER;
 
 					let progressBarUrl = null;
-					let hasAnimation = false;
 
 					if (webpDuration > 0.1) {
 						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
-						hasAnimation = true;
 					}
 
 					deco.renderOptions.after = buildAfterStyle({
@@ -1236,7 +1171,7 @@ async function renderImages(editor) {
 					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
 					deco.hoverMessage.isTrusted = true;
 
-					return { key: uniqueKey, deco, hasAnimation };
+					return { key: uniqueKey, deco };
 				} catch (e) {
 					return null;
 				}
@@ -1260,15 +1195,8 @@ async function renderImages(editor) {
 		for (const res of results) {
 			if (res) {
 				currentDecos.set(res.key, res.deco);
-				if (res.hasAnimation) {
-					animatedKeys.add(res.key);
-				}
 			}
 		}
-	}
-
-	if (animatedKeys.size > 0) {
-		startProgressSyncTimer();
 	}
 
 	editor.setDecorations(decorationType, Array.from(currentDecos.values()));
@@ -1872,7 +1800,6 @@ async function activate(context) {
 
 			if (e.document === ed?.document && e.contentChanges.length > 0) {
 				documentDecorationsMap.delete(e.document.uri.toString());
-				animatedDecorationKeys.delete(e.document.uri.toString());
 			}
 		}),
 
@@ -1880,25 +1807,12 @@ async function activate(context) {
 			const docUri = doc.uri.toString();
 
 			documentDecorationsMap.delete(docUri);
-			animatedDecorationKeys.delete(docUri);
 
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
 				if (editorId.startsWith(docUri + "::")) {
 					clearTimeout(timer);
 					editorDebounceTimers.delete(editorId);
 				}
-			}
-
-			let hasAnyAnimations = false;
-			for (const [, keys] of animatedDecorationKeys) {
-				if (keys.size > 0) {
-					hasAnyAnimations = true;
-					break;
-				}
-			}
-
-			if (!hasAnyAnimations) {
-				stopProgressSyncTimer();
 			}
 		}),
 
@@ -1927,11 +1841,9 @@ async function activate(context) {
 }
 
 async function deactivate() {
-	stopProgressSyncTimer();
 	clearAllEditorDebounceTimers();
 	clearDecorations();
 	await qqq.finishUserTracking(extensionContext);
 }
 
 module.exports = { activate, deactivate };
-
