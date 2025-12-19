@@ -1,6 +1,7 @@
 // src/q1.js
 // ==========================================
 // ★★★ 转码兜底 + 错误日志 + 配置dispose + 多编辑器独立防抖 ★★★
+// ★★★ 最终方案：CodeLens逻辑对齐 + 全局刷新机制重构 + 混合写入策略 ★★★
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -33,11 +34,23 @@ const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".svg", ".ai", ".eps", ".cdr", ".psd"]);
 const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
 
+// Pipe 不可 seek 的错误关键词
+const PIPE_SEEK_ERROR_PATTERNS = [
+	"non seekable",
+	"seek not allowed",
+	"Discarding interleaved",
+	"muxer does not support non seekable output",
+	"Could not write header"
+];
+
 // ==================== 全局状态 ====================
 let decorationType = null;
 let markerHideType = null;
 let extensionContext = null;
 let currentRenderVersion = 0;
+
+// ★★★ CodeLens Provider 实例，用于手动触发刷新 ★★★
+let codeLensProvider = null;
 
 const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
@@ -110,7 +123,15 @@ function refreshConfig() {
 	}
 }
 
+// ★★★ 彻底清除装饰器，确保无残留 ★★★
 function clearDecorations() {
+	// 立即清理所有可见编辑器的装饰器
+	const editors = vscode.window.visibleTextEditors;
+	for (const editor of editors) {
+		if (decorationType) editor.setDecorations(decorationType, []);
+		if (markerHideType) editor.setDecorations(markerHideType, []);
+	}
+
 	if (decorationType) {
 		try { decorationType.dispose(); } catch (e) { }
 		decorationType = null;
@@ -149,6 +170,100 @@ function logCriticalError(filePath, errorMsg) {
 		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
 		fs.appendFileSync(qqq.LOG_PATH, logLine);
 	} catch (e) { }
+}
+
+// ==================== 辅助函数 ====================
+
+// 统一缩放逻辑 (核心：CodeLens 和 渲染 必须都调用此函数)
+function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
+	if (!srcW || !srcH) {
+		return { width: boxW, height: boxH, scale: 1 };
+	}
+	let finalW, finalH, s;
+	if (enlarge) {
+		// 允许放大：按比例缩放以适应盒子
+		const scale = Math.min(boxW / srcW, boxH / srcH);
+		s = scale;
+		finalW = Math.max(1, Math.round(srcW * scale));
+		finalH = Math.max(1, Math.round(srcH * scale));
+	} else {
+		// 不允许放大
+		if (srcW > boxW || srcH > boxH) {
+			// 如果原图比盒子大，必须缩小
+			const scale = Math.min(boxW / srcW, boxH / srcH);
+			s = scale;
+			finalW = Math.max(1, Math.round(srcW * scale));
+			finalH = Math.max(1, Math.round(srcH * scale));
+		} else {
+			// 原图比盒子小，保持原样
+			s = 1;
+			finalW = srcW;
+			finalH = srcH;
+		}
+	}
+	return { width: finalW, height: finalH, scale: s };
+}
+
+// 统一 MIME 推断
+function mimeFromExt(ext) {
+	switch ((ext || "").toLowerCase()) {
+		case ".png": return "image/png";
+		case ".jpg": case ".jpeg": return "image/jpeg";
+		case ".gif": return "image/gif";
+		case ".webp": return "image/webp";
+		case ".svg": return "image/svg+xml";
+		case ".bmp": return "image/bmp";
+		case ".ico": return "image/x-icon";
+		default: return ""; // 返回空字符串以便回退到默认逻辑
+	}
+}
+
+// 统一构建 After 样式
+function buildAfterStyle({ marginLeft, boxWidth, boxHeight, previewWidth, previewHeight, contentUrl, outputSize, progressBarUrl, watermarkBase64 }) {
+	const gridSize = "20px 20px";
+	const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
+	const layers = [];
+	const sizes = [];
+	const positions = [];
+	const repeats = [];
+
+	if (watermarkBase64) {
+		layers.push(`url("${watermarkBase64}")`);
+		sizes.push("contain");
+		positions.push("center center");
+		repeats.push("no-repeat");
+	}
+
+	if (progressBarUrl) {
+		layers.push(progressBarUrl);
+		sizes.push(`${previewWidth}px 4px`);
+		positions.push("center bottom");
+		repeats.push("no-repeat");
+	}
+
+	layers.push(contentUrl);
+	sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
+	positions.push("center center");
+	repeats.push("no-repeat");
+
+	layers.push(gridImage);
+	sizes.push(gridSize);
+	positions.push("0 0");
+	repeats.push("repeat");
+
+	return {
+		contentText: "",
+		position: 'absolute',
+		left: marginLeft,
+		top: '0px',
+		width: `${boxWidth}px`,
+		height: `${boxHeight}px`,
+		padding: "2px",
+		border: "1px dashed #888",
+		backgroundColor: PREVIEW_BG_COLOR,
+		zIndex: -1,
+		textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
+	};
 }
 
 // ==================== 进度条同步定时器 ====================
@@ -388,9 +503,9 @@ function getWebPDurationFromBuffer(buffer) {
 
 // ==================== 缓存策略与转码 ====================
 
-function determineCacheStrategy(filePath, info) {
-	const previewWidth = LARGE_PREVIEW_WIDTH;
-	const previewHeight = LARGE_PREVIEW_HEIGHT;
+function determineCacheStrategy(filePath, info, targetW, targetH) {
+	const previewWidth = targetW;
+	const previewHeight = targetH;
 
 	const ext = path.extname(filePath).toLowerCase();
 	let fileSize = 0;
@@ -429,7 +544,8 @@ function determineCacheStrategy(filePath, info) {
 			qualityLevel = 70;
 	}
 
-	const cacheKey = `${qualityLevel}`;
+	// 缓存 Key 包含尺寸信息，防止小图配置命中大图缓存
+	const cacheKey = `${qualityLevel}_${previewWidth}x${previewHeight}`;
 
 	return { shouldBypassCache, previewWidth, previewHeight, cacheKey, qualityLevel, isMjpegStatic };
 }
@@ -514,6 +630,151 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 	return { args, targetW, targetH, expectedWebPDuration };
 }
 
+// ==================== 检测 Pipe Seek 错误 ====================
+
+function isPipeSeekError(stderr) {
+	const lowerStderr = stderr.toLowerCase();
+	return PIPE_SEEK_ERROR_PATTERNS.some(pattern => lowerStderr.includes(pattern.toLowerCase()));
+}
+
+// ==================== Pipe 直出转码（带文件回退 + 动画文件强制） ====================
+
+function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, isAnimated = false) {
+	return new Promise((resolve) => {
+		// ★ 动画内容直接走文件模式，因为 WebP Muxer 需要 Seek
+		if (isAnimated) {
+			runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
+			return;
+		}
+
+		// 阶段1：静态图尝试 pipe:1 直出
+		const pipeArgs = [...args, "pipe:1"];
+
+		const child = cp.spawn(qqq.ffmpegPath, pipeArgs, {
+			windowsHide: true,
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+
+		const chunks = [];
+		let stderr = "";
+		let resolved = false;
+
+		child.stdout.on("data", chunk => {
+			chunks.push(chunk);
+		});
+
+		child.stderr.on("data", d => {
+			// 限制 stderr 大小，防止无限累积
+			if (stderr.length < 64000) stderr += d.toString();
+		});
+
+		const timer = setTimeout(() => {
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				// 超时也回退到文件
+				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
+			}
+		}, timeoutMs);
+
+		child.on("close", (code) => {
+			if (resolved) return;
+			clearTimeout(timer);
+
+			const buffer = chunks.length > 0 ? Buffer.concat(chunks) : null;
+
+			// 检查是否命中 pipe seek 错误，或输出为空
+			if (isPipeSeekError(stderr) || !buffer || buffer.length === 0) {
+				// 阶段2：回退到文件写入模式
+				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
+				return;
+			}
+
+			if (buffer && buffer.length > 0) {
+				resolved = true;
+				resolve({ success: true, buffer, fromPipe: true });
+			} else {
+				resolved = true;
+				resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
+			}
+		});
+
+		child.on("error", (err) => {
+			if (resolved) return;
+			clearTimeout(timer);
+			resolved = true;
+			// spawn 错误也尝试回退
+			runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
+		});
+	});
+}
+
+// ==================== 文件写入模式（原子性 + 本地临时文件） ====================
+
+function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
+	return new Promise((resolve) => {
+		// ★ 临时文件直接写在目标文件旁边，不使用系统临时目录
+		const tmpPath = cacheFilePath + ".tmp";
+		const fileArgs = [...args, "-y", tmpPath];
+
+		const child = cp.spawn(qqq.ffmpegPath, fileArgs, {
+			windowsHide: true,
+			stdio: ['ignore', 'ignore', 'pipe']
+		});
+
+		let stderr = "";
+		let resolved = false;
+
+		child.stderr.on("data", d => {
+			if (stderr.length < 64000) stderr += d.toString();
+		});
+
+		const timer = setTimeout(() => {
+			if (!resolved) {
+				resolved = true;
+				try { child.kill(); } catch { }
+				cleanup();
+				resolve({ success: false, error: "TIMEOUT_FILE", stderr });
+			}
+		}, timeoutMs);
+
+		const cleanup = () => {
+			try {
+				if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+			} catch { }
+		};
+
+		child.on("close", (code) => {
+			if (resolved) return;
+			clearTimeout(timer);
+			resolved = true;
+
+			if (code === 0 && fs.existsSync(tmpPath)) {
+				try {
+					// 原子性 rename
+					fs.renameSync(tmpPath, cacheFilePath);
+					const buffer = fs.readFileSync(cacheFilePath);
+					resolve({ success: true, buffer, fromFile: true, cacheFilePath });
+				} catch (e) {
+					cleanup();
+					resolve({ success: false, error: e.message, stderr });
+				}
+			} else {
+				cleanup();
+				resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
+			}
+		});
+
+		child.on("error", (err) => {
+			if (resolved) return;
+			clearTimeout(timer);
+			resolved = true;
+			cleanup();
+			resolve({ success: false, error: err.message, stderr });
+		});
+	});
+}
+
 function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 	const ext = path.extname(filePath).toLowerCase();
 	if (!FALLBACK_DIRECT_READ_EXTS.has(ext)) return null;
@@ -524,25 +785,13 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 
 		const rawBuffer = fs.readFileSync(filePath);
 
-		let finalCssW = info?.width || renderW;
-		let finalCssH = info?.height || renderH;
-
-		if (info?.width && info?.height) {
-			if (enlargeSmallImages) {
-				const scale = Math.min(renderW / info.width, renderH / info.height);
-				finalCssW = Math.max(1, Math.round(info.width * scale));
-				finalCssH = Math.max(1, Math.round(info.height * scale));
-			} else {
-				if (info.width > renderW || info.height > renderH) {
-					const scale = Math.min(renderW / info.width, renderH / info.height);
-					finalCssW = Math.max(1, Math.round(info.width * scale));
-					finalCssH = Math.max(1, Math.round(info.height * scale));
-				} else {
-					finalCssW = info.width;
-					finalCssH = info.height;
-				}
-			}
-		}
+		const { width: finalCssW, height: finalCssH } = fitIntoBox(
+			info?.width,
+			info?.height,
+			renderW,
+			renderH,
+			enlargeSmallImages
+		);
 
 		return {
 			buffer: rawBuffer,
@@ -572,27 +821,21 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	const origSize = info ? { width: info.width, height: info.height, needsConversion: info.needsConversion } : null;
 	const originalDuration = info?.duration || 0;
 
-	const cacheStrategy = determineCacheStrategy(filePath, info);
+	// 传入 renderW/H 确保 cacheStrategy 使用正确的尺寸生成 key
+	const cacheStrategy = determineCacheStrategy(filePath, info, renderW, renderH);
 	const ext = path.extname(filePath).toLowerCase();
 
 	// MJPEG 静态图：强制直通读取原文件
 	if (cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
-			let finalCssW = info.width;
-			let finalCssH = info.height;
-
-			if (enlargeSmallImages) {
-				const scale = Math.min(renderW / info.width, renderH / info.height);
-				finalCssW = Math.max(1, Math.round(info.width * scale));
-				finalCssH = Math.max(1, Math.round(info.height * scale));
-			} else {
-				if (info.width > renderW || info.height > renderH) {
-					const scale = Math.min(renderW / info.width, renderH / info.height);
-					finalCssW = Math.max(1, Math.round(info.width * scale));
-					finalCssH = Math.max(1, Math.round(info.height * scale));
-				}
-			}
+			const { width: finalCssW, height: finalCssH } = fitIntoBox(
+				info.width,
+				info.height,
+				renderW,
+				renderH,
+				enlargeSmallImages
+			);
 
 			return {
 				buffer: rawBuffer,
@@ -607,7 +850,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			qqq.logMessage(`MJPEG 直通读取失败: ${e.message}`, "ERROR");
 		}
 	}
-
 	// 尝试读取缓存
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
@@ -622,28 +864,13 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 			const webpDur = getWebPDurationFromBuffer(cached);
 
-			let finalCssW = origWidth;
-			let finalCssH = origHeight;
-
-			if (origWidth > 0 && origHeight > 0) {
-				if (enlargeSmallImages) {
-					const scale = Math.min(renderW / origWidth, renderH / origHeight);
-					finalCssW = Math.max(1, Math.round(origWidth * scale));
-					finalCssH = Math.max(1, Math.round(origHeight * scale));
-				} else {
-					if (origWidth <= renderW && origHeight <= renderH) {
-						finalCssW = origWidth;
-						finalCssH = origHeight;
-					} else {
-						const scale = Math.min(renderW / origWidth, renderH / origHeight);
-						finalCssW = Math.max(1, Math.round(origWidth * scale));
-						finalCssH = Math.max(1, Math.round(origHeight * scale));
-					}
-				}
-			} else {
-				finalCssW = renderW;
-				finalCssH = renderH;
-			}
+			const { width: finalCssW, height: finalCssH } = fitIntoBox(
+				origWidth,
+				origHeight,
+				renderW,
+				renderH,
+				enlargeSmallImages
+			);
 
 			return {
 				buffer: cached,
@@ -651,6 +878,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				originalDuration: cachedOriginalDuration,
 				fromCache: true,
 				outputSize: { width: finalCssW, height: finalCssH },
+				ext: '.webp',
+				mimeType: 'image/webp'
 			};
 		}
 	}
@@ -659,20 +888,13 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
-			let finalCssW = info.width;
-			let finalCssH = info.height;
-
-			if (enlargeSmallImages) {
-				const scale = Math.min(renderW / info.width, renderH / info.height);
-				finalCssW = Math.max(1, Math.round(info.width * scale));
-				finalCssH = Math.max(1, Math.round(info.height * scale));
-			} else {
-				if (info.width > renderW || info.height > renderH) {
-					const scale = Math.min(renderW / info.width, renderH / info.height);
-					finalCssW = Math.max(1, Math.round(info.width * scale));
-					finalCssH = Math.max(1, Math.round(info.height * scale));
-				}
-			}
+			const { width: finalCssW, height: finalCssH } = fitIntoBox(
+				info.width,
+				info.height,
+				renderW,
+				renderH,
+				enlargeSmallImages
+			);
 
 			return {
 				buffer: rawBuffer,
@@ -685,143 +907,81 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		} catch (e) { }
 	}
 
-	// 转码生成
-	return new Promise((resolve) => {
-		const { args, targetW, targetH } = buildUnifiedWebPArgs(
-			filePath, origSize, originalDuration, cacheStrategy.qualityLevel,
-			cacheStrategy.previewWidth, cacheStrategy.previewHeight
+	// ★★★ 转码生成：Pipe 直出 + 文件回退 ★★★
+	const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(
+		filePath, origSize, originalDuration, cacheStrategy.qualityLevel,
+		cacheStrategy.previewWidth, cacheStrategy.previewHeight
+	);
+
+	// ★★★ 关键：判断是否为动画内容 ★★★
+	const isAnimated = expectedWebPDuration > 0.1;
+
+	// 构建缓存文件路径
+	const cacheDir = qqq.CACHE_DIR || path.join(os.tmpdir(), "qqq_cache");
+	if (!fs.existsSync(cacheDir)) {
+		try { fs.mkdirSync(cacheDir, { recursive: true }); } catch { }
+	}
+	const cacheFilePath = path.join(cacheDir, `${contentId}_${cacheStrategy.cacheKey}.webp`);
+
+	// ★★★ 传入 isAnimated 参数 ★★★
+	const result = await runFFmpegWithPipeAndFallback(args, cacheFilePath, 30000, isAnimated);
+
+	if (result.success) {
+		const buffer = result.buffer;
+		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
+
+		// 写入缓存（如果是 pipe 直出，需要手动写缓存）
+		if (result.fromPipe) {
+			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+				width: targetW,
+				height: targetH,
+				origWidth: origSize?.width || 0,
+				origHeight: origSize?.height || 0,
+				type: 'webp_unified',
+				webpDur: finalWebPDuration,
+				originalDuration: originalDuration
+			});
+		} else if (result.fromFile) {
+			// 文件模式已经写入了 cacheFilePath，更新缓存索引
+			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+				width: targetW,
+				height: targetH,
+				origWidth: origSize?.width || 0,
+				origHeight: origSize?.height || 0,
+				type: 'webp_unified',
+				webpDur: finalWebPDuration,
+				originalDuration: originalDuration
+			});
+		}
+
+		const ow = origSize?.width || targetW;
+		const oh = origSize?.height || targetH;
+
+		const { width: finalCssW, height: finalCssH } = fitIntoBox(
+			ow,
+			oh,
+			renderW,
+			renderH,
+			enlargeSmallImages
 		);
 
-		const rand = Math.random().toString(36).slice(2);
-		const tempFile = path.join(os.tmpdir(), `qqq_uni_${contentId}_${rand}.webp`);
-		args.push("-y", tempFile);
-
-		const child = cp.spawn(qqq.ffmpegPath, args, {
-			windowsHide: true,
-			stdio: ['ignore', 'ignore', 'pipe']
-		});
-
-		let ffErr = "";
-		child.stderr?.on("data", d => {
-			if (ffErr.length < 2000) ffErr += d.toString();
-		});
-
-		let resolved = false;
-
-		const cleanup = () => {
-			if (fs.existsSync(tempFile)) {
-				try { fs.unlinkSync(tempFile); } catch { }
-			}
+		return {
+			buffer,
+			webpDuration: finalWebPDuration,
+			originalDuration: originalDuration,
+			outputSize: { width: finalCssW, height: finalCssH }
 		};
-
-		const timer = setTimeout(() => {
-			if (!resolved) {
-				resolved = true;
-				try { child.kill(); } catch { }
-				cleanup();
-
-				const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
-				if (fallback) {
-					logCriticalError(filePath, "TIMEOUT(30s) - 使用兜底直读");
-					resolve(fallback);
-				} else {
-					logCriticalError(filePath, "TIMEOUT(30s) - 无法兜底");
-					resolve(null);
-				}
-			}
-		}, 30000);
-
-		child.on("close", (code) => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timer);
-
-				let buffer = null;
-				try {
-					if (fs.existsSync(tempFile)) {
-						buffer = fs.readFileSync(tempFile);
-					}
-				} catch (e) { }
-
-				cleanup();
-
-				if (!buffer) {
-					const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
-					if (fallback) {
-						if (ffErr.trim().length > 0) {
-							logCriticalError(filePath, `EXIT_CODE=${code}\n${ffErr}`);
-						}
-						resolve(fallback);
-						return;
-					} else {
-						if (ffErr.trim().length > 0) {
-							logCriticalError(filePath, `EXIT_CODE=${code} (无法兜底)\n${ffErr}`);
-						}
-						resolve(null);
-						return;
-					}
-				}
-
-				const finalWebPDuration = getWebPDurationFromBuffer(buffer);
-
-				qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
-					width: targetW,
-					height: targetH,
-					origWidth: origSize?.width || 0,
-					origHeight: origSize?.height || 0,
-					type: 'webp_unified',
-					webpDur: finalWebPDuration,
-					originalDuration: originalDuration
-				});
-
-				let finalCssW = targetW;
-				let finalCssH = targetH;
-				const ow = origSize?.width || targetW;
-				const oh = origSize?.height || targetH;
-
-				if (ow > 0 && oh > 0) {
-					if (enlargeSmallImages) {
-						const scale = Math.min(renderW / ow, renderH / oh);
-						finalCssW = Math.max(1, Math.round(ow * scale));
-						finalCssH = Math.max(1, Math.round(oh * scale));
-					} else {
-						if (ow <= renderW && oh <= renderH) {
-							finalCssW = ow;
-							finalCssH = oh;
-						} else {
-							const scale = Math.min(renderW / ow, renderH / oh);
-							finalCssW = Math.max(1, Math.round(ow * scale));
-							finalCssH = Math.max(1, Math.round(oh * scale));
-						}
-					}
-				}
-
-				resolve({
-					buffer,
-					webpDuration: finalWebPDuration,
-					originalDuration: originalDuration,
-					outputSize: { width: finalCssW, height: finalCssH }
-				});
-			}
-		});
-
-		child.on("error", (err) => {
-			if (!resolved) {
-				resolved = true;
-				clearTimeout(timer);
-				cleanup();
-
-				const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
-				if (fallback) {
-					logCriticalError(filePath, `SPAWN_ERROR: ${err.message}`);
-					resolve(fallback);
-				} else {
-					logCriticalError(filePath, `SPAWN_ERROR (无法兜底): ${err.message}`);
-					resolve(null);
-				}
-			}
-		});
-	});
+	} else {
+		// 转码失败，尝试兜底直读
+		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
+		if (fallback) {
+			logCriticalError(filePath, `${result.error} - 使用兜底直读\n${result.stderr || ''}`);
+			return fallback;
+		} else {
+			logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ''}`);
+			return null;
+		}
+	}
 }
 
 // ==================== 渲染辅助 ====================
@@ -1045,18 +1205,10 @@ async function renderImages(editor) {
 						let mime = "image/webp";
 
 						if (previewResult.isDirect) {
-							if (previewResult.mimeType) {
-								mime = previewResult.mimeType;
-							} else if (previewResult.ext) {
-								const e = previewResult.ext;
-								if (e === '.png') mime = 'image/png';
-								else if (e === '.jpg' || e === '.jpeg') mime = 'image/jpeg';
-								else if (e === '.svg') mime = 'image/svg+xml';
-								else if (e === '.gif') mime = 'image/gif';
-								else if (e === '.webp') mime = 'image/webp';
-								else if (e === '.bmp') mime = 'image/bmp';
-								else if (e === '.ico') mime = 'image/x-icon';
-							}
+							// 使用新的统一 MIME 推断逻辑
+							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
+						} else if (previewResult.mimeType) {
+							mime = previewResult.mimeType;
 						}
 
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
@@ -1077,51 +1229,18 @@ async function renderImages(editor) {
 						hasAnimation = true;
 					}
 
-					const gridSize = "20px 20px";
-					const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
-
-					let layers = [];
-					let sizes = [];
-					let positions = [];
-					let repeats = [];
-
-					if (watermarkBase64) {
-						layers.push(`url("${watermarkBase64}")`);
-						sizes.push("contain");
-						positions.push("center center");
-						repeats.push("no-repeat");
-					}
-
-					if (progressBarUrl) {
-						layers.push(progressBarUrl);
-						sizes.push(`${previewWidth}px 4px`);
-						positions.push("center bottom");
-						repeats.push("no-repeat");
-					}
-
-					layers.push(contentUrl);
-					sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
-					positions.push("center center");
-					repeats.push("no-repeat");
-
-					layers.push(gridImage);
-					sizes.push(gridSize);
-					positions.push("0 0");
-					repeats.push("repeat");
-
-					deco.renderOptions.after = {
-						contentText: "",
-						position: 'absolute',
-						left: marginLeft,
-						top: '0px',
-						width: `${boxWidth}px`,
-						height: `${boxHeight}px`,
-						padding: "2px",
-						border: "1px dashed #888",
-						backgroundColor: PREVIEW_BG_COLOR,
-						zIndex: -1,
-						textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(", ")}; background-size: ${sizes.join(", ")}; background-position: ${positions.join(", ")}; background-repeat: ${repeats.join(", ")};`
-					};
+					// 使用提取后的 Helper 构建样式，代码大幅精简
+					deco.renderOptions.after = buildAfterStyle({
+						marginLeft,
+						boxWidth,
+						boxHeight,
+						previewWidth,
+						previewHeight,
+						contentUrl,
+						outputSize,
+						progressBarUrl,
+						watermarkBase64
+					});
 
 					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
 					deco.hoverMessage.isTrusted = true;
@@ -1305,11 +1424,10 @@ async function replacePendingMarker(token, result) {
 
 // ==================== 整洁模式 (Clean Freak) ====================
 
-async function performGlobalClean(editor, force = false) {
-	if (!editor) return;
-	if (!force && !cleanFreakMode) return;
+// 抽取为提供 edits 的异步函数，供 waitUntil 和手动命令复用
+async function provideCleanlinessEditsAsync(document) {
+	if (!document) return [];
 
-	const document = editor.document;
 	const edits = [];
 	const text = document.getText();
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
@@ -1381,6 +1499,15 @@ async function performGlobalClean(editor, force = false) {
 		}
 	}
 
+	return edits;
+}
+
+// 旧函数改造为调用 provideCleanlinessEditsAsync
+async function performGlobalClean(editor, force = false) {
+	if (!editor) return;
+	if (!force && !cleanFreakMode) return;
+
+	const edits = await provideCleanlinessEditsAsync(editor.document);
 	if (edits.length > 0) {
 		await editor.edit(editBuilder => {
 			edits.forEach(e => {
@@ -1397,6 +1524,16 @@ async function performGlobalClean(editor, force = false) {
 // ==================== CodeLens ====================
 
 class FileCodeLensProvider {
+	// ★★★ 添加事件发射器，支持手动刷新 ★★★
+	constructor() {
+		this._onDidChangeCodeLenses = new vscode.EventEmitter();
+		this.onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+	}
+
+	refresh() {
+		this._onDidChangeCodeLenses.fire();
+	}
+
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid) return [];
 
@@ -1443,20 +1580,13 @@ class FileCodeLensProvider {
 					const info = await getMediaInfo(absPath, mtimeMs);
 
 					if (info?.width && info?.height) {
+						// ★★★ 核心修复：复用 fitIntoBox 逻辑计算百分比，无论是否动图，都受 enlargeSmallImages 控制 ★★★
 						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
 
 						if (info.type === "video") isRealVideo = true;
 
-						let scale = 1;
-						if (isRealVideo || info.duration > 0.1 || enlargeSmallImages) {
-							scale = Math.min(MAX_W / info.width, MAX_H / info.height);
-						} else {
-							if (info.width <= MAX_W && info.height <= MAX_H) {
-								scale = 1;
-							} else {
-								scale = Math.min(MAX_W / info.width, MAX_H / info.height);
-							}
-						}
+						// 使用统一的缩放逻辑获取最终显示尺寸
+						const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
 
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
@@ -1639,6 +1769,7 @@ async function renameFileCommand(rawPath, absPath) {
 
 // ==================== 多编辑器独立防抖 ====================
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
+	// 增加健壮性检查，防止已关闭的 editor 报错
 	if (!editor || editor.document.isClosed) return;
 
 	const editorId = getEditorId(editor);
@@ -1686,12 +1817,18 @@ async function activate(context) {
 	loadWatermarkResource();
 	refreshConfig();
 
+	// ★★★ 初始化 CodeLens Provider ★★★
+	codeLensProvider = new FileCodeLensProvider();
+
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration("qqq")) {
 				refreshConfig();
+
+				// ★★★ 全局刷新核心：清理 -> 触发CodeLens刷新 -> 重新渲染 ★★★
 				clearDecorations();
-				renderVisibleEditors();
+				if (codeLensProvider) codeLensProvider.refresh();
+				renderVisibleEditors(10); // 几乎立即重绘
 
 				if (cleanFreakMode) {
 					performGlobalClean(vscode.window.activeTextEditor);
@@ -1725,13 +1862,12 @@ async function activate(context) {
 			q1a.executeExportZipCommand(isCoreIntegrityValid);
 		}),
 
-		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
+		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 
+		// 改进：使用 waitUntil 确保保存前完成清理，避免跳变
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
-				performGlobalClean(
-					vscode.window.visibleTextEditors.find(ed => ed.document === e.document)
-				);
+				e.waitUntil(provideCleanlinessEditsAsync(e.document));
 			}
 		}),
 
