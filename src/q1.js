@@ -1720,6 +1720,11 @@ async function activate(context) {
 			q1a.executeExportDocCommand(isCoreIntegrityValid);
 		}),
 
+		// ★★★ 导出 ZIP 命令（调用 q1a 模块） ★★★
+		vscode.commands.registerCommand("qqq.exportZip", () => {
+			q1a.executeExportZipCommand(isCoreIntegrityValid);
+		}),
+
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, new FileCodeLensProvider()),
 
 		vscode.workspace.onWillSaveTextDocument(e => {
