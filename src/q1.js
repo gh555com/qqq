@@ -2,6 +2,7 @@
 // ==========================================
 // ★★★ 转码兜底 + 错误日志 + 配置dispose + 多编辑器独立防抖 ★★★
 // ★★★ 最终方案：CodeLens逻辑对齐 + 全局刷新机制重构 + 混合写入策略 ★★★
+// ★★★ Accelerated 修正：FPS=7 + PTS重置(线性化) + 帧数硬锁(14帧) ★★★
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -174,28 +175,24 @@ function logCriticalError(filePath, errorMsg) {
 
 // ==================== 辅助函数 ====================
 
-// 统一缩放逻辑 (核心：CodeLens 和 渲染 必须都调用此函数)
+// 统一缩放逻辑
 function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
 	if (!srcW || !srcH) {
 		return { width: boxW, height: boxH, scale: 1 };
 	}
 	let finalW, finalH, s;
 	if (enlarge) {
-		// 允许放大：按比例缩放以适应盒子
 		const scale = Math.min(boxW / srcW, boxH / srcH);
 		s = scale;
 		finalW = Math.max(1, Math.round(srcW * scale));
 		finalH = Math.max(1, Math.round(srcH * scale));
 	} else {
-		// 不允许放大
 		if (srcW > boxW || srcH > boxH) {
-			// 如果原图比盒子大，必须缩小
 			const scale = Math.min(boxW / srcW, boxH / srcH);
 			s = scale;
 			finalW = Math.max(1, Math.round(srcW * scale));
 			finalH = Math.max(1, Math.round(srcH * scale));
 		} else {
-			// 原图比盒子小，保持原样
 			s = 1;
 			finalW = srcW;
 			finalH = srcH;
@@ -214,7 +211,7 @@ function mimeFromExt(ext) {
 		case ".svg": return "image/svg+xml";
 		case ".bmp": return "image/bmp";
 		case ".ico": return "image/x-icon";
-		default: return ""; // 返回空字符串以便回退到默认逻辑
+		default: return "";
 	}
 }
 
@@ -537,14 +534,14 @@ function determineCacheStrategy(filePath, info, targetW, targetH) {
 			qualityLevel = 39;
 			break;
 		case "accelerated":
-			qualityLevel = 38;
+			// ★ 修改 Accelerated 的 qualityLevel 以隔离旧缓存
+			qualityLevel = 37;
 			break;
 		case "balanced":
 		default:
 			qualityLevel = 70;
 	}
 
-	// 缓存 Key 包含尺寸信息，防止小图配置命中大图缓存
 	const cacheKey = `${qualityLevel}_${previewWidth}x${previewHeight}`;
 
 	return { shouldBypassCache, previewWidth, previewHeight, cacheKey, qualityLevel, isMjpegStatic };
@@ -582,22 +579,30 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, previe
 		args.push("-frames:v", "1");
 		expectedWebPDuration = 0;
 	} else if (performanceMode === "accelerated") {
-		args.push("-ss", "0", "-i", filePath);
-
+		// ★★★ 核心修复：FPS 7 + PTS 重置 + 帧数硬锁定 ★★★
 		if (isStatic) {
+			args.push("-ss", "0", "-i", filePath);
 			vf = `[0:v]${scaleFilter}[out_v]`;
 			args.push("-frames:v", "1");
 			expectedWebPDuration = 0;
 		} else {
-			let clipDur = Math.min(2, duration);
-			if (duration > 2) {
-				let clipStart = Math.min(1, duration * 0.1);
-				clipDur = Math.min(2, duration - clipStart);
-				args.push("-ss", String(clipStart));
-			}
-			args.push("-t", String(clipDur));
-			vf = `[0:v]fps=6,${scaleFilter}[out_v]`;
-			expectedWebPDuration = clipDur;
+			// 前置输入：从 0 开始，稍微多读一点(3s)以确保滤镜有足够素材，但不让 ffmpeg 读完整个大文件
+			args.push("-ss", "0");
+			if (duration > 3) args.push("-t", "3");
+			args.push("-i", filePath);
+
+			// 滤镜链关键：
+			// 1. fps=7: 强制 7 帧每秒
+			// 2. setpts=N/7/TB: 强制将时间戳重写为线性增长。第0帧t=0，第1帧t=1/7...
+			//    这消除了原始视频帧间隔不均匀导致的动图忽快忽慢。
+			// 3. scale: 缩放
+			vf = `[0:v]fps=7,setpts=N/7/TB,${scaleFilter}[out_v]`;
+
+			// 硬输出限制：7fps * 2s = 14帧。多一帧都不要。
+			args.push("-frames:v", "14");
+
+			// 预期时长 2s (如果原视频短于2s，后续 getPreviewBuffer 会修正)
+			expectedWebPDuration = 2;
 		}
 	} else {
 		if (isStatic) {
@@ -664,7 +669,6 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
 		});
 
 		child.stderr.on("data", d => {
-			// 限制 stderr 大小，防止无限累积
 			if (stderr.length < 64000) stderr += d.toString();
 		});
 
@@ -821,11 +825,9 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	const origSize = info ? { width: info.width, height: info.height, needsConversion: info.needsConversion } : null;
 	const originalDuration = info?.duration || 0;
 
-	// 传入 renderW/H 确保 cacheStrategy 使用正确的尺寸生成 key
 	const cacheStrategy = determineCacheStrategy(filePath, info, renderW, renderH);
 	const ext = path.extname(filePath).toLowerCase();
 
-	// MJPEG 静态图：强制直通读取原文件
 	if (cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -850,7 +852,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			qqq.logMessage(`MJPEG 直通读取失败: ${e.message}`, "ERROR");
 		}
 	}
-	// 尝试读取缓存
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
 
@@ -884,7 +885,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 	}
 
-	// 其他静态图直通读取
 	if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -907,30 +907,25 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		} catch (e) { }
 	}
 
-	// ★★★ 转码生成：Pipe 直出 + 文件回退 ★★★
 	const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(
 		filePath, origSize, originalDuration, cacheStrategy.qualityLevel,
 		cacheStrategy.previewWidth, cacheStrategy.previewHeight
 	);
 
-	// ★★★ 关键：判断是否为动画内容 ★★★
 	const isAnimated = expectedWebPDuration > 0.1;
 
-	// 构建缓存文件路径
 	const cacheDir = qqq.CACHE_DIR || path.join(os.tmpdir(), "qqq_cache");
 	if (!fs.existsSync(cacheDir)) {
 		try { fs.mkdirSync(cacheDir, { recursive: true }); } catch { }
 	}
 	const cacheFilePath = path.join(cacheDir, `${contentId}_${cacheStrategy.cacheKey}.webp`);
 
-	// ★★★ 传入 isAnimated 参数 ★★★
 	const result = await runFFmpegWithPipeAndFallback(args, cacheFilePath, 30000, isAnimated);
 
 	if (result.success) {
 		const buffer = result.buffer;
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
-		// 写入缓存（如果是 pipe 直出，需要手动写缓存）
 		if (result.fromPipe) {
 			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
@@ -942,7 +937,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				originalDuration: originalDuration
 			});
 		} else if (result.fromFile) {
-			// 文件模式已经写入了 cacheFilePath，更新缓存索引
 			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
@@ -972,7 +966,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH }
 		};
 	} else {
-		// 转码失败，尝试兜底直读
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 		if (fallback) {
 			logCriticalError(filePath, `${result.error} - 使用兜底直读\n${result.stderr || ''}`);
@@ -1205,7 +1198,6 @@ async function renderImages(editor) {
 						let mime = "image/webp";
 
 						if (previewResult.isDirect) {
-							// 使用新的统一 MIME 推断逻辑
 							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
 						} else if (previewResult.mimeType) {
 							mime = previewResult.mimeType;
@@ -1229,7 +1221,6 @@ async function renderImages(editor) {
 						hasAnimation = true;
 					}
 
-					// 使用提取后的 Helper 构建样式，代码大幅精简
 					deco.renderOptions.after = buildAfterStyle({
 						marginLeft,
 						boxWidth,
@@ -1424,7 +1415,6 @@ async function replacePendingMarker(token, result) {
 
 // ==================== 整洁模式 (Clean Freak) ====================
 
-// 抽取为提供 edits 的异步函数，供 waitUntil 和手动命令复用
 async function provideCleanlinessEditsAsync(document) {
 	if (!document) return [];
 
@@ -1502,7 +1492,6 @@ async function provideCleanlinessEditsAsync(document) {
 	return edits;
 }
 
-// 旧函数改造为调用 provideCleanlinessEditsAsync
 async function performGlobalClean(editor, force = false) {
 	if (!editor) return;
 	if (!force && !cleanFreakMode) return;
@@ -1524,7 +1513,6 @@ async function performGlobalClean(editor, force = false) {
 // ==================== CodeLens ====================
 
 class FileCodeLensProvider {
-	// ★★★ 添加事件发射器，支持手动刷新 ★★★
 	constructor() {
 		this._onDidChangeCodeLenses = new vscode.EventEmitter();
 		this.onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
@@ -1580,12 +1568,10 @@ class FileCodeLensProvider {
 					const info = await getMediaInfo(absPath, mtimeMs);
 
 					if (info?.width && info?.height) {
-						// ★★★ 核心修复：复用 fitIntoBox 逻辑计算百分比，无论是否动图，都受 enlargeSmallImages 控制 ★★★
 						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
 
 						if (info.type === "video") isRealVideo = true;
 
-						// 使用统一的缩放逻辑获取最终显示尺寸
 						const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
 
 						const pct = Math.round(scale * 100);
@@ -1769,7 +1755,6 @@ async function renameFileCommand(rawPath, absPath) {
 
 // ==================== 多编辑器独立防抖 ====================
 function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
-	// 增加健壮性检查，防止已关闭的 editor 报错
 	if (!editor || editor.document.isClosed) return;
 
 	const editorId = getEditorId(editor);
@@ -1817,7 +1802,6 @@ async function activate(context) {
 	loadWatermarkResource();
 	refreshConfig();
 
-	// ★★★ 初始化 CodeLens Provider ★★★
 	codeLensProvider = new FileCodeLensProvider();
 
 	context.subscriptions.push(
@@ -1825,10 +1809,9 @@ async function activate(context) {
 			if (e.affectsConfiguration("qqq")) {
 				refreshConfig();
 
-				// ★★★ 全局刷新核心：清理 -> 触发CodeLens刷新 -> 重新渲染 ★★★
 				clearDecorations();
 				if (codeLensProvider) codeLensProvider.refresh();
-				renderVisibleEditors(10); // 几乎立即重绘
+				renderVisibleEditors(10);
 
 				if (cleanFreakMode) {
 					performGlobalClean(vscode.window.activeTextEditor);
@@ -1852,19 +1835,16 @@ async function activate(context) {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
 
-		// ★★★ 导出 DOC 命令（调用 q1a 模块） ★★★
 		vscode.commands.registerCommand("qqq.exportDoc", () => {
 			q1a.executeExportDocCommand(isCoreIntegrityValid);
 		}),
 
-		// ★★★ 导出 ZIP 命令（调用 q1a 模块） ★★★
 		vscode.commands.registerCommand("qqq.exportZip", () => {
 			q1a.executeExportZipCommand(isCoreIntegrityValid);
 		}),
 
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 
-		// 改进：使用 waitUntil 确保保存前完成清理，避免跳变
 		vscode.workspace.onWillSaveTextDocument(e => {
 			if (cleanFreakMode && e.document) {
 				e.waitUntil(provideCleanlinessEditsAsync(e.document));
@@ -1954,3 +1934,4 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
