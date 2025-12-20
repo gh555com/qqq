@@ -478,7 +478,7 @@ function generateDocxDocument(elements, attachments, title) {
 
     if (attachments.length > 0) {
         children.push(new Paragraph({
-            children: [new TextRun({ text: "─".repeat(60), size: 22, font: "Arial" })],
+            children: [new TextRun({ text: "─".repeat(31), size: 22, font: "Arial" })],
             spacing: { before: 600, after: 200 }
         }));
 
