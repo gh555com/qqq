@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "13.1.1",
+  "version": "15.0.0",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -261,6 +261,7 @@
     "생산성",
     "fingerprint",
     "q",
+    "qq",
     "指纹",
     "cache",
     "缓存",
