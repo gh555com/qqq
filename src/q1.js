@@ -112,22 +112,15 @@ class TaskScheduler {
 	constructor(maxConcurrency = 8) {
 		this.maxConcurrency = maxConcurrency;
 		this.runningCount = 0;
-		this.queue = []; // 等待执行的任务函数
-		this.pendingPromises = new Map(); // 防惊群 Map: key -> Promise
+		this.queue = [];
+		this.pendingPromises = new Map();
 	}
 
-	/**
-	 * 核心入口：带防惊群和并发限制的执行器
-	 * @param {string} taskKey - 唯一标识（如 filePath 或 contentId+params）
-	 * @param {Function} taskGenerator - 返回 Promise 的工厂函数
-	 */
 	async schedule(taskKey, taskGenerator) {
-		// 1. 防惊群 (Promise Memoization)
 		if (this.pendingPromises.has(taskKey)) {
 			return this.pendingPromises.get(taskKey);
 		}
 
-		// 2. 包装任务：加入队列逻辑
 		const promise = new Promise((resolve, reject) => {
 			const run = async () => {
 				this.runningCount++;
@@ -138,35 +131,25 @@ class TaskScheduler {
 					reject(e);
 				} finally {
 					this.runningCount--;
-					this.pendingPromises.delete(taskKey); // 任务完成，移除防惊群锁
-					this._next(); // 触发下一个
+					this.pendingPromises.delete(taskKey);
+					this._next();
 				}
 			};
 			this.queue.push(run);
 		});
 
-		// 3. 记录到防惊群 Map
 		this.pendingPromises.set(taskKey, promise);
-
-		// 4. 尝试启动
 		this._next();
-
 		return promise;
 	}
 
 	_next() {
-		if (
-			this.runningCount >= this.maxConcurrency ||
-			this.queue.length === 0
-		) {
-			return;
-		}
+		if (this.runningCount >= this.maxConcurrency || this.queue.length === 0) return;
 		const task = this.queue.shift();
-		task(); // 执行包装好的 run
+		task();
 	}
 }
 
-// 实例化全局调度器
 const globalScheduler = new TaskScheduler(MAX_CONCURRENT_TASKS);
 
 // ==================== 初始化 ====================
@@ -186,8 +169,7 @@ function loadWatermarkResource() {
 	try {
 		if (fs.existsSync(WATERMARK_PATH)) {
 			const buf = fs.readFileSync(WATERMARK_PATH);
-			watermarkBase64 =
-				"data:image/gif;base64," + buf.toString("base64");
+			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
 		}
 	} catch (e) {
 		watermarkBase64 = null;
@@ -203,11 +185,8 @@ function refreshConfig() {
 		);
 
 		const extremePerformance = config.get("extremePerformance", false);
-		if (extremePerformance) {
-			performanceMode = "extreme";
-		} else {
-			performanceMode = config.get("performanceMode", "balanced");
-		}
+		if (extremePerformance) performanceMode = "extreme";
+		else performanceMode = config.get("performanceMode", "balanced");
 
 		frameSizeMode = config.get("frameSizeMode", "smart");
 		cleanFreakMode = config.get("cleanFreak", false);
@@ -227,24 +206,18 @@ function clearDecorations() {
 	}
 
 	if (decorationType) {
-		try {
-			decorationType.dispose();
-		} catch (e) { }
+		try { decorationType.dispose(); } catch (e) { }
 		decorationType = null;
 	}
 	if (markerHideType) {
-		try {
-			markerHideType.dispose();
-		} catch (e) { }
+		try { markerHideType.dispose(); } catch (e) { }
 		markerHideType = null;
 	}
 	documentDecorationsMap.clear();
 }
 
 function clearAllEditorDebounceTimers() {
-	for (const timer of editorDebounceTimers.values()) {
-		clearTimeout(timer);
-	}
+	for (const timer of editorDebounceTimers.values()) clearTimeout(timer);
 	editorDebounceTimers.clear();
 }
 
@@ -254,10 +227,8 @@ function logCriticalError(filePath, errorMsg) {
 	try {
 		if (!qqq.LOG_PATH) return;
 		const timestamp = new Date().toISOString();
-		const shortPath =
-			filePath.length > 100 ? "..." + filePath.slice(-97) : filePath;
-		const shortErr =
-			errorMsg.length > 500 ? errorMsg.slice(0, 500) + "..." : errorMsg;
+		const shortPath = filePath.length > 100 ? "..." + filePath.slice(-97) : filePath;
+		const shortErr = errorMsg.length > 500 ? errorMsg.slice(0, 500) + "..." : errorMsg;
 		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
 		fs.appendFileSync(qqq.LOG_PATH, logLine);
 	} catch (e) { }
@@ -266,9 +237,8 @@ function logCriticalError(filePath, errorMsg) {
 // ==================== CSS 计算辅助 ====================
 
 function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
-	if (!srcW || !srcH) {
-		return { width: boxW, height: boxH, scale: 1 };
-	}
+	if (!srcW || !srcH) return { width: boxW, height: boxH, scale: 1 };
+
 	let finalW, finalH, s;
 	if (enlarge) {
 		const scale = Math.min(boxW / srcW, boxH / srcH);
@@ -292,23 +262,15 @@ function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
 
 function mimeFromExt(ext) {
 	switch ((ext || "").toLowerCase()) {
-		case ".png":
-			return "image/png";
+		case ".png": return "image/png";
 		case ".jpg":
-		case ".jpeg":
-			return "image/jpeg";
-		case ".gif":
-			return "image/gif";
-		case ".webp":
-			return "image/webp";
-		case ".svg":
-			return "image/svg+xml";
-		case ".bmp":
-			return "image/bmp";
-		case ".ico":
-			return "image/x-icon";
-		default:
-			return "";
+		case ".jpeg": return "image/jpeg";
+		case ".gif": return "image/gif";
+		case ".webp": return "image/webp";
+		case ".svg": return "image/svg+xml";
+		case ".bmp": return "image/bmp";
+		case ".ico": return "image/x-icon";
+		default: return "";
 	}
 }
 
@@ -324,7 +286,8 @@ function buildAfterStyle({
 	watermarkBase64,
 }) {
 	const gridSize = "20px 20px";
-	const gridImage = `conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
+	const gridImage =
+		`conic-gradient(#fdf6e3 0.25turn, #e6e1cf 0.25turn 0.5turn, #fdf6e3 0.5turn 0.75turn, #e6e1cf 0.75turn)`;
 
 	const layers = [];
 	const sizes = [];
@@ -346,11 +309,7 @@ function buildAfterStyle({
 	}
 
 	layers.push(contentUrl);
-	sizes.push(
-		outputSize
-			? `${outputSize.width}px ${outputSize.height}px`
-			: "contain"
-	);
+	sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
 	positions.push("center center");
 	repeats.push("no-repeat");
 
@@ -370,13 +329,12 @@ function buildAfterStyle({
 		border: "1px dashed #888",
 		backgroundColor: PREVIEW_BG_COLOR,
 		zIndex: -1,
-		textDecoration: `none; pointer-events: none; display: inline-block; background-image: ${layers.join(
-			", "
-		)}; background-size: ${sizes.join(
-			", "
-		)}; background-position: ${positions.join(
-			", "
-		)}; background-repeat: ${repeats.join(", ")};`,
+		textDecoration:
+			`none; pointer-events: none; display: inline-block; ` +
+			`background-image: ${layers.join(", ")}; ` +
+			`background-size: ${sizes.join(", ")}; ` +
+			`background-position: ${positions.join(", ")}; ` +
+			`background-repeat: ${repeats.join(", ")};`,
 	};
 }
 
@@ -402,10 +360,7 @@ function getFrameConfig(info) {
 			height = LARGE_PREVIEW_HEIGHT;
 		} else {
 			// smart
-			if (
-				info.width <= SMALL_PREVIEW_WIDTH &&
-				info.height <= SMALL_PREVIEW_HEIGHT
-			) {
+			if (info.width <= SMALL_PREVIEW_WIDTH && info.height <= SMALL_PREVIEW_HEIGHT) {
 				mode = "small";
 				width = SMALL_PREVIEW_WIDTH;
 				height = SMALL_PREVIEW_HEIGHT;
@@ -422,19 +377,14 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (cached && cached.mtime === mtimeMs) return cached;
 
 	const cacheKey = `info:${filePath}:${mtimeMs}`;
-
-	return globalScheduler.schedule(cacheKey, async () => {
-		return _getMediaInfoInternal(filePath, mtimeMs);
-	});
+	return globalScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
 	if (!qqq.ffmpegPath) return null;
 
 	return new Promise((resolve) => {
-		const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], {
-			windowsHide: true,
-		});
+		const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
 
 		child.stderr.on("data", (d) => {
@@ -471,10 +421,10 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			}
 
 			if (durMatch) {
-				const h = parseFloat(durMatch[1]);
-				const m = parseFloat(durMatch[2]);
-				const s = parseFloat(durMatch[3]);
-				info.duration = h * 3600 + m * 60 + s;
+				const hh = parseFloat(durMatch[1]);
+				const mm = parseFloat(durMatch[2]);
+				const ss = parseFloat(durMatch[3]);
+				info.duration = hh * 3600 + mm * 60 + ss;
 			}
 
 			if (codecMatch?.[1]) {
@@ -495,11 +445,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 					} else {
 						info.type = "video";
 					}
-				} else if (
-					["png", "bmp", "tiff", "webp", "svg", "pdf"].some((x) =>
-						c.includes(x)
-					)
-				) {
+				} else if (["png", "bmp", "tiff", "webp", "svg", "pdf"].some((x) => c.includes(x))) {
 					info.type = "image";
 					info.isStaticImage = isStaticByDuration;
 				} else if (c.includes("gif")) {
@@ -510,16 +456,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 						info.type = "animated_image";
 					}
 				} else if (
-					[
-						"h264",
-						"hevc",
-						"vp8",
-						"vp9",
-						"av1",
-						"mpeg4",
-						"mpeg2",
-						"mpeg1",
-					].some((x) => c.includes(x))
+					["h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2", "mpeg1"].some((x) => c.includes(x))
 				) {
 					info.type = "video";
 				}
@@ -543,8 +480,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			}
 
 			resolutionCache.set(filePath, info);
-			if (resolutionCache.size > 200)
-				resolutionCache.delete(resolutionCache.keys().next().value);
+			if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
 
 			resolve(info.width ? info : null);
 		});
@@ -552,9 +488,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 		child.on("error", () => resolve(null));
 
 		setTimeout(() => {
-			try {
-				child.kill();
-			} catch { }
+			try { child.kill(); } catch { }
 			resolve(null);
 		}, 5000);
 	});
@@ -562,11 +496,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 
 function getWebPDurationFromBuffer(buffer) {
 	if (!buffer || buffer.length < 12) return 0;
-	if (
-		buffer.toString("ascii", 0, 4) !== "RIFF" ||
-		buffer.toString("ascii", 8, 12) !== "WEBP"
-	)
-		return 0;
+	if (buffer.toString("ascii", 0, 4) !== "RIFF" || buffer.toString("ascii", 8, 12) !== "WEBP") return 0;
 
 	let pos = 12;
 	let totalDurationMs = 0;
@@ -580,10 +510,7 @@ function getWebPDurationFromBuffer(buffer) {
 		if (chunkId === "ANMF") {
 			frameCount++;
 			if (pos + 23 < buffer.length) {
-				const dur =
-					buffer[pos + 20] |
-					(buffer[pos + 21] << 8) |
-					(buffer[pos + 22] << 16);
+				const dur = buffer[pos + 20] | (buffer[pos + 21] << 8) | (buffer[pos + 22] << 16);
 				totalDurationMs += dur;
 			}
 		}
@@ -597,15 +524,12 @@ function getWebPDurationFromBuffer(buffer) {
 function determineCacheStrategy(filePath, info) {
 	const ext = path.extname(filePath).toLowerCase();
 	let fileSize = 0;
-	try {
-		fileSize = fs.statSync(filePath).size;
-	} catch { }
+	try { fileSize = fs.statSync(filePath).size; } catch { }
 
 	const isStaticSource = info?.isStaticImage === true;
 	const isMjpegStatic = info?.isMjpegStatic === true;
 	const simpleFormats = [".png", ".jpg", ".jpeg", ".svg"];
-	const canDirectRead =
-		simpleFormats.includes(ext) || (ext === ".webp" && isStaticSource);
+	const canDirectRead = simpleFormats.includes(ext) || (ext === ".webp" && isStaticSource);
 
 	let shouldBypassCache = false;
 	if (isMjpegStatic) {
@@ -624,20 +548,13 @@ function determineCacheStrategy(filePath, info) {
 	}
 
 	let qualityLevel = 71;
-	if (performanceMode === "accelerated" || performanceMode === "extreme") {
-		qualityLevel = 47;
-	}
+	if (performanceMode === "accelerated" || performanceMode === "extreme") qualityLevel = 47;
 
 	let isAnimatedOutput = false;
-	const isVideoOrGif =
-		!isStaticSource && (info?.type === "video" || info?.type === "animated_image");
-
+	const isVideoOrGif = !isStaticSource && (info?.type === "video" || info?.type === "animated_image");
 	if (isVideoOrGif) {
-		if (performanceMode === "extreme") {
-			isAnimatedOutput = false;
-		} else {
-			isAnimatedOutput = true;
-		}
+		if (performanceMode === "extreme") isAnimatedOutput = false;
+		else isAnimatedOutput = true;
 	}
 
 	const suffix = isAnimatedOutput ? "q" : "";
@@ -652,13 +569,7 @@ function determineCacheStrategy(filePath, info) {
 	};
 }
 
-function buildUnifiedWebPArgs(
-	filePath,
-	origSize,
-	duration,
-	qualityLevel,
-	isAnimatedOutput
-) {
+function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnimatedOutput) {
 	let targetW = CACHE_BASE_WIDTH;
 	let targetH = CACHE_BASE_HEIGHT;
 
@@ -682,7 +593,8 @@ function buildUnifiedWebPArgs(
 	const isSourceStatic = duration <= 0.1;
 	const isSourceGifLike = !isSourceStatic && duration > 0.1 && duration < 10;
 
-	const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
+	const scaleFilter =
+		`scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
 	let vf = scaleFilter;
 
 	if (performanceMode === "extreme") {
@@ -723,28 +635,25 @@ function buildUnifiedWebPArgs(
 			args.push("-ss", String(s1), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s2), "-t", String(seg), "-i", filePath);
 			args.push("-ss", String(s3), "-t", String(seg), "-i", filePath);
-			vf = `[0:v]fps=15,${scaleFilter}[v0];[1:v]fps=15,${scaleFilter}[v1];[2:v]fps=15,${scaleFilter}[v2];[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`;
+			vf =
+				`[0:v]fps=15,${scaleFilter}[v0];` +
+				`[1:v]fps=15,${scaleFilter}[v1];` +
+				`[2:v]fps=15,${scaleFilter}[v2];` +
+				`[v0][v1][v2]concat=n=3:v=1:a=0[out_v]`;
 			expectedWebPDuration = seg * 3;
 		}
 	}
 
 	args.push("-filter_complex", vf, "-map", "[out_v]");
 	args.push(
-		"-c:v",
-		"libwebp",
-		"-lossless",
-		"0",
-		"-compression_level",
-		"0",
-		"-q:v",
-		String(qualityLevel),
-		"-loop",
-		"0",
+		"-c:v", "libwebp",
+		"-lossless", "0",
+		"-compression_level", "0",
+		"-q:v", String(qualityLevel),
+		"-loop", "0",
 		"-an",
-		"-vsync",
-		"0",
-		"-f",
-		"webp"
+		"-vsync", "0",
+		"-f", "webp"
 	);
 
 	return { args, targetW, targetH, expectedWebPDuration };
@@ -752,17 +661,10 @@ function buildUnifiedWebPArgs(
 
 function isPipeSeekError(stderr) {
 	const lowerStderr = stderr.toLowerCase();
-	return PIPE_SEEK_ERROR_PATTERNS.some((pattern) =>
-		lowerStderr.includes(pattern.toLowerCase())
-	);
+	return PIPE_SEEK_ERROR_PATTERNS.some((pattern) => lowerStderr.includes(pattern.toLowerCase()));
 }
 
-function runFFmpegWithPipeAndFallback(
-	args,
-	cacheFilePath,
-	timeoutMs = 30000,
-	isAnimated = false
-) {
+function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, isAnimated = false) {
 	return new Promise((resolve) => {
 		if (isAnimated) {
 			runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
@@ -785,22 +687,16 @@ function runFFmpegWithPipeAndFallback(
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				resolved = true;
-				try {
-					child.kill();
-				} catch { }
+				try { child.kill(); } catch { }
 				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 			}
 		}, timeoutMs);
 
-		child.on("close", (code) => {
+		child.on("close", () => {
 			if (resolved) return;
 			clearTimeout(timer);
 			const buffer = chunks.length > 0 ? Buffer.concat(chunks) : null;
-			if (
-				isPipeSeekError(stderr) ||
-				!buffer ||
-				buffer.length === 0
-			) {
+			if (isPipeSeekError(stderr) || !buffer || buffer.length === 0) {
 				runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
 				return;
 			}
@@ -835,12 +731,8 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				resolved = true;
-				try {
-					child.kill();
-				} catch { }
-				try {
-					if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-				} catch { }
+				try { child.kill(); } catch { }
+				try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 				resolve({ success: false, error: "TIMEOUT_FILE", stderr });
 			}
 		}, timeoutMs);
@@ -849,31 +741,19 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 			if (resolved) return;
 			clearTimeout(timer);
 			resolved = true;
+
 			if (code === 0 && fs.existsSync(tmpPath)) {
 				try {
 					fs.renameSync(tmpPath, cacheFilePath);
 					const buffer = fs.readFileSync(cacheFilePath);
-					resolve({
-						success: true,
-						buffer,
-						fromFile: true,
-						cacheFilePath,
-					});
+					resolve({ success: true, buffer, fromFile: true, cacheFilePath });
 				} catch (e) {
-					try {
-						if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-					} catch { }
+					try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 					resolve({ success: false, error: e.message, stderr });
 				}
 			} else {
-				try {
-					if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-				} catch { }
-				resolve({
-					success: false,
-					error: `EXIT_CODE=${code}`,
-					stderr,
-				});
+				try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
+				resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
 			}
 		});
 
@@ -881,9 +761,7 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 			if (resolved) return;
 			clearTimeout(timer);
 			resolved = true;
-			try {
-				if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-			} catch { }
+			try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
 			resolve({ success: false, error: err.message, stderr });
 		});
 	});
@@ -896,6 +774,7 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 		const st = fs.statSync(filePath);
 		if (st.size > FALLBACK_MAX_SIZE) return null;
 		const rawBuffer = fs.readFileSync(filePath);
+
 		const { width: finalCssW, height: finalCssH } = fitIntoBox(
 			info?.width,
 			info?.height,
@@ -903,6 +782,7 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 			renderH,
 			enlargeSmallImages
 		);
+
 		return {
 			buffer: rawBuffer,
 			webpDuration: 0,
@@ -921,11 +801,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!qqq.ffmpegPath) return null;
 
 	let mtimeMs = 0;
-	try {
-		mtimeMs = fs.statSync(filePath).mtimeMs;
-	} catch {
-		return null;
-	}
+	try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
 
 	const info = await getMediaInfo(filePath, mtimeMs);
 	const origSize = info
@@ -936,6 +812,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 	const cacheStrategy = determineCacheStrategy(filePath, info);
 
+	// MJPEG 静态：直通
 	if (cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -960,18 +837,17 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 	}
 
+	// 缓存命中：仅取 meta（不再 getCacheEntry，避免命中统计“双计数”）
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
-			const cacheEntry = qqq.getCacheEntry(contentId);
-			const meta =
-				cacheEntry?.qualities?.[cacheStrategy.cacheKey]?.meta || {};
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey) || {};
+
 			const cachedWidth = meta.width || info?.width || 0;
 			const cachedHeight = meta.height || info?.height || 0;
 			const cachedOriginalDuration =
-				meta.originalDuration !== undefined
-					? meta.originalDuration
-					: originalDuration;
+				meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
+
 			const webpDur = getWebPDurationFromBuffer(cached);
 
 			const { width: finalCssW, height: finalCssH } = fitIntoBox(
@@ -994,6 +870,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 	}
 
+	// 直读（小静态等）
 	if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
 		try {
 			const rawBuffer = fs.readFileSync(filePath);
@@ -1015,12 +892,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		} catch (e) { }
 	}
 
-	const {
-		args,
-		targetW,
-		targetH,
-		expectedWebPDuration,
-	} = buildUnifiedWebPArgs(
+	// 生成 webp
+	const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(
 		filePath,
 		origSize,
 		originalDuration,
@@ -1031,30 +904,20 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
 
 	const result = await globalScheduler.schedule(taskKey, async () => {
+		// 再次确认缓存（并发下可能已被其它任务写入）
 		const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
-		if (existing) {
-			return { success: true, buffer: existing, fromCache: true };
-		}
+		if (existing) return { success: true, buffer: existing, fromCache: true };
 
 		const isAnimated = expectedWebPDuration > 0.1;
-		const cacheDir =
-			qqq.CACHE_DIR || path.join(os.tmpdir(), "qqq_cache");
-		if (!fs.existsSync(cacheDir)) {
-			try {
-				fs.mkdirSync(cacheDir, { recursive: true });
-			} catch { }
-		}
-		const cacheFilePath = path.join(
-			cacheDir,
-			`${contentId}_${cacheStrategy.cacheKey}.webp`
-		);
 
-		return runFFmpegWithPipeAndFallback(
-			args,
-			cacheFilePath,
-			30000,
-			isAnimated
-		);
+		// 注意：这里的 cacheFilePath 仅作 ffmpeg 文件落地中转；真正的长期缓存由 qqq.setCacheEntry 写入其 cacheDir
+		const tmpDir = path.join(os.tmpdir(), "qqq_ffmpeg_tmp");
+		try {
+			if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+		} catch { }
+
+		const cacheFilePath = path.join(tmpDir, `${contentId}_${cacheStrategy.cacheKey}.webp`);
+		return runFFmpegWithPipeAndFallback(args, cacheFilePath, 30000, isAnimated);
 	});
 
 	if (result.success) {
@@ -1088,29 +951,15 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH },
 		};
 	} else {
-
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
-
-
 		// 只有在确实失败时记录，避免日志太吵
-
 		if (!fallback) {
-
 			logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ""}`);
-
 		} else {
-
-			// 你也可以按需注释掉这行：兜底成功是否要记录，看你偏好
-
 			logCriticalError(filePath, `${result.error} - 使用兜底直读\n${result.stderr || ""}`);
-
 		}
-
-
-
 		return fallback;
-
 	}
 }
 
@@ -1150,7 +999,7 @@ function getDocumentEOL(doc) {
 function resolvePathToAbsolute(docUri, rawPath) {
 	if (!rawPath) return null;
 	let clean = rawPath.trim();
-	while (clean.startsWith('\\') || clean.startsWith("/")) clean = clean.slice(1);
+	while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
 	if (path.isAbsolute(clean)) return clean;
 	return path.resolve(path.dirname(docUri.fsPath), clean);
 }
@@ -1184,6 +1033,7 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		const lhMult = config.get("lineHeight", 0) || 1.35;
 		const pxPerLine = fontSize * lhMult;
 		const boxH = pxHeight + PREVIEW_BORDER;
+
 		let baseN = Math.ceil(boxH / pxPerLine);
 		let extra = 2 + Math.floor((lhMult - 1) * 3);
 		extra = Math.min(5, Math.max(2, extra));
@@ -1211,18 +1061,17 @@ async function renderImages(editor) {
 	}
 
 	const myVersion = ++currentRenderVersion;
+
 	if (!decorationType)
-		decorationType = vscode.window.createTextEditorDecorationType({
-			isWholeLine: false,
-		});
+		decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
+
 	if (!markerHideType)
 		markerHideType = vscode.window.createTextEditorDecorationType({
 			textDecoration: "none; font-size: 11px; color: transparent; opacity: 0;",
 		});
 
 	const docUri = editor.document.uri.toString();
-	if (!documentDecorationsMap.has(docUri))
-		documentDecorationsMap.set(docUri, new Map());
+	if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
 
 	const currentDecos = documentDecorationsMap.get(docUri);
 	const hideDecos = new Map();
@@ -1239,17 +1088,12 @@ async function renderImages(editor) {
 		let match;
 
 		while ((match = pathRegex.exec(text))) {
-			const offset =
-				editor.document.offsetAt(range.start) + match.index;
+			const offset = editor.document.offsetAt(range.start) + match.index;
 			const pos = editor.document.positionAt(offset);
-			const endPos = editor.document.positionAt(
-				offset + match[0].length
-			);
+			const endPos = editor.document.positionAt(offset + match[0].length);
 			const uniqueKey = `${pos.line}_${pos.character}`;
 
-			hideDecos.set(uniqueKey, {
-				range: new vscode.Range(pos, endPos),
-			});
+			hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
 
 			const rawPath = match[0].slice(2, -2).trim();
 
@@ -1271,7 +1115,12 @@ async function renderImages(editor) {
 							border: "1px dashed #888",
 							backgroundColor: PREVIEW_BG_COLOR,
 							zIndex: -1,
-							textDecoration: `none; pointer-events: none; display: inline-block; background-image: url("${LOADING_SVG}"); background-size: 120px 40px; background-position: center center; background-repeat: no-repeat;`,
+							textDecoration:
+								`none; pointer-events: none; display: inline-block; ` +
+								`background-image: url("${LOADING_SVG}"); ` +
+								`background-size: 120px 40px; ` +
+								`background-position: center center; ` +
+								`background-repeat: no-repeat;`,
 						},
 					},
 				};
@@ -1296,17 +1145,14 @@ async function renderImages(editor) {
 
 			tasks.push(async () => {
 				if (currentRenderVersion !== myVersion) return null;
+
 				try {
 					let mtimeMs = 0;
-					try {
-						mtimeMs = fs.statSync(absPath).mtimeMs;
-					} catch { }
+					try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 
 					const info = await getMediaInfo(absPath, mtimeMs);
-					const {
-						width: previewWidth,
-						height: previewHeight,
-					} = getFrameConfig(info);
+					const { width: previewWidth, height: previewHeight } = getFrameConfig(info);
+
 					const previewResult = await getPreviewBuffer(
 						absPath,
 						contentId,
@@ -1324,16 +1170,11 @@ async function renderImages(editor) {
 					if (previewResult?.buffer) {
 						let mime = "image/webp";
 						if (previewResult.isDirect) {
-							mime =
-								previewResult.mimeType ||
-								mimeFromExt(previewResult.ext) ||
-								"image/webp";
+							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
 						} else if (previewResult.mimeType) {
 							mime = previewResult.mimeType;
 						}
-						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString(
-							"base64"
-						)}")`;
+						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
 						webpDuration = previewResult.webpDuration || 0;
 						outputSize = previewResult.outputSize;
 					}
@@ -1342,12 +1183,10 @@ async function renderImages(editor) {
 
 					const boxWidth = previewWidth + PREVIEW_BORDER;
 					const boxHeight = previewHeight + PREVIEW_BORDER;
+
 					let progressBarUrl = null;
 					if (webpDuration > 0.1)
-						progressBarUrl = `url("${createProgressSvg(
-							webpDuration,
-							previewWidth
-						)}")`;
+						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
 
 					deco.renderOptions.after = buildAfterStyle({
 						marginLeft,
@@ -1376,11 +1215,8 @@ async function renderImages(editor) {
 
 	if (tasks.length > 0) {
 		const chunkResults = await Promise.all(tasks.map((t) => t()));
-
 		if (currentRenderVersion !== myVersion) return;
-		for (const res of chunkResults) {
-			if (res) currentDecos.set(res.key, res.deco);
-		}
+		for (const res of chunkResults) if (res) currentDecos.set(res.key, res.deco);
 	}
 
 	editor.setDecorations(decorationType, Array.from(currentDecos.values()));
@@ -1401,17 +1237,12 @@ async function executeClipboardCommand() {
 
 	let targetDir = "D:\\view\\p";
 	if (!editor.document.isUntitled) {
-		targetDir = path.join(
-			path.dirname(editor.document.uri.fsPath),
-			"qqq"
-		);
+		targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 	}
 
 	const fastResult = await qqq.handleClipboardFast();
 	if (fastResult?.type === "text") {
-		await editor.edit((e) =>
-			e.insert(editor.selection.active, fastResult.text)
-		);
+		await editor.edit((e) => e.insert(editor.selection.active, fastResult.text));
 		return;
 	}
 
@@ -1420,9 +1251,7 @@ async function executeClipboardCommand() {
 	const pendingMarker = `/\\__PENDING__:${token}__\\/`;
 	const insertPosition = editor.selection.active;
 
-	await editor.edit((e) =>
-		e.insert(insertPosition, eol + pendingMarker + eol)
-	);
+	await editor.edit((e) => e.insert(insertPosition, eol + pendingMarker + eol));
 
 	pendingTokens.set(token, {
 		editor: editor,
@@ -1437,10 +1266,7 @@ async function executeClipboardCommand() {
 			await replacePendingMarker(token, result);
 		} catch (e) {
 			qqq.logMessage(`媒体处理失败: ${e.message}`, "ERROR");
-			await replacePendingMarker(token, {
-				type: "error",
-				error: e.message,
-			});
+			await replacePendingMarker(token, { type: "error", error: e.message });
 		}
 	});
 }
@@ -1471,9 +1297,7 @@ async function replacePendingMarker(token, result) {
 
 	if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
-		const relPath = path
-			.relative(docDir, filePath)
-			.replace(/\//g, "\\");
+		const relPath = path.relative(docDir, filePath).replace(/\//g, "\\");
 		let pxHeight = LARGE_PREVIEW_HEIGHT;
 		try {
 			const info = await getMediaInfo(filePath, Date.now());
@@ -1487,9 +1311,7 @@ async function replacePendingMarker(token, result) {
 		const files = result.files;
 		for (let i = 0; i < files.length; i++) {
 			const f = files[i];
-			const relPath = path
-				.relative(docDir, f)
-				.replace(/\//g, "\\");
+			const relPath = path.relative(docDir, f).replace(/\//g, "\\");
 			let pxHeight = LARGE_PREVIEW_HEIGHT;
 			if (isImageOrVideoExt(path.extname(f))) {
 				try {
@@ -1505,10 +1327,7 @@ async function replacePendingMarker(token, result) {
 			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
-		if (files.length > 1)
-			vscode.window.showInformationMessage(
-				"文件已复制 " + files.length
-			);
+		if (files.length > 1) vscode.window.showInformationMessage("文件已复制 " + files.length);
 	} else if (result.type === "folder_text") {
 		replacement = result.text;
 	} else if (result.type === "text") {
@@ -1534,9 +1353,7 @@ async function provideCleanlinessEditsAsync(document) {
 	let match;
 	const markers = [];
 
-	while ((match = regex.exec(text))) {
-		markers.push({ text: match[0], index: match.index });
-	}
+	while ((match = regex.exec(text))) markers.push({ text: match[0], index: match.index });
 
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
@@ -1547,10 +1364,7 @@ async function provideCleanlinessEditsAsync(document) {
 
 		if (rawPath.startsWith("__PENDING__:")) continue;
 
-		const absPath = resolvePathToAbsolute(
-			document.uri,
-			rawPath.replace(/\//g, "\\")
-		);
+		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 		let pxHeight = 0;
 
 		if (absPath && fs.existsSync(absPath)) {
@@ -1571,34 +1385,22 @@ async function provideCleanlinessEditsAsync(document) {
 		const lineObj = document.lineAt(markerLine);
 		const lineContent = lineObj.text;
 
-		if (startPos.character > 0)
-			edits.push(vscode.TextEdit.insert(startPos, eol));
+		if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
 		const suffix = lineContent.substring(endPos.character);
-		if (suffix.trim().length > 0)
-			edits.push(vscode.TextEdit.insert(endPos, eol));
+		if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
 
 		if (pxHeight > 0) {
 			let isLastMarkerInDoc = i === markers.length - 1;
-			const neededLines = calculateBlankLinesExact(
-				pxHeight,
-				isLastMarkerInDoc
-			);
+			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
 			let existingBlanks = 0;
-			for (
-				let lineIdx = markerLine + 1;
-				lineIdx < document.lineCount;
-				lineIdx++
-			) {
-				if (document.lineAt(lineIdx).text.trim() === "")
-					existingBlanks++;
+			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
+				if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
 				else break;
 			}
 			if (existingBlanks < neededLines) {
 				const linesToAdd = neededLines - existingBlanks;
 				const lineEndPos = lineObj.range.end;
-				edits.push(
-					vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd))
-				);
+				edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
 			}
 		}
 	}
@@ -1612,8 +1414,7 @@ async function performGlobalClean(editor, force = false) {
 	if (edits.length > 0) {
 		await editor.edit((editBuilder) => {
 			edits.forEach((e) => {
-				if (e.newText)
-					editBuilder.insert(e.range.start, e.newText);
+				if (e.newText) editBuilder.insert(e.range.start, e.newText);
 				else editBuilder.replace(e.range, e.newText);
 			});
 		});
@@ -1643,10 +1444,7 @@ class FileCodeLensProvider {
 			const rawPath = match[0].slice(2, -2).trim();
 			if (rawPath.startsWith("__PENDING__:")) continue;
 
-			const absPath = resolvePathToAbsolute(
-				document.uri,
-				rawPath.replace(/\//g, "\\")
-			);
+			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 			if (!absPath || !fs.existsSync(absPath)) continue;
 
 			const folder = path.dirname(absPath);
@@ -1665,11 +1463,7 @@ class FileCodeLensProvider {
 				try {
 					const st = fs.statSync(absPath);
 					fileSz = formatBytes(st.size);
-					tooltipText = `创建: ${new Date(
-						st.birthtime
-					).toLocaleString()}\n修改: ${new Date(
-						st.mtime
-					).toLocaleString()}`;
+					tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
 					mtimeMs = st.mtimeMs;
 				} catch { }
 
@@ -1679,44 +1473,25 @@ class FileCodeLensProvider {
 				if (isVidOrImg) {
 					const info = await getMediaInfo(absPath, mtimeMs);
 					if (info?.width && info?.height) {
-						const {
-							width: MAX_W,
-							height: MAX_H,
-						} = getFrameConfig(info);
+						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
 						if (info.type === "video") isRealVideo = true;
-						const { scale } = fitIntoBox(
-							info.width,
-							info.height,
-							MAX_W,
-							MAX_H,
-							enlargeSmallImages
-						);
+						const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
 						const pct = Math.round(scale * 100);
 						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-						const displayCodec =
-							info.full_codec_desc || info.codec;
-						if (displayCodec)
-							tooltipText += `\n编码: ${displayCodec}`;
-						const arStr = calculateAspectRatioString(
-							info.width,
-							info.height
-						);
+
+						const displayCodec = info.full_codec_desc || info.codec;
+						if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
+
+						const arStr = calculateAspectRatioString(info.width, info.height);
 						if (arStr) tooltipText += `\n宽高比：${arStr}`;
-						if (qqq.shouldShowDuration(info))
-							tooltipText += `\n⌛原始时长：${formatDuration(
-								info.duration
-							)}`;
+
+						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 					}
 				}
 
 				const iconPart = isRealVideo ? "🎬" : "";
 				const spacePart = isRealVideo ? " " : "   ";
-				const r = new vscode.Range(
-					targetLensLine,
-					0,
-					targetLensLine,
-					0
-				);
+				const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
 				return [
 					new vscode.CodeLens(r, {
@@ -1755,8 +1530,8 @@ function invalidateFolderSizeCacheForPath(filePath) {
 async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = folderSizeCache.get(folderPath);
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE)
-		return cached.data;
+	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
+
 	const result = await qqq.getFolderInfo(folderPath);
 	if (result?.success) {
 		const parts = [];
@@ -1785,10 +1560,8 @@ async function getQqqFolderSize(folderPath) {
 function openFileCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
 	try {
-		if (process.platform === "win32")
-			cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-		else if (process.platform === "darwin")
-			cp.exec(`open "${filePath}"`);
+		if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+		else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
 		else cp.exec(`xdg-open "${filePath}"`);
 	} catch {
 		vscode.env.openExternal(vscode.Uri.file(filePath));
@@ -1799,9 +1572,7 @@ function revealFileInFolder(filePath) {
 	if (!fs.existsSync(filePath)) return;
 	try {
 		if (process.platform === "win32")
-			cp.exec(
-				`explorer /select,"${filePath.replace(/"/g, '""')}"`
-			);
+			cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
 		else if (process.platform === "darwin")
 			cp.exec(`open -R "${filePath}"`);
 		else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
@@ -1811,16 +1582,17 @@ function revealFileInFolder(filePath) {
 async function renameFileCommand(rawPath, absPath) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) return;
+
 	const currentName = path.basename(absPath);
 	const newName = await vscode.window.showInputBox({
 		title: "重命名粘贴文件",
 		prompt: "rename  ",
 		value: currentName,
 		ignoreFocusOut: true,
-		validateInput: (v) =>
-			!v || !v.trim() ? "文件名不能为空" : null,
+		validateInput: (v) => (!v || !v.trim() ? "文件名不能为空" : null),
 	});
 	if (!newName || newName.trim() === currentName) return;
+
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
 	try {
@@ -1834,22 +1606,18 @@ async function renameFileCommand(rawPath, absPath) {
 	const newRaw = rawPath.includes("/")
 		? rawPath.substring(0, rawPath.lastIndexOf("/") + 1) + trimmed
 		: trimmed;
+
 	const regex = new RegExp(qqq.QQQ_PATH_REGEX);
 	const ranges = [];
 	let m;
 	while ((m = regex.exec(doc.getText()))) {
-		if (m[0].slice(2, -2).trim() === rawPath)
-			ranges.push(
-				new vscode.Range(
-					doc.positionAt(m.index),
-					doc.positionAt(m.index + m[0].length)
-				)
-			);
+		if (m[0].slice(2, -2).trim() === rawPath) {
+			ranges.push(new vscode.Range(doc.positionAt(m.index), doc.positionAt(m.index + m[0].length)));
+		}
 	}
 	if (ranges.length)
-		await editor.edit((b) =>
-			ranges.forEach((r) => b.replace(r, `/\\${newRaw}\\/`))
-		);
+		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `/\\${newRaw}\\/`)));
+
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
 }
@@ -1859,22 +1627,21 @@ function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
 	const editorId = getEditorId(editor);
 	const existingTimer = editorDebounceTimers.get(editorId);
 	if (existingTimer) clearTimeout(existingTimer);
+
 	const timer = setTimeout(() => {
 		editorDebounceTimers.delete(editorId);
 		if (editor && !editor.document.isClosed) {
-			const stillVisible = vscode.window.visibleTextEditors.some(
-				(e) => getEditorId(e) === editorId
-			);
+			const stillVisible = vscode.window.visibleTextEditors.some((e) => getEditorId(e) === editorId);
 			if (stillVisible) renderImages(editor);
 		}
 	}, delay);
+
 	editorDebounceTimers.set(editorId, timer);
 }
 
 function renderVisibleEditors(delay = 50) {
 	const editors = vscode.window.visibleTextEditors;
-	if (editors?.length)
-		editors.forEach((e) => debounceRender(e, delay));
+	if (editors?.length) editors.forEach((e) => debounceRender(e, delay));
 }
 
 // ==================== 激活与停用 ====================
@@ -1882,10 +1649,7 @@ function renderVisibleEditors(delay = 50) {
 async function activate(context) {
 	extensionContext = context;
 	isCoreIntegrityValid = verifySystemIntegrity();
-	qqq.logMessage(
-		`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`,
-		"INFO"
-	);
+	qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
 	if (!isCoreIntegrityValid) return;
 
 	loadWatermarkResource();
@@ -1899,28 +1663,17 @@ async function activate(context) {
 				clearDecorations();
 				if (codeLensProvider) codeLensProvider.refresh();
 				renderVisibleEditors(10);
-				if (cleanFreakMode)
-					performGlobalClean(vscode.window.activeTextEditor);
+				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
-			if (
-				e.affectsConfiguration("editor.fontSize") ||
-				e.affectsConfiguration("editor.lineHeight")
-			) {
+			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
-				if (cleanFreakMode)
-					performGlobalClean(vscode.window.activeTextEditor);
+				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand(
-			"qqq.revealFileInFolder",
-			revealFileInFolder
-		),
-		vscode.commands.registerCommand(
-			"qqq.renameFile",
-			renameFileCommand
-		),
+		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
+		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
 		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
@@ -1930,13 +1683,9 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.exportZip", () => {
 			q1a.executeExportZipCommand(isCoreIntegrityValid);
 		}),
-		vscode.languages.registerCodeLensProvider(
-			{ scheme: "file" },
-			codeLensProvider
-		),
+		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
-			if (cleanFreakMode && e.document)
-				e.waitUntil(provideCleanlinessEditsAsync(e.document));
+			if (cleanFreakMode && e.document) e.waitUntil(provideCleanlinessEditsAsync(e.document));
 		}),
 		vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
 			debounceRender(e.textEditor);
@@ -1950,10 +1699,7 @@ async function activate(context) {
 		vscode.workspace.onDidChangeTextDocument((e) => {
 			const ed = vscode.window.activeTextEditor;
 			if (ed && e.document === ed.document) debounceRender(ed);
-			if (
-				e.document === ed?.document &&
-				e.contentChanges.length > 0
-			)
+			if (e.document === ed?.document && e.contentChanges.length > 0)
 				documentDecorationsMap.delete(e.document.uri.toString());
 		}),
 		vscode.workspace.onDidCloseTextDocument((doc) => {
@@ -1967,9 +1713,7 @@ async function activate(context) {
 			}
 		}),
 		vscode.window.onDidChangeVisibleTextEditors((editors) => {
-			const visibleEditorIds = new Set(
-				editors.map((e) => getEditorId(e))
-			);
+			const visibleEditorIds = new Set(editors.map((e) => getEditorId(e)));
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
 				if (!visibleEditorIds.has(editorId)) {
 					clearTimeout(timer);
@@ -1977,8 +1721,7 @@ async function activate(context) {
 				}
 			}
 			renderVisibleEditors();
-			if (cleanFreakMode)
-				performGlobalClean(vscode.window.activeTextEditor);
+			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 		})
 	);
 
@@ -1989,7 +1732,7 @@ async function activate(context) {
 async function deactivate() {
 	clearAllEditorDebounceTimers();
 	clearDecorations();
-	await qqq.finishUserTracking(extensionContext);
+	// 注意：用户时长统计由 qqq.js 中控统一管理，q1 不再重复调用 finishUserTracking（避免累计时长翻倍）
 }
 
 module.exports = { activate, deactivate };
