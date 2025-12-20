@@ -14,7 +14,6 @@ const CORE_INTEGRITY_HASH =
 let isCoreIntegrityValid = false;
 
 // ==================== 配置常量 ====================
-const MAX_CONCURRENT_TASKS = 8;
 const SCROLL_DEBOUNCE_MS = 200;
 
 // ★★★ 缓存生成基准尺寸 (512x288) ★★★
@@ -107,50 +106,17 @@ const LOADING_SVG =
 </svg>`
 	).toString("base64");
 
-// ==================== ★★★ 核心调度器：防惊群 + 流动队列 ★★★ ====================
-class TaskScheduler {
-	constructor(maxConcurrency = 8) {
-		this.maxConcurrency = maxConcurrency;
-		this.runningCount = 0;
-		this.queue = [];
-		this.pendingPromises = new Map();
-	}
+// ==================== ★★★ 调度器（分层）★★★ ====================
+// probe / gen 分流到 qqq 侧的双 scheduler；若 qqq 旧版本缺失，则降级直跑（不崩）
+const probeScheduler =
+	qqq?.probeScheduler && typeof qqq.probeScheduler.schedule === "function"
+		? qqq.probeScheduler
+		: { schedule: async (_k, fn) => fn() };
 
-	async schedule(taskKey, taskGenerator) {
-		if (this.pendingPromises.has(taskKey)) {
-			return this.pendingPromises.get(taskKey);
-		}
-
-		const promise = new Promise((resolve, reject) => {
-			const run = async () => {
-				this.runningCount++;
-				try {
-					const result = await taskGenerator();
-					resolve(result);
-				} catch (e) {
-					reject(e);
-				} finally {
-					this.runningCount--;
-					this.pendingPromises.delete(taskKey);
-					this._next();
-				}
-			};
-			this.queue.push(run);
-		});
-
-		this.pendingPromises.set(taskKey, promise);
-		this._next();
-		return promise;
-	}
-
-	_next() {
-		if (this.runningCount >= this.maxConcurrency || this.queue.length === 0) return;
-		const task = this.queue.shift();
-		task();
-	}
-}
-
-const globalScheduler = new TaskScheduler(MAX_CONCURRENT_TASKS);
+const genScheduler =
+	qqq?.genScheduler && typeof qqq.genScheduler.schedule === "function"
+		? qqq.genScheduler
+		: { schedule: async (_k, fn) => fn() };
 
 // ==================== 初始化 ====================
 
@@ -232,6 +198,23 @@ function logCriticalError(filePath, errorMsg) {
 		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
 		fs.appendFileSync(qqq.LOG_PATH, logLine);
 	} catch (e) { }
+}
+
+// ★ 兜底成功也记日志：用 qqq.logMessageRateLimited（同 error + ext 限流）
+function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
+	try {
+		const e = (ext || "").toLowerCase();
+		const err = String(errCode || "UNKNOWN").slice(0, 120);
+		const key = `ffmpeg_fallback:${e}:${err}`;
+		const shortPath = filePath.length > 140 ? "..." + filePath.slice(-137) : filePath;
+		const shortStderr = (stderr || "").toString().slice(0, 300);
+		qqq.logMessageRateLimited(
+			key,
+			`FFMPEG_FAIL -> fallbackDirectRead: ${shortPath}  ext=${e}  err=${err}${shortStderr ? `  stderr=${shortStderr}` : ""}`,
+			"WARN",
+			2 * 60 * 1000
+		);
+	} catch { }
 }
 
 // ==================== CSS 计算辅助 ====================
@@ -376,8 +359,8 @@ async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) return cached;
 
-	const cacheKey = `info:${filePath}:${mtimeMs}`;
-	return globalScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
+	const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
+	return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
@@ -903,10 +886,13 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 	const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
 
-	const result = await globalScheduler.schedule(taskKey, async () => {
+	const result = await genScheduler.schedule(taskKey, async () => {
 		// 再次确认缓存（并发下可能已被其它任务写入）
 		const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
-		if (existing) return { success: true, buffer: existing, fromCache: true };
+		if (existing) {
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey) || {};
+			return { success: true, buffer: existing, fromCache: true, meta };
+		}
 
 		const isAnimated = expectedWebPDuration > 0.1;
 
@@ -922,6 +908,14 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 	if (result.success) {
 		const buffer = result.buffer;
+
+		// ★ gen 二次命中 fromCache：优先用 meta.width/height（避免“用当前 targetW/H 推断”的误差）
+		const meta = result.meta || {};
+		const outW = meta.width || targetW;
+		const outH = meta.height || targetH;
+		const outOriginalDuration =
+			meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
+
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
 		if (result.fromPipe || result.fromFile) {
@@ -937,8 +931,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 
 		const { width: finalCssW, height: finalCssH } = fitIntoBox(
-			targetW,
-			targetH,
+			outW,
+			outH,
 			renderW,
 			renderH,
 			enlargeSmallImages
@@ -947,17 +941,18 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		return {
 			buffer,
 			webpDuration: finalWebPDuration,
-			originalDuration: originalDuration,
+			originalDuration: outOriginalDuration,
 			outputSize: { width: finalCssW, height: finalCssH },
 		};
 	} else {
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
-		// 只有在确实失败时记录，避免日志太吵
+		// 失败无法兜底：强日志（保留原 err.log 直写）
 		if (!fallback) {
 			logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ""}`);
 		} else {
-			logCriticalError(filePath, `${result.error} - 使用兜底直读\n${result.stderr || ""}`);
+			// 兜底成功：改为 rate-limit（同 error+ext 限流）
+			logFallbackUsedRateLimited(filePath, ext, result.error, result.stderr || "");
 		}
 		return fallback;
 	}
@@ -1079,11 +1074,58 @@ async function renderImages(editor) {
 	if (!visibleRanges?.length) return;
 
 	const marginLeft = "100px";
+
+	// ★ QQQ_PATH_REGEX 只匹配 qqq 路径 marker；PENDING 用独立正则
 	const pathRegex = new RegExp(qqq.QQQ_PATH_REGEX);
+	const pendingRegex = new RegExp(qqq.PENDING_REGEX);
+
 	const tasks = [];
 
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
+
+		// 1) 先渲染 PENDING（spinner）
+		pendingRegex.lastIndex = 0;
+		let pm;
+		while ((pm = pendingRegex.exec(text))) {
+			const offset = editor.document.offsetAt(range.start) + pm.index;
+			const pos = editor.document.positionAt(offset);
+			const endPos = editor.document.positionAt(offset + pm[0].length);
+			const uniqueKey = `${pos.line}_${pos.character}`;
+
+			hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
+
+			const { width: pW, height: pH } = getFrameConfig(null);
+			const boxWidth = pW + PREVIEW_BORDER;
+			const boxHeight = pH + PREVIEW_BORDER;
+
+			const loadingDeco = {
+				range: new vscode.Range(pos.line, 0, pos.line, 0),
+				renderOptions: {
+					after: {
+						contentText: "",
+						position: "absolute",
+						left: marginLeft,
+						top: "0px",
+						width: `${boxWidth}px`,
+						height: `${boxHeight}px`,
+						padding: "2px",
+						border: "1px dashed #888",
+						backgroundColor: PREVIEW_BG_COLOR,
+						zIndex: -1,
+						textDecoration:
+							`none; pointer-events: none; display: inline-block; ` +
+							`background-image: url("${LOADING_SVG}"); ` +
+							`background-size: 120px 40px; ` +
+							`background-position: center center; ` +
+							`background-repeat: no-repeat;`,
+					},
+				},
+			};
+			currentDecos.set(uniqueKey, loadingDeco);
+		}
+
+		// 2) 再渲染 qqq 路径 marker
 		pathRegex.lastIndex = 0;
 		let match;
 
@@ -1095,39 +1137,11 @@ async function renderImages(editor) {
 
 			hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
 
-			const rawPath = match[0].slice(2, -2).trim();
+			// ★ 捕获组 1 就是内部路径
+			const rawPath = (match[1] || "").trim();
+			if (!rawPath) continue;
 
-			if (rawPath.startsWith("__PENDING__:")) {
-				const { width: pW, height: pH } = getFrameConfig(null);
-				const boxWidth = pW + PREVIEW_BORDER;
-				const boxHeight = pH + PREVIEW_BORDER;
-				const loadingDeco = {
-					range: new vscode.Range(pos.line, 0, pos.line, 0),
-					renderOptions: {
-						after: {
-							contentText: "",
-							position: "absolute",
-							left: marginLeft,
-							top: "0px",
-							width: `${boxWidth}px`,
-							height: `${boxHeight}px`,
-							padding: "2px",
-							border: "1px dashed #888",
-							backgroundColor: PREVIEW_BG_COLOR,
-							zIndex: -1,
-							textDecoration:
-								`none; pointer-events: none; display: inline-block; ` +
-								`background-image: url("${LOADING_SVG}"); ` +
-								`background-size: 120px 40px; ` +
-								`background-position: center center; ` +
-								`background-repeat: no-repeat;`,
-						},
-					},
-				};
-				currentDecos.set(uniqueKey, loadingDeco);
-				continue;
-			}
-
+			// 已有 deco 则不重复做（文档变化会清 map）
 			if (currentDecos.has(uniqueKey)) continue;
 
 			const absPath = resolvePathToAbsolute(
@@ -1353,17 +1367,17 @@ async function provideCleanlinessEditsAsync(document) {
 	let match;
 	const markers = [];
 
-	while ((match = regex.exec(text))) markers.push({ text: match[0], index: match.index });
+	while ((match = regex.exec(text))) {
+		markers.push({ text: match[0], index: match.index, inner: (match[1] || "").trim() });
+	}
 
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
 		const startPos = document.positionAt(m.index);
 		const endPos = document.positionAt(m.index + m.text.length);
 		const markerLine = startPos.line;
-		const rawPath = m.text.slice(2, -2).trim();
 
-		if (rawPath.startsWith("__PENDING__:")) continue;
-
+		const rawPath = m.inner;
 		const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 		let pxHeight = 0;
 
@@ -1441,8 +1455,10 @@ class FileCodeLensProvider {
 
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
-			const rawPath = match[0].slice(2, -2).trim();
-			if (rawPath.startsWith("__PENDING__:")) continue;
+
+			// ★ 捕获组 1 就是内部路径
+			const rawPath = (match[1] || "").trim();
+			if (!rawPath) continue;
 
 			const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
 			if (!absPath || !fs.existsSync(absPath)) continue;
@@ -1611,7 +1627,8 @@ async function renameFileCommand(rawPath, absPath) {
 	const ranges = [];
 	let m;
 	while ((m = regex.exec(doc.getText()))) {
-		if (m[0].slice(2, -2).trim() === rawPath) {
+		const inner = (m[1] || "").trim();
+		if (inner === rawPath) {
 			ranges.push(new vscode.Range(doc.positionAt(m.index), doc.positionAt(m.index + m[0].length)));
 		}
 	}

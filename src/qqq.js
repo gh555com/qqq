@@ -10,7 +10,15 @@ const crypto = require("crypto");
 let LOG_PATH = null;
 const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
-const QQQ_PATH_REGEX = /\/\\\s*.*?qqq.*?\s*\\\//gi;
+// ============================================================================
+// ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
+// - 匹配形如：/\   ...qqq...   \/
+// - 捕获组(1)返回中间内容（去掉外壳 /\\ 和 \\ /）
+// - 用 [\s\S] 允许跨任意字符；*? 非贪婪，避免吞掉后续 marker
+// ============================================================================
+const QQQ_PATH_REGEX = /\/\\\s*([\s\S]*?qqq[\s\S]*?)\s*\\\//gi;
+
+// pending 仍保持原样（有捕获组 token）
 const PENDING_REGEX = /\/\\__PENDING__:([a-zA-Z0-9]+)__\\\//g;
 
 const CACHE_DIR_NAME = "qqq_cache";
@@ -25,6 +33,7 @@ const FINGERPRINT_TAIL = 128;
 const IMAGE_EXTS_FOR_CLIPBOARD = new Set([
 	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"
 ]);
+
 const BINARY_EXTS = new Set([
 	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
 	".exe", ".dll", ".zip", ".tar", ".gz",
@@ -44,6 +53,24 @@ let extensionContext = null;
 let cacheDir = null;
 let cacheMeta = null;
 
+// ============================================================================
+// ★ 5) 日志降噪（rate-limit）基础设施：同 key 在 interval 内只记一次
+// ============================================================================
+const _rateLimitLastTs = new Map();
+function logMessageRateLimited(key, message, level = "WARN", intervalMs = 5 * 60 * 1000) {
+	const now = Date.now();
+	const last = _rateLimitLastTs.get(key) || 0;
+	if (now - last < intervalMs) return;
+	_rateLimitLastTs.set(key, now);
+	logMessage(message, level);
+}
+
+// ★ 把 daemon stderr 也降噪：避免桥接层 stderr 一直刷屏
+function _bridgeStderrKey(name, text) {
+	const head = String(text || "").replace(/\s+/g, " ").slice(0, 120);
+	return `bridge:${name}:${head}`;
+}
+
 function logMessage(message, level = "INFO") {
 	const ts = new Date().toISOString();
 	const line = `[${ts}] [${level}] ${message}`;
@@ -58,16 +85,238 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
+// ============================================================================
+// ★ 3) probe / gen 双 scheduler：先在 qqq 层提供可复用实现
+// ============================================================================
+class TaskScheduler {
+	constructor(maxConcurrency = 8) {
+		this.maxConcurrency = Math.max(1, maxConcurrency | 0);
+		this.runningCount = 0;
+		this.queue = [];
+		this.pendingPromises = new Map();
+	}
+
+	async schedule(taskKey, taskGenerator) {
+		if (this.pendingPromises.has(taskKey)) return this.pendingPromises.get(taskKey);
+
+		const p = new Promise((resolve, reject) => {
+			const run = async () => {
+				this.runningCount++;
+				try {
+					const result = await taskGenerator();
+					resolve(result);
+				} catch (e) {
+					reject(e);
+				} finally {
+					this.runningCount--;
+					this.pendingPromises.delete(taskKey);
+					this._next();
+				}
+			};
+			this.queue.push(run);
+		});
+
+		this.pendingPromises.set(taskKey, p);
+		this._next();
+		return p;
+	}
+
+	_next() {
+		while (this.runningCount < this.maxConcurrency && this.queue.length > 0) {
+			const task = this.queue.shift();
+			task();
+		}
+	}
+}
+
+const probeScheduler = new TaskScheduler(12);
+const genScheduler = new TaskScheduler(6);
+
+// ============================================================================
+// ★ 4) 缓存 meta 只读快照：状态栏/外部模块取 stats 用（不改结构、不改命中）
+// ============================================================================
+function getCacheStatsSnapshot() {
+	const s = cacheMeta?.stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+	return {
+		totalSize: s.totalSize || 0,
+		fileCount: s.fileCount || 0,
+		hitCount: s.hitCount || 0,
+		missCount: s.missCount || 0
+	};
+}
+
+// ============================================================================
+// ★ 永不清零统计：全部写 VSCode globalState（累计 hit/miss、累计使用时间）
+// ============================================================================
 const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
 const KEY_SESSION_START = "qqq_stats_session_start";
+
+// ★ 永不清零：缓存命中/未命中累计（写入 globalState）
+const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
+const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
+
+let _cacheHitTotal = 0;
+let _cacheMissTotal = 0;
+
+let _statsFlushTimer = null;
+let _statsDirty = false;
+
+function _loadPersistentStats(context) {
+	try {
+		_cacheHitTotal = context?.globalState?.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
+		_cacheMissTotal = context?.globalState?.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
+	} catch { }
+}
+
+function _scheduleStatsFlush() {
+	if (!extensionContext || !_statsDirty) return;
+	if (_statsFlushTimer) return;
+
+	_statsFlushTimer = setTimeout(() => {
+		_statsFlushTimer = null;
+		if (!extensionContext || !_statsDirty) return;
+		_statsDirty = false;
+
+		try {
+			extensionContext.globalState.update(KEY_CACHE_HIT_TOTAL, _cacheHitTotal);
+			extensionContext.globalState.update(KEY_CACHE_MISS_TOTAL, _cacheMissTotal);
+		} catch { }
+	}, 2000); // 2s 合并写一次，避免高频写 globalState
+}
+
+function _markCacheHit() {
+	_cacheHitTotal++;
+	_statsDirty = true;
+	_scheduleStatsFlush();
+}
+
+function _markCacheMiss() {
+	_cacheMissTotal++;
+	_statsDirty = true;
+	_scheduleStatsFlush();
+}
+
+function getPersistentCacheStatsSnapshot() {
+	return {
+		hitTotal: _cacheHitTotal || 0,
+		missTotal: _cacheMissTotal || 0
+	};
+}
+
+// ============================================================================
+// ★ 状态栏：永久显示 [qqq: ⏱2222h ▥33m ⊙98% ⚡P]
+// ============================================================================
+let statusBarItem = null;
+let _statusBarTimer = null;
+
+function _formatBytes(size) {
+	if (size == null || isNaN(size)) return "?";
+	const units = ["B", "KB", "MB", "GB"];
+	let idx = 0;
+	let val = size;
+	while (val >= 1024 && idx < units.length - 1) {
+		val /= 1024;
+		idx++;
+	}
+	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]}`;
+}
+
+function _formatHours(totalSeconds) {
+	const h = totalSeconds / 3600;
+	return `${h.toFixed(2)} h`;
+}
+
+function _formatCompactTime(totalSeconds) {
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	return { h, m };
+}
+
+function getActiveEngineCode() {
+	// P: Python daemon
+	// R: Rust daemon
+	// S: Shell daemon
+	// N: Node/spawn fallback
+	if (pythonBridge?.isAvailable()) return "P";
+	if (rustBridge?.isAvailable()) return "R";
+	if (shellBridge?.isAvailable()) return "S";
+	return "N";
+}
+
+function getActiveEngineName() {
+	const code = getActiveEngineCode();
+	if (code === "P") return "Python";
+	if (code === "R") return "Rust";
+	if (code === "S") return "Shell";
+	return "Node";
+}
+
+function _getTotalSecondsIncludingSession() {
+	if (!extensionContext) return 0;
+	const base = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+	const start = extensionContext.globalState.get(KEY_SESSION_START);
+	if (!start) return base;
+	const diff = (Date.now() - start) / 1000;
+	return base + (diff > 0 ? diff : 0);
+}
+
+function updateStatusBarNow() {
+	if (!statusBarItem) return;
+
+	const totalSeconds = _getTotalSecondsIncludingSession();
+	const { h, m } = _formatCompactTime(totalSeconds);
+
+	// 磁盘缓存当前值：meta.stats.totalSize（正确口径）
+	const stats = getCacheStatsSnapshot();
+	const cacheBytes = stats.totalSize;
+	const cacheMB = cacheBytes / (1024 * 1024);
+
+	// 命中率永不清零：globalState 累计 hit/miss
+	const pstats = getPersistentCacheStatsSnapshot();
+	const denom = pstats.hitTotal + pstats.missTotal;
+	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+
+	// 你要的状态栏末尾只显示 P / R / N（Shell 归并显示 N；tooltip 再细分）
+	const engineCode = getActiveEngineCode();
+	const engineDisplay = (engineCode === "S") ? "N" : engineCode;
+
+	statusBarItem.text = `[qqq: ⏱${h}h ▥${cacheMB.toFixed(0)}m ⊙${hitRate.toFixed(0)}% ⚡${engineDisplay}]`;
+
+	const engineName = getActiveEngineName();
+	const tooltip = new vscode.MarkdownString(
+		[
+			`**累计使用时间：** ${_formatHours(totalSeconds)}`,
+			`**磁盘缓存：** ${_formatBytes(cacheBytes)}`,
+			`**缓存命中率：** ${hitRate.toFixed(2)}%  (hit=${pstats.hitTotal}, miss=${pstats.missTotal})`,
+			`**IO 引擎：** ${engineName}  （状态：${engineCode}）`,
+		].join("\n\n")
+	);
+	tooltip.isTrusted = true;
+	statusBarItem.tooltip = tooltip;
+	statusBarItem.show();
+}
 
 function initUserTracking(context) {
 	extensionContext = context;
 	context.globalState.update(KEY_SESSION_START, Date.now());
-	const total = context.globalState.get(KEY_TOTAL_DURATION, 0);
-	const h = Math.floor(total / 3600);
-	const m = Math.floor((total % 3600) / 60);
-	vscode.window.setStatusBarMessage(`qqq累计使用: ${h}小时${m}分钟`, 5000);
+
+	// 读取永不清零累计 hit/miss
+	_loadPersistentStats(context);
+
+	// 创建永久状态栏
+	if (!statusBarItem) {
+		statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+		statusBarItem.command = "qqq.allSettings";
+		try { context.subscriptions.push(statusBarItem); } catch { }
+	}
+
+	updateStatusBarNow();
+
+	// 定时刷新（低开销：5s）
+	if (_statusBarTimer) clearInterval(_statusBarTimer);
+	_statusBarTimer = setInterval(() => {
+		try { updateStatusBarNow(); } catch { }
+	}, 5000);
 }
 
 function finishUserTracking(context) {
@@ -75,10 +324,11 @@ function finishUserTracking(context) {
 	const start = context.globalState.get(KEY_SESSION_START);
 	if (start) {
 		const diff = (Date.now() - start) / 1000;
-		const old = context.globalState.get(KEY_TOTAL_DURATION, 0);
-		context.globalState.update(KEY_TOTAL_DURATION, old + diff);
+		const old = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+		context.globalState.update(KEY_TOTAL_DURATION, old + (diff > 0 ? diff : 0));
 		context.globalState.update(KEY_SESSION_START, undefined);
 	}
+	try { updateStatusBarNow(); } catch { }
 }
 
 // ---------- fingerprint ----------
@@ -285,14 +535,14 @@ function getCacheEntry(contentId) {
 	return entry;
 }
 
-// ★新增：纯 meta 读取，不污染 hit/miss
+// 纯 meta 读取，不污染 hit/miss
 function getCacheQualityMeta(contentId, quality) {
 	const entry = cacheMeta?.entries?.[contentId];
 	const qInfo = entry?.qualities?.[quality];
 	return qInfo?.meta || null;
 }
 
-// ★核心修复：覆盖写统计不再漂；并采用原子写 tmp->rename；并按增量预留空间
+// 覆盖写统计不再漂；原子写 tmp->rename；按增量预留空间
 function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!cacheDir || !cacheMeta) return null;
 
@@ -328,16 +578,22 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
 
 	saveCacheMeta();
+
+	try { updateStatusBarNow(); } catch { }
+
 	return filePath;
 }
 
-// ★补全统计：在“按 quality 取文件内容”处记 hit/miss，更贴近真实命中
+// 在“按 quality 取文件内容”处记 hit/miss（真实命中口径）
+// 同时把累计 hit/miss 写入 globalState（永不清零）
 function getCachedBuffer(contentId, quality) {
 	if (!cacheDir || !cacheMeta) return null;
 
 	const entry = cacheMeta.entries[contentId];
 	if (!entry?.qualities?.[quality]) {
 		cacheMeta.stats.missCount++;
+		_markCacheMiss();
+		try { updateStatusBarNow(); } catch { }
 		return null;
 	}
 
@@ -348,17 +604,23 @@ function getCachedBuffer(contentId, quality) {
 		if (fs.existsSync(filePath)) {
 			entry.atime = Date.now();
 			cacheMeta.stats.hitCount++;
+			_markCacheHit();
+			try { updateStatusBarNow(); } catch { }
 			return fs.readFileSync(filePath);
 		}
 	} catch (e) { }
 
 	cacheMeta.stats.missCount++;
+	_markCacheMiss();
 
 	delete entry.qualities[quality];
 	if (Object.keys(entry.qualities).length === 0) {
 		delete cacheMeta.entries[contentId];
 	}
 	saveCacheMeta();
+
+	try { updateStatusBarNow(); } catch { }
+
 	return null;
 }
 
@@ -414,7 +676,13 @@ class DaemonBridge {
 			}
 		});
 
-		proc.stderr.on("data", (d) => logMessage(`${this.name} stderr: ${d}`, "WARN"));
+		// stderr 降噪：同类 5 分钟只记一次
+		proc.stderr.on("data", (d) => {
+			const text = d?.toString?.() || "";
+			const key = _bridgeStderrKey(this.name, text);
+			logMessageRateLimited(key, `${this.name} stderr: ${text}`, "WARN", 5 * 60 * 1000);
+		});
+
 		proc.on("error", () => this._handleCrash());
 		proc.on("close", () => this._handleCrash());
 
@@ -426,13 +694,16 @@ class DaemonBridge {
 					this.available = true;
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
+					try { updateStatusBarNow(); } catch { }
 				} else {
 					this.available = false;
 					resolve(false);
+					try { updateStatusBarNow(); } catch { }
 				}
 			} catch (e) {
 				this.available = false;
 				resolve(false);
+				try { updateStatusBarNow(); } catch { }
 			}
 		}, 100);
 	}
@@ -452,6 +723,8 @@ class DaemonBridge {
 		} else {
 			this.available = false;
 		}
+
+		try { updateStatusBarNow(); } catch { }
 	}
 
 	async call(action, params = {}, timeout = 5000) {
@@ -841,7 +1114,14 @@ function spawnCheck(cmd, args, expected) {
 		child.stderr.on("data", d => errorOutput += d.toString().trim());
 
 		child.on("close", (code) => {
-			if (code !== 0 && errorOutput) logMessage(`${cmd} 执行失败 (exit ${code}): ${errorOutput}`, "WARN");
+			if (code !== 0 && errorOutput) {
+				logMessageRateLimited(
+					`spawnCheck:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
+					`${cmd} 执行失败 (exit ${code}): ${errorOutput}`,
+					"WARN",
+					2 * 60 * 1000
+				);
+			}
 			resolve(output.includes(expected));
 		});
 
@@ -852,7 +1132,7 @@ function spawnCheck(cmd, args, expected) {
 
 		setTimeout(() => {
 			try { child.kill(); } catch { }
-			logMessage(`${cmd} 执行超时`, "WARN");
+			logMessageRateLimited(`spawnCheckTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
 			resolve(false);
 		}, 5000);
 	});
@@ -868,7 +1148,14 @@ function spawnOutput(cmd, args) {
 		child.stderr.on("data", d => errorOutput += d.toString());
 
 		child.on("close", (code) => {
-			if (code !== 0 && errorOutput) logMessage(`${cmd} 执行失败 (exit ${code}): ${errorOutput}`, "WARN");
+			if (code !== 0 && errorOutput) {
+				logMessageRateLimited(
+					`spawnOutput:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
+					`${cmd} 执行失败 (exit ${code}): ${errorOutput}`,
+					"WARN",
+					2 * 60 * 1000
+				);
+			}
 			resolve(output);
 		});
 
@@ -879,7 +1166,7 @@ function spawnOutput(cmd, args) {
 
 		setTimeout(() => {
 			try { child.kill(); } catch { }
-			logMessage(`${cmd} 执行超时`, "WARN");
+			logMessageRateLimited(`spawnOutputTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
 			resolve("");
 		}, 5000);
 	});
@@ -1037,7 +1324,8 @@ async function pureCommand() {
 		return;
 	}
 
-	const regex = new RegExp(QQQ_PATH_REGEX);
+	// ★ 直接复用全局正则（带 gi + 捕获组）；每文件重置 lastIndex
+	const regex = QQQ_PATH_REGEX;
 
 	for (const fileName of parentFiles) {
 		const fullPath = path.join(parentDir, fileName);
@@ -1052,7 +1340,8 @@ async function pureCommand() {
 			regex.lastIndex = 0;
 
 			while ((match = regex.exec(content))) {
-				const rawPath = match[0].slice(2, -2).trim();
+				const rawPath = (match[1] || "").trim();
+
 				let absPath = path.isAbsolute(rawPath) ? rawPath : path.join(parentDir, rawPath);
 				absPath = absPath.replace(/\//g, "\\");
 
@@ -1149,6 +1438,7 @@ function startDaemons() {
 					shellBridge.start().then(ok3 => {
 						if (ok3) logMessage("Shell Bridge OK", "INFO");
 						else logMessage("All daemons failed, using spawn fallback", "WARN");
+						try { updateStatusBarNow(); } catch { }
 					});
 				}
 			});
@@ -1177,15 +1467,39 @@ async function deactivate() {
 	rustBridge.stop();
 	shellBridge.stop();
 
+	// 退出前先结算时长
 	finishUserTracking(extensionContext);
 
-	// ★兜底：退出前再校验一次，防 meta 漂移
+	// ★ 退出前强制写入累计 hit/miss（防最后 2s 合并写未触发）
+	try {
+		if (extensionContext) {
+			extensionContext.globalState.update(KEY_CACHE_HIT_TOTAL, _cacheHitTotal);
+			extensionContext.globalState.update(KEY_CACHE_MISS_TOTAL, _cacheMissTotal);
+		}
+	} catch { }
+
+	// ★ 清理累计统计 flush 定时器
+	try {
+		if (_statsFlushTimer) clearTimeout(_statsFlushTimer);
+		_statsFlushTimer = null;
+		_statsDirty = false;
+	} catch { }
+
+	// 退出前再校验一次，防 meta 漂移
 	try { validateCache(); } catch (e) { }
 	saveCacheMeta();
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch (e) { }
 	}
+
+	// 清理状态栏定时器
+	try {
+		if (_statusBarTimer) clearInterval(_statusBarTimer);
+		_statusBarTimer = null;
+		if (statusBarItem) statusBarItem.dispose();
+		statusBarItem = null;
+	} catch { }
 
 	logMessage("qqq 扩展已停用", "INFO");
 }
@@ -1202,15 +1516,20 @@ module.exports = {
 	ffprobePath,
 
 	logMessage,
+	logMessageRateLimited,
+
 	computeFingerprint,
 
 	initCache,
 	validateCache,
 
 	getCacheEntry,
-	getCacheQualityMeta,   // ★新增
-	setCacheEntry,         // ★修复覆盖写统计 + 原子写 + delta 预留
-	getCachedBuffer,       // ★补全 hit/miss + atime
+	getCacheQualityMeta,
+	getCacheStatsSnapshot,
+	getPersistentCacheStatsSnapshot, // ★ 永不清零累计 hit/miss（只读快照）
+
+	setCacheEntry,
+	getCachedBuffer,
 
 	handleClipboardFast,
 	handleClipboardSlow,
@@ -1226,7 +1545,16 @@ module.exports = {
 	resolvePendingJob,
 
 	initUserTracking,
-	finishUserTracking
+	finishUserTracking,
+
+	// 双 scheduler
+	probeScheduler,
+	genScheduler,
+
+	// 状态栏/引擎识别（给 q1/其他模块复用）
+	getActiveEngineCode,
+	getActiveEngineName,
+	updateStatusBarNow,
 };
 
 process.on("uncaughtException", (error) => {
