@@ -2,9 +2,15 @@
 # Node 依赖
 node_modules/
 
+
+
+.qoder/
+.vscode/
+
+
+
 # 日志文件
 *.log
-E:/r/qqq.log
 
 # VSCode 设置
 
