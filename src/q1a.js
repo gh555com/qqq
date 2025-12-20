@@ -1,7 +1,9 @@
 // src/q1a.js
 // ==========================================
 // ★★★ 导出文档模块 (支持 RTF/.doc、DOCX、ZIP) ★★★
-// ★★★ 两种文档格式交付物完全一致，仅底层编码不同 ★★★
+// ★★★ 两种文档格式交付物尽量一致，仅底层编码不同 ★★★
+// 修复/适配：跨平台路径统一、扫描结果更稳定、目录引用更明确
+// 修复：ZIP 进度条恢复、注释修正、Linux/macOS 绝对路径不再被剥离
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -14,15 +16,7 @@ const qqq = require("./qqq");
 
 // ★★★ 导入 docx 库 ★★★
 const docx = require("docx");
-const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    ImageRun,
-    TabStopType,
-    convertInchesToTwip
-} = docx;
+const { Document, Packer, Paragraph, TextRun, ImageRun, TabStopType, convertInchesToTwip } = docx;
 
 // ★★★ 导入 archiver 库 ★★★
 const archiver = require("archiver");
@@ -68,9 +62,7 @@ function cleanupExportSession(exportId) {
     if (set) {
         for (const child of set) {
             try {
-                if (!child.killed) {
-                    child.kill("SIGKILL");
-                }
+                if (!child.killed) child.kill("SIGKILL");
             } catch (e) { }
         }
         set.clear();
@@ -90,37 +82,71 @@ function formatBytes(size) {
         val /= 1024;
         idx++;
     }
-
     return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
 }
 
 function truncateFilename(filename, maxLength = FILENAME_MAX_LENGTH) {
     if (!filename) return filename;
-
     const ext = path.extname(filename);
     const baseName = path.basename(filename, ext);
-
-    if (baseName.length <= maxLength) {
-        return filename;
-    }
-
+    if (baseName.length <= maxLength) return filename;
     return baseName.substring(0, maxLength) + "..." + ext;
 }
 
 function isMediaFile(ext) {
-    const e = ext.toLowerCase();
+    const e = (ext || "").toLowerCase();
     return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e);
+}
+
+/**
+ * 统一跨平台路径清洗：
+ * - 不强行把 / 变成 \（让 path 自己处理）
+ * - 修复：Linux/macOS 下绝对路径（/xxx）不再被剥离
+ * - Windows 下保留旧习惯：仅当不是盘符/UNC 时，才剥离前导 / 或 \
+ */
+function normalizeRawPath(rawPath) {
+    if (!rawPath) return "";
+    let clean = String(rawPath).trim();
+
+    // 清掉文档换行残留
+    clean = clean.replace(/\r/g, "").replace(/\n/g, "");
+
+    const isWin = process.platform === "win32";
+
+    if (isWin) {
+        // 盘符绝对路径：C:\a\b 或 C:/a/b
+        const isDriveAbs = /^[a-zA-Z]:[\\/]/.test(clean);
+        // UNC：\\server\share 或 //server/share
+        const isUncAbs = clean.startsWith("\\\\") || clean.startsWith("//");
+
+        if (isDriveAbs || isUncAbs) {
+            return path.normalize(clean);
+        }
+
+        // Windows：把前导 / 或 \ 当成用户误写（维持你原来的“相对路径优先”语义）
+        while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
+        return path.normalize(clean);
+    }
+
+    // 非 Windows：以 / 开头就是绝对路径，不允许被剥离
+    if (clean.startsWith("/")) {
+        return path.normalize(clean);
+    }
+
+    // 非 Windows：若用户误写了前导 \ 或 /（相对路径但多写了根符号），剥离后当相对
+    while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
+    return path.normalize(clean);
 }
 
 function resolvePathToAbsolute(docUri, rawPath) {
     if (!rawPath) return null;
-    let clean = rawPath.trim();
+    const clean = normalizeRawPath(rawPath);
 
-    while (clean.startsWith("\\") || clean.startsWith("/")) {
-        clean = clean.slice(1);
-    }
+    if (!clean) return null;
 
+    // Windows 下 path.isAbsolute("/foo") 也可能为 true（根盘符），但我们在 normalizeRawPath 已把它剥离为相对
     if (path.isAbsolute(clean)) return clean;
+
     return path.resolve(path.dirname(docUri.fsPath), clean);
 }
 
@@ -129,7 +155,6 @@ function computeFileSHA256(filePath) {
         try {
             const hash = crypto.createHash("sha256");
             const stream = fs.createReadStream(filePath);
-
             stream.on("data", chunk => hash.update(chunk));
             stream.on("end", () => resolve(hash.digest("hex")));
             stream.on("error", () => resolve("无法计算"));
@@ -145,11 +170,7 @@ function computeFileSHA256(filePath) {
 function buildExportSuccessMessage(fileName, fileSize, hasQqqLinks) {
     const sizeStr = formatBytes(fileSize);
     let msg = `qqq: 文档已导出 (${sizeStr}): ${fileName}`;
-
-    if (!hasQqqLinks) {
-        msg += "，但，制品中不包含 qqq 滴韵味。";
-    }
-
+    if (!hasQqqLinks) msg += "，但，制品中不包含 qqq 滴韵味。";
     return msg;
 }
 
@@ -160,11 +181,9 @@ async function getMediaInfo(filePath, exportId) {
 
     return new Promise((resolve) => {
         const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
-
         registerChildProcess(exportId, child);
 
         let stderr = "";
-
         child.stderr.on("data", d => {
             if (stderr.length < 50000) stderr += d.toString();
         });
@@ -173,24 +192,17 @@ async function getMediaInfo(filePath, exportId) {
             const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
             const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
 
-            let info = {
-                width: null,
-                height: null,
-                duration: 0
-            };
-
+            let info = { width: null, height: null, duration: 0 };
             if (resMatch) {
                 info.width = parseInt(resMatch[1]);
                 info.height = parseInt(resMatch[2]);
             }
-
             if (durMatch) {
                 const h = parseFloat(durMatch[1]);
                 const m = parseFloat(durMatch[2]);
                 const s = parseFloat(durMatch[3]);
                 info.duration = h * 3600 + m * 60 + s;
             }
-
             resolve(info.width ? info : null);
         });
 
@@ -226,7 +238,6 @@ async function convertMediaToPng(filePath, info, exportId) {
 
     return new Promise((resolve) => {
         const args = ["-hide_banner", "-loglevel", "error"];
-
         const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
 
         if (duration > 0.5) {
@@ -244,15 +255,10 @@ async function convertMediaToPng(filePath, info, exportId) {
         const tempFile = path.join(os.tmpdir(), `qqq_export_${rand}.png`);
         args.push("-y", tempFile);
 
-        const child = cp.spawn(qqq.ffmpegPath, args, {
-            windowsHide: true,
-            stdio: ['ignore', 'ignore', 'pipe']
-        });
-
+        const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
         registerChildProcess(exportId, child);
 
         let resolved = false;
-
         const timer = setTimeout(() => {
             if (!resolved) {
                 resolved = true;
@@ -261,21 +267,19 @@ async function convertMediaToPng(filePath, info, exportId) {
             }
         }, 60000);
 
-        child.on("close", (code) => {
-            if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
+        child.on("close", () => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timer);
 
-                let buffer = null;
-                try {
-                    if (fs.existsSync(tempFile)) {
-                        buffer = fs.readFileSync(tempFile);
-                        fs.unlinkSync(tempFile);
-                    }
-                } catch { }
-
-                resolve(buffer ? { buffer, width: targetW, height: targetH } : null);
-            }
+            let buffer = null;
+            try {
+                if (fs.existsSync(tempFile)) {
+                    buffer = fs.readFileSync(tempFile);
+                    fs.unlinkSync(tempFile);
+                }
+            } catch { }
+            resolve(buffer ? { buffer, width: targetW, height: targetH } : null);
         });
 
         child.on("error", () => {
@@ -292,40 +296,32 @@ async function convertMediaToPng(filePath, info, exportId) {
 
 function escapeRtf(text) {
     if (!text) return "";
-
     let result = "";
 
     for (const char of text) {
-        const cp = char.codePointAt(0);
+        const cpv = char.codePointAt(0);
 
-        if (cp === 0x5C) {
-            result += "\\\\";
-        } else if (cp === 0x7B) {
-            result += "\\{";
-        } else if (cp === 0x7D) {
-            result += "\\}";
-        } else if (cp === 0x0A) {
-            result += "\\line ";
-        } else if (cp === 0x0D) {
-            continue;
-        } else if (cp === 0x09) {
-            result += "\\tab ";
-        } else if (cp > 127) {
-            if (cp > 0xFFFF) {
-                const hi = Math.floor((cp - 0x10000) / 0x400) + 0xD800;
-                const lo = ((cp - 0x10000) % 0x400) + 0xDC00;
+        if (cpv === 0x5C) result += "\\\\";
+        else if (cpv === 0x7B) result += "\\{";
+        else if (cpv === 0x7D) result += "\\}";
+        else if (cpv === 0x0A) result += "\\line ";
+        else if (cpv === 0x0D) continue;
+        else if (cpv === 0x09) result += "\\tab ";
+        else if (cpv > 127) {
+            if (cpv > 0xFFFF) {
+                const hi = Math.floor((cpv - 0x10000) / 0x400) + 0xD800;
+                const lo = ((cpv - 0x10000) % 0x400) + 0xDC00;
                 const hiSigned = hi > 32767 ? hi - 65536 : hi;
                 const loSigned = lo > 32767 ? lo - 65536 : lo;
                 result += `\\u${hiSigned}?\\u${loSigned}?`;
             } else {
-                const rtfCode = cp > 32767 ? cp - 65536 : cp;
+                const rtfCode = cpv > 32767 ? cpv - 65536 : cpv;
                 result += `\\u${rtfCode}?`;
             }
         } else {
             result += char;
         }
     }
-
     return result;
 }
 
@@ -333,23 +329,17 @@ function createRtfPicture(pngBuffer, width, height) {
     const twipsPerPixel = 15;
     const picwgoal = Math.round(width * twipsPerPixel);
     const pichgoal = Math.round(height * twipsPerPixel);
-
-    const hexData = pngBuffer.toString('hex');
-
+    const hexData = pngBuffer.toString("hex");
     return `{\\pict\\pngblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\r\n${hexData}\r\n}`;
 }
 
 function generateRtfDocument(elements, attachments, title) {
     const parts = [];
-
     parts.push("{\\rtf1\\ansi\\ansicpg1252\\deff0\\nouicompat\\deflang1033");
-
     parts.push("{\\fonttbl");
     parts.push("{\\f0\\fswiss\\fcharset0 Arial;}");
     parts.push("}");
-
     parts.push("{\\colortbl ;\\red0\\green0\\blue0;}");
-
     parts.push("\\paperw11906\\paperh16838");
     parts.push("\\margl1440\\margr1440\\margt1440\\margb1440");
     parts.push("\\widowctrl\\ftnbj\\aenddoc");
@@ -364,21 +354,17 @@ function generateRtfDocument(elements, attachments, title) {
         if (elem.type === "text") {
             const lines = elem.content.split(/\r?\n/);
             for (const line of lines) {
-                if (line.length === 0) {
-                    parts.push("\\pard\\ltrpar\\sa0\\par");
-                } else {
-                    parts.push(`\\pard\\ltrpar\\ql\\f0\\fs22 ${escapeRtf(line)}\\par`);
-                }
+                parts.push(line.length === 0
+                    ? "\\pard\\ltrpar\\sa0\\par"
+                    : `\\pard\\ltrpar\\ql\\f0\\fs22 ${escapeRtf(line)}\\par`);
             }
         } else if (elem.type === "image") {
             if (elem.originalMark) {
                 parts.push(`\\pard\\ltrpar\\ql\\sb200\\sa100\\f0\\fs22 ${escapeRtf(elem.originalMark)}\\par`);
             }
-
             parts.push("\\pard\\ltrpar\\ql\\sa200");
             parts.push(elem.rtfPicture);
             parts.push("\\par");
-
             parts.push("\\pard\\ltrpar\\ql\\f0\\fs22");
         } else if (elem.type === "image_error") {
             parts.push(`\\pard\\ltrpar\\f0\\fs22 [${escapeRtf("媒体转换失败: " + elem.path)}]\\par`);
@@ -398,11 +384,11 @@ function generateRtfDocument(elements, attachments, title) {
 
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
-            const shortHash = att.sha256.substring(0, 16) + "...";
+            const shortHash = (att.sha256 || "").substring(0, 16) + "...";
             const displayName = truncateFilename(att.name);
 
             parts.push("\\pard\\ltrpar\\tx500\\tx4500\\tx5500\\tx6800\\sa60\\f0\\fs16");
-            parts.push(`${i + 1}\\tab ${escapeRtf(displayName)}\\tab ${escapeRtf(att.ext.toUpperCase())}\\tab ${escapeRtf(formatBytes(att.size))}\\tab ${escapeRtf(shortHash)}`);
+            parts.push(`${i + 1}\\tab ${escapeRtf(displayName)}\\tab ${escapeRtf((att.ext || "").toUpperCase())}\\tab ${escapeRtf(formatBytes(att.size))}\\tab ${escapeRtf(shortHash)}`);
             parts.push("\\par");
         }
 
@@ -412,12 +398,11 @@ function generateRtfDocument(elements, attachments, title) {
 
         for (const att of attachments) {
             parts.push(`\\pard\\ltrpar\\sa40\\f0\\fs14 ${escapeRtf(att.name + ":")}\\par`);
-            parts.push(`\\pard\\ltrpar\\li400\\sa80\\f0\\fs12 ${escapeRtf(att.sha256)}\\par`);
+            parts.push(`\\pard\\ltrpar\\li400\\sa80\\f0\\fs12 ${escapeRtf(att.sha256 || "")}\\par`);
         }
     }
 
     parts.push("}");
-
     return parts.join("\r\n");
 }
 
@@ -457,15 +442,7 @@ function generateDocxDocument(elements, attachments, title) {
             }
 
             children.push(new Paragraph({
-                children: [
-                    new ImageRun({
-                        data: elem.imageBuffer,
-                        transformation: {
-                            width: elem.width,
-                            height: elem.height
-                        }
-                    })
-                ],
+                children: [new ImageRun({ data: elem.imageBuffer, transformation: { width: elem.width, height: elem.height } })],
                 spacing: { after: 200 }
             }));
         } else if (elem.type === "image_error") {
@@ -510,7 +487,7 @@ function generateDocxDocument(elements, attachments, title) {
 
         for (let i = 0; i < attachments.length; i++) {
             const att = attachments[i];
-            const shortHash = att.sha256.substring(0, 16) + "...";
+            const shortHash = (att.sha256 || "").substring(0, 16) + "...";
             const displayName = truncateFilename(att.name);
 
             children.push(new Paragraph({
@@ -519,7 +496,7 @@ function generateDocxDocument(elements, attachments, title) {
                     new TextRun({ text: "\t", size: 16 }),
                     new TextRun({ text: displayName, size: 16, font: "Arial" }),
                     new TextRun({ text: "\t", size: 16 }),
-                    new TextRun({ text: att.ext.toUpperCase(), size: 16, font: "Arial" }),
+                    new TextRun({ text: (att.ext || "").toUpperCase(), size: 16, font: "Arial" }),
                     new TextRun({ text: "\t", size: 16 }),
                     new TextRun({ text: formatBytes(att.size), size: 16, font: "Arial" }),
                     new TextRun({ text: "\t", size: 16 }),
@@ -546,7 +523,7 @@ function generateDocxDocument(elements, attachments, title) {
                 spacing: { after: 40 }
             }));
             children.push(new Paragraph({
-                children: [new TextRun({ text: att.sha256, size: 12, font: "Arial" })],
+                children: [new TextRun({ text: att.sha256 || "", size: 12, font: "Arial" })],
                 indent: { left: convertInchesToTwip(0.3) },
                 spacing: { after: 80 }
             }));
@@ -556,58 +533,59 @@ function generateDocxDocument(elements, attachments, title) {
     return new Document({
         creator: "qqq extension",
         title: title || "qqq 导出文档",
-        sections: [{
-            properties: {},
-            children: children
-        }]
+        sections: [{ properties: {}, children }]
     });
 }
 
 // ==================== 扫描 qqq 链接 ====================
 
 /**
- * ★★★ 扫描文档中的 qqq 暗号链接，返回去重后的引用文件列表 ★★★
- * @returns {{ hasQqqLinks: boolean, referencedFiles: Array<{ rawPath: string, absPath: string, relativePath: string }> }}
+ * 扫描文档中的 qqq 暗号链接，返回去重后的引用列表
+ * 注意：zip 内部路径统一使用 "/"，并保持相对结构
+ * @returns {{ hasQqqLinks: boolean, referencedFiles: Array<{ rawPath: string, absPath: string, relativePath: string, isDir: boolean }> }}
  */
 function scanQqqLinks(documentUri, text) {
     const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
     const docDir = path.dirname(documentUri.fsPath);
 
     const referencedFiles = [];
-    const seenPaths = new Set();
+    const seen = new Set();
 
     let match;
     while ((match = regex.exec(text))) {
         const originalMark = match[0];
         const rawPath = originalMark.slice(2, -2).trim();
 
-        if (rawPath.startsWith("__PENDING__:")) {
-            continue;
+        if (rawPath.startsWith("__PENDING__:")) continue;
+
+        const absPath = resolvePathToAbsolute(documentUri, rawPath);
+        if (!absPath) continue;
+
+        if (!fs.existsSync(absPath)) continue;
+
+        // 真实路径去重（避免 .. / symlink 造成重复）
+        let realKey = absPath;
+        try { realKey = fs.realpathSync(absPath); } catch { }
+
+        if (seen.has(realKey)) continue;
+        seen.add(realKey);
+
+        let relativePath = path.relative(docDir, absPath);
+        // 边界：引用到文档目录自身（或相同路径）会得到 "."，这里必须给一个明确落点，否则 zip 内会奇怪
+        if (!relativePath || relativePath === "." || relativePath === "./") {
+            relativePath = path.basename(absPath) || "qqq_ref";
         }
 
-        const absPath = resolvePathToAbsolute(documentUri, rawPath.replace(/\//g, path.sep));
+        // zip 内部路径必须用 /
+        relativePath = relativePath.split(path.sep).join("/");
 
-        if (absPath && fs.existsSync(absPath) && !seenPaths.has(absPath)) {
-            seenPaths.add(absPath);
+        let isDir = false;
+        try { isDir = fs.statSync(absPath).isDirectory(); } catch { }
 
-            // 计算相对于文档目录的路径
-            let relativePath = path.relative(docDir, absPath);
-
-            // 确保使用正斜杠（zip 内部路径）
-            relativePath = relativePath.split(path.sep).join("/");
-
-            referencedFiles.push({
-                rawPath: rawPath,
-                absPath: absPath,
-                relativePath: relativePath
-            });
-        }
+        referencedFiles.push({ rawPath, absPath, relativePath, isDir });
     }
 
-    return {
-        hasQqqLinks: referencedFiles.length > 0,
-        referencedFiles: referencedFiles
-    };
+    return { hasQqqLinks: referencedFiles.length > 0, referencedFiles };
 }
 
 // ==================== 导出 Doc 命令 ====================
@@ -650,12 +628,9 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         title: "qqq: 导出文档格式"
     });
 
-    if (!formatChoice) {
-        return;
-    }
+    if (!formatChoice) return;
 
     const selectedFormat = formatChoice.format;
-
     const text = document.getText();
     const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
 
@@ -664,46 +639,39 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     let lastIndex = 0;
     let match;
 
-    // ★★★ 统计是否包含 qqq 链接 ★★★
     let hasQqqLinks = false;
 
     while ((match = regex.exec(text))) {
         if (match.index > lastIndex) {
             const textBefore = text.substring(lastIndex, match.index);
-            if (textBefore.length > 0) {
-                rawElements.push({ type: "text", content: textBefore });
-            }
+            if (textBefore.length > 0) rawElements.push({ type: "text", content: textBefore });
         }
 
         const originalMark = match[0];
         const rawPath = originalMark.slice(2, -2).trim();
 
         if (!rawPath.startsWith("__PENDING__:")) {
-            const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
-
+            const absPath = resolvePathToAbsolute(document.uri, rawPath);
             if (absPath && fs.existsSync(absPath)) {
-                hasQqqLinks = true; // ★★★ 发现有效的 qqq 链接 ★★★
-
+                hasQqqLinks = true;
+                const stat = (() => { try { return fs.statSync(absPath); } catch { return null; } })();
                 const ext = path.extname(absPath).toLowerCase();
 
-                if (isMediaFile(ext)) {
-                    rawElements.push({
-                        type: "media",
-                        path: absPath,
-                        rawPath: rawPath,
-                        originalMark: originalMark
-                    });
+                // 目录：文档里原样保留标记；不进附件索引（你说取消打印可接受）
+                if (stat && stat.isDirectory()) {
+                    rawElements.push({ type: "text", content: originalMark });
+                } else if (isMediaFile(ext)) {
+                    rawElements.push({ type: "media", path: absPath, rawPath, originalMark });
                 } else {
                     rawElements.push({ type: "text", content: originalMark });
-
                     try {
-                        const stat = fs.statSync(absPath);
+                        const st = fs.statSync(absPath);
                         attachments.push({
                             name: path.basename(absPath),
                             path: rawPath,
-                            absPath: absPath,
-                            ext: ext,
-                            size: stat.size,
+                            absPath,
+                            ext,
+                            size: st.size,
                             sha256: await computeFileSHA256(absPath)
                         });
                     } catch { }
@@ -718,13 +686,10 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
-        if (remaining.length > 0) {
-            rawElements.push({ type: "text", content: remaining });
-        }
+        if (remaining.length > 0) rawElements.push({ type: "text", content: remaining });
     }
 
     const mediaCount = rawElements.filter(e => e.type === "media").length;
-
     if (rawElements.length === 0) {
         vscode.window.showWarningMessage("qqq: 文档为空，无法导出");
         return;
@@ -732,7 +697,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     activeExportCount++;
     const exportId = createExportSession();
-
     const formatLabel = selectedFormat === ExportFormat.RTF_DOC ? "RTF" : "DOCX";
 
     await vscode.window.withProgress({
@@ -740,14 +704,11 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         title: `qqq: 正在导出 ${formatLabel} 文档...`,
         cancellable: true
     }, async (progress, token) => {
-        token.onCancellationRequested(() => {
-            cleanupExportSession(exportId);
-        });
+        token.onCancellationRequested(() => cleanupExportSession(exportId));
 
         try {
             const processedElements = [];
             let processedCount = 0;
-
             const conversionCache = new Map();
 
             for (const elem of rawElements) {
@@ -758,7 +719,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
                 if (elem.type === "text") {
                     processedElements.push(elem);
-
                 } else if (elem.type === "media") {
                     processedCount++;
                     progress.report({
@@ -767,7 +727,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     });
 
                     const fingerprint = qqq.computeFingerprint(elem.path);
-
                     let pngResult;
 
                     if (fingerprint && conversionCache.has(fingerprint)) {
@@ -776,10 +735,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     } else {
                         const info = await getMediaInfo(elem.path, exportId);
                         pngResult = await convertMediaToPng(elem.path, info, exportId);
-
-                        if (pngResult && fingerprint) {
-                            conversionCache.set(fingerprint, pngResult);
-                        }
+                        if (pngResult && fingerprint) conversionCache.set(fingerprint, pngResult);
                     }
 
                     if (pngResult?.buffer) {
@@ -799,10 +755,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                             });
                         }
                     } else {
-                        processedElements.push({
-                            type: "image_error",
-                            path: elem.rawPath
-                        });
+                        processedElements.push({ type: "image_error", path: elem.rawPath });
                     }
                 }
             }
@@ -834,48 +787,38 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             const defaultExportPath = path.join(docDir, `${docBaseName}${fileExt}`);
             let finalSavePath = defaultExportPath;
 
+            // ✅ 注释修正：仅当默认路径存在时才弹保存对话框
             if (fs.existsSync(defaultExportPath)) {
                 const filters = {};
                 filters[filterLabel] = [fileExt.substring(1)];
-
                 const saveUri = await vscode.window.showSaveDialog({
                     defaultUri: vscode.Uri.file(defaultExportPath),
-                    filters: filters
+                    filters
                 });
-
                 if (!saveUri) {
                     vscode.window.showWarningMessage("qqq: 导出已取消");
                     return;
                 }
-
                 finalSavePath = saveUri.fsPath;
             }
 
             if (selectedFormat === ExportFormat.RTF_DOC) {
-                fs.writeFileSync(finalSavePath, fileContent, 'utf8');
+                fs.writeFileSync(finalSavePath, fileContent, "utf8");
             } else {
                 fs.writeFileSync(finalSavePath, fileContent);
             }
 
             const stats = fs.statSync(finalSavePath);
 
-            // ★★★ 使用统一的成功消息构建函数 ★★★
             const successMsg = buildExportSuccessMessage(
                 path.basename(finalSavePath),
                 stats.size,
                 hasQqqLinks
             );
 
-            vscode.window.showInformationMessage(
-                successMsg,
-                "打开文件",
-                "打开文件夹"
-            ).then(choice => {
-                if (choice === "打开文件") {
-                    openFile(finalSavePath);
-                } else if (choice === "打开文件夹") {
-                    revealInFolder(finalSavePath);
-                }
+            vscode.window.showInformationMessage(successMsg, "打开文件", "打开文件夹").then(choice => {
+                if (choice === "打开文件") openFile(finalSavePath);
+                else if (choice === "打开文件夹") revealInFolder(finalSavePath);
             });
 
         } catch (e) {
@@ -891,8 +834,10 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 // ==================== 导出 ZIP 命令 ====================
 
 /**
- * ★★★ 导出 ZIP 命令 ★★★
- * 将当前焦点文档及其引用的文件打包成 zip
+ * 导出 ZIP 命令：
+ * 将当前焦点文档及其引用的文件/目录打包成 zip（保持相对结构）
+ * ✅ 目录会递归导出（archive.directory）
+ * ✅ 进度条：使用 archiver 的 progress 事件恢复
  */
 async function executeExportZipCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
@@ -912,7 +857,6 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
     }
 
     const document = editor.document;
-
     if (document.isUntitled) {
         vscode.window.showWarningMessage("qqq: 请先保存文档后再导出 ZIP");
         return;
@@ -922,12 +866,9 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
     const docDir = path.dirname(docPath);
     const docFullName = path.basename(docPath);
     const docBaseName = path.basename(docPath, path.extname(docPath));
-
     const text = document.getText();
 
-    // ★★★ 扫描 qqq 链接 ★★★
     const scanResult = scanQqqLinks(document.uri, text);
-
     activeExportCount++;
 
     await vscode.window.withProgress({
@@ -935,26 +876,25 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
         title: "qqq: 正在导出 ZIP...",
         cancellable: true
     }, async (progress, token) => {
-        try {
-            progress.report({ message: "准备文件列表...", increment: 10 });
+        let archive = null;
+        let output = null;
+        let finalZipPath = null;
 
-            // ★★★ 确定保存路径 ★★★
+        try {
+            progress.report({ message: "准备文件列表...", increment: 5 });
+
             const defaultZipPath = path.join(docDir, `${docBaseName}.zip`);
-            let finalZipPath = defaultZipPath;
+            finalZipPath = defaultZipPath;
 
             if (fs.existsSync(defaultZipPath)) {
                 const saveUri = await vscode.window.showSaveDialog({
                     defaultUri: vscode.Uri.file(defaultZipPath),
-                    filters: {
-                        "ZIP 压缩包": ["zip"]
-                    }
+                    filters: { "ZIP 压缩包": ["zip"] }
                 });
-
                 if (!saveUri) {
                     vscode.window.showWarningMessage("qqq: 导出已取消");
                     return;
                 }
-
                 finalZipPath = saveUri.fsPath;
             }
 
@@ -963,122 +903,104 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                 return;
             }
 
-            progress.report({ message: "创建压缩包...", increment: 10 });
+            progress.report({ message: "创建压缩包...", increment: 5 });
 
-            // ★★★ 创建 zip 文件 ★★★
             await new Promise((resolve, reject) => {
-                const output = fs.createWriteStream(finalZipPath);
-                const archive = archiver("zip", {
-                    zlib: { level: 9 }  // 最高压缩级别
-                });
+                output = fs.createWriteStream(finalZipPath);
+                archive = archiver("zip", { zlib: { level: 9 } });
 
                 let resolved = false;
+                const finish = (err) => {
+                    if (resolved) return;
+                    resolved = true;
+                    err ? reject(err) : resolve();
+                };
 
-                output.on("close", () => {
-                    if (!resolved) {
-                        resolved = true;
-                        resolve();
-                    }
-                });
-
-                output.on("error", (err) => {
-                    if (!resolved) {
-                        resolved = true;
-                        reject(err);
-                    }
-                });
-
-                archive.on("error", (err) => {
-                    if (!resolved) {
-                        resolved = true;
-                        reject(err);
-                    }
-                });
+                output.on("close", () => finish(null));
+                output.on("error", (err) => finish(err));
+                archive.on("error", (err) => finish(err));
 
                 archive.on("warning", (err) => {
-                    if (err.code !== "ENOENT") {
-                        qqq.logMessage(`ZIP 警告: ${err.message}`, "WARN");
-                    }
+                    if (err.code !== "ENOENT") qqq.logMessage(`ZIP 警告: ${err.message}`, "WARN");
                 });
 
-                // 监听进度
-                let totalBytes = 0;
-                let processedBytes = 0;
+                // ✅ 进度条：archiver progress 事件（更靠谱）
+                let lastPercent = 10; // 前面我们已经 report 到 10 左右了
+                let lastTick = 0;
+                archive.on("progress", (p) => {
+                    const now = Date.now();
+                    if (now - lastTick < 150) return; // 防抖，别刷太快
+                    lastTick = now;
 
-                // 预先计算总大小
-                try {
-                    const docStat = fs.statSync(docPath);
-                    totalBytes += docStat.size;
+                    const entries = p?.entries || {};
+                    const fsinfo = p?.fs || {};
 
-                    for (const file of scanResult.referencedFiles) {
-                        try {
-                            const stat = fs.statSync(file.absPath);
-                            totalBytes += stat.size;
-                        } catch { }
-                    }
-                } catch { }
+                    const totalBytes = Number(fsinfo.totalBytes || 0);
+                    const processedBytes = Number(fsinfo.processedBytes || 0);
 
-                archive.on("data", (chunk) => {
-                    processedBytes += chunk.length;
+                    const totalEntries = Number(entries.total || 0);
+                    const processedEntries = Number(entries.processed || 0);
+
+                    let percent = 10;
+
                     if (totalBytes > 0) {
-                        const percent = Math.min(95, Math.round((processedBytes / totalBytes) * 70) + 20);
-                        progress.report({
-                            message: `压缩中... ${Math.round(processedBytes / 1024)} KB`,
-                            increment: 0
-                        });
+                        percent = Math.max(10, Math.min(95, Math.round((processedBytes / totalBytes) * 85) + 10));
+                    } else if (totalEntries > 0) {
+                        percent = Math.max(10, Math.min(95, Math.round((processedEntries / totalEntries) * 85) + 10));
+                    } else {
+                        percent = Math.min(95, lastPercent + 1);
                     }
+
+                    const inc = Math.max(0, percent - lastPercent);
+                    lastPercent = percent;
+
+                    const msg = totalBytes > 0
+                        ? `压缩中... ${formatBytes(processedBytes)} / ${formatBytes(totalBytes)}（${percent}%）`
+                        : `压缩中... 条目 ${processedEntries}/${totalEntries || "?"}（${percent}%）`;
+
+                    progress.report({ message: msg, increment: inc });
                 });
 
                 archive.pipe(output);
 
-                // ★★★ 添加焦点文档（原汁原味）★★★
+                // 添加焦点文档
                 archive.file(docPath, { name: docFullName });
 
-                // ★★★ 添加引用的文件（保持相对路径结构）★★★
+                // 添加引用文件/目录（目录递归导出）
                 for (const file of scanResult.referencedFiles) {
                     try {
-                        if (fs.existsSync(file.absPath)) {
-                            const stat = fs.statSync(file.absPath);
+                        if (!fs.existsSync(file.absPath)) continue;
+                        const stat = fs.statSync(file.absPath);
 
-                            if (stat.isDirectory()) {
-                                // 如果是目录，递归添加整个目录
-                                archive.directory(file.absPath, file.relativePath);
-                            } else {
-                                // 如果是文件，直接添加
-                                archive.file(file.absPath, { name: file.relativePath });
-                            }
+                        if (stat.isDirectory()) {
+                            // ✅ 目录百分百导出
+                            archive.directory(file.absPath, file.relativePath);
+                        } else {
+                            archive.file(file.absPath, { name: file.relativePath });
                         }
                     } catch (e) {
                         qqq.logMessage(`添加文件失败: ${file.absPath} - ${e.message}`, "WARN");
                     }
                 }
 
-                // 取消处理
                 token.onCancellationRequested(() => {
-                    if (!resolved) {
-                        resolved = true;
-                        archive.abort();
-                        reject(new Error("用户取消"));
-                    }
+                    try { if (archive) archive.abort(); } catch { }
+                    finish(new Error("用户取消"));
                 });
 
                 archive.finalize();
             });
 
             if (token.isCancellationRequested) {
-                // 清理未完成的文件
-                try {
-                    if (fs.existsSync(finalZipPath)) {
-                        fs.unlinkSync(finalZipPath);
-                    }
-                } catch { }
+                try { if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath); } catch { }
                 vscode.window.showWarningMessage("qqq: 导出已取消");
                 return;
             }
 
-            // ★★★ 获取最终文件大小并显示结果 ★★★
-            const stats = fs.statSync(finalZipPath);
+            // 收尾：推到 100%
+            progress.report({ message: "完成", increment: 100 });
 
+            const stats = fs.statSync(finalZipPath);
             const successMsg = buildExportSuccessMessage(
                 path.basename(finalZipPath),
                 stats.size,
@@ -1087,31 +1009,28 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
             const fileCount = scanResult.referencedFiles.length;
             const detailMsg = scanResult.hasQqqLinks
-                ? `${successMsg}（包含 ${fileCount} 个引用文件）`
+                ? `${successMsg}（包含 ${fileCount} 个引用项）`
                 : successMsg;
 
-            vscode.window.showInformationMessage(
-                detailMsg,
-                "打开文件",
-                "打开文件夹"
-            ).then(choice => {
-                if (choice === "打开文件") {
-                    openFile(finalZipPath);
-                } else if (choice === "打开文件夹") {
-                    revealInFolder(finalZipPath);
-                }
+            vscode.window.showInformationMessage(detailMsg, "打开文件", "打开文件夹").then(choice => {
+                if (choice === "打开文件") openFile(finalZipPath);
+                else if (choice === "打开文件夹") revealInFolder(finalZipPath);
             });
 
-            qqq.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个文件`, "INFO");
+            qqq.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个条目`, "INFO");
 
         } catch (e) {
-            if (e.message === "用户取消") {
+            // 取消：尽量删半成品
+            if (e && e.message === "用户取消") {
+                try { if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath); } catch { }
                 vscode.window.showWarningMessage("qqq: 导出已取消");
             } else {
                 qqq.logMessage(`ZIP 导出失败: ${e.message}\n${e.stack}`, "ERROR");
                 vscode.window.showErrorMessage(`qqq: ZIP 导出失败: ${e.message}`);
             }
         } finally {
+            try { if (archive) archive.abort(); } catch { }
+            try { if (output) output.close(); } catch { }
             activeExportCount--;
         }
     });
@@ -1121,15 +1040,10 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
 function openFile(filePath) {
     if (!fs.existsSync(filePath)) return;
-
     try {
-        if (process.platform === "win32") {
-            cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
-        } else if (process.platform === "darwin") {
-            cp.exec(`open "${filePath}"`);
-        } else {
-            cp.exec(`xdg-open "${filePath}"`);
-        }
+        if (process.platform === "win32") cp.exec(`start "" "${filePath.replace(/"/g, '""')}"`);
+        else if (process.platform === "darwin") cp.exec(`open "${filePath}"`);
+        else cp.exec(`xdg-open "${filePath}"`);
     } catch {
         vscode.env.openExternal(vscode.Uri.file(filePath));
     }
@@ -1137,15 +1051,10 @@ function openFile(filePath) {
 
 function revealInFolder(filePath) {
     if (!fs.existsSync(filePath)) return;
-
     try {
-        if (process.platform === "win32") {
-            cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
-        } else if (process.platform === "darwin") {
-            cp.exec(`open -R "${filePath}"`);
-        } else {
-            cp.exec(`xdg-open "${path.dirname(filePath)}"`);
-        }
+        if (process.platform === "win32") cp.exec(`explorer /select,"${filePath.replace(/"/g, '""')}"`);
+        else if (process.platform === "darwin") cp.exec(`open -R "${filePath}"`);
+        else cp.exec(`xdg-open "${path.dirname(filePath)}"`);
     } catch { }
 }
 
@@ -1155,4 +1064,3 @@ module.exports = {
     executeExportDocCommand,
     executeExportZipCommand
 };
-
