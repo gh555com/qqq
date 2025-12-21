@@ -1,9 +1,13 @@
 // File: src/q2.js
 // ★★★ 文件管理器：Webview 界面 + 使用 qqq.js 四级回退 + 防惊群尺寸调度/缓存 ★★★
+// 适配：匹配最新 qqq IO 引擎路径逻辑（跨平台 normalize + 绝对路径保留 + canonical 去重）
+// 说明：本文件内置 normalize/resolve/canonical，若 qqq.js 导出同名函数会自动优先使用 qqq 的实现
+
 const vscode = require("vscode");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const os = require("os");
 const trash = require("trash");
 
 // ==================== 从 qqq.js 导入核心接口 ====================
@@ -73,19 +77,171 @@ let sizeMode = "none";
 let kbmOverlap = 2;
 let globalContext = null;
 
+// ==================== IO / Path：匹配最新引擎逻辑（关键） ====================
+
+function _stripDocJunk(s) {
+    if (s == null) return "";
+    return String(s).trim().replace(/\r/g, "").replace(/\n/g, "");
+}
+
+function _getSystemDriveRoot() {
+    // Windows 根路径补全用：优先 SystemDrive，其次 USERPROFILE 盘符，否则 C:
+    const sd = process.env.SystemDrive;
+    if (sd && /^[A-Za-z]:$/.test(sd)) return sd.toUpperCase() + "\\";
+    const up = process.env.USERPROFILE;
+    if (up && /^[A-Za-z]:[\\/]/.test(up)) return up.slice(0, 2).toUpperCase() + "\\";
+    return "C:\\";
+}
+
+/**
+ * normalizeNavPath：用于“导航/打开/展示”的路径清洗
+ * - 非 Windows：/ 开头保持绝对路径；~ 支持展开
+ * - Windows：
+ *   - 盘符/UNC 保持绝对
+ *   - "C:" / "C:/" / "C:\" 归一到 "C:\"
+ *   - "\foo" 或 "/foo" 视为当前系统盘根路径下的 "\foo"
+ *   - 其他相对路径：只做 normalize（resolve 由 resolveNavPath 负责）
+ */
+function normalizeNavPath(rawPath) {
+    // 如果 qqq.js 新增了同名函数，优先使用（向后兼容你“最新 IO 引擎”）
+    if (qqq && typeof qqq.normalizeNavPath === "function") {
+        try {
+            return qqq.normalizeNavPath(rawPath);
+        } catch {
+            /* fallthrough */
+        }
+    }
+
+    let clean = _stripDocJunk(rawPath);
+    if (!clean) return "";
+
+    // ~ 展开（mac/linux 常用；windows 也允许）
+    if (clean === "~") clean = os.homedir();
+    else if (clean.startsWith("~/") || clean.startsWith("~\\")) {
+        clean = path.join(os.homedir(), clean.slice(2));
+    }
+
+    const isWin = process.platform === "win32";
+    if (!isWin) return path.normalize(clean);
+
+    // Windows：盘符根（"C:" 或 "C:/" 或 "C:\"）
+    if (/^[A-Za-z]:$/.test(clean)) return clean.toUpperCase() + "\\";
+    if (/^[A-Za-z]:[\\/]*$/.test(clean)) return clean[0].toUpperCase() + ":\\";
+
+    // UNC：\\server\share 或 //server/share
+    if (clean.startsWith("\\\\") || clean.startsWith("//")) return path.normalize(clean);
+
+    // 盘符绝对：C:\a\b 或 C:/a/b
+    if (/^[A-Za-z]:[\\/]/.test(clean)) {
+        const normalized = path.normalize(clean);
+        return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
+    }
+
+    // 形如 \foo 或 /foo：视为系统盘根路径下的绝对路径（更符合文件管理器直觉）
+    if (clean.startsWith("\\") || clean.startsWith("/")) {
+        const sysRoot = _getSystemDriveRoot();
+        const rest = clean.replace(/^[\\/]+/, "");
+        return path.normalize(path.join(sysRoot, rest));
+    }
+
+    // 其他：相对路径（后续由 resolveNavPath 结合 base 解析）
+    return path.normalize(clean);
+}
+
+/**
+ * resolveNavPath：把用户输入的 path 解析成最终要访问的绝对目录
+ * - 若 normalize 后已是绝对（含 UNC/盘符根），直接返回
+ * - 否则按 baseDir 进行 resolve
+ */
+function resolveNavPath(rawPath, baseDir) {
+    // 如果 qqq.js 新增了同名函数，优先使用
+    if (qqq && typeof qqq.resolveNavPath === "function") {
+        try {
+            return qqq.resolveNavPath(rawPath, baseDir);
+        } catch {
+            /* fallthrough */
+        }
+    }
+
+    const clean = normalizeNavPath(rawPath);
+    if (!clean) return "";
+
+    if (path.isAbsolute(clean)) return clean;
+
+    const base = baseDir && typeof baseDir === "string" ? baseDir : process.cwd();
+    return path.resolve(base, clean);
+}
+
+/**
+ * canonicalizeExistingPath：对“存在于磁盘上的路径”做统一键（避免重复/缓存穿透）
+ * - realpath（尽量）
+ * - normalize
+ * - 去尾分隔符（保留 root）
+ * - Windows 盘符大写
+ */
+function canonicalizeExistingPath(p) {
+    // 如果 qqq.js 新增了同名函数，优先使用（保证 q2/q1/其它模块 canonical 一致）
+    if (qqq && typeof qqq.canonicalizeExistingPath === "function") {
+        try {
+            return qqq.canonicalizeExistingPath(p);
+        } catch {
+            /* fallthrough */
+        }
+    }
+
+    if (!p) return "";
+    let out = String(p);
+
+    try {
+        if (fs.existsSync(out)) {
+            if (fs.realpathSync && fs.realpathSync.native) out = fs.realpathSync.native(out);
+            else out = fs.realpathSync(out);
+        }
+    } catch {
+        /* ignore */
+    }
+
+    out = path.normalize(out);
+
+    if (process.platform === "win32") {
+        out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
+    }
+
+    try {
+        const root = path.parse(out).root;
+        if (out.length > root.length) out = out.replace(/[\\/]+$/, "");
+    } catch {
+        /* ignore */
+    }
+
+    return out;
+}
+
+function cacheKeyForPath(p) {
+    // 如果 qqq.js 导出了 cacheKeyForPath，优先用（保持统一 cacheKey 口径）
+    if (qqq && typeof qqq.cacheKeyForPath === "function") {
+        try {
+            return qqq.cacheKeyForPath(p);
+        } catch {
+            /* fallthrough */
+        }
+    }
+
+    const canon = canonicalizeExistingPath(p);
+    return process.platform === "win32" ? canon.toLowerCase() : canon;
+}
+
 // ==================== 防惊群调度器（去重 + 限并发） ====================
 class TaskScheduler {
     constructor(maxConcurrency = 6) {
-        this.maxConcurrency = maxConcurrency;
+        this.maxConcurrency = Math.max(1, maxConcurrency | 0);
         this.runningCount = 0;
         this.queue = [];
         this.pendingPromises = new Map();
     }
 
     async schedule(taskKey, taskGenerator) {
-        if (this.pendingPromises.has(taskKey)) {
-            return this.pendingPromises.get(taskKey);
-        }
+        if (this.pendingPromises.has(taskKey)) return this.pendingPromises.get(taskKey);
 
         const promise = new Promise((resolve, reject) => {
             const run = async () => {
@@ -102,28 +258,29 @@ class TaskScheduler {
                 }
             };
             this.queue.push(run);
+            this._next();
         });
 
         this.pendingPromises.set(taskKey, promise);
-        this._next();
         return promise;
     }
 
     _next() {
-        if (this.runningCount >= this.maxConcurrency || this.queue.length === 0) return;
-        const task = this.queue.shift();
-        task();
+        while (this.runningCount < this.maxConcurrency && this.queue.length > 0) {
+            const task = this.queue.shift();
+            task();
+        }
     }
 }
+
 const globalScheduler = new TaskScheduler(MAX_CONCURRENT_TASKS);
 
 // ==================== 缓存（folder/file size）====================
-const folderSizeCache = new Map(); // folderPath -> { size, ts }
-const fileSizeCache = new Map(); // filePath -> { size, mtimeMs, ts }
+const folderSizeCache = new Map(); // key(folderPath) -> { size, ts }
+const fileSizeCache = new Map(); // key(filePath)   -> { size, mtimeMs, ts }
 
 function _pruneCacheIfNeeded(mapObj) {
     if (mapObj.size <= SIZE_CACHE_MAX_ENTRIES) return;
-    // 粗暴删最老的
     let oldestKey = null;
     let oldestTs = Infinity;
     for (const [k, v] of mapObj.entries()) {
@@ -160,29 +317,32 @@ function escapeJsStringLiteral(str) {
 
 // ==================== 文件夹大小获取（使用 qqq.js 四级回退 + 缓存 + 调度）====================
 async function getFolderSize(folderPath) {
+    const canon = canonicalizeExistingPath(folderPath);
+    const key = cacheKeyForPath(canon);
+
     const now = Date.now();
-    const cached = folderSizeCache.get(folderPath);
+    const cached = folderSizeCache.get(key);
     if (cached && now - cached.ts < SIZE_CACHE_MAX_AGE_MS) return cached.size;
 
-    const taskKey = `folderSize:${folderPath}`;
+    const taskKey = `folderSize:${key}`;
     return globalScheduler.schedule(taskKey, async () => {
         // 二次检查（并发下可能已有其它任务写入）
-        const again = folderSizeCache.get(folderPath);
+        const again = folderSizeCache.get(key);
         const now2 = Date.now();
         if (again && now2 - again.ts < SIZE_CACHE_MAX_AGE_MS) return again.size;
 
         try {
-            const result = await qqq.getFolderInfo(folderPath);
+            const result = await qqq.getFolderInfo(canon);
             if (result && result.success) {
                 const sz = Number(result.total_size) || 0;
-                folderSizeCache.set(folderPath, { size: sz, ts: Date.now() });
+                folderSizeCache.set(key, { size: sz, ts: Date.now() });
                 _pruneCacheIfNeeded(folderSizeCache);
                 return sz;
             }
             if (result && result.error) throw new Error(result.error);
-            throw new Error("未知错误");
+            throw new Error("unknown_error");
         } catch (error) {
-            qqq.logMessage(`获取文件夹大小失败: ${folderPath} - ${error.message}`, "ERROR");
+            qqq.logMessage(`获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
             throw error;
         }
     });
@@ -215,6 +375,7 @@ function formatFileSize(bytes, mode) {
     if (mode === "k" && bytes < 1024) return { text: "", show: false };
     if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
 
+    // 三段叠印：xxxxx xxxxx xxxxx（m/k/b 三段）
     const segWidth = 5;
     const ovRaw = parseInt(kbmOverlap, 10);
     const overlapChars = Math.max(0, Math.min(segWidth - 1, isNaN(ovRaw) ? 0 : ovRaw));
@@ -245,13 +406,14 @@ function formatFileSize(bytes, mode) {
 }
 
 function getFileSizeDisplayAsync(itemPath, mode) {
-    return globalScheduler.schedule(`sizeDisplay:${mode}:${itemPath}`, async () => {
+    const canon = canonicalizeExistingPath(itemPath);
+    const key = cacheKeyForPath(canon);
+
+    return globalScheduler.schedule(`sizeDisplay:${mode}:${key}`, async () => {
         if (mode === "none") return "";
 
-        // 文件：用 mtime + TTL 缓存
-        // 文件夹：用 TTL 缓存（上面 getFolderSize）
         try {
-            const stats = await fs.promises.stat(itemPath);
+            const stats = await fs.promises.stat(canon);
 
             const handleSize = (sizeInBytes) => {
                 const formatted = formatFileSize(sizeInBytes, mode);
@@ -260,20 +422,24 @@ function getFileSizeDisplayAsync(itemPath, mode) {
 
             if (stats.isFile()) {
                 const now = Date.now();
-                const cached = fileSizeCache.get(itemPath);
-                if (cached && cached.mtimeMs === stats.mtimeMs && now - cached.ts < SIZE_CACHE_MAX_AGE_MS) {
+                const cached = fileSizeCache.get(key);
+                if (
+                    cached &&
+                    cached.mtimeMs === stats.mtimeMs &&
+                    now - cached.ts < SIZE_CACHE_MAX_AGE_MS
+                ) {
                     return handleSize(cached.size);
                 }
                 const sz = Number(stats.size) || 0;
-                fileSizeCache.set(itemPath, { size: sz, mtimeMs: stats.mtimeMs, ts: Date.now() });
+                fileSizeCache.set(key, { size: sz, mtimeMs: stats.mtimeMs, ts: Date.now() });
                 _pruneCacheIfNeeded(fileSizeCache);
                 return handleSize(sz);
             } else {
-                const folderSz = await getFolderSize(itemPath);
+                const folderSz = await getFolderSize(canon);
                 return handleSize(folderSz);
             }
         } catch (err) {
-            qqq.logMessage(`计算大小失败: ${itemPath} - ${err.message}`, "ERROR");
+            qqq.logMessage(`计算大小失败: ${canon} - ${err.message}`, "ERROR");
             return " ...err ";
         }
     });
@@ -344,14 +510,18 @@ function saveConfig(
 // ==================== 目录管理 ====================
 function removeFromRecycleBin(directory) {
     const config = getConfig();
+    const canon = canonicalizeExistingPath(directory);
     let updated = false;
-    const newRecycleBin = config.recycleBin.filter((dir) => {
-        if (dir === directory) {
+
+    const newRecycleBin = (config.recycleBin || []).filter((dir) => {
+        const c = canonicalizeExistingPath(dir);
+        if (c && canon && cacheKeyForPath(c) === cacheKeyForPath(canon)) {
             updated = true;
             return false;
         }
         return true;
     });
+
     if (updated) {
         saveConfig(
             config.recentDirs,
@@ -368,9 +538,13 @@ function removeFromRecycleBin(directory) {
 
 function addToRecycleBin(directory) {
     const config = getConfig();
-    if (!directory || !fs.existsSync(directory) || typeof directory !== "string") return;
-    const newRecycleBin = config.recycleBin.filter((dir) => dir !== directory);
-    newRecycleBin.unshift(directory);
+    const canon = canonicalizeExistingPath(directory);
+    if (!canon || !fs.existsSync(canon) || typeof canon !== "string") return;
+
+    const key = cacheKeyForPath(canon);
+    const newRecycleBin = (config.recycleBin || []).filter((dir) => cacheKeyForPath(dir) !== key);
+    newRecycleBin.unshift(canon);
+
     saveConfig(
         config.recentDirs,
         config.lineSpacing,
@@ -385,11 +559,17 @@ function addToRecycleBin(directory) {
 
 function saveRecentDirectory(directory) {
     const config = getConfig();
-    if (!directory || !fs.existsSync(directory)) return;
-    removeFromRecycleBin(directory);
-    let recentDirs = config.recentDirs.filter((dir) => dir && dir !== directory);
+    const canon = canonicalizeExistingPath(directory);
+    if (!canon || !fs.existsSync(canon)) return;
+
+    removeFromRecycleBin(canon);
+
+    const key = cacheKeyForPath(canon);
+    let recentDirs = (config.recentDirs || []).filter((dir) => dir && cacheKeyForPath(dir) !== key);
+
     if (recentDirs.length >= 10) addToRecycleBin(recentDirs.pop());
-    recentDirs.unshift(directory);
+    recentDirs.unshift(canon);
+
     saveConfig(
         recentDirs.slice(0, 10),
         config.lineSpacing,
@@ -404,16 +584,20 @@ function saveRecentDirectory(directory) {
 
 function removeAndRecycleRecentDirectory(directory) {
     const config = getConfig();
+    const canon = canonicalizeExistingPath(directory);
+    const key = cacheKeyForPath(canon);
+
     let updated = false;
-    const newRecentDirs = config.recentDirs.filter((dir) => {
-        if (dir === directory) {
+    const newRecentDirs = (config.recentDirs || []).filter((dir) => {
+        if (cacheKeyForPath(dir) === key) {
             updated = true;
             return false;
         }
         return true;
     });
+
     if (updated) {
-        addToRecycleBin(directory);
+        addToRecycleBin(canon);
         saveConfig(
             newRecentDirs,
             config.lineSpacing,
@@ -452,28 +636,33 @@ function getDrives() {
 
 function getDirectoryContents(dirPath) {
     const contents = { dirs: [], files: [] };
+    const canonDir = canonicalizeExistingPath(dirPath);
+
     try {
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+        const entries = fs.readdirSync(canonDir, { withFileTypes: true });
         for (const entry of entries) {
-            const entryPath = path.join(dirPath, entry.name);
+            const entryPath = path.join(canonDir, entry.name);
             try {
                 const stat = fs.statSync(entryPath);
                 const item = {
                     name: entry.name,
-                    path: entryPath,
+                    path: canonicalizeExistingPath(entryPath),
                     isDir: entry.isDirectory(),
                     mtime: stat.mtime.toISOString(),
                 };
                 if (item.isDir) contents.dirs.push(item);
                 else contents.files.push(item);
-            } catch { }
+            } catch {
+                /* ignore */
+            }
         }
         const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
         contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
         contents.files.sort((a, b) => collator.compare(a.name, b.name));
     } catch (error) {
-        qqq.logMessage(`读取目录内容失败: ${dirPath}`, "ERROR");
+        qqq.logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
     }
+
     return contents;
 }
 
@@ -481,645 +670,735 @@ function getDirectoryContents(dirPath) {
 function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
     const escapedCurrentPath = escapeJsStringLiteral(currentPath);
     const escapedSizeMode = escapeJsStringLiteral(currentSizeMode);
-    const escapedSidebarRatio = sidebarRatio.toFixed(4);
+    const escapedSidebarRatio = Number(sidebarRatio || 0.2).toFixed(4);
 
     return `
-        const vscode = acquireVsCodeApi();
-        const sizeMode = '${escapedSizeMode}';
-        let currentPath = '${escapedCurrentPath}';
-        let sidebarRatio = ${escapedSidebarRatio};
-        let resizeObserver = null;
-        const MIN_RESPONSIVE_WIDTH = 240;
-        const MIN_TAG_WIDTH = 170;
-        const ROW_HEIGHT = 22;
-        const PIN_HIDE_WIDTH = 360;
-        let baseRecentHeight = 0;
-        let pathTooltipEl = null;
-        let pathTooltipVisible = false;
+const vscode = acquireVsCodeApi();
 
-        function ensurePathTooltip() {
-            if (pathTooltipEl) return;
-            pathTooltipEl = document.createElement('div');
-            pathTooltipEl.id = 'pathTooltip';
-            pathTooltipEl.className = 'path-tooltip';
-            pathTooltipEl.style.display = 'none';
-            document.body.appendChild(pathTooltipEl);
+let sizeMode = '${escapedSizeMode}';
+let currentPath = '${escapedCurrentPath}';
+let sidebarRatio = ${escapedSidebarRatio};
+
+let resizeObserver = null;
+const MIN_RESPONSIVE_WIDTH = 240;
+const MIN_TAG_WIDTH = 170;
+const PIN_HIDE_WIDTH = 360;
+let baseRecentHeight = 0;
+
+let pathTooltipEl = null;
+let pathTooltipVisible = false;
+
+function ensurePathTooltip(){
+  if (pathTooltipEl) return;
+  pathTooltipEl = document.createElement('div');
+  pathTooltipEl.id = 'pathTooltip';
+  pathTooltipEl.className = 'path-tooltip';
+  pathTooltipEl.style.display = 'none';
+  document.body.appendChild(pathTooltipEl);
+}
+
+function hidePathTooltip(){
+  if (pathTooltipEl) pathTooltipEl.style.display = 'none';
+  pathTooltipVisible = false;
+}
+
+function showPathTooltip(text, clientX, clientY){
+  if (!text) { hidePathTooltip(); return; }
+  ensurePathTooltip();
+  pathTooltipEl.textContent = text;
+  const margin = 8;
+  let left = clientX + margin;
+  let top = clientY + margin;
+  pathTooltipEl.style.left = left + 'px';
+  pathTooltipEl.style.top = top + 'px';
+  pathTooltipEl.style.display = 'block';
+  pathTooltipVisible = true;
+
+  const rect = pathTooltipEl.getBoundingClientRect();
+  const vw = window.innerWidth || document.documentElement.clientWidth;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+
+  if (rect.right > vw - 4) {
+    left = Math.max(4, vw - rect.width - 4);
+    pathTooltipEl.style.left = left + 'px';
+  }
+  if (rect.bottom > vh - 4) {
+    top = Math.max(4, vh - rect.height - 4);
+    pathTooltipEl.style.top = top + 'px';
+  }
+}
+
+function isEllipsisActive(element){
+  if (!element) return false;
+  return element.scrollWidth > element.clientWidth + 1;
+}
+
+// 关键修复：不要用 querySelector attribute 拼接路径（特殊字符会炸）
+function findItemElementByPath(p, type){
+  const all = document.querySelectorAll('.file-item');
+  for (const el of all) {
+    if (el && el.dataset && el.dataset.path === p) {
+      if (!type) return el;
+      if ((el.dataset.type || '') === type) return el;
+    }
+  }
+  return null;
+}
+
+function handleSidebarTooltipHover(e){
+  const target = e.target.closest('.nav-item, .recycle-item');
+  if (!target || !isEllipsisActive(target)) {
+    if (pathTooltipVisible) hidePathTooltip();
+    return;
+  }
+  const text = (target.textContent || '').trim();
+  if (text) showPathTooltip(text, e.clientX, e.clientY);
+}
+
+function handleKyTooltipHover(e){
+  const ky = document.getElementById('kyContent');
+  if (!ky || ky.clientWidth >= 200) {
+    if (pathTooltipVisible) hidePathTooltip();
+    return;
+  }
+  let text = '';
+  const recentItem = e.target.closest('.recent-item');
+  if (recentItem) {
+    const span = recentItem.querySelector('span:not(.delete-button)');
+    text = (span && span.textContent) ? span.textContent : (recentItem.textContent || '');
+  } else {
+    const fileItem = e.target.closest('.file-item');
+    if (fileItem) text = fileItem.getAttribute('data-path') || '';
+    else {
+      if (pathTooltipVisible) hidePathTooltip();
+      return;
+    }
+  }
+  text = (text || '').trim();
+  if (text) showPathTooltip(text, e.clientX, e.clientY);
+}
+
+function calculateAndAdjustScroll(){
+  const recentSection = document.querySelector('.recent-section');
+  const kyContent = document.getElementById('kyContent');
+  const addressBar = document.querySelector('.address-bar');
+  if (!recentSection || !addressBar || !kyContent) return;
+
+  const footerHeight = 60;
+  const editorHeight = window.innerHeight - footerHeight;
+
+  if (!baseRecentHeight && recentSection.style.display !== 'none') {
+    baseRecentHeight = recentSection.offsetHeight || recentSection.scrollHeight || 0;
+  }
+  const addressHeight = addressBar.offsetHeight || 0;
+  const needHeight = (baseRecentHeight || recentSection.offsetHeight || 0) + addressHeight + 100;
+
+  recentSection.style.display = (editorHeight < needHeight) ? 'none' : '';
+  const needScroll = kyContent.scrollHeight > kyContent.clientHeight + 1;
+  kyContent.style.overflowY = needScroll ? 'auto' : 'hidden';
+}
+
+function checkAndApplyResponsive(){
+  const container = document.querySelector('.container');
+  if (!container) return;
+
+  const currentWidth = container.clientWidth;
+  const footer = document.querySelector('.footer');
+  const pinContainer = document.getElementById('pinButton');
+  const saveButton = footer ? footer.querySelector('.save-button') : null;
+  const createFolderBtn = footer ? footer.querySelector('.cancel-button') : null;
+
+  if (pinContainer) pinContainer.style.display = (currentWidth < PIN_HIDE_WIDTH) ? 'none' : 'block';
+
+  if (currentWidth < MIN_RESPONSIVE_WIDTH) {
+    if (saveButton) saveButton.style.display = 'none';
+    if (createFolderBtn) createFolderBtn.style.display = 'block';
+    if (footer) footer.classList.add('responsive-narrow');
+  } else {
+    if (saveButton) saveButton.style.display = 'block';
+    if (createFolderBtn) createFolderBtn.style.display = 'block';
+    if (footer) footer.classList.remove('responsive-narrow');
+  }
+
+  if (currentWidth < MIN_TAG_WIDTH) {
+    if (createFolderBtn) createFolderBtn.style.display = 'none';
+    if (footer) footer.classList.add('responsive-extreme');
+  } else {
+    if (footer) footer.classList.remove('responsive-extreme');
+  }
+
+  setTimeout(calculateAndAdjustScroll, 50);
+}
+
+function adjustSidebarByRatio(){
+  const container = document.querySelector('.container');
+  const sidebar = document.querySelector('.sidebar');
+  const resizer = document.getElementById('sidebarResizer');
+  const kyContent = document.querySelector('.ky-content');
+  if (!container || !sidebar || !resizer || !kyContent) return;
+
+  const totalWidth = container.clientWidth;
+  let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio));
+
+  sidebar.style.width = newWidth + 'px';
+  resizer.style.left = newWidth + 'px';
+  kyContent.style.left = newWidth + 'px';
+}
+
+function hideAllContextMenus(){
+  const a = document.getElementById('itemContextMenu');
+  const b = document.getElementById('emptyContextMenu');
+  if (a) a.style.display = 'none';
+  if (b) b.style.display = 'none';
+}
+
+function navigateTo(p){ vscode.postMessage({ command: 'navigate', path: p }); }
+function navigateIntoFolder(p){ vscode.postMessage({ command: 'navigate', path: p }); }
+function removeFromRecent(p){ vscode.postMessage({ command: 'removeFromRecent', path: p }); }
+function cancel(){ vscode.postMessage({ command: 'cancel' }); }
+
+function togglePin(){
+  const pinBox = document.querySelector('#pinButton .pin-box');
+  const pinCheckbox = document.querySelector('#pinButton .pin-checkbox');
+  if (!pinBox || !pinCheckbox) return;
+
+  const newPinState = !pinBox.classList.contains('pinned');
+  if (newPinState) {
+    pinBox.classList.add('pinned');
+    pinCheckbox.textContent = '\\u2713';
+  } else {
+    pinBox.classList.remove('pinned');
+    pinCheckbox.textContent = '\\u25a1';
+  }
+  vscode.postMessage({ command: 'togglePin', isPinned: newPinState });
+}
+
+function isPinned(){
+  return !!document.querySelector('#pinButton .pin-box.pinned');
+}
+
+function saveFile(){
+  const filenameInput = document.getElementById('filenameInput');
+  if (!filenameInput) return;
+  const filename = (filenameInput.value || '').trim();
+  if (!filename) { alert('请输入文件名'); return; }
+
+  const pinned = isPinned();
+  vscode.postMessage({ command: 'save', filename, isPinned: pinned, openInCurrentGroup: !pinned });
+
+  if (pinned) {
+    filenameInput.value = '';
+    filenameInput.focus();
+  }
+}
+
+function createFolder(){
+  const filenameInput = document.getElementById('filenameInput');
+  if (!filenameInput) return;
+  const folderName = (filenameInput.value || '').trim();
+  if (!folderName) { alert('请输入文件夹名'); return; }
+  vscode.postMessage({ command: 'createFolder', folderName });
+}
+
+function setSizeMode(mode){
+  hideAllContextMenus();
+  vscode.postMessage({ command: 'setSizeMode', mode });
+}
+
+// ===== 选择/重命名 =====
+let selectedItem = null;
+let currentFocusType = 'filenameInput';
+
+function updateFocusType(element){
+  if (!element) { currentFocusType = 'other'; return; }
+  if (['filenameInput', 'addressInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
+  else if (element.classList.contains('file-list-container') || element.closest('.file-list-container')) currentFocusType = 'fileList';
+  else if (element.classList.contains('sidebar') || element.closest('.sidebar')) currentFocusType = 'sidebar';
+  else if (element.classList.contains('recent-section') || element.closest('.recent-section')) currentFocusType = 'recentSection';
+  else currentFocusType = 'other';
+}
+
+function selectFileItem(fileItem, requestSize){
+  if (!fileItem) return;
+  const type = fileItem.dataset.type;
+  const p = fileItem.dataset.path;
+  const name = fileItem.dataset.name;
+
+  const prevSelected = document.querySelector('.file-item.selected');
+  if (prevSelected && prevSelected !== fileItem) {
+    if (prevSelected.querySelector('.rename-input')) cancelRename(prevSelected);
+    prevSelected.classList.remove('selected');
+  }
+
+  fileItem.classList.add('selected');
+  selectedItem = { type, path: p, name };
+  currentFocusType = 'fileList';
+
+  if (sizeMode !== 'none' && requestSize) {
+    const szArea = fileItem.querySelector('.sz-area');
+    if (szArea) szArea.textContent = '    \\u2022    ';
+    vscode.postMessage({ command: 'requestSize', path: p, type });
+  }
+}
+
+let renameBlurHandler = null;
+
+function startRename(itemPath, itemName, itemType){
+  const itemElement = findItemElementByPath(itemPath);
+  if (!itemElement) return;
+
+  const prevSelected = document.querySelector('.file-item.selected');
+  if (prevSelected && prevSelected !== itemElement) {
+    if (prevSelected.querySelector('.rename-input')) cancelRename(prevSelected);
+    prevSelected.classList.remove('selected');
+  }
+
+  itemElement.classList.add('selected');
+  selectedItem = { type: itemType, path: itemPath, name: itemName };
+
+  const nameArea = itemElement.querySelector(\`.\\\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
+  if (!nameArea || nameArea.querySelector('.rename-input')) return;
+
+  const originalContent = nameArea.innerHTML;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'rename-input';
+  input.value = itemName;
+
+  Object.assign(input.style, {
+    width: '100%',
+    padding: '0',
+    border: '1px solid #ff6b00',
+    boxSizing: 'border-box',
+    fontSize: 'inherit',
+    fontFamily: 'inherit',
+    lineHeight: 'inherit',
+    backgroundColor: '#ff6b00',
+    color: 'white'
+  });
+
+  nameArea.innerHTML = '';
+  nameArea.appendChild(input);
+  input.focus();
+
+  const dotIndex = itemName.lastIndexOf('.');
+  if (dotIndex > 0) input.setSelectionRange(0, dotIndex);
+  else input.select();
+
+  currentFocusType = 'input';
+  renameBlurHandler = () => cancelRename(itemElement, originalContent);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation();
+      commitRename(itemElement, itemPath, itemType, input.value.trim());
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      cancelRename(itemElement, originalContent);
+    }
+  };
+
+  input.addEventListener('keydown', handleKeyDown);
+  input.addEventListener('blur', renameBlurHandler);
+  itemElement.dataset.originalContent = originalContent;
+}
+
+function commitRename(itemElement, oldPath, itemType, newName){
+  const input = itemElement.querySelector('.rename-input');
+  if (!input) return;
+  input.removeEventListener('blur', renameBlurHandler);
+  renameBlurHandler = null;
+  currentFocusType = 'fileList';
+  const oldName = itemElement.dataset.name;
+
+  if (newName && newName !== oldName) {
+    vscode.postMessage({ command: 'renameItem', oldPath, newName, itemType });
+  } else {
+    cancelRename(itemElement, itemElement.dataset.originalContent);
+  }
+}
+
+function cancelRename(itemElement, originalContent){
+  const input = itemElement.querySelector('.rename-input');
+  if (!input) return;
+  input.removeEventListener('blur', renameBlurHandler);
+  renameBlurHandler = null;
+  currentFocusType = 'fileList';
+
+  const itemType = itemElement.dataset.type;
+  const nameArea = itemElement.querySelector(\`.\\\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
+  if (nameArea) {
+    nameArea.innerHTML = originalContent || \`<span class="file-name">\\\${itemElement.dataset.name}</span>\`;
+  }
+}
+
+// ===== 操作 =====
+function performEditAction(item){ if (item) startRename(item.path, item.name, item.type); }
+function performOpenAction(item){ if (item) vscode.postMessage({ command: 'openWithDefault', path: item.path, type: item.type }); }
+function performDeleteAction(item){
+  if (!item) return;
+  const el = findItemElementByPath(item.path);
+  if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+  vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: item.path, type: item.type });
+  selectedItem = null;
+}
+function performCodeAction(item){
+  if (!item) return;
+  if (item.type === 'file') {
+    const pinned = isPinned();
+    vscode.postMessage({ command: 'editFile', path: item.path, isPinned: pinned, openInCurrentGroup: !pinned });
+  } else {
+    vscode.postMessage({ command: 'openFolderInNewWindow', path: item.path });
+  }
+}
+function performSizeAction(item){
+  if (!item) return;
+  const el = findItemElementByPath(item.path);
+  if (el) {
+    const sz = el.querySelector('.sz-area');
+    if (sz) sz.textContent = '    \\u2022    ';
+  }
+  vscode.postMessage({ command: 'refreshSize', path: item.path, type: item.type });
+}
+
+// ===== 右键菜单 =====
+function handleContextMenuAction(action){
+  const menu = document.getElementById('itemContextMenu');
+  if (!menu) return;
+  const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
+  hideAllContextMenus();
+  if (!item.path) return;
+
+  switch(action){
+    case 'rename': performEditAction(item); break;
+    case 'open': performOpenAction(item); break;
+    case 'delete': performDeleteAction(item); break;
+    case 'code': performCodeAction(item); break;
+    case 'size': performSizeAction(item); break;
+  }
+}
+
+function refreshSizeDisplay(){
+  const items = document.querySelectorAll('.file-item');
+  items.forEach(item => {
+    const szArea = item.querySelector('.sz-area');
+    if (!szArea) return;
+    if (sizeMode !== 'none') {
+      szArea.textContent = '    \\u2022    ';
+      vscode.postMessage({ command: 'requestSize', path: item.dataset.path, type: item.dataset.type });
+    } else {
+      szArea.textContent = '';
+    }
+  });
+}
+
+function requestFileSizeUpdates(items){
+  if (sizeMode === 'none') return;
+  items.forEach(item => {
+    if (!item || item.name === '..') return;
+    // 文件/文件夹都允许 requestSize（文件会命中 stat；文件夹会走 folderSize）
+    const el = findItemElementByPath(item.path, item.type);
+    if (el) {
+      const sz = el.querySelector('.sz-area');
+      if (sz) sz.textContent = '    \\u2022    ';
+    }
+    vscode.postMessage({ command: 'requestSize', path: item.path, type: item.type, name: item.name });
+  });
+}
+
+// ====== message ======
+window.addEventListener('message', event => {
+  const message = event.data;
+  if (!message) return;
+
+  if (message.command === 'update') {
+    const addr = document.getElementById('addressInput');
+    if (addr) addr.value = message.currentPath || '';
+    const list = document.getElementById('fileList');
+    if (list) list.innerHTML = message.fileListHtml || '';
+    requestFileSizeUpdates(message.items || []);
+    setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
+  } else if (message.command === 'updateSize') {
+    const el = findItemElementByPath(message.path, message.type);
+    if (el) {
+      const sz = el.querySelector('.sz-area');
+      if (sz) sz.textContent = message.sizeDisplay || '';
+    }
+  } else if (message.command === 'clearFilenameInput') {
+    const f = document.getElementById('filenameInput');
+    if (f) { f.value = ''; f.focus(); }
+  } else if (message.command === 'startRename') {
+    startRename(message.path, message.name, message.type);
+  } else if (message.command === 'refreshSizes') {
+    refreshSizeDisplay();
+  } else if (message.command === 'restoreDeletedItem') {
+    const el = findItemElementByPath(message.path);
+    if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
+  } else if (message.command === 'updateSidebarRatio') {
+    sidebarRatio = message.ratio;
+    adjustSidebarByRatio();
+  } else if (message.command === 'focusInput') {
+    const f = document.getElementById('filenameInput');
+    if (f) { f.focus(); f.select(); }
+  }
+});
+
+// ====== DOM ======
+document.addEventListener('focusin', (e) => updateFocusType(e.target));
+document.addEventListener('click', (e) => {
+  hideAllContextMenus();
+  if (!['filenameInput', 'addressInput'].includes((e.target && e.target.id) || '') && !(e.target && e.target.classList && e.target.classList.contains('rename-input'))) {
+    updateFocusType(e.target);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Backspace' && currentFocusType !== 'input') {
+    e.preventDefault();
+    vscode.postMessage({ command: 'navigateUp' });
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (currentFocusType === 'input' || !selectedItem) return;
+  const key = (e.key || '').toLowerCase();
+
+  // 避免把 ctrl+a/c/x 吞掉（让 vscode/webview 自己处理）
+  if (e.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) { e.preventDefault(); e.stopPropagation(); return; }
+
+  if (key === 'q') { e.preventDefault(); e.stopPropagation(); performEditAction(selectedItem); }
+  else if (key === 'w') { e.preventDefault(); e.stopPropagation(); performOpenAction(selectedItem); }
+  else if (key === 's') { e.preventDefault(); e.stopPropagation(); performDeleteAction(selectedItem); }
+  else if (key === 'e') { e.preventDefault(); e.stopPropagation(); performCodeAction(selectedItem); }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  ensurePathTooltip();
+
+  const filenameInput = document.getElementById('filenameInput');
+  if (filenameInput) {
+    filenameInput.focus();
+    filenameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') saveFile();
+    });
+  }
+
+  const addressInput = document.getElementById('addressInput');
+  if (addressInput) {
+    addressInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const p = (addressInput.value || '').trim();
+        if (p) vscode.postMessage({ command: 'navigate', path: p });
+      }
+    });
+  }
+
+  const sidebarEl = document.querySelector('.sidebar');
+  if (sidebarEl) {
+    sidebarEl.addEventListener('mousemove', handleSidebarTooltipHover);
+    sidebarEl.addEventListener('mouseleave', hidePathTooltip);
+  }
+
+  const kyEl = document.getElementById('kyContent');
+  if (kyEl) {
+    kyEl.addEventListener('mousemove', handleKyTooltipHover);
+    kyEl.addEventListener('mouseleave', hidePathTooltip);
+  }
+
+  document.addEventListener('scroll', hidePathTooltip, true);
+
+  window.addEventListener('resize', () => {
+    adjustSidebarByRatio();
+    checkAndApplyResponsive();
+  });
+
+  const container = document.querySelector('.container');
+  if (container && 'ResizeObserver' in window) {
+    resizeObserver = new ResizeObserver(() => {
+      adjustSidebarByRatio();
+      checkAndApplyResponsive();
+    });
+    resizeObserver.observe(container);
+  }
+
+  // 点击选择/进入
+  const fileList = document.getElementById('fileList');
+  if (fileList) {
+    fileList.addEventListener('click', (event) => {
+      const fileItem = event.target.closest('.file-item');
+      if (!fileItem) {
+        const prevSelected = document.querySelector('.file-item.selected');
+        if (prevSelected) {
+          const renameInput = prevSelected.querySelector('.rename-input');
+          if (renameInput) cancelRename(prevSelected);
+          prevSelected.classList.remove('selected');
         }
+        selectedItem = null;
+        return;
+      }
 
-        function hidePathTooltip() {
-            if (pathTooltipEl) pathTooltipEl.style.display = 'none';
-            pathTooltipVisible = false;
+      const type = fileItem.dataset.type;
+      const isSzArea = event.target.classList.contains('sz-area');
+      const isSelectArea = event.target.closest('.file-select-area');
+      const isFolderNameArea = event.target.closest('.folder-name-area');
+
+      if (type === 'folder') {
+        if (isSelectArea && !isFolderNameArea) {
+          selectFileItem(fileItem, true);
+          currentFocusType = 'fileList';
+          return;
         }
-
-        function showPathTooltip(text, clientX, clientY) {
-            if (!text) { hidePathTooltip(); return; }
-            ensurePathTooltip();
-            pathTooltipEl.textContent = text;
-            const margin = 8;
-            let left = clientX + margin;
-            let top = clientY + margin;
-            pathTooltipEl.style.left = left + 'px';
-            pathTooltipEl.style.top = top + 'px';
-            pathTooltipEl.style.display = 'block';
-            pathTooltipVisible = true;
-
-            const rect = pathTooltipEl.getBoundingClientRect();
-            const vw = window.innerWidth || document.documentElement.clientWidth;
-            const vh = window.innerHeight || document.documentElement.clientHeight;
-
-            if (rect.right > vw - 4) {
-                left = Math.max(4, vw - rect.width - 4);
-                pathTooltipEl.style.left = left + 'px';
-            }
-            if (rect.bottom > vh - 4) {
-                top = Math.max(4, vh - rect.height - 4);
-                pathTooltipEl.style.top = top + 'px';
-            }
+        if (isFolderNameArea) {
+          vscode.postMessage({ command: 'navigate', path: fileItem.dataset.path });
+          currentFocusType = 'fileList';
+          return;
         }
-
-        function isEllipsisActive(element) {
-            if (!element) return false;
-            return element.scrollWidth > element.clientWidth + 1;
-        }
-
-        // 关键修复：不要用 querySelector attribute 拼接路径（很容易被特殊字符搞炸）
-        function findItemElementByPath(p, type) {
-            const all = document.querySelectorAll('.file-item');
-            for (const el of all) {
-                if (el && el.dataset && el.dataset.path === p) {
-                    if (!type) return el;
-                    if ((el.dataset.type || '') === type) return el;
-                }
-            }
-            return null;
-        }
-
-        function handleSidebarTooltipHover(e) {
-            const target = e.target.closest('.nav-item, .recycle-item');
-            if (!target || !isEllipsisActive(target)) {
-                if (pathTooltipVisible) hidePathTooltip();
-                return;
-            }
-            let text = (target.textContent || '').trim();
-            if (text) showPathTooltip(text, e.clientX, e.clientY);
-        }
-
-        function handleKyTooltipHover(e) {
-            const ky = document.getElementById('kyContent');
-            if (!ky || ky.clientWidth >= 200) {
-                if (pathTooltipVisible) hidePathTooltip();
-                return;
-            }
-            let text = '';
-            const recentItem = e.target.closest('.recent-item');
-            if (recentItem) {
-                const span = recentItem.querySelector('span:not(.delete-button)');
-                text = (span && span.textContent) ? span.textContent : (recentItem.textContent || '');
-            } else {
-                const fileItem = e.target.closest('.file-item');
-                if (fileItem) text = fileItem.getAttribute('data-path') || '';
-                else {
-                    if (pathTooltipVisible) hidePathTooltip();
-                    return;
-                }
-            }
-            text = (text || '').trim();
-            if (text) showPathTooltip(text, e.clientX, e.clientY);
-        }
-
-        function calculateAndAdjustScroll() {
-            const recentSection = document.querySelector('.recent-section');
-            const kyContent = document.getElementById('kyContent');
-            const addressBar = document.querySelector('.address-bar');
-            if (!recentSection || !addressBar || !kyContent) return;
-
-            const footerHeight = 60;
-            const editorHeight = window.innerHeight - footerHeight;
-
-            if (!baseRecentHeight && recentSection.style.display !== 'none') {
-                baseRecentHeight = recentSection.offsetHeight || recentSection.scrollHeight || 0;
-            }
-            const addressHeight = addressBar.offsetHeight || 0;
-            const needHeight = (baseRecentHeight || recentSection.offsetHeight || 0) + addressHeight + 100;
-
-            recentSection.style.display = (editorHeight < needHeight) ? 'none' : '';
-            const needScroll = kyContent.scrollHeight > kyContent.clientHeight + 1;
-            kyContent.style.overflowY = needScroll ? 'auto' : 'hidden';
-        }
-
-        function checkAndApplyResponsive() {
-            const container = document.querySelector('.container');
-            if (!container) return;
-
-            const currentWidth = container.clientWidth;
-            const footer = document.querySelector('.footer');
-            const pinContainer = document.getElementById('pinButton');
-            const saveButton = footer.querySelector('.save-button');
-            const createFolderBtn = footer.querySelector('.cancel-button');
-
-            if (pinContainer) pinContainer.style.display = (currentWidth < PIN_HIDE_WIDTH) ? 'none' : 'block';
-
-            if (currentWidth < MIN_RESPONSIVE_WIDTH) {
-                if (saveButton) saveButton.style.display = 'none';
-                if (createFolderBtn) createFolderBtn.style.display = 'block';
-                footer.classList.add('responsive-narrow');
-            } else {
-                if (saveButton) saveButton.style.display = 'block';
-                if (createFolderBtn) createFolderBtn.style.display = 'block';
-                footer.classList.remove('responsive-narrow');
-            }
-
-            if (currentWidth < MIN_TAG_WIDTH) {
-                if (createFolderBtn) createFolderBtn.style.display = 'none';
-                footer.classList.add('responsive-extreme');
-            } else {
-                footer.classList.remove('responsive-extreme');
-            }
-            setTimeout(calculateAndAdjustScroll, 50);
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const filenameInput = document.getElementById('filenameInput');
-            filenameInput.focus();
-            updateResourceExplorer();
-            adjustSidebarByRatio();
-            ensurePathTooltip();
-
-            const sidebarEl = document.querySelector('.sidebar');
-            if (sidebarEl) {
-                sidebarEl.addEventListener('mousemove', handleSidebarTooltipHover);
-                sidebarEl.addEventListener('mouseleave', hidePathTooltip);
-            }
-            const kyEl = document.getElementById('kyContent');
-            if (kyEl) {
-                kyEl.addEventListener('mousemove', handleKyTooltipHover);
-                kyEl.addEventListener('mouseleave', hidePathTooltip);
-            }
-            document.addEventListener('scroll', hidePathTooltip, true);
-
-            window.addEventListener('resize', () => {
-                adjustSidebarByRatio();
-                checkAndApplyResponsive();
-            });
-
-            const container = document.querySelector('.container');
-            if (container && 'ResizeObserver' in window) {
-                resizeObserver = new ResizeObserver(() => {
-                    adjustSidebarByRatio();
-                    checkAndApplyResponsive();
-                });
-                resizeObserver.observe(container);
-            }
-
-            document.getElementById('fileList').addEventListener('click', (event) => {
-                const fileItem = event.target.closest('.file-item');
-                if (!fileItem) {
-                    const prevSelected = document.querySelector('.file-item.selected');
-                    if (prevSelected) {
-                        const renameInput = prevSelected.querySelector('.rename-input');
-                        if (renameInput) cancelRename(prevSelected);
-                        prevSelected.classList.remove('selected');
-                    }
-                    selectedItem = null;
-                    return;
-                }
-
-                const type = fileItem.dataset.type;
-                const isSzArea = event.target.classList.contains('sz-area');
-                const isSelectArea = event.target.closest('.file-select-area');
-                const isFolderNameArea = event.target.closest('.folder-name-area');
-
-                if (type === 'folder') {
-                    if (isSelectArea && !isFolderNameArea) {
-                        selectFileItem(fileItem, true);
-                        currentFocusType = 'fileList';
-                        return;
-                    }
-                    if (isFolderNameArea) {
-                        vscode.postMessage({ command: 'navigate', path: fileItem.dataset.path });
-                        currentFocusType = 'fileList';
-                        return;
-                    }
-                    selectFileItem(fileItem, true);
-                    currentFocusType = 'fileList';
-                    return;
-                }
-
-                selectFileItem(fileItem, type === 'file');
-                if (isSzArea) {
-                    const szArea = event.target;
-                    szArea.textContent = '    \\u2022    ';
-                    vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type: type });
-                }
-                currentFocusType = 'fileList';
-            });
-            checkAndApplyResponsive();
-        });
-
-        function adjustSidebarByRatio() {
-            const container = document.querySelector('.container');
-            const sidebar = document.querySelector('.sidebar');
-            const resizer = document.getElementById('sidebarResizer');
-            const kyContent = document.querySelector('.ky-content');
-            if (!container || !sidebar || !resizer || !kyContent) return;
-
-            const totalWidth = container.clientWidth;
-            let newWidth = Math.max(50, Math.min(500, totalWidth * sidebarRatio));
-
-            sidebar.style.width = newWidth + 'px';
-            resizer.style.left = newWidth + 'px';
-            kyContent.style.left = newWidth + 'px';
-        }
-
-        function navigateTo(path) { vscode.postMessage({ command: 'navigate', path: path }); }
-        function navigateIntoFolder(path) { vscode.postMessage({ command: 'navigate', path: path }); }
-
-        let currentFocusType = 'filenameInput';
-        document.addEventListener('focusin', (event) => { updateFocusType(event.target); });
-        document.addEventListener('focusout', (event) => {
-            if (['filenameInput', 'addressInput'].includes(event.target.id) || event.target.classList.contains('rename-input')) {
-                setTimeout(() => {
-                    const activeElement = document.activeElement;
-                    if (!['filenameInput', 'addressInput'].includes(activeElement.id) && !activeElement.classList.contains('rename-input')) {
-                        updateFocusType(activeElement);
-                    }
-                }, 0);
-            }
-        });
-
-        document.addEventListener('click', (event) => {
-            hideAllContextMenus();
-            if (!['filenameInput', 'addressInput'].includes(event.target.id) && !event.target.classList.contains('rename-input') && currentFocusType === 'input') {
-                updateFocusType(event.target);
-            }
-        });
-
-        function updateFocusType(element) {
-            if (['filenameInput', 'addressInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
-            else if (element.classList.contains('file-list-container') || element.closest('.file-list-container')) currentFocusType = 'fileList';
-            else if (element.classList.contains('sidebar') || element.closest('.sidebar')) currentFocusType = 'sidebar';
-            else if (element.classList.contains('recent-section') || element.closest('.recent-section')) currentFocusType = 'recentSection';
-            else currentFocusType = 'other';
-        }
-
-        function handleFilenameInputKeyDown(event) { if (event.key === 'Enter') saveFile(); }
-
-        function saveFile() {
-            const filename = document.getElementById('filenameInput').value.trim();
-            if (filename) {
-                const isPinned = document.querySelector('#pinButton .pin-box').classList.contains('pinned');
-                vscode.postMessage({ command: 'save', filename: filename, isPinned: isPinned, openInCurrentGroup: !isPinned });
-                if (isPinned) {
-                    document.getElementById('filenameInput').value = '';
-                    document.getElementById('filenameInput').focus();
-                }
-            } else {
-                alert('请输入文件名');
-            }
-        }
-
-        function togglePin() {
-            const pinBox = document.querySelector('#pinButton .pin-box');
-            const pinCheckbox = document.querySelector('#pinButton .pin-checkbox');
-            const newPinState = !pinBox.classList.contains('pinned');
-
-            if (newPinState) {
-                pinBox.classList.add('pinned');
-                pinCheckbox.textContent = '\\u2713';
-            } else {
-                pinBox.classList.remove('pinned');
-                pinCheckbox.textContent = '\\u25a1';
-            }
-            vscode.postMessage({ command: 'togglePin', isPinned: newPinState });
-        }
-
-        function removeFromRecent(path) { vscode.postMessage({ command: 'removeFromRecent', path: path }); }
-        function cancel() { vscode.postMessage({ command: 'cancel' }); }
-
-        function refreshSizeDisplay() {
-            const items = document.querySelectorAll('.file-item');
-            items.forEach(item => {
-                const szArea = item.querySelector('.sz-area');
-                if (item.dataset.type === 'file' && szArea) {
-                    szArea.textContent = sizeMode !== 'none' ? '    \\u2022    ' : '';
-                    vscode.postMessage({ command: 'requestSize', path: item.dataset.path, type: item.dataset.type });
-                }
-            });
-        }
-
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'update') {
-                document.getElementById('addressInput').value = message.currentPath;
-                document.getElementById('fileList').innerHTML = message.fileListHtml;
-                requestFileSizeUpdates(message.items);
-                setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
-            }
-            else if (message.command === 'updateSize') {
-                const item = findItemElementByPath(message.path, message.type);
-                if (item) {
-                    const szArea = item.querySelector('.sz-area');
-                    if (szArea) szArea.textContent = message.sizeDisplay;
-                }
-            }
-            else if (message.command === 'clearFilenameInput') {
-                document.getElementById('filenameInput').value = '';
-                document.getElementById('filenameInput').focus();
-            }
-            else if (message.command === 'startRename') startRename(message.path, message.name, message.type);
-            else if (message.command === 'refreshSizes') refreshSizeDisplay();
-            else if (message.command === 'restoreDeletedItem') {
-                const itemElement = findItemElementByPath(message.path);
-                if (itemElement) { itemElement.style.opacity = ''; itemElement.style.pointerEvents = ''; }
-            }
-            else if (message.command === 'updateSidebarRatio') {
-                sidebarRatio = message.ratio;
-                adjustSidebarByRatio();
-            }
-            else if (message.command === 'focusInput') {
-                const filenameInput = document.getElementById('filenameInput');
-                if (filenameInput) { filenameInput.focus(); filenameInput.select(); }
-            }
-        });
-
-        function requestFileSizeUpdates(items) {
-            if (sizeMode === 'none') return;
-            items.forEach(item => {
-                if (item.name === '..' || item.type !== 'file') return;
-                const itemElement = findItemElementByPath(item.path, item.type);
-                if (itemElement) {
-                    const szArea = itemElement.querySelector('.sz-area');
-                    if (szArea) szArea.textContent = '    \\u2022    ';
-                }
-                vscode.postMessage({ command: 'requestSize', path: item.path, type: item.type, name: item.name });
-            });
-        }
-
-        let selectedItem = null;
-        function isPinned() { return !!document.querySelector('#pinButton .pin-box.pinned'); }
-
-        function selectFileItem(fileItem, requestSize) {
-            if (!fileItem) return;
-            const type = fileItem.dataset.type;
-            const p = fileItem.dataset.path;
-            const name = fileItem.dataset.name;
-
-            const prevSelected = document.querySelector('.file-item.selected');
-            if (prevSelected && prevSelected !== fileItem) {
-                if (prevSelected.querySelector('.rename-input')) cancelRename(prevSelected);
-                prevSelected.classList.remove('selected');
-            }
-
-            fileItem.classList.add('selected');
-            selectedItem = { type, path: p, name };
-            currentFocusType = 'fileList';
-
-            if (sizeMode !== 'none' && requestSize) {
-                const szArea = fileItem.querySelector('.sz-area');
-                if (szArea) szArea.textContent = '    \\u2022    ';
-                vscode.postMessage({ command: 'requestSize', path: p, type: type });
-            }
-        }
-
-        let renameBlurHandler = null;
-        function startRename(itemPath, itemName, itemType) {
-            const itemElement = findItemElementByPath(itemPath);
-            if (!itemElement) return;
-
-            const prevSelected = document.querySelector('.file-item.selected');
-            if (prevSelected && prevSelected !== itemElement) {
-                if (prevSelected.querySelector('.rename-input')) cancelRename(prevSelected);
-                prevSelected.classList.remove('selected');
-            }
-            itemElement.classList.add('selected');
-            selectedItem = { type: itemType, path: itemPath, name: itemName };
-
-            const nameArea = itemElement.querySelector(\`.\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
-            if (!nameArea || nameArea.querySelector('.rename-input')) return;
-
-            const originalContent = nameArea.innerHTML;
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'rename-input';
-            input.value = itemName;
-            Object.assign(input.style, { width: '100%', padding: '0', border: '1px solid #ff6b00', boxSizing: 'border-box', fontSize: 'inherit', fontFamily: 'inherit', lineHeight: 'inherit', backgroundColor: '#ff6b00', color: 'white' });
-
-            nameArea.innerHTML = '';
-            nameArea.appendChild(input);
-            input.focus();
-
-            const dotIndex = itemName.lastIndexOf('.');
-            if (dotIndex > 0) input.setSelectionRange(0, dotIndex);
-            else input.select();
-
-            currentFocusType = 'input';
-            renameBlurHandler = () => cancelRename(itemElement, originalContent);
-
-            const handleKeyDown = (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault(); e.stopPropagation();
-                    commitRename(itemElement, itemPath, itemType, input.value.trim());
-                } else if (e.key === 'Escape') {
-                    e.preventDefault(); e.stopPropagation();
-                    cancelRename(itemElement, originalContent);
-                }
-            };
-            input.addEventListener('keydown', handleKeyDown);
-            input.addEventListener('blur', renameBlurHandler);
-            itemElement.dataset.originalContent = originalContent;
-        }
-
-        function commitRename(itemElement, oldPath, itemType, newName) {
-            const input = itemElement.querySelector('.rename-input');
-            if (!input) return;
-            input.removeEventListener('blur', renameBlurHandler);
-            renameBlurHandler = null;
-            currentFocusType = 'fileList';
-            const oldName = itemElement.dataset.name;
-            if (newName && newName !== oldName) {
-                vscode.postMessage({ command: 'renameItem', oldPath: oldPath, newName: newName, itemType: itemType });
-            } else {
-                cancelRename(itemElement, itemElement.dataset.originalContent);
-            }
-        }
-
-        function cancelRename(itemElement, originalContent) {
-            const input = itemElement.querySelector('.rename-input');
-            if (!input) return;
-            input.removeEventListener('blur', renameBlurHandler);
-            renameBlurHandler = null;
-            currentFocusType = 'fileList';
-            const itemType = itemElement.dataset.type;
-            const nameArea = itemElement.querySelector(\`.\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
-            if (nameArea) nameArea.innerHTML = originalContent || \`<span class="file-name">\${itemElement.dataset.name}</span>\`;
-        }
-
-        function performEditAction(itemToEdit) { if(itemToEdit) startRename(itemToEdit.path, itemToEdit.name, itemToEdit.type); }
-        function performOpenAction(itemToOpen) { if(itemToOpen) vscode.postMessage({ command: 'openWithDefault', path: itemToOpen.path, type: itemToOpen.type }); }
-
-        function performDeleteAction(itemToDelete) {
-            if (!itemToDelete) return;
-            const itemElement = findItemElementByPath(itemToDelete.path);
-            if (itemElement) { itemElement.style.opacity = '0.5'; itemElement.style.pointerEvents = 'none'; }
-            vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: itemToDelete.path, type: itemToDelete.type });
-            selectedItem = null;
-        }
-
-        function performCodeAction(itemToCode) {
-            if (!itemToCode) return;
-            if (itemToCode.type === 'file') {
-                const pinned = isPinned();
-                vscode.postMessage({ command: 'editFile', path: itemToCode.path, isPinned: pinned, openInCurrentGroup: !pinned });
-            } else {
-                vscode.postMessage({ command: 'openFolderInNewWindow', path: itemToCode.path });
-            }
-        }
-
-        function performSizeAction(itemToRefresh) {
-            if (!itemToRefresh) return;
-            const item = findItemElementByPath(itemToRefresh.path);
-            if (item) {
-                const szArea = item.querySelector('.sz-area');
-                if (szArea) szArea.textContent = '    \\u2022    ';
-            }
-            vscode.postMessage({ command: 'refreshSize', path: itemToRefresh.path, type: itemToRefresh.type });
-        }
-
-        function handleContextMenuAction(action) {
-            const contextMenu = document.getElementById('itemContextMenu');
-            const itemForAction = { path: contextMenu.dataset.path, name: contextMenu.dataset.name, type: contextMenu.dataset.type };
-            hideAllContextMenus();
-            if (!itemForAction || !itemForAction.path) return;
-            switch(action) {
-                case 'rename': performEditAction(itemForAction); break;
-                case 'open': performOpenAction(itemForAction); break;
-                case 'delete': performDeleteAction(itemForAction); break;
-                case 'code': performCodeAction(itemForAction); break;
-                case 'size': performSizeAction(itemForAction); break;
-            }
-        }
-
-        function hideAllContextMenus() {
-            document.getElementById('itemContextMenu').style.display = 'none';
-            document.getElementById('emptyContextMenu').style.display = 'none';
-        }
-
-        document.getElementById('itemContextMenu').querySelectorAll('.context-menu-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault(); e.stopPropagation();
-                handleContextMenuAction(e.currentTarget.dataset.action);
-            });
-        });
-
-        document.getElementById('fileList').addEventListener('contextmenu', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            hideAllContextMenus();
-            const itemElement = e.target.closest('.file-item');
-            const itemContextMenu = document.getElementById('itemContextMenu');
-            const emptyContextMenu = document.getElementById('emptyContextMenu');
-
-            if (itemElement) {
-                selectFileItem(itemElement, false);
-                const itemPath = itemElement.dataset.path;
-                const itemType = itemElement.dataset.type;
-
-                if (itemType === 'folder') {
-                    const szArea = itemElement.querySelector('.sz-area');
-                    if (szArea) szArea.textContent = '    \\u2022    ';
-                    vscode.postMessage({ command: 'requestSize', path: itemPath, type: itemType });
-                }
-
-                itemContextMenu.dataset.path = itemPath;
-                itemContextMenu.dataset.name = itemElement.dataset.name;
-                itemContextMenu.dataset.type = itemType;
-                itemContextMenu.style.left = e.clientX + 'px';
-                itemContextMenu.style.top = e.clientY + 'px';
-                itemContextMenu.style.display = 'flex';
-            } else {
-                emptyContextMenu.style.left = e.clientX + 'px';
-                emptyContextMenu.style.top = e.clientY + 'px';
-                emptyContextMenu.style.display = 'flex';
-            }
-        });
-
-        document.addEventListener('contextmenu', (e) => {
-            if (!e.target.closest('#fileList')) { e.preventDefault(); e.stopPropagation(); }
-        });
-
-        function setSizeMode(mode) {
-            hideAllContextMenus();
-            vscode.postMessage({ command: 'setSizeMode', mode: mode });
-        }
-
-        document.addEventListener('keydown', event => {
-            if (currentFocusType === 'input' || !selectedItem) return;
-            const key = event.key.toLowerCase();
-            if (event.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) { event.preventDefault(); event.stopPropagation(); return; }
-
-            if (key === 'q') { event.preventDefault(); event.stopPropagation(); performEditAction(selectedItem); }
-            else if (key === 'w') { event.preventDefault(); event.stopPropagation(); performOpenAction(selectedItem); }
-            else if (key === 's') { event.preventDefault(); event.stopPropagation(); performDeleteAction(selectedItem); }
-            else if (key === 'e') { event.preventDefault(); event.stopPropagation(); performCodeAction(selectedItem); }
-        });
-
-        document.addEventListener('keydown', event => {
-            if (event.key === 'Backspace' && currentFocusType !== 'input') {
-                event.preventDefault();
-                vscode.postMessage({ command: 'navigateUp' });
-            }
-        });
-
-        const sidebarResizer = document.getElementById('sidebarResizer');
-        const sidebar = document.querySelector('.sidebar');
-        const kyContent = document.querySelector('.ky-content');
-        let isResizing = false;
-        let startX = 0;
-        let startWidth = 0;
-
-        if (sidebarResizer && sidebar && kyContent) {
-            sidebarResizer.addEventListener('mousedown', (e) => {
-                isResizing = true; startX = e.clientX; startWidth = sidebar.offsetWidth;
-                sidebarResizer.classList.add('active'); document.body.style.userSelect = 'none';
-            });
-            document.addEventListener('mousemove', (e) => {
-                if (!isResizing) return;
-                const container = document.querySelector('.container');
-                const totalWidth = container ? container.clientWidth : window.innerWidth;
-                const newWidth = Math.max(50, Math.min(500, totalWidth * Math.max(0.05, Math.min(0.5, (startWidth + e.clientX - startX) / totalWidth))));
-                sidebar.style.width = newWidth + 'px';
-                sidebarResizer.style.left = newWidth + 'px';
-                kyContent.style.left = newWidth + 'px';
-            });
-            document.addEventListener('mouseup', () => {
-                if (!isResizing) return;
-                isResizing = false;
-                sidebarResizer.classList.remove('active');
-                document.body.style.userSelect = '';
-                const container = document.querySelector('.container');
-                const totalWidth = container ? container.clientWidth : window.innerWidth;
-                vscode.postMessage({ command: 'saveSidebarRatio', ratio: (parseInt(sidebar.style.width) || 100) / totalWidth });
-            });
-            document.addEventListener('mouseleave', () => {
-                if (isResizing) { isResizing = false; sidebarResizer.classList.remove('active'); document.body.style.userSelect = ''; }
-            });
-        }
-
-        function createFolder() {
-            const folderName = document.getElementById('filenameInput').value.trim();
-            if (folderName) vscode.postMessage({ command: 'createFolder', folderName: folderName });
-            else alert('请输入文件夹名');
-        }
-
-        function updateResourceExplorer() {}
-    `;
+        selectFileItem(fileItem, true);
+        currentFocusType = 'fileList';
+        return;
+      }
+
+      selectFileItem(fileItem, true);
+      if (isSzArea) {
+        const szArea = event.target;
+        szArea.textContent = '    \\u2022    ';
+        vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type });
+      }
+      currentFocusType = 'fileList';
+    });
+
+    // 右键：item / empty
+    fileList.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      hideAllContextMenus();
+
+      const itemElement = e.target.closest('.file-item');
+      const itemMenu = document.getElementById('itemContextMenu');
+      const emptyMenu = document.getElementById('emptyContextMenu');
+
+      if (itemElement && itemMenu) {
+        selectFileItem(itemElement, false);
+
+        itemMenu.dataset.path = itemElement.dataset.path;
+        itemMenu.dataset.name = itemElement.dataset.name;
+        itemMenu.dataset.type = itemElement.dataset.type;
+
+        itemMenu.style.left = e.clientX + 'px';
+        itemMenu.style.top = e.clientY + 'px';
+        itemMenu.style.display = 'flex';
+      } else if (emptyMenu) {
+        emptyMenu.style.left = e.clientX + 'px';
+        emptyMenu.style.top = e.clientY + 'px';
+        emptyMenu.style.display = 'flex';
+      }
+    });
+  }
+
+  // item menu click
+  const itemMenu = document.getElementById('itemContextMenu');
+  if (itemMenu) {
+    itemMenu.querySelectorAll('.context-menu-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        handleContextMenuAction(e.currentTarget.dataset.action);
+      });
+    });
+  }
+
+  // empty menu: 若模板里有 data-mode / data-action，这里自动接管
+  const emptyMenu = document.getElementById('emptyContextMenu');
+  if (emptyMenu) {
+    emptyMenu.querySelectorAll('[data-mode]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const mode = e.currentTarget.dataset.mode;
+        if (mode) setSizeMode(mode);
+      });
+    });
+    emptyMenu.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const act = e.currentTarget.dataset.action;
+        if (act === 'createFolder') createFolder();
+        else if (act === 'saveFile') saveFile();
+        else if (act === 'cancel') cancel();
+      });
+    });
+  }
+
+  // sidebar 拖动
+  const sidebarResizer = document.getElementById('sidebarResizer');
+  const sidebar = document.querySelector('.sidebar');
+  const kyContent = document.querySelector('.ky-content');
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  if (sidebarResizer && sidebar && kyContent) {
+    sidebarResizer.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = sidebar.offsetWidth;
+      sidebarResizer.classList.add('active');
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const container = document.querySelector('.container');
+      const totalWidth = container ? container.clientWidth : window.innerWidth;
+      const ratio = Math.max(0.05, Math.min(0.5, (startWidth + e.clientX - startX) / totalWidth));
+      const newWidth = Math.max(50, Math.min(500, totalWidth * ratio));
+      sidebar.style.width = newWidth + 'px';
+      sidebarResizer.style.left = newWidth + 'px';
+      kyContent.style.left = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      sidebarResizer.classList.remove('active');
+      document.body.style.userSelect = '';
+
+      const container = document.querySelector('.container');
+      const totalWidth = container ? container.clientWidth : window.innerWidth;
+      const ratio = (parseInt(sidebar.style.width) || 100) / totalWidth;
+      vscode.postMessage({ command: 'saveSidebarRatio', ratio });
+    });
+
+    document.addEventListener('mouseleave', () => {
+      if (!isResizing) return;
+      isResizing = false;
+      sidebarResizer.classList.remove('active');
+      document.body.style.userSelect = '';
+    });
+  }
+
+  // 最终：首次渲染后调一轮布局
+  adjustSidebarByRatio();
+  checkAndApplyResponsive();
+
+  // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
+});
+
+// ====== 导出给模板内联 onclick ======
+window.navigateTo = navigateTo;
+window.navigateIntoFolder = navigateIntoFolder;
+window.removeFromRecent = removeFromRecent;
+window.cancel = cancel;
+window.saveFile = saveFile;
+window.createFolder = createFolder;
+window.togglePin = togglePin;
+window.setSizeMode = setSizeMode;
+`;
 }
 
 function getWebviewContent(currentPath) {
     const config = getConfig();
     const drives = getDrives();
 
-    const safeRecentDirs = config.recentDirs.filter((dir) => dir && fs.existsSync(dir));
-    const safeRecycleBin = config.recycleBin.filter(
+    const safeRecentDirs = (config.recentDirs || []).filter((dir) => dir && fs.existsSync(dir));
+    const safeRecycleBin = (config.recycleBin || []).filter(
         (dir) => dir && typeof dir === "string" && fs.existsSync(dir)
     );
     const showRecycleBin =
@@ -1145,9 +1424,9 @@ function getWebviewContent(currentPath) {
 
     const recycleBinHtml = showRecycleBin
         ? `
-        <div class="divider"></div>
-        <div class="recycle-bin-section">
-            ${safeRecycleBin
+<div class="divider"></div>
+<div class="recycle-bin-section">
+  ${safeRecycleBin
             .map(
                 (dir) =>
                     `<div class="recycle-item" onclick="navigateTo('${escapeJsStringLiteral(
@@ -1155,19 +1434,19 @@ function getWebviewContent(currentPath) {
                     )}')">${escapeHtmlAttribute(dir)}</div>`
             )
             .join("")}
-        </div>`
+</div>`
         : "";
 
     const recentDirsHtml = safeRecentDirs
         .reverse()
         .map(
             (dir) => `
-        <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
-            <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${escapeJsStringLiteral(
+<div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
+  <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${escapeJsStringLiteral(
                 dir
             )}')">×</span>
-            <span>${escapeHtmlAttribute(dir)}</span>
-        </div>`
+  <span>${escapeHtmlAttribute(dir)}</span>
+</div>`
         )
         .join("");
 
@@ -1202,20 +1481,39 @@ function showSaveAsDialog() {
         if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
         setTimeout(() => {
             try {
-                if (activePanel && activePanelAlive) activePanel.webview.postMessage({ command: "focusInput" });
+                if (activePanel && activePanelAlive)
+                    activePanel.webview.postMessage({ command: "focusInput" });
             } catch { }
         }, 100);
         return;
     }
 
     const config = getConfig();
-    let currentPath =
-        config.recentDirs.length > 0 ? config.recentDirs[0] : process.env.USERPROFILE || "C:\\";
+
+    // 起始目录：优先 recentDirs[0]，否则按平台默认
+    let currentPath = "";
+    if (config.recentDirs && config.recentDirs.length > 0) {
+        currentPath = canonicalizeExistingPath(config.recentDirs[0]);
+    } else {
+        if (process.platform === "win32")
+            currentPath = canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot());
+        else currentPath = canonicalizeExistingPath(os.homedir() || "/");
+    }
+
     try {
-        if (!fs.existsSync(currentPath)) currentPath = process.env.USERPROFILE || "C:\\";
-        else if (!fs.statSync(currentPath).isDirectory()) currentPath = path.dirname(currentPath);
+        if (!currentPath || !fs.existsSync(currentPath)) {
+            currentPath =
+                process.platform === "win32"
+                    ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot())
+                    : canonicalizeExistingPath(os.homedir() || "/");
+        } else if (!fs.statSync(currentPath).isDirectory()) {
+            currentPath = canonicalizeExistingPath(path.dirname(currentPath));
+        }
     } catch {
-        currentPath = process.env.USERPROFILE || "C:\\";
+        currentPath =
+            process.platform === "win32"
+                ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot())
+                : canonicalizeExistingPath(os.homedir() || "/");
     }
 
     const panel = vscode.window.createWebviewPanel(
@@ -1243,8 +1541,21 @@ function showSaveAsDialog() {
             const items = [];
             let fileListHtml = "";
 
-            if (currentPath.length > 3 && path.dirname(currentPath) !== currentPath) {
-                const parentPath = path.dirname(currentPath);
+            // 允许返回上级：root 不显示 ..
+            const canonCur = canonicalizeExistingPath(currentPath);
+            const parent = canonicalizeExistingPath(path.dirname(canonCur));
+            const root = (() => {
+                try {
+                    return path.parse(canonCur).root || "";
+                } catch {
+                    return "";
+                }
+            })();
+
+            const canGoUp = canonCur && parent && canonCur !== parent && canonCur !== root;
+
+            if (canGoUp) {
+                const parentPath = parent;
                 items.push({ path: parentPath, name: "..", type: "folder" });
                 fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
                     parentPath
@@ -1255,9 +1566,7 @@ function showSaveAsDialog() {
                 items.push({ path: dir.path, name: dir.name, type: "folder" });
                 fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
                     dir.path
-                )}" data-name="${escapeHtmlAttribute(
-                    dir.name
-                )}" data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
+                )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
                     dir.name
                 )}</span></div></div>`;
             });
@@ -1266,9 +1575,7 @@ function showSaveAsDialog() {
                 items.push({ path: file.path, name: file.name, type: "file" });
                 fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
                     file.path
-                )}" data-name="${escapeHtmlAttribute(
-                    file.name
-                )}" data-type="file"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">🗎</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
+                )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">🗎</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
                     file.name
                 )}</span></div></div>`;
             });
@@ -1314,6 +1621,7 @@ function showSaveAsDialog() {
         const sorted = allGroups
             .filter((g) => typeof g.viewColumn === "number")
             .sort((a, b) => a.viewColumn - b.viewColumn);
+
         return Object.assign({}, baseOptions, {
             viewColumn: sorted.length > 0 ? sorted[0].viewColumn : vscode.ViewColumn.One,
         });
@@ -1351,7 +1659,7 @@ function showSaveAsDialog() {
                     if (panel && activePanelAlive) {
                         panel.webview.postMessage({
                             command: "updateSize",
-                            path: message.path,
+                            path: canonicalizeExistingPath(message.path),
                             type: message.type,
                             sizeDisplay: display,
                         });
@@ -1362,13 +1670,15 @@ function showSaveAsDialog() {
             case "renameItem":
                 try {
                     const { oldPath, newName } = message;
-                    const newPath = path.join(path.dirname(oldPath), newName);
+                    const oldCanon = canonicalizeExistingPath(oldPath);
+                    const newPath = canonicalizeExistingPath(path.join(path.dirname(oldCanon), newName));
+
                     if (fs.existsSync(newPath)) {
                         vscode.window.showErrorMessage(`重命名失败：目标位置已存在同名项。`);
                         refreshWebview();
                     } else {
-                        fs.renameSync(oldPath, newPath);
-                        saveRecentDirectory(path.dirname(oldPath));
+                        fs.renameSync(oldCanon, newPath);
+                        saveRecentDirectory(path.dirname(oldCanon));
                         setTimeout(() => {
                             if (panel && activePanelAlive) refreshWebview();
                         }, 100);
@@ -1381,8 +1691,14 @@ function showSaveAsDialog() {
 
             case "navigate":
                 try {
-                    let newPath = message.path;
-                    if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath += "\\";
+                    const resolved = resolveNavPath(message.path, currentPath);
+
+                    // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
+                    let newPath = resolved;
+                    if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath = newPath.toUpperCase() + "\\";
+
+                    newPath = canonicalizeExistingPath(newPath);
+
                     if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
                         currentPath = newPath;
                         refreshWebview();
@@ -1395,8 +1711,8 @@ function showSaveAsDialog() {
                 break;
 
             case "navigateUp": {
-                const parentDir = path.dirname(currentPath);
-                if (parentDir !== currentPath) {
+                const parentDir = canonicalizeExistingPath(path.dirname(currentPath));
+                if (parentDir && parentDir !== currentPath) {
                     currentPath = parentDir;
                     refreshWebview();
                 }
@@ -1433,14 +1749,12 @@ function showSaveAsDialog() {
 
             case "save": {
                 const { filename, isPinned, openInCurrentGroup } = message;
-                const fullFilePath = path.join(currentPath, filename);
+                const fullFilePath = canonicalizeExistingPath(path.join(currentPath, filename));
 
                 const createFileAction = () => {
                     try {
                         if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
-                            vscode.window.showErrorMessage(
-                                `无法创建文件，因为已存在同名文件夹: "${filename}"`
-                            );
+                            vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
                             return;
                         }
                         fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
@@ -1461,9 +1775,9 @@ function showSaveAsDialog() {
 
                 if (fs.existsSync(fullFilePath)) {
                     const stats = fs.statSync(fullFilePath);
-                    if (stats.isDirectory())
+                    if (stats.isDirectory()) {
                         vscode.window.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
-                    else {
+                    } else {
                         vscode.window
                             .showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
                             .then((answer) => {
@@ -1477,10 +1791,10 @@ function showSaveAsDialog() {
             }
 
             case "createFolder": {
-                const newFolderPath = path.join(currentPath, message.folderName);
-                if (fs.existsSync(newFolderPath))
+                const newFolderPath = canonicalizeExistingPath(path.join(currentPath, message.folderName));
+                if (fs.existsSync(newFolderPath)) {
                     vscode.window.showErrorMessage(`无法创建，"${message.folderName}" 已存在。`);
-                else {
+                } else {
                     fs.mkdirSync(newFolderPath);
                     saveRecentDirectory(currentPath);
                     refreshWebview();
@@ -1495,15 +1809,16 @@ function showSaveAsDialog() {
 
             case "editFile": {
                 saveRecentDirectory(path.dirname(message.path));
-                const ext = path.extname(message.path).toLowerCase();
+                const p = canonicalizeExistingPath(message.path);
+                const ext = path.extname(p).toLowerCase();
+
                 if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
-                    vscode.window.showWarningMessage(
-                        `该文件不支持在 VS Code 里打开: "${path.basename(message.path)}"`
-                    );
+                    vscode.window.showWarningMessage(`该文件不支持在 VS Code 里打开: "${path.basename(p)}"`);
                     break;
                 }
+
                 vscode.workspace
-                    .openTextDocument(message.path)
+                    .openTextDocument(p)
                     .then((doc) => {
                         vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
                             if (!message.isPinned && panel && activePanelAlive) panel.dispose();
@@ -1513,23 +1828,26 @@ function showSaveAsDialog() {
                 break;
             }
 
-            case "openFolderInNewWindow":
-                saveRecentDirectory(message.path);
-                vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(message.path), {
+            case "openFolderInNewWindow": {
+                const p = canonicalizeExistingPath(message.path);
+                saveRecentDirectory(p);
+                vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(p), {
                     forceNewWindow: true,
                 });
                 refreshWebview();
                 break;
+            }
 
-            case "openWithDefault":
-                saveRecentDirectory(message.type === "folder" ? message.path : path.dirname(message.path));
-                // 安全、跨平台：交给 VS Code / OS 打开
-                vscode.env.openExternal(vscode.Uri.file(message.path));
+            case "openWithDefault": {
+                const p = canonicalizeExistingPath(message.path);
+                saveRecentDirectory(message.type === "folder" ? p : path.dirname(p));
+                vscode.env.openExternal(vscode.Uri.file(p));
                 refreshWebview();
                 break;
+            }
 
             case "quickDeleteToRecycleBin": {
-                const itemToDelete = message.path;
+                const itemToDelete = canonicalizeExistingPath(message.path);
                 if (fs.existsSync(itemToDelete)) {
                     saveRecentDirectory(currentPath);
                     (async () => {
@@ -1565,7 +1883,7 @@ async function activate(context) {
     if (!isCoreIntegrityValid) return;
 
     getConfig();
-    qqq.logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退 + size调度/缓存）", "INFO");
+    qqq.logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
 
     context.subscriptions.push(
         vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),

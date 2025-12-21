@@ -76,14 +76,12 @@
               "auto",
               "python",
               "rust",
-              "shell",
               "node"
             ],
             "enumDescriptions": [
               "自动选择最佳引擎",
               "Python 引擎",
               "Rust 引擎",
-              "Shell 引擎",
               "Node 引擎"
             ],
             "description": "选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"

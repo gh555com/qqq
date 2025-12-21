@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ==========================================
 #  A组增强版 Daemon - IO 缓存优化 + 惰性文件夹创建 + DIB 严格处理
 #  修改：DIB/ DIBV5 一律保存为无损 PNG（母版）
@@ -9,6 +10,7 @@
 #    - media 若为本地路径/file:// 直接 copy2（原文件字节不改动）
 #    - http(s)/data: 可选下载/解码（仍保存原始字节）
 # ==========================================
+
 import sys
 import os
 import json
@@ -465,8 +467,13 @@ def _attr(attrs, name: str) -> str:
 
 def _pick_src(attrs) -> str:
     # 常见懒加载字段
-    src = _attr(attrs, "src") or _attr(attrs, "data-src") or _attr(attrs,
-                                                                   "data-original") or _attr(attrs, "data-url") or _attr(attrs, "data-lazy-src")
+    src = (
+        _attr(attrs, "src")
+        or _attr(attrs, "data-src")
+        or _attr(attrs, "data-original")
+        or _attr(attrs, "data-url")
+        or _attr(attrs, "data-lazy-src")
+    )
     if src:
         return src.strip()
     # srcset 兜底：取第一项
@@ -691,7 +698,7 @@ def _file_url_to_path(file_url: str) -> Union[Path, None]:
             p = p[1:]
         # Windows UNC: file://server/share/xxx
         if u.netloc and not re.match(r"^[a-zA-Z]:", p):
-            p2 = p.replace('/', '\\')
+            p2 = p.replace("/", "\\")
             p = "\\\\" + u.netloc + p2
         return Path(p)
     except Exception:
@@ -1268,18 +1275,18 @@ def handle_windows(output_dir: Path):
         res = handle_windows_pywin32(wcb, wcon, output_dir)
         if res:
             return res
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    except ImportError as e:
+        print(f"Python脚本缺少依赖: {str(e)}", file=sys.stderr)
+    except Exception as e:
+        print(f"Python脚本处理pywin32时出错: {str(e)}", file=sys.stderr)
 
     # ctypes fallback
     try:
         res = handle_windows_ctypes(output_dir)
         if res:
             return res
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Python脚本处理ctypes时出错: {str(e)}", file=sys.stderr)
 
     return {"type": "unknown"}
 
@@ -1426,27 +1433,27 @@ def handle_clipboard_peek():
                     fmt_html = wcb.RegisterClipboardFormat("HTML Format")
                     if fmt_html and wcb.IsClipboardFormatAvailable(fmt_html):
                         result["has_html"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查HTML格式时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
                         result["has_files"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查文件格式时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     dibv5_format = getattr(wcon, "CF_DIBV5", 17)
                     if wcb.IsClipboardFormatAvailable(dibv5_format) or wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
                         result["has_image"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查图像格式时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     if wcb.IsClipboardFormatAvailable(wcon.CF_UNICODETEXT) or wcb.IsClipboardFormatAvailable(wcon.CF_TEXT):
                         result["has_text"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查文本格式时出错: {str(e)}", file=sys.stderr)
 
             finally:
                 try:
@@ -1456,8 +1463,10 @@ def handle_clipboard_peek():
 
             return result
 
-        except Exception:
-            pass
+        except ImportError as e:
+            print(f"Python脚本缺少依赖: {str(e)}", file=sys.stderr)
+        except Exception as e:
+            print(f"Python脚本处理pywin32时出错: {str(e)}", file=sys.stderr)
 
         # ctypes fallback
         try:
@@ -1469,26 +1478,26 @@ def handle_clipboard_peek():
                     fmt_html = RegisterClipboardFormatW("HTML Format")
                     if fmt_html and IsClipboardFormatAvailable(fmt_html):
                         result["has_html"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查HTML格式(ctypes)时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     if IsClipboardFormatAvailable(CF_HDROP):
                         result["has_files"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查文件格式(ctypes)时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     if IsClipboardFormatAvailable(CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB):
                         result["has_image"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查图像格式(ctypes)时出错: {str(e)}", file=sys.stderr)
 
                 try:
                     if IsClipboardFormatAvailable(CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT):
                         result["has_text"] = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"检查文本格式(ctypes)时出错: {str(e)}", file=sys.stderr)
 
             finally:
                 try:
@@ -1497,7 +1506,8 @@ def handle_clipboard_peek():
                     pass
 
             return result
-        except Exception:
+        except Exception as e:
+            print(f"Python脚本处理ctypes时出错: {str(e)}", file=sys.stderr)
             return result
 
     elif sys_name == "Darwin":
@@ -1507,8 +1517,8 @@ def handle_clipboard_peek():
                 ["pbpaste", "-Prefer", "html"], capture_output=True, timeout=1.2)
             if html_proc.stdout and len(html_proc.stdout) > 0 and b"<" in html_proc.stdout:
                 result["has_html"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"MacOS检查HTML时出错: {str(e)}", file=sys.stderr)
 
         try:
             import subprocess
@@ -1516,8 +1526,8 @@ def handle_clipboard_peek():
                 ["pbpaste"], capture_output=True, timeout=0.8)
             if txt_proc.stdout and len(txt_proc.stdout) > 0:
                 result["has_text"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"MacOS检查文本时出错: {str(e)}", file=sys.stderr)
 
         return result
 
@@ -1537,8 +1547,8 @@ def handle_clipboard_peek():
                 result["has_image"] = True
             if any(x in targets for x in ["UTF8_STRING", "text/plain", "STRING"]):
                 result["has_text"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Linux检查剪贴板格式时出错: {str(e)}", file=sys.stderr)
 
         return result
 

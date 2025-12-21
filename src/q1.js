@@ -107,7 +107,6 @@ const LOADING_SVG =
     ).toString("base64");
 
 // ==================== ★★★ 调度器（分层）★★★ ====================
-// probe / gen 分流到 qqq 侧的双 scheduler；若 qqq 旧版本缺失，则降级直跑（不崩）
 const probeScheduler =
     qqq?.probeScheduler && typeof qqq.probeScheduler.schedule === "function"
         ? qqq.probeScheduler
@@ -200,7 +199,6 @@ function logCriticalError(filePath, errorMsg) {
     } catch (e) { }
 }
 
-// ★ 兜底成功也记日志：用 qqq.logMessageRateLimited（同 error + ext 限流）
 function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
     try {
         const e = (ext || "").toLowerCase();
@@ -342,7 +340,6 @@ function getFrameConfig(info) {
             width = LARGE_PREVIEW_WIDTH;
             height = LARGE_PREVIEW_HEIGHT;
         } else {
-            // smart
             if (info.width <= SMALL_PREVIEW_WIDTH && info.height <= SMALL_PREVIEW_HEIGHT) {
                 mode = "small";
                 width = SMALL_PREVIEW_WIDTH;
@@ -353,14 +350,65 @@ function getFrameConfig(info) {
     return { mode, width, height };
 }
 
+// ==================== 路径统一（对齐 qqq.js） ====================
+
+// 用 qqq.js 的 normalize/resolve/canonical 作为“唯一真理来源”
+// 兜底：保持你原逻辑，但不破坏绝对路径/UNC/盘符
+function resolvePathToAbsolute(docUri, rawPath) {
+    if (!rawPath) return null;
+    let clean = String(rawPath).trim();
+    if (!clean) return null;
+
+    // 去掉包裹引号（如果有）
+    clean = clean.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+
+    const baseDir =
+        docUri && docUri.scheme === "file" && docUri.fsPath
+            ? path.dirname(docUri.fsPath)
+            : process.cwd();
+
+    // 走 qqq 的统一规则（Windows: /foo -> 系统盘根；~ 展开；UNC/盘符保留）
+    let abs = "";
+    try {
+        if (typeof qqq.resolveNavPath === "function") abs = qqq.resolveNavPath(clean, baseDir);
+        else {
+            // 兜底：不剥离 / 或 \\，直接按绝对/相对处理
+            if (path.isAbsolute(clean) || /^[a-zA-Z]:[\\/]/.test(clean) || clean.startsWith("\\\\")) {
+                abs = path.normalize(clean);
+            } else {
+                abs = path.resolve(baseDir, clean);
+            }
+        }
+    } catch {
+        return null;
+    }
+
+    // canonical：保证 cacheKey / fingerprint / folderInfo 统一（去重、盘符大小写等）
+    try {
+        if (typeof qqq.canonicalizeExistingPath === "function") abs = qqq.canonicalizeExistingPath(abs) || abs;
+        else abs = path.normalize(abs);
+    } catch { }
+
+    return abs;
+}
+
 // ==================== FFprobe ====================
 
 async function getMediaInfo(filePath, mtimeMs) {
-    const cached = resolutionCache.get(filePath);
+    if (!filePath) return null;
+
+    // canonical 做 key，避免同一文件不同写法导致 cache 炸裂
+    let canon = filePath;
+    try {
+        if (typeof qqq.canonicalizeExistingPath === "function") canon = qqq.canonicalizeExistingPath(filePath) || filePath;
+        else canon = path.normalize(filePath);
+    } catch { }
+
+    const cached = resolutionCache.get(canon);
     if (cached && cached.mtime === mtimeMs) return cached;
 
-    const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
-    return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
+    const cacheKey = `probe:info:${canon}:${mtimeMs}`;
+    return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(canon, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
@@ -600,7 +648,6 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
             expectedWebPDuration = 2;
         }
     } else {
-        // balanced
         if (isSourceStatic) {
             args.push("-ss", "0", "-i", filePath);
             vf = `[0:v]${scaleFilter}[out_v]`;
@@ -795,7 +842,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
     const cacheStrategy = determineCacheStrategy(filePath, info);
 
-    // MJPEG 静态：直通
     if (cacheStrategy.isMjpegStatic) {
         try {
             const rawBuffer = fs.readFileSync(filePath);
@@ -820,7 +866,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         }
     }
 
-    // 缓存命中：仅取 meta（不再 getCacheEntry，避免命中统计“双计数”）
     if (!cacheStrategy.shouldBypassCache) {
         const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
         if (cached) {
@@ -853,7 +898,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         }
     }
 
-    // 直读（小静态等）
     if (cacheStrategy.shouldBypassCache && !cacheStrategy.isMjpegStatic) {
         try {
             const rawBuffer = fs.readFileSync(filePath);
@@ -875,7 +919,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         } catch (e) { }
     }
 
-    // 生成 webp
     const { args, targetW, targetH, expectedWebPDuration } = buildUnifiedWebPArgs(
         filePath,
         origSize,
@@ -887,7 +930,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
 
     const result = await genScheduler.schedule(taskKey, async () => {
-        // 再次确认缓存（并发下可能已被其它任务写入）
         const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
         if (existing) {
             const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey) || {};
@@ -896,7 +938,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
         const isAnimated = expectedWebPDuration > 0.1;
 
-        // 注意：这里的 cacheFilePath 仅作 ffmpeg 文件落地中转；真正的长期缓存由 qqq.setCacheEntry 写入其 cacheDir
         const tmpDir = path.join(os.tmpdir(), "qqq_ffmpeg_tmp");
         try {
             if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
@@ -909,7 +950,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     if (result.success) {
         const buffer = result.buffer;
 
-        // ★ gen 二次命中 fromCache：优先用 meta.width/height（避免“用当前 targetW/H 推断”的误差）
         const meta = result.meta || {};
         const outW = meta.width || targetW;
         const outH = meta.height || targetH;
@@ -947,11 +987,9 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     } else {
         const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
-        // 失败无法兜底：强日志（保留原 err.log 直写）
         if (!fallback) {
             logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ""}`);
         } else {
-            // 兜底成功：改为 rate-limit（同 error+ext 限流）
             logFallbackUsedRateLimited(filePath, ext, result.error, result.stderr || "");
         }
         return fallback;
@@ -991,14 +1029,6 @@ function getDocumentEOL(doc) {
     return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 }
 
-function resolvePathToAbsolute(docUri, rawPath) {
-    if (!rawPath) return null;
-    let clean = rawPath.trim();
-    while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
-    if (path.isAbsolute(clean)) return clean;
-    return path.resolve(path.dirname(docUri.fsPath), clean);
-}
-
 function calculateAspectRatioString(w, h) {
     if (!w || !h) return "";
     if (w >= h) {
@@ -1021,19 +1051,23 @@ function createProgressSvg(webpDuration, previewWidth) {
     return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 }
 
+// ★ 修正：VSCode editor.lineHeight 是“像素”，不是倍率
 function calculateBlankLinesExact(pxHeight, isLastItem = false) {
     try {
         const config = vscode.workspace.getConfiguration("editor");
         const fontSize = config.get("fontSize", 14);
-        const lhMult = config.get("lineHeight", 0) || 1.35;
-        const pxPerLine = fontSize * lhMult;
+        const lineHeightPx = config.get("lineHeight", 0);
+
+        const pxPerLine = lineHeightPx > 0 ? lineHeightPx : fontSize * 1.35;
         const boxH = pxHeight + PREVIEW_BORDER;
 
         let baseN = Math.ceil(boxH / pxPerLine);
-        let extra = 2 + Math.floor((lhMult - 1) * 3);
-        extra = Math.min(5, Math.max(2, extra));
-        let n = baseN + extra;
-        n = Math.max(4, n);
+
+        // 经验余量：防止不同字体/主题下露边
+        let extra = 3;
+        if (performanceMode === "extreme") extra = 2;
+
+        let n = Math.max(4, baseN + extra);
         if (isLastItem) n = Math.max(8, n);
         return n;
     } catch (e) {
@@ -1075,7 +1109,6 @@ async function renderImages(editor) {
 
     const marginLeft = "100px";
 
-    // ★ QQQ_PATH_REGEX 只匹配 qqq 路径 marker；PENDING 用独立正则
     const pathRegex = new RegExp(qqq.QQQ_PATH_REGEX);
     const pendingRegex = new RegExp(qqq.PENDING_REGEX);
 
@@ -1137,18 +1170,20 @@ async function renderImages(editor) {
 
             hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
 
-            // ★ 捕获组 1 就是内部路径
             const rawPath = (match[1] || "").trim();
             if (!rawPath) continue;
 
-            // 已有 deco 则不重复做（文档变化会清 map）
             if (currentDecos.has(uniqueKey)) continue;
 
-            const absPath = resolvePathToAbsolute(
-                editor.document.uri,
-                rawPath.replace(/\//g, "\\")
-            );
-            if (!absPath || !fs.existsSync(absPath)) continue;
+            let absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
+            if (!absPath) continue;
+
+            // 再次 canonical（防止 resolveNavPath 返回非标准写法）
+            try {
+                if (typeof qqq.canonicalizeExistingPath === "function") absPath = qqq.canonicalizeExistingPath(absPath) || absPath;
+            } catch { }
+
+            if (!fs.existsSync(absPath)) continue;
 
             const targetLine = pos.line;
             if (targetLine >= editor.document.lineCount) continue;
@@ -1249,8 +1284,12 @@ async function executeClipboardCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    let targetDir = "D:\\view\\p";
-    if (!editor.document.isUntitled) {
+    // 默认落地目录：尽量跨平台安全
+    let targetDir = process.platform === "win32"
+        ? "D:\\view\\p"
+        : path.join(os.tmpdir(), "qqq_p");
+
+    if (!editor.document.isUntitled && editor.document.uri.scheme === "file") {
         targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
     }
 
@@ -1307,9 +1346,12 @@ async function replacePendingMarker(token, result) {
 
     let replacement = "";
     const eol = getDocumentEOL(doc);
-    const docDir = path.dirname(doc.uri.fsPath);
 
-    // ★★★ 新增：处理 HTML blocks ★★★
+    const docDir =
+        (!doc.isUntitled && doc.uri.scheme === "file" && doc.uri.fsPath)
+            ? path.dirname(doc.uri.fsPath)
+            : process.cwd();
+
     if (result.type === "html_blocks" && result.blocks?.length) {
         const blocks = result.blocks;
         const finalContent = [];
@@ -1319,7 +1361,7 @@ async function replacePendingMarker(token, result) {
                 finalContent.push(block.text);
             } else if (block.type === "media" && block.path) {
                 const filePath = block.path;
-                const relPath = path.relative(docDir, filePath).replace(/\\/g, "/"); // 统一用 /
+                const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
                 const isLastItem = i === blocks.length - 1;
                 let pxHeight = LARGE_PREVIEW_HEIGHT;
                 try {
@@ -1333,7 +1375,7 @@ async function replacePendingMarker(token, result) {
             }
         }
         replacement = finalContent.join(eol);
-    } else if (result.type === "image" || result.type === "ikge") { // ikge 是旧版 rust 的笔误，兼容一下
+    } else if (result.type === "image" || result.type === "ikge") {
         const filePath = result.path;
         const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
         let pxHeight = LARGE_PREVIEW_HEIGHT;
@@ -1371,7 +1413,6 @@ async function replacePendingMarker(token, result) {
     } else if (result.type === "text") {
         replacement = result.text;
     } else {
-        // 粘贴失败或未知类型，删除 pending marker
         replacement = "";
     }
 
@@ -1380,7 +1421,6 @@ async function replacePendingMarker(token, result) {
     });
     setTimeout(() => renderImages(editor), 50);
 }
-
 
 // ==================== 整洁模式 ====================
 
@@ -1404,7 +1444,7 @@ async function provideCleanlinessEditsAsync(document) {
         const markerLine = startPos.line;
 
         const rawPath = m.inner;
-        const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
+        const absPath = resolvePathToAbsolute(document.uri, rawPath);
         let pxHeight = 0;
 
         if (absPath && fs.existsSync(absPath)) {
@@ -1447,6 +1487,7 @@ async function provideCleanlinessEditsAsync(document) {
     return edits;
 }
 
+// ★ 修正：TextEdit 应统一用 replace(range,newText) 应用（insert 也是 replace 的特例）
 async function performGlobalClean(editor, force = false) {
     if (!editor) return;
     if (!force && !cleanFreakMode) return;
@@ -1454,8 +1495,7 @@ async function performGlobalClean(editor, force = false) {
     if (edits.length > 0) {
         await editor.edit((editBuilder) => {
             edits.forEach((e) => {
-                if (e.newText) editBuilder.insert(e.range.start, e.newText);
-                else editBuilder.replace(e.range, e.newText);
+                editBuilder.replace(e.range, e.newText);
             });
         });
     }
@@ -1482,11 +1522,10 @@ class FileCodeLensProvider {
         while ((match = regex.exec(text))) {
             const pos = document.positionAt(match.index);
 
-            // ★ 捕获组 1 就是内部路径
             const rawPath = (match[1] || "").trim();
             if (!rawPath) continue;
 
-            const absPath = resolvePathToAbsolute(document.uri, rawPath.replace(/\//g, "\\"));
+            const absPath = resolvePathToAbsolute(document.uri, rawPath);
             if (!absPath || !fs.existsSync(absPath)) continue;
 
             const folder = path.dirname(absPath);
@@ -1570,6 +1609,11 @@ function invalidateFolderSizeCacheForPath(filePath) {
     } catch { }
 }
 async function getQqqFolderSize(folderPath) {
+    // folderPath canonical，避免 cache 错乱（比如盘符大小写/末尾斜杠）
+    try {
+        if (typeof qqq.canonicalizeExistingPath === "function") folderPath = qqq.canonicalizeExistingPath(folderPath) || folderPath;
+    } catch { }
+
     const now = Date.now();
     const cached = folderSizeCache.get(folderPath);
     if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
