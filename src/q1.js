@@ -118,7 +118,6 @@ const genScheduler =
         : { schedule: async (_k, fn) => fn() };
 
 // ==================== 初始化 ====================
-
 function verifySystemIntegrity() {
     try {
         if (!fs.existsSync(WATERMARK_PATH)) return false;
@@ -144,10 +143,7 @@ function loadWatermarkResource() {
 function refreshConfig() {
     try {
         const config = vscode.workspace.getConfiguration("qqq");
-        enlargeSmallImages = config.get(
-            "enlargeSmallImages",
-            config.get("stretchSmallImages", true)
-        );
+        enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
 
         const extremePerformance = config.get("extremePerformance", false);
         if (extremePerformance) performanceMode = "extreme";
@@ -187,7 +183,6 @@ function clearAllEditorDebounceTimers() {
 }
 
 // ==================== 错误日志 ====================
-
 function logCriticalError(filePath, errorMsg) {
     try {
         if (!qqq.LOG_PATH) return;
@@ -216,7 +211,6 @@ function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
 }
 
 // ==================== CSS 计算辅助 ====================
-
 function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
     if (!srcW || !srcH) return { width: boxW, height: boxH, scale: 1 };
 
@@ -350,65 +344,13 @@ function getFrameConfig(info) {
     return { mode, width, height };
 }
 
-// ==================== 路径统一（对齐 qqq.js） ====================
-
-// 用 qqq.js 的 normalize/resolve/canonical 作为“唯一真理来源”
-// 兜底：保持你原逻辑，但不破坏绝对路径/UNC/盘符
-function resolvePathToAbsolute(docUri, rawPath) {
-    if (!rawPath) return null;
-    let clean = String(rawPath).trim();
-    if (!clean) return null;
-
-    // 去掉包裹引号（如果有）
-    clean = clean.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
-
-    const baseDir =
-        docUri && docUri.scheme === "file" && docUri.fsPath
-            ? path.dirname(docUri.fsPath)
-            : process.cwd();
-
-    // 走 qqq 的统一规则（Windows: /foo -> 系统盘根；~ 展开；UNC/盘符保留）
-    let abs = "";
-    try {
-        if (typeof qqq.resolveNavPath === "function") abs = qqq.resolveNavPath(clean, baseDir);
-        else {
-            // 兜底：不剥离 / 或 \\，直接按绝对/相对处理
-            if (path.isAbsolute(clean) || /^[a-zA-Z]:[\\/]/.test(clean) || clean.startsWith("\\\\")) {
-                abs = path.normalize(clean);
-            } else {
-                abs = path.resolve(baseDir, clean);
-            }
-        }
-    } catch {
-        return null;
-    }
-
-    // canonical：保证 cacheKey / fingerprint / folderInfo 统一（去重、盘符大小写等）
-    try {
-        if (typeof qqq.canonicalizeExistingPath === "function") abs = qqq.canonicalizeExistingPath(abs) || abs;
-        else abs = path.normalize(abs);
-    } catch { }
-
-    return abs;
-}
-
 // ==================== FFprobe ====================
-
 async function getMediaInfo(filePath, mtimeMs) {
-    if (!filePath) return null;
-
-    // canonical 做 key，避免同一文件不同写法导致 cache 炸裂
-    let canon = filePath;
-    try {
-        if (typeof qqq.canonicalizeExistingPath === "function") canon = qqq.canonicalizeExistingPath(filePath) || filePath;
-        else canon = path.normalize(filePath);
-    } catch { }
-
-    const cached = resolutionCache.get(canon);
+    const cached = resolutionCache.get(filePath);
     if (cached && cached.mtime === mtimeMs) return cached;
 
-    const cacheKey = `probe:info:${canon}:${mtimeMs}`;
-    return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(canon, mtimeMs));
+    const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
+    return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
@@ -519,7 +461,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
         child.on("error", () => resolve(null));
 
         setTimeout(() => {
-            try { child.kill(); } catch { }
+            try { child.kill(); } catch (e) { }
             resolve(null);
         }, 5000);
     });
@@ -551,7 +493,6 @@ function getWebPDurationFromBuffer(buffer) {
 }
 
 // ==================== 核心缓存策略 ====================
-
 function determineCacheStrategy(filePath, info) {
     const ext = path.extname(filePath).toLowerCase();
     let fileSize = 0;
@@ -717,7 +658,7 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
         const timer = setTimeout(() => {
             if (!resolved) {
                 resolved = true;
-                try { child.kill(); } catch { }
+                try { child.kill(); } catch (e) { }
                 runFFmpegToFile(args, cacheFilePath, timeoutMs).then(resolve);
             }
         }, timeoutMs);
@@ -761,8 +702,8 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
         const timer = setTimeout(() => {
             if (!resolved) {
                 resolved = true;
-                try { child.kill(); } catch { }
-                try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
+                try { child.kill(); } catch (e) { }
+                try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) { }
                 resolve({ success: false, error: "TIMEOUT_FILE", stderr });
             }
         }, timeoutMs);
@@ -778,11 +719,11 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
                     const buffer = fs.readFileSync(cacheFilePath);
                     resolve({ success: true, buffer, fromFile: true, cacheFilePath });
                 } catch (e) {
-                    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
+                    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e2) { }
                     resolve({ success: false, error: e.message, stderr });
                 }
             } else {
-                try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
+                try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) { }
                 resolve({ success: false, error: `EXIT_CODE=${code}`, stderr });
             }
         });
@@ -791,7 +732,7 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
             if (resolved) return;
             clearTimeout(timer);
             resolved = true;
-            try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch { }
+            try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) { }
             resolve({ success: false, error: err.message, stderr });
         });
     });
@@ -997,7 +938,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 }
 
 // ==================== 其他工具 ====================
-
 function formatBytes(size) {
     if (size == null || isNaN(size)) return "?";
     const units = ["B", "KB", "MB", "GB"];
@@ -1029,6 +969,19 @@ function getDocumentEOL(doc) {
     return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 }
 
+// ★ 统一用 qqq 的路径真理来源（避免绝对路径/UNC 被破坏）
+function resolvePathToAbsolute(docUri, rawPath) {
+    if (!rawPath) return null;
+    let clean = String(rawPath).trim();
+    if (!clean) return null;
+
+    clean = clean.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+
+    const baseDir = path.dirname(docUri.fsPath);
+    const abs = qqq.resolveNavPath(clean, baseDir);
+    return abs ? path.normalize(abs) : null;
+}
+
 function calculateAspectRatioString(w, h) {
     if (!w || !h) return "";
     if (w >= h) {
@@ -1051,19 +1004,28 @@ function createProgressSvg(webpDuration, previewWidth) {
     return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 }
 
-// ★ 修正：VSCode editor.lineHeight 是“像素”，不是倍率
+// ★★★ 修复：lineHeight 有人写成 1.4/1.2 当倍率，VSCode 实际是像素，导致 pxPerLine≈1 => 几万空行
 function calculateBlankLinesExact(pxHeight, isLastItem = false) {
     try {
         const config = vscode.workspace.getConfiguration("editor");
-        const fontSize = config.get("fontSize", 14);
-        const lineHeightPx = config.get("lineHeight", 0);
+        const fontSize = Number(config.get("fontSize", 14)) || 14;
+        const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
 
-        const pxPerLine = lineHeightPx > 0 ? lineHeightPx : fontSize * 1.35;
+        // 兼容：如果 lineHeight 太小（<8），按“倍率”理解；否则按像素理解
+        let pxPerLine = 0;
+        if (lineHeightRaw > 0) {
+            if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw; // 倍率
+            else pxPerLine = lineHeightRaw; // 像素
+        } else {
+            pxPerLine = fontSize * 1.35;
+        }
+
+        // 钳制：防止异常配置造成爆炸
+        pxPerLine = Math.max(pxPerLine, fontSize * 1.1, 10);
+
         const boxH = pxHeight + PREVIEW_BORDER;
-
         let baseN = Math.ceil(boxH / pxPerLine);
 
-        // 经验余量：防止不同字体/主题下露边
         let extra = 3;
         if (performanceMode === "extreme") extra = 2;
 
@@ -1082,7 +1044,6 @@ function getEditorId(editor) {
 }
 
 // ==================== 主渲染逻辑 ====================
-
 async function renderImages(editor) {
     if (!editor || !isCoreIntegrityValid) {
         clearDecorations();
@@ -1117,7 +1078,6 @@ async function renderImages(editor) {
     for (const range of visibleRanges) {
         const text = editor.document.getText(range);
 
-        // 1) 先渲染 PENDING（spinner）
         pendingRegex.lastIndex = 0;
         let pm;
         while ((pm = pendingRegex.exec(text))) {
@@ -1158,7 +1118,6 @@ async function renderImages(editor) {
             currentDecos.set(uniqueKey, loadingDeco);
         }
 
-        // 2) 再渲染 qqq 路径 marker
         pathRegex.lastIndex = 0;
         let match;
 
@@ -1175,15 +1134,8 @@ async function renderImages(editor) {
 
             if (currentDecos.has(uniqueKey)) continue;
 
-            let absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
-            if (!absPath) continue;
-
-            // 再次 canonical（防止 resolveNavPath 返回非标准写法）
-            try {
-                if (typeof qqq.canonicalizeExistingPath === "function") absPath = qqq.canonicalizeExistingPath(absPath) || absPath;
-            } catch { }
-
-            if (!fs.existsSync(absPath)) continue;
+            const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
+            if (!absPath || !fs.existsSync(absPath)) continue;
 
             const targetLine = pos.line;
             if (targetLine >= editor.document.lineCount) continue;
@@ -1202,12 +1154,7 @@ async function renderImages(editor) {
                     const info = await getMediaInfo(absPath, mtimeMs);
                     const { width: previewWidth, height: previewHeight } = getFrameConfig(info);
 
-                    const previewResult = await getPreviewBuffer(
-                        absPath,
-                        contentId,
-                        previewWidth,
-                        previewHeight
-                    );
+                    const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
 
                     if (currentRenderVersion !== myVersion) return null;
 
@@ -1249,9 +1196,7 @@ async function renderImages(editor) {
                         watermarkBase64,
                     });
 
-                    deco.hoverMessage = new vscode.MarkdownString(
-                        `[打开文件](${vscode.Uri.file(absPath).toString()})`
-                    );
+                    deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
                     deco.hoverMessage.isTrusted = true;
 
                     return { key: uniqueKey, deco };
@@ -1269,12 +1214,10 @@ async function renderImages(editor) {
     }
 
     editor.setDecorations(decorationType, Array.from(currentDecos.values()));
-    if (hideDecos.size > 0)
-        editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
+    if (hideDecos.size > 0) editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
 }
 
 // ==================== 粘贴命令 ====================
-
 async function executeClipboardCommand() {
     if (!isCoreIntegrityValid) {
         vscode.window.showErrorMessage("Integrity check failed.");
@@ -1284,12 +1227,8 @@ async function executeClipboardCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    // 默认落地目录：尽量跨平台安全
-    let targetDir = process.platform === "win32"
-        ? "D:\\view\\p"
-        : path.join(os.tmpdir(), "qqq_p");
-
-    if (!editor.document.isUntitled && editor.document.uri.scheme === "file") {
+    let targetDir = "D:\\view\\p";
+    if (!editor.document.isUntitled) {
         targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
     }
 
@@ -1329,9 +1268,7 @@ async function replacePendingMarker(token, result) {
     if (!pending) return;
     pendingTokens.delete(token);
 
-    let editor = vscode.window.visibleTextEditors.find(
-        (e) => e.document.uri.toString() === pending.documentUri
-    );
+    let editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === pending.documentUri);
     if (!editor) return;
 
     const doc = editor.document;
@@ -1346,11 +1283,7 @@ async function replacePendingMarker(token, result) {
 
     let replacement = "";
     const eol = getDocumentEOL(doc);
-
-    const docDir =
-        (!doc.isUntitled && doc.uri.scheme === "file" && doc.uri.fsPath)
-            ? path.dirname(doc.uri.fsPath)
-            : process.cwd();
+    const docDir = path.dirname(doc.uri.fsPath);
 
     if (result.type === "html_blocks" && result.blocks?.length) {
         const blocks = result.blocks;
@@ -1423,7 +1356,6 @@ async function replacePendingMarker(token, result) {
 }
 
 // ==================== 整洁模式 ====================
-
 async function provideCleanlinessEditsAsync(document) {
     if (!document) return [];
     const edits = [];
@@ -1470,7 +1402,7 @@ async function provideCleanlinessEditsAsync(document) {
         if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
 
         if (pxHeight > 0) {
-            let isLastMarkerInDoc = i === markers.length - 1;
+            const isLastMarkerInDoc = i === markers.length - 1;
             const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
             let existingBlanks = 0;
             for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
@@ -1487,7 +1419,6 @@ async function provideCleanlinessEditsAsync(document) {
     return edits;
 }
 
-// ★ 修正：TextEdit 应统一用 replace(range,newText) 应用（insert 也是 replace 的特例）
 async function performGlobalClean(editor, force = false) {
     if (!editor) return;
     if (!force && !cleanFreakMode) return;
@@ -1502,7 +1433,6 @@ async function performGlobalClean(editor, force = false) {
 }
 
 // ==================== CodeLens ====================
-
 class FileCodeLensProvider {
     constructor() {
         this._onDidChangeCodeLenses = new vscode.EventEmitter();
@@ -1609,11 +1539,6 @@ function invalidateFolderSizeCacheForPath(filePath) {
     } catch { }
 }
 async function getQqqFolderSize(folderPath) {
-    // folderPath canonical，避免 cache 错乱（比如盘符大小写/末尾斜杠）
-    try {
-        if (typeof qqq.canonicalizeExistingPath === "function") folderPath = qqq.canonicalizeExistingPath(folderPath) || folderPath;
-    } catch { }
-
     const now = Date.now();
     const cached = folderSizeCache.get(folderPath);
     if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
@@ -1642,7 +1567,6 @@ async function getQqqFolderSize(folderPath) {
 }
 
 // ==================== 命令 ====================
-
 function openFileCommand(filePath) {
     if (!fs.existsSync(filePath)) return;
     try {
@@ -1732,7 +1656,6 @@ function renderVisibleEditors(delay = 50) {
 }
 
 // ==================== 激活与停用 ====================
-
 async function activate(context) {
     extensionContext = context;
     isCoreIntegrityValid = verifySystemIntegrity();
@@ -1819,7 +1742,7 @@ async function activate(context) {
 async function deactivate() {
     clearAllEditorDebounceTimers();
     clearDecorations();
-    // 注意：用户时长统计由 qqq.js 中控统一管理，q1 不再重复调用 finishUserTracking（避免累计时长翻倍）
+    // 用户时长统计由 qqq.js 中控统一管理
 }
 
 module.exports = { activate, deactivate };
