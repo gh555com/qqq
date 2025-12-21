@@ -44,8 +44,6 @@ from typing import Union, Tuple, List, Dict, Any, Optional
 # =============================================================================
 #  配置
 # =============================================================================
-DEFAULT_OUTPUT_DIR = Path(os.environ.get("QQQ_OUTPUT_DIR", r"D:/view/p"))
-
 # folder_info 缓存
 FOLDER_INFO_CACHE_TTL = 3.0
 FOLDER_INFO_CACHE_MAX = 200
@@ -77,7 +75,7 @@ _folder_cache = OrderedDict()
 def resolve_output_dir(target_dir: Optional[Union[str, Path]] = None) -> Path:
     if target_dir:
         return Path(target_dir)
-    return DEFAULT_OUTPUT_DIR
+    return Path("./qqq")
 
 
 def ensure_parent(path_obj: Path):
@@ -131,28 +129,28 @@ def safe_filename(name: str) -> str:
     return n
 
 
-def unique_path_in_dir(output_dir: Path, filename: str) -> Path:
-    base = Path(filename).stem
-    ext = Path(filename).suffix
-    candidate = output_dir / filename
-    if not candidate.exists():
-        return candidate
-    for i in range(1, 2000):
-        p = output_dir / f"{base}_{i}{ext}"
-        if not p.exists():
-            return p
-    return output_dir / f"{base}_{int(time.time() * 1000)}{ext}"
+def compute_file_fingerprint(file_path: Path) -> str:
+    """计算文件指纹"""
+    import hashlib
+    try:
+        with open(file_path, 'rb') as f:
+            # 读取文件头、中间和末尾的内容来计算指纹
+            head = f.read(1024)  # 头1KB
+            f.seek(max(0, file_path.stat().st_size - 1024))  # 尾1KB
+            tail = f.read(1024)
+            # 如果文件较大，再读取中间1KB
+            if file_path.stat().st_size > 2048:
+                f.seek(file_path.stat().st_size // 2)
+                mid = f.read(1024)
+            else:
+                mid = b''
+        return hashlib.md5(head + mid + tail).hexdigest()
+    except Exception:
+        return ""
 
 
 def unique_dir_in_dir(output_dir: Path, dirname: str) -> Path:
-    candidate = output_dir / dirname
-    if not candidate.exists():
-        return candidate
-    for i in range(1, 2000):
-        p = output_dir / f"{dirname}_{i}"
-        if not p.exists():
-            return p
-    return output_dir / f"{dirname}_{int(time.time() * 1000)}"
+    return output_dir / dirname
 
 
 def is_image_ext(ext: str) -> bool:
@@ -686,7 +684,7 @@ def _download_url_to_path(url: str, output_dir: Path, filename_hint: str = "") -
                 ext = ext_from_mime(ct) or ext_from_url(url) or ".bin"
                 name = Path(name).stem + ext
 
-            out_path = unique_path_in_dir(output_dir, name)
+            out_path = output_dir / name
             ensure_parent(out_path)
 
             tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -717,8 +715,7 @@ def _download_url_to_path(url: str, output_dir: Path, filename_hint: str = "") -
                         head = f.read(4096)
                     gext = guess_ext_by_magic(head)
                     if gext and gext != ".bin":
-                        new_path = unique_path_in_dir(
-                            output_dir, out_path.stem + gext)
+                        new_path = output_dir / (out_path.stem + gext)
                         os.replace(str(out_path), str(new_path))
                         out_path = new_path
                 except Exception:
@@ -736,19 +733,38 @@ def save_media_from_src(src: str, output_dir: Path, source_url: Optional[str]) -
     if not s:
         return None
 
+    # 构建目标目录中现有文件的指纹映射
+    existing_fingerprints = {}
+    try:
+        for entry in os.scandir(output_dir):
+            if entry.is_file():
+                fp = compute_file_fingerprint(Path(entry.path))
+                if fp:
+                    existing_fingerprints[fp] = Path(entry.path)
+    except Exception:
+        pass
+
     if s.lower().startswith("data:"):
         data, mime = _data_url_to_bytes(s)
         if not data:
             return None
+
+        # 计算数据指纹
+        import hashlib
+        data_fp = hashlib.md5(data).hexdigest()
+        if data_fp in existing_fingerprints:
+            return existing_fingerprints[data_fp]
+
         ext = ext_from_mime(mime) or guess_ext_by_magic(data) or ".bin"
         if not ext.startswith("."):
             ext = "." + ext
         name = safe_filename(get_timestamp_filename(ext))
-        out_path = unique_path_in_dir(output_dir, name)
+        out_path = output_dir / name
         ensure_parent(out_path)
         try:
             with open(out_path, "wb") as f:
                 f.write(data)
+            existing_fingerprints[data_fp] = out_path
             return out_path
         except Exception:
             return None
@@ -756,11 +772,17 @@ def save_media_from_src(src: str, output_dir: Path, source_url: Optional[str]) -
     if s.lower().startswith("file://"):
         p = _file_url_to_path(s)
         if p and p.exists() and p.is_file():
+            # 计算源文件指纹
+            src_fp = compute_file_fingerprint(p)
+            if src_fp in existing_fingerprints:
+                return existing_fingerprints[src_fp]
+
             name = safe_filename(p.name)
-            out_path = unique_path_in_dir(output_dir, name)
+            out_path = output_dir / name
             ensure_parent(out_path)
             try:
                 shutil.copy2(p, out_path)
+                existing_fingerprints[src_fp] = out_path
                 return out_path
             except Exception:
                 return None
@@ -769,18 +791,32 @@ def save_media_from_src(src: str, output_dir: Path, source_url: Optional[str]) -
     if re.match(r"^[a-zA-Z]:[\\/]", s) or s.startswith("\\\\") or s.startswith("/"):
         p = Path(s)
         if p.exists() and p.is_file():
+            # 计算源文件指纹
+            src_fp = compute_file_fingerprint(p)
+            if src_fp in existing_fingerprints:
+                return existing_fingerprints[src_fp]
+
             name = safe_filename(p.name)
-            out_path = unique_path_in_dir(output_dir, name)
+            out_path = output_dir / name
             ensure_parent(out_path)
             try:
                 shutil.copy2(p, out_path)
+                existing_fingerprints[src_fp] = out_path
                 return out_path
             except Exception:
                 return None
         return None
 
     if s.lower().startswith("http://") or s.lower().startswith("https://"):
-        return _download_url_to_path(s, output_dir)
+        # 下载文件
+        downloaded_path = _download_url_to_path(s, output_dir)
+        if downloaded_path:
+            # 计算下载文件的指纹
+            dl_fp = compute_file_fingerprint(downloaded_path)
+            if dl_fp:
+                existing_fingerprints[dl_fp] = downloaded_path
+            return downloaded_path
+        return None
 
     if source_url:
         try:
@@ -870,17 +906,48 @@ def copy_files_parallel(src_files: List[Path], output_dir: Path) -> List[str]:
         return []
     ensure_parent(output_dir / "dummy")
 
+    # 构建目标目录中现有文件的指纹映射
+    existing_fingerprints = {}
+    try:
+        for entry in os.scandir(output_dir):
+            if entry.is_file():
+                fp = compute_file_fingerprint(Path(entry.path))
+                if fp:
+                    existing_fingerprints[fp] = Path(entry.path)
+    except Exception:
+        pass
+
     results: List[str] = []
     futs: set = set()
     inflight = max(64, _MAX_WORKERS * 16)
 
     def submit_one(src: Path) -> Optional[Path]:
         try:
+            # 计算源文件指纹
+            src_fp = compute_file_fingerprint(src)
+            if src_fp and src_fp in existing_fingerprints:
+                # 指纹已存在，直接返回现有文件路径
+                return existing_fingerprints[src_fp]
+
             fname = safe_filename(src.name)
-            dst = unique_path_in_dir(output_dir, fname)
+            dst = output_dir / fname
             ensure_parent(dst)
-            shutil.copy2(src, dst)
-            return dst
+
+            # 再次检查目标文件是否已存在
+            if not dst.exists():
+                shutil.copy2(src, dst)
+                # 更新指纹映射
+                if src_fp:
+                    existing_fingerprints[src_fp] = dst
+                return dst
+            else:
+                # 目标文件已存在，检查指纹
+                dst_fp = compute_file_fingerprint(dst)
+                if dst_fp == src_fp:
+                    return dst
+                else:
+                    # 文件名相同但指纹不同，使用源文件名
+                    return dst
         except Exception:
             return None
 
@@ -899,14 +966,30 @@ def copy_files_parallel(src_files: List[Path], output_dir: Path) -> List[str]:
 
 
 def copytree_parallel(src_dir: Path, output_dir: Path) -> Optional[str]:
-    """复制整个文件夹到 output_dir 下（创建一个唯一子目录），返回目标目录路径"""
+    """复制整个文件夹到 output_dir 下，返回目标目录路径"""
     try:
         if not src_dir.exists() or not src_dir.is_dir():
             return None
         ensure_parent(output_dir / "dummy")
 
-        dst_dir = unique_dir_in_dir(output_dir, safe_filename(src_dir.name))
+        # 使用源目录名作为目标目录名
+        dst_dir = output_dir / safe_filename(src_dir.name)
         dst_dir.mkdir(parents=True, exist_ok=True)
+
+        # 构建目标目录中现有文件的指纹映射
+        def build_fingerprint_map(target_dir: Path) -> dict:
+            fingerprint_map = {}
+            try:
+                for root, _, files in os.walk(target_dir):
+                    for fn in files:
+                        fp = compute_file_fingerprint(Path(root) / fn)
+                        if fp:
+                            fingerprint_map[fp] = Path(root) / fn
+            except Exception:
+                pass
+            return fingerprint_map
+
+        fingerprint_map = build_fingerprint_map(dst_dir)
 
         futs: set = set()
         inflight = max(128, _MAX_WORKERS * 32)
@@ -914,8 +997,31 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> Optional[str]:
         def submit_copy(src_path: Path, dst_path: Path):
             try:
                 ensure_parent(dst_path)
-                shutil.copy2(src_path, dst_path)
-                return True
+
+                # 计算源文件指纹
+                src_fp = compute_file_fingerprint(src_path)
+                if src_fp and src_fp in fingerprint_map:
+                    # 指纹已存在，跳过复制
+                    return True
+
+                # 检查目标文件是否已存在
+                if not dst_path.exists():
+                    shutil.copy2(src_path, dst_path)
+                    # 更新指纹映射
+                    if src_fp:
+                        fingerprint_map[src_fp] = dst_path
+                    return True
+                else:
+                    # 目标文件已存在，检查指纹
+                    dst_fp = compute_file_fingerprint(dst_path)
+                    if dst_fp == src_fp:
+                        return True
+                    else:
+                        # 文件名相同但指纹不同，覆盖复制
+                        shutil.copy2(src_path, dst_path)
+                        if src_fp:
+                            fingerprint_map[src_fp] = dst_path
+                        return True
             except Exception:
                 return False
 
@@ -927,7 +1033,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> Optional[str]:
             except Exception:
                 pass
 
-            # 创建目录（尽量少改名，保持结构）
+            # 创建目录（保持原始结构）
             for d in dirs:
                 try:
                     (dst_root / d).mkdir(exist_ok=True)
@@ -940,7 +1046,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> Optional[str]:
                 futs.add(_IO_EXECUTOR.submit(submit_copy, sp, dp))
                 _wait_some(futs, inflight)
 
-        # drain
+        # 等待所有任务完成
         for _ in concurrent.futures.as_completed(futs):
             pass
 

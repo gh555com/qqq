@@ -1227,10 +1227,15 @@ async function executeClipboardCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
 
-    let targetDir = "D:\\view\\p";
-    if (!editor.document.isUntitled) {
-        targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
+    // 检查是否为未命名未保存的新建文件
+    if (editor.document.isUntitled) {
+        vscode.window.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
+        // 执行原始粘贴
+        await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+        return;
     }
+
+    const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 
     const fastResult = await qqq.handleClipboardFast();
     if (fastResult?.type === "text") {
@@ -1320,8 +1325,21 @@ async function replacePendingMarker(token, result) {
         const gapBelow = calculateBlankLinesExact(pxHeight, true);
         replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
         invalidateFolderSizeCacheForPath(filePath);
-    } else if (result.type === "file") {
-        const files = result.files;
+    } else if (result.type === "file" || result.type === "file_folder") {
+        const files = result.files || [];
+        const folders = result.folders || [];
+
+        // 处理文件夹
+        for (let i = 0; i < folders.length; i++) {
+            const folderPath = folders[i];
+            const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
+            const isLastItem = i === folders.length - 1 && files.length === 0;
+            const gapBelow = calculateBlankLinesExact(LARGE_PREVIEW_HEIGHT, isLastItem);
+            replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+            invalidateFolderSizeCacheForPath(folderPath);
+        }
+
+        // 处理文件
         for (let i = 0; i < files.length; i++) {
             const f = files[i];
             const relPath = path.relative(docDir, f).replace(/\\/g, "/");
@@ -1333,16 +1351,27 @@ async function replacePendingMarker(token, result) {
                     pxHeight = height;
                 } catch { }
             }
-            const isLastItem = i === files.length - 1;
-            if (i > 0) replacement += eol;
+            const isLastItem = i === files.length - 1 && folders.length === 0;
+            if (i > 0 || folders.length > 0) replacement += eol;
             replacement += `/\\${relPath}\\/`;
             const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
             replacement += eol.repeat(gapBelow);
             invalidateFolderSizeCacheForPath(f);
         }
-        if (files.length > 1) vscode.window.showInformationMessage("文件已复制 " + files.length);
+
+        const totalCount = files.length + folders.length;
+        if (totalCount > 1) vscode.window.showInformationMessage("文件/文件夹已复制 " + totalCount);
     } else if (result.type === "folder_text") {
-        replacement = result.text;
+        // 处理文件夹列表
+        const folders = result.text.split(/\r?\n/).filter(f => f.trim());
+        for (let i = 0; i < folders.length; i++) {
+            const folderPath = folders[i];
+            const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
+            const isLastItem = i === folders.length - 1;
+            const gapBelow = calculateBlankLinesExact(LARGE_PREVIEW_HEIGHT, isLastItem);
+            replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+            invalidateFolderSizeCacheForPath(folderPath);
+        }
     } else if (result.type === "text") {
         replacement = result.text;
     } else {
