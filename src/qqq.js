@@ -237,6 +237,26 @@ function getActiveEngineCode() {
 	// R: Rust daemon
 	// S: Shell daemon
 	// N: Node/spawn fallback
+
+	// 获取用户配置的 IO 引擎
+	const config = vscode.workspace.getConfiguration("qqq");
+	const enginePreference = config.get("ioEngine", "auto");
+
+	// 如果用户指定了特定引擎，则优先使用该引擎
+	if (enginePreference !== "auto") {
+		switch (enginePreference) {
+			case "python":
+				return pythonBridge?.isAvailable() ? "P" : "N";
+			case "rust":
+				return rustBridge?.isAvailable() ? "R" : "N";
+			case "shell":
+				return shellBridge?.isAvailable() ? "S" : "N";
+			case "node":
+				return "N";
+		}
+	}
+
+	// 自动选择模式
 	if (pythonBridge?.isAvailable()) return "P";
 	if (rustBridge?.isAvailable()) return "R";
 	if (shellBridge?.isAvailable()) return "S";
@@ -276,19 +296,23 @@ function updateStatusBarNow() {
 	const denom = pstats.hitTotal + pstats.missTotal;
 	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
 
-	// 你要的状态栏末尾只显示 P / R / N（Shell 归并显示 N；tooltip 再细分）
+	// 获取当前活动引擎代码和名称
 	const engineCode = getActiveEngineCode();
+	const engineName = getActiveEngineName();
+
+	// 状态栏末尾显示引擎代码
+	// 注：你说你理解 shell 和 node 显示成同一类，这里保持原逻辑不改
 	const engineDisplay = (engineCode === "S") ? "N" : engineCode;
 
 	statusBarItem.text = `[qqq: ⏱${h}h ▥${cacheMB.toFixed(0)}m ⊙${hitRate.toFixed(0)}% ⚡${engineDisplay}]`;
 
-	const engineName = getActiveEngineName();
 	const tooltip = new vscode.MarkdownString(
 		[
 			`**累计使用时间：** ${_formatHours(totalSeconds)}`,
 			`**磁盘缓存：** ${_formatBytes(cacheBytes)}`,
 			`**缓存命中率：** ${hitRate.toFixed(2)}%  (hit=${pstats.hitTotal}, miss=${pstats.missTotal})`,
 			`**IO 引擎：** ${engineName}  （状态：${engineCode}）`,
+			`**引擎配置：** ${vscode.workspace.getConfiguration("qqq").get("ioEngine", "auto")}`
 		].join("\n\n")
 	);
 	tooltip.isTrusted = true;
@@ -770,6 +794,8 @@ class DaemonBridge {
 	}
 }
 
+// Python bridge：优先 python，其次 python3（非 win32）
+// 修正：避免 python 不存在时永远起不来
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
 		const scriptPath = path.join(__dirname, "kp.py");
@@ -778,16 +804,52 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			resolve(false);
 			return;
 		}
-		try {
-			const proc = cp.spawn("python", [scriptPath, "--daemon"], {
-				stdio: ["pipe", "pipe", "pipe"],
-				windowsHide: true
+
+		const spawnWith = (bin) => {
+			return new Promise((res) => {
+				let proc;
+				try {
+					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
+						stdio: ["pipe", "pipe", "pipe"],
+						windowsHide: true
+					});
+				} catch (e) {
+					res(false);
+					return;
+				}
+
+				let settled = false;
+				const failFast = () => {
+					if (settled) return;
+					settled = true;
+					try { proc.kill(); } catch { }
+					bridge.available = false;
+					res(false);
+				};
+
+				// 如果命令不存在（ENOENT），会触发 error 事件（非 throw）
+				proc.once("error", () => failFast());
+
+				bridge.setupProcess(proc, (ok) => {
+					if (settled) return;
+					settled = true;
+					res(!!ok);
+				});
 			});
-			bridge.setupProcess(proc, resolve);
-		} catch (e) {
-			bridge.available = false;
+		};
+
+		(async () => {
+			const ok1 = await spawnWith("python");
+			if (ok1) { resolve(true); return; }
+
+			if (process.platform !== "win32") {
+				const ok2 = await spawnWith("python3");
+				resolve(!!ok2);
+				return;
+			}
+
 			resolve(false);
-		}
+		})().catch(() => resolve(false));
 	});
 });
 
@@ -902,21 +964,66 @@ function ensureDir(dirPath) {
 	}
 }
 
+// ★ Clipboard Fast/Slow timeouts（HTML 多媒体可能较慢）
+const CLIPBOARD_PEEK_TIMEOUT_MS = 350;
+const CLIPBOARD_SLOW_TIMEOUT_MS = 60000;
+
+// ★ 快速嗅探：只用于决定是否走 fast-path
+async function peekClipboardRichFast() {
+	// Python 优先：支持 has_html / has_files / has_image / has_text
+	try {
+		if (pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+			const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
+			if (res && !res.error && res.type === "peek") return res;
+		}
+	} catch (e) { }
+
+	// Shell fallback：仅能判断 files/image（Windows）
+	try {
+		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+			const hasFiles = await shellBridge.call("hasFiles", {}, 200);
+			const hasImg = await shellBridge.call("hasImage", {}, 200);
+			return {
+				type: "peek",
+				has_html: false,
+				has_files: !!hasFiles?.value,
+				has_image: !!hasImg?.value,
+				has_text: false,
+			};
+		}
+	} catch (e) { }
+
+	return null;
+}
+
 async function handleClipboardFast() {
 	try {
+		// 先读纯文本（VSCode 自带）
 		const text = await vscode.env.clipboard.readText();
-		if (text?.trim()) return { type: "text", text };
+		if (!text || !text.trim()) return null;
+
+		// 如果剪贴板里其实还有“富内容”（html / files / image），不要走 fast-path，
+		// 让 q1 进入 pending + slow，从而保证多图/视频/排版不丢。
+		const peek = await peekClipboardRichFast();
+		if (peek && (peek.has_html || peek.has_files || peek.has_image)) {
+			return null;
+		}
+
+		return { type: "text", text };
 	} catch (e) { }
 	return null;
 }
 
 async function handleClipboardSlow(targetDir) {
+	// ★ HTML 多媒体复制/下载可能较慢：统一提高超时
+	const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
+
 	if (pythonBridge.isAvailable()) {
-		const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 10000);
+		const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, timeoutMs);
 		if (!res.error && res.type !== "unknown") return res;
 	}
 	if (rustBridge.isAvailable()) {
-		const res = await rustBridge.call("clipboard", { target_dir: targetDir }, 10000);
+		const res = await rustBridge.call("clipboard", { target_dir: targetDir }, timeoutMs);
 		if (!res.error && res.type !== "unknown") return res;
 	}
 	if (shellBridge.isAvailable()) {
@@ -1104,11 +1211,20 @@ async function handleClipboardSpawnLinux(targetDir) {
 	return { type: "unknown" };
 }
 
+// 修正：timeout 清理 + 防重复 resolve/kill
 function spawnCheck(cmd, args, expected) {
 	return new Promise(resolve => {
 		const child = cp.spawn(cmd, args, { windowsHide: true });
 		let output = "";
 		let errorOutput = "";
+		let done = false;
+
+		const finish = (val) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve(val);
+		};
 
 		child.stdout.on("data", d => output += d.toString().trim());
 		child.stderr.on("data", d => errorOutput += d.toString().trim());
@@ -1122,27 +1238,36 @@ function spawnCheck(cmd, args, expected) {
 					2 * 60 * 1000
 				);
 			}
-			resolve(output.includes(expected));
+			finish(output.includes(expected));
 		});
 
 		child.on("error", (err) => {
 			logMessage(`${cmd} 启动失败: ${err.message}`, "ERROR");
-			resolve(false);
+			finish(false);
 		});
 
-		setTimeout(() => {
+		const timer = setTimeout(() => {
 			try { child.kill(); } catch { }
 			logMessageRateLimited(`spawnCheckTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
-			resolve(false);
+			finish(false);
 		}, 5000);
 	});
 }
 
+// 修正：timeout 清理 + 防重复 resolve/kill
 function spawnOutput(cmd, args) {
 	return new Promise(resolve => {
 		const child = cp.spawn(cmd, args, { windowsHide: true });
 		let output = "";
 		let errorOutput = "";
+		let done = false;
+
+		const finish = (val) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve(val);
+		};
 
 		child.stdout.on("data", d => output += d.toString());
 		child.stderr.on("data", d => errorOutput += d.toString());
@@ -1156,18 +1281,18 @@ function spawnOutput(cmd, args) {
 					2 * 60 * 1000
 				);
 			}
-			resolve(output);
+			finish(output);
 		});
 
 		child.on("error", (err) => {
 			logMessage(`${cmd} 启动失败: ${err.message}`, "ERROR");
-			resolve("");
+			finish("");
 		});
 
-		setTimeout(() => {
+		const timer = setTimeout(() => {
 			try { child.kill(); } catch { }
 			logMessageRateLimited(`spawnOutputTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
-			resolve("");
+			finish("");
 		}, 5000);
 	});
 }
@@ -1342,10 +1467,13 @@ async function pureCommand() {
 			while ((match = regex.exec(content))) {
 				const rawPath = (match[1] || "").trim();
 
-				let absPath = path.isAbsolute(rawPath) ? rawPath : path.join(parentDir, rawPath);
-				absPath = absPath.replace(/\//g, "\\");
+				// 修正：跨平台路径归一化，避免把 / 强行替换成 \ 导致 Linux/mac 误判
+				const absPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(parentDir, rawPath);
 
-				if (absPath.toLowerCase().startsWith(qqqDir.toLowerCase())) {
+				const absNorm = path.normalize(absPath).toLowerCase();
+				const qqqNorm = path.normalize(qqqDir).toLowerCase();
+
+				if (absNorm.startsWith(qqqNorm)) {
 					referencedFiles.add(path.basename(absPath).toLowerCase());
 				}
 			}
@@ -1418,6 +1546,17 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.pure", pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+		}),
+		// 监听配置变化
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration("qqq.ioEngine")) {
+				logMessage("IO 引擎配置已更改，重新启动守护进程...", "INFO");
+				// 重启守护进程以应用新的配置
+				pythonBridge.stop();
+				rustBridge.stop();
+				shellBridge.stop();
+				startDaemons();
+			}
 		})
 	);
 
@@ -1426,23 +1565,53 @@ async function activate(context) {
 	logMessage("qqq 扩展激活完成", "INFO");
 }
 
+// 修正：auto 模式不再重复启动（先前会并行启动 + 再串行兜底，导致重复 start）
 function startDaemons() {
-	pythonBridge.start().then(ok => {
-		if (ok) {
-			logMessage("Python Bridge OK", "INFO");
-		} else {
-			rustBridge.start().then(ok2 => {
-				if (ok2) {
-					logMessage("Rust Bridge OK", "INFO");
-				} else {
-					shellBridge.start().then(ok3 => {
-						if (ok3) logMessage("Shell Bridge OK", "INFO");
-						else logMessage("All daemons failed, using spawn fallback", "WARN");
-						try { updateStatusBarNow(); } catch { }
-					});
-				}
-			});
+	// 获取用户配置的 IO 引擎
+	const config = vscode.workspace.getConfiguration("qqq");
+	const enginePreference = config.get("ioEngine", "auto");
+
+	const startOne = async (bridge, okMsg, failMsg, isHardFail) => {
+		try {
+			const ok = await bridge.start();
+			if (ok) logMessage(okMsg, "INFO");
+			else if (isHardFail) logMessage(failMsg, "ERROR");
+			return !!ok;
+		} catch (e) {
+			if (isHardFail) logMessage(`${failMsg}: ${e?.message || e}`, "ERROR");
+			return false;
+		} finally {
+			try { updateStatusBarNow(); } catch { }
 		}
+	};
+
+	// 非 auto：只启动用户指定的那个
+	if (enginePreference !== "auto") {
+		if (enginePreference === "python") {
+			startOne(pythonBridge, "Python Bridge OK", "Python Bridge 启动失败", true);
+		} else if (enginePreference === "rust") {
+			startOne(rustBridge, "Rust Bridge OK", "Rust Bridge 启动失败", true);
+		} else if (enginePreference === "shell") {
+			startOne(shellBridge, "Shell Bridge OK", "Shell Bridge 启动失败", true);
+		} else {
+			// node：不启动 daemon，走 spawn fallback
+			logMessage("IO 引擎: Node（不启动守护进程）", "INFO");
+			try { updateStatusBarNow(); } catch { }
+		}
+		return;
+	}
+
+	// auto：串行兜底（只走这一条，避免重复 start）
+	(async () => {
+		if (await startOne(pythonBridge, "Python Bridge OK", "Python Bridge 启动失败", false)) return;
+		if (await startOne(rustBridge, "Rust Bridge OK", "Rust Bridge 启动失败", false)) return;
+		if (await startOne(shellBridge, "Shell Bridge OK", "Shell Bridge 启动失败", false)) return;
+
+		logMessage("All daemons failed, using spawn fallback", "WARN");
+		try { updateStatusBarNow(); } catch { }
+	})().catch(() => {
+		logMessage("startDaemons auto 启动流程异常，回退 spawn fallback", "WARN");
+		try { updateStatusBarNow(); } catch { }
 	});
 }
 
@@ -1504,16 +1673,13 @@ async function deactivate() {
 	logMessage("qqq 扩展已停用", "INFO");
 }
 
-module.exports = {
+// 重要修正：导出 LOG_PATH 不再是“导出时快照”（否则一直 null），改成 getter 动态读取
+const exported = {
 	activate,
 	deactivate,
 
 	QQQ_PATH_REGEX,
 	PENDING_REGEX,
-
-	LOG_PATH,
-	ffmpegPath,
-	ffprobePath,
 
 	logMessage,
 	logMessageRateLimited,
@@ -1556,6 +1722,13 @@ module.exports = {
 	getActiveEngineName,
 	updateStatusBarNow,
 };
+
+// 动态 getter：保证外部模块读到的是最新值
+Object.defineProperty(exported, "LOG_PATH", { enumerable: true, get: () => LOG_PATH });
+Object.defineProperty(exported, "ffmpegPath", { enumerable: true, get: () => ffmpegPath });
+Object.defineProperty(exported, "ffprobePath", { enumerable: true, get: () => ffprobePath });
+
+module.exports = exported;
 
 process.on("uncaughtException", (error) => {
 	const stack = error.stack || "";

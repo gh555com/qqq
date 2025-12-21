@@ -1,8 +1,13 @@
-# src/kp.py
 # ==========================================
 #  A组增强版 Daemon - IO 缓存优化 + 惰性文件夹创建 + DIB 严格处理
 #  修改：DIB/ DIBV5 一律保存为无损 PNG（母版）
 #  关键修复：DIB -> BMP 头严格计算 bfOffBits（header/palette/bitfields）
+#
+#  ★ 2025-12 更新：支持 HTML/富文本剪贴板（嗅探本地已下载图片/视频）
+#    - 读取 CF_HTML（Windows: "HTML Format"）
+#    - 解析 <img>/<video>/<source>，按顺序返回 blocks（text + media）
+#    - media 若为本地路径/file:// 直接 copy2（原文件字节不改动）
+#    - http(s)/data: 可选下载/解码（仍保存原始字节）
 # ==========================================
 import sys
 import os
@@ -17,6 +22,15 @@ from datetime import datetime
 import random
 import concurrent.futures
 from collections import OrderedDict
+
+import re
+import base64
+import html as html_lib
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlparse, unquote
+from urllib.request import Request, urlopen
+import mimetypes
+from typing import Union, Tuple
 
 # ==========================================
 #              缓存配置
@@ -153,6 +167,10 @@ if platform.system() == "Windows":
     IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
     IsClipboardFormatAvailable.restype = wintypes.BOOL
 
+    RegisterClipboardFormatW = user32.RegisterClipboardFormatW
+    RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+    RegisterClipboardFormatW.restype = wintypes.UINT
+
 
 def read_global_data(h_mem):
     if not h_mem:
@@ -203,6 +221,12 @@ def is_image_ext(ext):
     return ext.lower() in image_exts
 
 
+def is_video_ext(ext):
+    video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov",
+                  ".wmv", ".flv", ".m4v", ".ts", ".mpeg", ".mpg"}
+    return ext.lower() in video_exts
+
+
 def unique_path_in_dir(output_dir: Path, filename: str) -> Path:
     """
     防止极端情况下重名：如果已存在则追加 _n
@@ -218,6 +242,58 @@ def unique_path_in_dir(output_dir: Path, filename: str) -> Path:
             return p
     # 最后兜底
     return output_dir / f"{base}_{int(time.time()*1000)}{ext}"
+
+
+def safe_filename(name: str) -> str:
+    """
+    尽量把文件名变成跨平台可写的安全名字
+    """
+    if not name:
+        return get_timestamp_filename(".bin")
+    n = name.strip().replace("\x00", "")
+    # Windows 不允许的字符：<>:"/\|?*
+    n = re.sub(r'[<>:"/\\\\|?*]+', "_", n)
+    # 去掉前后空白点
+    n = n.strip(" .\t\r\n")
+    if not n:
+        return get_timestamp_filename(".bin")
+    if len(n) > 180:
+        stem = Path(n).stem[:160]
+        ext = Path(n).suffix
+        n = stem + ext
+    return n
+
+
+def ext_from_mime(mime: str) -> str:
+    m = (mime or "").split(";")[0].strip().lower()
+    if not m:
+        return ""
+    # mimetypes 对 jpeg 返回 .jpe，需要修正
+    ext = mimetypes.guess_extension(m) or ""
+    if ext == ".jpe":
+        ext = ".jpg"
+    if m == "image/jpeg":
+        ext = ".jpg"
+    if m == "video/quicktime":
+        ext = ".mov"
+    return ext or ""
+
+
+def ext_from_url(url: str) -> str:
+    try:
+        p = urlparse(url)
+        ext = os.path.splitext(p.path)[1]
+        if not ext:
+            return ""
+        ext = ext.lower()
+        # 常见别名修正
+        if ext == ".jpeg":
+            return ".jpg"
+        if ext == ".tiff":
+            return ".tif"
+        return ext
+    except Exception:
+        return ""
 
 
 def save_image_as_png(img, path: Path):
@@ -306,6 +382,542 @@ def bytes_from_pywin32_blob(blob) -> bytes:
             return bytes(blob)
         except Exception:
             return b""
+
+
+# ==========================================
+#        ★ HTML / 富文本 解析（blocks）
+# ==========================================
+HTML_MAX_MEDIA = 80
+HTML_REMOTE_MAX_BYTES = 80 * 1024 * 1024  # 远程下载最大字节，防止误触超大文件
+HTML_REMOTE_TIMEOUT = 15
+
+# 部分站点会拒绝空 UA
+_HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (qqq-html-paste)",
+    "Accept": "*/*",
+}
+
+
+def _extract_cf_html_fragment(cf_data) -> Tuple[Union[str, None], Union[str, None]]:
+    """
+    CF_HTML -> (fragment_html, source_url)
+    cf_data: bytes 或 str
+    """
+    if cf_data is None:
+        return None, None
+
+    if isinstance(cf_data, str):
+        text = cf_data
+        raw_bytes = cf_data.encode("utf-8", "ignore")
+    else:
+        raw_bytes = bytes(cf_data)
+        text = raw_bytes.decode("utf-8", "ignore")
+
+    source_url = None
+    m = re.search(r"^SourceURL:(.+)$", text,
+                  flags=re.IGNORECASE | re.MULTILINE)
+    if m:
+        source_url = (m.group(1) or "").strip()
+
+    # 优先：注释标记
+    s_mark = "<!--StartFragment-->"
+    e_mark = "<!--EndFragment-->"
+    i1 = text.find(s_mark)
+    i2 = text.find(e_mark)
+    if i1 >= 0 and i2 > i1:
+        frag = text[i1 + len(s_mark): i2].strip()
+        if frag:
+            return frag, source_url
+
+    # 次选：字节偏移（如果 clipboard 返回原始 bytes，通常可用）
+    m1 = re.search(r"StartFragment:(\d+)", text, flags=re.IGNORECASE)
+    m2 = re.search(r"EndFragment:(\d+)", text, flags=re.IGNORECASE)
+    if m1 and m2:
+        try:
+            s = int(m1.group(1))
+            e = int(m2.group(1))
+            if 0 <= s < e <= len(raw_bytes):
+                frag_b = raw_bytes[s:e]
+                frag = frag_b.decode("utf-8", "ignore").strip()
+                if frag:
+                    return frag, source_url
+        except Exception:
+            pass
+
+    # 再兜底：抓 <html>...</html>
+    m3 = re.search(r"<html[\s\S]*?</html>", text, flags=re.IGNORECASE)
+    if m3:
+        return m3.group(0).strip(), source_url
+
+    # 最后：原样
+    text2 = text.strip()
+    return (text2 if text2 else None), source_url
+
+
+def _attr(attrs, name: str) -> str:
+    for k, v in (attrs or []):
+        if not k:
+            continue
+        if k.lower() == name.lower():
+            return (v or "").strip()
+    return ""
+
+
+def _pick_src(attrs) -> str:
+    # 常见懒加载字段
+    src = _attr(attrs, "src") or _attr(attrs, "data-src") or _attr(attrs,
+                                                                   "data-original") or _attr(attrs, "data-url") or _attr(attrs, "data-lazy-src")
+    if src:
+        return src.strip()
+    # srcset 兜底：取第一项
+    srcset = _attr(attrs, "srcset")
+    if srcset:
+        first = srcset.split(",")[0].strip()
+        if first:
+            return first.split()[0].strip()
+    return ""
+
+
+class _HtmlBlocksParser(HTMLParser):
+    """
+    把 HTML 转成 tokens，保持顺序：
+      - str: 纯文本（含 \n / \t）
+      - dict: {"kind":"image"/"video", "src":..., "alt":...}
+    """
+    _BLOCK_TAGS = {
+        "p", "div", "section", "article", "header", "footer",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+        "blockquote", "pre", "table", "tr", "ul", "ol",
+    }
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tokens = []
+        self._skip_depth = 0
+        self._video_stack = []  # list[{src:str, sources:list[str]}]
+
+    def _push_text(self, s: str):
+        if not s:
+            return
+        self.tokens.append(s)
+
+    def _push_nl(self):
+        self.tokens.append("\n")
+
+    def _push_tab(self):
+        self.tokens.append("\t")
+
+    def handle_starttag(self, tag, attrs):
+        t = (tag or "").lower()
+
+        if t in ("script", "style", "noscript", "head"):
+            self._skip_depth += 1
+            return
+        if self._skip_depth > 0:
+            return
+
+        if t == "br":
+            self._push_nl()
+            return
+
+        if t in self._BLOCK_TAGS:
+            self._push_nl()
+            return
+
+        if t == "li":
+            self._push_nl()
+            self._push_text("- ")
+            return
+
+        if t in ("td", "th"):
+            # 单元格间用 tab
+            self._push_tab()
+            return
+
+        if t == "img":
+            src = _pick_src(attrs)
+            alt = _attr(attrs, "alt")
+            if src:
+                self.tokens.append({"kind": "image", "src": src, "alt": alt})
+                self._push_nl()
+            return
+
+        if t == "video":
+            src = _pick_src(attrs) or _attr(attrs, "src")
+            self._video_stack.append({"src": src, "sources": []})
+            self._push_nl()
+            return
+
+        if t == "source":
+            if self._video_stack:
+                s = _pick_src(attrs) or _attr(attrs, "src")
+                if s:
+                    self._video_stack[-1]["sources"].append(s)
+            return
+
+    def handle_endtag(self, tag):
+        t = (tag or "").lower()
+
+        if t in ("script", "style", "noscript", "head"):
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth > 0:
+            return
+
+        if t in self._BLOCK_TAGS or t in ("li", "tr"):
+            self._push_nl()
+            return
+
+        if t == "video":
+            if self._video_stack:
+                ctx = self._video_stack.pop()
+                src = (ctx.get("src") or "").strip()
+                if not src and ctx.get("sources"):
+                    src = (ctx["sources"][0] or "").strip()
+                if src:
+                    self.tokens.append(
+                        {"kind": "video", "src": src, "alt": ""})
+                    self._push_nl()
+
+    def handle_data(self, data):
+        if self._skip_depth > 0:
+            return
+        if not data:
+            return
+        # 保留原有换行/空格（轻度清理后再做）
+        self._push_text(data)
+
+    def handle_entityref(self, name):
+        # convert_charrefs=True 已处理
+        pass
+
+    def handle_charref(self, name):
+        pass
+
+
+def html_to_blocks(html_text: str) -> list:
+    """
+    HTML -> blocks:
+      {"type":"text","text":...}
+      {"type":"media","kind":"image"/"video","src":...,"alt":...}
+    """
+    if not html_text:
+        return []
+
+    parser = _HtmlBlocksParser()
+    try:
+        parser.feed(html_text)
+        parser.close()
+    except Exception:
+        # 最差：按纯文本
+        t = html_lib.unescape(re.sub(r"<[^>]+>", "", html_text))
+        return [{"type": "text", "text": t}] if t else []
+
+    tokens = parser.tokens
+    blocks = []
+    buf = ""
+
+    def flush_buf(force=False):
+        nonlocal buf
+        if not buf:
+            return
+        # 保留仅换行的段落（用于分隔媒体）
+        if force or buf.strip() or ("\n" in buf):
+            blocks.append({"type": "text", "text": buf})
+        buf = ""
+
+    for tok in tokens:
+        if isinstance(tok, dict):
+            flush_buf(force=True)
+            kind = tok.get("kind") or "image"
+            src = (tok.get("src") or "").strip()
+            alt = (tok.get("alt") or "").strip()
+            if src:
+                blocks.append(
+                    {"type": "media", "kind": kind, "src": src, "alt": alt})
+        else:
+            buf += str(tok)
+
+    flush_buf(force=False)
+
+    # 清理 text
+    cleaned = []
+    for b in blocks:
+        if b.get("type") != "text":
+            cleaned.append(b)
+            continue
+        t = b.get("text", "")
+        t = t.replace("\r\n", "\n").replace("\r", "\n")
+        # 行内：压缩连续空白（但保留 tab）
+        t = "\n".join([re.sub(r"[ \f\v]+", " ", line).rstrip()
+                      for line in t.split("\n")])
+        # 连续空行最多 2
+        t = re.sub(r"\n{3,}", "\n\n", t)
+        # 解实体（保险）
+        t = html_lib.unescape(t)
+        if t or ("\n" in t):
+            cleaned.append({"type": "text", "text": t})
+    return cleaned
+
+
+def _data_url_to_bytes(data_url: str) -> Tuple[Union[bytes, None], str]:
+    """
+    data:<mime>;base64,xxxx -> (bytes, mime)
+    """
+    m = re.match(r"^data:([^;]+);base64,(.*)$",
+                 data_url, flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None, ""
+    mime = (m.group(1) or "").strip().lower()
+    b64 = (m.group(2) or "").strip()
+    try:
+        return base64.b64decode(b64, validate=False), mime
+    except Exception:
+        try:
+            return base64.b64decode(b64 + "==="), mime
+        except Exception:
+            return None, mime
+
+
+def _file_url_to_path(file_url: str) -> Union[Path, None]:
+    try:
+        u = urlparse(file_url)
+        if u.scheme != "file":
+            return None
+        p = unquote(u.path or "")
+        # Windows: /C:/xxx
+        if re.match(r"^/[a-zA-Z]:/", p):
+            p = p[1:]
+        # Windows UNC: file://server/share/xxx
+        if u.netloc and not re.match(r"^[a-zA-Z]:", p):
+            p2 = p.replace('/', '\\')
+            p = "\\\\" + u.netloc + p2
+        return Path(p)
+    except Exception:
+        return None
+
+
+def _download_url_to_path(url: str, output_dir: Path, filename_hint: str = "") -> Union[Path, None]:
+    """
+    远程下载，原始字节保存；流式写入，避免内存爆。
+    """
+    try:
+        req = Request(url, headers=_HTTP_HEADERS)
+        with urlopen(req, timeout=HTML_REMOTE_TIMEOUT) as resp:
+            ct = resp.headers.get("Content-Type", "") or ""
+            cd = resp.headers.get("Content-Disposition", "") or ""
+
+            # filename 先取 hint，再取 URL basename，再取 Content-Disposition
+            name = safe_filename(filename_hint) if filename_hint else ""
+            if not name:
+                try:
+                    base = os.path.basename(urlparse(url).path)
+                    name = safe_filename(base)
+                except Exception:
+                    name = ""
+            if not name:
+                m = re.search(
+                    r'filename\\*=UTF-8\\\'\\\'([^;]+)', cd, flags=re.IGNORECASE)
+                if m:
+                    name = safe_filename(unquote(m.group(1)))
+                else:
+                    m2 = re.search(
+                        r'filename="([^"]+)"', cd, flags=re.IGNORECASE)
+                    if m2:
+                        name = safe_filename(m2.group(1))
+            if not name:
+                name = get_timestamp_filename(".bin")
+
+            ext = Path(name).suffix
+            if not ext:
+                ext = ext_from_mime(ct) or ext_from_url(url) or ".bin"
+                name = Path(name).stem + ext
+
+            out_path = unique_path_in_dir(output_dir, name)
+            ensure_parent(out_path)
+
+            tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+            total = 0
+            with open(tmp_path, "wb") as f:
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > HTML_REMOTE_MAX_BYTES:
+                        raise ValueError("remote file too large")
+                    f.write(chunk)
+
+            try:
+                os.replace(str(tmp_path), str(out_path))
+            except Exception:
+                try:
+                    if out_path.exists():
+                        out_path.unlink()
+                except Exception:
+                    pass
+                shutil.move(str(tmp_path), str(out_path))
+
+            # 如果扩展名不可靠，尝试 magic 再修正（只在 .bin 或未知时）
+            if out_path.suffix.lower() in (".bin", ""):
+                try:
+                    with open(out_path, "rb") as f:
+                        head = f.read(4096)
+                    gext = guess_ext_by_magic(head)
+                    if gext and gext != ".bin":
+                        new_path = unique_path_in_dir(
+                            output_dir, out_path.stem + gext)
+                        os.replace(str(out_path), str(new_path))
+                        out_path = new_path
+                except Exception:
+                    pass
+
+            return out_path
+    except Exception:
+        return None
+
+
+def save_media_from_src(src: str, output_dir: Path, source_url: Union[str, None], kind_hint: str = "") -> Union[Path, None]:
+    """
+    src -> 本地文件路径（已复制/已下载） or None
+    """
+    if not src:
+        return None
+
+    s = src.strip()
+    if not s:
+        return None
+
+    # 1) data url
+    if s.lower().startswith("data:"):
+        data, mime = _data_url_to_bytes(s)
+        if not data:
+            return None
+        ext = ext_from_mime(mime) or guess_ext_by_magic(data) or ".bin"
+        name = get_timestamp_filename(
+            ext if ext.startswith(".") else "." + ext)
+        name = safe_filename(name)
+        out_path = unique_path_in_dir(output_dir, name)
+        ensure_parent(out_path)
+        try:
+            with open(out_path, "wb") as f:
+                f.write(data)
+            return out_path
+        except Exception:
+            return None
+
+    # 2) file url
+    if s.lower().startswith("file://"):
+        p = _file_url_to_path(s)
+        if p and p.exists() and p.is_file():
+            name = safe_filename(p.name)
+            out_path = unique_path_in_dir(output_dir, name)
+            ensure_parent(out_path)
+            try:
+                shutil.copy2(p, out_path)  # 原封不动复制
+                return out_path
+            except Exception:
+                return None
+        return None
+
+    # 3) 绝对本地路径（Windows / UNC / POSIX）
+    if re.match(r"^[a-zA-Z]:[\\/]", s) or s.startswith("\\\\") or s.startswith("/"):
+        p = Path(s)
+        if p.exists() and p.is_file():
+            name = safe_filename(p.name)
+            out_path = unique_path_in_dir(output_dir, name)
+            ensure_parent(out_path)
+            try:
+                shutil.copy2(p, out_path)
+                return out_path
+            except Exception:
+                return None
+        return None
+
+    # 4) http(s)
+    if s.lower().startswith("http://") or s.lower().startswith("https://"):
+        return _download_url_to_path(s, output_dir)
+
+    # 5) 相对 URL：基于 SourceURL 解析
+    if source_url:
+        try:
+            abs_url = urljoin(source_url, s)
+            if abs_url.lower().startswith(("http://", "https://", "file://")):
+                return save_media_from_src(abs_url, output_dir, source_url, kind_hint=kind_hint)
+        except Exception:
+            pass
+
+    return None
+
+
+def materialize_html_blocks(blocks: list, output_dir: Path, source_url: Union[str, None]) -> list:
+    """
+    把 blocks 中的 media.src 落地成 output_dir 下的文件，并返回最终 blocks：
+      {"type":"text","text":...}
+      {"type":"media","kind":"image"/"video","path":...}
+    """
+    if not blocks:
+        return []
+
+    ensure_parent(output_dir / "dummy")
+
+    out = []
+    media_count = 0
+    for b in blocks:
+        if media_count >= HTML_MAX_MEDIA:
+            alt = (b.get("alt") or "").strip()
+            if alt:
+                out.append(
+                    {"type": "text", "text": f"[{b.get('kind', 'media')}]: {alt} (超限未下载)"})
+            continue
+
+        t = b.get("type")
+        if t == "text":
+            text = b.get("text", "")
+            if text is None:
+                continue
+            out.append({"type": "text", "text": str(text)})
+            continue
+
+        if t == "media":
+            src = (b.get("src") or "").strip()
+            if not src:
+                continue
+
+            media_count += 1
+            kind = (b.get("kind") or "image").strip().lower()
+            p = save_media_from_src(
+                src, output_dir, source_url, kind_hint=kind)
+            if p and p.exists():
+                out.append({"type": "media", "kind": kind, "path": str(p)})
+            else:
+                alt = (b.get("alt") or "").strip()
+                if alt:
+                    out.append({"type": "text", "text": f"[{kind}]: {alt}"})
+
+    # 合并相邻文本
+    merged = []
+    for b in out:
+        if b.get("type") == "text" and merged and merged[-1].get("type") == "text":
+            merged[-1]["text"] = (merged[-1].get("text")
+                                  or "") + "\n" + (b.get("text") or "")
+        else:
+            merged.append(b)
+
+    # 再做一次 text 清理（防止碎片）
+    final = []
+    for b in merged:
+        if b.get("type") != "text":
+            final.append(b)
+            continue
+        t = b.get("text", "")
+        t = str(t).replace("\r\n", "\n").replace("\r", "\n")
+        t = re.sub(r"\n{3,}", "\n\n", t)
+        t = t.strip("\n")
+        if t:
+            final.append({"type": "text", "text": t})
+    return final
 
 
 # ==========================================
@@ -408,15 +1020,47 @@ def get_folder_info(folder_path: str):
 def handle_windows_pywin32(wcb, wcon, output_dir: Path):
     """
     优先顺序：
-      1) CF_HDROP 文件/目录
-      2) CF_DIBV5（如果存在）
-      3) CF_DIB
+      1) CF_HTML（富文本，含多媒体 -> blocks）
+      2) CF_HDROP 文件/目录（物理复制，不转码）
+      3) CF_DIBV5（如果存在）
+      4) CF_DIB
     DIB/DIBV5：严格包装成 BMP 再给 PIL 解码，然后保存 PNG
     """
     try:
         wcb.OpenClipboard()
         try:
-            # 1) 文件/目录（物理复制，不转码）
+            # 1) CF_HTML：保持文字+多图/视频顺序
+            try:
+                fmt_html = wcb.RegisterClipboardFormat("HTML Format")
+                if fmt_html and wcb.IsClipboardFormatAvailable(fmt_html):
+                    raw = wcb.GetClipboardData(fmt_html)
+                    # pywin32 有时直接给 str
+                    if isinstance(raw, str):
+                        cf_text = raw
+                    else:
+                        cf_text = bytes_from_pywin32_blob(
+                            raw).decode("utf-8", "ignore")
+                    frag, source_url = _extract_cf_html_fragment(cf_text)
+                    if frag:
+                        blocks0 = html_to_blocks(frag)
+                        has_media = any(b.get("type") ==
+                                        "media" for b in blocks0)
+                        if blocks0:
+                            blocks = materialize_html_blocks(
+                                blocks0, output_dir, source_url)
+                            if blocks and any(b.get("type") == "media" for b in blocks):
+                                return {"type": "html_blocks", "blocks": blocks, "source_url": source_url or ""}
+                            # 没媒体：退化成纯文本（保留段落结构）
+                            if not has_media:
+                                texts = [b.get("text", "")
+                                         for b in blocks if b.get("type") == "text"]
+                                t = "\n\n".join([x for x in texts if x])
+                                if t.strip():
+                                    return {"type": "text", "text": t}
+            except Exception:
+                pass
+
+            # 2) 文件/目录（物理复制，不转码）
             if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
                 files = wcb.GetClipboardData(wcon.CF_HDROP)
 
@@ -438,12 +1082,10 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                     copied_files = []
 
                     for src in valid_files:
-                        ext = src.suffix
-                        fname = get_timestamp_filename(
-                            ext) if is_image_ext(ext) else src.name
+                        fname = safe_filename(src.name)  # ★ 原名优先
                         dst = unique_path_in_dir(output_dir, fname)
                         try:
-                            shutil.copy2(src, dst)
+                            shutil.copy2(src, dst)  # 原封不动
                             copied_files.append(str(dst))
                         except Exception:
                             pass
@@ -454,7 +1096,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                         return {"type": "file", "files": copied_files}
                     return None
 
-            # 2) 图片：优先 DIBV5
+            # 3/4) 图片：优先 DIBV5
             dibv5_format = getattr(wcon, "CF_DIBV5", 17)
             dib_formats = []
             if wcb.IsClipboardFormatAvailable(dibv5_format):
@@ -506,7 +1148,34 @@ def handle_windows_ctypes(output_dir: Path):
         return {"error": "Cannot open clipboard"}
 
     try:
-        # 1) 文件/目录：CF_HDROP
+        # 1) CF_HTML
+        try:
+            fmt_html = RegisterClipboardFormatW("HTML Format")
+            if fmt_html and IsClipboardFormatAvailable(fmt_html):
+                h_mem = GetClipboardData(fmt_html)
+                if h_mem:
+                    raw = read_global_data(h_mem)
+                    if raw:
+                        frag, source_url = _extract_cf_html_fragment(raw)
+                        if frag:
+                            blocks0 = html_to_blocks(frag)
+                            has_media = any(b.get("type") ==
+                                            "media" for b in blocks0)
+                            if blocks0:
+                                blocks = materialize_html_blocks(
+                                    blocks0, output_dir, source_url)
+                                if blocks and any(b.get("type") == "media" for b in blocks):
+                                    return {"type": "html_blocks", "blocks": blocks, "source_url": source_url or ""}
+                                if not has_media:
+                                    texts = [b.get("text", "") for b in blocks if b.get(
+                                        "type") == "text"]
+                                    t = "\n\n".join([x for x in texts if x])
+                                    if t.strip():
+                                        return {"type": "text", "text": t}
+        except Exception:
+            pass
+
+        # 2) 文件/目录：CF_HDROP
         if IsClipboardFormatAvailable(CF_HDROP):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
@@ -534,9 +1203,7 @@ def handle_windows_ctypes(output_dir: Path):
                     ensure_parent(output_dir / "dummy")
                     copied_files = []
                     for src in valid_files:
-                        ext = src.suffix
-                        fname = get_timestamp_filename(
-                            ext) if is_image_ext(ext) else src.name
+                        fname = safe_filename(src.name)
                         dst = unique_path_in_dir(output_dir, fname)
                         try:
                             shutil.copy2(src, dst)
@@ -549,7 +1216,7 @@ def handle_windows_ctypes(output_dir: Path):
                     if copied_files:
                         return {"type": "file", "files": copied_files}
 
-        # 2) 图片：优先 CF_DIBV5，再 CF_DIB
+        # 3) 图片：优先 CF_DIBV5，再 CF_DIB
         dib_format_list = []
         if IsClipboardFormatAvailable(CF_DIBV5):
             dib_format_list.append(CF_DIBV5)
@@ -620,6 +1287,27 @@ def handle_windows(output_dir: Path):
 def handle_macos(output_dir: Path):
     import subprocess
 
+    # 1) HTML（如果有）
+    try:
+        html_proc = subprocess.run(
+            ["pbpaste", "-Prefer", "html"], capture_output=True, timeout=2)
+        if html_proc.stdout and len(html_proc.stdout) > 0:
+            html_text = html_proc.stdout.decode("utf-8", "ignore")
+            if "<" in html_text and ">" in html_text:
+                blocks0 = html_to_blocks(html_text)
+                blocks = materialize_html_blocks(blocks0, output_dir, None)
+                if blocks and any(b.get("type") == "media" for b in blocks):
+                    return {"type": "html_blocks", "blocks": blocks, "source_url": ""}
+                # 纯文本
+                texts = [b.get("text", "")
+                         for b in blocks if b.get("type") == "text"]
+                t = "\n\n".join([x for x in texts if x])
+                if t.strip():
+                    return {"type": "text", "text": t}
+    except Exception:
+        pass
+
+    # 2) PNG 图片
     fname = get_timestamp_filename(".png")
     out_path = unique_path_in_dir(output_dir, fname)
 
@@ -641,6 +1329,37 @@ def handle_macos(output_dir: Path):
 def handle_linux(output_dir: Path):
     import subprocess
 
+    # 1) HTML（如果有）
+    try:
+        targets_proc = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        targets = targets_proc.stdout or ""
+        if "text/html" in targets:
+            html_proc = subprocess.run(
+                ["xclip", "-selection", "clipboard", "-t", "text/html", "-o"],
+                capture_output=True,
+                timeout=3,
+            )
+            if html_proc.stdout and len(html_proc.stdout) > 0:
+                html_text = html_proc.stdout.decode("utf-8", "ignore")
+                if "<" in html_text and ">" in html_text:
+                    blocks0 = html_to_blocks(html_text)
+                    blocks = materialize_html_blocks(blocks0, output_dir, None)
+                    if blocks and any(b.get("type") == "media" for b in blocks):
+                        return {"type": "html_blocks", "blocks": blocks, "source_url": ""}
+                    texts = [b.get("text", "")
+                             for b in blocks if b.get("type") == "text"]
+                    t = "\n\n".join([x for x in texts if x])
+                    if t.strip():
+                        return {"type": "text", "text": t}
+    except Exception:
+        pass
+
+    # 2) PNG 图片
     fname = get_timestamp_filename(".png")
     out_path = unique_path_in_dir(output_dir, fname)
 
@@ -682,6 +1401,150 @@ def handle_clipboard(target_dir=None):
         return {"type": "unknown"}
 
 
+def handle_clipboard_peek():
+    """
+    只做“快速嗅探”，不做任何写入：
+      - has_html: 是否存在 HTML/富文本
+      - has_files: 是否存在文件拖拽列表（多媒体原文件）
+      - has_image: 是否存在位图数据（单图）
+      - has_text: 是否存在文本
+    目的：让上层决定是否走 fast-path（纯文本直接插入）还是 slow-path（媒体落盘）
+    """
+    result = {"type": "peek", "has_html": False,
+              "has_files": False, "has_image": False, "has_text": False}
+    sys_name = platform.system()
+
+    if sys_name == "Windows":
+        # pywin32 优先
+        try:
+            import win32clipboard as wcb
+            import win32con as wcon
+
+            wcb.OpenClipboard()
+            try:
+                try:
+                    fmt_html = wcb.RegisterClipboardFormat("HTML Format")
+                    if fmt_html and wcb.IsClipboardFormatAvailable(fmt_html):
+                        result["has_html"] = True
+                except Exception:
+                    pass
+
+                try:
+                    if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
+                        result["has_files"] = True
+                except Exception:
+                    pass
+
+                try:
+                    dibv5_format = getattr(wcon, "CF_DIBV5", 17)
+                    if wcb.IsClipboardFormatAvailable(dibv5_format) or wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
+                        result["has_image"] = True
+                except Exception:
+                    pass
+
+                try:
+                    if wcb.IsClipboardFormatAvailable(wcon.CF_UNICODETEXT) or wcb.IsClipboardFormatAvailable(wcon.CF_TEXT):
+                        result["has_text"] = True
+                except Exception:
+                    pass
+
+            finally:
+                try:
+                    wcb.CloseClipboard()
+                except Exception:
+                    pass
+
+            return result
+
+        except Exception:
+            pass
+
+        # ctypes fallback
+        try:
+            if not OpenClipboard(None):
+                return result
+
+            try:
+                try:
+                    fmt_html = RegisterClipboardFormatW("HTML Format")
+                    if fmt_html and IsClipboardFormatAvailable(fmt_html):
+                        result["has_html"] = True
+                except Exception:
+                    pass
+
+                try:
+                    if IsClipboardFormatAvailable(CF_HDROP):
+                        result["has_files"] = True
+                except Exception:
+                    pass
+
+                try:
+                    if IsClipboardFormatAvailable(CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB):
+                        result["has_image"] = True
+                except Exception:
+                    pass
+
+                try:
+                    if IsClipboardFormatAvailable(CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT):
+                        result["has_text"] = True
+                except Exception:
+                    pass
+
+            finally:
+                try:
+                    CloseClipboard()
+                except Exception:
+                    pass
+
+            return result
+        except Exception:
+            return result
+
+    elif sys_name == "Darwin":
+        try:
+            import subprocess
+            html_proc = subprocess.run(
+                ["pbpaste", "-Prefer", "html"], capture_output=True, timeout=1.2)
+            if html_proc.stdout and len(html_proc.stdout) > 0 and b"<" in html_proc.stdout:
+                result["has_html"] = True
+        except Exception:
+            pass
+
+        try:
+            import subprocess
+            txt_proc = subprocess.run(
+                ["pbpaste"], capture_output=True, timeout=0.8)
+            if txt_proc.stdout and len(txt_proc.stdout) > 0:
+                result["has_text"] = True
+        except Exception:
+            pass
+
+        return result
+
+    elif sys_name == "Linux":
+        try:
+            import subprocess
+            targets_proc = subprocess.run(
+                ["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"],
+                capture_output=True,
+                text=True,
+                timeout=1.2,
+            )
+            targets = targets_proc.stdout or ""
+            if "text/html" in targets:
+                result["has_html"] = True
+            if any(x in targets for x in ["image/png", "image/jpeg", "image/bmp", "image/webp", "image/gif"]):
+                result["has_image"] = True
+            if any(x in targets for x in ["UTF8_STRING", "text/plain", "STRING"]):
+                result["has_text"] = True
+        except Exception:
+            pass
+
+        return result
+
+    return result
+
+
 # ==========================================
 #              Daemon 模式
 # ==========================================
@@ -708,6 +1571,10 @@ def daemon_mode():
 
             if action == "ping":
                 result["status"] = "alive"
+
+            elif action == "clipboard_peek":
+                peek = handle_clipboard_peek()
+                result.update(peek)
 
             elif action == "clipboard":
                 target_dir = cmd.get("target_dir")
@@ -743,6 +1610,10 @@ def main():
             return
         if sys.argv[1] == "folder_info" and len(sys.argv) >= 3:
             res = get_folder_info(sys.argv[2])
+            print(json.dumps(res, ensure_ascii=False))
+            return
+        if sys.argv[1] == "clipboard_peek":
+            res = handle_clipboard_peek()
             print(json.dumps(res, ensure_ascii=False))
             return
         if sys.argv[1] == "clipboard":
