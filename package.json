@@ -15,7 +15,8 @@
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
     "onCommand:qqq.setInOrder",
-    "onCommand:qqq.exportDoc"
+    "onCommand:qqq.exportDoc",
+    "onCommand:qqq.exportZip"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -67,6 +68,25 @@
             "type": "boolean",
             "default": false,
             "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+          },
+          "qqq.ioEngine": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "python",
+              "rust",
+              "shell",
+              "node"
+            ],
+            "enumDescriptions": [
+              "自动选择最佳引擎",
+              "Python 引擎",
+              "Rust 引擎",
+              "Shell 引擎",
+              "Node 引擎"
+            ],
+            "description": "选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
           }
         }
       }
