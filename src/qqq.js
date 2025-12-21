@@ -12,13 +12,8 @@ const outputChannel = vscode.window.createOutputChannel("qqq extension");
 
 // ============================================================================
 // ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
-// - 匹配形如：/\   ...qqq...   \/
-// - 捕获组(1)返回中间内容（去掉外壳 /\ 和 \ /）
-// - 用 [\s\S] 允许跨任意字符；*? 非贪婪，避免吞掉后续 marker
 // ============================================================================
 const QQQ_PATH_REGEX = /\/\\\s*([\s\S]*?qqq[\s\S]*?)\s*\\\//gi;
-
-// pending 仍保持原样（有捕获组 token）
 const PENDING_REGEX = /\/\\__PENDING__:([a-zA-Z0-9]+)__\\\//g;
 
 const CACHE_DIR_NAME = "qqq_cache";
@@ -31,14 +26,14 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 const IMAGE_EXTS_FOR_CLIPBOARD = new Set([
-	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"
+	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
 ]);
 
 const BINARY_EXTS = new Set([
 	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
 	".exe", ".dll", ".zip", ".tar", ".gz",
 	".mp3", ".mp4", ".avi", ".mov", ".mkv",
-	".pdf", ".doc", ".docx", ".psd", ".ai"
+	".pdf", ".doc", ".docx", ".psd", ".ai",
 ]);
 
 let ffmpegPath = null;
@@ -46,7 +41,7 @@ let ffprobePath = null;
 try {
 	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
 	ffmpegPath = ffmpegInstaller.path;
-	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, m => m.replace("ffmpeg", "ffprobe"));
+	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
 } catch (e) { }
 
 let extensionContext = null;
@@ -65,7 +60,6 @@ function logMessageRateLimited(key, message, level = "WARN", intervalMs = 5 * 60
 	logMessage(message, level);
 }
 
-// ★ 把 daemon stderr 也降噪：避免桥接层 stderr 一直刷屏
 function _bridgeStderrKey(name, text) {
 	const head = String(text || "").replace(/\s+/g, " ").slice(0, 120);
 	return `bridge:${name}:${head}`;
@@ -133,7 +127,7 @@ const probeScheduler = new TaskScheduler(12);
 const genScheduler = new TaskScheduler(6);
 
 // ============================================================================
-// ★ 4) 缓存 meta 只读快照：状态栏/外部模块取 stats 用（不改结构、不改命中）
+// ★ 4) 缓存 meta 只读快照
 // ============================================================================
 function getCacheStatsSnapshot() {
 	const s = cacheMeta?.stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
@@ -141,7 +135,7 @@ function getCacheStatsSnapshot() {
 		totalSize: s.totalSize || 0,
 		fileCount: s.fileCount || 0,
 		hitCount: s.hitCount || 0,
-		missCount: s.missCount || 0
+		missCount: s.missCount || 0,
 	};
 }
 
@@ -150,8 +144,6 @@ function getCacheStatsSnapshot() {
 // ============================================================================
 const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
 const KEY_SESSION_START = "qqq_stats_session_start";
-
-// ★ 永不清零：缓存命中/未命中累计（写入 globalState）
 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 
@@ -181,7 +173,7 @@ function _scheduleStatsFlush() {
 			extensionContext.globalState.update(KEY_CACHE_HIT_TOTAL, _cacheHitTotal);
 			extensionContext.globalState.update(KEY_CACHE_MISS_TOTAL, _cacheMissTotal);
 		} catch { }
-	}, 2000); // 2s 合并写一次，避免高频写 globalState
+	}, 2000);
 }
 
 function _markCacheHit() {
@@ -199,12 +191,15 @@ function _markCacheMiss() {
 function getPersistentCacheStatsSnapshot() {
 	return {
 		hitTotal: _cacheHitTotal || 0,
-		missTotal: _cacheMissTotal || 0
+		missTotal: _cacheMissTotal || 0,
 	};
 }
 
 // ============================================================================
 // ★ 状态栏：永久显示 [qqq: ⏱2222h ▥33m ⊙98% ⚡P]
+// - Node：N(D)=daemon / N(S)=spawn
+// - Python：P
+// - Rust：R
 // ============================================================================
 let statusBarItem = null;
 let _statusBarTimer = null;
@@ -233,8 +228,7 @@ function _formatCompactTime(totalSeconds) {
 }
 
 // ============================================================================
-// ★★★ 统一路径真理来源（给 q2/q1/未来模块用）：跨平台 normalize/resolve/canonical
-// - 目标：绝对路径不乱剥离；Windows 盘符/UNC/根路径行为一致；canonical 去重一致
+// ★★★ 统一路径真理来源（给 q2/q1/未来模块用）
 // ============================================================================
 function _stripDocJunk(s) {
 	if (s == null) return "";
@@ -249,20 +243,10 @@ function _getSystemDriveRoot() {
 	return "C:\\";
 }
 
-/**
- * normalizeNavPath：用于“导航/打开/展示”的路径清洗
- * - 非 Windows：/ 开头保持绝对路径；~ 展开
- * - Windows：
- *   - 盘符/UNC 保持绝对
- *   - "C:" / "C:/" / "C:\" => "C:\"
- *   - "\foo" 或 "/foo" => 系统盘根路径下的 "\foo"
- *   - 其他：相对路径只 normalize，不强行 resolve（resolve 交给 resolveNavPath）
- */
 function normalizeNavPath(rawPath) {
 	let clean = _stripDocJunk(rawPath);
 	if (!clean) return "";
 
-	// ~ 展开
 	if (clean === "~") clean = os.homedir();
 	else if (clean.startsWith("~/") || clean.startsWith("~\\")) {
 		clean = path.join(os.homedir(), clean.slice(2));
@@ -271,20 +255,16 @@ function normalizeNavPath(rawPath) {
 	const isWin = process.platform === "win32";
 	if (!isWin) return path.normalize(clean);
 
-	// "C:" or "C:/"
 	if (/^[A-Za-z]:$/.test(clean)) return clean.toUpperCase() + "\\";
 	if (/^[A-Za-z]:[\\/]*$/.test(clean)) return clean[0].toUpperCase() + ":\\";
 
-	// UNC
 	if (clean.startsWith("\\\\") || clean.startsWith("//")) return path.normalize(clean);
 
-	// Drive absolute
 	if (/^[A-Za-z]:[\\/]/.test(clean)) {
 		const normalized = path.normalize(clean);
 		return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
 	}
 
-	// "\foo" or "/foo" => system drive root
 	if (clean.startsWith("\\") || clean.startsWith("/")) {
 		const sysRoot = _getSystemDriveRoot();
 		const rest = clean.replace(/^[\\/]+/, "");
@@ -294,11 +274,6 @@ function normalizeNavPath(rawPath) {
 	return path.normalize(clean);
 }
 
-/**
- * resolveNavPath：把用户输入路径解析成最终绝对路径（用于导航）
- * - 如果 normalize 后已是绝对（含 UNC/盘符）直接返回
- * - 否则按 baseDir resolve
- */
 function resolveNavPath(rawPath, baseDir) {
 	const clean = normalizeNavPath(rawPath);
 	if (!clean) return "";
@@ -307,13 +282,6 @@ function resolveNavPath(rawPath, baseDir) {
 	return path.resolve(base, clean);
 }
 
-/**
- * canonicalizeExistingPath：对“存在于磁盘的路径”做 canonical key（去重/缓存稳定）
- * - realpath（尽量）
- * - normalize
- * - 去尾分隔符（保留 root）
- * - Windows 盘符大写；最终 cacheKey win32 下再 lower
- */
 function canonicalizeExistingPath(p) {
 	if (!p) return "";
 	let out = String(p);
@@ -345,60 +313,74 @@ function cacheKeyForPath(p) {
 }
 
 // -----------------------------
-// ★ IO 引擎策略：严格按用户配置选择
+// ★ IO 引擎策略：严格按用户配置选择（shell 选项已废弃：当成 node）
 // -----------------------------
 function getEnginePreference() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
-		return config.get("ioEngine", "auto");
+		const v = config.get("ioEngine", "auto");
+		// 兼容老配置：shell 当成 node
+		if (v === "shell") return "node";
+		return v;
 	} catch {
 		return "auto";
 	}
 }
 
 function getEngineTryOrder(pref) {
-	// 返回尝试顺序（含 spawn 兜底）
+	// 内部实现仍用 shellBridge 表示 “node 的 daemon”
 	switch (pref) {
-		case "python": return ["python", "rust", "shell", "spawn"]; // python 不行 → rust →（最后可选 shell）→ spawn
-		case "rust": return ["rust", "python", "shell", "spawn"];
-		case "shell": return ["shell", "spawn"];
-		case "node": return ["shell", "spawn"]; // node 优先 shell daemon，失败再 spawn
+		case "python":
+			return ["python", "rust", "shell", "spawn"]; // python -> rust -> node(daemon) -> spawn
+		case "rust":
+			return ["rust", "python", "shell", "spawn"]; // rust -> python -> node(daemon) -> spawn
+		case "node":
+			return ["shell", "spawn"]; // node：无条件先起 shell daemon，失败就 spawn
 		case "auto":
-		default: return ["python", "rust", "shell", "spawn"];
+		default:
+			return ["python", "rust", "shell", "spawn"];
 	}
 }
 
-function getActiveEngineCode() {
-	// P: Python daemon
-	// R: Rust daemon
-	// S: Shell daemon
-	// N: Node/spawn fallback
+function _nodeModeFromShellAvail() {
+	// D = daemon, S = spawn
+	return shellBridge?.isAvailable?.() === true ? "D" : "S";
+}
 
+function getActiveEngineState() {
 	const pref = getEnginePreference();
+	const order = getEngineTryOrder(pref);
 
-	// 注意：这里“只读判断”，不主动启动进程
 	const py = pythonBridge?.isAvailable?.() === true;
 	const rs = rustBridge?.isAvailable?.() === true;
 	const sh = shellBridge?.isAvailable?.() === true;
 
-	if (pref === "python") return py ? "P" : (rs ? "R" : (sh ? "S" : "N"));
-	if (pref === "rust") return rs ? "R" : (py ? "P" : (sh ? "S" : "N"));
-	if (pref === "shell") return sh ? "S" : "N";
-	if (pref === "node") return sh ? "S" : "N";
+	const pickByOrder = () => {
+		for (const e of order) {
+			if (e === "python" && py) return { code: "P", name: "Python" };
+			if (e === "rust" && rs) return { code: "R", name: "Rust" };
+			if (e === "shell") {
+				const mode = sh ? "D" : "S";
+				return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
+			}
+			if (e === "spawn") {
+				return { code: "N", nodeMode: "S", name: "Node (Node spawn)" };
+			}
+		}
+		// 兜底
+		const mode = sh ? "D" : "S";
+		return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
+	};
 
-	// auto
-	if (py) return "P";
-	if (rs) return "R";
-	if (sh) return "S";
-	return "N";
+	return pickByOrder();
+}
+
+function getActiveEngineCode() {
+	return getActiveEngineState().code; // P / R / N
 }
 
 function getActiveEngineName() {
-	const code = getActiveEngineCode();
-	if (code === "P") return "Python";
-	if (code === "R") return "Rust";
-	if (code === "S") return "Shell";
-	return "Node";
+	return getActiveEngineState().name; // Python / Rust / Node(...)
 }
 
 function _getTotalSecondsIncludingSession() {
@@ -408,6 +390,46 @@ function _getTotalSecondsIncludingSession() {
 	if (!start) return base;
 	const diff = (Date.now() - start) / 1000;
 	return base + (diff > 0 ? diff : 0);
+}
+
+function _cleanReason(s, maxLen = 260) {
+	const t = String(s || "").replace(/\s+/g, " ").trim();
+	return t.length > maxLen ? t.slice(0, maxLen) + "..." : t;
+}
+
+function _collectMismatchReasons(pref, activeState) {
+	const reasons = [];
+
+	const pyReason = _cleanReason(pythonBridge?.lastStartError || pythonBridge?.lastCrashReason || pythonBridge?.lastStderrSnippet);
+	const rsReason = _cleanReason(rustBridge?.lastStartError || rustBridge?.lastCrashReason || rustBridge?.lastStderrSnippet);
+	const shReason = _cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
+
+	// Node spawn 代表 shell daemon 没起来：必须带上 shell 原因
+	if (activeState.code === "N" && activeState.nodeMode === "S") {
+		if (shReason) reasons.push(`Shell daemon：${shReason}`);
+		else reasons.push(`Shell daemon：启动失败/不可用`);
+	}
+
+	if (pref === "python" && activeState.code !== "P") {
+		if (pyReason) reasons.unshift(`Python：${pyReason}`);
+		else reasons.unshift(`Python：启动失败/不可用`);
+		if (activeState.code === "N") {
+			if (rsReason) reasons.push(`Rust：${rsReason}`);
+			else reasons.push(`Rust：启动失败/不可用`);
+		}
+	}
+
+	if (pref === "rust" && activeState.code !== "R") {
+		if (rsReason) reasons.unshift(`Rust：${rsReason}`);
+		else reasons.unshift(`Rust：启动失败/不可用`);
+		if (activeState.code === "N") {
+			if (pyReason) reasons.push(`Python：${pyReason}`);
+			else reasons.push(`Python：启动失败/不可用`);
+		}
+	}
+
+	// auto 不是“期待不一致”，但如果最终落到 Node，也可以把失败原因露出来（不强制）
+	return reasons;
 }
 
 function updateStatusBarNow() {
@@ -424,53 +446,42 @@ function updateStatusBarNow() {
 	const denom = pstats.hitTotal + pstats.missTotal;
 	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
 
-	const engineCode = getActiveEngineCode();
-	const engineName = getActiveEngineName();
-
-	// 注：保持你原来“Shell 与 Node 归一显示 N”的口径不变
-	const engineDisplay = (engineCode === "S") ? "N" : engineCode;
-	let extraEngineInfo = "";
-	if (engineCode === "N" && shellBridge?.isAvailable?.()) {
-		extraEngineInfo = "(D)";
-	}
-
-	statusBarItem.text = `[qqq: ⏱${h}h ▥${cacheMB.toFixed(0)}m ⊙${hitRate.toFixed(0)}% ⚡${engineDisplay}${extraEngineInfo}]`;
-
 	const pref = getEnginePreference();
+	const active = getActiveEngineState();
 
-	let engineDisplayText = `**IO 引擎：** ${engineName}`;
-	if (engineCode === "N") {
-		if (shellBridge?.isAvailable?.()) engineDisplayText = "**IO 引擎：** Node (Shell daemon)";
-		else engineDisplayText = "**IO 引擎：** Node (Node spawn)";
+	const engineTag =
+		active.code === "P"
+			? "P"
+			: active.code === "R"
+				? "R"
+				: `N(${active.nodeMode || _nodeModeFromShellAvail()})`;
+
+	statusBarItem.text = `[qqq: ⏱${h}h ▥${cacheMB.toFixed(0)}m ⊙${hitRate.toFixed(0)}% ⚡${engineTag}]`;
+
+	// tooltip：纯白背景 + 只保留 IO 引擎（实际使用）
+	const mismatchReasons = _collectMismatchReasons(pref, active);
+	let mismatchText = "";
+	if ((pref === "python" && active.code !== "P") || (pref === "rust" && active.code !== "R")) {
+		const expectedName = pref === "python" ? "Python" : "Rust";
+		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : "未知原因";
+		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr}`;
 	}
 
-	let expectationMismatchText = "";
-	if (pref !== "auto" && pref !== "node") {
-		const expectedCode =
-			pref === "python" ? "P" :
-				pref === "rust" ? "R" :
-					pref === "shell" ? "S" : "N";
-		if (expectedCode !== engineCode) {
-			let reason = "启动失败或不可用";
-			if (pref === "python" && pythonBridge?.isAvailable?.() !== true) reason = "Python 引擎启动失败/不可用";
-			if (pref === "rust" && rustBridge?.isAvailable?.() !== true) reason = "Rust 引擎启动失败/不可用";
-			if (pref === "shell" && shellBridge?.isAvailable?.() !== true) reason = "Shell 引擎启动失败/不可用";
-			expectationMismatchText = ` ▬ 期待值 ${pref}，当前回退：${engineName}（${reason}）`;
-		}
-	}
+	const ioLine = `**IO 引擎：** ${active.name}${mismatchText}`;
 
 	const tooltip = new vscode.MarkdownString(
 		[
-			`<div style="background-color: #ffffff; padding: 8px; border-radius: 4px;">`,
+			`<div style="background:#fff !important; color:#000 !important; padding:8px; border-radius:4px; border:1px solid #ddd;">`,
 			`**累计使用时间：** ${_formatHours(totalSeconds)}`,
 			`**磁盘缓存：** ${_formatBytes(cacheBytes)}`,
 			`**缓存命中率：** ${hitRate.toFixed(2)}%  (hit=${pstats.hitTotal}, miss=${pstats.missTotal})`,
-			`${engineDisplayText}${expectationMismatchText}`,
-			`</div>`
+			ioLine,
+			`</div>`,
 		].join("\n\n")
 	);
 	tooltip.isTrusted = true;
 	tooltip.supportHtml = true;
+
 	statusBarItem.tooltip = tooltip;
 	statusBarItem.show();
 }
@@ -484,14 +495,18 @@ function initUserTracking(context) {
 	if (!statusBarItem) {
 		statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
 		statusBarItem.command = "qqq.allSettings";
-		try { context.subscriptions.push(statusBarItem); } catch { }
+		try {
+			context.subscriptions.push(statusBarItem);
+		} catch { }
 	}
 
 	updateStatusBarNow();
 
 	if (_statusBarTimer) clearInterval(_statusBarTimer);
 	_statusBarTimer = setInterval(() => {
-		try { updateStatusBarNow(); } catch { }
+		try {
+			updateStatusBarNow();
+		} catch { }
 	}, 5000);
 }
 
@@ -504,7 +519,9 @@ function finishUserTracking(context) {
 		context.globalState.update(KEY_TOTAL_DURATION, old + (diff > 0 ? diff : 0));
 		context.globalState.update(KEY_SESSION_START, undefined);
 	}
-	try { updateStatusBarNow(); } catch { }
+	try {
+		updateStatusBarNow();
+	} catch { }
 }
 
 // ---------- fingerprint ----------
@@ -571,7 +588,7 @@ function createEmptyMeta() {
 	return {
 		entries: {},
 		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
-		brokenFiles: {}
+		brokenFiles: {},
 	};
 }
 
@@ -699,7 +716,6 @@ function evictEntry(contentId) {
 	saveCacheMeta();
 }
 
-// 兼容保留：仍然按 contentId 层面记一次 hit/miss（注意：若你既调用 getCacheEntry 又调用 getCachedBuffer，会双计数）
 function getCacheEntry(contentId) {
 	if (!cacheMeta?.entries?.[contentId]) {
 		cacheMeta.stats.missCount++;
@@ -711,14 +727,12 @@ function getCacheEntry(contentId) {
 	return entry;
 }
 
-// 纯 meta 读取，不污染 hit/miss
 function getCacheQualityMeta(contentId, quality) {
 	const entry = cacheMeta?.entries?.[contentId];
 	const qInfo = entry?.qualities?.[quality];
 	return qInfo?.meta || null;
 }
 
-// 覆盖写统计不再漂；原子写 tmp->rename；按增量预留空间
 function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!cacheDir || !cacheMeta) return null;
 
@@ -742,7 +756,9 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 		fs.writeFileSync(tmpPath, buffer);
 		fs.renameSync(tmpPath, filePath);
 	} catch (e) {
-		try { fs.unlinkSync(filePath + ".tmp"); } catch { }
+		try {
+			fs.unlinkSync(filePath + ".tmp");
+		} catch { }
 		return null;
 	}
 
@@ -754,14 +770,13 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
 
 	saveCacheMeta();
-
-	try { updateStatusBarNow(); } catch { }
+	try {
+		updateStatusBarNow();
+	} catch { }
 
 	return filePath;
 }
 
-// 在“按 quality 取文件内容”处记 hit/miss（真实命中口径）
-// 同时把累计 hit/miss 写入 globalState（永不清零）
 function getCachedBuffer(contentId, quality) {
 	if (!cacheDir || !cacheMeta) return null;
 
@@ -769,7 +784,9 @@ function getCachedBuffer(contentId, quality) {
 	if (!entry?.qualities?.[quality]) {
 		cacheMeta.stats.missCount++;
 		_markCacheMiss();
-		try { updateStatusBarNow(); } catch { }
+		try {
+			updateStatusBarNow();
+		} catch { }
 		return null;
 	}
 
@@ -781,7 +798,9 @@ function getCachedBuffer(contentId, quality) {
 			entry.atime = Date.now();
 			cacheMeta.stats.hitCount++;
 			_markCacheHit();
-			try { updateStatusBarNow(); } catch { }
+			try {
+				updateStatusBarNow();
+			} catch { }
 			return fs.readFileSync(filePath);
 		}
 	} catch (e) { }
@@ -795,7 +814,9 @@ function getCachedBuffer(contentId, quality) {
 	}
 	saveCacheMeta();
 
-	try { updateStatusBarNow(); } catch { }
+	try {
+		updateStatusBarNow();
+	} catch { }
 
 	return null;
 }
@@ -814,14 +835,28 @@ class DaemonBridge {
 		this.maxRestarts = 3;
 		this.available = null;
 
-		// ★ 修正：stop() 触发 close 时不再走自动重启
 		this._stopping = false;
+
+		// ★ 失败原因收集（用于 tooltip + err.log）
+		this.lastStartError = "";
+		this.lastCrashReason = "";
+		this.lastStderrSnippet = "";
+	}
+
+	_setStartError(msg) {
+		this.lastStartError = _cleanReason(msg || "");
+	}
+
+	_appendStderrSnippet(text) {
+		const t = String(text || "").trim();
+		if (!t) return;
+		const next = (this.lastStderrSnippet ? this.lastStderrSnippet + "\n" : "") + t;
+		this.lastStderrSnippet = next.slice(-2000);
 	}
 
 	async start() {
 		logMessage(`${this.name} start 方法被调用`, "DEBUG");
 
-		// 一旦要启动，认为是“主动启动”，撤销 stopping 状态
 		this._stopping = false;
 
 		if (this.process && !this.process.killed) {
@@ -874,16 +909,19 @@ class DaemonBridge {
 
 		proc.stderr.on("data", (d) => {
 			const text = d?.toString?.() || "";
+			this._appendStderrSnippet(text);
 			const key = _bridgeStderrKey(this.name, text);
 			logMessageRateLimited(key, `${this.name} stderr: ${text}`, "WARN", 5 * 60 * 1000);
 		});
 
 		proc.on("error", (err) => {
 			logMessage(`${this.name} 进程错误: ${err.message}`, "ERROR");
+			this.lastCrashReason = _cleanReason(err.message);
 			this._handleCrash();
 		});
 		proc.on("close", (code) => {
 			logMessage(`${this.name} 进程关闭，退出码: ${code}`, "INFO");
+			this.lastCrashReason = _cleanReason(`exit_code=${code}`);
 			this._handleCrash();
 		});
 
@@ -895,16 +933,21 @@ class DaemonBridge {
 				if (pong?.status === "alive") {
 					this.restartCount = 0;
 					this.available = true;
+					this._setStartError("");
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
 					try { updateStatusBarNow(); } catch { }
 				} else {
+					const reason = `ping_invalid: ${JSON.stringify(pong)}${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
+					this._setStartError(reason);
 					logMessage(`${this.name} ping 响应无效: ${JSON.stringify(pong)}`, "WARN");
 					this.available = false;
 					resolve(false);
 					try { updateStatusBarNow(); } catch { }
 				}
 			} catch (e) {
+				const reason = `ping_failed: ${e?.message || e}${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
+				this._setStartError(reason);
 				logMessage(`${this.name} ping 失败: ${e?.message || e}`, "ERROR");
 				this.available = false;
 				resolve(false);
@@ -924,7 +967,6 @@ class DaemonBridge {
 		}
 		this.pending.clear();
 
-		// ★ stop() 触发 close/error 时：不允许自动重启（解决“热切换只换显示不换内核”）
 		if (this._stopping) {
 			logMessage(`${this.name} stopping=true，忽略自动重启`, "INFO");
 			this.available = false;
@@ -995,10 +1037,8 @@ class DaemonBridge {
 	stop() {
 		logMessage(`${this.name} stop 方法被调用`, "DEBUG");
 
-		// ★ stop 的语义：明确进入 stopping，防止 close 回调触发自动重启
 		this._stopping = true;
 
-		// stop 之后：清 pending，避免悬挂
 		for (const [id, { resolve, timer }] of this.pending) {
 			clearTimeout(timer);
 			resolve({ error: "stopped" });
@@ -1031,6 +1071,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
 		const scriptPath = path.join(__dirname, "kp.py");
 		if (!fs.existsSync(scriptPath)) {
+			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
 			bridge.available = false;
 			resolve(false);
 			return;
@@ -1042,9 +1083,11 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				try {
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
-						windowsHide: true
+						windowsHide: true,
 					});
 				} catch (e) {
+					const msg = `spawn_fail(${bin}): ${e.message}`;
+					bridge._setStartError(msg);
 					logMessage(`Python bridge 启动失败 (${bin}): ${e.message}`, "WARN");
 					res(false);
 					return;
@@ -1060,6 +1103,8 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				};
 
 				proc.once("error", (err) => {
+					const msg = `process_error(${bin}): ${err.message}`;
+					bridge._setStartError(msg);
 					logMessage(`Python bridge 进程错误 (${bin}): ${err.message}`, "WARN");
 					failFast();
 				});
@@ -1067,6 +1112,9 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				bridge.setupProcess(proc, (ok) => {
 					if (settled) return;
 					settled = true;
+					if (!ok && bridge.lastStartError) {
+						logMessage(`Python Bridge 启动失败原因：${bridge.lastStartError}`, "WARN");
+					}
 					res(!!ok);
 				});
 			});
@@ -1084,14 +1132,15 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				const ok2 = await spawnWith("python3");
 				if (ok2) {
 					logMessage("Python Bridge 使用 python3 启动成功", "INFO");
-					resolve(!!ok2);
+					resolve(true);
 					return;
 				}
 			}
 
-			logMessage("Python Bridge 启动失败，所有尝试均已失败", "WARN");
+			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError || "unknown"}`, "WARN");
 			resolve(false);
 		})().catch((e) => {
+			bridge._setStartError(`start_exception: ${e.message}`);
 			logMessage(`Python Bridge 启动异常: ${e.message}`, "ERROR");
 			resolve(false);
 		});
@@ -1112,7 +1161,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		const candidates = [
 			path.join(__dirname, "..", "assets", filename),
 			path.join(__dirname, "assets", filename),
-			path.join(__dirname, filename)
+			path.join(__dirname, filename),
 		];
 
 		let exePath = null;
@@ -1121,6 +1170,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		if (!exePath) {
+			bridge._setStartError(`exe_not_found: ${filename}`);
 			logMessage("Rust Bridge 可执行文件未找到", "WARN");
 			bridge.available = false;
 			resolve(false);
@@ -1131,10 +1181,11 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			logMessage(`Rust Bridge 尝试启动: ${exePath}`, "INFO");
 			const proc = cp.spawn(exePath, ["--daemon"], {
 				stdio: ["pipe", "pipe", "pipe"],
-				windowsHide: true
+				windowsHide: true,
 			});
 
 			proc.once("error", (err) => {
+				bridge._setStartError(`process_error: ${err.message}`);
 				logMessage(`Rust Bridge 进程错误: ${err.message}`, "WARN");
 				bridge.available = false;
 				resolve(false);
@@ -1145,11 +1196,12 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 					logMessage("Rust Bridge 启动成功", "INFO");
 					resolve(true);
 				} else {
-					logMessage("Rust Bridge 启动失败", "WARN");
+					logMessage(`Rust Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
 					resolve(false);
 				}
 			});
 		} catch (e) {
+			bridge._setStartError(`start_exception: ${e.message}`);
 			logMessage(`Rust Bridge 启动异常: ${e.message}`, "ERROR");
 			bridge.available = false;
 			resolve(false);
@@ -1157,7 +1209,10 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 	});
 });
 
-// ★ Shell bridge：修正 win32 proc 遮蔽 + STA + System.Drawing
+// ★ Shell bridge：用于 Node 模式的 daemon（跨平台）
+// - Windows：PowerShell + STA + Clipboard
+// - mac/linux：bash + node 解析 JSON（不依赖 python3）
+// ★ 修正：Windows 分支不再发生 proc 遮蔽
 const shellBridge = new DaemonBridge("Shell", (bridge) => {
 	return new Promise((resolve) => {
 		const platform = process.platform;
@@ -1210,7 +1265,6 @@ while ($true) {
 
 			logMessage("尝试启动 PowerShell 进程", "DEBUG");
 			try {
-				// ★ -STA：解决 Clipboard STA 问题
 				const psOptions = [
 					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
 					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
@@ -1224,34 +1278,41 @@ while ($true) {
 						logMessage(`尝试使用选项 ${index + 1} 启动 PowerShell: ${options[0]}`, "DEBUG");
 						proc = cp.spawn(options[0], options.slice(1), {
 							stdio: ["pipe", "pipe", "pipe"],
-							windowsHide: true
+							windowsHide: true,
 						});
 						logMessage(`PowerShell 进程已创建: ${options[0]}`, "DEBUG");
 						break;
 					} catch (e) {
-						logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
 						lastError = e;
+						logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
 					}
 				}
 
 				if (!proc) {
+					bridge._setStartError(`spawn_fail: ${lastError?.message || "无法启动任何PowerShell进程"}`);
 					throw lastError || new Error("无法启动任何PowerShell进程");
 				}
 
-				proc.on("error", (err) => logMessage(`PowerShell 进程错误: ${err.message}`, "ERROR"));
-				proc.on("exit", (code, signal) => logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal}`, "INFO"));
+				proc.on("error", (err) => {
+					bridge._setStartError(`process_error: ${err.message}`);
+					logMessage(`PowerShell 进程错误: ${err.message}`, "ERROR");
+				});
+				proc.on("exit", (code, signal) => {
+					logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal}`, "INFO");
+				});
 			} catch (e) {
+				bridge._setStartError(`create_fail: ${e.message}`);
 				logMessage(`PowerShell 进程创建失败: ${e.message}`, "ERROR");
 				bridge.available = false;
 				resolve(false);
 				return;
 			}
 		} else {
-			// ★ 非 Windows：用 process.execPath 的 node 来解析 JSON（不依赖 python3）
 			const nodeBin = process.execPath.replace(/"/g, '\\"');
-			const bashScript = platform === "darwin" ? `
+			const bashScript = platform === "darwin"
+				? `
 NODE_BIN="${nodeBin}"
-json_get() { echo "$1" | "$NODE_BIN" -e 'const fs=require("fs");let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
 
 while IFS= read -r line; do
   action=$(json_get "$line" "action")
@@ -1265,9 +1326,10 @@ while IFS= read -r line; do
     *) echo '{"_id":'"$id"',"error":"unknown action"}' ;;
   esac
 done
-`.trim() : `
+`.trim()
+				: `
 NODE_BIN="${nodeBin}"
-json_get() { echo "$1" | "$NODE_BIN" -e 'const fs=require("fs");let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
 
 while IFS= read -r line; do
   action=$(json_get "$line" "action")
@@ -1288,6 +1350,7 @@ done
 				proc = cp.spawn("bash", ["-c", bashScript], { stdio: ["pipe", "pipe", "pipe"] });
 				logMessage("Bash 进程已创建", "DEBUG");
 			} catch (e) {
+				bridge._setStartError(`spawn_fail(bash): ${e.message}`);
 				logMessage(`Bash 进程创建失败: ${e.message}`, "ERROR");
 				bridge.available = false;
 				resolve(false);
@@ -1295,7 +1358,16 @@ done
 			}
 		}
 
-		bridge.setupProcess(proc, resolve);
+		if (!proc) {
+			bridge._setStartError("proc_null");
+			resolve(false);
+			return;
+		}
+
+		bridge.setupProcess(proc, (ok) => {
+			if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+			resolve(ok);
+		});
 	});
 });
 
@@ -1306,27 +1378,22 @@ function ensureDir(dirPath) {
 	}
 }
 
-// ★ Clipboard Fast/Slow timeouts（HTML 多媒体可能较慢）
 const CLIPBOARD_PEEK_TIMEOUT_MS = 350;
 const CLIPBOARD_SLOW_TIMEOUT_MS = 60000;
 
-// ★ 快速嗅探：只用于决定是否走 fast-path
 async function peekClipboardRichFast() {
-	// 只做“轻量判断”，但也要尊重 ioEngine，避免 node 模式下硬拉起 python
 	const pref = getEnginePreference();
 	const order = getEngineTryOrder(pref);
 
-	// python peek
 	if (order.includes("python")) {
 		try {
 			if (pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
 				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
 				if (res && !res.error && res.type === "peek") return res;
 			}
-		} catch (e) { }
+		} catch { }
 	}
 
-	// shell peek（支持 files/image）
 	if (order.includes("shell")) {
 		try {
 			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
@@ -1340,7 +1407,7 @@ async function peekClipboardRichFast() {
 					has_text: false,
 				};
 			}
-		} catch (e) { }
+		} catch { }
 	}
 
 	return null;
@@ -1356,11 +1423,10 @@ async function handleClipboardFast() {
 			return null;
 		}
 		return { type: "text", text };
-	} catch (e) { }
+	} catch { }
 	return null;
 }
 
-// ★ 修正：严格按 ioEngine 顺序选择引擎；仅在允许链上回退
 async function handleClipboardSlow(targetDir) {
 	const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
 	const pref = getEnginePreference();
@@ -1388,28 +1454,26 @@ async function handleClipboardSlow(targetDir) {
 				if (res && res.type && res.type !== "unknown") return res;
 				return res;
 			}
-		} catch (e) { }
+		} catch { }
 	}
 
 	return handleClipboardSpawn(targetDir);
 }
 
-// ★ 修正：Shell daemon 在非 win32 也可做 image（bash script 已实现 hasImage/saveImage）
 async function handleClipboardShell(targetDir) {
 	try {
-		// Windows: 支持 files + image
 		if (process.platform === "win32") {
 			const hasFiles = await shellBridge.call("hasFiles", {}, 2000);
 			if (hasFiles?.value) {
 				const filesRes = await shellBridge.call("getFiles", {}, 3000);
 				const files = filesRes?.files || [];
 
-				const folders = files.filter(f => {
+				const folders = files.filter((f) => {
 					try { return fs.statSync(f).isDirectory(); } catch { return false; }
 				});
 				if (folders.length) return { type: "folder_text", text: folders.join("\n") };
 
-				const validFiles = files.filter(f => {
+				const validFiles = files.filter((f) => {
 					try { return fs.existsSync(f) && !fs.statSync(f).isDirectory(); } catch { return false; }
 				});
 
@@ -1424,7 +1488,6 @@ async function handleClipboardShell(targetDir) {
 			}
 		}
 
-		// All platforms: image
 		const hasImg = await shellBridge.call("hasImage", {}, 2000);
 		if (hasImg?.value) {
 			const fname = getTimestampFilename(".png");
@@ -1435,7 +1498,7 @@ async function handleClipboardShell(targetDir) {
 				return { type: "image", path: dest };
 			}
 		}
-	} catch (e) { }
+	} catch { }
 
 	return null;
 }
@@ -1450,7 +1513,7 @@ function copyFilesToTarget(files, targetDir) {
 			const dest = path.join(targetDir, fname);
 			fs.copyFileSync(f, dest);
 			copied.push(dest);
-		} catch (e) { }
+		} catch { }
 	}
 	return copied;
 }
@@ -1466,22 +1529,22 @@ async function handleClipboardSpawnWin32(targetDir) {
 	const hasFiles = await spawnCheck("powershell", [
 		"-STA",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsFileDropList()){\\\"1\\\"}else{\\\"0\\\"}"
+		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsFileDropList()){\\\"1\\\"}else{\\\"0\\\"}",
 	], "1");
 
 	if (hasFiles) {
 		const filesOutput = await spawnOutput("powershell", [
 			"-STA",
 			"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-			"Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetFileDropList();if($f){foreach($i in $f){$i}}"
+			"Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetFileDropList();if($f){foreach($i in $f){$i}}",
 		]);
 
-		const files = filesOutput.split(/\r?\n/).map(s => s.trim()).filter(s => s && fs.existsSync(s));
+		const files = filesOutput.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && fs.existsSync(s));
 
-		const folders = files.filter(f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
+		const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
 		if (folders.length) return { type: "folder_text", text: folders.join("\n") };
 
-		const validFiles = files.filter(f => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
+		const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
 		if (validFiles.length) {
 			ensureDir(targetDir);
 			const copied = copyFilesToTarget(validFiles, targetDir);
@@ -1495,7 +1558,7 @@ async function handleClipboardSpawnWin32(targetDir) {
 	const hasImg = await spawnCheck("powershell", [
 		"-STA",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsImage()){\\\"1\\\"}else{\\\"0\\\"}"
+		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsImage()){\\\"1\\\"}else{\\\"0\\\"}",
 	], "1");
 
 	if (hasImg) {
@@ -1507,7 +1570,7 @@ async function handleClipboardSpawnWin32(targetDir) {
 		const saved = await spawnCheck("powershell", [
 			"-STA",
 			"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
-			`Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`
+			`Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`,
 		], "OK");
 
 		if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
@@ -1535,7 +1598,7 @@ async function handleClipboardSpawnDarwin(targetDir) {
 				try {
 					fs.copyFileSync(tmpDest, dest);
 					try { fs.unlinkSync(tmpDest); } catch { }
-				} catch (e2) { }
+				} catch { }
 			}
 
 			if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
@@ -1574,14 +1637,13 @@ async function handleClipboardSpawnLinux(targetDir) {
 		if (fs.existsSync(dest)) {
 			try { fs.unlinkSync(dest); } catch { }
 		}
-	} catch (e) { }
+	} catch { }
 
 	return { type: "unknown" };
 }
 
-// 修正：timeout 清理 + 防重复 resolve/kill
 function spawnCheck(cmd, args, expected) {
-	return new Promise(resolve => {
+	return new Promise((resolve) => {
 		const child = cp.spawn(cmd, args, { windowsHide: true });
 		let output = "";
 		let errorOutput = "";
@@ -1594,8 +1656,8 @@ function spawnCheck(cmd, args, expected) {
 			resolve(val);
 		};
 
-		child.stdout.on("data", d => output += d.toString().trim());
-		child.stderr.on("data", d => errorOutput += d.toString().trim());
+		child.stdout.on("data", (d) => output += d.toString().trim());
+		child.stderr.on("data", (d) => errorOutput += d.toString().trim());
 
 		child.on("close", (code) => {
 			if (code !== 0 && errorOutput) {
@@ -1623,7 +1685,7 @@ function spawnCheck(cmd, args, expected) {
 }
 
 function spawnOutput(cmd, args) {
-	return new Promise(resolve => {
+	return new Promise((resolve) => {
 		const child = cp.spawn(cmd, args, { windowsHide: true });
 		let output = "";
 		let errorOutput = "";
@@ -1636,8 +1698,8 @@ function spawnOutput(cmd, args) {
 			resolve(val);
 		};
 
-		child.stdout.on("data", d => output += d.toString());
-		child.stderr.on("data", d => errorOutput += d.toString());
+		child.stdout.on("data", (d) => output += d.toString());
+		child.stderr.on("data", (d) => errorOutput += d.toString());
 
 		child.on("close", (code) => {
 			if (code !== 0 && errorOutput) {
@@ -1665,9 +1727,7 @@ function spawnOutput(cmd, args) {
 }
 
 // ---------- folder info ----------
-// ★ 修正：按 ioEngine 顺序选择（node 模式直接 JS，不拉 python/rust）
 async function getFolderInfo(folderPath) {
-	// ★★★ 关键：统一 canonical（保证 q2/其它模块传入各种写法也稳定一致）
 	folderPath = canonicalizeExistingPath(folderPath) || folderPath;
 
 	const pref = getEnginePreference();
@@ -1688,7 +1748,6 @@ async function getFolderInfo(folderPath) {
 					if (res && !res.error) return res;
 				}
 			} else if (engine === "spawn" || engine === "shell") {
-				// shell 没 folder_info；spawn 走 JS
 				return getFolderInfoJS(folderPath);
 			}
 		} catch { }
@@ -1718,10 +1777,10 @@ async function getFolderInfoJS(folderPath) {
 						fileCount++;
 						const ext = path.extname(file.name).toLowerCase().replace(".", "") || "no_ext";
 						extStats[ext] = (extStats[ext] || 0) + 1;
-					} catch (e) { }
+					} catch { }
 				}
 			}
-		} catch (e) { }
+		} catch { }
 	}
 
 	await walk(folderPath);
@@ -1730,7 +1789,7 @@ async function getFolderInfoJS(folderPath) {
 		success: true,
 		total_size: totalSize,
 		file_count_root: fileCount,
-		ext_stats: extStats
+		ext_stats: extStats,
 	};
 }
 
@@ -1745,13 +1804,13 @@ function getTimestampFilename(ext) {
 	const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
 	const valid = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		.split("")
-		.filter(c => !excluded.has(c.toLowerCase()));
+		.filter((c) => !excluded.has(c.toLowerCase()));
 
 	const c1 = valid[Math.floor(Math.random() * valid.length)];
 	let c2 = valid[Math.floor(Math.random() * valid.length)];
 
 	if (c1.toLowerCase() === "g") {
-		const noG = valid.filter(c => c.toLowerCase() !== "g");
+		const noG = valid.filter((c) => c.toLowerCase() !== "g");
 		c2 = noG[Math.floor(Math.random() * noG.length)];
 	}
 
@@ -1816,7 +1875,7 @@ async function pureCommand() {
 
 	let qqqFiles = [];
 	try {
-		qqqFiles = fs.readdirSync(qqqDir).filter(f => fs.statSync(path.join(qqqDir, f)).isFile());
+		qqqFiles = fs.readdirSync(qqqDir).filter((f) => fs.statSync(path.join(qqqDir, f)).isFile());
 	} catch (e) {
 		vscode.window.showErrorMessage("读取 qqq 目录失败");
 		return;
@@ -1861,23 +1920,23 @@ async function pureCommand() {
 					referencedFiles.add(path.basename(absPath).toLowerCase());
 				}
 			}
-		} catch (e) { }
+		} catch { }
 	}
 
-	const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
+	const orphans = qqqFiles.filter((f) => !referencedFiles.has(f.toLowerCase()));
 
 	if (!orphans.length) {
 		vscode.window.showInformationMessage("未发现孤儿文件");
 		return;
 	}
 
-	const orphanPaths = orphans.map(f => path.join(qqqDir, f));
+	const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
 	const cmdStr = os.platform() === "win32"
-		? `del ${orphanPaths.map(p => `"${p}"`).join(" ")}`
-		: `rm ${orphanPaths.map(p => `"${p}"`).join(" ")}`;
+		? `del ${orphanPaths.map((p) => `"${p}"`).join(" ")}`
+		: `rm ${orphanPaths.map((p) => `"${p}"`).join(" ")}`;
 
 	let content = "\n".repeat(13) + " 请在终端中执行下面命令：\n\n\n " + cmdStr + "\n\n\n";
-	content += orphanPaths.map(p => `/\\${p}\\//`).join("\n\n\n\n\n");
+	content += orphanPaths.map((p) => `/\\${p}\\//`).join("\n\n\n\n\n");
 
 	const purePath = path.join(parentDir, "qqq.pure");
 
@@ -1961,60 +2020,66 @@ function startDaemons() {
 	const pref = getEnginePreference();
 	logMessage(`开始启动守护进程，用户选择的引擎: ${pref}`, "INFO");
 
-	const startOne = async (bridge, okMsg, failMsg, isHardFail) => {
-		// 如果启动链已经过期，直接忽略
+	const startOne = async (bridge, isHardFail) => {
 		if (bootSeq !== _daemonBootSeq) return false;
 
 		try {
 			logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
 			const ok = await bridge.start();
 
-			// 若启动完成时世代已变：把刚启动的进程关掉（避免热切换时“旧引擎复活”）
 			if (bootSeq !== _daemonBootSeq) {
 				try { bridge.stop(); } catch { }
 				return false;
 			}
 
-			logMessage(`${bridge.name} bridge 启动结果: ${ok}`, "DEBUG");
-			if (ok) logMessage(okMsg, "INFO");
-			else if (isHardFail) logMessage(failMsg, "ERROR");
+			if (!ok) {
+				const msg = `${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`;
+				logMessage(msg, isHardFail ? "ERROR" : "WARN");
+			} else {
+				logMessage(`${bridge.name} Bridge OK`, "INFO");
+			}
 			return !!ok;
 		} catch (e) {
-			if (isHardFail) logMessage(`${failMsg}: ${e?.message || e}`, "ERROR");
+			const msg = `${bridge.name} Bridge 启动异常：${e?.message || e}`;
+			logMessage(msg, isHardFail ? "ERROR" : "WARN");
 			return false;
 		} finally {
 			try { updateStatusBarNow(); } catch { }
 		}
 	};
 
+	// python/rust/node(auto) 逻辑：node = shell daemon -> spawn
 	if (pref !== "auto") {
 		if (pref === "python") {
-			startOne(pythonBridge, "Python Bridge OK", "Python Bridge 启动失败", false).then(pyStarted => {
+			startOne(pythonBridge, false).then((pyStarted) => {
 				if (bootSeq !== _daemonBootSeq) return;
-				if (!pyStarted) startOne(rustBridge, "Rust Bridge OK", "Rust Bridge 启动失败", false);
+				if (!pyStarted) startOne(rustBridge, false).then((rsStarted) => {
+					if (bootSeq !== _daemonBootSeq) return;
+					if (!rsStarted) startOne(shellBridge, false);
+				});
 			});
 		} else if (pref === "rust") {
-			startOne(rustBridge, "Rust Bridge OK", "Rust Bridge 启动失败", false).then(rustStarted => {
+			startOne(rustBridge, false).then((rsStarted) => {
 				if (bootSeq !== _daemonBootSeq) return;
-				if (!rustStarted) startOne(pythonBridge, "Python Bridge OK", "Python Bridge 启动失败", false);
+				if (!rsStarted) startOne(pythonBridge, false).then((pyStarted) => {
+					if (bootSeq !== _daemonBootSeq) return;
+					if (!pyStarted) startOne(shellBridge, false);
+				});
 			});
-		} else if (pref === "shell") {
-			startOne(shellBridge, "Shell Bridge OK", "Shell Bridge 启动失败", true);
 		} else {
-			// node：无条件尝试 shell daemon
-			startOne(shellBridge, "Shell Bridge OK", "Shell Bridge 启动失败", false);
+			// node：无条件 shell daemon
+			startOne(shellBridge, false);
 		}
 		return;
 	}
 
-	// auto：串行兜底（只走这一条）
 	(async () => {
 		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(pythonBridge, "Python Bridge OK", "Python Bridge 启动失败", false)) return;
+		if (await startOne(pythonBridge, false)) return;
 		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(rustBridge, "Rust Bridge OK", "Rust Bridge 启动失败", false)) return;
+		if (await startOne(rustBridge, false)) return;
 		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(shellBridge, "Shell Bridge OK", "Shell Bridge 启动失败", false)) return;
+		if (await startOne(shellBridge, false)) return;
 
 		logMessage("All daemons failed, using spawn fallback", "WARN");
 		try { updateStatusBarNow(); } catch { }
@@ -2060,11 +2125,11 @@ async function deactivate() {
 		_statsDirty = false;
 	} catch { }
 
-	try { validateCache(); } catch (e) { }
+	try { validateCache(); } catch { }
 	saveCacheMeta();
 
 	if (q1Module?.deactivate) {
-		try { await q1Module.deactivate(); } catch (e) { }
+		try { await q1Module.deactivate(); } catch { }
 	}
 
 	try {
@@ -2077,7 +2142,6 @@ async function deactivate() {
 	logMessage("qqq 扩展已停用", "INFO");
 }
 
-// 重要修正：导出 LOG_PATH 不再是“导出时快照”（否则一直 null），改成 getter 动态读取
 const exported = {
 	activate,
 	deactivate,
@@ -2085,7 +2149,6 @@ const exported = {
 	QQQ_PATH_REGEX,
 	PENDING_REGEX,
 
-	// ★★★ 导出：路径统一真理来源（给 q2/q1/未来模块复用）
 	normalizeNavPath,
 	resolveNavPath,
 	canonicalizeExistingPath,

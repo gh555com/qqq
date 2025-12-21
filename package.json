@@ -15,6 +15,9 @@
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
     "onCommand:qqq.setInOrder",
+    "onCommand:qqq.openFile",
+    "onCommand:qqq.revealFileInFolder",
+    "onCommand:qqq.renameFile",
     "onCommand:qqq.exportDoc",
     "onCommand:qqq.exportZip"
   ],
@@ -85,6 +88,16 @@
               "Node 引擎"
             ],
             "description": "选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+          },
+          "qqq.outputDir": {
+            "type": "string",
+            "default": "",
+            "description": "（可选）媒体落盘目录。留空则使用扩展 globalStorage（推荐，跨平台稳定）。"
+          },
+          "qqq.pythonPath": {
+            "type": "string",
+            "default": "",
+            "description": "（可选）指定 python 可执行文件路径。例如：C:\\\\Python311\\\\python.exe；留空则自动探测 python/python3/py。"
           }
         }
       }
