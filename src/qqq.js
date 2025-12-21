@@ -1471,19 +1471,35 @@ async function handleClipboardShell(targetDir) {
 				const folders = files.filter((f) => {
 					try { return fs.statSync(f).isDirectory(); } catch { return false; }
 				});
-				if (folders.length) return { type: "folder_text", text: folders.join("\n") };
-
 				const validFiles = files.filter((f) => {
 					try { return fs.existsSync(f) && !fs.statSync(f).isDirectory(); } catch { return false; }
 				});
 
+				ensureDir(targetDir);
+				const copiedFiles = [];
+				const copiedFolders = [];
+
+				// 复制文件夹
+				for (const folder of folders) {
+					try {
+						const destFolder = path.join(targetDir, path.basename(folder));
+						fs.cpSync(folder, destFolder, { recursive: true, force: true });
+						copiedFolders.push(destFolder);
+					} catch { }
+				}
+
+				// 复制文件
 				if (validFiles.length > 0) {
-					ensureDir(targetDir);
 					const copied = copyFilesToTarget(validFiles, targetDir);
-					if (copied.length === 1 && isImageExtForClipboard(path.extname(copied[0]))) {
-						return { type: "image", path: copied[0] };
-					}
-					if (copied.length) return { type: "file", files: copied };
+					copiedFiles.push(...copied);
+				}
+
+				if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+					return {
+						type: "file_folder",
+						files: copiedFiles,
+						folders: copiedFolders
+					};
 				}
 			}
 		}
@@ -1504,14 +1520,43 @@ async function handleClipboardShell(targetDir) {
 }
 
 function copyFilesToTarget(files, targetDir) {
+	// 构建目标目录中现有文件的指纹映射
+	const existingFingerprints = new Map();
+	try {
+		const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (entry.isFile()) {
+				const filePath = path.join(targetDir, entry.name);
+				const fingerprint = computeFingerprint(filePath);
+				if (fingerprint) {
+					existingFingerprints.set(fingerprint, filePath);
+				}
+			}
+		}
+	} catch { }
+
 	const copied = [];
 	for (const f of files) {
 		try {
+			// 计算源文件指纹
+			const srcFingerprint = computeFingerprint(f);
+			if (srcFingerprint && existingFingerprints.has(srcFingerprint)) {
+				// 指纹已存在，直接使用现有文件路径
+				copied.push(existingFingerprints.get(srcFingerprint));
+				continue;
+			}
+
 			const ext = path.extname(f);
 			const isImg = isImageExtForClipboard(ext);
 			const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
 			const dest = path.join(targetDir, fname);
 			fs.copyFileSync(f, dest);
+
+			// 更新指纹映射
+			if (srcFingerprint) {
+				existingFingerprints.set(srcFingerprint, dest);
+			}
+
 			copied.push(dest);
 		} catch { }
 	}
@@ -1542,16 +1587,33 @@ async function handleClipboardSpawnWin32(targetDir) {
 		const files = filesOutput.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && fs.existsSync(s));
 
 		const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
-		if (folders.length) return { type: "folder_text", text: folders.join("\n") };
-
 		const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
-		if (validFiles.length) {
-			ensureDir(targetDir);
+
+		ensureDir(targetDir);
+		const copiedFiles = [];
+		const copiedFolders = [];
+
+		// 复制文件夹
+		for (const folder of folders) {
+			try {
+				const destFolder = path.join(targetDir, path.basename(folder));
+				fs.cpSync(folder, destFolder, { recursive: true, force: true });
+				copiedFolders.push(destFolder);
+			} catch { }
+		}
+
+		// 复制文件
+		if (validFiles.length > 0) {
 			const copied = copyFilesToTarget(validFiles, targetDir);
-			if (copied.length === 1 && isImageExtForClipboard(path.extname(copied[0]))) {
-				return { type: "image", path: copied[0] };
-			}
-			if (copied.length) return { type: "file", files: copied };
+			copiedFiles.push(...copied);
+		}
+
+		if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+			return {
+				type: "file_folder",
+				files: copiedFiles,
+				folders: copiedFolders
+			};
 		}
 	}
 
