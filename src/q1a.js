@@ -1197,7 +1197,130 @@ function revealInFolder(filePath) {
 
 // ==================== 模块导出 ====================
 
+// ---------- qqq.pure ----------
+const BINARY_EXTS = new Set([
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
+    ".exe", ".dll", ".zip", ".tar", ".gz",
+    ".mp3", ".mp4", ".avi", ".mov", ".mkv",
+    ".pdf", ".doc", ".docx", ".psd", ".ai",
+]);
+
+function isLikelyBinary(filePath) {
+    if (BINARY_EXTS.has(path.extname(filePath).toLowerCase())) return true;
+
+    try {
+        const buf = Buffer.alloc(4096);
+        const fd = fs.openSync(filePath, "r");
+        try {
+            const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+            for (let i = 0; i < bytesRead; i++) {
+                if (buf[i] === 0) return true;
+            }
+        } finally {
+            fs.closeSync(fd);
+        }
+    } catch {
+        // 打开失败默认当二进制处理（防止恶意文件）
+        return true;
+    }
+
+    return false;
+}
+
+async function pureCommand() {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showInformationMessage("请先打开一个文件");
+        return;
+    }
+
+    const docPath = editor.document.uri.fsPath;
+    const parentDir = path.dirname(docPath);
+    const qqqDir = path.join(parentDir, "qqq");
+
+    if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) {
+        vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹");
+        return;
+    }
+
+    let qqqFiles = [];
+    try {
+        qqqFiles = fs.readdirSync(qqqDir).filter((f) => fs.statSync(path.join(qqqDir, f)).isFile());
+    } catch (e) {
+        vscode.window.showErrorMessage("读取 qqq 目录失败");
+        return;
+    }
+
+    if (!qqqFiles.length) {
+        vscode.window.showInformationMessage("qqq 文件夹是空的");
+        return;
+    }
+
+    const referencedFiles = new Set();
+    let parentFiles = [];
+
+    try {
+        parentFiles = fs.readdirSync(parentDir);
+    } catch (e) {
+        return;
+    }
+
+    const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+
+    for (const fileName of parentFiles) {
+        const fullPath = path.join(parentDir, fileName);
+        if (fileName === "qqq" || fileName === "qqq.pure") continue;
+
+        try { if (!fs.statSync(fullPath).isFile()) continue; } catch { continue; }
+        if (isLikelyBinary(fullPath)) continue;
+
+        try {
+            const content = fs.readFileSync(fullPath, "utf-8");
+            let match;
+            regex.lastIndex = 0;
+
+            while ((match = regex.exec(content))) {
+                const rawPath = (match[1] || "").trim();
+                const absPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(parentDir, rawPath);
+
+                const absNorm = path.normalize(absPath).toLowerCase();
+                const qqqNorm = path.normalize(qqqDir).toLowerCase();
+
+                if (absNorm.startsWith(qqqNorm)) {
+                    referencedFiles.add(path.basename(absPath).toLowerCase());
+                }
+            }
+        } catch { }
+    }
+
+    const orphans = qqqFiles.filter((f) => !referencedFiles.has(f.toLowerCase()));
+
+    if (!orphans.length) {
+        vscode.window.showInformationMessage("未发现孤儿文件");
+        return;
+    }
+
+    const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
+    const cmdStr = os.platform() === "win32"
+        ? `del ${orphanPaths.map((p) => `"${p}"`).join(" ")}`
+        : `rm ${orphanPaths.map((p) => `"${p}"`).join(" ")}`;
+
+    let content = "\n".repeat(13) + " 请在终端中执行下面命令：\n\n\n " + cmdStr + "\n\n\n";
+    content += orphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
+
+    const purePath = path.join(parentDir, "qqq.pure");
+
+    try {
+        fs.writeFileSync(purePath, content, "utf-8");
+        const doc = await vscode.workspace.openTextDocument(purePath);
+        await vscode.window.showTextDocument(doc);
+    } catch (e) {
+        vscode.window.showErrorMessage("无法生成 qqq.pure 文件");
+    }
+}
+
 module.exports = {
     executeExportDocCommand,
     executeExportZipCommand,
+    pureCommand,
 };
