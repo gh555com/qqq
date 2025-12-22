@@ -62,6 +62,26 @@ function _bridgeStderrKey(name, text) {
 	return `bridge:${name}:${head}`;
 }
 
+function rotateLogIfNeeded() {
+	if (!LOG_PATH) return;
+
+	try {
+		const maxLogSize = 8 * 1024 * 1024; // 8MB
+		if (fs.existsSync(LOG_PATH)) {
+			const stats = fs.statSync(LOG_PATH);
+			if (stats.size >= maxLogSize) {
+				const oldLogPath = `${LOG_PATH}.1`;
+				if (fs.existsSync(oldLogPath)) {
+					fs.unlinkSync(oldLogPath);
+				}
+				fs.renameSync(LOG_PATH, oldLogPath);
+			}
+		}
+	} catch (e) {
+		// 日志轮转失败不影响主程序
+	}
+}
+
 function logMessage(message, level = "INFO") {
 	const ts = new Date().toISOString();
 	const line = `[${ts}] [${level}] ${message}`;
@@ -71,6 +91,10 @@ function logMessage(message, level = "INFO") {
 		try {
 			const dir = path.dirname(LOG_PATH);
 			if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+			// 检查并执行日志轮转
+			rotateLogIfNeeded();
+
 			fs.appendFileSync(LOG_PATH, line + "\n");
 		} catch (e) { }
 	}
@@ -900,7 +924,8 @@ class DaemonBridge {
 					res(result);
 				}
 			} catch (e) {
-				logMessage(`${this.name} 解析响应失败: ${line}`, "ERROR");
+				// 非JSON输出，可能是Python脚本的调试输出或错误信息
+				logMessage(`${this.name} stdout: ${line}`, "WARN");
 			}
 		});
 
@@ -2338,14 +2363,12 @@ module.exports = exported;
 
 process.on("uncaughtException", (error) => {
 	const stack = error.stack || "";
-	if (stack.includes("qqq")) {
-		logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
-	}
+	// 捕获所有未捕获异常，无论是否包含"qqq"
+	logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
 });
 
 process.on("unhandledRejection", (reason) => {
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-	if (msg.includes("qqq")) {
-		logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
-	}
+	// 捕获所有未处理Promise拒绝，无论是否包含"qqq"
+	logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
 });
