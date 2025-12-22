@@ -1295,9 +1295,8 @@ async function replacePendingMarker(token, result) {
         const finalContent = [];
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
-            if (block.type === "text") {
-                finalContent.push(block.text);
-            } else if (block.type === "media" && block.path) {
+            // 只处理媒体块，文本已经提前显示了
+            if (block.type === "media" && block.path) {
                 const filePath = block.path;
                 const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
                 const isLastItem = i === blocks.length - 1;
@@ -1312,6 +1311,7 @@ async function replacePendingMarker(token, result) {
                 invalidateFolderSizeCacheForPath(filePath);
             }
         }
+        // 只替换占位符，文本已经提前显示
         replacement = finalContent.join(eol);
     } else if (result.type === "image" || result.type === "ikge") {
         const filePath = result.path;

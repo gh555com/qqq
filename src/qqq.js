@@ -925,10 +925,17 @@ class DaemonBridge {
 			this._handleCrash();
 		});
 
-		setTimeout(async () => {
+		// 实现ping重试逻辑，最多重试3次
+		let pingAttempts = 0;
+		const maxPingAttempts = 3;
+		const pingInterval = 500; // 每次ping间隔500ms
+		const pingTimeout = 5000; // 增加ping超时时间到5秒
+
+		const attemptPing = async () => {
+			pingAttempts++;
 			try {
-				logMessage(`${this.name} 发送 ping 请求`, "DEBUG");
-				const pong = await this.call("ping", {}, 2000);
+				logMessage(`${this.name} 发送 ping 请求 (尝试 ${pingAttempts}/${maxPingAttempts})`, "DEBUG");
+				const pong = await this.call("ping", {}, pingTimeout);
 				logMessage(`${this.name} ping 响应: ${JSON.stringify(pong)}`, "DEBUG");
 				if (pong?.status === "alive") {
 					this.restartCount = 0;
@@ -937,23 +944,29 @@ class DaemonBridge {
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
 					try { updateStatusBarNow(); } catch { }
-				} else {
-					const reason = `ping_invalid: ${JSON.stringify(pong)}${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
-					this._setStartError(reason);
-					logMessage(`${this.name} ping 响应无效: ${JSON.stringify(pong)}`, "WARN");
-					this.available = false;
-					resolve(false);
-					try { updateStatusBarNow(); } catch { }
+					return true;
 				}
 			} catch (e) {
-				const reason = `ping_failed: ${e?.message || e}${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
-				this._setStartError(reason);
-				logMessage(`${this.name} ping 失败: ${e?.message || e}`, "ERROR");
-				this.available = false;
-				resolve(false);
-				try { updateStatusBarNow(); } catch { }
+				logMessage(`${this.name} ping 超时 (尝试 ${pingAttempts}/${maxPingAttempts}): ${e.message}`, "DEBUG");
 			}
-		}, 100);
+
+			// 如果还有重试机会，继续尝试
+			if (pingAttempts < maxPingAttempts) {
+				setTimeout(attemptPing, pingInterval);
+				return;
+			}
+
+			// 所有ping尝试都失败
+			const reason = `ping_failed_after_${maxPingAttempts}_attempts${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
+			this._setStartError(reason);
+			logMessage(`${this.name} ping 失败，已尝试 ${maxPingAttempts} 次`, "WARN");
+			this.available = false;
+			resolve(false);
+			try { updateStatusBarNow(); } catch { }
+		};
+
+		// 启动ping尝试，增加初始延迟到500ms，给进程更多启动时间
+		setTimeout(attemptPing, 500);
 	}
 
 	_handleCrash() {
@@ -988,9 +1001,10 @@ class DaemonBridge {
 
 	async call(action, params = {}, timeout = 5000) {
 		logMessage(`${this.name} call 方法被调用，action: ${action}`, "DEBUG");
+		// 允许再尝试启动/重启（尤其是 cold start/ping race）
 		if (this.available === false) {
-			logMessage(`${this.name} 不可用，返回错误`, "DEBUG");
-			return { error: `${this.name}_not_available` };
+			// 如果进程还活着，给一次机会重新 ping/start
+			this.available = null;
 		}
 
 		if (!this.process || this.process.killed) {
@@ -1394,6 +1408,20 @@ async function peekClipboardRichFast() {
 		} catch { }
 	}
 
+	// 尝试使用Node.js直接检测HTML
+	try {
+		const text = await vscode.env.clipboard.readText();
+		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+			return {
+				type: "peek",
+				has_html: true,
+				has_files: false,
+				has_image: false,
+				has_text: false,
+			};
+		}
+	} catch { }
+
 	if (order.includes("shell")) {
 		try {
 			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
@@ -1447,17 +1475,165 @@ async function handleClipboardSlow(targetDir) {
 					if (res && !res.error && res.type !== "unknown") return res;
 				}
 			} else if (engine === "shell") {
-				const shellResult = await handleClipboardShell(targetDir);
-				if (shellResult && shellResult.type && shellResult.type !== "unknown") return shellResult;
+				// 启动shell bridge（Node daemon）
+				const started = shellBridge.isAvailable() || await shellBridge.start();
+				if (started && shellBridge.isAvailable()) {
+					const shellResult = await handleClipboardShell(targetDir);
+					if (shellResult && shellResult.type && shellResult.type !== "unknown") return shellResult;
+				}
 			} else if (engine === "spawn") {
 				const res = await handleClipboardSpawn(targetDir);
 				if (res && res.type && res.type !== "unknown") return res;
 				return res;
 			}
-		} catch { }
+		} catch (e) {
+			logMessage(`引擎 ${engine} 处理失败: ${e.message}`, "ERROR");
+		}
 	}
 
 	return handleClipboardSpawn(targetDir);
+}
+
+async function handleClipboardNode(targetDir) {
+	try {
+		const text = await vscode.env.clipboard.readText();
+		if (!text || !text.trim()) return null;
+
+		// 检测是否为HTML
+		if (!(text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+			return null;
+		}
+
+		// 解析HTML，提取文本和图片
+		const blocks = [];
+		let cleanedText = text;
+
+		// 第一步：预处理HTML，清理可能导致乱码的内容
+		// 1. 移除BOM（字节顺序标记）
+		cleanedText = cleanedText.replace(/^\uFEFF/, '');
+		// 2. 统一换行符
+		cleanedText = cleanedText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+		// 第二步：移除HTML标签但保留文本内容
+		cleanedText = cleanedText.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+		cleanedText = cleanedText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+		// 更安全的标签移除：保留换行符结构
+		cleanedText = cleanedText.replace(/<br\s*\/?>/gi, '\n');
+		cleanedText = cleanedText.replace(/<p[^>]*>/gi, '\n');
+		cleanedText = cleanedText.replace(/<\/p>/gi, '\n');
+		cleanedText = cleanedText.replace(/<div[^>]*>/gi, '\n');
+		cleanedText = cleanedText.replace(/<\/div>/gi, '\n');
+		cleanedText = cleanedText.replace(/<[^>]+>/g, ' ');
+
+		// 第三步：简化的编码修复，确保文本正确显示
+		let fixedText = cleanedText;
+
+		// 简化编码处理，直接使用UTF-8编码
+		try {
+			// 直接使用UTF-8编码，避免过度复杂的转换导致乱码
+			fixedText = Buffer.from(cleanedText, 'utf-8').toString('utf-8');
+		} catch (e) {
+			// 兜底方案，使用原始文本
+			fixedText = cleanedText;
+		}
+
+		// 第四步：清理特殊字符和控制字符
+		// 1. 移除控制字符，但保留换行符和制表符
+		fixedText = fixedText.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
+		// 2. 清理HTML实体
+		fixedText = fixedText.replace(/&nbsp;/gi, ' ');
+		fixedText = fixedText.replace(/&amp;/gi, '&');
+		fixedText = fixedText.replace(/&lt;/gi, '<');
+		fixedText = fixedText.replace(/&gt;/gi, '>');
+		fixedText = fixedText.replace(/&quot;/gi, '"');
+		fixedText = fixedText.replace(/&#39;/gi, "'");
+		// 3. 清理多余空格和换行
+		fixedText = fixedText.replace(/\s+/g, ' ').trim();
+
+		// 最终清理后的文本
+		cleanedText = fixedText;
+
+		if (cleanedText) {
+			blocks.push({ type: "text", text: cleanedText });
+		}
+
+		// 处理图片标签
+		const imgRegex = /<img[^>]+src=["']?([^"'>\s]+)["']?[^>]*>/gi;
+		let match;
+		const imgSrcs = [];
+
+		// 确保目标目录存在
+		ensureDir(targetDir);
+
+		while ((match = imgRegex.exec(text)) !== null) {
+			const src = match[1];
+			if (src && !imgSrcs.includes(src)) {
+				imgSrcs.push(src);
+
+				// 生成唯一文件名
+				const timestamp = Date.now();
+				const random = Math.floor(Math.random() * 10000);
+				const ext = src.split('.').pop() || 'png';
+				const fileName = `image_${timestamp}_${random}.${ext}`;
+				const destPath = path.join(targetDir, fileName);
+
+				// 尝试下载或保存图片
+				let saved = false;
+
+				// 处理data URL
+				if (src.startsWith('data:')) {
+					try {
+						const dataUrlRegex = /^data:([^;]+);base64,(.*)$/;
+						const dataMatch = src.match(dataUrlRegex);
+						if (dataMatch) {
+							const base64Data = dataMatch[2];
+							const buffer = Buffer.from(base64Data, 'base64');
+							fs.writeFileSync(destPath, buffer);
+							saved = true;
+						}
+					} catch (e) {
+						logMessage(`保存data URL图片失败: ${e.message}`, "ERROR");
+					}
+				}
+				// 处理本地文件URL
+				else if (src.startsWith('file://')) {
+					try {
+						const localPath = decodeURIComponent(src.replace('file://', ''));
+						if (fs.existsSync(localPath)) {
+							fs.copyFileSync(localPath, destPath);
+							saved = true;
+						}
+					} catch (e) {
+						logMessage(`复制本地图片失败: ${e.message}`, "ERROR");
+					}
+				}
+
+
+				// 如果成功保存，添加到blocks
+				if (saved) {
+					blocks.push({
+						type: "media",
+						kind: "image",
+						src: destPath,
+						alt: ""
+					});
+				}
+			}
+		}
+
+		if (blocks.length === 0) {
+			return null;
+		}
+
+		return {
+			type: "html_blocks",
+			blocks: blocks,
+			source_url: ""
+		};
+	} catch (e) {
+		logMessage(`Node.js剪贴板处理失败: ${e.message}`, "ERROR");
+		return null;
+	}
 }
 
 async function handleClipboardShell(targetDir) {
@@ -1504,6 +1680,7 @@ async function handleClipboardShell(targetDir) {
 			}
 		}
 
+		// 先检查是否有图片
 		const hasImg = await shellBridge.call("hasImage", {}, 2000);
 		if (hasImg?.value) {
 			const fname = getTimestampFilename(".png");
@@ -1514,7 +1691,16 @@ async function handleClipboardShell(targetDir) {
 				return { type: "image", path: dest };
 			}
 		}
-	} catch { }
+
+		// 检查并处理HTML内容
+		const text = await vscode.env.clipboard.readText();
+		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+			// 使用我们的Node.js HTML处理逻辑
+			return await handleClipboardNode(targetDir);
+		}
+	} catch (e) {
+		logMessage(`Shell剪贴板处理失败: ${e.message}`, "ERROR");
+	}
 
 	return null;
 }
