@@ -1280,7 +1280,8 @@ async function pureCommand() {
 
             while ((match = regex.exec(content))) {
                 const rawPath = (match[1] || "").trim();
-                const absPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(parentDir, rawPath);
+                const normalized = rawPath.replace(/\\/g, path.sep).replace(/\//g, path.sep);
+                const absPath = path.isAbsolute(normalized) ? normalized : path.resolve(parentDir, normalized);
 
                 const absNorm = path.normalize(absPath).toLowerCase();
                 const qqqNorm = path.normalize(qqqDir).toLowerCase();

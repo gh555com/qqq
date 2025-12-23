@@ -1495,9 +1495,9 @@ async function provideCleanlinessEditsAsync(document) {
         const lineObj = document.lineAt(markerLine);
         const lineContent = lineObj.text;
 
-        if (startPos.character > 0) edits.push(vscode.TextEdit.insert(startPos, eol));
+        if (startPos.character > 0) edits.push({ range: new vscode.Range(startPos, startPos), newText: eol });
         const suffix = lineContent.substring(endPos.character);
-        if (suffix.trim().length > 0) edits.push(vscode.TextEdit.insert(endPos, eol));
+        if (suffix.trim().length > 0) edits.push({ range: new vscode.Range(endPos, endPos), newText: eol });
 
         if (pxHeight > 0) {
             const isLastMarkerInDoc = i === markers.length - 1;
@@ -1510,7 +1510,7 @@ async function provideCleanlinessEditsAsync(document) {
             if (existingBlanks < neededLines) {
                 const linesToAdd = neededLines - existingBlanks;
                 const lineEndPos = lineObj.range.end;
-                edits.push(vscode.TextEdit.insert(lineEndPos, eol.repeat(linesToAdd)));
+                edits.push({ range: new vscode.Range(lineEndPos, lineEndPos), newText: eol.repeat(linesToAdd) });
             }
         }
     }
@@ -1793,7 +1793,13 @@ async function activate(context) {
         }),
         vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
         vscode.workspace.onWillSaveTextDocument((e) => {
-            if (cleanFreakMode && e.document) e.waitUntil(provideCleanlinessEditsAsync(e.document));
+            if (cleanFreakMode && e.document) {
+                e.waitUntil(
+                    provideCleanlinessEditsAsync(e.document).then((edits) => {
+                        return edits.map((edit) => new vscode.TextEdit(edit.range, edit.newText));
+                    })
+                );
+            }
         }),
         vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
             debounceRender(e.textEditor);
