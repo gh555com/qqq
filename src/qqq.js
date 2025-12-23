@@ -546,10 +546,33 @@ function finishUserTracking(context) {
 }
 
 // ---------- fingerprint ----------
+const _fingerprintCache = new Map();
+
+function prefillFingerprint(filePath, fingerprint) {
+	try {
+		const stat = fs.statSync(filePath);
+		const key = cacheKeyForPath(filePath);
+		_fingerprintCache.set(key, {
+			mtime: stat.mtimeMs,
+			size: stat.size,
+			fp: fingerprint
+		});
+	} catch (e) { }
+}
+
 function computeFingerprint(filePath) {
 	try {
 		const stat = fs.statSync(filePath);
 		const size = stat.size;
+		const mtime = stat.mtimeMs;
+		const key = cacheKeyForPath(filePath);
+
+		// 缓存检查
+		const cached = _fingerprintCache.get(key);
+		if (cached && cached.mtime === mtime && cached.size === size) {
+			return cached.fp;
+		}
+
 		if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
 
 		const fd = fs.openSync(filePath, "r");
@@ -591,7 +614,14 @@ function computeFingerprint(filePath) {
 			fs.closeSync(fd);
 		}
 
-		return crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
+		const fp = crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
+
+		// 写入缓存
+		_fingerprintCache.set(key, { mtime, size, fp });
+		// 简单的缓存清理策略：超过 2000 个条目清空一半（虽然不太可能达到）
+		if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
+
+		return fp;
 	} catch (e) {
 		return null;
 	}
@@ -1516,6 +1546,38 @@ async function handleClipboardSlow(targetDir) {
 	return handleClipboardSpawn(targetDir);
 }
 
+// ---------- buffer hash helper ----------
+function computeBufferFingerprint(buffer) {
+	try {
+		const size = buffer.length;
+		if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
+
+		const chunks = [];
+		const sizeBuf = Buffer.alloc(8);
+		sizeBuf.writeBigUInt64LE(BigInt(size));
+		chunks.push(sizeBuf);
+
+		if (size <= FINGERPRINT_HEAD) {
+			chunks.push(buffer);
+		} else if (size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
+			chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
+			const tailSize = Math.min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD);
+			chunks.push(buffer.subarray(size - tailSize));
+		} else {
+			chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
+
+			const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
+			chunks.push(buffer.subarray(midPos, midPos + FINGERPRINT_MID));
+
+			chunks.push(buffer.subarray(size - FINGERPRINT_TAIL));
+		}
+
+		return crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
+	} catch (e) {
+		return null;
+	}
+}
+
 async function handleClipboardNode(targetDir) {
 	try {
 		const text = await vscode.env.clipboard.readText();
@@ -1601,6 +1663,7 @@ async function handleClipboardNode(targetDir) {
 
 				// 尝试下载或保存图片
 				let saved = false;
+				let fingerprint = null;
 
 				// 处理data URL
 				if (src.startsWith('data:')) {
@@ -1612,6 +1675,9 @@ async function handleClipboardNode(targetDir) {
 							const buffer = Buffer.from(base64Data, 'base64');
 							fs.writeFileSync(destPath, buffer);
 							saved = true;
+							// ★ 立即计算指纹并缓存
+							fingerprint = computeBufferFingerprint(buffer);
+							if (fingerprint) prefillFingerprint(destPath, fingerprint);
 						}
 					} catch (e) {
 						logMessage(`保存data URL图片失败: ${e.message}`, "ERROR");
@@ -1624,6 +1690,9 @@ async function handleClipboardNode(targetDir) {
 						if (fs.existsSync(localPath)) {
 							fs.copyFileSync(localPath, destPath);
 							saved = true;
+							// ★ 立即计算指纹并缓存
+							fingerprint = computeFingerprint(destPath); // 或者是 localPath 的指纹
+							// 这里 computeFingerprint 会自动缓存 destPath
 						}
 					} catch (e) {
 						logMessage(`复制本地图片失败: ${e.message}`, "ERROR");
@@ -1637,7 +1706,8 @@ async function handleClipboardNode(targetDir) {
 						type: "media",
 						kind: "image",
 						src: destPath,
-						alt: ""
+						alt: "",
+						fingerprint: fingerprint // ★ 返回指纹
 					});
 				}
 			}
@@ -1676,6 +1746,7 @@ async function handleClipboardShell(targetDir) {
 				ensureDir(targetDir);
 				const copiedFiles = [];
 				const copiedFolders = [];
+				const fingerprints = {};
 
 				// 复制文件夹
 				for (const folder of folders) {
@@ -1683,20 +1754,23 @@ async function handleClipboardShell(targetDir) {
 						const destFolder = path.join(targetDir, path.basename(folder));
 						fs.cpSync(folder, destFolder, { recursive: true, force: true });
 						copiedFolders.push(destFolder);
+						// 文件夹暂不计算整体指纹
 					} catch { }
 				}
 
 				// 复制文件
 				if (validFiles.length > 0) {
-					const copied = copyFilesToTarget(validFiles, targetDir);
-					copiedFiles.push(...copied);
+					const result = copyFilesToTarget(validFiles, targetDir);
+					copiedFiles.push(...result.copied);
+					Object.assign(fingerprints, result.fingerprints);
 				}
 
 				if (copiedFiles.length > 0 || copiedFolders.length > 0) {
 					return {
 						type: "file_folder",
 						files: copiedFiles,
-						folders: copiedFolders
+						folders: copiedFolders,
+						fingerprints: fingerprints
 					};
 				}
 			}
@@ -1710,7 +1784,9 @@ async function handleClipboardShell(targetDir) {
 			ensureDir(targetDir);
 			const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
 			if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-				return { type: "image", path: dest };
+				// ★ 立即计算指纹
+				const fp = computeFingerprint(dest);
+				return { type: "image", path: dest, fingerprint: fp };
 			}
 		}
 
@@ -1744,14 +1820,23 @@ function copyFilesToTarget(files, targetDir) {
 	} catch { }
 
 	const copied = [];
+	const fingerprints = {}; // ★ 收集指纹返回
+
 	for (const f of files) {
 		try {
 			// 计算源文件指纹
 			const srcFingerprint = computeFingerprint(f);
-			if (srcFingerprint && existingFingerprints.has(srcFingerprint)) {
-				// 指纹已存在，直接使用现有文件路径
-				copied.push(existingFingerprints.get(srcFingerprint));
-				continue;
+			if (srcFingerprint) {
+				fingerprints[f] = srcFingerprint; // 记录源文件指纹
+
+				if (existingFingerprints.has(srcFingerprint)) {
+					// 指纹已存在，直接使用现有文件路径
+					const existPath = existingFingerprints.get(srcFingerprint);
+					copied.push(existPath);
+					// 确保现有文件也在缓存中
+					prefillFingerprint(existPath, srcFingerprint);
+					continue;
+				}
 			}
 
 			const ext = path.extname(f);
@@ -1763,12 +1848,14 @@ function copyFilesToTarget(files, targetDir) {
 			// 更新指纹映射
 			if (srcFingerprint) {
 				existingFingerprints.set(srcFingerprint, dest);
+				// ★ 关键：立即为新文件预填缓存，使用源文件的指纹
+				prefillFingerprint(dest, srcFingerprint);
 			}
 
 			copied.push(dest);
 		} catch { }
 	}
-	return copied;
+	return { copied, fingerprints };
 }
 
 async function handleClipboardSpawn(targetDir) {
@@ -1800,6 +1887,7 @@ async function handleClipboardSpawnWin32(targetDir) {
 		ensureDir(targetDir);
 		const copiedFiles = [];
 		const copiedFolders = [];
+		const fingerprints = {};
 
 		// 复制文件夹
 		for (const folder of folders) {
@@ -1812,15 +1900,17 @@ async function handleClipboardSpawnWin32(targetDir) {
 
 		// 复制文件
 		if (validFiles.length > 0) {
-			const copied = copyFilesToTarget(validFiles, targetDir);
-			copiedFiles.push(...copied);
+			const result = copyFilesToTarget(validFiles, targetDir);
+			copiedFiles.push(...result.copied);
+			Object.assign(fingerprints, result.fingerprints);
 		}
 
 		if (copiedFiles.length > 0 || copiedFolders.length > 0) {
 			return {
 				type: "file_folder",
 				files: copiedFiles,
-				folders: copiedFolders
+				folders: copiedFolders,
+				fingerprints: fingerprints
 			};
 		}
 	}
@@ -1844,7 +1934,9 @@ async function handleClipboardSpawnWin32(targetDir) {
 		], "OK");
 
 		if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-			return { type: "image", path: dest };
+			// ★ 立即计算指纹
+			const fp = computeFingerprint(dest);
+			return { type: "image", path: dest, fingerprint: fp };
 		}
 	}
 
@@ -1872,7 +1964,9 @@ async function handleClipboardSpawnDarwin(targetDir) {
 			}
 
 			if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-				return { type: "image", path: dest };
+				// ★ 立即计算指纹
+				const fp = computeFingerprint(dest);
+				return { type: "image", path: dest, fingerprint: fp };
 			}
 
 			if (fs.existsSync(dest)) {
@@ -1901,7 +1995,9 @@ async function handleClipboardSpawnLinux(targetDir) {
 		cp.execSync(`xclip -selection clipboard -t image/png -o > "${dest}" 2>/dev/null`, { timeout: 5000 });
 
 		if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-			return { type: "image", path: dest };
+			// ★ 立即计算指纹
+			const fp = computeFingerprint(dest);
+			return { type: "image", path: dest, fingerprint: fp };
 		}
 
 		if (fs.existsSync(dest)) {
@@ -2319,6 +2415,7 @@ const exported = {
 	logMessageRateLimited,
 
 	computeFingerprint,
+	prefillFingerprint,
 
 	initCache,
 	validateCache,
