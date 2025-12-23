@@ -564,6 +564,42 @@ def handle_clipboard(target_dir):
 
     return {"type": "unknown"}
 
+def get_clipboard_files_only():
+    sys_name = platform.system()
+    if sys_name == "Windows":
+        try:
+            # 优先尝试 ctypes
+            if OpenClipboard(None):
+                try:
+                    if IsClipboardFormatAvailable(CF_HDROP):
+                        h_drop = GetClipboardData(CF_HDROP)
+                        if h_drop:
+                            count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
+                            buf = ctypes.create_unicode_buffer(4096)
+                            paths = []
+                            for i in range(count):
+                                DragQueryFileW(h_drop, i, buf, 4096)
+                                paths.append(buf.value)
+                            return {"type": "file_paths", "paths": paths}
+                finally:
+                    CloseClipboard()
+        except: pass
+
+        # 备选 pywin32
+        try:
+            import win32clipboard as wcb
+            import win32con as wcon
+            wcb.OpenClipboard()
+            try:
+                if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
+                    paths = wcb.GetClipboardData(wcon.CF_HDROP) or []
+                    return {"type": "file_paths", "paths": list(paths)}
+            finally:
+                wcb.CloseClipboard()
+        except: pass
+
+    return {"type": "unknown"}
+
 # =============================================================================
 #  Daemon / CLI
 # =============================================================================
@@ -580,6 +616,10 @@ def _dispatch_action(cmd):
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
         out["type"] = "peek"
+        return out
+
+    if action == "get_clipboard_files":
+        out.update(get_clipboard_files_only())
         return out
 
     if action in ("clipboard", "paste"):
