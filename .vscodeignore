@@ -7,6 +7,8 @@
 .gitignore
 .qoder/**
 .git/**
+.trae/
+
 
 # 防止套娃！忽略打包生成的安装包
 *.vsix  <--- 加上这一行！！！
