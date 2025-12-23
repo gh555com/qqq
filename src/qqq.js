@@ -564,6 +564,11 @@ function getCachedBuffer(contentId, quality) {
 	return null;
 }
 
+function _cleanReason(s) {
+	if (!s) return "";
+	return String(s).trim().replace(/\r/g, "").replace(/\n/g, " | ").slice(0, 300);
+}
+
 // ---------- daemon bridge ----------
 class DaemonBridge {
 	constructor(name, startFn) {

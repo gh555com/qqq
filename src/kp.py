@@ -556,7 +556,7 @@ def handle_windows_ctypes(output_dir: Path):
     finally:
         CloseClipboard()
 
-def handle_clipboard(target_dir):
+def handle_clipboard(target_dir=None):
     output_dir = resolve_output_dir(target_dir)
     sys_name = platform.system()
 
@@ -590,7 +590,7 @@ def get_clipboard_files_only():
                             for i in range(count):
                                 n = DragQueryFileW(h_drop, i, None, 0) + 1
                                 buf = ctypes.create_unicode_buffer(n)
-DragQueryFileW(h_drop, i, buf, n)
+                                DragQueryFileW(h_drop, i, buf, n)
                                 paths.append(buf.value)
                             return {"type": "file_paths", "paths": paths}
                 finally:
@@ -666,13 +666,6 @@ def main():
             daemon_mode()
         elif sys.argv[1] == "paste" and len(sys.argv) >= 3:
             print(json.dumps(handle_clipboard(sys.argv[2]), ensure_ascii=False))
-        else:
-            print(json.dumps(handle_clipboard(), ensure_ascii=False))
-    else:
-        print(json.dumps(handle_clipboard(), ensure_ascii=False))
-
-if __name__ == "__main__":
-    main()
         else:
             print(json.dumps(handle_clipboard(), ensure_ascii=False))
     else:
