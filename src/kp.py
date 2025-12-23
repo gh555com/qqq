@@ -124,21 +124,58 @@ def safe_filename(name: str) -> str:
 
 
 def compute_file_fingerprint(file_path: Path) -> str:
-    """计算文件指纹"""
+    """计算文件指纹，与JavaScript版本保持一致"""
     import hashlib
     try:
+        stat = file_path.stat()
+        size = stat.st_size
+
+        # 如果大小为0，返回特殊值
+        if size == 0:
+            return hashlib.md5("empty:0".encode()).hexdigest()
+
         with open(file_path, 'rb') as f:
-            # 读取文件头、中间和末尾的内容来计算指纹
-            head = f.read(1024)  # 头1KB
-            f.seek(max(0, file_path.stat().st_size - 1024))  # 尾1KB
-            tail = f.read(1024)
-            # 如果文件较大，再读取中间1KB
-            if file_path.stat().st_size > 2048:
-                f.seek(file_path.stat().st_size // 2)
-                mid = f.read(1024)
+            chunks = []
+
+            # 添加文件大小信息
+            size_bytes = size.to_bytes(8, byteorder='little')
+            chunks.append(size_bytes)
+
+            FINGERPRINT_HEAD = 128
+            FINGERPRINT_MID = 128
+            FINGERPRINT_TAIL = 128
+
+            if size <= FINGERPRINT_HEAD:
+                # 文件小于等于头部大小，读取整个文件
+                buf = f.read(size)
+                chunks.append(buf)
+            elif size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL:
+                # 文件小于等于头部+尾部大小，读取头和尾
+                head = f.read(FINGERPRINT_HEAD)
+                chunks.append(head)
+
+                # 读取尾部
+                tail_size = min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD)
+                f.seek(size - tail_size)
+                tail = f.read(tail_size)
+                chunks.append(tail)
             else:
-                mid = b''
-        return hashlib.md5(head + mid + tail).hexdigest()
+                # 文件较大，读取头部、中部和尾部
+                head = f.read(FINGERPRINT_HEAD)
+                chunks.append(head)
+
+                # 读取中部
+                mid_pos = size // 2 - FINGERPRINT_MID // 2
+                f.seek(max(0, mid_pos))
+                mid = f.read(FINGERPRINT_MID)
+                chunks.append(mid)
+
+                # 读取尾部
+                f.seek(size - FINGERPRINT_TAIL)
+                tail = f.read(FINGERPRINT_TAIL)
+                chunks.append(tail)
+
+        return hashlib.md5(b''.join(chunks)).hexdigest()
     except Exception:
         return ""
 
@@ -720,23 +757,24 @@ def _download_url_to_path(url: str, output_dir: Path, filename_hint: str = "") -
         return None
 
 
-def save_media_from_src(src: str, output_dir: Path, source_url: Optional[str]) -> Optional[Path]:
+def save_media_from_src(src: str, output_dir: Path, source_url: Optional[str], existing_fingerprints: Optional[dict] = None) -> Optional[Path]:
     if not src:
         return None
     s = src.strip()
     if not s:
         return None
 
-    # 构建目标目录中现有文件的指纹映射
-    existing_fingerprints = {}
-    try:
-        for entry in os.scandir(output_dir):
-            if entry.is_file():
-                fp = compute_file_fingerprint(Path(entry.path))
-                if fp:
-                    existing_fingerprints[fp] = Path(entry.path)
-    except Exception:
-        pass
+    # 构建目标目录中现有文件的指纹映射（如果未提供）
+    if existing_fingerprints is None:
+        existing_fingerprints = {}
+        try:
+            for entry in os.scandir(output_dir):
+                if entry.is_file():
+                    fp = compute_file_fingerprint(Path(entry.path))
+                    if fp:
+                        existing_fingerprints[fp] = Path(entry.path)
+        except Exception:
+            pass
 
     if s.lower().startswith("data:"):
         data, mime = _data_url_to_bytes(s)
@@ -829,6 +867,17 @@ def materialize_html_blocks(blocks: List[Dict[str, Any]], output_dir: Path, sour
 
     ensure_parent(output_dir / "dummy")
 
+    # 构建目标目录中现有文件的指纹映射
+    existing_fingerprints = {}
+    try:
+        for entry in os.scandir(output_dir):
+            if entry.is_file():
+                fp = compute_file_fingerprint(Path(entry.path))
+                if fp:
+                    existing_fingerprints[fp] = Path(entry.path)
+    except Exception:
+        pass
+
     out = []
     media_count = 0
     for b in blocks:
@@ -853,7 +902,8 @@ def materialize_html_blocks(blocks: List[Dict[str, Any]], output_dir: Path, sour
                 continue
             media_count += 1
             kind = (b.get("kind") or "image").strip().lower()
-            p = save_media_from_src(src, output_dir, source_url)
+            p = save_media_from_src(
+                src, output_dir, source_url, existing_fingerprints)
             if p and p.exists():
                 out.append({"type": "media", "kind": kind, "path": str(p)})
             else:
