@@ -1063,7 +1063,7 @@ async function renderImages(editor) {
     if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
 
     const currentDecos = documentDecorationsMap.get(docUri);
-    const hideDecos = new Map();
+    // 注意：hideDecos 不再作为局部 Map 收集，而是直接收集 Range 数组立即应用
     const visibleRanges = editor.visibleRanges;
     if (!visibleRanges?.length) return;
 
@@ -1073,55 +1073,60 @@ async function renderImages(editor) {
     const pendingRegex = new RegExp(qqq.PENDING_REGEX);
 
     const tasks = [];
+    const newHideRanges = [];
 
+    // 第一阶段：同步扫描，快速隐藏
     for (const range of visibleRanges) {
         const text = editor.document.getText(range);
+        const rangeOffset = editor.document.offsetAt(range.start);
 
         pendingRegex.lastIndex = 0;
         let pm;
         while ((pm = pendingRegex.exec(text))) {
-            const offset = editor.document.offsetAt(range.start) + pm.index;
+            const offset = rangeOffset + pm.index;
             const pos = editor.document.positionAt(offset);
             const endPos = editor.document.positionAt(offset + pm[0].length);
             const uniqueKey = `${pos.line}_${pos.character}`;
 
-            hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
+            newHideRanges.push(new vscode.Range(pos, endPos));
 
-            const { width: pW, height: pH } = getFrameConfig(null);
-            const boxWidth = pW + PREVIEW_BORDER;
-            const boxHeight = pH + PREVIEW_BORDER;
+            if (!currentDecos.has(uniqueKey)) {
+                const { width: pW, height: pH } = getFrameConfig(null);
+                const boxWidth = pW + PREVIEW_BORDER;
+                const boxHeight = pH + PREVIEW_BORDER;
 
-            const loadingDeco = {
-                range: new vscode.Range(pos.line, 0, pos.line, 0),
-                renderOptions: {
-                    after: {
-                        contentText: "",
-                        position: "absolute",
-                        left: marginLeft,
-                        top: "0px",
-                        width: `${boxWidth}px`,
-                        height: `${boxHeight}px`,
-                        padding: "2px",
-                        border: "1px dashed #888",
-                        backgroundColor: PREVIEW_BG_COLOR,
-                        zIndex: -1,
-                        textDecoration:
-                            `none; pointer-events: none; display: inline-block; ` +
-                            `background-image: url("${LOADING_SVG}"); ` +
-                            `background-size: 120px 40px; ` +
-                            `background-position: center center; ` +
-                            `background-repeat: no-repeat;`,
+                const loadingDeco = {
+                    range: new vscode.Range(pos.line, 0, pos.line, 0),
+                    renderOptions: {
+                        after: {
+                            contentText: "",
+                            position: "absolute",
+                            left: marginLeft,
+                            top: "0px",
+                            width: `${boxWidth}px`,
+                            height: `${boxHeight}px`,
+                            padding: "2px",
+                            border: "1px dashed #888",
+                            backgroundColor: PREVIEW_BG_COLOR,
+                            zIndex: -1,
+                            textDecoration:
+                                `none; pointer-events: none; display: inline-block; ` +
+                                `background-image: url("${LOADING_SVG}"); ` +
+                                `background-size: 120px 40px; ` +
+                                `background-position: center center; ` +
+                                `background-repeat: no-repeat;`,
+                        },
                     },
-                },
-            };
-            currentDecos.set(uniqueKey, loadingDeco);
+                };
+                currentDecos.set(uniqueKey, loadingDeco);
+            }
         }
 
         pathRegex.lastIndex = 0;
         let match;
 
         while ((match = pathRegex.exec(text))) {
-            const offset = editor.document.offsetAt(range.start) + match.index;
+            const offset = rangeOffset + match.index;
             const pos = editor.document.positionAt(offset);
             const endPos = editor.document.positionAt(offset + match[0].length);
             const uniqueKey = `${pos.line}_${pos.character}`;
@@ -1130,20 +1135,23 @@ async function renderImages(editor) {
             if (!rawPath) continue;
 
             const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
-            const fileExists = absPath && fs.existsSync(absPath);
 
-            if (fileExists) {
-                // 只有文件存在，才隐藏暗号文本
-                hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
+            // ★★★ 同步检查：存在性 ★★★
+            // 只要文件存在，就视为被接管，立即隐藏
+            let shouldHide = false;
+            if (absPath && fs.existsSync(absPath)) {
+                shouldHide = true;
+            }
+
+            if (shouldHide) {
+                newHideRanges.push(new vscode.Range(pos, endPos));
             } else {
-                // 文件不存在，如果之前有缓存的图片显示，需要移除（因为现在要显示纯文本了）
                 if (currentDecos.has(uniqueKey)) {
                     currentDecos.delete(uniqueKey);
                 }
                 continue;
             }
 
-            // 如果已经有显示元素（且确认文件存在），则无需重新生成任务，直接跳过
             if (currentDecos.has(uniqueKey)) continue;
 
             const targetLine = pos.line;
@@ -1216,6 +1224,14 @@ async function renderImages(editor) {
         }
     }
 
+    // ★★★ 立即应用隐藏装饰器，解决延迟问题 ★★★
+    if (newHideRanges.length > 0) {
+        editor.setDecorations(markerHideType, newHideRanges);
+    } else {
+        editor.setDecorations(markerHideType, []);
+    }
+
+    // 第二阶段：异步生成/更新图片
     if (tasks.length > 0) {
         const chunkResults = await Promise.all(tasks.map((t) => t()));
         if (currentRenderVersion !== myVersion) return;
@@ -1223,7 +1239,6 @@ async function renderImages(editor) {
     }
 
     editor.setDecorations(decorationType, Array.from(currentDecos.values()));
-    if (hideDecos.size > 0) editor.setDecorations(markerHideType, Array.from(hideDecos.values()));
 }
 
 // ==================== 粘贴命令 ====================
