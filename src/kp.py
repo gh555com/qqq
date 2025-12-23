@@ -479,10 +479,21 @@ def handle_windows_ctypes(output_dir: Path):
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
                 count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
-                buf = ctypes.create_unicode_buffer(4096)
+                # 优化：复用 Buffer，减少内存分配开销
+                current_buf_len = 4096
+                buf = ctypes.create_unicode_buffer(current_buf_len)
                 paths = []
+
                 for i in range(count):
-                    DragQueryFileW(h_drop, i, buf, 4096)
+                    # 必须先问长度，防止截断
+                    needed_len = DragQueryFileW(h_drop, i, None, 0) + 1
+
+                    # 仅在 Buffer 不够时扩容
+                    if needed_len > current_buf_len:
+                        current_buf_len = needed_len + 1024  # 多给点余量
+                        buf = ctypes.create_unicode_buffer(current_buf_len)
+
+                    DragQueryFileW(h_drop, i, buf, needed_len)
                     paths.append(buf.value)
 
                 src_dirs = []
@@ -575,10 +586,11 @@ def get_clipboard_files_only():
                         h_drop = GetClipboardData(CF_HDROP)
                         if h_drop:
                             count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
-                            buf = ctypes.create_unicode_buffer(4096)
                             paths = []
                             for i in range(count):
-                                DragQueryFileW(h_drop, i, buf, 4096)
+                                n = DragQueryFileW(h_drop, i, None, 0) + 1
+                                buf = ctypes.create_unicode_buffer(n)
+DragQueryFileW(h_drop, i, buf, n)
                                 paths.append(buf.value)
                             return {"type": "file_paths", "paths": paths}
                 finally:
@@ -654,6 +666,13 @@ def main():
             daemon_mode()
         elif sys.argv[1] == "paste" and len(sys.argv) >= 3:
             print(json.dumps(handle_clipboard(sys.argv[2]), ensure_ascii=False))
+        else:
+            print(json.dumps(handle_clipboard(), ensure_ascii=False))
+    else:
+        print(json.dumps(handle_clipboard(), ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
         else:
             print(json.dumps(handle_clipboard(), ensure_ascii=False))
     else:

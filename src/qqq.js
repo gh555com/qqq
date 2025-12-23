@@ -104,9 +104,7 @@ function getCacheStatsSnapshot() {
 
 // 辅助函数：状态栏更新代理
 function updateStatusBarNow() {
-	try {
-		global.updateStatusBar(getCacheStatsSnapshot(), pythonBridge, rustBridge, shellBridge);
-	} catch (e) { }
+	global.updateStatusBar(getCacheStatsSnapshot(), pythonBridge, rustBridge, shellBridge);
 }
 
 // ============================================================================
@@ -1937,7 +1935,8 @@ async function handleClipboardSpawnLinux(targetDir) {
 	return { type: "unknown" };
 }
 
-function spawnCheck(cmd, args, expected) {
+function spawnRun(cmd, args, opts = {}) {
+	const { checkExpected, returnOutput } = opts;
 	return new Promise((resolve) => {
 		const child = cp.spawn(cmd, args, { windowsHide: true });
 		let output = "";
@@ -1951,74 +1950,44 @@ function spawnCheck(cmd, args, expected) {
 			resolve(val);
 		};
 
-		child.stdout.on("data", (d) => output += d.toString().trim());
+		child.stdout.on("data", (d) => output += (returnOutput ? d.toString() : d.toString().trim()));
 		child.stderr.on("data", (d) => errorOutput += d.toString().trim());
 
 		child.on("close", (code) => {
 			if (code !== 0 && errorOutput) {
 				global.logMessageRateLimited(
-					`spawnCheck:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
+					`spawnRun:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
 					`${cmd} 执行失败 (exit ${code}): ${errorOutput}`,
 					"WARN",
 					2 * 60 * 1000
 				);
 			}
-			finish(output.includes(expected));
+			if (checkExpected) {
+				finish(output.includes(checkExpected));
+			} else {
+				finish(returnOutput ? output : "");
+			}
 		});
 
 		child.on("error", (err) => {
 			global.logMessage(`${cmd} 启动失败: ${err.message}`, "ERROR");
-			finish(false);
+			finish(checkExpected ? false : "");
 		});
 
 		const timer = setTimeout(() => {
 			try { child.kill(); } catch { }
-			global.logMessageRateLimited(`spawnCheckTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
-			finish(false);
+			global.logMessageRateLimited(`spawnRunTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
+			finish(checkExpected ? false : "");
 		}, 5000);
 	});
 }
 
+function spawnCheck(cmd, args, expected) {
+	return spawnRun(cmd, args, { checkExpected: expected });
+}
+
 function spawnOutput(cmd, args) {
-	return new Promise((resolve) => {
-		const child = cp.spawn(cmd, args, { windowsHide: true });
-		let output = "";
-		let errorOutput = "";
-		let done = false;
-
-		const finish = (val) => {
-			if (done) return;
-			done = true;
-			clearTimeout(timer);
-			resolve(val);
-		};
-
-		child.stdout.on("data", (d) => output += d.toString());
-		child.stderr.on("data", (d) => errorOutput += d.toString());
-
-		child.on("close", (code) => {
-			if (code !== 0 && errorOutput) {
-				global.logMessageRateLimited(
-					`spawnOutput:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
-					`${cmd} 执行失败 (exit ${code}): ${errorOutput}`,
-					"WARN",
-					2 * 60 * 1000
-				);
-			}
-			finish(output);
-		});
-
-		child.on("error", (err) => {
-			global.logMessage(`${cmd} 启动失败: ${err.message}`, "ERROR");
-			finish("");
-		});
-
-		const timer = setTimeout(() => {
-			try { child.kill(); } catch { }
-			global.logMessageRateLimited(`spawnOutputTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
-			finish("");
-		}, 5000);
-	});
+	return spawnRun(cmd, args, { returnOutput: true });
 }
 
 async function getFolderInfo(folderPath) {
@@ -2238,25 +2207,21 @@ function startDaemons() {
 	};
 
 	if (pref !== "auto") {
+		const bridges = [];
 		if (pref === "python") {
-			startOne(pythonBridge, false).then((pyStarted) => {
-				if (bootSeq !== _daemonBootSeq) return;
-				if (!pyStarted) startOne(rustBridge, false).then((rsStarted) => {
-					if (bootSeq !== _daemonBootSeq) return;
-					if (!rsStarted) startOne(shellBridge, false);
-				});
-			});
+			bridges.push(pythonBridge, rustBridge, shellBridge);
 		} else if (pref === "rust") {
-			startOne(rustBridge, false).then((rsStarted) => {
-				if (bootSeq !== _daemonBootSeq) return;
-				if (!rsStarted) startOne(pythonBridge, false).then((pyStarted) => {
-					if (bootSeq !== _daemonBootSeq) return;
-					if (!pyStarted) startOne(shellBridge, false);
-				});
-			});
+			bridges.push(rustBridge, pythonBridge, shellBridge);
 		} else {
-			startOne(shellBridge, false);
+			bridges.push(shellBridge);
 		}
+
+		(async () => {
+			for (const bridge of bridges) {
+				if (bootSeq !== _daemonBootSeq) return;
+				if (await startOne(bridge, false)) return;
+			}
+		})();
 		return;
 	}
 
