@@ -1124,15 +1124,25 @@ async function renderImages(editor) {
             const endPos = editor.document.positionAt(offset + match[0].length);
             const uniqueKey = `${pos.line}_${pos.character}`;
 
-            hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
-
             const rawPath = (match[1] || "").trim();
             if (!rawPath) continue;
 
-            if (currentDecos.has(uniqueKey)) continue;
-
             const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
-            if (!absPath || !fs.existsSync(absPath)) continue;
+            const fileExists = absPath && fs.existsSync(absPath);
+
+            if (fileExists) {
+                // 只有文件存在，才隐藏暗号文本
+                hideDecos.set(uniqueKey, { range: new vscode.Range(pos, endPos) });
+            } else {
+                // 文件不存在，如果之前有缓存的图片显示，需要移除（因为现在要显示纯文本了）
+                if (currentDecos.has(uniqueKey)) {
+                    currentDecos.delete(uniqueKey);
+                }
+                continue;
+            }
+
+            // 如果已经有显示元素（且确认文件存在），则无需重新生成任务，直接跳过
+            if (currentDecos.has(uniqueKey)) continue;
 
             const targetLine = pos.line;
             if (targetLine >= editor.document.lineCount) continue;
@@ -1804,6 +1814,20 @@ async function activate(context) {
             renderVisibleEditors();
             if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
         })
+    );
+
+    // 监听文件系统变化（删除/创建/重命名），及时更新渲染状态
+    const watcher = vscode.workspace.createFileSystemWatcher("**/*");
+    context.subscriptions.push(watcher);
+    const fsChangeHandler = () => {
+        if (codeLensProvider) codeLensProvider.refresh();
+        renderVisibleEditors(200);
+        clearDecorations(); // 强制刷新缓存
+    };
+    context.subscriptions.push(
+        watcher.onDidCreate(fsChangeHandler),
+        watcher.onDidDelete(fsChangeHandler),
+        watcher.onDidChange(fsChangeHandler)
     );
 
     const editor = vscode.window.activeTextEditor;

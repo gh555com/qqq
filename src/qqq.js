@@ -1550,204 +1550,300 @@ async function handleClipboardFast() {
 }
 
 async function handleClipboardSlow(targetDir) {
-	const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
-	const pref = getEnginePreference();
-	const order = getEngineTryOrder(pref);
+	return _pasteQueue.enqueue(async () => {
+		const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
+		const pref = getEnginePreference();
+		const order = getEngineTryOrder(pref);
 
-	// ★ 核心改进：创建一个临时目录作为打手（Python/Rust/Shell）的输出目标
-	// 这样我们可以在文件进入正式目录前，进行指纹计算和去重
-	// 如果是重复文件，直接删除临时文件；如果是新文件，移动到目标目录
-	const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-	const tempDir = path.join(os.tmpdir(), tempDirName);
-	ensureDir(tempDir);
+		// ------------------------------------------------------------------------
+		// ★ 方案 A: 预判拦截（Pre-check）
+		// 先尝试只获取文件路径列表，不进行复制
+		// 这样 Node 端可以直接计算源文件指纹，避免大文件无谓复制
+		// ------------------------------------------------------------------------
+		let preCheckFiles = null;
 
-	let rawResult = null;
-
-	try {
 		for (const engine of order) {
 			try {
 				if (engine === "python") {
 					const started = pythonBridge.isAvailable() || await pythonBridge.start();
 					if (started && pythonBridge.isAvailable()) {
-						rawResult = await pythonBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
-						if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
-					}
-				} else if (engine === "rust") {
-					const started = rustBridge.isAvailable() || await rustBridge.start();
-					if (started && rustBridge.isAvailable()) {
-						rawResult = await rustBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
-						if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
-					}
-				} else if (engine === "shell") {
-					const started = shellBridge.isAvailable() || await shellBridge.start();
-					if (started && shellBridge.isAvailable()) {
-						rawResult = await handleClipboardShell(tempDir);
-						if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
-					}
-				} else if (engine === "spawn") {
-					rawResult = await handleClipboardSpawn(tempDir);
-					if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
-				}
-			} catch (e) {
-				logMessage(`引擎 ${engine} 处理失败: ${e.message}`, "ERROR");
-			}
-		}
-
-		if (!rawResult || rawResult.type === "unknown") {
-			// 兜底尝试 spawn
-			rawResult = await handleClipboardSpawn(tempDir);
-		}
-
-		if (!rawResult || rawResult.type === "unknown") {
-			try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
-			return rawResult;
-		}
-
-		// ★ 后处理：在 Node 端统一进行指纹计算和文件移动
-		const finalResult = { ...rawResult };
-		ensureDir(targetDir);
-
-		if (finalResult.type === "image" && finalResult.path) {
-			const tempPath = finalResult.path;
-			if (fs.existsSync(tempPath)) {
-				const fp = computeFingerprint(tempPath);
-				const existingPath = findFileByFingerprint(fp);
-
-				if (existingPath && fs.existsSync(existingPath)) {
-					// 重复：删除临时文件，使用现有文件
-					try { fs.unlinkSync(tempPath); } catch { }
-					finalResult.path = existingPath;
-					finalResult.fingerprint = fp;
-				} else {
-					// 新文件：移动到目标目录
-					const ext = path.extname(tempPath);
-					const finalName = getTimestampFilename(ext);
-					const finalPath = path.join(targetDir, finalName);
-
-					// 确保目标文件名唯一
-					let targetPath = finalPath;
-					if (fs.existsSync(targetPath)) {
-						targetPath = path.join(targetDir, getTimestampFilename(ext));
-					}
-
-					try {
-						fs.renameSync(tempPath, targetPath);
-						finalResult.path = targetPath;
-						finalResult.fingerprint = fp;
-						if (fp) prefillFingerprint(targetPath, fp);
-					} catch (e) {
-						// 移动失败（可能是跨设备），尝试复制
-						try {
-							fs.copyFileSync(tempPath, targetPath);
-							fs.unlinkSync(tempPath);
-							finalResult.path = targetPath;
-							finalResult.fingerprint = fp;
-							if (fp) prefillFingerprint(targetPath, fp);
-						} catch (e2) {
-							// 还是失败，保留原样（虽然是在temp里，但也比丢了好）
+						const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
+						if (res && res.type === "file_paths" && Array.isArray(res.paths)) {
+							preCheckFiles = res.paths;
+							break;
 						}
 					}
 				}
+				// Rust/Shell 暂未实现 get_clipboard_files，跳过
+			} catch { }
+		}
+
+		if (preCheckFiles && preCheckFiles.length > 0) {
+			// 只有纯文件列表时才走优化路径
+			// 如果剪贴板里混杂了图片数据（非文件），这里可能拿不到，会回退到下面的全量流程
+			// 但通常文件复制和截图复制是互斥的
+
+			ensureDir(targetDir);
+			const finalFiles = [];
+			const finalFps = {};
+
+			for (const srcPath of preCheckFiles) {
+				try {
+					if (!fs.existsSync(srcPath) || fs.statSync(srcPath).isDirectory()) {
+						// 文件夹暂不支持优化路径，还是走老逻辑（复制整个文件夹太复杂）
+						preCheckFiles = null;
+						break;
+					}
+
+					// ★ 关键：读取源文件计算指纹（不复制）
+					const fp = computeFingerprint(srcPath);
+					const existingPath = findFileByFingerprint(fp);
+
+					if (existingPath && fs.existsSync(existingPath)) {
+						// 命中重复：直接复用，零 IO 写入
+						finalFiles.push(existingPath);
+						if (fp) finalFps[existingPath] = fp;
+					} else {
+						// 新文件：执行复制
+						const ext = path.extname(srcPath);
+						const fname = path.basename(srcPath); // 保持原名
+						let destPath = path.join(targetDir, fname);
+
+						if (fs.existsSync(destPath)) {
+							// 目标已存在同名文件
+							const dstFp = computeFingerprint(destPath);
+							if (dstFp === fp) {
+								// 内容也一样，直接复用
+								finalFiles.push(destPath);
+								if (fp) finalFps[destPath] = fp;
+								continue;
+							}
+							// 内容不一样，重命名
+							destPath = path.join(targetDir, getTimestampFilename(ext));
+						}
+
+						fs.copyFileSync(srcPath, destPath);
+						finalFiles.push(destPath);
+						if (fp) {
+							finalFps[destPath] = fp;
+							prefillFingerprint(destPath, fp);
+						}
+					}
+				} catch (e) {
+					// 只要有一个出错，就回退到老逻辑
+					preCheckFiles = null;
+					break;
+				}
 			}
-		} else if (finalResult.type === "file_folder") {
-			// 处理文件列表
-			const newFiles = [];
-			const newFps = {};
 
-			if (finalResult.files && finalResult.files.length > 0) {
-				for (const tempPath of finalResult.files) {
-					if (!fs.existsSync(tempPath)) continue;
+			if (preCheckFiles) {
+				return {
+					type: "file_folder",
+					files: finalFiles,
+					folders: [],
+					fingerprints: finalFps
+				};
+			}
+		}
 
+		// ------------------------------------------------------------------------
+		// 原有逻辑：创建一个临时目录作为打手（Python/Rust/Shell）的输出目标
+		// ------------------------------------------------------------------------
+		const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+		// 这样我们可以在文件进入正式目录前，进行指纹计算和去重
+		// 如果是重复文件，直接删除临时文件；如果是新文件，移动到目标目录
+		const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+		const tempDir = path.join(os.tmpdir(), tempDirName);
+		ensureDir(tempDir);
+
+		let rawResult = null;
+
+		try {
+			for (const engine of order) {
+				try {
+					if (engine === "python") {
+						const started = pythonBridge.isAvailable() || await pythonBridge.start();
+						if (started && pythonBridge.isAvailable()) {
+							rawResult = await pythonBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
+							if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
+						}
+					} else if (engine === "rust") {
+						const started = rustBridge.isAvailable() || await rustBridge.start();
+						if (started && rustBridge.isAvailable()) {
+							rawResult = await rustBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
+							if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
+						}
+					} else if (engine === "shell") {
+						const started = shellBridge.isAvailable() || await shellBridge.start();
+						if (started && shellBridge.isAvailable()) {
+							rawResult = await handleClipboardShell(tempDir);
+							if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
+						}
+					} else if (engine === "spawn") {
+						rawResult = await handleClipboardSpawn(tempDir);
+						if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
+					}
+				} catch (e) {
+					logMessage(`引擎 ${engine} 处理失败: ${e.message}`, "ERROR");
+				}
+			}
+
+			if (!rawResult || rawResult.type === "unknown") {
+				// 兜底尝试 spawn
+				rawResult = await handleClipboardSpawn(tempDir);
+			}
+
+			if (!rawResult || rawResult.type === "unknown") {
+				try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
+				return rawResult;
+			}
+
+			// ★ 后处理：在 Node 端统一进行指纹计算和文件移动
+			const finalResult = { ...rawResult };
+			ensureDir(targetDir);
+
+			if (finalResult.type === "image" && finalResult.path) {
+				const tempPath = finalResult.path;
+				if (fs.existsSync(tempPath)) {
 					const fp = computeFingerprint(tempPath);
 					const existingPath = findFileByFingerprint(fp);
 
 					if (existingPath && fs.existsSync(existingPath)) {
+						// 重复：删除临时文件，使用现有文件
 						try { fs.unlinkSync(tempPath); } catch { }
-						newFiles.push(existingPath);
-						if (fp) newFps[existingPath] = fp;
+						finalResult.path = existingPath;
+						finalResult.fingerprint = fp;
 					} else {
-						const fileName = path.basename(tempPath);
-						let finalPath = path.join(targetDir, fileName);
+						// 新文件：移动到目标目录
+						const ext = path.extname(tempPath);
+						const finalName = getTimestampFilename(ext);
+						const finalPath = path.join(targetDir, finalName);
 
-						// 处理文件名冲突
-						if (fs.existsSync(finalPath)) {
-							// 如果目标存在，且指纹相同，则视为同一个
-							const dstFp = computeFingerprint(finalPath);
-							if (dstFp === fp) {
-								try { fs.unlinkSync(tempPath); } catch { }
-								newFiles.push(finalPath);
-								if (fp) newFps[finalPath] = fp;
-								continue;
-							}
-							// 指纹不同，重命名
-							const ext = path.extname(fileName);
-							const stem = path.basename(fileName, ext);
-							finalPath = path.join(targetDir, `${stem}_${Date.now()}${ext}`);
+						// 确保目标文件名唯一
+						let targetPath = finalPath;
+						if (fs.existsSync(targetPath)) {
+							targetPath = path.join(targetDir, getTimestampFilename(ext));
 						}
 
 						try {
-							fs.renameSync(tempPath, finalPath);
-							newFiles.push(finalPath);
-							if (fp) {
-								newFps[finalPath] = fp;
-								prefillFingerprint(finalPath, fp);
-							}
+							fs.renameSync(tempPath, targetPath);
+							finalResult.path = targetPath;
+							finalResult.fingerprint = fp;
+							if (fp) prefillFingerprint(targetPath, fp);
 						} catch (e) {
+							// 移动失败（可能是跨设备），尝试复制
 							try {
-								fs.copyFileSync(tempPath, finalPath);
+								fs.copyFileSync(tempPath, targetPath);
 								fs.unlinkSync(tempPath);
+								finalResult.path = targetPath;
+								finalResult.fingerprint = fp;
+								if (fp) prefillFingerprint(targetPath, fp);
+							} catch (e2) {
+								// 还是失败，保留原样（虽然是在temp里，但也比丢了好）
+							}
+						}
+					}
+				}
+			} else if (finalResult.type === "file_folder") {
+				// 处理文件列表
+				const newFiles = [];
+				const newFps = {};
+
+				if (finalResult.files && finalResult.files.length > 0) {
+					for (const tempPath of finalResult.files) {
+						if (!fs.existsSync(tempPath)) continue;
+
+						const fp = computeFingerprint(tempPath);
+						const existingPath = findFileByFingerprint(fp);
+
+						if (existingPath && fs.existsSync(existingPath)) {
+							try { fs.unlinkSync(tempPath); } catch { }
+							newFiles.push(existingPath);
+							if (fp) newFps[existingPath] = fp;
+						} else {
+							const fileName = path.basename(tempPath);
+							let finalPath = path.join(targetDir, fileName);
+
+							// 处理文件名冲突
+							if (fs.existsSync(finalPath)) {
+								// 如果目标存在，且指纹相同，则视为同一个
+								const dstFp = computeFingerprint(finalPath);
+								if (dstFp === fp) {
+									try { fs.unlinkSync(tempPath); } catch { }
+									newFiles.push(finalPath);
+									if (fp) newFps[finalPath] = fp;
+									continue;
+								}
+								// 指纹不同，重命名
+								const ext = path.extname(fileName);
+								const stem = path.basename(fileName, ext);
+								finalPath = path.join(targetDir, `${stem}_${Date.now()}${ext}`);
+							}
+
+							try {
+								fs.renameSync(tempPath, finalPath);
 								newFiles.push(finalPath);
 								if (fp) {
 									newFps[finalPath] = fp;
 									prefillFingerprint(finalPath, fp);
 								}
+							} catch (e) {
+								try {
+									fs.copyFileSync(tempPath, finalPath);
+									fs.unlinkSync(tempPath);
+									newFiles.push(finalPath);
+									if (fp) {
+										newFps[finalPath] = fp;
+										prefillFingerprint(finalPath, fp);
+									}
+								} catch { }
+							}
+						}
+					}
+					finalResult.files = newFiles;
+					finalResult.fingerprints = newFps;
+				}
+
+				// 处理文件夹 (文件夹比较复杂，暂时整体移动)
+				if (finalResult.folders && finalResult.folders.length > 0) {
+					const newFolders = [];
+					for (const tempFolderPath of finalResult.folders) {
+						if (!fs.existsSync(tempFolderPath)) continue;
+
+						const folderName = path.basename(tempFolderPath);
+						let finalFolderPath = path.join(targetDir, folderName);
+
+						if (fs.existsSync(finalFolderPath)) {
+							finalFolderPath = path.join(targetDir, `${folderName}_${Date.now()}`);
+						}
+
+						try {
+							// fs.renameSync 在跨设备移动文件夹时可能会失败，保险起见用 cp + rm
+							// 如果在同一盘符，renameSync 是原子的且快
+							fs.renameSync(tempFolderPath, finalFolderPath);
+							newFolders.push(finalFolderPath);
+						} catch (e) {
+							try {
+								fs.cpSync(tempFolderPath, finalFolderPath, { recursive: true });
+								fs.rmSync(tempFolderPath, { recursive: true, force: true });
+								newFolders.push(finalFolderPath);
 							} catch { }
 						}
 					}
+					finalResult.folders = newFolders;
 				}
-				finalResult.files = newFiles;
-				finalResult.fingerprints = newFps;
 			}
 
-			// 处理文件夹 (文件夹比较复杂，暂时整体移动)
-			if (finalResult.folders && finalResult.folders.length > 0) {
-				const newFolders = [];
-				for (const tempFolderPath of finalResult.folders) {
-					if (!fs.existsSync(tempFolderPath)) continue;
+			// 清理临时目录（如果是空的）
+			try { fs.rmdirSync(tempDir); } catch { }
 
-					const folderName = path.basename(tempFolderPath);
-					let finalFolderPath = path.join(targetDir, folderName);
+			return finalResult;
 
-					if (fs.existsSync(finalFolderPath)) {
-						finalFolderPath = path.join(targetDir, `${folderName}_${Date.now()}`);
-					}
-
-					try {
-						// fs.renameSync 在跨设备移动文件夹时可能会失败，保险起见用 cp + rm
-						// 如果在同一盘符，renameSync 是原子的且快
-						fs.renameSync(tempFolderPath, finalFolderPath);
-						newFolders.push(finalFolderPath);
-					} catch (e) {
-						try {
-							fs.cpSync(tempFolderPath, finalFolderPath, { recursive: true });
-							fs.rmSync(tempFolderPath, { recursive: true, force: true });
-							newFolders.push(finalFolderPath);
-						} catch { }
-					}
-				}
-				finalResult.folders = newFolders;
-			}
+		} catch (e) {
+			try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
+			throw e;
 		}
-
-		// 清理临时目录（如果是空的）
-		try { fs.rmdirSync(tempDir); } catch { }
-
-		return finalResult;
-
-	} catch (e) {
-		try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
-		throw e;
-	}
+	});
 }
 
 // ---------- buffer hash helper ----------
