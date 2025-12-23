@@ -510,8 +510,10 @@ function determineCacheStrategy(filePath, info) {
         isStaticSource &&
         canDirectRead &&
         !info?.needsConversion &&
-        ((ext === ".ico") || (info?.width && info?.height && info.width <= 512 && info.height <= 512)) &&
-        fileSize < 300 * 1024
+        (
+            (ext === ".ico" && fileSize < FALLBACK_MAX_SIZE) ||
+            (fileSize < 300 * 1024 && info?.width && info?.height && info.width <= 512 && info.height <= 512)
+        )
     ) {
         shouldBypassCache = true;
     }
