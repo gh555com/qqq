@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const os = require("os");
 
 const qqq = require("./qqq");
-const q1a = require("./q1a");
+const q3 = require("./q3");
 
 const CORE_INTEGRITY_HASH =
     "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
@@ -1244,7 +1244,7 @@ async function renderImages(editor) {
 // ==================== 粘贴命令 ====================
 async function executeClipboardCommand() {
     if (!isCoreIntegrityValid) {
-        vscode.window.showErrorMessage("Integrity check failed.");
+        global.showErrorMessage("Integrity check failed.");
         return;
     }
 
@@ -1253,7 +1253,7 @@ async function executeClipboardCommand() {
 
     // 检查是否为未命名未保存的新建文件
     if (editor.document.isUntitled) {
-        vscode.window.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
+        global.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
         // 执行原始粘贴
         await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
         return;
@@ -1692,7 +1692,7 @@ async function renameFileCommand(rawPath, absPath) {
     if (!editor) return;
 
     const currentName = path.basename(absPath);
-    const newName = await vscode.window.showInputBox({
+    const newName = await global.showInputBox({
         title: "重命名粘贴文件",
         prompt: "rename  ",
         value: currentName,
@@ -1706,7 +1706,7 @@ async function renameFileCommand(rawPath, absPath) {
     try {
         await fs.promises.rename(absPath, newAbs);
     } catch (e) {
-        vscode.window.showErrorMessage(e.message);
+        global.showErrorMessage(e.message);
         return;
     }
 
@@ -1786,10 +1786,10 @@ async function activate(context) {
             performGlobalClean(vscode.window.activeTextEditor, true);
         }),
         vscode.commands.registerCommand("qqq.exportDoc", () => {
-            q1a.executeExportDocCommand(isCoreIntegrityValid);
+            q3.executeExportDocCommand(isCoreIntegrityValid);
         }),
         vscode.commands.registerCommand("qqq.exportZip", () => {
-            q1a.executeExportZipCommand(isCoreIntegrityValid);
+            q3.executeExportZipCommand(isCoreIntegrityValid);
         }),
         vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
         vscode.workspace.onWillSaveTextDocument((e) => {
