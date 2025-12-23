@@ -500,7 +500,7 @@ function determineCacheStrategy(filePath, info) {
 
     const isStaticSource = info?.isStaticImage === true;
     const isMjpegStatic = info?.isMjpegStatic === true;
-    const simpleFormats = [".png", ".jpg", ".jpeg", ".svg"];
+    const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
     const canDirectRead = simpleFormats.includes(ext) || (ext === ".webp" && isStaticSource);
 
     let shouldBypassCache = false;
@@ -510,10 +510,7 @@ function determineCacheStrategy(filePath, info) {
         isStaticSource &&
         canDirectRead &&
         !info?.needsConversion &&
-        info?.width &&
-        info?.height &&
-        info.width <= 512 &&
-        info.height <= 512 &&
+        ((ext === ".ico") || (info?.width && info?.height && info.width <= 512 && info.height <= 512)) &&
         fileSize < 300 * 1024
     ) {
         shouldBypassCache = true;
@@ -1298,7 +1295,7 @@ async function replacePendingMarker(token, result) {
             // 只处理媒体块，文本已经提前显示了
             if (block.type === "media" && block.path) {
                 const filePath = block.path;
-                
+
                 // ★ 注入指纹缓存
                 if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
 
@@ -1359,8 +1356,8 @@ async function replacePendingMarker(token, result) {
             // 如果没有，尝试归一化一下
             if (!fp) {
                 // 简单的 win32 路径匹配尝试
-                 const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
-                 fp = fingerprints[tryKey];
+                const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
+                fp = fingerprints[tryKey];
             }
             if (fp) qqq.prefillFingerprint(f, fp);
 
@@ -1436,8 +1433,31 @@ async function provideCleanlinessEditsAsync(document) {
                 try {
                     let mtimeMs = fs.statSync(absPath).mtimeMs;
                     const info = await getMediaInfo(absPath, mtimeMs);
-                    const { height } = getFrameConfig(info);
-                    pxHeight = height;
+
+                    let pxHeight = 0;
+
+                    // 特殊处理高风险格式 (ai, eps, cdr)，防止无法渲染时占位过大
+                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用的假数据)，
+                    //      则必须要有有效的预览缓存，才分配高度。否则默认不占位。
+                    if (info && info.needsConversion && [".ai", ".eps", ".cdr"].includes(ext)) {
+                        const contentId = qqq.computeFingerprint(absPath);
+                        if (contentId) {
+                            const strategy = determineCacheStrategy(absPath, info);
+                            const cached = qqq.getCachedBuffer(contentId, strategy.cacheKey);
+                            if (cached) {
+                                const { height } = getFrameConfig(info);
+                                pxHeight = height;
+                            } else {
+                                // 无缓存，大概率无法渲染，不占位
+                                pxHeight = 0;
+                            }
+                        } else {
+                            pxHeight = 0;
+                        }
+                    } else {
+                        const { height } = getFrameConfig(info);
+                        pxHeight = height;
+                    }
                 } catch {
                     const { height } = getFrameConfig(null);
                     pxHeight = height;
