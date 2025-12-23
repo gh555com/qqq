@@ -1298,6 +1298,10 @@ async function replacePendingMarker(token, result) {
             // 只处理媒体块，文本已经提前显示了
             if (block.type === "media" && block.path) {
                 const filePath = block.path;
+                
+                // ★ 注入指纹缓存
+                if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
+
                 const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
                 const isLastItem = i === blocks.length - 1;
                 let pxHeight = LARGE_PREVIEW_HEIGHT;
@@ -1315,6 +1319,10 @@ async function replacePendingMarker(token, result) {
         replacement = finalContent.join(eol);
     } else if (result.type === "image" || result.type === "ikge") {
         const filePath = result.path;
+
+        // ★ 注入指纹缓存
+        if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
+
         const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
         let pxHeight = LARGE_PREVIEW_HEIGHT;
         try {
@@ -1328,6 +1336,7 @@ async function replacePendingMarker(token, result) {
     } else if (result.type === "file" || result.type === "file_folder") {
         const files = result.files || [];
         const folders = result.folders || [];
+        const fingerprints = result.fingerprints || {};
 
         // 处理文件夹
         for (let i = 0; i < folders.length; i++) {
@@ -1342,6 +1351,19 @@ async function replacePendingMarker(token, result) {
         // 处理文件
         for (let i = 0; i < files.length; i++) {
             const f = files[i];
+
+            // ★ 注入指纹缓存（注意：路径 key 可能需要规范化，这里先尝试直接用）
+            // kp.py 返回的 fingerprints 键是 str(Path(p))，通常是绝对路径
+            // 我们这里简单做个匹配，如果直接有就用
+            let fp = fingerprints[f];
+            // 如果没有，尝试归一化一下
+            if (!fp) {
+                // 简单的 win32 路径匹配尝试
+                 const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
+                 fp = fingerprints[tryKey];
+            }
+            if (fp) qqq.prefillFingerprint(f, fp);
+
             const relPath = path.relative(docDir, f).replace(/\\/g, "/");
             let pxHeight = LARGE_PREVIEW_HEIGHT;
             if (isImageOrVideoExt(path.extname(f))) {
