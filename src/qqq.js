@@ -1652,7 +1652,6 @@ async function handleClipboardSlow(targetDir) {
 		const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 		// 这样我们可以在文件进入正式目录前，进行指纹计算和去重
 		// 如果是重复文件，直接删除临时文件；如果是新文件，移动到目标目录
-		const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 		const tempDir = path.join(os.tmpdir(), tempDirName);
 		ensureDir(tempDir);
 
