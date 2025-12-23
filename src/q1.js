@@ -1069,7 +1069,7 @@ async function renderImages(editor) {
 
     const marginLeft = "100px";
 
-    const pathRegex = new RegExp(qqq.QQQ_PATH_REGEX);
+    const pathRegex = qqq.createPathRegex();
     const pendingRegex = new RegExp(qqq.PENDING_REGEX);
 
     const tasks = [];
@@ -1326,7 +1326,7 @@ async function replacePendingMarker(token, result) {
                 // ★ 注入指纹缓存
                 if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
 
-                const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
+                const relPath = qqq.toSafePath(path.relative(docDir, filePath));
                 const isLastItem = i === blocks.length - 1;
                 let pxHeight = LARGE_PREVIEW_HEIGHT;
                 try {
@@ -1347,7 +1347,7 @@ async function replacePendingMarker(token, result) {
         // ★ 注入指纹缓存
         if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
 
-        const relPath = path.relative(docDir, filePath).replace(/\\/g, "/");
+        const relPath = qqq.toSafePath(path.relative(docDir, filePath));
         let pxHeight = LARGE_PREVIEW_HEIGHT;
         try {
             const info = await getMediaInfo(filePath, Date.now());
@@ -1365,7 +1365,7 @@ async function replacePendingMarker(token, result) {
         // 处理文件夹
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
-            const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
+            const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
             const isLastItem = i === folders.length - 1 && files.length === 0;
             const gapBelow = calculateBlankLinesExact(LARGE_PREVIEW_HEIGHT, isLastItem);
             replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
@@ -1388,7 +1388,7 @@ async function replacePendingMarker(token, result) {
             }
             if (fp) qqq.prefillFingerprint(f, fp);
 
-            const relPath = path.relative(docDir, f).replace(/\\/g, "/");
+            const relPath = qqq.toSafePath(path.relative(docDir, f));
             let pxHeight = LARGE_PREVIEW_HEIGHT;
             if (isImageOrVideoExt(path.extname(f))) {
                 try {
@@ -1435,7 +1435,7 @@ async function provideCleanlinessEditsAsync(document) {
     if (!document) return [];
     const edits = [];
     const text = document.getText();
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+    const regex = qqq.createPathRegex();
     const eol = getDocumentEOL(document);
     let match;
     const markers = [];
@@ -1542,7 +1542,7 @@ class FileCodeLensProvider {
     async provideCodeLenses(document) {
         if (!isCoreIntegrityValid) return [];
         const lenses = [];
-        const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+        const regex = qqq.createPathRegex();
         const text = document.getText();
         let match;
         const tasks = [];
@@ -1715,7 +1715,7 @@ async function renameFileCommand(rawPath, absPath) {
         ? rawPath.substring(0, rawPath.lastIndexOf("/") + 1) + trimmed
         : trimmed;
 
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+    const regex = qqq.createPathRegex();
     const ranges = [];
     let m;
     while ((m = regex.exec(doc.getText()))) {
