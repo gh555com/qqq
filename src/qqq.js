@@ -9,6 +9,7 @@ const crypto = require("crypto");
 
 const q3 = require("./q3");
 const global = require("./global");
+const cheerio = require("cheerio");
 
 // ============================================================================
 // ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
@@ -1159,7 +1160,7 @@ async function peekClipboardRichFast() {
 	// 尝试使用Node.js直接检测HTML
 	try {
 		const text = await vscode.env.clipboard.readText();
-		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p") || text.includes("<span"))) {
 			return {
 				type: "peek",
 				has_html: true,
@@ -1503,178 +1504,187 @@ async function handleClipboardNode(targetDir) {
 		const text = await vscode.env.clipboard.readText();
 		if (!text || !text.trim()) return null;
 
-		if (!(text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+		if (!(text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p") || text.includes("<span"))) {
 			return null;
 		}
 
+		const $ = cheerio.load(text, { decodeEntities: false });
+
+		$('script, style, link, meta, title, noscript, iframe, object, embed').remove();
+
+		let cleanedText = $.text() || "";
+		cleanedText = cleanedText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+		cleanedText = cleanedText.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
+		cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
+
 		const blocks = [];
-		let cleanedText = text;
-
-		cleanedText = cleanedText.replace(/^\uFEFF/, '');
-		cleanedText = cleanedText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-		cleanedText = cleanedText.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-		cleanedText = cleanedText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-		cleanedText = cleanedText.replace(/<br\s*\/?>/gi, '\n');
-		cleanedText = cleanedText.replace(/<p[^>]*>/gi, '\n');
-		cleanedText = cleanedText.replace(/<\/p>/gi, '\n');
-		cleanedText = cleanedText.replace(/<div[^>]*>/gi, '\n');
-		cleanedText = cleanedText.replace(/<\/div>/gi, '\n');
-		cleanedText = cleanedText.replace(/<[^>]+>/g, ' ');
-
-		let fixedText = cleanedText;
-		try {
-			fixedText = Buffer.from(cleanedText, 'utf-8').toString('utf-8');
-		} catch (e) {
-			fixedText = cleanedText;
-		}
-
-		fixedText = fixedText.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
-		fixedText = fixedText.replace(/&nbsp;/gi, ' ');
-		fixedText = fixedText.replace(/&amp;/gi, '&');
-		fixedText = fixedText.replace(/&lt;/gi, '<');
-		fixedText = fixedText.replace(/&gt;/gi, '>');
-		fixedText = fixedText.replace(/&quot;/gi, '"');
-		fixedText = fixedText.replace(/&#39;/gi, "'");
-		fixedText = fixedText.replace(/\s+/g, ' ').trim();
-
-		cleanedText = fixedText;
-
 		if (cleanedText) {
 			blocks.push({ type: "text", text: cleanedText });
 		}
 
-		const imgRegex = /<img[^>]+src=["']?([^"'>\s]+)["']?[^>]*>/gi;
-		let match;
-		const imgSrcs = [];
+		const imgSrcs = new Set();
+		const addUrl = (val) => {
+			if (!val) return;
+			const u = val.trim();
+			if (u) imgSrcs.add(u);
+		};
+
+		$('img').each((_, el) => {
+			const $el = $(el);
+			addUrl($el.attr('src'));
+			addUrl($el.attr('data-src'));
+			const srcset = $el.attr('srcset');
+			if (srcset) {
+				srcset.split(',').forEach(part => {
+					const u = part.trim().split(/\s+/)[0];
+					addUrl(u);
+				});
+			}
+		});
+
+		$('source').each((_, el) => {
+			const $el = $(el);
+			addUrl($el.attr('src'));
+			addUrl($el.attr('data-src'));
+			const srcset = $el.attr('srcset');
+			if (srcset) {
+				srcset.split(',').forEach(part => {
+					const u = part.trim().split(/\s+/)[0];
+					addUrl(u);
+				});
+			}
+		});
 
 		ensureDir(targetDir);
 
-		while ((match = imgRegex.exec(text)) !== null) {
-			const src = match[1];
-			if (src && !imgSrcs.includes(src)) {
-				imgSrcs.push(src);
-
-				const timestamp = Date.now();
-				const random = Math.floor(Math.random() * 10000);
-				const ext = src.split('.').pop() || 'png';
-				const fileName = `image_${timestamp}_${random}.${ext}`;
-				const destPath = path.join(targetDir, fileName);
-
-				let saved = false;
-				let fingerprint = null;
-
-				if (src.startsWith('data:')) {
-					try {
-						const dataUrlRegex = /^data:([^;]+);base64,(.*)$/;
-						const dataMatch = src.match(dataUrlRegex);
-						if (dataMatch) {
-							const base64Data = dataMatch[2];
-							const buffer = Buffer.from(base64Data, 'base64');
-
-							fingerprint = computeBufferFingerprint(buffer);
-							const existingPath = findFileByFingerprint(fingerprint);
-
-							if (existingPath && fs.existsSync(existingPath)) {
-								blocks.push({
-									type: "media",
-									kind: "image",
-									src: existingPath,
-									alt: "",
-									fingerprint: fingerprint
-								});
-								continue;
-							}
-
-							fs.writeFileSync(destPath, buffer);
-							saved = true;
-							if (fingerprint) prefillFingerprint(destPath, fingerprint);
-						}
-					} catch (e) {
-						global.logMessage(`保存data URL图片失败: ${e.message}`, "ERROR");
-					}
+		for (const src of imgSrcs) {
+			const timestamp = Date.now();
+			const random = Math.floor(Math.random() * 10000);
+			let ext = 'png';
+			try {
+				const pathPart = src.split('?')[0].split('#')[0];
+				const possibleExt = pathPart.split('.').pop();
+				if (possibleExt && possibleExt.length < 5 && /^[a-z0-9]+$/i.test(possibleExt)) {
+					ext = possibleExt;
 				}
-				else if (src.startsWith('file://')) {
-					try {
-						const localPath = decodeURIComponent(src.replace('file://', ''));
-						if (fs.existsSync(localPath)) {
-							fingerprint = computeFingerprint(localPath);
-							const existingPath = findFileByFingerprint(fingerprint);
+			} catch (e) { }
 
-							if (existingPath && fs.existsSync(existingPath)) {
-								blocks.push({
-									type: "media",
-									kind: "image",
-									src: existingPath,
-									alt: "",
-									fingerprint: fingerprint
-								});
-								continue;
-							}
+			const fileName = `image_${timestamp}_${random}.${ext}`;
+			const destPath = path.join(targetDir, fileName);
 
-							fs.copyFileSync(localPath, destPath);
-							saved = true;
-							if (fingerprint) prefillFingerprint(destPath, fingerprint);
+			let saved = false;
+			let fingerprint = null;
+
+			if (src.startsWith('data:')) {
+				try {
+					const dataUrlRegex = /^data:([^;]+);base64,(.*)$/;
+					const dataMatch = src.match(dataUrlRegex);
+					if (dataMatch) {
+						const base64Data = dataMatch[2];
+						const buffer = Buffer.from(base64Data, 'base64');
+
+						fingerprint = computeBufferFingerprint(buffer);
+						const existingPath = findFileByFingerprint(fingerprint);
+
+						if (existingPath && fs.existsSync(existingPath)) {
+							blocks.push({
+								type: "media",
+								kind: "image",
+								src: existingPath,
+								alt: "",
+								fingerprint: fingerprint
+							});
+							continue;
 						}
-					} catch (e) {
-						global.logMessage(`复制本地图片失败: ${e.message}`, "ERROR");
-					}
-				}
-				else if (src.startsWith('http://') || src.startsWith('https://')) {
-					try {
-						const https = require('https');
-						const http = require('http');
-						const client = src.startsWith('https') ? https : http;
 
-						await new Promise((resolve, reject) => {
-							client.get(src, (res) => {
-								if (res.statusCode !== 200) {
-									res.resume();
-									return resolve();
+						fs.writeFileSync(destPath, buffer);
+						saved = true;
+						if (fingerprint) prefillFingerprint(destPath, fingerprint);
+					}
+				} catch (e) {
+					global.logMessage(`保存data URL图片失败: ${e.message}`, "ERROR");
+				}
+			}
+			else if (src.startsWith('file://')) {
+				try {
+					const localPath = decodeURIComponent(src.replace('file://', ''));
+					if (fs.existsSync(localPath)) {
+						fingerprint = computeFingerprint(localPath);
+						const existingPath = findFileByFingerprint(fingerprint);
+
+						if (existingPath && fs.existsSync(existingPath)) {
+							blocks.push({
+								type: "media",
+								kind: "image",
+								src: existingPath,
+								alt: "",
+								fingerprint: fingerprint
+							});
+							continue;
+						}
+
+						fs.copyFileSync(localPath, destPath);
+						saved = true;
+						if (fingerprint) prefillFingerprint(destPath, fingerprint);
+					}
+				} catch (e) {
+					global.logMessage(`复制本地图片失败: ${e.message}`, "ERROR");
+				}
+			}
+			else if (src.startsWith('http://') || src.startsWith('https://')) {
+				try {
+					const https = require('https');
+					const http = require('http');
+					const client = src.startsWith('https') ? https : http;
+
+					await new Promise((resolve, reject) => {
+						client.get(src, (res) => {
+							if (res.statusCode !== 200) {
+								res.resume();
+								return resolve();
+							}
+							const chunks = [];
+							res.on('data', (chunk) => chunks.push(chunk));
+							res.on('end', () => {
+								const buffer = Buffer.concat(chunks);
+
+								fingerprint = computeBufferFingerprint(buffer);
+								const existingPath = findFileByFingerprint(fingerprint);
+
+								if (existingPath && fs.existsSync(existingPath)) {
+									blocks.push({
+										type: "media",
+										kind: "image",
+										src: existingPath,
+										alt: "",
+										fingerprint: fingerprint
+									});
+									saved = false;
+								} else {
+									fs.writeFileSync(destPath, buffer);
+									saved = true;
+									if (fingerprint) prefillFingerprint(destPath, fingerprint);
 								}
-								const chunks = [];
-								res.on('data', (chunk) => chunks.push(chunk));
-								res.on('end', () => {
-									const buffer = Buffer.concat(chunks);
-
-									fingerprint = computeBufferFingerprint(buffer);
-									const existingPath = findFileByFingerprint(fingerprint);
-
-									if (existingPath && fs.existsSync(existingPath)) {
-										blocks.push({
-											type: "media",
-											kind: "image",
-											src: existingPath,
-											alt: "",
-											fingerprint: fingerprint
-										});
-										saved = false;
-									} else {
-										fs.writeFileSync(destPath, buffer);
-										saved = true;
-										if (fingerprint) prefillFingerprint(destPath, fingerprint);
-									}
-									resolve();
-								});
-								res.on('error', reject);
-							}).on('error', (e) => {
 								resolve();
 							});
+							res.on('error', reject);
+						}).on('error', (e) => {
+							resolve();
 						});
-					} catch (e) {
-						global.logMessage(`下载图片失败: ${e.message}`, "ERROR");
-					}
-				}
-
-				if (saved) {
-					blocks.push({
-						type: "media",
-						kind: "image",
-						src: destPath,
-						alt: "",
-						fingerprint: fingerprint
 					});
+				} catch (e) {
+					global.logMessage(`下载图片失败: ${e.message}`, "ERROR");
 				}
+			}
+
+			if (saved) {
+				blocks.push({
+					type: "media",
+					kind: "image",
+					src: destPath,
+					alt: "",
+					fingerprint: fingerprint
+				});
 			}
 		}
 
