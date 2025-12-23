@@ -13,7 +13,9 @@ const global = require("./global");
 // ============================================================================
 // ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
 // ============================================================================
-const QQQ_PATH_REGEX = /\/\\\s*([\s\S]*?qqq[\s\S]*?)\s*\\\//gi;
+function createPathRegex() {
+	return /\/\\\s*([\s\S]*?qqq[\s\S]*?)\s*\\\//gi;
+}
 const PENDING_REGEX = /\/\\__PENDING__:([a-zA-Z0-9]+)__\\\//g;
 
 const CACHE_DIR_NAME = "qqq_cache";
@@ -121,6 +123,13 @@ function _getSystemDriveRoot() {
 	const up = process.env.USERPROFILE;
 	if (up && /^[A-Za-z]:[\\/]/.test(up)) return up.slice(0, 2).toUpperCase() + "\\";
 	return "C:\\";
+}
+
+function toSafePath(p) {
+	if (!p) return "";
+	return p.startsWith("\\\\")
+		? "\\\\" + p.slice(2).replace(/\\/g, "/")
+		: p.replace(/\\/g, "/");
 }
 
 function normalizeNavPath(rawPath) {
@@ -724,8 +733,10 @@ class DaemonBridge {
 
 		if (this.restartCount < this.maxRestarts) {
 			this.restartCount++;
-			global.logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})`, "WARN");
-			setTimeout(() => this.start(), 500);
+			// 指数退避策略：500ms, 1000ms, 2000ms...
+			const backoff = 500 * Math.pow(2, this.restartCount - 1);
+			global.logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})，延迟 ${backoff}ms`, "WARN");
+			setTimeout(() => this.start(), backoff);
 		} else {
 			global.logMessage(`${this.name} 进程崩溃，达到最大重启次数，标记为不可用`, "ERROR");
 			this.available = false;
@@ -2284,7 +2295,8 @@ const exported = {
 	activate,
 	deactivate,
 
-	QQQ_PATH_REGEX,
+	createPathRegex,
+	toSafePath,
 	PENDING_REGEX,
 
 	normalizeNavPath,

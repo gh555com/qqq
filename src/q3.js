@@ -615,7 +615,7 @@ function generateDocxDocument(elements, attachments, title) {
  * @returns {{ hasQqqLinks: boolean, referencedFiles: Array<{ rawPath: string, absPath: string, relativePath: string, isDir: boolean }> }}
  */
 function scanQqqLinks(documentUri, text) {
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
+    const regex = qqq.createPathRegex();
     const docDir = path.dirname(documentUri.fsPath);
 
     const referencedFiles = [];
@@ -707,7 +707,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const selectedFormat = formatChoice.format;
     const text = document.getText();
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX, "g");
+    const regex = qqq.createPathRegex();
 
     // 解析阶段：先构建 rawElements；附件先只收集候选项（SHA256 后算，纳入进度条）
     const rawElements = [];
@@ -1264,7 +1264,7 @@ async function pureCommand() {
         return;
     }
 
-    const regex = new RegExp(qqq.QQQ_PATH_REGEX);
+    const regex = qqq.createPathRegex();
 
     for (const fileName of parentFiles) {
         const fullPath = path.join(parentDir, fileName);
