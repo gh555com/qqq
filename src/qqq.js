@@ -800,7 +800,7 @@ class DaemonBridge {
 		return this.available === true;
 	}
 
-	stop() {
+	async stop() {
 		global.logMessage(`${this.name} stop 方法被调用`, "DEBUG");
 
 		this._stopping = true;
@@ -811,16 +811,32 @@ class DaemonBridge {
 		}
 		this.pending.clear();
 
-		if (this.process && !this.process.killed) {
-			global.logMessage(`${this.name} 进程存在且未被杀死，尝试终止进程`, "DEBUG");
+		if (!this.process) {
+			this.available = false;
+			this.restartCount = 0;
+			updateStatusBarNow();
+			return;
+		}
+
+		if (!this.process.killed) {
+			global.logMessage(`${this.name} 尝试优雅退出 (SIGTERM)`, "DEBUG");
 			try {
-				this.process.kill();
-				global.logMessage(`${this.name} 进程终止命令已发送`, "DEBUG");
+				// 第一阶段：温柔请求 (SIGTERM)
+				this.process.kill("SIGTERM");
+
+				// 给进程 3 秒时间优雅退出
+				await new Promise((resolve) => setTimeout(resolve, 3000));
+
+				// 第二阶段：如果还没死，强制杀掉 (SIGKILL)
+				if (this.process && !this.process.killed) {
+					global.logMessage(`${this.name} 进程未退出，强制杀死 (SIGKILL)`, "WARN");
+					this.process.kill("SIGKILL");
+				}
 			} catch (e) {
 				global.logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
 			}
 		} else {
-			global.logMessage(`${this.name} 进程不存在或已被杀死`, "DEBUG");
+			global.logMessage(`${this.name} 进程已被杀死`, "DEBUG");
 		}
 
 		this.process = null;
@@ -1499,17 +1515,363 @@ function computeBufferFingerprint(buffer) {
 	}
 }
 
+// ============================================================================
+// ★ HTML 解析（cheerio 版）辅助函数
+// ============================================================================
+
+/**
+ * 清理 HTML，移除危险标签和属性
+ * @param {string} html
+ * @returns {string}
+ */
+function sanitizeHtml(html) {
+	if (!html) return "";
+	const $ = cheerio.load(html, { decodeEntities: false });
+
+	// 移除脚本标签和潜在的危险标签
+	$("script, iframe, object, embed").remove();
+
+	// 移除事件处理器属性 和 javascript: 协议
+	$("*").each(function () {
+		const attrs = this.attribs || {};
+		for (const attr of Object.keys(attrs)) {
+			if (attr.toLowerCase().startsWith("on")) {
+				$(this).removeAttr(attr);
+			}
+		}
+
+		const href = $(this).attr("href");
+		if (href && href.toLowerCase().startsWith("javascript:")) {
+			$(this).removeAttr("href");
+		}
+
+		const src = $(this).attr("src");
+		if (src && src.toLowerCase().startsWith("javascript:")) {
+			$(this).removeAttr("src");
+		}
+	});
+
+	return $.html();
+}
+
+function _looksLikeHtml(s) {
+	if (!s) return false;
+	const t = String(s);
+	// 既兼容“整段 HTML”，也兼容“片段”
+	return /<\/?(html|body|div|p|img|picture|source|span|a)\b/i.test(t) || /\b(srcset|data-src|data-srcset)\s*=/i.test(t);
+}
+
+function _cleanAttr(v) {
+	if (v == null) return "";
+	return String(v).trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+}
+
+function _normalizeUrl(raw) {
+	let u = _cleanAttr(raw);
+	if (!u) return "";
+	// 常见无效/不可抓取 scheme
+	const lower = u.toLowerCase();
+	if (lower.startsWith("blob:")) return "";
+	if (lower.startsWith("chrome-extension:")) return "";
+	if (lower.startsWith("about:")) return "";
+
+	// 协议相对
+	if (u.startsWith("//")) u = "https:" + u;
+	return u;
+}
+
+function _parseSrcset(srcset) {
+	const out = [];
+	const s = _cleanAttr(srcset);
+	if (!s) return out;
+
+	// srcset: "url1 1x, url2 2x" 或 "url1 320w, url2 640w"
+	const parts = s.split(",").map(x => x.trim()).filter(Boolean);
+	for (const part of parts) {
+		// 用空白分割（url 可能带 query，不会含空白）
+		const segs = part.split(/\s+/).filter(Boolean);
+		const url = _normalizeUrl(segs[0] || "");
+		if (!url) continue;
+		const desc = (segs[1] || "").trim(); // "2x" / "640w" / ""
+		out.push({ url, desc });
+	}
+	return out;
+}
+
+function _scoreSrcsetDesc(desc) {
+	if (!desc) return 0;
+	const mW = /^(\d+(?:\.\d+)?)w$/i.exec(desc);
+	if (mW) return Number(mW[1]) || 0;
+	const mX = /^(\d+(?:\.\d+)?)x$/i.exec(desc);
+	if (mX) return (Number(mX[1]) || 0) * 100000; // x 通常更“强”，给个大权重
+	return 0;
+}
+
+function _pickBestFromSrcset(srcset) {
+	const cand = _parseSrcset(srcset);
+	if (!cand.length) return "";
+	
+	// 排序：分数降序
+	cand.sort((a, b) => _scoreSrcsetDesc(b.desc) - _scoreSrcsetDesc(a.desc));
+	
+	return cand[0]?.url || "";
+}
+
+function _collectElementUrls($el, isSourceTag = false) {
+	const urls = [];
+
+	// 先 srcset（含 data-*srcset）
+	const srcsetKeys = [
+		"srcset",
+		"data-srcset",
+		"data-lazy-srcset",
+		"data-lazysrcset",
+		"data-src-set",
+	];
+	for (const k of srcsetKeys) {
+		const v = _pickBestFromSrcset($el.attr(k));
+		if (v) urls.push(v);
+	}
+
+	// 再 src（含常见 data-src / data-original 等）
+	const srcKeys = isSourceTag
+		? ["src", "data-src"]
+		: [
+			"src",
+			"data-src",
+			"data-original",
+			"data-orig",
+			"data-lazy-src",
+			"data-lazysrc",
+			"data-actualsrc",
+			"data-url",
+			"data-img",
+		];
+	for (const k of srcKeys) {
+		const v = _normalizeUrl($el.attr(k));
+		if (v) urls.push(v);
+	}
+
+	return urls;
+}
+
+function _collectHtmlMediaUrls($) {
+	const seen = new Set();
+	const out = [];
+
+	// 按文档顺序扫 img/source
+	$("img,source").each((_, el) => {
+		const tag = (el?.tagName || "").toLowerCase();
+		const $el = $(el);
+		const urls = _collectElementUrls($el, tag === "source");
+		for (const u of urls) {
+			if (!u) continue;
+			if (seen.has(u)) continue;
+			seen.add(u);
+			out.push(u);
+		}
+	});
+
+	return out;
+}
+
+function _extFromContentType(ct) {
+	const t = String(ct || "").toLowerCase().split(";")[0].trim();
+	if (t === "image/jpeg") return ".jpg";
+	if (t === "image/jpg") return ".jpg";
+	if (t === "image/png") return ".png";
+	if (t === "image/gif") return ".gif";
+	if (t === "image/webp") return ".webp";
+	if (t === "image/svg+xml") return ".svg";
+	if (t === "image/bmp") return ".bmp";
+	if (t === "image/x-icon" || t === "image/vnd.microsoft.icon") return ".ico";
+	return "";
+}
+
+function _guessExtFromUrl(url, contentType) {
+	const byCT = _extFromContentType(contentType);
+	if (byCT) return byCT;
+	try {
+		const u = new URL(url);
+		const p = u.pathname || "";
+		const ext = path.extname(p);
+		if (ext && ext.length <= 6) return ext;
+	} catch { }
+	return ".png";
+}
+
+function _fileUrlToFsPath(fileUrl) {
+	try {
+		const u = new URL(fileUrl);
+		if (u.protocol !== "file:") return null;
+		let p = decodeURIComponent(u.pathname || "");
+		if (!p) return null;
+		// windows: /C:/Users/... -> C:\Users\...
+		if (process.platform === "win32") {
+			if (p.startsWith("/")) p = p.slice(1);
+			p = p.replace(/\//g, "\\");
+		}
+		return p;
+	} catch {
+		return null;
+	}
+}
+
+async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024 * 1024, redirectLeft = 5) {
+	const http = require("http");
+	const https = require("https");
+
+	return new Promise((resolve) => {
+		let done = false;
+		const finish = (r) => {
+			if (done) return;
+			done = true;
+			resolve(r);
+		};
+
+		let u;
+		try { u = new URL(url); } catch { return finish({ error: "bad_url" }); }
+		const client = u.protocol === "https:" ? https : (u.protocol === "http:" ? http : null);
+		if (!client) return finish({ error: "unsupported_protocol" });
+
+		const options = {
+			headers: {
+				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				"Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+			}
+		};
+
+		const req = client.get(url, options, (res) => {
+			const code = res.statusCode || 0;
+			const loc = res.headers?.location;
+
+			// redirect
+			if ([301, 302, 303, 307, 308].includes(code) && loc && redirectLeft > 0) {
+				res.resume();
+				const nextUrl = _normalizeUrl(loc.startsWith("http") ? loc : (new URL(loc, url)).toString());
+				_downloadUrlToBuffer(nextUrl, timeoutMs, maxBytes, redirectLeft - 1).then(finish);
+				return;
+			}
+
+			if (code < 200 || code >= 300) {
+				res.resume();
+				return finish({ error: `http_${code}` });
+			}
+
+			const chunks = [];
+			let total = 0;
+			res.on("data", (c) => {
+				total += c.length;
+				if (total > maxBytes) {
+					try { req.destroy(); } catch { }
+					return finish({ error: "too_large" });
+				}
+				chunks.push(c);
+			});
+			res.on("end", () => {
+				const buf = Buffer.concat(chunks);
+				const ct = res.headers?.["content-type"] || "";
+				finish({ buffer: buf, contentType: ct });
+			});
+		});
+
+		req.on("error", () => finish({ error: "net_error" }));
+		req.setTimeout(timeoutMs, () => {
+			try { req.destroy(); } catch { }
+			finish({ error: "timeout" });
+		});
+	});
+}
+
+async function _saveUrlToFile(url, targetDir) {
+	const u = _normalizeUrl(url);
+	if (!u) return null;
+
+	ensureDir(targetDir);
+
+	// data:
+	if (u.startsWith("data:")) {
+		const m = /^data:([^;]+);base64,(.*)$/i.exec(u);
+		if (!m) return null;
+		const mime = m[1];
+		const b64 = m[2];
+		const buffer = Buffer.from(b64, "base64");
+
+		const fp = computeBufferFingerprint(buffer);
+		const existingPath = fp ? findFileByFingerprint(fp) : null;
+		if (existingPath && fs.existsSync(existingPath)) {
+			return { path: existingPath, fingerprint: fp };
+		}
+
+		const ext = _guessExtFromUrl("x://data", mime);
+		const destPath = path.join(targetDir, getTimestampFilename(ext));
+		fs.writeFileSync(destPath, buffer);
+		if (fp) prefillFingerprint(destPath, fp);
+		return { path: destPath, fingerprint: fp };
+	}
+
+	// file:
+	if (u.startsWith("file://")) {
+		const localPath = _fileUrlToFsPath(u);
+		if (!localPath || !fs.existsSync(localPath) || fs.statSync(localPath).isDirectory()) return null;
+
+		const fp = computeFingerprint(localPath);
+		const existingPath = fp ? findFileByFingerprint(fp) : null;
+		if (existingPath && fs.existsSync(existingPath)) {
+			return { path: existingPath, fingerprint: fp };
+		}
+
+		const ext = path.extname(localPath) || ".png";
+		const destPath = path.join(targetDir, getTimestampFilename(ext));
+		fs.copyFileSync(localPath, destPath);
+		if (fp) prefillFingerprint(destPath, fp);
+		return { path: destPath, fingerprint: fp };
+	}
+
+	// http(s):
+	if (u.startsWith("http://") || u.startsWith("https://")) {
+		const dl = await _downloadUrlToBuffer(u);
+		if (!dl?.buffer || dl.error) return null;
+
+		const buffer = dl.buffer;
+		const fp = computeBufferFingerprint(buffer);
+		const existingPath = fp ? findFileByFingerprint(fp) : null;
+		if (existingPath && fs.existsSync(existingPath)) {
+			return { path: existingPath, fingerprint: fp };
+		}
+
+		const ext = _guessExtFromUrl(u, dl.contentType);
+		const destPath = path.join(targetDir, getTimestampFilename(ext));
+		fs.writeFileSync(destPath, buffer);
+		if (fp) prefillFingerprint(destPath, fp);
+		return { path: destPath, fingerprint: fp };
+	}
+
+	return null;
+}
+
 async function handleClipboardNode(targetDir) {
 	try {
 		const text = await vscode.env.clipboard.readText();
 		if (!text || !text.trim()) return null;
 
-		if (!(text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p") || text.includes("<span"))) {
+		if (!_looksLikeHtml(text)) return null;
+
+		// ★ 安全性净化
+		text = sanitizeHtml(text);
+
+		let $;
+		try {
+			$ = cheerio.load(text, { decodeEntities: false });
+		} catch (e) {
+			global.logMessage(`cheerio.load 失败: ${e.message}`, "ERROR");
 			return null;
 		}
 
-		const $ = cheerio.load(text, { decodeEntities: false });
+		// 1. 提取图片（在清理 DOM 之前，防止移除某些容器）
+		const urls = _collectHtmlMediaUrls($);
 
+		// 2. 提取文本（清理后）
 		$('script, style, link, meta, title, noscript, iframe, object, embed').remove();
 
 		let cleanedText = $.text() || "";
@@ -1522,168 +1884,18 @@ async function handleClipboardNode(targetDir) {
 			blocks.push({ type: "text", text: cleanedText });
 		}
 
-		const imgSrcs = new Set();
-		const addUrl = (val) => {
-			if (!val) return;
-			const u = val.trim();
-			if (u) imgSrcs.add(u);
-		};
-
-		$('img').each((_, el) => {
-			const $el = $(el);
-			addUrl($el.attr('src'));
-			addUrl($el.attr('data-src'));
-			const srcset = $el.attr('srcset');
-			if (srcset) {
-				srcset.split(',').forEach(part => {
-					const u = part.trim().split(/\s+/)[0];
-					addUrl(u);
-				});
-			}
-		});
-
-		$('source').each((_, el) => {
-			const $el = $(el);
-			addUrl($el.attr('src'));
-			addUrl($el.attr('data-src'));
-			const srcset = $el.attr('srcset');
-			if (srcset) {
-				srcset.split(',').forEach(part => {
-					const u = part.trim().split(/\s+/)[0];
-					addUrl(u);
-				});
-			}
-		});
-
-		ensureDir(targetDir);
-
-		for (const src of imgSrcs) {
-			const timestamp = Date.now();
-			const random = Math.floor(Math.random() * 10000);
-			let ext = 'png';
-			try {
-				const pathPart = src.split('?')[0].split('#')[0];
-				const possibleExt = pathPart.split('.').pop();
-				if (possibleExt && possibleExt.length < 5 && /^[a-z0-9]+$/i.test(possibleExt)) {
-					ext = possibleExt;
-				}
-			} catch (e) { }
-
-			const fileName = `image_${timestamp}_${random}.${ext}`;
-			const destPath = path.join(targetDir, fileName);
-
-			let saved = false;
-			let fingerprint = null;
-
-			if (src.startsWith('data:')) {
-				try {
-					const dataUrlRegex = /^data:([^;]+);base64,(.*)$/;
-					const dataMatch = src.match(dataUrlRegex);
-					if (dataMatch) {
-						const base64Data = dataMatch[2];
-						const buffer = Buffer.from(base64Data, 'base64');
-
-						fingerprint = computeBufferFingerprint(buffer);
-						const existingPath = findFileByFingerprint(fingerprint);
-
-						if (existingPath && fs.existsSync(existingPath)) {
-							blocks.push({
-								type: "media",
-								kind: "image",
-								src: existingPath,
-								alt: "",
-								fingerprint: fingerprint
-							});
-							continue;
-						}
-
-						fs.writeFileSync(destPath, buffer);
-						saved = true;
-						if (fingerprint) prefillFingerprint(destPath, fingerprint);
-					}
-				} catch (e) {
-					global.logMessage(`保存data URL图片失败: ${e.message}`, "ERROR");
-				}
-			}
-			else if (src.startsWith('file://')) {
-				try {
-					const localPath = decodeURIComponent(src.replace('file://', ''));
-					if (fs.existsSync(localPath)) {
-						fingerprint = computeFingerprint(localPath);
-						const existingPath = findFileByFingerprint(fingerprint);
-
-						if (existingPath && fs.existsSync(existingPath)) {
-							blocks.push({
-								type: "media",
-								kind: "image",
-								src: existingPath,
-								alt: "",
-								fingerprint: fingerprint
-							});
-							continue;
-						}
-
-						fs.copyFileSync(localPath, destPath);
-						saved = true;
-						if (fingerprint) prefillFingerprint(destPath, fingerprint);
-					}
-				} catch (e) {
-					global.logMessage(`复制本地图片失败: ${e.message}`, "ERROR");
-				}
-			}
-			else if (src.startsWith('http://') || src.startsWith('https://')) {
-				try {
-					const https = require('https');
-					const http = require('http');
-					const client = src.startsWith('https') ? https : http;
-
-					await new Promise((resolve, reject) => {
-						client.get(src, (res) => {
-							if (res.statusCode !== 200) {
-								res.resume();
-								return resolve();
-							}
-							const chunks = [];
-							res.on('data', (chunk) => chunks.push(chunk));
-							res.on('end', () => {
-								const buffer = Buffer.concat(chunks);
-
-								fingerprint = computeBufferFingerprint(buffer);
-								const existingPath = findFileByFingerprint(fingerprint);
-
-								if (existingPath && fs.existsSync(existingPath)) {
-									blocks.push({
-										type: "media",
-										kind: "image",
-										src: existingPath,
-										alt: "",
-										fingerprint: fingerprint
-									});
-									saved = false;
-								} else {
-									fs.writeFileSync(destPath, buffer);
-									saved = true;
-									if (fingerprint) prefillFingerprint(destPath, fingerprint);
-								}
-								resolve();
-							});
-							res.on('error', reject);
-						}).on('error', (e) => {
-							resolve();
-						});
-					});
-				} catch (e) {
-					global.logMessage(`下载图片失败: ${e.message}`, "ERROR");
-				}
-			}
-
-			if (saved) {
+		// 3. 处理图片落盘
+		if (urls && urls.length > 0) {
+			ensureDir(targetDir);
+			for (const url of urls) {
+				const saved = await _saveUrlToFile(url, targetDir);
+				if (!saved?.path) continue;
 				blocks.push({
 					type: "media",
 					kind: "image",
-					src: destPath,
+					path: saved.path,
 					alt: "",
-					fingerprint: fingerprint
+					fingerprint: saved.fingerprint || null
 				});
 			}
 		}
@@ -2172,14 +2384,16 @@ async function activate(context) {
 			if (event.affectsConfiguration("qqq.ioEngine")) {
 				global.logMessage("IO 引擎配置已更改，重新启动守护进程...", "INFO");
 
-				pythonBridge.stop();
-				rustBridge.stop();
-				shellBridge.stop();
+				(async () => {
+					await pythonBridge.stop();
+					await rustBridge.stop();
+					await shellBridge.stop();
 
-				setTimeout(() => {
-					global.logMessage("开始重新启动守护进程", "DEBUG");
-					startDaemons();
-				}, 200);
+					setTimeout(() => {
+						global.logMessage("开始重新启动守护进程", "DEBUG");
+						startDaemons();
+					}, 200);
+				})();
 			}
 		})
 	);
@@ -2212,7 +2426,7 @@ function startDaemons() {
 			const ok = await bridge.start();
 
 			if (bootSeq !== _daemonBootSeq) {
-				try { bridge.stop(); } catch { }
+				try { await bridge.stop(); } catch { }
 				return false;
 			}
 
@@ -2312,6 +2526,7 @@ const exported = {
 
 	createPathRegex,
 	toSafePath,
+	sanitizeHtml,
 	PENDING_REGEX,
 
 	normalizeNavPath,
