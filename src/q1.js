@@ -1235,10 +1235,14 @@ async function renderImages(editor) {
     if (tasks.length > 0) {
         const chunkResults = await Promise.all(tasks.map((t) => t()));
         if (currentRenderVersion !== myVersion) return;
+        if (!decorationType) return; // 防止异步期间 decorationType 被销毁
+
         for (const res of chunkResults) if (res) currentDecos.set(res.key, res.deco);
     }
 
-    editor.setDecorations(decorationType, Array.from(currentDecos.values()));
+    if (decorationType) {
+        editor.setDecorations(decorationType, Array.from(currentDecos.values()));
+    }
 }
 
 // ==================== 粘贴命令 ====================
