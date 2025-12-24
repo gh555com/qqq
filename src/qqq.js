@@ -1414,7 +1414,9 @@ async function raceClipboard(targetDir, callback) {
 
 	if (qStatus.hasHtml) {
 		try {
-			const res = await handleClipboardSlow(targetDir, qStart, "html");
+			const res = await handleClipboardSlow(targetDir, qStart, "html", (partial) => {
+				callback(partial, 100);
+			});
 			if (res) callback(res, 100);
 		} catch (e) { }
 		return;
@@ -2016,8 +2018,13 @@ async function handleClipboardNode(targetDir) {
 					if (isImg) {
 						const urls = _collectElementUrls($(el), false);
 						if (urls && urls.length > 0) {
-							// 暂存图片，等待 Block 结束时一起输出
-							currentBlockImages.push({ type: "media", kind: "image", src: urls[0], status: "pending" });
+							const imgBlock = { type: "media", kind: "image", src: urls[0], status: "pending" };
+							// ★ 关键修正：如果当前没有积攒文本，说明图片是独立的（或紧跟上一个Block的），直接输出，防止被吸附到下一个Block
+							if (currentBlockHasText) {
+								currentBlockImages.push(imgBlock);
+							} else {
+								blocks.push(imgBlock);
+							}
 						}
 					} else {
 						structuralWalk(el);
