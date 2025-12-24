@@ -1840,31 +1840,32 @@ function showSaveAsDialog() {
       }
 
       case "openWithDefault": {
-                const p = canonicalizeExistingPath(message.path);
-                saveRecentDirectory(message.type === "folder" ? p : path.dirname(p));
-                global.openExternal(vscode.Uri.file(p));
-                refreshWebview();
-                break;
-            }
+        const p = canonicalizeExistingPath(message.path);
+        saveRecentDirectory(message.type === "folder" ? p : path.dirname(p));
+        global.openExternal(vscode.Uri.file(p));
+        refreshWebview();
+        break;
+      }
 
-            case "quickDeleteToRecycleBin": {
-                const itemToDelete = canonicalizeExistingPath(message.path);
-                if (fs.existsSync(itemToDelete)) {
-                    saveRecentDirectory(currentPath);
-                    (async () => {
-                        try {
-                            await trash([itemToDelete]);
-                            setTimeout(() => {
-                                if (activePanel && activePanelAlive) refreshWebview();
-                            }, 300);
-                            global.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
-                        } catch (error) {
-                            if (panel && activePanelAlive)
-                                panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
-                            global.showErrorMessage("删除失败：文件正被占用。");
-                        }
-                    })();
-                } else {
+      case "quickDeleteToRecycleBin": {
+        const itemToDelete = canonicalizeExistingPath(message.path);
+        if (fs.existsSync(itemToDelete)) {
+          saveRecentDirectory(currentPath);
+          (async () => {
+            try {
+              const { default: trash } = await import("trash");
+              await trash([itemToDelete]);
+              setTimeout(() => {
+                if (activePanel && activePanelAlive) refreshWebview();
+              }, 300);
+              global.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
+            } catch (error) {
+              if (panel && activePanelAlive)
+                panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
+              global.showErrorMessage("删除失败：文件正被占用。");
+            }
+          })();
+        } else {
           refreshWebview();
         }
         break;
