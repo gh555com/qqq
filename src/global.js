@@ -277,10 +277,10 @@ function getEngineTryOrder(pref) {
 		case "rust":
 			return ["rust", "python", "shell", "spawn"];
 		case "node":
-			return ["shell", "spawn"];
+			return ["node", "shell", "spawn"];
 		case "auto":
 		default:
-			return ["python", "rust", "shell", "spawn"];
+			return ["python", "rust", "node", "shell", "spawn"];
 	}
 }
 

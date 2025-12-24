@@ -1116,6 +1116,10 @@ while IFS= read -r line; do
   case "$action" in
     ping) echo '{"_id":'"$id"',"status":"alive"}' ;;
     hasImage) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+    hasHtml) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+    getHtml)
+      content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+      echo '{"_id":'"$id"',"value":'$content'}' ;;
     saveImage)
       dest=$(json_get "$line" "path")
       if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi ;;
@@ -1176,7 +1180,8 @@ async function peekClipboardRichFast() {
 	// 尝试使用Node.js直接检测HTML
 	try {
 		const text = await vscode.env.clipboard.readText();
-		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p") || text.includes("<span"))) {
+		// 扩大检测范围，与 _looksLikeHtml 保持一致并增强
+		if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
 			return {
 				type: "peek",
 				has_html: true,
@@ -1326,6 +1331,10 @@ async function handleClipboardSlow(targetDir) {
 							rawResult = await rustBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
 							if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
 						}
+					} else if (engine === "node") {
+						// node 引擎内部已处理了去重和落盘，直接写入目标目录
+						rawResult = await handleClipboardNode(targetDir);
+						if (rawResult && rawResult.type !== "unknown") break;
 					} else if (engine === "shell") {
 						const started = shellBridge.isAvailable() || await shellBridge.start();
 						if (started && shellBridge.isAvailable()) {
@@ -1610,10 +1619,10 @@ function _scoreSrcsetDesc(desc) {
 function _pickBestFromSrcset(srcset) {
 	const cand = _parseSrcset(srcset);
 	if (!cand.length) return "";
-	
+
 	// 排序：分数降序
 	cand.sort((a, b) => _scoreSrcsetDesc(b.desc) - _scoreSrcsetDesc(a.desc));
-	
+
 	return cand[0]?.url || "";
 }
 
@@ -1852,17 +1861,64 @@ async function _saveUrlToFile(url, targetDir) {
 
 async function handleClipboardNode(targetDir) {
 	try {
-		const text = await vscode.env.clipboard.readText();
-		if (!text || !text.trim()) return null;
+		// 1. 尝试通过 Shell Bridge 获取 HTML（如果可用，这是最可靠的）
+		let htmlText = null;
+		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+			try {
+				const res = await shellBridge.call("getHtml", {}, 5000);
+				if (res && res.value) {
+					htmlText = res.value;
+				}
+			} catch (e) {
+				global.logMessage(`Shell Bridge getHtml 失败: ${e.message}`, "WARN");
+			}
+		}
 
-		if (!_looksLikeHtml(text)) return null;
+		// 2. 如果 Shell Bridge 没拿到，尝试 VS Code API (通常只能拿到纯文本，或者是被 VS Code 处理过的)
+		if (!htmlText) {
+			const text = await vscode.env.clipboard.readText();
+			if (text && _looksLikeHtml(text)) {
+				htmlText = text;
+			}
+		}
+
+		if (!htmlText || !htmlText.trim()) return null;
+
+		// 3. 处理 Windows 剪贴板 HTML 格式的 Header (Version:0.9...)
+		//    格式：Version:0.9\r\nStartHTML:0000000105...
+		//    我们需要提取 StartHTML 到 EndHTML 之间的内容，或者直接提取 <html>...</html>
+		if (htmlText.includes("StartHTML:") && htmlText.includes("EndHTML:")) {
+			const mStart = /StartHTML:(\d+)/.exec(htmlText);
+			const mEnd = /EndHTML:(\d+)/.exec(htmlText);
+			if (mStart && mEnd) {
+				const start = parseInt(mStart[1], 10);
+				const end = parseInt(mEnd[1], 10);
+				if (start > 0 && end > start) {
+					// 字节偏移通常是针对 UTF-8 字节流的，JS 字符串截取是按字符的。
+					// 简单起见，如果包含 <html>，我们优先用正则提取 html 标签段
+					const htmlMatch = /<html[\s\S]*<\/html>/i.exec(htmlText);
+					if (htmlMatch) {
+						htmlText = htmlMatch[0];
+					} else {
+						// 兜底：尝试直接截取，虽然可能不准
+						// 或者直接去掉 Header
+						const fragmentStart = /<!--StartFragment-->/.exec(htmlText);
+						const fragmentEnd = /<!--EndFragment-->/.exec(htmlText);
+						if (fragmentStart && fragmentEnd) {
+							htmlText = htmlText.substring(fragmentStart.index + 20, fragmentEnd.index);
+						}
+					}
+				}
+			}
+		}
 
 		// ★ 安全性净化
-		text = sanitizeHtml(text);
+		let safeHtml = sanitizeHtml(htmlText);
+		if (!safeHtml) return null;
 
 		let $;
 		try {
-			$ = cheerio.load(text, { decodeEntities: false });
+			$ = cheerio.load(safeHtml, { decodeEntities: false });
 		} catch (e) {
 			global.logMessage(`cheerio.load 失败: ${e.message}`, "ERROR");
 			return null;
