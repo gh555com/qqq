@@ -80,6 +80,17 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
+// 专门用于记录 Q 判断耗时的日志函数
+function logQ(ms) {
+	if (!LOG_PATH) return;
+	try {
+		// q.log 与 err.log 同级
+		const qLogPath = path.join(path.dirname(LOG_PATH), "q.log");
+		const line = `${ms}`; // 纯数字，每行一个
+		fs.appendFileSync(qLogPath, line + "\n");
+	} catch (e) { }
+}
+
 // ============================================================================
 // ★ 对话框包装 (qqq 涉及的对话框)
 // ============================================================================
@@ -418,6 +429,7 @@ module.exports = {
 	logMessage,
 	logMessageRateLimited,
 	bridgeStderrKey,
+	logQ,
 
 	// 对话框
 	showInformationMessage,

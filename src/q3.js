@@ -728,47 +728,45 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         const originalMark = match[0];
         const rawPath = originalMark.slice(2, -2).trim();
 
-        if (!rawPath.startsWith("__PENDING__:")) {
-            const absPath = resolvePathToAbsolute(document.uri, rawPath);
-            if (absPath && fs.existsSync(absPath)) {
-                hasQqqLinks = true;
+        const absPath = resolvePathToAbsolute(document.uri, rawPath);
+        if (absPath && fs.existsSync(absPath)) {
+            hasQqqLinks = true;
 
-                const stat = (() => { try { return fs.statSync(absPath); } catch { return null; } })();
-                const ext = path.extname(absPath).toLowerCase();
+            const stat = (() => { try { return fs.statSync(absPath); } catch { return null; } })();
+            const ext = path.extname(absPath).toLowerCase();
 
-                // 目录：文档里原样保留标记；不进附件索引
-                if (stat && stat.isDirectory()) {
-                    rawElements.push({ type: "text", content: originalMark });
-                } else if (isMediaFile(ext)) {
-                    rawElements.push({ type: "media", path: absPath, rawPath, originalMark });
-                } else {
-                    // 非媒体文件：文档里保留原标记 + 附件索引收集（去重）
-                    rawElements.push({ type: "text", content: originalMark });
-
-                    // realpath 去重，避免同一个文件多次引用导致附件索引重复
-                    let realKey = absPath;
-                    try { realKey = fs.realpathSync(absPath); } catch { }
-
-                    if (!attachmentSeen.has(realKey)) {
-                        attachmentSeen.add(realKey);
-
-                        try {
-                            const st = fs.statSync(absPath);
-                            attachmentCandidates.push({
-                                name: path.basename(absPath),
-                                path: rawPath,
-                                absPath,
-                                ext,
-                                size: st.size,
-                                sha256: "", // 后面算
-                            });
-                        } catch { }
-                    }
-                }
-            } else {
-                // 引用不存在：保留原标记
+            // 目录：文档里原样保留标记；不进附件索引
+            if (stat && stat.isDirectory()) {
                 rawElements.push({ type: "text", content: originalMark });
+            } else if (isMediaFile(ext)) {
+                rawElements.push({ type: "media", path: absPath, rawPath, originalMark });
+            } else {
+                // 非媒体文件：文档里保留原标记 + 附件索引收集（去重）
+                rawElements.push({ type: "text", content: originalMark });
+
+                // realpath 去重，避免同一个文件多次引用导致附件索引重复
+                let realKey = absPath;
+                try { realKey = fs.realpathSync(absPath); } catch { }
+
+                if (!attachmentSeen.has(realKey)) {
+                    attachmentSeen.add(realKey);
+
+                    try {
+                        const st = fs.statSync(absPath);
+                        attachmentCandidates.push({
+                            name: path.basename(absPath),
+                            path: rawPath,
+                            absPath,
+                            ext,
+                            size: st.size,
+                            sha256: "", // 后面算
+                        });
+                    } catch { }
+                }
             }
+        } else {
+            // 引用不存在：保留原标记
+            rawElements.push({ type: "text", content: originalMark });
         }
 
         lastIndex = match.index + match[0].length;
