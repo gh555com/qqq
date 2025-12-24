@@ -1009,9 +1009,21 @@ function Process-Command {
   try {
     switch ($cmd.action) {
       'ping' { $result.status = 'alive' }
-      'hasImage' { $result.value = [System.Windows.Forms.Clipboard]::ContainsImage() }
-      'hasFiles' { $result.value = [System.Windows.Forms.Clipboard]::ContainsFileDropList() }
-      'hasHtml' { $result.value = [System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html) }
+      'hasImage' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsImage()
+        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
+        return
+      }
+      'hasFiles' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsFileDropList()
+        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
+        return
+      }
+      'hasHtml' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html)
+        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
+        return
+      }
       'getFiles' {
         $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
         $result.files = @()
@@ -1023,7 +1035,27 @@ function Process-Command {
         else { $result.success = $false }
       }
       'getHtml' {
-        $result.value = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html)
+        $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
+        $b64 = ""
+        if ($obj -is [System.IO.Stream]) {
+          $ms = [System.IO.MemoryStream]::new()
+          $obj.CopyTo($ms)
+          $bytes = $ms.ToArray()
+          $b64 = [Convert]::ToBase64String($bytes)
+        } elseif ($obj -is [string]) {
+          $bytes = [Text.Encoding]::Default.GetBytes($obj)
+          $b64 = [Convert]::ToBase64String($bytes)
+        } else {
+           $txt = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html)
+           if ($txt) {
+             $bytes = [Text.Encoding]::Default.GetBytes($txt)
+             $b64 = [Convert]::ToBase64String($bytes)
+           }
+        }
+        if ($b64) {
+           Write-Host ('{"_id":' + $cmd._id + ',"value_base64":"' + $b64 + '"}')
+           return
+        }
       }
       default { $result.error = "unknown action" }
     }
@@ -1172,6 +1204,24 @@ async function peekClipboardRichFast() {
 	const pref = global.getEnginePreference();
 	const order = global.getEngineTryOrder(pref);
 
+	// ★ 优先检查 HTML：因为 Python/Rust 引擎可能不支持 HTML 检测，
+	// 而 ShellBridge 在 Windows/Linux 上能可靠检测 HTML。
+	// 如果发现 HTML，立即返回，强制进入 Slow Path 交给 Node 处理。
+	if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+		try {
+			const hasHtml = await shellBridge.call("hasHtml", {}, 200);
+			if (hasHtml?.value) {
+				return {
+					type: "peek",
+					has_html: true,
+					has_files: false,
+					has_image: false,
+					has_text: false,
+				};
+			}
+		} catch { }
+	}
+
 	if (order.includes("python")) {
 		try {
 			if (pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
@@ -1201,13 +1251,17 @@ async function peekClipboardRichFast() {
 			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
 				const hasFiles = await shellBridge.call("hasFiles", {}, 200);
 				const hasImg = await shellBridge.call("hasImage", {}, 200);
-				return {
-					type: "peek",
-					has_html: false,
-					has_files: !!hasFiles?.value,
-					has_image: !!hasImg?.value,
-					has_text: false,
-				};
+				const hasHtml = await shellBridge.call("hasHtml", {}, 200);
+
+				if (hasFiles?.value || hasImg?.value || hasHtml?.value) {
+					return {
+						type: "peek",
+						has_html: !!hasHtml?.value,
+						has_files: !!hasFiles?.value,
+						has_image: !!hasImg?.value,
+						has_text: false,
+					};
+				}
 			}
 		} catch { }
 	}
@@ -1882,8 +1936,12 @@ async function handleClipboardNode(targetDir) {
 		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
 			try {
 				const res = await shellBridge.call("getHtml", {}, 5000);
-				if (res && res.value) {
-					htmlText = res.value;
+				if (res) {
+					if (res.value_base64) {
+						htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
+					} else if (res.value) {
+						htmlText = res.value;
+					}
 				}
 			} catch (e) {
 				global.logMessage(`Shell Bridge getHtml 失败: ${e.message}`, "WARN");
@@ -2529,9 +2587,30 @@ function startDaemons() {
 		}
 
 		(async () => {
+			let primaryStarted = false;
 			for (const bridge of bridges) {
 				if (bootSeq !== _daemonBootSeq) return;
-				if (await startOne(bridge, false)) return;
+
+				// ★ 强制启动 ShellBridge：因为它负责 HTML 探测 (hasHtml)
+				// 即使主引擎是 Python/Rust，我们也需要 ShellBridge 在后台运行
+				if (bridge === shellBridge) {
+					startOne(bridge, false); // 不等待，不阻断，单纯启动
+					if (pref === "shell") {
+						// 如果用户首选就是 shell，那这里标记 primaryStarted
+						// 但由于 shellBridge 是列表最后一个，所以不影响逻辑
+						primaryStarted = true;
+						return;
+					}
+					continue;
+				}
+
+				if (!primaryStarted) {
+					if (await startOne(bridge, false)) {
+						primaryStarted = true;
+						// 如果主引擎启动成功，不要立即 return，必须让循环继续以启动 shellBridge
+						// return; // <--- 删除这行
+					}
+				}
 			}
 		})();
 		return;
