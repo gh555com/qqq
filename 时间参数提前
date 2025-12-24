@@ -1,0 +1,46 @@
+# File: 时间参数提前
+主内容区左侧位置变化：transition: left 0.04s ease;
+侧边栏宽度变化：transition: width 0.04s ease;
+分割线背景色和宽度变化：transition: background-color 0.04s, width 0.04s;
+长驻按钮背景色变化：transition: background-color 0.04s;
+JavaScript中的时间参数：
+Python脚本执行超时：30000 (30秒)
+javascript
+const timeout = setTimeout(() => {
+    // ...
+}, 30000); // 30秒超时
+更新资源展示区延迟：100 (100毫秒)
+javascript
+setTimeout(() => updateResourceExplorer(), 100);
+重命名后刷新延迟：100 (100毫秒)
+javascript
+setTimeout(() => refreshWebview(), 100);
+删除文件后刷新延迟：300 (300毫秒)
+javascript
+setTimeout(() => { refreshWebview(); }, 300);
+设置侧边栏宽度消息延迟：50 (50毫秒)
+javascript
+setTimeout(() => {
+    // ...
+}, 50);
+防抖渲染延迟：100 (100毫秒)
+javascript
+function debounceRender(editor, delay = 100) {
+    // ...
+}
+防抖处理完成后的重置延迟：50 (50毫秒)
+javascript
+setTimeout(() => {
+    debounceRender.isProcessing = false;
+}, 50);
+渲染可见编辑器的延迟：50 (50毫秒)
+javascript
+function renderVisibleEditors(delay = 50) {
+    // ...
+}
+错误消息显示时间：11000 (11秒)
+javascript
+setTimeout(() => {
+    // ...
+}, 11000);
+以上就是代码中所有涉及时间的参数。其中CSS过渡效果的时间已经按照您的要求从0.2秒修改为0.04秒。其他JavaScript中的时间参数主要用于功能逻辑，如超时、延迟渲染等，通常不需要修改。
