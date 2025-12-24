@@ -1323,8 +1323,9 @@ async function replacePendingMarker(token, result) {
         const finalContent = [];
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
-            // 只处理媒体块，文本已经提前显示了
-            if (block.type === "media" && block.path) {
+            if (block.type === "text" && block.text) {
+                finalContent.push(block.text);
+            } else if (block.type === "media" && block.path) {
                 const filePath = block.path;
 
                 // ★ 注入指纹缓存
