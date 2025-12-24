@@ -1,28 +1,25 @@
+# File: .vscodeignore
 # VSCode 扩展打包时忽略的文件
 
 # 开发工具
 .vscode/**
 .vscode-test/**
 .gitignore
+.qoder/**
 .git/**
+.trae/
+
+
+# 防止套娃！忽略打包生成的安装包
+*.vsix  <--- 加上这一行！！！
 
 # 测试文件
 test-config-fix.js
 *.test.js
 *.spec.js
 
-# 文档（保留 README）
-重构完成报告.md
-功能测试清单.md
-问题修复报告.md
-ConfigManager使用指南.md
-已做滴工作步骤简要.txt
-
 # 原始备份文件
 extension.js
-
-# Node 模块（会自动处理）
-node_modules/**
 
 # 日志文件
 *.log
@@ -33,7 +30,7 @@ node_modules/**
 .DS_Store
 Thumbs.db
 
-# 编译输出（如果有）
+# 编译输出
 out/**
 dist/**
 

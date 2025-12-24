@@ -1,8 +1,10 @@
 {
   "name": "qqq",
   "displayName": "qqq",
-  "publisher": "qqq",
-  "version": "1.0.0",
+  "publisher": "gh555",
+  "version": "15.0.5",
+  "description": "soldier",
+  "icon": "assets/icon.png",
   "engines": {
     "vscode": "^1.70.0"
   },
@@ -10,7 +12,14 @@
     "*",
     "onCommand:qqq.q1",
     "onCommand:qqq.q2",
-    "onCommand:qqq.toggleBlockMode"
+    "onCommand:qqq.pure",
+    "onCommand:qqq.allSettings",
+    "onCommand:qqq.setInOrder",
+    "onCommand:qqq.openFile",
+    "onCommand:qqq.revealFileInFolder",
+    "onCommand:qqq.renameFile",
+    "onCommand:qqq.exportDoc",
+    "onCommand:qqq.exportZip"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -22,6 +31,68 @@
             "type": "boolean",
             "default": true,
             "description": "是否在文件导航中显示历史回收站。"
+          },
+          "qqq.enlargeSmallImages": {
+            "type": "boolean",
+            "default": true,
+            "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+          },
+          "qqq.performanceMode": {
+            "type": "string",
+            "default": "balanced",
+            "enum": [
+              "extreme",
+              "accelerated",
+              "balanced"
+            ],
+            "enumDescriptions": [
+              "极限性能：只保留首帧，质量35",
+              "加速模式：最多2秒动画，6fps，质量35",
+              "最优模式：保留完整动画，视频截取首中尾，质量70"
+            ],
+            "description": "性能模式：控制预览生成的质量和性能平衡。"
+          },
+          "qqq.frameSizeMode": {
+            "type": "string",
+            "default": "smart",
+            "enum": [
+              "large",
+              "small",
+              "smart"
+            ],
+            "enumDescriptions": [
+              "大相框：512x288",
+              "小相框：256x144",
+              "智能：根据图片尺寸自动选择相框"
+            ],
+            "description": "相框尺寸模式：控制预览图像的显示尺寸。"
+          },
+          "qqq.cleanFreak": {
+            "type": "boolean",
+            "default": false,
+            "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+          },
+          "qqq.ioEngine": {
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "python",
+              "rust",
+              "node"
+            ],
+            "enumDescriptions": [
+              "自动选择最佳引擎",
+              "Python 引擎",
+              "Rust 引擎",
+              "Node 引擎"
+            ],
+            "description": "选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+          },
+          "qqq.pythonPath": {
+            "type": "string",
+            "default": "",
+            "description": "（可选）指定 python 可执行文件路径。例如：C:\\\\Python311\\\\python.exe；留空则自动探测 python/python3/py。"
           }
         }
       }
@@ -29,19 +100,43 @@
     "commands": [
       {
         "command": "qqq.q1",
-        "title": "q1"
-      },
-      {
-        "command": "qqq.toggleBlockMode",
-        "title": "切换块模式"
+        "title": "qqq: Paste (Ctrl+V)"
       },
       {
         "command": "qqq.q2",
-        "title": "q2"
+        "title": "qqq: Navigate (F2)"
       },
       {
-        "command": "qqq.saveAsDialog",
-        "title": "qqq: 新建文件..."
+        "command": "qqq.pure",
+        "title": "qqq: pure"
+      },
+      {
+        "command": "qqq.allSettings",
+        "title": "qqq: all settings"
+      },
+      {
+        "command": "qqq.setInOrder",
+        "title": "qqq: set in order (全局整理)"
+      },
+      {
+        "command": "qqq.openFile",
+        "title": "qqq: open file"
+      },
+      {
+        "command": "qqq.revealFileInFolder",
+        "title": "qqq: reveal in folder"
+      },
+      {
+        "command": "qqq.renameFile",
+        "title": "qqq: rename file"
+      },
+      {
+        "command": "qqq.exportDoc",
+        "title": "qqq: 导出文档 (Doc/Docx)"
+      },
+      {
+        "command": "qqq.exportZip",
+        "title": "qqq: 导出 ZIP"
       }
     ],
     "keybindings": [
@@ -59,17 +154,167 @@
         "command": "qqq.q2",
         "key": "f2",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "qqq.exportDoc",
+        "key": "ctrl+alt+p",
+        "when": "editorTextFocus"
       }
     ]
   },
   "scripts": {
-    "package": "@vscode/vsce package --allow-missing-repository",
-    "publish": "@vscode/vsce publish",
+    "package": "npx @vscode/vsce package --allow-missing-repository --allow-star-activation",
+    "publish": "npx @vscode/vsce publish",
+    "q": "npx @vscode/vsce publish patch --allow-star-activation",
+    "pub": "yes | npx vsce publish patch",
     "test": "echo \"Running tests...\" && exit 0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gh555com/qqq.git"
+  },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "categories": [
+    "Other",
+    "Visualization",
+    "Keymaps"
+  ],
+  "keywords": [
+    "qqq",
+    "gh555",
+    "soldier",
+    "paste image",
+    "smart preview",
+    "file manager",
+    "recycler",
+    "productivity",
+    "paste",
+    "粘贴",
+    "貼り付け",
+    "ペースト",
+    "einfügen",
+    "coller",
+    "붙여넣기",
+    "вставить",
+    "image",
+    "图片",
+    "粘贴图片",
+    "图片粘贴",
+    "貼り付け",
+    "写真",
+    "ペースト",
+    "画像を貼り付け",
+    "画像貼り付け",
+    "사진을 붙이다",
+    "사진붙이기",
+    "Bild einfügen",
+    "Bild-Einfügen",
+    "Coller Image",
+    "Collage Image",
+    "画像",
+    "bild",
+    "이미지",
+    "изображение",
+    "картинка",
+    "preview",
+    "预览",
+    "プレビュー",
+    "vorschau",
+    "aperçu",
+    "미리보기",
+    "просмотр",
+    "предпросмотр",
+    "gif",
+    "动图",
+    "animation",
+    "アニメーション",
+    "움짤",
+    "video",
+    "webp",
+    "视频",
+    "動画",
+    "vidéo",
+    "동영상",
+    "видео",
+    "file",
+    "文件",
+    "ファイル",
+    "datei",
+    "fichier",
+    "파일",
+    "файл",
+    "manager",
+    "管理",
+    "management",
+    "gestion",
+    "관리",
+    "менеджер",
+    "folder",
+    "文件夹",
+    "directory",
+    "フォルダ",
+    "ordner",
+    "dossier",
+    "폴더",
+    "папка",
+    "new",
+    "新建",
+    "create",
+    "新規",
+    "neu",
+    "nouveau",
+    "생성",
+    "создать",
+    "navigation",
+    "导航",
+    "nav",
+    "ナビゲーション",
+    "탐색",
+    "навигация",
+    "explore",
+    "漫游",
+    "browser",
+    "探索",
+    "erkunden",
+    "explorer",
+    "обзор",
+    "smart",
+    "智能",
+    "intelligent",
+    "スマート",
+    "умный",
+    "fast",
+    "sharp",
+    "快捷",
+    "quick",
+    "高速",
+    "schnell",
+    "rapide",
+    "빠른",
+    "быстро",
+    "efficiency",
+    "生産性",
+    "produktivität",
+    "productivité",
+    "생산성",
+    "fingerprint",
+    "q",
+    "qq",
+    "指纹",
+    "cache",
+    "缓存",
+    "daemon"
+  ],
   "dependencies": {
-    "sharp": "^0.34.4",
-    "trash": "^7.1.2"
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "archiver": "^5.3.1",
+    "cheerio": "^1.0.0",
+    "docx": "^8.5.0",
+    "docx-parser": "^0.2.1",
+    "trash": "^7.2.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

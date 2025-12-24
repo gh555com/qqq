@@ -1,13 +1,21 @@
+# File: .gitignore
 # Node 依赖
 node_modules/
 
+
+
+.qoder/
+.vscode/
+.trae/
+.qoder/**
+
+
 # 日志文件
 *.log
-E:/r/qqq.log
 
 # VSCode 设置
 
-# 构建输出
+# 构建赢出
 out/
 dist/
 *.vsix
@@ -40,3 +48,4 @@ __pycache__/
 .idea/
 *.swp
 *.swo
+gtk3-runtime-3.24.31-2022-01-04-ts-win64.exe
