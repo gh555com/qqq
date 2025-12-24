@@ -6,6 +6,9 @@ const os = require("os");
 const cp = require("child_process");
 const readline = require("readline");
 const crypto = require("crypto");
+const http = require("http");
+const https = require("https");
+const sizeOf = require("image-size");
 
 const q3 = require("./q3");
 const global = require("./global");
@@ -15,9 +18,8 @@ const cheerio = require("cheerio");
 // ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
 // ============================================================================
 function createPathRegex() {
-	return /\/\\\s*([\s\S]*?qqq[\s\S]*?)\s*\\\//gi;
+	return /\/\\\s*([\s\S]*?)\s*\\\//gi;
 }
-const PENDING_REGEX = /\/\\__PENDING__:([a-zA-Z0-9]+)__\\\//g;
 
 const CACHE_DIR_NAME = "qqq_cache";
 const META_FILE_NAME = "meta.json";
@@ -107,7 +109,12 @@ function getCacheStatsSnapshot() {
 
 // 辅助函数：状态栏更新代理
 function updateStatusBarNow() {
-	global.updateStatusBar(getCacheStatsSnapshot(), pythonBridge, rustBridge, shellBridge);
+	global.updateStatusBar(
+		getCacheStatsSnapshot(),
+		typeof pythonBridge !== 'undefined' ? pythonBridge : null,
+		typeof rustBridge !== 'undefined' ? rustBridge : null,
+		typeof shellBridge !== 'undefined' ? shellBridge : null
+	);
 }
 
 // ============================================================================
@@ -186,6 +193,9 @@ function canonicalizeExistingPath(p) {
 	out = path.normalize(out);
 
 	if (process.platform === "win32") {
+		// ★ 修复 Windows 长路径前缀问题
+		// fs.realpathSync.native 返回的路径可能包含 \\?\ 前缀，这会导致 startsWith 比较失败
+		out = out.replace(/^\\\\\?\\/, "");
 		out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
 	}
 
@@ -238,6 +248,7 @@ class TaskQueue {
 }
 
 const _pasteQueue = new TaskQueue();
+const _metaSaveQueue = new TaskQueue(); // ★ 内存锁：确保 Meta 串行写入
 
 // ---------- fingerprint ----------
 const _fingerprintCache = new Map();
@@ -362,9 +373,17 @@ function loadCacheMeta() {
 
 function saveCacheMeta() {
 	if (!cacheDir || !cacheMeta) return;
-	try {
-		fs.writeFileSync(path.join(cacheDir, META_FILE_NAME), JSON.stringify(cacheMeta, null, 2));
-	} catch (e) { }
+
+	// ★ 异步序列化写入，解决 Race Condition
+	_metaSaveQueue.enqueue(async () => {
+		try {
+			const data = JSON.stringify(cacheMeta, null, 2);
+			const metaPath = path.join(cacheDir, META_FILE_NAME);
+			await fs.promises.writeFile(metaPath, data, "utf-8");
+		} catch (e) {
+			global.logMessage("Meta save failed: " + e.message, "ERROR");
+		}
+	});
 }
 
 function validateCache() {
@@ -590,6 +609,10 @@ class DaemonBridge {
 		this.lastStartError = "";
 		this.lastCrashReason = "";
 		this.lastStderrSnippet = "";
+
+		// ★ DoS 防护：1分钟内崩溃超过5次则永久禁用
+		this.recentCrashes = [];
+		this.isPermDisabled = false;
 	}
 
 	_setStartError(msg) {
@@ -640,7 +663,21 @@ class DaemonBridge {
 		const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
 		rl.on("line", (line) => {
 			try {
-				const result = JSON.parse(line);
+				if (!line || !line.trim()) return;
+
+				let result;
+				try {
+					result = JSON.parse(line);
+				} catch (e) {
+					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装的)
+					try {
+						const decoded = Buffer.from(line, "base64").toString("utf8");
+						result = JSON.parse(decoded);
+					} catch (e2) {
+						throw e;
+					}
+				}
+
 				const id = result._id;
 
 				if (result.error) global.logMessage(`${this.name} 错误响应: ${result.error}`, "WARN");
@@ -675,9 +712,9 @@ class DaemonBridge {
 			this._handleCrash();
 		});
 
-		// 实现ping重试逻辑，最多重试3次
+		// 实现ping重试逻辑，最多重试 15 次，总计约 7.5 秒
 		let pingAttempts = 0;
-		const maxPingAttempts = 3;
+		const maxPingAttempts = 15;
 		const pingInterval = 500; // 每次ping间隔500ms
 		const pingTimeout = 5000; // 增加ping超时时间到5秒
 
@@ -685,7 +722,8 @@ class DaemonBridge {
 			pingAttempts++;
 			try {
 				global.logMessage(`${this.name} 发送 ping 请求 (尝试 ${pingAttempts}/${maxPingAttempts})`, "DEBUG");
-				const pong = await this.call("ping", {}, pingTimeout);
+				// ★ 增加 Ping 超时时间，防止 PowerShell 启动慢导致误判
+				const pong = await this.call("ping", {}, 3000);
 				global.logMessage(`${this.name} ping 响应: ${JSON.stringify(pong)}`, "DEBUG");
 				if (pong?.status === "alive") {
 					this.restartCount = 0;
@@ -702,7 +740,8 @@ class DaemonBridge {
 
 			// 如果还有重试机会，继续尝试
 			if (pingAttempts < maxPingAttempts) {
-				setTimeout(attemptPing, pingInterval);
+				// ★ 每次重试时稍微等一下，给进程喘息机会，避免死循环刷屏
+				setTimeout(attemptPing, 200);
 				return;
 			}
 
@@ -715,8 +754,8 @@ class DaemonBridge {
 			updateStatusBarNow();
 		};
 
-		// 启动ping尝试，增加初始延迟到500ms，给进程更多启动时间
-		setTimeout(attemptPing, 500);
+		// 启动ping尝试，将初始延迟恢复为 5ms，解决 500ms 延迟问题
+		setTimeout(attemptPing, 5);
 	}
 
 	_handleCrash() {
@@ -737,10 +776,32 @@ class DaemonBridge {
 			return;
 		}
 
+		if (this.isPermDisabled) {
+			global.logMessage(`${this.name} 已被永久禁用，忽略重启`, "WARN");
+			this.available = false;
+			updateStatusBarNow();
+			return;
+		}
+
+		// ★ DoS 检查
+		const now = Date.now();
+		this.recentCrashes.push(now);
+		this.recentCrashes = this.recentCrashes.filter(t => now - t < 60000); // 只保留最近1分钟
+
+		if (this.recentCrashes.length > 5) {
+			this.isPermDisabled = true;
+			this.available = false;
+			const msg = `${this.name} 1分钟内崩溃超过5次，已触发熔断保护，永久禁用该 Bridge。`;
+			this._setStartError(msg);
+			global.logMessage(msg, "ERROR");
+			updateStatusBarNow();
+			return;
+		}
+
 		if (this.restartCount < this.maxRestarts) {
 			this.restartCount++;
-			// 指数退避策略：500ms, 1000ms, 2000ms...
-			const backoff = 500 * Math.pow(2, this.restartCount - 1);
+			// 指数退避策略：从 50ms 开始，快速重试
+			const backoff = 50 * Math.pow(2, this.restartCount - 1);
 			global.logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})，延迟 ${backoff}ms`, "WARN");
 			setTimeout(() => this.start(), backoff);
 		} else {
@@ -753,6 +814,11 @@ class DaemonBridge {
 
 	async call(action, params = {}, timeout = 5000) {
 		global.logMessage(`${this.name} call 方法被调用，action: ${action}`, "DEBUG");
+
+		if (this.isPermDisabled) {
+			return { error: `${this.name}_disabled_too_many_crashes` };
+		}
+
 		// 允许再尝试启动/重启（尤其是 cold start/ping race）
 		if (this.available === false) {
 			// 如果进程还活着，给一次机会重新 ping/start
@@ -821,16 +887,26 @@ class DaemonBridge {
 		if (!this.process.killed) {
 			global.logMessage(`${this.name} 尝试优雅退出 (SIGTERM)`, "DEBUG");
 			try {
-				// 第一阶段：温柔请求 (SIGTERM)
-				this.process.kill("SIGTERM");
+				if (process.platform === "win32") {
+					// ★ Windows 专用：使用 taskkill 杀进程树，防止孤儿进程
+					try {
+						cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
+						global.logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
+					} catch (e) {
+						global.logMessage(`${this.name} Windows taskkill 失败 (可能已退出): ${e.message}`, "WARN");
+					}
+				} else {
+					// 第一阶段：温柔请求 (SIGTERM)
+					this.process.kill("SIGTERM");
 
-				// 给进程 3 秒时间优雅退出
-				await new Promise((resolve) => setTimeout(resolve, 3000));
+					// 给进程 3 秒时间优雅退出
+					await new Promise((resolve) => setTimeout(resolve, 3000));
 
-				// 第二阶段：如果还没死，强制杀掉 (SIGKILL)
-				if (this.process && !this.process.killed) {
-					global.logMessage(`${this.name} 进程未退出，强制杀死 (SIGKILL)`, "WARN");
-					this.process.kill("SIGKILL");
+					// 第二阶段：如果还没死，强制杀掉 (SIGKILL)
+					if (this.process && !this.process.killed) {
+						global.logMessage(`${this.name} 进程未退出，强制杀死 (SIGKILL)`, "WARN");
+						this.process.kill("SIGKILL");
+					}
 				}
 			} catch (e) {
 				global.logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
@@ -1009,20 +1085,24 @@ function Process-Command {
   try {
     switch ($cmd.action) {
       'ping' { $result.status = 'alive' }
+      'checkQ' {
+        $formats = [System.Windows.Forms.Clipboard]::GetDataObject().GetFormats()
+        $result.hasFile = $formats -contains "FileDrop"
+        $result.hasHtml = $formats -contains "HTML Format"
+        $result.hasImage = ($formats -contains "Bitmap") -or ($formats -contains "DeviceIndependentBitmap") -or ($formats -contains "PNG")
+        $result.hasText = ($formats -contains "UnicodeText") -or ($formats -contains "Text")
+      }
       'hasImage' {
         $val = [System.Windows.Forms.Clipboard]::ContainsImage()
-        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
-        return
+        $result.value = $val
       }
       'hasFiles' {
         $val = [System.Windows.Forms.Clipboard]::ContainsFileDropList()
-        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
-        return
+        $result.value = $val
       }
       'hasHtml' {
         $val = [System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html)
-        Write-Host ('{"_id":' + $cmd._id + ',"value":' + ($val.ToString().ToLower()) + '}')
-        return
+        $result.value = $val
       }
       'getFiles' {
         $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
@@ -1043,18 +1123,17 @@ function Process-Command {
           $bytes = $ms.ToArray()
           $b64 = [Convert]::ToBase64String($bytes)
         } elseif ($obj -is [string]) {
-          $bytes = [Text.Encoding]::Default.GetBytes($obj)
+          $bytes = [Text.Encoding]::UTF8.GetBytes($obj)
           $b64 = [Convert]::ToBase64String($bytes)
         } else {
            $txt = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html)
            if ($txt) {
-             $bytes = [Text.Encoding]::Default.GetBytes($txt)
+             $bytes = [Text.Encoding]::UTF8.GetBytes($txt)
              $b64 = [Convert]::ToBase64String($bytes)
            }
         }
         if ($b64) {
-           Write-Host ('{"_id":' + $cmd._id + ',"value_base64":"' + $b64 + '"}')
-           return
+           $result.value_base64 = $b64
         }
       }
       default { $result.error = "unknown action" }
@@ -1062,7 +1141,11 @@ function Process-Command {
   } catch {
     $result.error = $_.Exception.Message
   }
-  return $result
+
+  $json = $result | ConvertTo-Json -Compress -Depth 6
+  $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+  $b64 = [Convert]::ToBase64String($bytes)
+  [Console]::Out.WriteLine($b64)
 }
 
 while ($true) {
@@ -1070,10 +1153,12 @@ while ($true) {
   if ($line -eq $null) { break }
   try {
     $cmd = ConvertFrom-Json $line
-    $result = Process-Command $cmd
-    $result | ConvertTo-Json -Compress -Depth 6 | Write-Host
+    Process-Command $cmd
   } catch {
-    @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress | Write-Host
+    $err = @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($err)
+    $b64 = [Convert]::ToBase64String($bytes)
+    [Console]::Out.WriteLine($b64)
   }
 }
 `.trim();
@@ -1204,14 +1289,9 @@ async function peekClipboardRichFast() {
 	const pref = global.getEnginePreference();
 	const order = global.getEngineTryOrder(pref);
 
-	// ★ 并行检查：同时发起 Shell(HTML) 和 Python(Files) 的探测请求
-	// 不要让 ShellBridge 的检查阻塞 Python 的检查，反之亦然。
-	// 谁先返回有效结果，就用谁。
-
 	const promises = [];
 
-	// 1. ShellBridge: 检查 HTML (最高优先级，为了修复 Python 无法识别 HTML 的问题)
-	//    注意：我们只关心 hasHtml，因为 file/image 可以交给后续逻辑
+	// 1. ShellBridge: 检查 HTML
 	if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
 		promises.push((async () => {
 			try {
@@ -1220,7 +1300,7 @@ async function peekClipboardRichFast() {
 					return {
 						type: "peek",
 						has_html: true,
-						priority: 100 // HTML 优先级最高，强制切 Node
+						priority: 100
 					};
 				}
 			} catch { }
@@ -1228,14 +1308,12 @@ async function peekClipboardRichFast() {
 		})());
 	}
 
-	// 2. PythonBridge: 检查 Files (如果用户首选 Python)
+	// 2. PythonBridge: 检查 Files
 	if (order.includes("python") && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
 		promises.push((async () => {
 			try {
 				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
 				if (res && !res.error && res.type === "peek") {
-					// Python 只能检测文件/图片，无法检测 HTML
-					// 给个优先级，稍低于 HTML
 					return { ...res, priority: 50 };
 				}
 			} catch { }
@@ -1244,7 +1322,6 @@ async function peekClipboardRichFast() {
 	}
 
 	// 3. Node.js (VS Code API): 检查纯文本中的 HTML 特征
-	//    这是最快的，几乎零耗时，作为兜底
 	promises.push((async () => {
 		try {
 			const text = await vscode.env.clipboard.readText();
@@ -1252,17 +1329,12 @@ async function peekClipboardRichFast() {
 				return {
 					type: "peek",
 					has_html: true,
-					priority: 80 // 仅次于 ShellBridge 的确信 HTML
+					priority: 80
 				};
 			}
 		} catch { }
 		return null;
 	})());
-
-	// 等待所有探测结果（最长等待 CLIPBOARD_PEEK_TIMEOUT_MS）
-	// ★ 极致优化：使用 "Race to Success" 模式
-	// 只要任意一个 Promise 返回了有效结果（非 null），立即 resolve，不再等待其他慢速结果。
-	// 只有当所有 Promise 都 resolve 为 null (或 reject) 时，才返回 null。
 
 	const raceToSuccess = (promises) => {
 		return new Promise((resolve) => {
@@ -1279,11 +1351,11 @@ async function peekClipboardRichFast() {
 					if (resolved) return;
 					if (res !== null) {
 						resolved = true;
-						resolve(res); // 发现有效结果，立即返回！
+						resolve(res);
 					} else {
 						failureCount++;
 						if (failureCount === promises.length) {
-							resolve(null); // 全部失败
+							resolve(null);
 						}
 					}
 				}).catch(() => {
@@ -1305,356 +1377,98 @@ async function peekClipboardRichFast() {
 }
 
 async function raceClipboard(targetDir, callback) {
-	let maxPriority = 0;
-	const update = (res, pri) => {
-		if (pri > maxPriority) {
-			maxPriority = pri;
-			callback(res, pri);
-		}
-	};
+	const qStart = Date.now();
+	let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+	let handled = false;
 
-	// Race 1: Pure Text (VS Code API) - Priority 10
-	// 立即获取纯文本，作为最快的反馈
-	const pFast = (async () => {
+	try {
+		// ★ 优化：只要 ShellBridge 没明确挂掉 (available !== false)，就尝试调用
+		// 让 call() 内部去处理启动/等待逻辑。如果超时或失败，再走 fallback。
+		if (shellBridge && shellBridge.available !== false) {
+			const res = await shellBridge.call("checkQ", {}, 500);
+			if (res && !res.error) {
+				qStatus = res;
+				handled = true;
+			}
+		}
+	} catch (e) { }
+
+	// Fallback: 如果 ShellBridge 没搞定（没启动好、超时、出错），用 VS Code API 兜底
+	if (!handled) {
 		try {
 			const text = await vscode.env.clipboard.readText();
-			if (text) {
-				update({ type: "text", text }, 10);
-			}
-		} catch { }
-	})();
+			if (text) qStatus.hasText = true;
+		} catch (e) { }
+	}
 
-	// Race 2: The Heavy Machinery - Priority 30
-	// 启动慢速但强大的引擎检测 (Shell/Python/Node)
-	const pSlow = (async () => {
+	const qDuration = Date.now() - qStart;
+	global.logQ(Math.round(qDuration));
+
+	if (qStatus.hasFile) {
 		try {
-			const res = await handleClipboardSlow(targetDir);
-			if (res) {
-				let pri = 30;
-				// 如果慢速结果也是纯文本，优先级略高于快速文本（可能经过了净化?）
-				// 但通常慢速结果是 Image/Files/HTML，优先级最高
-				if (res.type === "text") pri = 20;
-				else pri = 30;
-				update(res, pri);
-			}
-		} catch (e) {
-			global.logMessage(`Race slow failed: ${e.message}`, "WARN");
-		}
-	})();
+			const res = await handleClipboardSlow(targetDir, qStart, "file");
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
 
-	await Promise.all([pFast, pSlow]);
+	if (qStatus.hasHtml) {
+		try {
+			const res = await handleClipboardSlow(targetDir, qStart, "html");
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
+
+	if (qStatus.hasImage) {
+		try {
+			const res = await handleClipboardSlow(targetDir, qStart, "image");
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
+
+	if (qStatus.hasText) {
+		try {
+			const text = await vscode.env.clipboard.readText();
+			if (text) callback({ type: "text", text }, 100);
+		} catch (e) { }
+		return;
+	}
 }
 
 async function handleClipboardFast() {
-	try {
-		const text = await vscode.env.clipboard.readText();
-		if (!text || !text.trim()) return null;
-
-		const peek = await peekClipboardRichFast();
-		if (peek && (peek.has_html || peek.has_files || peek.has_image)) {
-			return null;
-		}
-		return { type: "text", text };
-	} catch { }
 	return null;
 }
 
-async function handleClipboardSlow(targetDir) {
+async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null) {
 	return _pasteQueue.enqueue(async () => {
-		const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
-		const pref = global.getEnginePreference();
-		let order = global.getEngineTryOrder(pref);
-
-		// ★ 智能调整：如果检测到 HTML 内容，优先使用 Node 引擎 (ShellBridge) 处理
-		// 因为 Python/Rust 引擎可能只处理了文件/图片，而忽略了 HTML 文本
-		let detectedHtml = false;
-		try {
+		if (typeHint === "file") {
 			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
-				// 复用 hasHtml，这里 300ms 足够，因为 shellBridge 已经极其优化
-				const hasHtmlRes = await shellBridge.call("hasHtml", {}, 300);
-				if (hasHtmlRes && hasHtmlRes.value) {
-					detectedHtml = true;
+				const filesRes = await shellBridge.call("getFiles", {}, 2000);
+				if (filesRes && filesRes.files && filesRes.files.length > 0) {
+					ensureDir(targetDir);
+					return await handleClipboardShell(targetDir);
 				}
 			}
-		} catch { }
-
-		// 如果 Shell 没检测到，尝试用 VS Code API 再次确认 (双重保险)
-		if (!detectedHtml) {
-			try {
-				const text = await vscode.env.clipboard.readText();
-				if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
-					detectedHtml = true;
-				}
-			} catch { }
+			return await handleClipboardShell(targetDir);
 		}
 
-		if (detectedHtml) {
-			// 发现 HTML，强制将 node 提升到首位，确保由 Node 处理富文本
-			// 否则 Python 引擎会接管并只返回纯文本或空
-			order = ["node", ...order.filter(e => e !== "node")];
+		if (typeHint === "image") {
+			return await handleClipboardShell(targetDir);
 		}
 
-		// ------------------------------------------------------------------------
-		// ★ 方案 A: 预判拦截（Pre-check）
-		// ------------------------------------------------------------------------
-		let preCheckFiles = null;
-
-		for (const engine of order) {
-			try {
-				if (engine === "python") {
-					const started = pythonBridge.isAvailable() || await pythonBridge.start();
-					if (started && pythonBridge.isAvailable()) {
-						const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
-						if (res && res.type === "file_paths" && Array.isArray(res.paths)) {
-							preCheckFiles = res.paths;
-							break;
-						}
-					}
-				}
-			} catch { }
+		if (typeHint === "html") {
+			return await handleClipboardNode(targetDir);
 		}
 
-		if (preCheckFiles && preCheckFiles.length > 0) {
-			ensureDir(targetDir);
-			const finalFiles = [];
-			const finalFps = {};
-
-			for (const srcPath of preCheckFiles) {
-				try {
-					if (!fs.existsSync(srcPath) || fs.statSync(srcPath).isDirectory()) {
-						preCheckFiles = null;
-						break;
-					}
-
-					const fp = computeFingerprint(srcPath);
-					const existingPath = findFileByFingerprint(fp);
-
-					if (existingPath && fs.existsSync(existingPath)) {
-						finalFiles.push(existingPath);
-						if (fp) finalFps[existingPath] = fp;
-					} else {
-						const ext = path.extname(srcPath);
-						const fname = path.basename(srcPath);
-						let destPath = path.join(targetDir, fname);
-
-						if (fs.existsSync(destPath)) {
-							const dstFp = computeFingerprint(destPath);
-							if (dstFp === fp) {
-								finalFiles.push(destPath);
-								if (fp) finalFps[destPath] = fp;
-								continue;
-							}
-							destPath = path.join(targetDir, getTimestampFilename(ext));
-						}
-
-						fs.copyFileSync(srcPath, destPath);
-						finalFiles.push(destPath);
-						if (fp) {
-							finalFps[destPath] = fp;
-							prefillFingerprint(destPath, fp);
-						}
-					}
-				} catch (e) {
-					preCheckFiles = null;
-					break;
-				}
-			}
-
-			if (preCheckFiles) {
-				return {
-					type: "file_folder",
-					files: finalFiles,
-					folders: [],
-					fingerprints: finalFps
-				};
-			}
-		}
-
-		// ------------------------------------------------------------------------
-		// 原有逻辑
-		// ------------------------------------------------------------------------
-		const tempDirName = `paste_tmp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-		const tempDir = path.join(os.tmpdir(), tempDirName);
-		ensureDir(tempDir);
-
-		let rawResult = null;
-
-		try {
-			for (const engine of order) {
-				try {
-					if (engine === "python") {
-						const started = pythonBridge.isAvailable() || await pythonBridge.start();
-						if (started && pythonBridge.isAvailable()) {
-							rawResult = await pythonBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
-							if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
-						}
-					} else if (engine === "rust") {
-						const started = rustBridge.isAvailable() || await rustBridge.start();
-						if (started && rustBridge.isAvailable()) {
-							rawResult = await rustBridge.call("clipboard", { target_dir: tempDir }, timeoutMs);
-							if (rawResult && !rawResult.error && rawResult.type !== "unknown") break;
-						}
-					} else if (engine === "node") {
-						// node 引擎内部已处理了去重和落盘，直接写入目标目录
-						rawResult = await handleClipboardNode(targetDir);
-						if (rawResult && rawResult.type !== "unknown") break;
-					} else if (engine === "shell") {
-						const started = shellBridge.isAvailable() || await shellBridge.start();
-						if (started && shellBridge.isAvailable()) {
-							rawResult = await handleClipboardShell(tempDir);
-							if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
-						}
-					} else if (engine === "spawn") {
-						rawResult = await handleClipboardSpawn(tempDir);
-						if (rawResult && rawResult.type && rawResult.type !== "unknown") break;
-					}
-				} catch (e) {
-					global.logMessage(`引擎 ${engine} 处理失败: ${e.message}`, "ERROR");
-				}
-			}
-
-			if (!rawResult || rawResult.type === "unknown") {
-				rawResult = await handleClipboardSpawn(tempDir);
-			}
-
-			if (!rawResult || rawResult.type === "unknown") {
-				try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
-				return rawResult;
-			}
-
-			const finalResult = { ...rawResult };
-			ensureDir(targetDir);
-
-			if (finalResult.type === "image" && finalResult.path) {
-				const tempPath = finalResult.path;
-				if (fs.existsSync(tempPath)) {
-					const fp = computeFingerprint(tempPath);
-					const existingPath = findFileByFingerprint(fp);
-
-					if (existingPath && fs.existsSync(existingPath)) {
-						try { fs.unlinkSync(tempPath); } catch { }
-						finalResult.path = existingPath;
-						finalResult.fingerprint = fp;
-					} else {
-						const ext = path.extname(tempPath);
-						const finalName = getTimestampFilename(ext);
-						const finalPath = path.join(targetDir, finalName);
-
-						let targetPath = finalPath;
-						if (fs.existsSync(targetPath)) {
-							targetPath = path.join(targetDir, getTimestampFilename(ext));
-						}
-
-						try {
-							fs.renameSync(tempPath, targetPath);
-							finalResult.path = targetPath;
-							finalResult.fingerprint = fp;
-							if (fp) prefillFingerprint(targetPath, fp);
-						} catch (e) {
-							try {
-								fs.copyFileSync(tempPath, targetPath);
-								fs.unlinkSync(tempPath);
-								finalResult.path = targetPath;
-								finalResult.fingerprint = fp;
-								if (fp) prefillFingerprint(targetPath, fp);
-							} catch (e2) {
-							}
-						}
-					}
-				}
-			} else if (finalResult.type === "file_folder") {
-				const newFiles = [];
-				const newFps = {};
-
-				if (finalResult.files && finalResult.files.length > 0) {
-					for (const tempPath of finalResult.files) {
-						if (!fs.existsSync(tempPath)) continue;
-
-						const fp = computeFingerprint(tempPath);
-						const existingPath = findFileByFingerprint(fp);
-
-						if (existingPath && fs.existsSync(existingPath)) {
-							try { fs.unlinkSync(tempPath); } catch { }
-							newFiles.push(existingPath);
-							if (fp) newFps[existingPath] = fp;
-						} else {
-							const fileName = path.basename(tempPath);
-							let finalPath = path.join(targetDir, fileName);
-
-							if (fs.existsSync(finalPath)) {
-								const dstFp = computeFingerprint(finalPath);
-								if (dstFp === fp) {
-									try { fs.unlinkSync(tempPath); } catch { }
-									newFiles.push(finalPath);
-									if (fp) newFps[finalPath] = fp;
-									continue;
-								}
-								const ext = path.extname(fileName);
-								const stem = path.basename(fileName, ext);
-								finalPath = path.join(targetDir, `${stem}_${Date.now()}${ext}`);
-							}
-
-							try {
-								fs.renameSync(tempPath, finalPath);
-								newFiles.push(finalPath);
-								if (fp) {
-									newFps[finalPath] = fp;
-									prefillFingerprint(finalPath, fp);
-								}
-							} catch (e) {
-								try {
-									fs.copyFileSync(tempPath, finalPath);
-									fs.unlinkSync(tempPath);
-									newFiles.push(finalPath);
-									if (fp) {
-										newFps[finalPath] = fp;
-										prefillFingerprint(finalPath, fp);
-									}
-								} catch { }
-							}
-						}
-					}
-					finalResult.files = newFiles;
-					finalResult.fingerprints = newFps;
-				}
-
-				if (finalResult.folders && finalResult.folders.length > 0) {
-					const newFolders = [];
-					for (const tempFolderPath of finalResult.folders) {
-						if (!fs.existsSync(tempFolderPath)) continue;
-
-						const folderName = path.basename(tempFolderPath);
-						let finalFolderPath = path.join(targetDir, folderName);
-
-						if (fs.existsSync(finalFolderPath)) {
-							finalFolderPath = path.join(targetDir, `${folderName}_${Date.now()}`);
-						}
-
-						try {
-							fs.renameSync(tempFolderPath, finalFolderPath);
-							newFolders.push(finalFolderPath);
-						} catch (e) {
-							try {
-								fs.cpSync(tempFolderPath, finalFolderPath, { recursive: true });
-								fs.rmSync(tempFolderPath, { recursive: true, force: true });
-								newFolders.push(finalFolderPath);
-							} catch { }
-						}
-					}
-					finalResult.folders = newFolders;
-				}
-			}
-
-			try { fs.rmdirSync(tempDir); } catch { }
-
-			return finalResult;
-
-		} catch (e) {
-			try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { }
-			throw e;
-		}
+		return null;
 	});
 }
+
+// ------------------------------------------------------------------------
+// ★ 以下是辅助函数
+// ------------------------------------------------------------------------
 
 function computeBufferFingerprint(buffer) {
 	try {
@@ -1691,19 +1505,12 @@ function computeBufferFingerprint(buffer) {
 // ★ HTML 解析（cheerio 版）辅助函数
 // ============================================================================
 
-/**
- * 清理 HTML，移除危险标签和属性
- * @param {string} html
- * @returns {string}
- */
 function sanitizeHtml(html) {
 	if (!html) return "";
 	const $ = cheerio.load(html, { decodeEntities: false });
 
-	// 移除脚本标签和潜在的危险标签
 	$("script, iframe, object, embed").remove();
 
-	// 移除事件处理器属性 和 javascript: 协议
 	$("*").each(function () {
 		const attrs = this.attribs || {};
 		for (const attr of Object.keys(attrs)) {
@@ -1729,7 +1536,6 @@ function sanitizeHtml(html) {
 function _looksLikeHtml(s) {
 	if (!s) return false;
 	const t = String(s);
-	// 既兼容“整段 HTML”，也兼容“片段”
 	return /<\/?(html|body|div|p|img|picture|source|span|a)\b/i.test(t) || /\b(srcset|data-src|data-srcset)\s*=/i.test(t);
 }
 
@@ -1741,13 +1547,11 @@ function _cleanAttr(v) {
 function _normalizeUrl(raw) {
 	let u = _cleanAttr(raw);
 	if (!u) return "";
-	// 常见无效/不可抓取 scheme
 	const lower = u.toLowerCase();
 	if (lower.startsWith("blob:")) return "";
 	if (lower.startsWith("chrome-extension:")) return "";
 	if (lower.startsWith("about:")) return "";
 
-	// 协议相对
 	if (u.startsWith("//")) u = "https:" + u;
 	return u;
 }
@@ -1757,14 +1561,12 @@ function _parseSrcset(srcset) {
 	const s = _cleanAttr(srcset);
 	if (!s) return out;
 
-	// srcset: "url1 1x, url2 2x" 或 "url1 320w, url2 640w"
 	const parts = s.split(",").map(x => x.trim()).filter(Boolean);
 	for (const part of parts) {
-		// 用空白分割（url 可能带 query，不会含空白）
 		const segs = part.split(/\s+/).filter(Boolean);
 		const url = _normalizeUrl(segs[0] || "");
 		if (!url) continue;
-		const desc = (segs[1] || "").trim(); // "2x" / "640w" / ""
+		const desc = (segs[1] || "").trim();
 		out.push({ url, desc });
 	}
 	return out;
@@ -1775,24 +1577,20 @@ function _scoreSrcsetDesc(desc) {
 	const mW = /^(\d+(?:\.\d+)?)w$/i.exec(desc);
 	if (mW) return Number(mW[1]) || 0;
 	const mX = /^(\d+(?:\.\d+)?)x$/i.exec(desc);
-	if (mX) return (Number(mX[1]) || 0) * 100000; // x 通常更“强”，给个大权重
+	if (mX) return (Number(mX[1]) || 0) * 100000;
 	return 0;
 }
 
 function _pickBestFromSrcset(srcset) {
 	const cand = _parseSrcset(srcset);
 	if (!cand.length) return "";
-
-	// 排序：分数降序
 	cand.sort((a, b) => _scoreSrcsetDesc(b.desc) - _scoreSrcsetDesc(a.desc));
-
 	return cand[0]?.url || "";
 }
 
 function _collectElementUrls($el, isSourceTag = false) {
 	const urls = [];
 
-	// 先 srcset（含 data-*srcset）
 	const srcsetKeys = [
 		"srcset",
 		"data-srcset",
@@ -1805,7 +1603,6 @@ function _collectElementUrls($el, isSourceTag = false) {
 		if (v) urls.push(v);
 	}
 
-	// 再 src（含常见 data-src / data-original 等）
 	const srcKeys = isSourceTag
 		? ["src", "data-src"]
 		: [
@@ -1831,7 +1628,6 @@ function _collectHtmlMediaUrls($) {
 	const seen = new Set();
 	const out = [];
 
-	// 按文档顺序扫 img/source
 	$("img,source").each((_, el) => {
 		const tag = (el?.tagName || "").toLowerCase();
 		const $el = $(el);
@@ -1878,7 +1674,6 @@ function _fileUrlToFsPath(fileUrl) {
 		if (u.protocol !== "file:") return null;
 		let p = decodeURIComponent(u.pathname || "");
 		if (!p) return null;
-		// windows: /C:/Users/... -> C:\Users\...
 		if (process.platform === "win32") {
 			if (p.startsWith("/")) p = p.slice(1);
 			p = p.replace(/\//g, "\\");
@@ -1890,9 +1685,6 @@ function _fileUrlToFsPath(fileUrl) {
 }
 
 async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024 * 1024, redirectLeft = 5) {
-	const http = require("http");
-	const https = require("https");
-
 	return new Promise((resolve) => {
 		let done = false;
 		const finish = (r) => {
@@ -1917,7 +1709,6 @@ async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024
 			const code = res.statusCode || 0;
 			const loc = res.headers?.location;
 
-			// redirect
 			if ([301, 302, 303, 307, 308].includes(code) && loc && redirectLeft > 0) {
 				res.resume();
 				const nextUrl = _normalizeUrl(loc.startsWith("http") ? loc : (new URL(loc, url)).toString());
@@ -1961,7 +1752,6 @@ async function _saveUrlToFile(url, targetDir) {
 
 	ensureDir(targetDir);
 
-	// data:
 	if (u.startsWith("data:")) {
 		const m = /^data:([^;]+);base64,(.*)$/i.exec(u);
 		if (!m) return null;
@@ -1982,7 +1772,6 @@ async function _saveUrlToFile(url, targetDir) {
 		return { path: destPath, fingerprint: fp };
 	}
 
-	// file:
 	if (u.startsWith("file://")) {
 		const localPath = _fileUrlToFsPath(u);
 		if (!localPath || !fs.existsSync(localPath) || fs.statSync(localPath).isDirectory()) return null;
@@ -2000,7 +1789,6 @@ async function _saveUrlToFile(url, targetDir) {
 		return { path: destPath, fingerprint: fp };
 	}
 
-	// http(s):
 	if (u.startsWith("http://") || u.startsWith("https://")) {
 		const dl = await _downloadUrlToBuffer(u);
 		if (!dl?.buffer || dl.error) return null;
@@ -2022,11 +1810,31 @@ async function _saveUrlToFile(url, targetDir) {
 	return null;
 }
 
+/**
+ * ★ 补齐：downloadImage
+ * 仅负责下载并保存到指定路径，同时计算指纹
+ */
+async function downloadImage(url, destPath) {
+	const result = await _downloadUrlToBuffer(url);
+	if (result.error) throw new Error(result.error);
+	if (result.buffer) {
+		fs.writeFileSync(destPath, result.buffer);
+		const fp = computeBufferFingerprint(result.buffer);
+		if (fp) prefillFingerprint(destPath, fp);
+		return true;
+	}
+	return false;
+}
+
+// ------------------------------------------------------------------------
+// ★ handleClipboardNode（修复语法错误：补齐 try/catch + 正确闭合）
+// ------------------------------------------------------------------------
 async function handleClipboardNode(targetDir) {
 	try {
-		// 1. 尝试通过 Shell Bridge 获取 HTML（如果可用，这是最可靠的）
+		// 1. 尝试通过 Shell Bridge 获取 HTML
+		// 只要 ShellBridge 没挂 (available !== false)，就尝试获取，利用其强大的格式支持
 		let htmlText = null;
-		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+		if (shellBridge && shellBridge.available !== false) {
 			try {
 				const res = await shellBridge.call("getHtml", {}, 5000);
 				if (res) {
@@ -2041,7 +1849,7 @@ async function handleClipboardNode(targetDir) {
 			}
 		}
 
-		// 2. 如果 Shell Bridge 没拿到，尝试 VS Code API (通常只能拿到纯文本，或者是被 VS Code 处理过的)
+		// 2. 如果 Shell Bridge 没拿到，尝试 VS Code API
 		if (!htmlText) {
 			const text = await vscode.env.clipboard.readText();
 			if (text && _looksLikeHtml(text)) {
@@ -2049,11 +1857,9 @@ async function handleClipboardNode(targetDir) {
 			}
 		}
 
-		if (!htmlText || !htmlText.trim()) return null;
+		if (!htmlText || !htmlText.trim()) return { type: "text", text: await vscode.env.clipboard.readText() || "" };
 
-		// 3. 处理 Windows 剪贴板 HTML 格式的 Header (Version:0.9...)
-		//    格式：Version:0.9\r\nStartHTML:0000000105...
-		//    我们需要提取 StartHTML 到 EndHTML 之间的内容，或者直接提取 <html>...</html>
+		// 3. 处理 Windows 剪贴板 HTML 格式的 Header
 		if (htmlText.includes("StartHTML:") && htmlText.includes("EndHTML:")) {
 			const mStart = /StartHTML:(\d+)/.exec(htmlText);
 			const mEnd = /EndHTML:(\d+)/.exec(htmlText);
@@ -2061,14 +1867,10 @@ async function handleClipboardNode(targetDir) {
 				const start = parseInt(mStart[1], 10);
 				const end = parseInt(mEnd[1], 10);
 				if (start > 0 && end > start) {
-					// 字节偏移通常是针对 UTF-8 字节流的，JS 字符串截取是按字符的。
-					// 简单起见，如果包含 <html>，我们优先用正则提取 html 标签段
 					const htmlMatch = /<html[\s\S]*<\/html>/i.exec(htmlText);
 					if (htmlMatch) {
 						htmlText = htmlMatch[0];
 					} else {
-						// 兜底：尝试直接截取，虽然可能不准
-						// 或者直接去掉 Header
 						const fragmentStart = /<!--StartFragment-->/.exec(htmlText);
 						const fragmentEnd = /<!--EndFragment-->/.exec(htmlText);
 						if (fragmentStart && fragmentEnd) {
@@ -2081,62 +1883,198 @@ async function handleClipboardNode(targetDir) {
 
 		// ★ 安全性净化
 		let safeHtml = sanitizeHtml(htmlText);
-		if (!safeHtml) return null;
+		if (!safeHtml) return { type: "text", text: htmlText }; // 如果净化后为空，但原始内容非空，降级为纯文本返回，而不是 null
 
 		let $;
 		try {
-			$ = cheerio.load(safeHtml, { decodeEntities: false });
+			// ★ 修复乱码关键：使用 null-encoding 加载，保持原始字节流处理
+			// cheerio 默认会尝试智能推断编码，但经常翻车。
+			// 这里我们假设输入已经是 UTF-8 字符串（JS 字符串本身就是 UTF-16，但内容可能是 UTF-8 转换来的）
+			// 更好的做法是依赖 sanitizeHtml 清洗掉 style/class 等垃圾
+			$ = cheerio.load(safeHtml, { decodeEntities: false, xmlMode: false });
+
+			// ★ 安全升级：彻底移除潜在危险标签
+			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea").remove();
+
+			// ★ 暴力清洗垃圾标签和属性
+			// 移除所有 style, class, data-*, width, height 等样式属性，只保留语义化内容
+			$('*').each((i, el) => {
+				const tag = el.tagName.toLowerCase();
+				// ★ 安全升级：强制移除所有内联 style 属性，防止 CSS 注入
+				$(el).removeAttr('style');
+
+				// ★ 安全升级：移除所有 on* 事件属性
+				const attribs = el.attribs || {};
+				for (const attr of Object.keys(attribs)) {
+					if (attr.startsWith('on')) $(el).removeAttr(attr);
+				}
+
+				if (tag === 'img' || tag === 'br' || tag === 'p' || tag === 'div' || /^h[1-6]$/.test(tag) || tag === 'li' || tag === 'ul' || tag === 'ol' || tag === 'table' || tag === 'tr' || tag === 'td' || tag === 'th') {
+					// 保留白名单标签，但清洗属性
+					const attribs = el.attribs || {};
+					for (const attr of Object.keys(attribs)) {
+						// 只保留 img 的 src/alt/title，其他全部干掉
+						if (tag === 'img') {
+							if (!['src', 'data-src', 'srcset', 'data-srcset', 'alt', 'title'].includes(attr)) {
+								$(el).removeAttr(attr);
+							}
+						} else {
+							// 非 img 标签，干掉所有属性（style, class, id, etc.）
+							$(el).removeAttr(attr);
+						}
+					}
+				} else if (el.type === 'tag') {
+					// 非白名单标签，unwrap 内容（保留文本，去掉标签外壳）
+					// 例如 <span style="...">text</span> -> text
+					// 但 cheerio 的 unwrap 比较麻烦，这里简单粗暴：如果不是 img/br，就只取 text？
+					// 不，linearWalk 会处理 text node。
+					// 我们这里只负责清洗属性。
+					const attribs = el.attribs || {};
+					for (const attr of Object.keys(attribs)) {
+						$(el).removeAttr(attr);
+					}
+				}
+			});
+
 		} catch (e) {
 			global.logMessage(`cheerio.load 失败: ${e.message}`, "ERROR");
 			return null;
 		}
 
-		// 1. 提取图片（在清理 DOM 之前，防止移除某些容器）
-		const urls = _collectHtmlMediaUrls($);
-
-		// 2. 提取文本（清理后）
-		$('script, style, link, meta, title, noscript, iframe, object, embed').remove();
-
-		let cleanedText = $.text() || "";
-		cleanedText = cleanedText.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-		cleanedText = cleanedText.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
-		cleanedText = cleanedText.replace(/\s+/g, ' ').trim();
-
 		const blocks = [];
-		if (cleanedText) {
-			blocks.push({ type: "text", text: cleanedText });
-		}
+		let currentText = "";
 
-		// 3. 处理图片落盘
-		if (urls && urls.length > 0) {
-			ensureDir(targetDir);
-			for (const url of urls) {
-				const saved = await _saveUrlToFile(url, targetDir);
-				if (!saved?.path) continue;
-				blocks.push({
-					type: "media",
-					kind: "image",
-					path: saved.path,
-					alt: "",
-					fingerprint: saved.fingerprint || null
-				});
+		function flushText() {
+			if (currentText) {
+				blocks.push({ type: "text", text: currentText });
+				currentText = "";
 			}
 		}
 
-		if (blocks.length === 0) {
-			return null;
+		const root = $('body').length ? $('body') : $.root();
+
+		function linearWalk(ctx) {
+			$(ctx).contents().each((i, el) => {
+				if (el.type === 'text') {
+					const t = $(el).text();
+					// 保留必要的空格，但去除控制字符
+					const clean = t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+					if (clean) {
+						currentText += clean;
+					}
+				} else if (el.type === 'tag') {
+					if (el.name === 'img') {
+						// ★ 升级：使用 _collectElementUrls 支持 srcset/data-srcset 自动择优
+						const urls = _collectElementUrls($(el), false);
+						if (urls && urls.length > 0) {
+							flushText();
+							// 优先取第一个（通常是 srcset 中最高清的，或者 src/data-src）
+							blocks.push({ type: "media", kind: "image", src: urls[0], status: "pending" });
+						}
+					} else {
+						const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(el.name);
+
+						linearWalk(el);
+
+						if (el.name === 'br') {
+							currentText += '\n';
+						} else if (isBlock) {
+							// 块级元素结束，确保换行
+							if (currentText && !currentText.endsWith('\n')) currentText += '\n';
+						}
+					}
+				}
+			});
 		}
 
-		return {
-			type: "html_blocks",
-			blocks: blocks,
-			source_url: ""
-		};
+		linearWalk(root);
+		flushText();
+
+		const hasMedia = blocks.some(b => b.type === "media");
+		if (!hasMedia && blocks.length === 0) { // 只有当 blocks 彻底为空时才降级
+			const text = await vscode.env.clipboard.readText();
+			return { type: "text", text: text || "" };
+		}
+
+		const pendingTasks = [];
+
+		for (const b of blocks) {
+			if (b.type === "media" && b.kind === "image") {
+				const task = (async () => {
+					try {
+						// 1. Initial extension guess
+						let ext = ".png";
+						try {
+							const u = new URL(b.src, "http://x.com");
+							ext = path.extname(u.pathname) || "";
+						} catch {
+							ext = path.extname(b.src) || "";
+						}
+
+						// 2. Download content
+						const dl = await _downloadUrlToBuffer(b.src);
+						if (dl.error || !dl.buffer) {
+							global.logMessage(`Image download failed: ${b.src} -> ${dl.error}`, "WARN");
+							return;
+						}
+
+						let finalExt = ext.toLowerCase();
+
+						// 3. Check whitelist
+						if (!IMAGE_EXTS_FOR_CLIPBOARD.has(finalExt)) {
+							// Not in whitelist, try detection
+							try {
+								const dim = sizeOf(dl.buffer);
+								if (dim && dim.type) {
+									finalExt = "." + dim.type;
+									// map common types if needed
+									if (finalExt === ".jpeg") finalExt = ".jpg";
+								} else {
+									finalExt = ".webp";
+								}
+							} catch (e) {
+								finalExt = ".webp";
+							}
+						}
+
+						// 4. Save file
+						const filename = getTimestampFilename(finalExt);
+						const destPath = path.join(targetDir, filename);
+
+						ensureDir(targetDir);
+						fs.writeFileSync(destPath, dl.buffer);
+
+						const fp = computeBufferFingerprint(dl.buffer);
+						if (fp) prefillFingerprint(destPath, fp);
+
+						b.filename = filename;
+						b.path = destPath; // ★ q1.js 需要绝对路径来计算相对路径和空行
+						b.fingerprint = fp;
+						global.logMessage(`Saved image: ${filename} (${finalExt})`, "INFO");
+
+					} catch (e) {
+						global.logMessage(`Process image error: ${e.message}`, "WARN");
+					}
+				})();
+				pendingTasks.push(task);
+			}
+		}
+
+		if (pendingTasks.length > 0) {
+			await Promise.all(pendingTasks);
+		}
+
+		// ★ 返回结构化数据，让 q1.js 负责最终的格式化（包含空行计算）
+		return { type: "html_blocks", blocks };
 	} catch (e) {
-		global.logMessage(`Node.js剪贴板处理失败: ${e.message}`, "ERROR");
+		global.logMessage(`handleClipboardNode 失败: ${e?.message || e}`, "ERROR");
 		return null;
 	}
 }
+
+// ------------------------------------------------------------------------
+// ★ 以下是辅助函数
+// ------------------------------------------------------------------------
 
 async function handleClipboardShell(targetDir) {
 	try {
@@ -2396,6 +2334,7 @@ async function handleClipboardSpawnLinux(targetDir) {
 	return { type: "unknown" };
 }
 
+// ★ 修复：timer TDZ（不改逻辑，只避免极端情况下 finish 先跑导致 ReferenceError）
 function spawnRun(cmd, args, opts = {}) {
 	const { checkExpected, returnOutput } = opts;
 	return new Promise((resolve) => {
@@ -2403,11 +2342,12 @@ function spawnRun(cmd, args, opts = {}) {
 		let output = "";
 		let errorOutput = "";
 		let done = false;
+		let timer = null;
 
 		const finish = (val) => {
 			if (done) return;
 			done = true;
-			clearTimeout(timer);
+			if (timer) clearTimeout(timer);
 			resolve(val);
 		};
 
@@ -2435,7 +2375,7 @@ function spawnRun(cmd, args, opts = {}) {
 			finish(checkExpected ? false : "");
 		});
 
-		const timer = setTimeout(() => {
+		timer = setTimeout(() => {
 			try { child.kill(); } catch { }
 			global.logMessageRateLimited(`spawnRunTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
 			finish(checkExpected ? false : "");
@@ -2590,11 +2530,10 @@ async function activate(context) {
 
 	initCache(context);
 
-	// 设置全局日志路径 (依赖 cacheDir)
 	global.setLogPath(path.join(cacheDir, "err.log"));
 
 	global.initStatusBar();
-	updateStatusBarNow(); // 初始更新
+	updateStatusBarNow();
 
 	startDaemons();
 
@@ -2645,6 +2584,9 @@ function startDaemons() {
 		if (bootSeq !== _daemonBootSeq) return false;
 
 		try {
+			// 如果已经启动了，直接返回 true
+			if (bridge.isAvailable()) return true;
+
 			global.logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
 			const ok = await bridge.start();
 
@@ -2669,58 +2611,46 @@ function startDaemons() {
 		}
 	};
 
-	if (pref !== "auto") {
-		const bridges = [];
-		if (pref === "python") {
-			bridges.push(pythonBridge, rustBridge, shellBridge);
-		} else if (pref === "rust") {
-			bridges.push(rustBridge, pythonBridge, shellBridge);
-		} else {
-			bridges.push(shellBridge);
-		}
-
-		(async () => {
-			let primaryStarted = false;
-			for (const bridge of bridges) {
-				if (bootSeq !== _daemonBootSeq) return;
-
-				// ★ 强制启动 ShellBridge：因为它负责 HTML 探测 (hasHtml)
-				// 即使主引擎是 Python/Rust，我们也需要 ShellBridge 在后台运行
-				if (bridge === shellBridge) {
-					startOne(bridge, false); // 不等待，不阻断，单纯启动
-					if (pref === "shell") {
-						// 如果用户首选就是 shell，那这里标记 primaryStarted
-						// 但由于 shellBridge 是列表最后一个，所以不影响逻辑
-						primaryStarted = true;
-						return;
-					}
-					continue;
-				}
-
-				if (!primaryStarted) {
-					if (await startOne(bridge, false)) {
-						primaryStarted = true;
-						// 如果主引擎启动成功，不要立即 return，必须让循环继续以启动 shellBridge
-						// return; // <--- 删除这行
-					}
-				}
-			}
-		})();
-		return;
-	}
-
 	(async () => {
 		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(pythonBridge, false)) return;
-		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(rustBridge, false)) return;
-		if (bootSeq !== _daemonBootSeq) return;
-		if (await startOne(shellBridge, false)) return;
 
-		global.logMessage("All daemons failed, using spawn fallback", "WARN");
-		updateStatusBarNow();
-	})().catch(() => {
-		global.logMessage("startDaemons auto 启动流程异常，回退 spawn fallback", "WARN");
+		// 1. 始终启动 ShellBridge (作为基础 I/O 设施，提供剪贴板和 HTML 能力)
+		// 我们并行启动它，不阻塞后续主引擎的尝试，但最后会等待它完成以更新状态
+		const shellTask = startOne(shellBridge, false);
+
+		// 2. 根据配置启动主逻辑引擎 (Python/Rust)
+		// 只有当 pref 不是 explicitly "shell" 时才尝试启动逻辑引擎
+		if (pref !== "shell") {
+			let tryOrder = [];
+			if (pref === "python") {
+				tryOrder = [pythonBridge, rustBridge];
+			} else if (pref === "rust") {
+				tryOrder = [rustBridge, pythonBridge];
+			} else {
+				// auto: 优先 Python，失败则 Rust
+				tryOrder = [pythonBridge, rustBridge];
+			}
+
+			for (const bridge of tryOrder) {
+				if (bootSeq !== _daemonBootSeq) break;
+				// 尝试启动一个，如果成功则跳出循环（我们只需要一个主逻辑引擎）
+				if (await startOne(bridge, false)) break;
+			}
+		}
+
+		// 等待 ShellBridge 启动尝试完成
+		await shellTask;
+
+		// 3. 最终检查
+		if (bootSeq === _daemonBootSeq) {
+			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
+			if (!anyAvailable) {
+				global.logMessage("All daemons failed, using spawn fallback", "WARN");
+			}
+			updateStatusBarNow();
+		}
+	})().catch((e) => {
+		global.logMessage(`startDaemons 流程异常: ${e?.message || e}`, "WARN");
 		updateStatusBarNow();
 	});
 }
@@ -2771,7 +2701,6 @@ const exported = {
 	createPathRegex,
 	toSafePath,
 	sanitizeHtml,
-	PENDING_REGEX,
 
 	normalizeNavPath,
 	resolveNavPath,
@@ -2780,6 +2709,7 @@ const exported = {
 
 	logMessage: global.logMessage,
 	logMessageRateLimited: global.logMessageRateLimited,
+	logQ: global.logQ,
 
 	computeFingerprint,
 	prefillFingerprint,

@@ -314,6 +314,7 @@
     "cheerio": "1.0.0-rc.12",
     "docx": "^8.5.0",
     "docx-parser": "^0.2.1",
+    "image-size": "^2.0.2",
     "trash": "^7.2.0"
   },
   "devDependencies": {

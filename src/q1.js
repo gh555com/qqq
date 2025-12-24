@@ -90,22 +90,6 @@ let cleanFreakMode = false;
 let watermarkBase64 = null;
 const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
 
-const LOADING_SVG =
-    "data:image/svg+xml;base64," +
-    Buffer.from(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">
-  <circle cx="20" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0s"/>
-  </circle>
-  <circle cx="60" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.33s"/>
-  </circle>
-  <circle cx="100" cy="20" r="8" fill="#888">
-    <animate attributeName="opacity" values="1;0.3;1" dur="1s" repeatCount="indefinite" begin="0.66s"/>
-  </circle>
-</svg>`
-    ).toString("base64");
-
 // ==================== ★★★ 调度器（分层）★★★ ====================
 const probeScheduler =
     qqq?.probeScheduler && typeof qqq.probeScheduler.schedule === "function"
@@ -1070,7 +1054,6 @@ async function renderImages(editor) {
     const marginLeft = "100px";
 
     const pathRegex = qqq.createPathRegex();
-    const pendingRegex = new RegExp(qqq.PENDING_REGEX);
 
     const tasks = [];
     const newHideRanges = [];
@@ -1079,48 +1062,6 @@ async function renderImages(editor) {
     for (const range of visibleRanges) {
         const text = editor.document.getText(range);
         const rangeOffset = editor.document.offsetAt(range.start);
-
-        pendingRegex.lastIndex = 0;
-        let pm;
-        while ((pm = pendingRegex.exec(text))) {
-            const offset = rangeOffset + pm.index;
-            const pos = editor.document.positionAt(offset);
-            const endPos = editor.document.positionAt(offset + pm[0].length);
-            const uniqueKey = `${pos.line}_${pos.character}`;
-
-            newHideRanges.push(new vscode.Range(pos, endPos));
-
-            if (!currentDecos.has(uniqueKey)) {
-                const { width: pW, height: pH } = getFrameConfig(null);
-                const boxWidth = pW + PREVIEW_BORDER;
-                const boxHeight = pH + PREVIEW_BORDER;
-
-                const loadingDeco = {
-                    range: new vscode.Range(pos.line, 0, pos.line, 0),
-                    renderOptions: {
-                        after: {
-                            contentText: "",
-                            position: "absolute",
-                            left: marginLeft,
-                            top: "0px",
-                            width: `${boxWidth}px`,
-                            height: `${boxHeight}px`,
-                            padding: "2px",
-                            border: "1px dashed #888",
-                            backgroundColor: PREVIEW_BG_COLOR,
-                            zIndex: -1,
-                            textDecoration:
-                                `none; pointer-events: none; display: inline-block; ` +
-                                `background-image: url("${LOADING_SVG}"); ` +
-                                `background-size: 120px 40px; ` +
-                                `background-position: center center; ` +
-                                `background-repeat: no-repeat;`,
-                        },
-                    },
-                };
-                currentDecos.set(uniqueKey, loadingDeco);
-            }
-        }
 
         pathRegex.lastIndex = 0;
         let match;
@@ -1255,27 +1196,30 @@ async function formatResultToText(result, editor) {
     const docDir = path.dirname(doc.uri.fsPath);
     let replacement = "";
 
-    if (result.type === "html_blocks" && result.blocks?.length) {
+    if ((result.type === "html_blocks" || result.type === "skeleton") && result.blocks?.length) {
         const blocks = result.blocks;
         const finalContent = [];
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
             if (block.type === "text" && block.text) {
                 finalContent.push(block.text);
-            } else if (block.type === "media" && block.path) {
-                const filePath = block.path;
-                if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
-                const relPath = qqq.toSafePath(path.relative(docDir, filePath));
-                const isLastItem = i === blocks.length - 1;
-                let pxHeight = LARGE_PREVIEW_HEIGHT;
-                try {
-                    const info = await getMediaInfo(filePath, Date.now());
-                    const { height } = getFrameConfig(info);
-                    pxHeight = height;
-                } catch { }
-                const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
-                finalContent.push(`/\\${relPath}\\/${eol.repeat(gapBelow)}`);
-                invalidateFolderSizeCacheForPath(filePath);
+            } else if (block.type === "media") {
+                if (block.path) {
+                    const filePath = block.path;
+                    if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
+                    const relPath = qqq.toSafePath(path.relative(docDir, filePath));
+                    const isLastItem = i === blocks.length - 1;
+                    let pxHeight = LARGE_PREVIEW_HEIGHT;
+                    try {
+                        const info = await getMediaInfo(filePath, Date.now());
+                        const { height } = getFrameConfig(info);
+                        pxHeight = height;
+                    } catch { }
+                    const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
+                    finalContent.push(`/\\${relPath}\\/${eol.repeat(gapBelow)}`);
+                    invalidateFolderSizeCacheForPath(filePath);
+                }
+                // Skip pending blocks
             }
         }
         replacement = finalContent.join(eol);
@@ -1368,81 +1312,26 @@ async function executeClipboardCommand() {
 
     const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 
-    // 状态追踪
-    let insertedRange = null;
-    let lastInsertedText = "";
-    let updateChain = Promise.resolve();
+    // ★ 最终版策略：静默等待，单次插入
+    // 没有中间状态，没有占位符，没有多次更新。
+    // 如果是 HTML，用户会感觉“没反应”几秒钟，然后最终结果突然出现。
 
-    // Race to Success & Upgrade!
-    await qqq.raceClipboard(targetDir, (result, priority) => {
-        // 串行化更新操作，防止竞态条件导致 range 错乱
-        updateChain = updateChain.then(async () => {
-            const newText = await formatResultToText(result, editor);
-            if (!newText && result.type !== "text") return; // 允许空文本用于占位清除? 不，这里如果有结果通常是有内容的
+    await qqq.raceClipboard(targetDir, async (result, priority) => {
+        const newText = await formatResultToText(result, editor);
+        if (!newText) return;
 
-            // 如果 newText 为空且 type=text，可能是空剪贴板，忽略
-            if (!newText) return;
+        const activeEditor = vscode.window.activeTextEditor;
+        if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
 
-            const activeEditor = vscode.window.activeTextEditor;
-            if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
+        // 此时光标可能已经移动，我们需要获取最新的光标位置
+        const currentPos = activeEditor.selection.active;
 
-            await activeEditor.edit((editBuilder) => {
-                if (insertedRange) {
-                    editBuilder.replace(insertedRange, newText);
-                } else {
-                    editBuilder.insert(activeEditor.selection.active, newText);
-                }
-            });
-
-            // 更新 range 追踪
-            if (insertedRange) {
-                const startPos = insertedRange.start;
-                const lines = newText.split(/\r?\n/);
-                const lineCount = lines.length - 1;
-                const lastLineLen = lines[lines.length - 1].length;
-
-                let endLine = startPos.line + lineCount;
-                let endChar = (lineCount === 0 ? startPos.character : 0) + lastLineLen;
-
-                insertedRange = new vscode.Range(startPos, new vscode.Position(endLine, endChar));
-            } else {
-                // 首次插入，起始点是之前的 selection.active
-                // 注意：activeEditor.selection.active 在 edit 后可能已经变了（光标跟随）
-                // 但我们需要的是插入内容的起始位置。
-                // 如果我们假设用户没有乱动光标，edit.insert 处的 selection.active 是对的。
-                // 但因为我们是在 Promise chain 里，selection.active 可能变了。
-                // 更好的方式：记录初始的 insertPosition
-                // 但这里为了简化，我们假设 edit 发生时 selection 是正确的，或者我们应该在 edit 前捕获它？
-                // 不，editBuilder.insert 用的 position 必须是实时的或者预先计算的。
-                // 修正：首次插入时，insertedRange 是 null。我们用 activeEditor.selection.active。
-                // 插入后，我们用 newText 计算 range。
-                // 唯一风险：用户在 Race 1 和 Race 2 之间移动了光标。
-                // 但 insertedRange 是基于 Position 对象（Line/Char），如果用户在 *前面* 插入文本，Line 可能会变。
-                // 这是一个已知限制，但通常 Race 2 很快，或者用户粘贴后会停顿。
-
-                const startPos = activeEditor.selection.active;
-                // 这里的 startPos 是在 edit *执行前* 获取的。
-                // 实际上 editBuilder.insert(activeEditor.selection.active) 使用的是执行时的 selection。
-                // 我们需要获取 *真正* 插入的位置。
-                // 这在 VS Code API 中很难完美同步。
-                // 妥协：我们记录 startPos = activeEditor.selection.active。
-
-                const lines = newText.split(/\r?\n/);
-                const lineCount = lines.length - 1;
-                const lastLineLen = lines[lines.length - 1].length;
-
-                let endLine = startPos.line + lineCount;
-                let endChar = (lineCount === 0 ? startPos.character : 0) + lastLineLen;
-
-                insertedRange = new vscode.Range(startPos, new vscode.Position(endLine, endChar));
-            }
-
-            lastInsertedText = newText;
-            debounceRender(activeEditor, 10);
+        await activeEditor.edit((editBuilder) => {
+            editBuilder.insert(currentPos, newText);
         });
-    });
 
-    await updateChain;
+        debounceRender(activeEditor, 10);
+    });
 }
 
 // ==================== 整洁模式 ====================
