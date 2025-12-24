@@ -1260,55 +1260,89 @@ async function peekClipboardRichFast() {
 	})());
 
 	// 等待所有探测结果（最长等待 CLIPBOARD_PEEK_TIMEOUT_MS）
-	// 使用 Promise.allSettled 还是 Promise.race?
-	// 为了“快”，我们应该用 Promise.all，但设置较短的超时。
-	// 或者，只要有一个检测到了，就立刻返回？不行，得看优先级。
-	// 实际上，只要检测到 HTML，就应该立即返回。
+	// ★ 极致优化：使用 "Race to Success" 模式
+	// 只要任意一个 Promise 返回了有效结果（非 null），立即 resolve，不再等待其他慢速结果。
+	// 只有当所有 Promise 都 resolve 为 null (或 reject) 时，才返回 null。
+
+	const raceToSuccess = (promises) => {
+		return new Promise((resolve) => {
+			let failureCount = 0;
+			let resolved = false;
+
+			if (promises.length === 0) {
+				resolve(null);
+				return;
+			}
+
+			promises.forEach(p => {
+				Promise.resolve(p).then(res => {
+					if (resolved) return;
+					if (res !== null) {
+						resolved = true;
+						resolve(res); // 发现有效结果，立即返回！
+					} else {
+						failureCount++;
+						if (failureCount === promises.length) {
+							resolve(null); // 全部失败
+						}
+					}
+				}).catch(() => {
+					if (resolved) return;
+					failureCount++;
+					if (failureCount === promises.length) {
+						resolve(null);
+					}
+				});
+			});
+		});
+	};
 
 	try {
-		// 这里简单处理：并行执行，等待所有结果完成（因为都很快，且有超时控制）
-		const results = await Promise.all(promises);
-
-		// 筛选出有效结果
-		const valid = results.filter(r => r !== null);
-
-		if (valid.length > 0) {
-			// 按优先级排序：HTML (100) > Node HTML (80) > Python Files (50)
-			valid.sort((a, b) => (b.priority || 0) - (a.priority || 0));
-			return valid[0];
-		}
-
-		// 如果都没检测到，但用户配置了 shell 引擎，最后尝试全面的 shell 检查
-		if (order.includes("shell") && shellBridge?.isAvailable && shellBridge.isAvailable()) {
-			// ... (原有逻辑保留，作为最后防线)
-		}
-
+		return await raceToSuccess(promises);
 	} catch { }
 
 	return null;
 }
 
-if (order.includes("shell")) {
-	try {
-		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
-			const hasFiles = await shellBridge.call("hasFiles", {}, 200);
-			const hasImg = await shellBridge.call("hasImage", {}, 200);
-			const hasHtml = await shellBridge.call("hasHtml", {}, 200);
-
-			if (hasFiles?.value || hasImg?.value || hasHtml?.value) {
-				return {
-					type: "peek",
-					has_html: !!hasHtml?.value,
-					has_files: !!hasFiles?.value,
-					has_image: !!hasImg?.value,
-					has_text: false,
-				};
-			}
+async function raceClipboard(targetDir, callback) {
+	let maxPriority = 0;
+	const update = (res, pri) => {
+		if (pri > maxPriority) {
+			maxPriority = pri;
+			callback(res, pri);
 		}
-	} catch { }
-}
+	};
 
-return null;
+	// Race 1: Pure Text (VS Code API) - Priority 10
+	// 立即获取纯文本，作为最快的反馈
+	const pFast = (async () => {
+		try {
+			const text = await vscode.env.clipboard.readText();
+			if (text) {
+				update({ type: "text", text }, 10);
+			}
+		} catch { }
+	})();
+
+	// Race 2: The Heavy Machinery - Priority 30
+	// 启动慢速但强大的引擎检测 (Shell/Python/Node)
+	const pSlow = (async () => {
+		try {
+			const res = await handleClipboardSlow(targetDir);
+			if (res) {
+				let pri = 30;
+				// 如果慢速结果也是纯文本，优先级略高于快速文本（可能经过了净化?）
+				// 但通常慢速结果是 Image/Files/HTML，优先级最高
+				if (res.type === "text") pri = 20;
+				else pri = 30;
+				update(res, pri);
+			}
+		} catch (e) {
+			global.logMessage(`Race slow failed: ${e.message}`, "WARN");
+		}
+	})();
+
+	await Promise.all([pFast, pSlow]);
 }
 
 async function handleClipboardFast() {
@@ -1333,15 +1367,32 @@ async function handleClipboardSlow(targetDir) {
 
 		// ★ 智能调整：如果检测到 HTML 内容，优先使用 Node 引擎 (ShellBridge) 处理
 		// 因为 Python/Rust 引擎可能只处理了文件/图片，而忽略了 HTML 文本
+		let detectedHtml = false;
 		try {
 			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+				// 复用 hasHtml，这里 300ms 足够，因为 shellBridge 已经极其优化
 				const hasHtmlRes = await shellBridge.call("hasHtml", {}, 300);
 				if (hasHtmlRes && hasHtmlRes.value) {
-					// 发现 HTML，将 node 提升到首位
-					order = ["node", ...order.filter(e => e !== "node")];
+					detectedHtml = true;
 				}
 			}
 		} catch { }
+
+		// 如果 Shell 没检测到，尝试用 VS Code API 再次确认 (双重保险)
+		if (!detectedHtml) {
+			try {
+				const text = await vscode.env.clipboard.readText();
+				if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
+					detectedHtml = true;
+				}
+			} catch { }
+		}
+
+		if (detectedHtml) {
+			// 发现 HTML，强制将 node 提升到首位，确保由 Node 处理富文本
+			// 否则 Python 引擎会接管并只返回纯文本或空
+			order = ["node", ...order.filter(e => e !== "node")];
+		}
 
 		// ------------------------------------------------------------------------
 		// ★ 方案 A: 预判拦截（Pre-check）
@@ -2756,6 +2807,8 @@ const exported = {
 	createPendingToken,
 	registerPendingJob,
 	resolvePendingJob,
+
+	raceClipboard,
 
 	probeScheduler,
 	genScheduler,

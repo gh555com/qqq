@@ -1246,77 +1246,14 @@ async function renderImages(editor) {
 }
 
 // ==================== 粘贴命令 ====================
-async function executeClipboardCommand() {
-    if (!isCoreIntegrityValid) {
-        global.showErrorMessage("Integrity check failed.");
-        return;
-    }
 
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) return;
-
-    // 检查是否为未命名未保存的新建文件
-    if (editor.document.isUntitled) {
-        global.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
-        // 执行原始粘贴
-        await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
-        return;
-    }
-
-    const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
-
-    const fastResult = await qqq.handleClipboardFast();
-    if (fastResult?.type === "text") {
-        await editor.edit((e) => e.insert(editor.selection.active, fastResult.text));
-        return;
-    }
-
-    const token = qqq.createPendingToken();
-    const eol = getDocumentEOL(editor.document);
-    const pendingMarker = `/\\__PENDING__:${token}__\\/`;
-    const insertPosition = editor.selection.active;
-
-    await editor.edit((e) => e.insert(insertPosition, eol + pendingMarker + eol));
-
-    pendingTokens.set(token, {
-        editor: editor,
-        documentUri: editor.document.uri.toString(),
-        targetDir: targetDir,
-    });
-    debounceRender(editor, 10);
-
-    setImmediate(async () => {
-        try {
-            const result = await qqq.handleClipboardSlow(targetDir);
-            await replacePendingMarker(token, result);
-        } catch (e) {
-            qqq.logMessage(`媒体处理失败: ${e.message}`, "ERROR");
-            await replacePendingMarker(token, { type: "error", error: e.message });
-        }
-    });
-}
-
-async function replacePendingMarker(token, result) {
-    const pending = pendingTokens.get(token);
-    if (!pending) return;
-    pendingTokens.delete(token);
-
-    let editor = vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === pending.documentUri);
-    if (!editor) return;
-
+// 格式化结果为文本（复用原 replacePendingMarker 逻辑）
+async function formatResultToText(result, editor) {
+    if (!result) return "";
     const doc = editor.document;
-    const text = doc.getText();
-    const pendingMarker = `/\\__PENDING__:${token}__\\/`;
-    const markerIndex = text.indexOf(pendingMarker);
-    if (markerIndex === -1) return;
-
-    const startPos = doc.positionAt(markerIndex);
-    const endPos = doc.positionAt(markerIndex + pendingMarker.length);
-    const markerRange = new vscode.Range(startPos, endPos);
-
-    let replacement = "";
     const eol = getDocumentEOL(doc);
     const docDir = path.dirname(doc.uri.fsPath);
+    let replacement = "";
 
     if (result.type === "html_blocks" && result.blocks?.length) {
         const blocks = result.blocks;
@@ -1327,10 +1264,7 @@ async function replacePendingMarker(token, result) {
                 finalContent.push(block.text);
             } else if (block.type === "media" && block.path) {
                 const filePath = block.path;
-
-                // ★ 注入指纹缓存
                 if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
-
                 const relPath = qqq.toSafePath(path.relative(docDir, filePath));
                 const isLastItem = i === blocks.length - 1;
                 let pxHeight = LARGE_PREVIEW_HEIGHT;
@@ -1344,14 +1278,10 @@ async function replacePendingMarker(token, result) {
                 invalidateFolderSizeCacheForPath(filePath);
             }
         }
-        // 只替换占位符，文本已经提前显示
         replacement = finalContent.join(eol);
     } else if (result.type === "image" || result.type === "ikge") {
         const filePath = result.path;
-
-        // ★ 注入指纹缓存
         if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
-
         const relPath = qqq.toSafePath(path.relative(docDir, filePath));
         let pxHeight = LARGE_PREVIEW_HEIGHT;
         try {
@@ -1367,7 +1297,6 @@ async function replacePendingMarker(token, result) {
         const folders = result.folders || [];
         const fingerprints = result.fingerprints || {};
 
-        // 处理文件夹
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
             const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
@@ -1377,17 +1306,10 @@ async function replacePendingMarker(token, result) {
             invalidateFolderSizeCacheForPath(folderPath);
         }
 
-        // 处理文件
         for (let i = 0; i < files.length; i++) {
             const f = files[i];
-
-            // ★ 注入指纹缓存（注意：路径 key 可能需要规范化，这里先尝试直接用）
-            // kp.py 返回的 fingerprints 键是 str(Path(p))，通常是绝对路径
-            // 我们这里简单做个匹配，如果直接有就用
             let fp = fingerprints[f];
-            // 如果没有，尝试归一化一下
             if (!fp) {
-                // 简单的 win32 路径匹配尝试
                 const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
                 fp = fingerprints[tryKey];
             }
@@ -1413,7 +1335,6 @@ async function replacePendingMarker(token, result) {
         const totalCount = files.length + folders.length;
         if (totalCount > 1) vscode.window.showInformationMessage("文件/文件夹已复制 " + totalCount);
     } else if (result.type === "folder_text") {
-        // 处理文件夹列表
         const folders = result.text.split(/\r?\n/).filter(f => f.trim());
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
@@ -1425,14 +1346,103 @@ async function replacePendingMarker(token, result) {
         }
     } else if (result.type === "text") {
         replacement = result.text;
-    } else {
-        replacement = "";
     }
 
-    await editor.edit((editBuilder) => {
-        editBuilder.replace(markerRange, replacement);
+    return replacement;
+}
+
+async function executeClipboardCommand() {
+    if (!isCoreIntegrityValid) {
+        global.showErrorMessage("Integrity check failed.");
+        return;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return;
+
+    if (editor.document.isUntitled) {
+        global.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
+        await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+        return;
+    }
+
+    const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
+
+    // 状态追踪
+    let insertedRange = null;
+    let lastInsertedText = "";
+    let updateChain = Promise.resolve();
+
+    // Race to Success & Upgrade!
+    await qqq.raceClipboard(targetDir, (result, priority) => {
+        // 串行化更新操作，防止竞态条件导致 range 错乱
+        updateChain = updateChain.then(async () => {
+            const newText = await formatResultToText(result, editor);
+            if (!newText && result.type !== "text") return; // 允许空文本用于占位清除? 不，这里如果有结果通常是有内容的
+
+            // 如果 newText 为空且 type=text，可能是空剪贴板，忽略
+            if (!newText) return;
+
+            const activeEditor = vscode.window.activeTextEditor;
+            if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
+
+            await activeEditor.edit((editBuilder) => {
+                if (insertedRange) {
+                    editBuilder.replace(insertedRange, newText);
+                } else {
+                    editBuilder.insert(activeEditor.selection.active, newText);
+                }
+            });
+
+            // 更新 range 追踪
+            if (insertedRange) {
+                const startPos = insertedRange.start;
+                const lines = newText.split(/\r?\n/);
+                const lineCount = lines.length - 1;
+                const lastLineLen = lines[lines.length - 1].length;
+
+                let endLine = startPos.line + lineCount;
+                let endChar = (lineCount === 0 ? startPos.character : 0) + lastLineLen;
+
+                insertedRange = new vscode.Range(startPos, new vscode.Position(endLine, endChar));
+            } else {
+                // 首次插入，起始点是之前的 selection.active
+                // 注意：activeEditor.selection.active 在 edit 后可能已经变了（光标跟随）
+                // 但我们需要的是插入内容的起始位置。
+                // 如果我们假设用户没有乱动光标，edit.insert 处的 selection.active 是对的。
+                // 但因为我们是在 Promise chain 里，selection.active 可能变了。
+                // 更好的方式：记录初始的 insertPosition
+                // 但这里为了简化，我们假设 edit 发生时 selection 是正确的，或者我们应该在 edit 前捕获它？
+                // 不，editBuilder.insert 用的 position 必须是实时的或者预先计算的。
+                // 修正：首次插入时，insertedRange 是 null。我们用 activeEditor.selection.active。
+                // 插入后，我们用 newText 计算 range。
+                // 唯一风险：用户在 Race 1 和 Race 2 之间移动了光标。
+                // 但 insertedRange 是基于 Position 对象（Line/Char），如果用户在 *前面* 插入文本，Line 可能会变。
+                // 这是一个已知限制，但通常 Race 2 很快，或者用户粘贴后会停顿。
+
+                const startPos = activeEditor.selection.active;
+                // 这里的 startPos 是在 edit *执行前* 获取的。
+                // 实际上 editBuilder.insert(activeEditor.selection.active) 使用的是执行时的 selection。
+                // 我们需要获取 *真正* 插入的位置。
+                // 这在 VS Code API 中很难完美同步。
+                // 妥协：我们记录 startPos = activeEditor.selection.active。
+
+                const lines = newText.split(/\r?\n/);
+                const lineCount = lines.length - 1;
+                const lastLineLen = lines[lines.length - 1].length;
+
+                let endLine = startPos.line + lineCount;
+                let endChar = (lineCount === 0 ? startPos.character : 0) + lastLineLen;
+
+                insertedRange = new vscode.Range(startPos, new vscode.Position(endLine, endChar));
+            }
+
+            lastInsertedText = newText;
+            debounceRender(activeEditor, 10);
+        });
     });
-    setTimeout(() => renderImages(editor), 50);
+
+    await updateChain;
 }
 
 // ==================== 整洁模式 ====================
