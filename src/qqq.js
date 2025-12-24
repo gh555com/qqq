@@ -1941,59 +1941,107 @@ async function handleClipboardNode(targetDir) {
 			return null;
 		}
 
-		const blocks = [];
-		let currentText = "";
+		// ★ 跳出范式：不使用 HTML 里的文本，而是用 readText 的纯文本
+		// 我们只利用 HTML 来提取图片和推断图片的大致位置
+		const cleanText = await vscode.env.clipboard.readText() || "";
+		// 按换行符分割，并去除两端空白，过滤掉空行以便与 HTML 结构对齐
+		const cleanLines = cleanText.split(/\r?\n/);
+		let cleanLineIndex = 0;
 
-		function flushText() {
-			if (currentText) {
-				blocks.push({ type: "text", text: currentText });
-				currentText = "";
+		const blocks = [];
+		let currentBlockHasText = false;
+		let currentBlockImages = [];
+
+		// 辅助：提交当前 Block
+		function flushBlock() {
+			// 1. 先处理文本
+			if (currentBlockHasText) {
+				// 尝试从 cleanText 中提取一行或多行非空文本
+				// 简单的贪婪匹配：只要 cleanLines 还有内容，就取出一行
+				// 如果 HTML 里的这个 Block 是 "长文本"，可能对应 cleanText 的多行？
+				// 这里简化策略：一个 HTML Block 对应 cleanText 中的 "一段" (直到下一个空行? 或者就一行?)
+				// 最稳妥策略：只要 HTML Block 有文本，我们就从 cleanLines 里取出一行 "非空行"
+				// 如果 cleanLines 里全是空行了，那就取不到文本了。
+
+				while (cleanLineIndex < cleanLines.length) {
+					const line = cleanLines[cleanLineIndex++];
+					// 如果是空行，可能是段落间距，跳过，直到找到有内容的行
+					// 或者，我们保留空行作为间距？
+					// 既然是 "cleanText"，每一行都很重要。
+					// 让我们改一下策略：
+					// 每次 HTML Block 结束，我们就输出 "一段" cleanText。
+					// 但是 "一段" 是多少？
+
+					// 重新思考：HTML 的 <p> 对应 cleanText 的 "视觉段落"。
+					// cleanText 的 "视觉段落" 通常由空行分隔。
+					// 比如: Line1 \n \n Line2
+
+					// 让我们尝试 "非空行匹配"：
+					// 每个 HTML Block (有 Text) 消耗掉 cleanLines 里的一个 "非空行"。
+					if (line && line.trim()) {
+						blocks.push({ type: "text", text: line });
+						break;
+					} else {
+						// 如果是空行，我们也保留它作为格式？
+						// 是的，保留空行比较好。
+						blocks.push({ type: "text", text: "" }); // 空行
+					}
+				}
 			}
+
+			// 2. 再处理图片 (通常图片在文字后，或者独立)
+			for (const img of currentBlockImages) {
+				blocks.push(img);
+			}
+
+			currentBlockHasText = false;
+			currentBlockImages = [];
 		}
 
 		const root = $('body').length ? $('body') : $.root();
 
-		function linearWalk(ctx) {
+		// 递归遍历，寻找 Block 边界
+		function structuralWalk(ctx) {
 			$(ctx).contents().each((i, el) => {
 				if (el.type === 'text') {
-					const t = $(el).text();
-					// 保留必要的空格，但去除控制字符
-					const clean = t.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-					if (clean) {
-						currentText += clean;
+					if ($(el).text().trim().length > 0) {
+						currentBlockHasText = true;
 					}
 				} else if (el.type === 'tag') {
-					if (el.name === 'img') {
-						// ★ 升级：使用 _collectElementUrls 支持 srcset/data-srcset 自动择优
+					const tagName = el.name.toLowerCase();
+					const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(tagName);
+					const isBr = tagName === 'br';
+					const isImg = tagName === 'img';
+
+					if (isImg) {
 						const urls = _collectElementUrls($(el), false);
 						if (urls && urls.length > 0) {
-							flushText();
-							// 优先取第一个（通常是 srcset 中最高清的，或者 src/data-src）
-							blocks.push({ type: "media", kind: "image", src: urls[0], status: "pending" });
+							// 暂存图片，等待 Block 结束时一起输出
+							currentBlockImages.push({ type: "media", kind: "image", src: urls[0], status: "pending" });
 						}
 					} else {
-						const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(el.name);
+						structuralWalk(el);
+					}
 
-						linearWalk(el);
-
-						if (el.name === 'br') {
-							currentText += '\n';
-						} else if (isBlock) {
-							// 块级元素结束，确保换行
-							if (currentText && !currentText.endsWith('\n')) currentText += '\n';
-						}
+					if (isBlock || isBr) {
+						flushBlock();
 					}
 				}
 			});
 		}
 
-		linearWalk(root);
-		flushText();
+		structuralWalk(root);
+		flushBlock(); // 处理最后的残余
+
+		// 如果 cleanLines 还有剩余的文本（因为 HTML 结构可能比文本少，比如 HTML 解析提前结束），全部追加到后面
+		while (cleanLineIndex < cleanLines.length) {
+			const line = cleanLines[cleanLineIndex++];
+			blocks.push({ type: "text", text: line });
+		}
 
 		const hasMedia = blocks.some(b => b.type === "media");
-		if (!hasMedia && blocks.length === 0) { // 只有当 blocks 彻底为空时才降级
-			const text = await vscode.env.clipboard.readText();
-			return { type: "text", text: text || "" };
+		if (!hasMedia && blocks.length === 0) {
+			return { type: "text", text: cleanText || "" };
 		}
 
 		const pendingTasks = [];
