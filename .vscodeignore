@@ -7,7 +7,7 @@
 .gitignore
 .qoder/**
 .git/**
-.trae/
+.trae/**
 
 
 # 防止套娃！忽略打包生成的安装包
