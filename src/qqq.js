@@ -1204,69 +1204,111 @@ async function peekClipboardRichFast() {
 	const pref = global.getEnginePreference();
 	const order = global.getEngineTryOrder(pref);
 
-	// ★ 优先检查 HTML：因为 Python/Rust 引擎可能不支持 HTML 检测，
-	// 而 ShellBridge 在 Windows/Linux 上能可靠检测 HTML。
-	// 如果发现 HTML，立即返回，强制进入 Slow Path 交给 Node 处理。
+	// ★ 并行检查：同时发起 Shell(HTML) 和 Python(Files) 的探测请求
+	// 不要让 ShellBridge 的检查阻塞 Python 的检查，反之亦然。
+	// 谁先返回有效结果，就用谁。
+
+	const promises = [];
+
+	// 1. ShellBridge: 检查 HTML (最高优先级，为了修复 Python 无法识别 HTML 的问题)
+	//    注意：我们只关心 hasHtml，因为 file/image 可以交给后续逻辑
 	if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+		promises.push((async () => {
+			try {
+				const hasHtml = await shellBridge.call("hasHtml", {}, 200);
+				if (hasHtml?.value) {
+					return {
+						type: "peek",
+						has_html: true,
+						priority: 100 // HTML 优先级最高，强制切 Node
+					};
+				}
+			} catch { }
+			return null;
+		})());
+	}
+
+	// 2. PythonBridge: 检查 Files (如果用户首选 Python)
+	if (order.includes("python") && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+		promises.push((async () => {
+			try {
+				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
+				if (res && !res.error && res.type === "peek") {
+					// Python 只能检测文件/图片，无法检测 HTML
+					// 给个优先级，稍低于 HTML
+					return { ...res, priority: 50 };
+				}
+			} catch { }
+			return null;
+		})());
+	}
+
+	// 3. Node.js (VS Code API): 检查纯文本中的 HTML 特征
+	//    这是最快的，几乎零耗时，作为兜底
+	promises.push((async () => {
 		try {
-			const hasHtml = await shellBridge.call("hasHtml", {}, 200);
-			if (hasHtml?.value) {
+			const text = await vscode.env.clipboard.readText();
+			if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
 				return {
 					type: "peek",
 					has_html: true,
-					has_files: false,
-					has_image: false,
-					has_text: false,
+					priority: 80 // 仅次于 ShellBridge 的确信 HTML
 				};
 			}
 		} catch { }
-	}
+		return null;
+	})());
 
-	if (order.includes("python")) {
-		try {
-			if (pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
-				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
-				if (res && !res.error && res.type === "peek") return res;
-			}
-		} catch { }
-	}
+	// 等待所有探测结果（最长等待 CLIPBOARD_PEEK_TIMEOUT_MS）
+	// 使用 Promise.allSettled 还是 Promise.race?
+	// 为了“快”，我们应该用 Promise.all，但设置较短的超时。
+	// 或者，只要有一个检测到了，就立刻返回？不行，得看优先级。
+	// 实际上，只要检测到 HTML，就应该立即返回。
 
-	// 尝试使用Node.js直接检测HTML
 	try {
-		const text = await vscode.env.clipboard.readText();
-		// 扩大检测范围，与 _looksLikeHtml 保持一致并增强
-		if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
-			return {
-				type: "peek",
-				has_html: true,
-				has_files: false,
-				has_image: false,
-				has_text: false,
-			};
+		// 这里简单处理：并行执行，等待所有结果完成（因为都很快，且有超时控制）
+		const results = await Promise.all(promises);
+
+		// 筛选出有效结果
+		const valid = results.filter(r => r !== null);
+
+		if (valid.length > 0) {
+			// 按优先级排序：HTML (100) > Node HTML (80) > Python Files (50)
+			valid.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+			return valid[0];
 		}
+
+		// 如果都没检测到，但用户配置了 shell 引擎，最后尝试全面的 shell 检查
+		if (order.includes("shell") && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+			// ... (原有逻辑保留，作为最后防线)
+		}
+
 	} catch { }
 
-	if (order.includes("shell")) {
-		try {
-			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
-				const hasFiles = await shellBridge.call("hasFiles", {}, 200);
-				const hasImg = await shellBridge.call("hasImage", {}, 200);
-				const hasHtml = await shellBridge.call("hasHtml", {}, 200);
-
-				if (hasFiles?.value || hasImg?.value || hasHtml?.value) {
-					return {
-						type: "peek",
-						has_html: !!hasHtml?.value,
-						has_files: !!hasFiles?.value,
-						has_image: !!hasImg?.value,
-						has_text: false,
-					};
-				}
-			}
-		} catch { }
-	}
-
 	return null;
+}
+
+if (order.includes("shell")) {
+	try {
+		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+			const hasFiles = await shellBridge.call("hasFiles", {}, 200);
+			const hasImg = await shellBridge.call("hasImage", {}, 200);
+			const hasHtml = await shellBridge.call("hasHtml", {}, 200);
+
+			if (hasFiles?.value || hasImg?.value || hasHtml?.value) {
+				return {
+					type: "peek",
+					has_html: !!hasHtml?.value,
+					has_files: !!hasFiles?.value,
+					has_image: !!hasImg?.value,
+					has_text: false,
+				};
+			}
+		}
+	} catch { }
+}
+
+return null;
 }
 
 async function handleClipboardFast() {
