@@ -1011,6 +1011,7 @@ function Process-Command {
       'ping' { $result.status = 'alive' }
       'hasImage' { $result.value = [System.Windows.Forms.Clipboard]::ContainsImage() }
       'hasFiles' { $result.value = [System.Windows.Forms.Clipboard]::ContainsFileDropList() }
+      'hasHtml' { $result.value = [System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html) }
       'getFiles' {
         $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
         $result.files = @()
@@ -1020,6 +1021,9 @@ function Process-Command {
         $img = [System.Windows.Forms.Clipboard]::GetImage()
         if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
         else { $result.success = $false }
+      }
+      'getHtml' {
+        $result.value = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html)
       }
       default { $result.error = "unknown action" }
     }
@@ -1229,7 +1233,19 @@ async function handleClipboardSlow(targetDir) {
 	return _pasteQueue.enqueue(async () => {
 		const timeoutMs = CLIPBOARD_SLOW_TIMEOUT_MS;
 		const pref = global.getEnginePreference();
-		const order = global.getEngineTryOrder(pref);
+		let order = global.getEngineTryOrder(pref);
+
+		// ★ 智能调整：如果检测到 HTML 内容，优先使用 Node 引擎 (ShellBridge) 处理
+		// 因为 Python/Rust 引擎可能只处理了文件/图片，而忽略了 HTML 文本
+		try {
+			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+				const hasHtmlRes = await shellBridge.call("hasHtml", {}, 300);
+				if (hasHtmlRes && hasHtmlRes.value) {
+					// 发现 HTML，将 node 提升到首位
+					order = ["node", ...order.filter(e => e !== "node")];
+				}
+			}
+		} catch { }
 
 		// ------------------------------------------------------------------------
 		// ★ 方案 A: 预判拦截（Pre-check）
