@@ -36,6 +36,7 @@ const CACHE_DIR_NAME = "qqq_cache";
 const META_FILE_NAME = "meta.json";
 const CACHE_MAX_SIZE = 40 * 1024 * 1024;
 const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
+const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
 
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
@@ -719,25 +720,122 @@ async function handleClipboardFast() {
 	return null;
 }
 
-async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null) {
+
+function formatBytes(size) {
+	if (size == null || isNaN(size)) return "?";
+	const units = ["B", "KB", "MB", "GB"];
+	let idx = 0;
+	let val = size;
+	while (val >= 1024 && idx < units.length - 1) {
+		val /= 1024;
+		idx++;
+	}
+	return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
+}
+
+function getPathSize(p) {
+	try {
+		const stat = fs.statSync(p);
+		if (stat.isDirectory()) {
+			const files = fs.readdirSync(p);
+			return files.reduce((acc, f) => acc + getPathSize(path.join(p, f)), 0);
+		}
+		return stat.size;
+	} catch { return 0; }
+}
+
+async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null, partialCallback = null, token = null) {
 	return pasteQueue.enqueue(async () => {
+		if (token?.isCancellationRequested) return null;
+
+		// ★ 1. HTML: 总是显示进度条 (Complex Paste)
+		if (typeHint === "html") {
+			return await global.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: "qqq: 正在粘贴 HTML...",
+				cancellable: true
+			}, async (progress, newTok) => {
+				newTok.onCancellationRequested(() => {
+					global.logMessage("HTML 粘贴被用户取消", "WARN");
+				});
+
+				// 适配 progressCallback
+				const progCb = (pct, msg) => {
+					progress.report({ message: msg, increment: pct });
+				};
+
+				return await handleClipboardNode(targetDir, partialCallback, newTok, progCb);
+			});
+		}
+
+		// ★ 2. File: 超过阈值显示进度条 (Simple Paste)
 		if (typeHint === "file") {
-			if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
-				const filesRes = await shellBridge.call("getFiles", {}, 2000);
-				if (filesRes && filesRes.files && filesRes.files.length > 0) {
-					ensureDir(targetDir);
-					return await handleClipboardShell(targetDir);
+			let files = [];
+
+			// 优先尝试获取文件列表 (支持 Python 和 Shell 引擎)
+			const pref = global.getEnginePreference();
+			const order = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+
+			for (const engine of order) {
+				try {
+					if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+						const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
+						if (res && res.paths && res.paths.length > 0) {
+							files = res.paths;
+							break;
+						}
+					} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+						const res = await shellBridge.call("getFiles", {}, 2000);
+						if (res && res.files && res.files.length > 0) {
+							files = res.files;
+							break;
+						}
+					}
+				} catch { }
+			}
+
+			// 如果没找到，兜底尝试 ShellBridge (因为 shellBridge 可能不在 order 里但可用)
+			if (files.length === 0 && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+				try {
+					const res = await shellBridge.call("getFiles", {}, 2000);
+					files = res?.files || [];
+				} catch { }
+			}
+
+			let totalSize = 0;
+			if (files.length > 0) {
+				for (const f of files) {
+					totalSize += getPathSize(f);
 				}
 			}
-			return await handleClipboardShell(targetDir);
+
+			// 如果总大小超过阈值，或者文件数量特别多(>10)，开启进度条
+			if (totalSize > PASTE_SIZE_THRESHOLD || files.length > 10) {
+				const sizeStr = formatBytes(totalSize);
+				return await global.withProgress({
+					location: vscode.ProgressLocation.Notification,
+					title: `qqq: 正在粘贴文件 (${sizeStr})...`,
+					cancellable: true
+				}, async (progress, newTok) => {
+					newTok.onCancellationRequested(() => {
+						global.logMessage("文件粘贴被用户取消", "WARN");
+					});
+
+					const progCb = (pct, msg) => {
+						progress.report({ message: msg, increment: pct });
+					};
+
+					// 传入 preFetchedFiles (files) 和 totalSize 避免重复计算
+					return await handleClipboardShell(targetDir, newTok, progCb, files, totalSize);
+				});
+			} else {
+				// 小文件直接处理
+				return await handleClipboardShell(targetDir, token, null, files);
+			}
 		}
 
 		if (typeHint === "image") {
-			return await handleClipboardShell(targetDir);
-		}
-
-		if (typeHint === "html") {
-			return await handleClipboardNode(targetDir);
+			return await handleClipboardShell(targetDir, token, partialCallback);
 		}
 
 		return null;
@@ -1088,6 +1186,51 @@ async function _saveUrlToFile(url, targetDir) {
 	return null;
 }
 
+// ------------------------------------------------------------------------
+// ★ 异步流式拷贝（带进度监控 & 取消支持）
+// ------------------------------------------------------------------------
+async function copyFileWithProgress(src, dest, onProgress, token) {
+	return new Promise((resolve, reject) => {
+		if (token?.isCancellationRequested) return reject(new Error("cancelled"));
+
+		try {
+			const stat = fs.statSync(src);
+			const totalSize = stat.size;
+			let copiedSize = 0;
+
+			const readStream = fs.createReadStream(src);
+			const writeStream = fs.createWriteStream(dest);
+
+			readStream.on("error", reject);
+			writeStream.on("error", reject);
+
+			if (token) {
+				token.onCancellationRequested(() => {
+					readStream.destroy();
+					writeStream.destroy();
+					try { fs.unlinkSync(dest); } catch { }
+					reject(new Error("cancelled"));
+				});
+			}
+
+			readStream.on("data", (chunk) => {
+				copiedSize += chunk.length;
+				if (onProgress && totalSize > 0) {
+					onProgress(chunk.length, copiedSize, totalSize);
+				}
+			});
+
+			writeStream.on("finish", () => {
+				resolve();
+			});
+
+			readStream.pipe(writeStream);
+		} catch (e) {
+			reject(e);
+		}
+	});
+}
+
 /**
  * ★ 补齐：downloadImage
  * 仅负责下载并保存到指定路径，同时计算指纹
@@ -1105,14 +1248,43 @@ async function downloadImage(url, destPath) {
 }
 
 // ------------------------------------------------------------------------
-// ★ handleClipboardNode（修复语法错误：补齐 try/catch + 正确闭合）
+// ★ handleClipboardNode
 // ------------------------------------------------------------------------
-async function handleClipboardNode(targetDir) {
+async function handleClipboardNode(targetDir, partialCallback = null, token = null, progressCallback = null) {
 	try {
-		// 1. 尝试通过 Shell Bridge 获取 HTML
-		// 只要 ShellBridge 没挂 (available !== false)，就尝试获取，利用其强大的格式支持
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "正在解析 HTML...");
+
+		// 1. 尝试通过 Bridge 获取 HTML (Python/Rust/Shell)
 		let htmlText = null;
-		if (shellBridge && shellBridge.available !== false) {
+		const pref = global.getEnginePreference();
+		const order = global.getEngineTryOrder(pref);
+
+		for (const engine of order) {
+			try {
+				let res = null;
+				if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+					res = await pythonBridge.call("get_html", {}, 3000);
+				} else if (engine === "rust" && rustBridge?.isAvailable && rustBridge.isAvailable()) {
+					res = await rustBridge.call("get_html", {}, 3000);
+				} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+					res = await shellBridge.call("getHtml", {}, 5000);
+				}
+
+				if (res) {
+					if (res.value_base64) {
+						htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
+						break;
+					} else if (res.value) {
+						htmlText = res.value;
+						break;
+					}
+				}
+			} catch (e) { }
+		}
+
+		// 兜底尝试 ShellBridge
+		if (!htmlText && shellBridge && shellBridge.available !== false) {
 			try {
 				const res = await shellBridge.call("getHtml", {}, 5000);
 				if (res) {
@@ -1122,9 +1294,7 @@ async function handleClipboardNode(targetDir) {
 						htmlText = res.value;
 					}
 				}
-			} catch (e) {
-				global.logMessage(`Shell Bridge getHtml 失败: ${e.message}`, "WARN");
-			}
+			} catch (e) { }
 		}
 
 		// 2. Fallback: Spawn PowerShell (当 Daemon 失败时尝试冷启动获取)
@@ -1414,7 +1584,25 @@ async function handleClipboardNode(targetDir) {
 		}
 
 		if (pendingTasks.length > 0) {
-			await Promise.all(pendingTasks);
+			if (progressCallback) progressCallback(10, `发现 ${pendingTasks.length} 张图片，准备下载...`);
+
+			// 简单的并行下载，带进度汇报
+			let completedCount = 0;
+			const total = pendingTasks.length;
+
+			// 包装任务以支持进度
+			const wrappedTasks = pendingTasks.map(taskPromise => {
+				return taskPromise.then(() => {
+					completedCount++;
+					if (progressCallback) {
+						// 剩余 90% 的进度分给下载
+						const inc = 90 / total;
+						progressCallback(inc, `下载图片 ${completedCount}/${total}`);
+					}
+				});
+			});
+
+			await Promise.all(wrappedTasks);
 		}
 
 		// ★ 返回结构化数据，让 q1.js 负责最终的格式化（包含空行计算）
@@ -1429,13 +1617,44 @@ async function handleClipboardNode(targetDir) {
 // ★ 以下是辅助函数
 // ------------------------------------------------------------------------
 
-async function handleClipboardShell(targetDir) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
 	try {
+		if (token?.isCancellationRequested) return null;
 		if (process.platform === "win32") {
-			const hasFiles = await shellBridge.call("hasFiles", {}, 2000);
-			if (hasFiles?.value) {
-				const filesRes = await shellBridge.call("getFiles", {}, 3000);
-				const files = filesRes?.files || [];
+			let files = preFetchedFiles;
+			if (!files) {
+				// 优先尝试获取文件列表 (支持 Python 和 Shell 引擎)
+				const pref = global.getEnginePreference();
+				const order = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+
+				for (const engine of order) {
+					try {
+						if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+							const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
+							if (res && res.paths && res.paths.length > 0) {
+								files = res.paths;
+								break;
+							}
+						} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+							const res = await shellBridge.call("getFiles", {}, 2000);
+							if (res && res.files && res.files.length > 0) {
+								files = res.files;
+								break;
+							}
+						}
+					} catch { }
+				}
+
+				// 兜底尝试 ShellBridge
+				if ((!files || files.length === 0) && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+					try {
+						const res = await shellBridge.call("getFiles", {}, 2000);
+						files = res?.files || [];
+					} catch { }
+				}
+			}
+
+			if (files && files.length > 0) {
 
 				const folders = files.filter((f) => {
 					try { return fs.statSync(f).isDirectory(); } catch { return false; }
@@ -1449,7 +1668,22 @@ async function handleClipboardShell(targetDir) {
 				const copiedFolders = [];
 				const fingerprints = {};
 
-				for (const folder of folders) {
+				// 如果没有预计算总大小（比如直接调用的），且需要进度条，则现场计算
+				let totalBytesToTransfer = preCalculatedTotalSize;
+				if (progressCallback && totalBytesToTransfer <= 0) {
+					// 简单估算，文件夹就不递归了，太慢
+					for (const f of validFiles) {
+						try { totalBytesToTransfer += fs.statSync(f).size; } catch { }
+					}
+				}
+
+				let transferredBytes = 0;
+
+				// 处理文件夹
+				for (let i = 0; i < folders.length; i++) {
+					if (token?.isCancellationRequested) throw new Error("cancelled");
+					const folder = folders[i];
+					if (progressCallback) progressCallback(0, `复制文件夹 (${i + 1}/${folders.length}): ${path.basename(folder)}`);
 					try {
 						const destFolder = path.join(targetDir, path.basename(folder));
 						fs.cpSync(folder, destFolder, { recursive: true, force: true });
@@ -1457,10 +1691,82 @@ async function handleClipboardShell(targetDir) {
 					} catch { }
 				}
 
+				// 处理文件（支持大文件流式进度）
 				if (validFiles.length > 0) {
-					const result = copyFilesToTarget(validFiles, targetDir);
-					copiedFiles.push(...result.copied);
-					Object.assign(fingerprints, result.fingerprints);
+					const totalFileCount = validFiles.length;
+					for (let i = 0; i < totalFileCount; i++) {
+						if (token?.isCancellationRequested) throw new Error("cancelled");
+
+						const f = validFiles[i];
+						const baseName = path.basename(f);
+
+						try {
+							const srcFingerprint = computeFingerprint(f);
+							if (srcFingerprint) {
+								fingerprints[f] = srcFingerprint;
+								let existingPath = findFileByFingerprint(srcFingerprint);
+								if (existingPath && fs.existsSync(existingPath)) {
+									copiedFiles.push(existingPath);
+
+									// 秒传也算进度
+									try {
+										const fSize = fs.statSync(f).size;
+										transferredBytes += fSize;
+										if (progressCallback && totalBytesToTransfer > 0) {
+											const inc = (fSize / totalBytesToTransfer) * 100;
+											progressCallback(inc, `秒传: ${baseName}`);
+										}
+									} catch { }
+									continue;
+								}
+							}
+
+							const ext = path.extname(f);
+							const isImg = isImageExtForClipboard(ext);
+							const fname = isImg ? getTimestampFilename(ext) : baseName;
+							const dest = path.join(targetDir, fname);
+
+							if (fs.existsSync(dest)) {
+								const dstFingerprint = computeFingerprint(dest);
+								if (dstFingerprint === srcFingerprint) {
+									copiedFiles.push(dest);
+									if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+
+									// 跳过也算进度
+									try {
+										const fSize = fs.statSync(f).size;
+										transferredBytes += fSize;
+										if (progressCallback && totalBytesToTransfer > 0) {
+											const inc = (fSize / totalBytesToTransfer) * 100;
+											progressCallback(inc, `跳过: ${baseName}`);
+										}
+									} catch { }
+									continue;
+								}
+							}
+
+							// 流式拷贝
+							if (progressCallback) progressCallback(0, `正在复制 (${i + 1}/${totalFileCount}): ${baseName}`);
+
+							await copyFileWithProgress(f, dest, (chunkSize, copied, total) => {
+								transferredBytes += chunkSize;
+								if (progressCallback && totalBytesToTransfer > 0) {
+									const inc = (chunkSize / totalBytesToTransfer) * 100;
+									const filePct = total > 0 ? Math.round((copied / total) * 100) : 0;
+									progressCallback(inc, `复制 ${baseName} (${filePct}%)`);
+								}
+							}, token);
+
+							if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+							copiedFiles.push(dest);
+							// 这里的进度已经在 callback 里报过了，不需要额外报 "完成" 的 increment
+							if (progressCallback) progressCallback(0, `完成: ${baseName}`);
+
+						} catch (e) {
+							if (e.message === "cancelled") throw e;
+							global.logMessage(`Copy failed: ${f} -> ${e.message}`, "WARN");
+						}
+					}
 				}
 
 				if (copiedFiles.length > 0 || copiedFolders.length > 0) {
@@ -1474,16 +1780,47 @@ async function handleClipboardShell(targetDir) {
 			}
 		}
 
-		const hasImg = await shellBridge.call("hasImage", {}, 2000);
-		if (hasImg?.value) {
-			const fname = getTimestampFilename(".png");
-			const dest = path.join(targetDir, fname);
-			ensureDir(targetDir);
-			const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
-			if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-				const fp = computeFingerprint(dest);
-				return { type: "image", path: dest, fingerprint: fp };
-			}
+		// 图片处理回退 (Python/Rust/Shell)
+		const pref = global.getEnginePreference();
+		const order = global.getEngineTryOrder(pref);
+
+		for (const engine of order) {
+			try {
+				if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+					// Python 引擎的 "clipboard" 动作会自动保存图片
+					const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 2000);
+					if (res && res.type === "image") return res;
+				} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+					const hasImg = await shellBridge.call("hasImage", {}, 2000);
+					if (hasImg?.value) {
+						const fname = getTimestampFilename(".png");
+						const dest = path.join(targetDir, fname);
+						ensureDir(targetDir);
+						const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
+						if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+							const fp = computeFingerprint(dest);
+							return { type: "image", path: dest, fingerprint: fp };
+						}
+					}
+				}
+			} catch { }
+		}
+
+		// 兜底尝试 ShellBridge (如果 order 里没有)
+		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+			try {
+				const hasImg = await shellBridge.call("hasImage", {}, 2000);
+				if (hasImg?.value) {
+					const fname = getTimestampFilename(".png");
+					const dest = path.join(targetDir, fname);
+					ensureDir(targetDir);
+					const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
+					if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+						const fp = computeFingerprint(dest);
+						return { type: "image", path: dest, fingerprint: fp };
+					}
+				}
+			} catch { }
 		}
 
 		const text = await vscode.env.clipboard.readText();
