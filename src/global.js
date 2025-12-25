@@ -1192,6 +1192,35 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 	return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
 }
 
+async function tryOneByOne(callback) {
+	const pref = getEnginePreference();
+	const order = getEngineTryOrder(pref);
+	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
+
+	for (const name of order) {
+		if (name === "spawn") continue;
+		const bridge = bridges[name];
+		if (bridge && bridge.isAvailable()) {
+			try {
+				const res = await callback(bridge, name);
+				if (res) return res;
+			} catch (e) { }
+		}
+	}
+	return null;
+}
+
+async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
+	return tryOneByOne(async (bridge, name) => {
+		const action = typeof actionOrMap === "object" ? actionOrMap[name] : actionOrMap;
+		if (!action) return null;
+
+		const res = await bridge.call(action, params, timeout);
+		if (res && !res.error && res.type !== "unknown") return res;
+		return null;
+	});
+}
+
 function getActiveEngineCode(pythonBridge, rustBridge, shellBridge) {
 	return getActiveEngineState(pythonBridge, rustBridge, shellBridge).code;
 }
@@ -1392,6 +1421,8 @@ module.exports = {
 	updateStatusBarNow,
 	getEnginePreference,
 	getEngineTryOrder,
+	tryOneByOne,
+	tryEngineCall,
 	getActiveEngineCode,
 	getActiveEngineName,
 
