@@ -794,6 +794,23 @@ class DaemonBridge {
 			const msg = `${this.name} 1分钟内崩溃超过5次，已触发熔断保护，永久禁用该 Bridge。`;
 			this._setStartError(msg);
 			global.logMessage(msg, "ERROR");
+
+			// ★ Shell Daemon 致命错误弹窗
+			if (this.name === "Shell") {
+				vscode.window.showErrorMessage(
+					"Node shell Deamo 陷入异常，qqq 将停止工作。",
+					{
+						modal: false,
+						detail: " 解决方案：重启。"
+					},
+					"重启窗口"
+				).then(selection => {
+					if (selection === "重启窗口") {
+						vscode.commands.executeCommand("workbench.action.reloadWindow");
+					}
+				});
+			}
+
 			updateStatusBarNow();
 			return;
 		}
@@ -1393,7 +1410,34 @@ async function raceClipboard(targetDir, callback) {
 		}
 	} catch (e) { }
 
-	// Fallback: 如果 ShellBridge 没搞定（没启动好、超时、出错），用 VS Code API 兜底
+	// Fallback 1: Spawn Mode (当 Daemon 不可用时，冷启动 PowerShell 获取剪贴板状态)
+	if (!handled && process.platform === "win32") {
+		try {
+			// 使用 PowerShell 单行命令获取 JSON 状态
+			const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
+			const jsonStr = await spawnOutput("powershell", [
+				"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+			]);
+			if (jsonStr && jsonStr.trim()) {
+				const parsed = JSON.parse(jsonStr);
+				if (parsed) {
+					qStatus = parsed;
+					handled = true;
+					global.logMessage("[Fallback] raceClipboard used Spawn PowerShell", "INFO");
+
+					// ★ 机会：既然 Spawn 成功了，说明 PowerShell 还能用，尝试复活 ShellBridge
+					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
+						global.logMessage("[SelfHealing] Spawn 成功，尝试复活 Shell Daemon...", "INFO");
+						shellBridge.start().catch(() => { });
+					}
+				}
+			}
+		} catch (e) {
+			global.logMessage(`[Fallback] raceClipboard Spawn failed: ${e.message}`, "WARN");
+		}
+	}
+
+	// Fallback 2: VS Code API (最后的兜底，只能识别文本)
 	if (!handled) {
 		try {
 			const text = await vscode.env.clipboard.readText();
@@ -1851,7 +1895,29 @@ async function handleClipboardNode(targetDir) {
 			}
 		}
 
-		// 2. 如果 Shell Bridge 没拿到，尝试 VS Code API
+		// 2. Fallback: Spawn PowerShell (当 Daemon 失败时尝试冷启动获取)
+		if (!htmlText && process.platform === "win32") {
+			try {
+				const psScript = `Add-Type -A System.Windows.Forms;$t=[System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html);if($t){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))}`;
+				const b64 = await spawnOutput("powershell", [
+					"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+				]);
+				if (b64 && b64.trim()) {
+					htmlText = Buffer.from(b64.trim(), "base64").toString("utf8");
+					global.logMessage("[Fallback] handleClipboardNode used Spawn PowerShell", "INFO");
+
+					// ★ 机会：既然 Spawn 成功了，说明 PowerShell 还能用，尝试复活 ShellBridge
+					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
+						global.logMessage("[SelfHealing] Spawn 成功，尝试复活 Shell Daemon...", "INFO");
+						shellBridge.start().catch(() => { });
+					}
+				}
+			} catch (e) {
+				global.logMessage(`[Fallback] handleClipboardNode Spawn failed: ${e.message}`, "WARN");
+			}
+		}
+
+		// 3. 如果 Spawn 也没拿到，尝试 VS Code API
 		if (!htmlText) {
 			const text = await vscode.env.clipboard.readText();
 			if (text && _looksLikeHtml(text)) {
@@ -2252,6 +2318,80 @@ async function handleClipboardSpawn(targetDir) {
 }
 
 async function handleClipboardSpawnWin32(targetDir) {
+	// ==================================================================================
+	// ★ 四层回退机制 (The 4-Layer Fallback Architecture)
+	// 1. Python Daemon: 最佳体验（支持透明通道完美还原）
+	// 2. Rust Daemon:   高性能备选
+	// 3. Shell Daemon:  常驻 PowerShell（无冷启动开销，常规兼容性）
+	// 4. Spawn Mode:    最后的倔强（冷启动 PowerShell，极慢但最稳）
+	// ==================================================================================
+
+	const pref = global.getEnginePreference(); // "auto", "python", "rust", "shell"
+
+	// 构建尝试顺序
+	const bridgeMap = {
+		"python": pythonBridge,
+		"rust": rustBridge,
+		"shell": shellBridge
+	};
+
+	const typeOrder = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+	const bridgeOrder = [];
+
+	for (const type of typeOrder) {
+		const b = bridgeMap[type];
+		if (b) bridgeOrder.push(b);
+	}
+
+	// --- 尝试 Daemon 引擎 ---
+	for (const bridge of bridgeOrder) {
+		if (!bridge.isAvailable()) continue;
+
+		try {
+			// 1. Python / Rust 引擎：接口高度统一，直接通过 "clipboard" 动作一键处理
+			if (bridge === pythonBridge || bridge === rustBridge) {
+				const res = await bridge.call("clipboard", { target_dir: targetDir }, 10000);
+				if (res && !res.error && res.type !== "unknown") {
+					global.logMessage(`[FastPath] 由 ${bridge.name} 引擎处理成功`, "INFO");
+					return res;
+				}
+			}
+
+			// 2. Shell Bridge (PowerShell Daemon)：需要组合原子操作
+			if (bridge === shellBridge) {
+				// A. 检查是否有文件
+				const checkRes = await bridge.call("checkQ", {}, 2000);
+				if (checkRes?.hasFile) {
+					const filesRes = await bridge.call("getFiles", {}, 5000);
+					const files = filesRes?.files || [];
+					if (files.length > 0) {
+						// 复用现有的文件处理逻辑
+						const result = processFilesForClipboard(files, targetDir);
+						if (result) return result;
+					}
+				}
+
+				// B. 检查是否有图片
+				if (checkRes?.hasImage) {
+					const fname = getTimestampFilename(".png");
+					const dest = path.join(targetDir, fname);
+					ensureDir(targetDir);
+
+					const saveRes = await bridge.call("saveImage", { path: dest }, 8000);
+					if (saveRes?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+						const fp = computeFingerprint(dest);
+						return { type: "image", path: dest, fingerprint: fp };
+					}
+				}
+			}
+		} catch (e) {
+			global.logMessage(`${bridge.name} 处理剪贴板异常: ${e.message}`, "WARN");
+		}
+	}
+
+	// --- Fallback: Spawn Mode (冷启动 PowerShell) ---
+	global.logMessage("[SlowPath] 所有 Daemon 均不可用或失败，回退到 Spawn 模式", "WARN");
+
 	const hasFiles = await spawnCheck("powershell", [
 		"-STA",
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
@@ -2266,37 +2406,8 @@ async function handleClipboardSpawnWin32(targetDir) {
 		]);
 
 		const files = filesOutput.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && fs.existsSync(s));
-
-		const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
-		const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
-
-		ensureDir(targetDir);
-		const copiedFiles = [];
-		const copiedFolders = [];
-		const fingerprints = {};
-
-		for (const folder of folders) {
-			try {
-				const destFolder = path.join(targetDir, path.basename(folder));
-				fs.cpSync(folder, destFolder, { recursive: true, force: true });
-				copiedFolders.push(destFolder);
-			} catch { }
-		}
-
-		if (validFiles.length > 0) {
-			const result = copyFilesToTarget(validFiles, targetDir);
-			copiedFiles.push(...result.copied);
-			Object.assign(fingerprints, result.fingerprints);
-		}
-
-		if (copiedFiles.length > 0 || copiedFolders.length > 0) {
-			return {
-				type: "file_folder",
-				files: copiedFiles,
-				folders: copiedFolders,
-				fingerprints: fingerprints
-			};
-		}
+		const result = processFilesForClipboard(files, targetDir);
+		if (result) return result;
 	}
 
 	const hasImg = await spawnCheck("powershell", [
@@ -2324,6 +2435,41 @@ async function handleClipboardSpawnWin32(targetDir) {
 	}
 
 	return { type: "unknown" };
+}
+
+// 提取公共的文件处理逻辑，供 ShellBridge 和 SpawnMode 复用
+function processFilesForClipboard(files, targetDir) {
+	const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
+	const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
+
+	ensureDir(targetDir);
+	const copiedFiles = [];
+	const copiedFolders = [];
+	const fingerprints = {};
+
+	for (const folder of folders) {
+		try {
+			const destFolder = path.join(targetDir, path.basename(folder));
+			fs.cpSync(folder, destFolder, { recursive: true, force: true });
+			copiedFolders.push(destFolder);
+		} catch { }
+	}
+
+	if (validFiles.length > 0) {
+		const result = copyFilesToTarget(validFiles, targetDir);
+		copiedFiles.push(...result.copied);
+		Object.assign(fingerprints, result.fingerprints);
+	}
+
+	if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+		return {
+			type: "file_folder",
+			files: copiedFiles,
+			folders: copiedFolders,
+			fingerprints: fingerprints
+		};
+	}
+	return null;
 }
 
 async function handleClipboardSpawnDarwin(targetDir) {
@@ -2599,18 +2745,23 @@ async function activate(context) {
 		}),
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration("qqq.ioEngine")) {
-				global.logMessage("IO 引擎配置已更改，重新启动守护进程...", "INFO");
+				global.logMessage("IO 引擎配置已更改，执行热切换...", "INFO");
 
-				(async () => {
+				// ★ 增加防抖，避免用户快速切换配置导致多次触发
+				if (this._configChangeTimer) clearTimeout(this._configChangeTimer);
+				this._configChangeTimer = setTimeout(async () => {
+					// 1. 停止不需要的 Daemon (Python/Rust)，但【绝对不要】停止 ShellBridge
+					// ShellBridge 是系统基石，必须常驻，除非扩展被禁用
 					await pythonBridge.stop();
 					await rustBridge.stop();
-					await shellBridge.stop();
+					// await shellBridge.stop(); // <--- 删除这行，ShellBridge 永不停止
 
+					// 2. 稍作延迟，让 OS 回收资源
 					setTimeout(() => {
-						global.logMessage("开始重新启动守护进程", "DEBUG");
+						global.logMessage("开始重新启动守护进程 (Reload)", "DEBUG");
 						startDaemons();
 					}, 200);
-				})();
+				}, 500);
 			}
 		})
 	);
@@ -2645,7 +2796,9 @@ function startDaemons() {
 			global.logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
 			const ok = await bridge.start();
 
+			// ★ 再次检查 bootSeq，防止启动过程中发生了新的配置切换
 			if (bootSeq !== _daemonBootSeq) {
+				global.logMessage(`${bridge.name} 启动被中断 (bootSeq mismatch)，立即停止`, "WARN");
 				try { await bridge.stop(); } catch { }
 				return false;
 			}
@@ -2669,31 +2822,46 @@ function startDaemons() {
 	(async () => {
 		if (bootSeq !== _daemonBootSeq) return;
 
-		// 1. 始终启动 ShellBridge (作为基础 I/O 设施，提供剪贴板和 HTML 能力)
-		// 我们并行启动它，不阻塞后续主引擎的尝试，但最后会等待它完成以更新状态
+		// ★ 严格按照配置来决定启动谁，避免启动不必要的进程
+		// 1. ShellBridge 始终启动（它是基础能力）
 		const shellTask = startOne(shellBridge, false);
 
-		// 2. 根据配置启动主逻辑引擎 (Python/Rust)
-		// 只有当 pref 不是 explicitly "shell" 时才尝试启动逻辑引擎
+		// 2. 根据 pref 决定是否启动 Python/Rust
+		// 如果 pref 是 "shell" (即配置中的 node)，我们显式不启动 Py/Rust
 		if (pref !== "shell") {
+			// 根据回退顺序尝试启动
 			let tryOrder = [];
 			if (pref === "python") {
 				tryOrder = [pythonBridge, rustBridge];
 			} else if (pref === "rust") {
 				tryOrder = [rustBridge, pythonBridge];
 			} else {
-				// auto: 优先 Python，失败则 Rust
+				// auto
 				tryOrder = [pythonBridge, rustBridge];
 			}
 
 			for (const bridge of tryOrder) {
 				if (bootSeq !== _daemonBootSeq) break;
-				// 尝试启动一个，如果成功则跳出循环（我们只需要一个主逻辑引擎）
-				if (await startOne(bridge, false)) break;
+
+				// 启动成功一个主引擎即可
+				if (await startOne(bridge, false)) {
+					// ★ 关键优化：如果成功启动了高优先级的引擎，确保低优先级的引擎是停止的
+					// 比如：auto 模式下，Python 启动成功了，那么 Rust 就不应该在后台跑
+					for (const other of tryOrder) {
+						if (other !== bridge && other.isAvailable()) {
+							global.logMessage(`停止多余的引擎: ${other.name}`, "DEBUG");
+							other.stop();
+						}
+					}
+					break;
+				}
 			}
+		} else {
+			// 如果 pref 是 shell，确保 Py/Rust 是停止的 (防泄漏)
+			if (pythonBridge.isAvailable()) pythonBridge.stop();
+			if (rustBridge.isAvailable()) rustBridge.stop();
 		}
 
-		// 等待 ShellBridge 启动尝试完成
 		await shellTask;
 
 		// 3. 最终检查
