@@ -902,31 +902,52 @@ class DaemonBridge {
 		}
 
 		if (!this.process.killed) {
-			global.logMessage(`${this.name} 尝试优雅退出 (SIGTERM)`, "DEBUG");
+			global.logMessage(`${this.name} 尝试优雅退出...`, "DEBUG");
+
+			// ★ 阶段 1：协商退出 (Graceful Exit Protocol)
+			// 发送 exit 指令，让子进程自己清理资源（释放锁、关闭句柄）
+			let exitedCleanly = false;
 			try {
-				if (process.platform === "win32") {
-					// ★ Windows 专用：使用 taskkill 杀进程树，防止孤儿进程
-					try {
-						cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
-						global.logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
-					} catch (e) {
-						global.logMessage(`${this.name} Windows taskkill 失败 (可能已退出): ${e.message}`, "WARN");
-					}
-				} else {
-					// 第一阶段：温柔请求 (SIGTERM)
-					this.process.kill("SIGTERM");
+				// 给它发个信，别回了，直接走吧
+				const exitCmd = JSON.stringify({ _id: 0, action: "exit" }) + "\n";
+				if (this.process.stdin && !this.process.stdin.destroyed) {
+					this.process.stdin.write(exitCmd);
+				}
 
-					// 给进程 3 秒时间优雅退出
-					await new Promise((resolve) => setTimeout(resolve, 3000));
+				// 等待进程退出，最长 1000ms
+				const exitPromise = new Promise(resolve => {
+					this.process.once('exit', () => resolve(true));
+					this.process.once('close', () => resolve(true));
+				});
 
-					// 第二阶段：如果还没死，强制杀掉 (SIGKILL)
-					if (this.process && !this.process.killed) {
-						global.logMessage(`${this.name} 进程未退出，强制杀死 (SIGKILL)`, "WARN");
+				const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(false), 1000));
+
+				exitedCleanly = await Promise.race([exitPromise, timeoutPromise]);
+			} catch (e) {
+				global.logMessage(`${this.name} 发送 exit 指令失败: ${e.message}`, "WARN");
+			}
+
+			if (exitedCleanly) {
+				global.logMessage(`${this.name} 已优雅退出`, "DEBUG");
+			} else {
+				// ★ 阶段 2：强制退出 (Force Kill)
+				global.logMessage(`${this.name} 协商退出超时，执行强制终止`, "WARN");
+				try {
+					if (process.platform === "win32") {
+						// ★ Windows 专用：使用 taskkill 杀进程树，防止孤儿进程
+						try {
+							cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
+							global.logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
+						} catch (e) {
+							// 忽略进程不存在的错误
+						}
+					} else {
+						// Unix: SIGKILL
 						this.process.kill("SIGKILL");
 					}
+				} catch (e) {
+					global.logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
 				}
-			} catch (e) {
-				global.logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
 			}
 		} else {
 			global.logMessage(`${this.name} 进程已被杀死`, "DEBUG");
@@ -2840,15 +2861,24 @@ function startDaemons() {
 				tryOrder = [pythonBridge, rustBridge];
 			}
 
+			// ★ 关键修复：先尝试启动首选引擎，如果失败再尝试备选
+			let mainEngineStarted = false;
+
+			// 逐个尝试启动
 			for (const bridge of tryOrder) {
 				if (bootSeq !== _daemonBootSeq) break;
 
-				// 启动成功一个主引擎即可
 				if (await startOne(bridge, false)) {
-					// ★ 关键优化：如果成功启动了高优先级的引擎，确保低优先级的引擎是停止的
-					// 比如：auto 模式下，Python 启动成功了，那么 Rust 就不应该在后台跑
+					mainEngineStarted = true;
+					// 启动成功后，停止其他【已启动且不在本次选择中】的引擎
+					// 但注意：这里 tryOrder 是根据优先级排的，如果我们启动了 rust (因为 python 失败)，
+					// 那么 python 本身就是 failed 状态，不需要 stop。
+					// 唯一需要 stop 的是：如果之前 python 是活着的，但现在用户选了 rust，
+					// 或者 auto 模式下 python 活了，rust 就该死。
+
 					for (const other of tryOrder) {
 						if (other !== bridge && other.isAvailable()) {
+							// 只有当 other 确实活着才杀，避免不必要的调用
 							global.logMessage(`停止多余的引擎: ${other.name}`, "DEBUG");
 							other.stop();
 						}
@@ -2856,10 +2886,14 @@ function startDaemons() {
 					break;
 				}
 			}
+
+			// 如果所有外挂引擎都启动失败，但 pref 明确要求了非 shell
+			// 这时候我们不需要做什么，因为后续逻辑会 fallback 到 shell/spawn
 		} else {
 			// 如果 pref 是 shell，确保 Py/Rust 是停止的 (防泄漏)
-			if (pythonBridge.isAvailable()) pythonBridge.stop();
-			if (rustBridge.isAvailable()) rustBridge.stop();
+			// ★ 关键修复：增加 await 确保停止完成，防止资源占用冲突
+			if (pythonBridge.isAvailable()) await pythonBridge.stop();
+			if (rustBridge.isAvailable()) await rustBridge.stop();
 		}
 
 		await shellTask;

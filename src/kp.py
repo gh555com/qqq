@@ -368,6 +368,9 @@ def get_folder_info(folder_path: str):
 # =============================================================================
 
 def handle_windows_pywin32(wcb, wcon, output_dir: Path):
+    # ★ 阶段 1：只读取数据，必须毫秒级完成，立即释放锁
+    data_to_process = None # {type: 'text'|'files'|'dib', payload: ...}
+
     try:
         wcb.OpenClipboard()
         try:
@@ -382,76 +385,105 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                     if wcb.IsClipboardFormatAvailable(wcon.CF_UNICODETEXT):
                         text = wcb.GetClipboardData(wcon.CF_UNICODETEXT)
                         if isinstance(text, str) and text.strip():
-                            return {"type": "text", "text": text}
+                            data_to_process = {"type": "text", "text": text}
                 except Exception:
                     pass
 
-            # 2) 文件/文件夹
-            if has_files:
-                paths = wcb.GetClipboardData(wcon.CF_HDROP) or []
-                src_dirs = []
-                src_files = []
-                for fp in paths:
-                    try:
-                        p = Path(fp)
-                        if p.exists():
-                            if p.is_dir(): src_dirs.append(p)
-                            elif p.is_file(): src_files.append(p)
-                    except: pass
-
-                copied_dirs = []
-                copied_files = []
-
-                if src_dirs:
-                    for d in src_dirs:
-                        dst = copytree_parallel(d, output_dir)
-                        if dst: copied_dirs.append(dst)
-
-                if src_files:
-                    copied_files = copy_files_parallel(src_files, output_dir)
-
-                if copied_dirs or copied_files:
-                    return {
-                        "type": "file_folder",
-                        "folders": copied_dirs,
-                        "files": copied_files,
-                    }
-
-            # 3) DIB 截图
-            if has_dib:
+            # 2) 文件/文件夹 (只读取路径，不复制文件！)
+            elif has_files:
                 try:
-                    from PIL import Image
-                    import io
-                except ImportError:
-                    return None
+                    paths = wcb.GetClipboardData(wcon.CF_HDROP) or []
+                    # 确保是列表且非空
+                    if paths:
+                        data_to_process = {"type": "files", "paths": list(paths)}
+                except: pass
 
-                dib_formats = []
-                if wcb.IsClipboardFormatAvailable(dibv5_format): dib_formats.append(dibv5_format)
-                if wcb.IsClipboardFormatAvailable(wcon.CF_DIB): dib_formats.append(wcon.CF_DIB)
+            # 3) DIB 截图 (读取 Buffer 到内存，不保存图片！)
+            elif has_dib:
+                try:
+                    dib_formats = []
+                    if wcb.IsClipboardFormatAvailable(dibv5_format): dib_formats.append(dibv5_format)
+                    if wcb.IsClipboardFormatAvailable(wcon.CF_DIB): dib_formats.append(wcon.CF_DIB)
 
-                for fmt in dib_formats:
-                    try:
+                    for fmt in dib_formats:
                         dib_obj = wcb.GetClipboardData(fmt)
                         dib = bytes_from_pywin32_blob(dib_obj)
-                        if not dib: continue
-                        bmp = dib_to_bmp_bytes(dib)
-                        img = Image.open(io.BytesIO(bmp))
+                        if dib:
+                            data_to_process = {"type": "dib", "data": dib}
+                            break
+                except: pass
 
-                        fname = get_timestamp_filename(".png")
-                        out_path = unique_path_in_dir(output_dir, fname)
-                        ensure_parent(out_path)
-                        save_image_as_png(img, out_path)
-
-                        return {"type": "image", "path": str(out_path)}
-                    except Exception:
-                        continue
         finally:
+            # ★ 必须立即关闭剪贴板！
             wcb.CloseClipboard()
     except Exception:
         pass
+
+    # ★ 阶段 2：在锁外处理数据 (耗时操作)
+    if not data_to_process:
+        return None
+
+    try:
+        if data_to_process["type"] == "text":
+            return {"type": "text", "text": data_to_process["text"]}
+
+        if data_to_process["type"] == "files":
+            paths = data_to_process["paths"]
+            src_dirs = []
+            src_files = []
+            for fp in paths:
+                try:
+                    p = Path(fp)
+                    if p.exists():
+                        if p.is_dir(): src_dirs.append(p)
+                        elif p.is_file(): src_files.append(p)
+                except: pass
+
+            copied_dirs = []
+            copied_files = []
+
+            if src_dirs:
+                for d in src_dirs:
+                    dst = copytree_parallel(d, output_dir)
+                    if dst: copied_dirs.append(dst)
+
+            if src_files:
+                copied_files = copy_files_parallel(src_files, output_dir)
+
+            if copied_dirs or copied_files:
+                return {
+                    "type": "file_folder",
+                    "folders": copied_dirs,
+                    "files": copied_files,
+                }
+            return None # 只有空路径或不存在的路径
+
+        if data_to_process["type"] == "dib":
+            try:
+                from PIL import Image
+                import io
+                dib = data_to_process["data"]
+                bmp = dib_to_bmp_bytes(dib)
+                img = Image.open(io.BytesIO(bmp))
+
+                fname = get_timestamp_filename(".png")
+                out_path = unique_path_in_dir(output_dir, fname)
+                ensure_parent(out_path)
+                save_image_as_png(img, out_path)
+
+                return {"type": "image", "path": str(out_path)}
+            except Exception:
+                return None
+
+    except Exception:
+        return None
+    
     return None
 
 def handle_windows_ctypes(output_dir: Path):
+    # ★ 阶段 1：只读取数据，必须毫秒级完成，立即释放锁
+    data_to_process = None 
+
     if not OpenClipboard(None):
         return {"error": "Cannot open clipboard"}
     try:
@@ -469,67 +501,32 @@ def handle_windows_ctypes(output_dir: Path):
                             try:
                                 text = ctypes.wstring_at(ptr)
                                 if text and text.strip():
-                                    return {"type": "text", "text": text}
+                                    data_to_process = {"type": "text", "text": text}
                             finally:
                                 GlobalUnlock(h_mem)
             except Exception:
                 pass
 
-        if has_files:
+        elif has_files:
             h_drop = GetClipboardData(CF_HDROP)
             if h_drop:
                 count = DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
-                # 优化：复用 Buffer，减少内存分配开销
                 current_buf_len = 4096
                 buf = ctypes.create_unicode_buffer(current_buf_len)
                 paths = []
 
                 for i in range(count):
-                    # 必须先问长度，防止截断
                     needed_len = DragQueryFileW(h_drop, i, None, 0) + 1
-
-                    # 仅在 Buffer 不够时扩容
                     if needed_len > current_buf_len:
-                        current_buf_len = needed_len + 1024  # 多给点余量
+                        current_buf_len = needed_len + 1024
                         buf = ctypes.create_unicode_buffer(current_buf_len)
-
                     DragQueryFileW(h_drop, i, buf, needed_len)
                     paths.append(buf.value)
+                
+                if paths:
+                    data_to_process = {"type": "files", "paths": paths}
 
-                src_dirs = []
-                src_files = []
-                for fp in paths:
-                    try:
-                        p = Path(fp)
-                        if p.exists():
-                            if p.is_dir(): src_dirs.append(p)
-                            elif p.is_file(): src_files.append(p)
-                    except: pass
-
-                copied_dirs = []
-                copied_files = []
-
-                if src_dirs:
-                    for d in src_dirs:
-                        dst = copytree_parallel(d, output_dir)
-                        if dst: copied_dirs.append(dst)
-                if src_files:
-                    copied_files = copy_files_parallel(src_files, output_dir)
-
-                if copied_dirs or copied_files:
-                    return {
-                        "type": "file_folder",
-                        "folders": copied_dirs,
-                        "files": copied_files,
-                    }
-
-        if has_dib:
-            try:
-                from PIL import Image
-                import io
-            except ImportError:
-                return None
-
+        elif has_dib:
             dib_formats = []
             if IsClipboardFormatAvailable(CF_DIBV5): dib_formats.append(CF_DIBV5)
             if IsClipboardFormatAvailable(CF_DIB): dib_formats.append(CF_DIB)
@@ -538,23 +535,70 @@ def handle_windows_ctypes(output_dir: Path):
                 h_mem = GetClipboardData(fmt)
                 if not h_mem: continue
                 dib = read_global_data(h_mem)
-                if not dib: continue
-                try:
-                    bmp = dib_to_bmp_bytes(dib)
-                    img = Image.open(io.BytesIO(bmp))
-
-                    fname = get_timestamp_filename(".png")
-                    out_path = unique_path_in_dir(output_dir, fname)
-                    ensure_parent(out_path)
-                    save_image_as_png(img, out_path)
-
-                    return {"type": "image", "path": str(out_path)}
-                except Exception:
-                    continue
-
-        return {"type": "unknown"}
+                if dib:
+                    data_to_process = {"type": "dib", "data": dib}
+                    break
     finally:
+        # ★ 必须立即关闭剪贴板！
         CloseClipboard()
+
+    # ★ 阶段 2：在锁外处理数据 (耗时操作)
+    if not data_to_process:
+        return {"type": "unknown"}
+
+    try:
+        if data_to_process["type"] == "text":
+            return {"type": "text", "text": data_to_process["text"]}
+            
+        if data_to_process["type"] == "files":
+            paths = data_to_process["paths"]
+            src_dirs = []
+            src_files = []
+            for fp in paths:
+                try:
+                    p = Path(fp)
+                    if p.exists():
+                        if p.is_dir(): src_dirs.append(p)
+                        elif p.is_file(): src_files.append(p)
+                except: pass
+
+            copied_dirs = []
+            copied_files = []
+
+            if src_dirs:
+                for d in src_dirs:
+                    dst = copytree_parallel(d, output_dir)
+                    if dst: copied_dirs.append(dst)
+            if src_files:
+                copied_files = copy_files_parallel(src_files, output_dir)
+
+            if copied_dirs or copied_files:
+                return {
+                    "type": "file_folder",
+                    "folders": copied_dirs,
+                    "files": copied_files,
+                }
+            return {"type": "unknown"}
+
+        if data_to_process["type"] == "dib":
+            try:
+                from PIL import Image
+                import io
+                dib = data_to_process["data"]
+                bmp = dib_to_bmp_bytes(dib)
+                img = Image.open(io.BytesIO(bmp))
+
+                fname = get_timestamp_filename(".png")
+                out_path = unique_path_in_dir(output_dir, fname)
+                ensure_parent(out_path)
+                save_image_as_png(img, out_path)
+
+                return {"type": "image", "path": str(out_path)}
+            except Exception:
+                pass
+    except: pass
+
+    return {"type": "unknown"}
 
 def handle_clipboard(target_dir=None):
     output_dir = resolve_output_dir(target_dir)
@@ -633,6 +677,13 @@ def _dispatch_action(cmd):
     if action == "get_clipboard_files":
         out.update(get_clipboard_files_only())
         return out
+
+    if action == "exit":
+        # ★ 优雅退出指令
+        out["status"] = "exiting"
+        # 先打印响应，再退出
+        print(json.dumps(out, ensure_ascii=False), flush=True)
+        sys.exit(0)
 
     if action in ("clipboard", "paste"):
         target_dir = cmd.get("target_dir", cmd.get("output_dir"))
