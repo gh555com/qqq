@@ -1119,75 +1119,162 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 		}
 
 		const cleanText = await vscode.env.clipboard.readText() || "";
-		const cleanLines = cleanText.split(/\r?\n/);
-		let cleanLineIndex = 0;
+		// const cleanLines = cleanText.split(/\r?\n/); // [Modified] Stream-based processing
+		let textCursor = 0; // [Modified] Global cursor for cleanText
 
 		const blocks = [];
-		let currentBlockHasText = false;
-		let currentBlockImages = [];
-
-		function flushBlock() {
-			if (currentBlockHasText) {
-				while (cleanLineIndex < cleanLines.length) {
-					const line = cleanLines[cleanLineIndex++];
-					if (line && line.trim()) {
-						blocks.push({ type: "text", text: line });
-						break;
-					} else {
-						blocks.push({ type: "text", text: "" });
-					}
-				}
-			}
-
-			for (const img of currentBlockImages) {
-				blocks.push(img);
-			}
-
-			currentBlockHasText = false;
-			currentBlockImages = [];
-		}
+		const flatNodes = []; // [Modified] Collect all nodes first
 
 		const root = $('body').length ? $('body') : $.root();
 
 		function structuralWalk(ctx) {
 			$(ctx).contents().each((i, el) => {
 				if (el.type === 'text') {
-					if ($(el).text().trim().length > 0) {
-						currentBlockHasText = true;
+					const t = $(el).text();
+					if (t.length > 0) { // Don't skip whitespace yet, let heuristics handle it
+						flatNodes.push({ type: 'text', content: t });
 					}
 				} else if (el.type === 'tag') {
 					const tagName = el.name.toLowerCase();
-					const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(tagName);
-					const isBr = tagName === 'br';
+					// const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(tagName);
 					const isImg = tagName === 'img';
 
 					if (isImg) {
 						const urls = _collectElementUrls($(el), false);
 						if (urls && urls.length > 0) {
-							const imgBlock = { type: "media", kind: "image", src: urls[0], status: "pending" };
-							if (currentBlockHasText) {
-								currentBlockImages.push(imgBlock);
-							} else {
-								blocks.push(imgBlock);
-							}
+							flatNodes.push({ type: 'media', kind: 'image', src: urls[0], status: 'pending' });
 						}
 					} else {
 						structuralWalk(el);
-					}
-
-					if (isBlock || isBr) {
-						flushBlock();
 					}
 				}
 			});
 		}
 
 		structuralWalk(root);
-		flushBlock();
 
-		while (cleanLineIndex < cleanLines.length) {
-			const line = cleanLines[cleanLineIndex++];
-			blocks.push({ type: "text", text: line });
+		// [Modified] Stream Consumption Logic
+		// We try to match HTML text segments to the cleanText stream to preserve image position.
+		// "Jump Out Paradigm": Use cleanText for content (to avoid mojibake), use HTML for structure.
+
+		for (const node of flatNodes) {
+			if (node.type === 'media') {
+				blocks.push(node);
+			} else if (node.type === 'text') {
+				const htmlContent = node.content;
+				if (!htmlContent) continue;
+
+				// Strategy 1: Exact/Fuzzy Match of trimmed content
+				// We search for the first few significant characters
+				const trimmedHtml = htmlContent.trim();
+				if (trimmedHtml.length === 0) {
+					// It's just whitespace.
+					// If the HTML had whitespace, the cleanText might also have it (or newlines).
+					// We consume matched whitespace if present.
+					const wsMatch = cleanText.slice(textCursor).match(/^\s+/);
+					if (wsMatch) {
+						// Only consume if it looks reasonable (length check?)
+						// Actually, for pure whitespace nodes, we can often ignore them
+						// UNLESS they represent the space between words.
+						// Let's consume up to 1 char if it's a space?
+						// Safer: Don't strictly sync whitespace nodes unless necessary.
+						// But if we skip it, we might lose the space between "A" and "Img".
+						// Let's try to match it length-wise.
+						if (htmlContent.length < 5) {
+							// Small whitespace, try to consume equivalent whitespace from cleanText
+							const current = cleanText.slice(textCursor, textCursor + htmlContent.length);
+							if (/^\s+$/.test(current)) {
+								blocks.push({ type: 'text', text: current });
+								textCursor += current.length;
+							}
+						}
+					}
+					continue;
+				}
+
+				// Significant text
+				// [Modified] Reduced search window to prevent false positives (jumping too far)
+				const searchWindow = Math.min(Math.max(trimmedHtml.length * 2, 200), 500);
+				const searchArea = cleanText.slice(textCursor, textCursor + searchWindow);
+
+				// Try to find the start of this text block
+				// We use a small chunk of the start to anchor
+				const anchorLen = Math.min(8, trimmedHtml.length);
+				const anchor = trimmedHtml.substring(0, anchorLen);
+
+				const idx = searchArea.indexOf(anchor);
+
+				if (idx !== -1) {
+					// Found the anchor!
+
+					// Output the gap (prefix) - e.g. newlines between blocks
+					if (idx > 0) {
+						blocks.push({ type: 'text', text: searchArea.substring(0, idx) });
+						textCursor += idx; // Advance cursor past gap
+					}
+
+					// Now consume the content.
+					const endAnchorLen = Math.min(8, trimmedHtml.length);
+					const endAnchor = trimmedHtml.substring(trimmedHtml.length - endAnchorLen);
+
+					// Search for endAnchor starting from current cursor
+					// Note: searchArea is from old textCursor. We advanced textCursor by idx.
+					const remainingSearchLen = searchWindow - idx;
+					const contentSearchArea = cleanText.slice(textCursor, textCursor + remainingSearchLen + 100);
+
+					let contentLen = 0;
+
+					// If the text is short, just use length. Anchors might be same (e.g. "a")
+					if (trimmedHtml.length < 5) {
+						contentLen = trimmedHtml.length;
+					} else {
+						// Look for end anchor near expected end
+						const expectedPos = trimmedHtml.length - endAnchorLen;
+						const scanStart = Math.max(0, expectedPos - 20);
+						const scanEnd = expectedPos + 50;
+
+						const subScan = contentSearchArea.substring(scanStart, scanEnd);
+						const subIdx = subScan.indexOf(endAnchor);
+
+						if (subIdx !== -1) {
+							contentLen = scanStart + subIdx + endAnchorLen;
+						} else {
+							// Fallback: search anywhere in window
+							const anyIdx = contentSearchArea.lastIndexOf(endAnchor);
+							if (anyIdx !== -1) {
+								contentLen = anyIdx + endAnchorLen;
+							} else {
+								contentLen = trimmedHtml.length;
+							}
+						}
+					}
+
+					// Sanity check
+					if (contentLen > contentSearchArea.length) contentLen = contentSearchArea.length;
+
+					const fullChunk = cleanText.substr(textCursor, contentLen);
+					blocks.push({ type: 'text', text: fullChunk });
+					textCursor += contentLen;
+
+				} else {
+					// Anchor not found (Mojibake or heavy formatting diff).
+					// Fallback: Consume based on length.
+					// This is the "Jump Out" risk: structure mismatch.
+					const len = htmlContent.length;
+					// Ensure we don't read past end
+					const safeLen = Math.min(len, cleanText.length - textCursor);
+					if (safeLen > 0) {
+						const chunk = cleanText.substr(textCursor, safeLen);
+						blocks.push({ type: 'text', text: chunk });
+						textCursor += safeLen;
+					}
+				}
+			}
+		}
+
+		// Flush remaining text
+		if (textCursor < cleanText.length) {
+			blocks.push({ type: 'text', text: cleanText.substring(textCursor) });
 		}
 
 		const hasMedia = blocks.some(b => b.type === "media");
