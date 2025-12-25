@@ -2,7 +2,825 @@
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
+const cp = require("child_process");
+const readline = require("readline");
+
+// ============================================================================
+// ★ Daemon Bridge (从 qqq.js 迁移)
+// ============================================================================
+class DaemonBridge {
+	constructor(name, startFn) {
+		this.name = name;
+		this.startFn = startFn;
+		this.process = null;
+		this.pending = new Map();
+		this.requestId = 0;
+		this.isStarting = false;
+		this.startPromise = null;
+		this.restartCount = 0;
+		this.maxRestarts = 3;
+		this.available = null;
+
+		this._stopping = false;
+
+		// ★ 失败原因收集（用于 tooltip + err.log）
+		this.lastStartError = "";
+		this.lastCrashReason = "";
+		this.lastStderrSnippet = "";
+
+		// ★ DoS 防护：1分钟内崩溃超过5次则永久禁用
+		this.recentCrashes = [];
+		this.isPermDisabled = false;
+	}
+
+	_setStartError(msg) {
+		this.lastStartError = cleanReason(msg || "");
+	}
+
+	_appendStderrSnippet(text) {
+		const t = String(text || "").trim();
+		if (!t) return;
+		const next = (this.lastStderrSnippet ? this.lastStderrSnippet + "\n" : "") + t;
+		this.lastStderrSnippet = next.slice(-2000);
+	}
+
+	async start() {
+		logMessage(`${this.name} start 方法被调用`, "DEBUG");
+
+		this._stopping = false;
+
+		if (this.process && !this.process.killed) {
+			logMessage(`${this.name} 进程已存在且未被杀死，返回true`, "DEBUG");
+			return true;
+		}
+		if (this.isStarting) {
+			logMessage(`${this.name} 正在启动中，返回启动Promise`, "DEBUG");
+			return this.startPromise;
+		}
+
+		this.isStarting = true;
+		this.startPromise = this.startFn(this);
+
+		logMessage(`${this.name} 开始执行启动函数`, "DEBUG");
+
+		try {
+			const result = await this.startPromise;
+			logMessage(`${this.name} 启动函数执行完成，结果: ${result}`, "DEBUG");
+			return result;
+		} finally {
+			this.isStarting = false;
+			this.startPromise = null;
+		}
+	}
+
+	setupProcess(proc, resolve) {
+		this.process = proc;
+
+		logMessage(`${this.name} setupProcess called`, "DEBUG");
+
+		const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
+		rl.on("line", (line) => {
+			try {
+				if (!line || !line.trim()) return;
+
+				let result;
+				try {
+					result = JSON.parse(line);
+				} catch (e) {
+					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装的)
+					try {
+						const decoded = Buffer.from(line, "base64").toString("utf8");
+						result = JSON.parse(decoded);
+					} catch (e2) {
+						throw e;
+					}
+				}
+
+				const id = result._id;
+
+				if (result.error) logMessage(`${this.name} 错误响应: ${result.error}`, "WARN");
+
+				if (this.pending.has(id)) {
+					const { resolve: res, timer } = this.pending.get(id);
+					clearTimeout(timer);
+					this.pending.delete(id);
+					res(result);
+				}
+			} catch (e) {
+				// 非JSON输出，可能是Python脚本的调试输出或错误信息
+				logMessage(`${this.name} stdout: ${line}`, "WARN");
+			}
+		});
+
+		proc.stderr.on("data", (d) => {
+			const text = d?.toString?.() || "";
+			this._appendStderrSnippet(text);
+			const key = bridgeStderrKey(this.name, text);
+			logMessageRateLimited(key, `${this.name} stderr: ${text}`, "WARN", 5 * 60 * 1000);
+		});
+
+		proc.on("error", (err) => {
+			logMessage(`${this.name} 进程错误: ${err.message}`, "ERROR");
+			this.lastCrashReason = cleanReason(err.message);
+			this._handleCrash();
+		});
+		proc.on("close", (code) => {
+			logMessage(`${this.name} 进程关闭，退出码: ${code}`, "INFO");
+			this.lastCrashReason = cleanReason(`exit_code=${code}`);
+			this._handleCrash();
+		});
+
+		// 实现ping重试逻辑，最多重试 15 次，总计约 7.5 秒
+		let pingAttempts = 0;
+		const maxPingAttempts = 15;
+		const pingInterval = 500; // 每次ping间隔500ms
+		const pingTimeout = 5000; // 增加ping超时时间到5秒
+
+		const attemptPing = async () => {
+			pingAttempts++;
+			try {
+				logMessage(`${this.name} 发送 ping 请求 (尝试 ${pingAttempts}/${maxPingAttempts})`, "DEBUG");
+				// ★ 增加 Ping 超时时间，防止 PowerShell 启动慢导致误判
+				const pong = await this.call("ping", {}, 3000);
+				logMessage(`${this.name} ping 响应: ${JSON.stringify(pong)}`, "DEBUG");
+				if (pong?.status === "alive") {
+					this.restartCount = 0;
+					this.available = true;
+					this._setStartError("");
+					logMessage(`${this.name} started`, "INFO");
+					resolve(true);
+					// 注意：这里我们无法直接调用 qqq.js 的 updateStatusBarNow，
+					// 但 updateStatusBarNow 本质是调用 global.updateStatusBar，
+					// 我们需要从外部传入 bridge 实例，或者让 global 自己持有 bridge 实例。
+					// 暂时让 qqq.js 负责轮询状态栏更新，或者通过回调机制。
+					return true;
+				}
+			} catch (e) {
+				logMessage(`${this.name} ping 超时 (尝试 ${pingAttempts}/${maxPingAttempts}): ${e.message}`, "DEBUG");
+			}
+
+			// 如果还有重试机会，继续尝试
+			if (pingAttempts < maxPingAttempts) {
+				// ★ 每次重试时稍微等一下，给进程喘息机会，避免死循环刷屏
+				setTimeout(attemptPing, 200);
+				return;
+			}
+
+			// 所有ping尝试都失败
+			const reason = `ping_failed_after_${maxPingAttempts}_attempts${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
+			this._setStartError(reason);
+			logMessage(`${this.name} ping 失败，已尝试 ${maxPingAttempts} 次`, "WARN");
+			this.available = false;
+			resolve(false);
+		};
+
+		// 启动ping尝试，将初始延迟恢复为 5ms，解决 500ms 延迟问题
+		setTimeout(attemptPing, 5);
+	}
+
+	_handleCrash() {
+		logMessage(`${this.name} _handleCrash 方法被调用`, "DEBUG");
+		this.process = null;
+
+		for (const [id, { resolve, timer }] of this.pending) {
+			logMessage(`${this.name} 清理待处理请求，id: ${id}`, "DEBUG");
+			clearTimeout(timer);
+			resolve({ error: "process_crashed" });
+		}
+		this.pending.clear();
+
+		if (this._stopping) {
+			logMessage(`${this.name} stopping=true，忽略自动重启`, "INFO");
+			this.available = false;
+			return;
+		}
+
+		if (this.isPermDisabled) {
+			logMessage(`${this.name} 已被永久禁用，忽略重启`, "WARN");
+			this.available = false;
+			return;
+		}
+
+		// ★ DoS 检查
+		const now = Date.now();
+		this.recentCrashes.push(now);
+		this.recentCrashes = this.recentCrashes.filter(t => now - t < 60000); // 只保留最近1分钟
+
+		if (this.recentCrashes.length > 5) {
+			this.isPermDisabled = true;
+			this.available = false;
+			const msg = `${this.name} 1分钟内崩溃超过5次，已触发熔断保护，永久禁用该 Bridge。`;
+			this._setStartError(msg);
+			logMessage(msg, "ERROR");
+
+			// ★ Shell Daemon 致命错误弹窗
+			if (this.name === "Shell") {
+				showErrorMessage(
+					"node shell deamo 陷入异常，qqq 将停止工作。 解决方案：重启。",
+					{
+						modal: true,
+						detail: "检测到后台守护进程频繁崩溃，可能是被杀毒软件拦截或环境异常。为保护系统稳定性，核心功能已暂停。"
+					},
+					"立即重启窗口"
+				).then(selection => {
+					if (selection === "立即重启窗口") {
+						vscode.commands.executeCommand("workbench.action.reloadWindow");
+					}
+				});
+			}
+
+			return;
+		}
+
+		if (this.restartCount < this.maxRestarts) {
+			this.restartCount++;
+			// 指数退避策略：从 50ms 开始，快速重试
+			const backoff = 50 * Math.pow(2, this.restartCount - 1);
+			logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})，延迟 ${backoff}ms`, "WARN");
+			setTimeout(() => this.start(), backoff);
+		} else {
+			logMessage(`${this.name} 进程崩溃，达到最大重启次数，标记为不可用`, "ERROR");
+			this.available = false;
+		}
+	}
+
+	async call(action, params = {}, timeout = 5000) {
+		logMessage(`${this.name} call 方法被调用，action: ${action}`, "DEBUG");
+
+		if (this.isPermDisabled) {
+			return { error: `${this.name}_disabled_too_many_crashes` };
+		}
+
+		// 允许再尝试启动/重启（尤其是 cold start/ping race）
+		if (this.available === false) {
+			// 如果进程还活着，给一次机会重新 ping/start
+			this.available = null;
+		}
+
+		if (!this.process || this.process.killed) {
+			logMessage(`${this.name} 进程不存在或已被杀死，尝试启动`, "DEBUG");
+			const started = await this.start();
+			if (!started) {
+				logMessage(`${this.name} 启动失败，返回错误`, "DEBUG");
+				return { error: `${this.name}_not_available` };
+			}
+		}
+
+		const id = ++this.requestId;
+		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
+
+		logMessage(`${this.name} 发送命令: ${cmd}`, "DEBUG");
+
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				logMessage(`${this.name} 命令超时，id: ${id}`, "DEBUG");
+				if (this.pending.has(id)) {
+					this.pending.delete(id);
+					resolve({ error: "timeout" });
+				}
+			}, timeout);
+
+			this.pending.set(id, { resolve, timer });
+
+			try {
+				this.process.stdin.write(cmd);
+				logMessage(`${this.name} 命令写入成功，id: ${id}`, "DEBUG");
+			} catch (e) {
+				logMessage(`${this.name} 命令写入失败: ${e.message}, id: ${id}`, "ERROR");
+				clearTimeout(timer);
+				this.pending.delete(id);
+				resolve({ error: "write_error" });
+			}
+		});
+	}
+
+	isAvailable() {
+		return this.available === true;
+	}
+
+	async stop() {
+		logMessage(`${this.name} stop 方法被调用`, "DEBUG");
+
+		this._stopping = true;
+
+		for (const [id, { resolve, timer }] of this.pending) {
+			clearTimeout(timer);
+			resolve({ error: "stopped" });
+		}
+		this.pending.clear();
+
+		if (!this.process) {
+			this.available = false;
+			this.restartCount = 0;
+			return;
+		}
+
+		if (!this.process.killed) {
+			logMessage(`${this.name} 尝试优雅退出...`, "DEBUG");
+
+			// ★ 阶段 1：协商退出 (Graceful Exit Protocol)
+			// 发送 exit 指令，让子进程自己清理资源（释放锁、关闭句柄）
+			let exitedCleanly = false;
+			try {
+				// 给它发个信，别回了，直接走吧
+				const exitCmd = JSON.stringify({ _id: 0, action: "exit" }) + "\n";
+				if (this.process.stdin && !this.process.stdin.destroyed) {
+					this.process.stdin.write(exitCmd);
+				}
+
+				// 等待进程退出，最长 1000ms
+				const exitPromise = new Promise(resolve => {
+					this.process.once('exit', () => resolve(true));
+					this.process.once('close', () => resolve(true));
+				});
+
+				const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(false), 1000));
+
+				exitedCleanly = await Promise.race([exitPromise, timeoutPromise]);
+			} catch (e) {
+				logMessage(`${this.name} 发送 exit 指令失败: ${e.message}`, "WARN");
+			}
+
+			if (exitedCleanly) {
+				logMessage(`${this.name} 已优雅退出`, "DEBUG");
+			} else {
+				// ★ 阶段 2：强制退出 (Force Kill)
+				logMessage(`${this.name} 协商退出超时，执行强制终止`, "WARN");
+				try {
+					if (process.platform === "win32") {
+						// ★ Windows 专用：使用 taskkill 杀进程树，防止孤儿进程
+						try {
+							cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
+							logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
+						} catch (e) {
+							// 忽略进程不存在的错误
+						}
+					} else {
+						// Unix: SIGKILL
+						this.process.kill("SIGKILL");
+					}
+				} catch (e) {
+					logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
+				}
+			}
+		} else {
+			logMessage(`${this.name} 进程已被杀死`, "DEBUG");
+		}
+
+		this.process = null;
+		this.available = false;
+		this.restartCount = 0;
+	}
+}
+
+// ============================================================================
+// ★ Bridge Instances & Management
+// ============================================================================
+
+// Python bridge：优先 python，其次 python3（非 win32）
+const pythonBridge = new DaemonBridge("Python", (bridge) => {
+	return new Promise((resolve) => {
+		const scriptPath = path.join(__dirname, "kp.py");
+		if (!fs.existsSync(scriptPath)) {
+			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
+			bridge.available = false;
+			resolve(false);
+			return;
+		}
+
+		const spawnWith = (bin) => {
+			return new Promise((res) => {
+				let proc;
+				try {
+					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
+						stdio: ["pipe", "pipe", "pipe"],
+						windowsHide: true,
+					});
+				} catch (e) {
+					const msg = `spawn_fail(${bin}): ${e.message}`;
+					bridge._setStartError(msg);
+					logMessage(`Python bridge 启动失败 (${bin}): ${e.message}`, "WARN");
+					res(false);
+					return;
+				}
+
+				let settled = false;
+				const failFast = () => {
+					if (settled) return;
+					settled = true;
+					try { proc.kill(); } catch { }
+					bridge.available = false;
+					res(false);
+				};
+
+				proc.once("error", (err) => {
+					const msg = `process_error(${bin}): ${err.message}`;
+					bridge._setStartError(msg);
+					logMessage(`Python bridge 进程错误 (${bin}): ${err.message}`, "WARN");
+					failFast();
+				});
+
+				bridge.setupProcess(proc, (ok) => {
+					if (settled) return;
+					settled = true;
+					if (!ok && bridge.lastStartError) {
+						logMessage(`Python Bridge 启动失败原因：${bridge.lastStartError}`, "WARN");
+					}
+					res(!!ok);
+				});
+			});
+		};
+
+		(async () => {
+			const ok1 = await spawnWith("python");
+			if (ok1) {
+				logMessage("Python Bridge 使用 python 启动成功", "INFO");
+				resolve(true);
+				return;
+			}
+
+			if (process.platform !== "win32") {
+				const ok2 = await spawnWith("python3");
+				if (ok2) {
+					logMessage("Python Bridge 使用 python3 启动成功", "INFO");
+					resolve(true);
+					return;
+				}
+			}
+
+			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError || "unknown"}`, "WARN");
+			resolve(false);
+		})().catch((e) => {
+			bridge._setStartError(`start_exception: ${e.message}`);
+			logMessage(`Python Bridge 启动异常: ${e.message}`, "ERROR");
+			resolve(false);
+		});
+	});
+});
+
+// Rust bridge
+const rustBridge = new DaemonBridge("Rust", (bridge) => {
+	return new Promise((resolve) => {
+		const platform = process.platform;
+		const arch = process.arch;
+
+		let filename;
+		if (platform === "win32") filename = arch === "arm64" ? "q_win_arm64.exe" : "q_win_x64.exe";
+		else if (platform === "darwin") filename = arch === "arm64" ? "q_mac_arm64" : "q_mac_x64";
+		else filename = arch === "arm64" ? "q_linux_arm64" : "q_linux_x64";
+
+		const candidates = [
+			path.join(__dirname, "..", "assets", filename),
+			path.join(__dirname, "assets", filename),
+			path.join(__dirname, filename),
+		];
+
+		let exePath = null;
+		for (const c of candidates) {
+			if (fs.existsSync(c)) { exePath = c; break; }
+		}
+
+		if (!exePath) {
+			bridge._setStartError(`exe_not_found: ${filename}`);
+			logMessage("Rust Bridge 可执行文件未找到", "WARN");
+			bridge.available = false;
+			resolve(false);
+			return;
+		}
+
+		try {
+			logMessage(`Rust Bridge 尝试启动: ${exePath}`, "INFO");
+			const proc = cp.spawn(exePath, ["--daemon"], {
+				stdio: ["pipe", "pipe", "pipe"],
+				windowsHide: true,
+			});
+
+			proc.once("error", (err) => {
+				bridge._setStartError(`process_error: ${err.message}`);
+				logMessage(`Rust Bridge 进程错误: ${err.message}`, "WARN");
+				bridge.available = false;
+				resolve(false);
+			});
+
+			bridge.setupProcess(proc, (ok) => {
+				if (ok) {
+					logMessage("Rust Bridge 启动成功", "INFO");
+					resolve(true);
+				} else {
+					logMessage(`Rust Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+					resolve(false);
+				}
+			});
+		} catch (e) {
+			bridge._setStartError(`start_exception: ${e.message}`);
+			logMessage(`Rust Bridge 启动异常: ${e.message}`, "ERROR");
+			bridge.available = false;
+			resolve(false);
+		}
+	});
+});
+
+// Shell bridge
+const shellBridge = new DaemonBridge("Shell", (bridge) => {
+	return new Promise((resolve) => {
+		const platform = process.platform;
+		let proc = null;
+
+		if (platform === "win32") {
+			const simplePsScript = `
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+function Process-Command {
+  param($cmd)
+  $result = @{ _id = $cmd._id }
+  try {
+    switch ($cmd.action) {
+      'ping' { $result.status = 'alive' }
+      'checkQ' {
+        $formats = [System.Windows.Forms.Clipboard]::GetDataObject().GetFormats()
+        $result.hasFile = $formats -contains "FileDrop"
+        $result.hasHtml = $formats -contains "HTML Format"
+        $result.hasImage = ($formats -contains "Bitmap") -or ($formats -contains "DeviceIndependentBitmap") -or ($formats -contains "PNG")
+        $result.hasText = ($formats -contains "UnicodeText") -or ($formats -contains "Text")
+      }
+      'hasImage' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsImage()
+        $result.value = $val
+      }
+      'hasFiles' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsFileDropList()
+        $result.value = $val
+      }
+      'hasHtml' {
+        $val = [System.Windows.Forms.Clipboard]::ContainsText([System.Windows.Forms.TextDataFormat]::Html)
+        $result.value = $val
+      }
+      'getFiles' {
+        $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+        $result.files = @()
+        if ($files) { foreach ($f in $files) { $result.files += $f } }
+      }
+      'saveImage' {
+        $img = [System.Windows.Forms.Clipboard]::GetImage()
+        if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
+        else { $result.success = $false }
+      }
+      'getHtml' {
+        $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
+        $b64 = ""
+        if ($obj -is [System.IO.Stream]) {
+          $ms = [System.IO.MemoryStream]::new()
+          $obj.CopyTo($ms)
+          $bytes = $ms.ToArray()
+          $b64 = [Convert]::ToBase64String($bytes)
+        } elseif ($obj -is [string]) {
+          $bytes = [Text.Encoding]::UTF8.GetBytes($obj)
+          $b64 = [Convert]::ToBase64String($bytes)
+        } else {
+           $txt = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html)
+           if ($txt) {
+             $bytes = [Text.Encoding]::UTF8.GetBytes($txt)
+             $b64 = [Convert]::ToBase64String($bytes)
+           }
+        }
+        if ($b64) {
+           $result.value_base64 = $b64
+        }
+      }
+      default { $result.error = "unknown action" }
+    }
+  } catch {
+    $result.error = $_.Exception.Message
+  }
+
+  $json = $result | ConvertTo-Json -Compress -Depth 6
+  $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+  $b64 = [Convert]::ToBase64String($bytes)
+  [Console]::Out.WriteLine($b64)
+}
+
+while ($true) {
+  $line = [Console]::In.ReadLine()
+  if ($line -eq $null) { break }
+  try {
+    $cmd = ConvertFrom-Json $line
+    Process-Command $cmd
+  } catch {
+    $err = @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress
+    $bytes = [Text.Encoding]::UTF8.GetBytes($err)
+    $b64 = [Convert]::ToBase64String($bytes)
+    [Console]::Out.WriteLine($b64)
+  }
+}
+`.trim();
+
+			logMessage("尝试启动 PowerShell 进程", "DEBUG");
+			try {
+				const psOptions = [
+					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
+					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
+					["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
+					["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
+				];
+
+				let lastError = null;
+				for (const [index, options] of psOptions.entries()) {
+					try {
+						logMessage(`尝试使用选项 ${index + 1} 启动 PowerShell: ${options[0]}`, "DEBUG");
+						proc = cp.spawn(options[0], options.slice(1), {
+							stdio: ["pipe", "pipe", "pipe"],
+							windowsHide: true,
+						});
+						logMessage(`PowerShell 进程已创建: ${options[0]}`, "DEBUG");
+						break;
+					} catch (e) {
+						lastError = e;
+						logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
+					}
+				}
+
+				if (!proc) {
+					bridge._setStartError(`spawn_fail: ${lastError?.message || "无法启动任何PowerShell进程"}`);
+					throw lastError || new Error("无法启动任何PowerShell进程");
+				}
+
+				proc.on("error", (err) => {
+					bridge._setStartError(`process_error: ${err.message}`);
+					logMessage(`PowerShell 进程错误: ${err.message}`, "ERROR");
+				});
+				proc.on("exit", (code, signal) => {
+					logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal}`, "INFO");
+				});
+			} catch (e) {
+				bridge._setStartError(`create_fail: ${e.message}`);
+				logMessage(`PowerShell 进程创建失败: ${e.message}`, "ERROR");
+				bridge.available = false;
+				resolve(false);
+				return;
+			}
+		} else {
+			const nodeBin = process.execPath.replace(/"/g, '\\"');
+			const bashScript = platform === "darwin"
+				? `
+NODE_BIN="${nodeBin}"
+json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+
+while IFS= read -r line; do
+  action=$(json_get "$line" "action")
+  id=$(json_get "$line" "_id")
+  case "$action" in
+    ping) echo '{"_id":'"$id"',"status":"alive"}' ;;
+    hasImage) if command -v pngpaste >/dev/null 2>&1 && pngpaste - >/dev/null 2>&1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+    saveImage)
+      dest=$(json_get "$line" "path")
+      if command -v pngpaste >/dev/null 2>&1 && pngpaste "$dest" 2>/dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi ;;
+    *) echo '{"_id":'"$id"',"error":"unknown action"}' ;;
+  esac
+done
+`.trim()
+				: `
+NODE_BIN="${nodeBin}"
+json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+
+while IFS= read -r line; do
+  action=$(json_get "$line" "action")
+  id=$(json_get "$line" "_id")
+  case "$action" in
+    ping) echo '{"_id":'"$id"',"status":"alive"}' ;;
+    hasImage) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+    hasHtml) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+    getHtml)
+      content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+      echo '{"_id":'"$id"',"value":'$content'}' ;;
+    saveImage)
+      dest=$(json_get "$line" "path")
+      if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi ;;
+    *) echo '{"_id":'"$id"',"error":"unknown action"}' ;;
+  esac
+done
+`.trim();
+
+			logMessage("尝试启动 Bash 进程", "DEBUG");
+			try {
+				proc = cp.spawn("bash", ["-c", bashScript], { stdio: ["pipe", "pipe", "pipe"] });
+				logMessage("Bash 进程已创建", "DEBUG");
+			} catch (e) {
+				bridge._setStartError(`spawn_fail(bash): ${e.message}`);
+				logMessage(`Bash 进程创建失败: ${e.message}`, "ERROR");
+				bridge.available = false;
+				resolve(false);
+				return;
+			}
+		}
+
+		if (!proc) {
+			bridge._setStartError("proc_null");
+			resolve(false);
+			return;
+		}
+
+		bridge.setupProcess(proc, (ok) => {
+			if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+			resolve(ok);
+		});
+	});
+});
+
+let _daemonBootSeq = 0;
+
+function updateStatusBarNow() {
+	updateStatusBar(_cacheStatsGetter(), pythonBridge, rustBridge, shellBridge);
+}
+
+function startDaemons() {
+	const bootSeq = ++_daemonBootSeq;
+
+	const pref = getEnginePreference();
+	logMessage(`开始启动守护进程，用户选择的引擎: ${pref}`, "INFO");
+
+	const startOne = async (bridge, isHardFail) => {
+		if (bootSeq !== _daemonBootSeq) return false;
+
+		try {
+			if (bridge.isAvailable()) return true;
+
+			logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
+			const ok = await bridge.start();
+
+			if (bootSeq !== _daemonBootSeq) {
+				logMessage(`${bridge.name} 启动被中断 (bootSeq mismatch)，立即停止`, "WARN");
+				try { await bridge.stop(); } catch { }
+				return false;
+			}
+
+			if (!ok) {
+				const msg = `${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`;
+				logMessage(msg, isHardFail ? "ERROR" : "WARN");
+			} else {
+				logMessage(`${bridge.name} Bridge OK`, "INFO");
+			}
+			return !!ok;
+		} catch (e) {
+			const msg = `${bridge.name} Bridge 启动异常：${e?.message || e}`;
+			logMessage(msg, isHardFail ? "ERROR" : "WARN");
+			return false;
+		} finally {
+			updateStatusBarNow();
+		}
+	};
+
+	(async () => {
+		if (bootSeq !== _daemonBootSeq) return;
+
+		const shellTask = startOne(shellBridge, false);
+
+		if (pref !== "shell") {
+			let tryOrder = [];
+			if (pref === "python") {
+				tryOrder = [pythonBridge, rustBridge];
+			} else if (pref === "rust") {
+				tryOrder = [rustBridge, pythonBridge];
+			} else {
+				tryOrder = [pythonBridge, rustBridge];
+			}
+
+			let mainEngineStarted = false;
+
+			for (const bridge of tryOrder) {
+				if (bootSeq !== _daemonBootSeq) break;
+
+				if (await startOne(bridge, false)) {
+					mainEngineStarted = true;
+					for (const other of tryOrder) {
+						if (other !== bridge && other.isAvailable()) {
+							logMessage(`停止多余的引擎: ${other.name}`, "DEBUG");
+							other.stop();
+						}
+					}
+					break;
+				}
+			}
+		} else {
+			if (pythonBridge.isAvailable()) await pythonBridge.stop();
+			if (rustBridge.isAvailable()) await rustBridge.stop();
+		}
+
+		await shellTask;
+
+		if (bootSeq === _daemonBootSeq) {
+			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
+			if (!anyAvailable) {
+				logMessage("All daemons failed, using spawn fallback", "WARN");
+			}
+			updateStatusBarNow();
+		}
+	})().catch((e) => {
+		logMessage(`startDaemons 流程异常: ${e?.message || e}`, "WARN");
+		updateStatusBarNow();
+	});
+}
 
 // ============================================================================
 // ★ 全局上下文
@@ -146,6 +964,13 @@ let _cacheHitTotal = 0;
 let _cacheMissTotal = 0;
 let _statsFlushTimer = null;
 let _statsDirty = false;
+
+// ★ 修复 Crash：添加缺失的 Getter 定义
+let _cacheStatsGetter = () => ({ totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 });
+
+function setCacheStatsGetter(fn) {
+	_cacheStatsGetter = fn;
+}
 
 function _loadPersistentStats(context) {
 	try {
@@ -422,8 +1247,94 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	statusBarItem.show();
 }
 
+// ============================================================================
+// ★ IO Scheduler & Queue (从 qqq.js 迁移)
+// ============================================================================
+class TaskScheduler {
+	constructor(maxConcurrency = 8) {
+		this.maxConcurrency = Math.max(1, maxConcurrency | 0);
+		this.runningCount = 0;
+		this.queue = [];
+		this.pendingPromises = new Map();
+	}
+
+	async schedule(taskKey, taskGenerator) {
+		if (this.pendingPromises.has(taskKey)) return this.pendingPromises.get(taskKey);
+
+		const p = new Promise((resolve, reject) => {
+			const run = async () => {
+				this.runningCount++;
+				try {
+					const result = await taskGenerator();
+					resolve(result);
+				} catch (e) {
+					reject(e);
+				} finally {
+					this.runningCount--;
+					this.pendingPromises.delete(taskKey);
+					this._next();
+				}
+			};
+			this.queue.push(run);
+		});
+
+		this.pendingPromises.set(taskKey, p);
+		this._next();
+		return p;
+	}
+
+	_next() {
+		while (this.runningCount < this.maxConcurrency && this.queue.length > 0) {
+			const task = this.queue.shift();
+			task();
+		}
+	}
+}
+
+class TaskQueue {
+	constructor() {
+		this.queue = [];
+		this.running = false;
+	}
+
+	enqueue(task) {
+		return new Promise((resolve, reject) => {
+			this.queue.push({ task, resolve, reject });
+			this.processNext();
+		});
+	}
+
+	async processNext() {
+		if (this.running || this.queue.length === 0) return;
+		this.running = true;
+		const { task, resolve, reject } = this.queue.shift();
+		try {
+			const result = await task();
+			resolve(result);
+		} catch (e) {
+			reject(e);
+		} finally {
+			this.running = false;
+			this.processNext();
+		}
+	}
+}
+
+const probeScheduler = new TaskScheduler(12);
+const genScheduler = new TaskScheduler(6);
+const pasteQueue = new TaskQueue();
+const metaSaveQueue = new TaskQueue();
+
 module.exports = {
 	init,
+
+	// 调度器与队列
+	TaskScheduler,
+	TaskQueue,
+	probeScheduler,
+	genScheduler,
+	pasteQueue,
+	metaSaveQueue,
 
 	// 日志
 	setLogPath,
@@ -449,6 +1360,7 @@ module.exports = {
 	markCacheHit,
 	markCacheMiss,
 	getPersistentCacheStatsSnapshot,
+	setCacheStatsGetter,
 	finishUserTracking,
 
 	// 状态栏
@@ -459,6 +1371,12 @@ module.exports = {
 	cleanReason,
 
 	// 引擎辅助 (给外部用)
+	DaemonBridge,
+	pythonBridge,
+	rustBridge,
+	shellBridge,
+	startDaemons,
+	updateStatusBarNow,
 	getEnginePreference,
 	getEngineTryOrder,
 	getActiveEngineCode,
