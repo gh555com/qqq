@@ -1214,7 +1214,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	// 根据引擎类型选择不同的边框符号
 	if (active.code === "P" || active.code === "R") {
 		// 使用 ▌ 符号（适用于 P 和 R 引擎）
-		statusBarItem.text = ` ▌qqq: ⧖ ${h}h  ▥ ${cacheMB.toFixed(0)}m  ⊙ ${hitRate.toFixed(0)}%  ⚡ ${engineTag} ▌`;
+		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%      ${engineTag}   ▌`;
 	} else {
 		// 使用 ▪ 符号（适用于其他引擎）
 		statusBarItem.text = ` ▪ qqq: ⧖ ${h}h  ▥ ${cacheMB.toFixed(0)}m  ⊙ ${hitRate.toFixed(0)}%  ⚡ ${engineTag} ▪ `;
