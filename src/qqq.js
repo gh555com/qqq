@@ -1,10 +1,8 @@
-// src/qqq.js
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const cp = require("child_process");
-const readline = require("readline");
 const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
@@ -14,7 +12,7 @@ const q3 = require("./q3");
 const global = require("./global");
 const cheerio = require("cheerio");
 
-// ★ 引用从 global.js 迁移过来的核心对象，保持本地引用名不变以兼容旧逻辑
+// 引用 global.js 的核心对象
 const {
 	pythonBridge,
 	rustBridge,
@@ -25,9 +23,6 @@ const {
 	metaSaveQueue
 } = global;
 
-// ============================================================================
-// ★ 全局唯一真理来源：路径暗号 + 捕获组（match[1] 就是内部路径）
-// ============================================================================
 function createPathRegex() {
 	return /\/\\\s*([\s\S]*?)\s*\\\//gi;
 }
@@ -60,13 +55,7 @@ let cacheMeta = null;
 let _statusBarTimer = null;
 
 // ============================================================================
-// ★ 3) probe / gen 双 scheduler：已迁移至 global.js
-// ============================================================================
-// (TaskScheduler logic moved to global.js)
-
-
-// ============================================================================
-// ★ 4) 缓存 meta 只读快照
+// Cache Meta Logic
 // ============================================================================
 function getCacheStatsSnapshot() {
 	const s = cacheMeta?.stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
@@ -78,11 +67,6 @@ function getCacheStatsSnapshot() {
 	};
 }
 
-// updateStatusBarNow moved to global.js
-
-// ============================================================================
-// ★★★ 统一路径真理来源（给 q2/q1/未来模块用）
-// ============================================================================
 function _stripDocJunk(s) {
 	if (s == null) return "";
 	return String(s).trim().replace(/\r/g, "").replace(/\n/g, "");
@@ -156,8 +140,6 @@ function canonicalizeExistingPath(p) {
 	out = path.normalize(out);
 
 	if (process.platform === "win32") {
-		// ★ 修复 Windows 长路径前缀问题
-		// fs.realpathSync.native 返回的路径可能包含 \\?\ 前缀，这会导致 startsWith 比较失败
 		out = out.replace(/^\\\\\?\\/, "");
 		out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
 	}
@@ -175,16 +157,9 @@ function cacheKeyForPath(p) {
 	return process.platform === "win32" ? canon.toLowerCase() : canon;
 }
 
-function _nodeModeFromShellAvail() {
-	// D = daemon, S = spawn
-	return shellBridge?.isAvailable?.() === true ? "D" : "S";
-}
-
-// ---------- task queue ----------
-// (TaskQueue logic moved to global.js)
-
-
-// ---------- fingerprint ----------
+// ============================================================================
+// Fingerprint Logic
+// ============================================================================
 const _fingerprintCache = new Map();
 const _fingerprintDb = new Map();
 
@@ -197,7 +172,6 @@ function prefillFingerprint(filePath, fingerprint) {
 			size: stat.size,
 			fp: fingerprint
 		});
-		// 同时记录到反向查找表
 		_fingerprintDb.set(fingerprint, filePath);
 	} catch (e) { }
 }
@@ -213,7 +187,6 @@ function computeFingerprint(filePath) {
 		const mtime = stat.mtimeMs;
 		const key = cacheKeyForPath(filePath);
 
-		// 缓存检查
 		const cached = _fingerprintCache.get(key);
 		if (cached && cached.mtime === mtime && cached.size === size) {
 			return cached.fp;
@@ -262,9 +235,7 @@ function computeFingerprint(filePath) {
 
 		const fp = crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
 
-		// 写入缓存
 		_fingerprintCache.set(key, { mtime, size, fp });
-		// 简单的缓存清理策略：超过 2000 个条目清空一半（虽然不太可能达到）
 		if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
 
 		return fp;
@@ -273,7 +244,9 @@ function computeFingerprint(filePath) {
 	}
 }
 
-// ---------- cache ----------
+// ============================================================================
+// Cache Initialization & Management
+// ============================================================================
 function initCache(context) {
 	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
 	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
@@ -308,7 +281,6 @@ function loadCacheMeta() {
 function saveCacheMeta() {
 	if (!cacheDir || !cacheMeta) return;
 
-	// ★ 异步序列化写入，解决 Race Condition
 	metaSaveQueue.enqueue(async () => {
 		try {
 			const data = JSON.stringify(cacheMeta, null, 2);
@@ -518,14 +490,9 @@ function getCachedBuffer(contentId, quality) {
 	return null;
 }
 
-function _cleanReason(s) {
-	if (!s) return "";
-	return String(s).trim().replace(/\r/g, "").replace(/\n/g, " | ").slice(0, 300);
-}
-
-// DaemonBridge and instances moved to global.js
-
-// ---------- io ----------
+// ============================================================================
+// IO & Clipboard Logic
+// ============================================================================
 function ensureDir(dirPath) {
 	if (!fs.existsSync(dirPath)) {
 		try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) { }
@@ -533,7 +500,6 @@ function ensureDir(dirPath) {
 }
 
 const CLIPBOARD_PEEK_TIMEOUT_MS = 350;
-const CLIPBOARD_SLOW_TIMEOUT_MS = 60000;
 
 async function peekClipboardRichFast() {
 	const pref = global.getEnginePreference();
@@ -541,86 +507,38 @@ async function peekClipboardRichFast() {
 
 	const promises = [];
 
-	// 1. ShellBridge: 检查 HTML
 	if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
 		promises.push((async () => {
 			try {
 				const hasHtml = await shellBridge.call("hasHtml", {}, 200);
-				if (hasHtml?.value) {
-					return {
-						type: "peek",
-						has_html: true,
-						priority: 100
-					};
-				}
+				if (hasHtml?.value) return { type: "peek", has_html: true, priority: 100 };
 			} catch { }
 			return null;
 		})());
 	}
 
-	// 2. PythonBridge: 检查 Files
 	if (order.includes("python") && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
 		promises.push((async () => {
 			try {
 				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
-				if (res && !res.error && res.type === "peek") {
-					return { ...res, priority: 50 };
-				}
+				if (res && !res.error && res.type === "peek") return { ...res, priority: 50 };
 			} catch { }
 			return null;
 		})());
 	}
 
-	// 3. Node.js (VS Code API): 检查纯文本中的 HTML 特征
 	promises.push((async () => {
 		try {
 			const text = await vscode.env.clipboard.readText();
 			if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
-				return {
-					type: "peek",
-					has_html: true,
-					priority: 80
-				};
+				return { type: "peek", has_html: true, priority: 80 };
 			}
 		} catch { }
 		return null;
 	})());
 
-	const raceToSuccess = (promises) => {
-		return new Promise((resolve) => {
-			let failureCount = 0;
-			let resolved = false;
-
-			if (promises.length === 0) {
-				resolve(null);
-				return;
-			}
-
-			promises.forEach(p => {
-				Promise.resolve(p).then(res => {
-					if (resolved) return;
-					if (res !== null) {
-						resolved = true;
-						resolve(res);
-					} else {
-						failureCount++;
-						if (failureCount === promises.length) {
-							resolve(null);
-						}
-					}
-				}).catch(() => {
-					if (resolved) return;
-					failureCount++;
-					if (failureCount === promises.length) {
-						resolve(null);
-					}
-				});
-			});
-		});
-	};
-
 	try {
-		return await raceToSuccess(promises);
+		return await Promise.race(promises.filter(p => p !== null));
 	} catch { }
 
 	return null;
@@ -632,8 +550,6 @@ async function raceClipboard(targetDir, callback) {
 	let handled = false;
 
 	try {
-		// ★ 优化：只要 ShellBridge 没明确挂掉 (available !== false)，就尝试调用
-		// 让 call() 内部去处理启动/等待逻辑。如果超时或失败，再走 fallback。
 		if (shellBridge && shellBridge.available !== false) {
 			const res = await shellBridge.call("checkQ", {}, 500);
 			if (res && !res.error) {
@@ -643,10 +559,8 @@ async function raceClipboard(targetDir, callback) {
 		}
 	} catch (e) { }
 
-	// Fallback 1: Spawn Mode (当 Daemon 不可用时，冷启动 PowerShell 获取剪贴板状态)
 	if (!handled && process.platform === "win32") {
 		try {
-			// 使用 PowerShell 单行命令获取 JSON 状态
 			const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
 			const jsonStr = await spawnOutput("powershell", [
 				"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
@@ -656,11 +570,7 @@ async function raceClipboard(targetDir, callback) {
 				if (parsed) {
 					qStatus = parsed;
 					handled = true;
-					global.logMessage("[Fallback] raceClipboard used Spawn PowerShell", "INFO");
-
-					// ★ 机会：既然 Spawn 成功了，说明 PowerShell 还能用，尝试复活 ShellBridge
 					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
-						global.logMessage("[SelfHealing] Spawn 成功，尝试复活 Shell Daemon...", "INFO");
 						shellBridge.start().catch(() => { });
 					}
 				}
@@ -670,7 +580,6 @@ async function raceClipboard(targetDir, callback) {
 		}
 	}
 
-	// Fallback 2: VS Code API (最后的兜底，只能识别文本)
 	if (!handled) {
 		try {
 			const text = await vscode.env.clipboard.readText();
@@ -720,7 +629,6 @@ async function handleClipboardFast() {
 	return null;
 }
 
-
 function formatBytes(size) {
 	if (size == null || isNaN(size)) return "?";
 	const units = ["B", "KB", "MB", "GB"];
@@ -748,7 +656,6 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 	return pasteQueue.enqueue(async () => {
 		if (token?.isCancellationRequested) return null;
 
-		// ★ 1. HTML: 总是显示进度条 (Complex Paste)
 		if (typeHint === "html") {
 			return await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
@@ -758,23 +665,17 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				newTok.onCancellationRequested(() => {
 					global.logMessage("HTML 粘贴被用户取消", "WARN");
 				});
-
-				// 适配 progressCallback
 				const progCb = (pct, msg) => {
 					progress.report({ message: msg, increment: pct });
 				};
-
 				return await handleClipboardNode(targetDir, partialCallback, newTok, progCb);
 			});
 		}
 
-		// ★ 2. File: 超过阈值显示进度条 (Simple Paste)
 		if (typeHint === "file") {
 			let files = [];
-
-			// 优先尝试获取文件列表 (支持 Python 和 Shell 引擎)
 			const pref = global.getEnginePreference();
-			const order = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+			const order = global.getEngineTryOrder(pref);
 
 			for (const engine of order) {
 				try {
@@ -794,7 +695,6 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				} catch { }
 			}
 
-			// 如果没找到，兜底尝试 ShellBridge (因为 shellBridge 可能不在 order 里但可用)
 			if (files.length === 0 && shellBridge?.isAvailable && shellBridge.isAvailable()) {
 				try {
 					const res = await shellBridge.call("getFiles", {}, 2000);
@@ -809,7 +709,6 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				}
 			}
 
-			// 如果总大小超过阈值，或者文件数量特别多(>10)，开启进度条
 			if (totalSize > PASTE_SIZE_THRESHOLD || files.length > 10) {
 				const sizeStr = formatBytes(totalSize);
 				return await global.withProgress({
@@ -820,16 +719,12 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 					newTok.onCancellationRequested(() => {
 						global.logMessage("文件粘贴被用户取消", "WARN");
 					});
-
 					const progCb = (pct, msg) => {
 						progress.report({ message: msg, increment: pct });
 					};
-
-					// 传入 preFetchedFiles (files) 和 totalSize 避免重复计算
 					return await handleClipboardShell(targetDir, newTok, progCb, files, totalSize);
 				});
 			} else {
-				// 小文件直接处理
 				return await handleClipboardShell(targetDir, token, null, files);
 			}
 		}
@@ -841,10 +736,6 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 		return null;
 	});
 }
-
-// ------------------------------------------------------------------------
-// ★ 以下是辅助函数
-// ------------------------------------------------------------------------
 
 function computeBufferFingerprint(buffer) {
 	try {
@@ -878,9 +769,8 @@ function computeBufferFingerprint(buffer) {
 }
 
 // ============================================================================
-// ★ HTML 解析（cheerio 版）辅助函数
+// HTML Helpers
 // ============================================================================
-
 function sanitizeHtml(html) {
 	if (!html) return "";
 	const $ = cheerio.load(html, { decodeEntities: false });
@@ -967,13 +857,7 @@ function _pickBestFromSrcset(srcset) {
 function _collectElementUrls($el, isSourceTag = false) {
 	const urls = [];
 
-	const srcsetKeys = [
-		"srcset",
-		"data-srcset",
-		"data-lazy-srcset",
-		"data-lazysrcset",
-		"data-src-set",
-	];
+	const srcsetKeys = ["srcset", "data-srcset", "data-lazy-srcset", "data-lazysrcset", "data-src-set"];
 	for (const k of srcsetKeys) {
 		const v = _pickBestFromSrcset($el.attr(k));
 		if (v) urls.push(v);
@@ -981,42 +865,13 @@ function _collectElementUrls($el, isSourceTag = false) {
 
 	const srcKeys = isSourceTag
 		? ["src", "data-src"]
-		: [
-			"src",
-			"data-src",
-			"data-original",
-			"data-orig",
-			"data-lazy-src",
-			"data-lazysrc",
-			"data-actualsrc",
-			"data-url",
-			"data-img",
-		];
+		: ["src", "data-src", "data-original", "data-orig", "data-lazy-src", "data-lazysrc", "data-actualsrc", "data-url", "data-img"];
 	for (const k of srcKeys) {
 		const v = _normalizeUrl($el.attr(k));
 		if (v) urls.push(v);
 	}
 
 	return urls;
-}
-
-function _collectHtmlMediaUrls($) {
-	const seen = new Set();
-	const out = [];
-
-	$("img,source").each((_, el) => {
-		const tag = (el?.tagName || "").toLowerCase();
-		const $el = $(el);
-		const urls = _collectElementUrls($el, tag === "source");
-		for (const u of urls) {
-			if (!u) continue;
-			if (seen.has(u)) continue;
-			seen.add(u);
-			out.push(u);
-		}
-	});
-
-	return out;
 }
 
 function _extFromContentType(ct) {
@@ -1042,22 +897,6 @@ function _guessExtFromUrl(url, contentType) {
 		if (ext && ext.length <= 6) return ext;
 	} catch { }
 	return ".png";
-}
-
-function _fileUrlToFsPath(fileUrl) {
-	try {
-		const u = new URL(fileUrl);
-		if (u.protocol !== "file:") return null;
-		let p = decodeURIComponent(u.pathname || "");
-		if (!p) return null;
-		if (process.platform === "win32") {
-			if (p.startsWith("/")) p = p.slice(1);
-			p = p.replace(/\//g, "\\");
-		}
-		return p;
-	} catch {
-		return null;
-	}
 }
 
 async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024 * 1024, redirectLeft = 5) {
@@ -1122,73 +961,9 @@ async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024
 	});
 }
 
-async function _saveUrlToFile(url, targetDir) {
-	const u = _normalizeUrl(url);
-	if (!u) return null;
-
-	ensureDir(targetDir);
-
-	if (u.startsWith("data:")) {
-		const m = /^data:([^;]+);base64,(.*)$/i.exec(u);
-		if (!m) return null;
-		const mime = m[1];
-		const b64 = m[2];
-		const buffer = Buffer.from(b64, "base64");
-
-		const fp = computeBufferFingerprint(buffer);
-		const existingPath = fp ? findFileByFingerprint(fp) : null;
-		if (existingPath && fs.existsSync(existingPath)) {
-			return { path: existingPath, fingerprint: fp };
-		}
-
-		const ext = _guessExtFromUrl("x://data", mime);
-		const destPath = path.join(targetDir, getTimestampFilename(ext));
-		fs.writeFileSync(destPath, buffer);
-		if (fp) prefillFingerprint(destPath, fp);
-		return { path: destPath, fingerprint: fp };
-	}
-
-	if (u.startsWith("file://")) {
-		const localPath = _fileUrlToFsPath(u);
-		if (!localPath || !fs.existsSync(localPath) || fs.statSync(localPath).isDirectory()) return null;
-
-		const fp = computeFingerprint(localPath);
-		const existingPath = fp ? findFileByFingerprint(fp) : null;
-		if (existingPath && fs.existsSync(existingPath)) {
-			return { path: existingPath, fingerprint: fp };
-		}
-
-		const ext = path.extname(localPath) || ".png";
-		const destPath = path.join(targetDir, getTimestampFilename(ext));
-		fs.copyFileSync(localPath, destPath);
-		if (fp) prefillFingerprint(destPath, fp);
-		return { path: destPath, fingerprint: fp };
-	}
-
-	if (u.startsWith("http://") || u.startsWith("https://")) {
-		const dl = await _downloadUrlToBuffer(u);
-		if (!dl?.buffer || dl.error) return null;
-
-		const buffer = dl.buffer;
-		const fp = computeBufferFingerprint(buffer);
-		const existingPath = fp ? findFileByFingerprint(fp) : null;
-		if (existingPath && fs.existsSync(existingPath)) {
-			return { path: existingPath, fingerprint: fp };
-		}
-
-		const ext = _guessExtFromUrl(u, dl.contentType);
-		const destPath = path.join(targetDir, getTimestampFilename(ext));
-		fs.writeFileSync(destPath, buffer);
-		if (fp) prefillFingerprint(destPath, fp);
-		return { path: destPath, fingerprint: fp };
-	}
-
-	return null;
-}
-
-// ------------------------------------------------------------------------
-// ★ 异步流式拷贝（带进度监控 & 取消支持）
-// ------------------------------------------------------------------------
+// ============================================================================
+// File Copy with Progress
+// ============================================================================
 async function copyFileWithProgress(src, dest, onProgress, token) {
 	return new Promise((resolve, reject) => {
 		if (token?.isCancellationRequested) return reject(new Error("cancelled"));
@@ -1231,31 +1006,14 @@ async function copyFileWithProgress(src, dest, onProgress, token) {
 	});
 }
 
-/**
- * ★ 补齐：downloadImage
- * 仅负责下载并保存到指定路径，同时计算指纹
- */
-async function downloadImage(url, destPath) {
-	const result = await _downloadUrlToBuffer(url);
-	if (result.error) throw new Error(result.error);
-	if (result.buffer) {
-		fs.writeFileSync(destPath, result.buffer);
-		const fp = computeBufferFingerprint(result.buffer);
-		if (fp) prefillFingerprint(destPath, fp);
-		return true;
-	}
-	return false;
-}
-
-// ------------------------------------------------------------------------
-// ★ handleClipboardNode
-// ------------------------------------------------------------------------
+// ============================================================================
+// handleClipboardNode
+// ============================================================================
 async function handleClipboardNode(targetDir, partialCallback = null, token = null, progressCallback = null) {
 	try {
 		if (token?.isCancellationRequested) return null;
 		if (progressCallback) progressCallback(0, "正在解析 HTML...");
 
-		// 1. 尝试通过 Bridge 获取 HTML (Python/Rust/Shell)
 		let htmlText = null;
 		const pref = global.getEnginePreference();
 		const order = global.getEngineTryOrder(pref);
@@ -1283,7 +1041,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			} catch (e) { }
 		}
 
-		// 兜底尝试 ShellBridge
 		if (!htmlText && shellBridge && shellBridge.available !== false) {
 			try {
 				const res = await shellBridge.call("getHtml", {}, 5000);
@@ -1297,7 +1054,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			} catch (e) { }
 		}
 
-		// 2. Fallback: Spawn PowerShell (当 Daemon 失败时尝试冷启动获取)
 		if (!htmlText && process.platform === "win32") {
 			try {
 				const psScript = `Add-Type -A System.Windows.Forms;$t=[System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html);if($t){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))}`;
@@ -1306,11 +1062,7 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 				]);
 				if (b64 && b64.trim()) {
 					htmlText = Buffer.from(b64.trim(), "base64").toString("utf8");
-					global.logMessage("[Fallback] handleClipboardNode used Spawn PowerShell", "INFO");
-
-					// ★ 机会：既然 Spawn 成功了，说明 PowerShell 还能用，尝试复活 ShellBridge
 					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
-						global.logMessage("[SelfHealing] Spawn 成功，尝试复活 Shell Daemon...", "INFO");
 						shellBridge.start().catch(() => { });
 					}
 				}
@@ -1319,7 +1071,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			}
 		}
 
-		// 3. 如果 Spawn 也没拿到，尝试 VS Code API
 		if (!htmlText) {
 			const text = await vscode.env.clipboard.readText();
 			if (text && _looksLikeHtml(text)) {
@@ -1329,7 +1080,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 		if (!htmlText || !htmlText.trim()) return { type: "text", text: await vscode.env.clipboard.readText() || "" };
 
-		// 3. 处理 Windows 剪贴板 HTML 格式的 Header
 		if (htmlText.includes("StartHTML:") && htmlText.includes("EndHTML:")) {
 			const mStart = /StartHTML:(\d+)/.exec(htmlText);
 			const mEnd = /EndHTML:(\d+)/.exec(htmlText);
@@ -1351,70 +1101,47 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			}
 		}
 
-		// ★ 安全性净化
 		let safeHtml = sanitizeHtml(htmlText);
-		if (!safeHtml) return { type: "text", text: htmlText }; // 如果净化后为空，但原始内容非空，降级为纯文本返回，而不是 null
+		if (!safeHtml) return { type: "text", text: htmlText };
 
 		let $;
 		try {
-			// ★ 修复乱码关键：使用 null-encoding 加载，保持原始字节流处理
-			// cheerio 默认会尝试智能推断编码，但经常翻车。
-			// 这里我们假设输入已经是 UTF-8 字符串（JS 字符串本身就是 UTF-16，但内容可能是 UTF-8 转换来的）
-			// 更好的做法是依赖 sanitizeHtml 清洗掉 style/class 等垃圾
 			$ = cheerio.load(safeHtml, { decodeEntities: false, xmlMode: false });
-
-			// ★ 安全升级：彻底移除潜在危险标签
 			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea").remove();
 
-			// ★ 暴力清洗垃圾标签和属性
-			// 移除所有 style, class, data-*, width, height 等样式属性，只保留语义化内容
 			$('*').each((i, el) => {
 				const tag = el.tagName.toLowerCase();
-				// ★ 安全升级：强制移除所有内联 style 属性，防止 CSS 注入
 				$(el).removeAttr('style');
 
-				// ★ 安全升级：移除所有 on* 事件属性
 				const attribs = el.attribs || {};
 				for (const attr of Object.keys(attribs)) {
 					if (attr.startsWith('on')) $(el).removeAttr(attr);
 				}
 
 				if (tag === 'img' || tag === 'br' || tag === 'p' || tag === 'div' || /^h[1-6]$/.test(tag) || tag === 'li' || tag === 'ul' || tag === 'ol' || tag === 'table' || tag === 'tr' || tag === 'td' || tag === 'th') {
-					// 保留白名单标签，但清洗属性
 					const attribs = el.attribs || {};
 					for (const attr of Object.keys(attribs)) {
-						// 只保留 img 的 src/alt/title，其他全部干掉
 						if (tag === 'img') {
 							if (!['src', 'data-src', 'srcset', 'data-srcset', 'alt', 'title'].includes(attr)) {
 								$(el).removeAttr(attr);
 							}
 						} else {
-							// 非 img 标签，干掉所有属性（style, class, id, etc.）
 							$(el).removeAttr(attr);
 						}
 					}
 				} else if (el.type === 'tag') {
-					// 非白名单标签，unwrap 内容（保留文本，去掉标签外壳）
-					// 例如 <span style="...">text</span> -> text
-					// 但 cheerio 的 unwrap 比较麻烦，这里简单粗暴：如果不是 img/br，就只取 text？
-					// 不，linearWalk 会处理 text node。
-					// 我们这里只负责清洗属性。
 					const attribs = el.attribs || {};
 					for (const attr of Object.keys(attribs)) {
 						$(el).removeAttr(attr);
 					}
 				}
 			});
-
 		} catch (e) {
 			global.logMessage(`cheerio.load 失败: ${e.message}`, "ERROR");
 			return null;
 		}
 
-		// ★ 跳出范式：不使用 HTML 里的文本，而是用 readText 的纯文本
-		// 我们只利用 HTML 来提取图片和推断图片的大致位置
 		const cleanText = await vscode.env.clipboard.readText() || "";
-		// 按换行符分割，并去除两端空白，过滤掉空行以便与 HTML 结构对齐
 		const cleanLines = cleanText.split(/\r?\n/);
 		let cleanLineIndex = 0;
 
@@ -1422,44 +1149,19 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 		let currentBlockHasText = false;
 		let currentBlockImages = [];
 
-		// 辅助：提交当前 Block
 		function flushBlock() {
-			// 1. 先处理文本
 			if (currentBlockHasText) {
-				// 尝试从 cleanText 中提取一行或多行非空文本
-				// 简单的贪婪匹配：只要 cleanLines 还有内容，就取出一行
-				// 如果 HTML 里的这个 Block 是 "长文本"，可能对应 cleanText 的多行？
-				// 这里简化策略：一个 HTML Block 对应 cleanText 中的 "一段" (直到下一个空行? 或者就一行?)
-				// 最稳妥策略：只要 HTML Block 有文本，我们就从 cleanLines 里取出一行 "非空行"
-				// 如果 cleanLines 里全是空行了，那就取不到文本了。
-
 				while (cleanLineIndex < cleanLines.length) {
 					const line = cleanLines[cleanLineIndex++];
-					// 如果是空行，可能是段落间距，跳过，直到找到有内容的行
-					// 或者，我们保留空行作为间距？
-					// 既然是 "cleanText"，每一行都很重要。
-					// 让我们改一下策略：
-					// 每次 HTML Block 结束，我们就输出 "一段" cleanText。
-					// 但是 "一段" 是多少？
-
-					// 重新思考：HTML 的 <p> 对应 cleanText 的 "视觉段落"。
-					// cleanText 的 "视觉段落" 通常由空行分隔。
-					// 比如: Line1 \n \n Line2
-
-					// 让我们尝试 "非空行匹配"：
-					// 每个 HTML Block (有 Text) 消耗掉 cleanLines 里的一个 "非空行"。
 					if (line && line.trim()) {
 						blocks.push({ type: "text", text: line });
 						break;
 					} else {
-						// 如果是空行，我们也保留它作为格式？
-						// 是的，保留空行比较好。
-						blocks.push({ type: "text", text: "" }); // 空行
+						blocks.push({ type: "text", text: "" });
 					}
 				}
 			}
 
-			// 2. 再处理图片 (通常图片在文字后，或者独立)
 			for (const img of currentBlockImages) {
 				blocks.push(img);
 			}
@@ -1470,7 +1172,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 		const root = $('body').length ? $('body') : $.root();
 
-		// 递归遍历，寻找 Block 边界
 		function structuralWalk(ctx) {
 			$(ctx).contents().each((i, el) => {
 				if (el.type === 'text') {
@@ -1487,7 +1188,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 						const urls = _collectElementUrls($(el), false);
 						if (urls && urls.length > 0) {
 							const imgBlock = { type: "media", kind: "image", src: urls[0], status: "pending" };
-							// ★ 关键修正：如果当前没有积攒文本，说明图片是独立的（或紧跟上一个Block的），直接输出，防止被吸附到下一个Block
 							if (currentBlockHasText) {
 								currentBlockImages.push(imgBlock);
 							} else {
@@ -1506,9 +1206,8 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 		}
 
 		structuralWalk(root);
-		flushBlock(); // 处理最后的残余
+		flushBlock();
 
-		// 如果 cleanLines 还有剩余的文本（因为 HTML 结构可能比文本少，比如 HTML 解析提前结束），全部追加到后面
 		while (cleanLineIndex < cleanLines.length) {
 			const line = cleanLines[cleanLineIndex++];
 			blocks.push({ type: "text", text: line });
@@ -1525,7 +1224,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			if (b.type === "media" && b.kind === "image") {
 				const task = (async () => {
 					try {
-						// 1. Initial extension guess
 						let ext = ".png";
 						try {
 							const u = new URL(b.src, "http://x.com");
@@ -1534,7 +1232,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 							ext = path.extname(b.src) || "";
 						}
 
-						// 2. Download content
 						const dl = await _downloadUrlToBuffer(b.src);
 						if (dl.error || !dl.buffer) {
 							global.logMessage(`Image download failed: ${b.src} -> ${dl.error}`, "WARN");
@@ -1543,14 +1240,11 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 						let finalExt = ext.toLowerCase();
 
-						// 3. Check whitelist
 						if (!IMAGE_EXTS_FOR_CLIPBOARD.has(finalExt)) {
-							// Not in whitelist, try detection
 							try {
 								const dim = sizeOf(dl.buffer);
 								if (dim && dim.type) {
 									finalExt = "." + dim.type;
-									// map common types if needed
 									if (finalExt === ".jpeg") finalExt = ".jpg";
 								} else {
 									finalExt = ".webp";
@@ -1560,7 +1254,6 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 							}
 						}
 
-						// 4. Save file
 						const filename = getTimestampFilename(finalExt);
 						const destPath = path.join(targetDir, filename);
 
@@ -1571,7 +1264,7 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 						if (fp) prefillFingerprint(destPath, fp);
 
 						b.filename = filename;
-						b.path = destPath; // ★ q1.js 需要绝对路径来计算相对路径和空行
+						b.path = destPath;
 						b.fingerprint = fp;
 						global.logMessage(`Saved image: ${filename} (${finalExt})`, "INFO");
 
@@ -1585,27 +1278,20 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 		if (pendingTasks.length > 0) {
 			if (progressCallback) progressCallback(10, `发现 ${pendingTasks.length} 张图片，准备下载...`);
-
-			// 简单的并行下载，带进度汇报
 			let completedCount = 0;
 			const total = pendingTasks.length;
-
-			// 包装任务以支持进度
 			const wrappedTasks = pendingTasks.map(taskPromise => {
 				return taskPromise.then(() => {
 					completedCount++;
 					if (progressCallback) {
-						// 剩余 90% 的进度分给下载
 						const inc = 90 / total;
 						progressCallback(inc, `下载图片 ${completedCount}/${total}`);
 					}
 				});
 			});
-
 			await Promise.all(wrappedTasks);
 		}
 
-		// ★ 返回结构化数据，让 q1.js 负责最终的格式化（包含空行计算）
 		return { type: "html_blocks", blocks };
 	} catch (e) {
 		global.logMessage(`handleClipboardNode 失败: ${e?.message || e}`, "ERROR");
@@ -1613,19 +1299,17 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 	}
 }
 
-// ------------------------------------------------------------------------
-// ★ 以下是辅助函数
-// ------------------------------------------------------------------------
-
+// ============================================================================
+// handleClipboardShell
+// ============================================================================
 async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
 	try {
 		if (token?.isCancellationRequested) return null;
 		if (process.platform === "win32") {
 			let files = preFetchedFiles;
 			if (!files) {
-				// 优先尝试获取文件列表 (支持 Python 和 Shell 引擎)
 				const pref = global.getEnginePreference();
-				const order = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+				const order = global.getEngineTryOrder(pref);
 
 				for (const engine of order) {
 					try {
@@ -1645,7 +1329,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 					} catch { }
 				}
 
-				// 兜底尝试 ShellBridge
 				if ((!files || files.length === 0) && shellBridge?.isAvailable && shellBridge.isAvailable()) {
 					try {
 						const res = await shellBridge.call("getFiles", {}, 2000);
@@ -1655,7 +1338,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 			}
 
 			if (files && files.length > 0) {
-
 				const folders = files.filter((f) => {
 					try { return fs.statSync(f).isDirectory(); } catch { return false; }
 				});
@@ -1668,10 +1350,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 				const copiedFolders = [];
 				const fingerprints = {};
 
-				// 如果没有预计算总大小（比如直接调用的），且需要进度条，则现场计算
 				let totalBytesToTransfer = preCalculatedTotalSize;
 				if (progressCallback && totalBytesToTransfer <= 0) {
-					// 简单估算，文件夹就不递归了，太慢
 					for (const f of validFiles) {
 						try { totalBytesToTransfer += fs.statSync(f).size; } catch { }
 					}
@@ -1679,7 +1359,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 
 				let transferredBytes = 0;
 
-				// 处理文件夹
 				for (let i = 0; i < folders.length; i++) {
 					if (token?.isCancellationRequested) throw new Error("cancelled");
 					const folder = folders[i];
@@ -1691,7 +1370,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 					} catch { }
 				}
 
-				// 处理文件（支持大文件流式进度）
 				if (validFiles.length > 0) {
 					const totalFileCount = validFiles.length;
 					for (let i = 0; i < totalFileCount; i++) {
@@ -1707,8 +1385,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 								let existingPath = findFileByFingerprint(srcFingerprint);
 								if (existingPath && fs.existsSync(existingPath)) {
 									copiedFiles.push(existingPath);
-
-									// 秒传也算进度
 									try {
 										const fSize = fs.statSync(f).size;
 										transferredBytes += fSize;
@@ -1731,8 +1407,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 								if (dstFingerprint === srcFingerprint) {
 									copiedFiles.push(dest);
 									if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-
-									// 跳过也算进度
 									try {
 										const fSize = fs.statSync(f).size;
 										transferredBytes += fSize;
@@ -1745,7 +1419,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 								}
 							}
 
-							// 流式拷贝
 							if (progressCallback) progressCallback(0, `正在复制 (${i + 1}/${totalFileCount}): ${baseName}`);
 
 							await copyFileWithProgress(f, dest, (chunkSize, copied, total) => {
@@ -1759,7 +1432,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 
 							if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
 							copiedFiles.push(dest);
-							// 这里的进度已经在 callback 里报过了，不需要额外报 "完成" 的 increment
 							if (progressCallback) progressCallback(0, `完成: ${baseName}`);
 
 						} catch (e) {
@@ -1780,14 +1452,12 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 			}
 		}
 
-		// 图片处理回退 (Python/Rust/Shell)
 		const pref = global.getEnginePreference();
 		const order = global.getEngineTryOrder(pref);
 
 		for (const engine of order) {
 			try {
 				if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
-					// Python 引擎的 "clipboard" 动作会自动保存图片
 					const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 2000);
 					if (res && res.type === "image") return res;
 				} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
@@ -1806,7 +1476,6 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 			} catch { }
 		}
 
-		// 兜底尝试 ShellBridge (如果 order 里没有)
 		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
 			try {
 				const hasImg = await shellBridge.call("hasImage", {}, 2000);
@@ -1887,24 +1556,15 @@ async function handleClipboardSpawn(targetDir) {
 }
 
 async function handleClipboardSpawnWin32(targetDir) {
-	// ==================================================================================
-	// ★ 四层回退机制 (The 4-Layer Fallback Architecture)
-	// 1. Python Daemon: 最佳体验（支持透明通道完美还原）
-	// 2. Rust Daemon:   高性能备选
-	// 3. Shell Daemon:  常驻 PowerShell（无冷启动开销，常规兼容性）
-	// 4. Spawn Mode:    最后的倔强（冷启动 PowerShell，极慢但最稳）
-	// ==================================================================================
+	const pref = global.getEnginePreference();
 
-	const pref = global.getEnginePreference(); // "auto", "python", "rust", "shell"
-
-	// 构建尝试顺序
 	const bridgeMap = {
 		"python": pythonBridge,
 		"rust": rustBridge,
 		"shell": shellBridge
 	};
 
-	const typeOrder = global.getEngineTryOrder(pref); // ["python", "rust", "shell", "spawn"]
+	const typeOrder = global.getEngineTryOrder(pref);
 	const bridgeOrder = [];
 
 	for (const type of typeOrder) {
@@ -1912,12 +1572,10 @@ async function handleClipboardSpawnWin32(targetDir) {
 		if (b) bridgeOrder.push(b);
 	}
 
-	// --- 尝试 Daemon 引擎 ---
 	for (const bridge of bridgeOrder) {
 		if (!bridge.isAvailable()) continue;
 
 		try {
-			// 1. Python / Rust 引擎：接口高度统一，直接通过 "clipboard" 动作一键处理
 			if (bridge === pythonBridge || bridge === rustBridge) {
 				const res = await bridge.call("clipboard", { target_dir: targetDir }, 10000);
 				if (res && !res.error && res.type !== "unknown") {
@@ -1926,21 +1584,17 @@ async function handleClipboardSpawnWin32(targetDir) {
 				}
 			}
 
-			// 2. Shell Bridge (PowerShell Daemon)：需要组合原子操作
 			if (bridge === shellBridge) {
-				// A. 检查是否有文件
 				const checkRes = await bridge.call("checkQ", {}, 2000);
 				if (checkRes?.hasFile) {
 					const filesRes = await bridge.call("getFiles", {}, 5000);
 					const files = filesRes?.files || [];
 					if (files.length > 0) {
-						// 复用现有的文件处理逻辑
 						const result = processFilesForClipboard(files, targetDir);
 						if (result) return result;
 					}
 				}
 
-				// B. 检查是否有图片
 				if (checkRes?.hasImage) {
 					const fname = getTimestampFilename(".png");
 					const dest = path.join(targetDir, fname);
@@ -1958,7 +1612,6 @@ async function handleClipboardSpawnWin32(targetDir) {
 		}
 	}
 
-	// --- Fallback: Spawn Mode (冷启动 PowerShell) ---
 	global.logMessage("[SlowPath] 所有 Daemon 均不可用或失败，回退到 Spawn 模式", "WARN");
 
 	const hasFiles = await spawnCheck("powershell", [
@@ -2006,7 +1659,6 @@ async function handleClipboardSpawnWin32(targetDir) {
 	return { type: "unknown" };
 }
 
-// 提取公共的文件处理逻辑，供 ShellBridge 和 SpawnMode 复用
 function processFilesForClipboard(files, targetDir) {
 	const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
 	const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
@@ -2104,7 +1756,6 @@ async function handleClipboardSpawnLinux(targetDir) {
 	return { type: "unknown" };
 }
 
-// ★ 修复：timer TDZ（不改逻辑，只避免极端情况下 finish 先跑导致 ReferenceError）
 function spawnRun(cmd, args, opts = {}) {
 	const { checkExpected, returnOutput } = opts;
 	return new Promise((resolve) => {
@@ -2288,7 +1939,6 @@ function resolvePendingJob(token, result) {
 	}
 }
 
-// ---------- extension activate/deactivate ----------
 let q1Module = null;
 let q2Module = null;
 
@@ -2300,9 +1950,7 @@ async function activate(context) {
 
 	initCache(context);
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
-
 	global.setLogPath(path.join(cacheDir, "err.log"));
-
 	global.initStatusBar();
 	updateStatusBarNow();
 
@@ -2317,20 +1965,12 @@ async function activate(context) {
 			if (event.affectsConfiguration("qqq.ioEngine")) {
 				global.logMessage("IO 引擎配置已更改，执行热切换...", "INFO");
 
-				// ★ 增加防抖，避免用户快速切换配置导致多次触发
 				if (this._configChangeTimer) clearTimeout(this._configChangeTimer);
 				this._configChangeTimer = setTimeout(async () => {
-					// 1. 停止不需要的 Daemon (Python/Rust)，但【绝对不要】停止 ShellBridge
-					// ShellBridge 是系统基石，必须常驻，除非扩展被禁用
-					await pythonBridge.stop();
-					await rustBridge.stop();
-					// await shellBridge.stop(); // <--- 删除这行，ShellBridge 永不停止
-
-					// 2. 稍作延迟，让 OS 回收资源
-					setTimeout(() => {
-						global.logMessage("开始重新启动守护进程 (Reload)", "DEBUG");
-						startDaemons();
-					}, 200);
+					// 核心修改：配置变更时不再主动 kill 任何引擎
+					// 仅调用 startDaemons 确保新偏好的引擎启动
+					global.logMessage("配置变更，重新评估守护进程状态...", "DEBUG");
+					startDaemons();
 				}, 500);
 			}
 		})
@@ -2347,8 +1987,6 @@ async function activate(context) {
 
 	global.logMessage("qqq 扩展激活完成", "INFO");
 }
-
-// startDaemons moved to global.js
 
 function loadSubModules(context) {
 	try {
@@ -2367,6 +2005,7 @@ function loadSubModules(context) {
 }
 
 async function deactivate() {
+	// 只有在扩展彻底停用（关闭窗口）时才停止进程
 	pythonBridge.stop();
 	rustBridge.stop();
 	shellBridge.stop();
@@ -2458,4 +2097,3 @@ process.on("unhandledRejection", (reason) => {
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
 	global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
 });
-
