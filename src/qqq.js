@@ -34,6 +34,9 @@ const META_FILE_NAME = "meta.json";
 const CACHE_MAX_SIZE = 40 * 1024 * 1024;
 const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
 const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
+// 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
+// 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
+const HTML_PASTE_SCHEME = 2;
 
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
@@ -87,6 +90,703 @@ function toSafePath(p) {
 	return p.startsWith("\\\\")
 		? "\\\\" + p.slice(2).replace(/\\/g, "/")
 		: p.replace(/\\/g, "/");
+}
+// ============================================================================
+// Scheme2: Robust HTML decode + sanitize + DOM-order blocks (preserve image positions)
+// ============================================================================
+
+// --- CF_HTML header parse (byte offsets) ---
+function _parseCfHtmlHeaderFromBuffer(buf) {
+	try {
+		// header is ASCII-ish, read a limited head
+		const headLen = Math.min(buf.length, 4096);
+		const head = buf.subarray(0, headLen).toString("latin1"); // do NOT assume utf8 here
+
+		// Typical fields: StartHTML:00000097 EndHTML:00001234 StartFragment:... EndFragment:... SourceURL:...
+		const pickInt = (key) => {
+			const re = new RegExp(key + ":(\\d+)", "i");
+			const m = re.exec(head);
+			if (!m) return null;
+			const n = parseInt(m[1], 10);
+			return Number.isFinite(n) ? n : null;
+		};
+
+		const startHTML = pickInt("StartHTML");
+		const endHTML = pickInt("EndHTML");
+		const startFrag = pickInt("StartFragment");
+		const endFrag = pickInt("EndFragment");
+
+		let sourceUrl = "";
+		{
+			const m = /SourceURL:(.*)\r?\n/i.exec(head);
+			if (m) sourceUrl = String(m[1] || "").trim();
+		}
+
+		return { startHTML, endHTML, startFrag, endFrag, sourceUrl };
+	} catch {
+		return { startHTML: null, endHTML: null, startFrag: null, endFrag: null, sourceUrl: "" };
+	}
+}
+
+function _sliceCfHtmlPayload(buf) {
+	try {
+		const h = _parseCfHtmlHeaderFromBuffer(buf);
+
+		let htmlBuf = buf;
+		if (h.startHTML != null && h.endHTML != null && h.startHTML >= 0 && h.endHTML > h.startHTML && h.endHTML <= buf.length) {
+			htmlBuf = buf.subarray(h.startHTML, h.endHTML);
+		}
+
+		let fragBuf = null;
+		if (h.startFrag != null && h.endFrag != null && h.startFrag >= 0 && h.endFrag > h.startFrag && h.endFrag <= buf.length) {
+			fragBuf = buf.subarray(h.startFrag, h.endFrag);
+		}
+
+		return { htmlBuf, fragBuf, sourceUrl: h.sourceUrl || "" };
+	} catch {
+		return { htmlBuf: buf, fragBuf: null, sourceUrl: "" };
+	}
+}
+
+function _decodeUtf16be(buf) {
+	// swap bytes then decode as utf16le
+	const b = Buffer.from(buf); // copy
+	for (let i = 0; i + 1 < b.length; i += 2) {
+		const t = b[i];
+		b[i] = b[i + 1];
+		b[i + 1] = t;
+	}
+	return b.toString("utf16le");
+}
+
+function _scoreDecodedText(s) {
+	if (!s) return -1;
+	// fewer replacement chars, more printable, more CJK, etc.
+	let bad = 0;
+	let printable = 0;
+	let cjk = 0;
+
+	for (let i = 0; i < s.length; i++) {
+		const code = s.charCodeAt(i);
+		const ch = s[i];
+		if (ch === "\uFFFD") bad += 4;
+		if (code === 0) bad += 6;
+		if (code >= 0x20 && code !== 0x7f) printable++;
+		// CJK Unified Ideographs + common punctuation ranges (rough)
+		if ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf)) cjk += 3;
+		// Penalize too many '?/span>' like artifacts
+		if (ch === "?") bad += 0.2;
+	}
+	return printable + cjk - bad;
+}
+
+function _looksLikeUtf16ByNullPattern(buf) {
+	// If many zeros on odd or even indexes -> likely UTF-16
+	let zEven = 0, zOdd = 0, n = Math.min(buf.length, 4096);
+	for (let i = 0; i < n; i++) {
+		if (buf[i] === 0) {
+			if (i % 2 === 0) zEven++;
+			else zOdd++;
+		}
+	}
+	const ratioEven = zEven / Math.max(1, n);
+	const ratioOdd = zOdd / Math.max(1, n);
+	return { ratioEven, ratioOdd };
+}
+
+function _decodeHtmlBytesSmart(buf) {
+	try {
+		if (!buf || buf.length === 0) return "";
+
+		// BOM check
+		if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+			return buf.subarray(3).toString("utf8");
+		}
+		if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+			return buf.subarray(2).toString("utf16le");
+		}
+		if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+			return _decodeUtf16be(buf.subarray(2));
+		}
+
+		// Null pattern guess
+		const np = _looksLikeUtf16ByNullPattern(buf);
+		let candidates = [];
+
+		// try utf8
+		try { candidates.push({ enc: "utf8", text: buf.toString("utf8") }); } catch { }
+		// try latin1
+		try { candidates.push({ enc: "latin1", text: buf.toString("latin1") }); } catch { }
+
+		// try utf16 based on null distribution
+		if (np.ratioOdd > 0.08 || np.ratioEven > 0.08) {
+			// If odd bytes are often 0 => LE (ASCII low byte at even index, high byte 0 at odd)
+			if (np.ratioOdd >= np.ratioEven) {
+				try { candidates.push({ enc: "utf16le", text: buf.toString("utf16le") }); } catch { }
+			} else {
+				try { candidates.push({ enc: "utf16be", text: _decodeUtf16be(buf) }); } catch { }
+			}
+			// also try the other side just in case
+			try { candidates.push({ enc: "utf16le", text: buf.toString("utf16le") }); } catch { }
+			try { candidates.push({ enc: "utf16be", text: _decodeUtf16be(buf) }); } catch { }
+		}
+
+		// pick best
+		let best = "";
+		let bestScore = -1e18;
+		for (const c of candidates) {
+			const s = c.text || "";
+			const sc = _scoreDecodedText(s);
+			if (sc > bestScore) {
+				bestScore = sc;
+				best = s;
+			}
+		}
+		return best || "";
+	} catch {
+		return "";
+	}
+}
+
+// --- Fix broken angle brackets that show up as "?/span>" etc ---
+function _repairBrokenAngleTags(html) {
+	if (!html) return "";
+	let s = String(html);
+
+	// remove NULs
+	s = s.replace(/\u0000/g, "");
+
+	// If it contains many "?/tag>" patterns, repair them
+	const hits = (s.match(/\?\/[a-zA-Z]{1,12}\s*>/g) || []).length + (s.match(/\uFFFD\/[a-zA-Z]{1,12}\s*>/g) || []).length;
+	if (hits >= 2) {
+		s = s.replace(/[\?\uFFFD]\s*\/\s*([a-zA-Z]{1,12})\s*>/g, "</$1>");
+		s = s.replace(/[\?\uFFFD]\s*([a-zA-Z]{1,12})(\s|>)/g, "<$1$2>");
+	}
+
+	// Also repair "?\u003C" weird cases (rare)
+	s = s.replace(/\?(?=<\/?[a-zA-Z])/g, "<");
+
+	return s;
+}
+
+function _extractHtmlFragmentString(htmlText) {
+	if (!htmlText) return "";
+	let s = String(htmlText);
+
+	// CF_HTML may include StartFragment markers in the text
+	const si = s.indexOf("<!--StartFragment-->");
+	const ei = s.indexOf("<!--EndFragment-->");
+	if (si >= 0 && ei > si) {
+		return s.substring(si + "<!--StartFragment-->".length, ei);
+	}
+
+	// Sometimes it includes <html>...</html>
+	const m = /<html[\s\S]*<\/html>/i.exec(s);
+	if (m) return m[0];
+
+	return s;
+}
+
+function _normalizePlainText(s) {
+	if (s == null) return "";
+	let t = String(s);
+
+	// Normalize line breaks
+	t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+	// NBSP to space
+	t = t.replace(/\u00A0/g, " ");
+
+	// remove zero-width
+	t = t.replace(/[\u200B-\u200F\uFEFF]/g, "");
+
+	// trim trailing spaces each line (keep empty lines)
+	t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+
+	return t;
+}
+
+function _safeResolveUrlMaybe(rawUrl, baseUrl) {
+	let u = _normalizeUrl(rawUrl);
+	if (!u) return "";
+
+	// allow data uri
+	if (/^data:image\//i.test(u)) return u;
+
+	// allow file uri
+	if (/^file:\/\//i.test(u)) return u;
+
+	// already absolute
+	try {
+		const uu = new URL(u);
+		if (uu.protocol === "http:" || uu.protocol === "https:") return uu.toString();
+	} catch { }
+
+	// protocol-relative
+	if (u.startsWith("//")) return "https:" + u;
+
+	// relative => need baseUrl
+	if (baseUrl) {
+		try {
+			const abs = new URL(u, baseUrl).toString();
+			return abs;
+		} catch { }
+	}
+
+	return u;
+}
+
+function _fileUriToLocalPath(fileUri) {
+	try {
+		let u = String(fileUri || "");
+		if (!u.toLowerCase().startsWith("file://")) return "";
+		// file:///C:/path or file://localhost/C:/path or file:///home/xxx
+		u = u.replace(/^file:\/\//i, "");
+		u = u.replace(/^localhost\//i, "");
+		u = decodeURIComponent(u);
+
+		if (process.platform === "win32") {
+			// leading /C:/...
+			u = u.replace(/^\//, "");
+			// convert slashes
+			u = u.replace(/\//g, "\\");
+		} else {
+			u = "/" + u.replace(/^\/+/, "");
+		}
+		return u;
+	} catch {
+		return "";
+	}
+}
+
+function _pickBestImageUrlFromPicture($picture, baseUrl) {
+	try {
+		// Prefer <source srcset> then <img>
+		let best = "";
+
+		const sources = $picture.find("source").toArray();
+		for (const s of sources) {
+			const $s = cheerio(s);
+			const urls = _collectElementUrls($s, true);
+			for (const u of urls) {
+				const r = _safeResolveUrlMaybe(u, baseUrl);
+				if (r) { best = r; break; }
+			}
+			if (best) break;
+		}
+
+		if (!best) {
+			const img = $picture.find("img").first();
+			if (img && img.length) {
+				const urls = _collectElementUrls(img, false);
+				for (const u of urls) {
+					const r = _safeResolveUrlMaybe(u, baseUrl);
+					if (r) { best = r; break; }
+				}
+			}
+		}
+
+		return best;
+	} catch {
+		return "";
+	}
+}
+
+function _buildBlocksFromSanitizedDom($, baseUrl) {
+	const blocks = [];
+	let textBuf = "";
+
+	const BLOCK_TAGS = new Set([
+		"p", "div", "li", "tr", "td", "th",
+		"table", "thead", "tbody", "tfoot",
+		"section", "article", "header", "footer",
+		"blockquote", "pre",
+		"h1", "h2", "h3", "h4", "h5", "h6"
+	]);
+
+	function pushTextLinesFromBuf(force = false) {
+		const normalized = _normalizePlainText(textBuf);
+		if (!force && normalized.length === 0) {
+			textBuf = "";
+			return;
+		}
+		const lines = normalized.split("\n");
+		for (const line of lines) {
+			blocks.push({ type: "text", text: line });
+		}
+		textBuf = "";
+	}
+
+	function ensureLineBreak() {
+		// keep multiple breaks
+		if (!textBuf.endsWith("\n")) textBuf += "\n";
+		else textBuf += "\n";
+	}
+
+	function walk(node) {
+		if (!node) return;
+
+		if (node.type === "text") {
+			// Keep text as-is, but normalize later
+			textBuf += node.data || "";
+			return;
+		}
+
+		if (node.type !== "tag") return;
+
+		const tag = String(node.name || "").toLowerCase();
+
+		// br => newline
+		if (tag === "br") {
+			ensureLineBreak();
+			return;
+		}
+
+		// img => flush text, push media in place
+		if (tag === "img") {
+			pushTextLinesFromBuf(false);
+			const $img = $(node);
+			const urls = _collectElementUrls($img, false);
+			let picked = "";
+			for (const u of urls) {
+				const r = _safeResolveUrlMaybe(u, baseUrl);
+				if (r) { picked = r; break; }
+			}
+			if (picked) {
+				blocks.push({ type: "media", kind: "image", src: picked, status: "pending" });
+			}
+			return;
+		}
+
+		// picture => treat as one image
+		if (tag === "picture") {
+			pushTextLinesFromBuf(false);
+			const picked = _pickBestImageUrlFromPicture($(node), baseUrl);
+			if (picked) blocks.push({ type: "media", kind: "image", src: picked, status: "pending" });
+			return;
+		}
+
+		// li => bullet
+		if (tag === "li") {
+			ensureLineBreak();
+			textBuf += "• ";
+			const kids = node.children || [];
+			for (const k of kids) walk(k);
+			ensureLineBreak();
+			return;
+		}
+
+		// block boundary tags
+		const isBlock = BLOCK_TAGS.has(tag);
+
+		if (isBlock) {
+			ensureLineBreak();
+		}
+
+		// normal recursion
+		const children = node.children || [];
+		for (const c of children) walk(c);
+
+		if (isBlock) {
+			ensureLineBreak();
+			pushTextLinesFromBuf(false);
+		}
+	}
+
+	// Start at body if exists; otherwise root
+	const root = $("body").length ? $("body").get(0) : $.root().get(0);
+	if (root) {
+		const kids = root.children || [];
+		for (const k of kids) walk(k);
+	}
+
+	pushTextLinesFromBuf(false);
+
+	// If no blocks at all, ensure at least empty text so caller logic doesn't explode
+	if (blocks.length === 0) blocks.push({ type: "text", text: "" });
+
+	return blocks;
+}
+
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
+	const pending = blocks.filter(b => b && b.type === "media" && b.kind === "image" && b.src && b.status === "pending");
+
+	if (pending.length === 0) return;
+
+	let done = 0;
+	const total = pending.length;
+
+	for (const b of pending) {
+		try {
+			const src = String(b.src || "");
+			let buf = null;
+			let contentType = "";
+
+			// data uri
+			if (/^data:image\//i.test(src)) {
+				const m = /^data:(image\/[a-z0-9\+\-\.]+);base64,(.*)$/i.exec(src);
+				if (m) {
+					contentType = m[1] || "";
+					const b64 = m[2] || "";
+					buf = Buffer.from(b64, "base64");
+				}
+			}
+			// file uri
+			else if (/^file:\/\//i.test(src)) {
+				const localPath = _fileUriToLocalPath(src);
+				if (localPath && fs.existsSync(localPath) && !fs.statSync(localPath).isDirectory()) {
+					ensureDir(targetDir);
+					const ext = path.extname(localPath) || ".png";
+					const filename = getTimestampFilename(ext);
+					const destPath = path.join(targetDir, filename);
+					try {
+						fs.copyFileSync(localPath, destPath);
+						const fp = computeFingerprint(destPath);
+						if (fp) prefillFingerprint(destPath, fp);
+						b.filename = filename;
+						b.path = destPath;
+						b.fingerprint = fp || null;
+						b.status = "ok";
+					} catch (e) {
+						b.status = "failed";
+						b.error = "copy_failed";
+					}
+				} else {
+					b.status = "failed";
+					b.error = "file_not_found";
+				}
+
+				done++;
+				if (progressCallback) {
+					const inc = (100 / Math.max(1, total));
+					progressCallback(inc, `处理图片 ${done}/${total}`);
+				}
+				continue;
+			}
+			// http(s)
+			else {
+				const dl = await _downloadUrlToBuffer(src, 15000, 20 * 1024 * 1024, 6);
+				if (!dl || dl.error || !dl.buffer) {
+					b.status = "failed";
+					b.error = dl?.error || "download_failed";
+				} else {
+					buf = dl.buffer;
+					contentType = dl.contentType || "";
+				}
+			}
+
+			if (buf && buf.length > 0) {
+				ensureDir(targetDir);
+
+				let ext = _guessExtFromUrl(src, contentType);
+				ext = (ext || ".png").toLowerCase();
+				if (ext === ".jpeg") ext = ".jpg";
+
+				// If ext is suspicious, detect by magic bytes (image-size)
+				if (!IMAGE_EXTS_FOR_CLIPBOARD.has(ext)) {
+					try {
+						const dim = sizeOf(buf);
+						if (dim && dim.type) {
+							ext = "." + dim.type;
+							if (ext === ".jpeg") ext = ".jpg";
+						} else {
+							ext = ".webp";
+						}
+					} catch {
+						ext = ".webp";
+					}
+				}
+
+				const filename = getTimestampFilename(ext);
+				const destPath = path.join(targetDir, filename);
+				try {
+					fs.writeFileSync(destPath, buf);
+					const fp = computeBufferFingerprint(buf);
+					if (fp) prefillFingerprint(destPath, fp);
+
+					b.filename = filename;
+					b.path = destPath;
+					b.fingerprint = fp || null;
+					b.status = "ok";
+				} catch {
+					b.status = "failed";
+					b.error = "write_failed";
+				}
+			}
+
+		} catch (e) {
+			b.status = "failed";
+			b.error = "exception";
+		} finally {
+			done++;
+			if (progressCallback) {
+				const inc = (100 / Math.max(1, total));
+				progressCallback(inc, `处理图片 ${done}/${total}`);
+			}
+		}
+	}
+}
+
+async function handleClipboardNodeScheme2(targetDir, partialCallback = null, token = null, progressCallback = null) {
+	try {
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：读取 HTML...");
+
+		let rawBuf = null;
+		let rawText = null;
+		let baseUrl = "";
+
+		// 1) Try daemon engines (prefer base64 bytes if available)
+		const res = await tryEngineCall({
+			python: "get_html",
+			rust: "get_html",
+			shell: "getHtml"
+		}, {}, 8000);
+
+		if (res) {
+			if (res.value_base64) {
+				rawBuf = Buffer.from(res.value_base64, "base64");
+			} else if (res.value) {
+				rawText = String(res.value);
+			}
+		}
+
+		// 2) Windows fallback: powershell Clipboard Html (already utf8 base64 in your script)
+		if (!rawBuf && !rawText && process.platform === "win32") {
+			try {
+				const psScript = `Add-Type -A System.Windows.Forms;$t=[System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html);if($t){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))}`;
+				const b64 = await spawnOutput("powershell", [
+					"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+				]);
+				if (b64 && b64.trim()) {
+					rawBuf = Buffer.from(b64.trim(), "base64");
+				}
+			} catch (e) {
+				global.logMessage(`[Scheme2] powershell html 读取失败: ${e.message}`, "WARN");
+			}
+		}
+
+		// 3) Last fallback: readText if looks like html
+		if (!rawBuf && !rawText) {
+			const t = await vscode.env.clipboard.readText();
+			if (t && _looksLikeHtml(t)) rawText = t;
+		}
+
+		if (!rawBuf && !rawText) return null;
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：解析 CF_HTML/解码...");
+
+		let htmlText = "";
+
+		if (rawBuf) {
+			// If it's CF_HTML, slice payload by byte offsets first
+			const sliced = _sliceCfHtmlPayload(rawBuf);
+			baseUrl = sliced.sourceUrl || "";
+
+			// prefer fragment if exists, else full html
+			const payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
+			htmlText = _decodeHtmlBytesSmart(payload);
+
+			// Some daemons might return pure HTML bytes (no CF header) — still ok
+		} else {
+			htmlText = String(rawText || "");
+		}
+
+		if (!htmlText || !htmlText.trim()) return null;
+
+		// Normalize / extract fragment / repair broken tags
+		htmlText = _extractHtmlFragmentString(htmlText);
+		htmlText = _repairBrokenAngleTags(htmlText);
+
+		// Your existing sanitizer (removes scripts + on* + javascript:)
+		let safeHtml = sanitizeHtml(htmlText);
+		safeHtml = _repairBrokenAngleTags(safeHtml);
+
+		if (!safeHtml || !safeHtml.trim()) return null;
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：HTML 二次清洗...");
+
+		// Parse and aggressively remove attrs/styles (avoid style garbage + keep text clean)
+		let $;
+		try {
+			$ = cheerio.load(safeHtml, { decodeEntities: true, xmlMode: false });
+
+			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea, noscript").remove();
+
+			$("*").each((i, el) => {
+				if (!el || el.type !== "tag") return;
+				const tag = String(el.tagName || el.name || "").toLowerCase();
+				const attribs = el.attribs || {};
+
+				// Remove style always
+				if (attribs.style) delete attribs.style;
+
+				// Remove all on* handlers
+				for (const k of Object.keys(attribs)) {
+					if (k.toLowerCase().startsWith("on")) delete attribs[k];
+				}
+
+				// Remove dangerous href/src
+				if (attribs.href && String(attribs.href).toLowerCase().startsWith("javascript:")) delete attribs.href;
+				if (attribs.src && String(attribs.src).toLowerCase().startsWith("javascript:")) delete attribs.src;
+
+				// Whitelist attributes
+				const keep = new Set();
+				if (tag === "img") {
+					keep.add("src");
+					keep.add("srcset");
+					keep.add("data-src");
+					keep.add("data-srcset");
+					keep.add("data-lazy-src");
+					keep.add("data-original");
+					keep.add("data-url");
+					keep.add("alt");
+					keep.add("title");
+				} else if (tag === "source") {
+					keep.add("src");
+					keep.add("srcset");
+					keep.add("data-src");
+					keep.add("data-srcset");
+					keep.add("type");
+				} else if (tag === "a") {
+					// keep only href (optional). You can remove it if you don't want links.
+					keep.add("href");
+				}
+
+				for (const k of Object.keys(attribs)) {
+					if (!keep.has(k)) delete attribs[k];
+				}
+
+				// Apply sanitized attribs back
+				el.attribs = attribs;
+			});
+		} catch (e) {
+			global.logMessage(`[Scheme2] cheerio.load 失败: ${e.message}`, "ERROR");
+			return null;
+		}
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：按 DOM 顺序生成图文 blocks...");
+
+		// Build blocks in DOM order (text + images). This preserves image positions.
+		const blocks = _buildBlocksFromSanitizedDom($, baseUrl);
+
+		// Kick partial callback before downloading images (optional)
+		// try {
+		// 	if (partialCallback) partialCallback({ type: "html_blocks", blocks }, 30);
+		// } catch { }
+
+		// Materialize images to local files (same behavior as方案一：落盘+指纹)
+		if (progressCallback) progressCallback(0, `方案二：处理图片 (${blocks.filter(b => b.type === "media").length} 个)...`);
+		await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
+
+		return { type: "html_blocks", blocks };
+	} catch (e) {
+		global.logMessage(`[Scheme2] handleClipboardNodeScheme2 失败: ${e?.message || e}`, "ERROR");
+		return null;
+	}
 }
 
 function normalizeNavPath(rawPath) {
@@ -669,8 +1369,15 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				});
 				const progCb = (pct, msg) => {
 					progress.report({ message: msg, increment: pct });
-				};
+				}; if ((HTML_PASTE_SCHEME | 0) === 2) {
+					// const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, newTok, progCb);
+					const r2 = await handleClipboardNodeScheme2(targetDir, null, newTok, progCb);
+
+					if (r2) return r2;
+					// 方案二失败自动回退方案一
+				}
 				return await handleClipboardNode(targetDir, partialCallback, newTok, progCb);
+
 			});
 		}
 
