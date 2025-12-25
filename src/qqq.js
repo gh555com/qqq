@@ -814,7 +814,7 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				const sizeStr = formatBytes(totalSize);
 				return await global.withProgress({
 					location: vscode.ProgressLocation.Notification,
-					title: `qqq: 正在粘贴文件 (${sizeStr})...`,
+					title: `qqq: 正在粘贴文件 ( ${sizeStr} )`,
 					cancellable: true
 				}, async (progress, newTok) => {
 					newTok.onCancellationRequested(() => {
@@ -1753,7 +1753,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 								if (progressCallback && totalBytesToTransfer > 0) {
 									const inc = (chunkSize / totalBytesToTransfer) * 100;
 									const filePct = total > 0 ? Math.round((copied / total) * 100) : 0;
-									progressCallback(inc, `复制 ${baseName} (${filePct}%)`);
+									progressCallback(inc, ` ${baseName} (${filePct}%)`);
 								}
 							}, token);
 

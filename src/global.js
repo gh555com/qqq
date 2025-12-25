@@ -49,28 +49,53 @@ class DaemonBridge {
 
 		this._stopping = false;
 
-		if (this.process && !this.process.killed) {
-			logMessage(`${this.name} 进程已存在且未被杀死，返回true`, "DEBUG");
-			return true;
-		}
+		// ★ 关键修复：添加 startLock 防止重入
+		// 即使 this.isStarting 为 false，只要上一个 startPromise 还没完全 resolve/reject，也不应该重新开始
+		// 这里我们简化为：如果 isStarting，直接返回正在进行的 promise
 		if (this.isStarting) {
-			logMessage(`${this.name} 正在启动中，返回启动Promise`, "DEBUG");
+			logMessage(`${this.name} 正在启动中 (isStarting=true)，返回现有 Promise`, "DEBUG");
 			return this.startPromise;
 		}
 
-		this.isStarting = true;
-		this.startPromise = this.startFn(this);
-
-		logMessage(`${this.name} 开始执行启动函数`, "DEBUG");
-
-		try {
-			const result = await this.startPromise;
-			logMessage(`${this.name} 启动函数执行完成，结果: ${result}`, "DEBUG");
-			return result;
-		} finally {
-			this.isStarting = false;
-			this.startPromise = null;
+		// 检查现有进程状态
+		if (this.process && !this.process.killed) {
+			logMessage(`${this.name} 进程已存在且健康，无需启动`, "DEBUG");
+			return true;
 		}
+
+		this.isStarting = true;
+
+		// 每次启动生成唯一的 session ID，用于区分不同的启动尝试
+		const currentSession = Date.now();
+		this._currentStartSession = currentSession;
+
+		logMessage(`${this.name} 开始新一轮启动流程 (session=${currentSession})`, "DEBUG");
+
+		this.startPromise = (async () => {
+			try {
+				// 再次检查（因为异步间隙可能发生变化）
+				if (this.process && !this.process.killed) return true;
+
+				const result = await this.startFn(this);
+
+				// 再次检查 session，如果启动过程中被新的启动请求覆盖了，则当前结果无效
+				if (this._currentStartSession !== currentSession) {
+					logMessage(`${this.name} 启动结果被丢弃 (session mismatch: ${currentSession} vs ${this._currentStartSession})`, "WARN");
+					// 注意：这里不能 stop，因为新的 session 可能正在使用进程
+					return false;
+				}
+
+				return result;
+			} finally {
+				// 只有当自己是当前 session 的 owner 时，才重置 isStarting
+				if (this._currentStartSession === currentSession) {
+					this.isStarting = false;
+					this.startPromise = null;
+				}
+			}
+		})();
+
+		return this.startPromise;
 	}
 
 	setupProcess(proc, resolve) {
@@ -120,11 +145,13 @@ class DaemonBridge {
 		});
 
 		proc.on("error", (err) => {
+			if (this.process !== proc) return;
 			logMessage(`${this.name} 进程错误: ${err.message}`, "ERROR");
 			this.lastCrashReason = cleanReason(err.message);
 			this._handleCrash();
 		});
 		proc.on("close", (code) => {
+			if (this.process !== proc) return;
 			logMessage(`${this.name} 进程关闭，退出码: ${code}`, "INFO");
 			this.lastCrashReason = cleanReason(`exit_code=${code}`);
 			this._handleCrash();
@@ -241,6 +268,13 @@ class DaemonBridge {
 		} else {
 			logMessage(`${this.name} 进程崩溃，达到最大重启次数，标记为不可用`, "ERROR");
 			this.available = false;
+
+			// ★ Shell Daemon 特权：无限复活
+			if (this.name === "Shell") {
+				logMessage(`${this.name} 达到最大重启次数，但作为常驻服务将在 3秒 后强制复活`, "WARN");
+				this.restartCount = 0; // 重置计数以允许再次进入重启循环
+				setTimeout(() => this.start(), 3000);
+			}
 		}
 	}
 
@@ -736,35 +770,28 @@ function updateStatusBarNow() {
 
 function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
-
 	const pref = getEnginePreference();
 	logMessage(`开始启动守护进程，用户选择的引擎: ${pref}`, "INFO");
 
-	const startOne = async (bridge, isHardFail) => {
+	const ensureStarted = async (bridge) => {
 		if (bootSeq !== _daemonBootSeq) return false;
-
 		try {
+			// ★ 核心逻辑：有就用，没有就起，绝不杀生
 			if (bridge.isAvailable()) return true;
 
 			logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
 			const ok = await bridge.start();
 
-			if (bootSeq !== _daemonBootSeq) {
-				logMessage(`${bridge.name} 启动被中断 (bootSeq mismatch)，立即停止`, "WARN");
-				try { await bridge.stop(); } catch { }
-				return false;
-			}
+			if (bootSeq !== _daemonBootSeq) return false;
 
-			if (!ok) {
-				const msg = `${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`;
-				logMessage(msg, isHardFail ? "ERROR" : "WARN");
-			} else {
+			if (ok) {
 				logMessage(`${bridge.name} Bridge OK`, "INFO");
+			} else {
+				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`, "WARN");
 			}
 			return !!ok;
 		} catch (e) {
-			const msg = `${bridge.name} Bridge 启动异常：${e?.message || e}`;
-			logMessage(msg, isHardFail ? "ERROR" : "WARN");
+			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e}`, "WARN");
 			return false;
 		} finally {
 			updateStatusBarNow();
@@ -772,42 +799,26 @@ function startDaemons() {
 	};
 
 	(async () => {
-		if (bootSeq !== _daemonBootSeq) return;
+		// 1. 始终优先启动 Shell daemon (作为兜底和常驻服务)
+		// 让它在后台异步启动，不阻塞后续逻辑
+		const shellPromise = ensureStarted(shellBridge);
 
-		const shellTask = startOne(shellBridge, false);
-
-		if (pref !== "shell") {
-			let tryOrder = [];
-			if (pref === "python") {
-				tryOrder = [pythonBridge, rustBridge];
-			} else if (pref === "rust") {
-				tryOrder = [rustBridge, pythonBridge];
-			} else {
-				tryOrder = [pythonBridge, rustBridge];
-			}
-
-			let mainEngineStarted = false;
-
-			for (const bridge of tryOrder) {
-				if (bootSeq !== _daemonBootSeq) break;
-
-				if (await startOne(bridge, false)) {
-					mainEngineStarted = true;
-					for (const other of tryOrder) {
-						if (other !== bridge && other.isAvailable()) {
-							logMessage(`停止多余的引擎: ${other.name}`, "DEBUG");
-							other.stop();
-						}
-					}
-					break;
+		// 2. 根据偏好按需启动高性能引擎
+		if (pref === "python") {
+			await ensureStarted(pythonBridge);
+		} else if (pref === "rust") {
+			await ensureStarted(rustBridge);
+		} else if (pref === "auto") {
+			// 自动模式：优先 Python，失败则尝试 Rust
+			if (!await ensureStarted(pythonBridge)) {
+				if (bootSeq === _daemonBootSeq) {
+					await ensureStarted(rustBridge);
 				}
 			}
-		} else {
-			if (pythonBridge.isAvailable()) await pythonBridge.stop();
-			if (rustBridge.isAvailable()) await rustBridge.stop();
 		}
 
-		await shellTask;
+		// 等待 Shell 就绪 (虽然是并行的，但为了状态栏最终一致性，稍微等一下)
+		await shellPromise;
 
 		if (bootSeq === _daemonBootSeq) {
 			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
@@ -1137,8 +1148,10 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 
 	if (pref === "python" && activeState.code !== "P") {
 		if (pyReason) reasons.unshift(`Python：${pyReason}`);
-		else reasons.unshift(`Python：启动失败/不可用`);
-		if (activeState.code === "N") {
+		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败/不可用`); // 只有当真的不可用时才报
+
+		// Rust 只有在真的被尝试过且失败时才报
+		if (activeState.code === "N" && rustBridge.lastStartError) {
 			if (rsReason) reasons.push(`Rust：${rsReason}`);
 			else reasons.push(`Rust：启动失败/不可用`);
 		}

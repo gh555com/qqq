@@ -715,31 +715,63 @@ def _dispatch_action(cmd):
 
 def daemon_mode():
     try:
-        sys.stdout.reconfigure(line_buffering=True)
+        if hasattr(sys.stdin, 'reconfigure'):
+            sys.stdin.reconfigure(encoding='utf-8')
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8')
     except:
         pass
-    for line in sys.stdin:
-        if not line.strip():
-            continue
+
+    # Debug: log startup
+    sys.stderr.write(f"Daemon started. PID={os.getpid()}\n")
+    sys.stderr.flush()
+
+    while True:
         try:
-            cmd = json.loads(line)
-            res = _dispatch_action(cmd)
+            # Use binary reading to avoid encoding issues on Windows
+            line_bytes = sys.stdin.buffer.readline()
+            if not line_bytes:
+                # EOF reached
+                sys.stderr.write("Daemon stdin EOF.\n")
+                time.sleep(1)
+                continue
+
+            line = line_bytes.decode('utf-8', errors='ignore').strip()
+            if not line:
+                continue
+
+            try:
+                cmd = json.loads(line)
+                res = _dispatch_action(cmd)
+            except Exception as e:
+                res = {"_id": 0, "error": str(e)}
+
+            try:
+                print(json.dumps(res, ensure_ascii=True), flush=True)
+            except:
+                pass
+        except KeyboardInterrupt:
+            break
         except Exception as e:
-            res = {"_id": 0, "error": str(e)}
-        print(json.dumps(res, ensure_ascii=False), flush=True)
+            sys.stderr.write(f"Daemon loop error: {e}\n")
+            sys.stderr.flush()
+            time.sleep(0.05)
 
 
 def main():
     if len(sys.argv) > 1:
-        if sys.argv[1] in ("--daemon", "daemon"):
+        arg1 = sys.argv[1].strip().lower()
+        if arg1 in ("--daemon", "daemon", "-d"):
             daemon_mode()
-        elif sys.argv[1] == "paste" and len(sys.argv) >= 3:
+            return
+
+        if arg1 == "paste" and len(sys.argv) >= 3:
             print(json.dumps(handle_clipboard(
-                sys.argv[2]), ensure_ascii=False))
+                sys.argv[2]), ensure_ascii=True))
         else:
-            print(json.dumps(handle_clipboard(), ensure_ascii=False))
+            print(json.dumps(handle_clipboard(), ensure_ascii=True))
     else:
-        print(json.dumps(handle_clipboard(), ensure_ascii=False))
+        print(json.dumps(handle_clipboard(), ensure_ascii=True))
 
 
 if __name__ == "__main__":
