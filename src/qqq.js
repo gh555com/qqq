@@ -18,6 +18,8 @@ const {
 	rustBridge,
 	shellBridge,
 	startDaemons,
+	tryOneByOne,
+	tryEngineCall,
 	updateStatusBarNow,
 	pasteQueue,
 	metaSaveQueue
@@ -1015,43 +1017,18 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 		if (progressCallback) progressCallback(0, "正在解析 HTML...");
 
 		let htmlText = null;
-		const pref = global.getEnginePreference();
-		const order = global.getEngineTryOrder(pref);
+		const res = await tryEngineCall({
+			python: "get_html",
+			rust: "get_html",
+			shell: "getHtml"
+		}, {}, 5000);
 
-		for (const engine of order) {
-			try {
-				let res = null;
-				if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
-					res = await pythonBridge.call("get_html", {}, 3000);
-				} else if (engine === "rust" && rustBridge?.isAvailable && rustBridge.isAvailable()) {
-					res = await rustBridge.call("get_html", {}, 3000);
-				} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
-					res = await shellBridge.call("getHtml", {}, 5000);
-				}
-
-				if (res) {
-					if (res.value_base64) {
-						htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
-						break;
-					} else if (res.value) {
-						htmlText = res.value;
-						break;
-					}
-				}
-			} catch (e) { }
-		}
-
-		if (!htmlText && shellBridge && shellBridge.available !== false) {
-			try {
-				const res = await shellBridge.call("getHtml", {}, 5000);
-				if (res) {
-					if (res.value_base64) {
-						htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
-					} else if (res.value) {
-						htmlText = res.value;
-					}
-				}
-			} catch (e) { }
+		if (res) {
+			if (res.value_base64) {
+				htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
+			} else if (res.value) {
+				htmlText = res.value;
+			}
 		}
 
 		if (!htmlText && process.platform === "win32") {
@@ -1308,32 +1285,14 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 		if (process.platform === "win32") {
 			let files = preFetchedFiles;
 			if (!files) {
-				const pref = global.getEnginePreference();
-				const order = global.getEngineTryOrder(pref);
+				const res = await tryEngineCall({
+					python: "get_clipboard_files",
+					shell: "getFiles"
+				}, {}, 2000);
 
-				for (const engine of order) {
-					try {
-						if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
-							const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
-							if (res && res.paths && res.paths.length > 0) {
-								files = res.paths;
-								break;
-							}
-						} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
-							const res = await shellBridge.call("getFiles", {}, 2000);
-							if (res && res.files && res.files.length > 0) {
-								files = res.files;
-								break;
-							}
-						}
-					} catch { }
-				}
-
-				if ((!files || files.length === 0) && shellBridge?.isAvailable && shellBridge.isAvailable()) {
-					try {
-						const res = await shellBridge.call("getFiles", {}, 2000);
-						files = res?.files || [];
-					} catch { }
+				if (res) {
+					if (res.paths && res.paths.length > 0) files = res.paths;
+					else if (res.files && res.files.length > 0) files = res.files;
 				}
 			}
 
@@ -1452,45 +1411,28 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 			}
 		}
 
-		const pref = global.getEnginePreference();
-		const order = global.getEngineTryOrder(pref);
-
-		for (const engine of order) {
-			try {
-				if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
-					const res = await pythonBridge.call("clipboard", { target_dir: targetDir }, 2000);
-					if (res && res.type === "image") return res;
-				} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
-					const hasImg = await shellBridge.call("hasImage", {}, 2000);
-					if (hasImg?.value) {
-						const fname = getTimestampFilename(".png");
-						const dest = path.join(targetDir, fname);
-						ensureDir(targetDir);
-						const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
-						if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-							const fp = computeFingerprint(dest);
-							return { type: "image", path: dest, fingerprint: fp };
-						}
-					}
-				}
-			} catch { }
-		}
-
-		if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
-			try {
-				const hasImg = await shellBridge.call("hasImage", {}, 2000);
+		const res = await tryOneByOne(async (bridge, name) => {
+			if (name === "shell") {
+				const hasImg = await bridge.call("hasImage", {}, 2000);
 				if (hasImg?.value) {
 					const fname = getTimestampFilename(".png");
 					const dest = path.join(targetDir, fname);
 					ensureDir(targetDir);
-					const saved = await shellBridge.call("saveImage", { path: dest }, 8000);
+					const saved = await bridge.call("saveImage", { path: dest }, 8000);
 					if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
 						const fp = computeFingerprint(dest);
 						return { type: "image", path: dest, fingerprint: fp };
 					}
 				}
-			} catch { }
-		}
+				return null;
+			}
+
+			const r = await bridge.call("clipboard", { target_dir: targetDir }, 2000);
+			if (r && r.type === "image") return r;
+			return null;
+		});
+
+		if (res) return res;
 
 		const text = await vscode.env.clipboard.readText();
 		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
@@ -1556,61 +1498,42 @@ async function handleClipboardSpawn(targetDir) {
 }
 
 async function handleClipboardSpawnWin32(targetDir) {
-	const pref = global.getEnginePreference();
-
-	const bridgeMap = {
-		"python": pythonBridge,
-		"rust": rustBridge,
-		"shell": shellBridge
-	};
-
-	const typeOrder = global.getEngineTryOrder(pref);
-	const bridgeOrder = [];
-
-	for (const type of typeOrder) {
-		const b = bridgeMap[type];
-		if (b) bridgeOrder.push(b);
-	}
-
-	for (const bridge of bridgeOrder) {
-		if (!bridge.isAvailable()) continue;
-
-		try {
-			if (bridge === pythonBridge || bridge === rustBridge) {
-				const res = await bridge.call("clipboard", { target_dir: targetDir }, 10000);
-				if (res && !res.error && res.type !== "unknown") {
-					global.logMessage(`[FastPath] 由 ${bridge.name} 引擎处理成功`, "INFO");
-					return res;
+	const res = await tryOneByOne(async (bridge, name) => {
+		if (name === "shell") {
+			const checkRes = await bridge.call("checkQ", {}, 2000);
+			if (checkRes?.hasFile) {
+				const filesRes = await bridge.call("getFiles", {}, 5000);
+				const files = filesRes?.files || [];
+				if (files.length > 0) {
+					const result = processFilesForClipboard(files, targetDir);
+					if (result) return result;
 				}
 			}
 
-			if (bridge === shellBridge) {
-				const checkRes = await bridge.call("checkQ", {}, 2000);
-				if (checkRes?.hasFile) {
-					const filesRes = await bridge.call("getFiles", {}, 5000);
-					const files = filesRes?.files || [];
-					if (files.length > 0) {
-						const result = processFilesForClipboard(files, targetDir);
-						if (result) return result;
-					}
-				}
+			if (checkRes?.hasImage) {
+				const fname = getTimestampFilename(".png");
+				const dest = path.join(targetDir, fname);
+				ensureDir(targetDir);
 
-				if (checkRes?.hasImage) {
-					const fname = getTimestampFilename(".png");
-					const dest = path.join(targetDir, fname);
-					ensureDir(targetDir);
-
-					const saveRes = await bridge.call("saveImage", { path: dest }, 8000);
-					if (saveRes?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-						const fp = computeFingerprint(dest);
-						return { type: "image", path: dest, fingerprint: fp };
-					}
+				const saveRes = await bridge.call("saveImage", { path: dest }, 8000);
+				if (saveRes?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+					const fp = computeFingerprint(dest);
+					return { type: "image", path: dest, fingerprint: fp };
 				}
 			}
-		} catch (e) {
-			global.logMessage(`${bridge.name} 处理剪贴板异常: ${e.message}`, "WARN");
+			return null;
 		}
-	}
+
+		// python / rust
+		const res = await bridge.call("clipboard", { target_dir: targetDir }, 10000);
+		if (res && !res.error && res.type !== "unknown") {
+			global.logMessage(`[FastPath] 由 ${bridge.name} 引擎处理成功`, "INFO");
+			return res;
+		}
+		return null;
+	});
+
+	if (res) return res;
 
 	global.logMessage("[SlowPath] 所有 Daemon 均不可用或失败，回退到 Spawn 模式", "WARN");
 
@@ -1815,28 +1738,11 @@ function spawnOutput(cmd, args) {
 async function getFolderInfo(folderPath) {
 	folderPath = canonicalizeExistingPath(folderPath) || folderPath;
 
-	const pref = global.getEnginePreference();
-	const order = global.getEngineTryOrder(pref);
-
-	for (const engine of order) {
-		try {
-			if (engine === "python") {
-				const started = pythonBridge.isAvailable() || await pythonBridge.start();
-				if (started && pythonBridge.isAvailable()) {
-					const res = await pythonBridge.call("folder_info", { path: folderPath }, 15000);
-					if (res && !res.error) return res;
-				}
-			} else if (engine === "rust") {
-				const started = rustBridge.isAvailable() || await rustBridge.start();
-				if (started && rustBridge.isAvailable()) {
-					const res = await rustBridge.call("folder_info", { path: folderPath }, 15000);
-					if (res && !res.error) return res;
-				}
-			} else if (engine === "spawn" || engine === "shell") {
-				return getFolderInfoJS(folderPath);
-			}
-		} catch { }
-	}
+	const res = await tryEngineCall({
+		python: "folder_info",
+		rust: "folder_info"
+	}, { path: folderPath }, 15000);
+	if (res) return res;
 
 	return getFolderInfoJS(folderPath);
 }
