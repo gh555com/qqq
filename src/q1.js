@@ -57,7 +57,25 @@ const IMAGE_EXTS = new Set([
     ".cdr",
     ".psd",
 ]);
-const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
+const VIDEO_EXTS = new Set([
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".rmvb",
+    ".mpeg",
+    ".mpg",
+    ".3gp",
+    ".m4v",
+    ".f4v",
+    ".ts",
+    ".mts",
+    ".m2ts",
+    ".vob",
+]);
 
 const PIPE_SEEK_ERROR_PATTERNS = [
     "non seekable",
@@ -413,7 +431,27 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
                         info.type = "animated_image";
                     }
                 } else if (
-                    ["h264", "hevc", "vp8", "vp9", "av1", "mpeg4", "mpeg2", "mpeg1"].some((x) => c.includes(x))
+                    [
+                        "h264",
+                        "hevc",
+                        "vp8",
+                        "vp9",
+                        "av1",
+                        "mpeg4",
+                        "mpeg2",
+                        "mpeg1",
+                        "wmv",
+                        "vc1",
+                        "flv",
+                        "theora",
+                        "avs",
+                        "rv40",
+                        "rv30",
+                        "rv20",
+                        "rv10",
+                        "msmpeg4",
+                        "h263",
+                    ].some((x) => c.includes(x))
                 ) {
                     info.type = "video";
                 }
@@ -912,7 +950,16 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
         if (!fallback) {
-            logCriticalError(filePath, `${result.error} (无法兜底)\n${result.stderr || ""}`);
+            const stderr = result.stderr || "";
+            if (stderr.includes("moov atom not found")) {
+                qqq.logMessageRateLimited(
+                    `corrupt_video:${filePath}`,
+                    `Corrupt video file (moov atom not found): ${path.basename(filePath)}`,
+                    "WARN"
+                );
+            } else {
+                logCriticalError(filePath, `${result.error} (无法兜底)\n${stderr}`);
+            }
         } else {
             logFallbackUsedRateLimited(filePath, ext, result.error, result.stderr || "");
         }

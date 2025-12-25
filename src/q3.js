@@ -43,7 +43,25 @@ const IMAGE_EXTS = new Set([
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
     ".svg", ".ai", ".eps", ".cdr", ".psd"
 ]);
-const VIDEO_EXTS = new Set([".mp4", ".mkv", ".webm", ".avi", ".mov"]);
+const VIDEO_EXTS = new Set([
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".rmvb",
+    ".mpeg",
+    ".mpg",
+    ".3gp",
+    ".m4v",
+    ".f4v",
+    ".ts",
+    ".mts",
+    ".m2ts",
+    ".vob",
+]);
 
 const ExportFormat = {
     RTF_DOC: "rtf_doc",
