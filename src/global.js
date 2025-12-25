@@ -274,7 +274,8 @@ function getEnginePreference() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
 		const v = config.get("ioEngine", "auto");
-		if (v === "shell") return "node";
+		// 统一映射：配置里的 "node" 对应内部逻辑的 "shell" (Shell Daemon)
+		if (v === "node") return "shell";
 		return v;
 	} catch {
 		return "auto";
@@ -282,16 +283,18 @@ function getEnginePreference() {
 }
 
 function getEngineTryOrder(pref) {
+	// ★ 核心真理：定义不同偏好下的回退顺序
+	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
 	switch (pref) {
 		case "python":
 			return ["python", "rust", "shell", "spawn"];
 		case "rust":
 			return ["rust", "python", "shell", "spawn"];
-		case "node":
-			return ["node", "shell", "spawn"];
+		case "shell": // 对应配置 "node"
+			return ["shell", "spawn"];
 		case "auto":
 		default:
-			return ["python", "rust", "node", "shell", "spawn"];
+			return ["python", "rust", "shell", "spawn"];
 	}
 }
 
@@ -339,9 +342,8 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 	for (const e of order) {
 		if (e === "python" && py) return { code: "P", name: "Python" };
 		if (e === "rust" && rs) return { code: "R", name: "Rust" };
-		if (e === "shell") {
-			const mode = sh ? "D" : "S";
-			return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
+		if (e === "shell" && sh) {
+			return { code: "N", nodeMode: "D", name: "Node (Shell daemon)" };
 		}
 		if (e === "spawn") {
 			return { code: "N", nodeMode: "S", name: "Node (Node spawn)" };
