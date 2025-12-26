@@ -92,7 +92,22 @@
           "qqq.pythonPath": {
             "type": "string",
             "default": "",
-            "description": "（可选）指定 python 可执行文件路径。例如：C:\\\\Python311\\\\python.exe；留空则自动探测 python/python3/py。"
+            "description": "（可选）指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
+          },
+          "qqq.downloadSecurityLevel": {
+            "type": "integer",
+            "default": 0,
+            "enum": [
+              0,
+              1,
+              2
+            ],
+            "enumDescriptions": [
+              "0 - 最宽松：11项安全开关全部关闭",
+              "1 - 中等宽松：保留4项关键防护（http/https协议限制、重定向协议限制、下载锁、Header注入清洗），其余7项关闭",
+              "2 - 严格：11项安全开关全部开启。包括额外的7项：SSRF拦截、baseDir路径越界防护、content-length/content-range预检、严格断点续传、符号链接防护、yt-dlp probe输出限制、Fail-fast"
+            ],
+            "description": "下载安全级别：控制下载功能的安全防护强度。取舍请查看："
           }
         }
       }

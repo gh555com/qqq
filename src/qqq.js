@@ -36,7 +36,7 @@ const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
 const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
 // 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
 // 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
-const HTML_PASTE_SCHEME = 2;
+const HTML_PASTE_SCHEME = 1;
 
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
