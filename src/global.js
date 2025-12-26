@@ -971,6 +971,104 @@ const KEY_SESSION_START = "qqq_stats_session_start";
 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 
+// ============================================================================
+// ★ ConfigManager (Custom GlobalState Storage)
+// ============================================================================
+const DEFAULT_CONFIG = {
+	"showHistoryRecycleBin": true,
+	"enlargeSmallImages": true,
+	"performanceMode": "balanced",
+	"frameSizeMode": "smart",
+	"cleanFreak": false,
+	"ioEngine": "auto",
+	"pythonPath": "",
+	"downloadSecurityLevel": 0,
+	"enhancedHtmlPaste": false
+};
+
+const CONFIG_METADATA = {
+	"showHistoryRecycleBin": { name: "显示历史回收站", type: "boolean" },
+	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" },
+	"performanceMode": {
+		name: "性能模式", type: "enum",
+		options: ["balanced", "extreme", "accelerated"],
+		descriptions: ["最优模式", "极限性能", "加速模式"]
+	},
+	"frameSizeMode": {
+		name: "相框尺寸", type: "enum",
+		options: ["smart", "large", "small"],
+		descriptions: ["智能", "大相框", "小相框"]
+	},
+	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" },
+	"ioEngine": {
+		name: "IO 引擎", type: "enum",
+		options: ["auto", "python", "rust", "node"],
+		descriptions: ["自动", "Python", "Rust", "Node"]
+	},
+	"pythonPath": { name: "Python 路径", type: "string" },
+	"downloadSecurityLevel": {
+		name: "下载安全等级", type: "enum",
+		options: [0, 1, 2],
+		descriptions: ["0 - 最宽松", "1 - 中等", "2 - 严格"]
+	},
+	"enhancedHtmlPaste": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
+};
+
+let _configChangeCallback = null;
+
+const ConfigManager = {
+	get(key) {
+		// ★ Dual-Layer Strategy:
+		// 1. Try to get from globalState (DB)
+		if (extensionContext) {
+			const val = extensionContext.globalState.get(`cfg_${key}`);
+			if (val !== undefined) return val;
+		}
+
+		// 2. If missing in DB (first run or reset), try to get from Workspace Config (UI)
+		// This acts as a "migration" from old settings.json or default UI values.
+		try {
+			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
+			// Check if wsVal is strictly undefined? get() usually returns default if not found.
+			// But if it returns the default value, that's fine too.
+			if (wsVal !== undefined) return wsVal;
+		} catch { }
+
+		// 3. Fallback to hardcoded default
+		return DEFAULT_CONFIG[key];
+	},
+
+	async set(key, value) {
+		if (!extensionContext) return;
+		await extensionContext.globalState.update(`cfg_${key}`, value);
+		if (_configChangeCallback) _configChangeCallback(key, value);
+	},
+
+	getAll() {
+		const res = {};
+		for (const k of Object.keys(DEFAULT_CONFIG)) {
+			res[k] = this.get(k);
+		}
+		return res;
+	},
+
+	getMetadata(key) {
+		return CONFIG_METADATA[key];
+	},
+
+	onChange(cb) {
+		_configChangeCallback = cb;
+	}
+};
+
+function getConfig(key) {
+	return ConfigManager.get(key);
+}
+
+async function setConfig(key, value) {
+	await ConfigManager.set(key, value);
+}
+
 let _cacheHitTotal = 0;
 let _cacheMissTotal = 0;
 let _statsFlushTimer = null;
@@ -1108,8 +1206,7 @@ function cleanReason(s, maxLen = 260) {
 
 function getEnginePreference() {
 	try {
-		const config = vscode.workspace.getConfiguration("qqq");
-		const v = config.get("ioEngine", "auto");
+		const v = getConfig("ioEngine") || "auto";
 		// 统一映射：配置里的 "node" 对应内部逻辑的 "shell" (Shell Daemon)
 		if (v === "node") return "shell";
 		return v;
@@ -1414,6 +1511,10 @@ module.exports = {
 
 	// 引擎辅助 (给外部用)
 	DaemonBridge,
+	ConfigManager,
+	getConfig,
+	setConfig,
+
 	pythonBridge,
 	rustBridge,
 	shellBridge,

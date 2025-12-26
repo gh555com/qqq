@@ -23,7 +23,10 @@ const {
 	tryEngineCall,
 	updateStatusBarNow,
 	pasteQueue,
-	metaSaveQueue
+	metaSaveQueue,
+	ConfigManager,
+	getConfig,
+	setConfig
 } = global;
 
 function createPathRegex() {
@@ -35,9 +38,12 @@ const META_FILE_NAME = "meta.json";
 const CACHE_MAX_SIZE = 40 * 1024 * 1024;
 const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
 const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
-// 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
-// 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
-const HTML_PASTE_SCHEME = 1;
+function getHtmlPasteScheme() {
+	// 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
+	// 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
+	// 勾选 enhancedHtmlPaste -> 1, 否则 -> 2
+	return getConfig("enhancedHtmlPaste") ? 1 : 2;
+}
 
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
@@ -515,7 +521,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 	if (pending.length === 0) return;
 
 	const d = getSharedDownloader({
-		securityLevel: 0,
+		securityLevel: getConfig("downloadSecurityLevel") || 0,
 		baseDir: targetDir,
 		downloadVideos: "all",
 		ytdlpConcurrency: 2,
@@ -1475,7 +1481,7 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				});
 				const progCb = (pct, msg) => {
 					progress.report({ message: msg, increment: pct });
-				}; if ((HTML_PASTE_SCHEME | 0) === 2) {
+				}; if ((getHtmlPasteScheme() | 0) === 2) {
 					// const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, newTok, progCb);
 					const r2 = await handleClipboardNodeScheme2(targetDir, null, newTok, progCb);
 
@@ -2729,16 +2735,26 @@ async function activate(context) {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration("qqq.ioEngine")) {
-				global.logMessage("IO 引擎配置已更改，执行热切换...", "INFO");
-
-				if (this._configChangeTimer) clearTimeout(this._configChangeTimer);
-				this._configChangeTimer = setTimeout(async () => {
-					// 核心修改：配置变更时不再主动 kill 任何引擎
-					// 仅调用 startDaemons 确保新偏好的引擎启动
-					global.logMessage("配置变更，重新评估守护进程状态...", "DEBUG");
-					startDaemons();
-				}, 500);
+			// ★ Sync: 用户在 UI 修改配置 -> 写入 GlobalState (持久化)
+			// 注意：这里我们监听所有 qqq.* 配置的变更
+			for (const key of Object.keys(ConfigManager.getAll())) {
+				const fullKey = `qqq.${key}`;
+				if (event.affectsConfiguration(fullKey)) {
+					const val = vscode.workspace.getConfiguration("qqq").get(key);
+					// 仅当值确实改变（且不等于当前 GlobalState 中的值）时才更新，防止死循环
+					// 注意：ConfigManager.set 会更新 globalState，但不会反向触发 workspace 配置变更（因为我们不写 workspace）
+					// 所以这里是单向同步：UI (Workspace Config) -> GlobalState
+					const currentStored = ConfigManager.get(key);
+					if (val !== currentStored) {
+						// Async set
+						setConfig(key, val).then(() => {
+							if (key === "ioEngine" || key === "pythonPath") {
+								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
+								startDaemons();
+							}
+						});
+					}
+				}
 			}
 		})
 	);
