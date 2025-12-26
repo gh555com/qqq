@@ -982,7 +982,7 @@ const DEFAULT_CONFIG = {
 	"cleanFreak": false,
 	"ioEngine": "auto",
 	"pythonPath": "",
-	"downloadSecurityLevel": 0,
+	"downloadSecurityLevel": "0: 最宽松",
 	"enhancedHtmlPaste": false
 };
 
@@ -1008,7 +1008,7 @@ const CONFIG_METADATA = {
 	"pythonPath": { name: "Python 路径", type: "string" },
 	"downloadSecurityLevel": {
 		name: "下载安全等级", type: "enum",
-		options: [0, 1, 2],
+		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
 		descriptions: ["0 - 最宽松", "1 - 中等", "2 - 严格"]
 	},
 	"enhancedHtmlPaste": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
