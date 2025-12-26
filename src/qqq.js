@@ -519,20 +519,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 
 	if (pending.length === 0) return;
 
-	// 从用户配置获取安全级别并转换为数字
-	const config = vscode.workspace.getConfiguration("qqq");
-	const securityLevelString = config.get("downloadSecurityLevel", "0: 最宽松");
-	let securityLevel = 1; // 默认值
-	if (securityLevelString === "0: 最宽松") {
-		securityLevel = 0;
-	} else if (securityLevelString === "1: 平衡") {
-		securityLevel = 1;
-	} else if (securityLevelString === "2: 最严格") {
-		securityLevel = 2;
-	}
-
 	const d = getSharedDownloader({
-		securityLevel: securityLevel,
+		securityLevel: global.getConfig("downloadSecurityLevel") || 0,
 		baseDir: targetDir,
 		downloadVideos: "all",
 		ytdlpConcurrency: 2,
