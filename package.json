@@ -104,15 +104,15 @@
             ],
             "enumDescriptions": [
               "11项安全开关全部关闭。",
-              "11项安全开关开4项 关7项，开启项包括: \n  \n  . http/https协议限制; \n. 重定向协议限制; \n. 下载锁; \n. Header注入清洗。 ",
-              "11项安全开关全部开启，额外开启滴 7项是: \n  \n . SSRF防护; \n. 路径越界防护; \n. content-length/content-range预检; \n. 严格断点续传; \n. 符号链接防护; \n. yt-dlp probe输出限制; \n. Fail-fast。"
+              "11项安全开关开4项 关7项 \n  \n    开启项包括: \n  . http/https协议限制; \n. 重定向协议限制; \n. 下载锁; \n. Header注入清洗。 ",
+              "11项安全开关全部开启 \n  \n  额外开启滴 7项是: \n . SSRF防护; \n. 路径越界防护; \n. content-length/content-range预检; \n. 严格断点续传; \n. 符号链接防护; \n. yt-dlp probe输出限制; \n. Fail-fast。"
             ],
             "description": "如果下载视频失败，可以尝试更宽松滴级别。具体取舍请查看："
           },
           "qqq.enhancedHtmlPasteCompatibility": {
             "type": "boolean",
             "default": false,
-            "description": "富文本（html）块粘贴 消除乱码但降低精度。    \n \n  如果您粘贴 html 时遇到乱码，您可以尝试打开本选项，但在其他时候，请保持本选项关闭。 \n  \n  原理：默认会用“评分”体系来猜 html 编码，但有极小几率 猜错，导致乱码。勾选本选项则使用备用方案——先获取纯净文本流，再去猜图片位置，其有助于解决乱码，代价是有可能导致图片位置失准。"
+            "description": "富文本（html）块粘贴 消除乱码但降低精度。    \n \n  如果您粘贴 html 时遇到乱码，您可以尝试打开本选项，但在其他时候，请保持本选项关闭。 \n  原理：默认会用“评分”体系来猜 html 编码，但有极小几率 猜错，导致乱码。勾选本选项则使用备用方案——先获取纯净文本流，再去猜图片位置，其有助于解决乱码，代价是可能导致图片位置失准。"
           }
         }
       }

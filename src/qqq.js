@@ -38,10 +38,9 @@ const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
 // 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
 // 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
 function getHtmlPasteScheme() {
-	const config = vscode.workspace.getConfiguration("qqq");
 	// "enhancedHtmlPasteCompatibility" true => Scheme 1 (Lossy but robust against mojibake)
 	// "enhancedHtmlPasteCompatibility" false => Scheme 2 (Strict DOM order)
-	return config.get("enhancedHtmlPasteCompatibility", false) ? 1 : 2;
+	return global.getConfig("enhancedHtmlPasteCompatibility") ? 1 : 2;
 }
 
 const FINGERPRINT_HEAD = 128;
@@ -2734,16 +2733,26 @@ async function activate(context) {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration("qqq.ioEngine")) {
-				global.logMessage("IO 引擎配置已更改，执行热切换...", "INFO");
-
-				if (this._configChangeTimer) clearTimeout(this._configChangeTimer);
-				this._configChangeTimer = setTimeout(async () => {
-					// 核心修改：配置变更时不再主动 kill 任何引擎
-					// 仅调用 startDaemons 确保新偏好的引擎启动
-					global.logMessage("配置变更，重新评估守护进程状态...", "DEBUG");
-					startDaemons();
-				}, 500);
+			// ★ Sync: 用户在 UI 修改配置 -> 写入 GlobalState (持久化)
+			// 注意：这里我们监听所有 qqq.* 配置的变更
+			for (const key of Object.keys(global.ConfigManager.getAll())) {
+				const fullKey = `qqq.${key}`;
+				if (event.affectsConfiguration(fullKey)) {
+					const val = vscode.workspace.getConfiguration("qqq").get(key);
+					// 仅当值确实改变（且不等于当前 GlobalState 中的值）时才更新，防止死循环
+					// 注意：ConfigManager.set 会更新 globalState，但不会反向触发 workspace 配置变更（因为我们不写 workspace）
+					// 所以这里是单向同步：UI (Workspace Config) -> GlobalState
+					const currentStored = global.ConfigManager.get(key);
+					if (val !== currentStored) {
+						// Async set
+						global.setConfig(key, val).then(() => {
+							if (key === "ioEngine" || key === "pythonPath") {
+								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
+								startDaemons();
+							}
+						});
+					}
+				}
 			}
 		})
 	);
