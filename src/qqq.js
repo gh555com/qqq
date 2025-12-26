@@ -518,8 +518,19 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 
 	if (pending.length === 0) return;
 
+	// 将字符串类型的下载安全级别转换为数字
+	const securityLevelString = global.getConfig("downloadSecurityLevel") || "0: 最宽松";
+	let securityLevel = 0;
+	if (securityLevelString === "0: 最宽松") {
+		securityLevel = 0;
+	} else if (securityLevelString === "1: 平衡") {
+		securityLevel = 1;
+	} else if (securityLevelString === "2: 最严格") {
+		securityLevel = 2;
+	}
+
 	const d = getSharedDownloader({
-		securityLevel: global.getConfig("downloadSecurityLevel") || 0,
+		securityLevel: securityLevel,
 		baseDir: targetDir,
 		downloadVideos: "all",
 		ytdlpConcurrency: 2,
