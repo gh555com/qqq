@@ -37,7 +37,12 @@ const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
 const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
 // 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
 // 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
-const HTML_PASTE_SCHEME = 1;
+function getHtmlPasteScheme() {
+	const config = vscode.workspace.getConfiguration("qqq");
+	// "enhancedHtmlPasteCompatibility" true => Scheme 1 (Lossy but robust against mojibake)
+	// "enhancedHtmlPasteCompatibility" false => Scheme 2 (Strict DOM order)
+	return config.get("enhancedHtmlPasteCompatibility", false) ? 1 : 2;
+}
 
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
@@ -514,8 +519,20 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 
 	if (pending.length === 0) return;
 
+	// 从用户配置获取安全级别并转换为数字
+	const config = vscode.workspace.getConfiguration("qqq");
+	const securityLevelString = config.get("downloadSecurityLevel", "0: 最宽松");
+	let securityLevel = 1; // 默认值
+	if (securityLevelString === "0: 最宽松") {
+		securityLevel = 0;
+	} else if (securityLevelString === "1: 平衡") {
+		securityLevel = 1;
+	} else if (securityLevelString === "2: 最严格") {
+		securityLevel = 2;
+	}
+
 	const d = getSharedDownloader({
-		securityLevel: 0,
+		securityLevel: securityLevel,
 		baseDir: targetDir,
 		downloadVideos: "all",
 		ytdlpConcurrency: 2,
@@ -1475,7 +1492,7 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				});
 				const progCb = (pct, msg) => {
 					progress.report({ message: msg, increment: pct });
-				}; if ((HTML_PASTE_SCHEME | 0) === 2) {
+				}; if (getHtmlPasteScheme() === 2) {
 					// const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, newTok, progCb);
 					const r2 = await handleClipboardNodeScheme2(targetDir, null, newTok, progCb);
 

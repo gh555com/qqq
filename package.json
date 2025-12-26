@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.0.8",
+  "version": "15.3.0",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -25,7 +25,7 @@
   "contributes": {
     "configuration": [
       {
-        "title": "QQQ 扩展设置",
+        "title": "qqq aaa",
         "properties": {
           "qqq.showHistoryRecycleBin": {
             "type": "boolean",
@@ -95,19 +95,24 @@
             "description": "（可选）指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
           },
           "qqq.downloadSecurityLevel": {
-            "type": "integer",
-            "default": 0,
+            "type": "string",
+            "default": "1: 平衡",
             "enum": [
-              0,
-              1,
-              2
+              "0: 最宽松",
+              "1: 平衡",
+              "2: 最严格"
             ],
             "enumDescriptions": [
-              "0 - 最宽松：11项安全开关全部关闭",
-              "1 - 中等宽松：保留4项关键防护（http/https协议限制、重定向协议限制、下载锁、Header注入清洗），其余7项关闭",
-              "2 - 严格：11项安全开关全部开启。包括额外的7项：SSRF拦截、baseDir路径越界防护、content-length/content-range预检、严格断点续传、符号链接防护、yt-dlp probe输出限制、Fail-fast"
+              "11项安全开关全部关闭。",
+              "11项安全开关开4项 关7项，开启项包括: \n  \n  . http/https协议限制; \n. 重定向协议限制; \n. 下载锁; \n. Header注入清洗。 ",
+              "11项安全开关全部开启，额外开启滴 7项是: \n  \n . SSRF防护; \n. 路径越界防护; \n. content-length/content-range预检; \n. 严格断点续传; \n. 符号链接防护; \n. yt-dlp probe输出限制; \n. Fail-fast。"
             ],
-            "description": "下载安全级别：控制下载功能的安全防护强度。取舍请查看："
+            "description": "如果下载视频失败，可以尝试更宽松滴级别。具体取舍请查看："
+          },
+          "qqq.enhancedHtmlPasteCompatibility": {
+            "type": "boolean",
+            "default": false,
+            "description": "富文本（html）块粘贴 消除乱码但降低精度。    \n \n  如果您粘贴 html 时遇到乱码，您可以尝试打开本选项，但在其他时候，请保持本选项关闭。 \n  \n  原理：默认会用“评分”体系来猜 html 编码，但有极小几率 猜错，导致乱码。勾选本选项则使用备用方案——先获取纯净文本流，再去猜图片位置，其有助于解决乱码，代价是有可能导致图片位置失准。"
           }
         }
       }
