@@ -1900,56 +1900,123 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 				}
 
 				// Significant text
-				// [Modified] Reduced search window to prevent false positives (jumping too far)
-				const searchWindow = Math.min(Math.max(trimmedHtml.length * 2, 200), 500);
+				// [Modified] Adaptive search window based on text length
+				// Short texts are risky (high false positive rate), so we keep the leash very tight.
+				// Long texts are unique, so we can afford a bit more flexibility.
+				let searchWindow;
+				if (trimmedHtml.length < 10) {
+					searchWindow = 60; // Very tight window for short snippets (e.g. "Note:", "1.")
+				} else if (trimmedHtml.length < 50) {
+					searchWindow = 200; // Moderate window
+				} else {
+					// For long text, we allow looking ahead a bit more, but capped
+					searchWindow = Math.min(trimmedHtml.length * 1.5 + 100, 600);
+				}
+
 				const searchArea = cleanText.slice(textCursor, textCursor + searchWindow);
 
-				// Try to find the start of this text block
-				// We use a small chunk of the start to anchor
-				const anchorLen = Math.min(8, trimmedHtml.length);
-				const anchor = trimmedHtml.substring(0, anchorLen);
+				// [Smart Anchor] Try to find a "safe" anchor (alphanumeric) to avoid encoding/formatting issues
+				// e.g. HTML has "• Item", Clean has "- Item". Raw anchor "• Item" fails.
+				// Smart anchor "Item" succeeds.
+				// [Modified] Use Unicode Property Escapes for universal language support (Arabic, Hebrew, Thai, etc.)
+				function getSmartAnchor(str, startFrom = 0, len = 10) {
+					if (str.length <= len) return { text: str, offset: 0 };
 
-				const idx = searchArea.indexOf(anchor);
+					// Scan for a good chunk of word chars
+					const sub = str.substring(startFrom);
+					// \p{L} = Any Unicode Letter, \p{N} = Any Unicode Number
+					// This ensures we catch Arabic, Thai, Cyrillic, etc., not just [a-zA-Z]
+					const match = /[\p{L}\p{N}]{4,}/u.exec(sub);
+					if (match) {
+						// Use this match, capped at len
+						const safeLen = Math.min(match[0].length, len);
+						return {
+							text: match[0].substring(0, safeLen),
+							offset: startFrom + match.index
+						};
+					}
+					// Fallback: raw substring
+					return { text: str.substring(startFrom, startFrom + len), offset: startFrom };
+				}
+
+				// 1. Primary Start Anchor
+				const startAnchorObj = getSmartAnchor(trimmedHtml, 0, 10);
+				let idx = searchArea.indexOf(startAnchorObj.text);
+				let matchedOffsetInHtml = startAnchorObj.offset;
+
+				// 2. Retry with a secondary anchor if first failed (and text is long enough)
+				if (idx === -1 && trimmedHtml.length > 20) {
+					const secondAnchorObj = getSmartAnchor(trimmedHtml, Math.floor(trimmedHtml.length / 3), 10);
+					const idx2 = searchArea.indexOf(secondAnchorObj.text);
+					if (idx2 !== -1) {
+						idx = idx2;
+						matchedOffsetInHtml = secondAnchorObj.offset;
+					}
+				}
 
 				if (idx !== -1) {
 					// Found the anchor!
+					// Calculate where the block *actually* starts in cleanText
+					// cleanText index: idx
+					// This corresponds to trimmedHtml index: matchedOffsetInHtml
+					// So start of block is: idx - matchedOffsetInHtml
+
+					let blockStartRel = idx - matchedOffsetInHtml;
+
+					// If blockStartRel is negative, it means we found the anchor, but the prefix
+					// in cleanText is SHORTER than in HTML (e.g. HTML "   Text", Clean "Text").
+					// In this case, we just assume start is 0 (current cursor).
+					if (blockStartRel < 0) blockStartRel = 0;
 
 					// Output the gap (prefix) - e.g. newlines between blocks
-					if (idx > 0) {
-						blocks.push({ type: 'text', text: searchArea.substring(0, idx) });
-						textCursor += idx; // Advance cursor past gap
+					if (blockStartRel > 0) {
+						blocks.push({ type: 'text', text: searchArea.substring(0, blockStartRel) });
+						textCursor += blockStartRel; // Advance cursor past gap
 					}
 
 					// Now consume the content.
-					const endAnchorLen = Math.min(8, trimmedHtml.length);
-					const endAnchor = trimmedHtml.substring(trimmedHtml.length - endAnchorLen);
+					// Use Smart End Anchor
+					const endScanLen = 10;
+					const endAnchorStartPos = Math.max(0, trimmedHtml.length - 20);
+					const endAnchorObj = getSmartAnchor(trimmedHtml, endAnchorStartPos, endScanLen);
 
-					// Search for endAnchor starting from current cursor
-					// Note: searchArea is from old textCursor. We advanced textCursor by idx.
-					const remainingSearchLen = searchWindow - idx;
-					const contentSearchArea = cleanText.slice(textCursor, textCursor + remainingSearchLen + 100);
+					// Search for endAnchor
+					// We need to re-slice searchArea because we moved textCursor?
+					// No, searchArea was slice(oldCursor). blockStartRel is relative to oldCursor.
+					// Current textCursor is at oldCursor + blockStartRel.
+					// So we need to search in cleanText starting from current textCursor.
+
+					// Remaining search area
+					const maxContentLen = trimmedHtml.length * 1.5 + 20;
+					const contentSearchArea = cleanText.slice(textCursor, textCursor + maxContentLen);
 
 					let contentLen = 0;
 
-					// If the text is short, just use length. Anchors might be same (e.g. "a")
+					// If text is very short, rely on length
 					if (trimmedHtml.length < 5) {
 						contentLen = trimmedHtml.length;
 					} else {
-						// Look for end anchor near expected end
-						const expectedPos = trimmedHtml.length - endAnchorLen;
-						const scanStart = Math.max(0, expectedPos - 20);
-						const scanEnd = expectedPos + 50;
+						// Look for end anchor
+						// We expect it around html length - endAnchorObj.offset
+						// But endAnchorObj.offset is from START of trimmedHtml.
 
-						const subScan = contentSearchArea.substring(scanStart, scanEnd);
-						const subIdx = subScan.indexOf(endAnchor);
+						const expectedPos = trimmedHtml.length - (trimmedHtml.length - endAnchorObj.offset);
+						// Actually expected pos in CleanText is roughly endAnchorObj.offset
+
+						const scanStart = Math.max(0, endAnchorObj.offset - 20);
+						const subScan = contentSearchArea.substring(scanStart);
+
+						const subIdx = subScan.indexOf(endAnchorObj.text);
 
 						if (subIdx !== -1) {
-							contentLen = scanStart + subIdx + endAnchorLen;
+							// Found end anchor
+							// End of content = scanStart + subIdx + endAnchorObj.text.length
+							contentLen = scanStart + subIdx + endAnchorObj.text.length;
 						} else {
-							// Fallback: search anywhere in window
-							const anyIdx = contentSearchArea.lastIndexOf(endAnchor);
+							// Fallback: search anywhere
+							const anyIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
 							if (anyIdx !== -1) {
-								contentLen = anyIdx + endAnchorLen;
+								contentLen = anyIdx + endAnchorObj.text.length;
 							} else {
 								contentLen = trimmedHtml.length;
 							}
@@ -1958,6 +2025,7 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 					// Sanity check
 					if (contentLen > contentSearchArea.length) contentLen = contentSearchArea.length;
+					if (contentLen < 0) contentLen = 0;
 
 					const fullChunk = cleanText.substr(textCursor, contentLen);
 					blocks.push({ type: 'text', text: fullChunk });
