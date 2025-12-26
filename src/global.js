@@ -982,8 +982,8 @@ const DEFAULT_CONFIG = {
 	"cleanFreak": false,
 	"ioEngine": "auto",
 	"pythonPath": "",
-	"downloadSecurityLevel": "0: 最宽松",
-	"enhancedHtmlPaste": false
+	"downloadSecurityLevel": "1: 平衡",
+	"enhancedHtmlPasteCompatibility": false
 };
 
 const CONFIG_METADATA = {
@@ -992,26 +992,26 @@ const CONFIG_METADATA = {
 	"performanceMode": {
 		name: "性能模式", type: "enum",
 		options: ["balanced", "extreme", "accelerated"],
-		descriptions: ["最优模式", "极限性能", "加速模式"]
+		descriptions: []
 	},
 	"frameSizeMode": {
 		name: "相框尺寸", type: "enum",
 		options: ["smart", "large", "small"],
-		descriptions: ["智能", "大相框", "小相框"]
+		descriptions: []
 	},
 	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" },
 	"ioEngine": {
 		name: "IO 引擎", type: "enum",
 		options: ["auto", "python", "rust", "node"],
-		descriptions: ["自动", "Python", "Rust", "Node"]
+		descriptions: []
 	},
 	"pythonPath": { name: "Python 路径", type: "string" },
 	"downloadSecurityLevel": {
 		name: "下载安全等级", type: "enum",
 		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
-		descriptions: ["0 - 最宽松", "1 - 中等", "2 - 严格"]
+		descriptions: []
 	},
-	"enhancedHtmlPaste": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
+	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
 };
 
 let _configChangeCallback = null;
