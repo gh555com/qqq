@@ -1,0 +1,148 @@
+
+
+
+
+
+
+
+
+baseDir 是“允许写入的安全根目录”
+
+getSharedDownloader 是“全局单例复用下载器（复用 H2 连接池）”
+
+const { getSharedDownloader } = require("./unified-media-downloader");
+const path = require("path");
+
+const d = getSharedDownloader({
+  securityLevel: 0,
+  baseDir: path.resolve("./downloads"),
+});
+
+const items = [
+  { id: "p1", url: "https://xx.com/1.webp" },
+  { id: "p2", url: "https://xx.com/2.jpg" },
+];
+
+// 推荐：tag 设成稳定 id，后面 applyResultsToItems 才不会因为 url 重复乱套
+const tasks = items.map(x => ({
+  url: x.url,
+  tag: x.id,
+  kind: "image",
+}));
+
+const r = await d.downloadAll(tasks, path.join(d.options.baseDir, "tmp"), {
+  onProgress: (t, e) => {
+    if (e.type === "retry") console.log("retry", t.tag, e.delayMs, e.reason);
+  },
+});
+console.log(r.stats);
+
+
+
+
+需要平台视频（YouTube/B站/m3u8/mpd…）
+
+用：downloadVideos: "all" + 确保系统有 yt-dlp（和可选 ffmpeg）
+
+适用：平台视频、HLS/DASH
+
+const { UnifiedMediaDownloader } = require("./unified-media-downloader");
+const path = require("path");
+
+const baseDir = path.resolve("./downloads");
+const d = new UnifiedMediaDownloader({
+  securityLevel: 0,          // 实际等于用户配置
+  baseDir,
+  downloadVideos: "all",     // 关键：允许走 yt-dlp
+  ytdlpConcurrency: 2,       // 视 CPU/网速调
+});
+
+const outDir = path.join(baseDir, "videos");
+
+const r = await d.downloadAll(
+  [
+    { url: "https://www.bilibili.com/video/xxxx", kind: "video", filename: "a.mp4", tag: "v1" },
+    { url: "https://example.com/raw.mp4", kind: "video", tag: "v2", maxBytes: 5000 * 1024 * 1024 }, // 直链大视频加大上限
+  ],
+  outDir,
+  {
+    videoRateLimit: "8M", // 可选：限速，避免抢带宽
+    videoFormat: "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+    onProgress: (t, e) => {
+      if (e.protocol === "yt-dlp" && e.type === "progress") console.log("yt-dlp", t.tag, e.progress);
+    },
+  }
+);
+
+console.log("ytdlpAvailable:", r.ytdlpAvailable);
+console.log(r.results.filter(x => x.manual)); // 这里能看到“需要 yt-dlp / blob 等”被标记 manual 的项
+d.destroy();
+
+B. UI 预览：probe 的最佳用法（下载前展示标题/时长/缩略图）
+const { UnifiedMediaDownloader } = require("./unified-media-downloader");
+
+const d = new UnifiedMediaDownloader({ securityLevel: 1 });
+
+const p = await d.probe("https://www.youtube.com/watch?v=xxxx");
+if (!p.success) {
+  console.log("probe failed:", p.error);
+} else if (p.isPlaylist) {
+  console.log("playlist:", p.title, "entries:", p.entriesCount);
+  console.log("preview entries:", p.entries);
+} else {
+  console.log("single:", p.title, p.duration, p.thumbnail);
+}
+
+
+建议
+
+UI 上把 probe_output_too_large 单独提示为：“列表太大，建议直接下载/或缩小范围”。
+
+平台视频：先 probe 展示，再让用户点“下载”。
+
+C. 强烈建议你这样组织任务（tag/meta/referrer/maxBytes）
+1）tag：务必稳定唯一（配合 applyResultsToItems）
+
+你的 applyResultsToItems 用的是 tag || url 做 key。如果 URL 会重复（同一图多次、不同尺寸同源），不设 tag 容易串结果。
+推荐：tag = item.id 或 tag = ${id}:${variant}```。
+
+你的实现会在“反盗链重试”时自动补 Referer/Origin（anti_hotlink_boost）。
+建议调用层也能传：referrer: pageUrl（命中率更高、少重试）。
+
+{ url, tag, referrer: "https://site.com/page/xxx", headers: { /* 可再补 cookie */ } }
+
+3）maxBytes：图片默认 200   MB，直链视频默认   5000  MB。
+
+
+
+D. 安全档位 + overrides 的“最佳姿势” , 默认用 0  档
+
+
+
+E. 错误码给 UI 的“最佳提示文案”
+
+protocol_not_allowed：不支持的链接协议（仅允许 http/https）
+
+url_credentials_not_allowed：链接里包含账号密码，不允许
+
+ssrf_blocked_*：链接指向内网/本机/保留网段，已拦截
+
+dest_locked：同名文件正在下载（稍后重试）
+
+declared_too_large / file_too_large：文件超过大小限制
+
+too_many_redirects：跳转次数过多
+
+platform_or_segment_video_requires_ytdlp：平台/分片视频需要启用 yt-dlp 下载
+
+yt-dlp_not_installed：未安装 yt-dlp
+
+probe_output_too_large：视频列表信息过大，probe 被保护性终止
+
+blob_url_unavailable：blob: 链接无法在本地直接下载
+
+
+
+
+建议给 onProgress 加一个“最终汇总事件”
+调用侧做 UI 时很方便：比如每个 task 的最终状态统一走 done/error/manual，你现在已经做得不错了，再加个 batch end 会更丝滑

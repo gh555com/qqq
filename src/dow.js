@@ -687,7 +687,7 @@ class SmartHttpDownloader {
             maxRedirects: 6,
 
             // 默认大小限制（task.maxBytes 可覆盖）
-            maxBytesDefault: 20 * 1024 * 1024,
+            maxBytesDefault: 200 * 1024 * 1024,
 
             // 重试
             maxAttempts: 4,

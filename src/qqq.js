@@ -11,6 +11,7 @@ const sizeOf = require("image-size");
 const q3 = require("./q3");
 const global = require("./global");
 const cheerio = require("cheerio");
+const { getSharedDownloader, isPlatformOrSegmentVideo, applyResultsToItems } = require("./dow");
 
 // 引用 global.js 的核心对象
 const {
@@ -509,30 +510,64 @@ function _buildBlocksFromSanitizedDom($, baseUrl) {
 }
 
 async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
-	const pending = blocks.filter(b => b && b.type === "media" && b.kind === "image" && b.src && b.status === "pending");
+	const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
 
 	if (pending.length === 0) return;
 
-	let done = 0;
-	const total = pending.length;
+	const d = getSharedDownloader({
+		securityLevel: 0,
+		baseDir: targetDir,
+		downloadVideos: "all",
+		ytdlpConcurrency: 2,
+	});
+
+	const httpTasks = [];
+	const localTasks = [];
+	const taskMap = new Map();
 
 	for (const b of pending) {
+		const src = String(b.src || "");
+		if (/^data:/i.test(src) || /^file:/i.test(src)) {
+			localTasks.push(b);
+		} else {
+			// HTTP/HTTPS
+			const tag = Math.random().toString(36).slice(2) + "_" + Date.now();
+			b._tag = tag;
+
+			// 默认文件名（后续可能修正）
+			const ext = b.kind === "video" ? ".mp4" : ".png";
+			const filename = getTimestampFilename(ext);
+			const destPath = path.join(targetDir, filename);
+
+			httpTasks.push({
+				url: src,
+				tag: tag,
+				kind: b.kind || "image",
+				destPath: destPath,
+				referrer: b.referrer || "", // 如果有的话
+				maxBytes: b.kind === "video" ? 5000 * 1024 * 1024 : 200 * 1024 * 1024,
+			});
+			taskMap.set(tag, b);
+		}
+	}
+
+	// 1. 处理 Local Tasks (Data URI / File URI) - 保持原有逻辑
+	let doneCount = 0;
+	const total = pending.length;
+
+	for (const b of localTasks) {
 		try {
 			const src = String(b.src || "");
 			let buf = null;
 			let contentType = "";
 
-			// data uri
 			if (/^data:image\//i.test(src)) {
 				const m = /^data:(image\/[a-z0-9\+\-\.]+);base64,(.*)$/i.exec(src);
 				if (m) {
 					contentType = m[1] || "";
-					const b64 = m[2] || "";
-					buf = Buffer.from(b64, "base64");
+					buf = Buffer.from(m[2] || "", "base64");
 				}
-			}
-			// file uri
-			else if (/^file:\/\//i.test(src)) {
+			} else if (/^file:\/\//i.test(src)) {
 				const localPath = _fileUriToLocalPath(src);
 				if (localPath && fs.existsSync(localPath) && !fs.statSync(localPath).isDirectory()) {
 					ensureDir(targetDir);
@@ -551,38 +586,22 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 						b.status = "failed";
 						b.error = "copy_failed";
 					}
+					doneCount++;
+					if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+					continue;
 				} else {
 					b.status = "failed";
 					b.error = "file_not_found";
-				}
-
-				done++;
-				if (progressCallback) {
-					const inc = (100 / Math.max(1, total));
-					progressCallback(inc, `处理图片 ${done}/${total}`);
-				}
-				continue;
-			}
-			// http(s)
-			else {
-				const dl = await _downloadUrlToBuffer(src, 15000, 20 * 1024 * 1024, 6);
-				if (!dl || dl.error || !dl.buffer) {
-					b.status = "failed";
-					b.error = dl?.error || "download_failed";
-				} else {
-					buf = dl.buffer;
-					contentType = dl.contentType || "";
 				}
 			}
 
 			if (buf && buf.length > 0) {
 				ensureDir(targetDir);
-
 				let ext = _guessExtFromUrl(src, contentType);
 				ext = (ext || ".png").toLowerCase();
 				if (ext === ".jpeg") ext = ".jpg";
 
-				// If ext is suspicious, detect by magic bytes (image-size)
+				// image-size check
 				if (!IMAGE_EXTS_FOR_CLIPBOARD.has(ext)) {
 					try {
 						const dim = sizeOf(buf);
@@ -592,9 +611,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 						} else {
 							ext = ".webp";
 						}
-					} catch {
-						ext = ".webp";
-					}
+					} catch { ext = ".webp"; }
 				}
 
 				const filename = getTimestampFilename(ext);
@@ -603,7 +620,6 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 					fs.writeFileSync(destPath, buf);
 					const fp = computeBufferFingerprint(buf);
 					if (fp) prefillFingerprint(destPath, fp);
-
 					b.filename = filename;
 					b.path = destPath;
 					b.fingerprint = fp || null;
@@ -613,15 +629,90 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 					b.error = "write_failed";
 				}
 			}
-
 		} catch (e) {
 			b.status = "failed";
 			b.error = "exception";
-		} finally {
-			done++;
-			if (progressCallback) {
-				const inc = (100 / Math.max(1, total));
-				progressCallback(inc, `处理图片 ${done}/${total}`);
+		}
+		doneCount++;
+		if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+	}
+
+	// 2. 处理 HTTP Tasks (使用 dow.js)
+	if (httpTasks.length > 0) {
+		try {
+			const r = await d.downloadAll(httpTasks, targetDir, {
+				onProgress: (t, e) => {
+					// 简单的进度反馈
+					if (e.type === "done" || e.type === "error") {
+						doneCount++;
+						if (progressCallback) progressCallback((doneCount / total) * 100, `下载中 ${doneCount}/${total}`);
+					} else if (e.type === "retry") {
+						global.logMessage(`Retry ${t.tag}: ${e.reason} wait ${e.delayMs}ms`, "WARN");
+					}
+				}
+			});
+
+			// 回填结果
+			for (const res of r.results) {
+				const block = taskMap.get(res.tag);
+				if (!block) continue;
+
+				if (res.success) {
+					block.status = "ok";
+					// dow.js 可能会修正 extension (例如 yt-dlp mp4)，或者我们自己检查
+					// 这里假设 dow.js 返回的 path 是最终文件
+					block.path = res.path || res.destPath;
+					block.filename = path.basename(block.path);
+
+					// 尝试修正扩展名（如果 dow.js 下载的是 image 且我们给的是 .png 但实际是 .webp）
+					// 对于 video，通常 yt-dlp 会处理好。对于 image，SmartHttpDownloader 会直接写入 destPath
+					// 我们可以读取文件头来再次确认扩展名（如果需要极其严格），但 dow.js 已经比较智能。
+					// 为了保持 qqq 的习惯（根据内容修正扩展名），我们这里可以做一次 check & rename
+					if (block.kind === "image" && fs.existsSync(block.path)) {
+						try {
+							const buf = fs.readFileSync(block.path); // 可能有性能问题如果文件很大
+							// 如果是大文件，只读头？sizeOf 支持 buffer
+							// 这里简单处理：如果文件不大 (< 20MB)
+							if (buf.length < 20 * 1024 * 1024) {
+								let realExt = path.extname(block.path);
+								try {
+									const dim = sizeOf(buf);
+									if (dim && dim.type) {
+										const detected = "." + dim.type;
+										if (detected !== realExt && !(detected === ".jpeg" && realExt === ".jpg")) {
+											// 需要重命名
+											const newFilename = getTimestampFilename(detected === ".jpeg" ? ".jpg" : detected);
+											const newPath = path.join(targetDir, newFilename);
+											fs.renameSync(block.path, newPath);
+											block.path = newPath;
+											block.filename = newFilename;
+										}
+									}
+								} catch { }
+							}
+						} catch { }
+					}
+
+					block.fingerprint = computeFingerprint(block.path);
+					if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
+				} else {
+					block.status = "failed";
+					block.error = res.error;
+					// 手动处理提示
+					if (res.manual) {
+						global.logMessage(`Manual intervention needed for ${res.url}: ${res.error}`, "WARN");
+					}
+				}
+			}
+		} catch (e) {
+			global.logMessage(`dow.js downloadAll failed: ${e.message}`, "ERROR");
+			// Mark all remaining as failed
+			for (const t of httpTasks) {
+				const block = taskMap.get(t.tag);
+				if (block && block.status === "pending") {
+					block.status = "failed";
+					block.error = "downloader_exception";
+				}
 			}
 		}
 	}
@@ -1321,7 +1412,22 @@ async function raceClipboard(targetDir, callback) {
 	if (qStatus.hasText) {
 		try {
 			const text = await vscode.env.clipboard.readText();
-			if (text) callback({ type: "text", text }, 100);
+			if (text) {
+				// 嗅探：如果纯文本是视频链接，则尝试走视频下载流程
+				if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
+					try {
+						const res = await handleClipboardSlow(targetDir, qStart, "video_url", (partial) => {
+							callback(partial, 100);
+						});
+						if (res) {
+							callback(res, 100);
+							return;
+						}
+					} catch { }
+				}
+
+				callback({ type: "text", text }, 100);
+			}
 		} catch (e) { }
 		return;
 	}
@@ -1608,67 +1714,7 @@ function _guessExtFromUrl(url, contentType) {
 	return ".png";
 }
 
-async function _downloadUrlToBuffer(url, timeoutMs = 15000, maxBytes = 12 * 1024 * 1024, redirectLeft = 5) {
-	return new Promise((resolve) => {
-		let done = false;
-		const finish = (r) => {
-			if (done) return;
-			done = true;
-			resolve(r);
-		};
 
-		let u;
-		try { u = new URL(url); } catch { return finish({ error: "bad_url" }); }
-		const client = u.protocol === "https:" ? https : (u.protocol === "http:" ? http : null);
-		if (!client) return finish({ error: "unsupported_protocol" });
-
-		const options = {
-			headers: {
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-				"Accept": "image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
-			}
-		};
-
-		const req = client.get(url, options, (res) => {
-			const code = res.statusCode || 0;
-			const loc = res.headers?.location;
-
-			if ([301, 302, 303, 307, 308].includes(code) && loc && redirectLeft > 0) {
-				res.resume();
-				const nextUrl = _normalizeUrl(loc.startsWith("http") ? loc : (new URL(loc, url)).toString());
-				_downloadUrlToBuffer(nextUrl, timeoutMs, maxBytes, redirectLeft - 1).then(finish);
-				return;
-			}
-
-			if (code < 200 || code >= 300) {
-				res.resume();
-				return finish({ error: `http_${code}` });
-			}
-
-			const chunks = [];
-			let total = 0;
-			res.on("data", (c) => {
-				total += c.length;
-				if (total > maxBytes) {
-					try { req.destroy(); } catch { }
-					return finish({ error: "too_large" });
-				}
-				chunks.push(c);
-			});
-			res.on("end", () => {
-				const buf = Buffer.concat(chunks);
-				const ct = res.headers?.["content-type"] || "";
-				finish({ buffer: buf, contentType: ct });
-			});
-		});
-
-		req.on("error", () => finish({ error: "net_error" }));
-		req.setTimeout(timeoutMs, () => {
-			try { req.destroy(); } catch { }
-			finish({ error: "timeout" });
-		});
-	});
-}
 
 // ============================================================================
 // File Copy with Progress
@@ -1977,8 +2023,32 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 					// Now consume the content.
 					// Use Smart End Anchor
 					const endScanLen = 10;
-					const endAnchorStartPos = Math.max(0, trimmedHtml.length - 20);
-					const endAnchorObj = getSmartAnchor(trimmedHtml, endAnchorStartPos, endScanLen);
+
+					// [Modified] Find the LAST safe anchor to ensure we consume the full text block
+					let endAnchorObj;
+					{
+						const tailLimit = 150; // Look at last 150 chars
+						const tailStart = Math.max(0, trimmedHtml.length - tailLimit);
+						const tailStr = trimmedHtml.substring(tailStart);
+
+						// Try to find a long-ish suffix (10+ chars) that is not just whitespace
+						// Prefer including punctuation for better uniqueness in Chinese
+						if (tailStr.length >= 15) {
+							endAnchorObj = {
+								text: tailStr.substring(tailStr.length - 15),
+								offset: tailStart + tailStr.length - 15
+							};
+						} else if (tailStr.length >= 8) {
+							endAnchorObj = {
+								text: tailStr.substring(tailStr.length - 8),
+								offset: tailStart + tailStr.length - 8
+							};
+						} else {
+							// Fallback: just take the tail
+							const s = Math.max(0, trimmedHtml.length - endScanLen);
+							endAnchorObj = { text: trimmedHtml.substring(s), offset: s };
+						}
+					}
 
 					// Search for endAnchor
 					// We need to re-slice searchArea because we moved textCursor?
@@ -1996,27 +2066,24 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 					if (trimmedHtml.length < 5) {
 						contentLen = trimmedHtml.length;
 					} else {
-						// Look for end anchor
-						// We expect it around html length - endAnchorObj.offset
-						// But endAnchorObj.offset is from START of trimmedHtml.
+						// Look for end anchor using lastIndexOf to prefer the furthest match
+						// (solving the "image appears too early" issue)
 
-						const expectedPos = trimmedHtml.length - (trimmedHtml.length - endAnchorObj.offset);
-						// Actually expected pos in CleanText is roughly endAnchorObj.offset
-
-						const scanStart = Math.max(0, endAnchorObj.offset - 20);
-						const subScan = contentSearchArea.substring(scanStart);
-
-						const subIdx = subScan.indexOf(endAnchorObj.text);
+						const subIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
 
 						if (subIdx !== -1) {
 							// Found end anchor
-							// End of content = scanStart + subIdx + endAnchorObj.text.length
-							contentLen = scanStart + subIdx + endAnchorObj.text.length;
+							contentLen = subIdx + endAnchorObj.text.length;
 						} else {
-							// Fallback: search anywhere
-							const anyIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
-							if (anyIdx !== -1) {
-								contentLen = anyIdx + endAnchorObj.text.length;
+							// Anchor not found, try a shorter anchor (last 4 chars)
+							if (endAnchorObj.text.length > 4) {
+								const shortAnchor = endAnchorObj.text.substring(endAnchorObj.text.length - 4);
+								const subIdx2 = contentSearchArea.lastIndexOf(shortAnchor);
+								if (subIdx2 !== -1) {
+									contentLen = subIdx2 + shortAnchor.length;
+								} else {
+									contentLen = trimmedHtml.length;
+								}
 							} else {
 								contentLen = trimmedHtml.length;
 							}
@@ -2057,78 +2124,10 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			return { type: "text", text: cleanText || "" };
 		}
 
-		const pendingTasks = [];
-
-		for (const b of blocks) {
-			if (b.type === "media" && b.kind === "image") {
-				const task = (async () => {
-					try {
-						let ext = ".png";
-						try {
-							const u = new URL(b.src, "http://x.com");
-							ext = path.extname(u.pathname) || "";
-						} catch {
-							ext = path.extname(b.src) || "";
-						}
-
-						const dl = await _downloadUrlToBuffer(b.src);
-						if (dl.error || !dl.buffer) {
-							global.logMessage(`Image download failed: ${b.src} -> ${dl.error}`, "WARN");
-							return;
-						}
-
-						let finalExt = ext.toLowerCase();
-
-						if (!IMAGE_EXTS_FOR_CLIPBOARD.has(finalExt)) {
-							try {
-								const dim = sizeOf(dl.buffer);
-								if (dim && dim.type) {
-									finalExt = "." + dim.type;
-									if (finalExt === ".jpeg") finalExt = ".jpg";
-								} else {
-									finalExt = ".webp";
-								}
-							} catch (e) {
-								finalExt = ".webp";
-							}
-						}
-
-						const filename = getTimestampFilename(finalExt);
-						const destPath = path.join(targetDir, filename);
-
-						ensureDir(targetDir);
-						fs.writeFileSync(destPath, dl.buffer);
-
-						const fp = computeBufferFingerprint(dl.buffer);
-						if (fp) prefillFingerprint(destPath, fp);
-
-						b.filename = filename;
-						b.path = destPath;
-						b.fingerprint = fp;
-						global.logMessage(`Saved image: ${filename} (${finalExt})`, "INFO");
-
-					} catch (e) {
-						global.logMessage(`Process image error: ${e.message}`, "WARN");
-					}
-				})();
-				pendingTasks.push(task);
-			}
-		}
-
-		if (pendingTasks.length > 0) {
-			if (progressCallback) progressCallback(10, `发现 ${pendingTasks.length} 张图片，准备下载...`);
-			let completedCount = 0;
-			const total = pendingTasks.length;
-			const wrappedTasks = pendingTasks.map(taskPromise => {
-				return taskPromise.then(() => {
-					completedCount++;
-					if (progressCallback) {
-						const inc = 90 / total;
-						progressCallback(inc, `下载图片 ${completedCount}/${total}`);
-					}
-				});
-			});
-			await Promise.all(wrappedTasks);
+		// Materialize images using the unified logic
+		if (blocks.some(b => b.type === "media")) {
+			if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
+			await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
 		}
 
 		return { type: "html_blocks", blocks };
