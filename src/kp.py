@@ -61,7 +61,7 @@ def get_timestamp_filename(ext: str = ".png") -> str:
     random_chars = first_char + second_char
     prefix_code = f"{millisecond_part}{random_chars}"
     time_part = now.strftime("%H.%M.%S")
-    return f"{prefix_code}.  {date_part} [{weekday_number}] {time_part}{ext}"
+    return f"{prefix_code}_{date_part}__[{weekday_number}]__{time_part}{ext}"
 
 
 def safe_filename(name: str) -> str:

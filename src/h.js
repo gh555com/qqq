@@ -166,7 +166,7 @@ function getTimestampFilename(ext) {
         c2 = noG[Math.floor(Math.random() * noG.length)];
     }
 
-    return `${ms}${c1}${c2}. ${date} [${day}] ${time}${ext}`;
+    return `${ms}${c1}${c2}_${date}__[${day}]__${time}${ext}`;
 }
 
 function _fileUriToLocalPath(fileUri) {
