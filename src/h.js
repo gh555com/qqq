@@ -357,6 +357,114 @@ function computeBufferFingerprint(buffer) {
 }
 
 // ============================================================================
+// Quality Check & Intelligent Selection Logic
+// ============================================================================
+
+function _scoreDecodedText(s) {
+    let bad = 0, printable = 0, cjk = 0;
+    for (let i = 0; i < s.length; i++) {
+        const code = s.charCodeAt(i);
+        if (s[i] === "\uFFFD") bad += 4;        // Replacement character penalty
+        if (code === 0) bad += 6;              // NUL penalty
+        if (code >= 0x20 && code !== 0x7f) printable++;
+        if (code >= 0x4e00 && code <= 0x9fff) cjk += 3;  // CJK bonus
+    }
+    return printable + cjk - bad;
+}
+
+function _detectEncodingConfidence(buf) {
+    if (!buf || buf.length === 0) return 0;
+    const candidates = [
+        { enc: "utf8", text: buf.toString("utf8") },
+        { enc: "latin1", text: buf.toString("latin1") },
+    ];
+
+    // Simple UTF-16 detection
+    if (buf.length >= 2) {
+        if ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff)) {
+            // BOM present, high confidence if valid
+            // But let's check content score too
+            candidates.push({ enc: "utf16le", text: buf.toString("utf16le") });
+        } else {
+            // Heuristic: check null distribution for UTF-16LE vs BE
+            let zEven = 0, zOdd = 0, n = Math.min(buf.length, 1024);
+            for (let i = 0; i < n; i++) if (buf[i] === 0) i % 2 === 0 ? zEven++ : zOdd++;
+            if (zOdd > n * 0.1 && zOdd > zEven * 2) candidates.push({ enc: "utf16le", text: buf.toString("utf16le") });
+            if (zEven > n * 0.1 && zEven > zOdd * 2) candidates.push({ enc: "utf16be", text: _decodeUtf16be(buf) });
+        }
+    }
+
+    let maxScore = -Infinity;
+    for (const c of candidates) {
+        const score = _scoreDecodedText(c.text);
+        if (score > maxScore) maxScore = score;
+    }
+
+    // Normalized score: good text usually has score/length > 0.8 (if mostly ASCII) or > 1.5 (if CJK)
+    // Bad text (garbage) often has low or negative score.
+    const normalized = maxScore / Math.max(1, buf.length);
+    // Map to 0-1 confidence.
+    // < 0.2 -> 0
+    // > 0.8 -> 1
+    return Math.min(1, Math.max(0, (normalized - 0.2) / 0.6));
+}
+
+function _checkHtmlIntegrity(htmlText) {
+    if (!htmlText) return 0;
+    // Check for broken tags like </span or <div
+    // Or mojibake in tags like <?/span>
+    const brokenCloseTags = (htmlText.match(/[\?\uFFFD]\/[a-z]{1,12}\s*>/gi) || []).length;
+    const brokenOpenTags = (htmlText.match(/[\?\uFFFD][a-z]{1,12}[\s>]/gi) || []).length;
+    const totalTags = (htmlText.match(/<\/?[a-z]{1,12}/gi) || []).length;
+
+    if (totalTags === 0) return 0.5; // No tags, uncertain
+
+    const brokenRatio = (brokenCloseTags + brokenOpenTags) / totalTags;
+    // If > 10% tags are broken, integrity is very low.
+    return Math.max(0, 1 - brokenRatio * 5);
+}
+
+async function _checkPlainTextAlignment(htmlText) {
+    try {
+        const plainText = await vscode.env.clipboard.readText();
+        if (!plainText || !htmlText) return false;
+
+        const $ = cheerio.load(htmlText);
+        const textContent = $.text().trim();
+        if (textContent.length < 10) return true; // Too short to verify, assume aligned
+
+        // Pick anchors: start, middle, end
+        const anchors = [
+            textContent.substring(0, 20),
+            textContent.substring(Math.floor(textContent.length / 2), Math.floor(textContent.length / 2) + 20),
+            textContent.substring(Math.max(0, textContent.length - 20)),
+        ].map(s => s.replace(/\s+/g, ' ').trim()).filter(s => s.length > 5);
+
+        if (anchors.length === 0) return true;
+
+        let matchCount = 0;
+        for (const anchor of anchors) {
+            if (plainText.includes(anchor)) matchCount++;
+        }
+
+        // Require at least 2/3 matches or 100% if only 1 anchor
+        return matchCount >= Math.min(anchors.length, 2);
+    } catch { return false; }
+}
+
+function _isResultQualityAcceptable(blocks) {
+    if (!blocks || blocks.length === 0) return false;
+    const allText = blocks.filter(b => b.type === "text").map(b => b.text || "").join("");
+    if (allText.length === 0) return true; // Image only is OK
+
+    const badChars = (allText.match(/[\uFFFD]/g) || []).length;
+    const questionMarks = (allText.match(/\?{3,}/g) || []).length; // Continuous ???
+
+    const badRatio = badChars / allText.length;
+    return badRatio < 0.05 && questionMarks < 3;
+}
+
+// ============================================================================
 // Core HTML Logic (The "Eyes" & "Hands")
 // ============================================================================
 async function _getSmartHtmlFromClipboard(progressCallback, token) {
@@ -424,17 +532,19 @@ ${CLIPBOARD_HELPER_CS}
     if (progressCallback) progressCallback(0, "智能解码...");
 
     let htmlText = "";
+    let payload = null;
+
     if (rawBuf) {
+        // Pre-check for scheme selection decision later
+        // We do decoding here anyway
+        const sliced = _sliceCfHtmlPayload(rawBuf);
+        baseUrl = sliced.sourceUrl || "";
+        payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
+
         const simpleUtf8 = _decodeUtf8Strict(rawBuf);
         if (simpleUtf8 !== null) {
-            const sliced = _sliceCfHtmlPayload(rawBuf);
-            baseUrl = sliced.sourceUrl || "";
-            const payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
             htmlText = payload.toString("utf8");
         } else {
-            const sliced = _sliceCfHtmlPayload(rawBuf);
-            baseUrl = sliced.sourceUrl || "";
-            const payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
             htmlText = _decodeHtmlBytesSmart(payload);
         }
     } else {
@@ -442,6 +552,9 @@ ${CLIPBOARD_HELPER_CS}
     }
 
     if (!htmlText || !htmlText.trim()) return null;
+
+    // --- Decision Point: Return metadata for intelligent selection ---
+    // Instead of just returning $ and baseUrl, we return everything needed
 
     htmlText = _extractHtmlFragmentString(htmlText);
     htmlText = _repairBrokenAngleTags(htmlText);
@@ -474,7 +587,7 @@ ${CLIPBOARD_HELPER_CS}
         return null;
     }
 
-    return { $, baseUrl };
+    return { $, baseUrl, payload, htmlText }; // Return payload and htmlText for quality checks
 }
 
 const _UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -842,13 +955,56 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // Main Entry
 // ============================================================================
 async function handleClipboardUnified(targetDir, progressCallback, token) {
+    // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
 
-    const { $, baseUrl } = result;
-    const useScheme1 = getGlobal().getConfig("enhancedHtmlPasteCompatibility");
+    const { $, baseUrl, payload, htmlText } = result;
+
+    // 2. Intelligent Decision Logic
+    let useScheme1 = false;
+
+    // Check user config first
+    const configVal = getGlobal().getConfig("enhancedHtmlPasteCompatibility");
+    // If config is explicitly true/false, respect it?
+    // Usually config is boolean. If it's true, force Scheme 1?
+    // Let's assume config enables the "hybrid mode" capability, but we can still be smart.
+    // Or maybe config is the override.
+    // Let's implement the logic: Smart detection decides, unless user forces it?
+    // For now, let's treat "enhancedHtmlPasteCompatibility" as "Enable Scheme 1 (Hybrid) Mode"
+    // If enabled, we try to be smart. If disabled, we stick to Scheme 2 (DOM).
+
+    // Actually, "enhancedHtmlPasteCompatibility" usually means "Prefer Scheme 1".
+    // Let's implement the logic described in the doc:
+    // "Smart Scheme Selection"
+
+    // Detect quality signals
+    const encodingConf = payload ? _detectEncodingConfidence(payload) : 1;
+    const htmlIntegrity = _checkHtmlIntegrity(htmlText);
+    const plainTextOk = await _checkPlainTextAlignment(htmlText);
+
+    log(`[SmartPaste] conf=${encodingConf.toFixed(2)}, integrity=${htmlIntegrity.toFixed(2)}, plainTextOk=${plainTextOk}`, "INFO");
+
+    // Decision Tree
+    if (encodingConf > 0.8 && htmlIntegrity > 0.8) {
+        // High confidence in HTML -> Prefer Scheme 2 (DOM)
+        useScheme1 = false;
+    } else if (plainTextOk) {
+        // HTML is shaky, but plain text aligns well -> Prefer Scheme 1 (Hybrid)
+        useScheme1 = true;
+    } else {
+        // Both are bad, default to Scheme 2 as it handles images better usually,
+        // or Scheme 1 if user prefers it via config.
+        // Let's default to Scheme 2 but with a fallback check later.
+        useScheme1 = false;
+    }
+
+    // Force override if needed (e.g. debugging)
+    // if (configVal === true) useScheme1 = true;
 
     let blocks = [];
+
+    // Execution
     if (useScheme1) {
         if (progressCallback) progressCallback(0, "方案一：混合排版...");
         const cleanText = await vscode.env.clipboard.readText() || "";
@@ -856,6 +1012,14 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
     } else {
         if (progressCallback) progressCallback(0, "方案二：DOM排版...");
         blocks = _buildBlocksFromSanitizedDom($, baseUrl);
+
+        // Quality Check for Scheme 2 Result
+        if (!_isResultQualityAcceptable(blocks)) {
+            log("[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1", "WARN");
+            if (progressCallback) progressCallback(0, "质量检测不通过，回退到方案一...");
+            const cleanText = await vscode.env.clipboard.readText() || "";
+            blocks = await _zipDomWithCleanText($, cleanText);
+        }
     }
 
     if (blocks.some(b => b.type === "media")) {
