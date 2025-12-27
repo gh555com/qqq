@@ -965,18 +965,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
     let useScheme1 = false;
 
     // Check user config first
-    const configVal = getGlobal().getConfig("enhancedHtmlPasteCompatibility");
-    // If config is explicitly true/false, respect it?
-    // Usually config is boolean. If it's true, force Scheme 1?
-    // Let's assume config enables the "hybrid mode" capability, but we can still be smart.
-    // Or maybe config is the override.
-    // Let's implement the logic: Smart detection decides, unless user forces it?
-    // For now, let's treat "enhancedHtmlPasteCompatibility" as "Enable Scheme 1 (Hybrid) Mode"
-    // If enabled, we try to be smart. If disabled, we stick to Scheme 2 (DOM).
-
-    // Actually, "enhancedHtmlPasteCompatibility" usually means "Prefer Scheme 1".
-    // Let's implement the logic described in the doc:
-    // "Smart Scheme Selection"
+    const forceScheme1 = getGlobal().getConfig("forceTextFlowScheme"); // Replaced old key name
 
     // Detect quality signals
     const encodingConf = payload ? _detectEncodingConfidence(payload) : 1;
@@ -986,21 +975,20 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
     log(`[SmartPaste] conf=${encodingConf.toFixed(2)}, integrity=${htmlIntegrity.toFixed(2)}, plainTextOk=${plainTextOk}`, "INFO");
 
     // Decision Tree
-    if (encodingConf > 0.8 && htmlIntegrity > 0.8) {
+    if (forceScheme1) {
+        // User explicitly requested to force Scheme 1 (Text Flow) to fix mojibake
+        useScheme1 = true;
+        log("[SmartPaste] User forced Scheme 1 via config", "INFO");
+    } else if (encodingConf > 0.8 && htmlIntegrity > 0.8) {
         // High confidence in HTML -> Prefer Scheme 2 (DOM)
         useScheme1 = false;
     } else if (plainTextOk) {
         // HTML is shaky, but plain text aligns well -> Prefer Scheme 1 (Hybrid)
         useScheme1 = true;
     } else {
-        // Both are bad, default to Scheme 2 as it handles images better usually,
-        // or Scheme 1 if user prefers it via config.
-        // Let's default to Scheme 2 but with a fallback check later.
+        // Both are bad, default to Scheme 2 as it handles images better usually
         useScheme1 = false;
     }
-
-    // Force override if needed (e.g. debugging)
-    // if (configVal === true) useScheme1 = true;
 
     let blocks = [];
 
