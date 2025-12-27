@@ -1,0 +1,2891 @@
+const vscode = require("vscode");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const cp = require("child_process");
+const crypto = require("crypto");
+const http = require("http");
+const https = require("https");
+const sizeOf = require("image-size");
+
+const q3 = require("./q3");
+const global = require("./global");
+const cheerio = require("cheerio");
+const { getSharedDownloader, isPlatformOrSegmentVideo, applyResultsToItems } = require("./dow");
+
+// 引用 global.js 的核心对象
+const {
+	pythonBridge,
+	rustBridge,
+	shellBridge,
+	startDaemons,
+	tryOneByOne,
+	tryEngineCall,
+	updateStatusBarNow,
+	pasteQueue,
+	metaSaveQueue
+} = global;
+
+function createPathRegex() {
+	return /\/\\\s*([\s\S]*?)\s*\\\//gi;
+}
+
+const CACHE_DIR_NAME = "qqq_cache";
+const META_FILE_NAME = "meta.json";
+const CACHE_MAX_SIZE = 40 * 1024 * 1024;
+const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
+const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
+// 1 = 方案一（你现有“跳出范式”的图文拼排兜底）
+// 2 = 方案二（原范式：HTML 清洗解码，严格保留图文相对顺序）
+function getHtmlPasteScheme() {
+	// "enhancedHtmlPasteCompatibility" true => Scheme 1 (Lossy but robust against mojibake)
+	// "enhancedHtmlPasteCompatibility" false => Scheme 2 (Strict DOM order)
+	return global.getConfig("enhancedHtmlPasteCompatibility") ? 1 : 2;
+}
+
+const FINGERPRINT_HEAD = 128;
+const FINGERPRINT_MID = 128;
+const FINGERPRINT_TAIL = 128;
+
+const IMAGE_EXTS_FOR_CLIPBOARD = new Set([
+	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
+]);
+
+let ffmpegPath = null;
+let ffprobePath = null;
+try {
+	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+	ffmpegPath = ffmpegInstaller.path;
+	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
+} catch (e) { }
+
+let extensionContext = null;
+let cacheDir = null;
+let cacheMeta = null;
+let _statusBarTimer = null;
+
+// ============================================================================
+// Cache Meta Logic
+// ============================================================================
+function getCacheStatsSnapshot() {
+	const s = cacheMeta?.stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+	return {
+		totalSize: s.totalSize || 0,
+		fileCount: s.fileCount || 0,
+		hitCount: s.hitCount || 0,
+		missCount: s.missCount || 0,
+	};
+}
+
+function _stripDocJunk(s) {
+	if (s == null) return "";
+	return String(s).trim().replace(/\r/g, "").replace(/\n/g, "");
+}
+
+function _getSystemDriveRoot() {
+	const sd = process.env.SystemDrive;
+	if (sd && /^[A-Za-z]:$/.test(sd)) return sd.toUpperCase() + "\\";
+	const up = process.env.USERPROFILE;
+	if (up && /^[A-Za-z]:[\\/]/.test(up)) return up.slice(0, 2).toUpperCase() + "\\";
+	return "C:\\";
+}
+
+function toSafePath(p) {
+	if (!p) return "";
+	return p.startsWith("\\\\")
+		? "\\\\" + p.slice(2).replace(/\\/g, "/")
+		: p.replace(/\\/g, "/");
+}
+// ============================================================================
+// Scheme2: Robust HTML decode + sanitize + DOM-order blocks (preserve image positions)
+// ============================================================================
+
+// --- CF_HTML header parse (byte offsets) ---
+function _parseCfHtmlHeaderFromBuffer(buf) {
+	try {
+		// header is ASCII-ish, read a limited head
+		const headLen = Math.min(buf.length, 4096);
+		const head = buf.subarray(0, headLen).toString("latin1"); // do NOT assume utf8 here
+
+		// Typical fields: StartHTML:00000097 EndHTML:00001234 StartFragment:... EndFragment:... SourceURL:...
+		const pickInt = (key) => {
+			const re = new RegExp(key + ":(\\d+)", "i");
+			const m = re.exec(head);
+			if (!m) return null;
+			const n = parseInt(m[1], 10);
+			return Number.isFinite(n) ? n : null;
+		};
+
+		const startHTML = pickInt("StartHTML");
+		const endHTML = pickInt("EndHTML");
+		const startFrag = pickInt("StartFragment");
+		const endFrag = pickInt("EndFragment");
+
+		let sourceUrl = "";
+		{
+			const m = /SourceURL:(.*)\r?\n/i.exec(head);
+			if (m) sourceUrl = String(m[1] || "").trim();
+		}
+
+		return { startHTML, endHTML, startFrag, endFrag, sourceUrl };
+	} catch {
+		return { startHTML: null, endHTML: null, startFrag: null, endFrag: null, sourceUrl: "" };
+	}
+}
+
+function _sliceCfHtmlPayload(buf) {
+	try {
+		const h = _parseCfHtmlHeaderFromBuffer(buf);
+
+		let htmlBuf = buf;
+		if (h.startHTML != null && h.endHTML != null && h.startHTML >= 0 && h.endHTML > h.startHTML && h.endHTML <= buf.length) {
+			htmlBuf = buf.subarray(h.startHTML, h.endHTML);
+		}
+
+		let fragBuf = null;
+		if (h.startFrag != null && h.endFrag != null && h.startFrag >= 0 && h.endFrag > h.startFrag && h.endFrag <= buf.length) {
+			fragBuf = buf.subarray(h.startFrag, h.endFrag);
+		}
+
+		return { htmlBuf, fragBuf, sourceUrl: h.sourceUrl || "" };
+	} catch {
+		return { htmlBuf: buf, fragBuf: null, sourceUrl: "" };
+	}
+}
+
+function _decodeUtf16be(buf) {
+	// swap bytes then decode as utf16le
+	const b = Buffer.from(buf); // copy
+	for (let i = 0; i + 1 < b.length; i += 2) {
+		const t = b[i];
+		b[i] = b[i + 1];
+		b[i + 1] = t;
+	}
+	return b.toString("utf16le");
+}
+
+function _scoreDecodedText(s) {
+	if (!s) return -1;
+	// fewer replacement chars, more printable, more CJK, etc.
+	let bad = 0;
+	let printable = 0;
+	let cjk = 0;
+
+	for (let i = 0; i < s.length; i++) {
+		const code = s.charCodeAt(i);
+		const ch = s[i];
+		if (ch === "\uFFFD") bad += 4;
+		if (code === 0) bad += 6;
+		if (code >= 0x20 && code !== 0x7f) printable++;
+		// CJK Unified Ideographs + common punctuation ranges (rough)
+		if ((code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf)) cjk += 3;
+		// Penalize too many '?/span>' like artifacts
+		if (ch === "?") bad += 0.2;
+	}
+	return printable + cjk - bad;
+}
+
+function _looksLikeUtf16ByNullPattern(buf) {
+	// If many zeros on odd or even indexes -> likely UTF-16
+	let zEven = 0, zOdd = 0, n = Math.min(buf.length, 4096);
+	for (let i = 0; i < n; i++) {
+		if (buf[i] === 0) {
+			if (i % 2 === 0) zEven++;
+			else zOdd++;
+		}
+	}
+	const ratioEven = zEven / Math.max(1, n);
+	const ratioOdd = zOdd / Math.max(1, n);
+	return { ratioEven, ratioOdd };
+}
+
+function _decodeHtmlBytesSmart(buf) {
+	try {
+		if (!buf || buf.length === 0) return "";
+
+		// BOM check
+		if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+			return buf.subarray(3).toString("utf8");
+		}
+		if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+			return buf.subarray(2).toString("utf16le");
+		}
+		if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+			return _decodeUtf16be(buf.subarray(2));
+		}
+
+		// Null pattern guess
+		const np = _looksLikeUtf16ByNullPattern(buf);
+		let candidates = [];
+
+		// try utf8
+		try { candidates.push({ enc: "utf8", text: buf.toString("utf8") }); } catch { }
+		// try latin1
+		try { candidates.push({ enc: "latin1", text: buf.toString("latin1") }); } catch { }
+
+		// try utf16 based on null distribution
+		if (np.ratioOdd > 0.08 || np.ratioEven > 0.08) {
+			// If odd bytes are often 0 => LE (ASCII low byte at even index, high byte 0 at odd)
+			if (np.ratioOdd >= np.ratioEven) {
+				try { candidates.push({ enc: "utf16le", text: buf.toString("utf16le") }); } catch { }
+			} else {
+				try { candidates.push({ enc: "utf16be", text: _decodeUtf16be(buf) }); } catch { }
+			}
+			// also try the other side just in case
+			try { candidates.push({ enc: "utf16le", text: buf.toString("utf16le") }); } catch { }
+			try { candidates.push({ enc: "utf16be", text: _decodeUtf16be(buf) }); } catch { }
+		}
+
+		// pick best
+		let best = "";
+		let bestScore = -1e18;
+		for (const c of candidates) {
+			const s = c.text || "";
+			const sc = _scoreDecodedText(s);
+			if (sc > bestScore) {
+				bestScore = sc;
+				best = s;
+			}
+		}
+		return best || "";
+	} catch {
+		return "";
+	}
+}
+
+// --- Fix broken angle brackets that show up as "?/span>" etc ---
+function _repairBrokenAngleTags(html) {
+	if (!html) return "";
+	let s = String(html);
+
+	// remove NULs
+	s = s.replace(/\u0000/g, "");
+
+	// If it contains many "?/tag>" patterns, repair them
+	const hits = (s.match(/\?\/[a-zA-Z]{1,12}\s*>/g) || []).length + (s.match(/\uFFFD\/[a-zA-Z]{1,12}\s*>/g) || []).length;
+	if (hits >= 2) {
+		s = s.replace(/[\?\uFFFD]\s*\/\s*([a-zA-Z]{1,12})\s*>/g, "</$1>");
+		s = s.replace(/[\?\uFFFD]\s*([a-zA-Z]{1,12})(\s|>)/g, "<$1$2>");
+	}
+
+	// Also repair "?\u003C" weird cases (rare)
+	s = s.replace(/\?(?=<\/?[a-zA-Z])/g, "<");
+
+	return s;
+}
+
+function _extractHtmlFragmentString(htmlText) {
+	if (!htmlText) return "";
+	let s = String(htmlText);
+
+	// CF_HTML may include StartFragment markers in the text
+	const si = s.indexOf("<!--StartFragment-->");
+	const ei = s.indexOf("<!--EndFragment-->");
+	if (si >= 0 && ei > si) {
+		return s.substring(si + "<!--StartFragment-->".length, ei);
+	}
+
+	// Sometimes it includes <html>...</html>
+	const m = /<html[\s\S]*<\/html>/i.exec(s);
+	if (m) return m[0];
+
+	return s;
+}
+
+function _normalizePlainText(s) {
+	if (s == null) return "";
+	let t = String(s);
+
+	// Normalize line breaks
+	t = t.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+	// NBSP to space
+	t = t.replace(/\u00A0/g, " ");
+
+	// remove zero-width
+	t = t.replace(/[\u200B-\u200F\uFEFF]/g, "");
+
+	// trim trailing spaces each line (keep empty lines)
+	t = t.split("\n").map(line => line.replace(/[ \t]+$/g, "")).join("\n");
+
+	return t;
+}
+
+function _safeResolveUrlMaybe(rawUrl, baseUrl) {
+	let u = _normalizeUrl(rawUrl);
+	if (!u) return "";
+
+	// allow data uri
+	if (/^data:image\//i.test(u)) return u;
+
+	// allow file uri
+	if (/^file:\/\//i.test(u)) return u;
+
+	// already absolute
+	try {
+		const uu = new URL(u);
+		if (uu.protocol === "http:" || uu.protocol === "https:") return uu.toString();
+	} catch { }
+
+	// protocol-relative
+	if (u.startsWith("//")) return "https:" + u;
+
+	// relative => need baseUrl
+	if (baseUrl) {
+		try {
+			const abs = new URL(u, baseUrl).toString();
+			return abs;
+		} catch { }
+	}
+
+	return u;
+}
+
+function _fileUriToLocalPath(fileUri) {
+	try {
+		let u = String(fileUri || "");
+		if (!u.toLowerCase().startsWith("file://")) return "";
+		// file:///C:/path or file://localhost/C:/path or file:///home/xxx
+		u = u.replace(/^file:\/\//i, "");
+		u = u.replace(/^localhost\//i, "");
+		u = decodeURIComponent(u);
+
+		if (process.platform === "win32") {
+			// leading /C:/...
+			u = u.replace(/^\//, "");
+			// convert slashes
+			u = u.replace(/\//g, "\\");
+		} else {
+			u = "/" + u.replace(/^\/+/, "");
+		}
+		return u;
+	} catch {
+		return "";
+	}
+}
+
+function _pickBestImageUrlFromPicture($picture, baseUrl) {
+	try {
+		// Prefer <source srcset> then <img>
+		let best = "";
+
+		const sources = $picture.find("source").toArray();
+		for (const s of sources) {
+			const $s = cheerio(s);
+			const urls = _collectElementUrls($s, true);
+			for (const u of urls) {
+				const r = _safeResolveUrlMaybe(u, baseUrl);
+				if (r) { best = r; break; }
+			}
+			if (best) break;
+		}
+
+		if (!best) {
+			const img = $picture.find("img").first();
+			if (img && img.length) {
+				const urls = _collectElementUrls(img, false);
+				for (const u of urls) {
+					const r = _safeResolveUrlMaybe(u, baseUrl);
+					if (r) { best = r; break; }
+				}
+			}
+		}
+
+		return best;
+	} catch {
+		return "";
+	}
+}
+
+function _buildBlocksFromSanitizedDom($, baseUrl) {
+	const blocks = [];
+	let textBuf = "";
+
+	const BLOCK_TAGS = new Set([
+		"p", "div", "li", "tr", "td", "th",
+		"table", "thead", "tbody", "tfoot",
+		"section", "article", "header", "footer",
+		"blockquote", "pre",
+		"h1", "h2", "h3", "h4", "h5", "h6"
+	]);
+
+	function pushTextLinesFromBuf(force = false) {
+		const normalized = _normalizePlainText(textBuf);
+		if (!force && normalized.length === 0) {
+			textBuf = "";
+			return;
+		}
+		const lines = normalized.split("\n");
+		for (const line of lines) {
+			blocks.push({ type: "text", text: line });
+		}
+		textBuf = "";
+	}
+
+	function ensureLineBreak() {
+		// keep multiple breaks
+		if (!textBuf.endsWith("\n")) textBuf += "\n";
+		else textBuf += "\n";
+	}
+
+	function walk(node) {
+		if (!node) return;
+
+		if (node.type === "text") {
+			// Keep text as-is, but normalize later
+			textBuf += node.data || "";
+			return;
+		}
+
+		if (node.type !== "tag") return;
+
+		const tag = String(node.name || "").toLowerCase();
+
+		// br => newline
+		if (tag === "br") {
+			ensureLineBreak();
+			return;
+		}
+
+		// img => flush text, push media in place
+		if (tag === "img") {
+			pushTextLinesFromBuf(false);
+			const $img = $(node);
+			const urls = _collectElementUrls($img, false);
+			let picked = "";
+			for (const u of urls) {
+				const r = _safeResolveUrlMaybe(u, baseUrl);
+				if (r) { picked = r; break; }
+			}
+			if (picked) {
+				blocks.push({ type: "media", kind: "image", src: picked, status: "pending" });
+			}
+			return;
+		}
+
+		// picture => treat as one image
+		if (tag === "picture") {
+			pushTextLinesFromBuf(false);
+			const picked = _pickBestImageUrlFromPicture($(node), baseUrl);
+			if (picked) blocks.push({ type: "media", kind: "image", src: picked, status: "pending" });
+			return;
+		}
+
+		// li => bullet
+		if (tag === "li") {
+			ensureLineBreak();
+			textBuf += "• ";
+			const kids = node.children || [];
+			for (const k of kids) walk(k);
+			ensureLineBreak();
+			return;
+		}
+
+		// block boundary tags
+		const isBlock = BLOCK_TAGS.has(tag);
+
+		if (isBlock) {
+			ensureLineBreak();
+		}
+
+		// normal recursion
+		const children = node.children || [];
+		for (const c of children) walk(c);
+
+		if (isBlock) {
+			ensureLineBreak();
+			pushTextLinesFromBuf(false);
+		}
+	}
+
+	// Start at body if exists; otherwise root
+	const root = $("body").length ? $("body").get(0) : $.root().get(0);
+	if (root) {
+		const kids = root.children || [];
+		for (const k of kids) walk(k);
+	}
+
+	pushTextLinesFromBuf(false);
+
+	// If no blocks at all, ensure at least empty text so caller logic doesn't explode
+	if (blocks.length === 0) blocks.push({ type: "text", text: "" });
+
+	return blocks;
+}
+
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
+	const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
+
+	if (pending.length === 0) return;
+
+	// 将字符串类型的下载安全级别转换为数字
+	const securityLevelString = global.getConfig("downloadSecurityLevel") || "0: 最宽松";
+	let securityLevel = 0;
+	if (securityLevelString === "0: 最宽松") {
+		securityLevel = 0;
+	} else if (securityLevelString === "1: 平衡") {
+		securityLevel = 1;
+	} else if (securityLevelString === "2: 最严格") {
+		securityLevel = 2;
+	}
+
+	const d = getSharedDownloader({
+		securityLevel: securityLevel,
+		baseDir: targetDir,
+		downloadVideos: "all",
+		ytdlpConcurrency: 2,
+	});
+
+	const httpTasks = [];
+	const localTasks = [];
+	const taskMap = new Map();
+
+	for (const b of pending) {
+		const src = String(b.src || "");
+		if (/^data:/i.test(src) || /^file:/i.test(src)) {
+			localTasks.push(b);
+		} else {
+			// HTTP/HTTPS
+			const tag = Math.random().toString(36).slice(2) + "_" + Date.now();
+			b._tag = tag;
+
+			// 默认文件名（后续可能修正）
+			const ext = b.kind === "video" ? ".mp4" : ".png";
+			const filename = getTimestampFilename(ext);
+			const destPath = path.join(targetDir, filename);
+
+			httpTasks.push({
+				url: src,
+				tag: tag,
+				kind: b.kind || "image",
+				destPath: destPath,
+				referrer: b.referrer || "", // 如果有的话
+				maxBytes: b.kind === "video" ? 5000 * 1024 * 1024 : 200 * 1024 * 1024,
+			});
+			taskMap.set(tag, b);
+		}
+	}
+
+	// 1. 处理 Local Tasks (Data URI / File URI) - 保持原有逻辑
+	let doneCount = 0;
+	const total = pending.length;
+
+	for (const b of localTasks) {
+		try {
+			const src = String(b.src || "");
+			let buf = null;
+			let contentType = "";
+
+			if (/^data:image\//i.test(src)) {
+				const m = /^data:(image\/[a-z0-9\+\-\.]+);base64,(.*)$/i.exec(src);
+				if (m) {
+					contentType = m[1] || "";
+					buf = Buffer.from(m[2] || "", "base64");
+				}
+			} else if (/^file:\/\//i.test(src)) {
+				const localPath = _fileUriToLocalPath(src);
+				if (localPath && fs.existsSync(localPath) && !fs.statSync(localPath).isDirectory()) {
+					ensureDir(targetDir);
+					const ext = path.extname(localPath) || ".png";
+					const filename = getTimestampFilename(ext);
+					const destPath = path.join(targetDir, filename);
+					try {
+						fs.copyFileSync(localPath, destPath);
+						const fp = computeFingerprint(destPath);
+						if (fp) prefillFingerprint(destPath, fp);
+						b.filename = filename;
+						b.path = destPath;
+						b.fingerprint = fp || null;
+						b.status = "ok";
+					} catch (e) {
+						b.status = "failed";
+						b.error = "copy_failed";
+					}
+					doneCount++;
+					if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+					continue;
+				} else {
+					b.status = "failed";
+					b.error = "file_not_found";
+				}
+			}
+
+			if (buf && buf.length > 0) {
+				ensureDir(targetDir);
+				let ext = _guessExtFromUrl(src, contentType);
+				ext = (ext || ".png").toLowerCase();
+				if (ext === ".jpeg") ext = ".jpg";
+
+				// image-size check
+				if (!IMAGE_EXTS_FOR_CLIPBOARD.has(ext)) {
+					try {
+						const dim = sizeOf(buf);
+						if (dim && dim.type) {
+							ext = "." + dim.type;
+							if (ext === ".jpeg") ext = ".jpg";
+						} else {
+							ext = ".webp";
+						}
+					} catch { ext = ".webp"; }
+				}
+
+				const filename = getTimestampFilename(ext);
+				const destPath = path.join(targetDir, filename);
+				try {
+					fs.writeFileSync(destPath, buf);
+					const fp = computeBufferFingerprint(buf);
+					if (fp) prefillFingerprint(destPath, fp);
+					b.filename = filename;
+					b.path = destPath;
+					b.fingerprint = fp || null;
+					b.status = "ok";
+				} catch {
+					b.status = "failed";
+					b.error = "write_failed";
+				}
+			}
+		} catch (e) {
+			b.status = "failed";
+			b.error = "exception";
+		}
+		doneCount++;
+		if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+	}
+
+	// 2. 处理 HTTP Tasks (使用 dow.js)
+	if (httpTasks.length > 0) {
+		try {
+			const r = await d.downloadAll(httpTasks, targetDir, {
+				onProgress: (t, e) => {
+					// 简单的进度反馈
+					if (e.type === "done" || e.type === "error") {
+						doneCount++;
+						if (progressCallback) progressCallback((doneCount / total) * 100, `下载中 ${doneCount}/${total}`);
+					} else if (e.type === "retry") {
+						global.logMessage(`Retry ${t.tag}: ${e.reason} wait ${e.delayMs}ms`, "WARN");
+					}
+				}
+			});
+
+			// 回填结果
+			for (const res of r.results) {
+				const block = taskMap.get(res.tag);
+				if (!block) continue;
+
+				if (res.success) {
+					block.status = "ok";
+					// dow.js 可能会修正 extension (例如 yt-dlp mp4)，或者我们自己检查
+					// 这里假设 dow.js 返回的 path 是最终文件
+					block.path = res.path || res.destPath;
+					block.filename = path.basename(block.path);
+
+					// 尝试修正扩展名（如果 dow.js 下载的是 image 且我们给的是 .png 但实际是 .webp）
+					// 对于 video，通常 yt-dlp 会处理好。对于 image，SmartHttpDownloader 会直接写入 destPath
+					// 我们可以读取文件头来再次确认扩展名（如果需要极其严格），但 dow.js 已经比较智能。
+					// 为了保持 qqq 的习惯（根据内容修正扩展名），我们这里可以做一次 check & rename
+					if (block.kind === "image" && fs.existsSync(block.path)) {
+						try {
+							const buf = fs.readFileSync(block.path); // 可能有性能问题如果文件很大
+							// 如果是大文件，只读头？sizeOf 支持 buffer
+							// 这里简单处理：如果文件不大 (< 20MB)
+							if (buf.length < 20 * 1024 * 1024) {
+								let realExt = path.extname(block.path);
+								try {
+									const dim = sizeOf(buf);
+									if (dim && dim.type) {
+										const detected = "." + dim.type;
+										if (detected !== realExt && !(detected === ".jpeg" && realExt === ".jpg")) {
+											// 需要重命名
+											const newFilename = getTimestampFilename(detected === ".jpeg" ? ".jpg" : detected);
+											const newPath = path.join(targetDir, newFilename);
+											fs.renameSync(block.path, newPath);
+											block.path = newPath;
+											block.filename = newFilename;
+										}
+									}
+								} catch { }
+							}
+						} catch { }
+					}
+
+					block.fingerprint = computeFingerprint(block.path);
+					if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
+				} else {
+					block.status = "failed";
+					block.error = res.error;
+					// 手动处理提示
+					if (res.manual) {
+						global.logMessage(`Manual intervention needed for ${res.url}: ${res.error}`, "WARN");
+					}
+				}
+			}
+		} catch (e) {
+			global.logMessage(`dow.js downloadAll failed: ${e.message}`, "ERROR");
+			// Mark all remaining as failed
+			for (const t of httpTasks) {
+				const block = taskMap.get(t.tag);
+				if (block && block.status === "pending") {
+					block.status = "failed";
+					block.error = "downloader_exception";
+				}
+			}
+		}
+	}
+}
+
+async function handleClipboardNodeScheme2(targetDir, partialCallback = null, token = null, progressCallback = null) {
+	try {
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：读取 HTML...");
+
+		let rawBuf = null;
+		let rawText = null;
+		let baseUrl = "";
+
+		// 1) Try daemon engines (prefer base64 bytes if available)
+		const res = await tryEngineCall({
+			python: "get_html",
+			rust: "get_html",
+			shell: "getHtml"
+		}, {}, 8000);
+
+		if (res) {
+			if (res.value_base64) {
+				rawBuf = Buffer.from(res.value_base64, "base64");
+			} else if (res.value) {
+				rawText = String(res.value);
+			}
+		}
+
+		// 2) Windows fallback: powershell Clipboard Html (already utf8 base64 in your script)
+		if (!rawBuf && !rawText && process.platform === "win32") {
+			try {
+				const psScript = `Add-Type -A System.Windows.Forms;$t=[System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html);if($t){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))}`;
+				const b64 = await spawnOutput("powershell", [
+					"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+				]);
+				if (b64 && b64.trim()) {
+					rawBuf = Buffer.from(b64.trim(), "base64");
+				}
+			} catch (e) {
+				global.logMessage(`[Scheme2] powershell html 读取失败: ${e.message}`, "WARN");
+			}
+		}
+
+		// 3) Last fallback: readText if looks like html
+		if (!rawBuf && !rawText) {
+			const t = await vscode.env.clipboard.readText();
+			if (t && _looksLikeHtml(t)) rawText = t;
+		}
+
+		if (!rawBuf && !rawText) return null;
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：解析 CF_HTML/解码...");
+
+		let htmlText = "";
+
+		if (rawBuf) {
+			// If it's CF_HTML, slice payload by byte offsets first
+			const sliced = _sliceCfHtmlPayload(rawBuf);
+			baseUrl = sliced.sourceUrl || "";
+
+			// prefer fragment if exists, else full html
+			const payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
+			htmlText = _decodeHtmlBytesSmart(payload);
+
+			// Some daemons might return pure HTML bytes (no CF header) — still ok
+		} else {
+			htmlText = String(rawText || "");
+		}
+
+		if (!htmlText || !htmlText.trim()) return null;
+
+		// Normalize / extract fragment / repair broken tags
+		htmlText = _extractHtmlFragmentString(htmlText);
+		htmlText = _repairBrokenAngleTags(htmlText);
+
+		// Your existing sanitizer (removes scripts + on* + javascript:)
+		let safeHtml = sanitizeHtml(htmlText);
+		safeHtml = _repairBrokenAngleTags(safeHtml);
+
+		if (!safeHtml || !safeHtml.trim()) return null;
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：HTML 二次清洗...");
+
+		// Parse and aggressively remove attrs/styles (avoid style garbage + keep text clean)
+		let $;
+		try {
+			$ = cheerio.load(safeHtml, { decodeEntities: true, xmlMode: false });
+
+			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea, noscript").remove();
+
+			$("*").each((i, el) => {
+				if (!el || el.type !== "tag") return;
+				const tag = String(el.tagName || el.name || "").toLowerCase();
+				const attribs = el.attribs || {};
+
+				// Remove style always
+				if (attribs.style) delete attribs.style;
+
+				// Remove all on* handlers
+				for (const k of Object.keys(attribs)) {
+					if (k.toLowerCase().startsWith("on")) delete attribs[k];
+				}
+
+				// Remove dangerous href/src
+				if (attribs.href && String(attribs.href).toLowerCase().startsWith("javascript:")) delete attribs.href;
+				if (attribs.src && String(attribs.src).toLowerCase().startsWith("javascript:")) delete attribs.src;
+
+				// Whitelist attributes
+				const keep = new Set();
+				if (tag === "img") {
+					keep.add("src");
+					keep.add("srcset");
+					keep.add("data-src");
+					keep.add("data-srcset");
+					keep.add("data-lazy-src");
+					keep.add("data-original");
+					keep.add("data-url");
+					keep.add("alt");
+					keep.add("title");
+				} else if (tag === "source") {
+					keep.add("src");
+					keep.add("srcset");
+					keep.add("data-src");
+					keep.add("data-srcset");
+					keep.add("type");
+				} else if (tag === "a") {
+					// keep only href (optional). You can remove it if you don't want links.
+					keep.add("href");
+				}
+
+				for (const k of Object.keys(attribs)) {
+					if (!keep.has(k)) delete attribs[k];
+				}
+
+				// Apply sanitized attribs back
+				el.attribs = attribs;
+			});
+		} catch (e) {
+			global.logMessage(`[Scheme2] cheerio.load 失败: ${e.message}`, "ERROR");
+			return null;
+		}
+
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "方案二：按 DOM 顺序生成图文 blocks...");
+
+		// Build blocks in DOM order (text + images). This preserves image positions.
+		const blocks = _buildBlocksFromSanitizedDom($, baseUrl);
+
+		// Kick partial callback before downloading images (optional)
+		// try {
+		// 	if (partialCallback) partialCallback({ type: "html_blocks", blocks }, 30);
+		// } catch { }
+
+		// Materialize images to local files (same behavior as方案一：落盘+指纹)
+		if (progressCallback) progressCallback(0, `方案二：处理图片 (${blocks.filter(b => b.type === "media").length} 个)...`);
+		await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
+
+		return { type: "html_blocks", blocks };
+	} catch (e) {
+		global.logMessage(`[Scheme2] handleClipboardNodeScheme2 失败: ${e?.message || e}`, "ERROR");
+		return null;
+	}
+}
+
+function normalizeNavPath(rawPath) {
+	let clean = _stripDocJunk(rawPath);
+	if (!clean) return "";
+
+	if (clean === "~") clean = os.homedir();
+	else if (clean.startsWith("~/") || clean.startsWith("~\\")) {
+		clean = path.join(os.homedir(), clean.slice(2));
+	}
+
+	const isWin = process.platform === "win32";
+	if (!isWin) return path.normalize(clean);
+
+	if (/^[A-Za-z]:$/.test(clean)) return clean.toUpperCase() + "\\";
+	if (/^[A-Za-z]:[\\/]*$/.test(clean)) return clean[0].toUpperCase() + ":\\";
+
+	if (clean.startsWith("\\\\") || clean.startsWith("//")) return path.normalize(clean);
+
+	if (/^[A-Za-z]:[\\/]/.test(clean)) {
+		const normalized = path.normalize(clean);
+		return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
+	}
+
+	if (clean.startsWith("\\") || clean.startsWith("/")) {
+		const sysRoot = _getSystemDriveRoot();
+		const rest = clean.replace(/^[\\/]+/, "");
+		return path.normalize(path.join(sysRoot, rest));
+	}
+
+	return path.normalize(clean);
+}
+
+function resolveNavPath(rawPath, baseDir) {
+	const clean = normalizeNavPath(rawPath);
+	if (!clean) return "";
+	if (path.isAbsolute(clean)) return clean;
+	const base = baseDir && typeof baseDir === "string" ? baseDir : process.cwd();
+	return path.resolve(base, clean);
+}
+
+function canonicalizeExistingPath(p) {
+	if (!p) return "";
+	let out = String(p);
+
+	try {
+		if (fs.existsSync(out)) {
+			if (fs.realpathSync && fs.realpathSync.native) out = fs.realpathSync.native(out);
+			else out = fs.realpathSync(out);
+		}
+	} catch { }
+
+	out = path.normalize(out);
+
+	if (process.platform === "win32") {
+		out = out.replace(/^\\\\\?\\/, "");
+		out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
+	}
+
+	try {
+		const root = path.parse(out).root;
+		if (out.length > root.length) out = out.replace(/[\\/]+$/, "");
+	} catch { }
+
+	return out;
+}
+
+function cacheKeyForPath(p) {
+	const canon = canonicalizeExistingPath(p);
+	return process.platform === "win32" ? canon.toLowerCase() : canon;
+}
+
+// ============================================================================
+// Fingerprint Logic
+// ============================================================================
+const _fingerprintCache = new Map();
+const _fingerprintDb = new Map();
+
+function prefillFingerprint(filePath, fingerprint) {
+	try {
+		const stat = fs.statSync(filePath);
+		const key = cacheKeyForPath(filePath);
+		_fingerprintCache.set(key, {
+			mtime: stat.mtimeMs,
+			size: stat.size,
+			fp: fingerprint
+		});
+		_fingerprintDb.set(fingerprint, filePath);
+	} catch (e) { }
+}
+
+function findFileByFingerprint(fingerprint) {
+	return _fingerprintDb.get(fingerprint);
+}
+
+function computeFingerprint(filePath) {
+	try {
+		const stat = fs.statSync(filePath);
+		const size = stat.size;
+		const mtime = stat.mtimeMs;
+		const key = cacheKeyForPath(filePath);
+
+		const cached = _fingerprintCache.get(key);
+		if (cached && cached.mtime === mtime && cached.size === size) {
+			return cached.fp;
+		}
+
+		if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
+
+		const fd = fs.openSync(filePath, "r");
+		const chunks = [];
+
+		const sizeBuf = Buffer.alloc(8);
+		sizeBuf.writeBigUInt64LE(BigInt(size));
+		chunks.push(sizeBuf);
+
+		try {
+			if (size <= FINGERPRINT_HEAD) {
+				const buf = Buffer.alloc(size);
+				fs.readSync(fd, buf, 0, size, 0);
+				chunks.push(buf);
+			} else if (size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
+				const head = Buffer.alloc(FINGERPRINT_HEAD);
+				fs.readSync(fd, head, 0, FINGERPRINT_HEAD, 0);
+				chunks.push(head);
+
+				const tailSize = Math.min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD);
+				const tail = Buffer.alloc(tailSize);
+				fs.readSync(fd, tail, 0, tailSize, size - tailSize);
+				chunks.push(tail);
+			} else {
+				const head = Buffer.alloc(FINGERPRINT_HEAD);
+				fs.readSync(fd, head, 0, FINGERPRINT_HEAD, 0);
+				chunks.push(head);
+
+				const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
+				const mid = Buffer.alloc(FINGERPRINT_MID);
+				fs.readSync(fd, mid, 0, FINGERPRINT_MID, midPos);
+				chunks.push(mid);
+
+				const tail = Buffer.alloc(FINGERPRINT_TAIL);
+				fs.readSync(fd, tail, 0, FINGERPRINT_TAIL, size - FINGERPRINT_TAIL);
+				chunks.push(tail);
+			}
+		} finally {
+			fs.closeSync(fd);
+		}
+
+		const fp = crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
+
+		_fingerprintCache.set(key, { mtime, size, fp });
+		if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
+
+		return fp;
+	} catch (e) {
+		return null;
+	}
+}
+
+// ============================================================================
+// Cache Initialization & Management
+// ============================================================================
+function initCache(context) {
+	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+	loadCacheMeta();
+	validateCache();
+}
+
+function createEmptyMeta() {
+	return {
+		entries: {},
+		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
+		brokenFiles: {},
+	};
+}
+
+function loadCacheMeta() {
+	const metaPath = path.join(cacheDir, META_FILE_NAME);
+	try {
+		if (fs.existsSync(metaPath)) {
+			cacheMeta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+			if (!cacheMeta.entries) cacheMeta.entries = {};
+			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+		} else {
+			cacheMeta = createEmptyMeta();
+		}
+	} catch (e) {
+		cacheMeta = createEmptyMeta();
+	}
+}
+
+function saveCacheMeta() {
+	if (!cacheDir || !cacheMeta) return;
+
+	metaSaveQueue.enqueue(async () => {
+		try {
+			const data = JSON.stringify(cacheMeta, null, 2);
+			const metaPath = path.join(cacheDir, META_FILE_NAME);
+			await fs.promises.writeFile(metaPath, data, "utf-8");
+		} catch (e) {
+			global.logMessage("Meta save failed: " + e.message, "ERROR");
+		}
+	});
+}
+
+function validateCache() {
+	if (!cacheDir || !cacheMeta) return;
+
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+
+	try {
+		const files = fs.readdirSync(cacheDir);
+		for (const f of files) {
+			if (f !== META_FILE_NAME) actualFiles.add(f);
+		}
+	} catch (e) { }
+
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry || typeof entry !== "object") {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+			continue;
+		}
+		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
+
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			if (!qInfo) {
+				delete entry.qualities[q];
+				changed = true;
+				continue;
+			}
+
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = fs.statSync(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) {
+					delete entry.qualities[q];
+					changed = true;
+				}
+			}
+		}
+
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+
+	for (const orphan of actualFiles) {
+		try {
+			fs.unlinkSync(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+
+	if (changed) saveCacheMeta();
+}
+
+function ensureCacheSpace(neededBytes) {
+	if (!cacheDir || !cacheMeta) return;
+	if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return;
+
+	const entries = Object.entries(cacheMeta.entries)
+		.map(([contentId, entry]) => ({ contentId, atime: entry?.atime || 0 }))
+		.sort((a, b) => a.atime - b.atime);
+
+	while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) {
+		const oldest = entries.shift();
+		evictEntry(oldest.contentId);
+	}
+}
+
+function evictEntry(contentId) {
+	const entry = cacheMeta.entries[contentId];
+	if (!entry?.qualities) return;
+
+	for (const q of Object.keys(entry.qualities)) {
+		const fileName = `${contentId}.${q}`;
+		try {
+			const filePath = path.join(cacheDir, fileName);
+			const st = fs.statSync(filePath);
+			cacheMeta.stats.totalSize -= st.size;
+			cacheMeta.stats.fileCount--;
+			fs.unlinkSync(filePath);
+		} catch (e) { }
+	}
+
+	delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+}
+
+function getCacheEntry(contentId) {
+	if (!cacheMeta?.entries?.[contentId]) {
+		cacheMeta.stats.missCount++;
+		return null;
+	}
+	const entry = cacheMeta.entries[contentId];
+	entry.atime = Date.now();
+	cacheMeta.stats.hitCount++;
+	return entry;
+}
+
+function getCacheQualityMeta(contentId, quality) {
+	const entry = cacheMeta?.entries?.[contentId];
+	const qInfo = entry?.qualities?.[quality];
+	return qInfo?.meta || null;
+}
+
+function setCacheEntry(contentId, quality, buffer, meta) {
+	if (!cacheDir || !cacheMeta) return null;
+
+	if (!cacheMeta.entries[contentId]) {
+		cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} };
+	}
+	const entry = cacheMeta.entries[contentId];
+	if (!entry.qualities) entry.qualities = {};
+
+	const prev = entry.qualities[quality];
+	const prevSize = prev?.size || 0;
+	const delta = Math.max(0, buffer.length - prevSize);
+
+	ensureCacheSpace(delta);
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+
+	try {
+		const tmpPath = filePath + ".tmp";
+		fs.writeFileSync(tmpPath, buffer);
+		fs.renameSync(tmpPath, filePath);
+	} catch (e) {
+		try {
+			fs.unlinkSync(filePath + ".tmp");
+		} catch { }
+		return null;
+	}
+
+	entry.qualities[quality] = { size: buffer.length, format: "webp_unified", meta: {} };
+	entry.atime = Date.now();
+	if (meta) Object.assign(entry.qualities[quality].meta, meta);
+
+	if (!prev) cacheMeta.stats.fileCount++;
+	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
+
+	saveCacheMeta();
+	updateStatusBarNow();
+
+	return filePath;
+}
+
+function getCachedBuffer(contentId, quality) {
+	if (!cacheDir || !cacheMeta) return null;
+
+	const entry = cacheMeta.entries[contentId];
+	if (!entry?.qualities?.[quality]) {
+		cacheMeta.stats.missCount++;
+		global.markCacheMiss();
+		updateStatusBarNow();
+		return null;
+	}
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+
+	try {
+		if (fs.existsSync(filePath)) {
+			entry.atime = Date.now();
+			cacheMeta.stats.hitCount++;
+			global.markCacheHit();
+			updateStatusBarNow();
+			return fs.readFileSync(filePath);
+		}
+	} catch (e) { }
+
+	cacheMeta.stats.missCount++;
+	global.markCacheMiss();
+
+	delete entry.qualities[quality];
+	if (Object.keys(entry.qualities).length === 0) {
+		delete cacheMeta.entries[contentId];
+	}
+	saveCacheMeta();
+
+	updateStatusBarNow();
+
+	return null;
+}
+
+// ============================================================================
+// IO & Clipboard Logic
+// ============================================================================
+function ensureDir(dirPath) {
+	if (!fs.existsSync(dirPath)) {
+		try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) { }
+	}
+}
+
+const CLIPBOARD_PEEK_TIMEOUT_MS = 350;
+
+async function peekClipboardRichFast() {
+	const pref = global.getEnginePreference();
+	const order = global.getEngineTryOrder(pref);
+
+	const promises = [];
+
+	if (shellBridge?.isAvailable && shellBridge.isAvailable()) {
+		promises.push((async () => {
+			try {
+				const hasHtml = await shellBridge.call("hasHtml", {}, 200);
+				if (hasHtml?.value) return { type: "peek", has_html: true, priority: 100 };
+			} catch { }
+			return null;
+		})());
+	}
+
+	if (order.includes("python") && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+		promises.push((async () => {
+			try {
+				const res = await pythonBridge.call("clipboard_peek", {}, CLIPBOARD_PEEK_TIMEOUT_MS);
+				if (res && !res.error && res.type === "peek") return { ...res, priority: 50 };
+			} catch { }
+			return null;
+		})());
+	}
+
+	promises.push((async () => {
+		try {
+			const text = await vscode.env.clipboard.readText();
+			if (text && /<\/?(html|body|div|p|img|picture|source|span|a|ul|li|table|tr|td|h[1-6]|b|i|strong|em|code|pre|blockquote)\b/i.test(text)) {
+				return { type: "peek", has_html: true, priority: 80 };
+			}
+		} catch { }
+		return null;
+	})());
+
+	try {
+		return await Promise.race(promises.filter(p => p !== null));
+	} catch { }
+
+	return null;
+}
+
+async function raceClipboard(targetDir, callback) {
+	const qStart = Date.now();
+	let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+	let handled = false;
+
+	try {
+		if (shellBridge && shellBridge.available !== false) {
+			const res = await shellBridge.call("checkQ", {}, 500);
+			if (res && !res.error) {
+				qStatus = res;
+				handled = true;
+			}
+		}
+	} catch (e) { }
+
+	if (!handled && process.platform === "win32") {
+		try {
+			const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
+			const jsonStr = await spawnOutput("powershell", [
+				"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+			]);
+			if (jsonStr && jsonStr.trim()) {
+				const parsed = JSON.parse(jsonStr);
+				if (parsed) {
+					qStatus = parsed;
+					handled = true;
+					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
+						shellBridge.start().catch(() => { });
+					}
+				}
+			}
+		} catch (e) {
+			global.logMessage(`[Fallback] raceClipboard Spawn failed: ${e.message}`, "WARN");
+		}
+	}
+
+	if (!handled) {
+		try {
+			const text = await vscode.env.clipboard.readText();
+			if (text) qStatus.hasText = true;
+		} catch (e) { }
+	}
+
+	const qDuration = Date.now() - qStart;
+	global.logQ(Math.round(qDuration));
+
+	if (qStatus.hasFile) {
+		try {
+			const res = await handleClipboardSlow(targetDir, qStart, "file");
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
+
+	if (qStatus.hasHtml) {
+		try {
+			const res = await handleClipboardSlow(targetDir, qStart, "html", (partial) => {
+				callback(partial, 100);
+			});
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
+
+	if (qStatus.hasImage) {
+		try {
+			const res = await handleClipboardSlow(targetDir, qStart, "image");
+			if (res) callback(res, 100);
+		} catch (e) { }
+		return;
+	}
+
+	if (qStatus.hasText) {
+		try {
+			const text = await vscode.env.clipboard.readText();
+			if (text) {
+				// 嗅探：如果纯文本是视频链接，则尝试走视频下载流程
+				if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
+					try {
+						const res = await handleClipboardSlow(targetDir, qStart, "video_url", (partial) => {
+							callback(partial, 100);
+						});
+						if (res) {
+							callback(res, 100);
+							return;
+						}
+					} catch { }
+				}
+
+				callback({ type: "text", text }, 100);
+			}
+		} catch (e) { }
+		return;
+	}
+}
+
+async function handleClipboardFast() {
+	return null;
+}
+
+function formatBytes(size) {
+	if (size == null || isNaN(size)) return "?";
+	const units = ["B", "KB", "MB", "GB"];
+	let idx = 0;
+	let val = size;
+	while (val >= 1024 && idx < units.length - 1) {
+		val /= 1024;
+		idx++;
+	}
+	return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
+}
+
+function getPathSize(p) {
+	try {
+		const stat = fs.statSync(p);
+		if (stat.isDirectory()) {
+			const files = fs.readdirSync(p);
+			return files.reduce((acc, f) => acc + getPathSize(path.join(p, f)), 0);
+		}
+		return stat.size;
+	} catch { return 0; }
+}
+
+async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null, partialCallback = null, token = null) {
+	return pasteQueue.enqueue(async () => {
+		if (token?.isCancellationRequested) return null;
+
+		if (typeHint === "html") {
+			return await global.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: "qqq: 正在粘贴 HTML...",
+				cancellable: true
+			}, async (progress, newTok) => {
+				newTok.onCancellationRequested(() => {
+					global.logMessage("HTML 粘贴被用户取消", "WARN");
+				});
+				const progCb = (pct, msg) => {
+					progress.report({ message: msg, increment: pct });
+				}; if (getHtmlPasteScheme() === 2) {
+					// const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, newTok, progCb);
+					const r2 = await handleClipboardNodeScheme2(targetDir, null, newTok, progCb);
+
+					if (r2) return r2;
+					// 方案二失败自动回退方案一
+				}
+				return await handleClipboardNode(targetDir, partialCallback, newTok, progCb);
+
+			});
+		}
+
+		if (typeHint === "file") {
+			let files = [];
+			const pref = global.getEnginePreference();
+			const order = global.getEngineTryOrder(pref);
+
+			for (const engine of order) {
+				try {
+					if (engine === "python" && pythonBridge?.isAvailable && pythonBridge.isAvailable()) {
+						const res = await pythonBridge.call("get_clipboard_files", {}, 2000);
+						if (res && res.paths && res.paths.length > 0) {
+							files = res.paths;
+							break;
+						}
+					} else if (engine === "shell" && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+						const res = await shellBridge.call("getFiles", {}, 2000);
+						if (res && res.files && res.files.length > 0) {
+							files = res.files;
+							break;
+						}
+					}
+				} catch { }
+			}
+
+			if (files.length === 0 && shellBridge?.isAvailable && shellBridge.isAvailable()) {
+				try {
+					const res = await shellBridge.call("getFiles", {}, 2000);
+					files = res?.files || [];
+				} catch { }
+			}
+
+			let totalSize = 0;
+			if (files.length > 0) {
+				for (const f of files) {
+					totalSize += getPathSize(f);
+				}
+			}
+
+			if (totalSize > PASTE_SIZE_THRESHOLD || files.length > 10) {
+				const sizeStr = formatBytes(totalSize);
+				return await global.withProgress({
+					location: vscode.ProgressLocation.Notification,
+					title: `qqq: 正在粘贴文件 ( ${sizeStr} )`,
+					cancellable: true
+				}, async (progress, newTok) => {
+					newTok.onCancellationRequested(() => {
+						global.logMessage("文件粘贴被用户取消", "WARN");
+					});
+					const progCb = (pct, msg) => {
+						progress.report({ message: msg, increment: pct });
+					};
+					return await handleClipboardShell(targetDir, newTok, progCb, files, totalSize);
+				});
+			} else {
+				return await handleClipboardShell(targetDir, token, null, files);
+			}
+		}
+
+		if (typeHint === "image") {
+			return await handleClipboardShell(targetDir, token, partialCallback);
+		}
+
+		return null;
+	});
+}
+
+function computeBufferFingerprint(buffer) {
+	try {
+		const size = buffer.length;
+		if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
+
+		const chunks = [];
+		const sizeBuf = Buffer.alloc(8);
+		sizeBuf.writeBigUInt64LE(BigInt(size));
+		chunks.push(sizeBuf);
+
+		if (size <= FINGERPRINT_HEAD) {
+			chunks.push(buffer);
+		} else if (size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
+			chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
+			const tailSize = Math.min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD);
+			chunks.push(buffer.subarray(size - tailSize));
+		} else {
+			chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
+
+			const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
+			chunks.push(buffer.subarray(midPos, midPos + FINGERPRINT_MID));
+
+			chunks.push(buffer.subarray(size - FINGERPRINT_TAIL));
+		}
+
+		return crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
+	} catch (e) {
+		return null;
+	}
+}
+
+// ============================================================================
+// HTML Helpers
+// ============================================================================
+function sanitizeHtml(html) {
+	if (!html) return "";
+	const $ = cheerio.load(html, { decodeEntities: false });
+
+	$("script, iframe, object, embed").remove();
+
+	$("*").each(function () {
+		const attrs = this.attribs || {};
+		for (const attr of Object.keys(attrs)) {
+			if (attr.toLowerCase().startsWith("on")) {
+				$(this).removeAttr(attr);
+			}
+		}
+
+		const href = $(this).attr("href");
+		if (href && href.toLowerCase().startsWith("javascript:")) {
+			$(this).removeAttr("href");
+		}
+
+		const src = $(this).attr("src");
+		if (src && src.toLowerCase().startsWith("javascript:")) {
+			$(this).removeAttr("src");
+		}
+	});
+
+	return $.html();
+}
+
+function _looksLikeHtml(s) {
+	if (!s) return false;
+	const t = String(s);
+	return /<\/?(html|body|div|p|img|picture|source|span|a)\b/i.test(t) || /\b(srcset|data-src|data-srcset)\s*=/i.test(t);
+}
+
+function _cleanAttr(v) {
+	if (v == null) return "";
+	return String(v).trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
+}
+
+function _normalizeUrl(raw) {
+	let u = _cleanAttr(raw);
+	if (!u) return "";
+	const lower = u.toLowerCase();
+	if (lower.startsWith("blob:")) return "";
+	if (lower.startsWith("chrome-extension:")) return "";
+	if (lower.startsWith("about:")) return "";
+
+	if (u.startsWith("//")) u = "https:" + u;
+	return u;
+}
+
+function _parseSrcset(srcset) {
+	const out = [];
+	const s = _cleanAttr(srcset);
+	if (!s) return out;
+
+	const parts = s.split(",").map(x => x.trim()).filter(Boolean);
+	for (const part of parts) {
+		const segs = part.split(/\s+/).filter(Boolean);
+		const url = _normalizeUrl(segs[0] || "");
+		if (!url) continue;
+		const desc = (segs[1] || "").trim();
+		out.push({ url, desc });
+	}
+	return out;
+}
+
+function _scoreSrcsetDesc(desc) {
+	if (!desc) return 0;
+	const mW = /^(\d+(?:\.\d+)?)w$/i.exec(desc);
+	if (mW) return Number(mW[1]) || 0;
+	const mX = /^(\d+(?:\.\d+)?)x$/i.exec(desc);
+	if (mX) return (Number(mX[1]) || 0) * 100000;
+	return 0;
+}
+
+function _pickBestFromSrcset(srcset) {
+	const cand = _parseSrcset(srcset);
+	if (!cand.length) return "";
+	cand.sort((a, b) => _scoreSrcsetDesc(b.desc) - _scoreSrcsetDesc(a.desc));
+	return cand[0]?.url || "";
+}
+
+function _collectElementUrls($el, isSourceTag = false) {
+	const urls = [];
+
+	const srcsetKeys = ["srcset", "data-srcset", "data-lazy-srcset", "data-lazysrcset", "data-src-set"];
+	for (const k of srcsetKeys) {
+		const v = _pickBestFromSrcset($el.attr(k));
+		if (v) urls.push(v);
+	}
+
+	const srcKeys = isSourceTag
+		? ["src", "data-src"]
+		: ["src", "data-src", "data-original", "data-orig", "data-lazy-src", "data-lazysrc", "data-actualsrc", "data-url", "data-img"];
+	for (const k of srcKeys) {
+		const v = _normalizeUrl($el.attr(k));
+		if (v) urls.push(v);
+	}
+
+	return urls;
+}
+
+function _extFromContentType(ct) {
+	const t = String(ct || "").toLowerCase().split(";")[0].trim();
+	if (t === "image/jpeg") return ".jpg";
+	if (t === "image/jpg") return ".jpg";
+	if (t === "image/png") return ".png";
+	if (t === "image/gif") return ".gif";
+	if (t === "image/webp") return ".webp";
+	if (t === "image/svg+xml") return ".svg";
+	if (t === "image/bmp") return ".bmp";
+	if (t === "image/x-icon" || t === "image/vnd.microsoft.icon") return ".ico";
+	return "";
+}
+
+function _guessExtFromUrl(url, contentType) {
+	const byCT = _extFromContentType(contentType);
+	if (byCT) return byCT;
+	try {
+		const u = new URL(url);
+		const p = u.pathname || "";
+		const ext = path.extname(p);
+		if (ext && ext.length <= 6) return ext;
+	} catch { }
+	return ".png";
+}
+
+
+
+// ============================================================================
+// File Copy with Progress
+// ============================================================================
+async function copyFileWithProgress(src, dest, onProgress, token) {
+	return new Promise((resolve, reject) => {
+		if (token?.isCancellationRequested) return reject(new Error("cancelled"));
+
+		try {
+			const stat = fs.statSync(src);
+			const totalSize = stat.size;
+			let copiedSize = 0;
+
+			const readStream = fs.createReadStream(src);
+			const writeStream = fs.createWriteStream(dest);
+
+			readStream.on("error", reject);
+			writeStream.on("error", reject);
+
+			if (token) {
+				token.onCancellationRequested(() => {
+					readStream.destroy();
+					writeStream.destroy();
+					try { fs.unlinkSync(dest); } catch { }
+					reject(new Error("cancelled"));
+				});
+			}
+
+			readStream.on("data", (chunk) => {
+				copiedSize += chunk.length;
+				if (onProgress && totalSize > 0) {
+					onProgress(chunk.length, copiedSize, totalSize);
+				}
+			});
+
+			writeStream.on("finish", () => {
+				resolve();
+			});
+
+			readStream.pipe(writeStream);
+		} catch (e) {
+			reject(e);
+		}
+	});
+}
+
+// ============================================================================
+// handleClipboardNode
+// ============================================================================
+async function handleClipboardNode(targetDir, partialCallback = null, token = null, progressCallback = null) {
+	try {
+		if (token?.isCancellationRequested) return null;
+		if (progressCallback) progressCallback(0, "正在解析 HTML...");
+
+		let htmlText = null;
+		const res = await tryEngineCall({
+			python: "get_html",
+			rust: "get_html",
+			shell: "getHtml"
+		}, {}, 5000);
+
+		if (res) {
+			if (res.value_base64) {
+				htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
+			} else if (res.value) {
+				htmlText = res.value;
+			}
+		}
+
+		if (!htmlText && process.platform === "win32") {
+			try {
+				const psScript = `Add-Type -A System.Windows.Forms;$t=[System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html);if($t){[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))}`;
+				const b64 = await spawnOutput("powershell", [
+					"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
+				]);
+				if (b64 && b64.trim()) {
+					htmlText = Buffer.from(b64.trim(), "base64").toString("utf8");
+					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
+						shellBridge.start().catch(() => { });
+					}
+				}
+			} catch (e) {
+				global.logMessage(`[Fallback] handleClipboardNode Spawn failed: ${e.message}`, "WARN");
+			}
+		}
+
+		if (!htmlText) {
+			const text = await vscode.env.clipboard.readText();
+			if (text && _looksLikeHtml(text)) {
+				htmlText = text;
+			}
+		}
+
+		if (!htmlText || !htmlText.trim()) return { type: "text", text: await vscode.env.clipboard.readText() || "" };
+
+		if (htmlText.includes("StartHTML:") && htmlText.includes("EndHTML:")) {
+			const mStart = /StartHTML:(\d+)/.exec(htmlText);
+			const mEnd = /EndHTML:(\d+)/.exec(htmlText);
+			if (mStart && mEnd) {
+				const start = parseInt(mStart[1], 10);
+				const end = parseInt(mEnd[1], 10);
+				if (start > 0 && end > start) {
+					const htmlMatch = /<html[\s\S]*<\/html>/i.exec(htmlText);
+					if (htmlMatch) {
+						htmlText = htmlMatch[0];
+					} else {
+						const fragmentStart = /<!--StartFragment-->/.exec(htmlText);
+						const fragmentEnd = /<!--EndFragment-->/.exec(htmlText);
+						if (fragmentStart && fragmentEnd) {
+							htmlText = htmlText.substring(fragmentStart.index + 20, fragmentEnd.index);
+						}
+					}
+				}
+			}
+		}
+
+		let safeHtml = sanitizeHtml(htmlText);
+		if (!safeHtml) return { type: "text", text: htmlText };
+
+		let $;
+		try {
+			$ = cheerio.load(safeHtml, { decodeEntities: false, xmlMode: false });
+			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea").remove();
+
+			$('*').each((i, el) => {
+				const tag = el.tagName.toLowerCase();
+				$(el).removeAttr('style');
+
+				const attribs = el.attribs || {};
+				for (const attr of Object.keys(attribs)) {
+					if (attr.startsWith('on')) $(el).removeAttr(attr);
+				}
+
+				if (tag === 'img' || tag === 'br' || tag === 'p' || tag === 'div' || /^h[1-6]$/.test(tag) || tag === 'li' || tag === 'ul' || tag === 'ol' || tag === 'table' || tag === 'tr' || tag === 'td' || tag === 'th') {
+					const attribs = el.attribs || {};
+					for (const attr of Object.keys(attribs)) {
+						if (tag === 'img') {
+							if (!['src', 'data-src', 'srcset', 'data-srcset', 'alt', 'title'].includes(attr)) {
+								$(el).removeAttr(attr);
+							}
+						} else {
+							$(el).removeAttr(attr);
+						}
+					}
+				} else if (el.type === 'tag') {
+					const attribs = el.attribs || {};
+					for (const attr of Object.keys(attribs)) {
+						$(el).removeAttr(attr);
+					}
+				}
+			});
+		} catch (e) {
+			global.logMessage(`cheerio.load 失败: ${e.message}`, "ERROR");
+			return null;
+		}
+
+		const cleanText = await vscode.env.clipboard.readText() || "";
+		// const cleanLines = cleanText.split(/\r?\n/); // [Modified] Stream-based processing
+		let textCursor = 0; // [Modified] Global cursor for cleanText
+
+		const blocks = [];
+		const flatNodes = []; // [Modified] Collect all nodes first
+
+		const root = $('body').length ? $('body') : $.root();
+
+		function structuralWalk(ctx) {
+			$(ctx).contents().each((i, el) => {
+				if (el.type === 'text') {
+					const t = $(el).text();
+					if (t.length > 0) { // Don't skip whitespace yet, let heuristics handle it
+						flatNodes.push({ type: 'text', content: t });
+					}
+				} else if (el.type === 'tag') {
+					const tagName = el.name.toLowerCase();
+					// const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(tagName);
+					const isImg = tagName === 'img';
+
+					if (isImg) {
+						const urls = _collectElementUrls($(el), false);
+						if (urls && urls.length > 0) {
+							flatNodes.push({ type: 'media', kind: 'image', src: urls[0], status: 'pending' });
+						}
+					} else {
+						structuralWalk(el);
+					}
+				}
+			});
+		}
+
+		structuralWalk(root);
+
+		// [Modified] Stream Consumption Logic
+		// We try to match HTML text segments to the cleanText stream to preserve image position.
+		// "Jump Out Paradigm": Use cleanText for content (to avoid mojibake), use HTML for structure.
+
+		for (const node of flatNodes) {
+			if (node.type === 'media') {
+				blocks.push(node);
+			} else if (node.type === 'text') {
+				const htmlContent = node.content;
+				if (!htmlContent) continue;
+
+				// Strategy 1: Exact/Fuzzy Match of trimmed content
+				// We search for the first few significant characters
+				const trimmedHtml = htmlContent.trim();
+				if (trimmedHtml.length === 0) {
+					// It's just whitespace.
+					// If the HTML had whitespace, the cleanText might also have it (or newlines).
+					// We consume matched whitespace if present.
+					const wsMatch = cleanText.slice(textCursor).match(/^\s+/);
+					if (wsMatch) {
+						// Only consume if it looks reasonable (length check?)
+						// Actually, for pure whitespace nodes, we can often ignore them
+						// UNLESS they represent the space between words.
+						// Let's consume up to 1 char if it's a space?
+						// Safer: Don't strictly sync whitespace nodes unless necessary.
+						// But if we skip it, we might lose the space between "A" and "Img".
+						// Let's try to match it length-wise.
+						if (htmlContent.length < 5) {
+							// Small whitespace, try to consume equivalent whitespace from cleanText
+							const current = cleanText.slice(textCursor, textCursor + htmlContent.length);
+							if (/^\s+$/.test(current)) {
+								blocks.push({ type: 'text', text: current });
+								textCursor += current.length;
+							}
+						}
+					}
+					continue;
+				}
+
+				// Significant text
+				// [Modified] Adaptive search window based on text length
+				// Short texts are risky (high false positive rate), so we keep the leash very tight.
+				// Long texts are unique, so we can afford a bit more flexibility.
+				let searchWindow;
+				if (trimmedHtml.length < 10) {
+					searchWindow = 60; // Very tight window for short snippets (e.g. "Note:", "1.")
+				} else if (trimmedHtml.length < 50) {
+					searchWindow = 200; // Moderate window
+				} else {
+					// For long text, we allow looking ahead a bit more, but capped
+					searchWindow = Math.min(trimmedHtml.length * 1.5 + 100, 600);
+				}
+
+				const searchArea = cleanText.slice(textCursor, textCursor + searchWindow);
+
+				// [Smart Anchor] Try to find a "safe" anchor (alphanumeric) to avoid encoding/formatting issues
+				// e.g. HTML has "• Item", Clean has "- Item". Raw anchor "• Item" fails.
+				// Smart anchor "Item" succeeds.
+				// [Modified] Use Unicode Property Escapes for universal language support (Arabic, Hebrew, Thai, etc.)
+				function getSmartAnchor(str, startFrom = 0, len = 10) {
+					if (str.length <= len) return { text: str, offset: 0 };
+
+					// Scan for a good chunk of word chars
+					const sub = str.substring(startFrom);
+					// \p{L} = Any Unicode Letter, \p{N} = Any Unicode Number
+					// This ensures we catch Arabic, Thai, Cyrillic, etc., not just [a-zA-Z]
+					const match = /[\p{L}\p{N}]{4,}/u.exec(sub);
+					if (match) {
+						// Use this match, capped at len
+						const safeLen = Math.min(match[0].length, len);
+						return {
+							text: match[0].substring(0, safeLen),
+							offset: startFrom + match.index
+						};
+					}
+					// Fallback: raw substring
+					return { text: str.substring(startFrom, startFrom + len), offset: startFrom };
+				}
+
+				// 1. Primary Start Anchor
+				const startAnchorObj = getSmartAnchor(trimmedHtml, 0, 10);
+				let idx = searchArea.indexOf(startAnchorObj.text);
+				let matchedOffsetInHtml = startAnchorObj.offset;
+
+				// 2. Retry with a secondary anchor if first failed (and text is long enough)
+				if (idx === -1 && trimmedHtml.length > 20) {
+					const secondAnchorObj = getSmartAnchor(trimmedHtml, Math.floor(trimmedHtml.length / 3), 10);
+					const idx2 = searchArea.indexOf(secondAnchorObj.text);
+					if (idx2 !== -1) {
+						idx = idx2;
+						matchedOffsetInHtml = secondAnchorObj.offset;
+					}
+				}
+
+				if (idx !== -1) {
+					// Found the anchor!
+					// Calculate where the block *actually* starts in cleanText
+					// cleanText index: idx
+					// This corresponds to trimmedHtml index: matchedOffsetInHtml
+					// So start of block is: idx - matchedOffsetInHtml
+
+					let blockStartRel = idx - matchedOffsetInHtml;
+
+					// If blockStartRel is negative, it means we found the anchor, but the prefix
+					// in cleanText is SHORTER than in HTML (e.g. HTML "   Text", Clean "Text").
+					// In this case, we just assume start is 0 (current cursor).
+					if (blockStartRel < 0) blockStartRel = 0;
+
+					// Output the gap (prefix) - e.g. newlines between blocks
+					if (blockStartRel > 0) {
+						blocks.push({ type: 'text', text: searchArea.substring(0, blockStartRel) });
+						textCursor += blockStartRel; // Advance cursor past gap
+					}
+
+					// Now consume the content.
+					// Use Smart End Anchor
+					const endScanLen = 10;
+
+					// [Modified] Find the LAST safe anchor to ensure we consume the full text block
+					let endAnchorObj;
+					{
+						const tailLimit = 150; // Look at last 150 chars
+						const tailStart = Math.max(0, trimmedHtml.length - tailLimit);
+						const tailStr = trimmedHtml.substring(tailStart);
+
+						// Try to find a long-ish suffix (10+ chars) that is not just whitespace
+						// Prefer including punctuation for better uniqueness in Chinese
+						if (tailStr.length >= 15) {
+							endAnchorObj = {
+								text: tailStr.substring(tailStr.length - 15),
+								offset: tailStart + tailStr.length - 15
+							};
+						} else if (tailStr.length >= 8) {
+							endAnchorObj = {
+								text: tailStr.substring(tailStr.length - 8),
+								offset: tailStart + tailStr.length - 8
+							};
+						} else {
+							// Fallback: just take the tail
+							const s = Math.max(0, trimmedHtml.length - endScanLen);
+							endAnchorObj = { text: trimmedHtml.substring(s), offset: s };
+						}
+					}
+
+					// Search for endAnchor
+					// We need to re-slice searchArea because we moved textCursor?
+					// No, searchArea was slice(oldCursor). blockStartRel is relative to oldCursor.
+					// Current textCursor is at oldCursor + blockStartRel.
+					// So we need to search in cleanText starting from current textCursor.
+
+					// Remaining search area
+					const maxContentLen = trimmedHtml.length * 1.5 + 20;
+					const contentSearchArea = cleanText.slice(textCursor, textCursor + maxContentLen);
+
+					let contentLen = 0;
+
+					// If text is very short, rely on length
+					if (trimmedHtml.length < 5) {
+						contentLen = trimmedHtml.length;
+					} else {
+						// Look for end anchor using lastIndexOf to prefer the furthest match
+						// (solving the "image appears too early" issue)
+
+						const subIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
+
+						if (subIdx !== -1) {
+							// Found end anchor
+							contentLen = subIdx + endAnchorObj.text.length;
+						} else {
+							// Anchor not found, try a shorter anchor (last 4 chars)
+							if (endAnchorObj.text.length > 4) {
+								const shortAnchor = endAnchorObj.text.substring(endAnchorObj.text.length - 4);
+								const subIdx2 = contentSearchArea.lastIndexOf(shortAnchor);
+								if (subIdx2 !== -1) {
+									contentLen = subIdx2 + shortAnchor.length;
+								} else {
+									contentLen = trimmedHtml.length;
+								}
+							} else {
+								contentLen = trimmedHtml.length;
+							}
+						}
+					}
+
+					// Sanity check
+					if (contentLen > contentSearchArea.length) contentLen = contentSearchArea.length;
+					if (contentLen < 0) contentLen = 0;
+
+					const fullChunk = cleanText.substr(textCursor, contentLen);
+					blocks.push({ type: 'text', text: fullChunk });
+					textCursor += contentLen;
+
+				} else {
+					// Anchor not found (Mojibake or heavy formatting diff).
+					// Fallback: Consume based on length.
+					// This is the "Jump Out" risk: structure mismatch.
+					const len = htmlContent.length;
+					// Ensure we don't read past end
+					const safeLen = Math.min(len, cleanText.length - textCursor);
+					if (safeLen > 0) {
+						const chunk = cleanText.substr(textCursor, safeLen);
+						blocks.push({ type: 'text', text: chunk });
+						textCursor += safeLen;
+					}
+				}
+			}
+		}
+
+		// Flush remaining text
+		if (textCursor < cleanText.length) {
+			blocks.push({ type: 'text', text: cleanText.substring(textCursor) });
+		}
+
+		const hasMedia = blocks.some(b => b.type === "media");
+		if (!hasMedia && blocks.length === 0) {
+			return { type: "text", text: cleanText || "" };
+		}
+
+		// Materialize images using the unified logic
+		if (blocks.some(b => b.type === "media")) {
+			if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
+			await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
+		}
+
+		return { type: "html_blocks", blocks };
+	} catch (e) {
+		global.logMessage(`handleClipboardNode 失败: ${e?.message || e}`, "ERROR");
+		return null;
+	}
+}
+
+// ============================================================================
+// handleClipboardShell
+// ============================================================================
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
+	try {
+		if (token?.isCancellationRequested) return null;
+		if (process.platform === "win32") {
+			let files = preFetchedFiles;
+			if (!files) {
+				const res = await tryEngineCall({
+					python: "get_clipboard_files",
+					shell: "getFiles"
+				}, {}, 2000);
+
+				if (res) {
+					if (res.paths && res.paths.length > 0) files = res.paths;
+					else if (res.files && res.files.length > 0) files = res.files;
+				}
+			}
+
+			if (files && files.length > 0) {
+				const folders = files.filter((f) => {
+					try { return fs.statSync(f).isDirectory(); } catch { return false; }
+				});
+				const validFiles = files.filter((f) => {
+					try { return fs.existsSync(f) && !fs.statSync(f).isDirectory(); } catch { return false; }
+				});
+
+				ensureDir(targetDir);
+				const copiedFiles = [];
+				const copiedFolders = [];
+				const fingerprints = {};
+
+				let totalBytesToTransfer = preCalculatedTotalSize;
+				if (progressCallback && totalBytesToTransfer <= 0) {
+					for (const f of validFiles) {
+						try { totalBytesToTransfer += fs.statSync(f).size; } catch { }
+					}
+				}
+
+				let transferredBytes = 0;
+
+				for (let i = 0; i < folders.length; i++) {
+					if (token?.isCancellationRequested) throw new Error("cancelled");
+					const folder = folders[i];
+					if (progressCallback) progressCallback(0, `复制文件夹 (${i + 1}/${folders.length}): ${path.basename(folder)}`);
+					try {
+						const destFolder = path.join(targetDir, path.basename(folder));
+						fs.cpSync(folder, destFolder, { recursive: true, force: true });
+						copiedFolders.push(destFolder);
+					} catch { }
+				}
+
+				if (validFiles.length > 0) {
+					const totalFileCount = validFiles.length;
+					for (let i = 0; i < totalFileCount; i++) {
+						if (token?.isCancellationRequested) throw new Error("cancelled");
+
+						const f = validFiles[i];
+						const baseName = path.basename(f);
+
+						try {
+							const srcFingerprint = computeFingerprint(f);
+							if (srcFingerprint) {
+								fingerprints[f] = srcFingerprint;
+								let existingPath = findFileByFingerprint(srcFingerprint);
+								if (existingPath && fs.existsSync(existingPath)) {
+									copiedFiles.push(existingPath);
+									try {
+										const fSize = fs.statSync(f).size;
+										transferredBytes += fSize;
+										if (progressCallback && totalBytesToTransfer > 0) {
+											const inc = (fSize / totalBytesToTransfer) * 100;
+											progressCallback(inc, `秒传: ${baseName}`);
+										}
+									} catch { }
+									continue;
+								}
+							}
+
+							const ext = path.extname(f);
+							const isImg = isImageExtForClipboard(ext);
+							const fname = isImg ? getTimestampFilename(ext) : baseName;
+							const dest = path.join(targetDir, fname);
+
+							if (fs.existsSync(dest)) {
+								const dstFingerprint = computeFingerprint(dest);
+								if (dstFingerprint === srcFingerprint) {
+									copiedFiles.push(dest);
+									if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+									try {
+										const fSize = fs.statSync(f).size;
+										transferredBytes += fSize;
+										if (progressCallback && totalBytesToTransfer > 0) {
+											const inc = (fSize / totalBytesToTransfer) * 100;
+											progressCallback(inc, `跳过: ${baseName}`);
+										}
+									} catch { }
+									continue;
+								}
+							}
+
+							if (progressCallback) progressCallback(0, `正在复制 (${i + 1}/${totalFileCount}): ${baseName}`);
+
+							await copyFileWithProgress(f, dest, (chunkSize, copied, total) => {
+								transferredBytes += chunkSize;
+								if (progressCallback && totalBytesToTransfer > 0) {
+									const inc = (chunkSize / totalBytesToTransfer) * 100;
+									const filePct = total > 0 ? Math.round((copied / total) * 100) : 0;
+									progressCallback(inc, ` ${baseName} (${filePct}%)`);
+								}
+							}, token);
+
+							if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+							copiedFiles.push(dest);
+							if (progressCallback) progressCallback(0, `完成: ${baseName}`);
+
+						} catch (e) {
+							if (e.message === "cancelled") throw e;
+							global.logMessage(`Copy failed: ${f} -> ${e.message}`, "WARN");
+						}
+					}
+				}
+
+				if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+					return {
+						type: "file_folder",
+						files: copiedFiles,
+						folders: copiedFolders,
+						fingerprints: fingerprints
+					};
+				}
+			}
+		}
+
+		const res = await tryOneByOne(async (bridge, name) => {
+			if (name === "shell") {
+				const hasImg = await bridge.call("hasImage", {}, 2000);
+				if (hasImg?.value) {
+					const fname = getTimestampFilename(".png");
+					const dest = path.join(targetDir, fname);
+					ensureDir(targetDir);
+					const saved = await bridge.call("saveImage", { path: dest }, 8000);
+					if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+						const fp = computeFingerprint(dest);
+						return { type: "image", path: dest, fingerprint: fp };
+					}
+				}
+				return null;
+			}
+
+			const r = await bridge.call("clipboard", { target_dir: targetDir }, 2000);
+			if (r && r.type === "image") return r;
+			return null;
+		});
+
+		if (res) return res;
+
+		const text = await vscode.env.clipboard.readText();
+		if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img") || text.includes("<p"))) {
+			return await handleClipboardNode(targetDir);
+		}
+	} catch (e) {
+		global.logMessage(`Shell剪贴板处理失败: ${e.message}`, "ERROR");
+	}
+
+	return null;
+}
+
+function copyFilesToTarget(files, targetDir) {
+	ensureDir(targetDir);
+
+	const copied = [];
+	const fingerprints = {};
+
+	for (const f of files) {
+		try {
+			const srcFingerprint = computeFingerprint(f);
+			if (srcFingerprint) {
+				fingerprints[f] = srcFingerprint;
+
+				let existingPath = findFileByFingerprint(srcFingerprint);
+				if (existingPath && fs.existsSync(existingPath)) {
+					copied.push(existingPath);
+					continue;
+				}
+			}
+
+			const ext = path.extname(f);
+			const isImg = isImageExtForClipboard(ext);
+			const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+			const dest = path.join(targetDir, fname);
+
+			if (fs.existsSync(dest)) {
+				const dstFingerprint = computeFingerprint(dest);
+				if (dstFingerprint === srcFingerprint) {
+					copied.push(dest);
+					if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+					continue;
+				}
+			}
+
+			fs.copyFileSync(f, dest);
+
+			if (srcFingerprint) {
+				prefillFingerprint(dest, srcFingerprint);
+			}
+
+			copied.push(dest);
+		} catch { }
+	}
+	return { copied, fingerprints };
+}
+
+async function handleClipboardSpawn(targetDir) {
+	const platform = process.platform;
+	if (platform === "win32") return handleClipboardSpawnWin32(targetDir);
+	if (platform === "darwin") return handleClipboardSpawnDarwin(targetDir);
+	return handleClipboardSpawnLinux(targetDir);
+}
+
+async function handleClipboardSpawnWin32(targetDir) {
+	const res = await tryOneByOne(async (bridge, name) => {
+		if (name === "shell") {
+			const checkRes = await bridge.call("checkQ", {}, 2000);
+			if (checkRes?.hasFile) {
+				const filesRes = await bridge.call("getFiles", {}, 5000);
+				const files = filesRes?.files || [];
+				if (files.length > 0) {
+					const result = processFilesForClipboard(files, targetDir);
+					if (result) return result;
+				}
+			}
+
+			if (checkRes?.hasImage) {
+				const fname = getTimestampFilename(".png");
+				const dest = path.join(targetDir, fname);
+				ensureDir(targetDir);
+
+				const saveRes = await bridge.call("saveImage", { path: dest }, 8000);
+				if (saveRes?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+					const fp = computeFingerprint(dest);
+					return { type: "image", path: dest, fingerprint: fp };
+				}
+			}
+			return null;
+		}
+
+		// python / rust
+		const res = await bridge.call("clipboard", { target_dir: targetDir }, 10000);
+		if (res && !res.error && res.type !== "unknown") {
+			global.logMessage(`[FastPath] 由 ${bridge.name} 引擎处理成功`, "INFO");
+			return res;
+		}
+		return null;
+	});
+
+	if (res) return res;
+
+	global.logMessage("[SlowPath] 所有 Daemon 均不可用或失败，回退到 Spawn 模式", "WARN");
+
+	const hasFiles = await spawnCheck("powershell", [
+		"-STA",
+		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsFileDropList()){\\\"1\\\"}else{\\\"0\\\"}",
+	], "1");
+
+	if (hasFiles) {
+		const filesOutput = await spawnOutput("powershell", [
+			"-STA",
+			"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+			"Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetFileDropList();if($f){foreach($i in $f){$i}}",
+		]);
+
+		const files = filesOutput.split(/\r?\n/).map((s) => s.trim()).filter((s) => s && fs.existsSync(s));
+		const result = processFilesForClipboard(files, targetDir);
+		if (result) return result;
+	}
+
+	const hasImg = await spawnCheck("powershell", [
+		"-STA",
+		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+		"Add-Type -A System.Windows.Forms;if([System.Windows.Forms.Clipboard]::ContainsImage()){\\\"1\\\"}else{\\\"0\\\"}",
+	], "1");
+
+	if (hasImg) {
+		const fname = getTimestampFilename(".png");
+		const dest = path.join(targetDir, fname);
+		ensureDir(targetDir);
+
+		const escapedPath = dest.replace(/'/g, "''");
+		const saved = await spawnCheck("powershell", [
+			"-STA",
+			"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+			`Add-Type -A System.Windows.Forms;Add-Type -A System.Drawing;$img=[System.Windows.Forms.Clipboard]::GetImage();if($img){$img.Save('${escapedPath}',[System.Drawing.Imaging.ImageFormat]::Png);'OK'}else{'FAIL'}`,
+		], "OK");
+
+		if (saved && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+			const fp = computeFingerprint(dest);
+			return { type: "image", path: dest, fingerprint: fp };
+		}
+	}
+
+	return { type: "unknown" };
+}
+
+function processFilesForClipboard(files, targetDir) {
+	const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
+	const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
+
+	ensureDir(targetDir);
+	const copiedFiles = [];
+	const copiedFolders = [];
+	const fingerprints = {};
+
+	for (const folder of folders) {
+		try {
+			const destFolder = path.join(targetDir, path.basename(folder));
+			fs.cpSync(folder, destFolder, { recursive: true, force: true });
+			copiedFolders.push(destFolder);
+		} catch { }
+	}
+
+	if (validFiles.length > 0) {
+		const result = copyFilesToTarget(validFiles, targetDir);
+		copiedFiles.push(...result.copied);
+		Object.assign(fingerprints, result.fingerprints);
+	}
+
+	if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+		return {
+			type: "file_folder",
+			files: copiedFiles,
+			folders: copiedFolders,
+			fingerprints: fingerprints
+		};
+	}
+	return null;
+}
+
+async function handleClipboardSpawnDarwin(targetDir) {
+	const fname = getTimestampFilename(".png");
+	const dest = path.join(targetDir, fname);
+	const tmpName = `qqq_${Date.now()}_${Math.random().toString(16).slice(2)}.png`;
+	const tmpDest = path.join(os.tmpdir(), tmpName);
+
+	try {
+		cp.execSync(`pngpaste "${tmpDest}" 2>/dev/null || pbpaste -Prefer png > "${tmpDest}" 2>/dev/null`, { timeout: 5000 });
+
+		if (fs.existsSync(tmpDest) && fs.statSync(tmpDest).size > 0) {
+			ensureDir(targetDir);
+			try {
+				fs.renameSync(tmpDest, dest);
+			} catch (e) {
+				try {
+					fs.copyFileSync(tmpDest, dest);
+					try { fs.unlinkSync(tmpDest); } catch { }
+				} catch { }
+			}
+
+			if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+				const fp = computeFingerprint(dest);
+				return { type: "image", path: dest, fingerprint: fp };
+			}
+
+			if (fs.existsSync(dest)) {
+				try { fs.unlinkSync(dest); } catch { }
+			}
+		}
+
+		if (fs.existsSync(tmpDest)) {
+			try { fs.unlinkSync(tmpDest); } catch { }
+		}
+	} catch (e) {
+		if (fs.existsSync(tmpDest)) {
+			try { fs.unlinkSync(tmpDest); } catch { }
+		}
+	}
+
+	return { type: "unknown" };
+}
+
+async function handleClipboardSpawnLinux(targetDir) {
+	const fname = getTimestampFilename(".png");
+	const dest = path.join(targetDir, fname);
+
+	try {
+		ensureDir(targetDir);
+		cp.execSync(`xclip -selection clipboard -t image/png -o > "${dest}" 2>/dev/null`, { timeout: 5000 });
+
+		if (fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+			const fp = computeFingerprint(dest);
+			return { type: "image", path: dest, fingerprint: fp };
+		}
+
+		if (fs.existsSync(dest)) {
+			try { fs.unlinkSync(dest); } catch { }
+		}
+	} catch { }
+
+	return { type: "unknown" };
+}
+
+function spawnRun(cmd, args, opts = {}) {
+	const { checkExpected, returnOutput } = opts;
+	return new Promise((resolve) => {
+		const child = cp.spawn(cmd, args, { windowsHide: true });
+		let output = "";
+		let errorOutput = "";
+		let done = false;
+		let timer = null;
+
+		const finish = (val) => {
+			if (done) return;
+			done = true;
+			if (timer) clearTimeout(timer);
+			resolve(val);
+		};
+
+		child.stdout.on("data", (d) => output += (returnOutput ? d.toString() : d.toString().trim()));
+		child.stderr.on("data", (d) => errorOutput += d.toString().trim());
+
+		child.on("close", (code) => {
+			if (code !== 0 && errorOutput) {
+				global.logMessageRateLimited(
+					`spawnRun:${cmd}:${code}:${errorOutput.slice(0, 120)}`,
+					`${cmd} 执行失败 (exit ${code}): ${errorOutput}`,
+					"WARN",
+					2 * 60 * 1000
+				);
+			}
+			if (checkExpected) {
+				finish(output.includes(checkExpected));
+			} else {
+				finish(returnOutput ? output : "");
+			}
+		});
+
+		child.on("error", (err) => {
+			global.logMessage(`${cmd} 启动失败: ${err.message}`, "ERROR");
+			finish(checkExpected ? false : "");
+		});
+
+		timer = setTimeout(() => {
+			try { child.kill(); } catch { }
+			global.logMessageRateLimited(`spawnRunTimeout:${cmd}`, `${cmd} 执行超时`, "WARN", 2 * 60 * 1000);
+			finish(checkExpected ? false : "");
+		}, 5000);
+	});
+}
+
+function spawnCheck(cmd, args, expected) {
+	return spawnRun(cmd, args, { checkExpected: expected });
+}
+
+function spawnOutput(cmd, args) {
+	return spawnRun(cmd, args, { returnOutput: true });
+}
+
+async function getFolderInfo(folderPath) {
+	folderPath = canonicalizeExistingPath(folderPath) || folderPath;
+
+	const res = await tryEngineCall({
+		python: "folder_info",
+		rust: "folder_info"
+	}, { path: folderPath }, 15000);
+	if (res) return res;
+
+	return getFolderInfoJS(folderPath);
+}
+
+async function getFolderInfoJS(folderPath) {
+	if (!fs.existsSync(folderPath)) return { error: "not_found" };
+
+	let totalSize = 0;
+	let fileCount = 0;
+	const extStats = {};
+
+	async function walk(dir) {
+		try {
+			const files = await fs.promises.readdir(dir, { withFileTypes: true });
+			for (const file of files) {
+				const fullPath = path.join(dir, file.name);
+				if (file.isDirectory()) {
+					await walk(fullPath);
+				} else {
+					try {
+						const st = await fs.promises.stat(fullPath);
+						totalSize += st.size;
+						fileCount++;
+						const ext = path.extname(file.name).toLowerCase().replace(".", "") || "no_ext";
+						extStats[ext] = (extStats[ext] || 0) + 1;
+					} catch { }
+				}
+			}
+		} catch { }
+	}
+
+	await walk(folderPath);
+
+	return {
+		success: true,
+		total_size: totalSize,
+		file_count_root: fileCount,
+		ext_stats: extStats,
+	};
+}
+
+function getTimestampFilename(ext) {
+	const now = new Date();
+	const date = now.toISOString().slice(0, 10).replace(/-/g, ".");
+	const time = now.toTimeString().slice(0, 8).replace(/:/g, ".");
+	const day = now.getDay() || 7;
+	const ms = String(now.getMilliseconds()).padStart(3, "0");
+
+	const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
+	const valid = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		.split("")
+		.filter((c) => !excluded.has(c.toLowerCase()));
+
+	const c1 = valid[Math.floor(Math.random() * valid.length)];
+	let c2 = valid[Math.floor(Math.random() * valid.length)];
+
+	if (c1.toLowerCase() === "g") {
+		const noG = valid.filter((c) => c.toLowerCase() !== "g");
+		c2 = noG[Math.floor(Math.random() * noG.length)];
+	}
+
+	return `${ms}${c1}${c2}. ${date} [${day}] ${time}${ext}`;
+}
+
+function isImageExtForClipboard(ext) {
+	return IMAGE_EXTS_FOR_CLIPBOARD.has(ext.toLowerCase());
+}
+
+function shouldShowDuration(info) {
+	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
+}
+
+const pendingJobs = new Map();
+let tokenCounter = 0;
+
+function createPendingToken() {
+	const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+	let token = "";
+	for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)];
+	return token + (++tokenCounter).toString(36);
+}
+
+function registerPendingJob(token, data) {
+	return new Promise((resolve, reject) => {
+		pendingJobs.set(token, { resolve, reject, ...data, startTime: Date.now() });
+		setTimeout(() => {
+			if (pendingJobs.has(token)) {
+				pendingJobs.delete(token);
+				reject(new Error("timeout"));
+			}
+		}, 30000);
+	});
+}
+
+function resolvePendingJob(token, result) {
+	const job = pendingJobs.get(token);
+	if (job) {
+		pendingJobs.delete(token);
+		job.resolve(result);
+	}
+}
+
+let q1Module = null;
+let q2Module = null;
+
+async function activate(context) {
+	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
+
+	extensionContext = context;
+	global.init(context);
+
+	initCache(context);
+	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
+	global.setLogPath(path.join(cacheDir, "err.log"));
+	global.initStatusBar();
+	updateStatusBarNow();
+
+	startDaemons();
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
+		vscode.commands.registerCommand("qqq.allSettings", () => {
+			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+		}),
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			// ★ Sync: 用户在 UI 修改配置 -> 写入 GlobalState (持久化)
+			// 注意：这里我们监听所有 qqq.* 配置的变更
+			for (const key of Object.keys(global.ConfigManager.getAll())) {
+				const fullKey = `qqq.${key}`;
+				if (event.affectsConfiguration(fullKey)) {
+					const val = vscode.workspace.getConfiguration("qqq").get(key);
+					// 仅当值确实改变（且不等于当前 GlobalState 中的值）时才更新，防止死循环
+					// 注意：ConfigManager.set 会更新 globalState，但不会反向触发 workspace 配置变更（因为我们不写 workspace）
+					// 所以这里是单向同步：UI (Workspace Config) -> GlobalState
+					const currentStored = global.ConfigManager.get(key);
+					if (val !== currentStored) {
+						// Async set
+						global.setConfig(key, val).then(() => {
+							if (key === "ioEngine" || key === "pythonPath") {
+								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
+								startDaemons();
+							}
+						});
+					}
+				}
+			}
+		})
+	);
+
+	loadSubModules(context);
+
+	if (_statusBarTimer) clearInterval(_statusBarTimer);
+	_statusBarTimer = setInterval(() => {
+		try {
+			updateStatusBarNow();
+		} catch { }
+	}, 5000);
+
+	global.logMessage("qqq 扩展激活完成", "INFO");
+}
+
+function loadSubModules(context) {
+	try {
+		q1Module = require("./q1");
+		if (q1Module?.activate) q1Module.activate(context);
+	} catch (e) {
+		global.logMessage(`q1 加载失败: ${e.message}`, "ERROR");
+	}
+
+	try {
+		q2Module = require("./q2");
+		if (q2Module?.activate) q2Module.activate(context);
+	} catch (e) {
+		global.logMessage(`q2 加载失败: ${e.message}`, "ERROR");
+	}
+}
+
+async function deactivate() {
+	// 只有在扩展彻底停用（关闭窗口）时才停止进程
+	pythonBridge.stop();
+	rustBridge.stop();
+	shellBridge.stop();
+
+	global.finishUserTracking();
+
+	try {
+		if (_statusBarTimer) clearInterval(_statusBarTimer);
+		_statusBarTimer = null;
+		global.disposeStatusBar();
+	} catch { }
+
+	try { validateCache(); } catch { }
+	saveCacheMeta();
+
+	if (q1Module?.deactivate) {
+		try { await q1Module.deactivate(); } catch { }
+	}
+
+	global.logMessage("qqq 扩展已停用", "INFO");
+}
+
+const exported = {
+	activate,
+	deactivate,
+
+	createPathRegex,
+	toSafePath,
+	sanitizeHtml,
+
+	normalizeNavPath,
+	resolveNavPath,
+	canonicalizeExistingPath,
+	cacheKeyForPath,
+
+	logMessage: global.logMessage,
+	logMessageRateLimited: global.logMessageRateLimited,
+	logQ: global.logQ,
+
+	computeFingerprint,
+	prefillFingerprint,
+
+	initCache,
+	validateCache,
+
+	getCacheEntry,
+	getCacheQualityMeta,
+	getCacheStatsSnapshot,
+	getPersistentCacheStatsSnapshot: global.getPersistentCacheStatsSnapshot,
+
+	setCacheEntry,
+	getCachedBuffer,
+
+	handleClipboardFast,
+	handleClipboardSlow,
+
+	getFolderInfo,
+
+	getTimestampFilename,
+	isImageExtForClipboard,
+	shouldShowDuration,
+
+	createPendingToken,
+	registerPendingJob,
+	resolvePendingJob,
+
+	raceClipboard,
+
+	probeScheduler: global.probeScheduler,
+	genScheduler: global.genScheduler,
+
+	getActiveEngineCode: global.getActiveEngineCode,
+	getActiveEngineName: global.getActiveEngineName,
+	updateStatusBarNow,
+};
+
+Object.assign(module.exports, exported);
+
+Object.defineProperty(module.exports, "LOG_PATH", { enumerable: true, get: () => global.getLogPath() });
+Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => ffmpegPath });
+Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => ffprobePath });
+
+process.on("uncaughtException", (error) => {
+	const stack = error.stack || "";
+	global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+});
+
+process.on("unhandledRejection", (reason) => {
+	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+	global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+});

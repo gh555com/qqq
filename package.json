@@ -112,7 +112,7 @@
           "qqq.forceTextFlowScheme": {
             "type": "boolean",
             "default": false,
-            "description": "强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭原因是，代价：牺牲排版精度。"
+            "description": "强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
           }
         }
       }

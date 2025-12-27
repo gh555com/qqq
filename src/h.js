@@ -714,37 +714,148 @@ async function _zipDomWithCleanText($, cleanText) {
     const root = $("body").length ? $("body")[0] : $.root()[0];
     if (root) (root.children || []).forEach(structuralWalk);
 
-    let cursor = 0;
+    let textCursor = 0;
+
+    function getSmartAnchor(str, startFrom = 0, len = 10) {
+        if (str.length <= len) return { text: str, offset: 0 };
+        const sub = str.substring(startFrom);
+        const match = /[\p{L}\p{N}]{4,}/u.exec(sub);
+        if (match) {
+            const safeLen = Math.min(match[0].length, len);
+            return {
+                text: match[0].substring(0, safeLen),
+                offset: startFrom + match.index
+            };
+        }
+        return { text: str.substring(startFrom, startFrom + len), offset: startFrom };
+    }
+
     for (const node of flatNodes) {
-        if (node.type === "media") blocks.push(node);
-        else if (node.type === "text") {
-            const htmlContent = node.content.trim();
+        if (node.type === "media") {
+            blocks.push(node);
+        } else if (node.type === "text") {
+            const htmlContent = node.content;
             if (!htmlContent) continue;
-            const searchWindowSize = Math.max(200, htmlContent.length * 2);
-            const searchArea = cleanText.slice(cursor, cursor + searchWindowSize);
-            const anchor = htmlContent.slice(0, 10);
-            const idx = searchArea.indexOf(anchor);
+
+            const trimmedHtml = htmlContent.trim();
+            if (trimmedHtml.length === 0) {
+                const wsMatch = cleanText.slice(textCursor).match(/^\s+/);
+                if (wsMatch) {
+                    if (htmlContent.length < 5) {
+                        const current = cleanText.slice(textCursor, textCursor + htmlContent.length);
+                        if (/^\s+$/.test(current)) {
+                            blocks.push({ type: "text", text: current });
+                            textCursor += current.length;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            let searchWindow;
+            if (trimmedHtml.length < 10) {
+                searchWindow = 60;
+            } else if (trimmedHtml.length < 50) {
+                searchWindow = 200;
+            } else {
+                searchWindow = Math.min(trimmedHtml.length * 1.5 + 100, 600);
+            }
+
+            const searchArea = cleanText.slice(textCursor, textCursor + searchWindow);
+
+            const startAnchorObj = getSmartAnchor(trimmedHtml, 0, 10);
+            let idx = searchArea.indexOf(startAnchorObj.text);
+            let matchedOffsetInHtml = startAnchorObj.offset;
+
+            if (idx === -1 && trimmedHtml.length > 20) {
+                const secondAnchorObj = getSmartAnchor(trimmedHtml, Math.floor(trimmedHtml.length / 3), 10);
+                const idx2 = searchArea.indexOf(secondAnchorObj.text);
+                if (idx2 !== -1) {
+                    idx = idx2;
+                    matchedOffsetInHtml = secondAnchorObj.offset;
+                }
+            }
+
             if (idx !== -1) {
-                if (idx > 0) blocks.push({ type: "text", text: searchArea.slice(0, idx) });
-                cursor += idx;
-                const endAnchor = htmlContent.slice(-10);
-                const contentSearchArea = cleanText.slice(cursor, cursor + searchWindowSize);
-                const endIdx = contentSearchArea.lastIndexOf(endAnchor);
-                let len = htmlContent.length;
-                if (endIdx !== -1) len = endIdx + endAnchor.length;
-                const chunk = cleanText.substr(cursor, len);
-                blocks.push({ type: "text", text: chunk });
-                cursor += len;
+                let blockStartRel = idx - matchedOffsetInHtml;
+                if (blockStartRel < 0) blockStartRel = 0;
+
+                if (blockStartRel > 0) {
+                    blocks.push({ type: "text", text: searchArea.substring(0, blockStartRel) });
+                    textCursor += blockStartRel;
+                }
+
+                const endScanLen = 10;
+                let endAnchorObj;
+                {
+                    const tailLimit = 150;
+                    const tailStart = Math.max(0, trimmedHtml.length - tailLimit);
+                    const tailStr = trimmedHtml.substring(tailStart);
+
+                    if (tailStr.length >= 15) {
+                        endAnchorObj = {
+                            text: tailStr.substring(tailStr.length - 15),
+                            offset: tailStart + tailStr.length - 15
+                        };
+                    } else if (tailStr.length >= 8) {
+                        endAnchorObj = {
+                            text: tailStr.substring(tailStr.length - 8),
+                            offset: tailStart + tailStr.length - 8
+                        };
+                    } else {
+                        const s = Math.max(0, trimmedHtml.length - endScanLen);
+                        endAnchorObj = { text: trimmedHtml.substring(s), offset: s };
+                    }
+                }
+
+                const maxContentLen = trimmedHtml.length * 1.5 + 20;
+                const contentSearchArea = cleanText.slice(textCursor, textCursor + maxContentLen);
+                let contentLen = 0;
+
+                if (trimmedHtml.length < 5) {
+                    contentLen = trimmedHtml.length;
+                } else {
+                    const subIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
+
+                    if (subIdx !== -1) {
+                        contentLen = subIdx + endAnchorObj.text.length;
+                    } else {
+                        if (endAnchorObj.text.length > 4) {
+                            const shortAnchor = endAnchorObj.text.substring(endAnchorObj.text.length - 4);
+                            const subIdx2 = contentSearchArea.lastIndexOf(shortAnchor);
+                            if (subIdx2 !== -1) {
+                                contentLen = subIdx2 + shortAnchor.length;
+                            } else {
+                                contentLen = trimmedHtml.length;
+                            }
+                        } else {
+                            contentLen = trimmedHtml.length;
+                        }
+                    }
+                }
+
+                if (contentLen > contentSearchArea.length) contentLen = contentSearchArea.length;
+                if (contentLen < 0) contentLen = 0;
+
+                const fullChunk = cleanText.substr(textCursor, contentLen);
+                blocks.push({ type: "text", text: fullChunk });
+                textCursor += contentLen;
+
             } else {
                 const len = htmlContent.length;
-                if (cursor + len <= cleanText.length) {
-                    blocks.push({ type: "text", text: cleanText.substr(cursor, len) });
-                    cursor += len;
+                const safeLen = Math.min(len, cleanText.length - textCursor);
+                if (safeLen > 0) {
+                    const chunk = cleanText.substr(textCursor, safeLen);
+                    blocks.push({ type: "text", text: chunk });
+                    textCursor += safeLen;
                 }
             }
         }
     }
-    if (cursor < cleanText.length) blocks.push({ type: "text", text: cleanText.substring(cursor) });
+
+    if (textCursor < cleanText.length) {
+        blocks.push({ type: "text", text: cleanText.substring(textCursor) });
+    }
     return blocks;
 }
 
