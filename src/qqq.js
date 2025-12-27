@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
 const sizeOf = require("image-size");
+const { TextDecoder } = require("util");
 
 const q3 = require("./q3");
 const global = require("./global");
@@ -250,6 +251,40 @@ function _decodeHtmlBytesSmart(buf) {
 		return best || "";
 	} catch {
 		return "";
+	} 2222222222222
+}
+
+// ============================================================================
+// UTF-8 STRICT decode (行为对齐 Python: bytes.decode("utf-8")，失败就算失败)
+// ============================================================================
+const _UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true }); // ignoreBOM 默认 false：与 Python 一致
+
+function _decodeUtf8Strict(buf) {
+	try {
+		if (!buf || buf.length === 0) return "";
+		return _UTF8_FATAL_DECODER.decode(buf);
+	} catch {
+		return null; // 关键：失败返回 null（不要产生乱码字符串）
+	}
+}
+
+// ============================================================================
+// CF_HTML 解码：与 Python 完全一致的解码逻辑 (Windows CF_HTML 格式规范)
+// ============================================================================
+function _decodeHtmlBytesMatchPython(buf) {
+	// 跳过 UTF-8 BOM（如果存在）
+	let startIdx = 0;
+	if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+		startIdx = 3;
+	}
+
+	// ★ 核心：直接 UTF-8 解码，不做多编码猜测 ★
+	// Windows CF_HTML 格式规范：Header 部分是 ASCII，Payload 部分（HTML 内容）始终是 UTF-8 编码
+	const payload = startIdx > 0 ? buf.subarray(startIdx) : buf;
+	try {
+		return payload.toString("utf8");
+	} catch {
+		return null; // 解码失败返回 null
 	}
 }
 
@@ -289,6 +324,9 @@ function _extractHtmlFragmentString(htmlText) {
 	const m = /<html[\s\S]*<\/html>/i.exec(s);
 	if (m) return m[0];
 
+	// If CF_HTML header is present, strip it (Python 返回的是整段，但我们解析必须从 '<' 起)
+	const lt = s.indexOf("<");
+	if (lt >= 0) return s.slice(lt);
 	return s;
 }
 
@@ -786,15 +824,17 @@ async function handleClipboardNodeScheme2(targetDir, partialCallback = null, tok
 		let htmlText = "";
 
 		if (rawBuf) {
-			// If it's CF_HTML, slice payload by byte offsets first
-			const sliced = _sliceCfHtmlPayload(rawBuf);
-			baseUrl = sliced.sourceUrl || "";
+			// 100% 对齐 Python: 先把"整段 bytes"按 UTF-8 严格解码
+			// Python: data.decode("utf-8") 成功就返回 value，失败就返回 base64（不制造乱码字符串）
+			const h = _parseCfHtmlHeaderFromBuffer(rawBuf);
+			baseUrl = h.sourceUrl || "";
 
-			// prefer fragment if exists, else full html
-			const payload = sliced.fragBuf && sliced.fragBuf.length > 0 ? sliced.fragBuf : sliced.htmlBuf;
-			htmlText = _decodeHtmlBytesSmart(payload);
-
-			// Some daemons might return pure HTML bytes (no CF header) — still ok
+			const fullText = _decodeUtf8Strict(rawBuf);
+			if (fullText == null) {
+				// 对齐 Python：解不出来就当失败，让外层回退（不要继续用乱码 HTML 解析）
+				return null;
+			}
+			htmlText = fullText;
 		} else {
 			htmlText = String(rawText || "");
 		}
@@ -1309,6 +1349,46 @@ function ensureDir(dirPath) {
 
 const CLIPBOARD_PEEK_TIMEOUT_MS = 350;
 
+
+// VS Code progress.report({ increment }) 需要"增量"，但很多内部回调传的是"绝对百分比"
+// 这里把绝对百分比转换为增量，并做 0-100 的夹紧。
+function makeVsProgressAdapter(progress) {
+	let last = 0;
+	return (absPct, msg) => {
+		const now = Math.max(0, Math.min(100, Number(absPct) || 0));
+		const inc = Math.max(0, now - last);
+		last = now;
+		try { progress.report({ message: msg, increment: inc }); } catch { }
+	};
+}
+
+// Promise.race 会被"最快返回 null"的探测截胡；这里返回第一个非 null 的结果
+function raceFirstNonNull(promises) {
+	return new Promise((resolve) => {
+		let pending = promises.filter(Boolean).length;
+		if (pending === 0) return resolve(null);
+		let done = false;
+
+		const finish = (v) => {
+			if (done) return;
+			done = true;
+			resolve(v);
+		};
+
+		for (const p of promises.filter(Boolean)) {
+			Promise.resolve(p).then((v) => {
+				if (done) return;
+				if (v != null) return finish(v);
+				pending--;
+				if (pending === 0) finish(null);
+			}).catch(() => {
+				pending--;
+				if (!done && pending === 0) finish(null);
+			});
+		}
+	});
+}
+
 async function peekClipboardRichFast() {
 	const pref = global.getEnginePreference();
 	const order = global.getEngineTryOrder(pref);
@@ -1346,7 +1426,7 @@ async function peekClipboardRichFast() {
 	})());
 
 	try {
-		return await Promise.race(promises.filter(p => p !== null));
+		return await raceFirstNonNull(promises);
 	} catch { }
 
 	return null;
@@ -1488,9 +1568,8 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 				newTok.onCancellationRequested(() => {
 					global.logMessage("HTML 粘贴被用户取消", "WARN");
 				});
-				const progCb = (pct, msg) => {
-					progress.report({ message: msg, increment: pct });
-				}; if (getHtmlPasteScheme() === 2) {
+				const progCb = makeVsProgressAdapter(progress);
+				if (getHtmlPasteScheme() === 2) {
 					// const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, newTok, progCb);
 					const r2 = await handleClipboardNodeScheme2(targetDir, null, newTok, progCb);
 
@@ -1549,9 +1628,7 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 					newTok.onCancellationRequested(() => {
 						global.logMessage("文件粘贴被用户取消", "WARN");
 					});
-					const progCb = (pct, msg) => {
-						progress.report({ message: msg, increment: pct });
-					};
+					const progCb = makeVsProgressAdapter(progress);
 					return await handleClipboardShell(targetDir, newTok, progCb, files, totalSize);
 				});
 			} else {
@@ -1793,7 +1870,10 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 
 		if (res) {
 			if (res.value_base64) {
-				htmlText = Buffer.from(res.value_base64, "base64").toString("utf8");
+				const buf = Buffer.from(res.value_base64, "base64");
+				const dec = _decodeUtf8Strict(buf);
+				if (dec != null) htmlText = dec;
+				else htmlText = null; // 对齐 Python：失败就别继续拿"乱码字符串"跑
 			} else if (res.value) {
 				htmlText = res.value;
 			}
@@ -1806,7 +1886,10 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 					"-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
 				]);
 				if (b64 && b64.trim()) {
-					htmlText = Buffer.from(b64.trim(), "base64").toString("utf8");
+					const buf = Buffer.from(b64.trim(), "base64");
+					const dec = _decodeUtf8Strict(buf);
+					if (dec != null) htmlText = dec;
+					else htmlText = null;
 					if (shellBridge && !shellBridge.isAvailable() && !shellBridge.isPermDisabled) {
 						shellBridge.start().catch(() => { });
 					}
@@ -1855,7 +1938,7 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 			$("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea").remove();
 
 			$('*').each((i, el) => {
-				const tag = el.tagName.toLowerCase();
+				const tag = (el.tagName || el.name || "").toLowerCase();
 				$(el).removeAttr('style');
 
 				const attribs = el.attribs || {};
@@ -1903,7 +1986,7 @@ async function handleClipboardNode(targetDir, partialCallback = null, token = nu
 						flatNodes.push({ type: 'text', content: t });
 					}
 				} else if (el.type === 'tag') {
-					const tagName = el.name.toLowerCase();
+					const tagName = (el.name || el.tagName || "").toLowerCase();
 					// const isBlock = ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'article', 'section', 'footer', 'header', 'blockquote'].includes(tagName);
 					const isImg = tagName === 'img';
 
@@ -2571,8 +2654,8 @@ function spawnRun(cmd, args, opts = {}) {
 			resolve(val);
 		};
 
-		child.stdout.on("data", (d) => output += (returnOutput ? d.toString() : d.toString().trim()));
-		child.stderr.on("data", (d) => errorOutput += d.toString().trim());
+		child.stdout.on("data", (d) => output += d.toString());
+		child.stderr.on("data", (d) => errorOutput += d.toString());
 
 		child.on("close", (code) => {
 			if (code !== 0 && errorOutput) {
