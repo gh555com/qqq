@@ -1,0 +1,377 @@
+
+
+
+
+
+
+
+
+
+ 修改前是这样
+
+
+| 问题           | 答案                                                                              |
+| ------------ | ------------------------------------------------------------------------------- |
+| 方案二怎么判定失败？   | 当前只靠 `return null`，**没有质量判定**（乱码也算成功）                                           |
+| 那三个检测函数实现了吗？ | **都没有专门实现**，但有散落的相关逻辑                                                           |
+| 相关逻辑在哪？      | `_scoreDecodedText` (方案二)、`getSmartAnchor` (方案一)、`_repairBrokenAngleTags` (方案二) |
+|
+
+
+  下方是解决方案：
+
+
+
+ 方案二生成 blocks 后，再用 cleanText 对 text block 做“轻量校正/补字/去乱码”（但不改变 block 顺序），这样能最大化避免方案一那种 cursor 漂移导致的图片错位。 ┌─────────────────────────────────────────────────────────────────┐
+│                        方案一会失败                              │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. 纯文本与 HTML 文本差异过大                                    │
+│    HTML: "• 项目1"  vs  纯文本: "- 项目1"                        │
+│    → 锚点匹配失败，图片位置漂移                                  │
+│                                                                 │
+│ 2. 复杂表格/嵌套结构                                            │
+│    HTML DOM 顺序 ≠ 纯文本阅读顺序                                │
+│    → 流式消费乱序                                               │
+│                                                                 │
+│ 3. 纯文本被浏览器/系统"清洗"过                                   │
+│    → 长度对不上，cursor 漂移                                    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                        方案二会失败                              │
+├─────────────────────────────────────────────────────────────────┤
+│ 1. CF_HTML 编码检测失败                                         │
+│    某些应用输出非标准编码（如 GB2312 混合）                      │
+│    → 中文变成 ??? 或 \uFFFD                                     │
+│                                                                 │
+│ 2. HTML 严重畸形                                                │
+│    未闭合标签、嵌套错误                                          │
+│    → cheerio 解析崩溃或丢内容                                   │
+│                                                                 │
+│ 3. 特殊字符实体未解码                                           │
+│    &amp;nbsp; 残留、&#x 编码                                    │
+│    → 文本显示异常                                               │
+└─────────────────────────────────────────────────────────────────┘
+是否保留两者？结论
+✅ 建议保留，但调整策略
+javascript
+复制代码
+// 当前代码的回退逻辑（已经是对的）
+if ((HTML_PASTE_SCHEME | 0) === 2) {
+    const r2 = await handleClipboardNodeScheme2(...);
+    if (r2) return r2;
+    // 方案二失败自动回退方案一 ← 关键！
+}
+return await handleClipboardNode(...);
+优化建议
+javascript
+复制代码
+// 更智能的方案选择（基于预检测）
+async function selectHtmlPasteScheme(rawBuf) {
+    // 1. 检测编码置信度
+    const encodingConfidence = _detectEncodingConfidence(rawBuf);
+
+    // 2. 检测 HTML 完整性
+    const htmlIntegrity = _checkHtmlIntegrity(rawBuf);
+
+    // 3. 检测纯文本可用性
+    const plainTextUsable = await _checkPlainTextAlignment();
+
+    if (encodingConfidence > 0.9 && htmlIntegrity > 0.8) {
+        return 2; // 方案二优先
+    } else if (plainTextUsable) {
+        return 1; // 方案一兜底
+    }
+    return 2; // 默认方案二（带回退）
+}
+
+# 问题解答
+
+## 问题一：方案二失败的判定
+
+当前代码判定"失败"的方式非常**粗糙**——仅靠返回 `null`：
+
+```javascript
+async function handleClipboardNodeScheme2(...) {
+    // ❌ 失败点1: 没拿到数据
+    if (!rawBuf && !rawText) return null;
+
+    // ❌ 失败点2: HTML为空
+    if (!htmlText || !htmlText.trim()) return null;
+
+    // ❌ 失败点3: 清洗后为空
+    if (!safeHtml || !safeHtml.trim()) return null;
+
+    // ❌ 失败点4: cheerio解析崩溃
+    try {
+        $ = cheerio.load(safeHtml, ...);
+    } catch (e) {
+        return null;  // ← 这里
+    }
+
+    // ✅ 只要走到这里就算"成功"
+    return { type: "html_blocks", blocks };
+}
+```
+
+### 问题：**没有质量判定**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  当前逻辑的盲区：                                               │
+│                                                                │
+│  HTML: "<p>你好世界</p>"                                       │
+│  解码后: "<p>???世界</p>"  ← 部分乱码                          │
+│  blocks: [{ type: "text", text: "???世界" }]                   │
+│                                                                │
+│  返回值: { type: "html_blocks", blocks }  ← 被判定为"成功"！    │
+│  实际效果: 用户看到乱码                                        │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**应该但没有做的判定**：
+
+```javascript
+// 理想的失败判定（当前代码没有）
+function _isResultQualityAcceptable(blocks) {
+    const allText = blocks
+        .filter(b => b.type === "text")
+        .map(b => b.text)
+        .join("");
+
+    // 检查乱码率
+    const badChars = (allText.match(/[\uFFFD\?]/g) || []).length;
+    const badRatio = badChars / Math.max(1, allText.length);
+
+    if (badRatio > 0.1) return false;  // 超过10%乱码 → 失败
+
+    return true;
+}
+```
+
+---
+
+## 问题二：检测函数的实现情况
+
+### 对照表
+
+| 我建议的函数                      | 是否已实现          | 对应的现有代码                   | 在哪个方案 |
+| --------------------------- | -------------- | ------------------------- | ----- |
+| `_detectEncodingConfidence` | ❌ 未实现（但有相关逻辑）  | `_scoreDecodedText()`     | 方案二   |
+| `_checkHtmlIntegrity`       | ❌ 未实现          | 无                         | -     |
+| `_checkPlainTextAlignment`  | ❌ 未实现（但有执行时逻辑） | `getSmartAnchor()` + 锚点匹配 | 方案一   |
+
+### 现有相关代码分析
+
+#### 1. 编码置信度（方案二有部分逻辑）
+
+```javascript
+// 方案二的 _scoreDecodedText - 给解码结果打分
+function _scoreDecodedText(s) {
+    let bad = 0, printable = 0, cjk = 0;
+
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === "\uFFFD") bad += 4;        // 替换字符扣分
+        if (code === 0) bad += 6;              // NUL扣分
+        if (code >= 0x20 && code !== 0x7f) printable++;
+        if (code >= 0x4e00 && code <= 0x9fff) cjk += 3;  // CJK加分
+    }
+    return printable + cjk - bad;
+}
+
+// 方案二的 _decodeHtmlBytesSmart - 选择最佳编码
+function _decodeHtmlBytesSmart(buf) {
+    let candidates = [];
+    candidates.push({ enc: "utf8", text: buf.toString("utf8") });
+    candidates.push({ enc: "latin1", text: buf.toString("latin1") });
+    // ... 可能加 utf16
+
+    // 选分数最高的
+    let best = "", bestScore = -1e18;
+    for (const c of candidates) {
+        const sc = _scoreDecodedText(c.text);  // ← 这里用了
+        if (sc > bestScore) { bestScore = sc; best = c.text; }
+    }
+    return best;
+}
+```
+
+**问题**：这个分数只用于**内部选择**编码，没有暴露给外部判断"是否足够好"。
+
+#### 2. HTML 完整性（无专门检测）
+
+```javascript
+// 方案二只有修复逻辑，没有检测逻辑
+function _repairBrokenAngleTags(html) {
+    // 修复 "?/span>" → "</span>"
+    s = s.replace(/[\?\uFFFD]\s*\/\s*([a-zA-Z]{1,12})\s*>/g, "</$1>");
+    // ...
+}
+
+// 没有类似这样的检测：
+// function _checkHtmlIntegrity(html) {
+//     const brokenTags = (html.match(/[\?\uFFFD]\/[a-z]+>/gi) || []).length;
+//     const totalTags = (html.match(/<\/?[a-z]+/gi) || []).length;
+//     return 1 - (brokenTags / Math.max(1, totalTags));
+// }
+```
+
+#### 3. 纯文本对齐（方案一有执行时逻辑）
+
+```javascript
+// 方案一的 getSmartAnchor - 找安全锚点
+function getSmartAnchor(str, startFrom = 0, len = 10) {
+    const match = /[\p{L}\p{N}]{4,}/u.exec(sub);  // 找字母数字序列
+    if (match) {
+        return { text: match[0].substring(0, len), offset: ... };
+    }
+    return { text: str.substring(...), offset: startFrom };
+}
+
+// 方案一的匹配逻辑
+const startAnchorObj = getSmartAnchor(trimmedHtml, 0, 10);
+let idx = searchArea.indexOf(startAnchorObj.text);  // ← 能找到说明对齐
+
+if (idx === -1) {
+    // 对齐失败，回退到长度匹配（可能漂移）
+}
+```
+
+**问题**：这是**执行时**判断，不是**预检测**。如果对齐失败，已经在方案一里了，无法切换。
+
+---
+
+## 完整实现建议
+
+```javascript
+// ============== 新增：预检测函数 ==============
+
+function _detectEncodingConfidence(buf) {
+    // 尝试所有编码，返回最高分及其置信度
+    const candidates = [
+        { enc: "utf8", text: buf.toString("utf8") },
+        { enc: "latin1", text: buf.toString("latin1") },
+    ];
+
+    // 检测 UTF-16
+    const np = _looksLikeUtf16ByNullPattern(buf);
+    if (np.ratioOdd > 0.08 || np.ratioEven > 0.08) {
+        candidates.push({ enc: "utf16le", text: buf.toString("utf16le") });
+    }
+
+    let maxScore = -Infinity;
+    for (const c of candidates) {
+        const score = _scoreDecodedText(c.text);
+        if (score > maxScore) maxScore = score;
+    }
+
+    // 归一化到 0~1
+    // 经验值：好的文本 score/length ≈ 1.5~3，差的 < 0.5
+    const normalized = maxScore / Math.max(1, buf.length);
+    return Math.min(1, Math.max(0, normalized / 2));
+}
+
+function _checkHtmlIntegrity(htmlText) {
+    if (!htmlText) return 0;
+
+    // 检测损坏的标签
+    const brokenCloseTags = (htmlText.match(/[\?\uFFFD]\/[a-z]{1,12}\s*>/gi) || []).length;
+    const brokenOpenTags = (htmlText.match(/[\?\uFFFD][a-z]{1,12}[\s>]/gi) || []).length;
+    const totalTags = (htmlText.match(/<\/?[a-z]{1,12}/gi) || []).length;
+
+    if (totalTags === 0) return 0.5;  // 无标签，不确定
+
+    const brokenRatio = (brokenCloseTags + brokenOpenTags) / totalTags;
+    return Math.max(0, 1 - brokenRatio * 5);  // 放大惩罚
+}
+
+async function _checkPlainTextAlignment(htmlText) {
+    const plainText = await vscode.env.clipboard.readText();
+    if (!plainText || !htmlText) return false;
+
+    // 从 HTML 提取几个锚点，检查纯文本是否包含
+    const $ = cheerio.load(htmlText);
+    const textContent = $.text().trim();
+
+    // 取前中后三个锚点
+    const anchors = [
+        textContent.substring(0, 20),
+        textContent.substring(Math.floor(textContent.length / 2), Math.floor(textContent.length / 2) + 20),
+        textContent.substring(Math.max(0, textContent.length - 20)),
+    ].map(s => s.replace(/\s+/g, ' ').trim()).filter(s => s.length > 5);
+
+    let matchCount = 0;
+    for (const anchor of anchors) {
+        if (plainText.includes(anchor)) matchCount++;
+    }
+
+    return matchCount >= 2;  // 至少2个锚点匹配
+}
+
+// ============== 修改：智能方案选择 ==============
+
+async function selectAndExecuteHtmlPaste(targetDir, partialCallback, token, progressCallback) {
+    // 1. 获取原始数据（复用方案二的逻辑）
+    let rawBuf = null;
+    const res = await tryEngineCall({ python: "get_html", ... }, {}, 8000);
+    if (res?.value_base64) {
+        rawBuf = Buffer.from(res.value_base64, "base64");
+    }
+
+    if (!rawBuf) {
+        // 直接用方案一
+        return await handleClipboardNode(targetDir, partialCallback, token, progressCallback);
+    }
+
+    // 2. 预检测
+    const sliced = _sliceCfHtmlPayload(rawBuf);
+    const payload = sliced.fragBuf || sliced.htmlBuf;
+    const htmlText = _decodeHtmlBytesSmart(payload);
+
+    const encodingConf = _detectEncodingConfidence(payload);
+    const htmlIntegrity = _checkHtmlIntegrity(htmlText);
+    const plainTextOk = await _checkPlainTextAlignment(htmlText);
+
+    global.logMessage(`[HTML方案选择] encoding=${encodingConf.toFixed(2)}, integrity=${htmlIntegrity.toFixed(2)}, plainTextOk=${plainTextOk}`, "DEBUG");
+
+    // 3. 决策
+    if (encodingConf > 0.7 && htmlIntegrity > 0.6) {
+        // 方案二优先
+        const r2 = await handleClipboardNodeScheme2(targetDir, partialCallback, token, progressCallback);
+        if (r2 && _isResultQualityAcceptable(r2.blocks)) {
+            return r2;
+        }
+        // 质量不行，回退
+    }
+
+    if (plainTextOk) {
+        // 方案一
+        return await handleClipboardNode(targetDir, partialCallback, token, progressCallback);
+    }
+
+    // 兜底：方案二（可能有乱码，但至少有结构）
+    return await handleClipboardNodeScheme2(targetDir, partialCallback, token, progressCallback);
+}
+
+function _isResultQualityAcceptable(blocks) {
+    if (!blocks || blocks.length === 0) return false;
+
+    const allText = blocks
+        .filter(b => b.type === "text")
+        .map(b => b.text || "")
+        .join("");
+
+    if (allText.length === 0) return true;  // 纯图片，OK
+
+    const badChars = (allText.match(/[\uFFFD]/g) || []).length;
+    const questionMarks = (allText.match(/\?{3,}/g) || []).length;  // 连续问号
+
+    const badRatio = badChars / allText.length;
+
+    return badRatio < 0.05 && questionMarks < 3;
+}
+```
+
+---
+
