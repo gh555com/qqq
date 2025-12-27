@@ -561,10 +561,23 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 		let proc = null;
 
 		if (platform === "win32") {
+			let clipboardHelperCode = "";
+			try { clipboardHelperCode = require("./h").CLIPBOARD_HELPER_CS; } catch (e) { }
+
 			const simplePsScript = `
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# --- Inject C# ClipboardHelper (Optimized for Daemon) ---
+try {
+    $clipboardHelperCode = @'
+${clipboardHelperCode}
+'@
+    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp
+} catch {
+    # Ignore if type already exists
+}
 
 function Process-Command {
   param($cmd)
@@ -572,6 +585,16 @@ function Process-Command {
   try {
     switch ($cmd.action) {
       'ping' { $result.status = 'alive' }
+      'dumpHtmlToFile' {
+         try {
+             $res = [ClipboardHelper]::DumpHtmlToFile($cmd.path)
+             if ($res -eq "Success") { $result.success = $true }
+             else { $result.success = $false; $result.error = $res }
+         } catch {
+             $result.success = $false
+             $result.error = $_.Exception.Message
+         }
+      }
       'checkQ' {
         $formats = [System.Windows.Forms.Clipboard]::GetDataObject().GetFormats()
         $result.hasFile = $formats -contains "FileDrop"
