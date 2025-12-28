@@ -672,7 +672,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
         const videoUrls = new Set();
 
         // 查找 <video> 标签中的视频源
-        $('video source').each((i, elem) => {
+        $('video source, video').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
                 try {
@@ -684,28 +684,17 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                 }
             }
 
-            const srcAttr = elem.attribs['src'];
-            if (srcAttr) {
-                try {
-                    const fullUrl = new URL(srcAttr, baseUrl).href;
-                    videoUrls.add(fullUrl);
-                } catch (e) {
-                    // 如果URL解析失败，直接添加原始URL
-                    videoUrls.add(srcAttr);
-                }
-            }
-        });
-
-        // 查找直接的 <video> 标签的src属性
-        $('video').each((i, elem) => {
-            const src = $(elem).attr('src');
-            if (src) {
-                try {
-                    const fullUrl = new URL(src, baseUrl).href;
-                    videoUrls.add(fullUrl);
-                } catch (e) {
-                    // 如果URL解析失败，直接添加原始URL
-                    videoUrls.add(src);
+            // 检查其他可能的视频源属性
+            const attrsToCheck = ['data-src', 'data-source', 'data-video', 'data-url'];
+            for (const attr of attrsToCheck) {
+                const attrValue = $(elem).attr(attr);
+                if (attrValue) {
+                    try {
+                        const fullUrl = new URL(attrValue, baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        videoUrls.add(attrValue);
+                    }
                 }
             }
         });
@@ -724,9 +713,9 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 查找具有视频类名的元素
+        // 查找具有视频类名或ID的元素
         $('[class*="video" i], [id*="video" i]').each((i, elem) => {
-            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source') || $(elem).attr('data-video');
             if (src) {
                 try {
                     const fullUrl = new URL(src, baseUrl).href;
@@ -739,9 +728,9 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
         });
 
         // 查找可能的视频文件扩展名链接
-        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
-        $('a, [href]').each((i, elem) => {
-            const href = $(elem).attr('href');
+        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
+        $('a, [href], [data-href]').each((i, elem) => {
+            const href = $(elem).attr('href') || $(elem).attr('data-href');
             if (href) {
                 const lowerHref = href.toLowerCase();
                 if (videoExtensions.some(ext => lowerHref.includes(ext))) {
@@ -751,6 +740,24 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     } catch (e) {
                         // 如果URL解析失败，直接添加原始URL
                         videoUrls.add(href);
+                    }
+                }
+            }
+        });
+
+        // 从script标签中提取视频URL（如JSON配置、内联数据等）
+        $('script').each((i, elem) => {
+            const scriptContent = $(elem).text();
+            if (scriptContent && scriptContent.trim()) {
+                // 使用正则表达式从脚本内容中提取视频URL
+                const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
+                let match;
+                while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
+                    try {
+                        const fullUrl = new URL(match[0], baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        videoUrls.add(match[0]);
                     }
                 }
             }
