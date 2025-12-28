@@ -2087,6 +2087,122 @@ class YtDlpDownloader {
     setBinaryPath(path) {
         this.ytdlpPath = path;
     }
+
+    /**
+     * 自动下载安装yt-dlp
+     */
+    async autoInstall(context) {
+        try {
+            const os = require('os');
+            const fs = require('fs');
+            const path = require('path');
+            const https = require('https');
+
+            const platform = os.platform();
+            const arch = os.arch();
+
+            // 确定yt-dlp下载URL和文件名
+            let downloadUrl;
+            let binaryName;
+
+            if (platform === 'win32') {
+                // Windows
+                binaryName = 'yt-dlp.exe';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+            } else if (platform === 'darwin') {
+                // macOS
+                binaryName = 'yt-dlp';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+            } else {
+                // Linux和其他类Unix系统
+                binaryName = 'yt-dlp';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+            }
+
+            // 确定安装路径 - 使用扩展的全局存储路径
+            const installDir = context.globalStorageUri.fsPath;
+            const installPath = path.join(installDir, binaryName);
+
+            // 确保安装目录存在
+            if (!fs.existsSync(installDir)) {
+                fs.mkdirSync(installDir, { recursive: true });
+            }
+
+            // 检查文件是否已存在且非空
+            if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+                this.ytdlpPath = installPath;
+                return { success: true, path: installPath };
+            }
+
+            // 使用https模块下载yt-dlp
+            await new Promise((resolve, reject) => {
+                const file = fs.createWriteStream(installPath);
+
+                // 设置请求选项
+                const options = {
+                    host: 'github.com',
+                    path: downloadUrl.replace('https://github.com', ''),
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': '*/*',
+                        'Referer': 'https://github.com/'
+                    },
+                    timeout: 30000 // 30秒超时
+                };
+
+                // 发起HTTPS请求
+                const request = https.get(downloadUrl, options, (response) => {
+                    // 处理重定向
+                    if (response.statusCode === 302 || response.statusCode === 301) {
+                        const redirectUrl = response.headers.location;
+                        https.get(redirectUrl, (res) => {
+                            res.pipe(file);
+                            res.on('end', resolve);
+                            res.on('error', reject);
+                        }).on('error', (err) => {
+                            file.close();
+                            reject(err);
+                        });
+                    } else if (response.statusCode === 200) {
+                        response.pipe(file);
+                        response.on('end', resolve);
+                        response.on('error', reject);
+                    } else {
+                        file.close();
+                        reject(new Error(`下载失败，状态码: ${response.statusCode}`));
+                    }
+                }).on('error', (err) => {
+                    file.close();
+                    reject(err);
+                });
+
+                request.on('timeout', () => {
+                    file.close();
+                    request.abort();
+                    reject(new Error('下载超时'));
+                });
+
+                file.on('finish', () => {
+                    file.close();
+                });
+
+                file.on('error', (err) => {
+                    reject(err);
+                });
+            });
+
+            // 如果是Unix系统，需要设置可执行权限
+            if (platform !== 'win32') {
+                fs.chmodSync(installPath, '755');
+            }
+
+            // 更新路径
+            this.ytdlpPath = installPath;
+            return { success: true, path: installPath };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 /* ──────────────────────────────────────────────────────────────

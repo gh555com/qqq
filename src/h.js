@@ -663,6 +663,363 @@ function sanitizeHtml(html) {
     return $.html();
 }
 
+function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
+    try {
+        const cheerio = require('cheerio');
+        const { URL: NodeURL } = require('url');
+
+        const $ = cheerio.load(htmlContent);
+        const videoUrls = new Set();
+
+        // 查找 <video> 标签中的视频源
+        $('video source').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+
+            const srcAttr = elem.attribs['src'];
+            if (srcAttr) {
+                try {
+                    const fullUrl = new URL(srcAttr, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(srcAttr);
+                }
+            }
+        });
+
+        // 查找直接的 <video> 标签的src属性
+        $('video').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+        });
+
+        // 查找 <iframe> 标签（可能是视频播放器）
+        $('iframe').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+        });
+
+        // 查找具有视频类名的元素
+        $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+        });
+
+        // 查找可能的视频文件扩展名链接
+        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+        $('a, [href]').each((i, elem) => {
+            const href = $(elem).attr('href');
+            if (href) {
+                const lowerHref = href.toLowerCase();
+                if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                    try {
+                        const fullUrl = new URL(href, baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        // 如果URL解析失败，直接添加原始URL
+                        videoUrls.add(href);
+                    }
+                }
+            }
+        });
+
+        return Array.from(videoUrls);
+    } catch (error) {
+        console.error('从HTML片段提取视频URL失败:', error);
+        return [];
+    }
+}
+
+// 从网页中提取视频URL的辅助函数
+async function extractVideoUrlsFromWebPage(url) {
+    try {
+        const cheerio = require('cheerio');
+        const https = require('https');
+        const http = require('http');
+        const { URL: NodeURL } = require('url');
+
+        // 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
+        let fetch;
+        try {
+            fetch = require('node-fetch');
+        } catch {
+            // 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
+            if (typeof global.fetch === 'undefined') {
+                // 如果都没有，使用 https 模块作为备选方案
+                const webContent = await fetchViaHttps(url);
+                const $ = cheerio.load(webContent);
+
+                const videoUrls = new Set();
+
+                // 查找 <video> 标签中的视频源
+                $('video source').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+
+                    const srcAttr = elem.attribs['src'];
+                    if (srcAttr) {
+                        const fullUrl = new URL(srcAttr, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找直接的 <video> 标签的src属性
+                $('video').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找 <iframe> 标签（可能是视频播放器）
+                $('iframe').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找具有视频类名的元素
+                $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+                    const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找可能的视频文件扩展名链接
+                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+                $('a, [href]').each((i, elem) => {
+                    const href = $(elem).attr('href');
+                    if (href) {
+                        const lowerHref = href.toLowerCase();
+                        if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                            const fullUrl = new URL(href, url).href;
+                            videoUrls.add(fullUrl);
+                        }
+                    }
+                });
+
+                // 查找包含视频数据的script/pre标签（如JSON-LD结构）
+                $('script, pre').each((i, elem) => {
+                    const text = $(elem).text();
+                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO'))) {
+                        // 尝试从文本中提取视频URL
+                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^"\'\s\<\>\)\(\[\]]*/gi);
+                        if (videoUrlMatches) {
+                            videoUrlMatches.forEach(match => {
+                                try {
+                                    const fullUrl = new URL(match, url).href;
+                                    videoUrls.add(fullUrl);
+                                } catch (e) {
+                                    // 忽略无效URL
+                                }
+                            });
+                        }
+                        // 尝试提取视频ID并构造可能的视频URL
+                        const videoIdMatches = text.match(/"video_id"\s*:\s*"([^"]+)"/i);
+                        if (videoIdMatches && videoIdMatches[1]) {
+                            const videoId = videoIdMatches[1];
+                            // 对于Rambler等平台，尝试构造可能的视频URL
+                            // 由于这类视频通常需要特殊处理，我们直接返回原始页面URL
+                            // 让yt-dlp来处理这些特殊平台的视频提取
+                            videoUrls.add(url); // 添加页面URL供yt-dlp处理
+                            // 同时尝试从iframe src中提取视频URL
+                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/player[^"\'\s\<\>\)\(\[\]]*/gi);
+                            if (iframeSrcMatches) {
+                                iframeSrcMatches.forEach(match => {
+                                    try {
+                                        const fullUrl = new URL(match, url).href;
+                                        videoUrls.add(fullUrl);
+                                    } catch (e) {
+                                        // 忽略无效URL
+                                    }
+                                });
+                            }
+                        }
+                    }
+                });
+
+                // 检查iframe的src中可能包含的视频参数
+                $('iframe').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        // 检查是否为常见的视频播放器
+                        const videoPlayerDomains = ['youtube.com', 'youtu.be', 'vimeo.com', 'player.vimeo.com', 'rambler.ru', 'rutube.ru', 'ok.ru', 'tiktok.com', 'douyin.com', 'bilibili.com'];
+                        const isVideoPlayer = videoPlayerDomains.some(domain => src.includes(domain));
+                        if (isVideoPlayer) {
+                            const fullUrl = new URL(src, url).href;
+                            videoUrls.add(fullUrl);
+                        }
+                    }
+                });
+
+                return Array.from(videoUrls);
+            }
+
+            fetch = global.fetch;
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
+        const $ = cheerio.load(html);
+
+        const videoUrls = new Set();
+
+        // 查找 <video> 标签中的视频源
+        $('video source').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+
+            const srcAttr = elem.attribs['src'];
+            if (srcAttr) {
+                const fullUrl = new URL(srcAttr, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找直接的 <video> 标签的src属性
+        $('video').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找 <iframe> 标签（可能是视频播放器）
+        $('iframe').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找具有视频类名的元素
+        $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找可能的视频文件扩展名链接
+        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+        $('a, [href]').each((i, elem) => {
+            const href = $(elem).attr('href');
+            if (href) {
+                const lowerHref = href.toLowerCase();
+                if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                    const fullUrl = new URL(href, url).href;
+                    videoUrls.add(fullUrl);
+                }
+            }
+        });
+
+        return Array.from(videoUrls);
+    } catch (error) {
+        // 定义 fetchViaHttps 函数
+        function fetchViaHttps(targetUrl) {
+            return new Promise((resolve, reject) => {
+                const urlObj = new NodeURL(targetUrl);
+                const client = urlObj.protocol === 'https:' ? https : http;
+
+                const options = {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    },
+                    timeout: 15000 // 15秒超时
+                };
+
+                const request = client.get(targetUrl, options, (response) => {
+                    let data = '';
+
+                    response.on('data', (chunk) => {
+                        data += chunk;
+                    });
+
+                    response.on('end', () => {
+                        if (response.statusCode >= 200 && response.statusCode < 300) {
+                            resolve(data);
+                        } else {
+                            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+                        }
+                    });
+
+                    response.on('error', (err) => {
+                        reject(err);
+                    });
+                });
+
+                request.on('error', (err) => {
+                    reject(err);
+                });
+
+                request.on('timeout', () => {
+                    request.destroy();
+                    reject(new Error('Request timeout'));
+                });
+            });
+        }
+
+        throw error;
+    }
+}
+
 function _buildBlocksFromSanitizedDom($, baseUrl) {
     const blocks = [];
     let textBuf = "";
@@ -860,7 +1217,7 @@ async function _zipDomWithCleanText($, cleanText) {
 }
 
 async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
-    const pending = blocks.filter(b => b && b.type === "media" && b.kind === "image" && b.src && b.status === "pending");
+    const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
     let securityLevel = 0;
@@ -1121,6 +1478,22 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
         }
     }
 
+    // 检查是否有视频URL需要处理
+    const videoUrls = extractVideoUrlsFromHtmlFragment(htmlText, baseUrl);
+    if (videoUrls.length > 0) {
+        log(`[SmartPaste] 从HTML中提取到 ${videoUrls.length} 个视频URL`, "INFO");
+
+        // 将视频URL添加到blocks中作为媒体资源
+        for (const videoUrl of videoUrls) {
+            blocks.push({
+                type: "media",
+                kind: "video",
+                src: videoUrl,
+                status: "pending"
+            });
+        }
+    }
+
     if (blocks.some(b => b.type === "media")) {
         if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
         await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
@@ -1235,6 +1608,8 @@ module.exports = {
     handleClipboardShell,
     sanitizeHtml,
     _getSmartHtmlFromClipboard,
+    extractVideoUrlsFromWebPage, // 新增导出
+    extractVideoUrlsFromHtmlFragment, // 新增导出
     computeFingerprint,
     prefillFingerprint,
     getTimestampFilename,
