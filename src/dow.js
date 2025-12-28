@@ -1928,7 +1928,7 @@ class YtDlpDownloader {
                 "--ignore-errors", // 忽略个别视频错误
                 "--flat-playlist", // 快速列表探测
                 "--no-check-certificate", // 忽略 SSL 错误
-                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                // 移除硬编码 UA，使用 yt-dlp 默认策略以获得更好兼容性
                 url,
             ];
 
@@ -1969,7 +1969,23 @@ class YtDlpDownloader {
                 // 只要有 stdout，即使 exit code != 0 也尝试解析（可能是部分成功）
                 const raw = String(stdout || "").trim();
                 if (!raw) {
-                    resolve({ success: false, error: "probe_failed_empty_output", stderr: String(stderr || "").slice(0, 4096) });
+                    // 尝试从 stderr 提取更有用的错误信息
+                    let errorMsg = "probe_failed_empty_output";
+                    const stderrStr = String(stderr || "").trim();
+                    if (stderrStr) {
+                        // 提取 "ERROR: ..."
+                        const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
+                        if (errorMatch && errorMatch[1]) {
+                            errorMsg = errorMatch[1].trim();
+                        } else {
+                            // 如果没有标准 ERROR 格式，取最后一行非空内容
+                            const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
+                            if (lines.length > 0) {
+                                errorMsg = lines[lines.length - 1];
+                            }
+                        }
+                    }
+                    resolve({ success: false, error: errorMsg, stderr: stderrStr });
                     return;
                 }
 
@@ -2057,7 +2073,7 @@ class YtDlpDownloader {
                 "-f",
                 fmt,
                 "--no-check-certificate",
-                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                // 移除硬编码 UA
             ];
 
             if (this.ffmpegPath) {
@@ -2091,6 +2107,30 @@ class YtDlpDownloader {
 
     setBinaryPath(path) {
         this.ytdlpPath = path;
+    }
+
+    /**
+     * 尝试从全局存储路径加载 yt-dlp
+     */
+    trySetFromGlobalStorage(context) {
+        try {
+            if (!context || !context.globalStorageUri) return false;
+
+            const os = require('os');
+            const path = require('path');
+            const fs = require('fs');
+
+            const platform = os.platform();
+            const binaryName = platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+            const installDir = context.globalStorageUri.fsPath;
+            const installPath = path.join(installDir, binaryName);
+
+            if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+                this.ytdlpPath = installPath;
+                return true;
+            }
+        } catch { }
+        return false;
     }
 
     /**
@@ -2152,7 +2192,7 @@ class YtDlpDownloader {
                         hostname: urlObj.hostname,
                         path: urlObj.pathname + urlObj.search,
                         headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36', // 保持下载器的 UA，不影响 yt-dlp
                             'Accept': '*/*',
                             'Accept-Encoding': 'identity', // 禁止压缩，简化处理
                             'Connection': 'keep-alive'
@@ -2447,6 +2487,11 @@ class UnifiedMediaDownloader {
     }
 
     async ensureYtdlpReady(context) {
+        // 先尝试从 context 加载（避免重复下载）
+        if (context && this.ytdlp.trySetFromGlobalStorage(context)) {
+            if (this.ytdlp.isAvailable()) return true;
+        }
+
         if (!this.ytdlp.isAvailable()) {
             if (!vscode) return false;
             const installConfirmed = await vscode.window.showInformationMessage(
@@ -2576,6 +2621,7 @@ class UnifiedMediaDownloader {
         });
 
         const downloadResult = await this.downloadAll(downloadTasks, targetDir, {
+            downloadVideos: "all", // 显式允许下载平台视频
             onProgress: (task, event) => {
                 if (progress) {
                     if (event.type === "progress") {
