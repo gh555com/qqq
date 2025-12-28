@@ -2083,6 +2083,10 @@ class YtDlpDownloader {
             proc.on("error", (e) => resolve({ success: false, error: e.message }));
         });
     }
+
+    setBinaryPath(path) {
+        this.ytdlpPath = path;
+    }
 }
 
 /* ──────────────────────────────────────────────────────────────

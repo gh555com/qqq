@@ -507,6 +507,211 @@ function shouldShowDuration(info) {
 	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
 }
 
+let downloadContext = null;
+
+async function downloadVideosFromUrlCommand() {
+	try {
+		// 获取用户输入的URL
+		const url = await vscode.window.showInputBox({
+			prompt: "请输入包含视频的网页URL",
+			placeHolder: "https://example.com/page-with-video",
+			validateInput: text => {
+				if (!text) return "URL不能为空";
+				try {
+					new URL(text);
+					return null;
+				} catch {
+					return "请输入有效的URL";
+				}
+			}
+		});
+
+		if (!url) {
+			return; // 用户取消了输入
+		}
+
+		// 获取当前工作目录或让用户选择一个目录
+		const folders = vscode.workspace.workspaceFolders;
+		let targetDir;
+		if (folders && folders.length > 0) {
+			targetDir = folders[0].uri.fsPath;
+		} else {
+			// 如果没有工作区，让用户选择一个目录
+			const selectedDir = await vscode.window.showOpenDialog({
+				canSelectFolders: true,
+				canSelectFiles: false,
+				canSelectMany: false,
+				title: "选择视频下载目录"
+			});
+			if (!selectedDir || selectedDir.length === 0) {
+				return; // 用户取消了选择
+			}
+			targetDir = selectedDir[0].fsPath;
+		}
+
+		// 显示进度
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: "正在分析网页视频...",
+			cancellable: true
+		}, async (progress, token) => {
+			// 检查是否已安装yt-dlp
+			const { getSharedDownloader } = require('./dow');
+			let downloader = getSharedDownloader();
+
+			if (!downloader.ytdlp.isAvailable()) {
+				const installConfirmed = await vscode.window.showInformationMessage(
+					"yt-dlp 未安装，是否自动下载安装？",
+					{ modal: true },
+					"是",
+					"否"
+				);
+
+				if (installConfirmed === "是") {
+					progress.report({ message: "正在自动下载安装 yt-dlp...", increment: 5 });
+					try {
+						// 自动下载并安装yt-dlp
+						const installResult = await installYtDlp(downloadContext);
+						if (installResult.success) {
+							// 更新downloader的yt-dlp路径
+							downloader.ytdlp.setBinaryPath(installResult.path);
+							progress.report({ message: "yt-dlp 安装成功，更新路径...", increment: 10 });
+						} else {
+							vscode.window.showErrorMessage(`yt-dlp 安装失败: ${installResult.error}`);
+							return;
+						}
+					} catch (installError) {
+						vscode.window.showErrorMessage(`自动安装 yt-dlp 失败: ${installError.message}`);
+						return;
+					}
+				} else {
+					vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+					return;
+				}
+			}
+
+			progress.report({ message: "正在探测视频资源...", increment: 10 });
+
+			// 首先尝试使用yt-dlp探测
+			let probeResult = null;
+			let probeError = null;
+			try {
+				probeResult = await downloader.ytdlp.probe(url);
+			} catch (error) {
+				probeError = error;
+			}
+
+			// 如果yt-dlp探测失败，尝试直接解析网页获取视频资源
+			if (!probeResult || !probeResult.success) {
+				progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
+				try {
+					// 尝试获取网页内容并解析视频标签
+					const videoUrls = await extractVideoUrlsFromWebPage(url);
+					if (videoUrls && videoUrls.length > 0) {
+						// 创建模拟的探测结果
+						probeResult = {
+							success: true,
+							isPlaylist: false,
+							entries: videoUrls.map((videoUrl, index) => ({
+								id: `direct_video_${index}`,
+								title: `直接视频链接 ${index + 1}`,
+								url: videoUrl,
+								webpageUrl: url
+							}))
+						};
+						probeResult.isPlaylist = videoUrls.length > 1;
+						if (videoUrls.length === 1) {
+							probeResult.title = '直接视频链接';
+							probeResult.url = videoUrls[0];
+						} else {
+							probeResult.entriesCount = videoUrls.length;
+						}
+					} else {
+						vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '未知错误')}`);
+						return;
+					}
+				} catch (webError) {
+					vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
+					return;
+				}
+			}
+
+			progress.report({ message: "发现视频资源，准备下载...", increment: 30 });
+
+			let videosToDownload = [];
+
+			if (probeResult.isPlaylist) {
+				// 如果是播放列表，让用户选择要下载的视频
+				const items = probeResult.entries.map((entry, index) => ({
+					label: entry.title || `视频 ${index + 1}`,
+					description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
+					detail: entry.url,
+					video: entry
+				}));
+
+				const selectedItems = await vscode.window.showQuickPick(items, {
+					canPickMany: true,
+					placeHolder: "选择要下载的视频",
+					matchOnDescription: true,
+					matchOnDetail: true
+				});
+
+				if (!selectedItems || selectedItems.length === 0) {
+					return; // 用户没有选择任何视频
+				}
+
+				videosToDownload = selectedItems.map(item => item.video);
+			} else {
+				// 如果是单个视频，直接添加
+				videosToDownload = [probeResult.entries ? probeResult.entries[0] : probeResult];
+			}
+
+			progress.report({ message: `准备下载 ${videosToDownload.length} 个视频`, increment: 50 });
+
+			// 为每个视频下载任务创建下载请求
+			const downloadTasks = videosToDownload.map(video => {
+				const filename = h.getTimestampFilename('.mp4');
+				const destPath = path.join(targetDir, filename);
+				return {
+					url: video.url || url,
+					destPath: destPath,
+					tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
+					title: video.title || '网页视频'
+				};
+			});
+
+			// 开始下载
+			const downloadResult = await downloader.downloadAll(downloadTasks, targetDir, {
+				onProgress: (task, event) => {
+					if (event.type === "progress") {
+						progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
+					} else if (event.type === "done") {
+						progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
+					}
+				}
+			});
+
+			// 检查下载结果
+			const successfulDownloads = downloadResult.results.filter(r => r.success);
+			const failedDownloads = downloadResult.results.filter(r => !r.success);
+
+			if (successfulDownloads.length > 0) {
+				vscode.window.showInformationMessage(
+					`成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
+				);
+			} else if (failedDownloads.length > 0) {
+				vscode.window.showErrorMessage(
+					`所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
+				);
+			}
+
+			progress.report({ increment: 100 });
+		});
+	} catch (error) {
+		vscode.window.showErrorMessage(`下载视频时出错: ${error.message}`);
+	}
+}
+
 const pendingJobs = new Map();
 let tokenCounter = 0;
 
@@ -544,6 +749,7 @@ async function activate(context) {
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
 
 	extensionContext = context;
+	downloadContext = context;
 	global.init(context);
 
 	initCache(context);
@@ -559,6 +765,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
+		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			for (const key of Object.keys(global.ConfigManager.getAll())) {
 				const fullKey = `qqq.${key}`;
@@ -702,3 +910,324 @@ process.on("unhandledRejection", (reason) => {
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
 	global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
 });
+
+// 从网页中提取视频URL的辅助函数
+async function extractVideoUrlsFromWebPage(url) {
+	try {
+		const cheerio = require('cheerio');
+		const https = require('https');
+		const http = require('http');
+		const { URL: NodeURL } = require('url');
+
+		// 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
+		let fetch;
+		try {
+			fetch = require('node-fetch');
+		} catch {
+			// 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
+			if (typeof global.fetch === 'undefined') {
+				// 如果都没有，使用 https 模块作为备选方案
+				const webContent = await fetchViaHttps(url);
+				const $ = cheerio.load(webContent);
+
+				const videoUrls = new Set();
+
+				// 查找 <video> 标签中的视频源
+				$('video source').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+
+					const srcAttr = elem.attribs['src'];
+					if (srcAttr) {
+						const fullUrl = new URL(srcAttr, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找直接的 <video> 标签的src属性
+				$('video').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找 <iframe> 标签（可能是视频播放器）
+				$('iframe').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找具有视频类名的元素
+				$('[class*="video" i], [id*="video" i]').each((i, elem) => {
+					const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找可能的视频文件扩展名链接
+				const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+				$('a, [href]').each((i, elem) => {
+					const href = $(elem).attr('href');
+					if (href) {
+						const lowerHref = href.toLowerCase();
+						if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+							const fullUrl = new URL(href, url).href;
+							videoUrls.add(fullUrl);
+						}
+					}
+				});
+
+				return Array.from(videoUrls);
+			}
+
+			fetch = global.fetch;
+		}
+
+		// 定义 fetchViaHttps 函数
+		function fetchViaHttps(targetUrl) {
+			return new Promise((resolve, reject) => {
+				const urlObj = new NodeURL(targetUrl);
+				const client = urlObj.protocol === 'https:' ? https : http;
+
+				const options = {
+					headers: {
+						'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+					},
+					timeout: 15000 // 15秒超时
+				};
+
+				const request = client.get(targetUrl, options, (response) => {
+					let data = '';
+
+					response.on('data', (chunk) => {
+						data += chunk;
+					});
+
+					response.on('end', () => {
+						if (response.statusCode >= 200 && response.statusCode < 300) {
+							resolve(data);
+						} else {
+							reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+						}
+					});
+
+					response.on('error', (err) => {
+						reject(err);
+					});
+				});
+
+				request.on('error', (err) => {
+					reject(err);
+				});
+
+				request.on('timeout', () => {
+					request.destroy();
+					reject(new Error('Request timeout'));
+				});
+			});
+		}
+
+		const response = await fetch(url, {
+			method: 'GET',
+			headers: {
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+			}
+		});
+
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		}
+
+		const html = await response.text();
+		const $ = cheerio.load(html);
+
+		const videoUrls = new Set();
+
+		// 查找 <video> 标签中的视频源
+		$('video source').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+
+			const srcAttr = elem.attribs['src'];
+			if (srcAttr) {
+				const fullUrl = new URL(srcAttr, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找直接的 <video> 标签的src属性
+		$('video').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找 <iframe> 标签（可能是视频播放器）
+		$('iframe').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找具有视频类名的元素
+		$('[class*="video" i], [id*="video" i]').each((i, elem) => {
+			const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找可能的视频文件扩展名链接
+		const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+		$('a, [href]').each((i, elem) => {
+			const href = $(elem).attr('href');
+			if (href) {
+				const lowerHref = href.toLowerCase();
+				if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+					const fullUrl = new URL(href, url).href;
+					videoUrls.add(fullUrl);
+				}
+			}
+		});
+
+		return Array.from(videoUrls);
+	} catch (error) {
+		global.logMessage(`从网页提取视频URL失败: ${error.message}`, "ERROR");
+		throw error;
+	}
+}
+
+// 自动下载安装yt-dlp的函数
+async function installYtDlp(context) {
+	try {
+		const os = require('os');
+		const fs = require('fs');
+		const path = require('path');
+		const https = require('https');
+
+		const platform = os.platform();
+		const arch = os.arch();
+
+		// 确定yt-dlp下载URL和文件名
+		let downloadUrl;
+		let binaryName;
+
+		if (platform === 'win32') {
+			// Windows
+			binaryName = 'yt-dlp.exe';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+		} else if (platform === 'darwin') {
+			// macOS
+			binaryName = 'yt-dlp';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+		} else {
+			// Linux和其他类Unix系统
+			binaryName = 'yt-dlp';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+		}
+
+		// 确定安装路径 - 使用扩展的全局存储路径
+		const installDir = context.globalStorageUri.fsPath;
+		const installPath = path.join(installDir, binaryName);
+
+		// 确保安装目录存在
+		if (!fs.existsSync(installDir)) {
+			fs.mkdirSync(installDir, { recursive: true });
+		}
+
+		// 检查文件是否已存在且非空
+		if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+			global.logMessage(`yt-dlp 已存在: ${installPath}`, "INFO");
+			return { success: true, path: installPath };
+		}
+
+		global.logMessage(`开始下载 yt-dlp 从 ${downloadUrl}`, "INFO");
+
+		// 使用https模块下载yt-dlp
+		await new Promise((resolve, reject) => {
+			const file = fs.createWriteStream(installPath);
+
+			// 设置请求选项
+			const options = {
+				host: 'github.com',
+				path: downloadUrl.replace('https://github.com', ''),
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+					'Accept': '*/*',
+					'Referer': 'https://github.com/'
+				},
+				timeout: 30000 // 30秒超时
+			};
+
+			// 发起HTTPS请求
+			const request = https.get(downloadUrl, options, (response) => {
+				// 处理重定向
+				if (response.statusCode === 302 || response.statusCode === 301) {
+					const redirectUrl = response.headers.location;
+					global.logMessage(`处理重定向到: ${redirectUrl}`, "INFO");
+					https.get(redirectUrl, (res) => {
+						res.pipe(file);
+						res.on('end', resolve);
+						res.on('error', reject);
+					}).on('error', (err) => {
+						file.close();
+						reject(err);
+					});
+				} else if (response.statusCode === 200) {
+					response.pipe(file);
+					response.on('end', resolve);
+					response.on('error', reject);
+				} else {
+					file.close();
+					reject(new Error(`下载失败，状态码: ${response.statusCode}`));
+				}
+			}).on('error', (err) => {
+				file.close();
+				reject(err);
+			});
+
+			request.on('timeout', () => {
+				file.close();
+				request.abort();
+				reject(new Error('下载超时'));
+			});
+
+			file.on('finish', () => {
+				file.close();
+			});
+
+			file.on('error', (err) => {
+				reject(err);
+			});
+		});
+
+		// 如果是Unix系统，需要设置可执行权限
+		if (platform !== 'win32') {
+			fs.chmodSync(installPath, '755');
+		}
+
+		global.logMessage(`yt-dlp 安装成功: ${installPath}`, "INFO");
+		return { success: true, path: installPath };
+	} catch (error) {
+		global.logMessage(`自动安装 yt-dlp 失败: ${error.message}`, "ERROR");
+		return { success: false, error: error.message };
+	}
+}
