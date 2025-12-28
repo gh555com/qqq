@@ -646,6 +646,19 @@ function Process-Command {
            $result.value_base64 = $b64
         }
       }
+      'clipboard' {
+         # clipboard action implementation
+         $targetDir = $cmd.target_dir
+         $res = [ClipboardHelper]::SaveClipboardImage($targetDir)
+         if ($res -ne $null -and $res.StartsWith("{")) {
+             try {
+                 $parsed = $res | ConvertFrom-Json
+                 $result.type = "image"
+                 $result.path = $parsed.path
+                 $result.fingerprint = $parsed.fingerprint
+             } catch {}
+         }
+      }
       default { $result.error = "unknown action" }
     }
   } catch {

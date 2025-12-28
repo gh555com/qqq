@@ -510,214 +510,28 @@ function shouldShowDuration(info) {
 let downloadContext = null;
 
 async function downloadVideosFromUrlCommand() {
-	try {
-		// 获取用户输入的URL
-		const url = await vscode.window.showInputBox({
-			prompt: "请输入包含视频的网页URL",
-			placeHolder: "https://example.com/page-with-video",
-			validateInput: text => {
-				if (!text) return "URL不能为空";
-				try {
-					new URL(text);
-					return null;
-				} catch {
-					return "请输入有效的URL";
-				}
-			}
-		});
+	const { getSharedDownloader } = require('./dow');
+	const downloader = getSharedDownloader();
 
-		if (!url) {
-			return; // 用户取消了输入
-		}
+	const url = await h.promptForUrl("请输入包含视频的网页URL");
+	if (!url) return;
 
-		// 获取当前工作目录或让用户选择一个目录
-		const folders = vscode.workspace.workspaceFolders;
-		let targetDir;
-		if (folders && folders.length > 0) {
-			targetDir = folders[0].uri.fsPath;
-		} else {
-			// 如果没有工作区，让用户选择一个目录
-			const selectedDir = await vscode.window.showOpenDialog({
-				canSelectFolders: true,
-				canSelectFiles: false,
-				canSelectMany: false,
-				title: "选择视频下载目录"
-			});
-			if (!selectedDir || selectedDir.length === 0) {
-				return; // 用户取消了选择
-			}
-			targetDir = selectedDir[0].fsPath;
-		}
+	const targetDir = await h.pickTargetDirectory();
+	if (!targetDir) return;
 
-		// 显示进度
-		await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: "正在分析网页视频...",
-			cancellable: true
-		}, async (progress, token) => {
-			// 检查是否已安装yt-dlp
-			const { getSharedDownloader } = require('./dow');
-			let downloader = getSharedDownloader();
+	// 确保 yt-dlp 可用（内部处理安装提示）
+	if (!await downloader.ensureYtdlpReady(downloadContext)) return;
 
-			if (!downloader.ytdlp.isAvailable()) {
-				const installConfirmed = await vscode.window.showInformationMessage(
-					"yt-dlp 未安装，是否自动下载安装？",
-					{ modal: true },
-					"是",
-					"否"
-				);
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "正在下载视频...",
+		cancellable: true
+	}, async (progress, token) => {
+		const videos = await downloader.probeAndSelect(url, progress);
+		if (!videos?.length) return;
 
-				if (installConfirmed === "是") {
-					progress.report({ message: "正在自动下载安装 yt-dlp...", increment: 5 });
-					try {
-						// 自动下载并安装yt-dlp
-						const installResult = await downloader.ytdlp.autoInstall(downloadContext);
-						if (installResult.success) {
-							progress.report({ message: "yt-dlp 安装成功，更新路径...", increment: 10 });
-						} else {
-							vscode.window.showErrorMessage(`yt-dlp 安装失败: ${installResult.error}`);
-							return;
-						}
-					} catch (installError) {
-						vscode.window.showErrorMessage(`自动安装 yt-dlp 失败: ${installError.message}`);
-						return;
-					}
-				} else {
-					vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
-					return;
-				}
-			}
-
-			progress.report({ message: "正在探测视频资源...", increment: 10 });
-
-			// 首先尝试使用yt-dlp探测
-			let probeResult = null;
-			let probeError = null;
-			try {
-				probeResult = await downloader.ytdlp.probe(url);
-			} catch (error) {
-				probeError = error;
-			}
-
-			// 如果yt-dlp探测失败，尝试直接解析网页获取视频资源
-			if (!probeResult || !probeResult.success) {
-				progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
-				try {
-					// 尝试获取网页内容并解析视频标签
-					const videoUrls = await h.extractVideoUrlsFromWebPage(url);
-					if (videoUrls && videoUrls.length > 0) {
-						// 创建模拟的探测结果
-						probeResult = {
-							success: true,
-							isPlaylist: false,
-							entries: videoUrls.map((videoUrl, index) => ({
-								id: `direct_video_${index}`,
-								title: `直接视频链接 ${index + 1}`,
-								url: videoUrl,
-								webpageUrl: url
-							}))
-						};
-						probeResult.isPlaylist = videoUrls.length > 1;
-						if (videoUrls.length === 1) {
-							probeResult.title = '直接视频链接';
-							probeResult.url = videoUrls[0];
-						} else {
-							probeResult.entriesCount = videoUrls.length;
-						}
-					} else {
-						// 如果直接解析没有找到视频，尝试使用yt-dlp探测原始URL
-						progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
-						try {
-							probeResult = await downloader.ytdlp.probe(url);
-							if (!probeResult || !probeResult.success) {
-								vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`);
-								return;
-							}
-						} catch (ytDlpError) {
-							vscode.window.showErrorMessage(`视频探测失败: ${ytDlpError.message}`);
-							return;
-						}
-					}
-				} catch (webError) {
-					vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
-					return;
-				}
-			}
-
-			progress.report({ message: "发现视频资源，准备下载...", increment: 30 });
-
-			let videosToDownload = [];
-
-			if (probeResult.isPlaylist) {
-				// 如果是播放列表，让用户选择要下载的视频
-				const items = probeResult.entries.map((entry, index) => ({
-					label: entry.title || `视频 ${index + 1}`,
-					description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
-					detail: entry.url,
-					video: entry
-				}));
-
-				const selectedItems = await vscode.window.showQuickPick(items, {
-					canPickMany: true,
-					placeHolder: "选择要下载的视频",
-					matchOnDescription: true,
-					matchOnDetail: true
-				});
-
-				if (!selectedItems || selectedItems.length === 0) {
-					return; // 用户没有选择任何视频
-				}
-
-				videosToDownload = selectedItems.map(item => item.video);
-			} else {
-				// 如果是单个视频，直接添加
-				videosToDownload = [probeResult.entries ? probeResult.entries[0] : probeResult];
-			}
-
-			progress.report({ message: `准备下载 ${videosToDownload.length} 个视频`, increment: 50 });
-
-			// 为每个视频下载任务创建下载请求
-			const downloadTasks = videosToDownload.map(video => {
-				const filename = h.getTimestampFilename('.mp4');
-				const destPath = path.join(targetDir, filename);
-				return {
-					url: video.url || url,
-					destPath: destPath,
-					tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
-					title: video.title || '网页视频'
-				};
-			});
-
-			// 开始下载
-			const downloadResult = await downloader.downloadAll(downloadTasks, targetDir, {
-				onProgress: (task, event) => {
-					if (event.type === "progress") {
-						progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
-					} else if (event.type === "done") {
-						progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
-					}
-				}
-			});
-
-			// 检查下载结果
-			const successfulDownloads = downloadResult.results.filter(r => r.success);
-			const failedDownloads = downloadResult.results.filter(r => !r.success);
-
-			if (successfulDownloads.length > 0) {
-				vscode.window.showInformationMessage(
-					`成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
-				);
-			} else if (failedDownloads.length > 0) {
-				vscode.window.showErrorMessage(
-					`所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
-				);
-			}
-
-			progress.report({ increment: 100 });
-		});
-	} catch (error) {
-		vscode.window.showErrorMessage(`下载视频时出错: ${error.message}`);
-	}
+		await downloader.downloadVideos(videos, targetDir, progress);
+	});
 }
 
 const pendingJobs = new Map();
@@ -878,7 +692,6 @@ const exported = {
 	setCacheEntry,
 	getCachedBuffer,
 
-	handleClipboardFast,
 	handleClipboardSlow,
 
 	getFolderInfo,

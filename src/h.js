@@ -166,7 +166,7 @@ function getTimestampFilename(ext) {
         c2 = noG[Math.floor(Math.random() * noG.length)];
     }
 
-    return `${ms}${c1}${c2}_${date}__[${day}]__${time}${ext}`;
+    return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
 }
 
 function _fileUriToLocalPath(fileUri) {
@@ -1608,6 +1608,36 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
 
+async function promptForUrl(prompt = "请输入包含视频的网页URL") {
+    return await vscode.window.showInputBox({
+        prompt: prompt,
+        placeHolder: "https://example.com/page-with-video",
+        validateInput: text => {
+            if (!text) return "URL不能为空";
+            try {
+                new URL(text);
+                return null;
+            } catch {
+                return "请输入有效的URL";
+            }
+        }
+    });
+}
+
+async function pickTargetDirectory() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        return folders[0].uri.fsPath;
+    }
+    const selectedDir = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        title: "选择视频下载目录"
+    });
+    return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
+}
+
 module.exports = {
     CLIPBOARD_HELPER_CS,
     autoDetectAndPaste, // Exported
@@ -1622,5 +1652,7 @@ module.exports = {
     getTimestampFilename,
     isImageExtForClipboard,
     spawnOutput,
-    ensureDir
+    ensureDir,
+    promptForUrl,
+    pickTargetDirectory
 };

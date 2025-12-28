@@ -41,6 +41,8 @@ const dns = require("dns");
 const net = require("net");
 const { pipeline, Transform } = require("stream");
 const { spawn, spawnSync } = require("child_process");
+let vscode = null;
+try { vscode = require("vscode"); } catch { }
 
 /* ──────────────────────────────────────────────────────────────
  * 0) 无依赖并发池
@@ -1875,8 +1877,8 @@ class YtDlpDownloader {
         this.ffmpegPath = options.ffmpegPath || null;
 
         // probe 输出限制参数
-        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 2 * 1024 * 1024));
-        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 512 * 1024));
+        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 10 * 1024 * 1024)); // 10MB
+        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 1 * 1024 * 1024)); // 1MB
 
         // 1) 优先用户传入 / PATH
         if (!this.ytdlpPath) this.ytdlpPath = findExecutableInPath("yt-dlp");
@@ -1891,19 +1893,20 @@ class YtDlpDownloader {
         if (!this.ffmpegPath && process.platform !== "win32") {
             this.ffmpegPath = findExecutableInCommonPaths("ffmpeg");
         }
-
-        if (this.ytdlpPath) {
-            try {
-                const r = spawnSync(this.ytdlpPath, ["--version"], { stdio: "ignore", windowsHide: true });
-                if (r.status !== 0) this.ytdlpPath = null;
-            } catch {
-                this.ytdlpPath = null;
-            }
-        }
     }
 
     isAvailable() {
-        return !!this.ytdlpPath;
+        if (!this.ytdlpPath) return false;
+        try {
+            // 简单的存在性检查
+            if (!require('fs').existsSync(this.ytdlpPath)) return false;
+            // 尝试执行一次 version 检查确保可用
+            const { spawnSync } = require("child_process");
+            const r = spawnSync(this.ytdlpPath, ["--version"], { stdio: "ignore", windowsHide: true });
+            return r.status === 0;
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -1912,16 +1915,20 @@ class YtDlpDownloader {
      * - 开关 10：stdout/stderr 限制避免内存炸
      */
     async probe(url) {
-        if (!this.ytdlpPath) {
-            return { success: false, error: "yt-dlp_not_installed" };
+        if (!this.isAvailable()) {
+            return { success: false, error: "yt-dlp_not_installed_or_invalid" };
         }
 
         return new Promise((resolve) => {
+            // 构造参数：模拟浏览器，忽略错误，不下载，dump json
             const args = [
                 "--dump-json",
                 "--no-download",
                 "--no-warnings",
-                "--flat-playlist",
+                "--ignore-errors", // 忽略个别视频错误
+                "--flat-playlist", // 快速列表探测
+                "--no-check-certificate", // 忽略 SSL 错误
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
                 url,
             ];
 
@@ -1959,30 +1966,33 @@ class YtDlpDownloader {
                     return;
                 }
 
-                if (code !== 0) {
-                    resolve({ success: false, error: "probe_failed", stderr: String(stderr || "").slice(0, 4096) });
-                    return;
-                }
-
+                // 只要有 stdout，即使 exit code != 0 也尝试解析（可能是部分成功）
                 const raw = String(stdout || "").trim();
                 if (!raw) {
-                    resolve({ success: false, error: "empty_output", stderr: String(stderr || "").slice(0, 4096) });
+                    resolve({ success: false, error: "probe_failed_empty_output", stderr: String(stderr || "").slice(0, 4096) });
                     return;
                 }
 
                 const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-
                 const tryParseLine = (s) => {
                     try { return JSON.parse(s); } catch { return null; }
                 };
 
-                if (lines.length === 1) {
-                    const info = tryParseLine(lines[0]);
-                    if (!info) {
-                        resolve({ success: false, error: "parse_error" });
-                        return;
-                    }
+                const parsed = [];
+                for (const ln of lines) {
+                    const obj = tryParseLine(ln);
+                    if (obj) parsed.push(obj);
+                }
 
+                if (parsed.length === 0) {
+                    // 如果解析失败，可能是网络问题或不支持
+                    resolve({ success: false, error: "parse_error", stderr: String(stderr || "").slice(0, 4096) });
+                    return;
+                }
+
+                // 单视频
+                if (parsed.length === 1 && !parsed[0]._type && !parsed[0].entries) {
+                    const info = parsed[0];
                     resolve({
                         success: true,
                         title: info.title,
@@ -1992,38 +2002,31 @@ class YtDlpDownloader {
                         filename: info._filename || info.filename,
                         extractor: info.extractor,
                         isLive: info.is_live,
-                        webpageUrl: info.webpage_url,
+                        webpageUrl: info.webpage_url || info.url || url,
                         id: info.id,
+                        url: info.url // 原始/直链 URL
                     });
                     return;
                 }
 
-                const parsed = [];
-                for (const ln of lines) {
-                    const obj = tryParseLine(ln);
-                    if (obj) parsed.push(obj);
-                }
-                if (parsed.length === 0) {
-                    resolve({ success: false, error: "parse_error" });
-                    return;
-                }
-
+                // 列表
                 const first = parsed[0];
                 resolve({
                     success: true,
                     isPlaylist: true,
                     entriesCount: parsed.length,
-                    title: first.title,
+                    title: first.title || "Playlist",
                     thumbnail: first.thumbnail,
                     uploader: first.uploader,
                     extractor: first.extractor,
-                    entries: parsed.slice(0, 20).map((e) => ({
+                    entries: parsed.slice(0, 50).map((e) => ({
                         id: e.id,
-                        title: e.title,
+                        title: e.title || `Video ${e.id}`,
                         duration: e.duration,
                         thumbnail: e.thumbnail,
                         uploader: e.uploader,
-                        url: e.webpage_url || e.url,
+                        url: e.webpage_url || e.url || e.original_url,
+                        original: e
                     })),
                 });
             });
@@ -2033,8 +2036,8 @@ class YtDlpDownloader {
     }
 
     async download(url, destPath, options = {}) {
-        if (!this.ytdlpPath) {
-            return { success: false, error: "yt-dlp_not_installed" };
+        if (!this.isAvailable()) {
+            return { success: false, error: "yt-dlp_not_installed_or_invalid" };
         }
 
         ensureDirForFile(destPath);
@@ -2048,11 +2051,13 @@ class YtDlpDownloader {
                 "-o",
                 destPath,
                 "--no-warnings",
-                "--no-playlist",
+                "--no-playlist", // 明确只下载单个视频（如果 URL 指向列表中的某一项）
                 "--merge-output-format",
                 "mp4",
                 "-f",
                 fmt,
+                "--no-check-certificate",
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             ];
 
             if (this.ffmpegPath) {
@@ -2134,61 +2139,84 @@ class YtDlpDownloader {
                 return { success: true, path: installPath };
             }
 
-            // 使用https模块下载yt-dlp
+            // 使用https模块下载yt-dlp，支持重定向
             await new Promise((resolve, reject) => {
-                const file = fs.createWriteStream(installPath);
+                const downloadFile = (url, redirectCount = 0) => {
+                    if (redirectCount > 5) {
+                        reject(new Error('Too many redirects'));
+                        return;
+                    }
 
-                // 设置请求选项
-                const options = {
-                    host: 'github.com',
-                    path: downloadUrl.replace('https://github.com', ''),
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': '*/*',
-                        'Referer': 'https://github.com/'
-                    },
-                    timeout: 30000 // 30秒超时
+                    const urlObj = new URL(url);
+                    const options = {
+                        hostname: urlObj.hostname,
+                        path: urlObj.pathname + urlObj.search,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                            'Accept': '*/*',
+                            'Accept-Encoding': 'identity', // 禁止压缩，简化处理
+                            'Connection': 'keep-alive'
+                        },
+                        timeout: 30000
+                    };
+
+                    const req = https.get(options, (res) => {
+                        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308) {
+                            const location = res.headers.location;
+                            if (location) {
+                                // 处理相对路径重定向
+                                const nextUrl = new URL(location, url).href;
+                                downloadFile(nextUrl, redirectCount + 1);
+                            } else {
+                                reject(new Error(`Redirect without location header (status: ${res.statusCode})`));
+                            }
+                            // 消耗响应流
+                            res.resume();
+                            return;
+                        }
+
+                        if (res.statusCode === 200) {
+                            const file = fs.createWriteStream(installPath);
+                            res.pipe(file);
+
+                            file.on('finish', () => {
+                                file.close(() => {
+                                    // 再次验证文件大小
+                                    try {
+                                        const stats = fs.statSync(installPath);
+                                        if (stats.size > 0) {
+                                            resolve();
+                                        } else {
+                                            fs.unlinkSync(installPath);
+                                            reject(new Error('Downloaded file is empty'));
+                                        }
+                                    } catch (e) {
+                                        reject(e);
+                                    }
+                                });
+                            });
+
+                            file.on('error', (err) => {
+                                fs.unlink(installPath, () => { }); // 尝试删除
+                                reject(err);
+                            });
+                        } else {
+                            res.resume();
+                            reject(new Error(`Download failed with status code: ${res.statusCode}`));
+                        }
+                    });
+
+                    req.on('error', (err) => {
+                        reject(err);
+                    });
+
+                    req.on('timeout', () => {
+                        req.destroy();
+                        reject(new Error('Download timeout'));
+                    });
                 };
 
-                // 发起HTTPS请求
-                const request = https.get(downloadUrl, options, (response) => {
-                    // 处理重定向
-                    if (response.statusCode === 302 || response.statusCode === 301) {
-                        const redirectUrl = response.headers.location;
-                        https.get(redirectUrl, (res) => {
-                            res.pipe(file);
-                            res.on('end', resolve);
-                            res.on('error', reject);
-                        }).on('error', (err) => {
-                            file.close();
-                            reject(err);
-                        });
-                    } else if (response.statusCode === 200) {
-                        response.pipe(file);
-                        response.on('end', resolve);
-                        response.on('error', reject);
-                    } else {
-                        file.close();
-                        reject(new Error(`下载失败，状态码: ${response.statusCode}`));
-                    }
-                }).on('error', (err) => {
-                    file.close();
-                    reject(err);
-                });
-
-                request.on('timeout', () => {
-                    file.close();
-                    request.abort();
-                    reject(new Error('下载超时'));
-                });
-
-                file.on('finish', () => {
-                    file.close();
-                });
-
-                file.on('error', (err) => {
-                    reject(err);
-                });
+                downloadFile(downloadUrl);
             });
 
             // 如果是Unix系统，需要设置可执行权限
@@ -2416,6 +2444,166 @@ class UnifiedMediaDownloader {
         }
 
         return stats;
+    }
+
+    async ensureYtdlpReady(context) {
+        if (!this.ytdlp.isAvailable()) {
+            if (!vscode) return false;
+            const installConfirmed = await vscode.window.showInformationMessage(
+                "yt-dlp 未安装，是否自动下载安装？",
+                { modal: true },
+                "是",
+                "否"
+            );
+
+            if (installConfirmed === "是") {
+                return await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: "正在安装 yt-dlp...",
+                    cancellable: false
+                }, async (progress) => {
+                    progress.report({ message: "正在下载...", increment: 10 });
+                    const res = await this.ytdlp.autoInstall(context);
+                    if (res.success) {
+                        vscode.window.showInformationMessage("yt-dlp 安装成功");
+                        return true;
+                    } else {
+                        vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                        return false;
+                    }
+                });
+            } else {
+                vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    async probeAndSelect(url, progress) {
+        if (progress) progress.report({ message: "正在探测视频资源...", increment: 10 });
+
+        let probeResult = null;
+        let probeError = null;
+        try {
+            probeResult = await this.ytdlp.probe(url);
+        } catch (error) {
+            probeError = error;
+        }
+
+        if (!probeResult || !probeResult.success) {
+            if (progress) progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
+            try {
+                const h = require('./h');
+                const videoUrls = await h.extractVideoUrlsFromWebPage(url);
+                if (videoUrls && videoUrls.length > 0) {
+                    probeResult = {
+                        success: true,
+                        isPlaylist: videoUrls.length > 1,
+                        entries: videoUrls.map((videoUrl, index) => ({
+                            id: `direct_video_${index}`,
+                            title: `直接视频链接 ${index + 1}`,
+                            url: videoUrl,
+                            webpageUrl: url
+                        }))
+                    };
+                    if (videoUrls.length === 1) {
+                        probeResult.title = '直接视频链接';
+                        probeResult.url = videoUrls[0];
+                    } else {
+                        probeResult.entriesCount = videoUrls.length;
+                    }
+                } else {
+                    if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
+                    probeResult = await this.ytdlp.probe(url);
+                    if (!probeResult || !probeResult.success) {
+                        if (vscode) vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`);
+                        return null;
+                    }
+                }
+            } catch (webError) {
+                if (vscode) vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
+                return null;
+            }
+        }
+
+        if (progress) progress.report({ message: "发现视频资源，准备选择...", increment: 30 });
+
+        let videosToDownload = [];
+
+        if (probeResult.isPlaylist) {
+            if (!vscode) return null;
+            const items = probeResult.entries.map((entry, index) => ({
+                label: entry.title || `视频 ${index + 1}`,
+                description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
+                detail: entry.url,
+                video: entry
+            }));
+
+            const selectedItems = await vscode.window.showQuickPick(items, {
+                canPickMany: true,
+                placeHolder: "选择要下载的视频",
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+
+            if (!selectedItems || selectedItems.length === 0) {
+                return null;
+            }
+            videosToDownload = selectedItems.map(item => item.video);
+        } else {
+            videosToDownload = [probeResult.entries ? probeResult.entries[0] : probeResult];
+        }
+
+        return videosToDownload;
+    }
+
+    async downloadVideos(videos, targetDir, progress) {
+        if (!videos || videos.length === 0) return;
+        if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 });
+
+        const h = require('./h');
+
+        const downloadTasks = videos.map(video => {
+            const filename = h.getTimestampFilename('.mp4');
+            const destPath = require('path').join(targetDir, filename);
+            return {
+                url: video.url,
+                destPath: destPath,
+                tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
+                title: video.title || '网页视频'
+            };
+        });
+
+        const downloadResult = await this.downloadAll(downloadTasks, targetDir, {
+            onProgress: (task, event) => {
+                if (progress) {
+                    if (event.type === "progress") {
+                        progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
+                    } else if (event.type === "done") {
+                        progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
+                    }
+                }
+            }
+        });
+
+        const successfulDownloads = downloadResult.results.filter(r => r.success);
+        const failedDownloads = downloadResult.results.filter(r => !r.success);
+
+        if (vscode) {
+            if (successfulDownloads.length > 0) {
+                vscode.window.showInformationMessage(
+                    `成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
+                );
+            } else if (failedDownloads.length > 0) {
+                vscode.window.showErrorMessage(
+                    `所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
+                );
+            }
+        }
+
+        if (progress) progress.report({ increment: 100 });
+        return downloadResult;
     }
 }
 
