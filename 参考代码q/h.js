@@ -82,7 +82,7 @@ public class ClipboardHelper {
         }
     }
 
-    public static string SaveClipboardImage(string fullPath) {
+    public static string SaveClipboardImage(string targetDir) {
         if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
 
         try {
@@ -99,11 +99,11 @@ public class ClipboardHelper {
             }
 
             try {
+                string fileName = GetTimestampFileName(".png");
+                string fullPath = System.IO.Path.Combine(targetDir, fileName);
+
                 // 确保目录存在
-                string dir = System.IO.Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(dir)) {
-                   System.IO.Directory.CreateDirectory(dir);
-                }
+                System.IO.Directory.CreateDirectory(targetDir);
 
                 img.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
 
@@ -114,6 +114,11 @@ public class ClipboardHelper {
         } finally {
             CloseClipboard();
         }
+    }
+
+    private static string GetTimestampFileName(string extension) {
+        System.DateTime now = System.DateTime.Now;
+        return string.Format("{0:yyyyMMdd_HHmmss}_{1}{2}", now, System.Guid.NewGuid().ToString("N").Substring(0, 8), extension);
     }
 
 }
@@ -204,7 +209,7 @@ function getTimestampFilename(ext) {
         c2 = noG[Math.floor(Math.random() * noG.length)];
     }
 
-    return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
+    return `${ms}${c1}${c2}_${date}__[${day}]__${time}${ext}`;
 }
 
 function _fileUriToLocalPath(fileUri) {
@@ -783,37 +788,11 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 尝试从 script 标签和全局文本中提取 JSON 格式的视频 URL
-        // 很多 SPA 或移动端页面（如百度新闻）将视频信息存储在 JSON 中
+        // 从script标签中提取视频URL（如JSON配置、内联数据等）
         $('script').each((i, elem) => {
-            let scriptContent = $(elem).text();
+            const scriptContent = $(elem).text();
             if (scriptContent && scriptContent.trim()) {
-                // 1. 预处理：反转义 JSON 中的斜杠，以及 Unicode 转义
-                scriptContent = scriptContent.replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
-
-                // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
-                // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
-                const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
-
-                // 宽容正则：key 后面跟任意符号，直到遇到 http
-                const keyRegexStr = `(${commonKeys.join('|')})[^:="']*[:="']+\s*["']?(https?://[^"']+)["']?`;
-                const keyRegex = new RegExp(keyRegexStr, 'gi');
-
-                let keyMatch;
-                while ((keyMatch = keyRegex.exec(scriptContent)) !== null) {
-                    const potentialUrl = keyMatch[2];
-                    // 验证是否包含视频扩展名，或者看起来像视频 URL
-                    if (extensions.some(ext => potentialUrl.includes('.' + ext)) || potentialUrl.includes('video')) {
-                        try {
-                            const fullUrl = new URL(potentialUrl, baseUrl).href;
-                            videoUrls.add(fullUrl);
-                        } catch (e) {
-                            videoUrls.add(potentialUrl);
-                        }
-                    }
-                }
-
-                // 3. 原有的通用正则提取
+                // 使用正则表达式从脚本内容中提取视频URL
                 const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
                 let match;
                 while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
@@ -842,22 +821,6 @@ async function extractVideoUrlsFromWebPage(url) {
         const http = require('http');
         const { URL: NodeURL } = require('url');
 
-        const commonHeaders = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1'
-        };
-
         // 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
         let fetch;
         try {
@@ -866,7 +829,7 @@ async function extractVideoUrlsFromWebPage(url) {
             // 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
             if (typeof global.fetch === 'undefined') {
                 // 如果都没有，使用 https 模块作为备选方案
-                const webContent = await fetchViaHttps(url, commonHeaders);
+                const webContent = await fetchViaHttps(url);
                 const $ = cheerio.load(webContent);
 
                 const videoUrls = new Set();
@@ -931,8 +894,7 @@ async function extractVideoUrlsFromWebPage(url) {
                     const text = $(elem).text();
                     if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO'))) {
                         // 尝试从文本中提取视频URL
-                        // 修正正则：允许 path 中包含 () 等字符，避免截断
-                        const videoUrlMatches = text.match(/https?:\/\/[^\s"']+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^\s"']*/gi);
+                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^"\'\s\<\>\)\(\[\]]*/gi);
                         if (videoUrlMatches) {
                             videoUrlMatches.forEach(match => {
                                 try {
@@ -989,25 +951,16 @@ async function extractVideoUrlsFromWebPage(url) {
 
         const response = await fetch(url, {
             method: 'GET',
-            headers: commonHeaders
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
         });
 
         if (!response.ok) {
-            // 如果是 403/503，可能是 Cloudflare
-            if (response.status === 403 || response.status === 503) {
-                // 抛出特定错误，方便上层捕获并引导用户
-                throw new Error(`HTTP ${response.status}: Forbidden (可能需要浏览器验证)`);
-            }
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         const html = await response.text();
-
-        // 检测 Cloudflare 挑战页面特征
-        if (html.includes('cf-turnstile') || html.includes('challenge-platform') || html.includes('Cloudflare Ray ID')) {
-            throw new Error(`HTTP 403: Cloudflare Challenge Detected`);
-        }
-
         const $ = cheerio.load(html);
 
         const videoUrls = new Set();
@@ -1070,15 +1023,14 @@ async function extractVideoUrlsFromWebPage(url) {
         return Array.from(videoUrls);
     } catch (error) {
         // 定义 fetchViaHttps 函数
-        function fetchViaHttps(targetUrl, customHeaders = {}) {
+        function fetchViaHttps(targetUrl) {
             return new Promise((resolve, reject) => {
                 const urlObj = new NodeURL(targetUrl);
                 const client = urlObj.protocol === 'https:' ? https : http;
 
                 const options = {
                     headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        ...customHeaders
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                     },
                     timeout: 15000 // 15秒超时
                 };
@@ -1488,8 +1440,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         }
 
         const res = await getGlobal().tryOneByOne(async (bridge, name) => {
-            try {
-                const hasImg = await bridge.call("hasImage", {}, 1500);
+            if (name === "shell") {
+                const hasImg = await bridge.call("hasImage", {}, 2000);
                 if (hasImg?.value) {
                     const fname = getTimestampFilename(".png");
                     const dest = path.join(targetDir, fname);
@@ -1500,7 +1452,16 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                         return { type: "image", path: dest, fingerprint: fp };
                     }
                 }
-            } catch (e) { }
+                return null;
+            }
+            const r = await bridge.call("clipboard", { target_dir: targetDir }, 2000);
+            if (r && r.path) {
+                // C# 代码返回了路径，现在用 JS 计算指纹以确保一致性
+                if (fs.existsSync(r.path)) {
+                    const fp = computeFingerprint(r.path);
+                    return { type: "image", path: r.path, fingerprint: fp };
+                }
+            }
             return null;
         });
         if (res) return res;
@@ -1696,36 +1657,6 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
 
-async function promptForUrl(prompt = "请输入包含视频的网页URL") {
-    return await vscode.window.showInputBox({
-        prompt: prompt,
-        placeHolder: "https://example.com/page-with-video",
-        validateInput: text => {
-            if (!text) return "URL不能为空";
-            try {
-                new URL(text);
-                return null;
-            } catch {
-                return "请输入有效的URL";
-            }
-        }
-    });
-}
-
-async function pickTargetDirectory() {
-    const folders = vscode.workspace.workspaceFolders;
-    if (folders && folders.length > 0) {
-        return folders[0].uri.fsPath;
-    }
-    const selectedDir = await vscode.window.showOpenDialog({
-        canSelectFolders: true,
-        canSelectFiles: false,
-        canSelectMany: false,
-        title: "选择视频下载目录"
-    });
-    return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
-}
-
 module.exports = {
     CLIPBOARD_HELPER_CS,
     autoDetectAndPaste, // Exported
@@ -1740,8 +1671,5 @@ module.exports = {
     getTimestampFilename,
     isImageExtForClipboard,
     spawnOutput,
-    ensureDir,
-    promptForUrl,
-    pickTargetDirectory,
-    log // 导出 log 函数
+    ensureDir
 };
