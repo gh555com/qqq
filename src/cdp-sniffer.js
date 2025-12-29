@@ -422,8 +422,12 @@ class CdpSniffer {
                                 if (url.includes('.m3u8') || url.includes('.mpd')) {
                                     this._addCapture(url, null, 'response-mime', targetUrl, len, 100); // 优先级 100
                                     logMsg(`[!!! CAPTURED PRIORITY] ${url}`);
+                                } else if (url.match(/\.(mp4|webm|flv|mov|mkv)(\?|$)/) || mime.includes('mp4') || mime.includes('webm')) {
+                                    // 完整视频文件，优先级也设为 80，避免被 m3u8 过滤掉
+                                    this._addCapture(url, null, 'response-mime', targetUrl, len, 80);
+                                    logMsg(`[!!! CAPTURED VIDEO] ${url}`);
                                 } else {
-                                    // 对于 ts 等片段，稍微延迟一下，或者优先级设低
+                                    // 对于 ts, m4s 等片段，或者未识别后缀的流，优先级设低
                                     this._addCapture(url, null, 'response-mime', targetUrl, len, 10); // 优先级 10
                                     logMsg(`[!!! CAPTURED FRAGMENT] ${url}`);
                                 }
@@ -535,9 +539,14 @@ class CdpSniffer {
         if (priority >= 90) {
             this.capturedVideos.unshift(result);
         } else {
-            // 对于低优先级的，如果列表为空则插入，否则暂存或追加
-            if (this.capturedVideos.length === 0) this.capturedVideos.push(result);
+            // 总是追加低优先级视频
+            this.capturedVideos.push(result);
         }
+    }
+
+    // 获取所有捕获的视频
+    getCapturedVideos() {
+        return this.capturedVideos || [];
     }
 
     // 获取最近捕获的一个结果
@@ -590,7 +599,24 @@ class CdpSniffer {
 
                     // 4. 常见播放器探测
                     if (window.hls && window.hls.url) return JSON.stringify({ url: window.hls.url, cookie: document.cookie, referer: document.referrer });
-                    // ... 其他播放器逻辑类似，暂略，假设它们也返回 URL 字符串 ...
+
+                    // 5. 全局变量深度扫描 (针对百度新闻等 SPA)
+                    // 扫描 window 对象中看起来像视频配置的属性
+                    try {
+                        var keys = Object.keys(window);
+                        for (var i = 0; i < keys.length; i++) {
+                            var k = keys[i];
+                            if (k.includes('Info') || k.includes('Data') || k.includes('Player') || k.includes('Config')) {
+                                var val = window[k];
+                                if (val && typeof val === 'object') {
+                                    var str = JSON.stringify(val);
+                                    // 简单的正则匹配 http + mp4/m3u8
+                                    var match = str.match(/https?:\/\/[^"']+\.(mp4|m3u8|mpd)[^"']*/);
+                                    if (match) return JSON.stringify({ url: match[0].replace(/\\\//g, '/'), cookie: document.cookie, referer: document.referrer });
+                                }
+                            }
+                        }
+                    } catch(e) {}
                 } catch(e) { return null; }
                 return null;
             })()`;
@@ -669,6 +695,47 @@ class CdpSniffer {
             }
         }
         return null;
+    }
+
+    // 获取所有 Frame 的页面源码
+    async getPageSource() {
+        if (!this.ws || this.sessions.size === 0) return null;
+
+        const sessionIds = Array.from(this.sessions);
+        const promises = sessionIds.map(sessionId => {
+            return new Promise(resolve => {
+                const id = this.nextId++;
+                const listener = (data) => {
+                    try {
+                        const msg = JSON.parse(data);
+                        if (msg.id === id) {
+                            const idx = this.ws.listeners['message'].indexOf(listener);
+                            if (idx > -1) this.ws.listeners['message'].splice(idx, 1);
+
+                            if (msg.result && msg.result.result && msg.result.result.value) {
+                                resolve(msg.result.result.value);
+                            } else {
+                                resolve('');
+                            }
+                        }
+                    } catch { resolve(''); }
+                };
+                this.ws.on('message', listener);
+
+                this.sendCommand('Runtime.evaluate', {
+                    expression: 'document.documentElement.outerHTML',
+                    returnByValue: true
+                }, sessionId);
+
+                setTimeout(() => resolve(''), 1500); // 稍微缩短单个超时
+            });
+        });
+
+        try {
+            const sources = await Promise.all(promises);
+            // 将所有源码拼接，用注释分隔，方便分析
+            return sources.filter(s => s && s.length > 0).join('\n<!-- FRAME SEPARATOR -->\n');
+        } catch { return null; }
     }
 
     // 停止并清理

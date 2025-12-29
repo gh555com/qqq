@@ -97,61 +97,125 @@ class VideoDownloadController {
             }
 
             // 3. 用户确认后，提取结果
-            // 如果轮询已经抓到了，直接用；否则再抓一次
-            // 增加兜底：尝试注入 JS 获取
-            let result = capturedResult || await sniffer.getLatestCapture(true);
-            sniffer.stop(); // 停止嗅探
+            // 获取所有捕获结果
+            let results = sniffer.getCapturedVideos();
 
-            if (result) {
-                if (result.url) {
-                    h.log(`[Controller] 用户确认，获取到结果: ${result.url}`);
-                    this.snifferOutput.appendLine(`[Success] 最终捕获: ${result.url}`);
-                } else {
-                    h.log(`[Controller] 用户确认，但结果对象缺少 url 字段`);
-                    this.snifferOutput.appendLine(`[Warn] 捕获到结果对象，但缺少 url 字段`);
-                }
+            // 如果为空，尝试 JS 注入兜底 (JS 注入通常只返回一个结果)
+            if (results.length === 0) {
+                const jsResult = await sniffer.getLatestCapture(true);
+                if (jsResult) results.push(jsResult);
+            }
 
-                // 尝试补充元数据 (Duration, Resolution)
-                try {
-                    if (progress) progress.report({ message: "正在解析视频元数据...", increment: 5 });
-                    const probeRes = await this.downloader.probe(result.url);
-                    if (probeRes && probeRes.success) {
-                        const meta = probeRes.isPlaylist && probeRes.entries ? probeRes.entries[0] : probeRes;
-                        if (meta) {
-                            result.duration = meta.duration;
-                            result.resolution = meta.resolution || (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
-                            // 如果嗅探没拿到大小，尝试用 probe 的
-                            if (!result.filesize) result.filesize = meta.filesize || meta.filesize_approx;
-
-                            this.snifferOutput.appendLine(`[Metadata] 时长: ${result.duration}s, 分辨率: ${result.resolution}, 大小: ${result.filesize}`);
+            // 【新增】合并后台静态 HTTP 扫描结果
+            try {
+                if (progress) progress.report({ message: "正在合并静态扫描结果...", increment: 5 });
+                const staticUrls = await staticScanPromise; // 等待之前的并行任务
+                if (staticUrls && staticUrls.length > 0) {
+                    for (const vUrl of staticUrls) {
+                        // 去重
+                        if (!results.some(r => r.url === vUrl)) {
+                            results.push({
+                                url: vUrl,
+                                priority: 15, // 比普通分片略高
+                                cookieSource: 'http-static',
+                                timestamp: Date.now(),
+                                userDataDir: sniffer.tmpDir // 仍然借用浏览器 Profile，万一需要
+                            });
                         }
                     }
-                } catch (e) {
-                    this.snifferOutput.appendLine(`[Metadata] 元数据解析失败: ${e.message}`);
+                    this.snifferOutput.appendLine(`[Success] 已合并 ${staticUrls.length} 个静态扫描结果`);
                 }
+            } catch (e) { }
 
-                // 打印最终透传的 Headers，方便调试 403 问题
-                if (result.headers) {
-                    this.snifferOutput.appendLine(`[Headers] Cookie: ${result.headers['Cookie'] ? 'Yes' : 'No'}, Referer: ${result.headers['Referer'] || 'None'}, Origin: ${result.headers['Origin'] || 'None'}`);
+            // 【增强】主动获取页面源码并进行静态分析
+            // 无论之前是否抓到了视频，都尝试从源码中挖出更多链接（如多分辨率列表）
+            try {
+                if (progress) progress.report({ message: "正在从页面源码中挖掘更多链接...", increment: 5 });
+                const pageSource = await sniffer.getPageSource();
+                if (pageSource) {
+                    const staticVideos = h.extractVideoUrlsFromHtmlFragment(pageSource, url);
+                    if (staticVideos && staticVideos.length > 0) {
+                        h.log(`[Controller] 静态分析发现 ${staticVideos.length} 个链接`);
+                        this.snifferOutput.appendLine(`[Static] 从源码中解析出 ${staticVideos.length} 个视频链接`);
+
+                        // 将静态结果合并到 results 中
+                        for (const vUrl of staticVideos) {
+                            // 去重
+                            if (!results.some(r => r.url === vUrl)) {
+                                results.push({
+                                    url: vUrl,
+                                    priority: 10, // 静态分析优先级较低
+                                    cookieSource: 'cdp-static',
+                                    timestamp: Date.now(),
+                                    // 静态分析没有 Headers，但我们可以复用嗅探到的 User-Agent 和 Cookie (如果有)
+                                    // 或者我们假设它不需要特殊 Header (通常直链不需要，或者只需要 Referer)
+                                    userDataDir: sniffer.tmpDir // 仍然传递 Profile Path
+                                });
+                            }
+                        }
+                    }
                 }
+            } catch (e) {
+                this.snifferOutput.appendLine(`[Static] 源码分析失败: ${e.message}`);
+            }
+
+            sniffer.stop(); // 停止嗅探
+
+            if (results.length > 0) {
+                h.log(`[Controller] 用户确认，捕获到 ${results.length} 个结果`);
+                this.snifferOutput.appendLine(`[Success] 最终捕获 ${results.length} 个结果`);
+
+                // 移除所有自动过滤逻辑，响应用户需求：列出一切！
+                // 只是为了体验好一点，我们按优先级排序：m3u8/mp4 (100/80) > 静态结果 (15) > 分片 (10)
+                results.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+                // 批量处理元数据 (并发限制，比如最多 10 个)
+                // 为避免太慢，只对前 5 个进行详细 probe，其他的只使用基本信息
+                const resultsToProcess = results.slice(0, 10);
+
+                if (progress) progress.report({ message: "正在解析视频元数据...", increment: 5 });
+
+                const processed = await Promise.all(resultsToProcess.map(async (res, index) => {
+                    // 尝试补充元数据 (Duration, Resolution)
+                    try {
+                        // 只有当没有时长/大小时才去 probe
+                        if (!res.duration || !res.filesize) {
+                            const probeRes = await this.downloader.probe(res.url);
+                            if (probeRes && probeRes.success) {
+                                const meta = probeRes.isPlaylist && probeRes.entries ? probeRes.entries[0] : probeRes;
+                                if (meta) {
+                                    res.duration = meta.duration;
+                                    res.resolution = meta.resolution || (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
+                                    if (!res.filesize) res.filesize = meta.filesize || meta.filesize_approx;
+                                }
+                            }
+                        }
+                    } catch (e) { }
+
+                    // 打印最终透传的 Headers
+                    this.snifferOutput.appendLine(`[Result ${index + 1}] ${res.url} (Size:${res.filesize}, Dur:${res.duration})`);
+
+                    return {
+                        title: `嗅探结果 ${index + 1}`,
+                        description: `[${res.resolution || 'Unknown'}] ${res.url}`,
+                        url: res.url,
+                        duration: res.duration,
+                        filesize: res.filesize,
+                        resolution: res.resolution,
+                        _meta: {
+                            cookieSource: 'custom',
+                            referer: res.headers ? res.headers['Referer'] : undefined,
+                            userAgent: res.headers ? res.headers['User-Agent'] : undefined,
+                            cookie: res.headers ? res.headers['Cookie'] : undefined,
+                            origin: res.headers ? res.headers['Origin'] : undefined,
+                            browserProfilePath: res.userDataDir
+                        }
+                    };
+                }));
 
                 if (progress) progress.report({ message: "捕获成功，准备下载...", increment: 10 });
-                return [{
-                    title: "浏览器嗅探结果",
-                    description: "通过浏览器自动捕获",
-                    url: result.url,
-                    duration: result.duration,
-                    filesize: result.filesize,
-                    resolution: result.resolution,
-                    _meta: {
-                        cookieSource: 'custom',
-                        referer: result.headers ? result.headers['Referer'] : undefined,
-                        userAgent: result.headers ? result.headers['User-Agent'] : undefined,
-                        cookie: result.headers ? result.headers['Cookie'] : undefined,
-                        origin: result.headers ? result.headers['Origin'] : undefined, // 传递 Origin
-                        browserProfilePath: result.userDataDir // 传递浏览器配置路径
-                    }
-                }];
+                return processed;
+
             } else {
                 h.log(`[Controller] 用户确认，但未获取到结果`); // 兜底日志
                 this.snifferOutput.appendLine(`[Error] 用户点击确认，但未能提取到有效视频流。`);
@@ -482,22 +546,7 @@ class VideoDownloadController {
     }
 
     async _promptUserSelection(videos) {
-        if (videos.length === 1) {
-            const v = videos[0];
-            const metaParts = [];
-            if (v.duration) metaParts.push(this._formatDuration(v.duration));
-            if (v.filesize) metaParts.push(this._formatSize(v.filesize));
-            if (v.resolution) metaParts.push(v.resolution);
-
-            const metaStr = metaParts.length > 0 ? `(${metaParts.join(', ')})` : '';
-
-            const choice = await vscode.window.showInformationMessage(
-                `发现视频: ${v.title} ${metaStr}`,
-                "立即下载", "取消"
-            );
-            return choice === "立即下载" ? [v] : null;
-        }
-
+        // 统一使用 QuickPick，即使只有一个视频也显示列表，方便用户查看详情
         const items = videos.map((v, i) => {
             const metaParts = [];
             if (v.duration) metaParts.push(this._formatDuration(v.duration));

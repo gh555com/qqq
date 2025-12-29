@@ -745,11 +745,37 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 从script标签中提取视频URL（如JSON配置、内联数据等）
+        // 尝试从 script 标签和全局文本中提取 JSON 格式的视频 URL
+        // 很多 SPA 或移动端页面（如百度新闻）将视频信息存储在 JSON 中
         $('script').each((i, elem) => {
-            const scriptContent = $(elem).text();
+            let scriptContent = $(elem).text();
             if (scriptContent && scriptContent.trim()) {
-                // 使用正则表达式从脚本内容中提取视频URL
+                // 1. 预处理：反转义 JSON 中的斜杠，以及 Unicode 转义
+                scriptContent = scriptContent.replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
+
+                // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
+                // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
+                const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
+                
+                // 宽容正则：key 后面跟任意符号，直到遇到 http
+                const keyRegexStr = `(${commonKeys.join('|')})[^:="']*[:="']+\s*["']?(https?://[^"']+)["']?`;
+                const keyRegex = new RegExp(keyRegexStr, 'gi');
+
+                let keyMatch;
+                while ((keyMatch = keyRegex.exec(scriptContent)) !== null) {
+                    const potentialUrl = keyMatch[2];
+                    // 验证是否包含视频扩展名，或者看起来像视频 URL
+                    if (extensions.some(ext => potentialUrl.includes('.' + ext)) || potentialUrl.includes('video')) {
+                        try {
+                            const fullUrl = new URL(potentialUrl, baseUrl).href;
+                            videoUrls.add(fullUrl);
+                        } catch (e) {
+                            videoUrls.add(potentialUrl);
+                        }
+                    }
+                }
+
+                // 3. 原有的通用正则提取
                 const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
                 let match;
                 while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
@@ -867,7 +893,8 @@ async function extractVideoUrlsFromWebPage(url) {
                     const text = $(elem).text();
                     if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO'))) {
                         // 尝试从文本中提取视频URL
-                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^"\'\s\<\>\)\(\[\]]*/gi);
+                        // 修正正则：允许 path 中包含 () 等字符，避免截断
+                        const videoUrlMatches = text.match(/https?:\/\/[^\s"']+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^\s"']*/gi);
                         if (videoUrlMatches) {
                             videoUrlMatches.forEach(match => {
                                 try {
