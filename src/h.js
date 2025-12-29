@@ -778,6 +778,22 @@ async function extractVideoUrlsFromWebPage(url) {
         const http = require('http');
         const { URL: NodeURL } = require('url');
 
+        const commonHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        };
+
         // 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
         let fetch;
         try {
@@ -786,7 +802,7 @@ async function extractVideoUrlsFromWebPage(url) {
             // 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
             if (typeof global.fetch === 'undefined') {
                 // 如果都没有，使用 https 模块作为备选方案
-                const webContent = await fetchViaHttps(url);
+                const webContent = await fetchViaHttps(url, commonHeaders);
                 const $ = cheerio.load(webContent);
 
                 const videoUrls = new Set();
@@ -908,16 +924,25 @@ async function extractVideoUrlsFromWebPage(url) {
 
         const response = await fetch(url, {
             method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
+            headers: commonHeaders
         });
 
         if (!response.ok) {
+            // 如果是 403/503，可能是 Cloudflare
+            if (response.status === 403 || response.status === 503) {
+                // 抛出特定错误，方便上层捕获并引导用户
+                throw new Error(`HTTP ${response.status}: Forbidden (可能需要浏览器验证)`);
+            }
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         const html = await response.text();
+
+        // 检测 Cloudflare 挑战页面特征
+        if (html.includes('cf-turnstile') || html.includes('challenge-platform') || html.includes('Cloudflare Ray ID')) {
+            throw new Error(`HTTP 403: Cloudflare Challenge Detected`);
+        }
+
         const $ = cheerio.load(html);
 
         const videoUrls = new Set();
@@ -980,14 +1005,15 @@ async function extractVideoUrlsFromWebPage(url) {
         return Array.from(videoUrls);
     } catch (error) {
         // 定义 fetchViaHttps 函数
-        function fetchViaHttps(targetUrl) {
+        function fetchViaHttps(targetUrl, customHeaders = {}) {
             return new Promise((resolve, reject) => {
                 const urlObj = new NodeURL(targetUrl);
                 const client = urlObj.protocol === 'https:' ? https : http;
 
                 const options = {
                     headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        ...customHeaders
                     },
                     timeout: 15000 // 15秒超时
                 };
@@ -1654,5 +1680,6 @@ module.exports = {
     spawnOutput,
     ensureDir,
     promptForUrl,
-    pickTargetDirectory
+    pickTargetDirectory,
+    log // 导出 log 函数
 };

@@ -1928,126 +1928,156 @@ class YtDlpDownloader {
                 "--ignore-errors", // 忽略个别视频错误
                 "--flat-playlist", // 快速列表探测
                 "--no-check-certificate", // 忽略 SSL 错误
-                // 移除硬编码 UA，使用 yt-dlp 默认策略以获得更好兼容性
+                "--extractor-args", "generic:impersonate", // 绕过 Cloudflare 反爬虫
+                // 尝试模拟浏览器环境以提高嗅探成功率
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 url,
             ];
 
-            const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
+            // 第一次尝试：普通探测
+            const doProbe = (extraArgs = []) => {
+                return new Promise((resolveProbe) => {
+                    const proc = spawn(this.ytdlpPath, [...args, ...extraArgs], { windowsHide: true });
 
-            let stdout = "";
-            let stderr = "";
-            let killedByLimit = false;
+                    let stdout = "";
+                    let stderr = "";
+                    let killedByLimit = false;
 
-            const limitStdout = this.security.enableProbeOutputLimit ? this.maxProbeStdoutBytes : 0;
-            const limitStderr = this.security.enableProbeOutputLimit ? this.maxProbeStderrBytes : 0;
+                    const limitStdout = this.security.enableProbeOutputLimit ? this.maxProbeStdoutBytes : 0;
+                    const limitStderr = this.security.enableProbeOutputLimit ? this.maxProbeStderrBytes : 0;
 
-            const killIfTooLarge = () => {
-                if (!this.security.enableProbeOutputLimit) return;
-                if (killedByLimit) return;
+                    const killIfTooLarge = () => {
+                        if (!this.security.enableProbeOutputLimit) return;
+                        if (killedByLimit) return;
 
-                if ((limitStdout > 0 && stdout.length > limitStdout) || (limitStderr > 0 && stderr.length > limitStderr)) {
-                    killedByLimit = true;
-                    try { proc.kill("SIGKILL"); } catch { }
-                }
+                        if ((limitStdout > 0 && stdout.length > limitStdout) || (limitStderr > 0 && stderr.length > limitStderr)) {
+                            killedByLimit = true;
+                            try { proc.kill("SIGKILL"); } catch { }
+                        }
+                    };
+
+                    proc.stdout.on("data", (d) => {
+                        stdout += d.toString("utf8");
+                        killIfTooLarge();
+                    });
+                    proc.stderr.on("data", (d) => {
+                        stderr += d.toString("utf8");
+                        killIfTooLarge();
+                    });
+
+                    proc.on("close", (code) => {
+                        if (killedByLimit) {
+                            resolveProbe({ success: false, error: "probe_output_too_large" });
+                            return;
+                        }
+
+                        const raw = String(stdout || "").trim();
+                        if (!raw) {
+                            let errorMsg = "probe_failed_empty_output";
+                            const stderrStr = String(stderr || "").trim();
+                            if (stderrStr) {
+                                const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
+                                if (errorMatch && errorMatch[1]) {
+                                    errorMsg = errorMatch[1].trim();
+                                } else {
+                                    const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
+                                    if (lines.length > 0) errorMsg = lines[lines.length - 1];
+                                }
+                            }
+                            resolveProbe({ success: false, error: errorMsg, stderr: stderrStr });
+                            return;
+                        }
+
+                        const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+                        const tryParseLine = (s) => {
+                            try { return JSON.parse(s); } catch { return null; }
+                        };
+
+                        const parsed = [];
+                        for (const ln of lines) {
+                            const obj = tryParseLine(ln);
+                            if (obj) parsed.push(obj);
+                        }
+
+                        if (parsed.length === 0) {
+                            resolveProbe({ success: false, error: "parse_error", stderr: String(stderr || "").slice(0, 4096) });
+                            return;
+                        }
+
+                        // 单视频
+                        if (parsed.length === 1 && !parsed[0]._type && !parsed[0].entries) {
+                            const info = parsed[0];
+                            resolveProbe({
+                                success: true,
+                                title: info.title,
+                                duration: info.duration,
+                                thumbnail: info.thumbnail,
+                                uploader: info.uploader,
+                                filename: info._filename || info.filename,
+                                extractor: info.extractor,
+                                isLive: info.is_live,
+                                webpageUrl: info.webpage_url || info.url || url,
+                                id: info.id,
+                                url: info.url,
+                                // 透传成功的 cookieSource (如果有)
+                                cookieSource: extraArgs.includes("chrome") ? "chrome" :
+                                    extraArgs.includes("edge") ? "edge" :
+                                        extraArgs.includes("firefox") ? "firefox" : null
+                            });
+                            return;
+                        }
+
+                        // 列表
+                        const first = parsed[0];
+                        resolveProbe({
+                            success: true,
+                            isPlaylist: true,
+                            entriesCount: parsed.length,
+                            title: first.title || "Playlist",
+                            thumbnail: first.thumbnail,
+                            uploader: first.uploader,
+                            extractor: first.extractor,
+                            cookieSource: extraArgs.includes("chrome") ? "chrome" :
+                                extraArgs.includes("edge") ? "edge" :
+                                    extraArgs.includes("firefox") ? "firefox" : null,
+                            entries: parsed.slice(0, 50).map((e) => ({
+                                id: e.id,
+                                title: e.title || `Video ${e.id}`,
+                                duration: e.duration,
+                                thumbnail: e.thumbnail,
+                                uploader: e.uploader,
+                                url: e.webpage_url || e.url || e.original_url,
+                                original: e
+                            })),
+                        });
+                    });
+
+                    proc.on("error", (e) => resolveProbe({ success: false, error: e.message }));
+                });
             };
 
-            proc.stdout.on("data", (d) => {
-                stdout += d.toString("utf8");
-                killIfTooLarge();
-            });
-            proc.stderr.on("data", (d) => {
-                stderr += d.toString("utf8");
-                killIfTooLarge();
-            });
-
-            proc.on("close", (code) => {
-                if (killedByLimit) {
-                    resolve({ success: false, error: "probe_output_too_large" });
-                    return;
-                }
-
-                // 只要有 stdout，即使 exit code != 0 也尝试解析（可能是部分成功）
-                const raw = String(stdout || "").trim();
-                if (!raw) {
-                    // 尝试从 stderr 提取更有用的错误信息
-                    let errorMsg = "probe_failed_empty_output";
-                    const stderrStr = String(stderr || "").trim();
-                    if (stderrStr) {
-                        // 提取 "ERROR: ..."
-                        const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
-                        if (errorMatch && errorMatch[1]) {
-                            errorMsg = errorMatch[1].trim();
-                        } else {
-                            // 如果没有标准 ERROR 格式，取最后一行非空内容
-                            const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
-                            if (lines.length > 0) {
-                                errorMsg = lines[lines.length - 1];
-                            }
-                        }
-                    }
-                    resolve({ success: false, error: errorMsg, stderr: stderrStr });
-                    return;
-                }
-
-                const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-                const tryParseLine = (s) => {
-                    try { return JSON.parse(s); } catch { return null; }
-                };
-
-                const parsed = [];
-                for (const ln of lines) {
-                    const obj = tryParseLine(ln);
-                    if (obj) parsed.push(obj);
-                }
-
-                if (parsed.length === 0) {
-                    // 如果解析失败，可能是网络问题或不支持
-                    resolve({ success: false, error: "parse_error", stderr: String(stderr || "").slice(0, 4096) });
-                    return;
-                }
-
-                // 单视频
-                if (parsed.length === 1 && !parsed[0]._type && !parsed[0].entries) {
-                    const info = parsed[0];
-                    resolve({
-                        success: true,
-                        title: info.title,
-                        duration: info.duration,
-                        thumbnail: info.thumbnail,
-                        uploader: info.uploader,
-                        filename: info._filename || info.filename,
-                        extractor: info.extractor,
-                        isLive: info.is_live,
-                        webpageUrl: info.webpage_url || info.url || url,
-                        id: info.id,
-                        url: info.url // 原始/直链 URL
+            doProbe().then(res => {
+                // 如果第一次失败，且看起来是 403/ExtractorError，尝试带上浏览器 Cookie 重试
+                // 这能模拟 VDH 的“在浏览器中嗅探”的效果
+                if (!res.success && (
+                    res.error?.includes("403") ||
+                    res.error?.includes("401") ||
+                    res.error?.includes("Unable to extract") ||
+                    res.error?.includes("Sign in") ||
+                    res.error?.includes("Unsupported URL")
+                )) {
+                    // 尝试使用 chrome cookies (Windows 常见)
+                    // 注意：这可能会稍微慢一点，但在失败时值得一试
+                    return doProbe(["--cookies-from-browser", "chrome"]).then(res2 => {
+                        if (res2.success) return res2;
+                        // 如果 Chrome 也不行，尝试 Edge
+                        return doProbe(["--cookies-from-browser", "edge"]).then(res3 => {
+                            return res3.success ? res3 : res; // 如果都失败，返回第一次的错误（通常更直观）
+                        });
                     });
-                    return;
                 }
-
-                // 列表
-                const first = parsed[0];
-                resolve({
-                    success: true,
-                    isPlaylist: true,
-                    entriesCount: parsed.length,
-                    title: first.title || "Playlist",
-                    thumbnail: first.thumbnail,
-                    uploader: first.uploader,
-                    extractor: first.extractor,
-                    entries: parsed.slice(0, 50).map((e) => ({
-                        id: e.id,
-                        title: e.title || `Video ${e.id}`,
-                        duration: e.duration,
-                        thumbnail: e.thumbnail,
-                        uploader: e.uploader,
-                        url: e.webpage_url || e.url || e.original_url,
-                        original: e
-                    })),
-                });
-            });
-
-            proc.on("error", (e) => resolve({ success: false, error: e.message }));
+                return res;
+            }).then(resolve);
         });
     }
 
@@ -2058,51 +2088,120 @@ class YtDlpDownloader {
 
         ensureDirForFile(destPath);
 
-        return new Promise((resolve) => {
-            const fmt =
-                options.format ||
-                "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
+        // 如果外部指定了 referer，优先使用
+        const referer = options.referer || url;
 
-            const args = [
-                "-o",
-                destPath,
-                "--no-warnings",
-                "--no-playlist", // 明确只下载单个视频（如果 URL 指向列表中的某一项）
-                "--merge-output-format",
-                "mp4",
-                "-f",
-                fmt,
-                "--no-check-certificate",
-                // 移除硬编码 UA
-            ];
+        const runDownload = (extraArgs = []) => {
+            return new Promise((resolve) => {
+                const fmt =
+                    options.format ||
+                    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
 
-            if (this.ffmpegPath) {
-                args.unshift("--ffmpeg-location", this.ffmpegPath);
-            }
+                const args = [
+                    "-o",
+                    destPath,
+                    "--no-warnings",
+                    "--no-playlist",
+                    "--merge-output-format",
+                    "mp4",
+                    "-f",
+                    fmt,
+                    "--no-check-certificate",
+                    "--no-cache-dir",
+                    "--extractor-args", "generic:impersonate", // 绕过 Cloudflare 反爬虫
+                    "--referer", referer, // 使用修正后的 referer
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    ...extraArgs
+                ];
 
-            if (options.rateLimit) {
-                args.push("-r", String(options.rateLimit)); // e.g. "2M"
-            }
+                if (this.ffmpegPath) {
+                    args.unshift("--ffmpeg-location", this.ffmpegPath);
+                }
 
-            args.push(url);
+                if (options.rateLimit) {
+                    args.push("-r", String(options.rateLimit));
+                }
 
-            const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
+                args.push(url);
 
-            const onLine = (line) => {
-                const m = String(line).match(/(\d+(\.\d+)?)%/);
-                if (m && options.onProgress) options.onProgress(parseFloat(m[1]));
-            };
+                const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
 
-            proc.stdout.on("data", (d) => onLine(d.toString()));
-            proc.stderr.on("data", (d) => onLine(d.toString()));
+                let stderr = "";
 
-            proc.on("close", (code) => {
-                if (code === 0) resolve({ success: true, path: destPath });
-                else resolve({ success: false, error: `exit_code_${code}` });
+                const onLine = (line) => {
+                    const m = String(line).match(/(\d+(\.\d+)?)%/);
+                    if (m && options.onProgress) options.onProgress(parseFloat(m[1]));
+                };
+
+                proc.stdout.on("data", (d) => onLine(d.toString()));
+                proc.stderr.on("data", (d) => {
+                    const s = d.toString();
+                    stderr += s;
+                    onLine(s);
+                });
+
+                proc.on("close", (code) => {
+                    if (code === 0) {
+                        resolve({ success: true, path: destPath });
+                    } else {
+                        // 提取详细错误
+                        let errorMsg = `exit_code_${code}`;
+                        const stderrStr = String(stderr || "").trim();
+                        if (stderrStr) {
+                            const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
+                            if (errorMatch && errorMatch[1]) {
+                                errorMsg = errorMatch[1].trim();
+                            } else {
+                                // 取最后几行非空日志作为错误信息
+                                const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
+                                // 过滤掉进度条等无用信息
+                                const errLines = lines.filter(l => !l.startsWith('[download]') && !l.match(/^\d+%|ETA/));
+                                if (errLines.length > 0) {
+                                    errorMsg = errLines.slice(-1)[0]; // 取最后一行
+                                }
+                            }
+                        }
+                        resolve({ success: false, error: errorMsg, code });
+                    }
+                });
+
+                proc.on("error", (e) => resolve({ success: false, error: e.message }));
             });
+        };
 
-            proc.on("error", (e) => resolve({ success: false, error: e.message }));
-        });
+        // 策略优化：如果明确指定了 cookieSource，直接使用它，不做无用的首次尝试
+        if (options.cookieSource) {
+            const cs = options.cookieSource.toLowerCase();
+            if (cs === 'chrome' || cs === 'edge' || cs === 'firefox') {
+                return await runDownload(["--cookies-from-browser", cs]);
+            }
+        }
+
+        // 首次尝试 (默认无 Cookie)
+        let res = await runDownload();
+
+        // 如果失败且看起来是权限/解析问题，尝试带 Cookie 重试
+        if (!res.success && (
+            res.error?.includes("403") ||
+            res.error?.includes("401") ||
+            res.error?.includes("Unable to extract") ||
+            res.error?.includes("Sign in") ||
+            res.error?.includes("exit_code") // 宽容策略：只要失败就尝试一次 Cookie，反正用户已经在浏览器里打开了
+        )) {
+            // 1. Chrome
+            const resChrome = await runDownload(["--cookies-from-browser", "chrome"]);
+            if (resChrome.success) return resChrome;
+
+            // 2. Edge
+            const resEdge = await runDownload(["--cookies-from-browser", "edge"]);
+            if (resEdge.success) return resEdge;
+
+            // 3. Firefox (VDH 用户很多是用 Firefox)
+            const resFirefox = await runDownload(["--cookies-from-browser", "firefox"]);
+            if (resFirefox.success) return resFirefox;
+        }
+
+        return res;
     }
 
     setBinaryPath(path) {
@@ -2384,6 +2483,9 @@ class UnifiedMediaDownloader {
                 const r = await this.ytdlp.download(t.url, t.destPath, {
                     rateLimit: opts.videoRateLimit,
                     format: opts.videoFormat,
+                    // 透传元数据
+                    cookieSource: t.meta?.cookieSource,
+                    referer: t.meta?.referer,
                     onProgress: (p) => onProgress && onProgress(t, { type: "progress", protocol: "yt-dlp", progress: p }),
                 });
 
@@ -2616,7 +2718,10 @@ class UnifiedMediaDownloader {
                 url: video.url,
                 destPath: destPath,
                 tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
-                title: video.title || '网页视频'
+                title: video.title || '网页视频',
+                // 关键修正：从 video 对象中提取并传递元数据
+                // VideoDownloadController 里的 _normalizeProbeResult 会把 _meta 放在 video._meta 或 video 对象本身
+                meta: video._meta || video.meta
             };
         });
 

@@ -510,28 +510,9 @@ function shouldShowDuration(info) {
 let downloadContext = null;
 
 async function downloadVideosFromUrlCommand() {
-	const { getSharedDownloader } = require('./dow');
-	const downloader = getSharedDownloader();
-
-	const url = await h.promptForUrl("请输入包含视频的网页URL");
-	if (!url) return;
-
-	const targetDir = await h.pickTargetDirectory();
-	if (!targetDir) return;
-
-	// 确保 yt-dlp 可用（内部处理安装提示）
-	if (!await downloader.ensureYtdlpReady(downloadContext)) return;
-
-	await vscode.window.withProgress({
-		location: vscode.ProgressLocation.Notification,
-		title: "正在下载视频...",
-		cancellable: true
-	}, async (progress, token) => {
-		const videos = await downloader.probeAndSelect(url, progress);
-		if (!videos?.length) return;
-
-		await downloader.downloadVideos(videos, targetDir, progress);
-	});
+	const VideoDownloadController = require('./VideoDownloadController');
+	const controller = new VideoDownloadController(downloadContext);
+	await controller.start();
 }
 
 const pendingJobs = new Map();
