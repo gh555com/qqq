@@ -294,17 +294,17 @@ class VideoDownloadController {
 
                 if (token.isCancellationRequested) return;
 
-                // 策略 B: 如果 yt-dlp 失败或返回为空，尝试网页解析 (递归嗅探)
-                // 针对类似 gazeta.ru 这种新闻页，视频往往在 iframe 里
-                if (candidates.length === 0) {
+                // 策略 B: 总是尝试网页解析 (递归嗅探)，作为补充
+                // 即使 yt-dlp 成功了，可能只抓到了主视频，网页解析能发现更多（如推荐视频、iframe等）
+                if (true) {
                     progress.report({ message: "尝试深度网页解析...", increment: 20 });
                     try {
                         const webVideoUrls = await h.extractVideoUrlsFromWebPage(url);
                         if (webVideoUrls && webVideoUrls.length > 0) {
                             // 对提取到的每个潜在视频URL，再次尝试用 yt-dlp 确认
-                            // 限制并发数为 3，避免卡死
+                            // 限制并发数为 5，提高效率
                             const validVideos = [];
-                            await this._batchProbe(webVideoUrls, 3, (v) => validVideos.push(v), progress);
+                            await this._batchProbe(webVideoUrls, 5, (v) => validVideos.push(v), progress);
                             candidates.push(...validVideos);
                         }
                     } catch (e) {

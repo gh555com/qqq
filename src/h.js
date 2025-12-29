@@ -914,7 +914,7 @@ async function extractVideoUrlsFromWebPage(url) {
                 });
 
                 // 查找可能的视频文件扩展名链接
-                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
                 $('a, [href]').each((i, elem) => {
                     const href = $(elem).attr('href');
                     if (href) {
@@ -929,10 +929,10 @@ async function extractVideoUrlsFromWebPage(url) {
                 // 查找包含视频数据的script/pre标签（如JSON-LD结构）
                 $('script, pre').each((i, elem) => {
                     const text = $(elem).text();
-                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO'))) {
+                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO') || text.includes('m3u8') || text.includes('mp4'))) {
                         // 尝试从文本中提取视频URL
-                        // 修正正则：允许 path 中包含 () 等字符，避免截断
-                        const videoUrlMatches = text.match(/https?:\/\/[^\s"']+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^\s"']*/gi);
+                        // 修正正则：更加严谨的排除字符，并支持更多格式(m3u8, mpd)
+                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^"\'\s\<\>\)\(\[\]]*/gi);
                         if (videoUrlMatches) {
                             videoUrlMatches.forEach(match => {
                                 try {
@@ -951,8 +951,8 @@ async function extractVideoUrlsFromWebPage(url) {
                             // 由于这类视频通常需要特殊处理，我们直接返回原始页面URL
                             // 让yt-dlp来处理这些特殊平台的视频提取
                             videoUrls.add(url); // 添加页面URL供yt-dlp处理
-                            // 同时尝试从iframe src中提取视频URL
-                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/player[^"\'\s\<\>\)\(\[\]]*/gi);
+                            // 同时尝试从iframe src中提取视频URL (匹配 player, embed 等特征)
+                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/(player|embed|video)[^"\'\s\<\>\)\(\[\]]*/gi);
                             if (iframeSrcMatches) {
                                 iframeSrcMatches.forEach(match => {
                                     try {
