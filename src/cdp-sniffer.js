@@ -263,6 +263,16 @@ class CdpSniffer {
         this.browserProcess = null;
         this.ws = null;
         this.tmpDir = path.join(os.tmpdir(), 'vscode-video-sniffer-' + Date.now());
+        this.nextId = 1000; // 初始化 ID 计数器
+    }
+
+    // 统一发送命令的方法
+    sendCommand(method, params = {}, sessionId = undefined) {
+        if (!this.ws) return;
+        const id = this.nextId++;
+        const msg = { id, method, params };
+        if (sessionId) msg.sessionId = sessionId;
+        this.ws.send(JSON.stringify(msg));
     }
 
     // 启动监听模式
@@ -318,18 +328,14 @@ class CdpSniffer {
                     // 只是不再使用 AutoAttach 的 flatten 模式，或者尝试手动 Attach
 
                     // 1. 发现所有 Target
-                    this.ws.send(JSON.stringify({ id: 100, method: 'Target.setDiscoverTargets', params: { discover: true } }));
+                    this.sendCommand('Target.setDiscoverTargets', { discover: true });
 
                     // 2. 启用 AutoAttach (保险起见，但可能在某些版本失效)
-                    this.ws.send(JSON.stringify({
-                        id: 101,
-                        method: 'Target.setAutoAttach',
-                        params: {
-                            autoAttach: true,
-                            waitForDebuggerOnStart: false,
-                            flatten: true
-                        }
-                    }));
+                    this.sendCommand('Target.setAutoAttach', {
+                        autoAttach: true,
+                        waitForDebuggerOnStart: false,
+                        flatten: true
+                    });
 
                     // 注意：不要在 Browser 级别启用 Network（该域仅在 Page/Session 上可用）
 
@@ -340,8 +346,11 @@ class CdpSniffer {
                     try {
                         const msg = JSON.parse(data);
 
-                        // 打印详细的协议交互日志 (仅限关键命令回复)
-                        if (msg.id && msg.id >= 100 && msg.id <= 105) {
+                        // 打印详细的协议交互日志
+                        if (msg.error) {
+                            logMsg(`[CDP Error] ${JSON.stringify(msg)}`);
+                        } else if (msg.id && msg.id >= 100) {
+                            // 打印所有我们发出的命令的响应
                             logMsg(`[CDP] Command Response ${msg.id}: ${JSON.stringify(msg)}`);
                         }
 
@@ -350,11 +359,7 @@ class CdpSniffer {
                             const target = msg.params.targetInfo;
                             if (target.type === 'page' && !target.attached) { // 避免重复 Attach
                                 logMsg(`[CDP] 发现 Target: ${target.type} - ${target.url}`);
-                                this.ws.send(JSON.stringify({
-                                    id: Date.now(),
-                                    method: 'Target.attachToTarget',
-                                    params: { targetId: target.targetId, flatten: true }
-                                }));
+                                this.sendCommand('Target.attachToTarget', { targetId: target.targetId, flatten: true });
                             }
                         }
 
@@ -367,17 +372,18 @@ class CdpSniffer {
                             this.sessions.add(sessionId); // 记录 session
 
                             // 关键：为每个会话启用 Network 监听
-                            this.ws.send(JSON.stringify({
-                                id: Date.now(),
-                                sessionId: sessionId,
-                                method: 'Network.enable'
-                            }));
+                            const enableNetwork = () => {
+                                this.sendCommand('Network.enable', {}, sessionId);
+                            };
+                            enableNetwork();
+
+                            // 保活：每2秒重发一次 Network.enable，防止 Session 掉线或被重置
+                            if (!this.keepAliveTimers) this.keepAliveTimers = [];
+                            const timer = setInterval(enableNetwork, 2000);
+                            this.keepAliveTimers.push(timer);
+
                             // 同时启用 Runtime 以便后续注入
-                            this.ws.send(JSON.stringify({
-                                id: Date.now(),
-                                sessionId: sessionId,
-                                method: 'Runtime.enable'
-                            }));
+                            this.sendCommand('Runtime.enable', {}, sessionId);
                         }
 
                         // 处理 Network.requestWillBeSent (支持 flattened sessionId)
@@ -411,11 +417,18 @@ class CdpSniffer {
 
                                 const lenStr = resp.headers['Content-Length'] || resp.headers['content-length'];
                                 const len = lenStr ? parseInt(lenStr, 10) : null;
-                                this._addCapture(url, null, 'response-mime', targetUrl, len);
-                                logMsg(`[!!! CAPTURED] ${url}`);
+
+                                // 优先捕获 m3u8/mpd
+                                if (url.includes('.m3u8') || url.includes('.mpd')) {
+                                    this._addCapture(url, null, 'response-mime', targetUrl, len, 100); // 优先级 100
+                                    logMsg(`[!!! CAPTURED PRIORITY] ${url}`);
+                                } else {
+                                    // 对于 ts 等片段，稍微延迟一下，或者优先级设低
+                                    this._addCapture(url, null, 'response-mime', targetUrl, len, 10); // 优先级 10
+                                    logMsg(`[!!! CAPTURED FRAGMENT] ${url}`);
+                                }
                             }
                         }
-
                     } catch (e) { }
                 });
             });
@@ -426,33 +439,118 @@ class CdpSniffer {
         }
     }
 
-    _addCapture(url, headers, source, targetUrl, contentLength = null) {
+    _addCapture(url, headers, source, targetUrl, contentLength = null, priority = 50) {
+        // 如果已经有更高优先级的，忽略低优先级的（除非是同一个URL）
+        if (this.capturedVideos.length > 0 && this.capturedVideos[0].priority > priority && this.capturedVideos[0].url !== url) return;
+
+        // 避免重复
         if (this.capturedVideos.some(v => v.url === url)) return;
 
         const result = {
             url: url,
+            userDataDir: this.tmpDir, // 传递用户数据目录，供 yt-dlp 提取 Cookie
             headers: headers ? {
                 'Cookie': headers['Cookie'] || headers['cookie'],
                 'Referer': headers['Referer'] || headers['referer'] || targetUrl,
-                'User-Agent': headers['User-Agent'] || headers['user-agent']
+                'User-Agent': headers['User-Agent'] || headers['user-agent'],
+                'Origin': headers['Origin'] || headers['origin']
             } : {
                 // 如果是从 response 抓到的，可能没有 request headers，暂且留空或者给个默认
-                // 实际场景下，requestWillBeSent 通常会先触发，所以大概率能抓到 headers
                 'Referer': targetUrl
             },
             cookieSource: 'cdp-sniffed',
             timestamp: Date.now(),
             filesize: contentLength, // 记录 Content-Length
-            resolution: url.includes('1080') ? '1080p' : (url.includes('720') ? '720p' : 'unknown') // 简单的分辨率推断
+            resolution: url.includes('1080') ? '1080p' : (url.includes('720') ? '720p' : 'unknown'), // 简单的分辨率推断
+            priority: priority
         };
 
+        // 如果 Cookie 缺失，尝试主动获取
+        if (!result.headers.Cookie && this.ws && this.sessions.size > 0) {
+            // 策略优化：向所有 Sessions 广播获取 Cookie，因为我们不知道视频到底在哪个 Frame
+            // 但为了性能，我们稍微限制一下，或者只发给最近的几个
+            const sessionIds = Array.from(this.sessions);
+
+            // 标记正在获取 Cookie
+            result.waitingForCookie = true;
+
+            sessionIds.forEach(sessionId => {
+                const id = this.nextId++;
+
+                // 临时监听一次
+                const listener = (data) => {
+                    try {
+                        const msg = JSON.parse(data);
+                        if (msg.id === id && msg.result && msg.result.cookies) {
+                            const cookies = msg.result.cookies;
+                            if (cookies.length > 0) {
+                                const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+                                // 只有当新的 Cookie 比现有长（或者现有为空）时才更新
+                                if (!result.headers.Cookie || cookieStr.length > result.headers.Cookie.length) {
+                                    result.headers.Cookie = cookieStr;
+                                    h.log(`[CDP] 主动获取 Cookie 成功 (Session ${sessionId}): ${cookieStr.substring(0, 50)}...`);
+                                    result.waitingForCookie = false; // 标记完成
+                                }
+                            }
+                            // 移除监听
+                            const idx = this.ws.listeners['message'].indexOf(listener);
+                            if (idx > -1) this.ws.listeners['message'].splice(idx, 1);
+                        }
+                    } catch (e) { }
+                };
+                this.ws.on('message', listener);
+
+                this.ws.send(JSON.stringify({
+                    id: id,
+                    method: 'Network.getCookies',
+                    params: { urls: [url, targetUrl] }, // 指定 URL 范围
+                    sessionId: sessionId
+                }));
+            });
+
+            // 2秒后强制取消等待标记，防止死锁
+            setTimeout(() => { result.waitingForCookie = false; }, 2000);
+        }
+
+        // 清洗 Referer (更严格：只取第一个 URL，去除尾随逗号)
+        if (result.headers.Referer) {
+            let ref = result.headers.Referer.trim();
+            // 处理可能的 "url, url" 或 "url," 情况
+            if (ref.includes(',')) {
+                ref = ref.split(',')[0].trim();
+            }
+            result.headers.Referer = ref;
+        }
+
+        // 补全 Origin (如果 Referer 存在但 Origin 不存在)
+        if (!result.headers.Origin && result.headers.Referer) {
+            try {
+                result.headers.Origin = new URL(result.headers.Referer).origin;
+            } catch { }
+        }
+
         h.log(`[CDP] !!! 捕获成功 (${source}): ${url} Size:${contentLength}`);
-        this.capturedVideos.unshift(result);
+
+        // 按照优先级排序插入
+        if (priority >= 90) {
+            this.capturedVideos.unshift(result);
+        } else {
+            // 对于低优先级的，如果列表为空则插入，否则暂存或追加
+            if (this.capturedVideos.length === 0) this.capturedVideos.push(result);
+        }
     }
 
     // 获取最近捕获的一个结果
     async getLatestCapture(injectJs = false) {
-        if (this.capturedVideos && this.capturedVideos.length > 0) return this.capturedVideos[0];
+        if (this.capturedVideos && this.capturedVideos.length > 0) {
+            const latest = this.capturedVideos[0];
+            // 如果还在等待 Cookie，稍微等一下，给它 500ms 机会
+            if (latest.waitingForCookie) {
+                await new Promise(r => setTimeout(r, 500));
+                // 不管等到没等到，都返回，因为不能一直卡着
+            }
+            return latest;
+        }
 
         if (injectJs && this.ws && this.sessions.size > 0) {
             h.log(`[CDP] 尝试 JS 注入兜底... Sessions: ${this.sessions.size}`);
@@ -466,7 +564,8 @@ class CdpSniffer {
                     // 倒序查找最近的视频请求
                     for (var i = resources.length - 1; i >= 0; i--) {
                         var name = resources[i].name;
-                        if (name.includes('.m3u8') || name.includes('.mpd') || name.match(/\.(mp4|webm|flv)(\?|$)/)) {
+                        // 增加对 blob: 协议的支持
+                        if (name.startsWith('blob:') || name.includes('.m3u8') || name.includes('.mpd') || name.match(/\.(mp4|webm|flv)(\?|$)/)) {
                              // 过滤掉 icon
                              if (!name.includes('.png') && !name.includes('.ico')) return name;
                         }
@@ -475,28 +574,23 @@ class CdpSniffer {
                     // 2. 扫描 DOM <video>
                     var v = document.querySelector('video');
                     if (v) {
-                        if (v.src && (v.src.startsWith('http') || v.src.startsWith('blob'))) return v.src;
-                        if (v.currentSrc) return v.currentSrc;
+                        // 增加对 src 属性的严格检查
+                        if (v.src && (v.src.startsWith('http') || v.src.startsWith('blob:'))) return JSON.stringify({ url: v.src, cookie: document.cookie, referer: document.referrer });
+                        if (v.currentSrc && (v.currentSrc.startsWith('http') || v.currentSrc.startsWith('blob:'))) return JSON.stringify({ url: v.currentSrc, cookie: document.cookie, referer: document.referrer });
                         var s = v.querySelector('source');
-                        if (s && s.src) return s.src;
+                        if (s && s.src) return JSON.stringify({ url: s.src, cookie: document.cookie, referer: document.referrer });
                     }
 
                     // 3. 扫描 iframe
                     var iframes = document.querySelectorAll('iframe');
                     for (var i=0; i<iframes.length; i++) {
                          var src = iframes[i].src;
-                         if (src && (src.includes('m3u8') || src.includes('mp4'))) return src;
+                         if (src && (src.includes('m3u8') || src.includes('mp4'))) return JSON.stringify({ url: src, cookie: document.cookie, referer: document.referrer });
                     }
 
                     // 4. 常见播放器探测
-                    if (window.hls && window.hls.url) return window.hls.url;
-                    if (window.jwplayer) {
-                        var jw = window.jwplayer();
-                        if (jw && jw.getPlaylist) {
-                            var pl = jw.getPlaylist();
-                            if (pl && pl.length > 0 && pl[0].file) return pl[0].file;
-                        }
-                    }
+                    if (window.hls && window.hls.url) return JSON.stringify({ url: window.hls.url, cookie: document.cookie, referer: document.referrer });
+                    // ... 其他播放器逻辑类似，暂略，假设它们也返回 URL 字符串 ...
                 } catch(e) { return null; }
                 return null;
             })()`;
@@ -512,8 +606,17 @@ class CdpSniffer {
                             const msg = JSON.parse(data);
                             if (msg.id === id && msg.result && msg.result.result) {
                                 const val = msg.result.result.value;
-                                if (val && typeof val === 'string' && val.startsWith('http')) {
-                                    resolve(val);
+                                if (val && typeof val === 'string') {
+                                    // 尝试解析 JSON
+                                    try {
+                                        const obj = JSON.parse(val);
+                                        if (obj.url) resolve(obj);
+                                        else if (val.startsWith('http')) resolve({ url: val }); // 兼容旧脚本
+                                        else resolve(null);
+                                    } catch {
+                                        if (val.startsWith('http')) resolve({ url: val });
+                                        else resolve(null);
+                                    }
                                 } else {
                                     resolve(null);
                                 }
@@ -525,12 +628,10 @@ class CdpSniffer {
                     this.ws.on('message', listener);
 
                     // 发送执行请求
-                    this.ws.send(JSON.stringify({
-                        id: id,
-                        sessionId: sessionId,
-                        method: 'Runtime.evaluate',
-                        params: { expression: script, returnByValue: true }
-                    }));
+                    this.sendCommand('Runtime.evaluate', {
+                        expression: script,
+                        returnByValue: true
+                    }, sessionId);
 
                     // 超时清理
                     setTimeout(() => resolve(null), 1000);
@@ -539,15 +640,23 @@ class CdpSniffer {
 
             try {
                 const results = await Promise.all(promises);
-                const found = results.find(r => r);
+                const found = results.find(r => r && r.url);
                 if (found) {
-                    h.log(`[CDP] JS 注入成功提取: ${found}`);
+                    h.log(`[CDP] JS 注入成功提取: ${found.url}`);
                     // 构造伪造的捕获结果
+                    let referer = found.referer ? found.referer.trim() : 'https://www.google.com/';
+                    if (referer) referer = referer.split(',')[0].trim();
+
+                    let origin = '';
+                    try { origin = new URL(referer).origin; } catch { }
+
                     const result = {
-                        url: found,
+                        url: found.url,
                         headers: {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Referer': 'https://www.google.com/' // 默认 Referer
+                            'Referer': referer,
+                            'Origin': origin,
+                            'Cookie': found.cookie || '' // 从 JS 获取的 Cookie
                         },
                         cookieSource: 'cdp-injected',
                         timestamp: Date.now()
@@ -593,10 +702,15 @@ class CdpSniffer {
             try { this.ws.close(); } catch { }
             this.ws = null;
         }
+        if (this.keepAliveTimers) {
+            this.keepAliveTimers.forEach(t => clearInterval(t));
+            this.keepAliveTimers = [];
+        }
         if (this.browserProcess) {
-            // 在 Windows 上 kill 进程可能不会关闭所有子进程，但通常足够了
-            // 注意：我们不强制关闭浏览器，留给用户自己关，或者根据需求关
-            // 但为了清理连接，我们断开 WS
+            try {
+                this.browserProcess.kill();
+            } catch { }
+            this.browserProcess = null;
         }
         // 清理临时目录 (可选，可能需要递归删除)
     }

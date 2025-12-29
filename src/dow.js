@@ -2110,9 +2110,19 @@ class YtDlpDownloader {
                     "--no-cache-dir",
                     "--extractor-args", "generic:impersonate", // 绕过 Cloudflare 反爬虫
                     "--referer", referer, // 使用修正后的 referer
-                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "--user-agent", options.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     ...extraArgs
                 ];
+
+                // 如果有 Cookie，显式添加
+                if (options.cookie) {
+                    args.push("--add-header", `Cookie:${options.cookie}`);
+                }
+
+                // 如果有 Origin，显式添加 (应对 strict-origin-when-cross-origin)
+                if (options.origin) {
+                    args.push("--add-header", `Origin:${options.origin}`);
+                }
 
                 if (this.ffmpegPath) {
                     args.unshift("--ffmpeg-location", this.ffmpegPath);
@@ -2169,19 +2179,26 @@ class YtDlpDownloader {
             });
         };
 
-        // 策略优化：如果明确指定了 cookieSource，直接使用它，不做无用的首次尝试
-        if (options.cookieSource) {
-            const cs = options.cookieSource.toLowerCase();
+        // 策略优化：如果明确指定了 cookieSource，直接使用它，或者如果有 browserProfilePath
+        if (options.cookieSource || options.browserProfilePath) {
+            const cs = (options.cookieSource || '').toLowerCase();
+
+            // 优先使用 browserProfilePath (最准确，直接指向刚才嗅探的实例)
+            if (options.browserProfilePath) {
+                // chrome:PATH
+                return await runDownload(["--cookies-from-browser", `chrome:${options.browserProfilePath}`]);
+            }
+
             if (cs === 'chrome' || cs === 'edge' || cs === 'firefox') {
                 return await runDownload(["--cookies-from-browser", cs]);
             }
         }
 
-        // 首次尝试 (默认无 Cookie)
+        // 首次尝试 (默认无 Cookie，或者使用传入的 options.cookie)
         let res = await runDownload();
 
-        // 如果失败且看起来是权限/解析问题，尝试带 Cookie 重试
-        if (!res.success && (
+        // 如果失败且看起来是权限/解析问题，且没有传入特定 cookie，尝试带 Cookie 重试
+        if (!res.success && !options.cookie && (
             res.error?.includes("403") ||
             res.error?.includes("401") ||
             res.error?.includes("Unable to extract") ||
@@ -2486,6 +2503,10 @@ class UnifiedMediaDownloader {
                     // 透传元数据
                     cookieSource: t.meta?.cookieSource,
                     referer: t.meta?.referer,
+                    cookie: t.meta?.cookie, // 透传 cookie
+                    origin: t.meta?.origin, // 透传 origin
+                    browserProfilePath: t.meta?.browserProfilePath, // 透传 browserProfilePath
+                    userAgent: t.meta?.userAgent, // 透传 userAgent
                     onProgress: (p) => onProgress && onProgress(t, { type: "progress", protocol: "yt-dlp", progress: p }),
                 });
 

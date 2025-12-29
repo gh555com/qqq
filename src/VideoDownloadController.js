@@ -79,8 +79,10 @@ class VideoDownloadController {
                 }).catch(() => { /* ignore */ });
             }, 1000);
 
+            // 使用 modal: true 确保弹窗是模态的，并且显示所有按钮
             const selection = await vscode.window.showInformationMessage(
                 "专用浏览器已启动。请在其中播放视频。一旦检测到播放，系统会自动提示。",
+                { modal: true },
                 "✅ 我已播放，开始下载",
                 "取消"
             );
@@ -128,6 +130,11 @@ class VideoDownloadController {
                     this.snifferOutput.appendLine(`[Metadata] 元数据解析失败: ${e.message}`);
                 }
 
+                // 打印最终透传的 Headers，方便调试 403 问题
+                if (result.headers) {
+                    this.snifferOutput.appendLine(`[Headers] Cookie: ${result.headers['Cookie'] ? 'Yes' : 'No'}, Referer: ${result.headers['Referer'] || 'None'}, Origin: ${result.headers['Origin'] || 'None'}`);
+                }
+
                 if (progress) progress.report({ message: "捕获成功，准备下载...", increment: 10 });
                 return [{
                     title: "浏览器嗅探结果",
@@ -140,7 +147,9 @@ class VideoDownloadController {
                         cookieSource: 'custom',
                         referer: result.headers ? result.headers['Referer'] : undefined,
                         userAgent: result.headers ? result.headers['User-Agent'] : undefined,
-                        cookie: result.headers ? result.headers['Cookie'] : undefined
+                        cookie: result.headers ? result.headers['Cookie'] : undefined,
+                        origin: result.headers ? result.headers['Origin'] : undefined, // 传递 Origin
+                        browserProfilePath: result.userDataDir // 传递浏览器配置路径
                     }
                 }];
             } else {
@@ -513,7 +522,5 @@ class VideoDownloadController {
         return selected ? selected.map(x => x.video) : null;
     }
 }
-
-const path = require('path');
 
 module.exports = VideoDownloadController;
