@@ -1845,8 +1845,9 @@ class YtDlpDownloader {
                 "--ignore-errors",
                 "--no-flat-playlist", // 强制深入解析每个条目
                 "--no-check-certificate",
-                // "--extractor-args", "generic:impersonate", // 移除：YouTube 专用 extractor 不需要通用伪装，反而可能触发风控
-                // "--user-agent", ... // 移除强制 UA
+                "--extractor-args", "generic:impersonate",
+
+                "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 url,
             ];
 
@@ -2068,24 +2069,17 @@ class YtDlpDownloader {
                     destPath,
                     "--no-warnings",
                     "--no-playlist",
-                    "--force-ipv4", // 强制 IPv4
                     "--merge-output-format",
                     "mp4",
                     "-f",
                     fmt,
-                    "--no-mtime", // 不修改文件时间，避免某些文件系统操作延迟
                     "--no-check-certificate",
                     "--no-cache-dir",
-                    // 移除所有可能触发风控的 extractor-args
-                    // "--extractor-args", "youtubetab:skip=authcheck;youtube:player_skip=webpage,configs",
+                    "--extractor-args", "generic:impersonate",
                     "--referer", referer,
+                    "--user-agent", options.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     ...extraArgs
                 ];
-
-                // 只有当明确传入 userAgent 时才设置，否则完全留空让 yt-dlp 自己处理
-                if (options.userAgent) {
-                    args.push("--user-agent", options.userAgent);
-                }
 
 
                 if (options.cookie) {
@@ -2112,49 +2106,8 @@ class YtDlpDownloader {
                 let stderr = "";
 
                 const onLine = (line) => {
-                    const str = String(line);
-                    // 解析 yt-dlp 进度输出: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
-                    // 或者: [download] 100% of 10.00MiB in 00:01
-                    const match = str.match(/\[download\]\s+(\d+(\.\d+)?)%\s+of\s+([~\d\.]+\w+)(?:\s+at\s+([\d\.]+\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
-
-                    if (match && options.onProgress) {
-                        const percent = parseFloat(match[1]);
-                        const totalSize = match[3];
-                        const speed = match[4] || "";
-                        const eta = match[5] || "";
-
-                        // 计算已下载大小 (粗略估算)
-                        let currentSize = "";
-                        // 如果 totalSize 是 "100.00MiB"，percent 是 50，则 currentSize ≈ 50.00MiB
-                        // 这里为了展示方便，我们直接把 totalSize 解析成数值再乘百分比
-                        try {
-                            const sizeMatch = totalSize.match(/([\d\.]+)(\w+)/);
-                            if (sizeMatch) {
-                                const val = parseFloat(sizeMatch[1]);
-                                const unit = sizeMatch[2];
-                                const cur = (val * percent / 100).toFixed(2);
-                                currentSize = `${cur}${unit}`;
-                            }
-                        } catch (e) { }
-
-                        options.onProgress({
-                            percent,
-                            totalSize,
-                            currentSize, // 新增：已下载大小
-                            speed,
-                            eta,
-                            raw: str.trim()
-                        });
-                    } else if (str.includes('[download]') && options.onProgress) {
-                        // 尝试匹配没有百分比的情况，或者其他格式
-                        const mPercent = str.match(/(\d+(\.\d+)?)%/);
-                        if (mPercent) {
-                            options.onProgress({
-                                percent: parseFloat(mPercent[1]),
-                                raw: str.trim()
-                            });
-                        }
-                    }
+                    const m = String(line).match(/(\d+(\.\d+)?)%/);
+                    if (m && options.onProgress) options.onProgress(parseFloat(m[1]));
                 };
 
                 proc.stdout.on("data", (d) => onLine(d.toString()));

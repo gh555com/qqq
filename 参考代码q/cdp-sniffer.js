@@ -284,30 +284,20 @@ class CdpSniffer {
         // 随机端口
         const port = 9222 + Math.floor(Math.random() * 100);
 
-        // 使用固定的用户数据目录，以便保存登录状态 (Cookie, LocalStorage 等)
-        // 路径: %APPDATA%/Code/User/globalStorage/gh555.qqq/chrome-user-data
-        const userDateDir = path.join(
-            process.env.APPDATA || process.env.HOME,
-            "Code", "User", "globalStorage", "gh555.qqq", "chrome-user-data"
-        );
-
-        // 确保目录存在
-        if (!fs.existsSync(userDateDir)) {
-             try { fs.mkdirSync(userDateDir, { recursive: true }); } catch (e) {}
-        }
-
-        // 更新 tmpDir，以便 _addCapture 能传递正确的 userDataDir 给 yt-dlp
-        this.tmpDir = userDateDir;
-
         // 启动浏览器
         const args = [
             `--remote-debugging-port=${port}`,
-            `--user-data-dir=${userDateDir}`,
+            `--user-data-dir=${this.tmpDir}`,
             '--no-first-run',
             '--no-default-browser-check',
-            '--disable-infobars',
-            '--disable-blink-features=AutomationControlled', // 关键：防止被识别为自动化工具
+            '--disable-extensions',
+            '--disk-cache-dir=null',
+            '--media-cache-size=1',
+            // 关键优化：避免复用已有实例，强制新窗口
             '--new-window',
+            // 移除可能导致 CDP 异常的 flags，尝试更原生的启动方式
+            // '--no-default-browser-check',
+            // '--disable-extensions',
             '--disable-gpu',
             '--no-sandbox',
             targetUrl

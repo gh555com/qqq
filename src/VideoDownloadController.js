@@ -18,16 +18,16 @@ class VideoDownloadController {
     }
 
     async start() {
-        // 0. 确保 yt-dlp 可用
-        await this.downloader.ensureYtdlpReady(this.context);
-
-        // 1. 获取URL
+        // 1. 获取URL - 立即显示输入框，不等待任何检查
         const url = await vscode.window.showInputBox({
             prompt: "直接粘贴 [ 包含视频滴网址 ] ",
             ignoreFocusOut: true,
             placeHolder: "https://..."
         });
         if (!url) return;
+
+        // 异步后台检查 yt-dlp，不阻塞 UI
+        this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
 
         // 2. 确定目标目录
         const editor = vscode.window.activeTextEditor;
@@ -50,112 +50,248 @@ class VideoDownloadController {
 
     async _fastProcess(url, targetDir) {
         try {
-            this.log("正在智能嗅探资源...");
-            let tasks = [];
+            const urlSnippet = url.length > 33 ? url.slice(0, 33) + "..." : url;
 
-            // 1. 尝试使用 yt-dlp 探测 (涵盖了 平台视频 和 普通视频的 yt-dlp 支持)
-            // yt-dlp 能够处理 playlist，也能提取大部分网站的视频信息
-            let probeSuccess = false;
-            try {
-                // 注意：dow.js 的 probe 目前是深度探测 (--no-flat-playlist)，能获取详细列表
-                const res = await this.downloader.probe(url);
+            // 立即弹出进度条，作为系统接收反馈
+            await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: "",
+                cancellable: true
+            }, async (progress, token) => {
+                // 立即显示初始状态
+                progress.report({ message: `已下载 0k 从 ${urlSnippet} (正在解析...)` });
 
-                if (res && res.success) {
-                    probeSuccess = true;
-                    if (res.isPlaylist && res.entries && res.entries.length > 0) {
-                        this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
-                        tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                token.onCancellationRequested(() => {
+                    this.log("用户取消下载");
+                });
+
+                this.log("正在智能嗅探资源...");
+                let tasks = [];
+
+                // 1. 尝试使用 yt-dlp 探测
+                let probeSuccess = false;
+                let probeForbidden = false;
+                try {
+                    const res = await this.downloader.probe(url);
+                    // ... (后续探测逻辑保持不变，只需把 tasks 赋值逻辑包进来)
+
+                    if (res && res.success) {
+                        probeSuccess = true;
+                        if (res.isPlaylist && res.entries && res.entries.length > 0) {
+                            this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
+                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                        } else {
+                            this.log(`识别为单个视频: ${res.title}`);
+                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
+                        }
                     } else {
-                        // 单个视频
-                        this.log(`识别为单个视频: ${res.title}`);
-                        tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
+                        if (this._isForbidden(403, res?.error)) {
+                            probeForbidden = true;
+                            this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                            tasks.push(this._createTask(url, null, targetDir, url));
+                        } else {
+                            this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
+                        }
                     }
+                } catch (e) {
+                    this.log(`yt-dlp 探测异常: ${e.message}`);
+                }
+
+                // 2. 静态分析
+                try {
+                    const webUrls = await h.extractVideoUrlsFromWebPage(url);
+                    if (webUrls && webUrls.length > 0) {
+                        this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
+                    }
+                } catch (e) { }
+
+                // 3. 去重
+                tasks = this._deduplicateTasks(tasks);
+
+                // 4. 兜底
+                if (tasks.length === 0) {
+                    this.log("未探测到明确资源，尝试直接下载原链接...");
+                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
+                }
+
+                this.log(`准备下载 ${tasks.length} 个任务...`);
+
+                // 更新进度条状态：开始下载
+                progress.report({ message: `已下载 0k 从 ${urlSnippet}` });
+
+                // 准备累计下载量统计
+                // 抛弃 yt-dlp 回调的虚假数据，直接监听本地文件大小
+                // 轮询器
+                let fileSizeTimer = null;
+
+                // 启动轮询：每 0.5 秒检查一次 (加快频率，提高实时性)
+                fileSizeTimer = setInterval(() => {
+                    let currentTotalBytes = 0;
+
+                    // 遍历所有任务，检查其目标路径或 .part 路径的大小
+                    for (const t of tasks) {
+                        const dest = t.destPath;
+                        // 常见临时文件后缀
+                        const candidates = [
+                            dest,
+                            dest + ".part",
+                            dest + ".ytdl",
+                            dest + ".aria2"
+                        ];
+
+                        let size = 0;
+                        for (const p of candidates) {
+                            try {
+                                if (fs.existsSync(p)) {
+                                    size = fs.statSync(p).size;
+                                    if (size > 0) break; // 找到一个就认为是非零
+                                }
+                            } catch (e) { }
+                        }
+                        currentTotalBytes += size;
+                    }
+
+                    const totalStr = this._formatBytesSimple(currentTotalBytes);
+                    const msg = `已下载 ${totalStr} 从 ${urlSnippet}`;
+                    progress.report({ message: msg });
+
+                }, 500);
+
+                const res = await this.downloader.downloadAll(tasks, targetDir, {
+                    downloadVideos: "all",
+                    // 这里的 onProgress 仅用于记录日志，不再更新 UI 数字
+                    onProgress: (task, event) => {
+                        if (event.type === 'start') {
+                            this.log(`开始: ${this._sanitizeFilename(task.url).slice(0, 30)}...`);
+                        } else if (event.type === 'done') {
+                            this.log(`完成: ${path.basename(task.destPath)}`);
+                        } else if (event.type === 'error') {
+                            this.log(`失败: ${task.url} - ${event.error}`);
+                        } else if (event.type === 'retry') {
+                            this.log(`重试: ${task.url} (Wait ${event.delayMs}ms)`);
+                        }
+                    }
+                });
+
+                // 清楚轮询器
+                if (fileSizeTimer) clearInterval(fileSizeTimer);
+
+                // ... (后续结果处理逻辑保持不变)
+                // 6. 处理结果
+                const results = res.results || [];
+                const successResults = results.filter(r => r.success);
+                const failResults = results.filter(r => !r.success);
+
+                let verifiedCount = 0;
+                let finalTotalBytes = 0;
+
+                for (const r of successResults) {
+                    const p = r.path || r.destPath;
+                    if (await this._postProcess(p)) {
+                        verifiedCount++;
+                        if (fs.existsSync(p)) {
+                            try { finalTotalBytes += fs.statSync(p).size; } catch (e) { }
+                        }
+                    }
+                }
+
+                const finalTotalStr = this._formatBytesSimple(finalTotalBytes);
+                const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
+                const needEnhanced = forbiddenErrors.length > 0 || (probeForbidden && verifiedCount === 0) || (verifiedCount === 0 && successResults.length > 0);
+
+                if (needEnhanced) {
+                    await this._handleForbidden(forbiddenErrors[0]?.code || 403, url, targetDir);
                 } else {
-                    // Probe 失败 (可能是 403，也可能是 yt-dlp 不支持该站点)
-                    if (this._isForbidden(403, res?.error)) {
-                        this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
-                        // 这是一个策略：如果探测 403，我们直接把原 URL 当作一个任务去下载。
-                        // downloadAll 内部也会尝试 yt-dlp，如果再次 403，就会在结果中体现，从而触发 handleForbidden。
-                        tasks.push(this._createTask(url, null, targetDir, url));
-                    } else {
-                        this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
-                    }
+                    // 任务正常结束
+                    const resultMsg = `任务结束, 共下载${verifiedCount}个视频共：${finalTotalStr} 从 ${urlSnippet}`;
+
+                    // 使用 withProgress 模拟可自动关闭的“三号弹窗”
+                    // 虽然不能放原生按钮，但我们可以通过文字提示用户
+                    // 这是一个折中方案，因为原生 InformationMessage 无法自动关闭
+                    vscode.window.withProgress({
+                        location: vscode.ProgressLocation.Notification,
+                        title: "",
+                        cancellable: false
+                    }, async (progress) => {
+                        progress.report({ message: resultMsg + " (点击日志可打开文件夹)" });
+                        // 延迟 15 秒后自动关闭
+                        await new Promise(resolve => setTimeout(resolve, 15000));
+                    });
+
+                    // 同时在 Output Channel 输出带链接的日志，方便用户点击
+                    this.outputChannel.appendLine(`[Done] ${resultMsg}`);
+                    this.outputChannel.appendLine(`[Open] 点击打开下载文件夹: ${vscode.Uri.file(targetDir).toString()}`);
                 }
-            } catch (e) {
-                this.log(`yt-dlp 探测异常: ${e.message}`);
-            }
-
-            // 2. 静态分析 (作为补充，仅当 yt-dlp 没找到东西，或者我们想通过网页分析找到更多非平台资源时)
-            // 如果 yt-dlp 已经找到了列表，通常就不需要静态分析了，除非为了“宁滥勿缺”
-            // 用户的指令是 "智能多层 嗅探该网址存在滴一切视频... 找到一个下载一个"
-            // 所以我们可以把静态分析的结果也加进去，去重即可。
-            try {
-                const webUrls = await h.extractVideoUrlsFromWebPage(url);
-                if (webUrls && webUrls.length > 0) {
-                    this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
-                    webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
-                }
-            } catch (e) { }
-
-            // 3. 去重
-            tasks = this._deduplicateTasks(tasks);
-
-            // 4. 兜底：如果啥都没找到，把原 URL 当作任务试一把 (Blind Download)
-            if (tasks.length === 0) {
-                this.log("未探测到明确资源，尝试直接下载原链接...");
-                tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
-            }
-
-            this.log(`准备下载 ${tasks.length} 个任务...`);
-
-            // 5. 批量并行下载 (调用 dow.js 的 downloadAll，利用其内部并发控制)
-            const res = await this.downloader.downloadAll(tasks, targetDir, {
-                downloadVideos: "all", // 允许 yt-dlp
-                report: (msg) => this.log(msg.message)
             });
 
-            // 6. 处理结果
-            const results = res.results || [];
-            const successResults = results.filter(r => r.success);
-            const failResults = results.filter(r => !r.success);
-
-            this.log(`下载完成: 成功 ${successResults.length}, 失败 ${failResults.length}`);
-
-            // 后处理成功的文件 (验证、改名、插入)
-            for (const r of successResults) {
-                await this._postProcess(r.path || r.destPath);
-            }
-
-            // 检查是否有 403 错误需要触发增强流程
-            // 只要有一个任务因为 403 失败，就触发增强流程 (针对该 URL)
-            const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
-            if (forbiddenErrors.length > 0) {
-                this.log("检测到 403 拒绝，启动增强流程处理...");
-                await this._handleForbidden(forbiddenErrors[0].code || 403, url, targetDir);
-            }
-
         } catch (error) {
-            vscode.window.showErrorMessage(`处理失败: ${error.message}`);
+            this.log(`处理失败: ${error.message}`);
         }
+    }
+
+    _parseSizeToBytes(sizeStr) {
+        if (!sizeStr) return 0;
+        const match = sizeStr.match(/([\d\.]+)([KMGTiB]+)/i);
+        if (!match) return 0;
+        const val = parseFloat(match[1]);
+        const unit = match[2].toUpperCase();
+        let multiplier = 1;
+        if (unit.startsWith('K')) multiplier = 1024;
+        else if (unit.startsWith('M')) multiplier = 1024 * 1024;
+        else if (unit.startsWith('G')) multiplier = 1024 * 1024 * 1024;
+        return Math.floor(val * multiplier);
+    }
+
+    _formatBytesSimple(bytes) {
+        if (bytes === 0) return "0k";
+        const k = 1024;
+        const m = 1024 * 1024;
+        if (bytes >= m) {
+            return Math.round(bytes / m) + "m";
+        }
+        return Math.round(bytes / k) + "k";
     }
 
     _createTask(videoUrl, title, targetDir, referer) {
         let destPath = null;
+
+        // 尝试生成文件名
+        let fileName = null;
         if (title && title !== 'Direct Link' && title !== 'Web Resource') {
-            const safeTitle = this._sanitizeFilename(title);
-            if (safeTitle) {
-                destPath = path.join(targetDir, safeTitle + ".mp4");
+            fileName = this._sanitizeFilename(title) + ".mp4";
+        } else {
+            // 尝试从 URL 提取文件名
+            try {
+                const u = new URL(videoUrl);
+                const base = path.basename(u.pathname);
+                // 扩展支持更多视频格式：avi, wmv, m4v, mpg, mpeg, 3gp, ts, ogv 等
+                if (base && base.match(/\.(mp4|webm|mkv|mov|flv|avi|wmv|m4v|mpg|mpeg|3gp|ts|ogv)$/i)) {
+                    fileName = decodeURIComponent(base);
+                }
+            } catch (e) { }
+
+            // 如果无法从 URL 提取，或者提取的文件名不合法/太长，使用标准时间戳命名
+            if (!fileName || fileName.length > 50 || !/^[a-zA-Z0-9._-]+$/.test(fileName)) {
+                fileName = h.getTimestampFilename('.mp4');
             }
         }
+
+        if (fileName) {
+            destPath = path.join(targetDir, fileName);
+        }
+
+        const headers = {};
+        if (referer) headers["Referer"] = referer;
+        // 不再强制设置 User-Agent，让下载器(特别是 yt-dlp)自行决定或使用默认值
+        // headers["User-Agent"] = "Mozilla/5.0 ...";
+
         return {
             url: videoUrl,
-            destPath: destPath, // null 让 dow.js 自动生成
+            destPath: destPath, // 确保有值，避免 dow.js 生成不符合规则的随机名
             kind: "video",
             baseDir: targetDir,
-            headers: {
-                "Referer": referer,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            headers: headers
         };
     }
 
@@ -446,13 +582,49 @@ class VideoDownloadController {
 
             // 3. 用户确认后，提取结果并关闭浏览器
             if (selection === "我已在外部播放") {
-                const videos = sniffer.getCapturedVideos();
+                let videos = sniffer.getCapturedVideos();
                 await sniffer.stop();
+
+                // --- 智能过滤策略 ---
+                // 1. 识别高优先级资源 (m3u8, mpd, mp4, webm 等完整文件)
+                const hasMaster = videos.some(r =>
+                    (r.priority && r.priority >= 80) ||
+                    (r.url && (r.url.includes('.m3u8') ||
+                        r.url.includes('.mpd') ||
+                        r.url.match(/\.(mp4|webm|mkv|mov)(\?|$)/i)))
+                );
+
+                if (hasMaster) {
+                    // 如果存在主资源，果断过滤掉所有低优先级的碎片 (ts, m4s, key 等)
+                    const originalCount = videos.length;
+                    videos = videos.filter(r =>
+                        (r.priority && r.priority >= 50) ||
+                        (r.url && !r.url.match(/\.ts(\?|$)/i) && !r.url.match(/\.m4s(\?|$)/i) && !r.url.match(/\.key(\?|$)/i))
+                    );
+                    this.log(`[Filter] 已过滤碎片文件: ${originalCount} -> ${videos.length} (检测到主视频文件)`);
+                }
+                // --------------------
 
                 if (videos.length > 0) {
                     this.log(`捕获到 ${videos.length} 个视频，开始下载...`);
-                    const downloadPromises = videos.map(v => this._downloadOne(v, targetDir, url));
-                    await Promise.all(downloadPromises);
+
+                    // 关键修复：数据结构适配
+                    // cdp-sniffer 返回的 headers 在 v.headers 中，而 dow.js 期望在 v.meta 中
+                    videos.forEach(v => {
+                        if (!v.meta) v.meta = {};
+                        if (v.headers) {
+                            v.meta.cookie = v.headers['Cookie'];
+                            v.meta.referer = v.headers['Referer'];
+                            v.meta.userAgent = v.headers['User-Agent'];
+                            v.meta.origin = v.headers['Origin'];
+                        }
+                        // 传递浏览器配置路径，以便 yt-dlp 可以尝试直接读取 Cookie 文件（如果 Header 里的 Cookie 不全）
+                        if (v.userDataDir) {
+                            v.meta.browserProfilePath = v.userDataDir;
+                        }
+                    });
+
+                    await this.downloader.downloadVideos(videos, targetDir);
                 } else {
                     vscode.window.showErrorMessage("未能捕获到视频。请重试并确保视频已开始播放。");
                 }
