@@ -1,570 +1,473 @@
 const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
+const cp = require('child_process');
 const h = require('./h');
-// const metaProbe = require('./metadata'); // 已删除
-const { getSharedDownloader } = require('./dow');
+const { getSharedDownloader, isPlatformOrSegmentVideo } = require('./dow');
+const https = require('https');
 
 class VideoDownloadController {
     constructor(context) {
         this.context = context;
         this.downloader = getSharedDownloader();
+        this.outputChannel = vscode.window.createOutputChannel("qqq: Video Downloader");
+    }
+
+    log(msg) {
+        this.outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
     }
 
     async start() {
+        // 0. 确保 yt-dlp 可用
+        await this.downloader.ensureYtdlpReady(this.context);
+
         // 1. 获取URL
-        const url = await h.promptForUrl("请输入包含视频的网页URL");
+        const url = await vscode.window.showInputBox({
+            prompt: "直接粘贴 [ 包含视频滴网址 ] ",
+            ignoreFocusOut: true,
+            placeHolder: "https://..."
+        });
         if (!url) return;
 
-        // 2. 确保 yt-dlp 就绪
-        if (!await this.downloader.ensureYtdlpReady(this.context)) return;
+        // 2. 确定目标目录
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
+            return;
+        }
+        const currentDocDir = path.dirname(editor.document.uri.fsPath);
+        const targetDir = path.join(currentDocDir, "qqq");
+        if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+        }
 
-        // 3. 选择下载目录
-        const targetDir = await h.pickTargetDirectory();
-        if (!targetDir) return;
+        this.log(`开始处理: ${url}`);
+        this.outputChannel.show(true);
 
-        // 4. 执行探测和下载流程
-        await this.runProbeAndDownload(url, targetDir);
+        // 3. 极速嗅探与下载
+        await this._fastProcess(url, targetDir);
     }
 
-    async _sniffFromBrowser(url, progress) {
-        let sniffer = null;
-        // 创建或获取输出面板
-        if (!this.snifferOutput) {
-            this.snifferOutput = vscode.window.createOutputChannel("Video Sniffer Log");
-        }
-        this.snifferOutput.show(true); // 自动显示面板
-        this.snifferOutput.clear();
-        this.snifferOutput.appendLine(`[System] 正在启动嗅探器... 目标: ${url}`);
-
+    async _fastProcess(url, targetDir) {
         try {
-            const CdpSniffer = require('./cdp-sniffer');
+            this.log("正在智能嗅探资源...");
+            let tasks = [];
 
-            // 尝试恢复持久化的浏览器路径
-            if (!CdpSniffer.getCustomBrowserPath()) {
-                const savedPath = this.context.globalState.get('customBrowserPath');
-                if (savedPath) {
-                    if (await CdpSniffer.validateBrowserPath(savedPath)) {
-                        CdpSniffer.setCustomBrowserPath(savedPath);
-                    } else {
-                        this.context.globalState.update('customBrowserPath', undefined);
-                    }
-                }
-            }
-
-            sniffer = new CdpSniffer();
-
-            // 1. 非阻塞启动浏览器
-            if (progress) progress.report({ message: "正在启动专用浏览器...", increment: 0 });
-
-            // 启动时挂载日志回调
-            await sniffer.start(url, (msg) => {
-                this.snifferOutput.appendLine(msg);
-            });
-
-            // 2. 弹窗等待用户确认 (非 Modal，右下角)
-            // 启动一个定时器，在用户点确认之前，每秒检查一次是否有结果
-            let isWaiting = true;
-            let capturedResult = null;
-
-            // 后台轮询检查
-            const checkTimer = setInterval(() => {
-                if (!isWaiting) {
-                    clearInterval(checkTimer);
-                    return;
-                }
-                sniffer.getLatestCapture().then((latest) => {
-                    if (!isWaiting) return;
-                    if (latest) {
-                        capturedResult = latest;
-                        if (progress) progress.report({ message: "✅ 已检测到视频流！请点击右下角【确认】开始下载", increment: 0 });
-                    }
-                }).catch(() => { /* ignore */ });
-            }, 1000);
-
-            // 使用 modal: true 确保弹窗是模态的，并且显示所有按钮
-            const selection = await vscode.window.showInformationMessage(
-                "专用浏览器已启动。请在其中播放视频。一旦检测到播放，系统会自动提示。",
-                { modal: true },
-                "✅ 我已播放，开始下载",
-                "取消"
-            );
-
-            isWaiting = false;
-            clearInterval(checkTimer);
-
-            if (selection !== "✅ 我已播放，开始下载") {
-                // 用户取消
-                sniffer.stop();
-                return [];
-            }
-
-            // 3. 用户确认后，提取结果
-            // 获取所有捕获结果
-            let results = sniffer.getCapturedVideos();
-
-            // 如果为空，尝试 JS 注入兜底 (JS 注入通常只返回一个结果)
-            if (results.length === 0) {
-                const jsResult = await sniffer.getLatestCapture(true);
-                if (jsResult) results.push(jsResult);
-            }
-
-            // 【新增】合并后台静态 HTTP 扫描结果
+            // 1. 尝试使用 yt-dlp 探测 (涵盖了 平台视频 和 普通视频的 yt-dlp 支持)
+            // yt-dlp 能够处理 playlist，也能提取大部分网站的视频信息
+            let probeSuccess = false;
             try {
-                if (progress) progress.report({ message: "正在合并静态扫描结果...", increment: 5 });
-                const staticUrls = await staticScanPromise; // 等待之前的并行任务
-                if (staticUrls && staticUrls.length > 0) {
-                    for (const vUrl of staticUrls) {
-                        // 去重
-                        if (!results.some(r => r.url === vUrl)) {
-                            results.push({
-                                url: vUrl,
-                                priority: 15, // 比普通分片略高
-                                cookieSource: 'http-static',
-                                timestamp: Date.now(),
-                                userDataDir: sniffer.tmpDir // 仍然借用浏览器 Profile，万一需要
-                            });
-                        }
+                // 注意：dow.js 的 probe 目前是深度探测 (--no-flat-playlist)，能获取详细列表
+                const res = await this.downloader.probe(url);
+
+                if (res && res.success) {
+                    probeSuccess = true;
+                    if (res.isPlaylist && res.entries && res.entries.length > 0) {
+                        this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
+                        tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                    } else {
+                        // 单个视频
+                        this.log(`识别为单个视频: ${res.title}`);
+                        tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
                     }
-                    this.snifferOutput.appendLine(`[Success] 已合并 ${staticUrls.length} 个静态扫描结果`);
+                } else {
+                    // Probe 失败 (可能是 403，也可能是 yt-dlp 不支持该站点)
+                    if (this._isForbidden(403, res?.error)) {
+                        this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                        // 这是一个策略：如果探测 403，我们直接把原 URL 当作一个任务去下载。
+                        // downloadAll 内部也会尝试 yt-dlp，如果再次 403，就会在结果中体现，从而触发 handleForbidden。
+                        tasks.push(this._createTask(url, null, targetDir, url));
+                    } else {
+                        this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
+                    }
+                }
+            } catch (e) {
+                this.log(`yt-dlp 探测异常: ${e.message}`);
+            }
+
+            // 2. 静态分析 (作为补充，仅当 yt-dlp 没找到东西，或者我们想通过网页分析找到更多非平台资源时)
+            // 如果 yt-dlp 已经找到了列表，通常就不需要静态分析了，除非为了“宁滥勿缺”
+            // 用户的指令是 "智能多层 嗅探该网址存在滴一切视频... 找到一个下载一个"
+            // 所以我们可以把静态分析的结果也加进去，去重即可。
+            try {
+                const webUrls = await h.extractVideoUrlsFromWebPage(url);
+                if (webUrls && webUrls.length > 0) {
+                    this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+                    webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
                 }
             } catch (e) { }
 
-            // 【增强】主动获取页面源码并进行静态分析
-            // 无论之前是否抓到了视频，都尝试从源码中挖出更多链接（如多分辨率列表）
-            try {
-                if (progress) progress.report({ message: "正在从页面源码中挖掘更多链接...", increment: 5 });
-                const pageSource = await sniffer.getPageSource();
-                if (pageSource) {
-                    const staticVideos = h.extractVideoUrlsFromHtmlFragment(pageSource, url);
-                    if (staticVideos && staticVideos.length > 0) {
-                        h.log(`[Controller] 静态分析发现 ${staticVideos.length} 个链接`);
-                        this.snifferOutput.appendLine(`[Static] 从源码中解析出 ${staticVideos.length} 个视频链接`);
+            // 3. 去重
+            tasks = this._deduplicateTasks(tasks);
 
-                        // 将静态结果合并到 results 中
-                        for (const vUrl of staticVideos) {
-                            // 去重
-                            if (!results.some(r => r.url === vUrl)) {
-                                results.push({
-                                    url: vUrl,
-                                    priority: 10, // 静态分析优先级较低
-                                    cookieSource: 'cdp-static',
-                                    timestamp: Date.now(),
-                                    // 静态分析没有 Headers，但我们可以复用嗅探到的 User-Agent 和 Cookie (如果有)
-                                    // 或者我们假设它不需要特殊 Header (通常直链不需要，或者只需要 Referer)
-                                    userDataDir: sniffer.tmpDir // 仍然传递 Profile Path
-                                });
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                this.snifferOutput.appendLine(`[Static] 源码分析失败: ${e.message}`);
+            // 4. 兜底：如果啥都没找到，把原 URL 当作任务试一把 (Blind Download)
+            if (tasks.length === 0) {
+                this.log("未探测到明确资源，尝试直接下载原链接...");
+                tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
             }
 
-            sniffer.stop(); // 停止嗅探
+            this.log(`准备下载 ${tasks.length} 个任务...`);
 
-            if (results.length > 0) {
-                h.log(`[Controller] 用户确认，捕获到 ${results.length} 个结果`);
-                this.snifferOutput.appendLine(`[Success] 最终捕获 ${results.length} 个结果`);
+            // 5. 批量并行下载 (调用 dow.js 的 downloadAll，利用其内部并发控制)
+            const res = await this.downloader.downloadAll(tasks, targetDir, {
+                downloadVideos: "all", // 允许 yt-dlp
+                report: (msg) => this.log(msg.message)
+            });
 
-                // 移除所有自动过滤逻辑，响应用户需求：列出一切！
-                // 只是为了体验好一点，我们按优先级排序：m3u8/mp4 (100/80) > 静态结果 (15) > 分片 (10)
-                results.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+            // 6. 处理结果
+            const results = res.results || [];
+            const successResults = results.filter(r => r.success);
+            const failResults = results.filter(r => !r.success);
 
-                // 批量处理元数据 (并发限制，比如最多 10 个)
-                // 为避免太慢，只对前 5 个进行详细 probe，其他的只使用基本信息
-                const resultsToProcess = results.slice(0, 10);
+            this.log(`下载完成: 成功 ${successResults.length}, 失败 ${failResults.length}`);
 
-                if (progress) progress.report({ message: "正在解析视频元数据...", increment: 5 });
+            // 后处理成功的文件 (验证、改名、插入)
+            for (const r of successResults) {
+                await this._postProcess(r.path || r.destPath);
+            }
 
-                const processed = await Promise.all(resultsToProcess.map(async (res, index) => {
-                    // 尝试补充元数据 (Duration, Resolution)
-                    try {
-                        // 只有当没有时长/大小时才去 probe
-                        if (!res.duration || !res.filesize) {
-                            const probeRes = await this.downloader.probe(res.url);
-                            if (probeRes && probeRes.success) {
-                                const meta = probeRes.isPlaylist && probeRes.entries ? probeRes.entries[0] : probeRes;
-                                if (meta) {
-                                    res.duration = meta.duration;
-                                    res.resolution = meta.resolution || (meta.width && meta.height ? `${meta.width}x${meta.height}` : null);
-                                    if (!res.filesize) res.filesize = meta.filesize || meta.filesize_approx;
-                                }
-                            }
-                        }
-                    } catch (e) { }
+            // 检查是否有 403 错误需要触发增强流程
+            // 只要有一个任务因为 403 失败，就触发增强流程 (针对该 URL)
+            const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
+            if (forbiddenErrors.length > 0) {
+                this.log("检测到 403 拒绝，启动增强流程处理...");
+                await this._handleForbidden(forbiddenErrors[0].code || 403, url, targetDir);
+            }
 
-                    // 打印最终透传的 Headers
-                    this.snifferOutput.appendLine(`[Result ${index + 1}] ${res.url} (Size:${res.filesize}, Dur:${res.duration})`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`处理失败: ${error.message}`);
+        }
+    }
 
-                    return {
-                        title: `嗅探结果 ${index + 1}`,
-                        description: `[${res.resolution || 'Unknown'}] ${res.url}`,
-                        url: res.url,
-                        duration: res.duration,
-                        filesize: res.filesize,
-                        resolution: res.resolution,
-                        _meta: {
-                            cookieSource: 'custom',
-                            referer: res.headers ? res.headers['Referer'] : undefined,
-                            userAgent: res.headers ? res.headers['User-Agent'] : undefined,
-                            cookie: res.headers ? res.headers['Cookie'] : undefined,
-                            origin: res.headers ? res.headers['Origin'] : undefined,
-                            browserProfilePath: res.userDataDir
-                        }
-                    };
-                }));
+    _createTask(videoUrl, title, targetDir, referer) {
+        let destPath = null;
+        if (title && title !== 'Direct Link' && title !== 'Web Resource') {
+            const safeTitle = this._sanitizeFilename(title);
+            if (safeTitle) {
+                destPath = path.join(targetDir, safeTitle + ".mp4");
+            }
+        }
+        return {
+            url: videoUrl,
+            destPath: destPath, // null 让 dow.js 自动生成
+            kind: "video",
+            baseDir: targetDir,
+            headers: {
+                "Referer": referer,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        };
+    }
 
-                if (progress) progress.report({ message: "捕获成功，准备下载...", increment: 10 });
-                return processed;
+    _deduplicateTasks(tasks) {
+        const seen = new Set();
+        return tasks.filter(t => {
+            if (!t.url) return false;
+            if (seen.has(t.url)) return false;
+            seen.add(t.url);
+            return true;
+        });
+    }
 
+    _isForbidden(code, error) {
+        return code === 403 || code === 401 || (error && error.toString().includes('403'));
+    }
+
+    _sanitizeFilename(title) {
+        if (!title) return null;
+        let safe = title.replace(/[\\/:*?"<>|]/g, "_");
+        safe = safe.replace(/\s+/g, " ").trim();
+        if (safe.length > 80) safe = safe.substring(0, 80);
+        return safe;
+    }
+
+    // 针对平台视频的直接下载：让 yt-dlp 处理一切 (合并、文件名、Temp文件等)
+    // 兼容旧代码调用，实际上 _fastProcess 已经覆盖了它的功能，但保留以防万一
+    async _downloadDirect(url, targetDir) {
+        // 复用 _fastProcess 的逻辑，因为现在 _fastProcess 已经足够智能且支持并行
+        return this._fastProcess(url, targetDir);
+    }
+
+    // _downloadOne 已经不再需要，被 downloadAll 批量调用取代
+
+    async _postProcess(filePath) {
+        if (!fs.existsSync(filePath)) return;
+
+        this.log(`正在验证文件: ${path.basename(filePath)}`);
+
+        // 获取 ffmpeg 路径 (避免循环依赖 qqq.js)
+        let ffmpeg = 'ffmpeg';
+        if (this.downloader.ytdlp && this.downloader.ytdlp.ffmpegPath) {
+            ffmpeg = this.downloader.ytdlp.ffmpegPath;
+        }
+
+        const args = ['-i', filePath];
+
+        return new Promise((resolve) => {
+            const proc = cp.spawn(ffmpeg, args);
+            let stderr = '';
+            proc.stderr.on('data', d => stderr += d.toString());
+
+            proc.on('close', async (code) => {
+                const isVideo = stderr.includes('Video:') || stderr.includes('Audio:');
+                const durationMatch = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
+
+                if (isVideo && durationMatch) {
+                    const currentName = path.basename(filePath);
+                    const ext = path.extname(filePath).toLowerCase();
+                    let finalPath = filePath;
+
+                    // 1. 检查文件名长度
+                    const isTooLong = currentName.length > 100;
+
+                    // 2. 检查后缀名修正
+                    let newExt = ext;
+                    if (stderr.includes("Video: h264") && !['.mp4', '.mkv', '.mov'].includes(ext)) newExt = '.mp4';
+                    else if (stderr.includes("Video: vp9") && ext !== '.webm' && ext !== '.mkv') newExt = '.webm';
+
+                    if (isTooLong) {
+                        const safeName = h.getTimestampFilename(newExt || '.mp4');
+                        finalPath = path.join(path.dirname(filePath), safeName);
+                        try { fs.renameSync(filePath, finalPath); } catch (e) { finalPath = filePath; }
+                    } else if (newExt !== ext) {
+                        finalPath = filePath.replace(ext, newExt);
+                        try { fs.renameSync(filePath, finalPath); } catch (e) { finalPath = filePath; }
+                    }
+
+                    // 插入暗号
+                    const fileName = path.basename(finalPath);
+                    await this._insertToCursor(fileName, finalPath);
+                    resolve(true);
+                } else {
+                    this.log(`文件无效 (非视频或损坏)，删除: ${filePath}`);
+                    try { fs.unlinkSync(filePath); } catch (e) { }
+                    resolve(false);
+                }
+            });
+        });
+    }
+
+    async _insertToCursor(fileName, fullPath) {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
+
+        const docDir = path.dirname(editor.document.uri.fsPath);
+        let relPath = path.relative(docDir, fullPath);
+
+        // 强制使用 / 作为分隔符
+        relPath = relPath.replace(/\\/g, '/');
+
+        // 暗号格式: /\qqq/filename\/
+        const snippet = `/\\${relPath}\\/\n`;
+
+        await editor.edit(editBuilder => {
+            editBuilder.insert(editor.selection.active, snippet);
+        });
+    }
+
+    async _handleForbidden(code, url, targetDir) {
+        // 用户反馈：左右按钮反了。
+        // 要求：左边 "选择类似..."，右边 "启动增强..." (默认)
+        // 调整顺序以匹配用户预期的视觉顺序。
+        const selection = await vscode.window.showInformationMessage(
+            `qqq: 被拒绝，返回 ${code}，当前可尝试启动增强流程。`,
+            { modal: false },
+            "🚀启动增强流程",
+            "选择类似 chrome.exe 滴浏览器入口文件"
+        );
+
+        if (!selection || selection === "🚀启动增强流程") {
+            await this._runEnhancedFlow(url, targetDir);
+        } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
+            await this._promptForBrowser(url, targetDir);
+        }
+    }
+
+    async _runEnhancedFlow(url, targetDir) {
+        let browserPath = this.context.globalState.get('customBrowserPath');
+        const ownChromePath = path.join(this.context.globalStorageUri.fsPath, 'gh555.qqq', 'chrome-win', 'chrome.exe');
+
+        // 优先检查已下载的专用 Chrome
+        if (fs.existsSync(ownChromePath)) {
+            browserPath = ownChromePath;
+        }
+
+        if (browserPath && fs.existsSync(browserPath)) {
+            if (await this._validateBrowser(browserPath)) {
+                await this._startSniffer(browserPath, url, targetDir);
+                return;
+            }
+        }
+
+        await this._promptForBrowser(url, targetDir);
+    }
+
+    async _promptForBrowser(url, targetDir) {
+        const uris = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            filters: { 'Executables': ['exe'] },
+            title: "请选择类似 chrome.exe 滴浏览器入口文件"
+        });
+
+        if (uris && uris.length > 0) {
+            const exePath = uris[0].fsPath;
+            if (await this._validateBrowser(exePath)) {
+                await this.context.globalState.update('customBrowserPath', exePath);
+                await this._startSniffer(exePath, url, targetDir);
             } else {
-                h.log(`[Controller] 用户确认，但未获取到结果`); // 兜底日志
-                this.snifferOutput.appendLine(`[Error] 用户点击确认，但未能提取到有效视频流。`);
+                const sel = await vscode.window.showErrorMessage(
+                    "qqq: 该入口文件无效，可选下载chrome（约150m）或终止增强流程。",
+                    "下载 chrome", "终止一切"
+                );
 
-                // 尝试 dump 最近的几条捕获（如果有的话，可能是被过滤掉的？）
-                // 但 sniffer.capturedVideos 只存符合条件的。
-                // 我们在 onLog 里已经打印了所有相关的。
+                if (sel === "下载 chrome") {
+                    await this._downloadChrome(url, targetDir);
+                } else {
+                    vscode.window.showInformationMessage("qqq: 你取消了增强流程。");
+                }
+            }
+        } else {
+            vscode.window.showInformationMessage("qqq: 你取消了增强流程。");
+        }
+    }
 
-                vscode.window.showErrorMessage("未检测到视频流。请检查【Video Sniffer Log】面板查看是否有相关请求被拦截。");
-                return [];
+    async _validateBrowser(exePath) {
+        return new Promise(resolve => {
+            const check = cp.spawn(exePath, ['--version']);
+            check.on('error', () => resolve(false));
+            check.on('close', code => resolve(code === 0));
+        });
+    }
+
+    async _downloadChrome(url, targetDir) {
+        const destFolder = path.join(this.context.globalStorageUri.fsPath, 'gh555.qqq');
+        if (!fs.existsSync(destFolder)) fs.mkdirSync(destFolder, { recursive: true });
+
+        const zipPath = path.join(destFolder, 'chrome.zip');
+        // 使用一个稳定的 ungoogled-chromium Windows 版本
+        const chromeUrl = "https://github.com/ungoogled-software/ungoogled-chromium-binaries/releases/download/120.0.6099.109-1/ungoogled-chromium_120.0.6099.109-1.1_windows_x64.zip";
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "正在下载专用 Chrome...",
+            cancellable: false
+        }, async (progress) => {
+            try {
+                await this._downloadFileNative(chromeUrl, zipPath, progress);
+                progress.report({ message: "解压中..." });
+
+                // 使用 PowerShell 解压 (Windows 内置)
+                const psCommand = `Expand-Archive -Path "${zipPath}" -DestinationPath "${destFolder}" -Force`;
+                await new Promise((resolve, reject) => {
+                    cp.exec(`powershell -Command "${psCommand}"`, (err) => {
+                        if (err) reject(err);
+                        else resolve();
+                    });
+                });
+
+                // 查找解压后的 chrome.exe
+                const findExe = (dir) => {
+                    const files = fs.readdirSync(dir);
+                    for (const f of files) {
+                        const full = path.join(dir, f);
+                        if (fs.statSync(full).isDirectory()) {
+                            const res = findExe(full);
+                            if (res) return res;
+                        } else if (f === 'chrome.exe') {
+                            return full;
+                        }
+                    }
+                    return null;
+                };
+
+                const exePath = findExe(destFolder);
+                if (exePath) {
+                    await this._startSniffer(exePath, url, targetDir);
+                } else {
+                    throw new Error("Cannot find chrome.exe in downloaded archive");
+                }
+
+            } catch (e) {
+                vscode.window.showErrorMessage(`下载 Chrome 失败: ${e.message}`);
+            }
+        });
+    }
+
+    _downloadFileNative(url, destPath, progress) {
+        return new Promise((resolve, reject) => {
+            const request = (currentUrl) => {
+                https.get(currentUrl, (response) => {
+                    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                        request(response.headers.location);
+                        return;
+                    }
+                    if (response.statusCode !== 200) {
+                        reject(new Error(`Failed to download: Status Code ${response.statusCode}`));
+                        return;
+                    }
+                    const total = parseInt(response.headers['content-length'], 10);
+                    let downloaded = 0;
+                    const file = fs.createWriteStream(destPath);
+                    response.pipe(file);
+                    response.on('data', (chunk) => {
+                        downloaded += chunk.length;
+                        if (total) {
+                            const percent = Math.round((downloaded * 100) / total);
+                            progress.report({ message: `${percent}%` });
+                        }
+                    });
+                    file.on('finish', () => { file.close(resolve); });
+                    file.on('error', (err) => { fs.unlink(destPath, () => reject(err)); });
+                }).on('error', (err) => { fs.unlink(destPath, () => reject(err)); });
+            };
+            request(url);
+        });
+    }
+
+    async _startSniffer(browserPath, url, targetDir) {
+        this.log("启动增强嗅探流程...");
+
+        let sniffer = null;
+        try {
+            const CdpSniffer = require('./cdp-sniffer');
+            CdpSniffer.setCustomBrowserPath(browserPath);
+
+            sniffer = new CdpSniffer();
+
+            // 1. 启动浏览器
+            await sniffer.start(url, (msg) => this.log(msg));
+
+            // 2. 弹出模态框等待用户确认
+            const selection = await vscode.window.showInformationMessage(
+                "请在打开的浏览器中播放视频，完成后点击下方按钮。",
+                { modal: true },
+                "我已在外部播放"
+            );
+
+            // 3. 用户确认后，提取结果并关闭浏览器
+            if (selection === "我已在外部播放") {
+                const videos = sniffer.getCapturedVideos();
+                await sniffer.stop();
+
+                if (videos.length > 0) {
+                    this.log(`捕获到 ${videos.length} 个视频，开始下载...`);
+                    const downloadPromises = videos.map(v => this._downloadOne(v, targetDir, url));
+                    await Promise.all(downloadPromises);
+                } else {
+                    vscode.window.showErrorMessage("未能捕获到视频。请重试并确保视频已开始播放。");
+                }
+            } else {
+                await sniffer.stop();
+                vscode.window.showInformationMessage("已取消增强流程。");
             }
 
         } catch (e) {
-            if (sniffer) sniffer.stop();
-            const msg = e.message || '';
-            const CdpSniffer = require('./cdp-sniffer');
-
-            if (msg.includes('未找到 Chrome 或 Edge')) {
-                const choice = await vscode.window.showErrorMessage(
-                    `启动专用浏览器失败：系统路径中未找到 Chrome/Edge。请手动指定浏览器可执行文件(.exe)的位置。`,
-                    "📂 手动选择浏览器"
-                );
-
-                if (choice === "📂 手动选择浏览器") {
-                    const uris = await vscode.window.showOpenDialog({
-                        canSelectFiles: true,
-                        canSelectFolders: false,
-                        canSelectMany: false,
-                        filters: { 'Executables': ['exe'], 'Applications': ['app'] },
-                        title: "请选择 Chrome 或 Edge 的启动文件 (chrome.exe / msedge.exe)"
-                    });
-
-                    if (uris && uris.length > 0) {
-                        const exePath = uris[0].fsPath;
-                        if (await CdpSniffer.validateBrowserPath(exePath)) {
-                            CdpSniffer.setCustomBrowserPath(exePath);
-                            await this.context.globalState.update('customBrowserPath', exePath);
-                            vscode.window.showInformationMessage(`路径已保存，正在重试...`);
-                            return this._sniffFromBrowser(url, progress); // 递归重试
-                        } else {
-                            vscode.window.showErrorMessage(`验证失败：选择的文件不是有效的浏览器程序。`);
-                        }
-                    }
-                }
-            } else {
-                vscode.window.showErrorMessage(`浏览器嗅探失败: ${msg}`);
-            }
-        }
-        return [];
-    }
-
-    async runProbeAndDownload(url, targetDir) {
-        await vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: "视频下载任务",
-            cancellable: true
-        }, async (progress, token) => {
-            try {
-                // --- 阶段 1: 智能探测 ---
-                progress.report({ message: "正在智能探测视频资源...", increment: 10 });
-
-                let candidates = [];
-                let probeErrors = [];
-
-                // 策略 A: 直接使用 yt-dlp 探测 URL
-                try {
-                    const res = await this.downloader.probe(url);
-                    if (res.success) {
-                        candidates.push(...this._normalizeProbeResult(res));
-                    } else {
-                        probeErrors.push(`yt-dlp直连失败: ${res.error}`);
-                    }
-                } catch (e) {
-                    probeErrors.push(`yt-dlp异常: ${e.message}`);
-                }
-
-                if (token.isCancellationRequested) return;
-
-                // 策略 B: 总是尝试网页解析 (递归嗅探)，作为补充
-                // 即使 yt-dlp 成功了，可能只抓到了主视频，网页解析能发现更多（如推荐视频、iframe等）
-                if (true) {
-                    progress.report({ message: "尝试深度网页解析...", increment: 20 });
-                    try {
-                        const webVideoUrls = await h.extractVideoUrlsFromWebPage(url);
-                        if (webVideoUrls && webVideoUrls.length > 0) {
-                            // 对提取到的每个潜在视频URL，再次尝试用 yt-dlp 确认
-                            // 限制并发数为 5，提高效率
-                            const validVideos = [];
-                            await this._batchProbe(webVideoUrls, 5, (v) => validVideos.push(v), progress, url);
-                            candidates.push(...validVideos);
-                        }
-                    } catch (e) {
-                        probeErrors.push(`网页解析失败: ${e.message}`);
-                    }
-                }
-
-                if (token.isCancellationRequested) return;
-
-                // --- 阶段 2: 用户选择 ---
-                if (candidates.length === 0) {
-                    const detailMsg = probeErrors.join('; ');
-
-                    // 检查是否为 Cloudflare/403/Unsupported 错误
-                    const isAntiBot = probeErrors.some(e =>
-                        e.includes("403") ||
-                        e.includes("Cloudflare") ||
-                        e.includes("Unsupported URL") ||
-                        e.includes("Sign in")
-                    );
-
-                    if (isAntiBot) {
-                        // 发现反爬虫，直接无感切换到强力模式，不再弹窗询问
-                        // 用户只会看到浏览器的启动和随后的“确认”弹窗，流程更加连贯
-                        const sniffed = await this._sniffFromBrowser(url, progress);
-                        if (sniffed && sniffed.length > 0) {
-                            candidates.push(...sniffed);
-                        } else {
-                            // 强力模式用户手动取消或失败
-                            return;
-                        }
-                    } else {
-                        vscode.window.showErrorMessage(`未找到可下载视频。详情: ${detailMsg}`);
-                        return;
-                    }
-                }
-
-                // 去重
-                const uniqueCandidates = this._deduplicateVideos(candidates);
-
-                progress.report({ message: "等待用户选择...", increment: 40 });
-                const selected = await this._promptUserSelection(uniqueCandidates);
-                if (selected && selected.length > 0) {
-                    // 兜底：如果是直接下载没经过列表选择，确保元数据存在
-                    if (uniqueCandidates.length === 1 && selected[0] && !selected[0]._meta) {
-                        selected[0]._meta = uniqueCandidates[0]._meta;
-                    }
-
-                    if (token.isCancellationRequested) return;
-
-                    // --- 阶段 3: 执行下载 ---
-                    // 针对强力反爬虫网站（如 sex.com, missav 等），即便获取到了链接，
-                    // 如果直接下载失败，也尝试回退到强力模式重新获取一次
-                    // 或者在这里捕获下载失败，引导进入强力模式？
-                    // 现在的逻辑是：如果 probe 阶段就失败，直接进强力模式（上面已修改）。
-                    // 如果 probe 成功了（比如解析出了 m3u8），但下载阶段失败（403），
-                    // 我们需要在 downloadVideos 里处理，或者在这里捕获。
-
-                    // 但 VideoDownloadController 并没有直接捕获 downloadVideos 的每个结果。
-                    // 我们可以修改 downloadVideos 的调用方式。
-
-                    const dlResults = await this.downloader.downloadVideos(
-                        Array.isArray(selected) ? selected : [selected],
-                        targetDir,
-                        progress
-                    );
-
-                    // 检查下载结果
-                    const failed403 = dlResults.results.filter(r => !r.success && (
-                        String(r.error).includes('403') ||
-                        String(r.error).includes('Forbidden') ||
-                        String(r.error).includes('HTTP Error')
-                    ));
-
-                    if (failed403.length > 0) {
-                        // 下载阶段遇到 403，也直接无感切换到强力模式重试
-                        // 弹窗提示一下，给用户一个心理预期，但不需要用户做选择题
-                        const retryAction = await vscode.window.showWarningMessage(
-                            `检测到下载权限不足(403)，准备启动专用浏览器辅助验证...`,
-                            "🚀 启动验证", "取消任务"
-                        );
-
-                        if (retryAction === "🚀 启动验证") {
-                            for (const failTask of failed403) {
-                                const sniffed = await this._sniffFromBrowser(failTask.url, progress);
-                                if (sniffed && sniffed.length > 0) {
-                                    await this.downloader.downloadVideos(
-                                        sniffed,
-                                        targetDir,
-                                        progress
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-            } catch (err) {
-                vscode.window.showErrorMessage(`任务执行出错: ${err.message}`);
-            }
-        });
-    }
-
-    async _pollForProbeSuccess(url, progress, token) {
-        const maxAttempts = 12; // 12 * 5s = 60s
-        const intervalMs = 5000;
-
-        for (let i = 1; i <= maxAttempts; i++) {
-            if (token.isCancellationRequested) return null;
-
-            progress.report({ message: `正在等待浏览器验证通过 (尝试 ${i}/${maxAttempts})...`, increment: 0 });
-
-            try {
-                // 每次尝试都进行探测
-                // 注意：底层 dow.js 的 probe 已经包含了 Cookie 重试逻辑
-                const res = await this.downloader.probe(url);
-                if (res.success) {
-                    return res;
-                }
-            } catch (e) {
-                // 忽略错误，继续轮询
-            }
-
-            // 等待下一次
-            await new Promise(r => setTimeout(r, intervalMs));
-        }
-        return null;
-    }
-
-    _normalizeProbeResult(res) {
-        if (!res.success) return [];
-
-        // 提取元数据
-        const meta = {
-            cookieSource: res.cookieSource,
-            referer: res.webpageUrl || res.url // 优先使用网页 URL 作为 Referer
-        };
-
-        if (res.isPlaylist) {
-            return res.entries.map(e => ({
-                title: e.title || `Video ${e.id}`,
-                url: e.url || e.webpage_url,
-                pageUrl: res.webpageUrl || e.webpage_url, // 记录原始页面URL作为Referer
-                duration: e.duration,
-                thumbnail: e.thumbnail,
-                is_direct: false,
-                // 将元数据附加到每个视频对象上
-                _meta: meta
-            }));
-        } else {
-            return [{
-                title: res.title || "未知标题视频",
-                url: res.url || res.webpageUrl,
-                pageUrl: res.webpageUrl || res.url, // 记录原始页面URL作为Referer
-                duration: res.duration,
-                thumbnail: res.thumbnail,
-                filesize: res.filesize || res.filesize_approx,
-                resolution: res.resolution || (res.width && res.height ? `${res.width}x${res.height}` : null),
-                is_direct: false,
-                _meta: meta
-            }];
+            this.log(`增强流程出错: ${e.message}`);
+            if (sniffer) await sniffer.stop();
         }
     }
 
-    async _batchProbe(urls, concurrency, onValid, progress, referer) {
-        const queue = [...urls];
-        let active = 0;
-        let completed = 0;
-        const total = urls.length;
-
-        return new Promise((resolve) => {
-            const next = async () => {
-                if (queue.length === 0 && active === 0) {
-                    resolve();
-                    return;
-                }
-
-                while (active < concurrency && queue.length > 0) {
-                    const u = queue.shift();
-                    active++;
-
-                    // 只有当URL看起来像视频文件或知名平台时才深入探测，避免浪费时间
-                    // 但为了最大兼容性，这里我们稍微放宽，或者信任 extractVideoUrlsFromWebPage 的结果
-
-                    this.downloader.probe(u).then(res => {
-                        if (res.success) {
-                            const items = this._normalizeProbeResult(res);
-                            items.forEach(onValid);
-                        } else {
-                            (async () => {
-                                // 原生 HTTP HEAD 探测，获取 Content-Length
-                                let size = null;
-                                try {
-                                    const parsed = new URL(u);
-                                    const protocol = parsed.protocol === 'https:' ? require('https') : require('http');
-                                    const commonHeaders = { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' };
-                                    if (referer) commonHeaders['Referer'] = referer;
-
-                                    // 先尝试 HEAD
-                                    await new Promise(resolve => {
-                                        const req = protocol.request(u, { method: 'HEAD', headers: commonHeaders }, res => {
-                                            if (res.headers['content-length']) {
-                                                size = parseInt(res.headers['content-length'], 10);
-                                            }
-                                            resolve();
-                                        });
-                                        req.on('error', () => resolve());
-                                        req.setTimeout(2000, () => req.destroy());
-                                        req.end();
-                                    });
-
-                                    // 如果 HEAD 失败或无长度，尝试 GET Range: 0-0
-                                    if (!size) {
-                                        await new Promise(resolve => {
-                                            const headers = { ...commonHeaders, 'Range': 'bytes=0-0' };
-                                            const req = protocol.request(u, { method: 'GET', headers }, res => {
-                                                const cl = res.headers['content-length'];
-                                                const cr = res.headers['content-range'];
-                                                if (cr) {
-                                                    const m = String(cr).match(/\/(\d+)$/);
-                                                    if (m) size = parseInt(m[1], 10);
-                                                } else if (cl) {
-                                                    size = parseInt(cl, 10);
-                                                }
-                                                try { res.destroy(); } catch { }
-                                                resolve();
-                                            });
-                                            req.on('error', () => resolve());
-                                            req.setTimeout(2000, () => req.destroy());
-                                            req.end();
-                                        });
-                                    }
-                                } catch (e) { }
-
-                                const title = (function () { try { return require('path').basename(u).split('?')[0]; } catch { return "直接链接视频"; } })();
-                                onValid({
-                                    title,
-                                    url: u,
-                                    is_direct: true,
-                                    duration: null,
-                                    resolution: null,
-                                    filesize: size, // 填充探测到的大小
-                                    _meta: { referer }
-                                });
-                            })();
-                        }
-                    }).catch(() => { }).finally(() => {
-                        active--;
-                        completed++;
-                        if (progress) progress.report({ message: `深度分析中 ${completed}/${total}...`, increment: 0 });
-                        next();
-                    });
-                }
-            };
-            next();
-        });
-    }
-
-    _deduplicateVideos(videos) {
+    _deduplicate(videos) {
         const seen = new Set();
         return videos.filter(v => {
             if (!v.url) return false;
@@ -572,75 +475,6 @@ class VideoDownloadController {
             seen.add(v.url);
             return true;
         });
-    }
-
-    _formatDuration(seconds) {
-        if (!seconds || isNaN(seconds)) return '';
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        const pad = (n) => n.toString().padStart(2, '0');
-        if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
-        return `${m}:${pad(s)}`;
-    }
-
-    _formatSize(bytes) {
-        if (!bytes || isNaN(bytes)) return '';
-        const units = ['B', 'KB', 'MB', 'GB'];
-        let size = bytes;
-        let i = 0;
-        while (size >= 1024 && i < units.length - 1) {
-            size /= 1024;
-            i++;
-        }
-        return `${size.toFixed(1)} ${units[i]}`;
-    }
-
-    async _promptUserSelection(videos) {
-        const items = await Promise.all(videos.map(async (v, i) => {
-            const metaParts = [];
-            // 时长
-            if (v.duration) metaParts.push(`时长: ${this._formatDuration(v.duration)}`);
-            // 大小
-            if (v.filesize) metaParts.push(`大小: ${this._formatSize(v.filesize)}`);
-            // 分辨率
-            if (v.resolution) metaParts.push(`分辨率: ${v.resolution}`);
-
-
-
-            // 过滤逻辑: 只默认勾选 100KB (102400 Bytes) 以上的视频
-            // 防止误选小的广告片段或图标
-            // 如果没有 filesize，默认勾选（防止误杀无法探测大小的视频）
-            const isBigEnough = v.filesize ? v.filesize > 102400 : true;
-
-            // 构造 QuickPickItem
-            // 响应用户需求：
-            // label (第一行): [时长 - 分辨率 - 大小] 标题
-
-            const simpleMeta = [];
-            const durStr = v.duration ? this._formatDuration(v.duration) : '--:--';
-            const resStr = v.resolution ? v.resolution : '---p';
-            const sizeStr = Number.isFinite(v.filesize) && v.filesize > 0 ? this._formatSize(v.filesize) : '---MB';
-            simpleMeta.push(durStr, resStr, sizeStr);
-
-            const prefix = `[${simpleMeta.join(' - ')}] `;
-
-            return {
-                label: `$(device-camera-video) ${prefix}${v.title}`,
-                description: '', // 留空
-                detail: v.url,   // URL 放第二行
-                video: v,
-                picked: isBigEnough
-            };
-        }));
-
-        const selected = await vscode.window.showQuickPick(items, {
-            canPickMany: true,
-            placeHolder: `检测到 ${videos.length} 个视频，请选择要下载的项目`,
-            matchOnDetail: true
-        });
-
-        return selected ? selected.map(x => x.video) : null;
     }
 }
 

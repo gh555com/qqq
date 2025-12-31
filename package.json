@@ -160,7 +160,7 @@
       },
       {
         "command": "qqq.downloadVideosFromUrl",
-        "title": "qqq: 从URL下载视频"
+        "title": "qqq: 在光标位置插入 YouTube 等网页视频"
       }
     ],
     "keybindings": [
