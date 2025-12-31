@@ -1,0 +1,92 @@
+
+## 架构现状
+
+* 入口控制器在探测阶段依赖 yt-dlp 的 `--dump-json` 输出，但开启了 `--flat-playlist`，通常只返回条目基础信息，缺少 `formats/width/height/filesize` 等细节。[dow.js:probe 构参](file:///e:/s/wol/py/q3/src/dow.js#L1842-L1853)
+
+* 对网页静态解析得到的直链，当前只做二次 `probe` 或后缀兜底，不做 HEAD/Manifest 解析，缺少尺寸与时长。[VideoDownloadController.js:\_batchProbe](file:///e:/s/wol/py/q3/src/VideoDownloadController.js#L472-L506)
+
+* QuickPick 的描述来自 `duration/filesize/resolution` 三字段；缺失时统一显示“无详细信息”。[VideoDownloadController.js:\_promptUserSelection](file:///e:/s/wol/py/q3/src/VideoDownloadController.js#L552-L571)
+
+## 与 DownloadHelper 的差距
+
+* DownloadHelper 等工具会在下载前解析 HLS/DASH 清单，或列出 yt-dlp 的 `formats` 列表，计算各分辨率的码率/时长与预估体积。
+
+* 我们当前没有：
+
+  * 解析 `.m3u8/.mpd` 清单并汇总时长与带宽。
+
+  * 对 playlist/单视频做二级解析以拿到 `formats`。
+
+  * 对直链进行 HEAD 获取 `Content-Length` 或轻量取样以估算分辨率。
+
+## 可行方案（我们能做到）
+
+* 引入“元数据解析管线”（MetadataResolver），在候选列表弹出前为每个候选补全三要素：分辨率、大小、时长。
+
+* 策略组合：
+
+  1. yt-dlp 深解析：对平台页/playlist 取消 `--flat-playlist`，或二级调用以拿到 `formats`（含 `width/height/tbr/filesize_approx`）。
+  2. 直链 HEAD：对 `.mp4/.webm/.mov/.mkv` 发 HEAD/范围请求，读取 `Content-Length` 作为大小；可选用 ffprobe 远程流读取少量数据获取时长与分辨率（可配置）。
+  3. HLS（.m3u8）：
+
+     * 解析 master playlist（#EXT-X-STREAM-INF）生成各分辨率候选；
+
+     * 解析对应 media playlist（#EXTINF）累计时长；
+
+     * 以 `BANDWIDTH * duration / 8` 估算大小。
+  4. DASH（.mpd）：解析 `Representation` 的 `width/height/bandwidth` 与 segment timeline，拟合时长与大小。
+  5. 统一 headers：沿用候选的 `referer/user-agent/cookie`，保证受防盗链站点的 HEAD/清单访问成功。
+
+* UI 改进：
+
+  * QuickPick 逐项展示“分辨率 | 时长 | 大小”，默认勾选 `>100KB`。
+
+  * 对 HLS/DASH 将各 Representation 作为独立可选项（像 DownloadHelper 的格式列表）。
+
+## 实施计划
+
+1. 新增模块 `src/media-metadata.js`：
+
+   * `resolveMetaForUrl(url, meta)`：返回 `{duration, resolution, filesize}`。
+
+   * 内含子策略：`probeFormatsViaYtdlp`、`headForContentLength`、`parseM3U8`、`parseMPD`；并发+超时控制（如每项 3–5 秒）。
+2. 控制器接入：在 [runProbeAndDownload](file:///e:/s/wol/py/q3/src/VideoDownloadController.js#L270-L374) 的候选聚合后、QuickPick 前，对全部候选批量调用 `resolveMetaForUrl`，把结果补到对象上。
+3. 对 playlist 与平台页：
+
+   * 若 `res.isPlaylist`，对每个 `entry.webpage_url` 进行二级 `--dump-json` 获取 `formats`；
+
+   * 将 `formats` 列表映射为多个候选项（每项包含 width/height/tbr/format\_note/duration/filesize\_approx）。
+4. 对直链：
+
+   * HEAD 取 `Content-Length`；
+
+   * 可选（配置项）：`ffprobe` 少量读取获取分辨率/时长（对某些源可能需要），默认关闭以避免性能问题。
+5. 对 HLS/DASH：
+
+   * 解析 master + media/segment timeline，计算时长与大小；
+
+   * 生成多分辨率候选（如 1080p/720p/480p）。
+6. 统一 headers：
+
+   * 复用候选的 `_meta.referer/cookie/userAgent/origin`，在 HEAD/清单拉取时传递。
+7. UI 与默认勾选：
+
+   * QuickPick 改为显示“分辨率 | 时长 | 大小”，`picked = filesize > 100KB`；当仅有时长/分辨率无大小时，显示“≈大小”。
+8. 性能与容错：
+
+   * 并发池与全局 5–7 秒预算，失败项保留为“无详细信息”。
+
+## 风险与兼容
+
+* 某些站点禁止 HEAD 或需要 Cookie/Referer；通过统一 headers 与 `cookies-from-browser` 兜底。
+
+* HLS/DASH 估算体积为近似值；UI 标注“≈”。
+
+* 二级 yt-dlp 解析对部分源会慢；设置最大并发与条目上限，必要时只解析 Top-N。
+
+## 验证与交付
+
+* 用百度新闻示例页验证，可在 QuickPick 中看到 3 条视频各自的分辨率/时长/大小（或≈大小）。
+
+* 对 YouTube/Bilibili 等源展示 formats 条目。
+

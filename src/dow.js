@@ -1843,7 +1843,7 @@ class YtDlpDownloader {
                 "--no-download",
                 "--no-warnings",
                 "--ignore-errors",
-                "--flat-playlist",
+                "--no-flat-playlist", // 强制深入解析每个条目
                 "--no-check-certificate",
                 "--extractor-args", "generic:impersonate",
 
@@ -1924,6 +1924,22 @@ class YtDlpDownloader {
 
                         if (parsed.length === 1 && !parsed[0]._type && !parsed[0].entries) {
                             const info = parsed[0];
+                            const formats = Array.isArray(info.formats) ? info.formats : [];
+                            let best = null;
+                            for (const f of formats) {
+                                if (!f) continue;
+                                const isVideo = String(f.vcodec || "").toLowerCase() !== "none";
+                                if (!isVideo) continue;
+                                if (!best) { best = f; continue; }
+                                const hA = Number(f.height || 0), hB = Number(best.height || 0);
+                                const tA = Number(f.tbr || 0), tB = Number(best.tbr || 0);
+                                if (hA > hB || (hA === hB && tA > tB)) best = f;
+                            }
+                            const width = best ? (best.width || null) : (info.width || null);
+                            const height = best ? (best.height || null) : (info.height || null);
+                            const resolution = width && height ? `${width}x${height}` : (info.resolution || null);
+                            const filesize = best ? (best.filesize || best.filesize_approx || null) : (info.filesize || info.filesize_approx || null);
+
                             resolveProbe({
                                 success: true,
                                 title: info.title,
@@ -1936,6 +1952,10 @@ class YtDlpDownloader {
                                 webpageUrl: info.webpage_url || info.url || url,
                                 id: info.id,
                                 url: info.url,
+                                width,
+                                height,
+                                resolution,
+                                filesize,
 
                                 cookieSource: extraArgs.includes("chrome") ? "chrome" :
                                     extraArgs.includes("edge") ? "edge" :
@@ -1964,6 +1984,11 @@ class YtDlpDownloader {
                                 thumbnail: e.thumbnail,
                                 uploader: e.uploader,
                                 url: e.webpage_url || e.url || e.original_url,
+                                filesize: e.filesize,
+                                filesize_approx: e.filesize_approx,
+                                width: e.width,
+                                height: e.height,
+                                resolution: e.resolution,
                                 original: e
                             })),
                         });
@@ -1975,6 +2000,31 @@ class YtDlpDownloader {
 
             doProbe().then(res => {
 
+
+                // 成功但缺少关键信息时尝试使用浏览器 Cookie 进行深度解析
+                if (res.success) {
+                    const hasMeta = res.isPlaylist
+                        ? Array.isArray(res.entries) && res.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                        : (res.width || res.height || res.resolution || res.filesize || res.filesize_approx);
+                    if (!hasMeta) {
+                        return doProbe(["--cookies-from-browser", "chrome"]).then(res2 => {
+                            const res2Has = res2.success && (
+                                res2.isPlaylist
+                                    ? Array.isArray(res2.entries) && res2.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                                    : (res2.width || res2.height || res2.resolution || res2.filesize || res2.filesize_approx)
+                            );
+                            if (res2Has) return res2;
+                            return doProbe(["--cookies-from-browser", "edge"]).then(res3 => {
+                                const res3Has = res3.success && (
+                                    res3.isPlaylist
+                                        ? Array.isArray(res3.entries) && res3.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                                        : (res3.width || res3.height || res3.resolution || res3.filesize || res3.filesize_approx)
+                                );
+                                return res3Has ? res3 : res;
+                            });
+                        });
+                    }
+                }
 
                 if (!res.success && (
                     res.error?.includes("403") ||

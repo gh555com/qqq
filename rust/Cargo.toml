@@ -1,225 +1,26 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 [package]
-name = "q"
-version = "1.0.0"
+name = "dumb_saver_rs"
+version = "0.1.0"
 edition = "2021"
-authors = ["qqq"]
-description = "qqq Rust Daemon - Clipboard handler and file utilities"
-
-[[bin]]
-name = "q"
-path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+once_cell = "1"
+num_cpus = "1"
+threadpool = "1"
+walkdir = "2"
 rand = "0.8"
+chrono = { version = "0.4", features = ["clock"] }
+base64 = "0.21"
+filetime = "0.2"
+image = { version = "0.24", default-features = false, features = ["bmp", "png"] }
+regex = "1"
 
 [target.'cfg(windows)'.dependencies]
-# Windows 不需要额外依赖，使用 std 和 FFI
-
-[profile.release]
-opt-level = "z"      # 最小体积
-lto = true           # 链接时优化
-strip = true         # 移除符号
-panic = "abort"      # 减小体积
-codegen-units = 1    # 更好优化
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+windows-sys = { version = "0.52", features = [
+  "Win32_Foundation",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_UI_Shell"
+] }

@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const h = require('./h');
+// const metaProbe = require('./metadata'); // 已删除
 const { getSharedDownloader } = require('./dow');
 
 class VideoDownloadController {
@@ -304,7 +305,7 @@ class VideoDownloadController {
                             // 对提取到的每个潜在视频URL，再次尝试用 yt-dlp 确认
                             // 限制并发数为 5，提高效率
                             const validVideos = [];
-                            await this._batchProbe(webVideoUrls, 5, (v) => validVideos.push(v), progress);
+                            await this._batchProbe(webVideoUrls, 5, (v) => validVideos.push(v), progress, url);
                             candidates.push(...validVideos);
                         }
                     } catch (e) {
@@ -461,13 +462,15 @@ class VideoDownloadController {
                 pageUrl: res.webpageUrl || res.url, // 记录原始页面URL作为Referer
                 duration: res.duration,
                 thumbnail: res.thumbnail,
+                filesize: res.filesize || res.filesize_approx,
+                resolution: res.resolution || (res.width && res.height ? `${res.width}x${res.height}` : null),
                 is_direct: false,
                 _meta: meta
             }];
         }
     }
 
-    async _batchProbe(urls, concurrency, onValid, progress) {
+    async _batchProbe(urls, concurrency, onValid, progress, referer) {
         const queue = [...urls];
         let active = 0;
         let completed = 0;
@@ -492,14 +495,62 @@ class VideoDownloadController {
                             const items = this._normalizeProbeResult(res);
                             items.forEach(onValid);
                         } else {
-                            // 如果 yt-dlp 失败，但 url 结尾是 .mp4 等，可以直接当作直链
-                            if (/\.(mp4|webm|mov|mkv)(\?|$)/i.test(u)) {
+                            (async () => {
+                                // 原生 HTTP HEAD 探测，获取 Content-Length
+                                let size = null;
+                                try {
+                                    const parsed = new URL(u);
+                                    const protocol = parsed.protocol === 'https:' ? require('https') : require('http');
+                                    const commonHeaders = { 'User-Agent': 'Mozilla/5.0', 'Accept': '*/*' };
+                                    if (referer) commonHeaders['Referer'] = referer;
+
+                                    // 先尝试 HEAD
+                                    await new Promise(resolve => {
+                                        const req = protocol.request(u, { method: 'HEAD', headers: commonHeaders }, res => {
+                                            if (res.headers['content-length']) {
+                                                size = parseInt(res.headers['content-length'], 10);
+                                            }
+                                            resolve();
+                                        });
+                                        req.on('error', () => resolve());
+                                        req.setTimeout(2000, () => req.destroy());
+                                        req.end();
+                                    });
+
+                                    // 如果 HEAD 失败或无长度，尝试 GET Range: 0-0
+                                    if (!size) {
+                                        await new Promise(resolve => {
+                                            const headers = { ...commonHeaders, 'Range': 'bytes=0-0' };
+                                            const req = protocol.request(u, { method: 'GET', headers }, res => {
+                                                const cl = res.headers['content-length'];
+                                                const cr = res.headers['content-range'];
+                                                if (cr) {
+                                                    const m = String(cr).match(/\/(\d+)$/);
+                                                    if (m) size = parseInt(m[1], 10);
+                                                } else if (cl) {
+                                                    size = parseInt(cl, 10);
+                                                }
+                                                try { res.destroy(); } catch { }
+                                                resolve();
+                                            });
+                                            req.on('error', () => resolve());
+                                            req.setTimeout(2000, () => req.destroy());
+                                            req.end();
+                                        });
+                                    }
+                                } catch (e) { }
+
+                                const title = (function () { try { return require('path').basename(u).split('?')[0]; } catch { return "直接链接视频"; } })();
                                 onValid({
-                                    title: path.basename(u).split('?')[0] || "直接链接视频",
+                                    title,
                                     url: u,
-                                    is_direct: true
+                                    is_direct: true,
+                                    duration: null,
+                                    resolution: null,
+                                    filesize: size, // 填充探测到的大小
+                                    _meta: { referer }
                                 });
-                            }
+                            })();
                         }
                     }).catch(() => { }).finally(() => {
                         active--;
@@ -546,21 +597,42 @@ class VideoDownloadController {
     }
 
     async _promptUserSelection(videos) {
-        // 统一使用 QuickPick，即使只有一个视频也显示列表，方便用户查看详情
-        const items = videos.map((v, i) => {
+        const items = await Promise.all(videos.map(async (v, i) => {
             const metaParts = [];
-            if (v.duration) metaParts.push(this._formatDuration(v.duration));
-            if (v.filesize) metaParts.push(this._formatSize(v.filesize));
-            if (v.resolution) metaParts.push(v.resolution);
+            // 时长
+            if (v.duration) metaParts.push(`时长: ${this._formatDuration(v.duration)}`);
+            // 大小
+            if (v.filesize) metaParts.push(`大小: ${this._formatSize(v.filesize)}`);
+            // 分辨率
+            if (v.resolution) metaParts.push(`分辨率: ${v.resolution}`);
+
+
+
+            // 过滤逻辑: 只默认勾选 100KB (102400 Bytes) 以上的视频
+            // 防止误选小的广告片段或图标
+            // 如果没有 filesize，默认勾选（防止误杀无法探测大小的视频）
+            const isBigEnough = v.filesize ? v.filesize > 102400 : true;
+
+            // 构造 QuickPickItem
+            // 响应用户需求：
+            // label (第一行): [时长 - 分辨率 - 大小] 标题
+
+            const simpleMeta = [];
+            const durStr = v.duration ? this._formatDuration(v.duration) : '--:--';
+            const resStr = v.resolution ? v.resolution : '---p';
+            const sizeStr = Number.isFinite(v.filesize) && v.filesize > 0 ? this._formatSize(v.filesize) : '---MB';
+            simpleMeta.push(durStr, resStr, sizeStr);
+
+            const prefix = `[${simpleMeta.join(' - ')}] `;
 
             return {
-                label: `$(device-camera-video) ${v.title}`,
-                description: metaParts.join(' | '),
-                detail: v.url,
+                label: `$(device-camera-video) ${prefix}${v.title}`,
+                description: '', // 留空
+                detail: v.url,   // URL 放第二行
                 video: v,
-                picked: true
+                picked: isBigEnough
             };
-        });
+        }));
 
         const selected = await vscode.window.showQuickPick(items, {
             canPickMany: true,
