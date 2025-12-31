@@ -446,13 +446,93 @@ class VideoDownloadController {
 
             // 3. 用户确认后，提取结果并关闭浏览器
             if (selection === "我已在外部播放") {
-                const videos = sniffer.getCapturedVideos();
+                let videos = sniffer.getCapturedVideos();
+
+                // 1. 如果为空，尝试 JS 注入兜底
+                if (videos.length === 0) {
+                    this.log("常规嗅探未发现视频，尝试 JS 注入深度扫描...");
+                    const jsResult = await sniffer.getLatestCapture(true);
+                    if (jsResult) {
+                        this.log(`JS 注入成功发现: ${jsResult.url}`);
+                        videos.push(jsResult);
+                    }
+                }
+
+                // 2. 尝试从当前渲染的页面源码中静态分析 (针对 blob 或隐藏视频)
+                try {
+                    const pageSource = await sniffer.getPageSource();
+                    if (pageSource) {
+                        const staticVideos = h.extractVideoUrlsFromHtmlFragment(pageSource, url);
+                        if (staticVideos && staticVideos.length > 0) {
+                            this.log(`从渲染页面源码中发现 ${staticVideos.length} 个额外资源。`);
+                            for (const vUrl of staticVideos) {
+                                // 简单的去重检查
+                                if (!videos.some(v => v.url === vUrl)) {
+                                    videos.push({
+                                        url: vUrl,
+                                        priority: 15, // 静态分析优先级较低
+                                        headers: { Referer: url },
+                                        cookieSource: 'static-render'
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    this.log(`源码静态分析忽略错误: ${e.message}`);
+                }
+
                 await sniffer.stop();
 
                 if (videos.length > 0) {
-                    this.log(`捕获到 ${videos.length} 个视频，开始下载...`);
-                    const downloadPromises = videos.map(v => this._downloadOne(v, targetDir, url));
-                    await Promise.all(downloadPromises);
+                    // 3. 按优先级排序 (m3u8/mp4 > fragments)
+                    videos.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+                    // 4. 智能过滤：如果存在高优先级资源 (priority >= 80)，则忽略低优先级资源
+                    const hasHighPriority = videos.some(v => v.priority >= 80);
+                    if (hasHighPriority) {
+                        this.log("发现高优先级资源(m3u8/mp4)，自动过滤碎片文件...");
+                        videos = videos.filter(v => v.priority >= 80);
+                    }
+
+                    // 3. 去重
+                    videos = this._deduplicate(videos);
+
+                    this.log(`捕获到 ${videos.length} 个有效视频资源，开始下载...`);
+
+                    // 4. 构建任务
+                    const tasks = videos.map((v, index) => {
+                        const title = `Sniffed Video ${index + 1}`;
+                        // 从捕获结果中提取 Headers
+                        const headers = v.headers || {};
+                        // 确保 Referer 存在
+                        if (!headers.Referer) headers.Referer = url;
+
+                        return this._createTask(v.url, title, targetDir, url, headers);
+                    });
+
+                    // 5. 批量下载
+                    // 使用 downloadAll 替代已移除的 _downloadOne
+                    const res = await this.downloader.downloadAll(tasks, targetDir, {
+                        downloadVideos: "all",
+                        report: (msg) => this.log(msg.message)
+                    });
+
+                    // 6. 结果处理
+                    const successCount = res.results.filter(r => r.success).length;
+                    const failCount = res.results.filter(r => !r.success).length;
+                    this.log(`增强流程下载完成: 成功 ${successCount}, 失败 ${failCount}`);
+
+                    if (successCount > 0) {
+                        vscode.window.showInformationMessage(`成功下载 ${successCount} 个视频！`);
+                        // 后处理
+                        for (const r of res.results) {
+                            if (r.success) await this._postProcess(r.path || r.destPath);
+                        }
+                    } else if (failCount > 0) {
+                        vscode.window.showErrorMessage(`下载失败，请查看日志。可能需要 Cookie 或其它验证。`);
+                    }
+
                 } else {
                     vscode.window.showErrorMessage("未能捕获到视频。请重试并确保视频已开始播放。");
                 }
