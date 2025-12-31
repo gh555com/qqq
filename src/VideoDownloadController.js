@@ -123,36 +123,52 @@ class VideoDownloadController {
                 // 准备累计下载量统计
                 // 抛弃 yt-dlp 回调的虚假数据，直接监听本地文件大小
                 // 轮询器
-                let fileSizeTimer = null;
-
-                // 启动轮询：每 0.5 秒检查一次 (加快频率，提高实时性)
-                fileSizeTimer = setInterval(() => {
-                    let currentTotalBytes = 0;
-
-                    // 遍历所有任务，检查其目标路径或 .part 路径的大小
-                    for (const t of tasks) {
-                        const dest = t.destPath;
-                        // 常见临时文件后缀
-                        const candidates = [
-                            dest,
-                            dest + ".part",
-                            dest + ".ytdl",
-                            dest + ".aria2"
-                        ];
-
-                        let size = 0;
-                        for (const p of candidates) {
-                            try {
-                                if (fs.existsSync(p)) {
-                                    size = fs.statSync(p).size;
-                                    if (size > 0) break; // 找到一个就认为是非零
-                                }
-                            } catch (e) { }
-                        }
-                        currentTotalBytes += size;
+                // 准备累计下载量统计
+                // 方案 C (升级版): 前缀锁定 + 双源竞合
+                // 1. 确定本次任务的“文件名前缀集合”
+                const activePrefixes = new Set();
+                tasks.forEach(t => {
+                    if (t.destPath) {
+                        // 提取纯文件名 (无后缀)，作为前缀匹配依据
+                        // 例如: "C:/.../Video.mp4" -> "Video"
+                        const name = path.basename(t.destPath, path.extname(t.destPath));
+                        if (name) activePrefixes.add(name);
                     }
+                });
 
-                    const totalStr = this._formatBytesSimple(currentTotalBytes);
+                // 2. 双源变量
+                let diskTotalBytes = 0;   // 磁盘扫描到的总大小
+                let logTotalBytes = 0;    // 日志解析到的总大小
+                const logProgressMap = new Map(); // url -> bytes
+
+                // 启动轮询：每 0.5 秒检查一次
+                // 修复：显式声明 fileSizeTimer，避免 "fileSizeTimer is not defined" 错误
+                let fileSizeTimer = setInterval(() => {
+                    // A. 磁盘扫描 (前缀锁定)
+                    let currentDiskBytes = 0;
+                    try {
+                        if (fs.existsSync(targetDir)) {
+                            const files = fs.readdirSync(targetDir);
+                            for (const f of files) {
+                                // 只要文件名以我们任务的前缀开头，就计入
+                                for (const prefix of activePrefixes) {
+                                    if (f.startsWith(prefix)) {
+                                        try {
+                                            const s = fs.statSync(path.join(targetDir, f));
+                                            if (s.isFile()) currentDiskBytes += s.size;
+                                        } catch (e) { }
+                                        break; // 匹配到一个前缀即可
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                    diskTotalBytes = currentDiskBytes;
+
+                    // B. 竞合计算 (取最大值)
+                    const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
+
+                    const totalStr = this._formatBytesSimple(finalBytes);
                     const msg = `已下载 ${totalStr} 从 ${urlSnippet}`;
                     progress.report({ message: msg });
 
@@ -160,10 +176,25 @@ class VideoDownloadController {
 
                 const res = await this.downloader.downloadAll(tasks, targetDir, {
                     downloadVideos: "all",
-                    // 这里的 onProgress 仅用于记录日志，不再更新 UI 数字
                     onProgress: (task, event) => {
+                        // ...
                         if (event.type === 'start') {
                             this.log(`开始: ${this._sanitizeFilename(task.url).slice(0, 30)}...`);
+                        } else if (event.type === 'progress') {
+                            // C. 收集日志进度 (仅用于竞合)
+                            const p = event.progress;
+                            let currentBytes = 0;
+                            if (typeof p === 'object' && p.currentSize) {
+                                currentBytes = this._parseSizeToBytes(p.currentSize);
+                            }
+
+                            if (currentBytes > 0) {
+                                logProgressMap.set(task.url, currentBytes);
+                                // 重新汇总日志总大小
+                                let sum = 0;
+                                for (const b of logProgressMap.values()) sum += b;
+                                logTotalBytes = sum;
+                            }
                         } else if (event.type === 'done') {
                             this.log(`完成: ${path.basename(task.destPath)}`);
                         } else if (event.type === 'error') {
@@ -174,10 +205,10 @@ class VideoDownloadController {
                     }
                 });
 
+
                 // 清楚轮询器
                 if (fileSizeTimer) clearInterval(fileSizeTimer);
 
-                // ... (后续结果处理逻辑保持不变)
                 // 6. 处理结果
                 const results = res.results || [];
                 const successResults = results.filter(r => r.success);
@@ -201,17 +232,18 @@ class VideoDownloadController {
                 const needEnhanced = forbiddenErrors.length > 0 || (probeForbidden && verifiedCount === 0) || (verifiedCount === 0 && successResults.length > 0);
 
                 if (needEnhanced) {
+                    // 只有这里允许弹窗提示增强流程
+                    // 此时 withProgress 结束，一号弹窗自动关闭
                     await this._handleForbidden(forbiddenErrors[0]?.code || 403, url, targetDir);
                 } else {
                     // 任务正常结束
                     const resultMsg = `任务结束, 共下载${verifiedCount}个视频共：${finalTotalStr} 从 ${urlSnippet}`;
 
                     // 使用 withProgress 模拟可自动关闭的“三号弹窗”
-                    // 虽然不能放原生按钮，但我们可以通过文字提示用户
-                    // 这是一个折中方案，因为原生 InformationMessage 无法自动关闭
+                    // 这个 withProgress 会产生一个新的通知弹窗，与“一号弹窗”视觉上分离
                     vscode.window.withProgress({
                         location: vscode.ProgressLocation.Notification,
-                        title: "",
+                        title: "", // 纯净模式，无标题
                         cancellable: false
                     }, async (progress) => {
                         progress.report({ message: resultMsg + " (点击日志可打开文件夹)" });
@@ -219,7 +251,7 @@ class VideoDownloadController {
                         await new Promise(resolve => setTimeout(resolve, 15000));
                     });
 
-                    // 同时在 Output Channel 输出带链接的日志，方便用户点击
+                    // 同时在 Output Channel 输出带链接的日志
                     this.outputChannel.appendLine(`[Done] ${resultMsg}`);
                     this.outputChannel.appendLine(`[Open] 点击打开下载文件夹: ${vscode.Uri.file(targetDir).toString()}`);
                 }

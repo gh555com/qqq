@@ -2113,8 +2113,8 @@ class YtDlpDownloader {
 
                 const onLine = (line) => {
                     const str = String(line);
-                    // 解析 yt-dlp 进度输出: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
-                    // 或者: [download] 100% of 10.00MiB in 00:01
+                    // 解析 yt-dlp 进度输出:
+                    // 1. 标准格式: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
                     const match = str.match(/\[download\]\s+(\d+(\.\d+)?)%\s+of\s+([~\d\.]+\w+)(?:\s+at\s+([\d\.]+\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
 
                     if (match && options.onProgress) {
@@ -2125,8 +2125,6 @@ class YtDlpDownloader {
 
                         // 计算已下载大小 (粗略估算)
                         let currentSize = "";
-                        // 如果 totalSize 是 "100.00MiB"，percent 是 50，则 currentSize ≈ 50.00MiB
-                        // 这里为了展示方便，我们直接把 totalSize 解析成数值再乘百分比
                         try {
                             const sizeMatch = totalSize.match(/([\d\.]+)(\w+)/);
                             if (sizeMatch) {
@@ -2145,14 +2143,32 @@ class YtDlpDownloader {
                             eta,
                             raw: str.trim()
                         });
-                    } else if (str.includes('[download]') && options.onProgress) {
-                        // 尝试匹配没有百分比的情况，或者其他格式
-                        const mPercent = str.match(/(\d+(\.\d+)?)%/);
-                        if (mPercent) {
+                    } else if (options.onProgress) {
+                        // 2. Fragment 格式: [download] Downloading video fragment 10 of 150
+                        const matchFrag = str.match(/Downloading video fragment\s+(\d+)\s+of\s+(\d+)/);
+                        if (matchFrag) {
+                            const currentFrag = parseInt(matchFrag[1]);
+                            const totalFrag = parseInt(matchFrag[2]);
+                            const percent = (currentFrag / totalFrag * 100).toFixed(1);
+                            // 估算：假设每个 Fragment 2MB (HLS 常见大小)
+                            const estimatedSize = (currentFrag * 2).toFixed(2) + "MiB";
+
                             options.onProgress({
-                                percent: parseFloat(mPercent[1]),
+                                percent: parseFloat(percent),
+                                currentSize: estimatedSize, // 估算值，用于兜底
                                 raw: str.trim()
                             });
+                        }
+                        // 3. 纯字节格式: [download] 123456 bytes (0%)
+                        // 或者是 [download] 10.00MiB at 2.00MiB/s (没有总大小)
+                        else {
+                            const matchSize = str.match(/\[download\]\s+([\d\.]+\w+)\s+at/);
+                            if (matchSize) {
+                                options.onProgress({
+                                    currentSize: matchSize[1],
+                                    raw: str.trim()
+                                });
+                            }
                         }
                     }
                 };
