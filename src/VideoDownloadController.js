@@ -21,6 +21,10 @@ class VideoDownloadController {
         // globalState keys
         this.KEY_CUSTOM_BROWSER = 'customBrowserPath';         // 用户选择并成功跑过一次的 Chromium
         this.KEY_DEDICATED_BROWSER = 'dedicatedChromeExePath'; // 下载的专用 Chrome 并成功跑过一次
+
+        // 三号弹窗：点“打开”后能选中文件
+        this.CMD_REVEAL_DOWNLOADED = 'qqq.revealDownloaded';
+        this._ensureRevealCommandOnce();
     }
 
     log(msg) {
@@ -54,175 +58,15 @@ class VideoDownloadController {
         await this._fastProcess(url, targetDir);
     }
 
-    async _fastProcess(url, targetDir) {
-        try {
-            const urlSnippet = url.length > 44 ? url.slice(0, 44) + "..." : url;
+    // ============ 小工具 ============
+    _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: "",
-                cancellable: true
-            }, async (progress, token) => {
-                progress.report({ message: `已下载 0k 从 ${urlSnippet} (正在解析...)` });
-
-                token.onCancellationRequested(() => {
-                    this.log("用户取消下载");
-                });
-
-                this.log("正在智能嗅探资源...");
-                let tasks = [];
-
-                let probeForbidden = false;
-                try {
-                    const res = await this.downloader.probe(url);
-
-                    if (res && res.success) {
-                        if (res.isPlaylist && res.entries && res.entries.length > 0) {
-                            this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
-                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
-                        } else {
-                            this.log(`识别为单个视频: ${res.title}`);
-                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
-                        }
-                    } else {
-                        if (this._isForbidden(403, res?.error)) {
-                            probeForbidden = true;
-                            this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
-                            tasks.push(this._createTask(url, null, targetDir, url));
-                        } else {
-                            this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
-                        }
-                    }
-                } catch (e) {
-                    this.log(`yt-dlp 探测异常: ${e.message}`);
-                }
-
-                // 静态分析
-                try {
-                    const webUrls = await h.extractVideoUrlsFromWebPage(url);
-                    if (webUrls && webUrls.length > 0) {
-                        this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
-                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
-                    }
-                } catch (e) { }
-
-                tasks = this._deduplicateTasks(tasks);
-
-                if (tasks.length === 0) {
-                    this.log("未探测到明确资源，尝试直接下载原链接...");
-                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
-                }
-
-                this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: `已下载 0k 从 ${urlSnippet}` });
-
-                // 文件名前缀集合
-                const activePrefixes = new Set();
-                tasks.forEach(t => {
-                    if (t.destPath) {
-                        const name = path.basename(t.destPath, path.extname(t.destPath));
-                        if (name) activePrefixes.add(name);
-                    }
-                });
-
-                let diskTotalBytes = 0;
-                let logTotalBytes = 0;
-                const logProgressMap = new Map();
-
-                let fileSizeTimer = setInterval(() => {
-                    let currentDiskBytes = 0;
-                    try {
-                        if (fs.existsSync(targetDir)) {
-                            const files = fs.readdirSync(targetDir);
-                            for (const f of files) {
-                                for (const prefix of activePrefixes) {
-                                    if (f.startsWith(prefix)) {
-                                        try {
-                                            const s = fs.statSync(path.join(targetDir, f));
-                                            if (s.isFile()) currentDiskBytes += s.size;
-                                        } catch (e) { }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e) { }
-                    diskTotalBytes = currentDiskBytes;
-
-                    const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
-                    const totalStr = this._formatBytesSimple(finalBytes);
-                    progress.report({ message: `已下载 ${totalStr} 从 ${urlSnippet}` });
-                }, 500);
-
-                const res = await this.downloader.downloadAll(tasks, targetDir, {
-                    downloadVideos: "all",
-                    onProgress: (task, event) => {
-                        if (event.type === 'start') {
-                            this.log(`开始: ${this._sanitizeFilename(task.url).slice(0, 30)}...`);
-                        } else if (event.type === 'progress') {
-                            const p = event.progress;
-                            let currentBytes = 0;
-                            if (typeof p === 'object' && p.currentSize) {
-                                currentBytes = this._parseSizeToBytes(p.currentSize);
-                            }
-                            if (currentBytes > 0) {
-                                logProgressMap.set(task.url, currentBytes);
-                                let sum = 0;
-                                for (const b of logProgressMap.values()) sum += b;
-                                logTotalBytes = sum;
-                            }
-                        } else if (event.type === 'done') {
-                            this.log(`完成: ${path.basename(task.destPath)}`);
-                        } else if (event.type === 'error') {
-                            this.log(`失败: ${task.url} - ${event.error}`);
-                        } else if (event.type === 'retry') {
-                            this.log(`重试: ${task.url} (Wait ${event.delayMs}ms)`);
-                        }
-                    }
-                });
-
-                if (fileSizeTimer) clearInterval(fileSizeTimer);
-
-                const results = res.results || [];
-                const successResults = results.filter(r => r.success);
-                const failResults = results.filter(r => !r.success);
-
-                let verifiedCount = 0;
-                let finalTotalBytes = 0;
-
-                for (const r of successResults) {
-                    const p = r.path || r.destPath;
-                    if (await this._postProcess(p)) {
-                        verifiedCount++;
-                        if (fs.existsSync(p)) {
-                            try { finalTotalBytes += fs.statSync(p).size; } catch (e) { }
-                        }
-                    }
-                }
-
-                const finalTotalStr = this._formatBytesSimple(finalTotalBytes);
-                const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
-                const needEnhanced =
-                    forbiddenErrors.length > 0 ||
-                    (probeForbidden && verifiedCount === 0) ||
-                    (verifiedCount === 0 && successResults.length > 0);
-
-                if (needEnhanced) {
-                    await this._handleForbidden(forbiddenErrors[0]?.code || 403, url, targetDir);
-                } else {
-                    const resultMsg = `任务结束, 共下载${verifiedCount}个视频共：${finalTotalStr} 从 ${urlSnippet}`;
-                    this.log(`[Done] ${resultMsg}`);
-
-                    const action = await vscode.window.showInformationMessage(resultMsg, "打开下载文件夹");
-                    if (action === "打开下载文件夹") {
-                        vscode.env.openExternal(vscode.Uri.file(targetDir));
-                    }
-                }
-            });
-
-        } catch (error) {
-            this.log(`处理失败: ${error.message}`);
-        }
+    _formatBytesSimple(bytes) {
+        if (!bytes || bytes <= 0) return "0k";
+        const k = 1024;
+        const m = 1024 * 1024;
+        if (bytes >= m) return Math.round(bytes / m) + "m";
+        return Math.round(bytes / k) + "k";
     }
 
     _parseSizeToBytes(sizeStr) {
@@ -238,12 +82,26 @@ class VideoDownloadController {
         return Math.floor(val * multiplier);
     }
 
-    _formatBytesSimple(bytes) {
-        if (bytes === 0) return "0k";
-        const k = 1024;
-        const m = 1024 * 1024;
-        if (bytes >= m) return Math.round(bytes / m) + "m";
-        return Math.round(bytes / k) + "k";
+    _sanitizeFilename(title) {
+        if (!title) return null;
+        let safe = title.replace(/[\\/:*?"<>|]/g, "_");
+        safe = safe.replace(/\s+/g, " ").trim();
+        if (safe.length > 80) safe = safe.substring(0, 80);
+        return safe;
+    }
+
+    _isForbidden(code, error) {
+        return code === 403 || code === 401 || (error && error.toString().includes('403'));
+    }
+
+    _deduplicateTasks(tasks) {
+        const seen = new Set();
+        return tasks.filter(t => {
+            if (!t.url) return false;
+            if (seen.has(t.url)) return false;
+            seen.add(t.url);
+            return true;
+        });
     }
 
     _createTask(videoUrl, title, targetDir, referer) {
@@ -280,30 +138,358 @@ class VideoDownloadController {
         };
     }
 
-    _deduplicateTasks(tasks) {
-        const seen = new Set();
-        return tasks.filter(t => {
-            if (!t.url) return false;
-            if (seen.has(t.url)) return false;
-            seen.add(t.url);
-            return true;
+    // ==================== 三号弹窗（15s 自动消失 + 点击能选中文件） ====================
+    _ensureRevealCommandOnce() {
+        if (VideoDownloadController.__revealCmdRegistered) return;
+        VideoDownloadController.__revealCmdRegistered = true;
+
+        const disp = vscode.commands.registerCommand(this.CMD_REVEAL_DOWNLOADED, async (filePath, folderPath) => {
+            try {
+                // 点了就让三号立刻消失
+                if (VideoDownloadController.__resultToastCts) {
+                    VideoDownloadController.__resultToastCts.cancel();
+                }
+            } catch (e) { }
+
+            try {
+                await this._revealFileOrFolder(filePath, folderPath);
+            } catch (e) { }
+        });
+
+        try { this.context.subscriptions.push(disp); } catch (e) { }
+        VideoDownloadController.__revealCmdDisposable = disp;
+    }
+
+    _makeCommandLink(commandId, argsArray) {
+        try {
+            const arg = encodeURIComponent(JSON.stringify(argsArray || []));
+            return `[打开下载位置](command:${commandId}?${arg})`;
+        } catch (e) {
+            return '';
+        }
+    }
+
+    async _revealFileOrFolder(filePath, folderPath) {
+        const existsFile = filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+        const folder = folderPath && fs.existsSync(folderPath) ? folderPath : (existsFile ? path.dirname(filePath) : null);
+
+        // 1) 尽量选中文件
+        if (existsFile) {
+            const p = filePath;
+
+            if (process.platform === 'win32') {
+                // explorer.exe /select,"C:\path\file.mp4"
+                return await new Promise((resolve) => {
+                    try {
+                        cp.execFile('explorer.exe', ['/select,', p], { windowsHide: true }, () => resolve());
+                    } catch (e) { resolve(); }
+                });
+            }
+
+            if (process.platform === 'darwin') {
+                return await new Promise((resolve) => {
+                    try {
+                        cp.execFile('open', ['-R', p], {}, () => resolve());
+                    } catch (e) { resolve(); }
+                });
+            }
+
+            // linux: 没统一“选中某文件”能力，退化打开目录
+            if (folder) {
+                try { await vscode.env.openExternal(vscode.Uri.file(folder)); } catch (e) { }
+                return;
+            }
+        }
+
+        // 2) 退化：打开目录
+        if (folder) {
+            try { await vscode.env.openExternal(vscode.Uri.file(folder)); } catch (e) { }
+        }
+    }
+
+    _pickFirstFileBySize(paths) {
+        if (!paths || paths.length === 0) return null;
+        let best = null;
+        let bestSize = -1;
+        for (const p of paths) {
+            try {
+                if (!fs.existsSync(p)) continue;
+                const s = fs.statSync(p);
+                if (!s.isFile()) continue;
+                if (s.size > bestSize) {
+                    bestSize = s.size;
+                    best = p;
+                }
+            } catch (e) { }
+        }
+        return best || paths[0] || null;
+    }
+
+    async _showResultToastTimed(resultMsg, targetDir, firstFilePath, timeoutMs = 15000) {
+        // 干掉旧的三号弹窗
+        try {
+            if (VideoDownloadController.__resultToastCts) {
+                VideoDownloadController.__resultToastCts.cancel();
+                VideoDownloadController.__resultToastCts.dispose();
+            }
+        } catch (e) { }
+
+        const cts = new vscode.CancellationTokenSource();
+        VideoDownloadController.__resultToastCts = cts;
+
+        const link = this._makeCommandLink(this.CMD_REVEAL_DOWNLOADED, [firstFilePath || null, targetDir || null]);
+
+        await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "qqq: 任务结束",
+            cancellable: true   // ✅ 给你一个系统“取消”按钮（用户可立刻关掉）
+        }, async (progress) => {
+            progress.report({ message: `${resultMsg}  ${link}` });
+
+            return await new Promise((resolve) => {
+                let done = false;
+
+                const cleanup = () => {
+                    if (done) return;
+                    done = true;
+                    try { sub.dispose(); } catch (e) { }
+                    try { clearTimeout(t); } catch (e) { }
+                    try {
+                        if (VideoDownloadController.__resultToastCts === cts) {
+                            VideoDownloadController.__resultToastCts.dispose();
+                            VideoDownloadController.__resultToastCts = null;
+                        }
+                    } catch (e) { }
+                    resolve(null);
+                };
+
+                const sub = cts.token.onCancellationRequested(() => cleanup());
+                const t = setTimeout(() => cleanup(), timeoutMs);
+            });
         });
     }
 
-    _isForbidden(code, error) {
-        return code === 403 || code === 401 || (error && error.toString().includes('403'));
+    // ==================== 通知屏蔽：清掉 downloader 内部那种“成功/失败”弹窗 ====================
+    async _runWithSuppressedPopups(fn) {
+        const win = vscode.window;
+
+        const origInfo = win.showInformationMessage;
+        const origWarn = win.showWarningMessage;
+        const origErr = win.showErrorMessage;
+
+        const suppress = async (kind, msg) => {
+            try { this.log(`[Suppressed ${kind}] ${String(msg || '').slice(0, 200)}`); } catch (e) { }
+            return undefined;
+        };
+
+        win.showInformationMessage = async (message, ...rest) => suppress('Info', message);
+        win.showWarningMessage = async (message, ...rest) => suppress('Warn', message);
+        win.showErrorMessage = async (message, ...rest) => suppress('Error', message);
+
+        try {
+            return await fn();
+        } finally {
+            win.showInformationMessage = origInfo;
+            win.showWarningMessage = origWarn;
+            win.showErrorMessage = origErr;
+        }
     }
 
-    _sanitizeFilename(title) {
-        if (!title) return null;
-        let safe = title.replace(/[\\/:*?"<>|]/g, "_");
-        safe = safe.replace(/\s+/g, " ").trim();
-        if (safe.length > 80) safe = safe.substring(0, 80);
-        return safe;
+    // ==================== 普通流程：一号下载进度 + 三号结果 ====================
+    async _fastProcess(url, targetDir) {
+        try {
+            const urlSnippet = url.length > 44 ? url.slice(0, 44) + "..." : url;
+
+            // ========= 一号弹窗（进度通知） =========
+            const outcome = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: "",
+                cancellable: true
+            }, async (progress, token) => {
+                progress.report({ message: `已交换 0k 于 ${urlSnippet} (正在解析...)` });
+
+                token.onCancellationRequested(() => {
+                    this.log("用户取消下载（仅关闭弹窗；不一定能中断底层下载）");
+                });
+
+                this.log("正在智能嗅探资源...");
+                let tasks = [];
+
+                let probeForbidden = false;
+                try {
+                    const res = await this.downloader.probe(url);
+
+                    if (res && res.success) {
+                        if (res.isPlaylist && res.entries && res.entries.length > 0) {
+                            this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
+                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                        } else {
+                            this.log(`识别为单个视频: ${res.title}`);
+                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
+                        }
+                    } else {
+                        if (this._isForbidden(403, res?.error)) {
+                            probeForbidden = true;
+                            this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                            tasks.push(this._createTask(url, null, targetDir, url));
+                        } else {
+                            this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
+                        }
+                    }
+                } catch (e) {
+                    this.log(`yt-dlp 探测异常: ${e.message}`);
+                }
+
+                // 静态分析（保留：你以后可能还想用）
+                try {
+                    const webUrls = await h.extractVideoUrlsFromWebPage(url);
+                    if (webUrls && webUrls.length > 0) {
+                        this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
+                    }
+                } catch (e) { }
+
+                tasks = this._deduplicateTasks(tasks);
+
+                if (tasks.length === 0) {
+                    this.log("未探测到明确资源，尝试直接下载原链接...");
+                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
+                }
+
+                this.log(`准备下载 ${tasks.length} 个任务...`);
+                progress.report({ message: `已交换 0k 于 ${urlSnippet}` });
+
+                // 文件名前缀集合（用于扫盘统计）
+                const activePrefixes = new Set();
+                tasks.forEach(t => {
+                    if (t.destPath) {
+                        const name = path.basename(t.destPath, path.extname(t.destPath));
+                        if (name) activePrefixes.add(name);
+                    }
+                });
+
+                let diskTotalBytes = 0;
+                let logTotalBytes = 0;
+                const logProgressMap = new Map();
+
+                let fileSizeTimer = null;
+
+                try {
+                    fileSizeTimer = setInterval(() => {
+                        let currentDiskBytes = 0;
+                        try {
+                            if (fs.existsSync(targetDir)) {
+                                const files = fs.readdirSync(targetDir);
+                                for (const f of files) {
+                                    for (const prefix of activePrefixes) {
+                                        if (f.startsWith(prefix)) {
+                                            try {
+                                                const s = fs.statSync(path.join(targetDir, f));
+                                                if (s.isFile()) currentDiskBytes += s.size;
+                                            } catch (e) { }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) { }
+                        diskTotalBytes = currentDiskBytes;
+
+                        const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
+                        const totalStr = this._formatBytesSimple(finalBytes);
+                        progress.report({ message: `已交换 ${totalStr} 于 ${urlSnippet}` });
+                    }, 500);
+
+                    const res = await this.downloader.downloadAll(tasks, targetDir, {
+                        downloadVideos: "all",
+                        onProgress: (task, event) => {
+                            if (event.type === 'start') {
+                                this.log(`开始: ${this._sanitizeFilename(task.url).slice(0, 30)}...`);
+                            } else if (event.type === 'progress') {
+                                const p = event.progress;
+                                let currentBytes = 0;
+                                if (typeof p === 'object' && p.currentSize) {
+                                    currentBytes = this._parseSizeToBytes(p.currentSize);
+                                }
+                                if (currentBytes > 0) {
+                                    logProgressMap.set(task.url, currentBytes);
+                                    let sum = 0;
+                                    for (const b of logProgressMap.values()) sum += b;
+                                    logTotalBytes = sum;
+                                }
+                            } else if (event.type === 'done') {
+                                this.log(`完成: ${path.basename(task.destPath)}`);
+                            } else if (event.type === 'error') {
+                                // ✅ 只记日志，不弹失败弹窗
+                                this.log(`失败: ${task.url} - ${event.error}`);
+                            } else if (event.type === 'retry') {
+                                this.log(`重试: ${task.url} (Wait ${event.delayMs}ms)`);
+                            }
+                        }
+                    });
+
+                    const results = res.results || [];
+                    const successResults = results.filter(r => r.success);
+                    const failResults = results.filter(r => !r.success);
+
+                    const landedFiles = [];
+                    let finalTotalBytes = 0;
+
+                    for (const r of successResults) {
+                        const p = r.path || r.destPath;
+                        const finalPath = await this._postProcess(p);
+                        if (finalPath) {
+                            landedFiles.push(finalPath);
+                            try { finalTotalBytes += fs.statSync(finalPath).size; } catch (e) { }
+                        }
+                    }
+
+                    const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
+                    const needEnhanced =
+                        forbiddenErrors.length > 0 ||
+                        (probeForbidden && landedFiles.length === 0) ||
+                        (landedFiles.length === 0 && successResults.length > 0);
+
+                    return {
+                        needEnhanced,
+                        code: forbiddenErrors[0]?.code || 403,
+                        landedFiles,
+                        finalTotalBytes,
+                        urlSnippet
+                    };
+
+                } finally {
+                    if (fileSizeTimer) {
+                        try { clearInterval(fileSizeTimer); } catch (e) { }
+                    }
+                }
+            });
+
+            // ========= 到这里：一号弹窗必然已结束（消失） =========
+            if (!outcome) return;
+
+            if (outcome.needEnhanced) {
+                await this._handleForbidden(outcome.code || 403, url, targetDir);
+                return;
+            }
+
+            const landedCount = (outcome.landedFiles || []).length;
+            const finalTotalStr = this._formatBytesSimple(outcome.finalTotalBytes || 0);
+            const resultMsg = `任务结束, 共落盘${landedCount}个视频共：${finalTotalStr} 从 ${outcome.urlSnippet}`;
+
+            this.log(`[Done] ${resultMsg}`);
+
+            const firstFile = this._pickFirstFileBySize(outcome.landedFiles || []);
+            await this._showResultToastTimed(resultMsg, targetDir, firstFile, 15000);
+
+        } catch (error) {
+            this.log(`处理失败: ${error.message}`);
+        }
     }
 
+    // ==================== 后处理：验证 + 可能改名 + 插入路径（返回最终落盘路径） ====================
     async _postProcess(filePath) {
-        if (!fs.existsSync(filePath)) return false;
+        if (!filePath || !fs.existsSync(filePath)) return null;
 
         this.log(`正在验证文件: ${path.basename(filePath)}`);
 
@@ -334,19 +520,19 @@ class VideoDownloadController {
 
                     if (isTooLong) {
                         const safeName = h.getTimestampFilename(newExt || '.mp4');
-                        finalPath = path.join(path.dirname(filePath), safeName);
-                        try { fs.renameSync(filePath, finalPath); } catch (e) { finalPath = filePath; }
+                        const p2 = path.join(path.dirname(filePath), safeName);
+                        try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
                     } else if (newExt !== ext) {
-                        finalPath = filePath.replace(ext, newExt);
-                        try { fs.renameSync(filePath, finalPath); } catch (e) { finalPath = filePath; }
+                        const p2 = filePath.replace(ext, newExt);
+                        try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
                     }
 
                     await this._insertToCursor(path.basename(finalPath), finalPath);
-                    resolve(true);
+                    resolve(finalPath);
                 } else {
                     this.log(`文件无效 (非视频或损坏)，删除: ${filePath}`);
                     try { fs.unlinkSync(filePath); } catch (e) { }
-                    resolve(false);
+                    resolve(null);
                 }
             });
         });
@@ -364,8 +550,7 @@ class VideoDownloadController {
         });
     }
 
-    // ==================== 逻辑 Q：增强流程核心 ====================
-
+    // ==================== 逻辑 Q：增强流程入口 ====================
     async _handleForbidden(code, url, targetDir) {
         const selection = await vscode.window.showInformationMessage(
             `qqq: 被拒绝，返回 ${code}，当前可尝试启动增强流程。`,
@@ -379,12 +564,12 @@ class VideoDownloadController {
         } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
             await this._runEnhancedForcePick(url, targetDir);
         } else {
-            vscode.window.showInformationMessage("qqq: 你取消了增强流程。");
+            // ✅ 不再额外弹提示，避免噪音
+            this.log("用户取消增强流程");
         }
     }
 
     async _runEnhancedPreferSaved(url, targetDir) {
-        // ✅ 零代价价值：路径变更检测（不存在就清理，避免脏值冲突）
         await this._cleanupSavedBrowserPaths();
 
         const dedicated = this.context.globalState.get(this.KEY_DEDICATED_BROWSER);
@@ -395,7 +580,6 @@ class VideoDownloadController {
                 await this._startSniffer(dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
                 return;
             } else {
-                // ✅ 零代价价值：验证失败清理旧 globalState
                 await this.context.globalState.update(this.KEY_DEDICATED_BROWSER, undefined);
             }
         }
@@ -408,12 +592,10 @@ class VideoDownloadController {
                 await this._startSniffer(custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
                 return;
             } else {
-                // ✅ 零代价价值：验证失败清理旧 globalState
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
         }
 
-        // ✅ 都不可用：先弹文件选择；取消/失败 -> “下载 chrome / 终止一切”
         await this._promptPickThenMaybeDownload(url, targetDir);
     }
 
@@ -438,7 +620,7 @@ class VideoDownloadController {
             if (sel === "下载 chrome") {
                 await this._downloadChrome(url, targetDir);
             } else {
-                vscode.window.showInformationMessage("qqq: 你终止了一切。");
+                this.log("用户终止增强流程");
             }
             return;
         }
@@ -446,7 +628,6 @@ class VideoDownloadController {
         const exePath = uris[0].fsPath;
         this.log(`[增强] 用户选择: ${exePath}`);
 
-        // ✅ 只做静默验证：绝不打开 exe（Windows 用版本信息，不执行 exe）
         const validation = await this._validateChromiumSilently(exePath);
 
         if (validation.valid) {
@@ -455,7 +636,6 @@ class VideoDownloadController {
             return;
         }
 
-        // ✅ 零代价价值：验证失败清理旧 globalState（避免下次误用脏值）
         await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
 
         this.log(`[增强] 用户浏览器验证失败: ${validation.error}`);
@@ -468,11 +648,10 @@ class VideoDownloadController {
         if (sel === "下载 chrome") {
             await this._downloadChrome(url, targetDir);
         } else {
-            vscode.window.showInformationMessage("qqq: 你终止了一切。");
+            this.log("用户终止增强流程");
         }
     }
 
-    // ✅ 零代价价值：路径变更检测（不存在就清理）
     async _cleanupSavedBrowserPaths() {
         try {
             const savedDedicated = this.context.globalState.get(this.KEY_DEDICATED_BROWSER);
@@ -490,15 +669,9 @@ class VideoDownloadController {
     }
 
     _psQuote(s) {
-        // PowerShell 单引号字符串内部用 '' 表示一个 '
         return String(s).replace(/'/g, "''");
     }
 
-    /**
-     * ✅ 静默验证（重点修复）
-     * - Windows：用 PowerShell 读取 PE 版本信息（不执行 exe，不会弹窗，不会打开浏览器，不会乱码）
-     * - 其他平台：尽量轻量；必要时才 fallback 到 --version
-     */
     _validateChromiumSilently(exePath) {
         return new Promise((resolve) => {
             if (!exePath || !fs.existsSync(exePath)) {
@@ -561,7 +734,6 @@ $of = $vi.OriginalFilename;
                     if (isChromiumFamily && hasVersion) {
                         resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim(), raw: out });
                     } else if (isChromiumFamily) {
-                        // 家族像，但版本缺失：也当作有效（避免误杀你说的“正确 exe”）
                         resolve({ valid: true, version: (productName || fileDesc || 'Chromium').slice(0, 80), raw: out });
                     } else {
                         resolve({ valid: false, error: '不是 Chromium 内核浏览器' });
@@ -571,7 +743,6 @@ $of = $vi.OriginalFilename;
                 return;
             }
 
-            // 非 Windows：尽量不打开 UI，一般 --version 不会起 GUI
             cp.execFile(exePath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
                 if (err) {
                     resolve({ valid: false, error: '无法执行 --version' });
@@ -615,12 +786,6 @@ $of = $vi.OriginalFilename;
         };
     }
 
-    /**
-     * ✅ 下载专用 Chrome（重点修复：下载/解压/验证弹窗会正常关闭）
-     * - withProgress 只做“下载+解压+验证”
-     * - ✅ 绝不在 withProgress 里启动 sniffer（否则你说的“解压中... 永不关闭”必现）
-     * - 结束后再启动 sniffer
-     */
     async _downloadChrome(url, targetDir) {
         if (!fs.existsSync(this.chromeHome)) fs.mkdirSync(this.chromeHome, { recursive: true });
 
@@ -635,7 +800,6 @@ $of = $vi.OriginalFilename;
 
         let exePath = null;
 
-        // 只负责下载/解压/验证，结束就关闭通知
         exePath = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "正在下载 Chrome for Testing...",
@@ -659,7 +823,6 @@ $of = $vi.OriginalFilename;
 
                 progress.report({ message: "解压中..." });
 
-                // ✅ 解压到 chromeHome（得到 chrome-win64/...）
                 await this._extractZip(zipPath, this.chromeHome);
 
                 try { fs.unlinkSync(zipPath); } catch (e) { }
@@ -675,7 +838,6 @@ $of = $vi.OriginalFilename;
                     try { cp.execSync(`chmod +x "${foundExe}"`); } catch (e) { }
                 }
 
-                // ✅ 静默验证（不执行 exe）
                 const validation = await this._validateChromiumSilently(foundExe);
                 if (!validation.valid) throw new Error(`下载的 Chrome 验证失败: ${validation.error}`);
 
@@ -690,10 +852,8 @@ $of = $vi.OriginalFilename;
             }
         });
 
-        // ✅ 到这里：进度通知已经必然关闭（因为 withProgress 已 return）
         if (!exePath) return;
 
-        // ✅ 成功后再启动 sniffer（不占用下载弹窗）
         await this._startSniffer(exePath, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
     }
 
@@ -808,7 +968,6 @@ $of = $vi.OriginalFilename;
                 const zp = this._psQuote(zipPath);
                 const df = this._psQuote(destFolder);
 
-                // ✅ NoProfile + NonInteractive + timeout：防止“解压中...”卡死
                 const cmd = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${zp}' -DestinationPath '${df}' -Force"`;
                 cp.exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
                     if (err) reject(err);
@@ -843,7 +1002,160 @@ $of = $vi.OriginalFilename;
         return null;
     }
 
-    // ==================== 嗅探器（带持久化登录信息） ====================
+    // ==================== 增强流程：防重复 + 一号/三号体系 ====================
+
+    _looksLikeMaster(url) {
+        if (!url) return false;
+        const u = String(url);
+        return u.includes('.m3u8') || u.includes('.mpd') || u.match(/\.(mp4|webm|mkv|mov)(\?|$)/i);
+    }
+
+    _dedupeAndPickBestCapturedVideo(videos) {
+        if (!Array.isArray(videos) || videos.length === 0) return null;
+
+        // 1) URL 去重：同 URL 取 priority 更高的那条
+        const map = new Map();
+        for (const v of videos) {
+            if (!v || !v.url) continue;
+            const key = String(v.url).trim();
+            const old = map.get(key);
+            if (!old) {
+                map.set(key, v);
+            } else {
+                const p1 = Number(old.priority || 0);
+                const p2 = Number(v.priority || 0);
+                if (p2 > p1) map.set(key, v);
+            }
+        }
+
+        const uniq = Array.from(map.values());
+
+        // 2) 如果有 master 候选：只在 master 里挑一个最优（避免同视频多次下载/合成）
+        const masters = uniq.filter(v => this._looksLikeMaster(v.url));
+        const pool = masters.length > 0 ? masters : uniq;
+
+        // 3) 按 priority 排序（再按“更像 master”微调）
+        pool.sort((a, b) => {
+            const pa = Number(a.priority || 0);
+            const pb = Number(b.priority || 0);
+            if (pb !== pa) return pb - pa;
+
+            const am = this._looksLikeMaster(a.url) ? 1 : 0;
+            const bm = this._looksLikeMaster(b.url) ? 1 : 0;
+            return bm - am;
+        });
+
+        return pool[0] || null;
+    }
+
+    _scanRecentBytes(targetDir, sinceMs) {
+        let total = 0;
+        try {
+            if (!fs.existsSync(targetDir)) return 0;
+            const files = fs.readdirSync(targetDir);
+            for (const f of files) {
+                const full = path.join(targetDir, f);
+                try {
+                    const s = fs.statSync(full);
+                    if (!s.isFile()) continue;
+                    if (s.mtimeMs >= sinceMs) total += s.size;
+                } catch (e) { }
+            }
+        } catch (e) { }
+        return total;
+    }
+
+    _findLandedVideoFilesSince(targetDir, sinceMs) {
+        const exts = new Set(['.mp4', '.mkv', '.webm', '.mov', '.m4v', '.avi', '.wmv', '.flv']);
+        const ignoreSuffix = ['.part', '.tmp', '.ytdl', '.download'];
+
+        const out = [];
+        try {
+            if (!fs.existsSync(targetDir)) return out;
+            const files = fs.readdirSync(targetDir);
+
+            for (const f of files) {
+                const full = path.join(targetDir, f);
+                try {
+                    const s = fs.statSync(full);
+                    if (!s.isFile()) continue;
+                    if (s.mtimeMs < sinceMs) continue;
+
+                    const lower = f.toLowerCase();
+                    if (ignoreSuffix.some(x => lower.endsWith(x))) continue;
+
+                    const ext = path.extname(lower);
+                    if (!exts.has(ext)) continue;
+                    if (s.size <= 0) continue;
+
+                    out.push({ path: full, size: s.size, mtimeMs: s.mtimeMs });
+                } catch (e) { }
+            }
+        } catch (e) { }
+
+        // 按时间排序（更稳定）
+        out.sort((a, b) => a.mtimeMs - b.mtimeMs);
+        return out.map(x => x.path);
+    }
+
+    async _downloadEnhancedOne(url, targetDir, bestVideo) {
+        const urlSnippet = url.length > 44 ? url.slice(0, 44) + "..." : url;
+        const startMs = Date.now();
+
+        const outcome = await vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "",
+            cancellable: true
+        }, async (progress, token) => {
+            progress.report({ message: `已交换 0k 于 ${urlSnippet} (增强下载中...)` });
+
+            token.onCancellationRequested(() => {
+                this.log("用户取消增强下载弹窗（仅关闭弹窗；不一定能中断底层下载）");
+            });
+
+            let timer = null;
+            try {
+                timer = setInterval(() => {
+                    const bytes = this._scanRecentBytes(targetDir, startMs);
+                    progress.report({ message: `已交换 ${this._formatBytesSimple(bytes)} 于 ${urlSnippet} (增强下载中...)` });
+                }, 500);
+
+                // ✅ 屏蔽 downloader 内部弹窗（那种“成功/失败”）
+                await this._runWithSuppressedPopups(async () => {
+                    await this.downloader.downloadVideos([bestVideo], targetDir);
+                });
+
+            } finally {
+                if (timer) {
+                    try { clearInterval(timer); } catch (e) { }
+                }
+            }
+
+            // 给落盘一点点时间（避免 mtime 还没刷完）
+            await this._sleep(300);
+
+            const landedFiles = this._findLandedVideoFilesSince(targetDir, startMs);
+
+            let totalBytes = 0;
+            for (const p of landedFiles) {
+                try { totalBytes += fs.statSync(p).size; } catch (e) { }
+            }
+
+            // ✅ 插入：跟普通流程一致（插入所有落盘文件路径）
+            const inserted = new Set();
+            for (const p of landedFiles) {
+                if (inserted.has(p)) continue;
+                inserted.add(p);
+                try {
+                    await this._insertToCursor(path.basename(p), p);
+                } catch (e) { }
+            }
+
+            return { landedFiles, totalBytes, urlSnippet };
+        });
+
+        return outcome;
+    }
 
     async _startSniffer(browserPath, url, targetDir, opts = {}) {
         this.log("启动增强嗅探流程...");
@@ -858,7 +1170,6 @@ $of = $vi.OriginalFilename;
 
             CdpSniffer.setCustomBrowserPath(browserPath);
 
-            // 可选：如果 sniffer 支持，就喂进去（不支持也不会报错）
             if (typeof CdpSniffer.setUserDataDir === 'function') {
                 CdpSniffer.setUserDataDir(this.userDataDir);
             }
@@ -867,10 +1178,8 @@ $of = $vi.OriginalFilename;
 
             const startOptions = { userDataDir: this.userDataDir };
 
-            // ✅ “执行成功一次”的判定点：sniffer.start 成功返回
             await sniffer.start(url, (msg) => this.log(msg), startOptions);
 
-            // ✅ 成功启动后再写入 globalState
             if (opts.rememberKey) {
                 try {
                     await this.context.globalState.update(opts.rememberKey, browserPath);
@@ -886,63 +1195,59 @@ $of = $vi.OriginalFilename;
                 "我已在外部播放"
             );
 
-            if (selection === "我已在外部播放") {
-                let videos = sniffer.getCapturedVideos();
-                await sniffer.stop();
-
-                // 智能过滤：检测到主视频时过滤碎片
-                const hasMaster = videos.some(r =>
-                    (r.priority && r.priority >= 80) ||
-                    (r.url && (r.url.includes('.m3u8') ||
-                        r.url.includes('.mpd') ||
-                        r.url.match(/\.(mp4|webm|mkv|mov)(\?|$)/i)))
-                );
-
-                if (hasMaster) {
-                    const originalCount = videos.length;
-                    videos = videos.filter(r =>
-                        (r.priority && r.priority >= 50) ||
-                        (r.url && !r.url.match(/\.ts(\?|$)/i) &&
-                            !r.url.match(/\.m4s(\?|$)/i) &&
-                            !r.url.match(/\.key(\?|$)/i))
-                    );
-                    this.log(`[Filter] 已过滤碎片文件: ${originalCount} -> ${videos.length}`);
-                }
-
-                if (videos.length > 0) {
-                    this.log(`捕获到 ${videos.length} 个视频，开始下载...`);
-
-                    // ✅ 关键修复：不要无脑塞 browserProfilePath（会触发 yt-dlp 找 cookies db 并直接失败）
-                    // 只传 headers cookie/referer/ua 即可（参考你说“本地 exe 近乎完美”那条路径）
-                    videos.forEach(v => {
-                        if (!v.meta) v.meta = {};
-                        if (v.headers) {
-                            v.meta.cookie = v.headers['Cookie'];
-                            v.meta.referer = v.headers['Referer'];
-                            v.meta.userAgent = v.headers['User-Agent'];
-                            v.meta.origin = v.headers['Origin'];
-                        }
-                        // ❌ 不再强制：v.meta.browserProfilePath = this.userDataDir;
-                        // 如果未来你想启用 cookies db，也必须先检测 DB 是否存在再赋值（否则必炸）。
-                    });
-
-                    await this.downloader.downloadVideos(videos, targetDir);
-                } else {
-                    vscode.window.showErrorMessage("未能捕获到视频。请重试并确保视频已开始播放。");
-                }
-            } else {
-                await sniffer.stop();
-                vscode.window.showInformationMessage("已取消增强流程。");
+            if (selection !== "我已在外部播放") {
+                try { await sniffer.stop(); } catch (e) { }
+                this.log("用户取消增强嗅探");
+                return;
             }
+
+            let videos = sniffer.getCapturedVideos();
+            await sniffer.stop();
+
+            // ✅ 只关心“主资源”，并做去重 + 只取一个最优（防止重复下载/重复合成）
+            const best = this._dedupeAndPickBestCapturedVideo(videos || []);
+
+            if (!best) {
+                const msg = `任务结束, 共落盘0个视频共：0k 从 ${url.length > 44 ? url.slice(0, 44) + "..." : url}`;
+                this.log(`[增强] 未捕获到可用视频资源`);
+                await this._showResultToastTimed(msg, targetDir, null, 6000);
+                return;
+            }
+
+            // ✅ 补 meta（只传 headers，不传 cookies db 路径）
+            if (!best.meta) best.meta = {};
+            if (best.headers) {
+                best.meta.cookie = best.headers['Cookie'];
+                best.meta.referer = best.headers['Referer'];
+                best.meta.userAgent = best.headers['User-Agent'];
+                best.meta.origin = best.headers['Origin'];
+            }
+
+            // ========= 增强下载：一号 + 三号 =========
+            const out = await this._downloadEnhancedOne(url, targetDir, best);
+
+            const landedCount = (out?.landedFiles || []).length;
+            const totalStr = this._formatBytesSimple(out?.totalBytes || 0);
+            const resultMsg = `任务结束, 共落盘${landedCount}个视频共：${totalStr} 从 ${out?.urlSnippet || (url.length > 44 ? url.slice(0, 44) + "..." : url)}`;
+
+            this.log(`[增强 Done] ${resultMsg}`);
+
+            const firstFile = this._pickFirstFileBySize(out?.landedFiles || []);
+            await this._showResultToastTimed(resultMsg, targetDir, firstFile, 15000);
 
         } catch (e) {
             this.log(`增强流程出错: ${e.message}`);
             if (sniffer) {
                 try { await sniffer.stop(); } catch (e2) { }
             }
-            vscode.window.showErrorMessage(`增强流程出错: ${e.message}`);
+            // ✅ 不再额外弹出失败弹窗，避免噪音；只写日志
         }
     }
 }
+
+// 静态字段
+VideoDownloadController.__revealCmdRegistered = false;
+VideoDownloadController.__revealCmdDisposable = null;
+VideoDownloadController.__resultToastCts = null;
 
 module.exports = VideoDownloadController;
