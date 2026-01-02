@@ -2,13 +2,19 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
+const { AsyncLocalStorage } = require('async_hooks');
 const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
 
 /**
  * ✅ 进程追踪 + 真取消：不改 dow 模块，也能在用户点“取消”时杀掉 yt-dlp/ffmpeg 等子进程
- * 同时强制 detached=false，避免 reload 后还在后台跑
+ * ✅ 推荐：ALS 作用域隔离（彻底不误伤其它扩展）
+ *    - 全局只 patch 一次 child_process
+ *    - 只有在 runWithTracker(...) 作用域里启动的子进程才会：
+ *        * 被 track
+ *        * 被强制 detached:false
+ *    - 不修改原 options 对象（只做浅拷贝替换）
  */
 class ChildProcessTracker {
     constructor() {
@@ -46,7 +52,6 @@ class ChildProcessTracker {
             await this._killPidTree(pid, true);
         }
 
-        // 清理集合
         this._procs.clear();
     }
 
@@ -57,7 +62,6 @@ class ChildProcessTracker {
 
         const isWin = process.platform === 'win32';
         if (isWin) {
-            // taskkill /T 杀进程树
             return new Promise(resolve => {
                 const args = ['/PID', String(pid), '/T'];
                 if (force) args.push('/F');
@@ -65,11 +69,42 @@ class ChildProcessTracker {
             });
         }
 
-        // mac/linux：先杀子，再杀父
         try { cp.execFileSync('pkill', [force ? '-KILL' : '-TERM', '-P', String(pid)], { stdio: 'ignore' }); } catch (e) { }
         try { process.kill(pid, force ? 'SIGKILL' : 'SIGTERM'); } catch (e) { }
-        // 兜底：有些情况下进程组可杀
         try { process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM'); } catch (e) { }
+    }
+
+    // ==================== ALS：作用域隔离 ====================
+    static _getStore() {
+        try {
+            if (ChildProcessTracker.__als) return ChildProcessTracker.__als.getStore() || null;
+        } catch (e) { }
+        // 兜底（极老 Node 才会走到这；正常 VSCode Node 不会用到）
+        if (ChildProcessTracker.__fallbackActive) {
+            return { tracker: ChildProcessTracker.__fallbackActive, forceDetachedFalse: true };
+        }
+        return null;
+    }
+
+    static async runWithTracker(tracker, fn) {
+        ChildProcessTracker.ensurePatched();
+        if (!tracker || typeof fn !== 'function') return await fn();
+
+        const store = { tracker, forceDetachedFalse: true };
+
+        if (ChildProcessTracker.__als) {
+            return await new Promise((resolve, reject) => {
+                ChildProcessTracker.__als.run(store, async () => {
+                    try { resolve(await fn()); }
+                    catch (e) { reject(e); }
+                });
+            });
+        }
+
+        // 兜底：无 ALS 的老环境（基本不会发生）
+        ChildProcessTracker.__fallbackActive = tracker;
+        try { return await fn(); }
+        finally { ChildProcessTracker.__fallbackActive = null; }
     }
 
     // ---------- 全局 patch：只 patch 一次 ----------
@@ -77,42 +112,100 @@ class ChildProcessTracker {
         if (ChildProcessTracker.__patched) return;
         ChildProcessTracker.__patched = true;
 
+        // ALS init
+        try { ChildProcessTracker.__als = new AsyncLocalStorage(); } catch (e) { ChildProcessTracker.__als = null; }
+
         const mod = cp;
         ChildProcessTracker.__origSpawn = mod.spawn.bind(mod);
         ChildProcessTracker.__origExecFile = mod.execFile.bind(mod);
         ChildProcessTracker.__origExec = mod.exec.bind(mod);
 
+        const isPlainObject = (o) => {
+            return !!o && typeof o === 'object' && !Array.isArray(o) && !(o instanceof Buffer);
+        };
+
+        const forceDetachedFalseIfNeeded = (options) => {
+            const store = ChildProcessTracker._getStore();
+            if (!store || !store.forceDetachedFalse) return options;
+
+            // 不改原对象：只做浅拷贝
+            if (isPlainObject(options)) {
+                if (options.detached === false) return options;
+                return Object.assign({}, options, { detached: false });
+            }
+            // 没 options 时无需强加（默认就是 false）
+            return options;
+        };
+
+        const maybeTrack = (proc) => {
+            const store = ChildProcessTracker._getStore();
+            if (!store || !store.tracker) return;
+            if (typeof store.tracker.track === 'function') store.tracker.track(proc);
+        };
+
         const wrapSpawn = function (...args) {
             // spawn(file, args?, options?)
-            let options = null;
-            if (args.length >= 3 && args[2] && typeof args[2] === 'object') options = args[2];
-            else if (args.length === 2 && args[1] && typeof args[1] === 'object' && !Array.isArray(args[1])) options = args[1];
+            // options 可能在 args[2] 或 args[1]
+            let newArgs = args;
 
-            // ✅ 强制 detached=false（避免 reload 后继续跑）
-            if (options && typeof options === 'object') {
-                try { options.detached = false; } catch (e) { }
+            const optIdx =
+                (args.length >= 3 && isPlainObject(args[2])) ? 2 :
+                    (args.length >= 2 && isPlainObject(args[1])) ? 1 :
+                        -1;
+
+            if (optIdx !== -1) {
+                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
+                if (patchedOpt !== args[optIdx]) {
+                    newArgs = args.slice();
+                    newArgs[optIdx] = patchedOpt;
+                }
+            } else {
+                // 没 options：不需要做任何事
             }
 
-            const p = ChildProcessTracker.__origSpawn(...args);
-            if (ChildProcessTracker.__active && typeof ChildProcessTracker.__active.track === 'function') {
-                ChildProcessTracker.__active.track(p);
-            }
+            const p = ChildProcessTracker.__origSpawn(...newArgs);
+            maybeTrack(p);
             return p;
         };
 
         const wrapExecFile = function (...args) {
-            const p = ChildProcessTracker.__origExecFile(...args);
-            if (ChildProcessTracker.__active && typeof ChildProcessTracker.__active.track === 'function') {
-                ChildProcessTracker.__active.track(p);
+            // execFile(file[, args][, options][, callback])
+            let newArgs = args;
+
+            // options 可能在 args[2] 或 args[1]
+            const optIdx =
+                (args.length >= 3 && isPlainObject(args[2])) ? 2 :
+                    (args.length >= 2 && isPlainObject(args[1])) ? 1 :
+                        -1;
+
+            if (optIdx !== -1) {
+                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
+                if (patchedOpt !== args[optIdx]) {
+                    newArgs = args.slice();
+                    newArgs[optIdx] = patchedOpt;
+                }
             }
+
+            const p = ChildProcessTracker.__origExecFile(...newArgs);
+            maybeTrack(p);
             return p;
         };
 
         const wrapExec = function (...args) {
-            const p = ChildProcessTracker.__origExec(...args);
-            if (ChildProcessTracker.__active && typeof ChildProcessTracker.__active.track === 'function') {
-                ChildProcessTracker.__active.track(p);
+            // exec(command[, options][, callback])
+            let newArgs = args;
+
+            const optIdx = (args.length >= 2 && isPlainObject(args[1])) ? 1 : -1;
+            if (optIdx !== -1) {
+                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
+                if (patchedOpt !== args[optIdx]) {
+                    newArgs = args.slice();
+                    newArgs[optIdx] = patchedOpt;
+                }
             }
+
+            const p = ChildProcessTracker.__origExec(...newArgs);
+            maybeTrack(p);
             return p;
         };
 
@@ -120,14 +213,13 @@ class ChildProcessTracker {
         mod.execFile = wrapExecFile;
         mod.exec = wrapExec;
     }
-
-    static setActive(tracker) {
-        ChildProcessTracker.ensurePatched();
-        ChildProcessTracker.__active = tracker || null;
-    }
 }
 ChildProcessTracker.__patched = false;
-ChildProcessTracker.__active = null;
+ChildProcessTracker.__origSpawn = null;
+ChildProcessTracker.__origExecFile = null;
+ChildProcessTracker.__origExec = null;
+ChildProcessTracker.__als = null;
+ChildProcessTracker.__fallbackActive = null;
 
 class VideoDownloadController {
     constructor(context) {
@@ -263,14 +355,12 @@ class VideoDownloadController {
             const u = new URL(s);
             if (u.protocol === 'http:' || u.protocol === 'https:') {
                 const host = (u.hostname || '').trim();
-                // hostname 至少像域名/主机
                 if (host === 'localhost' || host.includes('.') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
                     return { ok: true, url: u.toString() };
                 }
             }
         } catch (e) { }
 
-        // 用户没带 scheme 的域名形式
         const domainLike = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/;
         if (domainLike.test(s)) {
             try {
@@ -282,17 +372,14 @@ class VideoDownloadController {
         return { ok: false };
     }
 
-    // ✅ 修正：识别 YouTube（避免 403 进入增强流程）
+    // ✅ 识别 YouTube（彻底排除增强：前置排除 + 最终兜底）
     _isYouTubeUrl(rawUrl) {
         try {
             const u = new URL(String(rawUrl || ''));
             const host = (u.hostname || '').toLowerCase();
-
-            // youtube 家族域名
             if (host === 'youtu.be' || host.endsWith('.youtu.be')) return true;
             if (host === 'youtube.com' || host.endsWith('.youtube.com')) return true;
             if (host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')) return true;
-
             return false;
         } catch (e) {
             return false;
@@ -319,7 +406,6 @@ class VideoDownloadController {
     }
 
     async _revealFileOrFolder(filePath, folderPath) {
-        // 1) 优先选中文件
         try {
             if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
                 await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
@@ -327,7 +413,6 @@ class VideoDownloadController {
             }
         } catch (e) { }
 
-        // 2) 退化：打开目录
         try {
             if (folderPath && fs.existsSync(folderPath)) {
                 await vscode.env.openExternal(vscode.Uri.file(folderPath));
@@ -335,7 +420,6 @@ class VideoDownloadController {
             }
         } catch (e) { }
 
-        // 3) Windows 兜底：explorer
         try {
             if (process.platform === 'win32' && folderPath && fs.existsSync(folderPath)) {
                 cp.execFile('explorer.exe', [folderPath], { windowsHide: true }, () => { });
@@ -370,7 +454,6 @@ class VideoDownloadController {
         }, async (progress, token) => {
             progress.report({ message: msg });
 
-            // 用户点取消 -> 直接关闭
             let done = false;
             return await new Promise((resolve) => {
                 const finish = async () => {
@@ -379,7 +462,7 @@ class VideoDownloadController {
                     resolve(null);
                 };
                 token.onCancellationRequested(() => finish());
-                setTimeout(() => finish(), 9000); // ✅ 9秒
+                setTimeout(() => finish(), 9000);
             });
         });
     }
@@ -389,12 +472,11 @@ class VideoDownloadController {
         const OPEN = "[打开下载目录]";
         const actions = canOpen ? [OPEN] : [];
 
-        // 用 showInformationMessage 才能有“可点按钮”
         const p = vscode.window.showInformationMessage(message, ...actions);
 
         let timer = null;
         const timeout = new Promise(resolve => {
-            timer = setTimeout(() => resolve(undefined), 15000); // ✅ 任务结束仍 15秒
+            timer = setTimeout(() => resolve(undefined), 15000);
         });
 
         const choice = await Promise.race([p, timeout]);
@@ -404,7 +486,6 @@ class VideoDownloadController {
             await this._revealFileOrFolder(filePath, folderPath);
         }
 
-        // 无论点不点，都尽力关掉通知
         await this._hideToastsBestEffort();
     }
 
@@ -433,7 +514,6 @@ class VideoDownloadController {
 
     // ==================== 任务上下文：总耗时 + 真取消 ====================
     _beginTask() {
-        // 如果上一任务还在，就先强行取消
         if (this._task && this._task.tracker && !this._task.tracker.isCancelled()) {
             try { this._task.tracker.killAll('新任务覆盖'); } catch (e) { }
         }
@@ -444,8 +524,6 @@ class VideoDownloadController {
         };
         this._task = task;
 
-        // ✅ 激活进程追踪（只在本任务期间追踪/强制 detached=false）
-        ChildProcessTracker.setActive(task.tracker);
         return task;
     }
 
@@ -456,7 +534,6 @@ class VideoDownloadController {
 
         t.tracker.markCancelled();
 
-        // 如果 downloader 自己支持 cancel（不确定有没有），就顺手调用
         try {
             if (typeof this.downloader.cancelAll === 'function') {
                 await this.downloader.cancelAll();
@@ -475,8 +552,6 @@ class VideoDownloadController {
     }
 
     _endTask() {
-        // 取消进程追踪
-        ChildProcessTracker.setActive(null);
         this._task = null;
     }
 
@@ -500,18 +575,15 @@ class VideoDownloadController {
         if (!raw) return;
 
         const task = this._beginTask();
+
         try {
             const v = this._normalizeAndValidateUrl(raw);
             if (!v.ok) {
-                // ✅ 明显不是网址：只弹“无效网址”（9秒）
                 await this._showInvalidUrlToast();
                 return;
             }
 
             const url = v.url;
-
-            // 异步确保 yt-dlp
-            this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
 
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
@@ -526,7 +598,12 @@ class VideoDownloadController {
             this.log(`开始处理: ${url}`);
             this.outputChannel.show(true);
 
-            await this._fastProcess(url, targetDir);
+            // ✅ 关键：只在这条 async 调用链里生效（ALS）
+            await ChildProcessTracker.runWithTracker(task.tracker, async () => {
+                // 异步确保 yt-dlp（也在 ALS 内启动 => 若内部 spawn，会被 track）
+                this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
+                await this._fastProcess(url, targetDir);
+            });
 
         } finally {
             this._endTask();
@@ -537,8 +614,8 @@ class VideoDownloadController {
     async _fastProcess(url, targetDir) {
         try {
             const urlSnippet = this._makeUrlSnippet(url);
+            const isYouTube = this._isYouTubeUrl(url);
 
-            // ========= 一号弹窗 =========
             const outcome = await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: "",
@@ -547,7 +624,6 @@ class VideoDownloadController {
                 progress.report({ message: `已交换 0k 于 ${urlSnippet} (正在解析...)` });
 
                 token.onCancellationRequested(async () => {
-                    // ✅ 真取消：杀子进程
                     await this._cancelTask('用户在一号窗口点取消');
                 });
 
@@ -572,9 +648,15 @@ class VideoDownloadController {
                         }
                     } else {
                         if (this._isForbidden(403, res?.error)) {
-                            probeForbidden = true;
-                            this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
-                            tasks.push(this._createTask(url, null, targetDir, url));
+                            if (!isYouTube) {
+                                probeForbidden = true;
+                                this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                                tasks.push(this._createTask(url, null, targetDir, url));
+                            } else {
+                                // ✅ 前置排除：YouTube 的 403 不作为增强信号
+                                this.log("YouTube 探测 403：忽略增强触发（仍尝试交给 yt-dlp 直接下载）。");
+                                tasks.push(this._createTask(url, null, targetDir, url));
+                            }
                         } else {
                             this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
                         }
@@ -606,7 +688,6 @@ class VideoDownloadController {
                 this.log(`准备下载 ${tasks.length} 个任务...`);
                 progress.report({ message: `已交换 0k 于 ${urlSnippet}` });
 
-                // 文件名前缀集合（扫盘统计）
                 const activePrefixes = new Set();
                 tasks.forEach(t => {
                     if (t.destPath) {
@@ -651,7 +732,6 @@ class VideoDownloadController {
 
                     if (this._isCancelled()) return null;
 
-                    // ✅ 屏蔽 downloadAll 内部可能的“成功/失败”弹窗
                     let res;
                     try {
                         res = await this._runWithSuppressedPopups(async () => {
@@ -709,17 +789,21 @@ class VideoDownloadController {
                     }
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
-                    const needEnhanced =
+
+                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强（包括第三条“落盘为空但 success>0”）
+                    const needEnhanced = (!isYouTube) && (
                         forbiddenErrors.length > 0 ||
                         (probeForbidden && landedFiles.length === 0) ||
-                        (landedFiles.length === 0 && successResults.length > 0);
+                        (landedFiles.length === 0 && successResults.length > 0)
+                    );
 
                     return {
                         needEnhanced,
                         code: forbiddenErrors[0]?.code || 403,
                         landedFiles,
                         finalTotalBytes,
-                        urlSnippet
+                        urlSnippet,
+                        isYouTube
                     };
 
                 } finally {
@@ -729,14 +813,13 @@ class VideoDownloadController {
                 }
             });
 
-            if (!outcome) return;                 // 可能是取消
-            if (this._isCancelled()) return;      // 再保险
+            if (!outcome) return;
+            if (this._isCancelled()) return;
 
-            // ✅ 修正：YouTube 即便 403 也不进入增强流程（增强对 YouTube 也会失败）
+            // ✅ 最终兜底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
-                if (this._isYouTubeUrl(url)) {
-                    this.log(`[增强] 检测到 YouTube 链接，忽略增强流程（即使出现 403）`);
-                    // 继续走“任务结束”三号弹窗（通常是 0 落盘）
+                if (outcome.isYouTube || this._isYouTubeUrl(url)) {
+                    this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
                     await this._handleForbidden(outcome.code || 403, url, targetDir);
                     return;
@@ -1420,7 +1503,6 @@ $of = $vi.OriginalFilename;
                 try { totalBytes += fs.statSync(p).size; } catch (e) { }
             }
 
-            // 插入（增强这边不做 ffmpeg 验证）
             const inserted = new Set();
             for (const p of landedFiles) {
                 if (this._isCancelled()) break;
