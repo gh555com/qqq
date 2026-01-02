@@ -120,12 +120,23 @@ public class ClipboardHelper {
 `;
 
 // ============================================================================
-// Process / Spawn Helpers
+// Process / Spawn Helpers  (✅ 配套：默认 NO_TRACK，不进入下载任务 tracker)
 // ============================================================================
+const NO_TRACK_ENV_KEY = "QQQ_NO_TRACK";
+function _envNoTrack() {
+    return { ...process.env, [NO_TRACK_ENV_KEY]: "1" };
+}
+
 function spawnRun(cmd, args, opts = {}) {
     const { checkExpected, returnOutput } = opts;
     return new Promise((resolve) => {
-        const child = cp.spawn(cmd, args, { windowsHide: true });
+        // ✅ 双保险：显式 env 标记 NO_TRACK
+        const child = cp.spawn(cmd, args, {
+            windowsHide: true,
+            env: _envNoTrack(),
+            // detached 默认就是 false；这里不强行写也行
+        });
+
         let output = "";
         let errorOutput = "";
         let done = false;
@@ -141,15 +152,12 @@ function spawnRun(cmd, args, opts = {}) {
         child.stdout.on("data", (d) => output += d.toString());
         child.stderr.on("data", (d) => errorOutput += d.toString());
 
-        child.on("close", (code) => {
-            if (checkExpected) {
-                finish(output.includes(checkExpected));
-            } else {
-                finish(returnOutput ? output : "");
-            }
+        child.on("close", () => {
+            if (checkExpected) finish(output.includes(checkExpected));
+            else finish(returnOutput ? output : "");
         });
 
-        child.on("error", (err) => {
+        child.on("error", () => {
             finish(checkExpected ? false : "");
         });
 

@@ -44,13 +44,9 @@ class ChildProcessTracker {
         }
 
         // 先温柔一点，再强杀
-        for (const pid of pids) {
-            await this._killPidTree(pid, false);
-        }
+        for (const pid of pids) await this._killPidTree(pid, false);
         await this._sleep(400);
-        for (const pid of pids) {
-            await this._killPidTree(pid, true);
-        }
+        for (const pid of pids) await this._killPidTree(pid, true);
 
         this._procs.clear();
     }
@@ -60,166 +56,345 @@ class ChildProcessTracker {
     async _killPidTree(pid, force) {
         if (!pid || typeof pid !== 'number') return;
 
+        const cp = require('child_process'); // lazy require
         const isWin = process.platform === 'win32';
+
+        // ⚠️ kill 本身绝不能再被 tracker 拦截/追踪，否则会递归污染
+        // 所以这里强制走 “原始未 patch 的函数”（如果已 patch）
+        const execFile = ChildProcessTracker.__origExecFile || cp.execFile;
+        const execFileSync = ChildProcessTracker.__origExecFileSync || cp.execFileSync;
+
         if (isWin) {
             return new Promise(resolve => {
                 const args = ['/PID', String(pid), '/T'];
                 if (force) args.push('/F');
-                cp.execFile('taskkill', args, { windowsHide: true }, () => resolve());
+                execFile('taskkill', args, {
+                    windowsHide: true,
+                    // ✅ 双保险：即便有人误把 kill 放在 ALS scope 里，也不追踪
+                    env: ChildProcessTracker._envNoTrack(),
+                }, () => resolve());
             });
         }
 
-        try { cp.execFileSync('pkill', [force ? '-KILL' : '-TERM', '-P', String(pid)], { stdio: 'ignore' }); } catch (e) { }
+        // mac/linux：先杀子，再杀父
+        try { execFileSync('pkill', [force ? '-KILL' : '-TERM', '-P', String(pid)], { stdio: 'ignore', env: ChildProcessTracker._envNoTrack() }); } catch (e) { }
         try { process.kill(pid, force ? 'SIGKILL' : 'SIGTERM'); } catch (e) { }
         try { process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM'); } catch (e) { }
     }
 
-    // ==================== ALS：作用域隔离 ====================
-    static _getStore() {
-        try {
-            if (ChildProcessTracker.__als) return ChildProcessTracker.__als.getStore() || null;
-        } catch (e) { }
-        // 兜底（极老 Node 才会走到这；正常 VSCode Node 不会用到）
-        if (ChildProcessTracker.__fallbackActive) {
-            return { tracker: ChildProcessTracker.__fallbackActive, forceDetachedFalse: true };
-        }
-        return null;
-    }
-
-    static async runWithTracker(tracker, fn) {
+    // ==================== ALS：只让“本任务 async 链”可见 tracker ====================
+    static runWithTracker(tracker, fn) {
         ChildProcessTracker.ensurePatched();
-        if (!tracker || typeof fn !== 'function') return await fn();
-
-        const store = { tracker, forceDetachedFalse: true };
-
-        if (ChildProcessTracker.__als) {
-            return await new Promise((resolve, reject) => {
-                ChildProcessTracker.__als.run(store, async () => {
-                    try { resolve(await fn()); }
-                    catch (e) { reject(e); }
-                });
-            });
-        }
-
-        // 兜底：无 ALS 的老环境（基本不会发生）
-        ChildProcessTracker.__fallbackActive = tracker;
-        try { return await fn(); }
-        finally { ChildProcessTracker.__fallbackActive = null; }
+        const store = tracker ? { tracker } : null;
+        if (!store) return fn();
+        return ChildProcessTracker.__als.run(store, fn);
     }
 
-    // ---------- 全局 patch：只 patch 一次 ----------
+    // ✅ 最终兜底：把某个回调“绑定到当前 store”
+    // VSCode 的一些回调/事件有时会脱离原 async 链，这个保证不丢 store
+    static bind(fn) {
+        ChildProcessTracker.ensurePatched();
+        const store = ChildProcessTracker.__als.getStore();
+        if (!store) return fn;
+        return (...args) => ChildProcessTracker.__als.run(store, () => fn(...args));
+    }
+
+    // ==================== 全局 patch：只 patch 一次 ====================
     static ensurePatched() {
         if (ChildProcessTracker.__patched) return;
         ChildProcessTracker.__patched = true;
 
-        // ALS init
-        try { ChildProcessTracker.__als = new AsyncLocalStorage(); } catch (e) { ChildProcessTracker.__als = null; }
+        const cp = require('child_process');
 
-        const mod = cp;
-        ChildProcessTracker.__origSpawn = mod.spawn.bind(mod);
-        ChildProcessTracker.__origExecFile = mod.execFile.bind(mod);
-        ChildProcessTracker.__origExec = mod.exec.bind(mod);
+        // 保存原始引用（供 kill / 兜底绕过）
+        ChildProcessTracker.__origSpawn = cp.spawn.bind(cp);
+        ChildProcessTracker.__origExecFile = cp.execFile.bind(cp);
+        ChildProcessTracker.__origExec = cp.exec.bind(cp);
+        ChildProcessTracker.__origFork = typeof cp.fork === 'function' ? cp.fork.bind(cp) : null;
 
-        const isPlainObject = (o) => {
-            return !!o && typeof o === 'object' && !Array.isArray(o) && !(o instanceof Buffer);
+        ChildProcessTracker.__origSpawnSync = typeof cp.spawnSync === 'function' ? cp.spawnSync.bind(cp) : null;
+        ChildProcessTracker.__origExecFileSync = typeof cp.execFileSync === 'function' ? cp.execFileSync.bind(cp) : null;
+        ChildProcessTracker.__origExecSync = typeof cp.execSync === 'function' ? cp.execSync.bind(cp) : null;
+
+        // ---------- helpers ----------
+        const isObj = (x) => !!x && typeof x === 'object';
+        const getCmdBase = (cmd) => {
+            try { return path.basename(String(cmd || '')).toLowerCase(); } catch { return String(cmd || '').toLowerCase(); }
         };
 
-        const forceDetachedFalseIfNeeded = (options) => {
-            const store = ChildProcessTracker._getStore();
-            if (!store || !store.forceDetachedFalse) return options;
+        // ✅ 前置排除：不在 ALS scope => 完全不动（不影响其它扩展 / 其它链）
+        // ✅ 前置排除：带 NO_TRACK 标记 => 完全不动（你自己也能 opt-out）
+        // ✅ 前置排除：排除“打开资源管理器/系统打开器”这类 UI 子进程，避免误杀
+        const shouldIntercept = (cmd, options) => {
+            const store = ChildProcessTracker.__als.getStore();
+            const tracker = store && store.tracker;
 
-            // 不改原对象：只做浅拷贝
-            if (isPlainObject(options)) {
-                if (options.detached === false) return options;
-                return Object.assign({}, options, { detached: false });
-            }
-            // 没 options 时无需强加（默认就是 false）
-            return options;
+            if (!tracker) return false;
+
+            // 任务取消后仍可能有人 spawn；允许拦截并 track，便于 killAll 兜底
+            // if (tracker.isCancelled && tracker.isCancelled()) return false;
+
+            if (ChildProcessTracker._hasNoTrackFlag(options)) return false;
+
+            const base = getCmdBase(cmd);
+            if (ChildProcessTracker.__excludedCmds.has(base)) return false;
+
+            return true;
         };
 
-        const maybeTrack = (proc) => {
-            const store = ChildProcessTracker._getStore();
-            if (!store || !store.tracker) return;
-            if (typeof store.tracker.track === 'function') store.tracker.track(proc);
+        // ✅ 不改原 options 对象：只有“必须改 detached”时才 clone
+        const cloneOptionsDetachedFalse = (opt) => {
+            if (!isObj(opt)) return opt;
+            if (opt.detached !== true) return opt; // detached 不是 true 就不动（默认本来就是 false）
+            const cloned = { ...opt, detached: false };
+            return cloned;
         };
 
-        const wrapSpawn = function (...args) {
+        // ---------- spawn ----------
+        cp.spawn = function (...args) {
             // spawn(file, args?, options?)
-            // options 可能在 args[2] 或 args[1]
-            let newArgs = args;
+            const cmd = args[0];
+            let optionsIndex = -1;
+            let options = null;
 
-            const optIdx =
-                (args.length >= 3 && isPlainObject(args[2])) ? 2 :
-                    (args.length >= 2 && isPlainObject(args[1])) ? 1 :
-                        -1;
+            if (args.length >= 3 && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
+            else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
 
-            if (optIdx !== -1) {
-                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
-                if (patchedOpt !== args[optIdx]) {
-                    newArgs = args.slice();
-                    newArgs[optIdx] = patchedOpt;
-                }
-            } else {
-                // 没 options：不需要做任何事
+            if (!shouldIntercept(cmd, options)) {
+                return ChildProcessTracker.__origSpawn(...args);
             }
 
-            const p = ChildProcessTracker.__origSpawn(...newArgs);
-            maybeTrack(p);
+            // 强制 detached:false（只在 detached===true 时修正；不改原对象）
+            if (optionsIndex >= 0) {
+                const fixed = cloneOptionsDetachedFalse(options);
+                if (fixed !== options) {
+                    const newArgs = args.slice();
+                    newArgs[optionsIndex] = fixed;
+                    const p = ChildProcessTracker.__origSpawn(...newArgs);
+                    const store = ChildProcessTracker.__als.getStore();
+                    if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+                    return p;
+                }
+            }
+
+            const p = ChildProcessTracker.__origSpawn(...args);
+            {
+                const store = ChildProcessTracker.__als.getStore();
+                if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+            }
             return p;
         };
 
-        const wrapExecFile = function (...args) {
+        // ---------- execFile ----------
+        cp.execFile = function (...args) {
             // execFile(file[, args][, options][, callback])
-            let newArgs = args;
+            const cmd = args[0];
+            let optionsIndex = -1;
+            let options = null;
 
-            // options 可能在 args[2] 或 args[1]
-            const optIdx =
-                (args.length >= 3 && isPlainObject(args[2])) ? 2 :
-                    (args.length >= 2 && isPlainObject(args[1])) ? 1 :
-                        -1;
+            if (args.length >= 3 && Array.isArray(args[1]) && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
+            else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
+            else if (args.length >= 3 && isObj(args[2]) && !Array.isArray(args[2])) { optionsIndex = 2; options = args[2]; }
 
-            if (optIdx !== -1) {
-                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
-                if (patchedOpt !== args[optIdx]) {
-                    newArgs = args.slice();
-                    newArgs[optIdx] = patchedOpt;
+            if (!shouldIntercept(cmd, options)) {
+                return ChildProcessTracker.__origExecFile(...args);
+            }
+
+            if (optionsIndex >= 0) {
+                const fixed = cloneOptionsDetachedFalse(options);
+                if (fixed !== options) {
+                    const newArgs = args.slice();
+                    newArgs[optionsIndex] = fixed;
+                    const p = ChildProcessTracker.__origExecFile(...newArgs);
+                    const store = ChildProcessTracker.__als.getStore();
+                    if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+                    return p;
                 }
             }
 
-            const p = ChildProcessTracker.__origExecFile(...newArgs);
-            maybeTrack(p);
+            const p = ChildProcessTracker.__origExecFile(...args);
+            {
+                const store = ChildProcessTracker.__als.getStore();
+                if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+            }
             return p;
         };
 
-        const wrapExec = function (...args) {
+        // ---------- exec ----------
+        cp.exec = function (...args) {
             // exec(command[, options][, callback])
-            let newArgs = args;
+            const cmd = args[0];
+            let optionsIndex = -1;
+            let options = null;
 
-            const optIdx = (args.length >= 2 && isPlainObject(args[1])) ? 1 : -1;
-            if (optIdx !== -1) {
-                const patchedOpt = forceDetachedFalseIfNeeded(args[optIdx]);
-                if (patchedOpt !== args[optIdx]) {
-                    newArgs = args.slice();
-                    newArgs[optIdx] = patchedOpt;
+            if (args.length >= 2 && isObj(args[1])) { optionsIndex = 1; options = args[1]; }
+
+            if (!shouldIntercept(cmd, options)) {
+                return ChildProcessTracker.__origExec(...args);
+            }
+
+            if (optionsIndex >= 0) {
+                const fixed = cloneOptionsDetachedFalse(options);
+                if (fixed !== options) {
+                    const newArgs = args.slice();
+                    newArgs[optionsIndex] = fixed;
+                    const p = ChildProcessTracker.__origExec(...newArgs);
+                    const store = ChildProcessTracker.__als.getStore();
+                    if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+                    return p;
                 }
             }
 
-            const p = ChildProcessTracker.__origExec(...newArgs);
-            maybeTrack(p);
+            const p = ChildProcessTracker.__origExec(...args);
+            {
+                const store = ChildProcessTracker.__als.getStore();
+                if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+            }
             return p;
         };
 
-        mod.spawn = wrapSpawn;
-        mod.execFile = wrapExecFile;
-        mod.exec = wrapExec;
+        // ---------- fork（如果你项目里有人用） ----------
+        if (ChildProcessTracker.__origFork) {
+            cp.fork = function (...args) {
+                // fork(modulePath[, args][, options])
+                const cmd = args[0];
+                let optionsIndex = -1;
+                let options = null;
+
+                if (args.length >= 3 && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
+                else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
+
+                if (!shouldIntercept(cmd, options)) {
+                    return ChildProcessTracker.__origFork(...args);
+                }
+
+                if (optionsIndex >= 0) {
+                    const fixed = cloneOptionsDetachedFalse(options);
+                    if (fixed !== options) {
+                        const newArgs = args.slice();
+                        newArgs[optionsIndex] = fixed;
+                        const p = ChildProcessTracker.__origFork(...newArgs);
+                        const store = ChildProcessTracker.__als.getStore();
+                        if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+                        return p;
+                    }
+                }
+
+                const p = ChildProcessTracker.__origFork(...args);
+                {
+                    const store = ChildProcessTracker.__als.getStore();
+                    if (store && store.tracker && typeof store.tracker.track === 'function') store.tracker.track(p);
+                }
+                return p;
+            };
+        }
+
+        // ---------- sync 兜底：只强制 detached:false，不 track（没意义） ----------
+        if (ChildProcessTracker.__origSpawnSync) {
+            cp.spawnSync = function (...args) {
+                const cmd = args[0];
+                let optionsIndex = -1;
+                let options = null;
+
+                if (args.length >= 3 && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
+                else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
+
+                // 不在 ALS scope / NO_TRACK / 排除 => 不动
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origSpawnSync(...args);
+
+                if (optionsIndex >= 0) {
+                    const fixed = cloneOptionsDetachedFalse(options);
+                    if (fixed !== options) {
+                        const newArgs = args.slice();
+                        newArgs[optionsIndex] = fixed;
+                        return ChildProcessTracker.__origSpawnSync(...newArgs);
+                    }
+                }
+                return ChildProcessTracker.__origSpawnSync(...args);
+            };
+        }
+
+        if (ChildProcessTracker.__origExecFileSync) {
+            cp.execFileSync = function (...args) {
+                const cmd = args[0];
+                let optionsIndex = -1;
+                let options = null;
+
+                // execFileSync(file[, args][, options])
+                if (args.length >= 3 && Array.isArray(args[1]) && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
+                else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
+                else if (args.length >= 3 && isObj(args[2]) && !Array.isArray(args[2])) { optionsIndex = 2; options = args[2]; }
+
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origExecFileSync(...args);
+
+                if (optionsIndex >= 0) {
+                    const fixed = cloneOptionsDetachedFalse(options);
+                    if (fixed !== options) {
+                        const newArgs = args.slice();
+                        newArgs[optionsIndex] = fixed;
+                        return ChildProcessTracker.__origExecFileSync(...newArgs);
+                    }
+                }
+                return ChildProcessTracker.__origExecFileSync(...args);
+            };
+        }
+
+        if (ChildProcessTracker.__origExecSync) {
+            cp.execSync = function (...args) {
+                const cmd = args[0];
+                let optionsIndex = -1;
+                let options = null;
+
+                // execSync(command[, options])
+                if (args.length >= 2 && isObj(args[1])) { optionsIndex = 1; options = args[1]; }
+
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origExecSync(...args);
+
+                if (optionsIndex >= 0) {
+                    const fixed = cloneOptionsDetachedFalse(options);
+                    if (fixed !== options) {
+                        const newArgs = args.slice();
+                        newArgs[optionsIndex] = fixed;
+                        return ChildProcessTracker.__origExecSync(...newArgs);
+                    }
+                }
+                return ChildProcessTracker.__origExecSync(...args);
+            };
+        }
+    }
+
+    // ============ NO_TRACK 支持（你想 opt-out 的子进程可以加这个标记） ============
+    static _envNoTrack() {
+        // 每次 clone 一份，避免外部改写污染
+        return { ...process.env, [ChildProcessTracker.NO_TRACK_ENV_KEY]: '1' };
+    }
+
+    static _hasNoTrackFlag(options) {
+        try {
+            if (!options || typeof options !== 'object') return false;
+            if (options._qqqNoTrack === true) return true;
+            const env = options.env;
+            if (env && typeof env === 'object') {
+                const v = env[ChildProcessTracker.NO_TRACK_ENV_KEY];
+                if (v === '1' || v === 'true' || v === true) return true;
+            }
+        } catch (e) { }
+        return false;
     }
 }
+
+ChildProcessTracker.NO_TRACK_ENV_KEY = 'QQQ_NO_TRACK';
+ChildProcessTracker.__als = new AsyncLocalStorage();
 ChildProcessTracker.__patched = false;
-ChildProcessTracker.__origSpawn = null;
-ChildProcessTracker.__origExecFile = null;
-ChildProcessTracker.__origExec = null;
-ChildProcessTracker.__als = null;
-ChildProcessTracker.__fallbackActive = null;
+
+// 这些命令属于“打开/外壳 UI”，不要纳入追踪，不然取消会误杀
+ChildProcessTracker.__excludedCmds = new Set([
+    'explorer.exe',
+    'open',
+    'xdg-open',
+    'gio',          // 一些 linux 桌面会用 gio open
+    'rundll32.exe', // 有时系统打开会走它
+]);
 
 class VideoDownloadController {
     constructor(context) {
@@ -514,6 +689,7 @@ class VideoDownloadController {
 
     // ==================== 任务上下文：总耗时 + 真取消 ====================
     _beginTask() {
+        // 如果上一任务还在，就先强行取消
         if (this._task && this._task.tracker && !this._task.tracker.isCancelled()) {
             try { this._task.tracker.killAll('新任务覆盖'); } catch (e) { }
         }
@@ -523,7 +699,6 @@ class VideoDownloadController {
             tracker: new ChildProcessTracker()
         };
         this._task = task;
-
         return task;
     }
 
@@ -577,31 +752,32 @@ class VideoDownloadController {
         const task = this._beginTask();
 
         try {
-            const v = this._normalizeAndValidateUrl(raw);
-            if (!v.ok) {
-                await this._showInvalidUrlToast();
-                return;
-            }
+            // ✅ 关键：只有这段 async 调用链里的 spawn 才会被追踪/强制 detached:false
+            return await ChildProcessTracker.runWithTracker(task.tracker, async () => {
+                const v = this._normalizeAndValidateUrl(raw);
+                if (!v.ok) {
+                    await this._showInvalidUrlToast();
+                    return;
+                }
 
-            const url = v.url;
+                const url = v.url;
 
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
-                return;
-            }
-
-            const currentDocDir = path.dirname(editor.document.uri.fsPath);
-            const targetDir = path.join(currentDocDir, "qqq");
-            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-
-            this.log(`开始处理: ${url}`);
-            this.outputChannel.show(true);
-
-            // ✅ 关键：只在这条 async 调用链里生效（ALS）
-            await ChildProcessTracker.runWithTracker(task.tracker, async () => {
-                // 异步确保 yt-dlp（也在 ALS 内启动 => 若内部 spawn，会被 track）
+                // 异步确保 yt-dlp（在 scope 内）
                 this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
+
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
+                    return;
+                }
+
+                const currentDocDir = path.dirname(editor.document.uri.fsPath);
+                const targetDir = path.join(currentDocDir, "qqq");
+                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+                this.log(`开始处理: ${url}`);
+                this.outputChannel.show(true);
+
                 await this._fastProcess(url, targetDir);
             });
 
@@ -623,9 +799,11 @@ class VideoDownloadController {
             }, async (progress, token) => {
                 progress.report({ message: `已交换 0k 于 ${urlSnippet} (正在解析...)` });
 
-                token.onCancellationRequested(async () => {
-                    await this._cancelTask('用户在一号窗口点取消');
-                });
+                token.onCancellationRequested(
+                    ChildProcessTracker.bind(async () => {
+                        await this._cancelTask('用户在一号窗口点取消');
+                    })
+                );
 
                 this.log("正在智能嗅探资源...");
                 let tasks = [];
@@ -1173,10 +1351,12 @@ $of = $vi.OriginalFilename;
             cancellable: true
         }, async (progress, token) => {
             let cancelled = false;
-            token.onCancellationRequested(async () => {
-                cancelled = true;
-                await this._cancelTask('用户取消 Chrome 下载');
-            });
+            token.onCancellationRequested(
+                ChildProcessTracker.bind(async () => {
+                    cancelled = true;
+                    await this._cancelTask('用户取消 Chrome 下载');
+                })
+            );
 
             try {
                 progress.report({ message: `0% (版本 ${chromeInfo.version})` });
@@ -1469,9 +1649,11 @@ $of = $vi.OriginalFilename;
         }, async (progress, token) => {
             progress.report({ message: `已交换 0k 于 ${urlSnippet} (增强下载中...)` });
 
-            token.onCancellationRequested(async () => {
-                await this._cancelTask('用户在增强下载窗口点取消');
-            });
+            token.onCancellationRequested(
+                ChildProcessTracker.bind(async () => {
+                    await this._cancelTask('用户在增强下载窗口点取消');
+                })
+            );
 
             let timer = null;
             try {

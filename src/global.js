@@ -5,6 +5,8 @@ const path = require("path");
 const cp = require("child_process");
 const readline = require("readline");
 
+const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
+
 // ============================================================================
 // ★ Daemon Bridge (从 qqq.js 迁移)
 // ============================================================================
@@ -429,6 +431,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
 						windowsHide: true,
+						env: NO_TRACK_ENV
 					});
 				} catch (e) {
 					const msg = `spawn_fail(${bin}): ${e.message}`;
@@ -774,7 +777,10 @@ done
 
 			logMessage("尝试启动 Bash 进程", "DEBUG");
 			try {
-				proc = cp.spawn("bash", ["-c", bashScript], { stdio: ["pipe", "pipe", "pipe"] });
+				proc = cp.spawn("bash", ["-c", bashScript], {
+					stdio: ["pipe", "pipe", "pipe"],
+					env: NO_TRACK_ENV
+				});
 				logMessage("Bash 进程已创建", "DEBUG");
 			} catch (e) {
 				bridge._setStartError(`spawn_fail(bash): ${e.message} `);
