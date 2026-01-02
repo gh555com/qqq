@@ -161,7 +161,6 @@ class VideoDownloadController {
         return Math.round(bytes / k) + "k";
     }
 
-    // ✅ 修正：总耗时 < 1 分钟时，不输出 0m+
     _formatDuration(ms) {
         const total = Math.max(0, Math.floor(ms / 1000));
         let s = total % 60;
@@ -170,8 +169,8 @@ class VideoDownloadController {
         m = m % 60;
 
         if (h > 0) return `${h}h+${m}m+${s}s`;
-        if (m > 0) return `${m}m+${s}s`;
-        return `${s}s`;
+        if (m > 0) return `${m}m+${s}s`; // ✅ 只有分钟大于0才显示 m
+        return `${s}s`; // ✅ 小于一分钟只显示秒
     }
 
     _parseSizeToBytes(sizeStr) {
@@ -280,23 +279,6 @@ class VideoDownloadController {
         }
 
         return { ok: false };
-    }
-
-    // ✅ 修正：识别 YouTube（避免 403 进入增强流程）
-    _isYouTubeUrl(rawUrl) {
-        try {
-            const u = new URL(String(rawUrl || ''));
-            const host = (u.hostname || '').toLowerCase();
-
-            // youtube 家族域名
-            if (host === 'youtu.be' || host.endsWith('.youtu.be')) return true;
-            if (host === 'youtube.com' || host.endsWith('.youtube.com')) return true;
-            if (host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')) return true;
-
-            return false;
-        } catch (e) {
-            return false;
-        }
     }
 
     // ==================== 选中最大视频文件优先 ====================
@@ -537,6 +519,8 @@ class VideoDownloadController {
     async _fastProcess(url, targetDir) {
         try {
             const urlSnippet = this._makeUrlSnippet(url);
+            // ✅ 识别 YouTube：如果是 YouTube，坚决不因为 403 触发增强流程
+            const isYouTube = /youtube\.com|youtu\.be/i.test(url);
 
             // ========= 一号弹窗 =========
             const outcome = await vscode.window.withProgress({
@@ -572,9 +556,15 @@ class VideoDownloadController {
                         }
                     } else {
                         if (this._isForbidden(403, res?.error)) {
-                            probeForbidden = true;
-                            this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
-                            tasks.push(this._createTask(url, null, targetDir, url));
+                            // ✅ 关键修复：如果是 YouTube，403 很正常（如 cookies 问题），但嗅探器对 YouTube 没用。
+                            // 此时不应标记 probeForbidden，而应尝试直接下载（交由 yt-dlp 处理），或者报错，但决不进增强流程。
+                            if (!isYouTube) {
+                                probeForbidden = true;
+                                this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                                tasks.push(this._createTask(url, null, targetDir, url));
+                            } else {
+                                this.log(`YouTube 返回 403，忽略增强流程触发 (yt-dlp 是最佳方案)。`);
+                            }
                         } else {
                             this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
                         }
@@ -709,8 +699,11 @@ class VideoDownloadController {
                     }
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
+
+                    // ✅ 关键修复：如果是 YouTube，即使有 Forbidden 也不要触发 Enhanced，
+                    // 因为 YouTube 的 403 通常无法通过 CDP 嗅探解决，反而是 yt-dlp 原生支持最好。
                     const needEnhanced =
-                        forbiddenErrors.length > 0 ||
+                        (!isYouTube && forbiddenErrors.length > 0) ||
                         (probeForbidden && landedFiles.length === 0) ||
                         (landedFiles.length === 0 && successResults.length > 0);
 
@@ -732,15 +725,9 @@ class VideoDownloadController {
             if (!outcome) return;                 // 可能是取消
             if (this._isCancelled()) return;      // 再保险
 
-            // ✅ 修正：YouTube 即便 403 也不进入增强流程（增强对 YouTube 也会失败）
             if (outcome.needEnhanced) {
-                if (this._isYouTubeUrl(url)) {
-                    this.log(`[增强] 检测到 YouTube 链接，忽略增强流程（即使出现 403）`);
-                    // 继续走“任务结束”三号弹窗（通常是 0 落盘）
-                } else {
-                    await this._handleForbidden(outcome.code || 403, url, targetDir);
-                    return;
-                }
+                await this._handleForbidden(outcome.code || 403, url, targetDir);
+                return;
             }
 
             const landedCount = (outcome.landedFiles || []).length;
