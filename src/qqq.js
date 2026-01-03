@@ -463,7 +463,7 @@ async function raceClipboard(targetDir, callback) {
 		try {
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
-				title: "qqq: 智能粘贴...",
+				title: "qqq: html粘贴...",
 				cancellable: true
 			}, async (progress, token) => {
 				token.onCancellationRequested(() => {
