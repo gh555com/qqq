@@ -1040,8 +1040,56 @@ class VideoDownloadController {
 
     // ==================== 后处理：验证 + 改名 + 插入（返回最终落盘路径） ====================
     async _postProcess(filePath) {
-        if (this._isCancelled()) return null;
+        if (this._isCancelled()) {
+            if (filePath && fs.existsSync(filePath)) {
+                try { fs.unlinkSync(filePath); } catch (e) { }
+            }
+            return null;
+        }
         if (!filePath || !fs.existsSync(filePath)) return null;
+
+        // 指纹去重检查 (Global + Local)
+        try {
+            const currentFp = h.computeFingerprint(filePath);
+            if (currentFp) {
+                // 1. Global Cache (qqq)
+                if (this.qqq && this.qqq.findSourceFile) {
+                    const existing = this.qqq.findSourceFile(currentFp);
+                    if (existing && existing !== filePath && fs.existsSync(existing)) {
+                        this.log(`[GlobalCache] 发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${path.basename(existing)}`);
+                        try { fs.unlinkSync(filePath); } catch (e) { }
+                        await this._insertToCursor(path.basename(existing), existing);
+                        return existing;
+                    }
+                    this.qqq.registerSourceFile(filePath);
+                }
+
+                // 2. Local Fallback
+                const dir = path.dirname(filePath);
+                const files = fs.readdirSync(dir);
+                for (const f of files) {
+                    const full = path.join(dir, f);
+                    if (full === filePath) continue;
+                    if (!fs.statSync(full).isFile()) continue;
+                    if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
+
+                    const otherFp = h.computeFingerprint(full);
+                    if (otherFp === currentFp) {
+                        this.log(`发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
+                        try { fs.unlinkSync(filePath); } catch (e) { }
+
+                        if (this.qqq && this.qqq.registerSourceFile) {
+                            this.qqq.registerSourceFile(full);
+                        }
+
+                        await this._insertToCursor(f, full);
+                        return full;
+                    }
+                }
+            }
+        } catch (e) {
+            this.log(`指纹检查出错: ${e.message}`);
+        }
 
         this.log(`正在验证文件: ${path.basename(filePath)}`);
 
@@ -1759,7 +1807,7 @@ $of = $vi.OriginalFilename;
             }
 
             const selection = await vscode.window.showInformationMessage(
-                "请在打开的浏览器中播放视频（登录信息会自动保存），完成后点击下方按钮。",
+                "请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。",
                 { modal: true },
                 "我已在外部播放"
             );

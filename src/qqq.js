@@ -167,6 +167,7 @@ function createEmptyMeta() {
 		entries: {},
 		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
 		brokenFiles: {},
+		fileIndex: {} // Persistent Source File Index (Fingerprint -> Path)
 	};
 }
 
@@ -178,6 +179,7 @@ function loadCacheMeta() {
 			if (!cacheMeta.entries) cacheMeta.entries = {};
 			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
 		} else {
 			cacheMeta = createEmptyMeta();
 		}
@@ -260,6 +262,21 @@ function validateCache() {
 			fs.unlinkSync(path.join(cacheDir, orphan));
 			changed = true;
 		} catch (e) { }
+	}
+
+	// Validate Source File Index
+	if (cacheMeta.fileIndex) {
+		const fps = Object.keys(cacheMeta.fileIndex);
+		for (const fp of fps) {
+			const p = cacheMeta.fileIndex[fp];
+			if (!p || !fs.existsSync(p)) {
+				delete cacheMeta.fileIndex[fp];
+				changed = true;
+			} else {
+				// Sync to memory
+				h.prefillFingerprint(p, fp);
+			}
+		}
 	}
 
 	cacheMeta.stats.totalSize = realSize;
@@ -398,6 +415,33 @@ function getCachedBuffer(contentId, quality) {
 	return null;
 }
 
+
+// ============================================================================
+// Source File Index (Deduplication)
+// ============================================================================
+function registerSourceFile(filePath) {
+	if (!filePath || !fs.existsSync(filePath)) return null;
+	const fp = h.computeFingerprint(filePath);
+	if (fp) {
+		if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
+		cacheMeta.fileIndex[fp] = filePath;
+		h.prefillFingerprint(filePath, fp); // Sync to memory
+		saveCacheMeta();
+	}
+	return fp;
+}
+
+function findSourceFile(fingerprint) {
+	if (!cacheMeta?.fileIndex) return null;
+	const p = cacheMeta.fileIndex[fingerprint];
+	if (p && fs.existsSync(p)) return p;
+	if (p) {
+		// Stale entry
+		delete cacheMeta.fileIndex[fingerprint];
+		saveCacheMeta();
+	}
+	return null;
+}
 
 // ============================================================================
 // Clipboard Logic (Delegated to h.js)
