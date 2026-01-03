@@ -50,9 +50,6 @@ public class ClipboardHelper {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern int GlobalSize(IntPtr hMem);
 
-    [DllImport("user32.dll")]
-    public static extern bool IsClipboardFormatAvailable(uint format);
-
     public static string DumpHtmlToFile(string filePath) {
         if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
 
@@ -81,62 +78,16 @@ public class ClipboardHelper {
             CloseClipboard();
         }
     }
-
-    public static string SaveClipboardImage(string fullPath) {
-        if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
-
-        try {
-            // 检查剪贴板是否包含图像格式
-            bool hasImage = IsClipboardFormatAvailable(8) || IsClipboardFormatAvailable(17) || IsClipboardFormatAvailable(49170); // CF_BITMAP, CF_DIB, CF_PNG
-
-            if (!hasImage) {
-                return "{\"error\":\"No image in clipboard\"}";
-            }
-
-            System.Drawing.Image img = System.Windows.Forms.Clipboard.GetImage();
-            if (img == null) {
-                return "{\"error\":\"Failed to get image from clipboard\"}";
-            }
-
-            try {
-                // 确保目录存在
-                string dir = System.IO.Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(dir)) {
-                   System.IO.Directory.CreateDirectory(dir);
-                }
-
-                img.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
-
-                return "{\"path\":\"" + fullPath.Replace("\\", "\\\\") + "\"}";
-            } catch (System.Exception ex) {
-                return "{\"error\":\"" + ex.Message.Replace("\"", "\\\"") + "\"}";
-            }
-        } finally {
-            CloseClipboard();
-        }
-    }
-
 }
 `;
 
 // ============================================================================
-// Process / Spawn Helpers  (✅ 配套：默认 NO_TRACK，不进入下载任务 tracker)
+// Process / Spawn Helpers
 // ============================================================================
-const NO_TRACK_ENV_KEY = "QQQ_NO_TRACK";
-function _envNoTrack() {
-    return { ...process.env, [NO_TRACK_ENV_KEY]: "1" };
-}
-
 function spawnRun(cmd, args, opts = {}) {
     const { checkExpected, returnOutput } = opts;
     return new Promise((resolve) => {
-        // ✅ 双保险：显式 env 标记 NO_TRACK
-        const child = cp.spawn(cmd, args, {
-            windowsHide: true,
-            env: _envNoTrack(),
-            // detached 默认就是 false；这里不强行写也行
-        });
-
+        const child = cp.spawn(cmd, args, { windowsHide: true });
         let output = "";
         let errorOutput = "";
         let done = false;
@@ -152,12 +103,15 @@ function spawnRun(cmd, args, opts = {}) {
         child.stdout.on("data", (d) => output += d.toString());
         child.stderr.on("data", (d) => errorOutput += d.toString());
 
-        child.on("close", () => {
-            if (checkExpected) finish(output.includes(checkExpected));
-            else finish(returnOutput ? output : "");
+        child.on("close", (code) => {
+            if (checkExpected) {
+                finish(output.includes(checkExpected));
+            } else {
+                finish(returnOutput ? output : "");
+            }
         });
 
-        child.on("error", () => {
+        child.on("error", (err) => {
             finish(checkExpected ? false : "");
         });
 
@@ -174,41 +128,6 @@ function spawnCheck(cmd, args, expected) {
 
 function spawnOutput(cmd, args) {
     return spawnRun(cmd, args, { returnOutput: true });
-}
-
-// ============================================================================
-// Deduplication Helper
-// ============================================================================
-function _tryGlobalDeduplicate(filePath) {
-    if (!filePath || !fs.existsSync(filePath)) return filePath;
-    try {
-        // Lazy require to avoid circular dependency during init
-        const qqq = require('./qqq');
-        if (qqq && typeof qqq.findSourceFile === 'function' && typeof qqq.registerSourceFile === 'function') {
-            const fp = computeFingerprint(filePath);
-            if (fp) {
-                const existing = qqq.findSourceFile(fp);
-                if (existing && existing !== filePath && fs.existsSync(existing)) {
-                    try {
-                        fs.unlinkSync(filePath);
-                        log(`[Dedupe] Replaced ${path.basename(filePath)} with existing ${path.basename(existing)}`, "INFO");
-                        return existing;
-                    } catch (e) {
-                        log(`[Dedupe] Failed to delete ${filePath}: ${e.message}`, "WARN");
-                    }
-                }
-                const regRes = qqq.registerSourceFile(filePath);
-                if (!regRes) log(`[Dedupe] Register failed for ${filePath}`, "WARN");
-            } else {
-                log(`[Dedupe] Failed to compute fingerprint for ${filePath}`, "WARN");
-            }
-        } else {
-            log(`[Dedupe] qqq module incomplete`, "WARN");
-        }
-    } catch (e) {
-        log(`[Dedupe] Exception: ${e.message}`, "ERROR");
-    }
-    return filePath;
 }
 
 // ============================================================================
@@ -582,7 +501,7 @@ try {
     $code = @'
 ${CLIPBOARD_HELPER_CS}
 '@
-    Add-Type -TypeDefinition $code -Language CSharp -ReferencedAssemblies System.Windows.Forms,System.Drawing
+    Add-Type -TypeDefinition $code -Language CSharp
     $res = [ClipboardHelper]::DumpHtmlToFile('${tempFile.replace(/\\/g, "\\\\")}')
     Write-Output $res
 } catch {
@@ -837,7 +756,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                 // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
                 // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
                 const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
-
+                
                 // 宽容正则：key 后面跟任意符号，直到遇到 http
                 const keyRegexStr = `(${commonKeys.join('|')})[^:="']*[:="']+\s*["']?(https?://[^"']+)["']?`;
                 const keyRegex = new RegExp(keyRegexStr, 'gi');
@@ -957,7 +876,7 @@ async function extractVideoUrlsFromWebPage(url) {
                 });
 
                 // 查找可能的视频文件扩展名链接
-                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
+                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
                 $('a, [href]').each((i, elem) => {
                     const href = $(elem).attr('href');
                     if (href) {
@@ -972,10 +891,10 @@ async function extractVideoUrlsFromWebPage(url) {
                 // 查找包含视频数据的script/pre标签（如JSON-LD结构）
                 $('script, pre').each((i, elem) => {
                     const text = $(elem).text();
-                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO') || text.includes('m3u8') || text.includes('mp4'))) {
+                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO'))) {
                         // 尝试从文本中提取视频URL
-                        // 修正正则：更加严谨的排除字符，并支持更多格式(m3u8, mpd)
-                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^"\'\s\<\>\)\(\[\]]*/gi);
+                        // 修正正则：允许 path 中包含 () 等字符，避免截断
+                        const videoUrlMatches = text.match(/https?:\/\/[^\s"']+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv)[^\s"']*/gi);
                         if (videoUrlMatches) {
                             videoUrlMatches.forEach(match => {
                                 try {
@@ -994,8 +913,8 @@ async function extractVideoUrlsFromWebPage(url) {
                             // 由于这类视频通常需要特殊处理，我们直接返回原始页面URL
                             // 让yt-dlp来处理这些特殊平台的视频提取
                             videoUrls.add(url); // 添加页面URL供yt-dlp处理
-                            // 同时尝试从iframe src中提取视频URL (匹配 player, embed 等特征)
-                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/(player|embed|video)[^"\'\s\<\>\)\(\[\]]*/gi);
+                            // 同时尝试从iframe src中提取视频URL
+                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/player[^"\'\s\<\>\)\(\[\]]*/gi);
                             if (iframeSrcMatches) {
                                 iframeSrcMatches.forEach(match => {
                                     try {
@@ -1400,14 +1319,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
-
-                        const finalPath = _tryGlobalDeduplicate(destPath);
-                        const fp = computeFingerprint(finalPath);
-
-                        b.filename = path.basename(finalPath);
-                        b.path = finalPath;
-                        b.fingerprint = fp || null;
-                        b.status = "ok";
+                        const fp = computeFingerprint(destPath);
+                        if (fp) prefillFingerprint(destPath, fp);
+                        b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -1424,14 +1338,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
-
-                    const finalPath = _tryGlobalDeduplicate(destPath);
-                    const fp = computeFingerprint(finalPath); // Re-compute in case it changed
-
-                    b.filename = path.basename(finalPath);
-                    b.path = finalPath;
-                    b.fingerprint = fp || null;
-                    b.status = "ok";
+                    const fp = computeBufferFingerprint(buf);
+                    if (fp) prefillFingerprint(destPath, fp);
+                    b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -1483,23 +1392,12 @@ function copyFilesToTarget(files, targetDir) {
                 if (dstFingerprint === srcFingerprint) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    // Ensure it's registered globally
-                    _tryGlobalDeduplicate(dest);
                     continue;
                 }
             }
             fs.copyFileSync(f, dest);
-
-            // Global Deduplication Check
-            const finalPath = _tryGlobalDeduplicate(dest);
-            if (finalPath !== dest) {
-                // If deduplicated to a different path
-                copied.push(finalPath);
-                // No need to prefill fingerprint as registerSourceFile does it
-            } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                copied.push(dest);
-            }
+            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+            copied.push(dest);
         } catch { }
     }
     return { copied, fingerprints };
@@ -1552,21 +1450,22 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         }
 
         const res = await getGlobal().tryOneByOne(async (bridge, name) => {
-            try {
-                const hasImg = await bridge.call("hasImage", {}, 1500);
+            if (name === "shell") {
+                const hasImg = await bridge.call("hasImage", {}, 2000);
                 if (hasImg?.value) {
                     const fname = getTimestampFilename(".png");
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
                     if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-                        // ✅ 关键：内存截图也要走全局去重
-                        const finalPath = _tryGlobalDeduplicate(dest);
-                        const fp = computeFingerprint(finalPath);
-                        return { type: "image", path: finalPath, fingerprint: fp };
+                        const fp = computeFingerprint(dest);
+                        return { type: "image", path: dest, fingerprint: fp };
                     }
                 }
-            } catch (e) { }
+                return null;
+            }
+            const r = await bridge.call("clipboard", { target_dir: targetDir }, 2000);
+            if (r && r.type === "image") return r;
             return null;
         });
         if (res) return res;
