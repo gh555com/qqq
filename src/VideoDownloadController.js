@@ -1130,8 +1130,6 @@ class VideoDownloadController {
                         await this._insertToCursor(path.basename(existing), existing);
                         return existing;
                     }
-                    // 暂时不注册，等改名完成后统一注册
-                    // this.qqq.registerSourceFile(filePath);
                 }
 
                 // 2. Local Fallback
@@ -1163,57 +1161,21 @@ class VideoDownloadController {
 
         this.log(`正在验证文件: ${path.basename(filePath)}`);
 
-        let ffmpeg = 'ffmpeg';
-        if (this.downloader.ytdlp && this.downloader.ytdlp.ffmpegPath) {
-            ffmpeg = this.downloader.ytdlp.ffmpegPath;
+        // 使用公共函数进行 FFmpeg 校验
+        const finalPath = await h.verifyVideoFile(filePath);
+
+        if (finalPath) {
+            await this._insertToCursor(path.basename(finalPath), finalPath);
+
+            // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重
+            if (this.qqq && this.qqq.registerSourceFile) {
+                try { this.qqq.registerSourceFile(finalPath); } catch (e) { }
+            }
+            return finalPath;
+        } else {
+            this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
+            return null;
         }
-
-        return new Promise((resolve) => {
-            const proc = cp.spawn(ffmpeg, ['-i', filePath]);
-            let stderr = '';
-            proc.stderr.on('data', d => stderr += d.toString());
-
-            proc.on('close', async () => {
-                if (this._isCancelled()) { resolve(null); return; }
-
-                const isVideo = stderr.includes('Video:') || stderr.includes('Audio:');
-                const durationMatch = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
-
-                if (isVideo && durationMatch) {
-                    const currentName = path.basename(filePath);
-                    const ext = path.extname(filePath).toLowerCase();
-                    let finalPath = filePath;
-
-                    const isTooLong = currentName.length > 100;
-
-                    let newExt = ext;
-                    if (stderr.includes("Video: h264") && !['.mp4', '.mkv', '.mov'].includes(ext)) newExt = '.mp4';
-                    else if (stderr.includes("Video: vp9") && ext !== '.webm' && ext !== '.mkv') newExt = '.webm';
-
-                    if (isTooLong) {
-                        const safeName = h.getTimestampFilename(newExt || '.mp4');
-                        const p2 = path.join(path.dirname(filePath), safeName);
-                        try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
-                    } else if (newExt !== ext) {
-                        const p2 = filePath.replace(ext, newExt);
-                        try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
-                    }
-
-                    await this._insertToCursor(path.basename(finalPath), finalPath);
-
-                    // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重
-                    if (this.qqq && this.qqq.registerSourceFile) {
-                        try { this.qqq.registerSourceFile(finalPath); } catch (e) { }
-                    }
-
-                    resolve(finalPath);
-                } else {
-                    this.log(`文件无效 (非视频或损坏)，删除: ${filePath}`);
-                    try { fs.unlinkSync(filePath); } catch (e) { }
-                    resolve(null);
-                }
-            });
-        });
     }
 
     async _insertToCursor(fileName, fullPath) {

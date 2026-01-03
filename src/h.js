@@ -1407,10 +1407,15 @@ async function verifyVideoFile(filePath) {
                 resolve(finalPath);
             } else {
                 try { fs.unlinkSync(filePath); } catch (e) { }
+                log(`[Verify] Video verification failed for ${path.basename(filePath)} (no video stream or duration)`, "WARN");
                 resolve(null);
             }
         });
-        proc.on('error', () => { clearTimeout(timer); resolve(null); });
+        proc.on('error', (err) => {
+            clearTimeout(timer);
+            log(`[Verify] FFmpeg spawn error for ${path.basename(filePath)}: ${err.message}`, "ERROR");
+            resolve(null);
+        });
     });
 }
 
@@ -1889,5 +1894,6 @@ module.exports = {
     ensureDir,
     promptForUrl,
     pickTargetDirectory,
-    log // 导出 log 函数
+    log, // 导出 log 函数
+    verifyVideoFile // Exported shared verification function
 };
