@@ -177,6 +177,41 @@ function spawnOutput(cmd, args) {
 }
 
 // ============================================================================
+// Deduplication Helper
+// ============================================================================
+function _tryGlobalDeduplicate(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return filePath;
+    try {
+        // Lazy require to avoid circular dependency during init
+        const qqq = require('./qqq');
+        if (qqq && typeof qqq.findSourceFile === 'function' && typeof qqq.registerSourceFile === 'function') {
+            const fp = computeFingerprint(filePath);
+            if (fp) {
+                const existing = qqq.findSourceFile(fp);
+                if (existing && existing !== filePath && fs.existsSync(existing)) {
+                    try {
+                        fs.unlinkSync(filePath);
+                        log(`[Dedupe] Replaced ${path.basename(filePath)} with existing ${path.basename(existing)}`, "INFO");
+                        return existing;
+                    } catch (e) {
+                        log(`[Dedupe] Failed to delete ${filePath}: ${e.message}`, "WARN");
+                    }
+                }
+                const regRes = qqq.registerSourceFile(filePath);
+                if (!regRes) log(`[Dedupe] Register failed for ${filePath}`, "WARN");
+            } else {
+                log(`[Dedupe] Failed to compute fingerprint for ${filePath}`, "WARN");
+            }
+        } else {
+            log(`[Dedupe] qqq module incomplete`, "WARN");
+        }
+    } catch (e) {
+        log(`[Dedupe] Exception: ${e.message}`, "ERROR");
+    }
+    return filePath;
+}
+
+// ============================================================================
 // File / Path Helpers
 // ============================================================================
 function ensureDir(dirPath) {
@@ -1365,9 +1400,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
-                        const fp = computeFingerprint(destPath);
-                        if (fp) prefillFingerprint(destPath, fp);
-                        b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
+
+                        const finalPath = _tryGlobalDeduplicate(destPath);
+                        const fp = computeFingerprint(finalPath);
+
+                        b.filename = path.basename(finalPath);
+                        b.path = finalPath;
+                        b.fingerprint = fp || null;
+                        b.status = "ok";
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -1384,9 +1424,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
-                    const fp = computeBufferFingerprint(buf);
-                    if (fp) prefillFingerprint(destPath, fp);
-                    b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
+
+                    const finalPath = _tryGlobalDeduplicate(destPath);
+                    const fp = computeFingerprint(finalPath); // Re-compute in case it changed
+
+                    b.filename = path.basename(finalPath);
+                    b.path = finalPath;
+                    b.fingerprint = fp || null;
+                    b.status = "ok";
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -1438,12 +1483,23 @@ function copyFilesToTarget(files, targetDir) {
                 if (dstFingerprint === srcFingerprint) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                    // Ensure it's registered globally
+                    _tryGlobalDeduplicate(dest);
                     continue;
                 }
             }
             fs.copyFileSync(f, dest);
-            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-            copied.push(dest);
+
+            // Global Deduplication Check
+            const finalPath = _tryGlobalDeduplicate(dest);
+            if (finalPath !== dest) {
+                // If deduplicated to a different path
+                copied.push(finalPath);
+                // No need to prefill fingerprint as registerSourceFile does it
+            } else {
+                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                copied.push(dest);
+            }
         } catch { }
     }
     return { copied, fingerprints };
@@ -1504,8 +1560,10 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
                     if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-                        const fp = computeFingerprint(dest);
-                        return { type: "image", path: dest, fingerprint: fp };
+                        // ✅ 关键：内存截图也要走全局去重
+                        const finalPath = _tryGlobalDeduplicate(dest);
+                        const fp = computeFingerprint(finalPath);
+                        return { type: "image", path: finalPath, fingerprint: fp };
                     }
                 }
             } catch (e) { }

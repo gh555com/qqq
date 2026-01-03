@@ -555,7 +555,7 @@ let downloadContext = null;
 
 async function downloadVideosFromUrlCommand() {
 	const VideoDownloadController = require('./VideoDownloadController');
-	const controller = new VideoDownloadController(downloadContext);
+	const controller = new VideoDownloadController(downloadContext, module.exports);
 	await controller.start();
 }
 
@@ -735,6 +735,9 @@ const exported = {
 
 	probeScheduler: global.probeScheduler,
 	genScheduler: global.genScheduler,
+
+	registerSourceFile,
+	findSourceFile,
 
 	getActiveEngineCode: global.getActiveEngineCode,
 	getActiveEngineName: global.getActiveEngineName,

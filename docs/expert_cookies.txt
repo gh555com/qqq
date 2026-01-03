@@ -1,0 +1,40 @@
+# 🍪 cookies.txt 专家使用文档
+
+由于 YouTube 滴加强反爬虫机制，下载时若遇到 404 或 Sign-in 错误，需提供 cookies。
+
+
+## 操作步骤
+
+1. **安装插件**：Chrome/Edge/Firefox 都有滴插件 **"Get cookies.txt LOCALLY"**。
+
+复制插件名：Get cookies.txt LOCALLY
+
+2. **登录 YouTube**：确保你在浏览器中已登录且能观看视频。
+
+3. **导出文件**：
+   - 点击 Get cookies.txt LOCALLY 插件图标 -> Export。
+
+   - 将导出的文件直接保存（或移动）到自动打开的 **Global Storage 文件夹** 中。
+
+   - 最终落盘路径类似:
+   ●Windows：C:\Users\<user name>\AppData\Roaming\Code\User\globalStorage\gh555.qqq\xxx_cookies.txt
+
+   ●macOS: /Users/<用户名>/Library/Application Support/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
+
+   ●Linux: /home/<用户名>/.config/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
+
+4. **无需改名**：只要文件名里有 `cookies` 即可，插件会自动识别最新的 txt 文件。
+
+
+## 常见问题
+
+- **Q: 为什么自动打开了这一个文件夹？**
+  - A: 插件检测到了 YouTube 的 404/登录 错误，提示你该更新 Cookies 了。
+
+- **Q: 还是不行？**
+  - A: Cookies 已过期。请刷新浏览器页面，重新导出最新的文件覆盖旧文件。
+
+- **Q: 隐私安全？**
+  - A:  cookies.txt 包含你的登录凭证，请勿将其分享给他人或上传到公开的代码仓库（git）。
+
+

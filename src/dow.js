@@ -1842,7 +1842,7 @@ class YtDlpDownloader {
      * - 兼容单视频、以及（可能）playlist 的多行 dump-json 输出
      * - 开关 10：stdout/stderr 限制避免内存炸
      */
-    async probe(url) {
+    async probe(url, options = {}) {
         if (!this.isAvailable()) {
             return { success: false, error: "yt-dlp_not_installed_or_invalid" };
         }
@@ -1856,10 +1856,12 @@ class YtDlpDownloader {
                 "--ignore-errors",
                 "--no-flat-playlist", // 强制深入解析每个条目
                 "--no-check-certificate",
-                // "--extractor-args", "generic:impersonate", // 移除：YouTube 专用 extractor 不需要通用伪装，反而可能触发风控
-                // "--user-agent", ... // 移除强制 UA
                 url,
             ];
+
+            if (options.cookiesFilePath) {
+                args.push("--cookies", options.cookiesFilePath);
+            }
 
 
             const doProbe = (extraArgs = []) => {
@@ -2221,9 +2223,12 @@ class YtDlpDownloader {
         };
 
 
-        if (options.cookieSource || options.browserProfilePath) {
+        if (options.cookieSource || options.browserProfilePath || options.cookiesFilePath) {
             const cs = (options.cookieSource || '').toLowerCase();
 
+            if (options.cookiesFilePath) {
+                return await runDownload(["--cookies", options.cookiesFilePath]);
+            }
 
             if (options.browserProfilePath) {
 

@@ -397,8 +397,9 @@ ChildProcessTracker.__excludedCmds = new Set([
 ]);
 
 class VideoDownloadController {
-    constructor(context) {
+    constructor(context, qqqManager) {
         this.context = context;
+        this.qqq = qqqManager;
         this.downloader = getSharedDownloader();
         this.outputChannel = vscode.window.createOutputChannel("qqq: Video Downloader");
 
@@ -696,7 +697,8 @@ class VideoDownloadController {
 
         const task = {
             startMs: Date.now(),
-            tracker: new ChildProcessTracker()
+            tracker: new ChildProcessTracker(),
+            activeFiles: new Set() // Track files for cleanup on cancel
         };
         this._task = task;
         return task;
@@ -708,19 +710,24 @@ class VideoDownloadController {
         if (t.tracker.isCancelled()) return;
 
         t.tracker.markCancelled();
+        this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
-        // 既然无法精确阻止特定任务，干脆让它们下载完再清理
-        // try {
-        //     if (typeof this.downloader.cancelAll === 'function') {
-        //         await this.downloader.cancelAll();
-        //     }
-        // } catch (e) { }
+        // Clean up any active files immediately
+        if (t.activeFiles) {
+            for (const file of t.activeFiles) {
+                try {
+                    if (fs.existsSync(file)) fs.unlinkSync(file);
+                    // Also try to remove partial files
+                    if (fs.existsSync(file + ".part")) fs.unlinkSync(file + ".part");
+                    if (fs.existsSync(file + ".ytdl")) fs.unlinkSync(file + ".ytdl");
+                } catch (e) { }
+            }
+            t.activeFiles.clear();
+        }
 
-        // try {
-        //     await t.tracker.killAll(reason);
-        // } catch (e) { }
-
-        this.log(`qqq: 已标记取消（${reason}），将在下载完成后自动清理。`);
+        try {
+            await t.tracker.killAll(reason);
+        } catch (e) { }
     }
 
     _isCancelled() {
@@ -779,16 +786,84 @@ class VideoDownloadController {
                 this.log(`开始处理: ${url}`);
                 this.outputChannel.show(true);
 
-                await this._fastProcess(url, targetDir);
-            });
+                // 查找 cookies.txt (Global Storage Only)
+                let cookiesFilePath = this._findBestCookieFileInGlobalStorage();
+                if (cookiesFilePath) {
+                    this.log(`[Cookies] 使用全局 Cookie 文件: ${cookiesFilePath}`);
+                } else {
+                    this.log(`[Cookies] 未在全局存储中找到 cookies 文件 (搜索 *cookies*.txt)`);
+                }
 
+                await this._fastProcess(url, targetDir, cookiesFilePath);
+            });
         } finally {
             this._endTask();
         }
     }
 
+    // ==================== Cookie 辅助 ====================
+    _findBestCookieFileInGlobalStorage() {
+        try {
+            const dir = this.context.globalStorageUri.fsPath;
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+            const files = fs.readdirSync(dir);
+            const candidates = [];
+            for (const f of files) {
+                const lower = f.toLowerCase();
+                if (lower.endsWith('.txt') && lower.includes('cookies')) {
+                    try {
+                        const full = path.join(dir, f);
+                        const st = fs.statSync(full);
+                        candidates.push({ path: full, mtime: st.mtimeMs });
+                    } catch (e) { }
+                }
+            }
+            if (candidates.length === 0) return null;
+            // 按时间倒序，取最新的
+            candidates.sort((a, b) => b.mtime - a.mtime);
+            return candidates[0].path;
+        } catch (e) {
+            this.log(`[Cookies] 搜索出错: ${e.message}`);
+            return null;
+        }
+    }
+
+    async _handleCookieErrorIfNeeded(errorMsg, url) {
+        if (!errorMsg) return;
+        const msg = String(errorMsg);
+
+        // 仅针对 YouTube
+        if (!this._isYouTubeUrl(url)) return;
+
+        // 关键词匹配
+        const keywords = ["Sign in", "404", "cookie", "bot", "confirm", "Unsupported URL", "Private video"];
+        const hit = keywords.some(k => msg.includes(k));
+
+        if (hit) {
+            this.log(`[Cookies] 检测到可能的 Cookie 失效/缺失 (${msg})，正在自动打开配置目录...`);
+
+            // 1. 打开文件夹
+            const dir = this.context.globalStorageUri.fsPath;
+            try {
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                await vscode.env.openExternal(vscode.Uri.file(dir));
+            } catch (e) { }
+
+            // 2. 打开文档
+            const docPath = 'e:\\s\\wol\\py\\q3\\docs\\expert_cookies.txt';
+            try {
+                if (fs.existsSync(docPath)) {
+                    await vscode.window.showTextDocument(vscode.Uri.file(docPath));
+                }
+            } catch (e) { }
+
+            vscode.window.showWarningMessage(`YouTube 下载失败，请检查 opened 文件夹下的 cookies 配置 (参考同时打开的文档)。`);
+        }
+    }
+
     // ==================== 普通流程：一号 + 三号 ====================
-    async _fastProcess(url, targetDir) {
+    async _fastProcess(url, targetDir, cookiesFilePath) {
         try {
             const urlSnippet = this._makeUrlSnippet(url);
             const isYouTube = this._isYouTubeUrl(url);
@@ -813,7 +888,7 @@ class VideoDownloadController {
                 try {
                     if (this._isCancelled()) return null;
 
-                    const res = await this.downloader.probe(url);
+                    const res = await this.downloader.probe(url, { cookiesFilePath });
 
                     if (this._isCancelled()) return null;
 
@@ -838,11 +913,13 @@ class VideoDownloadController {
                             }
                         } else {
                             this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
+                            await this._handleCookieErrorIfNeeded(res?.error, url);
                         }
                     }
                 } catch (e) {
                     if (this._isCancelled()) return null;
                     this.log(`yt-dlp 探测异常: ${e.message}`);
+                    await this._handleCookieErrorIfNeeded(e.message, url);
                 }
 
                 // 静态分析（保留）
@@ -921,6 +998,7 @@ class VideoDownloadController {
                         res = await this._runWithSuppressedPopups(async () => {
                             return await this.downloader.downloadAll(tasks, targetDir, {
                                 downloadVideos: "all",
+                                cookiesFilePath: cookiesFilePath, // Pass cookies here
                                 onProgress: (task, event) => {
                                     if (this._isCancelled()) return;
 
@@ -1061,7 +1139,8 @@ class VideoDownloadController {
                         await this._insertToCursor(path.basename(existing), existing);
                         return existing;
                     }
-                    this.qqq.registerSourceFile(filePath);
+                    // 暂时不注册，等改名完成后统一注册
+                    // this.qqq.registerSourceFile(filePath);
                 }
 
                 // 2. Local Fallback
@@ -1130,6 +1209,12 @@ class VideoDownloadController {
                     }
 
                     await this._insertToCursor(path.basename(finalPath), finalPath);
+
+                    // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重
+                    if (this.qqq && this.qqq.registerSourceFile) {
+                        try { this.qqq.registerSourceFile(finalPath); } catch (e) { }
+                    }
+
                     resolve(finalPath);
                 } else {
                     this.log(`文件无效 (非视频或损坏)，删除: ${filePath}`);
