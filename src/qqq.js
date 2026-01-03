@@ -167,6 +167,7 @@ function createEmptyMeta() {
 		entries: {},
 		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
 		brokenFiles: {},
+		fileIndex: {} // Persistent Source File Index (Fingerprint -> Path)
 	};
 }
 
@@ -178,6 +179,7 @@ function loadCacheMeta() {
 			if (!cacheMeta.entries) cacheMeta.entries = {};
 			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
 		} else {
 			cacheMeta = createEmptyMeta();
 		}
@@ -260,6 +262,21 @@ function validateCache() {
 			fs.unlinkSync(path.join(cacheDir, orphan));
 			changed = true;
 		} catch (e) { }
+	}
+
+	// Validate Source File Index
+	if (cacheMeta.fileIndex) {
+		const fps = Object.keys(cacheMeta.fileIndex);
+		for (const fp of fps) {
+			const p = cacheMeta.fileIndex[fp];
+			if (!p || !fs.existsSync(p)) {
+				delete cacheMeta.fileIndex[fp];
+				changed = true;
+			} else {
+				// Sync to memory
+				h.prefillFingerprint(p, fp);
+			}
+		}
 	}
 
 	cacheMeta.stats.totalSize = realSize;
@@ -400,6 +417,33 @@ function getCachedBuffer(contentId, quality) {
 
 
 // ============================================================================
+// Source File Index (Deduplication)
+// ============================================================================
+function registerSourceFile(filePath) {
+	if (!filePath || !fs.existsSync(filePath)) return null;
+	const fp = h.computeFingerprint(filePath);
+	if (fp) {
+		if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
+		cacheMeta.fileIndex[fp] = filePath;
+		h.prefillFingerprint(filePath, fp); // Sync to memory
+		saveCacheMeta();
+	}
+	return fp;
+}
+
+function findSourceFile(fingerprint) {
+	if (!cacheMeta?.fileIndex) return null;
+	const p = cacheMeta.fileIndex[fingerprint];
+	if (p && fs.existsSync(p)) return p;
+	if (p) {
+		// Stale entry
+		delete cacheMeta.fileIndex[fingerprint];
+		saveCacheMeta();
+	}
+	return null;
+}
+
+// ============================================================================
 // Clipboard Logic (Delegated to h.js)
 // ============================================================================
 
@@ -507,6 +551,14 @@ function shouldShowDuration(info) {
 	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
 }
 
+let downloadContext = null;
+
+async function downloadVideosFromUrlCommand() {
+	const VideoDownloadController = require('./VideoDownloadController');
+	const controller = new VideoDownloadController(downloadContext, module.exports);
+	await controller.start();
+}
+
 const pendingJobs = new Map();
 let tokenCounter = 0;
 
@@ -544,6 +596,7 @@ async function activate(context) {
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
 
 	extensionContext = context;
+	downloadContext = context;
 	global.init(context);
 
 	initCache(context);
@@ -559,6 +612,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
+		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			for (const key of Object.keys(global.ConfigManager.getAll())) {
 				const fullKey = `qqq.${key}`;
@@ -662,7 +717,6 @@ const exported = {
 	setCacheEntry,
 	getCachedBuffer,
 
-	handleClipboardFast,
 	handleClipboardSlow,
 
 	getFolderInfo,
@@ -681,6 +735,9 @@ const exported = {
 
 	probeScheduler: global.probeScheduler,
 	genScheduler: global.genScheduler,
+
+	registerSourceFile,
+	findSourceFile,
 
 	getActiveEngineCode: global.getActiveEngineCode,
 	getActiveEngineName: global.getActiveEngineName,

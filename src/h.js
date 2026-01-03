@@ -50,6 +50,9 @@ public class ClipboardHelper {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern int GlobalSize(IntPtr hMem);
 
+    [DllImport("user32.dll")]
+    public static extern bool IsClipboardFormatAvailable(uint format);
+
     public static string DumpHtmlToFile(string filePath) {
         if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
 
@@ -78,16 +81,62 @@ public class ClipboardHelper {
             CloseClipboard();
         }
     }
+
+    public static string SaveClipboardImage(string fullPath) {
+        if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
+
+        try {
+            // 检查剪贴板是否包含图像格式
+            bool hasImage = IsClipboardFormatAvailable(8) || IsClipboardFormatAvailable(17) || IsClipboardFormatAvailable(49170); // CF_BITMAP, CF_DIB, CF_PNG
+
+            if (!hasImage) {
+                return "{\"error\":\"No image in clipboard\"}";
+            }
+
+            System.Drawing.Image img = System.Windows.Forms.Clipboard.GetImage();
+            if (img == null) {
+                return "{\"error\":\"Failed to get image from clipboard\"}";
+            }
+
+            try {
+                // 确保目录存在
+                string dir = System.IO.Path.GetDirectoryName(fullPath);
+                if (!string.IsNullOrEmpty(dir)) {
+                   System.IO.Directory.CreateDirectory(dir);
+                }
+
+                img.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
+
+                return "{\"path\":\"" + fullPath.Replace("\\", "\\\\") + "\"}";
+            } catch (System.Exception ex) {
+                return "{\"error\":\"" + ex.Message.Replace("\"", "\\\"") + "\"}";
+            }
+        } finally {
+            CloseClipboard();
+        }
+    }
+
 }
 `;
 
 // ============================================================================
-// Process / Spawn Helpers
+// Process / Spawn Helpers  (✅ 配套：默认 NO_TRACK，不进入下载任务 tracker)
 // ============================================================================
+const NO_TRACK_ENV_KEY = "QQQ_NO_TRACK";
+function _envNoTrack() {
+    return { ...process.env, [NO_TRACK_ENV_KEY]: "1" };
+}
+
 function spawnRun(cmd, args, opts = {}) {
     const { checkExpected, returnOutput } = opts;
     return new Promise((resolve) => {
-        const child = cp.spawn(cmd, args, { windowsHide: true });
+        // ✅ 双保险：显式 env 标记 NO_TRACK
+        const child = cp.spawn(cmd, args, {
+            windowsHide: true,
+            env: _envNoTrack(),
+            // detached 默认就是 false；这里不强行写也行
+        });
+
         let output = "";
         let errorOutput = "";
         let done = false;
@@ -103,15 +152,12 @@ function spawnRun(cmd, args, opts = {}) {
         child.stdout.on("data", (d) => output += d.toString());
         child.stderr.on("data", (d) => errorOutput += d.toString());
 
-        child.on("close", (code) => {
-            if (checkExpected) {
-                finish(output.includes(checkExpected));
-            } else {
-                finish(returnOutput ? output : "");
-            }
+        child.on("close", () => {
+            if (checkExpected) finish(output.includes(checkExpected));
+            else finish(returnOutput ? output : "");
         });
 
-        child.on("error", (err) => {
+        child.on("error", () => {
             finish(checkExpected ? false : "");
         });
 
@@ -128,6 +174,41 @@ function spawnCheck(cmd, args, expected) {
 
 function spawnOutput(cmd, args) {
     return spawnRun(cmd, args, { returnOutput: true });
+}
+
+// ============================================================================
+// Deduplication Helper
+// ============================================================================
+function _tryGlobalDeduplicate(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return filePath;
+    try {
+        // Lazy require to avoid circular dependency during init
+        const qqq = require('./qqq');
+        if (qqq && typeof qqq.findSourceFile === 'function' && typeof qqq.registerSourceFile === 'function') {
+            const fp = computeFingerprint(filePath);
+            if (fp) {
+                const existing = qqq.findSourceFile(fp);
+                if (existing && existing !== filePath && fs.existsSync(existing)) {
+                    try {
+                        fs.unlinkSync(filePath);
+                        log(`[Dedupe] Replaced ${path.basename(filePath)} with existing ${path.basename(existing)}`, "INFO");
+                        return existing;
+                    } catch (e) {
+                        log(`[Dedupe] Failed to delete ${filePath}: ${e.message}`, "WARN");
+                    }
+                }
+                const regRes = qqq.registerSourceFile(filePath);
+                if (!regRes) log(`[Dedupe] Register failed for ${filePath}`, "WARN");
+            } else {
+                log(`[Dedupe] Failed to compute fingerprint for ${filePath}`, "WARN");
+            }
+        } else {
+            log(`[Dedupe] qqq module incomplete`, "WARN");
+        }
+    } catch (e) {
+        log(`[Dedupe] Exception: ${e.message}`, "ERROR");
+    }
+    return filePath;
 }
 
 // ============================================================================
@@ -166,7 +247,7 @@ function getTimestampFilename(ext) {
         c2 = noG[Math.floor(Math.random() * noG.length)];
     }
 
-    return `${ms}${c1}${c2}_${date}__[${day}]__${time}${ext}`;
+    return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
 }
 
 function _fileUriToLocalPath(fileUri) {
@@ -663,6 +744,423 @@ function sanitizeHtml(html) {
     return $.html();
 }
 
+function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
+    try {
+        const cheerio = require('cheerio');
+        const { URL: NodeURL } = require('url');
+
+        const $ = cheerio.load(htmlContent);
+        const videoUrls = new Set();
+
+        // 查找 <video> 标签中的视频源
+        $('video source, video').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+
+            // 检查其他可能的视频源属性
+            const attrsToCheck = ['data-src', 'data-source', 'data-video', 'data-url'];
+            for (const attr of attrsToCheck) {
+                const attrValue = $(elem).attr(attr);
+                if (attrValue) {
+                    try {
+                        const fullUrl = new URL(attrValue, baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        videoUrls.add(attrValue);
+                    }
+                }
+            }
+        });
+
+        // 查找 <iframe> 标签（可能是视频播放器）
+        $('iframe').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+        });
+
+        // 查找具有视频类名或ID的元素
+        $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source') || $(elem).attr('data-video');
+            if (src) {
+                try {
+                    const fullUrl = new URL(src, baseUrl).href;
+                    videoUrls.add(fullUrl);
+                } catch (e) {
+                    // 如果URL解析失败，直接添加原始URL
+                    videoUrls.add(src);
+                }
+            }
+        });
+
+        // 查找可能的视频文件扩展名链接
+        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
+        $('a, [href], [data-href]').each((i, elem) => {
+            const href = $(elem).attr('href') || $(elem).attr('data-href');
+            if (href) {
+                const lowerHref = href.toLowerCase();
+                if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                    try {
+                        const fullUrl = new URL(href, baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        // 如果URL解析失败，直接添加原始URL
+                        videoUrls.add(href);
+                    }
+                }
+            }
+        });
+
+        // 尝试从 script 标签和全局文本中提取 JSON 格式的视频 URL
+        // 很多 SPA 或移动端页面（如百度新闻）将视频信息存储在 JSON 中
+        $('script').each((i, elem) => {
+            let scriptContent = $(elem).text();
+            if (scriptContent && scriptContent.trim()) {
+                // 1. 预处理：反转义 JSON 中的斜杠，以及 Unicode 转义
+                scriptContent = scriptContent.replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
+
+                // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
+                // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
+                const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
+
+                // 宽容正则：key 后面跟任意符号，直到遇到 http
+                const keyRegexStr = `(${commonKeys.join('|')})[^:="']*[:="']+\s*["']?(https?://[^"']+)["']?`;
+                const keyRegex = new RegExp(keyRegexStr, 'gi');
+
+                let keyMatch;
+                while ((keyMatch = keyRegex.exec(scriptContent)) !== null) {
+                    const potentialUrl = keyMatch[2];
+                    // 验证是否包含视频扩展名，或者看起来像视频 URL
+                    if (extensions.some(ext => potentialUrl.includes('.' + ext)) || potentialUrl.includes('video')) {
+                        try {
+                            const fullUrl = new URL(potentialUrl, baseUrl).href;
+                            videoUrls.add(fullUrl);
+                        } catch (e) {
+                            videoUrls.add(potentialUrl);
+                        }
+                    }
+                }
+
+                // 3. 原有的通用正则提取
+                const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
+                let match;
+                while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
+                    try {
+                        const fullUrl = new URL(match[0], baseUrl).href;
+                        videoUrls.add(fullUrl);
+                    } catch (e) {
+                        videoUrls.add(match[0]);
+                    }
+                }
+            }
+        });
+
+        return Array.from(videoUrls);
+    } catch (error) {
+        console.error('从HTML片段提取视频URL失败:', error);
+        return [];
+    }
+}
+
+// 从网页中提取视频URL的辅助函数
+async function extractVideoUrlsFromWebPage(url) {
+    try {
+        const cheerio = require('cheerio');
+        const https = require('https');
+        const http = require('http');
+        const { URL: NodeURL } = require('url');
+
+        const commonHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        };
+
+        // 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
+        let fetch;
+        try {
+            fetch = require('node-fetch');
+        } catch {
+            // 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
+            if (typeof global.fetch === 'undefined') {
+                // 如果都没有，使用 https 模块作为备选方案
+                const webContent = await fetchViaHttps(url, commonHeaders);
+                const $ = cheerio.load(webContent);
+
+                const videoUrls = new Set();
+
+                // 查找 <video> 标签中的视频源
+                $('video source').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+
+                    const srcAttr = elem.attribs['src'];
+                    if (srcAttr) {
+                        const fullUrl = new URL(srcAttr, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找直接的 <video> 标签的src属性
+                $('video').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找 <iframe> 标签（可能是视频播放器）
+                $('iframe').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找具有视频类名的元素
+                $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+                    const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+                    if (src) {
+                        const fullUrl = new URL(src, url).href;
+                        videoUrls.add(fullUrl);
+                    }
+                });
+
+                // 查找可能的视频文件扩展名链接
+                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
+                $('a, [href]').each((i, elem) => {
+                    const href = $(elem).attr('href');
+                    if (href) {
+                        const lowerHref = href.toLowerCase();
+                        if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                            const fullUrl = new URL(href, url).href;
+                            videoUrls.add(fullUrl);
+                        }
+                    }
+                });
+
+                // 查找包含视频数据的script/pre标签（如JSON-LD结构）
+                $('script, pre').each((i, elem) => {
+                    const text = $(elem).text();
+                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO') || text.includes('m3u8') || text.includes('mp4'))) {
+                        // 尝试从文本中提取视频URL
+                        // 修正正则：更加严谨的排除字符，并支持更多格式(m3u8, mpd)
+                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^"\'\s\<\>\)\(\[\]]*/gi);
+                        if (videoUrlMatches) {
+                            videoUrlMatches.forEach(match => {
+                                try {
+                                    const fullUrl = new URL(match, url).href;
+                                    videoUrls.add(fullUrl);
+                                } catch (e) {
+                                    // 忽略无效URL
+                                }
+                            });
+                        }
+                        // 尝试提取视频ID并构造可能的视频URL
+                        const videoIdMatches = text.match(/"video_id"\s*:\s*"([^"]+)"/i);
+                        if (videoIdMatches && videoIdMatches[1]) {
+                            const videoId = videoIdMatches[1];
+                            // 对于Rambler等平台，尝试构造可能的视频URL
+                            // 由于这类视频通常需要特殊处理，我们直接返回原始页面URL
+                            // 让yt-dlp来处理这些特殊平台的视频提取
+                            videoUrls.add(url); // 添加页面URL供yt-dlp处理
+                            // 同时尝试从iframe src中提取视频URL (匹配 player, embed 等特征)
+                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/(player|embed|video)[^"\'\s\<\>\)\(\[\]]*/gi);
+                            if (iframeSrcMatches) {
+                                iframeSrcMatches.forEach(match => {
+                                    try {
+                                        const fullUrl = new URL(match, url).href;
+                                        videoUrls.add(fullUrl);
+                                    } catch (e) {
+                                        // 忽略无效URL
+                                    }
+                                });
+                            }
+                        }
+                    }
+                });
+
+                // 检查iframe的src中可能包含的视频参数
+                $('iframe').each((i, elem) => {
+                    const src = $(elem).attr('src');
+                    if (src) {
+                        // 检查是否为常见的视频播放器
+                        const videoPlayerDomains = ['youtube.com', 'youtu.be', 'vimeo.com', 'player.vimeo.com', 'rambler.ru', 'rutube.ru', 'ok.ru', 'tiktok.com', 'douyin.com', 'bilibili.com'];
+                        const isVideoPlayer = videoPlayerDomains.some(domain => src.includes(domain));
+                        if (isVideoPlayer) {
+                            const fullUrl = new URL(src, url).href;
+                            videoUrls.add(fullUrl);
+                        }
+                    }
+                });
+
+                return Array.from(videoUrls);
+            }
+
+            fetch = global.fetch;
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: commonHeaders
+        });
+
+        if (!response.ok) {
+            // 如果是 403/503，可能是 Cloudflare
+            if (response.status === 403 || response.status === 503) {
+                // 抛出特定错误，方便上层捕获并引导用户
+                throw new Error(`HTTP ${response.status}: Forbidden (可能需要浏览器验证)`);
+            }
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
+
+        // 检测 Cloudflare 挑战页面特征
+        if (html.includes('cf-turnstile') || html.includes('challenge-platform') || html.includes('Cloudflare Ray ID')) {
+            throw new Error(`HTTP 403: Cloudflare Challenge Detected`);
+        }
+
+        const $ = cheerio.load(html);
+
+        const videoUrls = new Set();
+
+        // 查找 <video> 标签中的视频源
+        $('video source').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+
+            const srcAttr = elem.attribs['src'];
+            if (srcAttr) {
+                const fullUrl = new URL(srcAttr, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找直接的 <video> 标签的src属性
+        $('video').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找 <iframe> 标签（可能是视频播放器）
+        $('iframe').each((i, elem) => {
+            const src = $(elem).attr('src');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找具有视频类名的元素
+        $('[class*="video" i], [id*="video" i]').each((i, elem) => {
+            const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+            if (src) {
+                const fullUrl = new URL(src, url).href;
+                videoUrls.add(fullUrl);
+            }
+        });
+
+        // 查找可能的视频文件扩展名链接
+        const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+        $('a, [href]').each((i, elem) => {
+            const href = $(elem).attr('href');
+            if (href) {
+                const lowerHref = href.toLowerCase();
+                if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+                    const fullUrl = new URL(href, url).href;
+                    videoUrls.add(fullUrl);
+                }
+            }
+        });
+
+        return Array.from(videoUrls);
+    } catch (error) {
+        // 定义 fetchViaHttps 函数
+        function fetchViaHttps(targetUrl, customHeaders = {}) {
+            return new Promise((resolve, reject) => {
+                const urlObj = new NodeURL(targetUrl);
+                const client = urlObj.protocol === 'https:' ? https : http;
+
+                const options = {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        ...customHeaders
+                    },
+                    timeout: 15000 // 15秒超时
+                };
+
+                const request = client.get(targetUrl, options, (response) => {
+                    let data = '';
+
+                    response.on('data', (chunk) => {
+                        data += chunk;
+                    });
+
+                    response.on('end', () => {
+                        if (response.statusCode >= 200 && response.statusCode < 300) {
+                            resolve(data);
+                        } else {
+                            reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+                        }
+                    });
+
+                    response.on('error', (err) => {
+                        reject(err);
+                    });
+                });
+
+                request.on('error', (err) => {
+                    reject(err);
+                });
+
+                request.on('timeout', () => {
+                    request.destroy();
+                    reject(new Error('Request timeout'));
+                });
+            });
+        }
+
+        throw error;
+    }
+}
+
 function _buildBlocksFromSanitizedDom($, baseUrl) {
     const blocks = [];
     let textBuf = "";
@@ -740,11 +1238,13 @@ async function _zipDomWithCleanText($, cleanText) {
             const trimmedHtml = htmlContent.trim();
             if (trimmedHtml.length === 0) {
                 const wsMatch = cleanText.slice(textCursor).match(/^\s+/);
-                if (wsMatch && htmlContent.length < 5) {
-                    const current = cleanText.slice(textCursor, textCursor + htmlContent.length);
-                    if (/^\s+$/.test(current)) {
-                        blocks.push({ type: "text", text: current });
-                        textCursor += current.length;
+                if (wsMatch) {
+                    if (htmlContent.length < 5) {
+                        const current = cleanText.slice(textCursor, textCursor + htmlContent.length);
+                        if (/^\s+$/.test(current)) {
+                            blocks.push({ type: "text", text: current });
+                            textCursor += current.length;
+                        }
                     }
                 }
                 continue;
@@ -784,26 +1284,48 @@ async function _zipDomWithCleanText($, cleanText) {
                 }
 
                 const endScanLen = 10;
-                const endAnchorStartPos = Math.max(0, trimmedHtml.length - 20);
-                const endAnchorObj = getSmartAnchor(trimmedHtml, endAnchorStartPos, endScanLen);
+                let endAnchorObj;
+                {
+                    const tailLimit = 150;
+                    const tailStart = Math.max(0, trimmedHtml.length - tailLimit);
+                    const tailStr = trimmedHtml.substring(tailStart);
+
+                    if (tailStr.length >= 15) {
+                        endAnchorObj = {
+                            text: tailStr.substring(tailStr.length - 15),
+                            offset: tailStart + tailStr.length - 15
+                        };
+                    } else if (tailStr.length >= 8) {
+                        endAnchorObj = {
+                            text: tailStr.substring(tailStr.length - 8),
+                            offset: tailStart + tailStr.length - 8
+                        };
+                    } else {
+                        const s = Math.max(0, trimmedHtml.length - endScanLen);
+                        endAnchorObj = { text: trimmedHtml.substring(s), offset: s };
+                    }
+                }
 
                 const maxContentLen = trimmedHtml.length * 1.5 + 20;
                 const contentSearchArea = cleanText.slice(textCursor, textCursor + maxContentLen);
-
                 let contentLen = 0;
+
                 if (trimmedHtml.length < 5) {
                     contentLen = trimmedHtml.length;
                 } else {
-                    const scanStart = Math.max(0, endAnchorObj.offset - 20);
-                    const subScan = contentSearchArea.substring(scanStart);
-                    const subIdx = subScan.lastIndexOf(endAnchorObj.text);
+                    const subIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
 
                     if (subIdx !== -1) {
-                        contentLen = scanStart + subIdx + endAnchorObj.text.length;
+                        contentLen = subIdx + endAnchorObj.text.length;
                     } else {
-                        const anyIdx = contentSearchArea.lastIndexOf(endAnchorObj.text);
-                        if (anyIdx !== -1) {
-                            contentLen = anyIdx + endAnchorObj.text.length;
+                        if (endAnchorObj.text.length > 4) {
+                            const shortAnchor = endAnchorObj.text.substring(endAnchorObj.text.length - 4);
+                            const subIdx2 = contentSearchArea.lastIndexOf(shortAnchor);
+                            if (subIdx2 !== -1) {
+                                contentLen = subIdx2 + shortAnchor.length;
+                            } else {
+                                contentLen = trimmedHtml.length;
+                            }
                         } else {
                             contentLen = trimmedHtml.length;
                         }
@@ -829,12 +1351,14 @@ async function _zipDomWithCleanText($, cleanText) {
         }
     }
 
-    if (textCursor < cleanText.length) blocks.push({ type: "text", text: cleanText.substring(textCursor) });
+    if (textCursor < cleanText.length) {
+        blocks.push({ type: "text", text: cleanText.substring(textCursor) });
+    }
     return blocks;
 }
 
 async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
-    const pending = blocks.filter(b => b && b.type === "media" && b.kind === "image" && b.src && b.status === "pending");
+    const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
     let securityLevel = 0;
@@ -876,9 +1400,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
-                        const fp = computeFingerprint(destPath);
-                        if (fp) prefillFingerprint(destPath, fp);
-                        b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
+
+                        const finalPath = _tryGlobalDeduplicate(destPath);
+                        const fp = computeFingerprint(finalPath);
+
+                        b.filename = path.basename(finalPath);
+                        b.path = finalPath;
+                        b.fingerprint = fp || null;
+                        b.status = "ok";
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -895,9 +1424,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
-                    const fp = computeBufferFingerprint(buf);
-                    if (fp) prefillFingerprint(destPath, fp);
-                    b.filename = filename; b.path = destPath; b.fingerprint = fp || null; b.status = "ok";
+
+                    const finalPath = _tryGlobalDeduplicate(destPath);
+                    const fp = computeFingerprint(finalPath); // Re-compute in case it changed
+
+                    b.filename = path.basename(finalPath);
+                    b.path = finalPath;
+                    b.fingerprint = fp || null;
+                    b.status = "ok";
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -949,12 +1483,23 @@ function copyFilesToTarget(files, targetDir) {
                 if (dstFingerprint === srcFingerprint) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                    // Ensure it's registered globally
+                    _tryGlobalDeduplicate(dest);
                     continue;
                 }
             }
             fs.copyFileSync(f, dest);
-            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-            copied.push(dest);
+
+            // Global Deduplication Check
+            const finalPath = _tryGlobalDeduplicate(dest);
+            if (finalPath !== dest) {
+                // If deduplicated to a different path
+                copied.push(finalPath);
+                // No need to prefill fingerprint as registerSourceFile does it
+            } else {
+                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                copied.push(dest);
+            }
         } catch { }
     }
     return { copied, fingerprints };
@@ -1007,22 +1552,21 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         }
 
         const res = await getGlobal().tryOneByOne(async (bridge, name) => {
-            if (name === "shell") {
-                const hasImg = await bridge.call("hasImage", {}, 2000);
+            try {
+                const hasImg = await bridge.call("hasImage", {}, 1500);
                 if (hasImg?.value) {
                     const fname = getTimestampFilename(".png");
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
                     if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-                        const fp = computeFingerprint(dest);
-                        return { type: "image", path: dest, fingerprint: fp };
+                        // ✅ 关键：内存截图也要走全局去重
+                        const finalPath = _tryGlobalDeduplicate(dest);
+                        const fp = computeFingerprint(finalPath);
+                        return { type: "image", path: finalPath, fingerprint: fp };
                     }
                 }
-                return null;
-            }
-            const r = await bridge.call("clipboard", { target_dir: targetDir }, 2000);
-            if (r && r.type === "image") return r;
+            } catch (e) { }
             return null;
         });
         if (res) return res;
@@ -1092,6 +1636,22 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
             if (progressCallback) progressCallback(0, "质量检测不通过，回退到方案一...");
             const cleanText = await vscode.env.clipboard.readText() || "";
             blocks = await _zipDomWithCleanText($, cleanText);
+        }
+    }
+
+    // 检查是否有视频URL需要处理
+    const videoUrls = extractVideoUrlsFromHtmlFragment(htmlText, baseUrl);
+    if (videoUrls.length > 0) {
+        log(`[SmartPaste] 从HTML中提取到 ${videoUrls.length} 个视频URL`, "INFO");
+
+        // 将视频URL添加到blocks中作为媒体资源
+        for (const videoUrl of videoUrls) {
+            blocks.push({
+                type: "media",
+                kind: "video",
+                src: videoUrl,
+                status: "pending"
+            });
         }
     }
 
@@ -1202,6 +1762,36 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
 
+async function promptForUrl(prompt = "请输入包含视频的网页URL") {
+    return await vscode.window.showInputBox({
+        prompt: prompt,
+        placeHolder: "https://example.com/page-with-video",
+        validateInput: text => {
+            if (!text) return "URL不能为空";
+            try {
+                new URL(text);
+                return null;
+            } catch {
+                return "请输入有效的URL";
+            }
+        }
+    });
+}
+
+async function pickTargetDirectory() {
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+        return folders[0].uri.fsPath;
+    }
+    const selectedDir = await vscode.window.showOpenDialog({
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        title: "选择视频下载目录"
+    });
+    return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
+}
+
 module.exports = {
     CLIPBOARD_HELPER_CS,
     autoDetectAndPaste, // Exported
@@ -1209,10 +1799,15 @@ module.exports = {
     handleClipboardShell,
     sanitizeHtml,
     _getSmartHtmlFromClipboard,
+    extractVideoUrlsFromWebPage, // 新增导出
+    extractVideoUrlsFromHtmlFragment, // 新增导出
     computeFingerprint,
     prefillFingerprint,
     getTimestampFilename,
     isImageExtForClipboard,
     spawnOutput,
-    ensureDir
+    ensureDir,
+    promptForUrl,
+    pickTargetDirectory,
+    log // 导出 log 函数
 };

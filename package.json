@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.3.2",
+  "version": "15.4.0",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -112,7 +112,30 @@
           "qqq.forceTextFlowScheme": {
             "type": "boolean",
             "default": false,
-            "description": "强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭原因是，代价：牺牲排版精度。"
+            "description": "强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
+          },
+          "qqq.autoDownload": {
+            "type": "boolean",
+            "default": true,
+            "description": "是否在检测到视频时自动下载"
+          },
+          "qqq.docExportImageResolution": {
+            "type": "string",
+            "default": "原始分辨率",
+            "enum": [
+              "原始分辨率",
+              "相框分辨率"
+            ],
+            "markdownDescription": "[ **doc 导出设置** ] 图片使用何种分辨率：",
+            "markdownEnumDescriptions": [
+              "得到原始精度。",
+              "优势在于: 1、文件更小； 2、相框显示滴缩略图总能对应一个完整滴图片预览（不会因为 Word 页面尺寸限制导致 预览 被截断）。"
+            ]
+          },
+          "qqq.docExportIncludeCipher": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "[ **doc 导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/）。"
           }
         }
       }
@@ -157,6 +180,10 @@
       {
         "command": "qqq.exportZip",
         "title": "qqq: 导出 ZIP"
+      },
+      {
+        "command": "qqq.downloadVideosFromUrl",
+        "title": "qqq: 在光标位置插入 YouTube 等网页视频"
       }
     ],
     "keybindings": [
@@ -345,10 +372,12 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "archiver": "^5.3.1",
+    "axios": "^1.6.0",
     "cheerio": "1.0.0-rc.12",
     "docx": "^8.5.0",
     "docx-parser": "^0.2.1",
     "image-size": "^2.0.2",
+    "node-fetch": "^2.7.0",
     "trash": "^7.2.0"
   },
   "devDependencies": {

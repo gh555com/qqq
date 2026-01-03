@@ -1,35 +1,4 @@
-// unified-media-downloader.js
 "use strict";
-
-/**
- * ──────────────────────────────────────────────────────────────
- * 安全开关（前 11 项，每项独立开关） + 3 档位组合
- * ──────────────────────────────────────────────────────────────
- *
- * 11 项独立开关（与我们上面讨论的 1~11 对齐）：
- *  1) enableSSRFProtection              : SSRF 防护（阻止内网/本机/保留网段）
- *  2) enableUrlProtocolAndCredsGuard    : 仅允许 http/https + 禁止 URL credentials（user:pass@）
- *  3) enableRedirectProtocolGuard       : 重定向协议限制（仅允许跳 http/https）
- *  4) enableBaseDirGuard                : 路径越界防护（destPath 必须落在 baseDir 内）
- *  5) enableDownloadLock                : 下载锁（避免并发踩踏）
- *  6) enableHeaderSanitize              : Header 注入清洗（CRLF/非法 header name）
- *  7) enableContentLengthRangePrecheck  : content-length / content-range 校验（声明长度/范围预检）
- *  8) enableStrictResumeChecks          : 严格续传策略（206 必须 + Range+压缩拒绝）
- *  9) enableSymlinkGuard                : 符号链接防护（基础：dest/tmp 若为 symlink 直接拒绝）
- * 10) enableProbeOutputLimit            : yt-dlp probe stdout/stderr 限制（防内存炸）
- * 11) enableFailFast                    : Fail-fast（遇到“可疑/不确定”优先失败而不是宽容放行）
- *
- * 档位（securityLevel）：
- *  0 档：最宽松 —— 11 项全部关闭
- *  1 档：中等宽松 —— 我设计的组合（兼容性更好，但仍保留关键防护）
- *  2 档：严格 —— 11 项全部开启（最安全）
- *
- * 说明：
- *  - 你仍可在构造器 options.securityOverrides 里逐项覆写（独立开关优先级最高）
- *  - 某些特性在“开关开启但缺少必要参数”时：
- *      * 若 enableFailFast=true -> 直接报错
- *      * 若 enableFailFast=false -> 尽量降级继续（中等/宽松更友好）
- */
 
 const http2 = require("http2");
 const https = require("https");
@@ -41,10 +10,9 @@ const dns = require("dns");
 const net = require("net");
 const { pipeline, Transform } = require("stream");
 const { spawn, spawnSync } = require("child_process");
+let vscode = null;
+try { vscode = require("vscode"); } catch { }
 
-/* ──────────────────────────────────────────────────────────────
- * 0) 无依赖并发池
- * ────────────────────────────────────────────────────────────── */
 async function runPool(items, concurrency, worker) {
     if (!items || items.length === 0) return;
     concurrency = Math.max(1, Number(concurrency) || 1);
@@ -77,9 +45,6 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 1) PATH 可执行文件探测（避免 which 依赖）
- * ────────────────────────────────────────────────────────────── */
 function findExecutableInPath(name) {
     const isWin = process.platform === "win32";
     const exts = isWin ? [".exe", ".cmd", ".bat", ""] : [""];
@@ -124,9 +89,6 @@ function findExecutableInCommonPaths(name, candidates = null) {
     return null;
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 2) 基础工具
- * ────────────────────────────────────────────────────────────── */
 function isBlobUrl(u) {
     return typeof u === "string" && u.startsWith("blob:");
 }
@@ -168,7 +130,7 @@ function guessExtension(url, kind) {
         if (kind === "video") {
             const m = pathname.match(/\.(mp4|webm|mov|mkv|m4v|avi|ogv)(\?|$)/);
             if (m) return "." + m[1];
-            return null; // m3u8/mpd 一般交给 yt-dlp 输出 mp4
+            return null;
         }
 
         const m = pathname.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?|$)/);
@@ -185,9 +147,6 @@ function generateFilename(url, kind) {
     return `${rand}. ${ts}${ext}`;
 }
 
-/**
- * 平台/分片视频（需要 yt-dlp）
- */
 function isPlatformOrSegmentVideo(url) {
     const s = String(url || "");
     const patterns = [
@@ -198,15 +157,12 @@ function isPlatformOrSegmentVideo(url) {
         /dailymotion\.com/i,
         /tiktok\.com|douyin\.com/i,
         /weibo\.com/i,
-        /\.m3u8(\?|$)/i, // HLS
-        /\.mpd(\?|$)/i, // DASH
+        /\.m3u8(\?|$)/i,
+        /\.mpd(\?|$)/i,
     ];
     return patterns.some((p) => p.test(s));
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 3) 字节上限 Transform（支持断点续写的初始偏移）
- * ────────────────────────────────────────────────────────────── */
 class ByteLimitTransform extends Transform {
     constructor(maxBytes, initialBytes = 0) {
         super();
@@ -223,10 +179,6 @@ class ByteLimitTransform extends Transform {
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 4) content-encoding 解码（更鲁棒）
- *    注意：断点续写时默认禁用压缩（Range + 压缩非常不可靠）
- * ────────────────────────────────────────────────────────────── */
 function pickDecoder(contentEncoding) {
     const enc = String(contentEncoding || "").toLowerCase();
     if (!enc || enc.includes("identity")) return null;
@@ -240,19 +192,16 @@ function pickDecoder(contentEncoding) {
     return null;
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 5) Retry 策略：谨慎但强力
- * ────────────────────────────────────────────────────────────── */
 function parseRetryAfterMs(retryAfter) {
     if (!retryAfter) return 0;
     const v = String(retryAfter).trim();
     if (!v) return 0;
 
-    // seconds
+
     const sec = Number(v);
     if (Number.isFinite(sec) && sec >= 0) return Math.min(sec * 1000, 60_000);
 
-    // HTTP-date
+
     const t = Date.parse(v);
     if (Number.isFinite(t)) {
         const delta = t - Date.now();
@@ -265,7 +214,7 @@ function parseRetryAfterMs(retryAfter) {
 function computeBackoffMs(attemptIndex, retryAfterMs = 0) {
     const base = 250;
     const exp = Math.min(6_000, base * Math.pow(2, Math.max(0, attemptIndex - 1)));
-    const jitter = Math.floor(Math.random() * 150); // 0~150ms
+    const jitter = Math.floor(Math.random() * 150);
     const normal = exp + jitter;
 
     if (retryAfterMs > 0) return Math.max(retryAfterMs, normal);
@@ -274,9 +223,9 @@ function computeBackoffMs(attemptIndex, retryAfterMs = 0) {
 
 function isRetryableHttpStatus(status) {
     return (
-        status === 408 || // Request Timeout
-        status === 425 || // Too Early
-        status === 429 || // Too Many Requests
+        status === 408 ||
+        status === 425 ||
+        status === 429 ||
         status === 500 ||
         status === 502 ||
         status === 503 ||
@@ -310,13 +259,10 @@ function isRetryableNetworkError(err) {
     return false;
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 6) Host 槽位限制：maxHosts（可重入，跨域 redirect 不死锁）
- * ────────────────────────────────────────────────────────────── */
 class HostSlotLimiter {
     constructor(maxHosts) {
         this.maxHosts = Math.max(1, Number(maxHosts) || 1);
-        this.activeCounts = new Map(); // origin -> count
+        this.activeCounts = new Map();
         this.waiting = [];
     }
 
@@ -364,9 +310,6 @@ class HostSlotLimiter {
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 安全开关与档位
- * ────────────────────────────────────────────────────────────── */
 function resolveSecurityProfile(level) {
     const lv = Number(level);
     if (lv === 2) {
@@ -386,23 +329,23 @@ function resolveSecurityProfile(level) {
     }
 
     if (lv === 1) {
-        // 1 档：保留4项关键防护，其余7项关
+
         return {
-            enableSSRFProtection: false, // 关：直接允许内网/NAS/localhost/保留网段下载（最宽松）
-            enableUrlProtocolAndCredsGuard: true, // 开：仅允许 http/https + 禁止 URL credentials（几乎不影响正常下载，却能砍掉一堆奇怪协议攻击面）
-            enableRedirectProtocolGuard: true, // 开：重定向协议限制（避免被30x引到file/data等危险协议）
-            enableBaseDirGuard: false, // 关：destPath可写任意位置（最自由）
-            enableDownloadLock: true, // 开：下载锁避免并发踩踏（稳定性保护，不是安全拦截）
-            enableHeaderSanitize: true, // 开：Header注入清洗（兼容性影响极小，但能避免经典CRLF注入坑）
-            enableContentLengthRangePrecheck: false, // 关：不会因为服务端length写错就提前拒绝（更少误杀）
-            enableStrictResumeChecks: false, // 关：更倾向"能下就下"，不纠结206/压缩等严格条件
-            enableSymlinkGuard: false, // 关：允许把结果写到symlink指向的位置（更符合一些用户习惯）
-            enableProbeOutputLimit: false, // 关：playlist再大也尽量给你吐（更宽松）
-            enableFailFast: false, // 关：遇到不确定尽量降级继续，少失败
+            enableSSRFProtection: false,
+            enableUrlProtocolAndCredsGuard: true,
+            enableRedirectProtocolGuard: true,
+            enableBaseDirGuard: false,
+            enableDownloadLock: true,
+            enableHeaderSanitize: true,
+            enableContentLengthRangePrecheck: false,
+            enableStrictResumeChecks: false,
+            enableSymlinkGuard: false,
+            enableProbeOutputLimit: false,
+            enableFailFast: false,
         };
     }
 
-    // 0 档：全关（最宽松）
+
     return {
         enableSSRFProtection: false,
         enableUrlProtocolAndCredsGuard: false,
@@ -421,17 +364,14 @@ function resolveSecurityProfile(level) {
 function mergeSecurityOptions(level, overrides) {
     const base = resolveSecurityProfile(level);
     const o = overrides && typeof overrides === "object" ? overrides : {};
-    // 独立开关逐项覆写
+
     return { ...base, ...o };
 }
 
-/* ──────────────────────────────────────────────────────────────
- * SSRF 工具：判定 IP 是否为非公网（阻止内网/本机/保留）
- * ────────────────────────────────────────────────────────────── */
 function ipv4ToInt(ip) {
     const parts = String(ip).split(".").map((x) => Number(x));
     if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return null;
-    // >>> 0 转无符号 32-bit
+
     return (((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0);
 }
 
@@ -445,7 +385,7 @@ function isNonPublicIPv4(ip) {
     const x = ipv4ToInt(ip);
     if (x === null) return true;
 
-    // 常见应拦截：loopback / private / link-local / CGNAT / reserved / multicast / benchmark / doc
+
     const blocks = [
         ["0.0.0.0", 8],
         ["10.0.0.0", 8],
@@ -453,14 +393,14 @@ function isNonPublicIPv4(ip) {
         ["169.254.0.0", 16],
         ["172.16.0.0", 12],
         ["192.168.0.0", 16],
-        ["100.64.0.0", 10], // CGNAT
+        ["100.64.0.0", 10],
         ["192.0.0.0", 24],
-        ["192.0.2.0", 24], // TEST-NET-1
-        ["198.18.0.0", 15], // benchmark
-        ["198.51.100.0", 24], // TEST-NET-2
-        ["203.0.113.0", 24], // TEST-NET-3
-        ["224.0.0.0", 4], // multicast
-        ["240.0.0.0", 4], // reserved
+        ["192.0.2.0", 24],
+        ["198.18.0.0", 15],
+        ["198.51.100.0", 24],
+        ["203.0.113.0", 24],
+        ["224.0.0.0", 4],
+        ["240.0.0.0", 4],
         ["255.255.255.255", 32],
     ];
 
@@ -474,27 +414,27 @@ function isNonPublicIPv4(ip) {
 function isNonPublicIPv6(ip) {
     const s = String(ip || "").toLowerCase();
 
-    // IPv4-mapped IPv6: ::ffff:192.168.0.1
+
     if (s.startsWith("::ffff:")) {
         const v4 = s.slice("::ffff:".length);
-        // 有的可能是 ::ffff:0:192.168.0.1 之类，这里做一次兜底提取
+
         const last = v4.split(":").pop();
         if (last && net.isIP(last) === 4) return isNonPublicIPv4(last);
     }
 
-    // loopback / unspecified
+
     if (s === "::1" || s === "::") return true;
 
-    // link-local fe80::/10
+
     if (s.startsWith("fe8") || s.startsWith("fe9") || s.startsWith("fea") || s.startsWith("feb")) return true;
 
-    // unique local fc00::/7 (fc00, fd00)
+
     if (s.startsWith("fc") || s.startsWith("fd")) return true;
 
-    // multicast ff00::/8
+
     if (s.startsWith("ff")) return true;
 
-    // documentation 2001:db8::/32
+
     if (s.startsWith("2001:db8")) return true;
 
     return false;
@@ -504,7 +444,7 @@ function isNonPublicIp(ip) {
     const t = net.isIP(ip);
     if (t === 4) return isNonPublicIPv4(ip);
     if (t === 6) return isNonPublicIPv6(ip);
-    return true; // 非法 IP 一律当作不安全
+    return true;
 }
 
 function isLocalHostname(hostname) {
@@ -535,9 +475,6 @@ function dnsLookupAll(hostname, timeoutMs) {
     });
 }
 
-/* ──────────────────────────────────────────────────────────────
- * Header 清洗（CRLF/非法 name）
- * ────────────────────────────────────────────────────────────── */
 const HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 function sanitizeHeaders(inputHeaders, failFast) {
@@ -547,13 +484,13 @@ function sanitizeHeaders(inputHeaders, failFast) {
         const k = String(k0 || "").trim();
         if (!k) continue;
 
-        // 防 CRLF 注入 / 非法 header name
+
         if (k.includes("\r") || k.includes("\n") || !HEADER_NAME_RE.test(k)) {
             if (failFast) return { ok: false, error: "invalid_header_name" };
             continue;
         }
 
-        // value 统一转 string，去掉 CRLF
+
         const v = Array.isArray(v0) ? v0.map((x) => String(x)) : [String(v0)];
         const vv = v.map((s) => s.replace(/[\r\n]+/g, " ").trim()).join(", ");
         if (!vv) continue;
@@ -563,9 +500,6 @@ function sanitizeHeaders(inputHeaders, failFast) {
     return { ok: true, headers: out };
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 目标路径安全（baseDir、symlink）
- * ────────────────────────────────────────────────────────────── */
 function realAbs(p) {
     return path.resolve(String(p || ""));
 }
@@ -574,7 +508,7 @@ function isPathInsideBaseDir(filePath, baseDir) {
     const absFile = realAbs(filePath);
     const absBase = realAbs(baseDir);
     if (!absBase.endsWith(path.sep)) {
-        // 防止 /foo/barX 被误判为 /foo/bar 内
+
         return absFile === absBase || absFile.startsWith(absBase + path.sep);
     }
     return absFile.startsWith(absBase);
@@ -602,9 +536,6 @@ function ensureNotSymlink(p, failFast) {
     return { ok: true };
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 下载锁（destPath.lock）避免并发踩踏
- * ────────────────────────────────────────────────────────────── */
 async function acquireDownloadLock(destPath, opts) {
     const lockPath = String(destPath) + ".lock";
     const waitMs = Math.max(0, Number(opts?.downloadLockWaitMs ?? 15_000));
@@ -615,7 +546,7 @@ async function acquireDownloadLock(destPath, opts) {
     ensureDirForFile(lockPath);
 
     while (true) {
-        // 尝试抢锁
+
         let fd = null;
         try {
             fd = fs.openSync(lockPath, "wx");
@@ -630,13 +561,13 @@ async function acquireDownloadLock(destPath, opts) {
         } catch (e) {
             safeClose(fd);
 
-            // 检查 stale
+
             try {
                 const st = fs.statSync(lockPath);
                 if (staleMs > 0 && Date.now() - st.mtimeMs > staleMs) {
-                    // stale -> 强制清理
+
                     safeUnlink(lockPath);
-                    // 立刻重试
+
                     continue;
                 }
             } catch { }
@@ -649,11 +580,8 @@ async function acquireDownloadLock(destPath, opts) {
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * Content-Range 解析与校验（基础）
- * ────────────────────────────────────────────────────────────── */
 function parseContentRange(cr) {
-    // e.g. "bytes 100-199/1000"
+
     const s = String(cr || "").trim();
     const m = s.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
     if (!m) return null;
@@ -665,52 +593,48 @@ function parseContentRange(cr) {
     return { start, end, total };
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 7) SmartHttpDownloader：H2 优先 + H1 降级 + 重试 + 防盗链
- *    + 11 项安全开关
- * ────────────────────────────────────────────────────────────── */
 class SmartHttpDownloader {
     constructor(config = {}) {
-        // 安全开关（可被 config.securityOverrides 覆写）
+
         const securityLevel = config.securityLevel ?? 1;
         const securityOverrides = config.securityOverrides || null;
         this.security = mergeSecurityOptions(securityLevel, securityOverrides);
 
         this.config = {
-            // 并发/连接
+
             maxHosts: 8,
-            maxStreamsPerHost: 50, // H2 并发流（本地上限，仍受远端限制）
-            maxStreamsPerHostH1: 4, // H1 每域名并发
+            maxStreamsPerHost: 50,
+            maxStreamsPerHostH1: 4,
             sessionTimeoutMs: 30_000,
             connectTimeoutMs: 5_000,
             requestTimeoutMs: 15_000,
             maxRedirects: 6,
 
-            // 默认大小限制（task.maxBytes 可覆盖）
+
             maxBytesDefault: 200 * 1024 * 1024,
 
-            // 重试
+
             maxAttempts: 4,
             maxTotalRetryDelayMs: 25_000,
 
-            // H1 keep-alive
+
             keepAlive: true,
 
-            // TLS 校验默认开启
+
             rejectUnauthorized: true,
 
-            // 默认 headers（你可在 task.headers 覆盖）
+
             defaultHeaders: {},
 
-            // H2 客户端 settings 提示（最终以对端为准）
+
             h2ClientSettings: null,
 
-            // 安全相关参数
-            baseDir: config.baseDir || null, // 用于 enableBaseDirGuard
+
+            baseDir: config.baseDir || null,
             dnsTimeoutMs: config.dnsTimeoutMs ?? 3000,
             dnsCacheTtlMs: config.dnsCacheTtlMs ?? 60_000,
 
-            // 下载锁参数
+
             downloadLockWaitMs: config.downloadLockWaitMs ?? 15_000,
             downloadLockPollMs: config.downloadLockPollMs ?? 120,
             downloadLockStaleMs: config.downloadLockStaleMs ?? 60_000,
@@ -718,7 +642,7 @@ class SmartHttpDownloader {
             ...config,
         };
 
-        this.pools = new Map(); // origin -> { session, h2Supported, lastUsed }
+        this.pools = new Map();
         this.hostLimiter = new HostSlotLimiter(this.config.maxHosts);
 
         this.httpAgent = new http.Agent({
@@ -728,10 +652,19 @@ class SmartHttpDownloader {
         this.httpsAgent = new https.Agent({
             keepAlive: !!this.config.keepAlive,
             maxSockets: 256,
-            rejectUnauthorized: this.config.rejectUnauthorized,
         });
 
-        this._dnsCache = new Map(); // hostname -> { ts, addrs: string[] } or { ts, err: string }
+        this._dnsCache = new Map();
+        this.activeReqs = new Set();
+    }
+
+    cancelAll() {
+        this._cancelled = true;
+        for (const req of this.activeReqs) {
+            try { req.destroy(); } catch (e) { }
+            try { if (req.socket) req.socket.destroy(); } catch (e) { }
+        }
+        this.activeReqs.clear();
     }
 
     async downloadAll(tasks, onProgress) {
@@ -740,14 +673,14 @@ class SmartHttpDownloader {
             return { stats: this._emptyStats(), results };
         }
 
-        // 按 origin 分组
+
         const byOrigin = new Map();
         for (const t of tasks) {
             try {
                 const u = new URL(t.url);
                 const origin = u.origin;
 
-                // URL 协议+凭据限制（开关 2）
+
                 const vr = this._validateUrlBasic(u);
                 if (!vr.ok) {
                     const r = this._resultFail(t, vr.error);
@@ -765,7 +698,7 @@ class SmartHttpDownloader {
             }
         }
 
-        // 并行处理各 origin（实际活跃数由 hostLimiter 控制）
+
         const jobs = [];
         for (const [origin, list] of byOrigin) {
             jobs.push(this._processOrigin(origin, list, results, onProgress));
@@ -909,7 +842,7 @@ class SmartHttpDownloader {
         let usedAntiHotlinkBoost = false;
         let totalDelay = 0;
 
-        // 安全：baseDir/锁/基础路径校验
+
         const pre = this._validateTaskPaths(task);
         if (!pre.ok) {
             const r = this._resultFail(task, pre.error);
@@ -917,7 +850,7 @@ class SmartHttpDownloader {
             return r;
         }
 
-        // 下载锁（开关 5）
+
         let lock = null;
         if (this.security.enableDownloadLock) {
             const lr = await acquireDownloadLock(task.destPath, this.config);
@@ -1040,7 +973,7 @@ class SmartHttpDownloader {
     _validateUrlBasic(urlObj) {
         const failFast = !!this.security.enableFailFast;
 
-        // 开关 2：仅允许 http/https + 禁止 URL credentials
+
         if (this.security.enableUrlProtocolAndCredsGuard) {
             const proto = String(urlObj?.protocol || "");
             if (proto !== "http:" && proto !== "https:") {
@@ -1059,19 +992,19 @@ class SmartHttpDownloader {
 
         const hostname = String(urlObj.hostname || "");
 
-        // 直接拦截本机域名
+
         if (isLocalHostname(hostname)) {
             return { ok: false, error: "ssrf_blocked_local_hostname" };
         }
 
-        // IP literal
+
         const ipType = net.isIP(hostname);
         if (ipType === 4 || ipType === 6) {
             if (isNonPublicIp(hostname)) return { ok: false, error: "ssrf_blocked_ip_literal" };
             return { ok: true };
         }
 
-        // DNS resolve（严格）
+
         const now = Date.now();
         const cached = this._dnsCache.get(hostname);
         if (cached && now - cached.ts <= this.config.dnsCacheTtlMs) {
@@ -1106,12 +1039,12 @@ class SmartHttpDownloader {
     _validateTaskPaths(task) {
         const failFast = !!this.security.enableFailFast;
 
-        // 开关 4：baseDir guard
+
         if (this.security.enableBaseDirGuard) {
             const baseDir = task.baseDir || this.config.baseDir;
             if (!baseDir) {
                 if (failFast) return { ok: false, error: "baseDir_required" };
-                // 中档/宽松：没 baseDir 就降级跳过（仍可能不安全，但符合“宽松”语义）
+
             } else {
                 if (!isPathInsideBaseDir(task.destPath, baseDir)) {
                     return { ok: false, error: "destPath_out_of_baseDir" };
@@ -1123,7 +1056,7 @@ class SmartHttpDownloader {
             }
         }
 
-        // 开关 9：symlink guard（基础：dest/tmp 若为 symlink/非普通文件则拒绝）
+
         if (this.security.enableSymlinkGuard) {
             const d1 = ensureNotSymlink(task.destPath, failFast);
             if (!d1.ok) return d1;
@@ -1137,7 +1070,7 @@ class SmartHttpDownloader {
     _buildHeaders(urlObj, task, { useAntiHotlink, resumeBytes }) {
         const failFast = !!this.security.enableFailFast;
 
-        // 默认 headers
+
         const baseHeaders = {
             "user-agent":
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -1147,12 +1080,12 @@ class SmartHttpDownloader {
             ...(task.headers || {}),
         };
 
-        // 开关 6：Header sanitize
+
         let headers = baseHeaders;
         if (this.security.enableHeaderSanitize) {
             const sr = sanitizeHeaders(baseHeaders, failFast);
             if (!sr.ok) {
-                // failFast: 直接失败；非 failFast：退回最小头（避免注入）
+
                 if (failFast) return { ok: false, error: sr.error };
                 headers = {
                     "user-agent": String(baseHeaders["user-agent"] || baseHeaders["User-Agent"] || "Mozilla/5.0"),
@@ -1163,13 +1096,13 @@ class SmartHttpDownloader {
             }
         }
 
-        // Range / 续传
+
         if (resumeBytes > 0) {
             headers["range"] = `bytes=${resumeBytes}-`;
             headers["accept-encoding"] = "identity";
         }
 
-        // 防盗链 boost
+
         if (useAntiHotlink) {
             const explicitRef =
                 task.referrer ||
@@ -1200,7 +1133,7 @@ class SmartHttpDownloader {
     async _attemptH2(ctx, task, attempt, useAntiHotlink, resumeInfo) {
         const failFast = !!this.security.enableFailFast;
 
-        // URL 基础校验（开关 2）
+
         let urlObj;
         try {
             urlObj = new URL(task.url);
@@ -1210,11 +1143,11 @@ class SmartHttpDownloader {
         const vb = this._validateUrlBasic(urlObj);
         if (!vb.ok) return this._resultFail(task, vb.error);
 
-        // SSRF（开关 1）
+
         const ss = await this._validateUrlSSRF(urlObj);
         if (!ss.ok) return this._resultFail(task, ss.error);
 
-        // session 可用性
+
         const origin = ctx.origin;
         let session = ctx.session;
 
@@ -1238,7 +1171,7 @@ class SmartHttpDownloader {
 
         ensureDirForFile(tmpPath);
 
-        // symlink guard（开关 9）：写之前再查一次（降低 TOCTOU）
+
         if (this.security.enableSymlinkGuard) {
             const d2 = ensureNotSymlink(tmpPath, failFast);
             if (!d2.ok) return this._resultFail(task, d2.error);
@@ -1271,6 +1204,8 @@ class SmartHttpDownloader {
             let req;
             try {
                 req = session.request(reqHeaders);
+                this.activeReqs.add(req);
+                req.once('close', () => this.activeReqs.delete(req));
             } catch (e) {
                 const r = this._resultFail(task, e.message || "h2_request_failed");
                 r._networkError = e;
@@ -1297,7 +1232,7 @@ class SmartHttpDownloader {
             req.on("response", async (h) => {
                 const status = Number(h[":status"] || 0);
 
-                // redirect
+
                 if (status >= 300 && status < 400 && h.location) {
                     try {
                         req.close();
@@ -1306,7 +1241,7 @@ class SmartHttpDownloader {
 
                     const newUrl = new URL(String(h.location), task.url).toString();
 
-                    // 开关 3：redirect 协议限制
+
                     if (this.security.enableRedirectProtocolGuard) {
                         try {
                             const nu = new URL(newUrl);
@@ -1345,7 +1280,7 @@ class SmartHttpDownloader {
                     return;
                 }
 
-                // 非 2xx
+
                 if (status < 200 || status >= 300) {
                     try {
                         req.close();
@@ -1357,7 +1292,7 @@ class SmartHttpDownloader {
                     return;
                 }
 
-                // 续传校验（开关 8：严格续传；开关 7：range/content-range 预检）
+
                 let resumeMode = willResume;
                 if (resumeMode) {
                     const contentEncoding = h["content-encoding"];
@@ -1365,7 +1300,7 @@ class SmartHttpDownloader {
                     const wantStrict = !!this.security.enableStrictResumeChecks;
 
                     if (wantStrict) {
-                        // 严格：必须 206
+
                         if (status !== 206) {
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
@@ -1374,7 +1309,7 @@ class SmartHttpDownloader {
                             finish(r);
                             return;
                         }
-                        // 严格：Range + content-encoding 必须 identity
+
                         if (contentEncoding && String(contentEncoding).toLowerCase() !== "identity") {
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
@@ -1383,7 +1318,7 @@ class SmartHttpDownloader {
                             finish(r);
                             return;
                         }
-                        // 严格：若启用预检，则 content-range 必须匹配
+
                         if (this.security.enableContentLengthRangePrecheck) {
                             const cr = parseContentRange(h["content-range"]);
                             if (!cr || cr.start !== resumeBytes) {
@@ -1396,7 +1331,7 @@ class SmartHttpDownloader {
                             }
                         }
                     } else {
-                        // 宽松：不满足续传条件就“重下”（安全但更兼容）
+
                         const bad206 = status !== 206;
                         const badEnc = contentEncoding && String(contentEncoding).toLowerCase() !== "identity";
                         let badRange = false;
@@ -1405,12 +1340,12 @@ class SmartHttpDownloader {
                             badRange = !cr || cr.start !== resumeBytes;
                         }
                         if (bad206 || badEnc || badRange) {
-                            // 关闭当前请求，删 part，重试一次“全量请求”（本 attempt 内完成）
+
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
                             const rr = await this._attemptH2(
                                 ctx,
-                                { ...task }, // 不带 resumeInfo（会当作不续传）
+                                { ...task },
                                 attempt,
                                 useAntiHotlink,
                                 { tmpPath, resumeBytes: 0, canResume: false }
@@ -1424,11 +1359,10 @@ class SmartHttpDownloader {
                 const contentEncoding = h["content-encoding"];
                 const declaredLen = Number(h["content-length"] || 0) || 0;
 
-                // 开关 7：content-length 预检（仅在无 decoder/或 failFast 情况下更严格）
+
                 if (this.security.enableContentLengthRangePrecheck) {
                     const decoder = resumeMode ? null : pickDecoder(contentEncoding);
-                    // 如果有 decoder，content-length 是压缩后字节数，不等于输出字节数；
-                    // 这里为了“不误杀”，只在无 decoder 时用声明长度做硬拦截
+
                     if (!decoder && declaredLen > 0) {
                         const initial = resumeMode ? resumeBytes : 0;
                         if (initial + declaredLen > maxBytes) {
@@ -1447,14 +1381,14 @@ class SmartHttpDownloader {
                 const limiter = new ByteLimitTransform(maxBytes, initialBytes);
                 const decoder = resumeMode ? null : pickDecoder(contentEncoding);
 
-                // 写入（symlink guard 已做；这里直接写）
+
                 const out = fs.createWriteStream(tmpPath, { flags: resumeMode ? "a" : "w" });
 
                 try {
                     if (decoder) await pipelineAsync(req, decoder, limiter, out);
                     else await pipelineAsync(req, limiter, out);
 
-                    // rename 前再做一次 destPath symlink guard（开关 9）
+
                     if (this.security.enableSymlinkGuard) {
                         const d1 = ensureNotSymlink(destPath, failFast);
                         if (!d1.ok) {
@@ -1503,11 +1437,11 @@ class SmartHttpDownloader {
             return this._resultFail(task, "invalid_url");
         }
 
-        // URL 基础校验（开关 2）
+
         const vb = this._validateUrlBasic(urlObj);
         if (!vb.ok) return this._resultFail(task, vb.error);
 
-        // SSRF（开关 1）
+
         const ss = await this._validateUrlSSRF(urlObj);
         if (!ss.ok) return this._resultFail(task, ss.error);
 
@@ -1522,7 +1456,7 @@ class SmartHttpDownloader {
 
         ensureDirForFile(tmpPath);
 
-        // symlink guard（开关 9）
+
         if (this.security.enableSymlinkGuard) {
             const d2 = ensureNotSymlink(tmpPath, failFast);
             if (!d2.ok) return this._resultFail(task, d2.error);
@@ -1549,14 +1483,14 @@ class SmartHttpDownloader {
 
         return new Promise((resolve) => {
             const req = client.request(options, async (res) => {
-                // redirect
+
                 if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                     res.destroy();
                     safeUnlink(tmpPath);
 
                     const newUrl = new URL(res.headers.location, task.url).toString();
 
-                    // 开关 3：redirect 协议限制
+
                     if (this.security.enableRedirectProtocolGuard) {
                         try {
                             const nu = new URL(newUrl);
@@ -1595,7 +1529,7 @@ class SmartHttpDownloader {
                     return;
                 }
 
-                // 非 2xx
+
                 if (res.statusCode < 200 || res.statusCode >= 300) {
                     res.destroy();
                     const r = this._resultFail(task, `http_${res.statusCode}`);
@@ -1605,7 +1539,7 @@ class SmartHttpDownloader {
                     return;
                 }
 
-                // 续传校验（开关 8/7）
+
                 let resumeMode = willResume;
                 if (resumeMode) {
                     const contentEncoding = res.headers["content-encoding"];
@@ -1651,7 +1585,7 @@ class SmartHttpDownloader {
                         }
 
                         if (bad206 || badEnc || badRange) {
-                            // 宽松：重下（本 attempt 内完成）
+
                             res.destroy();
                             safeUnlink(tmpPath);
                             const rr = await this._attemptH1(
@@ -1669,7 +1603,7 @@ class SmartHttpDownloader {
                 const contentEncoding = res.headers["content-encoding"];
                 const declaredLen = Number(res.headers["content-length"] || 0) || 0;
 
-                // 开关 7：content-length 预检（无 decoder 时硬拦截）
+
                 if (this.security.enableContentLengthRangePrecheck) {
                     const decoder = resumeMode ? null : pickDecoder(contentEncoding);
                     if (!decoder && declaredLen > 0) {
@@ -1696,7 +1630,7 @@ class SmartHttpDownloader {
                     if (decoder) await pipelineAsync(res, decoder, limiter, out);
                     else await pipelineAsync(res, limiter, out);
 
-                    // rename 前 destPath symlink guard（开关 9）
+
                     if (this.security.enableSymlinkGuard) {
                         const d1 = ensureNotSymlink(destPath, failFast);
                         if (!d1.ok) {
@@ -1765,11 +1699,11 @@ class SmartHttpDownloader {
             return this._resultFail(task, "invalid_url");
         }
 
-        // 开关 2：协议/凭据限制
+
         const vb = this._validateUrlBasic(u);
         if (!vb.ok) return this._resultFail(task, vb.error);
 
-        // 开关 3：redirect 协议限制（这里虽然是 universal，但仍可以挡非 http/https）
+
         if (this.security.enableRedirectProtocolGuard) {
             const proto = String(u.protocol || "");
             if (proto !== "http:" && proto !== "https:") return this._resultFail(task, "protocol_not_allowed");
@@ -1861,10 +1795,6 @@ class SmartHttpDownloader {
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 8) yt-dlp：平台/HLS/DASH 视频下载（扩展不打包，只探测调用）
- *    + probe stdout/stderr 限制（开关 10）
- * ────────────────────────────────────────────────────────────── */
 class YtDlpDownloader {
     constructor(options = {}) {
         const securityLevel = options.securityLevel ?? 1;
@@ -1874,36 +1804,37 @@ class YtDlpDownloader {
         this.ytdlpPath = options.ytdlpPath || null;
         this.ffmpegPath = options.ffmpegPath || null;
 
-        // probe 输出限制参数
-        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 2 * 1024 * 1024));
-        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 512 * 1024));
 
-        // 1) 优先用户传入 / PATH
+        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 10 * 1024 * 1024));
+        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 1 * 1024 * 1024));
+
+
         if (!this.ytdlpPath) this.ytdlpPath = findExecutableInPath("yt-dlp");
 
-        // 2) GUI/Electron 常见：PATH 不全，尝试常见绝对路径
+
         if (!this.ytdlpPath && process.platform !== "win32") {
             this.ytdlpPath = findExecutableInCommonPaths("yt-dlp");
         }
 
-        // 3) ffmpeg 同类增强
+
         if (!this.ffmpegPath) this.ffmpegPath = findExecutableInPath("ffmpeg");
         if (!this.ffmpegPath && process.platform !== "win32") {
             this.ffmpegPath = findExecutableInCommonPaths("ffmpeg");
         }
-
-        if (this.ytdlpPath) {
-            try {
-                const r = spawnSync(this.ytdlpPath, ["--version"], { stdio: "ignore", windowsHide: true });
-                if (r.status !== 0) this.ytdlpPath = null;
-            } catch {
-                this.ytdlpPath = null;
-            }
-        }
     }
 
     isAvailable() {
-        return !!this.ytdlpPath;
+        if (!this.ytdlpPath) return false;
+        try {
+
+            if (!require('fs').existsSync(this.ytdlpPath)) return false;
+
+            const { spawnSync } = require("child_process");
+            const r = spawnSync(this.ytdlpPath, ["--version"], { stdio: "ignore", windowsHide: true });
+            return r.status === 0;
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -1911,186 +1842,602 @@ class YtDlpDownloader {
      * - 兼容单视频、以及（可能）playlist 的多行 dump-json 输出
      * - 开关 10：stdout/stderr 限制避免内存炸
      */
-    async probe(url) {
-        if (!this.ytdlpPath) {
-            return { success: false, error: "yt-dlp_not_installed" };
+    async probe(url, options = {}) {
+        if (!this.isAvailable()) {
+            return { success: false, error: "yt-dlp_not_installed_or_invalid" };
         }
 
         return new Promise((resolve) => {
+
             const args = [
                 "--dump-json",
                 "--no-download",
                 "--no-warnings",
-                "--flat-playlist",
+                "--ignore-errors",
+                "--no-flat-playlist", // 强制深入解析每个条目
+                "--no-check-certificate",
                 url,
             ];
 
-            const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
+            if (options.cookiesFilePath) {
+                args.push("--cookies", options.cookiesFilePath);
+            }
 
-            let stdout = "";
-            let stderr = "";
-            let killedByLimit = false;
 
-            const limitStdout = this.security.enableProbeOutputLimit ? this.maxProbeStdoutBytes : 0;
-            const limitStderr = this.security.enableProbeOutputLimit ? this.maxProbeStderrBytes : 0;
+            const doProbe = (extraArgs = []) => {
+                return new Promise((resolveProbe) => {
+                    const proc = spawn(this.ytdlpPath, [...args, ...extraArgs], { windowsHide: true });
 
-            const killIfTooLarge = () => {
-                if (!this.security.enableProbeOutputLimit) return;
-                if (killedByLimit) return;
+                    let stdout = "";
+                    let stderr = "";
+                    let killedByLimit = false;
 
-                if ((limitStdout > 0 && stdout.length > limitStdout) || (limitStderr > 0 && stderr.length > limitStderr)) {
-                    killedByLimit = true;
-                    try { proc.kill("SIGKILL"); } catch { }
-                }
+                    const limitStdout = this.security.enableProbeOutputLimit ? this.maxProbeStdoutBytes : 0;
+                    const limitStderr = this.security.enableProbeOutputLimit ? this.maxProbeStderrBytes : 0;
+
+                    const killIfTooLarge = () => {
+                        if (!this.security.enableProbeOutputLimit) return;
+                        if (killedByLimit) return;
+
+                        if ((limitStdout > 0 && stdout.length > limitStdout) || (limitStderr > 0 && stderr.length > limitStderr)) {
+                            killedByLimit = true;
+                            try { proc.kill("SIGKILL"); } catch { }
+                        }
+                    };
+
+                    proc.stdout.on("data", (d) => {
+                        stdout += d.toString("utf8");
+                        killIfTooLarge();
+                    });
+                    proc.stderr.on("data", (d) => {
+                        stderr += d.toString("utf8");
+                        killIfTooLarge();
+                    });
+
+                    proc.on("close", (code) => {
+                        if (killedByLimit) {
+                            resolveProbe({ success: false, error: "probe_output_too_large" });
+                            return;
+                        }
+
+                        const raw = String(stdout || "").trim();
+                        if (!raw) {
+                            let errorMsg = "probe_failed_empty_output";
+                            const stderrStr = String(stderr || "").trim();
+                            if (stderrStr) {
+                                const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
+                                if (errorMatch && errorMatch[1]) {
+                                    errorMsg = errorMatch[1].trim();
+                                } else {
+                                    const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
+                                    if (lines.length > 0) errorMsg = lines[lines.length - 1];
+                                }
+                            }
+                            resolveProbe({ success: false, error: errorMsg, stderr: stderrStr });
+                            return;
+                        }
+
+                        const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+                        const tryParseLine = (s) => {
+                            try { return JSON.parse(s); } catch { return null; }
+                        };
+
+                        const parsed = [];
+                        for (const ln of lines) {
+                            const obj = tryParseLine(ln);
+                            if (obj) parsed.push(obj);
+                        }
+
+                        if (parsed.length === 0) {
+                            resolveProbe({ success: false, error: "parse_error", stderr: String(stderr || "").slice(0, 4096) });
+                            return;
+                        }
+
+
+                        if (parsed.length === 1 && !parsed[0]._type && !parsed[0].entries) {
+                            const info = parsed[0];
+                            const formats = Array.isArray(info.formats) ? info.formats : [];
+                            let best = null;
+                            for (const f of formats) {
+                                if (!f) continue;
+                                const isVideo = String(f.vcodec || "").toLowerCase() !== "none";
+                                if (!isVideo) continue;
+                                if (!best) { best = f; continue; }
+                                const hA = Number(f.height || 0), hB = Number(best.height || 0);
+                                const tA = Number(f.tbr || 0), tB = Number(best.tbr || 0);
+                                if (hA > hB || (hA === hB && tA > tB)) best = f;
+                            }
+                            const width = best ? (best.width || null) : (info.width || null);
+                            const height = best ? (best.height || null) : (info.height || null);
+                            const resolution = width && height ? `${width}x${height}` : (info.resolution || null);
+                            const filesize = best ? (best.filesize || best.filesize_approx || null) : (info.filesize || info.filesize_approx || null);
+
+                            resolveProbe({
+                                success: true,
+                                title: info.title,
+                                duration: info.duration,
+                                thumbnail: info.thumbnail,
+                                uploader: info.uploader,
+                                filename: info._filename || info.filename,
+                                extractor: info.extractor,
+                                isLive: info.is_live,
+                                webpageUrl: info.webpage_url || info.url || url,
+                                id: info.id,
+                                url: info.url,
+                                width,
+                                height,
+                                resolution,
+                                filesize,
+
+                                cookieSource: extraArgs.includes("chrome") ? "chrome" :
+                                    extraArgs.includes("edge") ? "edge" :
+                                        extraArgs.includes("firefox") ? "firefox" : null
+                            });
+                            return;
+                        }
+
+
+                        const first = parsed[0];
+                        resolveProbe({
+                            success: true,
+                            isPlaylist: true,
+                            entriesCount: parsed.length,
+                            title: first.title || "Playlist",
+                            thumbnail: first.thumbnail,
+                            uploader: first.uploader,
+                            extractor: first.extractor,
+                            cookieSource: extraArgs.includes("chrome") ? "chrome" :
+                                extraArgs.includes("edge") ? "edge" :
+                                    extraArgs.includes("firefox") ? "firefox" : null,
+                            entries: parsed.slice(0, 50).map((e) => ({
+                                id: e.id,
+                                title: e.title || `Video ${e.id}`,
+                                duration: e.duration,
+                                thumbnail: e.thumbnail,
+                                uploader: e.uploader,
+                                url: e.webpage_url || e.url || e.original_url,
+                                filesize: e.filesize,
+                                filesize_approx: e.filesize_approx,
+                                width: e.width,
+                                height: e.height,
+                                resolution: e.resolution,
+                                original: e
+                            })),
+                        });
+                    });
+
+                    proc.on("error", (e) => resolveProbe({ success: false, error: e.message }));
+                });
             };
 
-            proc.stdout.on("data", (d) => {
-                stdout += d.toString("utf8");
-                killIfTooLarge();
-            });
-            proc.stderr.on("data", (d) => {
-                stderr += d.toString("utf8");
-                killIfTooLarge();
-            });
+            doProbe().then(res => {
 
-            proc.on("close", (code) => {
-                if (killedByLimit) {
-                    resolve({ success: false, error: "probe_output_too_large" });
-                    return;
-                }
 
-                if (code !== 0) {
-                    resolve({ success: false, error: "probe_failed", stderr: String(stderr || "").slice(0, 4096) });
-                    return;
-                }
-
-                const raw = String(stdout || "").trim();
-                if (!raw) {
-                    resolve({ success: false, error: "empty_output", stderr: String(stderr || "").slice(0, 4096) });
-                    return;
-                }
-
-                const lines = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-
-                const tryParseLine = (s) => {
-                    try { return JSON.parse(s); } catch { return null; }
-                };
-
-                if (lines.length === 1) {
-                    const info = tryParseLine(lines[0]);
-                    if (!info) {
-                        resolve({ success: false, error: "parse_error" });
-                        return;
+                // 成功但缺少关键信息时尝试使用浏览器 Cookie 进行深度解析
+                if (res.success) {
+                    const hasMeta = res.isPlaylist
+                        ? Array.isArray(res.entries) && res.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                        : (res.width || res.height || res.resolution || res.filesize || res.filesize_approx);
+                    if (!hasMeta) {
+                        return doProbe(["--cookies-from-browser", "chrome"]).then(res2 => {
+                            const res2Has = res2.success && (
+                                res2.isPlaylist
+                                    ? Array.isArray(res2.entries) && res2.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                                    : (res2.width || res2.height || res2.resolution || res2.filesize || res2.filesize_approx)
+                            );
+                            if (res2Has) return res2;
+                            return doProbe(["--cookies-from-browser", "edge"]).then(res3 => {
+                                const res3Has = res3.success && (
+                                    res3.isPlaylist
+                                        ? Array.isArray(res3.entries) && res3.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
+                                        : (res3.width || res3.height || res3.resolution || res3.filesize || res3.filesize_approx)
+                                );
+                                return res3Has ? res3 : res;
+                            });
+                        });
                     }
+                }
 
-                    resolve({
-                        success: true,
-                        title: info.title,
-                        duration: info.duration,
-                        thumbnail: info.thumbnail,
-                        uploader: info.uploader,
-                        filename: info._filename || info.filename,
-                        extractor: info.extractor,
-                        isLive: info.is_live,
-                        webpageUrl: info.webpage_url,
-                        id: info.id,
+                if (!res.success && (
+                    res.error?.includes("403") ||
+                    res.error?.includes("401") ||
+                    res.error?.includes("Unable to extract") ||
+                    res.error?.includes("Sign in") ||
+                    res.error?.includes("Unsupported URL")
+                )) {
+
+
+                    return doProbe(["--cookies-from-browser", "chrome"]).then(res2 => {
+                        if (res2.success) return res2;
+
+                        return doProbe(["--cookies-from-browser", "edge"]).then(res3 => {
+                            return res3.success ? res3 : res;
+                        });
                     });
-                    return;
                 }
-
-                const parsed = [];
-                for (const ln of lines) {
-                    const obj = tryParseLine(ln);
-                    if (obj) parsed.push(obj);
-                }
-                if (parsed.length === 0) {
-                    resolve({ success: false, error: "parse_error" });
-                    return;
-                }
-
-                const first = parsed[0];
-                resolve({
-                    success: true,
-                    isPlaylist: true,
-                    entriesCount: parsed.length,
-                    title: first.title,
-                    thumbnail: first.thumbnail,
-                    uploader: first.uploader,
-                    extractor: first.extractor,
-                    entries: parsed.slice(0, 20).map((e) => ({
-                        id: e.id,
-                        title: e.title,
-                        duration: e.duration,
-                        thumbnail: e.thumbnail,
-                        uploader: e.uploader,
-                        url: e.webpage_url || e.url,
-                    })),
-                });
-            });
-
-            proc.on("error", (e) => resolve({ success: false, error: e.message }));
+                return res;
+            }).then(resolve);
         });
     }
 
     async download(url, destPath, options = {}) {
-        if (!this.ytdlpPath) {
-            return { success: false, error: "yt-dlp_not_installed" };
+        if (!this.isAvailable()) {
+            return { success: false, error: "yt-dlp_not_installed_or_invalid" };
         }
 
         ensureDirForFile(destPath);
 
-        return new Promise((resolve) => {
-            const fmt =
-                options.format ||
-                "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
 
-            const args = [
-                "-o",
-                destPath,
-                "--no-warnings",
-                "--no-playlist",
-                "--merge-output-format",
-                "mp4",
-                "-f",
-                fmt,
-            ];
+        const referer = options.referer || url;
 
-            if (this.ffmpegPath) {
-                args.unshift("--ffmpeg-location", this.ffmpegPath);
+        const runDownload = (extraArgs = []) => {
+            return new Promise((resolve) => {
+                const fmt =
+                    options.format ||
+                    "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best";
+
+                const args = [
+                    "-o",
+                    destPath,
+                    "--no-warnings",
+                    "--no-playlist",
+                    "--force-ipv4", // 强制 IPv4
+                    "--merge-output-format",
+                    "mp4",
+                    "-f",
+                    fmt,
+                    "--no-mtime", // 不修改文件时间，避免某些文件系统操作延迟
+                    "--no-check-certificate",
+                    "--no-cache-dir",
+                    // 移除所有可能触发风控的 extractor-args
+                    // "--extractor-args", "youtubetab:skip=authcheck;youtube:player_skip=webpage,configs",
+                    "--referer", referer,
+                    ...extraArgs
+                ];
+
+                // 只有当明确传入 userAgent 时才设置，否则完全留空让 yt-dlp 自己处理
+                if (options.userAgent) {
+                    args.push("--user-agent", options.userAgent);
+                }
+
+
+                if (options.cookie) {
+                    args.push("--add-header", `Cookie:${options.cookie}`);
+                }
+
+
+                if (options.origin) {
+                    args.push("--add-header", `Origin:${options.origin}`);
+                }
+
+                if (this.ffmpegPath) {
+                    args.unshift("--ffmpeg-location", this.ffmpegPath);
+                }
+
+                if (options.rateLimit) {
+                    args.push("-r", String(options.rateLimit));
+                }
+
+                args.push(url);
+
+                const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
+
+                let stderr = "";
+
+                const onLine = (line) => {
+                    const str = String(line);
+                    // 解析 yt-dlp 进度输出:
+                    // 1. 标准格式: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
+                    const match = str.match(/\[download\]\s+(\d+(\.\d+)?)%\s+of\s+([~\d\.]+\w+)(?:\s+at\s+([\d\.]+\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
+
+                    if (match && options.onProgress) {
+                        const percent = parseFloat(match[1]);
+                        const totalSize = match[3];
+                        const speed = match[4] || "";
+                        const eta = match[5] || "";
+
+                        // 计算已下载大小 (粗略估算)
+                        let currentSize = "";
+                        try {
+                            const sizeMatch = totalSize.match(/([\d\.]+)(\w+)/);
+                            if (sizeMatch) {
+                                const val = parseFloat(sizeMatch[1]);
+                                const unit = sizeMatch[2];
+                                const cur = (val * percent / 100).toFixed(2);
+                                currentSize = `${cur}${unit}`;
+                            }
+                        } catch (e) { }
+
+                        options.onProgress({
+                            percent,
+                            totalSize,
+                            currentSize, // 新增：已下载大小
+                            speed,
+                            eta,
+                            raw: str.trim()
+                        });
+                    } else if (options.onProgress) {
+                        // 2. Fragment 格式: [download] Downloading video fragment 10 of 150
+                        const matchFrag = str.match(/Downloading video fragment\s+(\d+)\s+of\s+(\d+)/);
+                        if (matchFrag) {
+                            const currentFrag = parseInt(matchFrag[1]);
+                            const totalFrag = parseInt(matchFrag[2]);
+                            const percent = (currentFrag / totalFrag * 100).toFixed(1);
+                            // 估算：假设每个 Fragment 2MB (HLS 常见大小)
+                            const estimatedSize = (currentFrag * 2).toFixed(2) + "MiB";
+
+                            options.onProgress({
+                                percent: parseFloat(percent),
+                                currentSize: estimatedSize, // 估算值，用于兜底
+                                raw: str.trim()
+                            });
+                        }
+                        // 3. 纯字节格式: [download] 123456 bytes (0%)
+                        // 或者是 [download] 10.00MiB at 2.00MiB/s (没有总大小)
+                        else {
+                            const matchSize = str.match(/\[download\]\s+([\d\.]+\w+)\s+at/);
+                            if (matchSize) {
+                                options.onProgress({
+                                    currentSize: matchSize[1],
+                                    raw: str.trim()
+                                });
+                            }
+                        }
+                    }
+                };
+
+                proc.stdout.on("data", (d) => onLine(d.toString()));
+                proc.stderr.on("data", (d) => {
+                    const s = d.toString();
+                    stderr += s;
+                    onLine(s);
+                });
+
+                proc.on("close", (code) => {
+                    if (code === 0) {
+                        resolve({ success: true, path: destPath });
+                    } else {
+
+                        let errorMsg = `exit_code_${code}`;
+                        const stderrStr = String(stderr || "").trim();
+                        if (stderrStr) {
+                            const errorMatch = stderrStr.match(/ERROR:\s*(.*)/);
+                            if (errorMatch && errorMatch[1]) {
+                                errorMsg = errorMatch[1].trim();
+                            } else {
+
+                                const lines = stderrStr.split('\n').map(l => l.trim()).filter(Boolean);
+
+                                const errLines = lines.filter(l => !l.startsWith('[download]') && !l.match(/^\d+%|ETA/));
+                                if (errLines.length > 0) {
+                                    errorMsg = errLines.slice(-1)[0];
+                                }
+                            }
+                        }
+                        resolve({ success: false, error: errorMsg, code });
+                    }
+                });
+
+                proc.on("error", (e) => resolve({ success: false, error: e.message }));
+            });
+        };
+
+
+        if (options.cookieSource || options.browserProfilePath || options.cookiesFilePath) {
+            const cs = (options.cookieSource || '').toLowerCase();
+
+            if (options.cookiesFilePath) {
+                return await runDownload(["--cookies", options.cookiesFilePath]);
             }
 
-            if (options.rateLimit) {
-                args.push("-r", String(options.rateLimit)); // e.g. "2M"
+            if (options.browserProfilePath) {
+
+                return await runDownload(["--cookies-from-browser", `chrome:${options.browserProfilePath}`]);
             }
 
-            args.push(url);
+            if (cs === 'chrome' || cs === 'edge' || cs === 'firefox') {
+                return await runDownload(["--cookies-from-browser", cs]);
+            }
+        }
 
-            const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
 
-            const onLine = (line) => {
-                const m = String(line).match(/(\d+(\.\d+)?)%/);
-                if (m && options.onProgress) options.onProgress(parseFloat(m[1]));
-            };
+        let res = await runDownload();
 
-            proc.stdout.on("data", (d) => onLine(d.toString()));
-            proc.stderr.on("data", (d) => onLine(d.toString()));
 
-            proc.on("close", (code) => {
-                if (code === 0) resolve({ success: true, path: destPath });
-                else resolve({ success: false, error: `exit_code_${code}` });
+        if (!res.success && !options.cookie && (
+            res.error?.includes("403") ||
+            res.error?.includes("401") ||
+            res.error?.includes("Unable to extract") ||
+            res.error?.includes("Sign in") ||
+            res.error?.includes("exit_code")
+        )) {
+
+            const resChrome = await runDownload(["--cookies-from-browser", "chrome"]);
+            if (resChrome.success) return resChrome;
+
+
+            const resEdge = await runDownload(["--cookies-from-browser", "edge"]);
+            if (resEdge.success) return resEdge;
+
+
+            const resFirefox = await runDownload(["--cookies-from-browser", "firefox"]);
+            if (resFirefox.success) return resFirefox;
+        }
+
+        return res;
+    }
+
+    setBinaryPath(path) {
+        this.ytdlpPath = path;
+    }
+
+    /**
+     * 尝试从全局存储路径加载 yt-dlp
+     */
+    trySetFromGlobalStorage(context) {
+        try {
+            if (!context || !context.globalStorageUri) return false;
+
+            const os = require('os');
+            const path = require('path');
+            const fs = require('fs');
+
+            const platform = os.platform();
+            const binaryName = platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+            const installDir = context.globalStorageUri.fsPath;
+            const installPath = path.join(installDir, binaryName);
+
+            if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+                this.ytdlpPath = installPath;
+                return true;
+            }
+        } catch { }
+        return false;
+    }
+
+    /**
+     * 自动下载安装yt-dlp
+     */
+    async autoInstall(context) {
+        try {
+            const os = require('os');
+            const fs = require('fs');
+            const path = require('path');
+            const https = require('https');
+
+            const platform = os.platform();
+            const arch = os.arch();
+
+
+            let downloadUrl;
+            let binaryName;
+
+            if (platform === 'win32') {
+
+                binaryName = 'yt-dlp.exe';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+            } else if (platform === 'darwin') {
+
+                binaryName = 'yt-dlp';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+            } else {
+
+                binaryName = 'yt-dlp';
+                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+            }
+
+
+            const installDir = context.globalStorageUri.fsPath;
+            const installPath = path.join(installDir, binaryName);
+
+
+            if (!fs.existsSync(installDir)) {
+                fs.mkdirSync(installDir, { recursive: true });
+            }
+
+
+            if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+                this.ytdlpPath = installPath;
+                return { success: true, path: installPath };
+            }
+
+
+            await new Promise((resolve, reject) => {
+                const downloadFile = (url, redirectCount = 0) => {
+                    if (redirectCount > 5) {
+                        reject(new Error('Too many redirects'));
+                        return;
+                    }
+
+                    const urlObj = new URL(url);
+                    const options = {
+                        hostname: urlObj.hostname,
+                        path: urlObj.pathname + urlObj.search,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                            'Accept': '*/*',
+                            'Accept-Encoding': 'identity',
+                            'Connection': 'keep-alive'
+                        },
+                        timeout: 30000
+                    };
+
+                    const req = https.get(options, (res) => {
+                        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308) {
+                            const location = res.headers.location;
+                            if (location) {
+
+                                const nextUrl = new URL(location, url).href;
+                                downloadFile(nextUrl, redirectCount + 1);
+                            } else {
+                                reject(new Error(`Redirect without location header (status: ${res.statusCode})`));
+                            }
+
+                            res.resume();
+                            return;
+                        }
+
+                        if (res.statusCode === 200) {
+                            const file = fs.createWriteStream(installPath);
+                            res.pipe(file);
+
+                            file.on('finish', () => {
+                                file.close(() => {
+
+                                    try {
+                                        const stats = fs.statSync(installPath);
+                                        if (stats.size > 0) {
+                                            resolve();
+                                        } else {
+                                            fs.unlinkSync(installPath);
+                                            reject(new Error('Downloaded file is empty'));
+                                        }
+                                    } catch (e) {
+                                        reject(e);
+                                    }
+                                });
+                            });
+
+                            file.on('error', (err) => {
+                                fs.unlink(installPath, () => { });
+                                reject(err);
+                            });
+                        } else {
+                            res.resume();
+                            reject(new Error(`Download failed with status code: ${res.statusCode}`));
+                        }
+                    });
+
+                    req.on('error', (err) => {
+                        reject(err);
+                    });
+
+                    req.on('timeout', () => {
+                        req.destroy();
+                        reject(new Error('Download timeout'));
+                    });
+                };
+
+                downloadFile(downloadUrl);
             });
 
-            proc.on("error", (e) => resolve({ success: false, error: e.message }));
-        });
+
+            if (platform !== 'win32') {
+                fs.chmodSync(installPath, '755');
+            }
+
+
+            this.ytdlpPath = installPath;
+            return { success: true, path: installPath };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 9) UnifiedMediaDownloader：对外极简接口 + 最佳默认策略
- * ────────────────────────────────────────────────────────────── */
 class UnifiedMediaDownloader {
     constructor(options = {}) {
-        // 档位与安全开关覆写
+
         const securityLevel = options.securityLevel ?? 1;
         const securityOverrides = options.securityOverrides || null;
 
@@ -2113,11 +2460,11 @@ class UnifiedMediaDownloader {
             maxBytesImage: options.maxBytesImage ?? 20 * 1024 * 1024,
             maxBytesDirectVideo: options.maxBytesDirectVideo ?? 200 * 1024 * 1024,
 
-            // 安全档位
+
             securityLevel,
             securityOverrides,
 
-            // baseDir（给 normalizeTasks 或外部约束）
+
             baseDir: options.baseDir || null,
 
             ...options,
@@ -2129,6 +2476,14 @@ class UnifiedMediaDownloader {
      */
     async probe(url) {
         return await this.ytdlp.probe(url);
+    }
+
+    async cancelAll() {
+        try {
+            if (this.http && typeof this.http.cancelAll === 'function') {
+                this.http.cancelAll();
+            }
+        } catch (e) { }
     }
 
     async downloadAll(input, targetDir, opts = {}) {
@@ -2196,6 +2551,13 @@ class UnifiedMediaDownloader {
                 const r = await this.ytdlp.download(t.url, t.destPath, {
                     rateLimit: opts.videoRateLimit,
                     format: opts.videoFormat,
+
+                    cookieSource: t.meta?.cookieSource,
+                    referer: t.meta?.referer,
+                    cookie: t.meta?.cookie,
+                    origin: t.meta?.origin,
+                    browserProfilePath: t.meta?.browserProfilePath,
+                    userAgent: t.meta?.userAgent,
                     onProgress: (p) => onProgress && onProgress(t, { type: "progress", protocol: "yt-dlp", progress: p }),
                 });
 
@@ -2297,11 +2659,177 @@ class UnifiedMediaDownloader {
 
         return stats;
     }
+
+    async ensureYtdlpReady(context) {
+
+        if (context && this.ytdlp.trySetFromGlobalStorage(context)) {
+            if (this.ytdlp.isAvailable()) return true;
+        }
+
+        if (!this.ytdlp.isAvailable()) {
+            if (!vscode) return false;
+            const installConfirmed = await vscode.window.showInformationMessage(
+                "yt-dlp 未安装，是否自动下载安装？",
+                { modal: true },
+                "是",
+                "否"
+            );
+
+            if (installConfirmed === "是") {
+                return await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: "正在安装 yt-dlp...",
+                    cancellable: false
+                }, async (progress) => {
+                    progress.report({ message: "正在下载...", increment: 10 });
+                    const res = await this.ytdlp.autoInstall(context);
+                    if (res.success) {
+                        vscode.window.showInformationMessage("yt-dlp 安装成功");
+                        return true;
+                    } else {
+                        vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                        return false;
+                    }
+                });
+            } else {
+                vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    async probeAndSelect(url, progress) {
+        if (progress) progress.report({ message: "正在探测视频资源...", increment: 10 });
+
+        let probeResult = null;
+        let probeError = null;
+        try {
+            probeResult = await this.ytdlp.probe(url);
+        } catch (error) {
+            probeError = error;
+        }
+
+        if (!probeResult || !probeResult.success) {
+            if (progress) progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
+            try {
+                const h = require('./h');
+                const videoUrls = await h.extractVideoUrlsFromWebPage(url);
+                if (videoUrls && videoUrls.length > 0) {
+                    probeResult = {
+                        success: true,
+                        isPlaylist: videoUrls.length > 1,
+                        entries: videoUrls.map((videoUrl, index) => ({
+                            id: `direct_video_${index}`,
+                            title: `直接视频链接 ${index + 1}`,
+                            url: videoUrl,
+                            webpageUrl: url
+                        }))
+                    };
+                    if (videoUrls.length === 1) {
+                        probeResult.title = '直接视频链接';
+                        probeResult.url = videoUrls[0];
+                    } else {
+                        probeResult.entriesCount = videoUrls.length;
+                    }
+                } else {
+                    if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
+                    probeResult = await this.ytdlp.probe(url);
+                    if (!probeResult || !probeResult.success) {
+                        if (vscode) vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`);
+                        return null;
+                    }
+                }
+            } catch (webError) {
+                if (vscode) vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
+                return null;
+            }
+        }
+
+        if (progress) progress.report({ message: "发现视频资源，准备选择...", increment: 30 });
+
+        let videosToDownload = [];
+
+        if (probeResult.isPlaylist) {
+            if (!vscode) return null;
+            const items = probeResult.entries.map((entry, index) => ({
+                label: entry.title || `视频 ${index + 1}`,
+                description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
+                detail: entry.url,
+                video: entry
+            }));
+
+            const selectedItems = await vscode.window.showQuickPick(items, {
+                canPickMany: true,
+                placeHolder: "选择要下载的视频",
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+
+            if (!selectedItems || selectedItems.length === 0) {
+                return null;
+            }
+            videosToDownload = selectedItems.map(item => item.video);
+        } else {
+            videosToDownload = [probeResult.entries ? probeResult.entries[0] : probeResult];
+        }
+
+        return videosToDownload;
+    }
+
+    async downloadVideos(videos, targetDir, progress) {
+        if (!videos || videos.length === 0) return;
+        if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 });
+
+        const h = require('./h');
+
+        const downloadTasks = videos.map(video => {
+            const filename = h.getTimestampFilename('.mp4');
+            const destPath = require('path').join(targetDir, filename);
+            return {
+                url: video.url,
+                destPath: destPath,
+                tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
+                title: video.title || '网页视频',
+
+
+                meta: video._meta || video.meta
+            };
+        });
+
+        const downloadResult = await this.downloadAll(downloadTasks, targetDir, {
+            downloadVideos: "all",
+            onProgress: (task, event) => {
+                if (progress) {
+                    if (event.type === "progress") {
+                        progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
+                    } else if (event.type === "done") {
+                        progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
+                    }
+                }
+            }
+        });
+
+        const successfulDownloads = downloadResult.results.filter(r => r.success);
+        const failedDownloads = downloadResult.results.filter(r => !r.success);
+
+        if (vscode) {
+            if (successfulDownloads.length > 0) {
+                vscode.window.showInformationMessage(
+                    `成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
+                );
+            } else if (failedDownloads.length > 0) {
+                vscode.window.showErrorMessage(
+                    `所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
+                );
+            }
+        }
+
+        if (progress) progress.report({ increment: 100 });
+        return downloadResult;
+    }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 10) 状态回写辅助函数（Mutation Helper）
- * ────────────────────────────────────────────────────────────── */
 function applyResultsToItems(items, results, idKey = "id") {
     const resultMap = new Map(results.map((r) => [r.tag || r.url, r]));
 
@@ -2322,9 +2850,6 @@ function applyResultsToItems(items, results, idKey = "id") {
     }
 }
 
-/* ──────────────────────────────────────────────────────────────
- * 11) 单例/工厂模式（共享 H2 连接复用）
- * ────────────────────────────────────────────────────────────── */
 let globalInstance = null;
 
 function getSharedDownloader(options = {}) {
@@ -2334,26 +2859,23 @@ function getSharedDownloader(options = {}) {
     return globalInstance;
 }
 
-/* ──────────────────────────────────────────────────────────────
- * exports
- * ────────────────────────────────────────────────────────────── */
 module.exports = {
     UnifiedMediaDownloader,
     SmartHttpDownloader,
     YtDlpDownloader,
 
-    // 工具
+
     runPool,
     findExecutableInPath,
     isPlatformOrSegmentVideo,
     isBlobUrl,
     generateFilename,
 
-    // 新增导出
+
     applyResultsToItems,
     getSharedDownloader,
 
-    // 安全档位/开关工具
+
     resolveSecurityProfile,
     mergeSecurityOptions,
 };

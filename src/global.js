@@ -5,6 +5,8 @@ const path = require("path");
 const cp = require("child_process");
 const readline = require("readline");
 
+const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
+
 // ============================================================================
 // ★ Daemon Bridge (从 qqq.js 迁移)
 // ============================================================================
@@ -429,6 +431,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
 						windowsHide: true,
+						env: NO_TRACK_ENV
 					});
 				} catch (e) {
 					const msg = `spawn_fail(${bin}): ${e.message}`;
@@ -620,9 +623,23 @@ function Process-Command {
         if ($files) { foreach ($f in $files) { $result.files += $f } }
       }
       'saveImage' {
-        $img = [System.Windows.Forms.Clipboard]::GetImage()
-        if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
-        else { $result.success = $false }
+        try {
+            $res = [ClipboardHelper]::SaveClipboardImage($cmd.path)
+            if ($res -ne $null -and $res.StartsWith("{")) {
+                $p = $res | ConvertFrom-Json
+                if ($p.error) { $result.success = $false; $result.error = $p.error }
+                else { $result.success = $true }
+            } else {
+                # Fallback to pure PS
+                $img = [System.Windows.Forms.Clipboard]::GetImage()
+                if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
+                else { $result.success = $false }
+            }
+        } catch {
+             $img = [System.Windows.Forms.Clipboard]::GetImage()
+             if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
+             else { $result.success = $false }
+        }
       }
       'getHtml' {
         $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
@@ -699,20 +716,19 @@ while ($true) {
 				}
 
 				if (!proc) {
-					bridge._setStartError(`spawn_fail: ${lastError?.message || "无法启动任何PowerShell进程"}`);
 					throw lastError || new Error("无法启动任何PowerShell进程");
 				}
 
 				proc.on("error", (err) => {
 					bridge._setStartError(`process_error: ${err.message}`);
-					logMessage(`PowerShell 进程错误: ${err.message}`, "ERROR");
+					logMessage(`PowerShell 进程错误: ${err.message} `, "ERROR");
 				});
 				proc.on("exit", (code, signal) => {
-					logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal}`, "INFO");
+					logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal} `, "INFO");
 				});
 			} catch (e) {
-				bridge._setStartError(`create_fail: ${e.message}`);
-				logMessage(`PowerShell 进程创建失败: ${e.message}`, "ERROR");
+				bridge._setStartError(`create_fail: ${e.message} `);
+				logMessage(`PowerShell 进程创建失败: ${e.message} `, "ERROR");
 				bridge.available = false;
 				resolve(false);
 				return;
@@ -721,51 +737,54 @@ while ($true) {
 			const nodeBin = process.execPath.replace(/"/g, '\\"');
 			const bashScript = platform === "darwin"
 				? `
-NODE_BIN="${nodeBin}"
-json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+			NODE_BIN = "${nodeBin}"
+			json_get() { echo "$1" | "$NODE_BIN" - e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2 > /dev/null; }
 
-while IFS= read -r line; do
-  action=$(json_get "$line" "action")
-  id=$(json_get "$line" "_id")
+			while IFS = read - r line; do
+				action = $(json_get "$line" "action")
+  id = $(json_get "$line" "_id")
   case "$action" in
-    ping) echo '{"_id":'"$id"',"status":"alive"}' ;;
-    hasImage) if command -v pngpaste >/dev/null 2>&1 && pngpaste - >/dev/null 2>&1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+	ping) echo '{"_id":'"$id"',"status":"alive"}';;
+    hasImage) if command - v pngpaste > /dev/null 2 >& 1 && pngpaste - > /dev/null 2 >& 1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
     saveImage)
-      dest=$(json_get "$line" "path")
-      if command -v pngpaste >/dev/null 2>&1 && pngpaste "$dest" 2>/dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi ;;
-    *) echo '{"_id":'"$id"',"error":"unknown action"}' ;;
-  esac
+dest = $(json_get "$line" "path")
+if command - v pngpaste > /dev/null 2 >& 1 && pngpaste "$dest" 2 > /dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+    *) echo '{"_id":'"$id"',"error":"unknown action"}';;
+esac
 done
-`.trim()
+	`.trim()
 				: `
-NODE_BIN="${nodeBin}"
-json_get() { echo "$1" | "$NODE_BIN" -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2>/dev/null; }
+NODE_BIN = "${nodeBin}"
+json_get() { echo "$1" | "$NODE_BIN" - e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s);process.stdout.write(String((j[process.argv[1]]??"")))}catch(e){}});' "$2" 2 > /dev/null; }
 
-while IFS= read -r line; do
-  action=$(json_get "$line" "action")
-  id=$(json_get "$line" "_id")
+while IFS = read - r line; do
+	action = $(json_get "$line" "action")
+  id = $(json_get "$line" "_id")
   case "$action" in
-    ping) echo '{"_id":'"$id"',"status":"alive"}' ;;
-    hasImage) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
-    hasHtml) if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi ;;
+	ping) echo '{"_id":'"$id"',"status":"alive"}';;
+    hasImage) if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t TARGETS - o 2 > /dev/null | grep - q "image/png"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasHtml) if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t TARGETS - o 2 > /dev/null | grep - q "text/html"; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
     getHtml)
-      content=$(xclip -selection clipboard -o -t text/html 2>/dev/null | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
-      echo '{"_id":'"$id"',"value":'$content'}' ;;
+content = $(xclip - selection clipboard - o - t text / html 2 > /dev/null | python3 - c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+      echo '{"_id":'"$id"',"value":'$content'}';;
     saveImage)
-      dest=$(json_get "$line" "path")
-      if command -v xclip >/dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi ;;
-    *) echo '{"_id":'"$id"',"error":"unknown action"}' ;;
-  esac
+dest = $(json_get "$line" "path")
+if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t image / png - o > "$dest" 2 > /dev/null && [-s "$dest"]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+    *) echo '{"_id":'"$id"',"error":"unknown action"}';;
+esac
 done
 `.trim();
 
 			logMessage("尝试启动 Bash 进程", "DEBUG");
 			try {
-				proc = cp.spawn("bash", ["-c", bashScript], { stdio: ["pipe", "pipe", "pipe"] });
+				proc = cp.spawn("bash", ["-c", bashScript], {
+					stdio: ["pipe", "pipe", "pipe"],
+					env: NO_TRACK_ENV
+				});
 				logMessage("Bash 进程已创建", "DEBUG");
 			} catch (e) {
-				bridge._setStartError(`spawn_fail(bash): ${e.message}`);
-				logMessage(`Bash 进程创建失败: ${e.message}`, "ERROR");
+				bridge._setStartError(`spawn_fail(bash): ${e.message} `);
+				logMessage(`Bash 进程创建失败: ${e.message} `, "ERROR");
 				bridge.available = false;
 				resolve(false);
 				return;
@@ -779,7 +798,7 @@ done
 		}
 
 		bridge.setupProcess(proc, (ok) => {
-			if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+			if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"} `, "WARN");
 			resolve(ok);
 		});
 	});
@@ -794,7 +813,7 @@ function updateStatusBarNow() {
 function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
 	const pref = getEnginePreference();
-	logMessage(`开始启动守护进程，用户选择的引擎: ${pref}`, "INFO");
+	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
 
 	const ensureStarted = async (bridge) => {
 		if (bootSeq !== _daemonBootSeq) return false;
@@ -810,11 +829,11 @@ function startDaemons() {
 			if (ok) {
 				logMessage(`${bridge.name} Bridge OK`, "INFO");
 			} else {
-				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`, "WARN");
+				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"} `, "WARN");
 			}
 			return !!ok;
 		} catch (e) {
-			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e}`, "WARN");
+			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e} `, "WARN");
 			return false;
 		} finally {
 			updateStatusBarNow();
@@ -851,7 +870,7 @@ function startDaemons() {
 			updateStatusBarNow();
 		}
 	})().catch((e) => {
-		logMessage(`startDaemons 流程异常: ${e?.message || e}`, "WARN");
+		logMessage(`startDaemons 流程异常: ${e?.message || e} `, "WARN");
 		updateStatusBarNow();
 	});
 }
@@ -892,7 +911,7 @@ function logMessageRateLimited(key, message, level = "WARN", intervalMs = 5 * 60
 
 function bridgeStderrKey(name, text) {
 	const head = String(text || "").replace(/\s+/g, " ").slice(0, 120);
-	return `bridge:${name}:${head}`;
+	return `bridge:${name}:${head} `;
 }
 
 function rotateLogIfNeeded() {
@@ -903,7 +922,7 @@ function rotateLogIfNeeded() {
 		if (fs.existsSync(LOG_PATH)) {
 			const stats = fs.statSync(LOG_PATH);
 			if (stats.size >= maxLogSize) {
-				const oldLogPath = `${LOG_PATH}.1`;
+				const oldLogPath = `${LOG_PATH} .1`;
 				if (fs.existsSync(oldLogPath)) {
 					fs.unlinkSync(oldLogPath);
 				}
@@ -917,7 +936,7 @@ function rotateLogIfNeeded() {
 
 function logMessage(message, level = "INFO") {
 	const ts = new Date().toISOString();
-	const line = `[${ts}] [${level}] ${message}`;
+	const line = `[${ts}][${level}] ${message} `;
 	outputChannel.appendLine(line);
 
 	if ((level === "ERROR" || level === "WARN") && LOG_PATH) {
@@ -938,7 +957,7 @@ function logQ(ms) {
 	try {
 		// q.log 与 err.log 同级
 		const qLogPath = path.join(path.dirname(LOG_PATH), "q.log");
-		const line = `${ms}`; // 纯数字，每行一个
+		const line = `${ms} `; // 纯数字，每行一个
 		fs.appendFileSync(qLogPath, line + "\n");
 	} catch (e) { }
 }
@@ -1006,7 +1025,9 @@ const DEFAULT_CONFIG = {
 	"ioEngine": "auto",
 	"pythonPath": "",
 	"downloadSecurityLevel": "1: 平衡",
-	"enhancedHtmlPasteCompatibility": false
+	"enhancedHtmlPasteCompatibility": false,
+	"docExportImageResolution": "原始分辨率",
+	"docExportIncludeCipher": true
 };
 
 const CONFIG_METADATA = {
@@ -1034,7 +1055,13 @@ const CONFIG_METADATA = {
 		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
 		descriptions: []
 	},
-	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
+	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" },
+	"docExportImageResolution": {
+		name: "导出图片分辨率", type: "enum",
+		options: ["原始分辨率", "相框分辨率"],
+		descriptions: []
+	},
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }
 };
 
 let _configChangeCallback = null;
@@ -1044,7 +1071,7 @@ const ConfigManager = {
 		// ★ Dual-Layer Strategy:
 		// 1. Try to get from globalState (DB)
 		if (extensionContext) {
-			const val = extensionContext.globalState.get(`cfg_${key}`);
+			const val = extensionContext.globalState.get(`cfg_${key} `);
 			if (val !== undefined) return val;
 		}
 
@@ -1063,7 +1090,7 @@ const ConfigManager = {
 
 	async set(key, value) {
 		if (!extensionContext) return;
-		await extensionContext.globalState.update(`cfg_${key}`, value);
+		await extensionContext.globalState.update(`cfg_${key} `, value);
 		if (_configChangeCallback) _configChangeCallback(key, value);
 	},
 
@@ -1208,7 +1235,7 @@ function formatBytes(size) {
 		val /= 1024;
 		idx++;
 	}
-	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]}`;
+	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]} `;
 }
 
 function formatHours(totalSeconds) {
@@ -1262,27 +1289,27 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 	const shReason = cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
 
 	if (activeState.code === "N" && activeState.nodeMode === "S") {
-		if (shReason) reasons.push(`Shell daemon：${shReason}`);
-		else reasons.push(`Shell daemon：启动失败/不可用`);
+		if (shReason) reasons.push(`Shell daemon：${shReason} `);
+		else reasons.push(`Shell daemon：启动失败 / 不可用`);
 	}
 
 	if (pref === "python" && activeState.code !== "P") {
-		if (pyReason) reasons.unshift(`Python：${pyReason}`);
-		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败/不可用`); // 只有当真的不可用时才报
+		if (pyReason) reasons.unshift(`Python：${pyReason} `);
+		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真的不可用时才报
 
 		// Rust 只有在真的被尝试过且失败时才报
 		if (activeState.code === "N" && rustBridge.lastStartError) {
-			if (rsReason) reasons.push(`Rust：${rsReason}`);
-			else reasons.push(`Rust：启动失败/不可用`);
+			if (rsReason) reasons.push(`Rust：${rsReason} `);
+			else reasons.push(`Rust：启动失败 / 不可用`);
 		}
 	}
 
 	if (pref === "rust" && activeState.code !== "R") {
-		if (rsReason) reasons.unshift(`Rust：${rsReason}`);
-		else reasons.unshift(`Rust：启动失败/不可用`);
+		if (rsReason) reasons.unshift(`Rust：${rsReason} `);
+		else reasons.unshift(`Rust：启动失败 / 不可用`);
 		if (activeState.code === "N") {
-			if (pyReason) reasons.push(`Python：${pyReason}`);
-			else reasons.push(`Python：启动失败/不可用`);
+			if (pyReason) reasons.push(`Python：${pyReason} `);
+			else reasons.push(`Python：启动失败 / 不可用`);
 		}
 	}
 
@@ -1376,10 +1403,10 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	// 根据引擎类型选择不同的边框符号
 	if (active.code === "P" || active.code === "R") {
 		// 使用 ▌ 符号（适用于 P 和 R 引擎）
-		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%      ${engineTag}   ▌`;
+		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}% ${engineTag}   ▌`;
 	} else {
 		// 使用 ▪ 符号（适用于其他引擎）
-		statusBarItem.text = ` ▪ qqq: ⧖ ${h}h  ▥ ${cacheMB.toFixed(0)}m  ⊙ ${hitRate.toFixed(0)}%  ⚡ ${engineTag} ▪ `;
+		statusBarItem.text = ` ▪ qqq: ⧖ ${h} h  ▥ ${cacheMB.toFixed(0)} m  ⊙ ${hitRate.toFixed(0)}%  ⚡ ${engineTag} ▪ `;
 	}
 
 	const mismatchReasons = collectMismatchReasons(pref, active, pythonBridge, rustBridge, shellBridge);
@@ -1387,19 +1414,19 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	if ((pref === "python" && active.code !== "P") || (pref === "rust" && active.code !== "R")) {
 		const expectedName = pref === "python" ? "Python" : "Rust";
 		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : "未知原因";
-		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr}`;
+		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `;
 	}
 
-	const ioLine = `**IO 引擎：** ${active.name}${mismatchText}`;
+	const ioLine = `** IO 引擎：** ${active.name}${mismatchText} `;
 
 	const tooltip = new vscode.MarkdownString(
 		[
-			`<div style="background:#fff !important; color:#000 !important; padding:8px; border-radius:4px; border:1px solid #ddd;">`,
-			`**累计使用时间：** ${formatHours(totalSeconds)}`,
-			`**磁盘缓存：** ${formatBytes(cacheBytes)}`,
-			`**缓存命中率：** ${hitRate.toFixed(2)}%  (hit=${pstats.hitTotal}, miss=${pstats.missTotal})`,
+			`< div style = "background:#fff !important; color:#000 !important; padding:8px; border-radius:4px; border:1px solid #ddd;" > `,
+			`** 累计使用时间：** ${formatHours(totalSeconds)} `,
+			`** 磁盘缓存：** ${formatBytes(cacheBytes)} `,
+			`** 缓存命中率：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})`,
 			ioLine,
-			`</div>`,
+			`</div > `,
 		].join("\n\n")
 	);
 	tooltip.isTrusted = true;
