@@ -7,15 +7,6 @@ const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
 
-/**
- * ✅ 进程追踪 + 真取消：不改 dow 模块，也能在用户点“取消”时杀掉 yt-dlp/ffmpeg 等子进程
- * ✅ 推荐：ALS 作用域隔离（彻底不误伤其它扩展）
- *    - 全局只 patch 一次 child_process
- *    - 只有在 runWithTracker(...) 作用域里启动的子进程才会：
- *        * 被 track
- *        * 被强制 detached:false
- *    - 不修改原 options 对象（只做浅拷贝替换）
- */
 class ChildProcessTracker {
     constructor() {
         this._procs = new Set();
