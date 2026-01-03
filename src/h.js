@@ -1127,6 +1127,11 @@ function _buildBlocksFromSanitizedDom($, baseUrl) {
     const blocks = [];
     let textBuf = "";
     const BLOCK_TAGS = new Set(["p", "div", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote"]);
+
+    function resolve(src) {
+        try { return baseUrl ? new URL(src, baseUrl).href : src; } catch { return src; }
+    }
+
     function flush() {
         if (!textBuf.trim()) { textBuf = ""; return; }
         const lines = textBuf.replace(/\r/g, "").split("\n");
@@ -1140,8 +1145,30 @@ function _buildBlocksFromSanitizedDom($, baseUrl) {
             if (tag === "br") { textBuf += "\n"; return; }
             if (tag === "img") {
                 flush();
-                const src = $(node).attr("src") || $(node).attr("data-src");
+                const rawSrc = $(node).attr("src") || $(node).attr("data-src");
+                const src = resolve(rawSrc);
                 if (src) blocks.push({ type: "media", kind: "image", src, status: "pending" });
+                return;
+            }
+            if (tag === "video") {
+                flush();
+                let rawSrc = $(node).attr("src") || $(node).attr("data-src");
+                if (!rawSrc) {
+                    const sources = $(node).find("source");
+                    for (let i = 0; i < sources.length; i++) {
+                        rawSrc = $(sources[i]).attr("src");
+                        if (rawSrc) break;
+                    }
+                }
+                const src = resolve(rawSrc);
+                if (src) blocks.push({ type: "media", kind: "video", src, status: "pending" });
+                return;
+            }
+            if (tag === "iframe" || tag === "embed") {
+                flush();
+                const rawSrc = $(node).attr("src");
+                const src = resolve(rawSrc);
+                if (src) blocks.push({ type: "media", kind: "video", src, status: "pending" });
                 return;
             }
             const isBlock = BLOCK_TAGS.has(tag);
@@ -1157,17 +1184,39 @@ function _buildBlocksFromSanitizedDom($, baseUrl) {
     return blocks;
 }
 
-async function _zipDomWithCleanText($, cleanText) {
+async function _zipDomWithCleanText($, cleanText, baseUrl) {
     const blocks = [];
     const flatNodes = [];
+
+    function resolve(src) {
+        try { return baseUrl ? new URL(src, baseUrl).href : src; } catch { return src; }
+    }
+
     function structuralWalk(node) {
         if (node.type === "text") {
             const t = $(node).text();
             if (t.length > 0) flatNodes.push({ type: "text", content: t });
         } else if (node.type === "tag") {
             if (node.name === "img") {
-                const src = $(node).attr("src") || $(node).attr("data-src");
+                const rawSrc = $(node).attr("src") || $(node).attr("data-src");
+                const src = resolve(rawSrc);
                 if (src) flatNodes.push({ type: "media", kind: "image", src, status: "pending" });
+            } else if (node.name === "video") {
+                let rawSrc = $(node).attr("src") || $(node).attr("data-src");
+                if (!rawSrc && node.children) {
+                    for (const c of node.children) {
+                        if (c.type === "tag" && c.name === "source") {
+                            rawSrc = $(c).attr("src");
+                            if (rawSrc) break;
+                        }
+                    }
+                }
+                const src = resolve(rawSrc);
+                if (src) flatNodes.push({ type: "media", kind: "video", src, status: "pending" });
+            } else if (node.name === "iframe" || node.name === "embed") {
+                const rawSrc = $(node).attr("src");
+                const src = resolve(rawSrc);
+                if (src) flatNodes.push({ type: "media", kind: "video", src, status: "pending" });
             } else { (node.children || []).forEach(structuralWalk); }
         }
     }
@@ -1319,6 +1368,52 @@ async function _zipDomWithCleanText($, cleanText) {
     return blocks;
 }
 
+async function verifyVideoFile(filePath) {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    let ffmpeg = 'ffmpeg';
+    try {
+        const d = getSharedDownloader();
+        if (d && d.ytdlp && d.ytdlp.ffmpegPath) ffmpeg = d.ytdlp.ffmpegPath;
+    } catch (e) { }
+
+    return new Promise((resolve) => {
+        const proc = cp.spawn(ffmpeg, ['-i', filePath]);
+        let stderr = '';
+        proc.stderr.on('data', d => stderr += d.toString());
+        const cleanup = () => { try { proc.kill(); } catch (e) { } };
+        const timer = setTimeout(() => { cleanup(); resolve(null); }, 30000);
+
+        proc.on('close', () => {
+            clearTimeout(timer);
+            const isVideo = stderr.includes('Video:') || stderr.includes('Audio:');
+            const durationMatch = stderr.match(/Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)/);
+            if (isVideo && durationMatch) {
+                const currentName = path.basename(filePath);
+                const ext = path.extname(filePath).toLowerCase();
+                let finalPath = filePath;
+                const isTooLong = currentName.length > 100;
+                let newExt = ext;
+                if (stderr.includes("Video: h264") && !['.mp4', '.mkv', '.mov'].includes(ext)) newExt = '.mp4';
+                else if (stderr.includes("Video: vp9") && ext !== '.webm' && ext !== '.mkv') newExt = '.webm';
+
+                if (isTooLong) {
+                    const safeName = getTimestampFilename(newExt || '.mp4');
+                    const p2 = path.join(path.dirname(filePath), safeName);
+                    try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
+                } else if (newExt !== ext) {
+                    const p2 = filePath.replace(ext, newExt);
+                    try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
+                }
+                resolve(finalPath);
+            } else {
+                try { fs.unlinkSync(filePath); } catch (e) { }
+                resolve(null);
+            }
+        });
+        proc.on('error', () => { clearTimeout(timer); resolve(null); });
+    });
+}
+
 async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
@@ -1409,7 +1504,23 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 const block = taskMap.get(res.tag);
                 if (!block) continue;
                 if (res.success) {
-                    block.status = "ok"; block.path = res.path || res.destPath; block.filename = path.basename(block.path);
+                    let dlPath = res.path || res.destPath;
+
+                    if (block.kind === "video") {
+                        dlPath = await verifyVideoFile(dlPath);
+                        if (!dlPath) {
+                            block.status = "failed";
+                            block.error = "Video verification failed";
+                            continue;
+                        }
+                    }
+
+                    // 下载完成后，尝试全局去重
+                    const finalPath = _tryGlobalDeduplicate(dlPath);
+
+                    block.status = "ok";
+                    block.path = finalPath;
+                    block.filename = path.basename(finalPath);
                     block.fingerprint = computeFingerprint(block.path);
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
                 } else { block.status = "failed"; block.error = res.error; }
@@ -1587,7 +1698,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
     if (useScheme1) {
         if (progressCallback) progressCallback(0, "方案一：混合排版...");
         const cleanText = await vscode.env.clipboard.readText() || "";
-        blocks = await _zipDomWithCleanText($, cleanText);
+        blocks = await _zipDomWithCleanText($, cleanText, baseUrl);
     } else {
         if (progressCallback) progressCallback(0, "方案二：DOM排版...");
         blocks = _buildBlocksFromSanitizedDom($, baseUrl);
@@ -1597,7 +1708,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
             log("[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1", "WARN");
             if (progressCallback) progressCallback(0, "质量检测不通过，回退到方案一...");
             const cleanText = await vscode.env.clipboard.readText() || "";
-            blocks = await _zipDomWithCleanText($, cleanText);
+            blocks = await _zipDomWithCleanText($, cleanText, baseUrl);
         }
     }
 
@@ -1606,14 +1717,21 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
     if (videoUrls.length > 0) {
         log(`[SmartPaste] 从HTML中提取到 ${videoUrls.length} 个视频URL`, "INFO");
 
+        // 收集已有的媒体链接，避免重复
+        const existingMediaSrcs = new Set(blocks.filter(b => b.type === "media").map(b => b.src));
+
         // 将视频URL添加到blocks中作为媒体资源
         for (const videoUrl of videoUrls) {
+            // 如果已经在DOM解析中添加过，则跳过
+            if (existingMediaSrcs.has(videoUrl)) continue;
+
             blocks.push({
                 type: "media",
                 kind: "video",
                 src: videoUrl,
                 status: "pending"
             });
+            existingMediaSrcs.add(videoUrl);
         }
     }
 

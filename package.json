@@ -135,7 +135,7 @@
           "qqq.docExportIncludeCipher": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ **doc 导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/）。"
+            "markdownDescription": "[ **doc 导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
           }
         }
       }
