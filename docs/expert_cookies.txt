@@ -1,3 +1,78 @@
+
+
+
+
+
+
+# 🍪 cookies.txt Expert User Guide （下方有中文版）
+
+Due to YouTube's enhanced anti-bot mechanisms, you may encounter 404 or Sign-in errors when downloading. In such cases, providing cookies is required.
+
+## Steps
+
+1. **Install the Extension**: The extension **"Get cookies.txt LOCALLY"** is available for Chrome/Edge/Firefox.
+
+Copy the extension name: Get cookies.txt LOCALLY
+
+2. **Log in to YouTube**: Make sure you are logged in and can watch videos in your browser.
+
+3. **Export the File**:
+
+   * Click the Get cookies.txt LOCALLY extension icon -> Export.
+
+   * Save (or move) the exported file directly to the auto-opened **Global Storage folder**.
+
+   * The final file path should look like:
+     ● Windows: C:\Users<user name>\AppData\Roaming\Code\User\globalStorage\gh555.qqq\xxx_cookies.txt
+
+     ● macOS: /Users/<username>/Library/Application Support/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
+
+     ● Linux: /home/<username>/.config/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
+
+4. **No Renaming Needed**: As long as the filename contains `cookies`, the extension will automatically detect the latest txt file.
+
+## FAQ
+
+* **Q: Why did this folder open automatically?**
+
+  * A: The extension detected a YouTube 404/Sign-in error, prompting you to update your Cookies.
+
+* **Q: Still not working?**
+
+  * A: Your Cookies have expired. Please refresh the browser page and re-export the latest file to overwrite the old one.
+
+* **Q: Privacy concerns?**
+
+  * A: The cookies.txt file contains your login credentials. Do not share it with others or upload it to public code repositories (git).
+
+
+
+
+
+
+
+
+## (Secondary, No Action Required) Expert Questions
+
+* **Q: Does the Expert Mode we're discussing support non-YouTube sites (such as Bilibili, Twitter, etc.)?**
+
+  * A: Yes. If you include Bilibili's Cookie in cookies.txt, downloading Bilibili videos will automatically carry your membership status/HD access. If you include Twitter's Cookie, you can download Twitter sensitive content. "Expert Mode" and "Enhanced Flow" work as "Plan A" and "Plan B": Plan A (Cookies First): The extension first attempts to download directly using cookies.txt. If successful: the task ends immediately without triggering the enhanced flow. If failed (Cookie expired or invalid): yt-dlp will report an error (403/401). Plan B (Enhanced Flow Fallback): When needEnhanced = true is detected (and it's not YouTube), only then will the "Start Enhanced Flow" popup appear, using a dedicated browser to sniff the stream.
+
+
+ (end)
+
+
+
+
+
+
+//===================================================================================
+
+
+
+
+
+
 # 🍪 cookies.txt 专家使用文档
 
 由于 YouTube 滴加强反爬虫机制，下载时若遇到 404 或 Sign-in 错误，需提供 cookies。
@@ -17,7 +92,7 @@
    - 将导出的文件直接保存（或移动）到自动打开的 **Global Storage 文件夹** 中。
 
    - 最终落盘路径类似:
-   ●Windows：C:\Users\<user name>\AppData\Roaming\Code\User\globalStorage\gh555.qqq\xxx_cookies.txt
+   ●Windows：C:\Users\<用户名>\AppData\Roaming\Code\User\globalStorage\gh555.qqq\xxx_cookies.txt
 
    ●macOS: /Users/<用户名>/Library/Application Support/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
 
@@ -56,3 +131,4 @@
   - A: 支持。如果你在 cookies.txt 里放了 Bilibili 的 Cookie，下载 B站视频时就会自动带上会员状态/高清权限。如果你放了 Twitter 的 Cookie，就能下载推特敏感内容。“专家模式”与“增强流程”是“Plan A”与“Plan B”的关系：Plan A (Cookies 优先)：插件先尝试用 cookies.txt 直接下载，如果成功：任务直接结束，不会触发增强流程。如果失败（Cookie 过期或无效）：yt-dlp 会报错（403/401），Plan B (增强流程兜底)：检测到 needEnhanced = true（且不是 YouTube）此时才会弹出“启动增强流程”的弹窗，通过专用浏览器嗅探。
 
 
+ (end)

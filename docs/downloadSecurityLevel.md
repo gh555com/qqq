@@ -1,5 +1,52 @@
 
 
+
+
+
+
+
+
+# Video Downloader Security Policy Tiers: Trade-off  & Quantification （下方有中文版）
+
+
+## Tier 0: All Security Policies Disabled — Most Permissive
+
+## Tier 2: All Security Policies Enabled — Most Strict
+
+## Tier 1:
+
+|  # | Switch                                                                                            | Tier 1  | Benefits of Enabling (Security Gains)                                                                                                               | Cost of Enabling (Compatibility/Overhead)                                                                                                                                                 | Quantified Trade-off (Security:Cost) + Conclusion/Recommendation                                                                                                                                          |
+| -: | ------------------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  1 | SSRF Default Block (private/localhost/reserved IP ranges)                                         | **OFF** | Blocks internal network probing / localhost attacks / cloud metadata (169.254.169.254) abuse; confines downloader to "pure downloader" role         | Internal/NAS/dev environment/corporate intranet domains blocked by default; extra DNS resolution overhead (all:true); conservative rules may false-positive on .local/IPv6 special ranges | **10:7** Conclusion: Huge security gain but significant false positives. Recommendation: Enable by default for untrusted public URLs; use allowlist or temporarily disable for internal downloads.        |
+|  2 | Allow Only http/https + Block URL Credentials                                                     | **ON**  | Eliminates dangerous protocols like file/data/ftp/gopher; prevents user:pass@ leakage / proxy quirks                                                | Legacy systems relying on "credentials in URL" will break; reduced feature surface                                                                                                        | **9:2** Conclusion: Benefits far outweigh costs. Recommendation: Keep enabled long-term; use headers/config for basic-auth if needed.                                                                     |
+|  3 | Redirect Protocol Restriction (redirects only to http/https)                                      | **ON**  | Prevents 30x redirects to file/data and other dangerous protocols; blocks "looks normal, redirects malicious" attacks                               | Rare custom schemes / unusual redirects will fail                                                                                                                                         | **8:1** Conclusion: Almost pure upside. Recommendation: Enable by default; whitelist rare edge-case sites individually.                                                                                   |
+|  4 | baseDir Path Traversal Protection (destPath must be within baseDir)                               | **OFF** | Blocks ../../ and absolute paths from writing to sensitive system locations; enforces clear write boundaries                                        | Must define a download root directory; Windows/UNC/symlinked directories more prone to false positives; reduced flexibility (can't write to arbitrary directories)                        | **9:5** Conclusion: Clearly stronger security but moderate integration cost. Recommendation: Enable if destPath has any external input risk; disable for purely internal fixed paths.                     |
+|  5 | Download Lock (destPath.lock) to Prevent Concurrent Trampling                                     | **ON**  | Prevents concurrent writes corrupting files / rename conflicts; reduces rare corrupted files and mysterious failures (stability ≈ part of security) | Concurrent writes to same destPath become serialized; extra I/O; abnormal exits may leave stale locks (needs cleanup mechanism)                                                           | **7:3** Conclusion: Benefits outweigh costs. Recommendation: Enable for almost all concurrent download scenarios; provide lockStaleMs fallback.                                                           |
+|  6 | Header Injection Sanitization (CRLF / illegal headers)                                            | **ON**  | Prevents CRLF injection to forge additional headers; avoids undefined behavior from illegal headers                                                 | Rare "technically invalid but somehow works" headers will fail; may cause debugging confusion                                                                                             | **8:1** Conclusion: Enable without hesitation. Recommendation: Enable by default; log sanitized headers for troubleshooting.                                                                              |
+|  7 | content-length / content-range Pre-check (reject if declared size exceeds limit / range mismatch) | **OFF** | Early rejection of oversized responses saves bandwidth and time; early detection of range mismatches during resume reduces silent corruption        | False positives when servers report incorrect length; reduced benefit for chunked responses without length; more complex logic branches                                                   | **7:4** Conclusion: Benefits slightly outweigh costs. Recommendation: More advisable for untrusted sources / high-concurrency crawling; disable for sites with frequently inaccurate lengths.             |
+|  8 | Strict Resume (206 required + no Range+compression + strict matching)                             | **OFF** | Maximally avoids resume offset errors / compression-induced offset errors / silent file corruption                                                  | Resume success rate drops significantly; more scenarios trigger full re-download (increased bandwidth cost)                                                                               | **6:5** Conclusion: Only worthwhile for "correctness purists". Recommendation: Enable if you'd rather re-download than risk potential corruption; otherwise keep disabled and re-download when uncertain. |
+|  9 | Symlink Protection (reject symlinks / non-regular file objects)                                   | **OFF** | Prevents pre-planted symlinks from redirecting writes to sensitive paths; avoids writing to directories/device files/non-regular objects            | Users who intentionally want to write to symlink targets will fail; TOCTOU theoretical edge cases remain (not kernel-level)                                                               | **8:4** Conclusion: Significant security gain, moderate compatibility cost. Recommendation: Enable for multi-user/shared directories/untrusted environments; disable for single-user local tools.         |
+| 10 | yt-dlp Probe Output Limit (stdout/stderr limits)                                                  | **OFF** | Prevents massive playlists / huge JSON from exhausting memory or freezing UI; avoids being overwhelmed by "output-based attacks/accidents"          | Probe may fail due to output limit exceeded; information may be truncated (e.g., only partial entries returned)                                                                           | **7:3** Conclusion: Benefits usually outweigh costs. Recommendation: Enable whenever probe is exposed to untrusted URLs; disable if you only probe a few trusted links.                                   |
+| 11 | Fail-fast (reject on suspicious / uncertain conditions)                                           | **OFF** | Clear boundaries: DNS failure/missing baseDir/illegal headers result in immediate rejection, reducing security gray areas from "fuzzy degradation"  | Increased failure rate; UI/callers need to explain more errors; users may complain "browser can download but qqq can't"                                                                   | **8:6** Conclusion: Stronger security but harder UX. Recommendation: Enable for security-critical scenarios; disable for general users who prioritize "just make it work".                                |
+
+
+ (end)
+
+
+
+
+
+
+//===================================================================================
+
+
+
+
+
+
+ # 视频下载器安全策略分级：取舍与量化
+
+
 ## 0 档：安全策略全关闭，最宽松
 
 ## 2 档：安全策略全打开，最严格
@@ -22,6 +69,7 @@
 
 
 
+ (end)
 
 
 
