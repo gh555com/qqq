@@ -709,17 +709,18 @@ class VideoDownloadController {
 
         t.tracker.markCancelled();
 
-        try {
-            if (typeof this.downloader.cancelAll === 'function') {
-                await this.downloader.cancelAll();
-            }
-        } catch (e) { }
+        // 既然无法精确阻止特定任务，干脆让它们下载完再清理
+        // try {
+        //     if (typeof this.downloader.cancelAll === 'function') {
+        //         await this.downloader.cancelAll();
+        //     }
+        // } catch (e) { }
 
-        try {
-            await t.tracker.killAll(reason);
-        } catch (e) { }
+        // try {
+        //     await t.tracker.killAll(reason);
+        // } catch (e) { }
 
-        this.log(`qqq: 已取消（${reason}）`);
+        this.log(`qqq: 已标记取消（${reason}），将在下载完成后自动清理。`);
     }
 
     _isCancelled() {
@@ -871,6 +872,11 @@ class VideoDownloadController {
                     if (t.destPath) {
                         const name = path.basename(t.destPath, path.extname(t.destPath));
                         if (name) activePrefixes.add(name);
+
+                        // Track for cancellation cleanup
+                        if (this._task && this._task.activeFiles) {
+                            this._task.activeFiles.add(t.destPath);
+                        }
                     }
                 });
 
@@ -947,7 +953,20 @@ class VideoDownloadController {
                         throw e;
                     }
 
-                    if (this._isCancelled()) return null;
+                    if (this._isCancelled()) {
+                        // 下载完成后的清理逻辑：如果是用户取消，则删除所有已下载的文件
+                        if (res && res.results) {
+                            for (const r of res.results) {
+                                if (r.success) {
+                                    const f = r.path || r.destPath;
+                                    if (f && fs.existsSync(f)) {
+                                        try { fs.unlinkSync(f); } catch (e) { }
+                                    }
+                                }
+                            }
+                        }
+                        return null;
+                    }
 
                     const results = res?.results || [];
                     const successResults = results.filter(r => r.success);

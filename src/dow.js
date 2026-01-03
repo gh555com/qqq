@@ -652,10 +652,19 @@ class SmartHttpDownloader {
         this.httpsAgent = new https.Agent({
             keepAlive: !!this.config.keepAlive,
             maxSockets: 256,
-            rejectUnauthorized: this.config.rejectUnauthorized,
         });
 
         this._dnsCache = new Map();
+        this.activeReqs = new Set();
+    }
+
+    cancelAll() {
+        this._cancelled = true;
+        for (const req of this.activeReqs) {
+            try { req.destroy(); } catch (e) { }
+            try { if (req.socket) req.socket.destroy(); } catch (e) { }
+        }
+        this.activeReqs.clear();
     }
 
     async downloadAll(tasks, onProgress) {
@@ -1195,6 +1204,8 @@ class SmartHttpDownloader {
             let req;
             try {
                 req = session.request(reqHeaders);
+                this.activeReqs.add(req);
+                req.once('close', () => this.activeReqs.delete(req));
             } catch (e) {
                 const r = this._resultFail(task, e.message || "h2_request_failed");
                 r._networkError = e;
@@ -2460,6 +2471,14 @@ class UnifiedMediaDownloader {
      */
     async probe(url) {
         return await this.ytdlp.probe(url);
+    }
+
+    async cancelAll() {
+        try {
+            if (this.http && typeof this.http.cancelAll === 'function') {
+                this.http.cancelAll();
+            }
+        } catch (e) { }
     }
 
     async downloadAll(input, targetDir, opts = {}) {
