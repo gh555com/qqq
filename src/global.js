@@ -1025,7 +1025,9 @@ const DEFAULT_CONFIG = {
 	"ioEngine": "auto",
 	"pythonPath": "",
 	"downloadSecurityLevel": "1: 平衡",
-	"enhancedHtmlPasteCompatibility": false
+	"enhancedHtmlPasteCompatibility": false,
+	"docExportImageResolution": "原始分辨率",
+	"docExportIncludeCipher": true
 };
 
 const CONFIG_METADATA = {
@@ -1053,7 +1055,13 @@ const CONFIG_METADATA = {
 		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
 		descriptions: []
 	},
-	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }
+	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" },
+	"docExportImageResolution": {
+		name: "导出图片分辨率", type: "enum",
+		options: ["原始分辨率", "相框分辨率"],
+		descriptions: []
+	},
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }
 };
 
 let _configChangeCallback = null;

@@ -38,3 +38,21 @@
   - A:  cookies.txt 包含你的登录凭证，请勿将其分享给他人或上传到公开的代码仓库（git）。
 
 
+
+
+
+
+
+
+
+
+
+
+
+## （次要，无需操作）专家问题
+
+- **Q: 对于非 YouTube 网站（如 Bilibili, Twitter 等）是否支持我们正在谈论滴专家模式**
+
+  - A: 支持。如果你在 cookies.txt 里放了 Bilibili 的 Cookie，下载 B站视频时就会自动带上会员状态/高清权限。如果你放了 Twitter 的 Cookie，就能下载推特敏感内容。“专家模式”与“增强流程”是“Plan A”与“Plan B”的关系：Plan A (Cookies 优先)：插件先尝试用 cookies.txt 直接下载，如果成功：任务直接结束，不会触发增强流程。如果失败（Cookie 过期或无效）：yt-dlp 会报错（403/401），Plan B (增强流程兜底)：检测到 needEnhanced = true（且不是 YouTube）此时才会弹出“启动增强流程”的弹窗，通过专用浏览器嗅探。
+
+

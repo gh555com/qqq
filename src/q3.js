@@ -252,7 +252,7 @@ async function getMediaInfo(filePath, exportId) {
 
 // ==================== PNG 转换（统一格式） ====================
 
-async function convertMediaToPng(filePath, info, exportId) {
+async function convertMediaToPng(filePath, info, exportId, useFrameResolution) {
     if (!qqq.ffmpegPath) return null;
 
     const duration = info?.duration || 0;
@@ -261,28 +261,41 @@ async function convertMediaToPng(filePath, info, exportId) {
 
     let targetW = origW;
     let targetH = origH;
+    let needScale = false;
 
-    if (origW > EXPORT_MAX_WIDTH || origH > EXPORT_MAX_HEIGHT) {
-        const scale = Math.min(EXPORT_MAX_WIDTH / origW, EXPORT_MAX_HEIGHT / origH);
-        targetW = Math.max(1, Math.round(origW * scale));
-        targetH = Math.max(1, Math.round(origH * scale));
+    if (useFrameResolution) {
+        // ★★★ 相框分辨率模式：强制压缩到 EXPORT_MAX_WIDTH/HEIGHT ★★★
+        if (origW > EXPORT_MAX_WIDTH || origH > EXPORT_MAX_HEIGHT) {
+            const scale = Math.min(EXPORT_MAX_WIDTH / origW, EXPORT_MAX_HEIGHT / origH);
+            targetW = Math.max(1, Math.round(origW * scale));
+            targetH = Math.max(1, Math.round(origH * scale));
+            needScale = true;
+        }
+        // ffmpeg 的某些编码器更喜欢偶数尺寸
+        targetW = targetW % 2 === 0 ? targetW : targetW + 1;
+        targetH = targetH % 2 === 0 ? targetH : targetH + 1;
+    } else {
+        // ★★★ 原始分辨率模式：保持原样 ★★★
+        // 之前逻辑：限制在 EXPORT_MAX_WIDTH/HEIGHT 内
+        // 现在逻辑：物理尺寸保持原样，显示尺寸由文档生成器控制
     }
-
-    // ffmpeg 的某些编码器更喜欢偶数尺寸
-    targetW = targetW % 2 === 0 ? targetW : targetW + 1;
-    targetH = targetH % 2 === 0 ? targetH : targetH + 1;
 
     return new Promise((resolve) => {
         const args = ["-hide_banner", "-loglevel", "error"];
-        const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
 
+        // 只有当需要 seek 时才添加参数
         if (duration > 0.5) {
             const seekTime = Math.floor(duration / 2);
             args.push("-ss", String(seekTime));
         }
 
         args.push("-i", filePath);
-        args.push("-vf", scaleFilter);
+
+        if (needScale) {
+            const scaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=lanczos`;
+            args.push("-vf", scaleFilter);
+        }
+
         args.push("-frames:v", "1");
         args.push("-f", "image2");
         args.push("-c:v", "png");
@@ -367,10 +380,22 @@ function escapeRtf(text) {
 }
 
 function createRtfPicture(pngBuffer, width, height) {
+    // ★★★ 适应页面宽度策略 (修正版) ★★★
+    // 1. 大图缩小：宽度 > 页面宽度 -> 缩小到页面宽度
+    // 2. 小图保持：宽度 <= 页面宽度 -> 保持原始尺寸
+
+    const PAGE_CONTENT_WIDTH_TWIPS = 9000; // 约 16cm
     const twipsPerPixel = 15;
-    const picwgoal = Math.round(width * twipsPerPixel);
-    const pichgoal = Math.round(height * twipsPerPixel);
+
+    // 计算原图在文档中的理论宽度 (twips)
+    const origWidthTwips = width * twipsPerPixel;
+
+    // 取较小值：既不让大图撑爆，也不让小图模糊拉大
+    const picwgoal = Math.min(origWidthTwips, PAGE_CONTENT_WIDTH_TWIPS);
+    const pichgoal = Math.round(picwgoal * (height / width));
+
     const hexData = pngBuffer.toString("hex");
+    // picw/pich: 原始物理分辨率（保留最大精度）
     return `{\\pict\\pngblip\\picw${width}\\pich${height}\\picwgoal${picwgoal}\\pichgoal${pichgoal}\r\n${hexData}\r\n}`;
 }
 
@@ -506,12 +531,20 @@ function generateDocxDocument(elements, attachments, title) {
                 );
             }
 
+            // ★★★ 适应页面宽度策略 (修正版) ★★★
+            // 假设 A4 纸有效内容宽度约 16cm (对应 96dpi 下约 600px)
+            const PAGE_CONTENT_WIDTH_PX = 600;
+
+            // 取较小值：既不让大图撑爆，也不让小图模糊拉大
+            const dispW = Math.min(elem.width, PAGE_CONTENT_WIDTH_PX);
+            const dispH = Math.round(dispW * (elem.height / elem.width));
+
             children.push(
                 new Paragraph({
                     children: [
                         new ImageRun({
                             data: elem.imageBuffer,
-                            transformation: { width: elem.width, height: elem.height },
+                            transformation: { width: dispW, height: dispH },
                         }),
                     ],
                     spacing: { after: 200 },
@@ -705,13 +738,13 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const formatChoice = await global.showQuickPick(
         [
             {
-                label: "$(file) Word 文档（兼容 Office 2003, RTF）(*.doc)",
-                description: "RTF 格式，兼容性最好",
+                label: "$(file) .doc 文档（兼容 Office 2003, RTF）",
+                description: "RTF 编码 ◉ 兼容性更好",
                 format: ExportFormat.RTF_DOC,
             },
             {
-                label: "$(file) Word 文档 (*.docx)",
-                description: "Office Open XML 格式，支持腾讯文档/Google Docs",
+                label: "$(file) .docx 文档 （支持 Google Docs/腾讯文档） ",
+                description: "Office Open XML 编码 ◉ 功能更强、压缩率更高（文件体积能小一半）",
                 format: ExportFormat.DOCX,
             },
         ],
@@ -726,6 +759,19 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const selectedFormat = formatChoice.format;
     const text = document.getText();
     const regex = qqq.createPathRegex();
+
+    // 获取图片分辨率配置
+    const resolutionConfig = vscode.workspace.getConfiguration("qqq").get("docExportImageResolution");
+    const useFrameResolution = resolutionConfig === "相框分辨率";
+    if (useFrameResolution) {
+        global.logMessage("导出策略：使用相框分辨率 (小尺寸)", "INFO");
+    } else {
+        global.logMessage("导出策略：使用原始分辨率 (适应页面宽度)", "INFO");
+    }
+
+    // 获取暗号保留配置
+    const includeCipher = vscode.workspace.getConfiguration("qqq").get("docExportIncludeCipher", true);
+    global.logMessage(`导出策略：${includeCipher ? "保留" : "移除"}暗号字符串`, "INFO");
 
     // 解析阶段：先构建 rawElements；附件先只收集候选项（SHA256 后算，纳入进度条）
     const rawElements = [];
@@ -755,13 +801,25 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
             // 目录：文档里原样保留标记；不进附件索引
             if (stat && stat.isDirectory()) {
-                rawElements.push({ type: "text", content: originalMark });
+                // 如果需要保留暗号，则原样输出；否则直接忽略该段（即不输出）
+                if (includeCipher) {
+                    rawElements.push({ type: "text", content: originalMark });
+                }
             } else if (isMediaFile(ext)) {
-                rawElements.push({ type: "media", path: absPath, rawPath, originalMark });
+                // 媒体：总是输出媒体（如果需要保留暗号，则 originalMark 字段会有值）
+                rawElements.push({
+                    type: "media",
+                    path: absPath,
+                    rawPath,
+                    originalMark: includeCipher ? originalMark : null
+                });
             } else {
-                // 非媒体文件：文档里保留原标记 + 附件索引收集（去重）
-                rawElements.push({ type: "text", content: originalMark });
+                // 非媒体文件：
+                if (includeCipher) {
+                    rawElements.push({ type: "text", content: originalMark });
+                }
 
+                // 附件索引收集（去重）逻辑不变
                 // realpath 去重，避免同一个文件多次引用导致附件索引重复
                 let realKey = absPath;
                 try { realKey = fs.realpathSync(absPath); } catch { }
@@ -783,7 +841,11 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
             }
         } else {
-            // 引用不存在：保留原标记
+            // 引用不存在：保留原标记 (既然是错误引用，通常保留作为提示，或者也可以根据 includeCipher 移除)
+            // 这里遵循“仅移除有效暗号”的原则，或者为了文档整洁也可以移除。
+            // 考虑到用户意图是“文档中不包含暗号”，那无效的暗号最好也去掉？
+            // 但如果去掉，用户就不知道这里原来有个错链接了。
+            // 按照惯例，错误链接保留文本。
             rawElements.push({ type: "text", content: originalMark });
         }
 
@@ -848,7 +910,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                             );
                         } else {
                             const info = await getMediaInfo(elem.path, exportId);
-                            pngResult = await convertMediaToPng(elem.path, info, exportId);
+                            // 传入分辨率策略
+                            pngResult = await convertMediaToPng(elem.path, info, exportId, useFrameResolution);
                             if (pngResult && fingerprint) conversionCache.set(fingerprint, pngResult);
                         }
 
@@ -955,11 +1018,24 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     hasQqqLinks
                 );
 
-                global.showInformationMessage(successMsg, "打开文件", "打开文件夹")
-                    .then((choice) => {
-                        if (choice === "打开文件") openFile(finalSavePath);
-                        else if (choice === "打开文件夹") revealInFolder(finalSavePath);
-                    });
+                // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                const OPEN_LABEL = "打开文件夹";
+                const p = vscode.window.showInformationMessage(successMsg, OPEN_LABEL);
+
+                let timer = null;
+                const timeout = new Promise(resolve => {
+                    timer = setTimeout(() => resolve(undefined), 9000);
+                });
+
+                const choice = await Promise.race([p, timeout]);
+                try { if (timer) clearTimeout(timer); } catch (e) { }
+
+                if (choice === OPEN_LABEL) {
+                    await revealFileOrFolder(finalSavePath);
+                }
+
+                await hideToastsBestEffort();
+
             } catch (e) {
                 global.logMessage(`导出失败: ${e.message}\n${e.stack}`, "ERROR");
                 global.showErrorMessage(`qqq: 导出失败: ${e.message}`);
@@ -1162,11 +1238,23 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     ? `${successMsg}（包含 ${fileCount} 个引用项）`
                     : successMsg;
 
-                global.showInformationMessage(detailMsg, "打开文件", "打开文件夹")
-                    .then((choice) => {
-                        if (choice === "打开文件") openFile(finalZipPath);
-                        else if (choice === "打开文件夹") revealInFolder(finalZipPath);
-                    });
+                // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                const OPEN_LABEL = "打开文件夹";
+                const p = vscode.window.showInformationMessage(detailMsg, OPEN_LABEL);
+
+                let timer = null;
+                const timeout = new Promise(resolve => {
+                    timer = setTimeout(() => resolve(undefined), 9000);
+                });
+
+                const choice = await Promise.race([p, timeout]);
+                try { if (timer) clearTimeout(timer); } catch (e) { }
+
+                if (choice === OPEN_LABEL) {
+                    await revealFileOrFolder(finalZipPath);
+                }
+
+                await hideToastsBestEffort();
 
                 global.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个条目`, "INFO");
             } catch (e) {
@@ -1189,6 +1277,39 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 }
 
 // ==================== 文件操作辅助 ====================
+
+async function hideToastsBestEffort() {
+    try {
+        await vscode.commands.executeCommand("workbench.action.closeMessages");
+    } catch (e) { }
+}
+
+async function revealFileOrFolder(filePath) {
+    try {
+        if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
+            return;
+        }
+    } catch (e) { }
+
+    try {
+        const folderPath = path.dirname(filePath);
+        if (fs.existsSync(folderPath)) {
+            await vscode.env.openExternal(vscode.Uri.file(folderPath));
+            return;
+        }
+    } catch (e) { }
+
+    // Windows 兜底
+    if (process.platform === 'win32') {
+        try {
+            const folderPath = path.dirname(filePath);
+            if (fs.existsSync(folderPath)) {
+                cp.exec(`explorer "${folderPath}"`);
+            }
+        } catch (e) { }
+    }
+}
 
 function openFile(filePath) {
     if (!fs.existsSync(filePath)) return;
