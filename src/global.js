@@ -577,7 +577,7 @@ try {
     $clipboardHelperCode = @'
 ${clipboardHelperCode}
 '@
-    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp -ReferencedAssemblies System.Windows.Forms,System.Drawing
+    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp
 } catch {
     # Ignore if type already exists
 }

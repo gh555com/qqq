@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.4.0",
+  "version": "15.5.8",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -27,16 +27,6 @@
       {
         "title": "qqq aaa",
         "properties": {
-          "qqq.showHistoryRecycleBin": {
-            "type": "boolean",
-            "default": true,
-            "description": "是否在文件导航中显示历史回收站。"
-          },
-          "qqq.enlargeSmallImages": {
-            "type": "boolean",
-            "default": true,
-            "description": "图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
-          },
           "qqq.performanceMode": {
             "type": "string",
             "default": "balanced",
@@ -46,31 +36,11 @@
               "balanced"
             ],
             "enumDescriptions": [
-              "极限性能：只保留首帧，质量35",
-              "加速模式：最多2秒动画，6fps，质量35",
-              "最优模式：保留完整动画，视频截取首中尾，质量70"
+              "极限性能：只保留首帧，质量47",
+              "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47",
+              "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71"
             ],
-            "description": "性能模式：控制预览生成的质量和性能平衡。"
-          },
-          "qqq.frameSizeMode": {
-            "type": "string",
-            "default": "smart",
-            "enum": [
-              "large",
-              "small",
-              "smart"
-            ],
-            "enumDescriptions": [
-              "大相框：512x288",
-              "小相框：256x144",
-              "智能：根据图片尺寸自动选择相框"
-            ],
-            "description": "相框尺寸模式：控制预览图像的显示尺寸。"
-          },
-          "qqq.cleanFreak": {
-            "type": "boolean",
-            "default": false,
-            "description": "洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+            "markdownDescription": "[ **核心** ] 性能模式：控制预览生成的质量和性能平衡。"
           },
           "qqq.ioEngine": {
             "type": "string",
@@ -87,12 +57,42 @@
               "Rust 引擎",
               "Node 引擎"
             ],
-            "description": "选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+            "markdownDescription": "[ **核心** ] 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
           },
           "qqq.pythonPath": {
             "type": "string",
             "default": "",
-            "description": "（可选）指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
+            "markdownDescription": "（可选）指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
+          },
+          "qqq.showHistoryRecycleBin": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "[ **漫游器** ] 是否在文件导航中显示历史回收站。"
+          },
+          "qqq.frameSizeMode": {
+            "type": "string",
+            "default": "smart",
+            "enum": [
+              "large",
+              "small",
+              "smart"
+            ],
+            "enumDescriptions": [
+              "大相框：512x288",
+              "小相框：256x144",
+              "智能：根据图片尺寸自动选择相框"
+            ],
+            "markdownDescription": "[ **视觉** ] 相框尺寸模式：控制预览图像的显示尺寸。"
+          },
+          "qqq.cleanFreak": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "[ **视觉** ] 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+          },
+          "qqq.enlargeSmallImages": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "[ **视觉** ] 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           },
           "qqq.downloadSecurityLevel": {
             "type": "string",
@@ -107,17 +107,17 @@
               "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
               "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。●"
             ],
-            "description": "如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
+            "markdownDescription": "[ **html与富文本** ] 如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
           },
           "qqq.forceTextFlowScheme": {
             "type": "boolean",
             "default": false,
-            "description": "强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
+            "markdownDescription": "[ **html与富文本** ] 强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
           },
           "qqq.autoDownload": {
             "type": "boolean",
             "default": true,
-            "description": "是否在检测到视频时自动下载"
+            "markdownDescription": "[ **html与富文本** ] 是否在检测到视频时自动下载"
           },
           "qqq.docExportImageResolution": {
             "type": "string",

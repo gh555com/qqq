@@ -50,9 +50,6 @@ public class ClipboardHelper {
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern int GlobalSize(IntPtr hMem);
 
-    [DllImport("user32.dll")]
-    public static extern bool IsClipboardFormatAvailable(uint format);
-
     public static string DumpHtmlToFile(string filePath) {
         if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
 
@@ -81,41 +78,6 @@ public class ClipboardHelper {
             CloseClipboard();
         }
     }
-
-    public static string SaveClipboardImage(string fullPath) {
-        if (!OpenClipboard(IntPtr.Zero)) return "Error: OpenClipboard failed";
-
-        try {
-            // 检查剪贴板是否包含图像格式
-            bool hasImage = IsClipboardFormatAvailable(8) || IsClipboardFormatAvailable(17) || IsClipboardFormatAvailable(49170); // CF_BITMAP, CF_DIB, CF_PNG
-
-            if (!hasImage) {
-                return "{\"error\":\"No image in clipboard\"}";
-            }
-
-            System.Drawing.Image img = System.Windows.Forms.Clipboard.GetImage();
-            if (img == null) {
-                return "{\"error\":\"Failed to get image from clipboard\"}";
-            }
-
-            try {
-                // 确保目录存在
-                string dir = System.IO.Path.GetDirectoryName(fullPath);
-                if (!string.IsNullOrEmpty(dir)) {
-                   System.IO.Directory.CreateDirectory(dir);
-                }
-
-                img.Save(fullPath, System.Drawing.Imaging.ImageFormat.Png);
-
-                return "{\"path\":\"" + fullPath.Replace("\\", "\\\\") + "\"}";
-            } catch (System.Exception ex) {
-                return "{\"error\":\"" + ex.Message.Replace("\"", "\\\"") + "\"}";
-            }
-        } finally {
-            CloseClipboard();
-        }
-    }
-
 }
 `;
 
