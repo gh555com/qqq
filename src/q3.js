@@ -735,28 +735,40 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         ? "untitled"
         : path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
 
-    const formatChoice = await global.showQuickPick(
-        [
-            {
-                label: "$(file) .doc 文档（兼容 Office 2003, RTF）",
-                description: "RTF 编码 ◉ 兼容性更好",
-                format: ExportFormat.RTF_DOC,
-            },
-            {
-                label: "$(file) .docx 文档 （支持 Google Docs/腾讯文档） ",
-                description: "Office Open XML 编码 ◉ 功能更强、压缩率更高（文件体积能小一半）",
-                format: ExportFormat.DOCX,
-            },
-        ],
+    // 记住用户上次的选择 (置顶优化)
+    const KEY_LAST_DOC_FORMAT = "lastExportDocFormat";
+    const lastFormat = global.getConfig(KEY_LAST_DOC_FORMAT);
+
+    const pickItems = [
         {
-            placeHolder: "选择导出格式",
-            title: "qqq: 导出文档格式",
+            label: "$(file) .doc 文档（兼容 Office 2003, RTF）",
+            description: "RTF 编码 ◉ 兼容性更好",
+            format: ExportFormat.RTF_DOC,
+        },
+        {
+            label: "$(file) .docx 文档 （支持 Google Docs/腾讯文档） ",
+            description: "Office Open XML 编码 ◉ 功能更强、压缩率更高（文件体积能小一半）",
+            format: ExportFormat.DOCX,
+        },
+    ];
+
+    if (lastFormat) {
+        const idx = pickItems.findIndex(i => i.format === lastFormat);
+        if (idx > 0) {
+            const item = pickItems.splice(idx, 1)[0];
+            pickItems.unshift(item);
         }
-    );
+    }
+
+    const formatChoice = await global.showQuickPick(pickItems, {
+        placeHolder: "选择导出格式",
+        title: "qqq: 导出文档格式",
+    });
 
     if (!formatChoice) return;
 
     const selectedFormat = formatChoice.format;
+    await global.setConfig(KEY_LAST_DOC_FORMAT, selectedFormat); // 保存选择
     const text = document.getText();
     const regex = qqq.createPathRegex();
 
@@ -1013,28 +1025,35 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 const stats = fs.statSync(finalSavePath);
 
                 const successMsg = buildExportSuccessMessage(
-                    path.basename(finalSavePath),
+                    finalSavePath, // 使用绝对路径
                     stats.size,
                     hasQqqLinks
                 );
 
-                // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
-                const OPEN_LABEL = "打开文件夹";
-                const p = vscode.window.showInformationMessage(successMsg, OPEN_LABEL);
+                // ★★★ 确保一号弹窗（Progress）先关闭，再显示三号弹窗（Message） ★★★
+                // 在 VS Code 中，progress 结束后（resolve 或 return）才会关闭进度条
+                // 所以我们不能在这里 await showInformationMessage，否则进度条会一直卡着直到用户点击
+                // 解决方案：使用 setTimeout 将 Message 放到下一个 tick，让 Progress 先结束
 
-                let timer = null;
-                const timeout = new Promise(resolve => {
-                    timer = setTimeout(() => resolve(undefined), 9000);
-                });
+                setTimeout(async () => {
+                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    const OPEN_LABEL = "打开文件夹";
+                    const p = vscode.window.showInformationMessage(successMsg, OPEN_LABEL);
 
-                const choice = await Promise.race([p, timeout]);
-                try { if (timer) clearTimeout(timer); } catch (e) { }
+                    let timer = null;
+                    const timeout = new Promise(resolve => {
+                        timer = setTimeout(() => resolve(undefined), 9000);
+                    });
 
-                if (choice === OPEN_LABEL) {
-                    await revealFileOrFolder(finalSavePath);
-                }
+                    const choice = await Promise.race([p, timeout]);
+                    try { if (timer) clearTimeout(timer); } catch (e) { }
 
-                await hideToastsBestEffort();
+                    if (choice === OPEN_LABEL) {
+                        await revealFileOrFolder(finalSavePath);
+                    }
+
+                    await hideToastsBestEffort();
+                }, 100);
 
             } catch (e) {
                 global.logMessage(`导出失败: ${e.message}\n${e.stack}`, "ERROR");
@@ -1228,7 +1247,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                 const stats = fs.statSync(finalZipPath);
                 const successMsg = buildExportSuccessMessage(
-                    path.basename(finalZipPath),
+                    finalZipPath, // 使用绝对路径
                     stats.size,
                     scanResult.hasQqqLinks
                 );
@@ -1238,23 +1257,26 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     ? `${successMsg}（包含 ${fileCount} 个引用项）`
                     : successMsg;
 
-                // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
-                const OPEN_LABEL = "打开文件夹";
-                const p = vscode.window.showInformationMessage(detailMsg, OPEN_LABEL);
+                // ★★★ 确保一号弹窗（Progress）先关闭，再显示三号弹窗（Message） ★★★
+                setTimeout(async () => {
+                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    const OPEN_LABEL = "打开文件夹";
+                    const p = vscode.window.showInformationMessage(detailMsg, OPEN_LABEL);
 
-                let timer = null;
-                const timeout = new Promise(resolve => {
-                    timer = setTimeout(() => resolve(undefined), 9000);
-                });
+                    let timer = null;
+                    const timeout = new Promise(resolve => {
+                        timer = setTimeout(() => resolve(undefined), 9000);
+                    });
 
-                const choice = await Promise.race([p, timeout]);
-                try { if (timer) clearTimeout(timer); } catch (e) { }
+                    const choice = await Promise.race([p, timeout]);
+                    try { if (timer) clearTimeout(timer); } catch (e) { }
 
-                if (choice === OPEN_LABEL) {
-                    await revealFileOrFolder(finalZipPath);
-                }
+                    if (choice === OPEN_LABEL) {
+                        await revealFileOrFolder(finalZipPath);
+                    }
 
-                await hideToastsBestEffort();
+                    await hideToastsBestEffort();
+                }, 100);
 
                 global.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个条目`, "INFO");
             } catch (e) {
@@ -1279,9 +1301,17 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 // ==================== 文件操作辅助 ====================
 
 async function hideToastsBestEffort() {
-    try {
-        await vscode.commands.executeCommand("workbench.action.closeMessages");
-    } catch (e) { }
+    const cmds = [
+        'notifications.hideToasts',
+        'workbench.action.closeMessages',
+        'notifications.clearAll'
+    ];
+    for (const c of cmds) {
+        try {
+            await vscode.commands.executeCommand(c);
+            return;
+        } catch (e) { }
+    }
 }
 
 async function revealFileOrFolder(filePath) {

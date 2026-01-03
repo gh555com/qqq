@@ -126,7 +126,7 @@
               "原始分辨率",
               "相框分辨率"
             ],
-            "markdownDescription": "[ **doc 导出设置** ] 导出滴图片使用何种分辨率：",
+            "markdownDescription": "[ **doc 导出设置** ] 图片使用何种分辨率：",
             "markdownEnumDescriptions": [
               "得到原始精度。",
               "优势在于: 1、文件更小； 2、相框显示滴缩略图总能对应一个完整滴图片预览（不会因为 Word 页面尺寸限制导致 预览 被截断）。"
@@ -135,8 +135,7 @@
           "qqq.docExportIncludeCipher": {
             "type": "boolean",
             "default": true,
-            "description": "[ doc 导出设置 ] 导出文档中包含暗号字符串",
-            "markdownDescription": "[ **doc 导出设置** ] 导出文档中**包含** 暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/）。"
+            "markdownDescription": "[ **doc 导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/）。"
           }
         }
       }
