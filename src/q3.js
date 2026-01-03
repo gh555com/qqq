@@ -741,7 +741,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const pickItems = [
         {
-            label: "$(file) .doc 文档（兼容 Office 2003, RTF）",
+            label: "$(file) .doc 文档（兼容 Office 2003, RTF） ",
             description: "RTF 编码 ◉ 兼容性更好",
             format: ExportFormat.RTF_DOC,
         },
@@ -814,11 +814,11 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             // 目录：文档里原样保留标记；不进附件索引
             if (stat && stat.isDirectory()) {
                 // 如果需要保留暗号，则原样输出；否则直接忽略该段（即不输出）
-                if (includeCipher) {
-                    rawElements.push({ type: "text", content: originalMark });
-                }
+                // ★★★ 修正：用户要求除媒体外的暗号必须导出，所以目录总是导出 ★★★
+                rawElements.push({ type: "text", content: originalMark });
             } else if (isMediaFile(ext)) {
                 // 媒体：总是输出媒体（如果需要保留暗号，则 originalMark 字段会有值）
+                // ★★★ 修正：includeCipher 仅控制媒体上方的暗号是否显示 ★★★
                 rawElements.push({
                     type: "media",
                     path: absPath,
@@ -826,10 +826,9 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     originalMark: includeCipher ? originalMark : null
                 });
             } else {
-                // 非媒体文件：
-                if (includeCipher) {
-                    rawElements.push({ type: "text", content: originalMark });
-                }
+                // 非媒体文件 (exe, bat, txt 等)：
+                // ★★★ 修正：用户要求除媒体外的暗号必须导出，所以这里总是导出 ★★★
+                rawElements.push({ type: "text", content: originalMark });
 
                 // 附件索引收集（去重）逻辑不变
                 // realpath 去重，避免同一个文件多次引用导致附件索引重复
