@@ -52,6 +52,7 @@ Copy the extension name: Get cookies.txt LOCALLY
 
 
 
+
 ## (Secondary, No Action Required) Expert Questions
 
 * **Q: Does the Expert Mode we're discussing support non-YouTube sites (such as Bilibili, Twitter, etc.)?**
@@ -111,9 +112,6 @@ Copy the extension name: Get cookies.txt LOCALLY
 
 - **Q: 隐私安全？**
   - A:  cookies.txt 包含你的登录凭证，请勿将其分享给他人或上传到公开的代码仓库（git）。
-
-
-
 
 
 
