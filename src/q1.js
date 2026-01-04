@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
+const global = require("./global");
 
 const qqq = require("./qqq");
 const q3 = require("./q3");
@@ -1359,25 +1360,105 @@ async function executeClipboardCommand() {
 
     const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 
-    // ★ 最终版策略：静默等待，单次插入
-    // 没有中间状态，没有占位符，没有多次更新。
-    // 如果是 HTML，用户会感觉“没反应”几秒钟，然后最终结果突然出现。
+    const level = (global.getConfig("transactionLevel") || "half");
+    let route = "q";
+    try {
+        let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+        try {
+            if (global.shellBridge && global.shellBridge.isAvailable()) {
+                const s = await global.shellBridge.call("checkQ", {}, 500);
+                if (s && !s.error) status = s;
+            }
+        } catch { }
 
-    await qqq.raceClipboard(targetDir, async (result, priority) => {
+        if (status.hasFile) {
+            let files = [];
+            try {
+                const gf = await global.shellBridge.call("getFiles", {}, 1000);
+                if (gf && Array.isArray(gf.files)) files = gf.files;
+            } catch { }
+            let totalBytes = 0;
+            for (const p of files) {
+                try {
+                    const st = fs.statSync(p);
+                    if (st.isDirectory()) {
+                        const info = await qqq.getFolderInfo(p);
+                        if (info && info.total_size) totalBytes += info.total_size;
+                    } else {
+                        totalBytes += st.size;
+                    }
+                } catch { }
+            }
+            if (level === "half" && totalBytes < 80 * 1024 * 1024) route = "q";
+            else route = "a";
+        } else if (status.hasHtml) {
+            let htmlStr = "";
+            try {
+                const r = await global.shellBridge.call("getHtml", {}, 1500);
+                if (r && r.value_base64) {
+                    const buf = Buffer.from(r.value_base64, "base64");
+                    htmlStr = buf.toString("utf8");
+                }
+            } catch { }
+            const looksImg = /<img\b/i.test(htmlStr) || /<video\b/i.test(htmlStr);
+            route = looksImg ? "a" : "q";
+        } else if (status.hasImage && !status.hasFile && !status.hasHtml) {
+            route = level === "half" ? "q" : "a";
+        } else {
+            let txt = "";
+            try { txt = await vscode.env.clipboard.readText(); } catch { }
+            if (txt && (/\.(mp4|webm|mkv|mov)(\?|$)/i.test(txt) || /https?:\/\/(www\.)?(youtube\.com|youtu\.be|vimeo\.com)\b/i.test(txt))) {
+                route = "a";
+            } else {
+                route = "q";
+            }
+        }
+    } catch { route = "q"; }
+
+    if (route === "q") {
+        await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+        return;
+    }
+
+    const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let token = "";
+    for (let i = 0; i < 6; i++) token += letters[Math.floor(Math.random() * letters.length)];
+    const anchor = `/\\__PENDING__:${token}\\/`;
+    await editor.edit((b) => b.insert(editor.selection.active, anchor));
+    global.addPendingTransaction(token, { uri: editor.document.uri.toString(), anchor, targetDir });
+
+    await qqq.raceClipboard(targetDir, async (result) => {
         const newText = await formatResultToText(result, editor);
-        if (!newText) return;
-
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
-
-        // 此时光标可能已经移动，我们需要获取最新的光标位置
-        const currentPos = activeEditor.selection.active;
-
-        await activeEditor.edit((editBuilder) => {
-            editBuilder.insert(currentPos, newText);
-        });
-
-        debounceRender(activeEditor, 10);
+        const doc = editor.document;
+        const fullText = doc.getText();
+        const idx = fullText.indexOf(anchor);
+        if (idx >= 0) {
+            const start = doc.positionAt(idx);
+            const end = doc.positionAt(idx + anchor.length);
+            await editor.edit((eb) => eb.replace(new vscode.Range(start, end), newText || ""));
+            debounceRender(editor, 10);
+            global.completeTransaction(token);
+        } else {
+            try {
+                const paths = [];
+                if (result) {
+                    if (result.type === "image" && result.path) paths.push(result.path);
+                    if (result.type === "file" || result.type === "file_folder") {
+                        (result.files || []).forEach(p => paths.push(p));
+                        (result.folders || []).forEach(p => paths.push(p));
+                    }
+                    if (result.type === "html_blocks") {
+                        (result.blocks || []).forEach(b => { if (b.type === "media" && b.path) paths.push(b.path); });
+                    }
+                }
+                for (const p of paths) {
+                    try {
+                        if (fs.existsSync(p)) fs.unlinkSync(p);
+                    } catch { }
+                }
+            } catch { }
+            global.completeTransaction(token);
+        }
     });
 }
 

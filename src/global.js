@@ -883,6 +883,7 @@ let extensionContext = null;
 function init(context) {
 	extensionContext = context;
 	initUserTracking(context);
+	_loadPendingTransactions(context);
 }
 
 // ============================================================================
@@ -1027,7 +1028,8 @@ const DEFAULT_CONFIG = {
 	"downloadSecurityLevel": "1: 平衡",
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率",
-	"docExportIncludeCipher": true
+	"docExportIncludeCipher": true,
+	"transactionLevel": "half"
 };
 
 const CONFIG_METADATA = {
@@ -1061,7 +1063,12 @@ const CONFIG_METADATA = {
 		options: ["原始分辨率", "相框分辨率"],
 		descriptions: []
 	},
-	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" },
+	"transactionLevel": {
+		name: "事务包裹级别", type: "enum",
+		options: ["full", "half"],
+		descriptions: []
+	}
 };
 
 let _configChangeCallback = null;
@@ -1136,6 +1143,47 @@ function _loadPersistentStats(context) {
 		_cacheHitTotal = context?.globalState?.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
 		_cacheMissTotal = context?.globalState?.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
 	} catch { }
+}
+
+// ============================================================================
+// ★ 事务管线
+// ============================================================================
+const KEY_PENDING_TX = "qqq_pending_transactions";
+let _pendingTx = new Map();
+
+function _loadPendingTransactions(context) {
+	try {
+		const raw = context?.globalState?.get(KEY_PENDING_TX, []);
+		if (Array.isArray(raw)) {
+			_pendingTx = new Map(raw.map(x => [x.token, x]));
+		}
+	} catch { _pendingTx = new Map(); }
+}
+
+async function _persistPendingTransactions() {
+	if (!extensionContext) return;
+	const arr = Array.from(_pendingTx.values());
+	try { await extensionContext.globalState.update(KEY_PENDING_TX, arr); } catch { }
+}
+
+function addPendingTransaction(token, data) {
+	_pendingTx.set(token, { token, ...data, ts: Date.now() });
+	_persistPendingTransactions();
+}
+
+function completeTransaction(token) {
+	if (_pendingTx.has(token)) {
+		_pendingTx.delete(token);
+		_persistPendingTransactions();
+	}
+}
+
+function getPendingTransaction(token) {
+	return _pendingTx.get(token);
+}
+
+function listPendingTransactions() {
+	return Array.from(_pendingTx.values());
 }
 
 function _scheduleStatsFlush() {
@@ -1579,5 +1627,11 @@ module.exports = {
 
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
-	formatHours
+	formatHours,
+
+	// 事务
+	addPendingTransaction,
+	completeTransaction,
+	getPendingTransaction,
+	listPendingTransactions
 };
