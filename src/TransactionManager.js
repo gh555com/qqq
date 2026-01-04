@@ -11,7 +11,12 @@ class TransactionManager {
     }
 
     static createId() {
-        return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let id = "";
+        for (let i = 0; i < 6; i++) {
+            id += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return id;
     }
 
     static async register(id, targetDir) {

@@ -490,13 +490,7 @@ async function raceClipboard(targetDir, callback) {
 				mode = 'q';
 			} else {
 				if (configMode === 'full') {
-					// FIX: Memory screenshot (Image but not File) should use 'q' (sync) to avoid anchor flicker
-					// because it is usually fast and processed in memory.
-					if (qStatus.hasImage && !qStatus.hasFile) {
-						mode = 'q';
-					} else {
-						mode = 'a';
-					}
+					mode = 'a';
 				} else {
 					// Half Package
 					if (qStatus.hasFile) {
