@@ -1020,7 +1020,7 @@ const DEFAULT_CONFIG = {
 	"showHistoryRecycleBin": true,
 	"enlargeSmallImages": true,
 	"performanceMode": "balanced",
-	"frameSizeMode": "smart",
+	"frameSizeMode": "fix",
 	"cleanFreak": false,
 	"ioEngine": "auto",
 	"pythonPath": "",
@@ -1041,7 +1041,7 @@ const CONFIG_METADATA = {
 	},
 	"frameSizeMode": {
 		name: "相框尺寸", type: "enum",
-		options: ["smart", "large", "small"],
+		options: ["fix", "large", "small"],
 		descriptions: []
 	},
 	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" },

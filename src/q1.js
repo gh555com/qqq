@@ -102,7 +102,7 @@ const editorDebounceTimers = new Map();
 
 let enlargeSmallImages = true;
 let performanceMode = "balanced";
-let frameSizeMode = "smart";
+let frameSizeMode = "fix";
 let cleanFreakMode = false;
 
 let watermarkBase64 = null;
@@ -151,12 +151,12 @@ function refreshConfig() {
         if (extremePerformance) performanceMode = "extreme";
         else performanceMode = config.get("performanceMode", "balanced");
 
-        frameSizeMode = config.get("frameSizeMode", "smart");
+        frameSizeMode = config.get("frameSizeMode", "fix");
         cleanFreakMode = config.get("cleanFreak", false);
     } catch (e) {
         enlargeSmallImages = true;
         performanceMode = "balanced";
-        frameSizeMode = "smart";
+        frameSizeMode = "fix";
         cleanFreakMode = false;
     }
 }

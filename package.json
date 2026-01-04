@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.5.10",
+  "version": "15.6.0",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -25,7 +25,7 @@
   "contributes": {
     "configuration": [
       {
-        "title": "qqq · ⚙️ 核心",
+        "title": "⚙️ 核心",
         "order": 10,
         "properties": {
           "qqq.performanceMode": {
@@ -85,7 +85,7 @@
         }
       },
       {
-        "title": "qqq · 🛸 漫游器",
+        "title": "🛸 漫游器",
         "order": 20,
         "properties": {
           "qqq.showHistoryRecycleBin": {
@@ -97,22 +97,22 @@
         }
       },
       {
-        "title": "qqq · 👁️ 视觉",
+        "title": "👁️ 视觉",
         "order": 30,
         "properties": {
           "qqq.frameSizeMode": {
             "order": 10,
             "type": "string",
-            "default": "smart",
+            "default": "fix",
             "enum": [
               "large",
               "small",
-              "smart"
+              "fix"
             ],
             "markdownEnumDescriptions": [
               "大相框：512x288",
               "小相框：256x144",
-              "智能：根据图片尺寸自动选择相框"
+              "Fix：根据图片尺寸自动选择相框"
             ],
             "markdownDescription": "[ 👁️ **视觉** ] 相框尺寸模式：控制预览图像的显示尺寸。"
           },
@@ -131,7 +131,7 @@
         }
       },
       {
-        "title": "qqq · 🍌 html 与富文本",
+        "title": "🍌 html与富文本",
         "order": 40,
         "properties": {
           "qqq.downloadSecurityLevel": {
@@ -165,7 +165,7 @@
         }
       },
       {
-        "title": "qqq · 📦 Doc 导出",
+        "title": "📦 doc导出设置",
         "order": 50,
         "properties": {
           "qqq.docExportImageResolution": {
@@ -176,7 +176,7 @@
               "原始分辨率",
               "相框分辨率"
             ],
-            "markdownDescription": "[ 📦 **doc 导出设置** ] 图片使用何种分辨率：",
+            "markdownDescription": "[ 📦 **doc导出设置** ] 图片使用何种分辨率：",
             "markdownEnumDescriptions": [
               "得到原始精度。",
               "优势在于: 1、文件更小； 2、相框显示滴缩略图总能对应一个完整滴图片预览（不会因为 Word 页面尺寸限制导致 预览 被截断）。"
@@ -186,7 +186,7 @@
             "order": 20,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ 📦 **doc 导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
+            "markdownDescription": "[ 📦 **doc导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
           }
         }
       }
