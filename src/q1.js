@@ -1363,42 +1363,107 @@ async function executeClipboardCommand() {
 
     // ★ 最终版策略：静默等待，单次插入
     // 进度条逻辑已移交至 qqq.raceClipboard 根据配置决定 (Smart vs Full)
-    await qqq.raceClipboard(targetDir, async (result, priority) => {
-        // 这里的 editor 仅用于获取配置（EOL 等），即便它不再是 active 也没关系
-        const newText = await formatResultToText(result, editor);
-        if (!newText) return;
+    await qqq.raceClipboard(targetDir,
+        // 1. Immediate Callback (Straight or Anchor)
+        async (result, priority) => {
+            // 这里的 editor 仅用于获取配置（EOL 等），即便它不再是 active 也没关系
+            const newText = await formatResultToText(result, editor);
+            if (!newText) return;
 
-        // 使用 WorkspaceEdit 确保后台写入原子性，无需依赖 activeTextEditor
-        const wsEdit = new vscode.WorkspaceEdit();
-        wsEdit.insert(targetUri, insertPos, newText);
-        const success = await vscode.workspace.applyEdit(wsEdit);
+            // 使用 WorkspaceEdit 确保后台写入原子性，无需依赖 activeTextEditor
+            const wsEdit = new vscode.WorkspaceEdit();
+            wsEdit.insert(targetUri, insertPos, newText);
+            const success = await vscode.workspace.applyEdit(wsEdit);
 
-        if (success) {
-            // 尝试更新光标位置（仅当用户仍停留在该文档时）
-            const activeEditor = vscode.window.activeTextEditor;
-            if (activeEditor && activeEditor.document.uri.toString() === targetUri.toString()) {
-                const lines = newText.split(/\r\n|\r|\n/);
-                const lineDelta = lines.length - 1;
-                const lastLineLen = lines[lines.length - 1].length;
+            if (success) {
+                // 尝试更新光标位置（仅当用户仍停留在该文档时）
+                const activeEditor = vscode.window.activeTextEditor;
+                if (activeEditor && activeEditor.document.uri.toString() === targetUri.toString()) {
+                    const lines = newText.split(/\r\n|\r|\n/);
+                    const lineDelta = lines.length - 1;
+                    const lastLineLen = lines[lines.length - 1].length;
 
-                let newLine = insertPos.line + lineDelta;
-                let newChar = (lineDelta === 0 ? insertPos.character : 0) + lastLineLen;
+                    let newLine = insertPos.line + lineDelta;
+                    let newChar = (lineDelta === 0 ? insertPos.character : 0) + lastLineLen;
 
-                // 简单的边界检查
-                if (newLine < 0) newLine = 0;
-                if (newChar < 0) newChar = 0;
+                    // 简单的边界检查
+                    if (newLine < 0) newLine = 0;
+                    if (newChar < 0) newChar = 0;
 
-                const newPos = new vscode.Position(newLine, newChar);
-                activeEditor.selection = new vscode.Selection(newPos, newPos);
-                activeEditor.revealRange(new vscode.Range(newPos, newPos));
+                    const newPos = new vscode.Position(newLine, newChar);
+                    activeEditor.selection = new vscode.Selection(newPos, newPos);
+                    activeEditor.revealRange(new vscode.Range(newPos, newPos));
 
-                debounceRender(activeEditor, 10);
-            } else {
-                // 如果用户已切换，给一个温和的提示
-                vscode.window.showInformationMessage(`粘贴已在后台完成: ${path.basename(targetUri.fsPath)}`);
+                    debounceRender(activeEditor, 10);
+                } else {
+                    // 如果用户已切换，给一个温和的提示
+                    vscode.window.showInformationMessage(`粘贴已在后台完成: ${path.basename(targetUri.fsPath)}`);
+                }
+            }
+        },
+        // 2. Async Callback (Curved Paste Completion)
+        async (finalResult) => {
+            if (!finalResult) return; // Background task failed
+
+            // Helper for Rollback
+            const rollback = async (res) => {
+                try {
+                    if (res.files) {
+                        for (const f of res.files) try { await fs.promises.unlink(f); } catch { }
+                    }
+                    if (res.folders) {
+                        for (const f of res.folders) try { await fs.promises.rm(f, { recursive: true, force: true }); } catch { }
+                    }
+                } catch (e) { }
+            };
+
+            try {
+                // 1. Find Document (It might be closed)
+                let targetDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === targetUri.toString());
+                if (!targetDoc) {
+                    try {
+                        targetDoc = await vscode.workspace.openTextDocument(targetUri);
+                    } catch (e) {
+                        await rollback(finalResult);
+                        return;
+                    }
+                }
+
+                // 2. Check Anchor
+                const text = targetDoc.getText();
+                const anchorIdx = text.indexOf(qqq.ANCHOR);
+                if (anchorIdx === -1) {
+                    await rollback(finalResult);
+                    return;
+                }
+
+                // 3. Format Result
+                // formatResultToText needs an object with .document property
+                const replacement = await formatResultToText(finalResult, { document: targetDoc });
+
+                // 4. Edit
+                // We need an editor to edit (WorkspaceEdit is better for background)
+                const wsEdit = new vscode.WorkspaceEdit();
+                const startPos = targetDoc.positionAt(anchorIdx);
+                const endPos = targetDoc.positionAt(anchorIdx + qqq.ANCHOR.length);
+                const range = new vscode.Range(startPos, endPos);
+
+                wsEdit.replace(targetUri, range, replacement);
+                const success = await vscode.workspace.applyEdit(wsEdit);
+
+                if (!success) {
+                    await rollback(finalResult);
+                } else {
+                    // Trigger render update
+                    const visibleEd = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri.toString());
+                    if (visibleEd) debounceRender(visibleEd, 10);
+                }
+
+            } catch (e) {
+                await rollback(finalResult);
             }
         }
-    });
+    );
 }
 
 // ==================== 整洁模式 ====================

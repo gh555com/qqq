@@ -1583,29 +1583,176 @@ function copyFilesToTarget(files, targetDir) {
     return { copied, fingerprints };
 }
 
-function processFilesForClipboard(files, targetDir) {
+async function processFilesForClipboard(files, targetDir, progressCallback) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
     const copiedFiles = [];
     const copiedFolders = [];
     const fingerprints = {};
+
+    // Helper for async folder copy
+    async function copyFolderRecursive(src, dest) {
+        await fs.promises.mkdir(dest, { recursive: true });
+        const entries = await fs.promises.readdir(src, { withFileTypes: true });
+        for (const entry of entries) {
+            const srcPath = path.join(src, entry.name);
+            const destPath = path.join(dest, entry.name);
+            if (entry.isDirectory()) {
+                await copyFolderRecursive(srcPath, destPath);
+            } else {
+                await fs.promises.copyFile(srcPath, destPath);
+            }
+        }
+    }
+
+    // Process folders async
     for (const folder of folders) {
         try {
             const destFolder = path.join(targetDir, path.basename(folder));
-            fs.cpSync(folder, destFolder, { recursive: true, force: true });
+            // Use async copy instead of cpSync to avoid blocking UI
+            if (fs.promises.cp) {
+                await fs.promises.cp(folder, destFolder, { recursive: true, force: true });
+            } else {
+                // Fallback for older Node versions
+                await copyFolderRecursive(folder, destFolder);
+            }
             copiedFolders.push(destFolder);
-        } catch { }
+        } catch (e) {
+            log(`[AsyncCopy] Folder copy failed: ${e.message}`, "WARN");
+        }
     }
+
+    // Process files
     if (validFiles.length > 0) {
+        // We can reuse the sync helper for flat files if it's fast enough,
+        // but for "Straight Paste" we want speed.
+        // For "Curved Paste", this runs in background so sync is "okay" but async is better.
+        // However, copyFilesToTarget involves deduplication logic which is synchronous.
+        // Let's keep copyFilesToTarget sync for now as it's complex to refactor completely,
+        // but since we are running in 'a' mode (background), it won't block UI if called inside a Promise.
+        // Wait, 'a' mode runs in background. 'q' mode runs on main thread.
+        // If 'q' mode hits a large file, it might block.
+        // But 'q' mode is only for < 80MB.
+        // So keeping copyFilesToTarget sync is acceptable for now given the complexity of dedupe.
+
         const result = copyFilesToTarget(validFiles, targetDir);
         copiedFiles.push(...result.copied);
         Object.assign(fingerprints, result.fingerprints);
     }
+
     if (copiedFiles.length > 0 || copiedFolders.length > 0) {
         return { type: "file_folder", files: copiedFiles, folders: copiedFolders, fingerprints: fingerprints };
     }
     return null;
+}
+
+async function getClipboardQuickStats() {
+    const global = getGlobal();
+    const stats = {
+        hasFile: false,
+        hasHtml: false,
+        hasImage: false,
+        hasText: false,
+        totalSize: 0,
+        isPureTextHtml: false,
+        fileCount: 0
+    };
+
+    // 1. Check Shell/PowerShell for Files
+    let files = [];
+    try {
+        if (global.shellBridge && global.shellBridge.available !== false) {
+            const res = await global.shellBridge.call("checkQ", {}, 500);
+            if (res && !res.error) {
+                Object.assign(stats, res);
+                if (res.files) files = res.files;
+            }
+        }
+    } catch (e) { }
+
+    if (!stats.hasFile && !stats.hasHtml && !stats.hasImage && !stats.hasText && process.platform === "win32") {
+        try {
+            const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
+            const jsonStr = await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
+            if (jsonStr && jsonStr.trim()) Object.assign(stats, JSON.parse(jsonStr));
+        } catch (e) { }
+    }
+
+    // 2. If Files, Calculate Size
+    if (stats.hasFile) {
+        if (files.length === 0 && process.platform === "win32") {
+            const res = await global.tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 2000);
+            if (res) files = res.paths || res.files || [];
+        }
+
+        if (files.length > 0) {
+            stats.fileCount = files.length;
+            for (const f of files) {
+                try {
+                    const st = fs.statSync(f); // Sync stat is fast enough usually
+                    if (st.isDirectory()) {
+                        // Quick estimate for directory? Or just assume it's large?
+                        // For safety, let's treat directories as "check contents"
+                        // But recursive stat can be slow.
+                        // Strategy: If directory, we treat it as "Unknown Size" or just count it.
+                        // User requirement: "If total < 80m go q".
+                        // We need to calculate it.
+                        const dirSize = await _getDirSizeQuick(f);
+                        stats.totalSize += dirSize;
+                    } else {
+                        stats.totalSize += st.size;
+                    }
+                } catch (e) { }
+            }
+        }
+    }
+
+    // 3. If HTML, Check Purity (Scan for media tags)
+    if (stats.hasHtml && process.platform === "win32") {
+        try {
+            // Check for media tags in HTML content
+            const psScript = `Add-Type -A System.Windows.Forms; $t = [System.Windows.Forms.Clipboard]::GetText([System.Windows.Forms.TextDataFormat]::Html); if ($t -match '<(img|video|source|object|embed|iframe)') { 'dirty' } else { 'clean' }`;
+            const out = await new Promise(resolve => {
+                const child = require('child_process').spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript]);
+                let stdout = "";
+                child.stdout.on("data", d => stdout += d.toString());
+                child.on("close", () => resolve(stdout.trim()));
+                child.on("error", () => resolve("dirty")); // Default to dirty on error
+                setTimeout(() => { child.kill(); resolve("dirty"); }, 1000); // Timeout
+            });
+
+            if (out === 'clean') {
+                stats.isPureTextHtml = true;
+            }
+        } catch (e) { }
+    } else if (stats.hasHtml && !stats.hasImage && !stats.hasFile) {
+        // Non-win32 fallback:
+        // If we have text content and it doesn't look like it has media tags in plain text (weak check),
+        // we might consider it clean?
+        // Better to be safe: default to false (Yellow) for HTML on other platforms unless we implement pbpaste check.
+        // User asked for "White list... 2. HTML ... only text".
+        // For now, let's stick to strict check on Windows.
+    }
+
+    return stats;
+}
+
+async function _getDirSizeQuick(dirPath) {
+    let size = 0;
+    try {
+        const files = await fs.promises.readdir(dirPath, { withFileTypes: true });
+        for (const file of files) {
+            const fullPath = path.join(dirPath, file.name);
+            if (file.isDirectory()) {
+                size += await _getDirSizeQuick(fullPath);
+            } else {
+                const st = await fs.promises.stat(fullPath);
+                size += st.size;
+            }
+        }
+    } catch (e) { }
+    return size;
 }
 
 async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
@@ -1895,5 +2042,7 @@ module.exports = {
     promptForUrl,
     pickTargetDirectory,
     log, // 导出 log 函数
-    verifyVideoFile // Exported shared verification function
+    verifyVideoFile, // Exported shared verification function
+    getClipboardQuickStats,
+    processFilesForClipboard
 };
