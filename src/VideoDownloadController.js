@@ -399,11 +399,129 @@ class VideoDownloadController {
 
         this.KEY_CUSTOM_BROWSER = 'customBrowserPath';
         this.KEY_DEDICATED_BROWSER = 'dedicatedChromeExePath';
+        this.KEY_TRANSACTIONS = 'qqq.transactions'; // 事务存储 Key
 
         // 当前任务上下文（用于总耗时 + 真取消）
         this._task = null;
 
         ChildProcessTracker.ensurePatched();
+    }
+
+    // ==================== 事务管理器 (Transaction Manager) ====================
+
+    // 启动时恢复并清理异常中断的事务
+    static async cleanUpPendingDirs(context) {
+        try {
+            const transList = context.globalState.get('qqq.transactions') || [];
+            if (!Array.isArray(transList) || transList.length === 0) return;
+
+            const now = Date.now();
+            const validTrans = [];
+            let cleanedCount = 0;
+
+            for (const t of transList) {
+                // 超过 10 分钟的未完成事务，视为异常中断，执行回滚
+                if (now - (t.createdAt || 0) > 10 * 60 * 1000) {
+                    try {
+                        // 回滚：精准删除预期生成的文件及其残留
+                        if (Array.isArray(t.expectedFiles)) {
+                            for (const f of t.expectedFiles) {
+                                if (!f) continue;
+                                const candidates = [
+                                    f,
+                                    f + ".part",
+                                    f + ".ytdl",
+                                    f + ".tmp",
+                                    f + ".download"
+                                ];
+                                for (const c of candidates) {
+                                    if (fs.existsSync(c)) {
+                                        try { fs.unlinkSync(c); cleanedCount++; } catch (e) { }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                } else {
+                    // 未过期的保留（可能是刚启动还没跑完？虽不常见，但为了安全）
+                    // 其实启动时 context 刚加载，理论上都是上次留下的。
+                    // 激进策略：启动时只要还在 pending，统统杀掉。
+                    // 这里我们采用 10 分钟阈值，避免极其罕见的 race condition。
+                    validTrans.push(t);
+                }
+            }
+
+            if (cleanedCount > 0) {
+                console.log(`[qqq] 启动清理：移除了 ${cleanedCount} 个异常残留文件。`);
+            }
+
+            await context.globalState.update('qqq.transactions', validTrans);
+
+        } catch (e) {
+            console.error('[qqq] 事务清理失败:', e);
+        }
+    }
+
+    // 开启新事务
+    async _beginTransaction(targetDir, expectedFiles = []) {
+        const transId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        const trans = {
+            id: transId,
+            targetDir,
+            expectedFiles, // 记录预期的最终文件名（如 xxx.mp4）
+            createdAt: Date.now(),
+            status: 'pending'
+        };
+
+        const list = this.context.globalState.get(this.KEY_TRANSACTIONS) || [];
+        list.push(trans);
+        await this.context.globalState.update(this.KEY_TRANSACTIONS, list);
+        return transId;
+    }
+
+    // 更新事务（追加追踪文件）
+    async _updateTransactionFiles(transId, newFiles) {
+        if (!transId || !newFiles || newFiles.length === 0) return;
+        const list = this.context.globalState.get(this.KEY_TRANSACTIONS) || [];
+        const idx = list.findIndex(t => t.id === transId);
+        if (idx >= 0) {
+            const t = list[idx];
+            if (!t.expectedFiles) t.expectedFiles = [];
+            for (const f of newFiles) {
+                if (!t.expectedFiles.includes(f)) t.expectedFiles.push(f);
+            }
+            await this.context.globalState.update(this.KEY_TRANSACTIONS, list);
+        }
+    }
+
+    // 提交事务（成功完成）
+    async _commitTransaction(transId) {
+        if (!transId) return;
+        const list = this.context.globalState.get(this.KEY_TRANSACTIONS) || [];
+        const newList = list.filter(t => t.id !== transId);
+        await this.context.globalState.update(this.KEY_TRANSACTIONS, newList);
+    }
+
+    // 回滚事务（失败或取消）
+    async _rollbackTransaction(transId) {
+        if (!transId) return;
+        const list = this.context.globalState.get(this.KEY_TRANSACTIONS) || [];
+        const t = list.find(x => x.id === transId);
+        if (t) {
+            // 执行删除
+            if (Array.isArray(t.expectedFiles)) {
+                for (const f of t.expectedFiles) {
+                    try {
+                        if (fs.existsSync(f)) fs.unlinkSync(f);
+                        if (fs.existsSync(f + ".part")) fs.unlinkSync(f + ".part");
+                        if (fs.existsSync(f + ".ytdl")) fs.unlinkSync(f + ".ytdl");
+                    } catch (e) { }
+                }
+            }
+            // 移除记录
+            const newList = list.filter(x => x.id !== transId);
+            await this.context.globalState.update(this.KEY_TRANSACTIONS, newList);
+        }
     }
 
     log(msg) {
@@ -774,6 +892,10 @@ class VideoDownloadController {
                 const targetDir = path.join(currentDocDir, "qqq");
                 if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
+                // ★ 开启事务：虽然这时还没生成具体文件，但我们可以在生成 Task 时追加
+                const transId = await this._beginTransaction(targetDir, []);
+                task.transId = transId;
+
                 this.log(`开始处理: ${url}`);
                 this.outputChannel.show(true);
 
@@ -785,9 +907,11 @@ class VideoDownloadController {
                     this.log(`[Cookies] 未在全局存储中找到 cookies 文件 (搜索 *cookies*.txt)`);
                 }
 
-                await this._fastProcess(url, targetDir, cookiesFilePath);
+                await this._fastProcess(url, targetDir, cookiesFilePath, transId);
             });
         } finally {
+            // 注意：正常流程中，_fastProcess 内部负责 commit 或 rollback
+            // 这里只处理 task 对象的清理
             this._endTask();
         }
     }
@@ -854,7 +978,7 @@ class VideoDownloadController {
     }
 
     // ==================== 普通流程：一号 + 三号 ====================
-    async _fastProcess(url, targetDir, cookiesFilePath) {
+    async _fastProcess(url, targetDir, cookiesFilePath, transId) {
         try {
             const urlSnippet = this._makeUrlSnippet(url);
             const isYouTube = this._isYouTubeUrl(url);
@@ -936,10 +1060,13 @@ class VideoDownloadController {
                 progress.report({ message: `已交换 0k 于 ${urlSnippet}` });
 
                 const activePrefixes = new Set();
+                const expectedFiles = [];
+
                 tasks.forEach(t => {
                     if (t.destPath) {
                         const name = path.basename(t.destPath, path.extname(t.destPath));
                         if (name) activePrefixes.add(name);
+                        expectedFiles.push(t.destPath);
 
                         // Track for cancellation cleanup
                         if (this._task && this._task.activeFiles) {
@@ -947,6 +1074,9 @@ class VideoDownloadController {
                         }
                     }
                 });
+
+                // ★ 更新事务
+                if (transId) await this._updateTransactionFiles(transId, expectedFiles);
 
                 let diskTotalBytes = 0;
                 let logTotalBytes = 0;
@@ -1023,17 +1153,6 @@ class VideoDownloadController {
                     }
 
                     if (this._isCancelled()) {
-                        // 下载完成后的清理逻辑：如果是用户取消，则删除所有已下载的文件
-                        if (res && res.results) {
-                            for (const r of res.results) {
-                                if (r.success) {
-                                    const f = r.path || r.destPath;
-                                    if (f && fs.existsSync(f)) {
-                                        try { fs.unlinkSync(f); } catch (e) { }
-                                    }
-                                }
-                            }
-                        }
                         return null;
                     }
 
@@ -1079,18 +1198,27 @@ class VideoDownloadController {
                 }
             });
 
-            if (!outcome) return;
-            if (this._isCancelled()) return;
+            if (!outcome) {
+                if (transId) await this._rollbackTransaction(transId);
+                return;
+            }
+            if (this._isCancelled()) {
+                if (transId) await this._rollbackTransaction(transId);
+                return;
+            }
 
             // ✅ 最终兜底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
+                    if (transId) await this._commitTransaction(transId);
                     await this._handleForbidden(outcome.code || 403, url, targetDir);
                     return;
                 }
             }
+
+            if (transId) await this._commitTransaction(transId);
 
             const landedCount = (outcome.landedFiles || []).length;
             const totalStr = this._formatBytesSimple(outcome.finalTotalBytes || 0);
@@ -1102,6 +1230,7 @@ class VideoDownloadController {
             await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
 
         } catch (error) {
+            if (transId) await this._rollbackTransaction(transId);
             if (this._isCancelled()) return;
             this.log(`处理失败: ${error.message}`);
         }
@@ -1180,15 +1309,59 @@ class VideoDownloadController {
 
     async _insertToCursor(fileName, fullPath) {
         if (this._isCancelled()) return;
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) return;
 
-        const docDir = path.dirname(editor.document.uri.fsPath);
+        // 获取上下文（优先使用 task 中锁定的，如果没有则降级到 activeTextEditor）
+        const task = this._task;
+        const targetUri = task?.targetUri || vscode.window.activeTextEditor?.document.uri;
+        // 如果连 activeEditor 都没有，那就真的没办法了
+        if (!targetUri) return;
+
+        // 计算相对路径
+        const docDir = path.dirname(targetUri.fsPath);
         let relPath = path.relative(docDir, fullPath).replace(/\\/g, '/');
+        const textToInsert = `/\\${relPath}\\/\n`;
 
-        await editor.edit(editBuilder => {
-            editBuilder.insert(editor.selection.active, `/\\${relPath}\\/\n`);
-        });
+        try {
+            // 打开文档（即使不可见）
+            const doc = await vscode.workspace.openTextDocument(targetUri);
+
+            // 计算插入点
+            let insertPos = task?.insertPos;
+            if (!insertPos) {
+                // 降级：如果没锁定位置，尝试用当前 activeEditor 的光标
+                if (vscode.window.activeTextEditor?.document.uri.toString() === targetUri.toString()) {
+                    insertPos = vscode.window.activeTextEditor.selection.active;
+                } else {
+                    // 如果都没激活，默认插到文件末尾
+                    insertPos = doc.lineAt(doc.lineCount - 1).range.end;
+                }
+            }
+
+            // ✅ 关键：处理“原有商行全删除”的情况
+            // validatePosition 会将无效位置（如第10行，但文档只有3行）自动钳制到文档合法的最后位置
+            const safePos = doc.validatePosition(insertPos);
+
+            // 使用 WorkspaceEdit 进行后台原子写入
+            const wsEdit = new vscode.WorkspaceEdit();
+            wsEdit.insert(targetUri, safePos, textToInsert);
+            const success = await vscode.workspace.applyEdit(wsEdit);
+
+            if (success) {
+                // 可选：如果用户碰巧还在看这个文档，帮他移动光标
+                const activeEditor = vscode.window.activeTextEditor;
+                if (activeEditor && activeEditor.document.uri.toString() === targetUri.toString()) {
+                    // 简单的光标下移策略
+                    const newPos = activeEditor.document.validatePosition(safePos.translate(1, 0));
+                    activeEditor.selection = new vscode.Selection(newPos, newPos);
+                    activeEditor.revealRange(new vscode.Range(newPos, newPos));
+                } else {
+                    // 提示用户后台完成
+                    // vscode.window.showInformationMessage(`视频链接已插入: ${path.basename(targetUri.fsPath)}`);
+                }
+            }
+        } catch (e) {
+            this.log(`插入文本失败: ${e.message}`);
+        }
     }
 
     // ==================== 增强流程入口 ====================

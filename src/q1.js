@@ -1358,26 +1358,46 @@ async function executeClipboardCommand() {
     }
 
     const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
+    const targetUri = editor.document.uri;
+    const insertPos = editor.selection.active;
 
     // ★ 最终版策略：静默等待，单次插入
-    // 没有中间状态，没有占位符，没有多次更新。
-    // 如果是 HTML，用户会感觉“没反应”几秒钟，然后最终结果突然出现。
-
+    // 进度条逻辑已移交至 qqq.raceClipboard 根据配置决定 (Smart vs Full)
     await qqq.raceClipboard(targetDir, async (result, priority) => {
+        // 这里的 editor 仅用于获取配置（EOL 等），即便它不再是 active 也没关系
         const newText = await formatResultToText(result, editor);
         if (!newText) return;
 
-        const activeEditor = vscode.window.activeTextEditor;
-        if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
+        // 使用 WorkspaceEdit 确保后台写入原子性，无需依赖 activeTextEditor
+        const wsEdit = new vscode.WorkspaceEdit();
+        wsEdit.insert(targetUri, insertPos, newText);
+        const success = await vscode.workspace.applyEdit(wsEdit);
 
-        // 此时光标可能已经移动，我们需要获取最新的光标位置
-        const currentPos = activeEditor.selection.active;
+        if (success) {
+            // 尝试更新光标位置（仅当用户仍停留在该文档时）
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor && activeEditor.document.uri.toString() === targetUri.toString()) {
+                const lines = newText.split(/\r\n|\r|\n/);
+                const lineDelta = lines.length - 1;
+                const lastLineLen = lines[lines.length - 1].length;
 
-        await activeEditor.edit((editBuilder) => {
-            editBuilder.insert(currentPos, newText);
-        });
+                let newLine = insertPos.line + lineDelta;
+                let newChar = (lineDelta === 0 ? insertPos.character : 0) + lastLineLen;
 
-        debounceRender(activeEditor, 10);
+                // 简单的边界检查
+                if (newLine < 0) newLine = 0;
+                if (newChar < 0) newChar = 0;
+
+                const newPos = new vscode.Position(newLine, newChar);
+                activeEditor.selection = new vscode.Selection(newPos, newPos);
+                activeEditor.revealRange(new vscode.Range(newPos, newPos));
+
+                debounceRender(activeEditor, 10);
+            } else {
+                // 如果用户已切换，给一个温和的提示
+                vscode.window.showInformationMessage(`粘贴已在后台完成: ${path.basename(targetUri.fsPath)}`);
+            }
+        }
     });
 }
 
