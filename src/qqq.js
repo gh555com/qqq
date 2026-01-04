@@ -732,6 +732,13 @@ const exported = {
 	resolvePendingJob,
 
 	raceClipboard,
+	// 统一接口别名
+	qPaste: async () => {
+		try { await vscode.commands.executeCommand("editor.action.clipboardPasteAction"); } catch {}
+	},
+	aPaste: async (targetDir, callback, token = null) => {
+		return await handleClipboardSlow(targetDir, Date.now(), null, callback, token);
+	},
 
 	probeScheduler: global.probeScheduler,
 	genScheduler: global.genScheduler,
