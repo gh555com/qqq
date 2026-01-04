@@ -151,12 +151,12 @@ function refreshConfig() {
         if (extremePerformance) performanceMode = "extreme";
         else performanceMode = config.get("performanceMode", "balanced");
 
-        frameSizeMode = config.get("frameSizeMode", "smart");
+        frameSizeMode = config.get("frameSizeMode", "fix");
         cleanFreakMode = config.get("cleanFreak", false);
     } catch (e) {
         enlargeSmallImages = true;
         performanceMode = "balanced";
-        frameSizeMode = "smart";
+        frameSizeMode = "fix";
         cleanFreakMode = false;
     }
 }
