@@ -463,42 +463,78 @@ function makeDummyProgressAdapter() {
 	return (absPct, msg) => { };
 }
 
-async function raceClipboard(targetDir, callback) {
+const ANCHOR = "/__PENDING__:R8HKDEjS8/";
+
+async function raceClipboard(targetDir, callback, asyncCallback) {
 	return pasteQueue.enqueue(async () => {
 		try {
 			const config = vscode.workspace.getConfiguration("qqq");
 			const transLevel = config.get("transactionLevel", "half"); // 'half' | 'full'
+			const stats = await h.getClipboardQuickStats();
 
-			// Fast Path: Half mode (default) -> No Progress Bar, No Rollback (for simple tasks)
-			if (transLevel === "half") {
+			// 1. Decision Matrix
+			// White List: Pure Text or Pure Text HTML
+			const isWhiteList = stats.hasText || stats.isPureTextHtml;
+			const isYellowList = !isWhiteList;
+
+			let useCurve = false;
+			if (isYellowList) {
+				if (transLevel === "full") {
+					useCurve = true;
+				} else {
+					// Half/Smart mode
+					// If files/folders and total size > 80MB -> Curve (a)
+					// If Memory Screenshot (Image but no file) -> Straight (q)
+					// If Text/TextHTML -> Straight (q) (Covered by White List)
+					if (stats.hasFile) {
+						if (stats.totalSize > PASTE_SIZE_THRESHOLD) { // 80MB
+							useCurve = true;
+						}
+					}
+					// Else Straight
+				}
+			}
+
+			// 2. Execution
+			if (!useCurve) {
+				// Straight Paste (q)
+				// Direct call without UI blocking (Primitive)
 				const dummyToken = { isCancellationRequested: false, onCancellationRequested: () => { } };
-				const dummyCb = makeDummyProgressAdapter();
-
-				// Direct call without UI blocking
-				const res = await h.autoDetectAndPaste(targetDir, dummyCb, dummyToken);
+				const res = await h.autoDetectAndPaste(targetDir, makeDummyProgressAdapter(), dummyToken);
 				if (res) {
 					callback(res, 100);
 				}
-				return;
-			}
+			} else {
+				// Curved Paste (a)
+				// 1. Insert Anchor immediately
+				callback({ type: "text", text: ANCHOR }, 100);
 
-			// Safe Path: Full mode -> Progress Bar + (Implicitly) Transaction
-			const res = await global.withProgress({
-				location: vscode.ProgressLocation.Notification,
-				title: "qqq: html粘贴...",
-				cancellable: true
-			}, async (progress, token) => {
-				token.onCancellationRequested(() => {
-					global.logMessage("粘贴操作被用户取消", "WARN");
-				});
-				const progCb = makeVsProgressAdapter(progress);
+				// 2. Run Heavy Task in Background (Floating)
+				(async () => {
+					try {
+						// We use a separate token source for the background task
+						const tokenSource = new vscode.CancellationTokenSource();
 
-				// ★ Delegate all detection and handling to h.js
-				return await h.autoDetectAndPaste(targetDir, progCb, token);
-			});
+						// We can show a status bar message instead of blocking progress
+						const statusDisp = vscode.window.setStatusBarMessage("qqq: Background pasting...", 10000);
 
-			if (res) {
-				callback(res, 100);
+						const res = await h.autoDetectAndPaste(targetDir, (pct, msg) => {
+							// Optional: Update status bar with percentage?
+						}, tokenSource.token);
+
+						statusDisp.dispose();
+
+						if (asyncCallback) {
+							await asyncCallback(res);
+						}
+					} catch (e) {
+						global.logMessage(`Background paste failed: ${e.message}`, "ERROR");
+						// Trigger asyncCallback with null/error to allow rollback if needed?
+						// Currently asyncCallback expects 'res'.
+						// If we pass null, q1 logic should handle it.
+						if (asyncCallback) await asyncCallback(null);
+					}
+				})();
 			}
 		} catch (e) {
 			global.logMessage(`raceClipboard failed: ${e.message}`, "ERROR");
@@ -761,7 +797,8 @@ const exported = {
 	registerPendingJob,
 	resolvePendingJob,
 
-	raceClipboard,
+	ANCHOR,
+    raceClipboard,
 
 	probeScheduler: global.probeScheduler,
 	genScheduler: global.genScheduler,

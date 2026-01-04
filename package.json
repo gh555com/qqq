@@ -42,7 +42,7 @@
               "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47",
               "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71"
             ],
-            "markdownDescription": "[ ⚙️ **核心** ] 性能模式：控制预览生成的质量和性能平衡。"
+            "markdownDescription": "⚙️ 性能模式：控制预览生成的质量和性能平衡。"
           },
           "qqq.ioEngine": {
             "order": 20,
@@ -60,13 +60,13 @@
               "Rust 引擎",
               "Node 引擎"
             ],
-            "markdownDescription": "[ ⚙️ **核心** ] 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+            "markdownDescription": "⚙️ 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
           },
           "qqq.pythonPath": {
             "order": 30,
             "type": "string",
             "default": "",
-            "markdownDescription": "[ ⚙️ **核心** ] 指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
+            "markdownDescription": "⚙️ 指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
           },
           "qqq.transactionLevel": {
             "order": 40,
@@ -77,10 +77,10 @@
               "half"
             ],
             "markdownEnumDescriptions": [
-              "全包裹：一切操作都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",
-              "半包裹：仅对耗时任务（如视频下载、批量文件、混合富文本等）使用事务包裹。其余视做简单粘贴：最快响应，无进度条，异常**无**回滚或清理。"
+              "全包裹：一切耗时操作（如视频下载、批量文件、混合富文本等）都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",
+              "半包裹：细分出上方耗时操作中滴“轻便操作”（如小于80m滴文件（文件夹）混合落盘、内存截图等）做简单粘贴：最快响应，无进度条，异常**无**回滚或清理。"
             ],
-            "markdownDescription": "[ ⚙️ **核心** ] 事务包裹级别："
+            "markdownDescription": "⚙️ 事务包裹级别："
           }
         }
       },
@@ -92,7 +92,7 @@
             "order": 10,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ 🛸 **漫游器** ] 是否在文件导航中显示历史回收站。"
+            "markdownDescription": "🛸 是否在文件导航中显示历史回收站。"
           }
         }
       },
@@ -114,19 +114,19 @@
               "小相框：256x144",
               "Fix：根据图片尺寸自动选择相框"
             ],
-            "markdownDescription": "[ 👁️ **视觉** ] 相框尺寸模式：控制预览图像的显示尺寸。"
+            "markdownDescription": "👁️ 相框尺寸模式：控制预览图像的显示尺寸。"
           },
           "qqq.cleanFreak": {
             "order": 20,
             "type": "boolean",
             "default": false,
-            "markdownDescription": "[ 👁️ **视觉** ] 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+            "markdownDescription": "👁️ 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
           },
           "qqq.enlargeSmallImages": {
             "order": 30,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ 👁️ **视觉** ] 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+            "markdownDescription": "👁️ 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           }
         }
       },
@@ -148,19 +148,19 @@
               "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
               "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。●"
             ],
-            "markdownDescription": "[ 🍌 **html与富文本** ] 如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
+            "markdownDescription": "🍌 如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
           },
           "qqq.forceTextFlowScheme": {
             "order": 20,
             "type": "boolean",
             "default": false,
-            "markdownDescription": "[ 🍌 **html与富文本** ] 强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
+            "markdownDescription": "🍌 强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
           },
           "qqq.autoDownload": {
             "order": 30,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ 🍌 **html与富文本** ] 是否在检测到视频时自动下载"
+            "markdownDescription": "🍌 是否在检测到视频时自动下载"
           }
         }
       },
@@ -176,7 +176,7 @@
               "原始分辨率",
               "相框分辨率"
             ],
-            "markdownDescription": "[ 📦 **doc导出设置** ] 图片使用何种分辨率：",
+            "markdownDescription": "📦 图片使用何种分辨率：",
             "markdownEnumDescriptions": [
               "得到原始精度。",
               "优势在于: 1、文件更小； 2、相框显示滴缩略图总能对应一个完整滴图片预览（不会因为 Word 页面尺寸限制导致 预览 被截断）。"
@@ -186,7 +186,7 @@
             "order": 20,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "[ 📦 **doc导出设置** ] 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
+            "markdownDescription": "📦 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
           }
         }
       }
