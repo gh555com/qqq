@@ -1027,7 +1027,8 @@ const DEFAULT_CONFIG = {
 	"downloadSecurityLevel": "1: 平衡",
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率",
-	"docExportIncludeCipher": true
+	"docExportIncludeCipher": true,
+	"transactionLevel": "half"
 };
 
 const CONFIG_METADATA = {
@@ -1061,7 +1062,12 @@ const CONFIG_METADATA = {
 		options: ["原始分辨率", "相框分辨率"],
 		descriptions: []
 	},
-	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" },
+	"transactionLevel": {
+		name: "事务包裹级别", type: "enum",
+		options: ["full", "half"],
+		descriptions: ["全包裹", "半包裹"]
+	}
 };
 
 let _configChangeCallback = null;

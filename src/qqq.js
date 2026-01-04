@@ -458,9 +458,31 @@ function makeVsProgressAdapter(progress) {
 	};
 }
 
+// Dummy adapter for fast path
+function makeDummyProgressAdapter() {
+	return (absPct, msg) => { };
+}
+
 async function raceClipboard(targetDir, callback) {
 	return pasteQueue.enqueue(async () => {
 		try {
+			const config = vscode.workspace.getConfiguration("qqq");
+			const transLevel = config.get("transactionLevel", "half"); // 'half' | 'full'
+
+			// Fast Path: Half mode (default) -> No Progress Bar, No Rollback (for simple tasks)
+			if (transLevel === "half") {
+				const dummyToken = { isCancellationRequested: false, onCancellationRequested: () => { } };
+				const dummyCb = makeDummyProgressAdapter();
+
+				// Direct call without UI blocking
+				const res = await h.autoDetectAndPaste(targetDir, dummyCb, dummyToken);
+				if (res) {
+					callback(res, 100);
+				}
+				return;
+			}
+
+			// Safe Path: Full mode -> Progress Bar + (Implicitly) Transaction
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: "qqq: html粘贴...",
@@ -598,6 +620,14 @@ async function activate(context) {
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
+
+	// 启动时清理异常残留
+	try {
+		const VideoDownloadController = require('./VideoDownloadController');
+		if (VideoDownloadController && typeof VideoDownloadController.cleanUpPendingDirs === 'function') {
+			VideoDownloadController.cleanUpPendingDirs(context).catch(e => console.error(e));
+		}
+	} catch (e) { }
 
 	initCache(context);
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
