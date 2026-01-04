@@ -7,6 +7,7 @@ const cp = require("child_process"); // Retain for ffmpeg/spawn if needed by q3 
 const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
+const TransactionManager = require("./TransactionManager");
 
 // 引用 global.js 的核心对象
 const {
@@ -461,27 +462,190 @@ function makeVsProgressAdapter(progress) {
 async function raceClipboard(targetDir, callback) {
 	return pasteQueue.enqueue(async () => {
 		try {
-			const res = await global.withProgress({
-				location: vscode.ProgressLocation.Notification,
-				title: "qqq: html粘贴...",
-				cancellable: true
-			}, async (progress, token) => {
-				token.onCancellationRequested(() => {
-					global.logMessage("粘贴操作被用户取消", "WARN");
-				});
-				const progCb = makeVsProgressAdapter(progress);
-
-				// ★ Delegate all detection and handling to h.js
-				return await h.autoDetectAndPaste(targetDir, progCb, token);
-			});
-
-			if (res) {
-				callback(res, 100);
+			// 1. Analyze
+			let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+			if (global.shellBridge) {
+				try {
+					const res = await global.shellBridge.call("checkQ", {}, 500);
+					if (res && !res.error) qStatus = res;
+				} catch (e) { }
 			}
+			// Fallback detection
+			if (!qStatus.hasFile && !qStatus.hasHtml && !qStatus.hasImage && !qStatus.hasText) {
+				try {
+					const text = await vscode.env.clipboard.readText();
+					if (text) qStatus.hasText = true;
+				} catch (e) { }
+			}
+
+			// 2. Determine Mode
+			let mode = 'q';
+			const configMode = global.getConfig("pasteMode") || "full"; // full or half
+
+			const isSimple = await isSimpleHtml(qStatus);
+			const isWhiteList = (qStatus.hasText && !qStatus.hasImage && !qStatus.hasFile && !qStatus.hasHtml) ||
+				(qStatus.hasHtml && isSimple && !qStatus.hasImage && !qStatus.hasFile);
+
+			if (isWhiteList) {
+				mode = 'q';
+			} else {
+				if (configMode === 'full') {
+					// FIX: Memory screenshot (Image but not File) should use 'q' (sync) to avoid anchor flicker
+					// because it is usually fast and processed in memory.
+					if (qStatus.hasImage && !qStatus.hasFile) {
+						mode = 'q';
+					} else {
+						mode = 'a';
+					}
+				} else {
+					// Half Package
+					if (qStatus.hasFile) {
+						const totalSize = await calculateClipboardFileSize();
+						if (totalSize < 80 * 1024 * 1024) mode = 'q';
+						else mode = 'a';
+					} else if (qStatus.hasImage) {
+						// Memory screenshot -> Q
+						mode = 'q';
+					} else {
+						mode = 'a';
+					}
+				}
+			}
+
+			// 3. Execute
+			if (mode === 'q') {
+				const res = await h.autoDetectAndPaste(targetDir, null, null);
+				if (res) callback(res, 100);
+			} else {
+				// Async Paste 'a'
+				const transId = TransactionManager.createId();
+				const anchor = `/\\__PENDING__:${transId}\\/`;
+
+				// Immediate callback with anchor
+				callback({ type: 'text', text: anchor }, 100);
+
+				// Fire and forget async task
+				runAsyncTask(transId, targetDir, anchor);
+			}
+
 		} catch (e) {
 			global.logMessage(`raceClipboard failed: ${e.message}`, "ERROR");
 		}
 	});
+}
+
+async function isSimpleHtml(status) {
+	if (!status.hasHtml) return true;
+	try {
+		const text = await vscode.env.clipboard.readText();
+		if (/<(img|video|source|iframe)/i.test(text)) return false;
+		return true;
+	} catch { return true; }
+}
+
+async function calculateClipboardFileSize() {
+	try {
+		if (process.platform === "win32") {
+			const res = await global.tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 2000);
+			let files = [];
+			if (res) {
+				if (res.paths) files = res.paths;
+				else if (res.files) files = res.files;
+			}
+			let total = 0;
+			for (const f of files) {
+				try { total += fs.statSync(f).size; } catch { }
+			}
+			return total;
+		}
+	} catch { }
+	return 0;
+}
+
+async function runAsyncTask(transId, targetDir, anchorText) {
+	// 使用 VS Code 原生进度条，因为 global.withProgress 可能包含特定的封装逻辑
+	await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "资源处理中...",
+		cancellable: true
+	}, async (progress, token) => {
+		try {
+			token.onCancellationRequested(async () => {
+				global.logMessage("后台任务被用户取消", "WARN");
+				await TransactionManager.rollback(transId);
+				await replaceAnchor(anchorText, { type: 'text', text: '' });
+			});
+
+			await TransactionManager.register(transId, targetDir);
+
+			const progCb = makeVsProgressAdapter(progress);
+
+			const res = await h.autoDetectAndPaste(targetDir, progCb, token, transId);
+
+			if (token.isCancellationRequested) return;
+
+			const files = extractFiles(res);
+			await TransactionManager.commit(transId, files);
+
+			await replaceAnchor(anchorText, res);
+
+			await TransactionManager.complete(transId);
+
+		} catch (e) {
+			global.logMessage(`Async Task Failed: ${e.message}`, "ERROR");
+			await TransactionManager.rollback(transId);
+			await replaceAnchor(anchorText, { type: 'text', text: '' });
+		}
+	});
+}
+
+async function replaceAnchor(anchorText, result) {
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) return;
+
+	const doc = editor.document;
+	const docDir = path.dirname(doc.uri.fsPath);
+	const eol = doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+
+	let textToInsert = "";
+	if (result.type === 'text') textToInsert = result.text;
+	else if (result.type === 'video_url') textToInsert = result.text;
+	else {
+		const files = [];
+		if (result.path) files.push(result.path);
+		if (result.files) files.push(...result.files);
+		if (result.folders) files.push(...result.folders);
+		if (result.blocks) {
+			result.blocks.forEach(b => { if (b.path) files.push(b.path); });
+		}
+
+		textToInsert = files.map(f => {
+			const rel = path.relative(docDir, f).replace(/\\/g, '/');
+			return `/\\${toSafePath(rel)}\\/`;
+		}).join(eol + eol.repeat(15)); // Add spacing like q1
+	}
+
+	const text = doc.getText();
+	const idx = text.indexOf(anchorText);
+	if (idx !== -1) {
+		const pos = doc.positionAt(idx);
+		const range = new vscode.Range(pos, doc.positionAt(idx + anchorText.length));
+		await editor.edit(editBuilder => {
+			editBuilder.replace(range, textToInsert);
+		});
+	}
+}
+
+function extractFiles(result) {
+	const files = [];
+	if (!result) return files;
+	if (result.path) files.push(result.path);
+	if (result.files) files.push(...result.files);
+	if (result.folders) files.push(...result.folders);
+	if (result.blocks) {
+		result.blocks.forEach(b => { if (b.path) files.push(b.path); });
+	}
+	return files;
 }
 
 async function handleClipboardFast() {
@@ -598,6 +762,9 @@ async function activate(context) {
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
+
+	TransactionManager.init(context);
+	TransactionManager.recover().catch(e => global.logMessage(`Recover transactions failed: ${e.message}`, "ERROR"));
 
 	initCache(context);
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());

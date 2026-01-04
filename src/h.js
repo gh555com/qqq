@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const { TextDecoder } = require("util");
 const { getSharedDownloader, isPlatformOrSegmentVideo } = require("./dow");
 const sizeOf = require("image-size");
+const TransactionManager = require("./TransactionManager");
 
 let _global = null;
 function getGlobal() {
@@ -1419,7 +1420,7 @@ async function verifyVideoFile(filePath) {
     });
 }
 
-async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, transId = null) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
@@ -1462,6 +1463,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
+                        if (transId) await TransactionManager.addTempFile(transId, destPath);
 
                         const finalPath = _tryGlobalDeduplicate(destPath);
                         const fp = computeFingerprint(finalPath);
@@ -1486,6 +1488,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
+                    if (transId) await TransactionManager.addTempFile(transId, destPath);
 
                     const finalPath = _tryGlobalDeduplicate(destPath);
                     const fp = computeFingerprint(finalPath); // Re-compute in case it changed
@@ -1510,6 +1513,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (!block) continue;
                 if (res.success) {
                     let dlPath = res.path || res.destPath;
+                    if (transId && dlPath) await TransactionManager.addTempFile(transId, dlPath);
 
                     if (block.kind === "video") {
                         dlPath = await verifyVideoFile(dlPath);
@@ -1537,78 +1541,133 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-function copyFilesToTarget(files, targetDir) {
-    ensureDir(targetDir);
-    const copied = [];
-    const fingerprints = {};
-    for (const f of files) {
-        try {
-            const srcFingerprint = computeFingerprint(f);
-            if (srcFingerprint) {
-                fingerprints[f] = srcFingerprint;
-                let existingPath = findFileByFingerprint(srcFingerprint);
-                if (existingPath && fs.existsSync(existingPath)) {
-                    copied.push(existingPath);
-                    continue;
-                }
-            }
-            const ext = path.extname(f);
-            const isImg = isImageExtForClipboard(ext);
-            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
-            const dest = path.join(targetDir, fname);
-            if (fs.existsSync(dest)) {
-                const dstFingerprint = computeFingerprint(dest);
-                if (dstFingerprint === srcFingerprint) {
-                    copied.push(dest);
-                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    // Ensure it's registered globally
-                    _tryGlobalDeduplicate(dest);
-                    continue;
-                }
-            }
-            fs.copyFileSync(f, dest);
+async function copyFileWithProgress(src, dest, progressCallback, token) {
+    if (token?.isCancellationRequested) return;
+    const stat = await fs.promises.stat(src);
+    const totalSize = stat.size;
+    let copiedSize = 0;
 
-            // Global Deduplication Check
-            const finalPath = _tryGlobalDeduplicate(dest);
-            if (finalPath !== dest) {
-                // If deduplicated to a different path
-                copied.push(finalPath);
-                // No need to prefill fingerprint as registerSourceFile does it
-            } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                copied.push(dest);
+    return new Promise((resolve, reject) => {
+        const rs = fs.createReadStream(src);
+        const ws = fs.createWriteStream(dest);
+
+        rs.on('data', (chunk) => {
+            if (token?.isCancellationRequested) {
+                rs.destroy();
+                ws.destroy();
+                reject(new Error("Cancelled"));
+                return;
             }
-        } catch { }
-    }
-    return { copied, fingerprints };
+            copiedSize += chunk.length;
+            if (progressCallback) progressCallback(chunk, copiedSize, totalSize);
+        });
+
+        rs.on('error', reject);
+        ws.on('error', reject);
+        ws.on('finish', resolve);
+
+        rs.pipe(ws);
+    });
 }
 
-function processFilesForClipboard(files, targetDir) {
+async function processFilesForClipboard(files, targetDir, transId = null, progressCallback = null, token = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
     const copiedFiles = [];
     const copiedFolders = [];
     const fingerprints = {};
+
+    // 处理文件夹 (递归复制)
     for (const folder of folders) {
+        if (token?.isCancellationRequested) break;
         try {
             const destFolder = path.join(targetDir, path.basename(folder));
+            if (progressCallback) progressCallback(null, `正在复制文件夹 ${path.basename(folder)}...`);
+
+            // 使用 fs.cpSync (或 promises.cp)
+            // 这里为了简单保持同步，但因为文件夹通常作为一个整体处理，如果需要也可以改为异步
             fs.cpSync(folder, destFolder, { recursive: true, force: true });
+
+            if (transId) await TransactionManager.addTempFile(transId, destFolder);
             copiedFolders.push(destFolder);
-        } catch { }
+        } catch (e) {
+            log(`Folder copy failed: ${e.message}`, "WARN");
+        }
     }
+
+    // 处理文件 (带进度条)
     if (validFiles.length > 0) {
-        const result = copyFilesToTarget(validFiles, targetDir);
-        copiedFiles.push(...result.copied);
-        Object.assign(fingerprints, result.fingerprints);
+        let doneCount = 0;
+        const total = validFiles.length;
+
+        for (const f of validFiles) {
+            if (token?.isCancellationRequested) break;
+
+            try {
+                // 1. 尝试去重
+                const srcFingerprint = computeFingerprint(f);
+                if (srcFingerprint) {
+                    fingerprints[f] = srcFingerprint;
+                    let existingPath = findFileByFingerprint(srcFingerprint);
+                    if (existingPath && fs.existsSync(existingPath)) {
+                        copiedFiles.push(existingPath);
+                        doneCount++;
+                        if (progressCallback) progressCallback((doneCount / total) * 100, `处理中 ${doneCount}/${total}`);
+                        continue;
+                    }
+                }
+
+                // 2. 准备目标路径
+                const ext = path.extname(f);
+                const isImg = isImageExtForClipboard(ext);
+                const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+                const dest = path.join(targetDir, fname);
+
+                // 3. 目标路径冲突检查与指纹匹配
+                if (fs.existsSync(dest)) {
+                    const dstFingerprint = computeFingerprint(dest);
+                    if (dstFingerprint === srcFingerprint) {
+                        copiedFiles.push(dest);
+                        if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                        _tryGlobalDeduplicate(dest);
+                        doneCount++;
+                        if (progressCallback) progressCallback((doneCount / total) * 100, `处理中 ${doneCount}/${total}`);
+                        continue;
+                    }
+                }
+
+                // 4. 执行复制 (使用带进度的 helper)
+                await copyFileWithProgress(f, dest, (chunk, curr, totalBytes) => {
+                    // 可以在这里汇报更细粒度的字节级进度，但对于多文件，文件计数进度通常够了
+                }, token);
+
+                if (transId) await TransactionManager.addTempFile(transId, dest);
+
+                // 5. 全局去重检查
+                const finalPath = _tryGlobalDeduplicate(dest);
+                if (finalPath !== dest) {
+                    copiedFiles.push(finalPath);
+                } else {
+                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                    copiedFiles.push(dest);
+                }
+            } catch (e) {
+                log(`File copy failed for ${f}: ${e.message}`, "WARN");
+            }
+
+            doneCount++;
+            if (progressCallback) progressCallback((doneCount / total) * 100, `处理中 ${doneCount}/${total}`);
+        }
     }
+
     if (copiedFiles.length > 0 || copiedFolders.length > 0) {
         return { type: "file_folder", files: copiedFiles, folders: copiedFolders, fingerprints: fingerprints };
     }
     return null;
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null) {
     try {
         if (token?.isCancellationRequested) return null;
         if (process.platform === "win32") {
@@ -1621,11 +1680,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 }
             }
             if (files && files.length > 0) {
-                // ... (Logic simplified for brevity, using processFilesForClipboard)
-                // The original code had detailed progress reporting.
-                // Since we are migrating, I should preserve the detailed progress logic if possible.
-                // But for now, let's use the helper to keep it clean.
-                return processFilesForClipboard(files, targetDir);
+                // FIX: Use awaited async call with progress support
+                return await processFilesForClipboard(files, targetDir, transId, progressCallback, token);
             }
         }
 
@@ -1638,6 +1694,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
                     if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+                        if (transId) await TransactionManager.addTempFile(transId, dest);
                         // ✅ 关键：内存截图也要走全局去重
                         const finalPath = _tryGlobalDeduplicate(dest);
                         const fp = computeFingerprint(finalPath);
@@ -1652,7 +1709,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         // Fallback to HTML if text looks like HTML
         const text = await vscode.env.clipboard.readText();
         if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img"))) {
-            return await handleClipboardUnified(targetDir, progressCallback, token);
+            return await handleClipboardUnified(targetDir, progressCallback, token, transId);
         }
     } catch (e) { log(`Shell剪贴板处理失败: ${e.message}`, "ERROR"); }
     return null;
@@ -1661,7 +1718,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // ============================================================================
 // Main Entry
 // ============================================================================
-async function handleClipboardUnified(targetDir, progressCallback, token) {
+async function handleClipboardUnified(targetDir, progressCallback, token, transId = null) {
     // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
@@ -1742,7 +1799,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
 
     if (blocks.some(b => b.type === "media")) {
         if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
-        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
+        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, transId);
     }
 
     return { type: "html_blocks", blocks, baseUrl };
@@ -1751,7 +1808,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
 // ============================================================================
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId = null) {
     const global = getGlobal();
     const qStart = Date.now();
     let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
@@ -1806,17 +1863,17 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
     // Priority: File > HTML > Image > Text (Video URL)
 
     if (qStatus.hasFile) {
-        return await handleClipboardShell(targetDir, token, progressCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
     if (qStatus.hasHtml) {
         // Use Unified Logic
-        return await handleClipboardUnified(targetDir, progressCallback, token);
+        return await handleClipboardUnified(targetDir, progressCallback, token, transId);
     }
 
     if (qStatus.hasImage) {
         // Shell/Image handler
-        return await handleClipboardShell(targetDir, token, progressCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
     if (qStatus.hasText) {

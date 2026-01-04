@@ -6,6 +6,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
+const TransactionManager = require('./TransactionManager');
 
 class ChildProcessTracker {
     constructor() {
@@ -689,7 +690,8 @@ class VideoDownloadController {
         const task = {
             startMs: Date.now(),
             tracker: new ChildProcessTracker(),
-            activeFiles: new Set() // Track files for cleanup on cancel
+            activeFiles: new Set(), // Track files for cancellation cleanup
+            transId: TransactionManager.createId()
         };
         this._task = task;
         return task;
@@ -703,7 +705,12 @@ class VideoDownloadController {
         t.tracker.markCancelled();
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
-        // Clean up any active files immediately
+        // Clean up via TransactionManager
+        if (t.transId) {
+            await TransactionManager.rollback(t.transId);
+        }
+
+        // Clean up any active files immediately (Legacy fallback)
         if (t.activeFiles) {
             for (const file of t.activeFiles) {
                 try {
@@ -773,6 +780,8 @@ class VideoDownloadController {
                 const currentDocDir = path.dirname(editor.document.uri.fsPath);
                 const targetDir = path.join(currentDocDir, "qqq");
                 if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+                await TransactionManager.register(task.transId, targetDir);
 
                 this.log(`开始处理: ${url}`);
                 this.outputChannel.show(true);
@@ -1009,6 +1018,7 @@ class VideoDownloadController {
                                         }
                                     } else if (event.type === 'done') {
                                         this.log(`完成: ${path.basename(task.destPath || '')}`);
+                                        if (task.destPath) TransactionManager.addTempFile(this._task.transId, task.destPath);
                                     } else if (event.type === 'error') {
                                         this.log(`失败: ${task.url} - ${event.error}`);
                                     } else if (event.type === 'retry') {
@@ -1052,6 +1062,11 @@ class VideoDownloadController {
                             landedFiles.push(finalPath);
                             try { finalTotalBytes += fs.statSync(finalPath).size; } catch (e) { }
                         }
+                    }
+
+                    if (landedFiles.length > 0) {
+                        await TransactionManager.commit(this._task.transId, landedFiles);
+                        await TransactionManager.complete(this._task.transId);
                     }
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
