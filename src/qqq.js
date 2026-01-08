@@ -554,9 +554,108 @@ function shouldShowDuration(info) {
 let downloadContext = null;
 
 async function downloadVideosFromUrlCommand() {
-	const VideoDownloadController = require('./VideoDownloadController');
-	const controller = new VideoDownloadController(downloadContext, module.exports);
-	await controller.start();
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) {
+		vscode.window.showErrorMessage("请先打开一个文档以便插入视频锚点。");
+		return;
+	}
+
+	const rawUrl = await vscode.window.showInputBox({
+		prompt: "直接粘贴 [ 包含视频滴网址 ] ",
+		ignoreFocusOut: true,
+		placeHolder: "https://..."
+	});
+	if (!rawUrl) return;
+
+	const currentDocDir = path.dirname(editor.document.uri.fsPath);
+	const targetDir = path.join(currentDocDir, "qqq");
+	if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+	const transId = global.TransactionManager.createTransactionId();
+	const targetUri = editor.document.uri;
+
+	// 1. 立即插入锚点 (类似于 "Curved Paste (a)")
+	await global.TransactionManager.insertAnchor(editor, transId);
+
+	// 2. 启动带进度条的弹窗任务
+	// 不 await 这个 promise，让它在后台跑（但 withProgress 会保持弹窗直到 resolve）
+	// 实际上我们需要 await 它，否则函数结束可能会导致 context 问题？
+	// 不，为了支持"多任务并行"，我们不能阻塞主线程太久，但 withProgress 本身是 async 的。
+	// 这里我们 await withProgress，但用户可以在 UI 上操作其他 Tab。
+	// VS Code 的 withProgress 不会阻塞 UI 交互。
+
+	global.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "qqq: 视频下载中...",
+		cancellable: true
+	}, async (progress, token) => {
+		token.onCancellationRequested(async () => {
+			global.logMessage(`任务 ${transId} 被用户取消`, "WARN");
+			await global.TransactionManager.rollback(transId);
+		});
+
+		const VideoDownloadController = require('./VideoDownloadController');
+		const controller = new VideoDownloadController(downloadContext, module.exports);
+
+		// 适配 progress callback
+		const progressAdapter = (pct, msg) => {
+			progress.report({ message: msg, increment: 0 }); // increment 0 for marquee or text update
+		};
+
+		try {
+			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri);
+
+			// 3. 处理结果 & 替换锚点
+			if (res && res.landedFiles && res.landedFiles.length > 0) {
+				const eol = editor.document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+				const relativePaths = res.landedFiles.map(f => {
+					const rel = path.relative(currentDocDir, f).replace(/\\/g, '/');
+					return `/\\${rel}\\/`;
+				});
+				const newText = relativePaths.join(eol);
+
+				// 替换锚点
+				const replaced = await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, newText);
+				if (replaced) {
+					await global.TransactionManager.removeTransaction(transId);
+				} else {
+					global.logMessage("锚点替换失败，回滚事务", "ERROR");
+					await global.TransactionManager.rollback(transId);
+				}
+			} else {
+				// 下载失败或取消，回滚
+				await global.TransactionManager.rollback(transId);
+				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+			}
+
+		} catch (e) {
+			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
+			vscode.window.showErrorMessage(`视频下载失败: ${e.message}`);
+			await global.TransactionManager.rollback(transId);
+			await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+		}
+	});
+}
+
+// ==================== 锚点替换辅助 ====================
+async function replaceAnchorInDoc(uri, anchor, newText) {
+	try {
+		const doc = await vscode.workspace.openTextDocument(uri);
+		const text = doc.getText();
+		const idx = text.indexOf(anchor);
+
+		if (idx === -1) return false;
+
+		const pos = doc.positionAt(idx);
+		const endPos = doc.positionAt(idx + anchor.length);
+		const range = new vscode.Range(pos, endPos);
+
+		const edit = new vscode.WorkspaceEdit();
+		edit.replace(uri, range, newText);
+		return await vscode.workspace.applyEdit(edit);
+	} catch (e) {
+		return false;
+	}
 }
 
 const pendingJobs = new Map();
