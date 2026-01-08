@@ -904,6 +904,7 @@ class VideoDownloadController {
                 let tasks = [];
 
                 let probeForbidden = false;
+                let hasStaticDirectVideo = false; // 标记是否有静态分析找到的直连视频
                 try {
                     if (this._isTaskCancelled(task)) return null;
 
@@ -948,14 +949,18 @@ class VideoDownloadController {
                     if (webUrls && webUrls.length > 0) {
                         this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
 
-                        // 如果静态分析找到了明确的视频资源（mp4/m3u8等），且之前探测结果是 403 或失败
-                        // 那么我们应该优先使用这些静态资源，并移除那个会导致 403 的原始 URL 任务
+                        // 检查是否有直连视频 URL
                         const hasDirectVideo = webUrls.some(u => u.match(/\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i));
-                        if (hasDirectVideo && probeForbidden) {
-                            this.log("静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。");
-                            // Filter out the task that is just the raw URL
-                            tasks = tasks.filter(t => t.url !== url);
-                            probeForbidden = false; // Reset forbidden flag so we don't trigger enhanced mode unnecessarily
+
+                        // 只要找到了直连视频，就设置标志并移除原始 403 任务
+                        if (hasDirectVideo) {
+                            hasStaticDirectVideo = true;
+                            if (probeForbidden) {
+                                this.log("静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。");
+                                // Filter out the task that is just the raw URL
+                                tasks = tasks.filter(t => t.url !== url);
+                                probeForbidden = false; // Reset forbidden flag so we don't trigger enhanced mode unnecessarily
+                            }
                         }
 
                         webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
@@ -1095,8 +1100,8 @@ class VideoDownloadController {
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
 
-                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强
-                    const needEnhanced = (!isYouTube) && (
+                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强，静态分析找到直连视频且下载成功也不触发增强
+                    const needEnhanced = (!isYouTube) && (!hasStaticDirectVideo || landedFiles.length === 0) && (
                         forbiddenErrors.length > 0 ||
                         (probeForbidden && landedFiles.length === 0) ||
                         (landedFiles.length === 0 && successResults.length > 0)
