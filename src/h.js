@@ -707,6 +707,8 @@ function sanitizeHtml(html) {
     return $.html();
 }
 
+
+
 function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
     try {
         const cheerio = require('cheerio');
@@ -1420,7 +1422,7 @@ async function verifyVideoFile(filePath) {
     });
 }
 
-async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback) {
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
@@ -1471,6 +1473,16 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         b.path = finalPath;
                         b.fingerprint = fp || null;
                         b.status = "ok";
+
+                        // ★ Register Transaction
+                        if (transId) {
+                            const global = getGlobal();
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                            if (trans) {
+                                const newLanded = [...(trans.landedFiles || []), finalPath];
+                                await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                            }
+                        }
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -1495,6 +1507,16 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     b.path = finalPath;
                     b.fingerprint = fp || null;
                     b.status = "ok";
+
+                    // ★ Register Transaction
+                    if (transId) {
+                        const global = getGlobal();
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                        if (trans) {
+                            const newLanded = [...(trans.landedFiles || []), finalPath];
+                            await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                        }
+                    }
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -1529,6 +1551,16 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     block.filename = path.basename(finalPath);
                     block.fingerprint = computeFingerprint(block.path);
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
+
+                    // ★ Register Transaction
+                    if (transId) {
+                        const global = getGlobal();
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                        if (trans) {
+                            const newLanded = [...(trans.landedFiles || []), finalPath];
+                            await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                        }
+                    }
                 } else { block.status = "failed"; block.error = res.error; }
             }
         } catch (e) { log(`dow.js downloadAll failed: ${e.message}`, "ERROR"); }
@@ -1680,7 +1712,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // ============================================================================
 // Main Entry
 // ============================================================================
-async function handleClipboardUnified(targetDir, progressCallback, token) {
+async function handleClipboardUnified(targetDir, progressCallback, token, transId) {
     // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
