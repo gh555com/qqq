@@ -1337,6 +1337,19 @@ const TransactionManager = {
 			// 或者可以判断 createdAt 是否超时 (例如 10分钟)
 			await this.rollback(trans);
 		}
+	},
+
+	createTransactionId() {
+		// 生成6位随机字符，类似 q1.js 中的逻辑
+		return Math.random().toString(36).slice(2, 8);
+	},
+
+	async insertAnchor(editor, transId) {
+		const anchor = `/__PENDING_${transId}/`;
+		const success = await editor.edit(editBuilder => {
+			editBuilder.replace(editor.selection, anchor);
+		});
+		return success;
 	}
 };
 

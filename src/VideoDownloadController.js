@@ -941,12 +941,23 @@ class VideoDownloadController {
                     await this._handleCookieErrorIfNeeded(e.message, url);
                 }
 
-                // 静态分析（保留）
+                // 静态分析（优先于 403 增强）
                 try {
                     if (this._isTaskCancelled(task)) return null;
                     const webUrls = await h.extractVideoUrlsFromWebPage(url);
                     if (webUrls && webUrls.length > 0) {
                         this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+
+                        // 如果静态分析找到了明确的视频资源（mp4/m3u8等），且之前探测结果是 403 或失败
+                        // 那么我们应该优先使用这些静态资源，并移除那个会导致 403 的原始 URL 任务
+                        const hasDirectVideo = webUrls.some(u => u.match(/\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i));
+                        if (hasDirectVideo && probeForbidden) {
+                            this.log("静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。");
+                            // Filter out the task that is just the raw URL
+                            tasks = tasks.filter(t => t.url !== url);
+                            probeForbidden = false; // Reset forbidden flag so we don't trigger enhanced mode unnecessarily
+                        }
+
                         webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
                     }
                 } catch (e) { }
@@ -1283,7 +1294,7 @@ class VideoDownloadController {
 
     // ==================== 增强流程入口 ====================
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         const selection = await vscode.window.showInformationMessage(
             `qqq: 被拒绝，返回 ${code}，当前可尝试启动增强流程。`,
@@ -1292,14 +1303,15 @@ class VideoDownloadController {
             "选择类似 chrome.exe 滴浏览器入口文件"
         );
 
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (selection === "🚀启动增强流程") {
-            await this._runEnhancedPreferSaved(task, url, targetDir);
+            return await this._runEnhancedPreferSaved(task, url, targetDir);
         } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
-            await this._runEnhancedForcePick(task, url, targetDir);
+            return await this._runEnhancedForcePick(task, url, targetDir);
         } else {
             this.log("用户取消增强流程");
+            return null;
         }
     }
 
@@ -1311,8 +1323,7 @@ class VideoDownloadController {
             const v = await this._validateChromiumSilently(dedicated);
             if (v.valid) {
                 this.log(`[增强] 使用已保存专用浏览器: ${dedicated} (${v.version})`);
-                await this._startSniffer(task, dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
-                return;
+                return await this._startSniffer(task, dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
             } else {
                 await this.context.globalState.update(this.KEY_DEDICATED_BROWSER, undefined);
             }
@@ -1323,22 +1334,21 @@ class VideoDownloadController {
             const v = await this._validateChromiumSilently(custom);
             if (v.valid) {
                 this.log(`[增强] 使用已保存用户浏览器: ${custom} (${v.version})`);
-                await this._startSniffer(task, custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
-                return;
+                return await this._startSniffer(task, custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             } else {
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
         }
 
-        await this._promptPickThenMaybeDownload(task, url, targetDir);
+        return await this._promptPickThenMaybeDownload(task, url, targetDir);
     }
 
     async _runEnhancedForcePick(task, url, targetDir) {
-        await this._promptPickThenMaybeDownload(task, url, targetDir);
+        return await this._promptPickThenMaybeDownload(task, url, targetDir);
     }
 
     async _promptPickThenMaybeDownload(task, url, targetDir) {
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
@@ -1348,7 +1358,7 @@ class VideoDownloadController {
             title: "请选择 Chromium 内核浏览器的可执行文件"
         });
 
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (!uris || uris.length === 0) {
             const sel = await vscode.window.showErrorMessage(
@@ -1356,11 +1366,11 @@ class VideoDownloadController {
                 "下载 chrome", "终止一切"
             );
             if (sel === "下载 chrome") {
-                await this._downloadChrome(task, url, targetDir);
+                return await this._downloadChrome(task, url, targetDir);
             } else {
                 this.log("用户终止增强流程");
             }
-            return;
+            return null;
         }
 
         const exePath = uris[0].fsPath;
@@ -1368,12 +1378,11 @@ class VideoDownloadController {
 
         const validation = await this._validateChromiumSilently(exePath);
 
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (validation.valid) {
             this.log(`[增强] 用户浏览器验证通过: ${validation.version}`);
-            await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
-            return;
+            return await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
         }
 
         await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
@@ -1386,10 +1395,11 @@ class VideoDownloadController {
         );
 
         if (sel === "下载 chrome") {
-            await this._downloadChrome(task, url, targetDir);
+            return await this._downloadChrome(task, url, targetDir);
         } else {
             this.log("用户终止增强流程");
         }
+        return null;
     }
 
     async _cleanupSavedBrowserPaths() {
@@ -1896,7 +1906,7 @@ $of = $vi.OriginalFilename;
 
     // ==================== 嗅探器（增强也要任务结束三号弹窗） ====================
     async _startSniffer(task, browserPath, url, targetDir, opts = {}) {
-        if (this._isTaskCancelled(task)) return;
+        if (this._isTaskCancelled(task)) return null;
 
         this.log("启动增强嗅探流程...");
         this.log(`浏览器: ${browserPath}`);
@@ -1931,7 +1941,7 @@ $of = $vi.OriginalFilename;
 
             if (this._isTaskCancelled(task)) {
                 try { await sniffer.stop(); } catch (e) { }
-                return;
+                return null;
             }
 
             const selection = await vscode.window.showInformationMessage(
@@ -1943,12 +1953,12 @@ $of = $vi.OriginalFilename;
             if (selection !== "我已在外部播放") {
                 try { await sniffer.stop(); } catch (e) { }
                 this.log("用户取消增强嗅探");
-                return;
+                return null;
             }
 
             if (this._isTaskCancelled(task)) {
                 try { await sniffer.stop(); } catch (e) { }
-                return;
+                return null;
             }
 
             const videos = sniffer.getCapturedVideos();
@@ -1961,7 +1971,7 @@ $of = $vi.OriginalFilename;
                 const msg0 = this._buildDoneMessage(task, 0, "0k", urlSnippet);
                 this.log(msg0);
                 await this._showTaskDoneToast(msg0, false, null, targetDir);
-                return;
+                return null;
             }
 
             if (!best.meta) best.meta = {};
@@ -1973,8 +1983,8 @@ $of = $vi.OriginalFilename;
             }
 
             const out = await this._downloadEnhancedOne(task, url, targetDir, best);
-            if (!out) return;
-            if (this._isTaskCancelled(task)) return;
+            if (!out) return null;
+            if (this._isTaskCancelled(task)) return null;
 
             const landedCount = (out?.landedFiles || []).length;
             const totalStr = this._formatBytesSimple(out?.totalBytes || 0);
@@ -1985,13 +1995,16 @@ $of = $vi.OriginalFilename;
             const firstFile = this._pickFirstFileBySize(out?.landedFiles || []);
             await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
 
+            return out; // Return successful outcome
+
         } catch (e) {
-            if (this._isTaskCancelled(task)) return;
+            if (this._isTaskCancelled(task)) return null;
 
             this.log(`增强流程出错: ${e.message}`);
             if (sniffer) {
                 try { await sniffer.stop(); } catch (e2) { }
             }
+            return null;
         }
     }
 }

@@ -1375,19 +1375,15 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 
 async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
     // 1. 生成并插入锚点
-    const anchorId = Math.random().toString(36).slice(2, 8); // 6位随机字符
-    // 注意：大小写敏感
-    const anchor = `/__PENDING_${anchorId}/`;
+    const transId = TransactionManager.createTransactionId();
+    const anchor = `/__PENDING_${transId}/`;
 
     // 立即插入锚点
-    const success = await editor.edit(editBuilder => {
-        editBuilder.replace(editor.selection, anchor);
-    });
+    const success = await TransactionManager.insertAnchor(editor, transId);
 
     if (!success) return; // 插入失败，直接退出
 
     const docUri = editor.document.uri;
-    const transId = Date.now().toString();
 
     // 2. 注册事务 (Pending)
     await TransactionManager.saveTransaction({
