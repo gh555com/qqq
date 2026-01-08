@@ -6,6 +6,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
+const global = require('./global');
 
 class ChildProcessTracker {
     constructor() {
@@ -679,18 +680,28 @@ class VideoDownloadController {
         }
     }
 
-    // ==================== 任务上下文：总耗时 + 真取消 ====================
-    _beginTask() {
+    // ==================== 任务上下文：总耗时 + 真取消 + 事务 ====================
+    async _beginTask(targetDir) {
         // 如果上一任务还在，就先强行取消
         if (this._task && this._task.tracker && !this._task.tracker.isCancelled()) {
-            try { this._task.tracker.killAll('新任务覆盖'); } catch (e) { }
+            try { await this._task.tracker.killAll('新任务覆盖'); } catch (e) { }
         }
 
         const task = {
             startMs: Date.now(),
             tracker: new ChildProcessTracker(),
-            activeFiles: new Set() // Track files for cleanup on cancel
+            activeFiles: new Set(), // Track files for cleanup on cancel
+            transId: Date.now().toString()
         };
+
+        // ★ 注册事务
+        await global.TransactionManager.saveTransaction({
+            id: task.transId,
+            targetDir: targetDir,
+            tempFiles: [],
+            landedFiles: []
+        });
+
         this._task = task;
         return task;
     }
@@ -703,7 +714,15 @@ class VideoDownloadController {
         t.tracker.markCancelled();
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
-        // Clean up any active files immediately
+        // ★ 事务回滚 (比简单的 activeFiles 更强大，因为它是持久化的)
+        if (t.transId) {
+            const trans = global.TransactionManager.getTransactions().find(tr => tr.id === t.transId);
+            if (trans) {
+                await global.TransactionManager.rollback(trans);
+            }
+        }
+
+        // Clean up any active files immediately (Double safety)
         if (t.activeFiles) {
             for (const file of t.activeFiles) {
                 try {
@@ -748,7 +767,17 @@ class VideoDownloadController {
         });
         if (!raw) return;
 
-        const task = this._beginTask();
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
+            return;
+        }
+
+        const currentDocDir = path.dirname(editor.document.uri.fsPath);
+        const targetDir = path.join(currentDocDir, "qqq");
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+        const task = await this._beginTask(targetDir);
 
         try {
             // ✅ 关键：只有这段 async 调用链里的 spawn 才会被追踪/强制 detached:false
@@ -764,16 +793,6 @@ class VideoDownloadController {
                 // 异步确保 yt-dlp（在 scope 内）
                 this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
 
-                const editor = vscode.window.activeTextEditor;
-                if (!editor) {
-                    vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
-                    return;
-                }
-
-                const currentDocDir = path.dirname(editor.document.uri.fsPath);
-                const targetDir = path.join(currentDocDir, "qqq");
-                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-
                 this.log(`开始处理: ${url}`);
                 this.outputChannel.show(true);
 
@@ -786,6 +805,11 @@ class VideoDownloadController {
                 }
 
                 await this._fastProcess(url, targetDir, cookiesFilePath);
+
+                // ★ 任务成功结束 (未被取消)，提交事务 (移除 pending 状态)
+                if (!this._isCancelled() && task.transId) {
+                    await global.TransactionManager.removeTransaction(task.transId);
+                }
             });
         } finally {
             this._endTask();
@@ -1165,6 +1189,16 @@ class VideoDownloadController {
         const finalPath = await h.verifyVideoFile(filePath);
 
         if (finalPath) {
+            // ★ 更新事务：记录落盘文件
+            if (this._task && this._task.transId) {
+                const trans = global.TransactionManager.getTransactions().find(t => t.id === this._task.transId);
+                if (trans) {
+                    const newLanded = [...(trans.landedFiles || []), finalPath];
+                    // De-dupe
+                    await global.TransactionManager.updateTransaction(this._task.transId, { landedFiles: [...new Set(newLanded)] });
+                }
+            }
+
             await this._insertToCursor(path.basename(finalPath), finalPath);
 
             // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重

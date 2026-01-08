@@ -1027,7 +1027,8 @@ const DEFAULT_CONFIG = {
 	"downloadSecurityLevel": "1: 平衡",
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率",
-	"docExportIncludeCipher": true
+	"docExportIncludeCipher": true,
+	"transactionLevel": "full"
 };
 
 const CONFIG_METADATA = {
@@ -1061,7 +1062,12 @@ const CONFIG_METADATA = {
 		options: ["原始分辨率", "相框分辨率"],
 		descriptions: []
 	},
-	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" },
+	"transactionLevel": {
+		name: "事物包裹倾向", type: "enum",
+		options: ["full", "half"],
+		descriptions: ["全包模式: 黄名单全部走事务(a)", "半包模式: 截图和小文件走直粘(q), 其他走事务(a)"]
+	}
 };
 
 let _configChangeCallback = null;
@@ -1263,6 +1269,138 @@ function getEnginePreference() {
 	} catch {
 		return "auto";
 	}
+}
+
+// ============================================================================
+// ★ Transaction Manager (基于 globalState 的强一致性管理)
+// ============================================================================
+const KEY_TRANSACTIONS = "qqq.transactions";
+
+const TransactionManager = {
+	getTransactions() {
+		if (!extensionContext) return [];
+		return extensionContext.globalState.get(KEY_TRANSACTIONS, []);
+	},
+
+	async saveTransaction(trans) {
+		if (!extensionContext) return;
+		const list = this.getTransactions();
+		list.push({
+			...trans,
+			createdAt: Date.now(),
+			status: 'pending'
+		});
+		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
+	},
+
+	async updateTransaction(id, updates) {
+		if (!extensionContext) return;
+		let list = this.getTransactions();
+		list = list.map(t => t.id === id ? { ...t, ...updates } : t);
+		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
+	},
+
+	async removeTransaction(id) {
+		if (!extensionContext) return;
+		let list = this.getTransactions();
+		list = list.filter(t => t.id !== id);
+		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
+	},
+
+	async rollback(trans) {
+		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
+		const files = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
+		for (const f of files) {
+			try {
+				if (fs.existsSync(f)) {
+					fs.unlinkSync(f);
+					// 同时清理 .part/.ytdl 衍生文件
+					const part = f + ".part";
+					const ytdl = f + ".ytdl";
+					if (fs.existsSync(part)) fs.unlinkSync(part);
+					if (fs.existsSync(ytdl)) fs.unlinkSync(ytdl);
+				}
+			} catch (e) {
+				logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "ERROR");
+			}
+		}
+		await this.removeTransaction(trans.id);
+	},
+
+	async recover() {
+		const list = this.getTransactions();
+		if (list.length === 0) return;
+
+		logMessage(`[Recovery] 发现 ${list.length} 个未完成事务，开始清理...`, "WARN");
+		for (const trans of list) {
+			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
+			// 或者可以判断 createdAt 是否超时 (例如 10分钟)
+			await this.rollback(trans);
+		}
+	}
+};
+
+/**
+ * 精准分类：白名单 (q) vs 黄名单 (a)
+ * 返回 { type: 'whitelist' | 'yellowlist', subType: string, data?: any }
+ */
+async function checkQ() {
+	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+	let handled = false;
+
+	// 1. 尝试使用 Daemon Bridge (高性能)
+	if (shellBridge && shellBridge.isAvailable()) {
+		try {
+			const res = await shellBridge.call("checkQ", {}, 500);
+			if (res && !res.error) {
+				status = res;
+				handled = true;
+			}
+		} catch (e) { }
+	}
+
+	// 2. 备选方案 (VS Code API)
+	if (!handled) {
+		const text = await vscode.env.clipboard.readText();
+		if (text) status.hasText = true;
+		// 注意：VS Code API 无法检测 HTML/Image 格式，此时我们偏向保守，认为可能有
+	}
+
+	// --- 核心分类逻辑 ---
+
+	// A. 白名单识别 (1.纯文本 2.纯文字HTML)
+	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
+		return { type: 'whitelist', subType: 'text' };
+	}
+
+	if (status.hasHtml && !status.hasImage && !status.hasFile) {
+		// 这里需要读取 HTML 内容判断是否包含图片
+		try {
+			const hModule = require('./h');
+			const res = await hModule._getSmartHtmlFromClipboard();
+			if (res && res.$) {
+				const $ = res.$;
+				const hasImg = $('img, video, iframe, embed, object').length > 0;
+				if (!hasImg) return { type: 'whitelist', subType: 'html_text' };
+			}
+		} catch (e) { }
+	}
+
+	// B. 黄名单识别 (其余一切)
+	let subType = 'unknown';
+	if (status.hasFile) subType = 'file';
+	else if (status.hasImage) subType = 'image';
+	else if (status.hasHtml) subType = 'html_rich';
+	else if (status.hasText) {
+		// 检查是否为视频链接
+		const text = await vscode.env.clipboard.readText();
+		const { isPlatformOrSegmentVideo } = require('./dow');
+		if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
+			subType = 'video_url';
+		}
+	}
+
+	return { type: 'yellowlist', subType };
 }
 
 function getEngineTryOrder(pref) {
@@ -1579,5 +1717,9 @@ module.exports = {
 
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
-	formatHours
+	formatHours,
+
+	// ★ 核心逻辑导出
+	checkQ,
+	TransactionManager
 };
