@@ -563,7 +563,28 @@ async function downloadVideosFromUrlCommand() {
 	const rawUrl = await vscode.window.showInputBox({
 		prompt: "直接粘贴 [ 包含视频滴网址 ] ",
 		ignoreFocusOut: true,
-		placeHolder: "https://..."
+		placeHolder: "https://...",
+		validateInput: (text) => {
+			const s = (text || "").trim();
+			if (!s) return null;
+			if (/\s/.test(s)) return "无效网址";
+
+			// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
+			let toCheck = s;
+			if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
+				toCheck = 'https://' + s;
+			}
+
+			try {
+				const u = new URL(toCheck);
+				// 至少包含一个点或者是 localhost
+				if (u.hostname.includes('.') || u.hostname === 'localhost') {
+					return null;
+				}
+			} catch { }
+
+			return "无效的网址格式";
+		}
 	});
 	if (!rawUrl) return;
 
