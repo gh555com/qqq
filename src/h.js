@@ -8,6 +8,7 @@ const crypto = require("crypto");
 const { TextDecoder } = require("util");
 const { getSharedDownloader, isPlatformOrSegmentVideo } = require("./dow");
 const sizeOf = require("image-size");
+const global = require("./global");
 
 let _global = null;
 function getGlobal() {
@@ -1608,7 +1609,7 @@ function processFilesForClipboard(files, targetDir) {
     return null;
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null) {
     try {
         if (token?.isCancellationRequested) return null;
         if (process.platform === "win32") {
@@ -1622,10 +1623,17 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             }
             if (files && files.length > 0) {
                 // ... (Logic simplified for brevity, using processFilesForClipboard)
-                // The original code had detailed progress reporting.
-                // Since we are migrating, I should preserve the detailed progress logic if possible.
-                // But for now, let's use the helper to keep it clean.
-                return processFilesForClipboard(files, targetDir);
+                const result = processFilesForClipboard(files, targetDir);
+                // ★ Register Transaction
+                if (result && transId) {
+                    const global = getGlobal();
+                    const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                    if (trans) {
+                        const newLanded = [...(trans.landedFiles || []), ...(result.files || [])];
+                        await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                    }
+                }
+                return result;
             }
         }
 
@@ -1641,6 +1649,17 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                         // ✅ 关键：内存截图也要走全局去重
                         const finalPath = _tryGlobalDeduplicate(dest);
                         const fp = computeFingerprint(finalPath);
+
+                        // ★ Register Transaction
+                        if (transId) {
+                            const global = getGlobal();
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                            if (trans) {
+                                const newLanded = [...(trans.landedFiles || []), finalPath];
+                                await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                            }
+                        }
+
                         return { type: "image", path: finalPath, fingerprint: fp };
                     }
                 }
@@ -1652,7 +1671,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         // Fallback to HTML if text looks like HTML
         const text = await vscode.env.clipboard.readText();
         if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img"))) {
-            return await handleClipboardUnified(targetDir, progressCallback, token);
+            return await handleClipboardUnified(targetDir, progressCallback, token, transId);
         }
     } catch (e) { log(`Shell剪贴板处理失败: ${e.message}`, "ERROR"); }
     return null;
@@ -1742,7 +1761,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
 
     if (blocks.some(b => b.type === "media")) {
         if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
-        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback);
+        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId);
     }
 
     return { type: "html_blocks", blocks, baseUrl };
@@ -1751,7 +1770,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token) {
 // ============================================================================
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId) {
     const global = getGlobal();
     const qStart = Date.now();
     let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
@@ -1806,17 +1825,17 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
     // Priority: File > HTML > Image > Text (Video URL)
 
     if (qStatus.hasFile) {
-        return await handleClipboardShell(targetDir, token, progressCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
     if (qStatus.hasHtml) {
         // Use Unified Logic
-        return await handleClipboardUnified(targetDir, progressCallback, token);
+        return await handleClipboardUnified(targetDir, progressCallback, token, transId);
     }
 
     if (qStatus.hasImage) {
         // Shell/Image handler
-        return await handleClipboardShell(targetDir, token, progressCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
     if (qStatus.hasText) {
@@ -1825,15 +1844,6 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
             if (text) {
                 // Video URL detection
                 if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
-                    // Delegate to download logic (via Shell/Dow) - Currently unified in handleClipboardShell/Unified?
-                    // qqq.js handled 'video_url' by calling handleClipboardSlow -> ???
-                    // Actually qqq.js didn't implement 'video_url' fully in the read code, it just called callback.
-                    // But let's check if handleClipboardUnified handles video URLs?
-                    // handleClipboardUnified expects HTML.
-                    // If it's a raw URL, we should treat it as text or try to download.
-                    // The requirement is "migrate 100%".
-                    // qqq.js had: if (isPlatformOrSegmentVideo...) callback({ type: "video_url", ... })
-                    // We should return that type.
                     return { type: "video_url", text, url: text };
                 }
                 return { type: "text", text };
@@ -1842,6 +1852,23 @@ async function autoDetectAndPaste(targetDir, progressCallback, token) {
     }
 
     return null;
+}
+
+async function getClipboardTotalSize() {
+    try {
+        const global = getGlobal();
+        if (global.shellBridge && global.shellBridge.isAvailable()) {
+            const res = await global.shellBridge.call("getFiles", {}, 1000);
+            if (res && res.files) {
+                let total = 0;
+                for (const f of res.files) {
+                    try { total += fs.statSync(f).size; } catch { }
+                }
+                return total;
+            }
+        }
+    } catch { }
+    return 0;
 }
 
 // Helper needed for video detection
@@ -1895,5 +1922,6 @@ module.exports = {
     promptForUrl,
     pickTargetDirectory,
     log, // 导出 log 函数
-    verifyVideoFile // Exported shared verification function
+    verifyVideoFile, // Exported shared verification function
+    getClipboardTotalSize // Exported
 };
