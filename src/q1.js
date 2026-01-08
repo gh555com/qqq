@@ -1,6 +1,7 @@
 // src/q1.js
 const { checkQ, TransactionManager, getConfig } = require('./global');
 const h = require('./h');
+const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -1416,9 +1417,36 @@ async function performCurvedPaste(editor, targetDir, typeInfo) {
 
         try {
             // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
-            const result = await h.autoDetectAndPaste(targetDir, (p, msg) => {
+            let result = await h.autoDetectAndPaste(targetDir, (p, msg) => {
                 progress.report({ increment: p, message: msg });
             }, token, transId);
+
+            // ★★★ 视频并发下载接管 ★★★
+            if (result && result.type === 'video_url') {
+                try {
+                    const vc = new VideoDownloadController(extensionContext);
+                    const downloadRes = await vc.downloadEntry(
+                        result.url,
+                        targetDir,
+                        transId,
+                        (p, msg) => progress.report({ increment: 0, message: msg }),
+                        token
+                    );
+
+                    if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
+                        result = {
+                            type: 'file',
+                            files: downloadRes.landedFiles,
+                            fingerprints: {}
+                        };
+                    } else {
+                        result = null; // 下载失败或取消
+                    }
+                } catch (e) {
+                    console.error("Video Download Failed:", e);
+                    result = null;
+                }
+            }
 
             if (result) {
                 // 5. 格式化结果
