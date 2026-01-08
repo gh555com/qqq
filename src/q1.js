@@ -1373,7 +1373,7 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
     }
 }
 
-async function performCurvedPaste(editor, targetDir, typeInfo) {
+async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
     // 1. 生成并插入锚点
     const anchorId = Math.random().toString(36).slice(2, 8); // 6位随机字符
     // 注意：大小写敏感
@@ -1550,6 +1550,12 @@ async function executeClipboardCommand() {
     if (mode === 'q') {
         // 直粘 (q) - 最快速度，无事务
         await h.autoDetectAndPaste(targetDir, null, null, null).then(async (result) => {
+            // ★ Handle Video URL in q mode -> Escalate to 'a' (Curved Paste)
+            if (result && result.type === 'video_url') {
+                await performCurvedPaste(editor, targetDir, { type: 'yellowlist', subType: 'video_url' }, result);
+                return;
+            }
+
             const newText = await formatResultToText(result, editor);
             if (!newText) return;
 

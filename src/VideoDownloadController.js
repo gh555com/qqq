@@ -777,9 +777,12 @@ class VideoDownloadController {
     }
 
     // ==================== Headless Entry (for q1.js concurrency) ====================
-    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token) {
+    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null) {
         // 1. 初始化任务上下文
         const task = await this._beginTask(targetDir, transId);
+
+        // Save targetUri to task for insertion
+        task.targetUri = targetUri;
 
         // 2. 绑定外部取消 Token (如果有)
         if (token) {
@@ -1241,20 +1244,31 @@ class VideoDownloadController {
         if (this._isTaskCancelled(task)) return;
 
         // 如果是外部事务 (headless mode)，通常 q1.js 会处理插入 (通过 formatResultToText)
-        // 但这里我们保留插入逻辑以支持 "Direct Paste" 或 "Mixed Mode"
-        // 关键：headless mode 下 activeTextEditor 可能不是目标 editor！
-        // 如果 task.isExternalTrans，我们可能应该跳过这里的插入，让 q1.js 处理？
-        // 但是 _fastProcess 返回的是 landedFiles，q1.js 会拿到并处理。
-        // 如果这里也插入，就会重复。
-
-        // 如果是 interactive start()，externalTransId 是 null，isExternalTrans false。
-        // 如果是 q1.js curved paste，isExternalTrans true。
-        // curved paste logic:
-        // q1.js calls downloadEntry -> _fastProcess -> _postProcess -> _insertToCursor.
-        // q1.js waits for result, then formatResultToText -> replaceAnchor.
-        // So _insertToCursor SHOULD NOT run if isExternalTrans is true (managed by q1.js).
-
         if (task.isExternalTrans) return;
+
+        const targetUri = task.targetUri;
+        if (targetUri) {
+            // Background insertion using WorkspaceEdit
+            try {
+                const doc = await vscode.workspace.openTextDocument(targetUri);
+                // Insert at end of document if no selection context, or maybe just append?
+                // For "Direct Paste", we usually want to replace selection.
+                // But in background, selection might be gone.
+                // We'll append to the end for safety in background mode, or try to use a stored range?
+                // Storing range is complex. Appending is safe for "download queue" behavior.
+                // Better: Insert at the end of document.
+                const lastLine = doc.lineCount - 1;
+                const range = new vscode.Range(lastLine, doc.lineAt(lastLine).text.length, lastLine, doc.lineAt(lastLine).text.length);
+
+                const edit = new vscode.WorkspaceEdit();
+                const relPath = path.relative(path.dirname(targetUri.fsPath), fullPath).replace(/\\/g, '/');
+                edit.insert(targetUri, range, `\n/\\${relPath}\\/\n`);
+                await vscode.workspace.applyEdit(edit);
+            } catch (e) {
+                this.log(`Background insert failed: ${e.message}`);
+            }
+            return;
+        }
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
