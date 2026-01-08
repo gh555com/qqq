@@ -1,0 +1,1233 @@
+const vscode = require("vscode");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const cp = require("child_process"); // Retain for ffmpeg/spawn if needed by q3 or legacy
+
+const q3 = require("./q3");
+const global = require("./global");
+const h = require("./h");
+
+// 引用 global.js 的核心对象
+const {
+	pythonBridge,
+	rustBridge,
+	shellBridge,
+	startDaemons,
+	tryOneByOne,
+	tryEngineCall,
+	updateStatusBarNow,
+	pasteQueue,
+	metaSaveQueue
+} = global;
+
+function createPathRegex() {
+	return /\/\\\s*([\s\S]*?)\s*\\\//gi;
+}
+
+const CACHE_DIR_NAME = "qqq_cache";
+const META_FILE_NAME = "meta.json";
+const CACHE_MAX_SIZE = 40 * 1024 * 1024;
+const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
+const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
+
+const FINGERPRINT_HEAD = 128;
+const FINGERPRINT_MID = 128;
+const FINGERPRINT_TAIL = 128;
+
+// Keep ffmpeg loading in qqq as it was
+let ffmpegPath = null;
+let ffprobePath = null;
+try {
+	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+	ffmpegPath = ffmpegInstaller.path;
+	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
+} catch (e) { }
+
+let extensionContext = null;
+let cacheDir = null;
+let cacheMeta = null;
+let _statusBarTimer = null;
+
+// ============================================================================
+// Cache Meta Logic (Retained in qqq)
+// ============================================================================
+function getCacheStatsSnapshot() {
+	const s = cacheMeta?.stats || { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+	return {
+		totalSize: s.totalSize || 0,
+		fileCount: s.fileCount || 0,
+		hitCount: s.hitCount || 0,
+		missCount: s.missCount || 0,
+	};
+}
+
+function _stripDocJunk(s) {
+	if (s == null) return "";
+	return String(s).trim().replace(/\r/g, "").replace(/\n/g, "");
+}
+
+function _getSystemDriveRoot() {
+	const sd = process.env.SystemDrive;
+	if (sd && /^[A-Za-z]:$/.test(sd)) return sd.toUpperCase() + "\\";
+	const up = process.env.USERPROFILE;
+	if (up && /^[A-Za-z]:[\\/]/.test(up)) return up.slice(0, 2).toUpperCase() + "\\";
+	return "C:\\";
+}
+
+function toSafePath(p) {
+	if (!p) return "";
+	return p.startsWith("\\\\")
+		? "\\\\" + p.slice(2).replace(/\\/g, "/")
+		: p.replace(/\\/g, "/");
+}
+
+function normalizeNavPath(rawPath) {
+	let clean = _stripDocJunk(rawPath);
+	if (!clean) return "";
+
+	if (clean === "~") clean = os.homedir();
+	else if (clean.startsWith("~/") || clean.startsWith("~\\")) {
+		clean = path.join(os.homedir(), clean.slice(2));
+	}
+
+	const isWin = process.platform === "win32";
+	if (!isWin) return path.normalize(clean);
+
+	if (/^[A-Za-z]:$/.test(clean)) return clean.toUpperCase() + "\\";
+	if (/^[A-Za-z]:[\\/]*$/.test(clean)) return clean[0].toUpperCase() + ":\\";
+
+	if (clean.startsWith("\\\\") || clean.startsWith("//")) return path.normalize(clean);
+
+	if (/^[A-Za-z]:[\\/]/.test(clean)) {
+		const normalized = path.normalize(clean);
+		return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
+	}
+
+	if (clean.startsWith("\\") || clean.startsWith("/")) {
+		const sysRoot = _getSystemDriveRoot();
+		const rest = clean.replace(/^[\\/]+/, "");
+		return path.normalize(path.join(sysRoot, rest));
+	}
+
+	return path.normalize(clean);
+}
+
+function resolveNavPath(rawPath, baseDir) {
+	const clean = normalizeNavPath(rawPath);
+	if (!clean) return "";
+	if (path.isAbsolute(clean)) return clean;
+	const base = baseDir && typeof baseDir === "string" ? baseDir : process.cwd();
+	return path.resolve(base, clean);
+}
+
+function canonicalizeExistingPath(p) {
+	if (!p) return "";
+	let out = String(p);
+
+	try {
+		if (fs.existsSync(out)) {
+			if (fs.realpathSync && fs.realpathSync.native) out = fs.realpathSync.native(out);
+			else out = fs.realpathSync(out);
+		}
+	} catch { }
+
+	out = path.normalize(out);
+
+	if (process.platform === "win32") {
+		out = out.replace(/^\\\\\?\\/, "");
+		out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
+	}
+
+	try {
+		const root = path.parse(out).root;
+		if (out.length > root.length) out = out.replace(/[\\/]+$/, "");
+	} catch { }
+
+	return out;
+}
+
+function cacheKeyForPath(p) {
+	const canon = canonicalizeExistingPath(p);
+	return process.platform === "win32" ? canon.toLowerCase() : canon;
+}
+
+// ============================================================================
+// Cache Initialization & Management
+// ============================================================================
+function initCache(context) {
+	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+	loadCacheMeta();
+	validateCache();
+}
+
+function createEmptyMeta() {
+	return {
+		entries: {},
+		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
+		brokenFiles: {},
+	};
+}
+
+function loadCacheMeta() {
+	const metaPath = path.join(cacheDir, META_FILE_NAME);
+	try {
+		if (fs.existsSync(metaPath)) {
+			cacheMeta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+			if (!cacheMeta.entries) cacheMeta.entries = {};
+			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+		} else {
+			cacheMeta = createEmptyMeta();
+		}
+	} catch (e) {
+		cacheMeta = createEmptyMeta();
+	}
+}
+
+function saveCacheMeta() {
+	if (!cacheDir || !cacheMeta) return;
+
+	metaSaveQueue.enqueue(async () => {
+		try {
+			const data = JSON.stringify(cacheMeta, null, 2);
+			const metaPath = path.join(cacheDir, META_FILE_NAME);
+			await fs.promises.writeFile(metaPath, data, "utf-8");
+		} catch (e) {
+			global.logMessage("Meta save failed: " + e.message, "ERROR");
+		}
+	});
+}
+
+function validateCache() {
+	if (!cacheDir || !cacheMeta) return;
+
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+
+	try {
+		const files = fs.readdirSync(cacheDir);
+		for (const f of files) {
+			if (f !== META_FILE_NAME) actualFiles.add(f);
+		}
+	} catch (e) { }
+
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry || typeof entry !== "object") {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+			continue;
+		}
+		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
+
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			if (!qInfo) {
+				delete entry.qualities[q];
+				changed = true;
+				continue;
+			}
+
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = fs.statSync(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) {
+					delete entry.qualities[q];
+					changed = true;
+				}
+			}
+		}
+
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+
+	for (const orphan of actualFiles) {
+		try {
+			fs.unlinkSync(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+
+	if (changed) saveCacheMeta();
+}
+
+function ensureCacheSpace(neededBytes) {
+	if (!cacheDir || !cacheMeta) return;
+	if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return;
+
+	const entries = Object.entries(cacheMeta.entries)
+		.map(([contentId, entry]) => ({ contentId, atime: entry?.atime || 0 }))
+		.sort((a, b) => a.atime - b.atime);
+
+	while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) {
+		const oldest = entries.shift();
+		evictEntry(oldest.contentId);
+	}
+}
+
+function evictEntry(contentId) {
+	const entry = cacheMeta.entries[contentId];
+	if (!entry?.qualities) return;
+
+	for (const q of Object.keys(entry.qualities)) {
+		const fileName = `${contentId}.${q}`;
+		try {
+			const filePath = path.join(cacheDir, fileName);
+			const st = fs.statSync(filePath);
+			cacheMeta.stats.totalSize -= st.size;
+			cacheMeta.stats.fileCount--;
+			fs.unlinkSync(filePath);
+		} catch (e) { }
+	}
+
+	delete cacheMeta.entries[contentId];
+	saveCacheMeta();
+}
+
+function getCacheEntry(contentId) {
+	if (!cacheMeta?.entries?.[contentId]) {
+		cacheMeta.stats.missCount++;
+		return null;
+	}
+	const entry = cacheMeta.entries[contentId];
+	entry.atime = Date.now();
+	cacheMeta.stats.hitCount++;
+	return entry;
+}
+
+function getCacheQualityMeta(contentId, quality) {
+	const entry = cacheMeta?.entries?.[contentId];
+	const qInfo = entry?.qualities?.[quality];
+	return qInfo?.meta || null;
+}
+
+function setCacheEntry(contentId, quality, buffer, meta) {
+	if (!cacheDir || !cacheMeta) return null;
+
+	if (!cacheMeta.entries[contentId]) {
+		cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} };
+	}
+	const entry = cacheMeta.entries[contentId];
+	if (!entry.qualities) entry.qualities = {};
+
+	const prev = entry.qualities[quality];
+	const prevSize = prev?.size || 0;
+	const delta = Math.max(0, buffer.length - prevSize);
+
+	ensureCacheSpace(delta);
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+
+	try {
+		const tmpPath = filePath + ".tmp";
+		fs.writeFileSync(tmpPath, buffer);
+		fs.renameSync(tmpPath, filePath);
+	} catch (e) {
+		try {
+			fs.unlinkSync(filePath + ".tmp");
+		} catch { }
+		return null;
+	}
+
+	entry.qualities[quality] = { size: buffer.length, format: "webp_unified", meta: {} };
+	entry.atime = Date.now();
+	if (meta) Object.assign(entry.qualities[quality].meta, meta);
+
+	if (!prev) cacheMeta.stats.fileCount++;
+	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
+
+	saveCacheMeta();
+	updateStatusBarNow();
+
+	return filePath;
+}
+
+function getCachedBuffer(contentId, quality) {
+	if (!cacheDir || !cacheMeta) return null;
+
+	const entry = cacheMeta.entries[contentId];
+	if (!entry?.qualities?.[quality]) {
+		cacheMeta.stats.missCount++;
+		global.markCacheMiss();
+		updateStatusBarNow();
+		return null;
+	}
+
+	const fileName = `${contentId}.${quality}`;
+	const filePath = path.join(cacheDir, fileName);
+
+	try {
+		if (fs.existsSync(filePath)) {
+			entry.atime = Date.now();
+			cacheMeta.stats.hitCount++;
+			global.markCacheHit();
+			updateStatusBarNow();
+			return fs.readFileSync(filePath);
+		}
+	} catch (e) { }
+
+	cacheMeta.stats.missCount++;
+	global.markCacheMiss();
+
+	delete entry.qualities[quality];
+	if (Object.keys(entry.qualities).length === 0) {
+		delete cacheMeta.entries[contentId];
+	}
+	saveCacheMeta();
+
+	updateStatusBarNow();
+
+	return null;
+}
+
+
+// ============================================================================
+// Clipboard Logic (Delegated to h.js)
+// ============================================================================
+
+// VS Code progress adapter
+function makeVsProgressAdapter(progress) {
+	let last = 0;
+	return (absPct, msg) => {
+		const now = Math.max(0, Math.min(100, Number(absPct) || 0));
+		const inc = Math.max(0, now - last);
+		last = now;
+		try { progress.report({ message: msg, increment: inc }); } catch { }
+	};
+}
+
+async function raceClipboard(targetDir, callback) {
+	return pasteQueue.enqueue(async () => {
+		try {
+			const res = await global.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: "qqq: 智能粘贴...",
+				cancellable: true
+			}, async (progress, token) => {
+				token.onCancellationRequested(() => {
+					global.logMessage("粘贴操作被用户取消", "WARN");
+				});
+				const progCb = makeVsProgressAdapter(progress);
+
+				// ★ Delegate all detection and handling to h.js
+				return await h.autoDetectAndPaste(targetDir, progCb, token);
+			});
+
+			if (res) {
+				callback(res, 100);
+			}
+		} catch (e) {
+			global.logMessage(`raceClipboard failed: ${e.message}`, "ERROR");
+		}
+	});
+}
+
+async function handleClipboardFast() {
+	return null; // Deprecated / Not used in read code
+}
+
+async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null, partialCallback = null, token = null) {
+	// Wrapper to match old signature if called directly, but prefer raceClipboard
+	return await h.autoDetectAndPaste(targetDir, partialCallback, token);
+}
+
+
+// ============================================================================
+// Other Helpers
+// ============================================================================
+
+async function getFolderInfo(folderPath) {
+	folderPath = canonicalizeExistingPath(folderPath) || folderPath;
+
+	const res = await tryEngineCall({
+		python: "folder_info",
+		rust: "folder_info"
+	}, { path: folderPath }, 15000);
+	if (res) return res;
+
+	return getFolderInfoJS(folderPath);
+}
+
+async function getFolderInfoJS(folderPath) {
+	if (!fs.existsSync(folderPath)) return { error: "not_found" };
+
+	let totalSize = 0;
+	let fileCount = 0;
+	const extStats = {};
+
+	async function walk(dir) {
+		try {
+			const files = await fs.promises.readdir(dir, { withFileTypes: true });
+			for (const file of files) {
+				const fullPath = path.join(dir, file.name);
+				if (file.isDirectory()) {
+					await walk(fullPath);
+				} else {
+					try {
+						const st = await fs.promises.stat(fullPath);
+						totalSize += st.size;
+						fileCount++;
+						const ext = path.extname(file.name).toLowerCase().replace(".", "") || "no_ext";
+						extStats[ext] = (extStats[ext] || 0) + 1;
+					} catch { }
+				}
+			}
+		} catch { }
+	}
+
+	await walk(folderPath);
+
+	return {
+		success: true,
+		total_size: totalSize,
+		file_count_root: fileCount,
+		ext_stats: extStats,
+	};
+}
+
+function shouldShowDuration(info) {
+	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
+}
+
+let downloadContext = null;
+
+async function downloadVideosFromUrlCommand() {
+	try {
+		// 获取用户输入的URL
+		const url = await vscode.window.showInputBox({
+			prompt: "请输入包含视频的网页URL",
+			placeHolder: "https://example.com/page-with-video",
+			validateInput: text => {
+				if (!text) return "URL不能为空";
+				try {
+					new URL(text);
+					return null;
+				} catch {
+					return "请输入有效的URL";
+				}
+			}
+		});
+
+		if (!url) {
+			return; // 用户取消了输入
+		}
+
+		// 获取当前工作目录或让用户选择一个目录
+		const folders = vscode.workspace.workspaceFolders;
+		let targetDir;
+		if (folders && folders.length > 0) {
+			targetDir = folders[0].uri.fsPath;
+		} else {
+			// 如果没有工作区，让用户选择一个目录
+			const selectedDir = await vscode.window.showOpenDialog({
+				canSelectFolders: true,
+				canSelectFiles: false,
+				canSelectMany: false,
+				title: "选择视频下载目录"
+			});
+			if (!selectedDir || selectedDir.length === 0) {
+				return; // 用户取消了选择
+			}
+			targetDir = selectedDir[0].fsPath;
+		}
+
+		// 显示进度
+		await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: "正在分析网页视频...",
+			cancellable: true
+		}, async (progress, token) => {
+			// 检查是否已安装yt-dlp
+			const { getSharedDownloader } = require('./dow');
+			let downloader = getSharedDownloader();
+
+			if (!downloader.ytdlp.isAvailable()) {
+				const installConfirmed = await vscode.window.showInformationMessage(
+					"yt-dlp 未安装，是否自动下载安装？",
+					{ modal: true },
+					"是",
+					"否"
+				);
+
+				if (installConfirmed === "是") {
+					progress.report({ message: "正在自动下载安装 yt-dlp...", increment: 5 });
+					try {
+						// 自动下载并安装yt-dlp
+						const installResult = await installYtDlp(downloadContext);
+						if (installResult.success) {
+							// 更新downloader的yt-dlp路径
+							downloader.ytdlp.setBinaryPath(installResult.path);
+							progress.report({ message: "yt-dlp 安装成功，更新路径...", increment: 10 });
+						} else {
+							vscode.window.showErrorMessage(`yt-dlp 安装失败: ${installResult.error}`);
+							return;
+						}
+					} catch (installError) {
+						vscode.window.showErrorMessage(`自动安装 yt-dlp 失败: ${installError.message}`);
+						return;
+					}
+				} else {
+					vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+					return;
+				}
+			}
+
+			progress.report({ message: "正在探测视频资源...", increment: 10 });
+
+			// 首先尝试使用yt-dlp探测
+			let probeResult = null;
+			let probeError = null;
+			try {
+				probeResult = await downloader.ytdlp.probe(url);
+			} catch (error) {
+				probeError = error;
+			}
+
+			// 如果yt-dlp探测失败，尝试直接解析网页获取视频资源
+			if (!probeResult || !probeResult.success) {
+				progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
+				try {
+					// 尝试获取网页内容并解析视频标签
+					const videoUrls = await extractVideoUrlsFromWebPage(url);
+					if (videoUrls && videoUrls.length > 0) {
+						// 创建模拟的探测结果
+						probeResult = {
+							success: true,
+							isPlaylist: false,
+							entries: videoUrls.map((videoUrl, index) => ({
+								id: `direct_video_${index}`,
+								title: `直接视频链接 ${index + 1}`,
+								url: videoUrl,
+								webpageUrl: url
+							}))
+						};
+						probeResult.isPlaylist = videoUrls.length > 1;
+						if (videoUrls.length === 1) {
+							probeResult.title = '直接视频链接';
+							probeResult.url = videoUrls[0];
+						} else {
+							probeResult.entriesCount = videoUrls.length;
+						}
+					} else {
+						vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '未知错误')}`);
+						return;
+					}
+				} catch (webError) {
+					vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
+					return;
+				}
+			}
+
+			progress.report({ message: "发现视频资源，准备下载...", increment: 30 });
+
+			let videosToDownload = [];
+
+			if (probeResult.isPlaylist) {
+				// 如果是播放列表，让用户选择要下载的视频
+				const items = probeResult.entries.map((entry, index) => ({
+					label: entry.title || `视频 ${index + 1}`,
+					description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
+					detail: entry.url,
+					video: entry
+				}));
+
+				const selectedItems = await vscode.window.showQuickPick(items, {
+					canPickMany: true,
+					placeHolder: "选择要下载的视频",
+					matchOnDescription: true,
+					matchOnDetail: true
+				});
+
+				if (!selectedItems || selectedItems.length === 0) {
+					return; // 用户没有选择任何视频
+				}
+
+				videosToDownload = selectedItems.map(item => item.video);
+			} else {
+				// 如果是单个视频，直接添加
+				videosToDownload = [probeResult.entries ? probeResult.entries[0] : probeResult];
+			}
+
+			progress.report({ message: `准备下载 ${videosToDownload.length} 个视频`, increment: 50 });
+
+			// 为每个视频下载任务创建下载请求
+			const downloadTasks = videosToDownload.map(video => {
+				const filename = h.getTimestampFilename('.mp4');
+				const destPath = path.join(targetDir, filename);
+				return {
+					url: video.url || url,
+					destPath: destPath,
+					tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
+					title: video.title || '网页视频'
+				};
+			});
+
+			// 开始下载
+			const downloadResult = await downloader.downloadAll(downloadTasks, targetDir, {
+				onProgress: (task, event) => {
+					if (event.type === "progress") {
+						progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
+					} else if (event.type === "done") {
+						progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
+					}
+				}
+			});
+
+			// 检查下载结果
+			const successfulDownloads = downloadResult.results.filter(r => r.success);
+			const failedDownloads = downloadResult.results.filter(r => !r.success);
+
+			if (successfulDownloads.length > 0) {
+				vscode.window.showInformationMessage(
+					`成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
+				);
+			} else if (failedDownloads.length > 0) {
+				vscode.window.showErrorMessage(
+					`所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
+				);
+			}
+
+			progress.report({ increment: 100 });
+		});
+	} catch (error) {
+		vscode.window.showErrorMessage(`下载视频时出错: ${error.message}`);
+	}
+}
+
+const pendingJobs = new Map();
+let tokenCounter = 0;
+
+function createPendingToken() {
+	const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+	let token = "";
+	for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)];
+	return token + (++tokenCounter).toString(36);
+}
+
+function registerPendingJob(token, data) {
+	return new Promise((resolve, reject) => {
+		pendingJobs.set(token, { resolve, reject, ...data, startTime: Date.now() });
+		setTimeout(() => {
+			if (pendingJobs.has(token)) {
+				pendingJobs.delete(token);
+				reject(new Error("timeout"));
+			}
+		}, 30000);
+	});
+}
+
+function resolvePendingJob(token, result) {
+	const job = pendingJobs.get(token);
+	if (job) {
+		pendingJobs.delete(token);
+		job.resolve(result);
+	}
+}
+
+let q1Module = null;
+let q2Module = null;
+
+async function activate(context) {
+	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
+
+	extensionContext = context;
+	downloadContext = context;
+	global.init(context);
+
+	initCache(context);
+	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
+	global.setLogPath(path.join(cacheDir, "err.log"));
+	global.initStatusBar();
+	updateStatusBarNow();
+
+	startDaemons();
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
+		vscode.commands.registerCommand("qqq.allSettings", () => {
+			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+		}),
+		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			for (const key of Object.keys(global.ConfigManager.getAll())) {
+				const fullKey = `qqq.${key}`;
+				if (event.affectsConfiguration(fullKey)) {
+					const val = vscode.workspace.getConfiguration("qqq").get(key);
+					const currentStored = global.ConfigManager.get(key);
+					if (val !== currentStored) {
+						global.setConfig(key, val).then(() => {
+							if (key === "ioEngine" || key === "pythonPath") {
+								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
+								startDaemons();
+							}
+						});
+					}
+				}
+			}
+		})
+	);
+
+	loadSubModules(context);
+
+	if (_statusBarTimer) clearInterval(_statusBarTimer);
+	_statusBarTimer = setInterval(() => {
+		try {
+			updateStatusBarNow();
+		} catch { }
+	}, 5000);
+
+	global.logMessage("qqq 扩展激活完成", "INFO");
+}
+
+function loadSubModules(context) {
+	try {
+		q1Module = require("./q1");
+		if (q1Module?.activate) q1Module.activate(context);
+	} catch (e) {
+		global.logMessage(`q1 加载失败: ${e.message}`, "ERROR");
+	}
+
+	try {
+		q2Module = require("./q2");
+		if (q2Module?.activate) q2Module.activate(context);
+	} catch (e) {
+		global.logMessage(`q2 加载失败: ${e.message}`, "ERROR");
+	}
+}
+
+async function deactivate() {
+	pythonBridge.stop();
+	rustBridge.stop();
+	shellBridge.stop();
+
+	global.finishUserTracking();
+
+	try {
+		if (_statusBarTimer) clearInterval(_statusBarTimer);
+		_statusBarTimer = null;
+		global.disposeStatusBar();
+	} catch { }
+
+	try { validateCache(); } catch { }
+	saveCacheMeta();
+
+	if (q1Module?.deactivate) {
+		try { await q1Module.deactivate(); } catch { }
+	}
+
+	global.logMessage("qqq 扩展已停用", "INFO");
+}
+
+const exported = {
+	activate,
+	deactivate,
+
+	createPathRegex,
+	toSafePath,
+	// Delegate to h.js
+	sanitizeHtml: h.sanitizeHtml,
+
+	normalizeNavPath,
+	resolveNavPath,
+	canonicalizeExistingPath,
+	cacheKeyForPath,
+
+	logMessage: global.logMessage,
+	logMessageRateLimited: global.logMessageRateLimited,
+	logQ: global.logQ,
+
+	// Delegate to h.js
+	computeFingerprint: h.computeFingerprint,
+	prefillFingerprint: h.prefillFingerprint,
+
+	initCache,
+	validateCache,
+
+	getCacheEntry,
+	getCacheQualityMeta,
+	getCacheStatsSnapshot,
+	getPersistentCacheStatsSnapshot: global.getPersistentCacheStatsSnapshot,
+
+	setCacheEntry,
+	getCachedBuffer,
+
+	handleClipboardFast,
+	handleClipboardSlow,
+
+	getFolderInfo,
+
+	// Delegate to h.js
+	getTimestampFilename: h.getTimestampFilename,
+	isImageExtForClipboard: h.isImageExtForClipboard,
+
+	shouldShowDuration,
+
+	createPendingToken,
+	registerPendingJob,
+	resolvePendingJob,
+
+	raceClipboard,
+
+	probeScheduler: global.probeScheduler,
+	genScheduler: global.genScheduler,
+
+	getActiveEngineCode: global.getActiveEngineCode,
+	getActiveEngineName: global.getActiveEngineName,
+	updateStatusBarNow,
+};
+
+Object.assign(module.exports, exported);
+
+Object.defineProperty(module.exports, "LOG_PATH", { enumerable: true, get: () => global.getLogPath() });
+Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => ffmpegPath });
+Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => ffprobePath });
+
+process.on("uncaughtException", (error) => {
+	const stack = error.stack || "";
+	global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+});
+
+process.on("unhandledRejection", (reason) => {
+	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+	global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+});
+
+// 从网页中提取视频URL的辅助函数
+async function extractVideoUrlsFromWebPage(url) {
+	try {
+		const cheerio = require('cheerio');
+		const https = require('https');
+		const http = require('http');
+		const { URL: NodeURL } = require('url');
+
+		// 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
+		let fetch;
+		try {
+			fetch = require('node-fetch');
+		} catch {
+			// 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
+			if (typeof global.fetch === 'undefined') {
+				// 如果都没有，使用 https 模块作为备选方案
+				const webContent = await fetchViaHttps(url);
+				const $ = cheerio.load(webContent);
+
+				const videoUrls = new Set();
+
+				// 查找 <video> 标签中的视频源
+				$('video source').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+
+					const srcAttr = elem.attribs['src'];
+					if (srcAttr) {
+						const fullUrl = new URL(srcAttr, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找直接的 <video> 标签的src属性
+				$('video').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找 <iframe> 标签（可能是视频播放器）
+				$('iframe').each((i, elem) => {
+					const src = $(elem).attr('src');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找具有视频类名的元素
+				$('[class*="video" i], [id*="video" i]').each((i, elem) => {
+					const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+					if (src) {
+						const fullUrl = new URL(src, url).href;
+						videoUrls.add(fullUrl);
+					}
+				});
+
+				// 查找可能的视频文件扩展名链接
+				const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+				$('a, [href]').each((i, elem) => {
+					const href = $(elem).attr('href');
+					if (href) {
+						const lowerHref = href.toLowerCase();
+						if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+							const fullUrl = new URL(href, url).href;
+							videoUrls.add(fullUrl);
+						}
+					}
+				});
+
+				return Array.from(videoUrls);
+			}
+
+			fetch = global.fetch;
+		}
+
+		// 定义 fetchViaHttps 函数
+		function fetchViaHttps(targetUrl) {
+			return new Promise((resolve, reject) => {
+				const urlObj = new NodeURL(targetUrl);
+				const client = urlObj.protocol === 'https:' ? https : http;
+
+				const options = {
+					headers: {
+						'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+					},
+					timeout: 15000 // 15秒超时
+				};
+
+				const request = client.get(targetUrl, options, (response) => {
+					let data = '';
+
+					response.on('data', (chunk) => {
+						data += chunk;
+					});
+
+					response.on('end', () => {
+						if (response.statusCode >= 200 && response.statusCode < 300) {
+							resolve(data);
+						} else {
+							reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+						}
+					});
+
+					response.on('error', (err) => {
+						reject(err);
+					});
+				});
+
+				request.on('error', (err) => {
+					reject(err);
+				});
+
+				request.on('timeout', () => {
+					request.destroy();
+					reject(new Error('Request timeout'));
+				});
+			});
+		}
+
+		const response = await fetch(url, {
+			method: 'GET',
+			headers: {
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+			}
+		});
+
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		}
+
+		const html = await response.text();
+		const $ = cheerio.load(html);
+
+		const videoUrls = new Set();
+
+		// 查找 <video> 标签中的视频源
+		$('video source').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+
+			const srcAttr = elem.attribs['src'];
+			if (srcAttr) {
+				const fullUrl = new URL(srcAttr, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找直接的 <video> 标签的src属性
+		$('video').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找 <iframe> 标签（可能是视频播放器）
+		$('iframe').each((i, elem) => {
+			const src = $(elem).attr('src');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找具有视频类名的元素
+		$('[class*="video" i], [id*="video" i]').each((i, elem) => {
+			const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
+			if (src) {
+				const fullUrl = new URL(src, url).href;
+				videoUrls.add(fullUrl);
+			}
+		});
+
+		// 查找可能的视频文件扩展名链接
+		const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
+		$('a, [href]').each((i, elem) => {
+			const href = $(elem).attr('href');
+			if (href) {
+				const lowerHref = href.toLowerCase();
+				if (videoExtensions.some(ext => lowerHref.includes(ext))) {
+					const fullUrl = new URL(href, url).href;
+					videoUrls.add(fullUrl);
+				}
+			}
+		});
+
+		return Array.from(videoUrls);
+	} catch (error) {
+		global.logMessage(`从网页提取视频URL失败: ${error.message}`, "ERROR");
+		throw error;
+	}
+}
+
+// 自动下载安装yt-dlp的函数
+async function installYtDlp(context) {
+	try {
+		const os = require('os');
+		const fs = require('fs');
+		const path = require('path');
+		const https = require('https');
+
+		const platform = os.platform();
+		const arch = os.arch();
+
+		// 确定yt-dlp下载URL和文件名
+		let downloadUrl;
+		let binaryName;
+
+		if (platform === 'win32') {
+			// Windows
+			binaryName = 'yt-dlp.exe';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+		} else if (platform === 'darwin') {
+			// macOS
+			binaryName = 'yt-dlp';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+		} else {
+			// Linux和其他类Unix系统
+			binaryName = 'yt-dlp';
+			downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+		}
+
+		// 确定安装路径 - 使用扩展的全局存储路径
+		const installDir = context.globalStorageUri.fsPath;
+		const installPath = path.join(installDir, binaryName);
+
+		// 确保安装目录存在
+		if (!fs.existsSync(installDir)) {
+			fs.mkdirSync(installDir, { recursive: true });
+		}
+
+		// 检查文件是否已存在且非空
+		if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
+			global.logMessage(`yt-dlp 已存在: ${installPath}`, "INFO");
+			return { success: true, path: installPath };
+		}
+
+		global.logMessage(`开始下载 yt-dlp 从 ${downloadUrl}`, "INFO");
+
+		// 使用https模块下载yt-dlp
+		await new Promise((resolve, reject) => {
+			const file = fs.createWriteStream(installPath);
+
+			// 设置请求选项
+			const options = {
+				host: 'github.com',
+				path: downloadUrl.replace('https://github.com', ''),
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+					'Accept': '*/*',
+					'Referer': 'https://github.com/'
+				},
+				timeout: 30000 // 30秒超时
+			};
+
+			// 发起HTTPS请求
+			const request = https.get(downloadUrl, options, (response) => {
+				// 处理重定向
+				if (response.statusCode === 302 || response.statusCode === 301) {
+					const redirectUrl = response.headers.location;
+					global.logMessage(`处理重定向到: ${redirectUrl}`, "INFO");
+					https.get(redirectUrl, (res) => {
+						res.pipe(file);
+						res.on('end', resolve);
+						res.on('error', reject);
+					}).on('error', (err) => {
+						file.close();
+						reject(err);
+					});
+				} else if (response.statusCode === 200) {
+					response.pipe(file);
+					response.on('end', resolve);
+					response.on('error', reject);
+				} else {
+					file.close();
+					reject(new Error(`下载失败，状态码: ${response.statusCode}`));
+				}
+			}).on('error', (err) => {
+				file.close();
+				reject(err);
+			});
+
+			request.on('timeout', () => {
+				file.close();
+				request.abort();
+				reject(new Error('下载超时'));
+			});
+
+			file.on('finish', () => {
+				file.close();
+			});
+
+			file.on('error', (err) => {
+				reject(err);
+			});
+		});
+
+		// 如果是Unix系统，需要设置可执行权限
+		if (platform !== 'win32') {
+			fs.chmodSync(installPath, '755');
+		}
+
+		global.logMessage(`yt-dlp 安装成功: ${installPath}`, "INFO");
+		return { success: true, path: installPath };
+	} catch (error) {
+		global.logMessage(`自动安装 yt-dlp 失败: ${error.message}`, "ERROR");
+		return { success: false, error: error.message };
+	}
+}
