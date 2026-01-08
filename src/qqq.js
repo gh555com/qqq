@@ -642,6 +642,13 @@ async function activate(context) {
 		} catch { }
 	}, 5000);
 
+	// ★ 启动时恢复/清理事务 (确保上次崩溃留下的垃圾被清理)
+	try {
+		await global.TransactionManager.recover();
+	} catch (e) {
+		global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
+	}
+
 	global.logMessage("qqq 扩展激活完成", "INFO");
 }
 
