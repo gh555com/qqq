@@ -540,7 +540,7 @@ class VideoDownloadController {
         return { ok: false };
     }
 
-    // ✅ 识别 YouTube（彻底排除增强：前置排除 + 最终兜底）
+    // ✅ 识别 YouTube（彻底排除增强：前置排除 + 最终兖底）
     _isYouTubeUrl(rawUrl) {
         try {
             const u = new URL(String(rawUrl || ''));
@@ -945,7 +945,9 @@ class VideoDownloadController {
                 // 静态分析（优先于 403 增强）
                 try {
                     if (this._isTaskCancelled(task)) return null;
+                    this.log(`开始静态分析网页: ${url}`);
                     const webUrls = await h.extractVideoUrlsFromWebPage(url);
+                    this.log(`静态分析结果: ${webUrls ? webUrls.length : 0} 个 URL`);
                     if (webUrls && webUrls.length > 0) {
                         this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
 
@@ -965,7 +967,9 @@ class VideoDownloadController {
 
                         webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
                     }
-                } catch (e) { }
+                } catch (e) {
+                    this.log(`静态分析失败: ${e.message}`);
+                }
 
                 if (this._isTaskCancelled(task)) return null;
 
@@ -1100,8 +1104,8 @@ class VideoDownloadController {
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
 
-                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强，静态分析找到直连视频且下载成功也不触发增强
-                    const needEnhanced = (!isYouTube) && (!hasStaticDirectVideo || landedFiles.length === 0) && (
+                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强，静态分析找到直连视频也不触发增强
+                    const needEnhanced = (!isYouTube) && (!hasStaticDirectVideo) && (
                         forbiddenErrors.length > 0 ||
                         (probeForbidden && landedFiles.length === 0) ||
                         (landedFiles.length === 0 && successResults.length > 0)
@@ -1144,7 +1148,7 @@ class VideoDownloadController {
             if (!outcome) return;
             if (this._isTaskCancelled(task)) return;
 
-            // ✅ 最终兜底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
+            // ✅ 最终兖底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
