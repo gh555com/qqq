@@ -9,6 +9,60 @@ const https = require('https');
 const global = require('./global');
 const { TaskCounter } = require('./global');
 
+// ==================== ★ 统一消息格式化器（唯一真理源） ====================
+const VideoMessage = {
+    /**
+     * 生成进度消息
+     * @param {Object} task - 任务对象（含 taskTitle）
+     * @param {string} sizeStr - 已交换的大小字符串，如 "7m"
+     * @param {string} urlSnippet - URL 缩略
+     * @param {string} [suffix] - 可选后缀，如 "(正在解析...)", "(增强下载中...)"
+     */
+    progress(task, sizeStr, urlSnippet, suffix = '') {
+        const prefix = task?.taskTitle || 'qqq';
+        const suffixPart = suffix ? ` ${suffix}` : '';
+        return `${prefix} 已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
+    },
+
+    /**
+     * 生成任务完成消息
+     * @param {Object} task - 任务对象（含 taskTitle, startMs）
+     * @param {number} landedCount - 落盘文件数
+     * @param {string} totalStr - 总大小字符串，如 "19m"
+     * @param {string} urlSnippet - URL 缩略
+     */
+    done(task, landedCount, totalStr, urlSnippet) {
+        const prefix = task?.taskTitle || 'qqq';
+        const dur = VideoMessage._formatDuration(Date.now() - (task?.startMs || Date.now()));
+
+        if (!landedCount || landedCount <= 0) {
+            return `${prefix} 0 落盘，从 ${urlSnippet}（耗时${dur}）`;
+        }
+        return `${prefix}，共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}（耗时${dur}）`;
+    },
+
+    /**
+     * 生成用户提示消息（如增强模式的播放提示）
+     * @param {Object} task - 任务对象
+     * @param {string} message - 提示内容
+     */
+    prompt(task, message) {
+        const prefix = task?.taskTitle || 'qqq';
+        return `${prefix} ${message}`;
+    },
+
+    /**
+     * 格式化时间
+     */
+    _formatDuration(ms) {
+        const sec = Math.round(ms / 1000);
+        if (sec < 60) return `${sec}s`;
+        const min = Math.floor(sec / 60);
+        const s = sec % 60;
+        return s > 0 ? `${min}m${s}s` : `${min}m`;
+    }
+};
+
 class ChildProcessTracker {
     constructor() {
         this._procs = new Set();
@@ -747,15 +801,9 @@ class VideoDownloadController {
         return !!(task && (task.isCancelled || (task.tracker && task.tracker.isCancelled())));
     }
 
-    // ==================== 任务结束打印（严格文本，不带 command 垃圾） ====================
+    // ==================== 任务结束打印（★ 使用统一格式化器） ====================
     _buildDoneMessage(task, landedCount, totalStr, urlSnippet) {
-        const dur = this._formatDuration(Date.now() - (task?.startMs || Date.now()));
-        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
-
-        if (!landedCount || landedCount <= 0) {
-            return `${prefix}任务结束（总耗时${dur}），0 落盘，从 ${urlSnippet}`;
-        }
-        return `${prefix}任务结束（总耗时${dur}），共落盘${landedCount}个视频共: ${totalStr}，从 ${urlSnippet}`;
+        return VideoMessage.done(task, landedCount, totalStr, urlSnippet);
     }
 
     // ==================== start ====================
@@ -902,9 +950,8 @@ class VideoDownloadController {
             const isYouTube = this._isYouTubeUrl(url);
 
             const runLogic = async (progress, token) => {
-                // ★ 进度消息带 taskTitle 前缀
-                const msgPrefix = task.taskTitle ? `${task.taskTitle} ` : '';
-                progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet} (正在解析...)` });
+                // ★ 使用统一格式化器
+                progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet, '(正在解析...)') });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -995,7 +1042,7 @@ class VideoDownloadController {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet}` });
+                progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet) });
 
                 const activePrefixes = new Set();
                 tasks.forEach(t => {
@@ -1041,7 +1088,7 @@ class VideoDownloadController {
 
                         const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
                         const totalStr = this._formatBytesSimple(finalBytes);
-                        progress.report({ message: `${msgPrefix}已交换 ${totalStr} 于 ${urlSnippet}` });
+                        progress.report({ message: VideoMessage.progress(task, totalStr, urlSnippet) });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1857,14 +1904,14 @@ $of = $vi.OriginalFilename;
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
-        const msgPrefix = task?.taskTitle ? `${task.taskTitle} ` : '';
 
         const out = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "",
             cancellable: true
         }, async (progress, token) => {
-            progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet} (增强下载中...)` });
+            // ★ 使用统一格式化器
+            progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet, '(增强下载中...)') });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -1877,7 +1924,7 @@ $of = $vi.OriginalFilename;
                 timer = setInterval(() => {
                     if (this._isTaskCancelled(task)) return;
                     const bytes = this._scanRecentBytes(targetDir, startMs);
-                    progress.report({ message: `${msgPrefix}已交换 ${this._formatBytesSimple(bytes)} 于 ${urlSnippet} (增强下载中...)` });
+                    progress.report({ message: VideoMessage.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -1956,9 +2003,9 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
+            // ★ 使用统一格式化器
             const selection = await vscode.window.showInformationMessage(
-                `${prefix}请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。`,
+                VideoMessage.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
                 { modal: true },
                 "我已在外部播放"
             );
