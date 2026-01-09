@@ -679,19 +679,12 @@ class VideoDownloadController {
         });
     }
 
-    // ==================== 三号弹窗：任务结束（带按钮 + 15秒自动关） ====================
+    // ==================== 三号弹窗：任务结束（15秒自动关闭） ====================
     async _showTaskDoneToast(message, canOpen, filePath, folderPath, taskTitle = '') {
-        // ★ 使用 TaskMessage 统一真理源，确保15秒自动关闭
+        // ★ 使用 withProgress 确保15秒自动关闭
+        // VS Code 的 showInformationMessage 不支持自动关闭
         const { TaskMessage } = global;
-        await TaskMessage.showDoneToast(message, {
-            buttons: canOpen ? ['[打开下载目录]'] : [],
-            timeout: 15000,
-            onButton: async (choice) => {
-                if (choice === '[打开下载目录]') {
-                    await this._revealFileOrFolder(filePath, folderPath);
-                }
-            }
-        });
+        await TaskMessage.showSimpleToast(message, 15000);
     }
 
     // ==================== downloader 内部弹窗屏蔽 ====================
@@ -813,15 +806,9 @@ class VideoDownloadController {
         // 交互式模式：不传递 progressCallback，使用内部的 withProgress
         const result = await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
 
-        // ★ 进度弹窗结束后，显示完成弹窗（不阻塞）
+        // ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
         if (result && result.doneMessage) {
-            if (result.cancelled) {
-                // ★ 取消消息：无按钮
-                global.TaskMessage.showSimpleToast(result.doneMessage);
-            } else {
-                // ★ 成功消息：可带按钮
-                this._showTaskDoneToast(result.doneMessage, result.canOpenDir, result.firstFile, result.targetDir);
-            }
+            global.TaskMessage.showSimpleToast(result.doneMessage, 15000);
         }
     }
 
@@ -1147,10 +1134,12 @@ class VideoDownloadController {
                     for (const r of successResults) {
                         if (this._isTaskCancelled(task)) return null;
                         const p = r.path || r.destPath;
-                        const finalPath = await this._postProcess(task, p);
-                        if (finalPath) {
-                            landedFiles.push(finalPath);
-                            try { finalTotalBytes += fs.statSync(finalPath).size; } catch (e) { }
+                        const result = await this._postProcess(task, p);
+                        // ★ result.path 是最终路径（新文件或复用旧文件）
+                        // ★ 事务记录已在 _postProcess 内部处理（只记录 isNew: true 的）
+                        if (result && result.path) {
+                            landedFiles.push(result.path);
+                            try { finalTotalBytes += fs.statSync(result.path).size; } catch (e) { }
                         }
                     }
 
@@ -1197,7 +1186,20 @@ class VideoDownloadController {
                 }, runLogic);
             }
 
-            if (!outcome) return { landedFiles: [], finalTotalBytes: 0 };
+            if (!outcome) {
+                // ★ 即使 outcome 为空，也要检查是否被取消
+                if (this._isTaskCancelled(task)) {
+                    const cancelMsg = VideoMsg.done(task, 0, '0k', urlSnippet).replace(/\uff08耗时.*\uff09$/, '') + ' 已取消并回滚';
+                    return {
+                        landedFiles: [],
+                        finalTotalBytes: 0,
+                        cancelled: true,
+                        doneMessage: cancelMsg,
+                        targetDir: targetDir
+                    };
+                }
+                return { landedFiles: [], finalTotalBytes: 0 };
+            }
 
             // ★ 检查是否被取消，返回取消消息
             if (this._isTaskCancelled(task)) {
@@ -1259,6 +1261,10 @@ class VideoDownloadController {
     }
 
     // ==================== 后处理：验证 + 改名 + 插入（返回最终落盘路径） ====================
+    // ★ 返回值约定：
+    //   - { path, isNew: true }  → 新下载的文件，需记入事务
+    //   - { path, isNew: false } → 复用旧文件，不记入事务（取消时不删除）
+    //   - null                   → 失败
     async _postProcess(task, filePath) {
         if (this._isTaskCancelled(task)) {
             if (filePath && fs.existsSync(filePath)) {
@@ -1283,10 +1289,11 @@ class VideoDownloadController {
 
                     const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
-                        this.log(`发现指纹重复文件（同文件夹），删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
+                        this.log(`发现指纹重复文件（同文件夹），删除新下载文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }
                         await this._insertToCursor(task, f, full);
-                        return full;
+                        // ★ 返回 isNew: false，表示复用旧文件，不记入事务
+                        return { path: full, isNew: false };
                     }
                 }
             }
@@ -1300,7 +1307,7 @@ class VideoDownloadController {
         const finalPath = await h.verifyVideoFile(filePath);
 
         if (finalPath) {
-            // ★ 更新事务：记录落盘文件
+            // ★ 新文件：记入事务
             if (task && task.transId) {
                 const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
                 if (trans) {
@@ -1311,7 +1318,8 @@ class VideoDownloadController {
             }
 
             await this._insertToCursor(task, path.basename(finalPath), finalPath);
-            return finalPath;
+            // ★ 返回 isNew: true，表示新文件
+            return { path: finalPath, isNew: true };
         } else {
             this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
             return null;
@@ -1960,10 +1968,11 @@ $of = $vi.OriginalFilename;
             // ★ 增强流程也要经过 _postProcess 验证和指纹注册
             for (const p of rawFiles) {
                 if (this._isTaskCancelled(task)) break;
-                const finalPath = await this._postProcess(task, p);
-                if (finalPath) {
-                    landedFiles.push(finalPath);
-                    try { totalBytes += fs.statSync(finalPath).size; } catch (e) { }
+                const result = await this._postProcess(task, p);
+                // ★ result.path 是最终路径（新文件或复用旧文件）
+                if (result && result.path) {
+                    landedFiles.push(result.path);
+                    try { totalBytes += fs.statSync(result.path).size; } catch (e) { }
                 }
             }
 
