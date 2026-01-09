@@ -1521,42 +1521,35 @@ async function executeClipboardCommand() {
     const targetDir = path.join(currentDocDir, "qqq");
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-    // 1. 分类 (Check Q)
-    const typeInfo = await checkQ();
+    // 1. 分类 (Check Q) - ★ 单一真理源，返回完整快照
+    const snapshot = await checkQ();
     const config = getConfig('transactionLevel') || 'full';
 
     let mode = 'a'; // 默认弯粘
 
     // 白名单 -> 直粘 (q)
-    if (typeInfo.type === 'whitelist') {
+    if (snapshot.type === 'whitelist') {
         mode = 'q';
     } else {
         // 黄名单
         if (config === 'half') {
             // 半包模式例外
-            if (typeInfo.subType === 'image') {
+            if (snapshot.subType === 'image') {
                 mode = 'q'; // 截图 -> q
-            } else if (typeInfo.subType === 'file') {
-                // 文件 < 80MB -> q
-                const size = await h.getClipboardTotalSize();
-                if (size < 80 * 1024 * 1024) mode = 'q';
+            } else if (snapshot.subType === 'file') {
+                // 文件 < 80MB -> q（★ 直接使用快照中的 totalSize）
+                if (snapshot.totalSize < 80 * 1024 * 1024) mode = 'q';
             }
         }
     }
 
     if (mode === 'q') {
         // 直粘 (q) - 最快速度，无事务
-        // ★ 根据 typeInfo 构建 qStatus，避免重复调用 checkQ
-        const preQStatus = {
-            hasFile: typeInfo.subType === 'file',
-            hasHtml: typeInfo.subType === 'html_rich' || typeInfo.subType === 'html_text',
-            hasImage: typeInfo.subType === 'image',
-            hasText: typeInfo.subType === 'text' || typeInfo.subType === 'video_url'
-        };
-        await h.autoDetectAndPaste(targetDir, null, null, null, preQStatus).then(async (result) => {
+        // ★ 直接传递完整快照，不再重复调用 Shell
+        await h.autoDetectAndPaste(targetDir, null, null, null, snapshot).then(async (result) => {
             // ★ Handle Video URL in q mode -> Escalate to 'a' (Curved Paste)
             if (result && result.type === 'video_url') {
-                await performCurvedPaste(editor, targetDir, { type: 'yellowlist', subType: 'video_url' }, result);
+                await performCurvedPaste(editor, targetDir, snapshot, result);
                 return;
             }
 
@@ -1574,7 +1567,7 @@ async function executeClipboardCommand() {
         });
     } else {
         // 弯粘 (a) - 事务 + 弹窗 + 锚点
-        await performCurvedPaste(editor, targetDir, typeInfo);
+        await performCurvedPaste(editor, targetDir, snapshot);
     }
 }
 

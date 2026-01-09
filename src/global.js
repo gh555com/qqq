@@ -1467,20 +1467,41 @@ const TransactionManager = {
 };
 
 /**
- * 精准分类：白名单 (q) vs 黄名单 (a)
- * 返回 { type: 'whitelist' | 'yellowlist', subType: string, data?: any }
+ * ★ 单一真理源：精准分类 + 完整快照
+ * 返回 { type, subType, files?, totalSize?, rawStatus }
+ * - type: 'whitelist' | 'yellowlist'
+ * - subType: 'text' | 'html_text' | 'file' | 'image' | 'html_rich' | 'video_url' | 'unknown'
+ * - files: 文件列表 (仅当 hasFile 时)
+ * - totalSize: 文件总大小 (仅当 hasFile 时)
+ * - rawStatus: 原始状态 { hasFile, hasHtml, hasImage, hasText }
  */
 async function checkQ() {
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
 	let handled = false;
+	let files = [];
+	let totalSize = 0;
 
 	// 1. 尝试使用 Daemon Bridge (高性能)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
-			const res = await shellBridge.call("checkQ", {}, 3000);  // ★ 增加超时到 3 秒
+			const res = await shellBridge.call("checkQ", {}, 3000);
 			if (res && !res.error) {
 				status = res;
 				handled = true;
+
+				// ★ 如果有文件，立即获取文件列表（同一次 Shell 调用窗口）
+				if (status.hasFile) {
+					try {
+						const filesRes = await shellBridge.call("getFiles", {}, 3000);
+						if (filesRes && filesRes.files) {
+							files = filesRes.files;
+							// 计算总大小
+							for (const f of files) {
+								try { totalSize += fs.statSync(f).size; } catch { }
+							}
+						}
+					} catch (e) { }
+				}
 			}
 		} catch (e) { }
 	}
@@ -1489,25 +1510,24 @@ async function checkQ() {
 	if (!handled) {
 		const text = await vscode.env.clipboard.readText();
 		if (text) status.hasText = true;
-		// 注意：VS Code API 无法检测 HTML/Image 格式，此时我们偏向保守，认为可能有
 	}
 
 	// --- 核心分类逻辑 ---
+	const baseResult = { rawStatus: status, files, totalSize };
 
 	// A. 白名单识别 (1.纯文本 2.纯文字HTML)
 	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
-		return { type: 'whitelist', subType: 'text' };
+		return { type: 'whitelist', subType: 'text', ...baseResult };
 	}
 
 	if (status.hasHtml && !status.hasImage && !status.hasFile) {
-		// 这里需要读取 HTML 内容判断是否包含图片
 		try {
 			const hModule = require('./h');
 			const res = await hModule._getSmartHtmlFromClipboard();
 			if (res && res.$) {
 				const $ = res.$;
 				const hasImg = $('img, video, iframe, embed, object').length > 0;
-				if (!hasImg) return { type: 'whitelist', subType: 'html_text' };
+				if (!hasImg) return { type: 'whitelist', subType: 'html_text', ...baseResult };
 			}
 		} catch (e) { }
 	}
@@ -1518,7 +1538,6 @@ async function checkQ() {
 	else if (status.hasImage) subType = 'image';
 	else if (status.hasHtml) subType = 'html_rich';
 	else if (status.hasText) {
-		// 检查是否为视频链接
 		const text = await vscode.env.clipboard.readText();
 		const { isPlatformOrSegmentVideo } = require('./dow');
 		if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
@@ -1526,7 +1545,7 @@ async function checkQ() {
 		}
 	}
 
-	return { type: 'yellowlist', subType };
+	return { type: 'yellowlist', subType, ...baseResult };
 }
 
 function getEngineTryOrder(pref) {
