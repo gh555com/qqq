@@ -1307,23 +1307,75 @@ const TransactionManager = {
 		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
 	},
 
-	async rollback(trans) {
+	async rollback(transOrId) {
+		// ★ 兼容两种调用方式：传 transId 字符串 或 trans 对象
+		let trans;
+		if (typeof transOrId === 'string') {
+			trans = this.getTransactions().find(t => t.id === transOrId);
+			if (!trans) {
+				logMessage(`[Rollback] 未找到事务: ${transOrId}`, "WARN");
+				return;
+			}
+		} else {
+			trans = transOrId;
+		}
+
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
-		const files = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
-		for (const f of files) {
+
+		// 1. 删除记录的文件
+		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
+		for (const f of recordedFiles) {
 			try {
 				if (fs.existsSync(f)) {
 					fs.unlinkSync(f);
-					// 同时清理 .part/.ytdl 衍生文件
-					const part = f + ".part";
-					const ytdl = f + ".ytdl";
-					if (fs.existsSync(part)) fs.unlinkSync(part);
-					if (fs.existsSync(ytdl)) fs.unlinkSync(ytdl);
+					logMessage(`[Rollback] 删除记录文件: ${f}`, "INFO");
 				}
+				// 同时清理 .part/.ytdl 衍生文件
+				const part = f + ".part";
+				const ytdl = f + ".ytdl";
+				if (fs.existsSync(part)) fs.unlinkSync(part);
+				if (fs.existsSync(ytdl)) fs.unlinkSync(ytdl);
 			} catch (e) {
 				logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "ERROR");
 			}
 		}
+
+		// 2. ★ 扫描 targetDir，删除事务创建后修改的文件（包括未记录的临时文件）
+		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
+			const transCreatedAt = trans.createdAt || 0;
+			try {
+				const files = fs.readdirSync(trans.targetDir);
+				for (const f of files) {
+					const fullPath = path.join(trans.targetDir, f);
+					try {
+						const stat = fs.statSync(fullPath);
+						if (!stat.isFile()) continue;
+
+						// 只删除事务创建后修改的文件
+						if (stat.mtimeMs >= transCreatedAt) {
+							// 排除一些明显不应该删除的文件（如旧文件、配置文件等）
+							const ext = path.extname(f).toLowerCase();
+							const isMediaOrTemp = [
+								'.mp4', '.webm', '.mkv', '.mov', '.avi', '.flv', '.m4v',
+								'.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac',
+								'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+								'.part', '.ytdl', '.tmp', '.download'
+							].includes(ext);
+
+							if (isMediaOrTemp) {
+								fs.unlinkSync(fullPath);
+								logMessage(`[Rollback] 删除残余文件: ${f}`, "INFO");
+							}
+						}
+					} catch (e) {
+						logMessage(`[Rollback] 检查文件失败 ${f}: ${e.message}`, "WARN");
+					}
+				}
+			} catch (e) {
+				logMessage(`[Rollback] 扫描目录失败: ${e.message}`, "ERROR");
+			}
+		}
+
 		await this.removeTransaction(trans.id);
 	},
 

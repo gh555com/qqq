@@ -1145,16 +1145,17 @@ class VideoDownloadController {
                 }, runLogic);
             }
 
-            if (!outcome) return;
-            if (this._isTaskCancelled(task)) return;
+            if (!outcome) return { landedFiles: [], finalTotalBytes: 0 };
+            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
 
             // ✅ 最终兖底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
-                    await this._handleForbidden(task, outcome.code || 403, url, targetDir, progressCallback);
-                    return;
+                    const enhancedResult = await this._handleForbidden(task, outcome.code || 403, url, targetDir, progressCallback);
+                    // 增强流程也返回结果
+                    return enhancedResult || { landedFiles: [], finalTotalBytes: 0 };
                 }
             }
 
@@ -1173,9 +1174,16 @@ class VideoDownloadController {
             const firstFile = this._pickFirstFileBySize(outcome.landedFiles || []);
             await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
 
+            // ★ 返回结果给调用者（用于替换锚点等）
+            return {
+                landedFiles: outcome.landedFiles || [],
+                finalTotalBytes: outcome.finalTotalBytes || 0
+            };
+
         } catch (error) {
-            if (this._isTaskCancelled(task)) return;
+            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
             this.log(`处理失败: ${error.message}`);
+            return { landedFiles: [], finalTotalBytes: 0 };
         }
     }
 
@@ -1189,22 +1197,11 @@ class VideoDownloadController {
         }
         if (!filePath || !fs.existsSync(filePath)) return null;
 
-        // 指纹去重检查 (Global + Local)
+        // 指纹去重检查 (仅同文件夹内去重，不跨文件夹)
         try {
             const currentFp = h.computeFingerprint(filePath);
             if (currentFp) {
-                // 1. Global Cache (qqq)
-                if (this.qqq && this.qqq.findSourceFile) {
-                    const existing = this.qqq.findSourceFile(currentFp);
-                    if (existing && existing !== filePath && fs.existsSync(existing)) {
-                        this.log(`[GlobalCache] 发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${path.basename(existing)}`);
-                        try { fs.unlinkSync(filePath); } catch (e) { }
-                        await this._insertToCursor(task, path.basename(existing), existing);
-                        return existing;
-                    }
-                }
-
-                // 2. Local Fallback
+                // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
                 const dir = path.dirname(filePath);
                 const files = fs.readdirSync(dir);
                 for (const f of files) {
@@ -1215,13 +1212,8 @@ class VideoDownloadController {
 
                     const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
-                        this.log(`发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
+                        this.log(`发现指纹重复文件（同文件夹），删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }
-
-                        if (this.qqq && this.qqq.registerSourceFile) {
-                            this.qqq.registerSourceFile(full);
-                        }
-
                         await this._insertToCursor(task, f, full);
                         return full;
                     }
@@ -1248,11 +1240,6 @@ class VideoDownloadController {
             }
 
             await this._insertToCursor(task, path.basename(finalPath), finalPath);
-
-            // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重
-            if (this.qqq && this.qqq.registerSourceFile) {
-                try { this.qqq.registerSourceFile(finalPath); } catch (e) { }
-            }
             return finalPath;
         } else {
             this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
@@ -1893,18 +1880,18 @@ $of = $vi.OriginalFilename;
 
             await this._sleep(300);
 
-            const landedFiles = this._findLandedVideoFilesSince(targetDir, startMs);
+            const rawFiles = this._findLandedVideoFilesSince(targetDir, startMs);
+            const landedFiles = [];
             let totalBytes = 0;
-            for (const p of landedFiles) {
-                try { totalBytes += fs.statSync(p).size; } catch (e) { }
-            }
 
-            const inserted = new Set();
-            for (const p of landedFiles) {
+            // ★ 增强流程也要经过 _postProcess 验证和指纹注册
+            for (const p of rawFiles) {
                 if (this._isTaskCancelled(task)) break;
-                if (inserted.has(p)) continue;
-                inserted.add(p);
-                try { await this._insertToCursor(task, path.basename(p), p); } catch (e) { }
+                const finalPath = await this._postProcess(task, p);
+                if (finalPath) {
+                    landedFiles.push(finalPath);
+                    try { totalBytes += fs.statSync(finalPath).size; } catch (e) { }
+                }
             }
 
             return { landedFiles, totalBytes, urlSnippet };
