@@ -1487,6 +1487,95 @@ function processFilesForClipboard(files, targetDir) {
     return null;
 }
 
+// ★ 带进度显示的文件复制
+function processFilesForClipboardWithProgress(files, targetDir, progressCallback) {
+    const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
+    const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
+    ensureDir(targetDir);
+    const copiedFiles = [];
+    const copiedFolders = [];
+    const fingerprints = {};
+
+    const totalItems = folders.length + validFiles.length;
+    let processedItems = 0;
+
+    // 复制文件夹
+    for (const folder of folders) {
+        try {
+            const folderName = path.basename(folder);
+            if (progressCallback) {
+                const pct = Math.round((processedItems / totalItems) * 90) + 5;
+                progressCallback(pct, `复制文件夹: ${folderName} (${processedItems + 1}/${totalItems})`);
+            }
+            const destFolder = path.join(targetDir, folderName);
+            fs.cpSync(folder, destFolder, { recursive: true, force: true });
+            copiedFolders.push(destFolder);
+        } catch (e) {
+            log(`复制文件夹失败 ${folder}: ${e.message}`, "WARN");
+        }
+        processedItems++;
+    }
+
+    // 复制文件
+    for (const f of validFiles) {
+        try {
+            const fileName = path.basename(f);
+            if (progressCallback) {
+                const pct = Math.round((processedItems / totalItems) * 90) + 5;
+                progressCallback(pct, `复制文件: ${fileName} (${processedItems + 1}/${totalItems})`);
+            }
+
+            const srcFingerprint = computeFingerprint(f);
+            if (srcFingerprint) {
+                fingerprints[f] = srcFingerprint;
+                let existingPath = findFileByFingerprint(srcFingerprint);
+                if (existingPath && fs.existsSync(existingPath)) {
+                    copiedFiles.push(existingPath);
+                    processedItems++;
+                    continue;
+                }
+            }
+
+            const ext = path.extname(f);
+            const isImg = isImageExtForClipboard(ext);
+            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+            const dest = path.join(targetDir, fname);
+
+            if (fs.existsSync(dest)) {
+                const dstFingerprint = computeFingerprint(dest);
+                if (dstFingerprint === srcFingerprint) {
+                    copiedFiles.push(dest);
+                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                    _tryGlobalDeduplicate(dest);
+                    processedItems++;
+                    continue;
+                }
+            }
+
+            fs.copyFileSync(f, dest);
+            const finalPath = _tryGlobalDeduplicate(dest);
+            if (finalPath !== dest) {
+                copiedFiles.push(finalPath);
+            } else {
+                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                copiedFiles.push(dest);
+            }
+        } catch (e) {
+            log(`复制文件失败 ${f}: ${e.message}`, "WARN");
+        }
+        processedItems++;
+    }
+
+    if (progressCallback) {
+        progressCallback(95, `复制完成: ${copiedFiles.length} 个文件, ${copiedFolders.length} 个文件夹`);
+    }
+
+    if (copiedFiles.length > 0 || copiedFolders.length > 0) {
+        return { type: "file_folder", files: copiedFiles, folders: copiedFolders, fingerprints: fingerprints };
+    }
+    return null;
+}
+
 async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null) {
     try {
         if (token?.isCancellationRequested) return null;
@@ -1494,7 +1583,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             let files = preFetchedFiles;
             if (!files) {
                 log(`[Clipboard] 调用 tryEngineCall 获取文件...`, "INFO");
-                const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 2000);
+                const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 5000);
                 log(`[Clipboard] tryEngineCall 返回: ${JSON.stringify(res)}`, "INFO");
                 if (res) {
                     if (res.paths && res.paths.length > 0) files = res.paths;
@@ -1503,8 +1592,13 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             }
             if (files && files.length > 0) {
                 log(`[Clipboard] 获取到 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
-                // ... (Logic simplified for brevity, using processFilesForClipboard)
-                const result = processFilesForClipboard(files, targetDir);
+
+                // ★ 显示进度
+                if (progressCallback) {
+                    progressCallback(5, `发现 ${files.length} 个文件，开始复制...`);
+                }
+
+                const result = processFilesForClipboardWithProgress(files, targetDir, progressCallback);
                 log(`[Clipboard] 复制结果: files=${(result?.files || []).length}, folders=${(result?.folders || []).length}`, "INFO");
                 // ★ Register Transaction (files + folders)
                 if (result && transId) {
@@ -1661,23 +1755,26 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
 // ============================================================================
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
+// ★ 支持传入预检测的 qStatus，避免重复调用 checkQ
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, preQStatus = null) {
     const global = getGlobal();
     const qStart = Date.now();
-    let qStatus = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
-    let handled = false;
+    let qStatus = preQStatus || { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+    let handled = preQStatus !== null;
 
-    // 1. Try Shell Bridge
-    try {
-        if (global.shellBridge && global.shellBridge.available !== false) {
-            const res = await global.shellBridge.call("checkQ", {}, 500);
-            if (res && !res.error) {
-                qStatus = res;
-                handled = true;
+    // 1. Try Shell Bridge (只有在没有预检测结果时才执行)
+    if (!handled) {
+        try {
+            if (global.shellBridge && global.shellBridge.isAvailable()) {
+                const res = await global.shellBridge.call("checkQ", {}, 3000);
+                if (res && !res.error) {
+                    qStatus = res;
+                    handled = true;
+                }
             }
-        }
-    } catch (e) { }
+        } catch (e) { }
+    }
 
     // 2. PowerShell Fallback
     if (!handled && process.platform === "win32") {
@@ -1750,7 +1847,7 @@ async function getClipboardTotalSize() {
     try {
         const global = getGlobal();
         if (global.shellBridge && global.shellBridge.isAvailable()) {
-            const res = await global.shellBridge.call("getFiles", {}, 1000);
+            const res = await global.shellBridge.call("getFiles", {}, 3000);  // ★ 增加超时到 3 秒
             if (res && res.files) {
                 let total = 0;
                 for (const f of res.files) {

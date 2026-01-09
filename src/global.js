@@ -1477,7 +1477,7 @@ async function checkQ() {
 	// 1. 尝试使用 Daemon Bridge (高性能)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
-			const res = await shellBridge.call("checkQ", {}, 500);
+			const res = await shellBridge.call("checkQ", {}, 3000);  // ★ 增加超时到 3 秒
 			if (res && !res.error) {
 				status = res;
 				handled = true;
