@@ -1420,6 +1420,23 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             taskMap.set(tag, b);
         }
     }
+
+    // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
+    // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
+    if (transId && httpTasks.length > 0) {
+        try {
+            const global = getGlobal();
+            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+            if (trans) {
+                const allDestPaths = httpTasks.map(t => t.destPath);
+                const newTempFiles = [...(trans.tempFiles || []), ...allDestPaths];
+                await global.TransactionManager.updateTransaction(transId, { tempFiles: [...new Set(newTempFiles)] });
+            }
+        } catch (e) {
+            log(`[事务] 预注册 tempFiles 失败: ${e.message}`, "WARN");
+        }
+    }
+
     let doneCount = 0;
     const total = pending.length;
     for (const b of localTasks) {
@@ -1519,6 +1536,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 
                     // 下载完成后，尝试全局去重
                     const finalPath = _tryGlobalDeduplicate(dlPath);
+                    const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
 
                     block.status = "ok";
                     block.path = finalPath;
@@ -1526,13 +1544,27 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     block.fingerprint = computeFingerprint(block.path);
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
-                    // ★ Register Transaction
-                    if (transId) {
+                    // ★ 事务记录：只有新文件才记入 landedFiles
+                    // 复用的旧文件不记入，取消时不删除
+                    if (transId && isNewFile) {
                         const global = getGlobal();
                         const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                         if (trans) {
                             const newLanded = [...(trans.landedFiles || []), finalPath];
-                            await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                            // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
+                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
+                            await global.TransactionManager.updateTransaction(transId, {
+                                landedFiles: [...new Set(newLanded)],
+                                tempFiles: newTempFiles
+                            });
+                        }
+                    } else if (transId && !isNewFile) {
+                        // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
+                        const global = getGlobal();
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                        if (trans) {
+                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath);
+                            await global.TransactionManager.updateTransaction(transId, { tempFiles: newTempFiles });
                         }
                     }
                 } else { block.status = "failed"; block.error = res.error; }

@@ -1429,10 +1429,15 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 
         // 监听取消
         token.onCancellationRequested(async () => {
+            // ★ 立即显示取消弹窗，不等待清理完成
+            const cancelMsg = `${taskTitle} 已取消并回滚`;
+            TaskMessage.showSimpleToast(cancelMsg, 15000);
+
+            // ★ 后台执行回滚
             const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-            if (trans) await TransactionManager.rollback(trans);
+            if (trans) TransactionManager.rollback(trans).catch(e => console.error(e));
             // 尝试移除锚点
-            await replaceAnchorInDoc(docUri, anchor, "");
+            replaceAnchorInDoc(docUri, anchor, "").catch(e => console.error(e));
         });
 
         try {
