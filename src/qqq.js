@@ -677,9 +677,9 @@ async function downloadVideosFromUrlCommand() {
 		}
 	});
 
-	// ★ 进度弹窗结束后，再显示完成弹窗（15秒自动关闭）
-	if (downloadResult && downloadResult.doneMessage) {
-		// ★ 使用 showSimpleToast，确保15秒自动关闭
+	// ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
+	// ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
+	if (downloadResult && downloadResult.doneMessage && !downloadResult.cancelled) {
 		global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000);
 	}
 }
