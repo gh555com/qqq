@@ -306,6 +306,98 @@ function canonicalizeExistingPath(p) {
     return out;
 }
 
+/**
+ * 安全检查文件/文件夹是否可以被访问和读取
+ * @param {string} filePath - 要检查的路径
+ * @returns {boolean} - 是否可以安全访问
+ */
+function safeAccessCheck(filePath) {
+    try {
+        // 检查是否能访问（读取权限）
+        fs.accessSync(filePath, fs.constants.R_OK);
+        // 检查是否能获取状态信息
+        fs.statSync(filePath);
+        return true;
+    } catch (e) {
+        // 文件被占用、权限不足、路径无效等情况
+        log(`[SafeAccess] 无法访问: ${filePath} - ${e.code || e.message}`, "WARN");
+        return false;
+    }
+}
+
+/**
+ * 安全的递归复制文件夹，忽略无法访问的文件
+ * @param {string} src - 源文件夹
+ * @param {string} dest - 目标文件夹
+ * @returns {{success: boolean, skipped: string[], errors: string[]}} - 复制结果
+ */
+function safeCopyFolderRecursive(src, dest) {
+    const skipped = [];
+    const errors = [];
+
+    function copyRecursive(srcPath, destPath) {
+        try {
+            if (!safeAccessCheck(srcPath)) {
+                skipped.push(srcPath);
+                return;
+            }
+
+            const stat = fs.statSync(srcPath);
+
+            if (stat.isDirectory()) {
+                // 创建目标目录
+                try {
+                    if (!fs.existsSync(destPath)) {
+                        fs.mkdirSync(destPath, { recursive: true });
+                    }
+                } catch (e) {
+                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
+                    return;
+                }
+
+                // 读取目录内容
+                let entries = [];
+                try {
+                    entries = fs.readdirSync(srcPath);
+                } catch (e) {
+                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
+                    return;
+                }
+
+                // 递归复制每个条目
+                for (const entry of entries) {
+                    const srcEntry = path.join(srcPath, entry);
+                    const destEntry = path.join(destPath, entry);
+                    copyRecursive(srcEntry, destEntry);
+                }
+            } else if (stat.isFile()) {
+                // 复制文件
+                try {
+                    fs.copyFileSync(srcPath, destPath);
+                } catch (e) {
+                    if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
+                        skipped.push(srcPath);
+                        log(`[SafeCopy] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
+                    } else {
+                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
+                    }
+                }
+            }
+            // 忽略符号链接和其他特殊文件类型
+        } catch (e) {
+            // 捕获所有未预期的错误，防止崩溃
+            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
+        }
+    }
+
+    try {
+        copyRecursive(src, dest);
+        return { success: true, skipped, errors };
+    } catch (e) {
+        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`] };
+    }
+}
+
 function cacheKeyForPath(p) {
     const canon = canonicalizeExistingPath(p);
     return process.platform === "win32" ? canon.toLowerCase() : canon;
@@ -1422,6 +1514,12 @@ function copyFilesToTarget(files, targetDir) {
     const fingerprints = {};
     for (const f of files) {
         try {
+            // ★ 先检查文件是否可访问
+            if (!safeAccessCheck(f)) {
+                log(`[copyFilesToTarget] 跳过无法访问的文件: ${f}`, "WARN");
+                continue;
+            }
+
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
@@ -1457,7 +1555,14 @@ function copyFilesToTarget(files, targetDir) {
                 if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
                 copied.push(dest);
             }
-        } catch { }
+        } catch (e) {
+            // ★ 对于被占用/权限不足的文件，记录日志并跳过
+            if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
+                log(`[copyFilesToTarget] 跳过文件 (${e.code}): ${f}`, "WARN");
+            } else {
+                log(`[copyFilesToTarget] 复制文件失败 ${f}: ${e.message}`, "WARN");
+            }
+        }
     }
     return { copied, fingerprints };
 }
@@ -1472,9 +1577,19 @@ function processFilesForClipboard(files, targetDir) {
     for (const folder of folders) {
         try {
             const destFolder = path.join(targetDir, path.basename(folder));
-            fs.cpSync(folder, destFolder, { recursive: true, force: true });
-            copiedFolders.push(destFolder);
-        } catch { }
+            // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
+            const result = safeCopyFolderRecursive(folder, destFolder);
+            if (result.success) {
+                copiedFolders.push(destFolder);
+                if (result.skipped.length > 0) {
+                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
+                }
+            } else {
+                log(`[Clipboard] 复制文件夹失败 ${folder}: ${result.errors.join('; ')}`, "WARN");
+            }
+        } catch (e) {
+            log(`[Clipboard] 复制文件夹异常 ${folder}: ${e.message}`, "WARN");
+        }
     }
     if (validFiles.length > 0) {
         const result = copyFilesToTarget(validFiles, targetDir);
@@ -1498,31 +1613,58 @@ function processFilesForClipboardWithProgress(files, targetDir, progressCallback
 
     const totalItems = folders.length + validFiles.length;
     let processedItems = 0;
+    let skippedCount = 0;
+
+    // ★ 初始进度显示
+    if (progressCallback && totalItems > 0) {
+        progressCallback(2, `准备复制 ${totalItems} 个项目 (${folders.length} 个文件夹, ${validFiles.length} 个文件)...`);
+    }
 
     // 复制文件夹
-    for (const folder of folders) {
+    for (let i = 0; i < folders.length; i++) {
+        const folder = folders[i];
         try {
             const folderName = path.basename(folder);
             if (progressCallback) {
-                const pct = Math.round((processedItems / totalItems) * 90) + 5;
-                progressCallback(pct, `复制文件夹: ${folderName} (${processedItems + 1}/${totalItems})`);
+                const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
+                progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
             }
             const destFolder = path.join(targetDir, folderName);
-            fs.cpSync(folder, destFolder, { recursive: true, force: true });
-            copiedFolders.push(destFolder);
+            // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
+            const result = safeCopyFolderRecursive(folder, destFolder);
+            if (result.success) {
+                copiedFolders.push(destFolder);
+                if (result.skipped.length > 0) {
+                    skippedCount += result.skipped.length;
+                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
+                }
+            } else {
+                skippedCount++;
+                log(`[Clipboard] 复制文件夹失败 ${folder}: ${result.errors.slice(0, 3).join('; ')}`, "WARN");
+            }
         } catch (e) {
-            log(`复制文件夹失败 ${folder}: ${e.message}`, "WARN");
+            skippedCount++;
+            log(`复制文件夹异常 ${folder}: ${e.message}`, "WARN");
         }
         processedItems++;
     }
 
     // 复制文件
-    for (const f of validFiles) {
+    for (let i = 0; i < validFiles.length; i++) {
+        const f = validFiles[i];
         try {
             const fileName = path.basename(f);
             if (progressCallback) {
-                const pct = Math.round((processedItems / totalItems) * 90) + 5;
-                progressCallback(pct, `复制文件: ${fileName} (${processedItems + 1}/${totalItems})`);
+                const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
+                progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
+            }
+
+            // ★ 先检查文件是否可访问
+            if (!safeAccessCheck(f)) {
+                skippedCount++;
+                log(`[Clipboard] 跳过无法访问的文件: ${f}`, "WARN");
+                processedItems++;
+                continue;
             }
 
             const srcFingerprint = computeFingerprint(f);
@@ -1561,19 +1703,36 @@ function processFilesForClipboardWithProgress(files, targetDir, progressCallback
                 copiedFiles.push(dest);
             }
         } catch (e) {
-            log(`复制文件失败 ${f}: ${e.message}`, "WARN");
+            // ★ 对于被占用/权限不足的文件，跳过而不是崩溃
+            if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
+                skippedCount++;
+                log(`[Clipboard] 跳过文件 (${e.code}): ${f}`, "WARN");
+            } else {
+                log(`复制文件失败 ${f}: ${e.message}`, "WARN");
+            }
         }
         processedItems++;
     }
 
+    // ★ 最终进度显示
     if (progressCallback) {
-        progressCallback(95, `复制完成: ${copiedFiles.length} 个文件, ${copiedFolders.length} 个文件夹`);
+        let msg = `✅ 复制完成: ${copiedFiles.length} 个文件, ${copiedFolders.length} 个文件夹`;
+        if (skippedCount > 0) {
+            msg += ` (⚠️ 跳过 ${skippedCount} 个无法访问)`;
+        }
+        progressCallback(95, msg);
     }
 
-    if (copiedFiles.length > 0 || copiedFolders.length > 0) {
-        return { type: "file_folder", files: copiedFiles, folders: copiedFolders, fingerprints: fingerprints };
-    }
-    return null;
+    // ★ 无论是否有成功复制的文件，都返回结果（包含跳过信息）
+    // 这样可以确保弹窗正确显示结果
+    return {
+        type: "file_folder",
+        files: copiedFiles,
+        folders: copiedFolders,
+        fingerprints: fingerprints,
+        skippedCount: skippedCount,
+        totalRequested: totalItems
+    };
 }
 
 async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null) {
@@ -1600,11 +1759,16 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 
                 // ★ 显示进度（简洁格式，不带前缀）
                 if (progressCallback) {
-                    progressCallback(5, `复制 ${files.length} 个文件...`);
+                    progressCallback(2, `正在分析 ${files.length} 个项目...`);
                 }
 
                 const result = processFilesForClipboardWithProgress(files, targetDir, progressCallback);
-                log(`[Clipboard] 复制结果: files=${(result?.files || []).length}, folders=${(result?.folders || []).length}`, "INFO");
+
+                // ★ 记录复制结果（包含跳过信息）
+                const successFiles = (result?.files || []).length;
+                const successFolders = (result?.folders || []).length;
+                const skipped = result?.skippedCount || 0;
+                log(`[Clipboard] 复制结果: files=${successFiles}, folders=${successFolders}, skipped=${skipped}`, "INFO");
                 // ★ Register Transaction (files + folders)
                 if (result && transId) {
                     log(`[Clipboard] 尝试更新事务 ${transId}`, "INFO");
