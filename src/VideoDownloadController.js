@@ -1406,58 +1406,12 @@ class VideoDownloadController {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
-        // 获取上下文（优先使用 task 中锁定的，如果没有则降级到 activeTextEditor）
-        const task = this._task;
-        const targetUri = task?.targetUri || vscode.window.activeTextEditor?.document.uri;
-        // 如果连 activeEditor 都没有，那就真的没办法了
-        if (!targetUri) return;
-
-        // 计算相对路径
-        const docDir = path.dirname(targetUri.fsPath);
+        const docDir = path.dirname(editor.document.uri.fsPath);
         let relPath = path.relative(docDir, fullPath).replace(/\\/g, '/');
-        const textToInsert = `/\\${relPath}\\/\n`;
 
-        try {
-            // 打开文档（即使不可见）
-            const doc = await vscode.workspace.openTextDocument(targetUri);
-
-            // 计算插入点
-            let insertPos = task?.insertPos;
-            if (!insertPos) {
-                // 降级：如果没锁定位置，尝试用当前 activeEditor 的光标
-                if (vscode.window.activeTextEditor?.document.uri.toString() === targetUri.toString()) {
-                    insertPos = vscode.window.activeTextEditor.selection.active;
-                } else {
-                    // 如果都没激活，默认插到文件末尾
-                    insertPos = doc.lineAt(doc.lineCount - 1).range.end;
-                }
-            }
-
-            // ✅ 关键：处理“原有商行全删除”的情况
-            // validatePosition 会将无效位置（如第10行，但文档只有3行）自动钳制到文档合法的最后位置
-            const safePos = doc.validatePosition(insertPos);
-
-            // 使用 WorkspaceEdit 进行后台原子写入
-            const wsEdit = new vscode.WorkspaceEdit();
-            wsEdit.insert(targetUri, safePos, textToInsert);
-            const success = await vscode.workspace.applyEdit(wsEdit);
-
-            if (success) {
-                // 可选：如果用户碰巧还在看这个文档，帮他移动光标
-                const activeEditor = vscode.window.activeTextEditor;
-                if (activeEditor && activeEditor.document.uri.toString() === targetUri.toString()) {
-                    // 简单的光标下移策略
-                    const newPos = activeEditor.document.validatePosition(safePos.translate(1, 0));
-                    activeEditor.selection = new vscode.Selection(newPos, newPos);
-                    activeEditor.revealRange(new vscode.Range(newPos, newPos));
-                } else {
-                    // 提示用户后台完成
-                    // vscode.window.showInformationMessage(`视频链接已插入: ${path.basename(targetUri.fsPath)}`);
-                }
-            }
-        } catch (e) {
-            this.log(`插入文本失败: ${e.message}`);
-        }
+        await editor.edit(editBuilder => {
+            editBuilder.insert(editor.selection.active, `/\\${relPath}\\/\n`);
+        });
     }
 
     // ==================== 增强流程入口 ====================
