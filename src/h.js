@@ -1581,17 +1581,22 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         if (token?.isCancellationRequested) return null;
         if (process.platform === "win32") {
             let files = preFetchedFiles;
-            if (!files) {
-                log(`[Clipboard] 调用 tryEngineCall 获取文件...`, "INFO");
+
+            // ★ 优先使用预获取的文件列表（单一真理源）
+            if (files && files.length > 0) {
+                log(`[Clipboard] 使用预获取的 ${files.length} 个文件`, "INFO");
+            } else {
+                // 备选方案：现场获取
+                log(`[Clipboard] 无预获取文件，调用 tryEngineCall...`, "INFO");
                 const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 5000);
-                log(`[Clipboard] tryEngineCall 返回: ${JSON.stringify(res)}`, "INFO");
                 if (res) {
                     if (res.paths && res.paths.length > 0) files = res.paths;
                     else if (res.files && res.files.length > 0) files = res.files;
                 }
             }
+
             if (files && files.length > 0) {
-                log(`[Clipboard] 获取到 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
+                log(`[Clipboard] 开始复制 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
 
                 // ★ 显示进度
                 if (progressCallback) {
@@ -1755,15 +1760,17 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
 // ============================================================================
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
-// ★ 支持传入预检测的 qStatus，避免重复调用 checkQ
+// ★ 接受完整快照（单一真理源），不再重复调用 Shell
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId, preQStatus = null) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null) {
     const global = getGlobal();
-    const qStart = Date.now();
-    let qStatus = preQStatus || { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
-    let handled = preQStatus !== null;
 
-    // 1. Try Shell Bridge (只有在没有预检测结果时才执行)
+    // ★ 从快照中提取信息
+    let qStatus = snapshot?.rawStatus || { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
+    let preFiles = snapshot?.files || null;
+    let handled = snapshot !== null && snapshot.rawStatus !== undefined;
+
+    // 备选方案：如果没有传入快照，尝试获取
     if (!handled) {
         try {
             if (global.shellBridge && global.shellBridge.isAvailable()) {
@@ -1776,30 +1783,17 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, p
         } catch (e) { }
     }
 
-    // 2. PowerShell Fallback
     if (!handled && process.platform === "win32") {
         try {
             const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
-            const jsonStr = await spawnOutput("powershell", [
-                "-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript
-            ]);
+            const jsonStr = await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
             if (jsonStr && jsonStr.trim()) {
                 const parsed = JSON.parse(jsonStr);
-                if (parsed) {
-                    qStatus = parsed;
-                    handled = true;
-                    // Auto-start shell bridge if needed
-                    if (global.shellBridge && !global.shellBridge.isAvailable() && !global.shellBridge.isPermDisabled) {
-                        global.shellBridge.start().catch(() => { });
-                    }
-                }
+                if (parsed) { qStatus = parsed; handled = true; }
             }
-        } catch (e) {
-            global.logMessage(`[Fallback] checkQ failed: ${e.message}`, "WARN");
-        }
+        } catch (e) { }
     }
 
-    // 3. VS Code API Fallback
     if (!handled) {
         try {
             const text = await vscode.env.clipboard.readText();
@@ -1807,23 +1801,17 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, p
         } catch (e) { }
     }
 
-    const qDuration = Date.now() - qStart;
-    global.logQ(Math.round(qDuration));
-
-    // Dispatch based on priority
-    // Priority: File > HTML > Image > Text (Video URL)
-
+    // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
-        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
+        // ★ 传递预获取的文件列表，避免重复调用 getFiles
+        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId);
     }
 
     if (qStatus.hasHtml) {
-        // Use Unified Logic
         return await handleClipboardUnified(targetDir, progressCallback, token, transId);
     }
 
     if (qStatus.hasImage) {
-        // Shell/Image handler
         return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
@@ -1831,7 +1819,6 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, p
         try {
             const text = await vscode.env.clipboard.readText();
             if (text) {
-                // Video URL detection
                 if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
                     return { type: "video_url", text, url: text };
                 }
@@ -1843,22 +1830,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, p
     return null;
 }
 
-async function getClipboardTotalSize() {
-    try {
-        const global = getGlobal();
-        if (global.shellBridge && global.shellBridge.isAvailable()) {
-            const res = await global.shellBridge.call("getFiles", {}, 3000);  // ★ 增加超时到 3 秒
-            if (res && res.files) {
-                let total = 0;
-                for (const f of res.files) {
-                    try { total += fs.statSync(f).size; } catch { }
-                }
-                return total;
-            }
-        }
-    } catch { }
-    return 0;
-}
+// getClipboardTotalSize 已废弃 - 由 checkQ 单一真理源提供 totalSize
 
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
@@ -1895,13 +1867,13 @@ async function pickTargetDirectory() {
 
 module.exports = {
     CLIPBOARD_HELPER_CS,
-    autoDetectAndPaste, // Exported
+    autoDetectAndPaste,
     handleClipboardUnified,
     handleClipboardShell,
     sanitizeHtml,
     _getSmartHtmlFromClipboard,
-    extractVideoUrlsFromWebPage, // 新增导出
-    extractVideoUrlsFromHtmlFragment, // 新增导出
+    extractVideoUrlsFromWebPage,
+    extractVideoUrlsFromHtmlFragment,
     computeFingerprint,
     prefillFingerprint,
     getTimestampFilename,
@@ -1910,7 +1882,7 @@ module.exports = {
     ensureDir,
     promptForUrl,
     pickTargetDirectory,
-    log, // 导出 log 函数
-    verifyVideoFile, // Exported shared verification function
-    getClipboardTotalSize // Exported
+    log,
+    verifyVideoFile
+    // getClipboardTotalSize 已废弃
 };
