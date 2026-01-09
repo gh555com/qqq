@@ -624,9 +624,9 @@ async function downloadVideosFromUrlCommand() {
 		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
 		cancellable: true
 	}, async (progress, token) => {
-		token.onCancellationRequested(async () => {
+		// ★ 不在这里调用 rollback，让 downloadEntry 内部的 _cancelTask 统一处理
+		token.onCancellationRequested(() => {
 			global.logMessage(`任务 ${transId} 被用户取消`, "WARN");
-			await global.TransactionManager.rollback(transId);
 		});
 
 		const VideoDownloadController = require('./VideoDownloadController');
@@ -677,22 +677,10 @@ async function downloadVideosFromUrlCommand() {
 		}
 	});
 
-	// ★ 进度弹窗结束后，再显示完成弹窗（不阻塞）
+	// ★ 进度弹窗结束后，再显示完成弹窗（15秒自动关闭）
 	if (downloadResult && downloadResult.doneMessage) {
-		if (downloadResult.cancelled) {
-			// ★ 取消消息：无按钮，简单显示
-			global.TaskMessage.showSimpleToast(downloadResult.doneMessage);
-		} else {
-			// ★ 成功消息：可带按钮
-			global.TaskMessage.showDoneToast(downloadResult.doneMessage, {
-				buttons: downloadResult.canOpenDir ? ['[打开下载目录]'] : [],
-				onButton: async (choice) => {
-					if (choice === '[打开下载目录]' && downloadResult.targetDir) {
-						vscode.env.openExternal(vscode.Uri.file(downloadResult.targetDir));
-					}
-				}
-			});
-		}
+		// ★ 使用 showSimpleToast，确保15秒自动关闭
+		global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000);
 	}
 }
 
