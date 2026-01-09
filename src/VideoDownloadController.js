@@ -745,11 +745,15 @@ class VideoDownloadController {
         task.isCancelled = true;
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
-        // ★ 事务回滚
+        // ★ 立即显示取消弹窗，不等待清理完成
+        const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
+        global.TaskMessage.showSimpleToast(cancelMsg, 15000);
+
+        // ★ 事务回滚（后台执行）
         if (task.transId) {
             const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
             if (trans) {
-                await global.TransactionManager.rollback(trans);
+                global.TransactionManager.rollback(trans).catch(e => this.log(`回滚失败: ${e.message}`));
             }
         }
 
@@ -807,7 +811,8 @@ class VideoDownloadController {
         const result = await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
 
         // ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
-        if (result && result.doneMessage) {
+        // ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
+        if (result && result.doneMessage && !result.cancelled) {
             global.TaskMessage.showSimpleToast(result.doneMessage, 15000);
         }
     }
@@ -1028,8 +1033,9 @@ class VideoDownloadController {
                         const name = path.basename(t.destPath, path.extname(t.destPath));
                         if (name) activePrefixes.add(name);
 
-                        // Track for cancellation cleanup
-                        if (task && task.activeFiles) {
+                        // ★ 只把还不存在的文件加入 activeFiles
+                        // 避免取消时误删已存在的文件（上次成功下载的）
+                        if (task && task.activeFiles && !fs.existsSync(t.destPath)) {
                             task.activeFiles.add(t.destPath);
                         }
                     }
@@ -1187,28 +1193,24 @@ class VideoDownloadController {
             }
 
             if (!outcome) {
-                // ★ 即使 outcome 为空，也要检查是否被取消
+                // ★ 取消弹窗已在 _cancelTask 中显示，这里只返回标记
                 if (this._isTaskCancelled(task)) {
-                    const cancelMsg = VideoMsg.done(task, 0, '0k', urlSnippet).replace(/\uff08耗时.*\uff09$/, '') + ' 已取消并回滚';
                     return {
                         landedFiles: [],
                         finalTotalBytes: 0,
                         cancelled: true,
-                        doneMessage: cancelMsg,
                         targetDir: targetDir
                     };
                 }
                 return { landedFiles: [], finalTotalBytes: 0 };
             }
 
-            // ★ 检查是否被取消，返回取消消息
+            // ★ 取消弹窗已在 _cancelTask 中显示，这里只返回标记
             if (this._isTaskCancelled(task)) {
-                const cancelMsg = VideoMsg.done(task, 0, '0k', urlSnippet).replace(/\uff08耗时.*\uff09$/, '') + ' 已取消并回滚';
                 return {
                     landedFiles: [],
                     finalTotalBytes: 0,
                     cancelled: true,
-                    doneMessage: cancelMsg,
                     targetDir: targetDir
                 };
             }
@@ -1245,13 +1247,12 @@ class VideoDownloadController {
             return result;
 
         } catch (error) {
+            // ★ 取消弹窗已在 _cancelTask 中显示
             if (this._isTaskCancelled(task)) {
-                const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
                 return {
                     landedFiles: [],
                     finalTotalBytes: 0,
                     cancelled: true,
-                    doneMessage: cancelMsg,
                     targetDir: targetDir
                 };
             }
