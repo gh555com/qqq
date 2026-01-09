@@ -1218,7 +1218,7 @@ let statusBarItem = null;
 
 function initStatusBar() {
 	if (!statusBarItem) {
-		statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+		statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, Infinity);
 		statusBarItem.command = "qqq.allSettings";
 		if (extensionContext) extensionContext.subscriptions.push(statusBarItem);
 		statusBarItem.show();
