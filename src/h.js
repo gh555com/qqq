@@ -1602,8 +1602,8 @@ function processFilesForClipboard(files, targetDir) {
     return null;
 }
 
-// ★ 带进度显示的文件复制
-function processFilesForClipboardWithProgress(files, targetDir, progressCallback) {
+// ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1615,9 +1615,13 @@ function processFilesForClipboardWithProgress(files, targetDir, progressCallback
     let processedItems = 0;
     let skippedCount = 0;
 
+    // ★ 让出事件循环的辅助函数
+    const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
+
     // ★ 初始进度显示
     if (progressCallback && totalItems > 0) {
         progressCallback(2, `准备复制 ${totalItems} 个项目 (${folders.length} 个文件夹, ${validFiles.length} 个文件)...`);
+        await yieldToUI(); // ★ 让 UI 更新
     }
 
     // 复制文件夹
@@ -1628,6 +1632,7 @@ function processFilesForClipboardWithProgress(files, targetDir, progressCallback
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
+                await yieldToUI(); // ★ 让 UI 更新
             }
             const destFolder = path.join(targetDir, folderName);
             // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
@@ -1657,6 +1662,10 @@ function processFilesForClipboardWithProgress(files, targetDir, progressCallback
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
+                // ★ 每复制几个文件后让出一次，避免过于频繁影响性能
+                if (i % 5 === 0) {
+                    await yieldToUI();
+                }
             }
 
             // ★ 先检查文件是否可访问
@@ -1747,10 +1756,16 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             } else {
                 // 备选方案：现场获取
                 log(`[Clipboard] 无预获取文件，调用 tryEngineCall...`, "INFO");
-                const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 5000);
+                if (progressCallback) {
+                    progressCallback(1, `正在获取剪贴板文件列表...`);
+                }
+                const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 8000);
                 if (res) {
                     if (res.paths && res.paths.length > 0) files = res.paths;
                     else if (res.files && res.files.length > 0) files = res.files;
+                    log(`[Clipboard] tryEngineCall 返回: ${JSON.stringify(res).slice(0, 200)}`, "INFO");
+                } else {
+                    log(`[Clipboard] tryEngineCall 返回空`, "WARN");
                 }
             }
 
@@ -1759,10 +1774,11 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 
                 // ★ 显示进度（简洁格式，不带前缀）
                 if (progressCallback) {
-                    progressCallback(2, `正在分析 ${files.length} 个项目...`);
+                    progressCallback(1, `检测到 ${files.length} 个项目，开始复制...`);
                 }
 
-                const result = processFilesForClipboardWithProgress(files, targetDir, progressCallback);
+                // ★ 异步调用，让 UI 能够更新进度
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
@@ -1934,48 +1950,75 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     let preFiles = snapshot?.files || null;
     let handled = snapshot !== null && snapshot.rawStatus !== undefined;
 
+    log(`[AutoDetect] 开始检测, snapshot=${!!snapshot}, handled=${handled}`, "INFO");
+
     // 备选方案：如果没有传入快照，尝试获取
     if (!handled) {
+        if (progressCallback) {
+            progressCallback(1, `正在检测剪贴板内容...`);
+        }
         try {
             if (global.shellBridge && global.shellBridge.isAvailable()) {
+                log(`[AutoDetect] 尝试 shellBridge.wq...`, "INFO");
                 const res = await global.shellBridge.call("wq", {}, 3000);
                 if (res && !res.error) {
                     qStatus = res;
+                    if (res.files) preFiles = res.files;
                     handled = true;
+                    log(`[AutoDetect] shellBridge.wq 成功: hasFile=${res.hasFile}, hasHtml=${res.hasHtml}, hasImage=${res.hasImage}, files=${res.files?.length || 0}`, "INFO");
                 }
+            } else {
+                log(`[AutoDetect] shellBridge 不可用`, "INFO");
             }
-        } catch (e) { }
+        } catch (e) {
+            log(`[AutoDetect] shellBridge.wq 失败: ${e.message}`, "WARN");
+        }
     }
 
     if (!handled && process.platform === "win32") {
         try {
+            log(`[AutoDetect] 尝试 PowerShell 检测...`, "INFO");
             const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
             const jsonStr = await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
             if (jsonStr && jsonStr.trim()) {
                 const parsed = JSON.parse(jsonStr);
-                if (parsed) { qStatus = parsed; handled = true; }
+                if (parsed) {
+                    qStatus = parsed;
+                    handled = true;
+                    log(`[AutoDetect] PowerShell 检测成功: hasFile=${parsed.hasFile}, hasHtml=${parsed.hasHtml}, hasImage=${parsed.hasImage}`, "INFO");
+                }
             }
-        } catch (e) { }
+        } catch (e) {
+            log(`[AutoDetect] PowerShell 检测失败: ${e.message}`, "WARN");
+        }
     }
 
     if (!handled) {
         try {
             const text = await vscode.env.clipboard.readText();
-            if (text) qStatus.hasText = true;
+            if (text) {
+                qStatus.hasText = true;
+                log(`[AutoDetect] VS Code API 检测到文本`, "INFO");
+            }
         } catch (e) { }
     }
 
+    log(`[AutoDetect] 最终状态: hasFile=${qStatus.hasFile}, hasHtml=${qStatus.hasHtml}, hasImage=${qStatus.hasImage}, hasText=${qStatus.hasText}`, "INFO");
+
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
+        log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
         // ★ 传递预获取的文件列表，避免重复调用 getFiles
         return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId);
     }
 
     if (qStatus.hasHtml) {
+        log(`[AutoDetect] 进入 HTML 处理流程`, "INFO");
         return await handleClipboardUnified(targetDir, progressCallback, token, transId);
     }
 
     if (qStatus.hasImage) {
+        log(`[AutoDetect] 进入图片处理流程`, "INFO");
         return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
     }
 
@@ -1984,13 +2027,16 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
             const text = await vscode.env.clipboard.readText();
             if (text) {
                 if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
+                    log(`[AutoDetect] 检测到视频 URL`, "INFO");
                     return { type: "video_url", text, url: text };
                 }
+                log(`[AutoDetect] 检测到纯文本`, "INFO");
                 return { type: "text", text };
             }
         } catch (e) { }
     }
 
+    log(`[AutoDetect] 未检测到任何内容`, "WARN");
     return null;
 }
 
