@@ -600,29 +600,28 @@ async function downloadVideosFromUrlCommand() {
 	const transId = global.TransactionManager.createTransactionId();
 	const targetUri = editor.document.uri;
 
-	// 1. 立即插入锚点 (类似于 "Curved Paste (a)")
+	// ★ 生成 taskTitle（统一任务标识）
+	const filePath = editor.document.uri.fsPath;
+	const taskNum = await global.TaskCounter.increment(filePath);
+	const taskTitle = global.TaskCounter.formatTitle(filePath, taskNum);
+
+	// 1. 立即插入锚点
 	await global.TransactionManager.insertAnchor(editor, transId);
 
-	// ★ 保存事务到 globalState，确保 VS Code 崩溃时可以恢复清理
+	// ★ 保存事务到 globalState
 	await global.TransactionManager.saveTransaction({
 		id: transId,
 		targetDir: targetDir,
-		targetUri: targetUri.fsPath, // 记录目标文档
+		targetUri: targetUri.fsPath,
 		tempFiles: [],
 		landedFiles: [],
 		landedFolders: []
 	});
 
 	// 2. 启动带进度条的弹窗任务
-	// 不 await 这个 promise，让它在后台跑（但 withProgress 会保持弹窗直到 resolve）
-	// 实际上我们需要 await 它，否则函数结束可能会导致 context 问题？
-	// 不，为了支持"多任务并行"，我们不能阻塞主线程太久，但 withProgress 本身是 async 的。
-	// 这里我们 await withProgress，但用户可以在 UI 上操作其他 Tab。
-	// VS Code 的 withProgress 不会阻塞 UI 交互。
-
-	global.withProgress({
+	const downloadResult = await global.withProgress({
 		location: vscode.ProgressLocation.Notification,
-		title: "qqq: 视频下载中...",
+		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
 		cancellable: true
 	}, async (progress, token) => {
 		token.onCancellationRequested(async () => {
@@ -633,13 +632,13 @@ async function downloadVideosFromUrlCommand() {
 		const VideoDownloadController = require('./VideoDownloadController');
 		const controller = new VideoDownloadController(downloadContext, module.exports);
 
-		// 适配 progress callback
 		const progressAdapter = (pct, msg) => {
-			progress.report({ message: msg, increment: 0 }); // increment 0 for marquee or text update
+			progress.report({ message: msg, increment: 0 });
 		};
 
 		try {
-			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri);
+			// ★ 传递 taskTitle
+			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle);
 
 			// 3. 处理结果 & 替换锚点
 			if (res && res.landedFiles && res.landedFiles.length > 0) {
@@ -658,19 +657,43 @@ async function downloadVideosFromUrlCommand() {
 					global.logMessage("锚点替换失败，回滚事务", "ERROR");
 					await global.TransactionManager.rollback(transId);
 				}
+			} else if (res && res.cancelled) {
+				// ★ 已取消：_cancelTask 已经回滚了，只需清理锚点
+				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
 			} else {
-				// 下载失败或取消，回滚
+				// 下载失败，回滚
 				await global.TransactionManager.rollback(transId);
 				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
 			}
+
+			return res; // ★ 返回结果给外层
 
 		} catch (e) {
 			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
 			vscode.window.showErrorMessage(`视频下载失败: ${e.message}`);
 			await global.TransactionManager.rollback(transId);
 			await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+			return null;
 		}
 	});
+
+	// ★ 进度弹窗结束后，再显示完成弹窗（不阻塞）
+	if (downloadResult && downloadResult.doneMessage) {
+		if (downloadResult.cancelled) {
+			// ★ 取消消息：无按钮，简单显示
+			global.TaskMessage.showSimpleToast(downloadResult.doneMessage);
+		} else {
+			// ★ 成功消息：可带按钮
+			global.TaskMessage.showDoneToast(downloadResult.doneMessage, {
+				buttons: downloadResult.canOpenDir ? ['[打开下载目录]'] : [],
+				onButton: async (choice) => {
+					if (choice === '[打开下载目录]' && downloadResult.targetDir) {
+						vscode.env.openExternal(vscode.Uri.file(downloadResult.targetDir));
+					}
+				}
+			});
+		}
+	}
 }
 
 // ==================== 锚点替换辅助 ====================

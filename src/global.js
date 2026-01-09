@@ -1508,49 +1508,26 @@ const TransactionManager = {
 			}
 		}
 
-		// 2. ★ 扫描 targetDir，删除事务创建后修改的文件（包括未记录的临时文件）
+		// 2. ★ 只删除明确的临时文件（.part, .ytdl, .tmp），不再扫描删除媒体文件
+		// 避免误删其他任务的文件
 		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
-			const transCreatedAt = trans.createdAt || 0;
-
-			// 媒体文件扩展名
-			const mediaExts = [
-				'.mp4', '.webm', '.mkv', '.mov', '.avi', '.flv', '.m4v',
-				'.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac',
-				'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'
-			];
-			// 明确的临时文件扩展名
 			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
-
 			try {
 				const files = fs.readdirSync(trans.targetDir);
 				for (const f of files) {
-					const fullPath = path.join(trans.targetDir, f);
-					try {
-						const stat = fs.statSync(fullPath);
-						if (!stat.isFile()) continue;
-
-						// 只删除事务创建后修改的文件
-						if (stat.mtimeMs >= transCreatedAt) {
-							const lowerName = f.toLowerCase();
-							const ext = path.extname(f).toLowerCase();
-
-							// 情况1: 直接是媒体文件或临时文件
-							const isMediaOrTemp = mediaExts.includes(ext) || tempExts.includes(ext);
-
-							// 情况2: 文件名中包含媒体扩展名（如 xxx.mp4.lock，表示是媒体文件的临时锁文件）
-							const hasMediaExtInName = mediaExts.some(me => lowerName.includes(me + '.'));
-
-							if (isMediaOrTemp || hasMediaExtInName) {
+					const ext = path.extname(f).toLowerCase();
+					if (tempExts.includes(ext)) {
+						const fullPath = path.join(trans.targetDir, f);
+						try {
+							if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
 								fs.unlinkSync(fullPath);
-								logMessage(`[Rollback] 删除残余文件: ${f}`, "INFO");
+								logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
 							}
-						}
-					} catch (e) {
-						logMessage(`[Rollback] 检查文件失败 ${f}: ${e.message}`, "WARN");
+						} catch (e) { }
 					}
 				}
 			} catch (e) {
-				logMessage(`[Rollback] 扫描目录失败: ${e.message}`, "ERROR");
+				logMessage(`[Rollback] 扫描临时文件失败: ${e.message}`, "WARN");
 			}
 		}
 
