@@ -1,5 +1,5 @@
 // src/q1.js
-const { wq, TransactionManager, getConfig } = require('./global');
+const { wq, TransactionManager, getConfig, TaskCounter } = require('./global');
 const h = require('./h');
 const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
@@ -1239,7 +1239,8 @@ async function renderImages(editor) {
 // ==================== 粘贴命令 ====================
 
 // 格式化结果为文本（复用原 replacePendingMarker 逻辑）
-async function formatResultToText(result, editor) {
+// ★ 新增可选参数：taskTitle, transId, taskStartTime, token 用于显示最终结果弹窗
+async function formatResultToText(result, editor, taskTitle = '', transId = null, taskStartTime = 0, token = null) {
     if (!result) return "";
     const doc = editor.document;
     const eol = getDocumentEOL(doc);
@@ -1327,7 +1328,19 @@ async function formatResultToText(result, editor) {
         }
 
         const totalCount = files.length + folders.length;
-        if (totalCount > 1) vscode.window.showInformationMessage("文件/文件夹已复制 " + totalCount);
+        // ★ 最终结果弹窗带 taskTitle 和耗时（仅当传递了 taskTitle 时显示）
+        if (totalCount > 1 && taskTitle) {
+            const trans = transId ? (TransactionManager.getTransactions() || []).find(t => t.id === transId) : null;
+            const startTime = trans?.startTime || taskStartTime || Date.now();
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+            // ★ 检查是否被取消
+            if (token && token.isCancellationRequested) {
+                vscode.window.showInformationMessage(`${taskTitle} 文件/文件夹复制 ${totalCount} 已取消并回滚（耗时${elapsed}s）`);
+            } else {
+                vscode.window.showInformationMessage(`${taskTitle} 文件/文件夹已复制 ${totalCount}（耗时${elapsed}s）`);
+            }
+        }
     } else if (result.type === "folder_text") {
         const folders = result.text.split(/\r?\n/).filter(f => f.trim());
         for (let i = 0; i < folders.length; i++) {
@@ -1374,6 +1387,11 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 }
 
 async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
+    // 0. ★ 获取任务编号（永久递增）
+    const filePath = editor.document.uri.fsPath;
+    const taskNum = await TaskCounter.increment(filePath);
+    const taskTitle = TaskCounter.formatTitle(filePath, taskNum);
+
     // 1. 生成并插入锚点
     const transId = TransactionManager.createTransactionId();
     const anchor = `/__PENDING_${transId}/`;
@@ -1394,13 +1412,15 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         tempFiles: [],
         landedFiles: [],
         landedFolders: [],
-        startTime: Date.now()
+        startTime: Date.now(),
+        taskNum: taskNum  // ★ 记录任务编号
     });
 
     // 3. 启动带进度的后台任务
+    const taskStartTime = Date.now();  // ★ 记录开始时间
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: "资源处理中 (弯粘)...",
+        title: taskTitle,  // ★ 简洁标题，不加额外描述
         cancellable: true
     }, async (progress, token) => {
 
@@ -1427,7 +1447,9 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         targetDir,
                         transId,
                         (p, msg) => progress.report({ increment: 0, message: msg }),
-                        token
+                        token,
+                        null,
+                        taskTitle  // ★ 传递 taskTitle
                     );
 
                     if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
@@ -1459,7 +1481,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 // 如果它需要 getText，我们需要 openTextDocument。
                 // 查看源码 formatResultToText 使用了 getDocumentEOL 和 path.dirname。安全。
 
-                const newText = await formatResultToText(result, mockEditor);
+                const newText = await formatResultToText(result, mockEditor, taskTitle, transId, taskStartTime, token);
 
                 if (newText) {
                     // 6. 替换锚点 (原子化提交)

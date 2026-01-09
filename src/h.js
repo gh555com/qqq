@@ -1598,9 +1598,9 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             if (files && files.length > 0) {
                 log(`[Clipboard] 开始复制 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
 
-                // ★ 显示进度
+                // ★ 显示进度（简洁格式，不带前缀）
                 if (progressCallback) {
-                    progressCallback(5, `发现 ${files.length} 个文件，开始复制...`);
+                    progressCallback(5, `复制 ${files.length} 个文件...`);
                 }
 
                 const result = processFilesForClipboardWithProgress(files, targetDir, progressCallback);
