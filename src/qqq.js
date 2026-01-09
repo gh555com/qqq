@@ -604,7 +604,8 @@ async function downloadVideosFromUrlCommand() {
 		targetDir: targetDir,
 		targetUri: targetUri.fsPath, // 记录目标文档
 		tempFiles: [],
-		landedFiles: []
+		landedFiles: [],
+		landedFolders: []
 	});
 
 	// 2. 启动带进度条的弹窗任务
