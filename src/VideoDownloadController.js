@@ -1294,7 +1294,7 @@ class VideoDownloadController {
         if (this._isTaskCancelled(task)) return null;
 
         const selection = await vscode.window.showInformationMessage(
-            `qqq: 被拒绝，返回 ${code}，当前可尝试启动增强流程。`,
+            `qqq: 下载被拒（${code}），当前可尝试启动增强流程。`,
             { modal: false },
             "🚀启动增强流程",
             "选择类似 chrome.exe 滴浏览器入口文件"
