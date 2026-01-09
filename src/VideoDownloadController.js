@@ -681,25 +681,17 @@ class VideoDownloadController {
 
     // ==================== 三号弹窗：任务结束（带按钮 + 15秒自动关） ====================
     async _showTaskDoneToast(message, canOpen, filePath, folderPath, taskTitle = '') {
-        // 已经带 taskTitle 的消息不需要再加前缀
-        const OPEN = "[打开下载目录]";
-        const actions = canOpen ? [OPEN] : [];
-
-        const p = vscode.window.showInformationMessage(message, ...actions);
-
-        let timer = null;
-        const timeout = new Promise(resolve => {
-            timer = setTimeout(() => resolve(undefined), 15000);
+        // ★ 使用 TaskMessage 统一真理源，确保15秒自动关闭
+        const { TaskMessage } = global;
+        await TaskMessage.showDoneToast(message, {
+            buttons: canOpen ? ['[打开下载目录]'] : [],
+            timeout: 15000,
+            onButton: async (choice) => {
+                if (choice === '[打开下载目录]') {
+                    await this._revealFileOrFolder(filePath, folderPath);
+                }
+            }
         });
-
-        const choice = await Promise.race([p, timeout]);
-        try { if (timer) clearTimeout(timer); } catch (e) { }
-
-        if (choice === OPEN) {
-            await this._revealFileOrFolder(filePath, folderPath);
-        }
-
-        await this._hideToastsBestEffort();
     }
 
     // ==================== downloader 内部弹窗屏蔽 ====================
@@ -819,7 +811,18 @@ class VideoDownloadController {
         const taskTitle = TaskCounter.formatTitle(filePath, taskNum);
 
         // 交互式模式：不传递 progressCallback，使用内部的 withProgress
-        await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
+        const result = await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
+
+        // ★ 进度弹窗结束后，显示完成弹窗（不阻塞）
+        if (result && result.doneMessage) {
+            if (result.cancelled) {
+                // ★ 取消消息：无按钮
+                global.TaskMessage.showSimpleToast(result.doneMessage);
+            } else {
+                // ★ 成功消息：可带按钮
+                this._showTaskDoneToast(result.doneMessage, result.canOpenDir, result.firstFile, result.targetDir);
+            }
+        }
     }
 
     // ==================== Headless Entry (for q1.js concurrency) ====================
@@ -1195,7 +1198,18 @@ class VideoDownloadController {
             }
 
             if (!outcome) return { landedFiles: [], finalTotalBytes: 0 };
-            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
+
+            // ★ 检查是否被取消，返回取消消息
+            if (this._isTaskCancelled(task)) {
+                const cancelMsg = VideoMsg.done(task, 0, '0k', urlSnippet).replace(/\uff08耗时.*\uff09$/, '') + ' 已取消并回滚';
+                return {
+                    landedFiles: [],
+                    finalTotalBytes: 0,
+                    cancelled: true,
+                    doneMessage: cancelMsg,
+                    targetDir: targetDir
+                };
+            }
 
             // ✅ 最终兖底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
@@ -1214,23 +1228,31 @@ class VideoDownloadController {
             const msg = this._buildDoneMessage(task, landedCount, totalStr, outcome.urlSnippet);
             this.log(msg);
 
-            // 只有在非 headless 模式下，或者 headless 但有产出时才提示?
-            // 用户要求 Tab B 粘贴完 HTML，视频下载在 Tab A 继续。
-            // 如果是在 Tab A 启动的下载 (interactive)，则 progressCallback 为空，会显示 Toast。
-            // 如果是在 Tab B 启动的 (headless)，progressCallback 不为空，Toast 可能会打扰?
-            // 但用户说 "Tab B should finish..." implies independent success notification is OK.
-            // Let's keep Toast for now.
-            const firstFile = this._pickFirstFileBySize(outcome.landedFiles || []);
-            await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
-
-            // ★ 返回结果给调用者（用于替换锚点等）
-            return {
+            // ★ 先准备返回结果
+            const result = {
                 landedFiles: outcome.landedFiles || [],
-                finalTotalBytes: outcome.finalTotalBytes || 0
+                finalTotalBytes: outcome.finalTotalBytes || 0,
+                // ★ 传递完成消息和相关信息，让调用者决定何时显示
+                doneMessage: msg,
+                canOpenDir: landedCount > 0,
+                firstFile: this._pickFirstFileBySize(outcome.landedFiles || []),
+                targetDir: targetDir
             };
 
+            // ★ 返回结果给调用者（用于替换锚点等）- 不在这里显示弹窗
+            return result;
+
         } catch (error) {
-            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
+            if (this._isTaskCancelled(task)) {
+                const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
+                return {
+                    landedFiles: [],
+                    finalTotalBytes: 0,
+                    cancelled: true,
+                    doneMessage: cancelMsg,
+                    targetDir: targetDir
+                };
+            }
             this.log(`处理失败: ${error.message}`);
             return { landedFiles: [], finalTotalBytes: 0 };
         }
@@ -2018,8 +2040,8 @@ $of = $vi.OriginalFilename;
             if (!best) {
                 const msg0 = this._buildDoneMessage(task, 0, "0k", urlSnippet);
                 this.log(msg0);
-                await this._showTaskDoneToast(msg0, false, null, targetDir);
-                return null;
+                // ★ 返回完成消息，不直接显示
+                return { landedFiles: [], totalBytes: 0, doneMessage: msg0, canOpenDir: false, targetDir };
             }
 
             if (!best.meta) best.meta = {};
@@ -2041,9 +2063,15 @@ $of = $vi.OriginalFilename;
             this.log(msg);
 
             const firstFile = this._pickFirstFileBySize(out?.landedFiles || []);
-            await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
-
-            return out; // Return successful outcome
+            // ★ 返回完整结果（含完成消息），不直接显示弹窗
+            return {
+                landedFiles: out?.landedFiles || [],
+                finalTotalBytes: out?.totalBytes || 0,
+                doneMessage: msg,
+                canOpenDir: landedCount > 0,
+                firstFile: firstFile,
+                targetDir: targetDir
+            };
 
         } catch (e) {
             if (this._isTaskCancelled(task)) return null;
