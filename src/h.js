@@ -1774,7 +1774,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     if (!handled) {
         try {
             if (global.shellBridge && global.shellBridge.isAvailable()) {
-                const res = await global.shellBridge.call("checkQ", {}, 3000);
+                const res = await global.shellBridge.call("wq", {}, 3000);
                 if (res && !res.error) {
                     qStatus = res;
                     handled = true;
@@ -1830,7 +1830,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     return null;
 }
 
-// getClipboardTotalSize 已废弃 - 由 checkQ 单一真理源提供 totalSize
+// getClipboardTotalSize 已废弃 - 由 wq 单一真理源提供 totalSize
 
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");

@@ -598,7 +598,7 @@ function Process-Command {
              $result.error = $_.Exception.Message
          }
       }
-      'checkQ' {
+      'wq' {
         $formats = [System.Windows.Forms.Clipboard]::GetDataObject().GetFormats()
         $result.hasFile = $formats -contains "FileDrop"
         $result.hasHtml = $formats -contains "HTML Format"
@@ -1019,7 +1019,7 @@ const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 const DEFAULT_CONFIG = {
 	"showHistoryRecycleBin": true,
 	"enlargeSmallImages": true,
-	"performanceMode": "balanced",
+	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
 	"cleanFreak": false,
 	"ioEngine": "auto",
@@ -1036,7 +1036,7 @@ const CONFIG_METADATA = {
 	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" },
 	"performanceMode": {
 		name: "性能模式", type: "enum",
-		options: ["balanced", "extreme", "accelerated"],
+		options: ["optmum", "extreme", "accelerated"],
 		descriptions: []
 	},
 	"frameSizeMode": {
@@ -1475,7 +1475,7 @@ const TransactionManager = {
  * - totalSize: 文件总大小 (仅当 hasFile 时)
  * - rawStatus: 原始状态 { hasFile, hasHtml, hasImage, hasText }
  */
-async function checkQ() {
+async function wq() {
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
 	let handled = false;
 	let files = [];
@@ -1484,7 +1484,7 @@ async function checkQ() {
 	// 1. 尝试使用 Daemon Bridge (高性能)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
-			const res = await shellBridge.call("checkQ", {}, 3000);
+			const res = await shellBridge.call("wq", {}, 3000);
 			if (res && !res.error) {
 				status = res;
 				handled = true;
@@ -1865,6 +1865,6 @@ module.exports = {
 	formatHours,
 
 	// ★ 核心逻辑导出
-	checkQ,
+	wq,
 	TransactionManager
 };

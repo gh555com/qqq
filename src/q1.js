@@ -1,5 +1,5 @@
 // src/q1.js
-const { checkQ, TransactionManager, getConfig } = require('./global');
+const { wq, TransactionManager, getConfig } = require('./global');
 const h = require('./h');
 const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
@@ -104,7 +104,7 @@ const pendingTokens = new Map();
 const editorDebounceTimers = new Map();
 
 let enlargeSmallImages = true;
-let performanceMode = "balanced";
+let performanceMode = "optmum";
 let frameSizeMode = "smart";
 let cleanFreakMode = false;
 
@@ -152,13 +152,13 @@ function refreshConfig() {
 
         const extremePerformance = config.get("extremePerformance", false);
         if (extremePerformance) performanceMode = "extreme";
-        else performanceMode = config.get("performanceMode", "balanced");
+        else performanceMode = config.get("performanceMode", "optmum");
 
         frameSizeMode = config.get("frameSizeMode", "fix");
         cleanFreakMode = config.get("cleanFreak", false);
     } catch (e) {
         enlargeSmallImages = true;
-        performanceMode = "balanced";
+        performanceMode = "optmum";
         frameSizeMode = "fix";
         cleanFreakMode = false;
     }
@@ -1522,7 +1522,7 @@ async function executeClipboardCommand() {
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
     // 1. 分类 (Check Q) - ★ 单一真理源，返回完整快照
-    const snapshot = await checkQ();
+    const snapshot = await wq();
     const config = getConfig('transactionLevel') || 'full';
 
     let mode = 'a'; // 默认弯粘
