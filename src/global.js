@@ -1322,6 +1322,35 @@ const TransactionManager = {
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
 
+		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
+		try {
+			const anchor = `/__PENDING_${trans.id}/`;
+			const targetUri = trans.targetUri || trans.docUri;
+			if (targetUri) {
+				const uri = typeof targetUri === 'string'
+					? (targetUri.startsWith('file:') ? vscode.Uri.parse(targetUri) : vscode.Uri.file(targetUri))
+					: targetUri;
+				try {
+					const doc = await vscode.workspace.openTextDocument(uri);
+					const text = doc.getText();
+					const idx = text.indexOf(anchor);
+					if (idx !== -1) {
+						const pos = doc.positionAt(idx);
+						const endPos = doc.positionAt(idx + anchor.length);
+						const range = new vscode.Range(pos, endPos);
+						const edit = new vscode.WorkspaceEdit();
+						edit.replace(uri, range, '');
+						await vscode.workspace.applyEdit(edit);
+						logMessage(`[Rollback] 已删除残留锚点: ${anchor}`, "INFO");
+					}
+				} catch (e) {
+					logMessage(`[Rollback] 删除锚点失败: ${e.message}`, "WARN");
+				}
+			}
+		} catch (e) {
+			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
+		}
+
 		// 1. 删除记录的文件
 		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
 		for (const f of recordedFiles) {
@@ -1343,6 +1372,16 @@ const TransactionManager = {
 		// 2. ★ 扫描 targetDir，删除事务创建后修改的文件（包括未记录的临时文件）
 		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
 			const transCreatedAt = trans.createdAt || 0;
+
+			// 媒体文件扩展名
+			const mediaExts = [
+				'.mp4', '.webm', '.mkv', '.mov', '.avi', '.flv', '.m4v',
+				'.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac',
+				'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'
+			];
+			// 明确的临时文件扩展名
+			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
+
 			try {
 				const files = fs.readdirSync(trans.targetDir);
 				for (const f of files) {
@@ -1353,16 +1392,16 @@ const TransactionManager = {
 
 						// 只删除事务创建后修改的文件
 						if (stat.mtimeMs >= transCreatedAt) {
-							// 排除一些明显不应该删除的文件（如旧文件、配置文件等）
+							const lowerName = f.toLowerCase();
 							const ext = path.extname(f).toLowerCase();
-							const isMediaOrTemp = [
-								'.mp4', '.webm', '.mkv', '.mov', '.avi', '.flv', '.m4v',
-								'.mp3', '.m4a', '.wav', '.flac', '.ogg', '.aac',
-								'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
-								'.part', '.ytdl', '.tmp', '.download'
-							].includes(ext);
 
-							if (isMediaOrTemp) {
+							// 情况1: 直接是媒体文件或临时文件
+							const isMediaOrTemp = mediaExts.includes(ext) || tempExts.includes(ext);
+
+							// 情况2: 文件名中包含媒体扩展名（如 xxx.mp4.lock，表示是媒体文件的临时锁文件）
+							const hasMediaExtInName = mediaExts.some(me => lowerName.includes(me + '.'));
+
+							if (isMediaOrTemp || hasMediaExtInName) {
 								fs.unlinkSync(fullPath);
 								logMessage(`[Rollback] 删除残余文件: ${f}`, "INFO");
 							}

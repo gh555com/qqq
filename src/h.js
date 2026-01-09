@@ -856,7 +856,7 @@ async function extractVideoUrlsFromWebPage(url) {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         };
 
-        // 定义 fetchViaHttps 函数（在 try 块内部定义，确保可以被调用）
+        // ★ 始终使用 fetchViaHttps，因为它使用简化的 headers，避免被服务器拒绝
         function fetchViaHttps(targetUrl, customHeaders = {}) {
             return new Promise((resolve, reject) => {
                 const urlObj = new NodeURL(targetUrl);
@@ -867,16 +867,20 @@ async function extractVideoUrlsFromWebPage(url) {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                         ...customHeaders
                     },
-                    timeout: 15000 // 15秒超时
+                    timeout: 15000
                 };
 
                 const request = client.get(targetUrl, options, (response) => {
+                    // 处理重定向
+                    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                        fetchViaHttps(new NodeURL(response.headers.location, targetUrl).href, customHeaders)
+                            .then(resolve)
+                            .catch(reject);
+                        return;
+                    }
+
                     let data = '';
-
-                    response.on('data', (chunk) => {
-                        data += chunk;
-                    });
-
+                    response.on('data', (chunk) => { data += chunk; });
                     response.on('end', () => {
                         if (response.statusCode >= 200 && response.statusCode < 300) {
                             resolve(data);
@@ -884,16 +888,10 @@ async function extractVideoUrlsFromWebPage(url) {
                             reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
                         }
                     });
-
-                    response.on('error', (err) => {
-                        reject(err);
-                    });
+                    response.on('error', (err) => { reject(err); });
                 });
 
-                request.on('error', (err) => {
-                    reject(err);
-                });
-
+                request.on('error', (err) => { reject(err); });
                 request.on('timeout', () => {
                     request.destroy();
                     reject(new Error('Request timeout'));
@@ -901,150 +899,8 @@ async function extractVideoUrlsFromWebPage(url) {
             });
         }
 
-        // 尝试使用 node-fetch 或内置的 fetch API 获取网页内容
-        let fetch;
-        try {
-            fetch = require('node-fetch');
-        } catch {
-            // 如果 node-fetch 不可用，尝试使用全局 fetch (Node.js 18+)
-            if (typeof global.fetch === 'undefined') {
-                // 如果都没有，使用 https 模块作为备选方案
-                const webContent = await fetchViaHttps(url, commonHeaders);
-                const $ = cheerio.load(webContent);
-
-                const videoUrls = new Set();
-
-                // 查找 <video> 标签中的视频源
-                $('video source').each((i, elem) => {
-                    const src = $(elem).attr('src');
-                    if (src) {
-                        const fullUrl = new URL(src, url).href;
-                        videoUrls.add(fullUrl);
-                    }
-
-                    const srcAttr = elem.attribs['src'];
-                    if (srcAttr) {
-                        const fullUrl = new URL(srcAttr, url).href;
-                        videoUrls.add(fullUrl);
-                    }
-                });
-
-                // 查找直接的 <video> 标签的src属性
-                $('video').each((i, elem) => {
-                    const src = $(elem).attr('src');
-                    if (src) {
-                        const fullUrl = new URL(src, url).href;
-                        videoUrls.add(fullUrl);
-                    }
-                });
-
-                // 查找 <iframe> 标签（可能是视频播放器）
-                $('iframe').each((i, elem) => {
-                    const src = $(elem).attr('src');
-                    if (src) {
-                        const fullUrl = new URL(src, url).href;
-                        videoUrls.add(fullUrl);
-                    }
-                });
-
-                // 查找具有视频类名的元素
-                $('[class*="video" i], [id*="video" i]').each((i, elem) => {
-                    const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
-                    if (src) {
-                        const fullUrl = new URL(src, url).href;
-                        videoUrls.add(fullUrl);
-                    }
-                });
-
-                // 查找可能的视频文件扩展名链接
-                const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
-                $('a, [href]').each((i, elem) => {
-                    const href = $(elem).attr('href');
-                    if (href) {
-                        const lowerHref = href.toLowerCase();
-                        if (videoExtensions.some(ext => lowerHref.includes(ext))) {
-                            const fullUrl = new URL(href, url).href;
-                            videoUrls.add(fullUrl);
-                        }
-                    }
-                });
-
-                // 查找包含视频数据的script/pre标签（如JSON-LD结构）
-                $('script, pre').each((i, elem) => {
-                    const text = $(elem).text();
-                    if (text && (text.includes('video') || text.includes('Video') || text.includes('VIDEO') || text.includes('m3u8') || text.includes('mp4'))) {
-                        // 尝试从文本中提取视频URL
-                        // 修正正则：更加严谨的排除字符，并支持更多格式(m3u8, mpd)
-                        const videoUrlMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^"\'\s\<\>\)\(\[\]]*/gi);
-                        if (videoUrlMatches) {
-                            videoUrlMatches.forEach(match => {
-                                try {
-                                    const fullUrl = new URL(match, url).href;
-                                    videoUrls.add(fullUrl);
-                                } catch (e) {
-                                    // 忽略无效URL
-                                }
-                            });
-                        }
-                        // 尝试提取视频ID并构造可能的视频URL
-                        const videoIdMatches = text.match(/"video_id"\s*:\s*"([^"]+)"/i);
-                        if (videoIdMatches && videoIdMatches[1]) {
-                            const videoId = videoIdMatches[1];
-                            // 对于Rambler等平台，尝试构造可能的视频URL
-                            // 由于这类视频通常需要特殊处理，我们直接返回原始页面URL
-                            // 让yt-dlp来处理这些特殊平台的视频提取
-                            videoUrls.add(url); // 添加页面URL供yt-dlp处理
-                            // 同时尝试从iframe src中提取视频URL (匹配 player, embed 等特征)
-                            const iframeSrcMatches = text.match(/https?:\/\/[^"\'\s\<\>\)\(\[\]]*\/(player|embed|video)[^"\'\s\<\>\)\(\[\]]*/gi);
-                            if (iframeSrcMatches) {
-                                iframeSrcMatches.forEach(match => {
-                                    try {
-                                        const fullUrl = new URL(match, url).href;
-                                        videoUrls.add(fullUrl);
-                                    } catch (e) {
-                                        // 忽略无效URL
-                                    }
-                                });
-                            }
-                        }
-                    }
-                });
-
-                // 检查iframe的src中可能包含的视频参数
-                $('iframe').each((i, elem) => {
-                    const src = $(elem).attr('src');
-                    if (src) {
-                        // 检查是否为常见的视频播放器
-                        const videoPlayerDomains = ['youtube.com', 'youtu.be', 'vimeo.com', 'player.vimeo.com', 'rambler.ru', 'rutube.ru', 'ok.ru', 'tiktok.com', 'douyin.com', 'bilibili.com'];
-                        const isVideoPlayer = videoPlayerDomains.some(domain => src.includes(domain));
-                        if (isVideoPlayer) {
-                            const fullUrl = new URL(src, url).href;
-                            videoUrls.add(fullUrl);
-                        }
-                    }
-                });
-
-                return Array.from(videoUrls);
-            }
-
-            fetch = global.fetch;
-        }
-
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: commonHeaders
-        });
-
-        if (!response.ok) {
-            // 如果是 403/503，可能是 Cloudflare
-            if (response.status === 403 || response.status === 503) {
-                // 抛出特定错误，方便上层捕获并引导用户
-                throw new Error(`HTTP ${response.status}: Forbidden (可能需要浏览器验证)`);
-            }
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const html = await response.text();
+        // 直接使用 fetchViaHttps，不依赖 node-fetch 或 global.fetch
+        const html = await fetchViaHttps(url, commonHeaders);
 
         // 检测 Cloudflare 挑战页面特征
         if (html.includes('cf-turnstile') || html.includes('challenge-platform') || html.includes('Cloudflare Ray ID')) {
