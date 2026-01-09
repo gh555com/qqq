@@ -463,7 +463,7 @@ async function raceClipboard(targetDir, callback) {
 		try {
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
-				title: "qqq: html粘贴...",
+				title: "qqq: 文件复制...",
 				cancellable: true
 			}, async (progress, token) => {
 				token.onCancellationRequested(() => {
@@ -475,7 +475,12 @@ async function raceClipboard(targetDir, callback) {
 				return await h.autoDetectAndPaste(targetDir, progCb, token);
 			});
 
+			// ★ 无论结果如何都调用 callback，确保用户能看到结果
 			if (res) {
+				// 如果所有文件都被跳过，显示警告
+				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
+					global.logMessage(`所有 ${res.skippedCount} 个文件都无法访问，已跳过`, "WARN");
+				}
 				callback(res, 100);
 			}
 		} catch (e) {
@@ -889,10 +894,22 @@ Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: ()
 
 process.on("uncaughtException", (error) => {
 	const stack = error.stack || "";
-	global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
+	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+	if (error.code && fsErrorCodes.includes(error.code)) {
+		global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
+	} else {
+		global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+	}
 });
 
 process.on("unhandledRejection", (reason) => {
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-	global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
+	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+	if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
+		global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
+	} else {
+		global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+	}
 });

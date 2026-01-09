@@ -1698,9 +1698,20 @@ class FileCodeLensProvider {
     constructor() {
         this._onDidChangeCodeLenses = new vscode.EventEmitter();
         this.onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+        this._refreshDebounceTimer = null;
     }
     refresh() {
         this._onDidChangeCodeLenses.fire();
+    }
+    // ★ 防抖刷新，避免频繁刷新
+    debouncedRefresh() {
+        if (this._refreshDebounceTimer) {
+            clearTimeout(this._refreshDebounceTimer);
+        }
+        this._refreshDebounceTimer = setTimeout(() => {
+            this._refreshDebounceTimer = null;
+            this._onDidChangeCodeLenses.fire();
+        }, 300);
     }
     async provideCodeLenses(document) {
         if (!isCoreIntegrityValid) return [];
@@ -1708,7 +1719,7 @@ class FileCodeLensProvider {
         const regex = qqq.createPathRegex();
         const text = document.getText();
         let match;
-        const tasks = [];
+        const foldersToFetch = new Set(); // ★ 需要异步获取的文件夹
 
         while ((match = regex.exec(text))) {
             const pos = document.positionAt(match.index);
@@ -1723,82 +1734,165 @@ class FileCodeLensProvider {
             const ext = path.extname(absPath).toLowerCase();
             const isVidOrImg = isImageOrVideoExt(ext);
             const targetLensLine = pos.line;
+            const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
-            tasks.push(async () => {
-                let folderData = await getQqqFolderSize(folder);
-                const fSizeStr = formatBytes(folderData?.size || 0);
-                const folderTooltip = folderData?.summary;
-                let fileSz = "?";
-                let tooltipText = "";
-                let mtimeMs = 0;
+            // ★ 同步获取文件夹大小（仅从缓存）
+            let folderData = getQqqFolderSizeSync(folder);
+            let fSizeStr;
+            let folderTooltip;
 
-                try {
-                    const st = fs.statSync(absPath);
-                    fileSz = formatBytes(st.size);
-                    tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
-                    mtimeMs = st.mtimeMs;
-                } catch { }
+            if (folderData) {
+                fSizeStr = formatBytes(folderData.size || 0);
+                folderTooltip = folderData.summary;
+            } else {
+                // ★ 没有缓存，显示占位符
+                fSizeStr = "●";
+                folderTooltip = "正在计算文件夹大小...";
+                foldersToFetch.add(folder);
+            }
 
-                let titleSuffix = "";
-                let isRealVideo = false;
+            // ★ 同步获取文件信息（这个很快）
+            let fileSz = "?";
+            let tooltipText = "";
+            let mtimeMs = 0;
+            try {
+                const st = fs.statSync(absPath);
+                fileSz = formatBytes(st.size);
+                tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
+                mtimeMs = st.mtimeMs;
+            } catch { }
 
-                if (isVidOrImg) {
-                    const info = await getMediaInfo(absPath, mtimeMs);
-                    if (info?.width && info?.height) {
-                        const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
-                        if (info.type === "video") isRealVideo = true;
-                        const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
-                        const pct = Math.round(scale * 100);
-                        titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
+            // ★ 先添加基本的 CodeLens（不等待媒体信息）
+            lenses.push(
+                new vscode.CodeLens(r, {
+                    title: `✎( ${fSizeStr}) 🗀qqq`,
+                    command: "qqq.revealFileInFolder",
+                    arguments: [absPath],
+                    tooltip: folderTooltip,
+                }),
+                new vscode.CodeLens(r, {
+                    title: "✎rename",
+                    command: "qqq.renameFile",
+                    arguments: [rawPath, absPath],
+                })
+            );
 
-                        const displayCodec = info.full_codec_desc || info.codec;
-                        if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
+            // ★ 媒体信息可以异步获取，但这里我们保持同步以简化逻辑
+            let titleSuffix = "";
+            let iconPart = "";
+            let spacePart = "   ";
 
-                        const arStr = calculateAspectRatioString(info.width, info.height);
-                        if (arStr) tooltipText += `\n宽高比：${arStr}`;
-
-                        if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+            if (isVidOrImg) {
+                const info = await getMediaInfo(absPath, mtimeMs);
+                if (info?.width && info?.height) {
+                    const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
+                    const isRealVideo = info.type === "video";
+                    if (isRealVideo) {
+                        iconPart = "🎬";
+                        spacePart = " ";
                     }
+                    const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
+                    const pct = Math.round(scale * 100);
+                    titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
+
+                    const displayCodec = info.full_codec_desc || info.codec;
+                    if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
+
+                    const arStr = calculateAspectRatioString(info.width, info.height);
+                    if (arStr) tooltipText += `\n宽高比：${arStr}`;
+
+                    if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
                 }
+            }
 
-                const iconPart = isRealVideo ? "🎬" : "";
-                const spacePart = isRealVideo ? " " : "   ";
-                const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
-
-                return [
-                    new vscode.CodeLens(r, {
-                        title: `✎( ${fSizeStr}) 🗀qqq`,
-                        command: "qqq.revealFileInFolder",
-                        arguments: [absPath],
-                        tooltip: folderTooltip,
-                    }),
-                    new vscode.CodeLens(r, {
-                        title: "✎rename",
-                        command: "qqq.renameFile",
-                        arguments: [rawPath, absPath],
-                    }),
-                    new vscode.CodeLens(r, {
-                        title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-                        command: "qqq.openFile",
-                        arguments: [absPath],
-                        tooltip: tooltipText,
-                    }),
-                ];
-            });
+            lenses.push(
+                new vscode.CodeLens(r, {
+                    title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
+                    command: "qqq.openFile",
+                    arguments: [absPath],
+                    tooltip: tooltipText,
+                })
+            );
         }
-        const results = await Promise.all(tasks.map((t) => t()));
-        results.forEach((group) => lenses.push(...group));
+
+        // ★ 异步获取未缓存的文件夹大小
+        if (foldersToFetch.size > 0) {
+            const refreshCb = () => this.debouncedRefresh();
+            for (const folder of foldersToFetch) {
+                fetchFolderSizeAsync(folder, refreshCb);
+            }
+        }
+
         return lenses;
     }
 }
 
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
+const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行的请求
+
 function invalidateFolderSizeCacheForPath(filePath) {
     try {
         const dir = path.dirname(filePath);
         if (folderSizeCache.has(dir)) folderSizeCache.delete(dir);
     } catch { }
 }
+
+/**
+ * ★ 同步获取文件夹大小（仅从缓存）
+ * 返回缓存数据或 null（表示需要异步获取）
+ */
+function getQqqFolderSizeSync(folderPath) {
+    const now = Date.now();
+    const cached = folderSizeCache.get(folderPath);
+    if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
+        return cached.data;
+    }
+    return null;
+}
+
+/**
+ * ★ 异步获取文件夹大小（带去重，完成后刷新 CodeLens）
+ */
+function fetchFolderSizeAsync(folderPath, refreshCallback) {
+    // 如果已经有正在进行的请求，不重复发起
+    if (_pendingFolderSizeRequests.has(folderPath)) {
+        return;
+    }
+
+    _pendingFolderSizeRequests.set(folderPath, true);
+
+    // 后台异步获取
+    qqq.getFolderInfo(folderPath).then(result => {
+        _pendingFolderSizeRequests.delete(folderPath);
+
+        if (result?.success) {
+            const parts = [];
+            let totalFiles = 0;
+            if (result.ext_stats) {
+                for (const [ext, count] of Object.entries(result.ext_stats)) {
+                    totalFiles += count;
+                    parts.push(`${count}_${ext || "无后缀"}`);
+                }
+            }
+            const summaryStr =
+                parts.length > 0
+                    ? `${totalFiles}个文件：${parts.join("; ")}`
+                    : result.file_count_root > 0
+                        ? `${result.file_count_root}个文件`
+                        : "空文件夹";
+            const data = { size: result.total_size, summary: summaryStr };
+            folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
+
+            // ★ 缓存完成，刷新 CodeLens
+            if (refreshCallback) {
+                refreshCallback();
+            }
+        }
+    }).catch(() => {
+        _pendingFolderSizeRequests.delete(folderPath);
+    });
+}
+
 async function getQqqFolderSize(folderPath) {
     const now = Date.now();
     const cached = folderSizeCache.get(folderPath);
