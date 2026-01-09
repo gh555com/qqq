@@ -7,10 +7,10 @@ const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
 const global = require('./global');
-const { TaskCounter } = require('./global');
+const { TaskCounter, TaskMessage } = require('./global');
 
-// ==================== ★ 统一消息格式化器（唯一真理源） ====================
-const VideoMessage = {
+// ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
+const VideoMsg = {
     /**
      * 生成进度消息
      * @param {Object} task - 任务对象（含 taskTitle）
@@ -19,9 +19,8 @@ const VideoMessage = {
      * @param {string} [suffix] - 可选后缀，如 "(正在解析...)", "(增强下载中...)"
      */
     progress(task, sizeStr, urlSnippet, suffix = '') {
-        const prefix = task?.taskTitle || 'qqq';
         const suffixPart = suffix ? ` ${suffix}` : '';
-        return `${prefix} 已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
+        return TaskMessage.progress(task?.taskTitle, `已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`);
     },
 
     /**
@@ -32,34 +31,23 @@ const VideoMessage = {
      * @param {string} urlSnippet - URL 缩略
      */
     done(task, landedCount, totalStr, urlSnippet) {
-        const prefix = task?.taskTitle || 'qqq';
-        const dur = VideoMessage._formatDuration(Date.now() - (task?.startMs || Date.now()));
-
+        const elapsedMs = Date.now() - (task?.startMs || Date.now());
+        let summary;
         if (!landedCount || landedCount <= 0) {
-            return `${prefix} 0 落盘，从 ${urlSnippet}（耗时${dur}）`;
+            summary = `0 落盘，从 ${urlSnippet}`;
+        } else {
+            summary = `共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}`;
         }
-        return `${prefix}，共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}（耗时${dur}）`;
+        return TaskMessage.done(task?.taskTitle, summary, elapsedMs);
     },
 
     /**
-     * 生成用户提示消息（如增强模式的播放提示）
+     * 生成用户提示消息
      * @param {Object} task - 任务对象
      * @param {string} message - 提示内容
      */
     prompt(task, message) {
-        const prefix = task?.taskTitle || 'qqq';
-        return `${prefix} ${message}`;
-    },
-
-    /**
-     * 格式化时间
-     */
-    _formatDuration(ms) {
-        const sec = Math.round(ms / 1000);
-        if (sec < 60) return `${sec}s`;
-        const min = Math.floor(sec / 60);
-        const s = sec % 60;
-        return s > 0 ? `${min}m${s}s` : `${min}m`;
+        return TaskMessage.prompt(task?.taskTitle, message);
     }
 };
 
@@ -803,7 +791,7 @@ class VideoDownloadController {
 
     // ==================== 任务结束打印（★ 使用统一格式化器） ====================
     _buildDoneMessage(task, landedCount, totalStr, urlSnippet) {
-        return VideoMessage.done(task, landedCount, totalStr, urlSnippet);
+        return VideoMsg.done(task, landedCount, totalStr, urlSnippet);
     }
 
     // ==================== start ====================
@@ -951,7 +939,7 @@ class VideoDownloadController {
 
             const runLogic = async (progress, token) => {
                 // ★ 使用统一格式化器
-                progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet, '(正在解析...)') });
+                progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet, '(正在解析...)') });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -1042,7 +1030,7 @@ class VideoDownloadController {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet) });
+                progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet) });
 
                 const activePrefixes = new Set();
                 tasks.forEach(t => {
@@ -1088,7 +1076,7 @@ class VideoDownloadController {
 
                         const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
                         const totalStr = this._formatBytesSimple(finalBytes);
-                        progress.report({ message: VideoMessage.progress(task, totalStr, urlSnippet) });
+                        progress.report({ message: VideoMsg.progress(task, totalStr, urlSnippet) });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1911,7 +1899,7 @@ $of = $vi.OriginalFilename;
             cancellable: true
         }, async (progress, token) => {
             // ★ 使用统一格式化器
-            progress.report({ message: VideoMessage.progress(task, '0k', urlSnippet, '(增强下载中...)') });
+            progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet, '(增强下载中...)') });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -1924,7 +1912,7 @@ $of = $vi.OriginalFilename;
                 timer = setInterval(() => {
                     if (this._isTaskCancelled(task)) return;
                     const bytes = this._scanRecentBytes(targetDir, startMs);
-                    progress.report({ message: VideoMessage.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
+                    progress.report({ message: VideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -2005,7 +1993,7 @@ $of = $vi.OriginalFilename;
 
             // ★ 使用统一格式化器
             const selection = await vscode.window.showInformationMessage(
-                VideoMessage.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
+                VideoMsg.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
                 { modal: true },
                 "我已在外部播放"
             );

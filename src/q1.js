@@ -1,6 +1,6 @@
 // src/q1.js
 const global = require('./global');
-const { wq, TransactionManager, getConfig, TaskCounter, showAutoCloseMessage } = global;
+const { wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
 const h = require('./h');
 const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
@@ -1333,13 +1333,15 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         if (totalCount > 1 && taskTitle) {
             const trans = transId ? (TransactionManager.getTransactions() || []).find(t => t.id === transId) : null;
             const startTime = trans?.startTime || taskStartTime || Date.now();
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const elapsedMs = Date.now() - startTime;
 
-            // ★ 检查是否被取消
+            // ★ 检查是否被取消，使用统一格式化器
             if (token && token.isCancellationRequested) {
-                showAutoCloseMessage(`${taskTitle} 文件/文件夹复制 ${totalCount} 已取消并回滚（耗时${elapsed}s）`);
+                const msg = TaskMessage.done(taskTitle, `文件/文件夹复制 ${totalCount} 已取消并回滚`, elapsedMs);
+                TaskMessage.showSimpleToast(msg);
             } else {
-                showAutoCloseMessage(`${taskTitle} 文件/文件夹已复制 ${totalCount}（耗时${elapsed}s）`);
+                const msg = TaskMessage.done(taskTitle, `文件/文件夹已复制 ${totalCount}`, elapsedMs);
+                TaskMessage.showSimpleToast(msg);
             }
         }
     } else if (result.type === "folder_text") {
