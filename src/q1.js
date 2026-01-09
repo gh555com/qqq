@@ -1546,7 +1546,14 @@ async function executeClipboardCommand() {
 
     if (mode === 'q') {
         // 直粘 (q) - 最快速度，无事务
-        await h.autoDetectAndPaste(targetDir, null, null, null).then(async (result) => {
+        // ★ 根据 typeInfo 构建 qStatus，避免重复调用 checkQ
+        const preQStatus = {
+            hasFile: typeInfo.subType === 'file',
+            hasHtml: typeInfo.subType === 'html_rich' || typeInfo.subType === 'html_text',
+            hasImage: typeInfo.subType === 'image',
+            hasText: typeInfo.subType === 'text' || typeInfo.subType === 'video_url'
+        };
+        await h.autoDetectAndPaste(targetDir, null, null, null, preQStatus).then(async (result) => {
             // ★ Handle Video URL in q mode -> Escalate to 'a' (Curved Paste)
             if (result && result.type === 'video_url') {
                 await performCurvedPaste(editor, targetDir, { type: 'yellowlist', subType: 'video_url' }, result);
