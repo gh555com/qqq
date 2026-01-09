@@ -699,7 +699,8 @@ class VideoDownloadController {
                 id: task.transId,
                 targetDir: targetDir,
                 tempFiles: [],
-                landedFiles: []
+                landedFiles: [],
+                landedFolders: []
             });
         }
 

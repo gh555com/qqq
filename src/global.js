@@ -889,7 +889,7 @@ function init(context) {
 // ★ 日志相关
 // ============================================================================
 let LOG_PATH = null;
-const outputChannel = vscode.window.createOutputChannel("qqq extension");
+const outputChannel = vscode.window.createOutputChannel("qqq");
 
 function setLogPath(p) {
 	LOG_PATH = p;
@@ -1308,19 +1308,22 @@ const TransactionManager = {
 	},
 
 	async rollback(transOrId) {
-		// ★ 兼容两种调用方式：传 transId 字符串 或 trans 对象
-		let trans;
-		if (typeof transOrId === 'string') {
-			trans = this.getTransactions().find(t => t.id === transOrId);
-			if (!trans) {
-				logMessage(`[Rollback] 未找到事务: ${transOrId}`, "WARN");
-				return;
-			}
-		} else {
-			trans = transOrId;
+		// ★ 始终从 globalState 获取最新的事务数据（避免使用过时的快照）
+		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
+		if (!transId) {
+			logMessage(`[Rollback] 无效的事务ID`, "WARN");
+			return;
+		}
+
+		// 从 globalState 重新获取最新数据
+		const trans = this.getTransactions().find(t => t.id === transId);
+		if (!trans) {
+			logMessage(`[Rollback] 未找到事务: ${transId}`, "WARN");
+			return;
 		}
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
+		logMessage(`[Rollback] 事务详情: landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}`, "INFO");
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
 		try {
@@ -1356,8 +1359,14 @@ const TransactionManager = {
 		for (const f of recordedFiles) {
 			try {
 				if (fs.existsSync(f)) {
-					fs.unlinkSync(f);
-					logMessage(`[Rollback] 删除记录文件: ${f}`, "INFO");
+					const stat = fs.statSync(f);
+					if (stat.isDirectory()) {
+						fs.rmSync(f, { recursive: true, force: true });
+						logMessage(`[Rollback] 删除记录文件夹: ${f}`, "INFO");
+					} else {
+						fs.unlinkSync(f);
+						logMessage(`[Rollback] 删除记录文件: ${f}`, "INFO");
+					}
 				}
 				// 同时清理 .part/.ytdl 衍生文件
 				const part = f + ".part";
@@ -1366,6 +1375,19 @@ const TransactionManager = {
 				if (fs.existsSync(ytdl)) fs.unlinkSync(ytdl);
 			} catch (e) {
 				logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "ERROR");
+			}
+		}
+
+		// 1.5 ★ 删除记录的文件夹（批量粘贴文件夹时使用）
+		const recordedFolders = trans.landedFolders || [];
+		for (const folder of recordedFolders) {
+			try {
+				if (fs.existsSync(folder)) {
+					fs.rmSync(folder, { recursive: true, force: true });
+					logMessage(`[Rollback] 删除记录文件夹: ${folder}`, "INFO");
+				}
+			} catch (e) {
+				logMessage(`[Rollback] 删除文件夹失败 ${folder}: ${e.message}`, "ERROR");
 			}
 		}
 

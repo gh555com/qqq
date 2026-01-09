@@ -1393,6 +1393,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         docUri: docUri.toString(),
         tempFiles: [],
         landedFiles: [],
+        landedFolders: [],
         startTime: Date.now()
     });
 

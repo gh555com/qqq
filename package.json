@@ -78,7 +78,7 @@
             ],
             "markdownEnumDescriptions": [
               "全包裹：一切耗时操作（如视频下载、批量文件、混合富文本等）都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",
-              "半包裹：细分出上方耗时操作中滴“轻便操作”（如小于80m滴文件（文件夹）混合落盘、内存截图等）做简单粘贴：最快响应，无进度条，异常**无**回滚或清理。"
+              "半包裹：细分出上方耗时操作中滴“轻便操作”（如小于80m滴文件（文件夹）混合落盘、内存截图等）做简单粘贴：最快响应，无进度条，异常**无**回滚和清理。"
             ],
             "markdownDescription": "☀️ 事务包裹级别："
           }
@@ -143,10 +143,10 @@
               "1: 平衡",
               "2: 最严格"
             ],
-            "markdownEnumDescriptions": [
+            "enumDescriptions": [
               "11项安全开关全部关闭。",
               "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
-              "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。●"
+              "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。"
             ],
             "markdownDescription": "🍌 如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
           },

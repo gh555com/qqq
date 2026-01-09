@@ -1493,23 +1493,37 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         if (process.platform === "win32") {
             let files = preFetchedFiles;
             if (!files) {
+                log(`[Clipboard] 调用 tryEngineCall 获取文件...`, "INFO");
                 const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 2000);
+                log(`[Clipboard] tryEngineCall 返回: ${JSON.stringify(res)}`, "INFO");
                 if (res) {
                     if (res.paths && res.paths.length > 0) files = res.paths;
                     else if (res.files && res.files.length > 0) files = res.files;
                 }
             }
             if (files && files.length > 0) {
+                log(`[Clipboard] 获取到 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
                 // ... (Logic simplified for brevity, using processFilesForClipboard)
                 const result = processFilesForClipboard(files, targetDir);
-                // ★ Register Transaction
+                log(`[Clipboard] 复制结果: files=${(result?.files || []).length}, folders=${(result?.folders || []).length}`, "INFO");
+                // ★ Register Transaction (files + folders)
                 if (result && transId) {
+                    log(`[Clipboard] 尝试更新事务 ${transId}`, "INFO");
                     const global = getGlobal();
                     const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                     if (trans) {
                         const newLanded = [...(trans.landedFiles || []), ...(result.files || [])];
-                        await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                        const newFolders = [...(trans.landedFolders || []), ...(result.folders || [])];
+                        log(`[Clipboard] 更新事务: landedFiles=${newLanded.length}, landedFolders=${newFolders.length}`, "INFO");
+                        await global.TransactionManager.updateTransaction(transId, {
+                            landedFiles: [...new Set(newLanded)],
+                            landedFolders: [...new Set(newFolders)]
+                        });
+                    } else {
+                        log(`[Clipboard] 未找到事务 ${transId}`, "WARN");
                     }
+                } else {
+                    log(`[Clipboard] 未传入 transId 或 result 为空`, "WARN");
                 }
                 return result;
             }
