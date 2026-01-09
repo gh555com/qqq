@@ -6,6 +6,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
+const global = require('./global');
 
 class ChildProcessTracker {
     constructor() {
@@ -657,7 +658,7 @@ class VideoDownloadController {
         return { ok: false };
     }
 
-    // ✅ 识别 YouTube（彻底排除增强：前置排除 + 最终兜底）
+    // ✅ 识别 YouTube（彻底排除增强：前置排除 + 最终兖底）
     _isYouTubeUrl(rawUrl) {
         try {
             const u = new URL(String(rawUrl || ''));
@@ -797,59 +798,72 @@ class VideoDownloadController {
         }
     }
 
-    // ==================== 任务上下文：总耗时 + 真取消 ====================
-    _beginTask() {
-        // 如果上一任务还在，就先强行取消
-        if (this._task && this._task.tracker && !this._task.tracker.isCancelled()) {
-            try { this._task.tracker.killAll('新任务覆盖'); } catch (e) { }
-        }
+    // ==================== 任务上下文：总耗时 + 真取消 + 事务 ====================
+    async _beginTask(targetDir, externalTransId = null) {
+        // Remove dependency on this._task (instance state)
 
         const task = {
             startMs: Date.now(),
             tracker: new ChildProcessTracker(),
-            activeFiles: new Set() // Track files for cleanup on cancel
+            activeFiles: new Set(), // Track files for cleanup on cancel
+            transId: externalTransId || Date.now().toString(),
+            isExternalTrans: !!externalTransId,
+            isCancelled: false // Local cancelled flag
         };
-        this._task = task;
+
+        // ★ 注册事务 (如果是外部事务，我们假设外部已经注册了，或者我们可以 update 一下以防万一)
+        if (!task.isExternalTrans) {
+            await global.TransactionManager.saveTransaction({
+                id: task.transId,
+                targetDir: targetDir,
+                tempFiles: [],
+                landedFiles: []
+            });
+        }
+
         return task;
     }
 
-    async _cancelTask(reason = '用户取消') {
-        const t = this._task;
-        if (!t || !t.tracker) return;
-        if (t.tracker.isCancelled()) return;
+    async _cancelTask(task, reason = '用户取消') {
+        if (!task || !task.tracker) return;
+        if (task.tracker.isCancelled()) return;
 
-        t.tracker.markCancelled();
+        task.tracker.markCancelled();
+        task.isCancelled = true;
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
+        // ★ 事务回滚
+        if (task.transId) {
+            const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
+            if (trans) {
+                await global.TransactionManager.rollback(trans);
+            }
+        }
+
         // Clean up any active files immediately
-        if (t.activeFiles) {
-            for (const file of t.activeFiles) {
+        if (task.activeFiles) {
+            for (const file of task.activeFiles) {
                 try {
                     if (fs.existsSync(file)) fs.unlinkSync(file);
-                    // Also try to remove partial files
                     if (fs.existsSync(file + ".part")) fs.unlinkSync(file + ".part");
                     if (fs.existsSync(file + ".ytdl")) fs.unlinkSync(file + ".ytdl");
                 } catch (e) { }
             }
-            t.activeFiles.clear();
+            task.activeFiles.clear();
         }
 
         try {
-            await t.tracker.killAll(reason);
+            await task.tracker.killAll(reason);
         } catch (e) { }
     }
 
-    _isCancelled() {
-        return !!(this._task && this._task.tracker && this._task.tracker.isCancelled());
-    }
-
-    _endTask() {
-        this._task = null;
+    _isTaskCancelled(task) {
+        return !!(task && (task.isCancelled || (task.tracker && task.tracker.isCancelled())));
     }
 
     // ==================== 任务结束打印（严格文本，不带 command 垃圾） ====================
-    _buildDoneMessage(landedCount, totalStr, urlSnippet) {
-        const dur = this._formatDuration(Date.now() - (this._task?.startMs || Date.now()));
+    _buildDoneMessage(task, landedCount, totalStr, urlSnippet) {
+        const dur = this._formatDuration(Date.now() - (task?.startMs || Date.now()));
 
         if (!landedCount || landedCount <= 0) {
             return ` qqq: 任务结束（总耗时${dur}），0 落盘，从 ${urlSnippet}`;
@@ -866,53 +880,63 @@ class VideoDownloadController {
         });
         if (!raw) return;
 
-        const task = this._beginTask();
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
+            return;
+        }
+
+        const currentDocDir = path.dirname(editor.document.uri.fsPath);
+        const targetDir = path.join(currentDocDir, "qqq");
+        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+        // 交互式模式：不传递 progressCallback，使用内部的 withProgress
+        await this.downloadEntry(raw, targetDir, null, null, null);
+    }
+
+    // ==================== Headless Entry (for q1.js concurrency) ====================
+    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null) {
+        // 1. 初始化任务上下文
+        const task = await this._beginTask(targetDir, transId);
+
+        // Save targetUri to task for insertion
+        task.targetUri = targetUri;
+
+        // 2. 绑定外部取消 Token (如果有)
+        if (token) {
+            token.onCancellationRequested(async () => {
+                await this._cancelTask(task, '外部 Token 取消');
+            });
+        }
 
         try {
-            // ✅ 关键：只有这段 async 调用链里的 spawn 才会被追踪/强制 detached:false
+            // 3. 在 Tracker 作用域内运行
             return await ChildProcessTracker.runWithTracker(task.tracker, async () => {
-                const v = this._normalizeAndValidateUrl(raw);
+                const v = this._normalizeAndValidateUrl(rawUrl);
                 if (!v.ok) {
-                    await this._showInvalidUrlToast();
-                    return;
+                    if (!progressCallback) await this._showInvalidUrlToast();
+                    return null;
                 }
 
                 const url = v.url;
 
-                // 异步确保 yt-dlp（在 scope 内）
+                // 异步确保 yt-dlp
                 this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
 
-                const editor = vscode.window.activeTextEditor;
-                if (!editor) {
-                    vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
-                    return;
-                }
-
-                const currentDocDir = path.dirname(editor.document.uri.fsPath);
-                const targetDir = path.join(currentDocDir, "qqq");
-                if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-
-                // ★ 开启事务：虽然这时还没生成具体文件，但我们可以在生成 Task 时追加
-                const transId = await this._beginTransaction(targetDir, []);
-                task.transId = transId;
-
                 this.log(`开始处理: ${url}`);
-                this.outputChannel.show(true);
+                if (!progressCallback) this.outputChannel.show(true);
 
-                // 查找 cookies.txt (Global Storage Only)
+                // Cookies
                 let cookiesFilePath = this._findBestCookieFileInGlobalStorage();
                 if (cookiesFilePath) {
                     this.log(`[Cookies] 使用全局 Cookie 文件: ${cookiesFilePath}`);
-                } else {
-                    this.log(`[Cookies] 未在全局存储中找到 cookies 文件 (搜索 *cookies*.txt)`);
                 }
 
-                await this._fastProcess(url, targetDir, cookiesFilePath, transId);
+                // 4. 执行核心流程
+                return await this._fastProcess(task, url, targetDir, cookiesFilePath, progressCallback);
             });
         } finally {
-            // 注意：正常流程中，_fastProcess 内部负责 commit 或 rollback
-            // 这里只处理 task 对象的清理
-            this._endTask();
+            // No explicit endTask needed as task is local variable
         }
     }
 
@@ -978,34 +1002,33 @@ class VideoDownloadController {
     }
 
     // ==================== 普通流程：一号 + 三号 ====================
-    async _fastProcess(url, targetDir, cookiesFilePath, transId) {
+    async _fastProcess(task, url, targetDir, cookiesFilePath, progressCallback) {
         try {
             const urlSnippet = this._makeUrlSnippet(url);
             const isYouTube = this._isYouTubeUrl(url);
 
-            const outcome = await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: "",
-                cancellable: true
-            }, async (progress, token) => {
+            const runLogic = async (progress, token) => {
                 progress.report({ message: `已交换 0k 于 ${urlSnippet} (正在解析...)` });
 
-                token.onCancellationRequested(
-                    ChildProcessTracker.bind(async () => {
-                        await this._cancelTask('用户在一号窗口点取消');
-                    })
-                );
+                if (token) {
+                    token.onCancellationRequested(
+                        ChildProcessTracker.bind(async () => {
+                            await this._cancelTask(task, '用户在一号窗口点取消');
+                        })
+                    );
+                }
 
                 this.log("正在智能嗅探资源...");
                 let tasks = [];
 
                 let probeForbidden = false;
+                let hasStaticDirectVideo = false; // 标记是否有静态分析找到的直连视频
                 try {
-                    if (this._isCancelled()) return null;
+                    if (this._isTaskCancelled(task)) return null;
 
                     const res = await this.downloader.probe(url, { cookiesFilePath });
 
-                    if (this._isCancelled()) return null;
+                    if (this._isTaskCancelled(task)) return null;
 
                     if (res && res.success) {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
@@ -1032,22 +1055,41 @@ class VideoDownloadController {
                         }
                     }
                 } catch (e) {
-                    if (this._isCancelled()) return null;
+                    if (this._isTaskCancelled(task)) return null;
                     this.log(`yt-dlp 探测异常: ${e.message}`);
                     await this._handleCookieErrorIfNeeded(e.message, url);
                 }
 
-                // 静态分析（保留）
+                // 静态分析（优先于 403 增强）
                 try {
-                    if (this._isCancelled()) return null;
+                    if (this._isTaskCancelled(task)) return null;
+                    this.log(`开始静态分析网页: ${url}`);
                     const webUrls = await h.extractVideoUrlsFromWebPage(url);
+                    this.log(`静态分析结果: ${webUrls ? webUrls.length : 0} 个 URL`);
                     if (webUrls && webUrls.length > 0) {
                         this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+
+                        // 检查是否有直连视频 URL
+                        const hasDirectVideo = webUrls.some(u => u.match(/\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i));
+
+                        // 只要找到了直连视频，就设置标志并移除原始 403 任务
+                        if (hasDirectVideo) {
+                            hasStaticDirectVideo = true;
+                            if (probeForbidden) {
+                                this.log("静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。");
+                                // Filter out the task that is just the raw URL
+                                tasks = tasks.filter(t => t.url !== url);
+                                probeForbidden = false; // Reset forbidden flag so we don't trigger enhanced mode unnecessarily
+                            }
+                        }
+
                         webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
                     }
-                } catch (e) { }
+                } catch (e) {
+                    this.log(`静态分析失败: ${e.message}`);
+                }
 
-                if (this._isCancelled()) return null;
+                if (this._isTaskCancelled(task)) return null;
 
                 tasks = this._deduplicateTasks(tasks);
 
@@ -1069,8 +1111,8 @@ class VideoDownloadController {
                         expectedFiles.push(t.destPath);
 
                         // Track for cancellation cleanup
-                        if (this._task && this._task.activeFiles) {
-                            this._task.activeFiles.add(t.destPath);
+                        if (task && task.activeFiles) {
+                            task.activeFiles.add(t.destPath);
                         }
                     }
                 });
@@ -1086,7 +1128,7 @@ class VideoDownloadController {
 
                 try {
                     fileSizeTimer = setInterval(() => {
-                        if (this._isCancelled()) return;
+                        if (this._isTaskCancelled(task)) return;
 
                         let currentDiskBytes = 0;
                         try {
@@ -1112,7 +1154,7 @@ class VideoDownloadController {
                         progress.report({ message: `已交换 ${totalStr} 于 ${urlSnippet}` });
                     }, 500);
 
-                    if (this._isCancelled()) return null;
+                    if (this._isTaskCancelled(task)) return null;
 
                     let res;
                     try {
@@ -1120,11 +1162,11 @@ class VideoDownloadController {
                             return await this.downloader.downloadAll(tasks, targetDir, {
                                 downloadVideos: "all",
                                 cookiesFilePath: cookiesFilePath, // Pass cookies here
-                                onProgress: (task, event) => {
-                                    if (this._isCancelled()) return;
+                                onProgress: (t, event) => {
+                                    if (this._isTaskCancelled(task)) return;
 
                                     if (event.type === 'start') {
-                                        this.log(`开始: ${String(task.url).slice(0, 60)}...`);
+                                        this.log(`开始: ${String(t.url).slice(0, 60)}...`);
                                     } else if (event.type === 'progress') {
                                         const p = event.progress;
                                         let currentBytes = 0;
@@ -1132,27 +1174,38 @@ class VideoDownloadController {
                                             currentBytes = this._parseSizeToBytes(p.currentSize);
                                         }
                                         if (currentBytes > 0) {
-                                            logProgressMap.set(task.url, currentBytes);
+                                            logProgressMap.set(t.url, currentBytes);
                                             let sum = 0;
                                             for (const b of logProgressMap.values()) sum += b;
                                             logTotalBytes = sum;
                                         }
                                     } else if (event.type === 'done') {
-                                        this.log(`完成: ${path.basename(task.destPath || '')}`);
+                                        this.log(`完成: ${path.basename(t.destPath || '')}`);
                                     } else if (event.type === 'error') {
-                                        this.log(`失败: ${task.url} - ${event.error}`);
+                                        this.log(`失败: ${t.url} - ${event.error}`);
                                     } else if (event.type === 'retry') {
-                                        this.log(`重试: ${task.url} (Wait ${event.delayMs}ms)`);
+                                        this.log(`重试: ${t.url} (Wait ${event.delayMs}ms)`);
                                     }
                                 }
                             });
                         });
                     } catch (e) {
-                        if (this._isCancelled()) return null;
+                        if (this._isTaskCancelled(task)) return null;
                         throw e;
                     }
 
-                    if (this._isCancelled()) {
+                    if (this._isTaskCancelled(task)) {
+                        // 下载完成后的清理逻辑
+                        if (res && res.results) {
+                            for (const r of res.results) {
+                                if (r.success) {
+                                    const f = r.path || r.destPath;
+                                    if (f && fs.existsSync(f)) {
+                                        try { fs.unlinkSync(f); } catch (e) { }
+                                    }
+                                }
+                            }
+                        }
                         return null;
                     }
 
@@ -1164,9 +1217,9 @@ class VideoDownloadController {
                     let finalTotalBytes = 0;
 
                     for (const r of successResults) {
-                        if (this._isCancelled()) return null;
+                        if (this._isTaskCancelled(task)) return null;
                         const p = r.path || r.destPath;
-                        const finalPath = await this._postProcess(p);
+                        const finalPath = await this._postProcess(task, p);
                         if (finalPath) {
                             landedFiles.push(finalPath);
                             try { finalTotalBytes += fs.statSync(finalPath).size; } catch (e) { }
@@ -1175,8 +1228,8 @@ class VideoDownloadController {
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
 
-                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强（包括第三条“落盘为空但 success>0”）
-                    const needEnhanced = (!isYouTube) && (
+                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强，静态分析找到直连视频也不触发增强
+                    const needEnhanced = (!isYouTube) && (!hasStaticDirectVideo) && (
                         forbiddenErrors.length > 0 ||
                         (probeForbidden && landedFiles.length === 0) ||
                         (landedFiles.length === 0 && successResults.length > 0)
@@ -1196,25 +1249,37 @@ class VideoDownloadController {
                         try { clearInterval(fileSizeTimer); } catch (e) { }
                     }
                 }
-            });
+            };
 
-            if (!outcome) {
-                if (transId) await this._rollbackTransaction(transId);
-                return;
-            }
-            if (this._isCancelled()) {
-                if (transId) await this._rollbackTransaction(transId);
-                return;
+            let outcome;
+            if (progressCallback) {
+                // Headless adapter
+                const progress = {
+                    report: (p) => {
+                        if (p && p.message) progressCallback(0, p.message);
+                    }
+                };
+                outcome = await runLogic(progress, null);
+            } else {
+                // Interactive
+                outcome = await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: "",
+                    cancellable: true
+                }, runLogic);
             }
 
-            // ✅ 最终兜底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
+            if (!outcome) return { landedFiles: [], finalTotalBytes: 0 };
+            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
+
+            // ✅ 最终兖底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
-                    if (transId) await this._commitTransaction(transId);
-                    await this._handleForbidden(outcome.code || 403, url, targetDir);
-                    return;
+                    const enhancedResult = await this._handleForbidden(task, outcome.code || 403, url, targetDir, progressCallback);
+                    // 增强流程也返回结果
+                    return enhancedResult || { landedFiles: [], finalTotalBytes: 0 };
                 }
             }
 
@@ -1223,22 +1288,34 @@ class VideoDownloadController {
             const landedCount = (outcome.landedFiles || []).length;
             const totalStr = this._formatBytesSimple(outcome.finalTotalBytes || 0);
 
-            const msg = this._buildDoneMessage(landedCount, totalStr, outcome.urlSnippet);
+            const msg = this._buildDoneMessage(task, landedCount, totalStr, outcome.urlSnippet);
             this.log(msg);
 
+            // 只有在非 headless 模式下，或者 headless 但有产出时才提示?
+            // 用户要求 Tab B 粘贴完 HTML，视频下载在 Tab A 继续。
+            // 如果是在 Tab A 启动的下载 (interactive)，则 progressCallback 为空，会显示 Toast。
+            // 如果是在 Tab B 启动的 (headless)，progressCallback 不为空，Toast 可能会打扰?
+            // 但用户说 "Tab B should finish..." implies independent success notification is OK.
+            // Let's keep Toast for now.
             const firstFile = this._pickFirstFileBySize(outcome.landedFiles || []);
             await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
 
+            // ★ 返回结果给调用者（用于替换锚点等）
+            return {
+                landedFiles: outcome.landedFiles || [],
+                finalTotalBytes: outcome.finalTotalBytes || 0
+            };
+
         } catch (error) {
-            if (transId) await this._rollbackTransaction(transId);
-            if (this._isCancelled()) return;
+            if (this._isTaskCancelled(task)) return { landedFiles: [], finalTotalBytes: 0 };
             this.log(`处理失败: ${error.message}`);
+            return { landedFiles: [], finalTotalBytes: 0 };
         }
     }
 
     // ==================== 后处理：验证 + 改名 + 插入（返回最终落盘路径） ====================
-    async _postProcess(filePath) {
-        if (this._isCancelled()) {
+    async _postProcess(task, filePath) {
+        if (this._isTaskCancelled(task)) {
             if (filePath && fs.existsSync(filePath)) {
                 try { fs.unlinkSync(filePath); } catch (e) { }
             }
@@ -1246,22 +1323,11 @@ class VideoDownloadController {
         }
         if (!filePath || !fs.existsSync(filePath)) return null;
 
-        // 指纹去重检查 (Global + Local)
+        // 指纹去重检查 (仅同文件夹内去重，不跨文件夹)
         try {
             const currentFp = h.computeFingerprint(filePath);
             if (currentFp) {
-                // 1. Global Cache (qqq)
-                if (this.qqq && this.qqq.findSourceFile) {
-                    const existing = this.qqq.findSourceFile(currentFp);
-                    if (existing && existing !== filePath && fs.existsSync(existing)) {
-                        this.log(`[GlobalCache] 发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${path.basename(existing)}`);
-                        try { fs.unlinkSync(filePath); } catch (e) { }
-                        await this._insertToCursor(path.basename(existing), existing);
-                        return existing;
-                    }
-                }
-
-                // 2. Local Fallback
+                // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
                 const dir = path.dirname(filePath);
                 const files = fs.readdirSync(dir);
                 for (const f of files) {
@@ -1272,14 +1338,9 @@ class VideoDownloadController {
 
                     const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
-                        this.log(`发现指纹重复文件，删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
+                        this.log(`发现指纹重复文件（同文件夹），删除新下载文件: ${path.basename(filePath)} -> 使用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }
-
-                        if (this.qqq && this.qqq.registerSourceFile) {
-                            this.qqq.registerSourceFile(full);
-                        }
-
-                        await this._insertToCursor(f, full);
+                        await this._insertToCursor(task, f, full);
                         return full;
                     }
                 }
@@ -1294,12 +1355,17 @@ class VideoDownloadController {
         const finalPath = await h.verifyVideoFile(filePath);
 
         if (finalPath) {
-            await this._insertToCursor(path.basename(finalPath), finalPath);
-
-            // ✅ 关键：新文件落盘后，立即注册到全局指纹库，供下次去重
-            if (this.qqq && this.qqq.registerSourceFile) {
-                try { this.qqq.registerSourceFile(finalPath); } catch (e) { }
+            // ★ 更新事务：记录落盘文件
+            if (task && task.transId) {
+                const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
+                if (trans) {
+                    const newLanded = [...(trans.landedFiles || []), finalPath];
+                    // De-dupe
+                    await global.TransactionManager.updateTransaction(task.transId, { landedFiles: [...new Set(newLanded)] });
+                }
             }
+
+            await this._insertToCursor(task, path.basename(finalPath), finalPath);
             return finalPath;
         } else {
             this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
@@ -1307,8 +1373,38 @@ class VideoDownloadController {
         }
     }
 
-    async _insertToCursor(fileName, fullPath) {
-        if (this._isCancelled()) return;
+    async _insertToCursor(task, fileName, fullPath) {
+        if (this._isTaskCancelled(task)) return;
+
+        // 如果是外部事务 (headless mode)，通常 q1.js 会处理插入 (通过 formatResultToText)
+        if (task.isExternalTrans) return;
+
+        const targetUri = task.targetUri;
+        if (targetUri) {
+            // Background insertion using WorkspaceEdit
+            try {
+                const doc = await vscode.workspace.openTextDocument(targetUri);
+                // Insert at end of document if no selection context, or maybe just append?
+                // For "Direct Paste", we usually want to replace selection.
+                // But in background, selection might be gone.
+                // We'll append to the end for safety in background mode, or try to use a stored range?
+                // Storing range is complex. Appending is safe for "download queue" behavior.
+                // Better: Insert at the end of document.
+                const lastLine = doc.lineCount - 1;
+                const range = new vscode.Range(lastLine, doc.lineAt(lastLine).text.length, lastLine, doc.lineAt(lastLine).text.length);
+
+                const edit = new vscode.WorkspaceEdit();
+                const relPath = path.relative(path.dirname(targetUri.fsPath), fullPath).replace(/\\/g, '/');
+                edit.insert(targetUri, range, `\n/\\${relPath}\\/\n`);
+                await vscode.workspace.applyEdit(edit);
+            } catch (e) {
+                this.log(`Background insert failed: ${e.message}`);
+            }
+            return;
+        }
+
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return;
 
         // 获取上下文（优先使用 task 中锁定的，如果没有则降级到 activeTextEditor）
         const task = this._task;
@@ -1365,8 +1461,8 @@ class VideoDownloadController {
     }
 
     // ==================== 增强流程入口 ====================
-    async _handleForbidden(code, url, targetDir) {
-        if (this._isCancelled()) return;
+    async _handleForbidden(task, code, url, targetDir, progressCallback) {
+        if (this._isTaskCancelled(task)) return null;
 
         const selection = await vscode.window.showInformationMessage(
             `qqq: 被拒绝，返回 ${code}，当前可尝试启动增强流程。`,
@@ -1375,18 +1471,19 @@ class VideoDownloadController {
             "选择类似 chrome.exe 滴浏览器入口文件"
         );
 
-        if (this._isCancelled()) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (selection === "🚀启动增强流程") {
-            await this._runEnhancedPreferSaved(url, targetDir);
+            return await this._runEnhancedPreferSaved(task, url, targetDir);
         } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
-            await this._runEnhancedForcePick(url, targetDir);
+            return await this._runEnhancedForcePick(task, url, targetDir);
         } else {
             this.log("用户取消增强流程");
+            return null;
         }
     }
 
-    async _runEnhancedPreferSaved(url, targetDir) {
+    async _runEnhancedPreferSaved(task, url, targetDir) {
         await this._cleanupSavedBrowserPaths();
 
         const dedicated = this.context.globalState.get(this.KEY_DEDICATED_BROWSER);
@@ -1394,8 +1491,7 @@ class VideoDownloadController {
             const v = await this._validateChromiumSilently(dedicated);
             if (v.valid) {
                 this.log(`[增强] 使用已保存专用浏览器: ${dedicated} (${v.version})`);
-                await this._startSniffer(dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
-                return;
+                return await this._startSniffer(task, dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
             } else {
                 await this.context.globalState.update(this.KEY_DEDICATED_BROWSER, undefined);
             }
@@ -1406,22 +1502,21 @@ class VideoDownloadController {
             const v = await this._validateChromiumSilently(custom);
             if (v.valid) {
                 this.log(`[增强] 使用已保存用户浏览器: ${custom} (${v.version})`);
-                await this._startSniffer(custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
-                return;
+                return await this._startSniffer(task, custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             } else {
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
         }
 
-        await this._promptPickThenMaybeDownload(url, targetDir);
+        return await this._promptPickThenMaybeDownload(task, url, targetDir);
     }
 
-    async _runEnhancedForcePick(url, targetDir) {
-        await this._promptPickThenMaybeDownload(url, targetDir);
+    async _runEnhancedForcePick(task, url, targetDir) {
+        return await this._promptPickThenMaybeDownload(task, url, targetDir);
     }
 
-    async _promptPickThenMaybeDownload(url, targetDir) {
-        if (this._isCancelled()) return;
+    async _promptPickThenMaybeDownload(task, url, targetDir) {
+        if (this._isTaskCancelled(task)) return null;
 
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
@@ -1431,7 +1526,7 @@ class VideoDownloadController {
             title: "请选择 Chromium 内核浏览器的可执行文件"
         });
 
-        if (this._isCancelled()) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (!uris || uris.length === 0) {
             const sel = await vscode.window.showErrorMessage(
@@ -1439,11 +1534,11 @@ class VideoDownloadController {
                 "下载 chrome", "终止一切"
             );
             if (sel === "下载 chrome") {
-                await this._downloadChrome(url, targetDir);
+                return await this._downloadChrome(task, url, targetDir);
             } else {
                 this.log("用户终止增强流程");
             }
-            return;
+            return null;
         }
 
         const exePath = uris[0].fsPath;
@@ -1451,12 +1546,11 @@ class VideoDownloadController {
 
         const validation = await this._validateChromiumSilently(exePath);
 
-        if (this._isCancelled()) return;
+        if (this._isTaskCancelled(task)) return null;
 
         if (validation.valid) {
             this.log(`[增强] 用户浏览器验证通过: ${validation.version}`);
-            await this._startSniffer(exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
-            return;
+            return await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
         }
 
         await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
@@ -1469,10 +1563,11 @@ class VideoDownloadController {
         );
 
         if (sel === "下载 chrome") {
-            await this._downloadChrome(url, targetDir);
+            return await this._downloadChrome(task, url, targetDir);
         } else {
             this.log("用户终止增强流程");
         }
+        return null;
     }
 
     async _cleanupSavedBrowserPaths() {
@@ -1607,8 +1702,8 @@ $of = $vi.OriginalFilename;
         };
     }
 
-    async _downloadChrome(url, targetDir) {
-        if (this._isCancelled()) return;
+    async _downloadChrome(task, url, targetDir) {
+        if (this._isTaskCancelled(task)) return;
 
         if (!fs.existsSync(this.chromeHome)) fs.mkdirSync(this.chromeHome, { recursive: true });
 
@@ -1632,16 +1727,16 @@ $of = $vi.OriginalFilename;
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
                     cancelled = true;
-                    await this._cancelTask('用户取消 Chrome 下载');
+                    await this._cancelTask(task, '用户取消 Chrome 下载');
                 })
             );
 
             try {
                 progress.report({ message: `0% (版本 ${chromeInfo.version})` });
 
-                await this._downloadFile(chromeInfo.url, zipPath, progress, () => cancelled || this._isCancelled());
+                await this._downloadFile(chromeInfo.url, zipPath, progress, () => cancelled || this._isTaskCancelled(task));
 
-                if (cancelled || this._isCancelled()) {
+                if (cancelled || this._isTaskCancelled(task)) {
                     try { fs.unlinkSync(zipPath); } catch (e) { }
                     return null;
                 }
@@ -1671,7 +1766,7 @@ $of = $vi.OriginalFilename;
                 return foundExe;
 
             } catch (e) {
-                if (this._isCancelled()) return null;
+                if (this._isTaskCancelled(task)) return null;
                 this.log(`[Chrome] 失败: ${e.message}`);
                 vscode.window.showErrorMessage(`下载 Chrome 失败: ${e.message}`);
                 return null;
@@ -1680,7 +1775,7 @@ $of = $vi.OriginalFilename;
 
         if (!exePath) return;
 
-        await this._startSniffer(exePath, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
+        await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
     }
 
     _downloadFile(url, destPath, progress, isCancelled) {
@@ -1916,7 +2011,7 @@ $of = $vi.OriginalFilename;
         return total;
     }
 
-    async _downloadEnhancedOne(url, targetDir, bestVideo) {
+    async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
 
@@ -1929,19 +2024,19 @@ $of = $vi.OriginalFilename;
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
-                    await this._cancelTask('用户在增强下载窗口点取消');
+                    await this._cancelTask(task, '用户在增强下载窗口点取消');
                 })
             );
 
             let timer = null;
             try {
                 timer = setInterval(() => {
-                    if (this._isCancelled()) return;
+                    if (this._isTaskCancelled(task)) return;
                     const bytes = this._scanRecentBytes(targetDir, startMs);
                     progress.report({ message: `已交换 ${this._formatBytesSimple(bytes)} 于 ${urlSnippet} (增强下载中...)` });
                 }, 500);
 
-                if (this._isCancelled()) return null;
+                if (this._isTaskCancelled(task)) return null;
 
                 await this._runWithSuppressedPopups(async () => {
                     await this.downloader.downloadVideos([bestVideo], targetDir);
@@ -1953,22 +2048,22 @@ $of = $vi.OriginalFilename;
                 }
             }
 
-            if (this._isCancelled()) return null;
+            if (this._isTaskCancelled(task)) return null;
 
             await this._sleep(300);
 
-            const landedFiles = this._findLandedVideoFilesSince(targetDir, startMs);
+            const rawFiles = this._findLandedVideoFilesSince(targetDir, startMs);
+            const landedFiles = [];
             let totalBytes = 0;
-            for (const p of landedFiles) {
-                try { totalBytes += fs.statSync(p).size; } catch (e) { }
-            }
 
-            const inserted = new Set();
-            for (const p of landedFiles) {
-                if (this._isCancelled()) break;
-                if (inserted.has(p)) continue;
-                inserted.add(p);
-                try { await this._insertToCursor(path.basename(p), p); } catch (e) { }
+            // ★ 增强流程也要经过 _postProcess 验证和指纹注册
+            for (const p of rawFiles) {
+                if (this._isTaskCancelled(task)) break;
+                const finalPath = await this._postProcess(task, p);
+                if (finalPath) {
+                    landedFiles.push(finalPath);
+                    try { totalBytes += fs.statSync(finalPath).size; } catch (e) { }
+                }
             }
 
             return { landedFiles, totalBytes, urlSnippet };
@@ -1978,8 +2073,8 @@ $of = $vi.OriginalFilename;
     }
 
     // ==================== 嗅探器（增强也要任务结束三号弹窗） ====================
-    async _startSniffer(browserPath, url, targetDir, opts = {}) {
-        if (this._isCancelled()) return;
+    async _startSniffer(task, browserPath, url, targetDir, opts = {}) {
+        if (this._isTaskCancelled(task)) return null;
 
         this.log("启动增强嗅探流程...");
         this.log(`浏览器: ${browserPath}`);
@@ -2012,9 +2107,9 @@ $of = $vi.OriginalFilename;
                 }
             }
 
-            if (this._isCancelled()) {
+            if (this._isTaskCancelled(task)) {
                 try { await sniffer.stop(); } catch (e) { }
-                return;
+                return null;
             }
 
             const selection = await vscode.window.showInformationMessage(
@@ -2026,12 +2121,12 @@ $of = $vi.OriginalFilename;
             if (selection !== "我已在外部播放") {
                 try { await sniffer.stop(); } catch (e) { }
                 this.log("用户取消增强嗅探");
-                return;
+                return null;
             }
 
-            if (this._isCancelled()) {
+            if (this._isTaskCancelled(task)) {
                 try { await sniffer.stop(); } catch (e) { }
-                return;
+                return null;
             }
 
             const videos = sniffer.getCapturedVideos();
@@ -2041,10 +2136,10 @@ $of = $vi.OriginalFilename;
             const urlSnippet = this._makeUrlSnippet(url);
 
             if (!best) {
-                const msg0 = this._buildDoneMessage(0, "0k", urlSnippet);
+                const msg0 = this._buildDoneMessage(task, 0, "0k", urlSnippet);
                 this.log(msg0);
                 await this._showTaskDoneToast(msg0, false, null, targetDir);
-                return;
+                return null;
             }
 
             if (!best.meta) best.meta = {};
@@ -2055,26 +2150,29 @@ $of = $vi.OriginalFilename;
                 best.meta.origin = best.headers['Origin'];
             }
 
-            const out = await this._downloadEnhancedOne(url, targetDir, best);
-            if (!out) return;
-            if (this._isCancelled()) return;
+            const out = await this._downloadEnhancedOne(task, url, targetDir, best);
+            if (!out) return null;
+            if (this._isTaskCancelled(task)) return null;
 
             const landedCount = (out?.landedFiles || []).length;
             const totalStr = this._formatBytesSimple(out?.totalBytes || 0);
 
-            const msg = this._buildDoneMessage(landedCount, totalStr, out?.urlSnippet || urlSnippet);
+            const msg = this._buildDoneMessage(task, landedCount, totalStr, out?.urlSnippet || urlSnippet);
             this.log(msg);
 
             const firstFile = this._pickFirstFileBySize(out?.landedFiles || []);
             await this._showTaskDoneToast(msg, landedCount > 0, firstFile, targetDir);
 
+            return out; // Return successful outcome
+
         } catch (e) {
-            if (this._isCancelled()) return;
+            if (this._isTaskCancelled(task)) return null;
 
             this.log(`增强流程出错: ${e.message}`);
             if (sniffer) {
                 try { await sniffer.stop(); } catch (e2) { }
             }
+            return null;
         }
     }
 }

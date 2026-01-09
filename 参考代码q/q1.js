@@ -1,7 +1,4 @@
 // src/q1.js
-const { checkQ, TransactionManager, getConfig } = require('./global');
-const h = require('./h');
-const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -105,7 +102,7 @@ const editorDebounceTimers = new Map();
 
 let enlargeSmallImages = true;
 let performanceMode = "balanced";
-let frameSizeMode = "fix";
+let frameSizeMode = "smart";
 let cleanFreakMode = false;
 
 let watermarkBase64 = null;
@@ -154,12 +151,12 @@ function refreshConfig() {
         if (extremePerformance) performanceMode = "extreme";
         else performanceMode = config.get("performanceMode", "balanced");
 
-        frameSizeMode = config.get("frameSizeMode", "fix");
+        frameSizeMode = config.get("frameSizeMode", "smart");
         cleanFreakMode = config.get("cleanFreak", false);
     } catch (e) {
         enlargeSmallImages = true;
         performanceMode = "balanced";
-        frameSizeMode = "fix";
+        frameSizeMode = "smart";
         cleanFreakMode = false;
     }
 }
@@ -1345,159 +1342,9 @@ async function formatResultToText(result, editor) {
     return replacement;
 }
 
-// ==================== 锚点替换辅助 ====================
-async function replaceAnchorInDoc(uri, anchor, newText) {
-    try {
-        // 尝试打开文档（即使不可见）
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const text = doc.getText();
-        const idx = text.indexOf(anchor);
-
-        if (idx === -1) {
-            // 锚点丢失，返回 false 触发回滚
-            return false;
-        }
-
-        const pos = doc.positionAt(idx);
-        const endPos = doc.positionAt(idx + anchor.length);
-        const range = new vscode.Range(pos, endPos);
-
-        const edit = new vscode.WorkspaceEdit();
-        edit.replace(uri, range, newText);
-
-        // 应用编辑
-        return await vscode.workspace.applyEdit(edit);
-    } catch (e) {
-        console.error("Replace Anchor Failed:", e);
-        return false;
-    }
-}
-
-async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
-    // 1. 生成并插入锚点
-    const transId = TransactionManager.createTransactionId();
-    const anchor = `/__PENDING_${transId}/`;
-
-    // 立即插入锚点
-    const success = await TransactionManager.insertAnchor(editor, transId);
-
-    if (!success) return; // 插入失败，直接退出
-
-    const docUri = editor.document.uri;
-
-    // 2. 注册事务 (Pending)
-    await TransactionManager.saveTransaction({
-        id: transId,
-        targetDir: targetDir,
-        expectedAnchor: anchor,
-        docUri: docUri.toString(),
-        tempFiles: [],
-        landedFiles: [],
-        startTime: Date.now()
-    });
-
-    // 3. 启动带进度的后台任务
-    vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: "资源处理中 (弯粘)...",
-        cancellable: true
-    }, async (progress, token) => {
-
-        // 监听取消
-        token.onCancellationRequested(async () => {
-            const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-            if (trans) await TransactionManager.rollback(trans);
-            // 尝试移除锚点
-            await replaceAnchorInDoc(docUri, anchor, "");
-        });
-
-        try {
-            // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
-            let result = await h.autoDetectAndPaste(targetDir, (p, msg) => {
-                progress.report({ increment: p, message: msg });
-            }, token, transId);
-
-            // ★★★ 视频并发下载接管 ★★★
-            if (result && result.type === 'video_url') {
-                try {
-                    const vc = new VideoDownloadController(extensionContext);
-                    const downloadRes = await vc.downloadEntry(
-                        result.url,
-                        targetDir,
-                        transId,
-                        (p, msg) => progress.report({ increment: 0, message: msg }),
-                        token
-                    );
-
-                    if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
-                        result = {
-                            type: 'file',
-                            files: downloadRes.landedFiles,
-                            fingerprints: {}
-                        };
-                    } else {
-                        result = null; // 下载失败或取消
-                    }
-                } catch (e) {
-                    console.error("Video Download Failed:", e);
-                    result = null;
-                }
-            }
-
-            if (result) {
-                // 5. 格式化结果
-                // Mock editor object for formatResultToText
-                const mockEditor = {
-                    document: {
-                        uri: docUri,
-                        eol: editor.document.eol // Use captured EOL or default
-                    }
-                };
-
-                // 这里我们假设 formatResultToText 只需要 document.uri 和 eol
-                // 如果它需要 getText，我们需要 openTextDocument。
-                // 查看源码 formatResultToText 使用了 getDocumentEOL 和 path.dirname。安全。
-
-                const newText = await formatResultToText(result, mockEditor);
-
-                if (newText) {
-                    // 6. 替换锚点 (原子化提交)
-                    const replaced = await replaceAnchorInDoc(docUri, anchor, newText);
-
-                    if (replaced) {
-                        // 成功：提交事务 (移除记录)
-                        await TransactionManager.removeTransaction(transId);
-                    } else {
-                        // 失败：锚点丢失 -> 回滚文件
-                        const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-                        if (trans) await TransactionManager.rollback(trans);
-                    }
-                } else {
-                    // 结果为空 -> 回滚
-                    const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-                    if (trans) await TransactionManager.rollback(trans);
-                    await replaceAnchorInDoc(docUri, anchor, "");
-                }
-            } else {
-                // 任务失败/取消 -> 回滚
-                if (!token.isCancellationRequested) {
-                    const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-                    if (trans) await TransactionManager.rollback(trans);
-                    await replaceAnchorInDoc(docUri, anchor, "");
-                }
-            }
-        } catch (e) {
-            console.error(e);
-            const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-            if (trans) await TransactionManager.rollback(trans);
-            await replaceAnchorInDoc(docUri, anchor, "");
-        }
-    });
-}
-
 async function executeClipboardCommand() {
     if (!isCoreIntegrityValid) {
-        vscode.window.showErrorMessage("Integrity check failed.");
+        global.showErrorMessage("Integrity check failed.");
         return;
     }
 
@@ -1505,69 +1352,33 @@ async function executeClipboardCommand() {
     if (!editor) return;
 
     if (editor.document.isUntitled) {
-        vscode.window.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
+        global.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
         await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
         return;
     }
 
-    // Lazy Recovery Trigger (Only once per session)
-    if (!global.hasRecovered) {
-        global.hasRecovered = true;
-        TransactionManager.recover().catch(e => console.error(e));
-    }
+    const targetDir = path.join(path.dirname(editor.document.uri.fsPath), "qqq");
 
-    const currentDocDir = path.dirname(editor.document.uri.fsPath);
-    const targetDir = path.join(currentDocDir, "qqq");
-    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+    // ★ 最终版策略：静默等待，单次插入
+    // 没有中间状态，没有占位符，没有多次更新。
+    // 如果是 HTML，用户会感觉“没反应”几秒钟，然后最终结果突然出现。
 
-    // 1. 分类 (Check Q)
-    const typeInfo = await checkQ();
-    const config = getConfig('transactionLevel') || 'full';
+    await qqq.raceClipboard(targetDir, async (result, priority) => {
+        const newText = await formatResultToText(result, editor);
+        if (!newText) return;
 
-    let mode = 'a'; // 默认弯粘
+        const activeEditor = vscode.window.activeTextEditor;
+        if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
 
-    // 白名单 -> 直粘 (q)
-    if (typeInfo.type === 'whitelist') {
-        mode = 'q';
-    } else {
-        // 黄名单
-        if (config === 'half') {
-            // 半包模式例外
-            if (typeInfo.subType === 'image') {
-                mode = 'q'; // 截图 -> q
-            } else if (typeInfo.subType === 'file') {
-                // 文件 < 80MB -> q
-                const size = await h.getClipboardTotalSize();
-                if (size < 80 * 1024 * 1024) mode = 'q';
-            }
-        }
-    }
+        // 此时光标可能已经移动，我们需要获取最新的光标位置
+        const currentPos = activeEditor.selection.active;
 
-    if (mode === 'q') {
-        // 直粘 (q) - 最快速度，无事务
-        await h.autoDetectAndPaste(targetDir, null, null, null).then(async (result) => {
-            // ★ Handle Video URL in q mode -> Escalate to 'a' (Curved Paste)
-            if (result && result.type === 'video_url') {
-                await performCurvedPaste(editor, targetDir, { type: 'yellowlist', subType: 'video_url' }, result);
-                return;
-            }
-
-            const newText = await formatResultToText(result, editor);
-            if (!newText) return;
-
-            // 确保编辑器仍然活跃
-            const activeEditor = vscode.window.activeTextEditor;
-            if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
-
-            await activeEditor.edit((editBuilder) => {
-                editBuilder.replace(activeEditor.selection, newText);
-            });
-            debounceRender(activeEditor, 10);
+        await activeEditor.edit((editBuilder) => {
+            editBuilder.insert(currentPos, newText);
         });
-    } else {
-        // 弯粘 (a) - 事务 + 弹窗 + 锚点
-        await performCurvedPaste(editor, targetDir, typeInfo);
-    }
+
+        debounceRender(activeEditor, 10);
+    });
 }
 
 // ==================== 整洁模式 ====================
@@ -1896,21 +1707,6 @@ function renderVisibleEditors(delay = 50) {
 // ==================== 激活与停用 ====================
 async function activate(context) {
     extensionContext = context;
-    // Inject context into global for state access
-    try {
-        const global = require('./global');
-        if (global.ConfigManager) global.ConfigManager.setContext(context);
-        // Also ensure global state is accessible for TransactionManager
-        // global.js uses extensionContext variable if exported or set?
-        // In global.js I used `extensionContext` variable but didn't export a setter.
-        // Wait, global.js has `getConfig` using `vscode.workspace.getConfiguration`.
-        // But `TransactionManager` uses `extensionContext.globalState`.
-        // I need to set `extensionContext` in global.js.
-        // `global.js` has `extensionContext` variable but no setter exported?
-        // Let's check global.js content again.
-        // I might need to add a setter in global.js or pass context to recover.
-    } catch (e) { }
-
     isCoreIntegrityValid = verifySystemIntegrity();
     qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
     if (!isCoreIntegrityValid) return;
@@ -1918,13 +1714,6 @@ async function activate(context) {
     loadWatermarkResource();
     refreshConfig();
     codeLensProvider = new FileCodeLensProvider();
-
-    // ★ 启动时恢复/清理事务
-    try {
-        await TransactionManager.recover();
-    } catch (e) {
-        console.error("Transaction Recovery Failed:", e);
-    }
 
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
