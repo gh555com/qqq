@@ -140,33 +140,35 @@ function spawnOutput(cmd, args) {
 }
 
 // ============================================================================
-// Deduplication Helper
+// Deduplication Helper (仅同文件夹内去重，不跨文件夹)
 // ============================================================================
 function _tryGlobalDeduplicate(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return filePath;
     try {
-        // Lazy require to avoid circular dependency during init
-        const qqq = require('./qqq');
-        if (qqq && typeof qqq.findSourceFile === 'function' && typeof qqq.registerSourceFile === 'function') {
-            const fp = computeFingerprint(filePath);
-            if (fp) {
-                const existing = qqq.findSourceFile(fp);
-                if (existing && existing !== filePath && fs.existsSync(existing)) {
-                    try {
-                        fs.unlinkSync(filePath);
-                        log(`[Dedupe] Replaced ${path.basename(filePath)} with existing ${path.basename(existing)}`, "INFO");
-                        return existing;
-                    } catch (e) {
-                        log(`[Dedupe] Failed to delete ${filePath}: ${e.message}`, "WARN");
-                    }
+        const currentFp = computeFingerprint(filePath);
+        if (!currentFp) return filePath;
+
+        // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
+        const dir = path.dirname(filePath);
+        const files = fs.readdirSync(dir);
+        for (const f of files) {
+            const full = path.join(dir, f);
+            if (full === filePath) continue;
+            try {
+                if (!fs.statSync(full).isFile()) continue;
+            } catch { continue; }
+            if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
+
+            const otherFp = computeFingerprint(full);
+            if (otherFp === currentFp) {
+                try {
+                    fs.unlinkSync(filePath);
+                    log(`[Dedupe] 同文件夹重复: ${path.basename(filePath)} -> 使用旧文件: ${f}`, "INFO");
+                    return full;
+                } catch (e) {
+                    log(`[Dedupe] 删除失败 ${filePath}: ${e.message}`, "WARN");
                 }
-                const regRes = qqq.registerSourceFile(filePath);
-                if (!regRes) log(`[Dedupe] Register failed for ${filePath}`, "WARN");
-            } else {
-                log(`[Dedupe] Failed to compute fingerprint for ${filePath}`, "WARN");
             }
-        } else {
-            log(`[Dedupe] qqq module incomplete`, "WARN");
         }
     } catch (e) {
         log(`[Dedupe] Exception: ${e.message}`, "ERROR");

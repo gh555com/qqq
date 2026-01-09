@@ -598,6 +598,15 @@ async function downloadVideosFromUrlCommand() {
 	// 1. 立即插入锚点 (类似于 "Curved Paste (a)")
 	await global.TransactionManager.insertAnchor(editor, transId);
 
+	// ★ 保存事务到 globalState，确保 VS Code 崩溃时可以恢复清理
+	await global.TransactionManager.saveTransaction({
+		id: transId,
+		targetDir: targetDir,
+		targetUri: targetUri.fsPath, // 记录目标文档
+		tempFiles: [],
+		landedFiles: []
+	});
+
 	// 2. 启动带进度条的弹窗任务
 	// 不 await 这个 promise，让它在后台跑（但 withProgress 会保持弹窗直到 resolve）
 	// 实际上我们需要 await 它，否则函数结束可能会导致 context 问题？
