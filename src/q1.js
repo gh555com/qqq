@@ -1549,6 +1549,9 @@ async function executeClipboardCommand() {
 
     let mode = 'a'; // 默认弯粘
 
+    // ★ 文件数量阈值：超过此数量必须显示进度弹窗
+    const FILE_COUNT_THRESHOLD = 100;
+
     // 白名单 -> 直粘 (q)
     if (snapshot.type === 'whitelist') {
         mode = 'q';
@@ -1559,8 +1562,12 @@ async function executeClipboardCommand() {
             if (snapshot.subType === 'image') {
                 mode = 'q'; // 截图 -> q
             } else if (snapshot.subType === 'file') {
-                // 文件 < 80MB -> q（★ 直接使用快照中的 totalSize）
-                if (snapshot.totalSize < 80 * 1024 * 1024) mode = 'q';
+                const fileCount = snapshot.files?.length || 0;
+                // ★ 文件 < 80MB 且数量 < 10 -> q
+                // 否则使用弯粘模式显示进度弹窗
+                if (snapshot.totalSize < 80 * 1024 * 1024 && fileCount < FILE_COUNT_THRESHOLD) {
+                    mode = 'q';
+                }
             }
         }
     }
