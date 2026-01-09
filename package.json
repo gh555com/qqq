@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.6.0",
+  "version": "15.8.0",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -25,7 +25,7 @@
   "contributes": {
     "configuration": [
       {
-        "title": "💗 核心",
+        "title": "☀️ 核心",
         "order": 10,
         "properties": {
           "qqq.performanceMode": {
@@ -42,7 +42,7 @@
               "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47",
               "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71"
             ],
-            "markdownDescription": "💗 性能模式：控制预览生成的质量和性能平衡。"
+            "markdownDescription": "☀️ 性能模式：控制预览生成的质量和性能平衡。"
           },
           "qqq.ioEngine": {
             "order": 20,
@@ -60,13 +60,13 @@
               "Rust 引擎",
               "Node 引擎"
             ],
-            "markdownDescription": "💗 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+            "markdownDescription": "☀️ 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
           },
           "qqq.pythonPath": {
             "order": 30,
             "type": "string",
             "default": "",
-            "markdownDescription": "💗 指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
+            "markdownDescription": "☀️ 指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
           },
           "qqq.transactionLevel": {
             "order": 40,
@@ -80,7 +80,7 @@
               "全包裹：一切耗时操作（如视频下载、批量文件、混合富文本等）都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",
               "半包裹：细分出上方耗时操作中滴“轻便操作”（如小于80m滴文件（文件夹）混合落盘、内存截图等）做简单粘贴：最快响应，无进度条，异常**无**回滚或清理。"
             ],
-            "markdownDescription": "💗 事务包裹级别："
+            "markdownDescription": "☀️ 事务包裹级别："
           }
         }
       },
