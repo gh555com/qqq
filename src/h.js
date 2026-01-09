@@ -215,6 +215,40 @@ function getTimestampFilename(ext) {
     return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
 }
 
+/**
+ * ★ 从 URL 提取原始文件名（与 VideoDownloadController._createTask 统一逻辑）
+ * @param {string} url - 资源 URL
+ * @param {string} kind - 'video' 或 'image'
+ * @returns {string|null} - 文件名，失败返回 null
+ */
+function getFilenameFromUrl(url, kind = 'video') {
+    try {
+        const u = new URL(url);
+        const pathname = u.pathname || '';
+        const base = path.basename(pathname);
+
+        if (kind === 'video') {
+            // ★ 视频：匹配常见视频扩展名
+            if (base && /\.(mp4|webm|mkv|mov|flv|avi|wmv|m4v|mpg|mpeg|3gp|ts|ogv)$/i.test(base)) {
+                const decoded = decodeURIComponent(base);
+                // ★ 文件名合理检查：不能太长，不能有特殊字符
+                if (decoded.length <= 100 && /^[a-zA-Z0-9._\-\u4e00-\u9fff]+$/.test(decoded)) {
+                    return decoded;
+                }
+            }
+        } else {
+            // ★ 图片：匹配常见图片扩展名
+            if (base && /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(base)) {
+                const decoded = decodeURIComponent(base);
+                if (decoded.length <= 100 && /^[a-zA-Z0-9._\-\u4e00-\u9fff]+$/.test(decoded)) {
+                    return decoded;
+                }
+            }
+        }
+    } catch (e) { }
+    return null;
+}
+
 function _fileUriToLocalPath(fileUri) {
     try {
         let u = String(fileUri || "");
@@ -1378,7 +1412,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const tag = Math.random().toString(36).slice(2) + "_" + Date.now();
             b._tag = tag;
             const ext = b.kind === "video" ? ".mp4" : ".png";
-            const filename = getTimestampFilename(ext);
+            // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
+            // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
+            const filename = getFilenameFromUrl(src, b.kind) || getTimestampFilename(ext);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 200 * 1024 * 1024 });
             taskMap.set(tag, b);
@@ -2087,6 +2123,7 @@ module.exports = {
     computeFingerprint,
     prefillFingerprint,
     getTimestampFilename,
+    getFilenameFromUrl,
     isImageExtForClipboard,
     spawnOutput,
     ensureDir,
