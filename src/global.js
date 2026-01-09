@@ -963,6 +963,105 @@ function logQ(ms) {
 }
 
 // ============================================================================
+// ★ 统一任务消息模块（唯一真理源）
+// 用于文件粘贴、视频下载等所有任务的进度/完成消息格式化和显示
+// ============================================================================
+const TaskMessage = {
+	/**
+	 * 格式化耗时
+	 * @param {number} ms - 毫秒数
+	 * @returns {string} 如 "6s", "1m30s"
+	 */
+	formatDuration(ms) {
+		const sec = Math.round(ms / 1000);
+		if (sec < 60) return `${sec}s`;
+		const min = Math.floor(sec / 60);
+		const s = sec % 60;
+		return s > 0 ? `${min}m${s}s` : `${min}m`;
+	},
+
+	/**
+	 * 生成进度消息
+	 * @param {string} taskTitle - 任务标题，如 "qqq：'d:/122.txt 任务 19'"
+	 * @param {string} content - 进度内容，如 "已交换 7m 于 https://..."
+	 * @returns {string}
+	 */
+	progress(taskTitle, content) {
+		const prefix = taskTitle || 'qqq';
+		return `${prefix} ${content}`;
+	},
+
+	/**
+	 * 生成完成消息
+	 * @param {string} taskTitle - 任务标题
+	 * @param {string} summary - 结果摘要，如 "文件/文件夹已复制 59" 或 "共落盘 3个视频共 19m"
+	 * @param {string|number} elapsed - 耗时，可以是字符串 "6s" 或毫秒数
+	 * @returns {string}
+	 */
+	done(taskTitle, summary, elapsed) {
+		const prefix = taskTitle || 'qqq';
+		const dur = typeof elapsed === 'number' ? this.formatDuration(elapsed) : elapsed;
+		return `${prefix} ${summary}（耗时${dur}）`;
+	},
+
+	/**
+	 * 生成用户提示消息
+	 * @param {string} taskTitle - 任务标题
+	 * @param {string} message - 提示内容
+	 * @returns {string}
+	 */
+	prompt(taskTitle, message) {
+		const prefix = taskTitle || 'qqq';
+		return `${prefix} ${message}`;
+	},
+
+	/**
+	 * 显示自动关闭的完成弹窗（可带按钮）
+	 * @param {string} message - 消息内容
+	 * @param {Object} options - 选项
+	 * @param {string[]} options.buttons - 按钮文本数组
+	 * @param {number} options.timeout - 自动关闭时间（毫秒），默认 15000
+	 * @param {Function} options.onButton - 按钮点击回调 (buttonText) => {}
+	 * @returns {Promise<string|undefined>} 用户点击的按钮文本，或 undefined（超时/无操作）
+	 */
+	async showDoneToast(message, options = {}) {
+		const { buttons = [], timeout = 15000, onButton } = options;
+
+		const p = vscode.window.showInformationMessage(message, ...buttons);
+
+		let timer = null;
+		const timeoutPromise = new Promise(resolve => {
+			timer = setTimeout(() => resolve(undefined), timeout);
+		});
+
+		const choice = await Promise.race([p, timeoutPromise]);
+		try { if (timer) clearTimeout(timer); } catch (e) { }
+
+		if (choice && onButton) {
+			await onButton(choice);
+		}
+
+		return choice;
+	},
+
+	/**
+	 * 显示简单的自动关闭消息（无按钮）
+	 * @param {string} message - 消息内容
+	 * @param {number} timeout - 自动关闭时间（毫秒），默认 15000
+	 */
+	async showSimpleToast(message, timeout = 15000) {
+		return vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: message,
+			cancellable: false
+		}, async (progress) => {
+			progress.report({ increment: 100 });
+			await new Promise(resolve => setTimeout(resolve, timeout));
+		});
+	}
+};
+
+// ============================================================================
 // ★ 对话框包装 (qqq 涉及的对话框)
 // ============================================================================
 function showInformationMessage(message, ...items) {
@@ -1910,6 +2009,9 @@ module.exports = {
 	showTextDocument,
 	openExternal,
 	setStatusBarMessage,
+
+	// ★ 统一任务消息模块
+	TaskMessage,
 
 	// 统计
 	markCacheHit,
