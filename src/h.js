@@ -1671,7 +1671,8 @@ function processFilesForClipboard(files, targetDir) {
 }
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
-async function processFilesForClipboardWithProgress(files, targetDir, progressCallback) {
+// ★ 修复：添加 token 和 transId 参数，边复制边记录事务
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1686,14 +1687,42 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
 
+    // ★ 辅助函数：更新事务记录
+    const updateTransaction = async (newFiles, newFolders) => {
+        if (!transId) return;
+        try {
+            const global = getGlobal();
+            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+            if (trans) {
+                const updates = {};
+                if (newFiles && newFiles.length > 0) {
+                    updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...newFiles])];
+                }
+                if (newFolders && newFolders.length > 0) {
+                    updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...newFolders])];
+                }
+                if (Object.keys(updates).length > 0) {
+                    await global.TransactionManager.updateTransaction(transId, updates);
+                }
+            }
+        } catch (e) {
+            log(`[事务] 更新失败: ${e.message}`, "WARN");
+        }
+    };
+
     // ★ 初始进度显示
     if (progressCallback && totalItems > 0) {
-        progressCallback(2, `准备复制 ${totalItems} 个项目 (${folders.length} 个文件夹, ${validFiles.length} 个文件)...`);
+        progressCallback(2, `准备复制 ${totalItems} 个项目 (文件夹${folders.length}, 文件${validFiles.length})...`);
         await yieldToUI(); // ★ 让 UI 更新
     }
 
     // 复制文件夹
     for (let i = 0; i < folders.length; i++) {
+        // ★ 检查取消状态
+        if (token?.isCancellationRequested) {
+            log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            break;
+        }
         const folder = folders[i];
         try {
             const folderName = path.basename(folder);
@@ -1707,6 +1736,8 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
+                // ★ 立即更新事务
+                await updateTransaction(null, [destFolder]);
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
                     log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
@@ -1724,6 +1755,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
     // 复制文件
     for (let i = 0; i < validFiles.length; i++) {
+        // ★ 检查取消状态
+        if (token?.isCancellationRequested) {
+            log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            break;
+        }
         const f = validFiles[i];
         try {
             const fileName = path.basename(f);
@@ -1750,6 +1786,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 let existingPath = findFileByFingerprint(srcFingerprint);
                 if (existingPath && fs.existsSync(existingPath)) {
                     copiedFiles.push(existingPath);
+                    // ★ 复用旧文件，不记入事务（取消时不删除）
                     processedItems++;
                     continue;
                 }
@@ -1766,6 +1803,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                     copiedFiles.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
                     _tryGlobalDeduplicate(dest);
+                    // ★ 复用旧文件，不记入事务
                     processedItems++;
                     continue;
                 }
@@ -1773,11 +1811,15 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             fs.copyFileSync(f, dest);
             const finalPath = _tryGlobalDeduplicate(dest);
+            const isNewFile = (finalPath === dest);
             if (finalPath !== dest) {
                 copiedFiles.push(finalPath);
+                // ★ 复用旧文件，不记入事务
             } else {
                 if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
                 copiedFiles.push(dest);
+                // ★ 新文件，立即记入事务
+                await updateTransaction([dest], null);
             }
         } catch (e) {
             // ★ 对于被占用/权限不足的文件，跳过而不是崩溃
@@ -1845,33 +1887,15 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     progressCallback(1, `检测到 ${files.length} 个项目，开始复制...`);
                 }
 
-                // ★ 异步调用，让 UI 能够更新进度
-                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback);
+                // ★ 传入 token 和 transId，边复制边记录事务
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
                 const successFolders = (result?.folders || []).length;
                 const skipped = result?.skippedCount || 0;
                 log(`[Clipboard] 复制结果: files=${successFiles}, folders=${successFolders}, skipped=${skipped}`, "INFO");
-                // ★ Register Transaction (files + folders)
-                if (result && transId) {
-                    log(`[Clipboard] 尝试更新事务 ${transId}`, "INFO");
-                    const global = getGlobal();
-                    const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                    if (trans) {
-                        const newLanded = [...(trans.landedFiles || []), ...(result.files || [])];
-                        const newFolders = [...(trans.landedFolders || []), ...(result.folders || [])];
-                        log(`[Clipboard] 更新事务: landedFiles=${newLanded.length}, landedFolders=${newFolders.length}`, "INFO");
-                        await global.TransactionManager.updateTransaction(transId, {
-                            landedFiles: [...new Set(newLanded)],
-                            landedFolders: [...new Set(newFolders)]
-                        });
-                    } else {
-                        log(`[Clipboard] 未找到事务 ${transId}`, "WARN");
-                    }
-                } else {
-                    log(`[Clipboard] 未传入 transId 或 result 为空`, "WARN");
-                }
+                // ★ 事务已在 processFilesForClipboardWithProgress 中边复制边记录，这里不再重复更新
                 return result;
             }
         }
