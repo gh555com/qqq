@@ -1466,6 +1466,70 @@ const TransactionManager = {
 	}
 };
 
+// ============================================================================
+// ★ 任务计数器系统（每个文件路径维护一个永久递增的任务计数 q）
+// ============================================================================
+const KEY_TASK_COUNTERS = "qqq.task_counters";
+
+const TaskCounter = {
+	/**
+	 * 获取文件路径的当前任务计数
+	 */
+	getCount(filePath) {
+		if (!extensionContext) return 0;
+		const counters = extensionContext.globalState.get(KEY_TASK_COUNTERS, {});
+		return counters[filePath] || 0;
+	},
+
+	/**
+	 * 递增并返回新的任务计数（永不重置）
+	 */
+	async increment(filePath) {
+		if (!extensionContext) return 1;
+		const counters = extensionContext.globalState.get(KEY_TASK_COUNTERS, {});
+		const newCount = (counters[filePath] || 0) + 1;
+		counters[filePath] = newCount;
+		await extensionContext.globalState.update(KEY_TASK_COUNTERS, counters);
+		return newCount;
+	},
+
+	/**
+	 * 截断路径显示：目录部分超过22字符时截断
+	 * 例：E:\s\dqqqqqqqqqqqqqqqqqqq\11.txt -> ...qqqqqqqqqqqqqqq\11.txt
+	 * ★ 统一使用正斜杠显示（避免 Windows 反斜杠被转义显示为双斜杠）
+	 */
+	formatPath(filePath, maxDirLen = 22) {
+		if (!filePath) return '';
+
+		// ★ 统一转换为正斜杠（对用户友好，避免反斜杠转义问题）
+		const normalizedPath = filePath.replace(/\\/g, '/');
+		const lastSlash = normalizedPath.lastIndexOf('/');
+
+		let dir = lastSlash >= 0 ? normalizedPath.substring(0, lastSlash) : '';
+		const fileName = lastSlash >= 0 ? normalizedPath.substring(lastSlash + 1) : normalizedPath;
+
+		let displayDir = dir;
+		if (dir.length > maxDirLen) {
+			// 只保留最右边的22个字符
+			displayDir = '...' + dir.slice(-maxDirLen);
+		}
+
+		return displayDir + '/' + fileName;
+	},
+
+	/**
+	 * 生成任务标题：qqq：'截断路径 任务 q' ...
+	 * @param {string} filePath - 文件路径
+	 * @param {number} taskNum - 任务编号
+	 * @param {string} suffix - 可选后缀描述
+	 */
+	formatTitle(filePath, taskNum, suffix = '') {
+		const displayPath = this.formatPath(filePath);
+		const base = `qqq：'${displayPath} 任务 ${taskNum}'`;
+		return suffix ? `${base} ${suffix}` : base;
+	}
+};
+
 /**
  * ★ 单一真理源：精准分类 + 完整快照
  * 返回 { type, subType, files?, totalSize?, rawStatus }
@@ -1866,5 +1930,6 @@ module.exports = {
 
 	// ★ 核心逻辑导出
 	wq,
-	TransactionManager
+	TransactionManager,
+	TaskCounter
 };

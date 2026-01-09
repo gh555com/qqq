@@ -7,6 +7,7 @@ const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
 const global = require('./global');
+const { TaskCounter } = require('./global');
 
 class ChildProcessTracker {
     constructor() {
@@ -611,8 +612,9 @@ class VideoDownloadController {
     }
 
     // ==================== 三号弹窗：无效网址（9秒关闭） ====================
-    async _showInvalidUrlToast() {
-        const msg = ` qqq: 无效网址。`;
+    async _showInvalidUrlToast(taskTitle = '') {
+        const prefix = taskTitle ? `${taskTitle} ` : 'qqq: ';
+        const msg = `${prefix}无效网址。`;
         this.log(msg);
 
         await vscode.window.withProgress({
@@ -636,7 +638,8 @@ class VideoDownloadController {
     }
 
     // ==================== 三号弹窗：任务结束（带按钮 + 15秒自动关） ====================
-    async _showTaskDoneToast(message, canOpen, filePath, folderPath) {
+    async _showTaskDoneToast(message, canOpen, filePath, folderPath, taskTitle = '') {
+        // 已经带 taskTitle 的消息不需要再加前缀
         const OPEN = "[打开下载目录]";
         const actions = canOpen ? [OPEN] : [];
 
@@ -747,11 +750,12 @@ class VideoDownloadController {
     // ==================== 任务结束打印（严格文本，不带 command 垃圾） ====================
     _buildDoneMessage(task, landedCount, totalStr, urlSnippet) {
         const dur = this._formatDuration(Date.now() - (task?.startMs || Date.now()));
+        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
 
         if (!landedCount || landedCount <= 0) {
-            return ` qqq: 任务结束（总耗时${dur}），0 落盘，从 ${urlSnippet}`;
+            return `${prefix}任务结束（总耗时${dur}），0 落盘，从 ${urlSnippet}`;
         }
-        return ` qqq: 任务结束（总耗时${dur}） [打开下载目录]，共落盘${landedCount}个视频共: ${totalStr}，从 ${urlSnippet}`;
+        return `${prefix}任务结束（总耗时${dur}） [打开下载目录]，共落盘${landedCount}个视频共: ${totalStr}，从 ${urlSnippet}`;
     }
 
     // ==================== start ====================
@@ -773,17 +777,24 @@ class VideoDownloadController {
         const targetDir = path.join(currentDocDir, "qqq");
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
+        // ★ 交互式模式也生成 taskTitle
+        const filePath = editor.document.uri.fsPath;
+        const taskNum = await TaskCounter.increment(filePath);
+        const taskTitle = TaskCounter.formatTitle(filePath, taskNum);
+
         // 交互式模式：不传递 progressCallback，使用内部的 withProgress
-        await this.downloadEntry(raw, targetDir, null, null, null);
+        await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
     }
 
     // ==================== Headless Entry (for q1.js concurrency) ====================
-    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null) {
+    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null, taskTitle = '') {
         // 1. 初始化任务上下文
         const task = await this._beginTask(targetDir, transId);
 
         // Save targetUri to task for insertion
         task.targetUri = targetUri;
+        // ★ 保存 taskTitle 到 task 对象，供所有弹窗使用
+        task.taskTitle = taskTitle;
 
         // 2. 绑定外部取消 Token (如果有)
         if (token) {
@@ -797,7 +808,7 @@ class VideoDownloadController {
             return await ChildProcessTracker.runWithTracker(task.tracker, async () => {
                 const v = this._normalizeAndValidateUrl(rawUrl);
                 if (!v.ok) {
-                    if (!progressCallback) await this._showInvalidUrlToast();
+                    if (!progressCallback) await this._showInvalidUrlToast(task.taskTitle);
                     return null;
                 }
 
@@ -891,7 +902,9 @@ class VideoDownloadController {
             const isYouTube = this._isYouTubeUrl(url);
 
             const runLogic = async (progress, token) => {
-                progress.report({ message: `已交换 0k 于 ${urlSnippet} (正在解析...)` });
+                // ★ 进度消息带 taskTitle 前缀
+                const msgPrefix = task.taskTitle ? `${task.taskTitle} ` : '';
+                progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet} (正在解析...)` });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -982,7 +995,7 @@ class VideoDownloadController {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: `已交换 0k 于 ${urlSnippet}` });
+                progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet}` });
 
                 const activePrefixes = new Set();
                 tasks.forEach(t => {
@@ -1028,7 +1041,7 @@ class VideoDownloadController {
 
                         const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
                         const totalStr = this._formatBytesSimple(finalBytes);
-                        progress.report({ message: `已交换 ${totalStr} 于 ${urlSnippet}` });
+                        progress.report({ message: `${msgPrefix}已交换 ${totalStr} 于 ${urlSnippet}` });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1293,8 +1306,9 @@ class VideoDownloadController {
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
         if (this._isTaskCancelled(task)) return null;
 
+        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
         const selection = await vscode.window.showInformationMessage(
-            `qqq: 下载被拒（${code}），当前可尝试启动增强流程。`,
+            `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
             { modal: false },
             "🚀启动增强流程",
             "选择类似 chrome.exe 滴浏览器入口文件"
@@ -1843,13 +1857,14 @@ $of = $vi.OriginalFilename;
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
+        const msgPrefix = task?.taskTitle ? `${task.taskTitle} ` : '';
 
         const out = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "",
             cancellable: true
         }, async (progress, token) => {
-            progress.report({ message: `已交换 0k 于 ${urlSnippet} (增强下载中...)` });
+            progress.report({ message: `${msgPrefix}已交换 0k 于 ${urlSnippet} (增强下载中...)` });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -1862,7 +1877,7 @@ $of = $vi.OriginalFilename;
                 timer = setInterval(() => {
                     if (this._isTaskCancelled(task)) return;
                     const bytes = this._scanRecentBytes(targetDir, startMs);
-                    progress.report({ message: `已交换 ${this._formatBytesSimple(bytes)} 于 ${urlSnippet} (增强下载中...)` });
+                    progress.report({ message: `${msgPrefix}已交换 ${this._formatBytesSimple(bytes)} 于 ${urlSnippet} (增强下载中...)` });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -1941,8 +1956,9 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
+            const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
             const selection = await vscode.window.showInformationMessage(
-                "请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。",
+                `${prefix}请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。`,
                 { modal: true },
                 "我已在外部播放"
             );
