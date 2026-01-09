@@ -1,5 +1,6 @@
 // src/q1.js
-const { wq, TransactionManager, getConfig, TaskCounter } = require('./global');
+const global = require('./global');
+const { wq, TransactionManager, getConfig, TaskCounter, showAutoCloseMessage } = global;
 const h = require('./h');
 const VideoDownloadController = require('./VideoDownloadController');
 const vscode = require("vscode");
@@ -1336,9 +1337,9 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 
             // ★ 检查是否被取消
             if (token && token.isCancellationRequested) {
-                vscode.window.showInformationMessage(`${taskTitle} 文件/文件夹复制 ${totalCount} 已取消并回滚（耗时${elapsed}s）`);
+                showAutoCloseMessage(`${taskTitle} 文件/文件夹复制 ${totalCount} 已取消并回滚（耗时${elapsed}s）`);
             } else {
-                vscode.window.showInformationMessage(`${taskTitle} 文件/文件夹已复制 ${totalCount}（耗时${elapsed}s）`);
+                showAutoCloseMessage(`${taskTitle} 文件/文件夹已复制 ${totalCount}（耗时${elapsed}s）`);
             }
         }
     } else if (result.type === "folder_text") {

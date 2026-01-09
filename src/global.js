@@ -969,6 +969,24 @@ function showInformationMessage(message, ...items) {
 	return vscode.window.showInformationMessage(message, ...items);
 }
 
+/**
+ * ★ 显示一个会自动关闭的通知消息
+ * @param {string} message - 消息内容
+ * @param {number} timeout - 自动关闭时间（毫秒），默认 15000ms
+ */
+function showAutoCloseMessage(message, timeout = 15000) {
+	return vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: message,
+		cancellable: false
+	}, async (progress) => {
+		// 立即设置进度到 100%，这样不显示进度条动画
+		progress.report({ increment: 100 });
+		// 等待指定时间后自动关闭
+		await new Promise(resolve => setTimeout(resolve, timeout));
+	});
+}
+
 function showErrorMessage(message, ...items) {
 	return vscode.window.showErrorMessage(message, ...items);
 }
@@ -1882,6 +1900,7 @@ module.exports = {
 
 	// 对话框
 	showInformationMessage,
+	showAutoCloseMessage,
 	showErrorMessage,
 	showWarningMessage,
 	showInputBox,

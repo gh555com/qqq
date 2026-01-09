@@ -755,7 +755,7 @@ class VideoDownloadController {
         if (!landedCount || landedCount <= 0) {
             return `${prefix}任务结束（总耗时${dur}），0 落盘，从 ${urlSnippet}`;
         }
-        return `${prefix}任务结束（总耗时${dur}） [打开下载目录]，共落盘${landedCount}个视频共: ${totalStr}，从 ${urlSnippet}`;
+        return `${prefix}任务结束（总耗时${dur}），共落盘${landedCount}个视频共: ${totalStr}，从 ${urlSnippet}`;
     }
 
     // ==================== start ====================
