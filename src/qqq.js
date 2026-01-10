@@ -615,30 +615,86 @@ async function downloadVideosFromUrlCommand() {
 		targetUri: targetUri.fsPath,
 		tempFiles: [],
 		landedFiles: [],
-		landedFolders: []
+		landedFolders: [],
+		taskType: 'video'  // ★ 视频下载任务，赦免时间固定 81s
 	});
 
 	// 2. 启动带进度条的弹窗任务
+	// ★ 创建自定义取消源（用于锚点丢失时主动取消）
+	const anchor = `/__PENDING_${transId}/`;
+	const anchorLostSource = new vscode.CancellationTokenSource();
+	let anchorLost = false;
+	let lastAnchorCheckTime = 0;
+	const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
+
+	// ★ 锚点检查函数（带节流）
+	const checkAnchorExists = async () => {
+		if (anchorLost) return false;
+
+		const now = Date.now();
+		if (now - lastAnchorCheckTime < ANCHOR_CHECK_INTERVAL) {
+			return true;
+		}
+		lastAnchorCheckTime = now;
+
+		try {
+			const doc = await vscode.workspace.openTextDocument(targetUri);
+			const text = doc.getText();
+			const exists = text.includes(anchor);
+
+			if (!exists && !anchorLost) {
+				anchorLost = true;
+				global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
+				anchorLostSource.cancel();
+				return false;
+			}
+			return exists;
+		} catch (e) {
+			if (!anchorLost) {
+				anchorLost = true;
+				global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
+				anchorLostSource.cancel();
+			}
+			return false;
+		}
+	};
+
 	const downloadResult = await global.withProgress({
 		location: vscode.ProgressLocation.Notification,
 		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
 		cancellable: true
 	}, async (progress, token) => {
-		// ★ 不在这里调用 rollback，让 downloadEntry 内部的 _cancelTask 统一处理
 		token.onCancellationRequested(() => {
 			global.logMessage(`任务 ${transId} 被用户取消`, "WARN");
+		});
+
+		// ★ 锚点丢失也触发回滚提示
+		anchorLostSource.token.onCancellationRequested(() => {
+			global.logMessage('[AnchorLost] 锚点丢失触发取消', 'WARN');
 		});
 
 		const VideoDownloadController = require('./VideoDownloadController');
 		const controller = new VideoDownloadController(downloadContext, module.exports);
 
-		const progressAdapter = (pct, msg) => {
+		// ★ 进度回调中检查锚点
+		const progressAdapter = async (pct, msg) => {
 			progress.report({ message: msg, increment: 0 });
+			await checkAnchorExists();
 		};
 
 		try {
 			// ★ 传递 taskTitle
 			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle);
+
+			// ★ 检查是否已取消（用户取消 或 锚点丢失）
+			if (token.isCancellationRequested || anchorLost) {
+				await global.TransactionManager.rollback(transId);
+				await replaceAnchorInDoc(targetUri, anchor, "");
+				if (anchorLost) {
+					return { anchorLost: true };
+				}
+				return { cancelled: true };
+			}
 
 			// 3. 处理结果 & 替换锚点
 			if (res && res.landedFiles && res.landedFiles.length > 0) {
@@ -650,7 +706,7 @@ async function downloadVideosFromUrlCommand() {
 				const newText = relativePaths.join(eol);
 
 				// 替换锚点
-				const replaced = await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, newText);
+				const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);
 				if (replaced) {
 					await global.TransactionManager.removeTransaction(transId);
 					// ★ 成功：返回结果，由外层显示弹窗
@@ -663,11 +719,11 @@ async function downloadVideosFromUrlCommand() {
 			} else if (res && res.cancelled) {
 				// ★ 已取消：回滚并清理锚点
 				await global.TransactionManager.rollback(transId);
-				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+				await replaceAnchorInDoc(targetUri, anchor, "");
 			} else {
 				// 下载失败，回滚
 				await global.TransactionManager.rollback(transId);
-				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+				await replaceAnchorInDoc(targetUri, anchor, "");
 				return { failed: true };
 			}
 
@@ -677,7 +733,7 @@ async function downloadVideosFromUrlCommand() {
 			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
 			vscode.window.showErrorMessage(`视频下载失败: ${e.message}`);
 			await global.TransactionManager.rollback(transId);
-			await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+			await replaceAnchorInDoc(targetUri, anchor, "");
 			return null;
 		}
 	});
