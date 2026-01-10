@@ -730,7 +730,8 @@ class VideoDownloadController {
                 targetDir: targetDir,
                 tempFiles: [],
                 landedFiles: [],
-                landedFolders: []
+                landedFolders: [],
+                taskType: 'video'  // ★ 视频下载任务，赦免时间固定 81s
             });
         }
 

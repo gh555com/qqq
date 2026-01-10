@@ -1452,7 +1452,55 @@ const TransactionManager = {
 		}
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
-		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}`, "INFO");
+		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}, taskType=${trans.taskType || 'unknown'}`, "INFO");
+
+		// ★ 计算赦免时间 (amnesty time)
+		// - 本地文件: 根据总大小计算, 最小 33s, 每增加 1GB +8s
+		// - HTML/视频: 固定 81s
+		const calculateAmnestyTime = () => {
+			const taskType = trans.taskType || 'local_file';
+
+			if (taskType === 'html' || taskType === 'video') {
+				// HTML 粘贴和视频下载：固定 81s
+				return 81;
+			}
+
+			// 本地文件: 根据意图列表总大小计算
+			const totalSize = trans.intentTotalSize || 0;
+			const ONE_GB = 1024 * 1024 * 1024;
+
+			if (totalSize < ONE_GB) {
+				return 33;  // 小于 1GB，赦免时间 33s
+			}
+
+			// 大于等于 1GB：33 + 8 * (超过的 GB 数)
+			// 例如: 3GB = 33 + 8*2 = 49s
+			const extraGB = Math.ceil(totalSize / ONE_GB) - 1;
+			return 33 + extraGB * 8;
+		};
+
+		const amnestySeconds = calculateAmnestyTime();
+		const amnestyMs = amnestySeconds * 1000;
+		const now = Date.now();
+
+		logMessage(`[Rollback] 赦免时间: ${amnestySeconds}s (任务类型: ${trans.taskType || 'local_file'}, 意图大小: ${((trans.intentTotalSize || 0) / 1024 / 1024).toFixed(1)}MB)`, "INFO");
+
+		// ★ 判断文件是否应该被赦免（创建时间超过赦免时间）
+		const shouldAmnesty = (filePath) => {
+			try {
+				if (!fs.existsSync(filePath)) return false;
+				const stat = fs.statSync(filePath);
+				const createTime = stat.birthtime.getTime();
+				const age = now - createTime;
+				if (age > amnestyMs) {
+					logMessage(`[Rollback] 赦免保留: ${filePath} (创建于 ${(age / 1000).toFixed(1)}s 前, 超过赦免时间 ${amnestySeconds}s)`, "INFO");
+					return true;
+				}
+				return false;
+			} catch (e) {
+				return false;
+			}
+		};
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
 		try {
@@ -1483,11 +1531,20 @@ const TransactionManager = {
 			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
 		}
 
-		// 1. 删除记录的文件（无差别删除）
+		// 1. 删除记录的文件（★ 带赦免时间检查）
 		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
+		let deletedCount = 0;
+		let amnestiedCount = 0;
+
 		for (const f of recordedFiles) {
 			try {
 				if (fs.existsSync(f)) {
+					// ★ 检查是否应该赦免
+					if (shouldAmnesty(f)) {
+						amnestiedCount++;
+						continue;  // 保留不删除
+					}
+
 					const stat = fs.statSync(f);
 					if (stat.isDirectory()) {
 						fs.rmSync(f, { recursive: true, force: true });
@@ -1496,8 +1553,9 @@ const TransactionManager = {
 						fs.unlinkSync(f);
 						logMessage(`[Rollback] 删除记录文件: ${f}`, "INFO");
 					}
+					deletedCount++;
 				}
-				// 同时清理 .part/.ytdl 衍生文件
+				// 同时清理 .part/.ytdl 衍生文件（这些不检查赦免时间）
 				const part = f + ".part";
 				const ytdl = f + ".ytdl";
 				if (fs.existsSync(part)) fs.unlinkSync(part);
@@ -1507,13 +1565,20 @@ const TransactionManager = {
 			}
 		}
 
-		// 1.5 ★ 删除记录的文件夹（无差别删除）
+		// 1.5 ★ 删除记录的文件夹（★ 带赦免时间检查）
 		const recordedFolders = trans.landedFolders || [];
 		for (const folder of recordedFolders) {
 			try {
 				if (fs.existsSync(folder)) {
+					// ★ 检查是否应该赦免
+					if (shouldAmnesty(folder)) {
+						amnestiedCount++;
+						continue;  // 保留不删除
+					}
+
 					fs.rmSync(folder, { recursive: true, force: true });
 					logMessage(`[Rollback] 删除记录文件夹: ${folder}`, "INFO");
+					deletedCount++;
 				}
 			} catch (e) {
 				logMessage(`[Rollback] 删除文件夹失败 ${folder}: ${e.message}`, "ERROR");
@@ -1543,6 +1608,7 @@ const TransactionManager = {
 			}
 		}
 
+		logMessage(`[Rollback] 回滚完成: 删除 ${deletedCount} 个, 赦免保留 ${amnestiedCount} 个`, "INFO");
 		await this.removeTransaction(trans.id);
 	},
 

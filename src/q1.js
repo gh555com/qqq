@@ -1392,6 +1392,20 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
     const docUri = editor.document.uri;
 
     // 2. 注册事务 (Pending)
+    // ★ 确定任务类型和总大小（用于回滚赦免时间计算）
+    let taskType = 'local_file';  // 默认本地文件
+    let intentTotalSize = 0;
+    if (snapshot) {
+        if (snapshot.subType === 'html_rich' || snapshot.subType === 'html_text') {
+            taskType = 'html';
+        } else if (snapshot.subType === 'video_url') {
+            taskType = 'video';
+        } else if (snapshot.subType === 'file' || snapshot.subType === 'image') {
+            taskType = 'local_file';
+            intentTotalSize = snapshot.totalSize || 0;
+        }
+    }
+
     await TransactionManager.saveTransaction({
         id: transId,
         targetDir: targetDir,
@@ -1401,11 +1415,52 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         landedFiles: [],
         landedFolders: [],
         startTime: Date.now(),
-        taskNum: taskNum  // ★ 记录任务编号
+        taskNum: taskNum,  // ★ 记录任务编号
+        taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
+        intentTotalSize: intentTotalSize  // ★ 意图列表总大小（仅本地文件有效）
     });
 
     // 3. 启动带进度的后台任务
     const taskStartTime = Date.now();  // ★ 记录开始时间
+
+    // ★ 创建自定义取消源（用于锚点丢失时主动取消）
+    const anchorLostSource = new vscode.CancellationTokenSource();
+    let anchorLost = false;
+    let lastAnchorCheckTime = 0;
+    const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
+
+    // ★ 锚点检查函数（带节流）
+    const checkAnchorExists = async () => {
+        if (anchorLost) return false;  // 已经检测到丢失，不再检查
+
+        const now = Date.now();
+        if (now - lastAnchorCheckTime < ANCHOR_CHECK_INTERVAL) {
+            return true;  // 节流：还没到检查时间
+        }
+        lastAnchorCheckTime = now;
+
+        try {
+            const doc = await vscode.workspace.openTextDocument(docUri);
+            const text = doc.getText();
+            const exists = text.includes(anchor);
+
+            if (!exists && !anchorLost) {
+                anchorLost = true;
+                global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
+                anchorLostSource.cancel();  // ★ 触发取消
+                return false;
+            }
+            return exists;
+        } catch (e) {
+            // 文档可能被关闭，视为锚点丢失
+            if (!anchorLost) {
+                anchorLost = true;
+                global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
+                anchorLostSource.cancel();
+            }
+            return false;
+        }
+    };
 
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
@@ -1418,22 +1473,40 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
             vscode.window.setStatusBarMessage(`❌ ${taskTitle} 正在回滚...`, 30000);
         });
 
+        // ★ 锚点丢失也触发回滚提示
+        anchorLostSource.token.onCancellationRequested(() => {
+            global.logMessage('[AnchorLost] 锚点丢失触发取消', 'WARN');
+            vscode.window.setStatusBarMessage(`❌ ${taskTitle} 锚点丢失，正在回滚...`, 30000);
+        });
+
+        // ★ 组合取消检查：用户取消 或 锚点丢失
+        const isCancelled = () => token.isCancellationRequested || anchorLostSource.token.isCancellationRequested;
+
         try {
             // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
-            // ★ 传入 null（不需要取消回调，只显示最终弹窗）
-            let result = await h.autoDetectAndPaste(targetDir, (p, msg) => {
+            // ★ 进度回调中检查锚点
+            let result = await h.autoDetectAndPaste(targetDir, async (p, msg) => {
                 progress.report({ increment: p, message: msg });
+                // ★ 每次进度更新时检查锚点
+                await checkAnchorExists();
             }, token, transId, null, null);
 
             // ★★★ 视频并发下载接管 ★★★
             if (result && result.type === 'video_url') {
+                // ★ 更新事务类型为视频（影响赦免时间计算）
+                await TransactionManager.updateTransaction(transId, { taskType: 'video' });
+
                 try {
                     const vc = new VideoDownloadController(extensionContext);
                     const downloadRes = await vc.downloadEntry(
                         result.url,
                         targetDir,
                         transId,
-                        (p, msg) => progress.report({ increment: 0, message: msg }),
+                        async (p, msg) => {
+                            progress.report({ increment: 0, message: msg });
+                            // ★ 视频下载进度更新时也检查锚点
+                            await checkAnchorExists();
+                        },
                         token,
                         null,
                         taskTitle  // ★ 传递 taskTitle
@@ -1454,15 +1527,19 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 }
             }
 
-            // ★ 检查是否被取消
-            if (token.isCancellationRequested) {
+            // ★ 检查是否被取消（用户取消 或 锚点丢失）
+            if (isCancelled()) {
                 // ★ 执行回滚
                 const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
 
-                // ★ 显示最终弹窗
-                TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+                // ★ 根据取消原因显示不同的弹窗
+                if (anchorLost) {
+                    TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
+                } else {
+                    TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+                }
                 return;
             }
 
