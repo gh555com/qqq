@@ -1330,19 +1330,13 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 
         const totalCount = files.length + folders.length;
         // ★ 最终结果弹窗带 taskTitle 和耗时（仅当传递了 taskTitle 时显示）
-        if (totalCount > 1 && taskTitle) {
+        // ★ 取消弹窗已在 onCancellationRequested 中显示，这里只显示成功消息
+        if (totalCount > 1 && taskTitle && !(token && token.isCancellationRequested)) {
             const trans = transId ? (TransactionManager.getTransactions() || []).find(t => t.id === transId) : null;
             const startTime = trans?.startTime || taskStartTime || Date.now();
             const elapsedMs = Date.now() - startTime;
-
-            // ★ 检查是否被取消，使用统一格式化器
-            if (token && token.isCancellationRequested) {
-                const msg = TaskMessage.done(taskTitle, `文件/文件夹复制 ${totalCount} 已取消并回滚`, elapsedMs);
-                TaskMessage.showSimpleToast(msg);
-            } else {
-                const msg = TaskMessage.done(taskTitle, `文件/文件夹已复制 ${totalCount}`, elapsedMs);
-                TaskMessage.showSimpleToast(msg);
-            }
+            const msg = TaskMessage.done(taskTitle, `文件/文件夹已复制 ${totalCount}`, elapsedMs);
+            TaskMessage.showSimpleToast(msg, 15000, 'success');
         }
     } else if (result.type === "folder_text") {
         const folders = result.text.split(/\r?\n/).filter(f => f.trim());
@@ -1421,30 +1415,24 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 
     // 3. 启动带进度的后台任务
     const taskStartTime = Date.now();  // ★ 记录开始时间
+
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: taskTitle,  // ★ 简洁标题，不加额外描述
         cancellable: true
     }, async (progress, token) => {
-
-        // 监听取消
-        token.onCancellationRequested(async () => {
-            // ★ 立即显示取消弹窗，不等待清理完成
-            const cancelMsg = `${taskTitle} 已取消并回滚`;
-            TaskMessage.showSimpleToast(cancelMsg, 15000);
-
-            // ★ 后台执行回滚
-            const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-            if (trans) TransactionManager.rollback(trans).catch(e => console.error(e));
-            // 尝试移除锚点
-            replaceAnchorInDoc(docUri, anchor, "").catch(e => console.error(e));
+        // ★ 注册 onCancellationRequested 回调（仅显示状态栏消息，不弹窗）
+        token.onCancellationRequested(() => {
+            global.logMessage('[Cancel] onCancellationRequested 触发', 'INFO');
+            vscode.window.setStatusBarMessage(`❌ ${taskTitle} 正在回滚...`, 30000);
         });
 
         try {
             // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
+            // ★ 传入 null（不需要取消回调，只显示最终弹窗）
             let result = await h.autoDetectAndPaste(targetDir, (p, msg) => {
                 progress.report({ increment: p, message: msg });
-            }, token, transId);
+            }, token, transId, null, null);
 
             // ★★★ 视频并发下载接管 ★★★
             if (result && result.type === 'video_url') {
@@ -1473,6 +1461,18 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                     console.error("Video Download Failed:", e);
                     result = null;
                 }
+            }
+
+            // ★ 检查是否被取消
+            if (token.isCancellationRequested) {
+                // ★ 执行回滚
+                const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
+                if (trans) await TransactionManager.rollback(trans);
+                await replaceAnchorInDoc(docUri, anchor, "");
+
+                // ★ 显示最终弹窗
+                TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+                return;
             }
 
             if (result) {
@@ -1511,11 +1511,10 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 }
             } else {
                 // 任务失败/取消 -> 回滚
-                if (!token.isCancellationRequested) {
-                    const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
-                    if (trans) await TransactionManager.rollback(trans);
-                    await replaceAnchorInDoc(docUri, anchor, "");
-                }
+                // ★ 取消时也执行回滚（复制已完成，可以安全回滚所有记录）
+                const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
+                if (trans) await TransactionManager.rollback(trans);
+                await replaceAnchorInDoc(docUri, anchor, "");
             }
         } catch (e) {
             console.error(e);

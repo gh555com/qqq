@@ -680,7 +680,7 @@ async function downloadVideosFromUrlCommand() {
 	// ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
 	// ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
 	if (downloadResult && downloadResult.doneMessage && !downloadResult.cancelled) {
-		global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000);
+		global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
 	}
 }
 
@@ -702,36 +702,6 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 		return await vscode.workspace.applyEdit(edit);
 	} catch (e) {
 		return false;
-	}
-}
-
-const pendingJobs = new Map();
-let tokenCounter = 0;
-
-function createPendingToken() {
-	const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
-	let token = "";
-	for (let i = 0; i < 8; i++) token += chars[Math.floor(Math.random() * chars.length)];
-	return token + (++tokenCounter).toString(36);
-}
-
-function registerPendingJob(token, data) {
-	return new Promise((resolve, reject) => {
-		pendingJobs.set(token, { resolve, reject, ...data, startTime: Date.now() });
-		setTimeout(() => {
-			if (pendingJobs.has(token)) {
-				pendingJobs.delete(token);
-				reject(new Error("timeout"));
-			}
-		}, 30000);
-	});
-}
-
-function resolvePendingJob(token, result) {
-	const job = pendingJobs.get(token);
-	if (job) {
-		pendingJobs.delete(token);
-		job.resolve(result);
 	}
 }
 
@@ -879,10 +849,6 @@ const exported = {
 	isImageExtForClipboard: h.isImageExtForClipboard,
 
 	shouldShowDuration,
-
-	createPendingToken,
-	registerPendingJob,
-	resolvePendingJob,
 
 	raceClipboard,
 

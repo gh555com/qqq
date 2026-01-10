@@ -1048,11 +1048,22 @@ const TaskMessage = {
 	 * 显示简单的自动关闭消息（无按钮）
 	 * @param {string} message - 消息内容
 	 * @param {number} timeout - 自动关闭时间（毫秒），默认 15000
+	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同的 emoji 图标
 	 */
-	async showSimpleToast(message, timeout = 15000) {
+	async showSimpleToast(message, timeout = 15000, type = 'info') {
+		// ★ 根据类型添加 emoji 前缀
+		const prefixMap = {
+			'success': '✅ ',
+			'cancel': '❌ ',
+			'error': '❌ ',
+			'info': ''
+		};
+		const prefix = prefixMap[type] || '';
+		const fullMessage = prefix + message;
+
 		return vscode.window.withProgress({
 			location: vscode.ProgressLocation.Notification,
-			title: message,
+			title: fullMessage,
 			cancellable: false
 		}, async (progress) => {
 			progress.report({ increment: 100 });
@@ -1440,7 +1451,7 @@ const TransactionManager = {
 		}
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
-		logMessage(`[Rollback] 事务详情: landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}`, "INFO");
+		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}`, "INFO");
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
 		try {
@@ -1471,7 +1482,7 @@ const TransactionManager = {
 			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
 		}
 
-		// 1. 删除记录的文件
+		// 1. 删除记录的文件（无差别删除）
 		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
 		for (const f of recordedFiles) {
 			try {
@@ -1495,7 +1506,7 @@ const TransactionManager = {
 			}
 		}
 
-		// 1.5 ★ 删除记录的文件夹（批量粘贴文件夹时使用）
+		// 1.5 ★ 删除记录的文件夹（无差别删除）
 		const recordedFolders = trans.landedFolders || [];
 		for (const folder of recordedFolders) {
 			try {
@@ -1547,8 +1558,13 @@ const TransactionManager = {
 	},
 
 	createTransactionId() {
-		// 生成6位随机字符，类似 q1.js 中的逻辑
-		return Math.random().toString(36).slice(2, 8);
+
+		const chars = 'ABEGHJKLNQRVWXYZabeghjknqrvwxyz234567890O1lI';
+		let id = '';
+		for (let i = 0; i < 6; i++) {
+			id += chars[Math.floor(Math.random() * chars.length)];
+		}
+		return id;
 	},
 
 	async insertAnchor(editor, transId) {
