@@ -1483,28 +1483,33 @@ const TransactionManager = {
 		const amnestyMs = amnestySeconds * 1000;
 		const now = Date.now();
 
-		logMessage(`[Rollback] 赦免时间: ${amnestySeconds}s (任务类型: ${trans.taskType || 'local_file'}, 意图大小: ${((trans.intentTotalSize || 0) / 1024 / 1024).toFixed(1)}MB)`, "INFO");
+		// ★ 计算任务已执行时间（从任务开始到现在）
+		// ★ 关键修复：使用任务开始时间，而不是文件创建时间
+		// ★ 原因：Windows 上 yt-dlp 重命名 .part 文件时会更新 birthtime，导致文件年龄不准确
+		const taskStartTime = trans.startTime || trans.createdAt || now;
+		const taskAge = now - taskStartTime;
+		const taskAgeSeconds = taskAge / 1000;
 
-		// ★ 判断文件是否应该被赦免（创建时间超过赦免时间）
+		logMessage(`[Rollback] 赦免时间: ${amnestySeconds}s, 任务已执行: ${taskAgeSeconds.toFixed(1)}s (任务类型: ${trans.taskType || 'local_file'})`, "INFO");
+
+		// ★ 判断是否应该赦免所有文件（基于任务执行时间）
+		const shouldAmnestyAll = taskAge > amnestyMs;
+
+		if (shouldAmnestyAll) {
+			logMessage(`[Rollback] ★ 任务执行 ${taskAgeSeconds.toFixed(1)}s > 赦免时间 ${amnestySeconds}s，所有文件将被赦免保留`, "INFO");
+		} else {
+			logMessage(`[Rollback] 任务执行 ${taskAgeSeconds.toFixed(1)}s < 赦免时间 ${amnestySeconds}s，文件将被删除`, "INFO");
+		}
+
+		// ★ 赦免检查函数
 		const shouldAmnesty = (filePath) => {
-			try {
-				if (!fs.existsSync(filePath)) return false;
-				const stat = fs.statSync(filePath);
-				const createTime = stat.birthtime.getTime();
-				const age = now - createTime;
+			if (!fs.existsSync(filePath)) return false;
 
-				// ★ 详细日志：显示文件年龄和赦免时间对比
-				logMessage(`[Rollback] 检查文件: ${path.basename(filePath)}, 年龄=${(age / 1000).toFixed(1)}s, 赦免时间=${amnestySeconds}s, 应赦免=${age > amnestyMs}`, "DEBUG");
-
-				if (age > amnestyMs) {
-					logMessage(`[Rollback] 赦免保留: ${filePath} (创建于 ${(age / 1000).toFixed(1)}s 前, 超过赦免时间 ${amnestySeconds}s)`, "INFO");
-					return true;
-				}
-				return false;
-			} catch (e) {
-				logMessage(`[Rollback] 检查文件失败: ${filePath}, ${e.message}`, "WARN");
-				return false;
+			if (shouldAmnestyAll) {
+				logMessage(`[Rollback] 赦免保留: ${path.basename(filePath)} (任务已执行 ${taskAgeSeconds.toFixed(1)}s)`, "INFO");
+				return true;
 			}
+			return false;
 		};
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）

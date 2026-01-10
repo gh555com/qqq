@@ -683,8 +683,8 @@ async function downloadVideosFromUrlCommand() {
 		};
 
 		try {
-			// ★ 传递 taskTitle
-			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle);
+			// ★ 传递 taskTitle 和 shouldCancel 回调
+			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, () => anchorLost);
 
 			// ★ 检查是否已取消（用户取消 或 锚点丢失）
 			if (token.isCancellationRequested || anchorLost) {

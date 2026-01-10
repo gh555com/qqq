@@ -1497,7 +1497,8 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         },
                         token,
                         null,
-                        taskTitle  // ★ 传递 taskTitle
+                        taskTitle,  // ★ 传递 taskTitle
+                        () => anchorLost  // ★ 传递 shouldCancel 回调
                     );
 
                     if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
