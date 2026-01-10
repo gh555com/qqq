@@ -780,7 +780,27 @@ class VideoDownloadController {
     }
 
     _isTaskCancelled(task) {
-        return !!(task && (task.isCancelled || (task.tracker && task.tracker.isCancelled())));
+        // ★ 检查三种取消条件：
+        // 1. 任务本身的 isCancelled 标志
+        // 2. tracker 的取消状态
+        // 3. 外部 shouldCancel 回调（用于检测锚点丢失）
+        if (!task) return false;
+
+        if (task.isCancelled || (task.tracker && task.tracker.isCancelled())) {
+            return true;
+        }
+
+        // ★ 检查外部取消回调（锚点丢失）
+        if (task.shouldCancel && task.shouldCancel()) {
+            // ★ 立即触发取消流程
+            if (!task.isCancelled) {
+                this.log('[AnchorLost] 检测到锚点丢失，触发取消');
+                this._cancelTask(task, '锚点丢失').catch(e => { });
+            }
+            return true;
+        }
+
+        return false;
     }
 
     // ==================== 任务结束打印（★ 使用统一格式化器） ====================
@@ -823,7 +843,7 @@ class VideoDownloadController {
     }
 
     // ==================== Headless Entry (for q1.js concurrency) ====================
-    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null, taskTitle = '') {
+    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null, taskTitle = '', shouldCancel = null) {
         // 1. 初始化任务上下文
         const task = await this._beginTask(targetDir, transId);
 
@@ -831,6 +851,8 @@ class VideoDownloadController {
         task.targetUri = targetUri;
         // ★ 保存 taskTitle 到 task 对象，供所有弹窗使用
         task.taskTitle = taskTitle;
+        // ★ 保存 shouldCancel 回调，用于实时检查锚点是否丢失
+        task.shouldCancel = shouldCancel;
 
         // 2. 绑定外部取消 Token (如果有)
         if (token) {
