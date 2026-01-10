@@ -1329,15 +1329,6 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         }
 
         const totalCount = files.length + folders.length;
-        // ★ 最终结果弹窗带 taskTitle 和耗时（仅当传递了 taskTitle 时显示）
-        // ★ 取消弹窗已在 onCancellationRequested 中显示，这里只显示成功消息
-        if (totalCount > 1 && taskTitle && !(token && token.isCancellationRequested)) {
-            const trans = transId ? (TransactionManager.getTransactions() || []).find(t => t.id === transId) : null;
-            const startTime = trans?.startTime || taskStartTime || Date.now();
-            const elapsedMs = Date.now() - startTime;
-            const msg = TaskMessage.done(taskTitle, `文件/文件夹已复制 ${totalCount}`, elapsedMs);
-            TaskMessage.showSimpleToast(msg, 15000, 'success');
-        }
     } else if (result.type === "folder_text") {
         const folders = result.text.split(/\r?\n/).filter(f => f.trim());
         for (let i = 0; i < folders.length; i++) {
@@ -1498,29 +1489,51 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                     if (replaced) {
                         // 成功：提交事务 (移除记录)
                         await TransactionManager.removeTransaction(transId);
+
+                        // ★ 显示最终成功弹窗
+                        const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
+                        const skippedCount = result.skippedCount || 0;
+                        const elapsedMs = Date.now() - taskStartTime;
+                        let detail = `文件/文件夹已复制 ${totalCount}`;
+                        if (skippedCount > 0) {
+                            detail += ` (跳过 ${skippedCount}个无法访问)`;
+                        }
+                        const msg = TaskMessage.done(taskTitle, detail, elapsedMs);
+                        TaskMessage.showSimpleToast(msg, 15000, 'success');
                     } else {
                         // 失败：锚点丢失 -> 回滚文件
                         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                         if (trans) await TransactionManager.rollback(trans);
+
+                        // ★ 显示锚点丢失弹窗
+                        TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                     }
                 } else {
                     // 结果为空 -> 回滚
                     const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                     if (trans) await TransactionManager.rollback(trans);
                     await replaceAnchorInDoc(docUri, anchor, "");
+
+                    // ★ 显示失败弹窗
+                    TaskMessage.showSimpleToast(`${taskTitle} 处理失败，已回滚`, 15000, 'cancel');
                 }
             } else {
                 // 任务失败/取消 -> 回滚
-                // ★ 取消时也执行回滚（复制已完成，可以安全回滚所有记录）
                 const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
+
+                // ★ 显示失败弹窗
+                TaskMessage.showSimpleToast(`${taskTitle} 任务失败，已回滚`, 15000, 'cancel');
             }
         } catch (e) {
             console.error(e);
             const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
             if (trans) await TransactionManager.rollback(trans);
             await replaceAnchorInDoc(docUri, anchor, "");
+
+            // ★ 显示异常弹窗
+            TaskMessage.showSimpleToast(`${taskTitle} 发生异常，已回滚`, 15000, 'cancel');
         }
     });
 }

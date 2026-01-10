@@ -1812,15 +1812,6 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         await batchUpdateTransaction(copiedFiles, copiedFolders);
     }
 
-    // ★ 最终进度显示
-    if (progressCallback) {
-        let msg = `✅ 复制完成: ${copiedFiles.length} 个文件, ${copiedFolders.length} 个文件夹`;
-        if (skippedCount > 0) {
-            msg += ` (⚠️ 跳过 ${skippedCount} 个无法访问)`;
-        }
-        progressCallback(95, msg);
-    }
-
     return {
         type: "file_folder",
         files: copiedFiles,
