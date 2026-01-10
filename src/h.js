@@ -1672,7 +1672,7 @@ function processFilesForClipboard(files, targetDir) {
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
-async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null) {
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1686,6 +1686,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
+
+    // ★ 组合取消检查：token 或 shouldCancel 回调
+    const isCancelled = () => token?.isCancellationRequested || (shouldCancel && shouldCancel());
 
     // ★ 批量更新事务记录（一次性更新所有文件）
     const batchUpdateTransaction = async (allFiles, allFolders) => {
@@ -1720,9 +1723,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
     // 复制文件夹
     for (let i = 0; i < folders.length; i++) {
-        // ★ 检查取消状态
-        if (token?.isCancellationRequested) {
-            log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+        // ★ 检查取消状态（用户取消 或 锚点丢失）
+        if (isCancelled()) {
+            log(`[复制] 取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
             // ★ 取消时先批量更新事务，确保所有已复制文件都被记录
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
@@ -1757,9 +1760,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
     // 复制文件
     for (let i = 0; i < validFiles.length; i++) {
-        // ★ 检查取消状态
-        if (token?.isCancellationRequested) {
-            log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+        // ★ 检查取消状态（用户取消 或 锚点丢失）
+        if (isCancelled()) {
+            log(`[复制] 取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
             // ★ 取消时先批量更新事务
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
@@ -1808,7 +1811,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     }
 
     // ★ 复制完成后批量更新事务（如果没有取消）
-    if (!token?.isCancellationRequested) {
+    if (!isCancelled()) {
         await batchUpdateTransaction(copiedFiles, copiedFolders);
     }
 
@@ -1822,9 +1825,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     };
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null) {
     try {
-        if (token?.isCancellationRequested) return null;
+        if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
         if (process.platform === "win32") {
             let files = preFetchedFiles;
 
@@ -1856,7 +1859,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 }
 
                 // ★ 传入 token 和 transId，边复制边记录事务
-                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback);
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
@@ -1911,10 +1914,13 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // ============================================================================
 // Main Entry
 // ============================================================================
-async function handleClipboardUnified(targetDir, progressCallback, token, transId) {
+async function handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel = null) {
     // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
+
+    // ★ 检查取消状态
+    if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
 
     const { $, baseUrl, payload, htmlText } = result;
 
@@ -2002,7 +2008,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ★ 接受完整快照（单一真理源），不再重复调用 Shell
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null) {
     const global = getGlobal();
 
     // ★ 从快照中提取信息
@@ -2069,17 +2075,17 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     if (qStatus.hasFile) {
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
         // ★ 传递预获取的文件列表，避免重复调用 getFiles
-        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel);
     }
 
     if (qStatus.hasHtml) {
         log(`[AutoDetect] 进入 HTML 处理流程`, "INFO");
-        return await handleClipboardUnified(targetDir, progressCallback, token, transId);
+        return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel);
     }
 
     if (qStatus.hasImage) {
         log(`[AutoDetect] 进入图片处理流程`, "INFO");
-        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId, onCancelCallback);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId, onCancelCallback, shouldCancel);
     }
 
     if (qStatus.hasText) {

@@ -761,11 +761,12 @@ class VideoDownloadController {
             }
         }
 
-        // Clean up any active files immediately
+        // ★ 不再直接删除 activeFiles，由 rollback 统一处理（带赦免时间检查）
+        // ★ 仅清理临时文件 (.part/.ytdl)
         if (task.activeFiles) {
             for (const file of task.activeFiles) {
                 try {
-                    if (fs.existsSync(file)) fs.unlinkSync(file);
+                    // ★ 不删除主文件，让 rollback 带赦免时间检查来处理
                     if (fs.existsSync(file + ".part")) fs.unlinkSync(file + ".part");
                     if (fs.existsSync(file + ".ytdl")) fs.unlinkSync(file + ".ytdl");
                 } catch (e) { }

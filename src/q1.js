@@ -1395,14 +1395,14 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
     // ★ 确定任务类型和总大小（用于回滚赦免时间计算）
     let taskType = 'local_file';  // 默认本地文件
     let intentTotalSize = 0;
-    if (snapshot) {
-        if (snapshot.subType === 'html_rich' || snapshot.subType === 'html_text') {
+    if (typeInfo) {
+        if (typeInfo.subType === 'html_rich' || typeInfo.subType === 'html_text') {
             taskType = 'html';
-        } else if (snapshot.subType === 'video_url') {
+        } else if (typeInfo.subType === 'video_url') {
             taskType = 'video';
-        } else if (snapshot.subType === 'file' || snapshot.subType === 'image') {
+        } else if (typeInfo.subType === 'file' || typeInfo.subType === 'image') {
             taskType = 'local_file';
-            intentTotalSize = snapshot.totalSize || 0;
+            intentTotalSize = typeInfo.totalSize || 0;
         }
     }
 
@@ -1467,29 +1467,17 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         title: taskTitle,  // ★ 简洁标题，不加额外描述
         cancellable: true
     }, async (progress, token) => {
-        // ★ 注册 onCancellationRequested 回调（仅显示状态栏消息，不弹窗）
-        token.onCancellationRequested(() => {
-            global.logMessage('[Cancel] onCancellationRequested 触发', 'INFO');
-            vscode.window.setStatusBarMessage(`❌ ${taskTitle} 正在回滚...`, 30000);
-        });
-
-        // ★ 锚点丢失也触发回滚提示
-        anchorLostSource.token.onCancellationRequested(() => {
-            global.logMessage('[AnchorLost] 锚点丢失触发取消', 'WARN');
-            vscode.window.setStatusBarMessage(`❌ ${taskTitle} 锚点丢失，正在回滚...`, 30000);
-        });
-
         // ★ 组合取消检查：用户取消 或 锚点丢失
         const isCancelled = () => token.isCancellationRequested || anchorLostSource.token.isCancellationRequested;
 
         try {
             // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
-            // ★ 进度回调中检查锚点
+            // ★ 进度回调中检查锚点，并传递 shouldCancel 回调
             let result = await h.autoDetectAndPaste(targetDir, async (p, msg) => {
                 progress.report({ increment: p, message: msg });
                 // ★ 每次进度更新时检查锚点
                 await checkAnchorExists();
-            }, token, transId, null, null);
+            }, token, transId, null, null, () => anchorLost);
 
             // ★★★ 视频并发下载接管 ★★★
             if (result && result.type === 'video_url') {
@@ -1563,16 +1551,18 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         // 成功：提交事务 (移除记录)
                         await TransactionManager.removeTransaction(transId);
 
-                        // ★ 显示最终成功弹窗
-                        const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
-                        const skippedCount = result.skippedCount || 0;
-                        const elapsedMs = Date.now() - taskStartTime;
-                        let detail = `文件/文件夹已复制 ${totalCount}`;
-                        if (skippedCount > 0) {
-                            detail += ` (跳过 ${skippedCount}个无法访问)`;
+                        // ★ 内存截图不显示弹窗，其他类型显示成功弹窗
+                        if (result.type !== 'image') {
+                            const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
+                            const skippedCount = result.skippedCount || 0;
+                            const elapsedMs = Date.now() - taskStartTime;
+                            let detail = `文件/文件夹已复制 ${totalCount}`;
+                            if (skippedCount > 0) {
+                                detail += ` (跳过 ${skippedCount}个无法访问)`;
+                            }
+                            const msg = TaskMessage.done(taskTitle, detail, elapsedMs);
+                            TaskMessage.showSimpleToast(msg, 15000, 'success');
                         }
-                        const msg = TaskMessage.done(taskTitle, detail, elapsedMs);
-                        TaskMessage.showSimpleToast(msg, 15000, 'success');
                     } else {
                         // 失败：锚点丢失 -> 回滚文件
                         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
@@ -1591,13 +1581,11 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                     TaskMessage.showSimpleToast(`${taskTitle} 处理失败，已回滚`, 15000, 'cancel');
                 }
             } else {
-                // 任务失败/取消 -> 回滚
+                // ★ result 为 null：未知类型（如 reaper 片段）-> 静默删除锚点，不显示弹窗
                 const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
-
-                // ★ 显示失败弹窗
-                TaskMessage.showSimpleToast(`${taskTitle} 任务失败，已回滚`, 15000, 'cancel');
+                // 不显示任何弹窗
             }
         } catch (e) {
             console.error(e);

@@ -1492,12 +1492,17 @@ const TransactionManager = {
 				const stat = fs.statSync(filePath);
 				const createTime = stat.birthtime.getTime();
 				const age = now - createTime;
+
+				// ★ 详细日志：显示文件年龄和赦免时间对比
+				logMessage(`[Rollback] 检查文件: ${path.basename(filePath)}, 年龄=${(age / 1000).toFixed(1)}s, 赦免时间=${amnestySeconds}s, 应赦免=${age > amnestyMs}`, "DEBUG");
+
 				if (age > amnestyMs) {
 					logMessage(`[Rollback] 赦免保留: ${filePath} (创建于 ${(age / 1000).toFixed(1)}s 前, 超过赦免时间 ${amnestySeconds}s)`, "INFO");
 					return true;
 				}
 				return false;
 			} catch (e) {
+				logMessage(`[Rollback] 检查文件失败: ${filePath}, ${e.message}`, "WARN");
 				return false;
 			}
 		};
