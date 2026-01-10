@@ -653,17 +653,22 @@ async function downloadVideosFromUrlCommand() {
 				const replaced = await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, newText);
 				if (replaced) {
 					await global.TransactionManager.removeTransaction(transId);
+					// ★ 成功：返回结果，由外层显示弹窗
 				} else {
+					// ★ 锚点丢失：回滚并标记
 					global.logMessage("锚点替换失败，回滚事务", "ERROR");
 					await global.TransactionManager.rollback(transId);
+					return { ...res, anchorLost: true };
 				}
 			} else if (res && res.cancelled) {
-				// ★ 已取消：_cancelTask 已经回滚了，只需清理锚点
+				// ★ 已取消：回滚并清理锚点
+				await global.TransactionManager.rollback(transId);
 				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
 			} else {
 				// 下载失败，回滚
 				await global.TransactionManager.rollback(transId);
 				await replaceAnchorInDoc(targetUri, `/__PENDING_${transId}/`, "");
+				return { failed: true };
 			}
 
 			return res; // ★ 返回结果给外层
@@ -677,10 +682,21 @@ async function downloadVideosFromUrlCommand() {
 		}
 	});
 
-	// ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
-	// ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
-	if (downloadResult && downloadResult.doneMessage && !downloadResult.cancelled) {
-		global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
+	// ★ 进度弹窗结束后，统一显示最终弹窗（唯一真理源）
+	if (downloadResult) {
+		if (downloadResult.cancelled) {
+			// ★ 取消
+			global.TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+		} else if (downloadResult.anchorLost) {
+			// ★ 锚点丢失
+			global.TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
+		} else if (downloadResult.failed) {
+			// ★ 下载失败
+			global.TaskMessage.showSimpleToast(`${taskTitle} 下载失败，已回滚`, 15000, 'cancel');
+		} else if (downloadResult.doneMessage) {
+			// ★ 成功
+			global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
+		}
 	}
 }
 

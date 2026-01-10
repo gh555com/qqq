@@ -1476,10 +1476,6 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                     }
                 };
 
-                // 这里我们假设 formatResultToText 只需要 document.uri 和 eol
-                // 如果它需要 getText，我们需要 openTextDocument。
-                // 查看源码 formatResultToText 使用了 getDocumentEOL 和 path.dirname。安全。
-
                 const newText = await formatResultToText(result, mockEditor, taskTitle, transId, taskStartTime, token);
 
                 if (newText) {
