@@ -1672,7 +1672,7 @@ function processFilesForClipboard(files, targetDir) {
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
-async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null) {
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1687,33 +1687,35 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
 
-    // ★ 辅助函数：更新事务记录
-    const updateTransaction = async (newFiles, newFolders) => {
+    // ★ 批量更新事务记录（一次性更新所有文件）
+    const batchUpdateTransaction = async (allFiles, allFolders) => {
         if (!transId) return;
+        if (allFiles.length === 0 && allFolders.length === 0) return;
         try {
             const global = getGlobal();
             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
             if (trans) {
                 const updates = {};
-                if (newFiles && newFiles.length > 0) {
-                    updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...newFiles])];
+                if (allFiles.length > 0) {
+                    updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...allFiles])];
                 }
-                if (newFolders && newFolders.length > 0) {
-                    updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...newFolders])];
+                if (allFolders.length > 0) {
+                    updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...allFolders])];
                 }
                 if (Object.keys(updates).length > 0) {
                     await global.TransactionManager.updateTransaction(transId, updates);
+                    log(`[事务] 批量更新: ${allFiles.length} 文件, ${allFolders.length} 文件夹`, "INFO");
                 }
             }
         } catch (e) {
-            log(`[事务] 更新失败: ${e.message}`, "WARN");
+            log(`[事务] 批量更新失败: ${e.message}`, "WARN");
         }
     };
 
     // ★ 初始进度显示
     if (progressCallback && totalItems > 0) {
         progressCallback(2, `准备复制 ${totalItems} 个项目 (文件夹${folders.length}, 文件${validFiles.length})...`);
-        await yieldToUI(); // ★ 让 UI 更新
+        await yieldToUI();
     }
 
     // 复制文件夹
@@ -1721,6 +1723,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         // ★ 检查取消状态
         if (token?.isCancellationRequested) {
             log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            // ★ 取消时先批量更新事务，确保所有已复制文件都被记录
+            await batchUpdateTransaction(copiedFiles, copiedFolders);
+            if (onCancelCallback) onCancelCallback();
             break;
         }
         const folder = folders[i];
@@ -1729,15 +1734,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
-                await yieldToUI(); // ★ 让 UI 更新
+                await yieldToUI();
             }
             const destFolder = path.join(targetDir, folderName);
-            // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
-                // ★ 立即更新事务
-                await updateTransaction(null, [destFolder]);
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
                     log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
@@ -1758,6 +1760,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         // ★ 检查取消状态
         if (token?.isCancellationRequested) {
             log(`[复制] 用户取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            // ★ 取消时先批量更新事务
+            await batchUpdateTransaction(copiedFiles, copiedFolders);
+            if (onCancelCallback) onCancelCallback();
             break;
         }
         const f = validFiles[i];
@@ -1766,13 +1771,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
-                // ★ 每复制几个文件后让出一次，避免过于频繁影响性能
                 if (i % 5 === 0) {
                     await yieldToUI();
                 }
             }
 
-            // ★ 先检查文件是否可访问
             if (!safeAccessCheck(f)) {
                 skippedCount++;
                 log(`[Clipboard] 跳过无法访问的文件: ${f}`, "WARN");
@@ -1783,13 +1786,6 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
-                let existingPath = findFileByFingerprint(srcFingerprint);
-                if (existingPath && fs.existsSync(existingPath)) {
-                    copiedFiles.push(existingPath);
-                    // ★ 复用旧文件，不记入事务（取消时不删除）
-                    processedItems++;
-                    continue;
-                }
             }
 
             const ext = path.extname(f);
@@ -1797,32 +1793,10 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
             const dest = path.join(targetDir, fname);
 
-            if (fs.existsSync(dest)) {
-                const dstFingerprint = computeFingerprint(dest);
-                if (dstFingerprint === srcFingerprint) {
-                    copiedFiles.push(dest);
-                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    _tryGlobalDeduplicate(dest);
-                    // ★ 复用旧文件，不记入事务
-                    processedItems++;
-                    continue;
-                }
-            }
-
             fs.copyFileSync(f, dest);
-            const finalPath = _tryGlobalDeduplicate(dest);
-            const isNewFile = (finalPath === dest);
-            if (finalPath !== dest) {
-                copiedFiles.push(finalPath);
-                // ★ 复用旧文件，不记入事务
-            } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                copiedFiles.push(dest);
-                // ★ 新文件，立即记入事务
-                await updateTransaction([dest], null);
-            }
+            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+            copiedFiles.push(dest);
         } catch (e) {
-            // ★ 对于被占用/权限不足的文件，跳过而不是崩溃
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 skippedCount++;
                 log(`[Clipboard] 跳过文件 (${e.code}): ${f}`, "WARN");
@@ -1831,6 +1805,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             }
         }
         processedItems++;
+    }
+
+    // ★ 复制完成后批量更新事务（如果没有取消）
+    if (!token?.isCancellationRequested) {
+        await batchUpdateTransaction(copiedFiles, copiedFolders);
     }
 
     // ★ 最终进度显示
@@ -1842,8 +1821,6 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         progressCallback(95, msg);
     }
 
-    // ★ 无论是否有成功复制的文件，都返回结果（包含跳过信息）
-    // 这样可以确保弹窗正确显示结果
     return {
         type: "file_folder",
         files: copiedFiles,
@@ -1854,7 +1831,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     };
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null) {
     try {
         if (token?.isCancellationRequested) return null;
         if (process.platform === "win32") {
@@ -1888,7 +1865,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 }
 
                 // ★ 传入 token 和 transId，边复制边记录事务
-                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId);
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
@@ -2034,7 +2011,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ★ 接受完整快照（单一真理源），不再重复调用 Shell
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null) {
     const global = getGlobal();
 
     // ★ 从快照中提取信息
@@ -2101,7 +2078,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     if (qStatus.hasFile) {
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
         // ★ 传递预获取的文件列表，避免重复调用 getFiles
-        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId);
+        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback);
     }
 
     if (qStatus.hasHtml) {
@@ -2111,7 +2088,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 
     if (qStatus.hasImage) {
         log(`[AutoDetect] 进入图片处理流程`, "INFO");
-        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId);
+        return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId, onCancelCallback);
     }
 
     if (qStatus.hasText) {

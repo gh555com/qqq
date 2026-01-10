@@ -684,7 +684,7 @@ class VideoDownloadController {
         // ★ 使用 withProgress 确保15秒自动关闭
         // VS Code 的 showInformationMessage 不支持自动关闭
         const { TaskMessage } = global;
-        await TaskMessage.showSimpleToast(message, 15000);
+        await TaskMessage.showSimpleToast(message, 15000, 'success');
     }
 
     // ==================== downloader 内部弹窗屏蔽 ====================
@@ -747,7 +747,7 @@ class VideoDownloadController {
 
         // ★ 立即显示取消弹窗，不等待清理完成
         const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
-        global.TaskMessage.showSimpleToast(cancelMsg, 15000);
+        global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
 
         // ★ 事务回滚（后台执行）
         if (task.transId) {
@@ -813,7 +813,7 @@ class VideoDownloadController {
         // ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
         // ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
         if (result && result.doneMessage && !result.cancelled) {
-            global.TaskMessage.showSimpleToast(result.doneMessage, 15000);
+            global.TaskMessage.showSimpleToast(result.doneMessage, 15000, 'success');
         }
     }
 
