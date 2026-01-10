@@ -745,12 +745,15 @@ class VideoDownloadController {
         task.isCancelled = true;
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
 
-        // ★ 立即显示取消弹窗，不等待清理完成
-        const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
-        global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
+        // ★ 如果是外部事务（从 performCurvedPaste 调用），不显示弹窗，由外部统一管理
+        // ★ 如果是内部事务（start 方法直接调用），显示弹窗
+        if (!task.isExternalTrans) {
+            const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
+            global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
+        }
 
         // ★ 事务回滚（后台执行）
-        if (task.transId) {
+        if (task.transId && !task.isExternalTrans) {
             const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
             if (trans) {
                 global.TransactionManager.rollback(trans).catch(e => this.log(`回滚失败: ${e.message}`));

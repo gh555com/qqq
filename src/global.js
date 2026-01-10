@@ -1001,7 +1001,8 @@ const TaskMessage = {
 	done(taskTitle, summary, elapsed) {
 		const prefix = taskTitle || 'qqq';
 		const dur = typeof elapsed === 'number' ? this.formatDuration(elapsed) : elapsed;
-		return `${prefix} ${summary}（耗时${dur}）`;
+		// ★ taskTitle 和 summary 之间用两个空格
+		return `${prefix}  ${summary}（耗时${dur}）`;
 	},
 
 	/**
