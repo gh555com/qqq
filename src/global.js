@@ -1736,7 +1736,7 @@ const TaskCounter = {
 	 */
 	formatTitle(filePath, taskId, suffix = '') {
 		const displayPath = this.formatPath(filePath);
-		const base = `qqq：'${displayPath} 任务${taskId}'`;
+		const base = `qqq：'${displayPath} 任务 ${taskId}'`;
 		return suffix ? `${base} ${suffix}` : base;
 	}
 };

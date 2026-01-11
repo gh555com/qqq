@@ -600,10 +600,10 @@ async function downloadVideosFromUrlCommand() {
 	const transId = global.TransactionManager.createTransactionId();
 	const targetUri = editor.document.uri;
 
-	// ★ 生成 taskTitle（统一任务标识）
+	// ★ 生成 taskTitle
 	const filePath = editor.document.uri.fsPath;
-	const taskNum = await global.TaskCounter.increment(filePath);
-	const taskTitle = global.TaskCounter.formatTitle(filePath, taskNum);
+	const taskNum = await global.TaskCounter.increment(filePath);  // 数据库递增编号
+	const taskTitle = global.TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
 
 	// 1. 立即插入锚点
 	await global.TransactionManager.insertAnchor(editor, transId);
@@ -685,7 +685,7 @@ async function downloadVideosFromUrlCommand() {
 
 		try {
 			// ★ 传递 taskTitle 和 shouldCancel 回调
-			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, () => anchorLost);
+			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, () => anchorLost, taskNum);
 
 			// ★ 检查是否已取消（用户取消 或 锚点丢失）
 			if (token.isCancellationRequested || anchorLost) {

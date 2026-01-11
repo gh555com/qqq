@@ -1375,13 +1375,11 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 }
 
 async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
-    // 0. ★ 获取任务编号（永久递增）
+    // 0. ★ 生成任务标识
     const filePath = editor.document.uri.fsPath;
-    const taskNum = await TaskCounter.increment(filePath);
-    const taskTitle = TaskCounter.formatTitle(filePath, taskNum);
-
-    // 1. 生成并插入锚点
-    const transId = TransactionManager.createTransactionId();
+    const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号
+    const transId = TransactionManager.createTransactionId();  // 六位随机ID（用于锚点）
+    const taskTitle = TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
     const anchor = `/__PENDING_${transId}/`;
 
     // 立即插入锚点
@@ -1415,7 +1413,6 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         landedFiles: [],
         landedFolders: [],
         startTime: Date.now(),
-        taskNum: taskNum,  // ★ 记录任务编号
         taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
         intentTotalSize: intentTotalSize,  // ★ 意图列表总大小（仅本地文件有效）
         existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
@@ -1499,7 +1496,8 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         token,
                         null,
                         taskTitle,  // ★ 传递 taskTitle
-                        () => anchorLost  // ★ 传递 shouldCancel 回调
+                        () => anchorLost,  // ★ 传递 shouldCancel 回调
+                        taskNum  // ★ 传递 taskNum
                     );
 
                     if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
@@ -1562,7 +1560,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                             if (skippedCount > 0) {
                                 detail += ` (跳过 ${skippedCount}个无法访问)`;
                             }
-                            const msg = TaskMessage.done(taskTitle, detail, elapsedMs);
+                            const msg = TaskMessage.done(taskTitle, detail, elapsedMs, taskNum);
                             TaskMessage.showSimpleToast(msg, 15000, 'success');
                         }
                     } else {
