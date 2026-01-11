@@ -984,7 +984,7 @@ class VideoDownloadController {
                 }
             } catch (e) { }
 
-            vscode.window.showWarningMessage(`qqq: youtube下载失败，专家可选配置 opened 文件夹下的 cookies (参考打开滴文档)。`);
+            vscode.window.showWarningMessage(`qqq: youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，稍做等待也是一种解决方案。 `);
         }
     }
 
@@ -1468,12 +1468,6 @@ class VideoDownloadController {
             // Background insertion using WorkspaceEdit
             try {
                 const doc = await vscode.workspace.openTextDocument(targetUri);
-                // Insert at end of document if no selection context, or maybe just append?
-                // For "Direct Paste", we usually want to replace selection.
-                // But in background, selection might be gone.
-                // We'll append to the end for safety in background mode, or try to use a stored range?
-                // Storing range is complex. Appending is safe for "download queue" behavior.
-                // Better: Insert at the end of document.
                 const lastLine = doc.lineCount - 1;
                 const range = new vscode.Range(lastLine, doc.lineAt(lastLine).text.length, lastLine, doc.lineAt(lastLine).text.length);
 
@@ -1502,10 +1496,8 @@ class VideoDownloadController {
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
         if (this._isTaskCancelled(task)) return null;
 
-        // ★ 不再跳过增强流程，允许多个任务独立进行增强流程选择
-        // ★ 已移除 _hideToastsBestEffort()，不会干扰其他任务的通知
-
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
+
         const selection = await vscode.window.showInformationMessage(
             `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
             { modal: false },
@@ -2156,16 +2148,15 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            // ★ 使用统一格式化器
             const selection = await vscode.window.showInformationMessage(
                 VideoMsg.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
-                { modal: true },
+                { modal: false },
                 "我已在外部播放"
             );
 
             if (selection !== "我已在外部播放") {
                 try { await sniffer.stop(); } catch (e) { }
-                this.log("用户取消增强嗅探");
+                this.log("用户取消增强嘗探");
                 return null;
             }
 
