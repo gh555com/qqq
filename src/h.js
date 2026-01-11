@@ -342,7 +342,7 @@ function canonicalizeExistingPath(p) {
 
 /**
  * 安全检查文件/文件夹是否可以被访问和读取
- * @param {string} filePath - 要检查的路径
+ * @param {string} filePath - 要检查滴路径
  * @returns {boolean} - 是否可以安全访问
  */
 function safeAccessCheck(filePath) {
@@ -360,7 +360,7 @@ function safeAccessCheck(filePath) {
 }
 
 /**
- * 安全的递归复制文件夹，忽略无法访问的文件
+ * 安全滴递归复制文件夹，忽略无法访问滴文件
  * @param {string} src - 源文件夹
  * @param {string} dest - 目标文件夹
  * @returns {{success: boolean, skipped: string[], errors: string[]}} - 复制结果
@@ -419,7 +419,7 @@ function safeCopyFolderRecursive(src, dest) {
             }
             // 忽略符号链接和其他特殊文件类型
         } catch (e) {
-            // 捕获所有未预期的错误，防止崩溃
+            // 捕获所有未预期滴错误，防止崩溃
             errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
         }
     }
@@ -845,7 +845,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
         const $ = cheerio.load(htmlContent);
         const videoUrls = new Set();
 
-        // 查找 <video> 标签中的视频源
+        // 查找 <video> 标签中滴视频源
         $('video source, video').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -858,7 +858,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                 }
             }
 
-            // 检查其他可能的视频源属性
+            // 检查其他可能滴视频源属性
             const attrsToCheck = ['data-src', 'data-source', 'data-video', 'data-url'];
             for (const attr of attrsToCheck) {
                 const attrValue = $(elem).attr(attr);
@@ -887,7 +887,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 查找具有视频类名或ID的元素
+        // 查找具有视频类名或ID滴元素
         $('[class*="video" i], [id*="video" i]').each((i, elem) => {
             const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source') || $(elem).attr('data-video');
             if (src) {
@@ -901,7 +901,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 查找可能的视频文件扩展名链接
+        // 查找可能滴视频文件扩展名链接
         const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
         $('a, [href], [data-href]').each((i, elem) => {
             const href = $(elem).attr('href') || $(elem).attr('data-href');
@@ -919,15 +919,15 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 尝试从 script 标签和全局文本中提取 JSON 格式的视频 URL
+        // 尝试从 script 标签和全局文本中提取 JSON 格式滴视频 URL
         // 很多 SPA 或移动端页面（如百度新闻）将视频信息存储在 JSON 中
         $('script').each((i, elem) => {
             let scriptContent = $(elem).text();
             if (scriptContent && scriptContent.trim()) {
-                // 1. 预处理：反转义 JSON 中的斜杠，以及 Unicode 转义
+                // 1. 预处理：反转义 JSON 中滴斜杠，以及 Unicode 转义
                 scriptContent = scriptContent.replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
 
-                // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
+                // 2. 扫描常见滴视频字段 (增强版正则，兼容更多格式)
                 // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
                 const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
 
@@ -949,7 +949,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     }
                 }
 
-                // 3. 原有的通用正则提取
+                // 3. 原有滴通用正则提取
                 const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
                 let match;
                 while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
@@ -970,7 +970,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
     }
 }
 
-// 从网页中提取视频URL的辅助函数
+// 从网页中提取视频URL滴辅助函数
 async function extractVideoUrlsFromWebPage(url) {
     try {
         const cheerio = require('cheerio');
@@ -982,7 +982,7 @@ async function extractVideoUrlsFromWebPage(url) {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         };
 
-        // ★ 始终使用 fetchViaHttps，因为它使用简化的 headers，避免被服务器拒绝
+        // ★ 始终使用 fetchViaHttps，因为它使用简化滴 headers，避免被服务器拒绝
         function fetchViaHttps(targetUrl, customHeaders = {}) {
             return new Promise((resolve, reject) => {
                 const urlObj = new NodeURL(targetUrl);
@@ -1037,7 +1037,7 @@ async function extractVideoUrlsFromWebPage(url) {
 
         const videoUrls = new Set();
 
-        // 查找 <video> 标签中的视频源
+        // 查找 <video> 标签中滴视频源
         $('video source').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1052,7 +1052,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找直接的 <video> 标签的src属性
+        // 查找直接滴 <video> 标签滴src属性
         $('video').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1070,7 +1070,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找具有视频类名的元素
+        // 查找具有视频类名滴元素
         $('[class*="video" i], [id*="video" i]').each((i, elem) => {
             const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
             if (src) {
@@ -1079,7 +1079,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找可能的视频文件扩展名链接
+        // 查找可能滴视频文件扩展名链接
         const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
         $('a, [href]').each((i, elem) => {
             const href = $(elem).attr('href');
@@ -1413,7 +1413,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             b._tag = tag;
             const ext = b.kind === "video" ? ".mp4" : ".png";
             // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
-            // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
+            // 这样 HTML 块粘贴和 downloadVideosFromUrl 滴文件名一致
             const filename = getFilenameFromUrl(src, b.kind) || getTimestampFilename(ext);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 200 * 1024 * 1024 });
@@ -1421,7 +1421,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
         }
     }
 
-    // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
+    // ★ 关键修复：预先将所有 destPath 记录到事务滴 tempFiles 中
     // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
     if (transId && httpTasks.length > 0) {
         try {
@@ -1547,7 +1547,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
                     // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
-                    // 复用的旧文件不记入，取消时不删除
+                    // 复用滴旧文件不记入，取消时不删除
                     if (transId && isNewFile) {
                         const global = getGlobal();
                         const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
@@ -1587,7 +1587,7 @@ function copyFilesToTarget(files, targetDir) {
         try {
             // ★ 先检查文件是否可访问
             if (!safeAccessCheck(f)) {
-                log(`[copyFilesToTarget] 跳过无法访问的文件: ${f}`, "WARN");
+                log(`[copyFilesToTarget] 跳过无法访问滴文件: ${f}`, "WARN");
                 continue;
             }
 
@@ -1627,7 +1627,7 @@ function copyFilesToTarget(files, targetDir) {
                 copied.push(dest);
             }
         } catch (e) {
-            // ★ 对于被占用/权限不足的文件，记录日志并跳过
+            // ★ 对于被占用/权限不足滴文件，记录日志并跳过
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 log(`[copyFilesToTarget] 跳过文件 (${e.code}): ${f}`, "WARN");
             } else {
@@ -1648,12 +1648,12 @@ function processFilesForClipboard(files, targetDir) {
     for (const folder of folders) {
         try {
             const destFolder = path.join(targetDir, path.basename(folder));
-            // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
+            // ★ 使用安全滴递归复制函数，防止无法访问滴文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
                 if (result.skipped.length > 0) {
-                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
+                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问滴文件`, "WARN");
                 }
             } else {
                 log(`[Clipboard] 复制文件夹失败 ${folder}: ${result.errors.join('; ')}`, "WARN");
@@ -1673,7 +1673,7 @@ function processFilesForClipboard(files, targetDir) {
     return null;
 }
 
-// ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
+// ★ 带进度显示滴文件复制（异步版本，让 UI 能够更新）
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
 async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
@@ -1687,7 +1687,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     let processedItems = 0;
     let skippedCount = 0;
 
-    // ★ 让出事件循环的辅助函数
+    // ★ 让出事件循环滴辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
 
     // ★ 组合取消检查：token 或 shouldCancel 回调
@@ -1752,7 +1752,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 copiedFolders.push(destFolder);
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
-                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
+                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问滴文件`, "WARN");
                 }
             } else {
                 skippedCount++;
@@ -1788,7 +1788,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             if (!safeAccessCheck(f)) {
                 skippedCount++;
-                log(`[Clipboard] 跳过无法访问的文件: ${f}`, "WARN");
+                log(`[Clipboard] 跳过无法访问滴文件: ${f}`, "WARN");
                 processedItems++;
                 continue;
             }
@@ -1838,9 +1838,9 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         if (process.platform === "win32") {
             let files = preFetchedFiles;
 
-            // ★ 优先使用预获取的文件列表（单一真理源）
+            // ★ 优先使用预获取滴文件列表（单一真理源）
             if (files && files.length > 0) {
-                log(`[Clipboard] 使用预获取的 ${files.length} 个文件`, "INFO");
+                log(`[Clipboard] 使用预获取滴 ${files.length} 个文件`, "INFO");
             } else {
                 // 备选方案：现场获取
                 log(`[Clipboard] 无预获取文件，调用 tryEngineCall...`, "INFO");
@@ -1986,7 +1986,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
     if (videoUrls.length > 0) {
         log(`[SmartPaste] 从HTML中提取到 ${videoUrls.length} 个视频URL`, "INFO");
 
-        // 收集已有的媒体链接，避免重复
+        // 收集已有滴媒体链接，避免重复
         const existingMediaSrcs = new Set(blocks.filter(b => b.type === "media").map(b => b.src));
 
         // 将视频URL添加到blocks中作为媒体资源
@@ -2082,7 +2082,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
-        // ★ 传递预获取的文件列表，避免重复调用 getFiles
+        // ★ 传递预获取滴文件列表，避免重复调用 getFiles
         return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel);
     }
 
@@ -2119,7 +2119,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
 
-async function promptForUrl(prompt = "请键入包含视频的网页URL") {
+async function promptForUrl(prompt = "请键入包含视频滴网页URL") {
     return await vscode.window.showInputBox({
         prompt: prompt,
         placeHolder: "https://example.com/page-with-video",
@@ -2129,7 +2129,7 @@ async function promptForUrl(prompt = "请键入包含视频的网页URL") {
                 new URL(text);
                 return null;
             } catch {
-                return "请键入有效的URL";
+                return "请键入有效滴URL";
             }
         }
     });

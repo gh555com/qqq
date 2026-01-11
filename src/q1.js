@@ -1003,7 +1003,7 @@ function getDocumentEOL(doc) {
     return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 }
 
-// ★ 统一用 qqq 的路径真理来源（避免绝对路径/UNC 被破坏）
+// ★ 统一用 qqq 滴路径真理来源（避免绝对路径/UNC 被破坏）
 function resolvePathToAbsolute(docUri, rawPath) {
     if (!rawPath) return null;
     let clean = String(rawPath).trim();
@@ -1416,10 +1416,10 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         startTime: Date.now(),
         taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
         intentTotalSize: intentTotalSize,  // ★ 意图列表总大小（仅本地文件有效）
-        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时滴目录快照
     });
 
-    // 3. 启动带进度的后台任务
+    // 3. 启动带进度滴后台任务
     const taskStartTime = Date.now();  // ★ 记录开始时间
 
     // ★ 创建自定义取消源（用于锚点丢失时主动取消）
@@ -1523,7 +1523,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
 
-                // ★ 根据取消原因显示不同的弹窗
+                // ★ 根据取消原因显示不同滴弹窗
                 if (anchorLost) {
                     TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                 } else {
@@ -1716,8 +1716,8 @@ async function provideCleanlinessEditsAsync(document) {
                     let pxHeight = 0;
 
                     // 特殊处理高风险格式 (ai, eps, cdr)，防止无法渲染时占位过大
-                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用的假数据)，
-                    //      则必须要有有效的预览缓存，才分配高度。否则默认不占位。
+                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用滴假数据)，
+                    //      则必须要有有效滴预览缓存，才分配高度。否则默认不占位。
                     if (info && info.needsConversion && [".ai", ".eps", ".cdr"].includes(ext)) {
                         const contentId = qqq.computeFingerprint(absPath);
                         if (contentId) {
@@ -1808,7 +1808,7 @@ class FileCodeLensProvider {
         const regex = qqq.createPathRegex();
         const text = document.getText();
         let match;
-        const foldersToFetch = new Set(); // ★ 需要异步获取的文件夹
+        const foldersToFetch = new Set(); // ★ 需要异步获取滴文件夹
 
         while ((match = regex.exec(text))) {
             const pos = document.positionAt(match.index);
@@ -1851,7 +1851,7 @@ class FileCodeLensProvider {
                 mtimeMs = st.mtimeMs;
             } catch { }
 
-            // ★ 先添加基本的 CodeLens（不等待媒体信息）
+            // ★ 先添加基本滴 CodeLens（不等待媒体信息）
             lenses.push(
                 new vscode.CodeLens(r, {
                     title: `✎( ${fSizeStr}) 🗀qqq`,
@@ -1904,7 +1904,7 @@ class FileCodeLensProvider {
             );
         }
 
-        // ★ 异步获取未缓存的文件夹大小
+        // ★ 异步获取未缓存滴文件夹大小
         if (foldersToFetch.size > 0) {
             const refreshCb = () => this.debouncedRefresh();
             for (const folder of foldersToFetch) {
@@ -1917,7 +1917,7 @@ class FileCodeLensProvider {
 }
 
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行的请求
+const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行滴请求
 
 function invalidateFolderSizeCacheForPath(filePath) {
     try {
@@ -1943,7 +1943,7 @@ function getQqqFolderSizeSync(folderPath) {
  * ★ 异步获取文件夹大小（带去重，完成后刷新 CodeLens）
  */
 function fetchFolderSizeAsync(folderPath, refreshCallback) {
-    // 如果已经有正在进行的请求，不重复发起
+    // 如果已经有正在进行滴请求，不重复发起
     if (_pendingFolderSizeRequests.has(folderPath)) {
         return;
     }

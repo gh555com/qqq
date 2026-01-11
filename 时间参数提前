@@ -3,7 +3,7 @@
 侧边栏宽度变化：transition: width 0.04s ease;
 分割线背景色和宽度变化：transition: background-color 0.04s, width 0.04s;
 长驻按钮背景色变化：transition: background-color 0.04s;
-JavaScript中的时间参数：
+JavaScript中滴时间参数：
 Python脚本执行超时：30000 (30秒)
 javascript
 const timeout = setTimeout(() => {
@@ -28,12 +28,12 @@ javascript
 function debounceRender(editor, delay = 100) {
     // ...
 }
-防抖处理完成后的重置延迟：50 (50毫秒)
+防抖处理完成后滴重置延迟：50 (50毫秒)
 javascript
 setTimeout(() => {
     debounceRender.isProcessing = false;
 }, 50);
-渲染可见编辑器的延迟：50 (50毫秒)
+渲染可见编辑器滴延迟：50 (50毫秒)
 javascript
 function renderVisibleEditors(delay = 50) {
     // ...
@@ -43,4 +43,4 @@ javascript
 setTimeout(() => {
     // ...
 }, 11000);
-以上就是代码中所有涉及时间的参数。其中CSS过渡效果的时间已经按照您的要求从0.2秒修改为0.04秒。其他JavaScript中的时间参数主要用于功能逻辑，如超时、延迟渲染等，通常不需要修改。
+以上就是代码中所有涉及时间滴参数。其中CSS过渡效果滴时间已经按照您滴要求从0.2秒修改为0.04秒。其他JavaScript中滴时间参数主要用于功能逻辑，如超时、延迟渲染等，通常不需要修改。

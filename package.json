@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.11.3",
+  "version": "15.13.4",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -42,7 +42,7 @@
               "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47",
               "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71"
             ],
-            "markdownDescription": "☀️ 性能模式：控制预览生成的质量和性能平衡。"
+            "markdownDescription": "☀️ 性能模式：控制预览生成滴质量和性能平衡。"
           },
           "qqq.ioEngine": {
             "order": 20,
@@ -114,7 +114,7 @@
               "小相框：256x144",
               "Fix：根据图片尺寸自动选择相框"
             ],
-            "markdownDescription": "👁️ 相框尺寸模式：控制预览图像的显示尺寸。"
+            "markdownDescription": "👁️ 相框尺寸模式：控制预览图像滴显示尺寸。"
           },
           "qqq.cleanFreak": {
             "order": 20,
@@ -126,7 +126,7 @@
             "order": 30,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "👁️ 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+            "markdownDescription": "👁️ 图片/视频预览时，小于相框（512×288）滴图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
           }
         }
       },

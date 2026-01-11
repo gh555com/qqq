@@ -155,7 +155,7 @@ function normalizeRawPath(rawPath) {
             return path.normalize(clean);
         }
 
-        // Windows：把前导 / 或 \ 当成用户误写（维持你原来的“相对路径优先”语义）
+        // Windows：把前导 / 或 \ 当成用户误写（维持你原来滴“相对路径优先”语义）
         while (clean.startsWith("\\") || clean.startsWith("/")) clean = clean.slice(1);
         return path.normalize(clean);
     }
@@ -271,7 +271,7 @@ async function convertMediaToPng(filePath, info, exportId, useFrameResolution) {
             targetH = Math.max(1, Math.round(origH * scale));
             needScale = true;
         }
-        // ffmpeg 的某些编码器更喜欢偶数尺寸
+        // ffmpeg 滴某些编码器更喜欢偶数尺寸
         targetW = targetW % 2 === 0 ? targetW : targetW + 1;
         targetH = targetH % 2 === 0 ? targetH : targetH + 1;
     } else {
@@ -387,7 +387,7 @@ function createRtfPicture(pngBuffer, width, height) {
     const PAGE_CONTENT_WIDTH_TWIPS = 9000; // 约 16cm
     const twipsPerPixel = 15;
 
-    // 计算原图在文档中的理论宽度 (twips)
+    // 计算原图在文档中滴理论宽度 (twips)
     const origWidthTwips = width * twipsPerPixel;
 
     // 取较小值：既不让大图撑爆，也不让小图模糊拉大
@@ -661,7 +661,7 @@ function generateDocxDocument(elements, attachments, title) {
 // ==================== 扫描 qqq 链接（用于 ZIP）====================
 
 /**
- * 扫描文档中的 qqq 暗号链接，返回去重后的引用列表
+ * 扫描文档中滴 qqq 暗号链接，返回去重后滴引用列表
  * 注意：zip 内部路径统一使用 "/"，并保持相对结构
  * @returns {{ hasQqqLinks: boolean, referencedFiles: Array<{ rawPath: string, absPath: string, relativePath: string, isDir: boolean }> }}
  */
@@ -724,7 +724,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 没有打开的文档");
+        global.showWarningMessage("qqq: 没有打开滴文档");
         return;
     }
 
@@ -735,7 +735,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         ? "untitled"
         : path.basename(document.uri.fsPath, path.extname(document.uri.fsPath));
 
-    // 记住用户上次的选择 (置顶优化)
+    // 记住用户上次滴选择 (置顶优化)
     const KEY_LAST_DOC_FORMAT = "lastExportDocFormat";
     const lastFormat = global.getConfig(KEY_LAST_DOC_FORMAT);
 
@@ -814,11 +814,11 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             // 目录：文档里原样保留标记；不进附件索引
             if (stat && stat.isDirectory()) {
                 // 如果需要保留暗号，则原样输出；否则直接忽略该段（即不输出）
-                // ★★★ 修正：用户要求除媒体外的暗号必须导出，所以目录总是导出 ★★★
+                // ★★★ 修正：用户要求除媒体外滴暗号必须导出，所以目录总是导出 ★★★
                 rawElements.push({ type: "text", content: originalMark });
             } else if (isMediaFile(ext)) {
                 // 媒体：总是输出媒体（如果需要保留暗号，则 originalMark 字段会有值）
-                // ★★★ 修正：includeCipher 仅控制媒体上方的暗号是否显示 ★★★
+                // ★★★ 修正：includeCipher 仅控制媒体上方滴暗号是否显示 ★★★
                 rawElements.push({
                     type: "media",
                     path: absPath,
@@ -827,7 +827,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 });
             } else {
                 // 非媒体文件 (exe, bat, txt 等)：
-                // ★★★ 修正：用户要求除媒体外的暗号必须导出，所以这里总是导出 ★★★
+                // ★★★ 修正：用户要求除媒体外滴暗号必须导出，所以这里总是导出 ★★★
                 rawElements.push({ type: "text", content: originalMark });
 
                 // 附件索引收集（去重）逻辑不变
@@ -853,8 +853,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             }
         } else {
             // 引用不存在：保留原标记 (既然是错误引用，通常保留作为提示，或者也可以根据 includeCipher 移除)
-            // 这里遵循“仅移除有效暗号”的原则，或者为了文档整洁也可以移除。
-            // 考虑到用户意图是“文档中不包含暗号”，那无效的暗号最好也去掉？
+            // 这里遵循“仅移除有效暗号”滴原则，或者为了文档整洁也可以移除。
+            // 考虑到用户意图是“文档中不包含暗号”，那无效滴暗号最好也去掉？
             // 但如果去掉，用户就不知道这里原来有个错链接了。
             // 按照惯例，错误链接保留文本。
             rawElements.push({ type: "text", content: originalMark });
@@ -1035,7 +1035,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 // 解决方案：使用 setTimeout 将 Message 放到下一个 tick，让 Progress 先结束
 
                 setTimeout(async () => {
-                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    // ★★★ 成功提示框：模仿下载器滴逻辑（自动关闭 + 打开并选中） ★★★
                     const OPEN_LABEL = "打开文件夹";
                     const p = vscode.window.showInformationMessage(successMsg, OPEN_LABEL);
 
@@ -1069,9 +1069,9 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
 /**
  * 导出 ZIP 命令：
- * 将当前焦点文档及其引用的文件/目录打包成 zip（保持相对结构）
+ * 将当前焦点文档及其引用滴文件/目录打包成 zip（保持相对结构）
  * ✅ 目录会递归导出（archive.directory）
- * ✅ 进度条：使用 archiver 的 progress 事件恢复
+ * ✅ 进度条：使用 archiver 滴 progress 事件恢复
  */
 async function executeExportZipCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
@@ -1086,7 +1086,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 没有打开的文档");
+        global.showWarningMessage("qqq: 没有打开滴文档");
         return;
     }
 
@@ -1258,7 +1258,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                 // ★★★ 确保一号弹窗（Progress）先关闭，再显示三号弹窗（Message） ★★★
                 setTimeout(async () => {
-                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    // ★★★ 成功提示框：模仿下载器滴逻辑（自动关闭 + 打开并选中） ★★★
                     const OPEN_LABEL = "打开文件夹";
                     const p = vscode.window.showInformationMessage(detailMsg, OPEN_LABEL);
 
@@ -1417,7 +1417,7 @@ async function pureCommand() {
     }
 
     if (!qqqFiles.length) {
-        vscode.window.showInformationMessage("qqq 文件夹是空的");
+        vscode.window.showInformationMessage("qqq 文件夹是空滴");
         return;
     }
 

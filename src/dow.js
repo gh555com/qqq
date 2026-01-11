@@ -1840,7 +1840,7 @@ class YtDlpDownloader {
 
     /**
      * probe：获取视频信息而不下载
-     * - 兼容单视频、以及（可能）playlist 的多行 dump-json 输出
+     * - 兼容单视频、以及（可能）playlist 滴多行 dump-json 输出
      * - 开关 10：stdout/stderr 限制避免内存炸
      */
     async probe(url, options = {}) {
@@ -2092,7 +2092,7 @@ class YtDlpDownloader {
                     "--no-mtime", // 不修改文件时间，避免某些文件系统操作延迟
                     "--no-check-certificate",
                     "--no-cache-dir",
-                    // 移除所有可能触发风控的 extractor-args
+                    // 移除所有可能触发风控滴 extractor-args
                     // "--extractor-args", "youtubetab:skip=authcheck;youtube:player_skip=webpage,configs",
                     "--referer", referer,
                     ...extraArgs
@@ -2557,7 +2557,7 @@ class UnifiedMediaDownloader {
                     rateLimit: opts.videoRateLimit,
                     format: opts.videoFormat,
 
-                    // ★ 优先使用全局 cookiesFilePath，其次使用 task 级别的
+                    // ★ 优先使用全局 cookiesFilePath，其次使用 task 级别滴
                     cookiesFilePath: opts.cookiesFilePath || t.meta?.cookiesFilePath,
                     cookieSource: t.meta?.cookieSource,
                     referer: t.meta?.referer,
@@ -2743,7 +2743,7 @@ class UnifiedMediaDownloader {
                     if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
                     probeResult = await this.ytdlp.probe(url);
                     if (!probeResult || !probeResult.success) {
-                        if (vscode) vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`);
+                        if (vscode) vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载滴视频，yt-dlp也无法处理此页面')}`);
                         return null;
                     }
                 }
@@ -2768,7 +2768,7 @@ class UnifiedMediaDownloader {
 
             const selectedItems = await vscode.window.showQuickPick(items, {
                 canPickMany: true,
-                placeHolder: "选择要下载的视频",
+                placeHolder: "选择要下载滴视频",
                 matchOnDescription: true,
                 matchOnDetail: true
             });
