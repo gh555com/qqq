@@ -984,7 +984,7 @@ class VideoDownloadController {
                 }
             } catch (e) { }
 
-            vscode.window.showWarningMessage(`YouTube 下载失败，请检查 opened 文件夹下的 cookies 配置 (参考同时打开的文档)。`);
+            vscode.window.showWarningMessage(`qqq: youtube下载失败，专家可选配置 opened 文件夹下的 cookies (参考打开滴文档)。`);
         }
     }
 
@@ -1309,7 +1309,7 @@ class VideoDownloadController {
                 };
             }
 
-            // ✅ 最终兖底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
+            // ✅ 最终兄底：哪怕未来有人改坏 needEnhanced，这里也坚决挡住 YouTube 增强
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
@@ -1318,6 +1318,11 @@ class VideoDownloadController {
                     // 增强流程也返回结果
                     return enhancedResult || { landedFiles: [], finalTotalBytes: 0 };
                 }
+            }
+
+            // ★ YouTube 下载失败时，触发 cookies 配置流程（独立于 needEnhanced 判断）
+            if ((outcome.isYouTube || this._isYouTubeUrl(url)) && outcome.landedFiles.length === 0) {
+                await this._handleCookieErrorIfNeeded('Sign in to confirm', url);
             }
 
             const landedCount = (outcome.landedFiles || []).length;

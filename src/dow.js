@@ -2557,6 +2557,8 @@ class UnifiedMediaDownloader {
                     rateLimit: opts.videoRateLimit,
                     format: opts.videoFormat,
 
+                    // ★ 优先使用全局 cookiesFilePath，其次使用 task 级别的
+                    cookiesFilePath: opts.cookiesFilePath || t.meta?.cookiesFilePath,
                     cookieSource: t.meta?.cookieSource,
                     referer: t.meta?.referer,
                     cookie: t.meta?.cookie,
