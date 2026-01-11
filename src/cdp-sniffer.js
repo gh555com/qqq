@@ -784,6 +784,22 @@ class CdpSniffer {
             this.keepAliveTimers = [];
         }
         if (this.browserProcess) {
+            const pid = this.browserProcess.pid;
+            
+            // ★ 修复：在 Windows 上使用 taskkill 彻底杀死进程树（防止僵尸进程）
+            if (process.platform === 'win32' && pid) {
+                try {
+                     // /F = Force, /T = Tree (kills children), /PID = Process ID
+                     // QQQ_NO_TRACK=1 防止此命令本身被追踪系统误判
+                     require('child_process').execSync(`taskkill /pid ${pid} /T /F`, { 
+                         stdio: 'ignore',
+                         env: { ...process.env, QQQ_NO_TRACK: '1' }
+                     });
+                } catch (e) { 
+                    // 忽略错误（例如进程已经不存在）
+                }
+            }
+
             try {
                 this.browserProcess.kill();
             } catch { }

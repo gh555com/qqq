@@ -1446,12 +1446,11 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
             if (!exists && !anchorLost) {
                 anchorLost = true;
                 global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
-                anchorLostSource.cancel();  // ★ 触发取消
+                anchorLostSource.cancel();
                 return false;
             }
             return exists;
         } catch (e) {
-            // 文档可能被关闭，视为锚点丢失
             if (!anchorLost) {
                 anchorLost = true;
                 global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
@@ -2128,8 +2127,10 @@ async function activate(context) {
     // ★ 启动时恢复/清理事务
     try {
         await TransactionManager.recover();
+        global.hasRecovered = true;  // ★ 防止 executeClipboardCommand 重复触发
     } catch (e) {
         console.error("Transaction Recovery Failed:", e);
+        global.hasRecovered = true;  // ★ 即使失败也标记，防止重复执行
     }
 
     context.subscriptions.push(
