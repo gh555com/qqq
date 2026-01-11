@@ -21,7 +21,9 @@ const VideoMsg = {
     progress(task, sizeStr, urlSnippet, suffix = '') {
         const suffixPart = suffix ? ` ${suffix}` : '';
         // ★ 修复：只保留统一真理源滴前缀，移除 VideoDownloadController 中重复添加滴前缀
-        return `已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
+        // 但如果前缀缺失，需要补上
+        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
+        return `${prefix}已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
     },
 
     /**
@@ -989,7 +991,7 @@ class VideoDownloadController {
             const isYouTube = this._isYouTubeUrl(url);
 
             const runLogic = async (progress, token) => {
-                // ★ 使用统一格式化器
+                // ★ 使用统一格式化器 (progress 方法已去除了重复前缀，现在只需传递纯内容)
                 progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet, '(正在解析...)') });
 
                 if (token) {

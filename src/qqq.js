@@ -629,7 +629,7 @@ async function downloadVideosFromUrlCommand() {
 	let lastAnchorCheckTime = 0;
 	const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
 
-	// ★ 锚点检查函数（带节流 + 二次确认）
+	// ★ 锚点检查函数（带节流）
 	const checkAnchorExists = async () => {
 		if (anchorLost) return false;
 
@@ -640,21 +640,11 @@ async function downloadVideosFromUrlCommand() {
 		lastAnchorCheckTime = now;
 
 		try {
-			// ★ 优先从可见编辑器获取文档（避免重新打开）
-			let doc = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri.toString())?.document;
-			if (!doc) doc = await vscode.workspace.openTextDocument(targetUri);
-
+			const doc = await vscode.workspace.openTextDocument(targetUri);
 			const text = doc.getText();
 			const exists = text.includes(anchor);
 
 			if (!exists && !anchorLost) {
-				// ★ 发现锚点丢失，等待 300ms 二次确认（防止粘贴/格式化期间滴瞬时状态导致误判）
-				await new Promise(r => setTimeout(r, 300));
-				if (doc.getText().includes(anchor)) {
-					// global.logMessage(`[AnchorWatch] 虚惊一场，锚点瞬时丢失后恢复`, 'DEBUG');
-					return true;
-				}
-
 				anchorLost = true;
 				global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
 				anchorLostSource.cancel();
@@ -663,14 +653,6 @@ async function downloadVideosFromUrlCommand() {
 			return exists;
 		} catch (e) {
 			if (!anchorLost) {
-				// ★ 异常也进行二次确认
-				await new Promise(r => setTimeout(r, 300));
-				try {
-					let doc2 = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri.toString())?.document;
-					if (!doc2) doc2 = await vscode.workspace.openTextDocument(targetUri);
-					if (doc2.getText().includes(anchor)) return true;
-				} catch { }
-
 				anchorLost = true;
 				global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
 				anchorLostSource.cancel();
