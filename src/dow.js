@@ -2817,20 +2817,7 @@ class UnifiedMediaDownloader {
             }
         });
 
-        const successfulDownloads = downloadResult.results.filter(r => r.success);
-        const failedDownloads = downloadResult.results.filter(r => !r.success);
-
-        if (vscode) {
-            if (successfulDownloads.length > 0) {
-                vscode.window.showInformationMessage(
-                    `成功下载 ${successfulDownloads.length} 个视频，失败 ${failedDownloads.length} 个`
-                );
-            } else if (failedDownloads.length > 0) {
-                vscode.window.showErrorMessage(
-                    `所有视频下载失败: ${failedDownloads.map(f => f.error).join(', ')}`
-                );
-            }
-        }
+        // ★ 不在这里显示弹窗，由调用方统一处理
 
         if (progress) progress.report({ increment: 100 });
         return downloadResult;
