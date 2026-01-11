@@ -1573,7 +1573,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                     }
                 } else {
-                    // 结果为空 -> 回滚
+                    // 失败：结果为空 -> 回滚
                     const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                     if (trans) await TransactionManager.rollback(trans);
                     await replaceAnchorInDoc(docUri, anchor, "");
