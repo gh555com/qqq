@@ -1377,9 +1377,10 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
     // 0. ★ 生成任务标识
     const filePath = editor.document.uri.fsPath;
-    const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号
+    const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
+    const iconNum = await TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
     const transId = TransactionManager.createTransactionId();  // 六位随机ID（用于锚点）
-    const taskTitle = TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
+    const taskTitle = TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
     const anchor = `/__PENDING_${transId}/`;
 
     // 立即插入锚点

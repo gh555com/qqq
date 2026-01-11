@@ -884,9 +884,10 @@ class VideoDownloadController {
 
         // ★ 生成任务标识
         const filePath = editor.document.uri.fsPath;
-        const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号
+        const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
+        const iconNum = await TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
         const transId = global.TransactionManager.createTransactionId();  // 六位随机ID
-        const taskTitle = TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
+        const taskTitle = TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
 
         // 交互式模式
         const result = await this.downloadEntry(raw, targetDir, transId, null, null, null, taskTitle, null, taskNum);
