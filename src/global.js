@@ -1584,22 +1584,40 @@ const TransactionManager = {
 			}
 		}
 
-		// 2. ★ 只删除明确的临时文件（.part, .ytdl, .tmp），不再扫描删除媒体文件
-		// 避免误删其他任务的文件
+		// 2. ★ 扩展清理：删除 yt-dlp 临时文件和中间文件
+		// .part, .ytdl, .tmp - 明确的临时文件
+		// .fXXX.mp4, .fXXX.m4a, .fXXX.webm - yt-dlp 分离下载的纯视频/纯音频流
 		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
 			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
+			// ★ yt-dlp 中间文件模式：.f数字.扩展名 或 .f数字.扩展名.part
+			const ytdlpIntermediatePattern = /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i;
 			try {
 				const files = fs.readdirSync(trans.targetDir);
 				for (const f of files) {
-					const ext = path.extname(f).toLowerCase();
-					if (tempExts.includes(ext)) {
-						const fullPath = path.join(trans.targetDir, f);
-						try {
-							if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-								fs.unlinkSync(fullPath);
-								logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
-							}
-						} catch (e) { }
+					const fullPath = path.join(trans.targetDir, f);
+					try {
+						if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) continue;
+
+						// ★ 检查是否应该保留（任务开始前已存在）
+						if (shouldPreserve(fullPath)) continue;
+
+						const ext = path.extname(f).toLowerCase();
+
+						// ★ 清理明确的临时文件
+						if (tempExts.includes(ext)) {
+							fs.unlinkSync(fullPath);
+							logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
+							continue;
+						}
+
+						// ★ 清理 yt-dlp 中间文件（纯视频/纯音频流）
+						if (ytdlpIntermediatePattern.test(f)) {
+							fs.unlinkSync(fullPath);
+							logMessage(`[Rollback] 删除 yt-dlp 中间文件: ${f}`, "INFO");
+							continue;
+						}
+					} catch (e) {
+						logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
 					}
 				}
 			} catch (e) {

@@ -9,7 +9,8 @@ const zlib = require("zlib");
 const dns = require("dns");
 const net = require("net");
 const { pipeline, Transform } = require("stream");
-const { spawn, spawnSync } = require("child_process");
+// ★ 不在顶部缓存 spawn，改为每次使用时动态获取，以便 ChildProcessTracker 能正确追踪
+const { spawnSync } = require("child_process");
 let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
@@ -1866,6 +1867,8 @@ class YtDlpDownloader {
 
             const doProbe = (extraArgs = []) => {
                 return new Promise((resolveProbe) => {
+                    // ★ 动态获取 spawn（确保使用 patched 版本）
+                    const { spawn } = require("child_process");
                     const proc = spawn(this.ytdlpPath, [...args, ...extraArgs], { windowsHide: true });
 
                     let stdout = "";
@@ -2120,6 +2123,8 @@ class YtDlpDownloader {
 
                 args.push(url);
 
+                // ★ 动态获取 spawn（确保使用 patched 版本）
+                const { spawn } = require("child_process");
                 const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
 
                 let stderr = "";
