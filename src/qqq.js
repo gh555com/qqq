@@ -602,8 +602,9 @@ async function downloadVideosFromUrlCommand() {
 
 	// ★ 生成 taskTitle
 	const filePath = editor.document.uri.fsPath;
-	const taskNum = await global.TaskCounter.increment(filePath);  // 数据库递增编号
-	const taskTitle = global.TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
+	const taskNum = await global.TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
+	const iconNum = await global.TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
+	const taskTitle = global.TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
 
 	// 1. 立即插入锚点
 	await global.TransactionManager.insertAnchor(editor, transId);

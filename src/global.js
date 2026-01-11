@@ -1673,6 +1673,100 @@ const TransactionManager = {
 
 		logMessage(`[Rollback] 回滚完成: 删除 ${deletedCount} 个, 保留旧文件 ${preservedCount} 个`, "INFO");
 		await this.removeTransaction(trans.id);
+
+		// ★ 终极兖底：11秒后后台执行孤儿文件清理
+		if (trans.targetDir) {
+			setTimeout(() => {
+				this._cleanupOrphanFiles(trans.targetDir).catch(e => {
+					logMessage(`[兖底清理] 失败: ${e.message}`, "WARN");
+				});
+			}, 11000);
+		}
+	},
+
+	/**
+	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟的孤儿文件
+	 * @param {string} targetDir - qqq 文件夹路径
+	 */
+	async _cleanupOrphanFiles(targetDir) {
+		if (!targetDir || !fs.existsSync(targetDir)) return;
+
+		// 找到父目录（包含文档文件的目录）
+		const parentDir = path.dirname(targetDir);
+		if (!fs.existsSync(parentDir)) return;
+
+		// 获取 qqq 文件夹中的所有文件
+		let qqqFiles = [];
+		try {
+			qqqFiles = fs.readdirSync(targetDir).filter(f => {
+				try { return fs.statSync(path.join(targetDir, f)).isFile(); } catch { return false; }
+			});
+		} catch { return; }
+
+		if (!qqqFiles.length) return;
+
+		// 扫描父目录中的文本文件，找出所有被引用的文件
+		const referencedFiles = new Set();
+		const BINARY_EXTS = new Set([
+			".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
+			".exe", ".dll", ".zip", ".tar", ".gz",
+			".mp3", ".mp4", ".avi", ".mov", ".mkv",
+			".pdf", ".doc", ".docx", ".psd", ".ai",
+		]);
+
+		// 匹配 qqq/ 路径的正则
+		const regex = /qqq[\\\/]([^\s"'<>\[\]\(\)]+)/gi;
+
+		try {
+			const parentFiles = fs.readdirSync(parentDir);
+			for (const fileName of parentFiles) {
+				if (fileName === "qqq" || fileName === "qqq.pure") continue;
+				const fullPath = path.join(parentDir, fileName);
+				try { if (!fs.statSync(fullPath).isFile()) continue; } catch { continue; }
+
+				// 跳过二进制文件
+				const ext = path.extname(fileName).toLowerCase();
+				if (BINARY_EXTS.has(ext)) continue;
+
+				try {
+					const content = fs.readFileSync(fullPath, "utf-8");
+					let match;
+					regex.lastIndex = 0;
+					while ((match = regex.exec(content))) {
+						const rawPath = (match[1] || "").trim();
+						// 提取文件名
+						const baseName = path.basename(rawPath);
+						if (baseName) referencedFiles.add(baseName.toLowerCase());
+					}
+				} catch { }
+			}
+		} catch { return; }
+
+		// 找出孤儿文件
+		const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
+		if (!orphans.length) return;
+
+		// 删除创建时间 < 5分钟的孤儿文件
+		const now = Date.now();
+		const FIVE_MINUTES = 5 * 60 * 1000;
+		let cleanedCount = 0;
+
+		for (const orphan of orphans) {
+			const fullPath = path.join(targetDir, orphan);
+			try {
+				const stat = fs.statSync(fullPath);
+				const age = now - stat.birthtimeMs;
+				if (age < FIVE_MINUTES) {
+					fs.unlinkSync(fullPath);
+					logMessage(`[兖底清理] 删除孤儿文件: ${orphan} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+					cleanedCount++;
+				}
+			} catch { }
+		}
+
+		if (cleanedCount > 0) {
+			logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿文件`, "INFO");
+		}
 	},
 
 	async recover() {
@@ -1710,6 +1804,7 @@ const TransactionManager = {
 // ★ 任务计数器系统（每个文件路径维护一个永久递增的任务计数 q）
 // ============================================================================
 const KEY_TASK_COUNTERS = "qqq.task_counters";
+const KEY_ICON_COUNTER = "qqq.icon_counter";  // ★ 全局图形计数器
 
 const TaskCounter = {
 	/**
@@ -1722,7 +1817,7 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 递增并返回新的任务计数（永不重置）
+	 * 递增并返回新的任务计数（永不重置，按文件分别计数）
 	 */
 	async increment(filePath) {
 		if (!extensionContext) return 1;
@@ -1730,6 +1825,17 @@ const TaskCounter = {
 		const newCount = (counters[filePath] || 0) + 1;
 		counters[filePath] = newCount;
 		await extensionContext.globalState.update(KEY_TASK_COUNTERS, counters);
+		return newCount;
+	},
+
+	/**
+	 * ★ 递增并返回全局图形计数（跨文件，用于选择图形）
+	 */
+	async incrementIcon() {
+		if (!extensionContext) return 1;
+		const current = extensionContext.globalState.get(KEY_ICON_COUNTER, 0);
+		const newCount = current + 1;
+		await extensionContext.globalState.update(KEY_ICON_COUNTER, newCount);
 		return newCount;
 	},
 
@@ -1758,14 +1864,19 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 生成任务标题：qqq：'截断路径 任务 q' ...
+	 * 生成任务标题：qqq：'截断路径❤️taskId'
 	 * @param {string} filePath - 文件路径
 	 * @param {string} taskId - 任务ID（六位随机字符串）
+	 * @param {number} iconNum - 全局图形编号（跨文件递增，用于选择图形）
 	 * @param {string} suffix - 可选后缀描述
 	 */
-	formatTitle(filePath, taskId, suffix = '') {
+	formatTitle(filePath, taskId, iconNum = 1, suffix = '') {
+		// ★ 11个图形固定顺序循环（跨文件全局队列）
+		const ICONS = ['❤️', '💚', '💜', '🧡', '💙', '🤎', '💛', '🖤', '🤍', '⬛', '⬜'];
+		const icon = ICONS[(iconNum - 1) % ICONS.length];
+
 		const displayPath = this.formatPath(filePath);
-		const base = `qqq：'${displayPath} 任务 ${taskId}'`;
+		const base = `qqq：'${displayPath}${icon}${taskId}'`;
 		return suffix ? `${base} ${suffix}` : base;
 	}
 };
