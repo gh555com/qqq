@@ -38,7 +38,7 @@ const VideoMsg = {
         } else {
             summary = `共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}`;
         }
-        return TaskMessage.done(task?.taskTitle, summary, elapsedMs, task?.transId || '');
+        return TaskMessage.done(task?.taskTitle, summary, elapsedMs, task?.taskNum || '');
     },
 
     /**
@@ -740,11 +740,14 @@ class VideoDownloadController {
     async _beginTask(targetDir, externalTransId = null) {
         // Remove dependency on this._task (instance state)
 
+        // ★ 使用六位随机 ID
+        const transId = externalTransId || global.TransactionManager.createTransactionId();
+
         const task = {
             startMs: Date.now(),
             tracker: new ChildProcessTracker(),
             activeFiles: new Set(), // Track files for cleanup on cancel
-            transId: externalTransId || Date.now().toString(),
+            transId: transId,
             isExternalTrans: !!externalTransId,
             isCancelled: false // Local cancelled flag
         };
@@ -857,13 +860,14 @@ class VideoDownloadController {
         const targetDir = path.join(currentDocDir, "qqq");
         if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-        // ★ 交互式模式也生成 taskTitle
+        // ★ 生成任务标识
         const filePath = editor.document.uri.fsPath;
-        const taskNum = await TaskCounter.increment(filePath);
-        const taskTitle = TaskCounter.formatTitle(filePath, taskNum);
+        const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号
+        const transId = global.TransactionManager.createTransactionId();  // 六位随机ID
+        const taskTitle = TaskCounter.formatTitle(filePath, transId);  // 标题用 transId
 
-        // 交互式模式：不传递 progressCallback，使用内部的 withProgress
-        const result = await this.downloadEntry(raw, targetDir, null, null, null, null, taskTitle);
+        // 交互式模式
+        const result = await this.downloadEntry(raw, targetDir, transId, null, null, null, taskTitle, null, taskNum);
 
         // ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
         // ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
@@ -873,7 +877,7 @@ class VideoDownloadController {
     }
 
     // ==================== Headless Entry (for q1.js concurrency) ====================
-    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null, taskTitle = '', shouldCancel = null) {
+    async downloadEntry(rawUrl, targetDir, transId, progressCallback, token, targetUri = null, taskTitle = '', shouldCancel = null, taskNum = null) {
         // 1. 初始化任务上下文
         const task = await this._beginTask(targetDir, transId);
 
@@ -881,6 +885,8 @@ class VideoDownloadController {
         task.targetUri = targetUri;
         // ★ 保存 taskTitle 到 task 对象，供所有弹窗使用
         task.taskTitle = taskTitle;
+        // ★ 保存 taskNum 到 task 对象，用于结束消息
+        task.taskNum = taskNum;
         // ★ 保存 shouldCancel 回调，用于实时检查锚点是否丢失
         task.shouldCancel = shouldCancel;
 
