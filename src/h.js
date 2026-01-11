@@ -1465,12 +1465,13 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         b.fingerprint = fp || null;
                         b.status = "ok";
 
-                        // ★ Register Transaction
+                        // ★ Register Transaction（使用规范化路径）
                         if (transId) {
                             const global = getGlobal();
                             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                             if (trans) {
-                                const newLanded = [...(trans.landedFiles || []), finalPath];
+                                const normalizedPath = path.normalize(finalPath);
+                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
                                 await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                             }
                         }
@@ -1499,12 +1500,13 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     b.fingerprint = fp || null;
                     b.status = "ok";
 
-                    // ★ Register Transaction
+                    // ★ Register Transaction（使用规范化路径）
                     if (transId) {
                         const global = getGlobal();
                         const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                         if (trans) {
-                            const newLanded = [...(trans.landedFiles || []), finalPath];
+                            const normalizedPath = path.normalize(finalPath);
+                            const newLanded = [...(trans.landedFiles || []), normalizedPath];
                             await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                         }
                     }
@@ -1544,13 +1546,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     block.fingerprint = computeFingerprint(block.path);
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
-                    // ★ 事务记录：只有新文件才记入 landedFiles
+                    // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
                     // 复用的旧文件不记入，取消时不删除
                     if (transId && isNewFile) {
                         const global = getGlobal();
                         const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                         if (trans) {
-                            const newLanded = [...(trans.landedFiles || []), finalPath];
+                            const normalizedPath = path.normalize(finalPath);
+                            const newLanded = [...(trans.landedFiles || []), normalizedPath];
                             // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
                             const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
                             await global.TransactionManager.updateTransaction(transId, {
@@ -1690,7 +1693,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     // ★ 组合取消检查：token 或 shouldCancel 回调
     const isCancelled = () => token?.isCancellationRequested || (shouldCancel && shouldCancel());
 
-    // ★ 批量更新事务记录（一次性更新所有文件）
+    // ★ 批量更新事务记录（一次性更新所有文件，使用规范化路径）
     const batchUpdateTransaction = async (allFiles, allFolders) => {
         if (!transId) return;
         if (allFiles.length === 0 && allFolders.length === 0) return;
@@ -1700,10 +1703,14 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (trans) {
                 const updates = {};
                 if (allFiles.length > 0) {
-                    updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...allFiles])];
+                    // ★ 规范化所有路径
+                    const normalizedFiles = allFiles.map(f => path.normalize(f));
+                    updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...normalizedFiles])];
                 }
                 if (allFolders.length > 0) {
-                    updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...allFolders])];
+                    // ★ 规范化所有路径
+                    const normalizedFolders = allFolders.map(f => path.normalize(f));
+                    updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...normalizedFolders])];
                 }
                 if (Object.keys(updates).length > 0) {
                     await global.TransactionManager.updateTransaction(transId, updates);
@@ -1884,12 +1891,13 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                         const finalPath = _tryGlobalDeduplicate(dest);
                         const fp = computeFingerprint(finalPath);
 
-                        // ★ Register Transaction
+                        // ★ Register Transaction（使用规范化路径）
                         if (transId) {
                             const global = getGlobal();
                             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                             if (trans) {
-                                const newLanded = [...(trans.landedFiles || []), finalPath];
+                                const normalizedPath = path.normalize(finalPath);
+                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
                                 await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                             }
                         }

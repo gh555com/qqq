@@ -1405,6 +1405,34 @@ function getEnginePreference() {
 // ============================================================================
 const KEY_TRANSACTIONS = "qqq.transactions";
 
+/**
+ * ★ 获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
+ * @param {string} targetDir - 目标目录
+ * @returns {string[]} - 文件和文件夹的完整路径数组（已规范化）
+ */
+function getDirectorySnapshot(targetDir) {
+	if (!targetDir || !fs.existsSync(targetDir)) {
+		return [];
+	}
+
+	try {
+		const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+		const snapshot = [];
+
+		for (const entry of entries) {
+			// ★ 使用 path.normalize 统一路径格式
+			const fullPath = path.normalize(path.join(targetDir, entry.name));
+			snapshot.push(fullPath);
+			// ★ 不递归子目录，只记录第一层（性能优化 + landedFiles 通常在第一层）
+		}
+
+		return snapshot;
+	} catch (e) {
+		logMessage(`[Snapshot] 获取目录快照失败: ${e.message}`, "WARN");
+		return [];
+	}
+}
+
 const TransactionManager = {
 	getTransactions() {
 		if (!extensionContext) return [];
@@ -1454,59 +1482,20 @@ const TransactionManager = {
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
 		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}, taskType=${trans.taskType || 'unknown'}`, "INFO");
 
-		// ★ 计算赦免时间 (amnesty time)
-		// - 本地文件: 根据总大小计算, 最小 33s, 每增加 1GB +8s
-		// - HTML/视频: 固定 81s
-		const calculateAmnestyTime = () => {
-			const taskType = trans.taskType || 'local_file';
+		// ★ 获取任务开始时的目录快照（用于判断文件是否是任务前就存在的）
+		const existingFilesSet = new Set(trans.existingFiles || []);
+		logMessage(`[Rollback] 目录快照: ${existingFilesSet.size} 个已存在文件`, "INFO");
 
-			if (taskType === 'html' || taskType === 'video') {
-				// HTML 粘贴和视频下载：固定 81s
-				return 81;
-			}
-
-			// 本地文件: 根据意图列表总大小计算
-			const totalSize = trans.intentTotalSize || 0;
-			const ONE_GB = 1024 * 1024 * 1024;
-
-			if (totalSize < ONE_GB) {
-				return 33;  // 小于 1GB，赦免时间 33s
-			}
-
-			// 大于等于 1GB：33 + 8 * (超过的 GB 数)
-			// 例如: 3GB = 33 + 8*2 = 49s
-			const extraGB = Math.ceil(totalSize / ONE_GB) - 1;
-			return 33 + extraGB * 8;
-		};
-
-		const amnestySeconds = calculateAmnestyTime();
-		const amnestyMs = amnestySeconds * 1000;
-		const now = Date.now();
-
-		// ★ 计算任务已执行时间（从任务开始到现在）
-		// ★ 关键修复：使用任务开始时间，而不是文件创建时间
-		// ★ 原因：Windows 上 yt-dlp 重命名 .part 文件时会更新 birthtime，导致文件年龄不准确
-		const taskStartTime = trans.startTime || trans.createdAt || now;
-		const taskAge = now - taskStartTime;
-		const taskAgeSeconds = taskAge / 1000;
-
-		logMessage(`[Rollback] 赦免时间: ${amnestySeconds}s, 任务已执行: ${taskAgeSeconds.toFixed(1)}s (任务类型: ${trans.taskType || 'local_file'})`, "INFO");
-
-		// ★ 判断是否应该赦免所有文件（基于任务执行时间）
-		const shouldAmnestyAll = taskAge > amnestyMs;
-
-		if (shouldAmnestyAll) {
-			logMessage(`[Rollback] ★ 任务执行 ${taskAgeSeconds.toFixed(1)}s > 赦免时间 ${amnestySeconds}s，所有文件将被赦免保留`, "INFO");
-		} else {
-			logMessage(`[Rollback] 任务执行 ${taskAgeSeconds.toFixed(1)}s < 赦免时间 ${amnestySeconds}s，文件将被删除`, "INFO");
-		}
-
-		// ★ 赦免检查函数
-		const shouldAmnesty = (filePath) => {
+		// ★ 判断文件是否应该被保留（任务开始前就存在的文件）
+		const shouldPreserve = (filePath) => {
 			if (!fs.existsSync(filePath)) return false;
 
-			if (shouldAmnestyAll) {
-				logMessage(`[Rollback] 赦免保留: ${path.basename(filePath)} (任务已执行 ${taskAgeSeconds.toFixed(1)}s)`, "INFO");
+			// ★ 规范化路径后再比较
+			const normalizedPath = path.normalize(filePath);
+
+			// ★ 如果文件在任务开始时就存在，保留不删除
+			if (existingFilesSet.has(normalizedPath)) {
+				logMessage(`[Rollback] 保留旧文件: ${path.basename(filePath)} (任务开始前已存在)`, "INFO");
 				return true;
 			}
 			return false;
@@ -1541,17 +1530,17 @@ const TransactionManager = {
 			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
 		}
 
-		// 1. 删除记录的文件（★ 带赦免时间检查）
+		// 1. 删除记录的文件（★ 保留任务开始前已存在的文件）
 		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
 		let deletedCount = 0;
-		let amnestiedCount = 0;
+		let preservedCount = 0;
 
 		for (const f of recordedFiles) {
 			try {
 				if (fs.existsSync(f)) {
-					// ★ 检查是否应该赦免
-					if (shouldAmnesty(f)) {
-						amnestiedCount++;
+					// ★ 检查是否应该保留（任务开始前就存在的文件）
+					if (shouldPreserve(f)) {
+						preservedCount++;
 						continue;  // 保留不删除
 					}
 
@@ -1575,14 +1564,14 @@ const TransactionManager = {
 			}
 		}
 
-		// 1.5 ★ 删除记录的文件夹（★ 带赦免时间检查）
+		// 1.5 ★ 删除记录的文件夹（★ 保留任务开始前已存在的文件夹）
 		const recordedFolders = trans.landedFolders || [];
 		for (const folder of recordedFolders) {
 			try {
 				if (fs.existsSync(folder)) {
-					// ★ 检查是否应该赦免
-					if (shouldAmnesty(folder)) {
-						amnestiedCount++;
+					// ★ 检查是否应该保留
+					if (shouldPreserve(folder)) {
+						preservedCount++;
 						continue;  // 保留不删除
 					}
 
@@ -1618,7 +1607,7 @@ const TransactionManager = {
 			}
 		}
 
-		logMessage(`[Rollback] 回滚完成: 删除 ${deletedCount} 个, 赦免保留 ${amnestiedCount} 个`, "INFO");
+		logMessage(`[Rollback] 回滚完成: 删除 ${deletedCount} 个, 保留旧文件 ${preservedCount} 个`, "INFO");
 		await this.removeTransaction(trans.id);
 	},
 
@@ -2122,5 +2111,6 @@ module.exports = {
 	// ★ 核心逻辑导出
 	wq,
 	TransactionManager,
-	TaskCounter
+	TaskCounter,
+	getDirectorySnapshot  // ★ 目录快照函数
 };

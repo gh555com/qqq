@@ -561,14 +561,14 @@ let downloadContext = null;
 async function downloadVideosFromUrlCommand() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
-		vscode.window.showErrorMessage("请先打开一个文档以便插入视频锚点。");
+		vscode.window.showErrorMessage("请先打开一个文档");
 		return;
 	}
 
 	const rawUrl = await vscode.window.showInputBox({
-		prompt: "直接粘贴 [ 包含视频滴网址 ] ",
+		prompt: " ",
 		ignoreFocusOut: true,
-		placeHolder: "https://...",
+		placeHolder: " 直接粘贴 [ 包含视频滴网址 ]",
 		validateInput: (text) => {
 			const s = (text || "").trim();
 			if (!s) return null;
@@ -588,7 +588,7 @@ async function downloadVideosFromUrlCommand() {
 				}
 			} catch { }
 
-			return "无效的网址格式";
+			return "无效网址";
 		}
 	});
 	if (!rawUrl) return;
@@ -616,7 +616,8 @@ async function downloadVideosFromUrlCommand() {
 		tempFiles: [],
 		landedFiles: [],
 		landedFolders: [],
-		taskType: 'video'  // ★ 视频下载任务，赦免时间固定 81s
+		taskType: 'video',  // ★ 视频下载任务
+		existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
 	});
 
 	// 2. 启动带进度条的弹窗任务
