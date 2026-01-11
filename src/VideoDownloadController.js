@@ -83,30 +83,11 @@ class ChildProcessTracker {
         await this._sleep(400);
         for (const pid of pids) await this._killPidTree(pid, true);
 
-        // ★ 直接杀死所有 yt-dlp 进程（因为 dow.js 的 spawn 不在 ALS 作用域内）
-        await this._killYtdlpProcesses();
+        // ★ 已移除 _killYtdlpProcesses()：
+        // 该方法会杀死系统上所有 yt-dlp 进程，导致多任务互相干扰
+        // 现在 dow.js 已改为动态获取 spawn，能被 tracker 正确追踪，无需全局兆底
 
         this._procs.clear();
-    }
-
-    // ★ 直接杀死所有 yt-dlp 进程
-    async _killYtdlpProcesses() {
-        const cp = require('child_process');
-        const isWin = process.platform === 'win32';
-
-        try {
-            if (isWin) {
-                // Windows: taskkill /IM yt-dlp.exe /F /T
-                await new Promise(resolve => {
-                    cp.execFile('taskkill', ['/IM', 'yt-dlp.exe', '/F', '/T'], {
-                        windowsHide: true
-                    }, () => resolve());
-                });
-            } else {
-                // macOS/Linux: pkill -9 yt-dlp
-                try { cp.execSync('pkill -9 yt-dlp', { stdio: 'ignore' }); } catch (e) { }
-            }
-        } catch (e) { }
     }
 
     _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -462,6 +443,9 @@ function getSharedOutputChannel() {
     }
     return _sharedOutputChannel;
 }
+
+// ★ 活跃任务集合（用于避免多任务互相干扰）
+const _activeTasks = new Set();
 
 class VideoDownloadController {
     constructor(context, qqqManager) {
@@ -901,6 +885,9 @@ class VideoDownloadController {
         // ★ 保存 shouldCancel 回调，用于实时检查锚点是否丢失
         task.shouldCancel = shouldCancel;
 
+        // ★ 添加到活跃任务集合
+        _activeTasks.add(task);
+
         // 2. 绑定外部取消 Token (如果有)
         if (token) {
             token.onCancellationRequested(async () => {
@@ -935,7 +922,8 @@ class VideoDownloadController {
                 return await this._fastProcess(task, url, targetDir, cookiesFilePath, progressCallback);
             });
         } finally {
-            // No explicit endTask needed as task is local variable
+            // ★ 从活跃任务集合中移除
+            _activeTasks.delete(task);
         }
     }
 
@@ -1509,9 +1497,8 @@ class VideoDownloadController {
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
         if (this._isTaskCancelled(task)) return null;
 
-        // ★ 先关闭之前的通知，避免多个弹窗同时显示
-        await this._hideToastsBestEffort();
-        await new Promise(r => setTimeout(r, 100));  // ★ 等待通知关闭
+        // ★ 不再跳过增强流程，允许多个任务独立进行增强流程选择
+        // ★ 已移除 _hideToastsBestEffort()，不会干扰其他任务的通知
 
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
         const selection = await vscode.window.showInformationMessage(
@@ -1567,9 +1554,6 @@ class VideoDownloadController {
 
     async _promptPickThenMaybeDownload(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return null;
-
-        // ★ 先关闭之前的通知
-        await this._hideToastsBestEffort();
 
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
