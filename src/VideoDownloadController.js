@@ -746,10 +746,9 @@ class VideoDownloadController {
         const task = {
             startMs: Date.now(),
             tracker: new ChildProcessTracker(),
-            activeFiles: new Set(), // Track files for cleanup on cancel
             transId: transId,
             isExternalTrans: !!externalTransId,
-            isCancelled: false // Local cancelled flag
+            isCancelled: false
         };
 
         // ★ 注册事务 (如果是外部事务，我们假设外部已经注册了，或者我们可以 update 一下以防万一)
@@ -770,7 +769,6 @@ class VideoDownloadController {
 
     async _cancelTask(task, reason = '用户取消') {
         if (!task || !task.tracker) return;
-        // ★ 不再检查 isCancelled，因为可能已经在 _isTaskCancelled 中设置了
         // ★ 确保设置取消标志
         task.tracker.markCancelled();
         task.isCancelled = true;
@@ -783,47 +781,12 @@ class VideoDownloadController {
             global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
-        // ★ 将 activeFiles 中滴文件添加到 tempFiles，确保回滚时能清理
-        // ★ 无论是内部事务还是外部事务都需要执行
-        // ★ 不过滤 fs.existsSync，因为文件可能正在下载中（.part）或尚未开始
-        if (task.transId && task.activeFiles && task.activeFiles.size > 0) {
-            try {
-                const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
-                if (trans) {
-                    const allActiveFiles = [...task.activeFiles];
-                    this.log(`[取消] activeFiles 数量: ${allActiveFiles.length}`);
-                    if (allActiveFiles.length > 0) {
-                        const newTempFiles = [...new Set([...(trans.tempFiles || []), ...allActiveFiles])];
-                        await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
-                        this.log(`[取消] 将 ${allActiveFiles.length} 个 activeFiles 添加到 tempFiles`);
-                    }
-                }
-            } catch (e) {
-                this.log(`[取消] 更新 tempFiles 失败: ${e.message}`);
-            }
-        } else {
-            this.log(`[取消] activeFiles 为空或不存在`);
-        }
-
         // ★ 内部事务回滚（外部事务由调用方负责回滚）
         if (task.transId && !task.isExternalTrans) {
             const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
             if (trans) {
                 global.TransactionManager.rollback(trans).catch(e => this.log(`回滚失败: ${e.message}`));
             }
-        }
-
-        // ★ 不再直接删除 activeFiles，由 rollback 统一处理（带赦免时间检查）
-        // ★ 仅清理临时文件 (.part/.ytdl)
-        if (task.activeFiles) {
-            for (const file of task.activeFiles) {
-                try {
-                    // ★ 不删除主文件，让 rollback 带赦免时间检查来处理
-                    if (fs.existsSync(file + ".part")) fs.unlinkSync(file + ".part");
-                    if (fs.existsSync(file + ".ytdl")) fs.unlinkSync(file + ".ytdl");
-                } catch (e) { }
-            }
-            task.activeFiles.clear();
         }
 
         try {
@@ -1122,15 +1085,8 @@ class VideoDownloadController {
                     if (t.destPath) {
                         const name = path.basename(t.destPath, path.extname(t.destPath));
                         if (name) activePrefixes.add(name);
-
-                        // ★ 把所有 destPath 加入 activeFiles（不管文件是否存在）
-                        // 这样取消时能清理 .part 文件和已完成滴文件
-                        if (task && task.activeFiles) {
-                            task.activeFiles.add(t.destPath);
-                        }
                     }
                 });
-                this.log(`[预注册] activeFiles 数量: ${task.activeFiles.size}`);
 
                 let diskTotalBytes = 0;
                 let logTotalBytes = 0;
@@ -1197,10 +1153,6 @@ class VideoDownloadController {
 
                                     if (event.type === 'start') {
                                         this.log(`开始: ${String(t.url).slice(0, 60)}...`);
-                                        // ★ 记录正在下载滴文件，用于取消时清理 .part 文件
-                                        if (t.destPath) {
-                                            task.activeFiles.add(t.destPath);
-                                        }
                                     } else if (event.type === 'progress') {
                                         const p = event.progress;
                                         let currentBytes = 0;
@@ -1215,22 +1167,6 @@ class VideoDownloadController {
                                         }
                                     } else if (event.type === 'done') {
                                         this.log(`完成: ${path.basename(t.destPath || '')}`);
-
-                                        // ★ 文件完成时立即记录到 tempFiles，这样取消时回滚能清理
-                                        if (t.destPath && task.transId && fs.existsSync(t.destPath)) {
-                                            (async () => {
-                                                try {
-                                                    const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
-                                                    if (trans) {
-                                                        const newTempFiles = [...new Set([...(trans.tempFiles || []), t.destPath])];
-                                                        await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
-                                                        this.log(`[事务] 即时记录临时文件: ${path.basename(t.destPath)}`);
-                                                    }
-                                                } catch (e) {
-                                                    this.log(`[事务] 记录 tempFiles 失败: ${e.message}`);
-                                                }
-                                            })();
-                                        }
                                     } else if (event.type === 'error') {
                                         this.log(`失败: ${t.url} - ${event.error}`);
                                     } else if (event.type === 'retry') {
@@ -1254,40 +1190,8 @@ class VideoDownloadController {
                     }
 
                     if (this._isTaskCancelled(task)) {
-                        // 下载完成后滴清理逻辑
-                        if (res && res.results) {
-                            for (const r of res.results) {
-                                if (r.success) {
-                                    const f = r.path || r.destPath;
-                                    if (f && fs.existsSync(f)) {
-                                        try { fs.unlinkSync(f); } catch (e) { }
-                                    }
-                                }
-                            }
-                        }
+                        // ★ 取消后由 rollback 统一清理
                         return null;
-                    }
-
-                    // ★ 立即将所有成功下载滴文件记入事务滴 tempFiles
-                    // 这样即使在 _postProcess 前取消，回滚时也能清理这些文件
-                    if (res && res.results && task.transId) {
-                        const downloadedFiles = res.results
-                            .filter(r => r.success)
-                            .map(r => r.path || r.destPath)
-                            .filter(f => f && fs.existsSync(f));
-
-                        if (downloadedFiles.length > 0) {
-                            try {
-                                const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
-                                if (trans) {
-                                    const newTempFiles = [...new Set([...(trans.tempFiles || []), ...downloadedFiles])];
-                                    await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
-                                    this.log(`[事务] 记录 ${downloadedFiles.length} 个临时文件到 tempFiles`);
-                                }
-                            } catch (e) {
-                                this.log(`[事务] 记录 tempFiles 失败: ${e.message}`);
-                            }
-                        }
                     }
 
                     const results = res?.results || [];
@@ -1389,8 +1293,16 @@ class VideoDownloadController {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
                     const enhancedResult = await this._handleForbidden(task, outcome.code || 403, url, targetDir, progressCallback);
-                    // 增强流程也返回结果
-                    return enhancedResult || { landedFiles: [], finalTotalBytes: 0 };
+                    // ★ 增强流程取消时也要返回 cancelled: true
+                    if (!enhancedResult || this._isTaskCancelled(task)) {
+                        return {
+                            landedFiles: [],
+                            finalTotalBytes: 0,
+                            cancelled: this._isTaskCancelled(task),
+                            targetDir: targetDir
+                        };
+                    }
+                    return enhancedResult;
                 }
             }
 
@@ -1599,9 +1511,12 @@ class VideoDownloadController {
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
         if (this._isTaskCancelled(task)) return null;
 
+        // ★ 等待前一个 withProgress 弹窗完全关闭（VS Code UI 有延迟，需要较长时间）
+        await this._sleep(1000);
+
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
 
-        // ★ 先尝试普通弹窗
+        // ★ 非模态弹窗（右下角）
         const startTime = Date.now();
         let selection = await vscode.window.showInformationMessage(
             `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
@@ -2216,6 +2131,19 @@ $of = $vi.OriginalFilename;
             try {
                 timer = setInterval(() => {
                     if (this._isTaskCancelled(task)) return;
+
+                    // ★ 检查锚点是否丢失
+                    if (task.shouldCancel && typeof task.shouldCancel === 'function') {
+                        try {
+                            if (task.shouldCancel()) {
+                                this.log('[AnchorLost] 增强流程检测到锚点丢失');
+                                task.anchorLost = true;
+                                this._cancelTask(task, '锚点丢失').catch(e => { });
+                                return;
+                            }
+                        } catch (e) { }
+                    }
+
                     const bytes = this._scanRecentBytes(targetDir, startMs);
                     progress.report({ message: VideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
                 }, 500);
@@ -2297,16 +2225,44 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            this.log(`[增强] 准备显示“我已在外部播放”弹窗...`);
+            this.log(`[增强] 准备显示"我已在外部播放"弹窗...`);
 
-            // ★ 先尝试普通弹窗
+            // ★ 启动锚点检查定时器（在等待用户确认期间检查锚点）
+            let anchorCheckTimer = null;
+            let anchorLostDuringWait = false;
+            anchorCheckTimer = setInterval(() => {
+                if (task.shouldCancel && typeof task.shouldCancel === 'function') {
+                    try {
+                        if (task.shouldCancel()) {
+                            this.log('[AnchorLost] 噗探等待期间检测到锚点丢失');
+                            task.anchorLost = true;
+                            anchorLostDuringWait = true;
+                            this._cancelTask(task, '锚点丢失').catch(e => { });
+                        }
+                    } catch (e) { }
+                }
+            }, 500);
+
+            // ★ 先尝试模态弹窗（Windows 级别，阻止其他操作，不会自动消失）
             const startTime = Date.now();
             let selection = await vscode.window.showInformationMessage(
                 VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
-                { modal: false },
+                { modal: true },
                 "我已在外部播放"
             );
             const elapsed = Date.now() - startTime;
+
+            // ★ 停止锚点检查定时器
+            if (anchorCheckTimer) {
+                clearInterval(anchorCheckTimer);
+                anchorCheckTimer = null;
+            }
+
+            // ★ 如果等待期间锚点丢失，立即返回
+            if (anchorLostDuringWait || this._isTaskCancelled(task)) {
+                try { await sniffer.stop(); } catch (e) { }
+                return null;
+            }
 
             this.log(`[增强] 弹窗返回: selection=${selection}, 耗时=${elapsed}ms`);
 
@@ -2382,6 +2338,9 @@ $of = $vi.OriginalFilename;
                 best.meta.userAgent = best.headers['User-Agent'];
                 best.meta.origin = best.headers['Origin'];
             }
+
+            // ★ 等待前一个弹窗关闭（VS Code UI 有延迟，需要较长时间）
+            await this._sleep(1000);
 
             const out = await this._downloadEnhancedOne(task, url, targetDir, best);
             if (!out) return null;

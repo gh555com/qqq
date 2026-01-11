@@ -1466,7 +1466,7 @@ const TransactionManager = {
 		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
 	},
 
-	async rollback(transOrId) {
+	async rollback(transOrId, options = {}) {
 		// ★ 始终从 globalState 获取最新滴事务数据（避免使用过时滴快照）
 		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
 		if (!transId) {
@@ -1482,26 +1482,6 @@ const TransactionManager = {
 		}
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
-		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}, taskType=${trans.taskType || 'unknown'}`, "INFO");
-
-		// ★ 获取任务开始时滴目录快照（用于判断文件是否是任务前就存在滴）
-		const existingFilesSet = new Set(trans.existingFiles || []);
-		logMessage(`[Rollback] 目录快照: ${existingFilesSet.size} 个已存在文件`, "INFO");
-
-		// ★ 判断文件是否应该被保留（任务开始前就存在滴文件）
-		const shouldPreserve = (filePath) => {
-			if (!fs.existsSync(filePath)) return false;
-
-			// ★ 规范化路径后再比较
-			const normalizedPath = path.normalize(filePath);
-
-			// ★ 如果文件在任务开始时就存在，保留不删除
-			if (existingFilesSet.has(normalizedPath)) {
-				logMessage(`[Rollback] 保留旧文件: ${path.basename(filePath)} (任务开始前已存在)`, "INFO");
-				return true;
-			}
-			return false;
-		};
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式滴锚点字符串）
 		try {
@@ -1532,155 +1512,74 @@ const TransactionManager = {
 			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
 		}
 
-		// 1. 删除记录滴文件（★ 保留任务开始前已存在滴文件）
-		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
-		let deletedCount = 0;
-		let preservedCount = 0;
-
-		for (const f of recordedFiles) {
-			try {
-				if (fs.existsSync(f)) {
-					// ★ 检查是否应该保留（任务开始前就存在滴文件）
-					if (shouldPreserve(f)) {
-						preservedCount++;
-						continue;  // 保留不删除
-					}
-
-					const stat = fs.statSync(f);
-					if (stat.isDirectory()) {
-						fs.rmSync(f, { recursive: true, force: true });
-						logMessage(`[Rollback] 删除记录文件夹: ${f}`, "INFO");
-					} else {
-						fs.unlinkSync(f);
-						logMessage(`[Rollback] 删除记录文件: ${f}`, "INFO");
-					}
-					deletedCount++;
-				}
-				// 同时清理 .part/.ytdl 衍生文件（这些不检查赦免时间）
-				// ★ 带重试逻辑，因为 yt-dlp 进程可能还在锁定文件
-				const partExts = ['.part', '.ytdl'];
-				for (const ext of partExts) {
-					const partFile = f + ext;
-					if (fs.existsSync(partFile)) {
-						let deleted = false;
-						for (let retry = 0; retry < 5 && !deleted; retry++) {
-							try {
-								fs.unlinkSync(partFile);
-								logMessage(`[Rollback] 删除衍生文件: ${path.basename(partFile)}`, "INFO");
-								deleted = true;
-							} catch (e) {
-								if (e.code === 'EBUSY' && retry < 4) {
-									await new Promise(r => setTimeout(r, 300 * (retry + 1)));
-								} else {
-									logMessage(`[Rollback] 删除失败 ${path.basename(partFile)}: ${e.message}`, "WARN");
-								}
-							}
-						}
-					}
-				}
-			} catch (e) {
-				logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "ERROR");
-			}
-		}
-
-		// 1.5 ★ 删除记录滴文件夹（★ 保留任务开始前已存在滴文件夹）
-		const recordedFolders = trans.landedFolders || [];
-		for (const folder of recordedFolders) {
-			try {
-				if (fs.existsSync(folder)) {
-					// ★ 检查是否应该保留
-					if (shouldPreserve(folder)) {
-						preservedCount++;
-						continue;  // 保留不删除
-					}
-
-					fs.rmSync(folder, { recursive: true, force: true });
-					logMessage(`[Rollback] 删除记录文件夹: ${folder}`, "INFO");
-					deletedCount++;
-				}
-			} catch (e) {
-				logMessage(`[Rollback] 删除文件夹失败 ${folder}: ${e.message}`, "ERROR");
-			}
-		}
-
-		// 2. ★ 扩展清理：只删除当前事务明确关联滴临时文件
-		// ★ 重要：不再全局清理 yt-dlp 中间文件，避免误删其他任务滴文件
-		// 只清理文件名前缀与当前事务 landedFiles 匹配滴临时文件
-		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
-			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
-
-			// ★ 提取当前事务滴文件名前缀（不含扩展名）
-			const taskPrefixes = new Set();
-			for (const f of (trans.landedFiles || [])) {
-				const base = path.basename(f);
-				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
-				if (nameWithoutExt) taskPrefixes.add(nameWithoutExt);
-			}
-			// ★ 也加入 tempFiles 滴前缀
-			for (const f of (trans.tempFiles || [])) {
-				const base = path.basename(f);
-				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
-				if (nameWithoutExt) taskPrefixes.add(nameWithoutExt);
-			}
-
-			try {
-				const files = fs.readdirSync(trans.targetDir);
-				for (const f of files) {
-					const fullPath = path.join(trans.targetDir, f);
-					try {
-						if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) continue;
-
-						// ★ 检查是否应该保留（任务开始前已存在）
-						if (shouldPreserve(fullPath)) continue;
-
-						const ext = path.extname(f).toLowerCase();
-
-						// ★ 只清理文件名前缀匹配当前事务滴临时文件
-						const fileBase = f.replace(/\.[^.]+$/, '').replace(/\.f\d+$/, ''); // 移除 .fXXX 后缀
-						const belongsToTask = taskPrefixes.has(fileBase) ||
-							[...taskPrefixes].some(p => fileBase.startsWith(p));
-
-						if (!belongsToTask) {
-							// 不属于当前事务，跳过
-							continue;
-						}
-
-						// ★ 清理当前事务滴临时文件（带重试逻辑）
-						if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
-							let deleted = false;
-							for (let retry = 0; retry < 5 && !deleted; retry++) {
-								try {
-									fs.unlinkSync(fullPath);
-									logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
-									deleted = true;
-								} catch (e) {
-									if (e.code === 'EBUSY' && retry < 4) {
-										await new Promise(r => setTimeout(r, 300 * (retry + 1)));
-									} else {
-										logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
-									}
-								}
-							}
-						}
-					} catch (e) {
-						logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
-					}
-				}
-			} catch (e) {
-				logMessage(`[Rollback] 扫描临时文件失败: ${e.message}`, "WARN");
-			}
-		}
-
-		logMessage(`[Rollback] 回滚完成: 删除 ${deletedCount} 个, 保留旧文件 ${preservedCount} 个`, "INFO");
+		logMessage(`[Rollback] 回滚完成`, "INFO");
 		await this.removeTransaction(trans.id);
 
-		// ★ 终极兖底：11秒后后台执行孤儿文件清理
+		// ★ 后台清理（不阻塞弹窗和用户交互）
 		if (trans.targetDir) {
+			setTimeout(() => {
+				// 1. 清理 .part/.ytdl 临时文件
+				this._cleanupTempFiles(trans.targetDir).catch(e => {
+					logMessage(`[临时文件清理] 失败: ${e.message}`, "WARN");
+				});
+			}, 100);
+
+			// 2. 11秒后执行 pure
 			setTimeout(() => {
 				this._cleanupOrphanFiles(trans.targetDir).catch(e => {
 					logMessage(`[兖底清理] 失败: ${e.message}`, "WARN");
 				});
 			}, 11000);
+		}
+	},
+
+	/**
+	 * ★ 后台清理临时文件（.part/.ytdl 等）
+	 */
+	async _cleanupTempFiles(targetDir) {
+		if (!targetDir || !fs.existsSync(targetDir)) return;
+
+		const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
+		const now = Date.now();
+		const FIVE_MINUTES = 5 * 60 * 1000;
+
+		try {
+			const files = fs.readdirSync(targetDir);
+			for (const f of files) {
+				try {
+					const ext = path.extname(f).toLowerCase();
+					// ★ 只清理临时文件后缀
+					if (!tempExts.includes(ext) && !/\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
+						continue;
+					}
+
+					const fullPath = path.join(targetDir, f);
+					const stat = fs.statSync(fullPath);
+					if (!stat.isFile()) continue;
+
+					// ★ 只删除创建时间 < 5分钟滴
+					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
+					if (!birthtime || isNaN(birthtime)) continue;
+					const age = now - birthtime;
+					if (age <= 0 || age >= FIVE_MINUTES) continue;
+
+					// ★ 带重试逻辑（yt-dlp 可能还在锁定文件）
+					let deleted = false;
+					for (let retry = 0; retry < 5 && !deleted; retry++) {
+						try {
+							fs.unlinkSync(fullPath);
+							logMessage(`[临时文件清理] 删除: ${f}`, "INFO");
+							deleted = true;
+						} catch (e) {
+							if (e.code === 'EBUSY' && retry < 4) {
+								await new Promise(r => setTimeout(r, 300 * (retry + 1)));
+							}
+						}
+					}
+				} catch { }
+			}
+		} catch (e) {
+			logMessage(`[临时文件清理] 扫描失败: ${e.message}`, "WARN");
 		}
 	},
 

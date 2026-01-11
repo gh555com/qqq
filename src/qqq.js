@@ -661,6 +661,15 @@ async function downloadVideosFromUrlCommand() {
 		}
 	};
 
+	// ★ shouldCancel 回调：返回当前状态，同时触发后台检查
+	const shouldCancelCallback = () => {
+		// 先返回当前状态
+		if (anchorLost) return true;
+		// 后台触发检查（不等待结果）
+		checkAnchorExists().catch(() => { });
+		return anchorLost;
+	};
+
 	const downloadResult = await global.withProgress({
 		location: vscode.ProgressLocation.Notification,
 		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
@@ -686,7 +695,7 @@ async function downloadVideosFromUrlCommand() {
 
 		try {
 			// ★ 传递 taskTitle 和 shouldCancel 回调
-			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, () => anchorLost, taskNum);
+			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, shouldCancelCallback, taskNum);
 
 			// ★ 检查是否已取消（用户取消 或 锚点丢失）
 			if (token.isCancellationRequested || anchorLost) {
