@@ -996,13 +996,15 @@ const TaskMessage = {
 	 * @param {string} taskTitle - 任务标题
 	 * @param {string} summary - 结果摘要，如 "文件/文件夹已复制 59" 或 "共落盘 3个视频共 19m"
 	 * @param {string|number} elapsed - 耗时，可以是字符串 "6s" 或毫秒数
+	 * @param {string} taskId - 任务ID（可选）
 	 * @returns {string}
 	 */
-	done(taskTitle, summary, elapsed) {
+	done(taskTitle, summary, elapsed, taskId = '') {
 		const prefix = taskTitle || 'qqq';
 		const dur = typeof elapsed === 'number' ? this.formatDuration(elapsed) : elapsed;
 		// ★ taskTitle 和 summary 之间用两个空格
-		return `${prefix}  ${summary}（耗时${dur}）`;
+		const idPart = taskId ? `;  id: ${taskId}` : '';
+		return `${prefix}  ${summary}( 耗时: ${dur}${idPart} )`;
 	},
 
 	/**
@@ -1729,12 +1731,12 @@ const TaskCounter = {
 	/**
 	 * 生成任务标题：qqq：'截断路径 任务 q' ...
 	 * @param {string} filePath - 文件路径
-	 * @param {number} taskNum - 任务编号
+	 * @param {string} taskId - 任务ID（六位随机字符串）
 	 * @param {string} suffix - 可选后缀描述
 	 */
-	formatTitle(filePath, taskNum, suffix = '') {
+	formatTitle(filePath, taskId, suffix = '') {
 		const displayPath = this.formatPath(filePath);
-		const base = `qqq：'${displayPath} 任务 ${taskNum}'`;
+		const base = `qqq：'${displayPath} 任务${taskId}'`;
 		return suffix ? `${base} ${suffix}` : base;
 	}
 };

@@ -38,7 +38,7 @@ const VideoMsg = {
         } else {
             summary = `共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}`;
         }
-        return TaskMessage.done(task?.taskTitle, summary, elapsedMs);
+        return TaskMessage.done(task?.taskTitle, summary, elapsedMs, task?.transId || '');
     },
 
     /**
@@ -481,7 +481,6 @@ class VideoDownloadController {
         return Math.round(bytes / k) + "k";
     }
 
-    // ✅ 修正：总耗时 < 1 分钟时，不输出 0m+
     _formatDuration(ms) {
         const total = Math.max(0, Math.floor(ms / 1000));
         let s = total % 60;
@@ -1182,6 +1181,22 @@ class VideoDownloadController {
                                         }
                                     } else if (event.type === 'done') {
                                         this.log(`完成: ${path.basename(t.destPath || '')}`);
+
+                                        // ★ 文件完成时立即记录到 tempFiles，这样取消时回滚能清理
+                                        if (t.destPath && task.transId && fs.existsSync(t.destPath)) {
+                                            (async () => {
+                                                try {
+                                                    const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
+                                                    if (trans) {
+                                                        const newTempFiles = [...new Set([...(trans.tempFiles || []), t.destPath])];
+                                                        await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
+                                                        this.log(`[事务] 即时记录临时文件: ${path.basename(t.destPath)}`);
+                                                    }
+                                                } catch (e) {
+                                                    this.log(`[事务] 记录 tempFiles 失败: ${e.message}`);
+                                                }
+                                            })();
+                                        }
                                     } else if (event.type === 'error') {
                                         this.log(`失败: ${t.url} - ${event.error}`);
                                     } else if (event.type === 'retry') {
@@ -1219,6 +1234,28 @@ class VideoDownloadController {
                         return null;
                     }
 
+                    // ★ 立即将所有成功下载的文件记入事务的 tempFiles
+                    // 这样即使在 _postProcess 前取消，回滚时也能清理这些文件
+                    if (res && res.results && task.transId) {
+                        const downloadedFiles = res.results
+                            .filter(r => r.success)
+                            .map(r => r.path || r.destPath)
+                            .filter(f => f && fs.existsSync(f));
+
+                        if (downloadedFiles.length > 0) {
+                            try {
+                                const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
+                                if (trans) {
+                                    const newTempFiles = [...new Set([...(trans.tempFiles || []), ...downloadedFiles])];
+                                    await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
+                                    this.log(`[事务] 记录 ${downloadedFiles.length} 个临时文件到 tempFiles`);
+                                }
+                            } catch (e) {
+                                this.log(`[事务] 记录 tempFiles 失败: ${e.message}`);
+                            }
+                        }
+                    }
+
                     const results = res?.results || [];
                     const successResults = results.filter(r => r.success);
                     const failResults = results.filter(r => !r.success);
@@ -1227,7 +1264,10 @@ class VideoDownloadController {
                     let finalTotalBytes = 0;
 
                     for (const r of successResults) {
-                        if (this._isTaskCancelled(task)) return null;
+                        if (this._isTaskCancelled(task)) {
+                            this.log(`[取消] 在 _postProcess 循环中检测到取消，跳出`);
+                            return null;
+                        }
                         const p = r.path || r.destPath;
                         // ★ 通过 destPath 找到对应的 task，获取 originalFileName
                         const matchedTask = tasks.find(t => t.destPath === p || t.destPath === r.destPath);
@@ -1368,8 +1408,9 @@ class VideoDownloadController {
     // ★ originalFileName: 原始文件名（可选），用于落盘时重命名（去除时间戳）
     async _postProcess(task, filePath, originalFileName = null) {
         // ★ 调试日志
-        this.log(`[_postProcess] filePath=${path.basename(filePath)}, originalFileName=${originalFileName || '(null)'}`);
+        this.log(`[_postProcess] 开始: filePath=${path.basename(filePath)}, originalFileName=${originalFileName || '(null)'}`);
         if (this._isTaskCancelled(task)) {
+            this.log(`[_postProcess] 开始时已取消，跳过`);
             if (filePath && fs.existsSync(filePath)) {
                 try { fs.unlinkSync(filePath); } catch (e) { }
             }
@@ -1379,12 +1420,16 @@ class VideoDownloadController {
 
         // 指纹去重检查 (仅同文件夹内去重，不跨文件夹)
         try {
+            if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
+
             const currentFp = h.computeFingerprint(filePath);
             if (currentFp) {
                 // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
                 const dir = path.dirname(filePath);
                 const files = fs.readdirSync(dir);
                 for (const f of files) {
+                    if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
+
                     const full = path.join(dir, f);
                     if (full === filePath) continue;
                     if (!fs.statSync(full).isFile()) continue;
@@ -1406,8 +1451,13 @@ class VideoDownloadController {
 
         this.log(`正在验证文件: ${path.basename(filePath)}`);
 
+        if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
+
         // 使用公共函数进行 FFmpeg 校验
         const verifiedPath = await h.verifyVideoFile(filePath);
+
+        if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
+
         if (!verifiedPath) {
             this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
             return null;
@@ -1416,6 +1466,7 @@ class VideoDownloadController {
         // ★ 重命名为原始文件名（去除时间戳）
         let finalPath = verifiedPath;
         if (originalFileName) {
+            if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
             const dir = path.dirname(verifiedPath);
             let targetPath = path.join(dir, originalFileName);
 
@@ -1434,6 +1485,22 @@ class VideoDownloadController {
                 try {
                     fs.renameSync(verifiedPath, targetPath);
                     this.log(`重命名: ${path.basename(verifiedPath)} -> ${path.basename(targetPath)}`);
+
+                    // ★ 重命名后立即更新事务：将旧路径替换为新路径
+                    // 这样即使在记入 landedFiles 前取消，回滚也能正确清理
+                    if (task && task.transId) {
+                        try {
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
+                            if (trans) {
+                                const oldTemp = (trans.tempFiles || []).filter(f => f !== verifiedPath && f !== filePath);
+                                oldTemp.push(targetPath);  // 添加新路径
+                                await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(oldTemp)] });
+                            }
+                        } catch (e) {
+                            this.log(`[事务] 更新 tempFiles 失败: ${e.message}`);
+                        }
+                    }
+
                     finalPath = targetPath;
                 } catch (e) {
                     this.log(`重命名失败: ${e.message}，保留原文件名`);
@@ -1442,6 +1509,8 @@ class VideoDownloadController {
         }
 
         // ★ 新文件：记入事务（使用规范化路径）
+        if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
+
         const normalizedPath = path.normalize(finalPath);
         if (task && task.transId) {
             const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
@@ -1498,12 +1567,58 @@ class VideoDownloadController {
 
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
 
-        const selection = await vscode.window.showInformationMessage(
+        // ★ 先尝试普通弹窗
+        const startTime = Date.now();
+        let selection = await vscode.window.showInformationMessage(
             `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
             { modal: false },
             "🚀启动增强流程",
             "选择类似 chrome.exe 滴浏览器入口文件"
         );
+        const elapsed = Date.now() - startTime;
+
+        // ★ 如果被立即关闭（< 500ms 且 undefined），用 QuickPick 兆底
+        if (selection === undefined && elapsed < 500) {
+            this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
+
+            if (this._isTaskCancelled(task)) return null;
+
+            const items = [
+                { label: '🚀 启动增强流程', value: 'enhanced' },
+                { label: '📂 选择类似 chrome.exe 滴浏览器入口文件', value: 'pick' },
+                { label: '❌ 取消', value: 'cancel' }
+            ];
+
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: `${prefix}下载被拒（${code}），当前可尝试启动增强流程。（窗口被vs code吃掉，固走本下拉框流程，本质是一样）`,
+                ignoreFocusOut: true
+            });
+
+            this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`);
+
+            if (picked?.value === 'enhanced') {
+                selection = "🚀启动增强流程";
+            } else if (picked?.value === 'pick') {
+                selection = "选择类似 chrome.exe 滴浏览器入口文件";
+            } else if (picked === undefined) {
+                // ★ QuickPick 也失败了，用 InputBox 作为终极兆底
+                this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
+
+                const input = await vscode.window.showInputBox({
+                    prompt: `${prefix}下载被拒（${code}），键入 1 启动增强流程，2 选择浏览器，其他取消`,
+                    placeHolder: '键入 1 或 2',
+                    ignoreFocusOut: true
+                });
+
+                this.log(`[增强] InputBox 返回: ${input}`);
+
+                if (input?.trim() === '1') {
+                    selection = "🚀启动增强流程";
+                } else if (input?.trim() === '2') {
+                    selection = "选择类似 chrome.exe 滴浏览器入口文件";
+                }
+            }
+        }
 
         if (this._isTaskCancelled(task)) return null;
 
@@ -2148,11 +2263,59 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            const selection = await vscode.window.showInformationMessage(
+            this.log(`[增强] 准备显示“我已在外部播放”弹窗...`);
+
+            // ★ 先尝试普通弹窗
+            const startTime = Date.now();
+            let selection = await vscode.window.showInformationMessage(
                 VideoMsg.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
                 { modal: false },
                 "我已在外部播放"
             );
+            const elapsed = Date.now() - startTime;
+
+            this.log(`[增强] 弹窗返回: selection=${selection}, 耗时=${elapsed}ms`);
+
+            // ★ 如果被立即关闭，用 QuickPick 兆底
+            if (selection === undefined && elapsed < 500) {
+                this.log(`[增强] 嘗探确认弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
+
+                if (this._isTaskCancelled(task)) {
+                    try { await sniffer.stop(); } catch (e) { }
+                    return null;
+                }
+
+                const items = [
+                    { label: '✅ 我已在外部播放', value: 'done' },
+                    { label: '❌ 取消', value: 'cancel' }
+                ];
+
+                const picked = await vscode.window.showQuickPick(items, {
+                    placeHolder: VideoMsg.prompt(task, '请在浏览器中播放视频后选择：'),
+                    ignoreFocusOut: true
+                });
+
+                this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`);
+
+                if (picked?.value === 'done') {
+                    selection = "我已在外部播放";
+                } else if (picked === undefined) {
+                    // ★ QuickPick 也失败了，用 InputBox 作为终极兆底
+                    this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
+
+                    const input = await vscode.window.showInputBox({
+                        prompt: VideoMsg.prompt(task, '请在浏览器中播放视频，然后键入 ok 并回车'),
+                        placeHolder: '键入 ok 确认',
+                        ignoreFocusOut: true
+                    });
+
+                    this.log(`[增强] InputBox 返回: ${input}`);
+
+                    if (input && input.toLowerCase().trim() === 'ok') {
+                        selection = "我已在外部播放";
+                    }
+                }
+            }
 
             if (selection !== "我已在外部播放") {
                 try { await sniffer.stop(); } catch (e) { }

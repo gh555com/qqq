@@ -2119,7 +2119,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
 
-async function promptForUrl(prompt = "请输入包含视频的网页URL") {
+async function promptForUrl(prompt = "请键入包含视频的网页URL") {
     return await vscode.window.showInputBox({
         prompt: prompt,
         placeHolder: "https://example.com/page-with-video",
@@ -2129,7 +2129,7 @@ async function promptForUrl(prompt = "请输入包含视频的网页URL") {
                 new URL(text);
                 return null;
             } catch {
-                return "请输入有效的URL";
+                return "请键入有效的URL";
             }
         }
     });

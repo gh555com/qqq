@@ -150,7 +150,7 @@ function normalizeNavPath(rawPath) {
 }
 
 /**
- * resolveNavPath：把用户输入的 path 解析成最终要访问的绝对目录
+ * resolveNavPath：把用户键入的 path 解析成最终要访问的绝对目录
  * - 若 normalize 后已是绝对（含 UNC/盘符根），直接返回
  * - 否则按 baseDir 进行 resolve
  */
@@ -882,7 +882,7 @@ function saveFile(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const filename = (filenameInput.value || '').trim();
-  if (!filename) { alert('请输入文件名'); return; }
+  if (!filename) { alert('请键入文件名'); return; }
 
   const pinned = isPinned();
   vscode.postMessage({ command: 'save', filename, isPinned: pinned, openInCurrentGroup: !pinned });
@@ -897,7 +897,7 @@ function createFolder(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const folderName = (filenameInput.value || '').trim();
-  if (!folderName) { alert('请输入文件夹名'); return; }
+  if (!folderName) { alert('请键入文件夹名'); return; }
   vscode.postMessage({ command: 'createFolder', folderName });
 }
 
