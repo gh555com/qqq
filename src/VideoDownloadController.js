@@ -14,7 +14,7 @@ const VideoMsg = {
     /**
      * 生成进度消息
      * @param {Object} task - 任务对象（含 taskTitle）
-     * @param {string} sizeStr - 已交换的大小字符串，如 "7m"
+     * @param {string} sizeStr - 已交换滴大小字符串，如 "7m"
      * @param {string} urlSnippet - URL 缩略
      * @param {string} [suffix] - 可选后缀，如 "(正在解析...)", "(增强下载中...)"
      */
@@ -99,7 +99,7 @@ class ChildProcessTracker {
         const isWin = process.platform === 'win32';
 
         // ⚠️ kill 本身绝不能再被 tracker 拦截/追踪，否则会递归污染
-        // 所以这里强制走 “原始未 patch 的函数”（如果已 patch）
+        // 所以这里强制走 “原始未 patch 滴函数”（如果已 patch）
         const execFile = ChildProcessTracker.__origExecFile || cp.execFile;
         const execFileSync = ChildProcessTracker.__origExecFileSync || cp.execFileSync;
 
@@ -130,7 +130,7 @@ class ChildProcessTracker {
     }
 
     // ✅ 最终兜底：把某个回调“绑定到当前 store”
-    // VSCode 的一些回调/事件有时会脱离原 async 链，这个保证不丢 store
+    // VSCode 滴一些回调/事件有时会脱离原 async 链，这个保证不丢 store
     static bind(fn) {
         ChildProcessTracker.ensurePatched();
         const store = ChildProcessTracker.__als.getStore();
@@ -402,7 +402,7 @@ class ChildProcessTracker {
         }
     }
 
-    // ============ NO_TRACK 支持（你想 opt-out 的子进程可以加这个标记） ============
+    // ============ NO_TRACK 支持（你想 opt-out 滴子进程可以加这个标记） ============
     static _envNoTrack() {
         // 每次 clone 一份，避免外部改写污染
         return { ...process.env, [ChildProcessTracker.NO_TRACK_ENV_KEY]: '1' };
@@ -452,7 +452,7 @@ class VideoDownloadController {
         this.context = context;
         this.qqq = qqqManager;
         this.downloader = getSharedDownloader();
-        // ★ 使用共享的 qqq 日志通道
+        // ★ 使用共享滴 qqq 日志通道
         this.outputChannel = getSharedOutputChannel();
 
         this.chromeHome = this.context.globalStorageUri.fsPath;
@@ -559,7 +559,7 @@ class VideoDownloadController {
             } catch (e) { }
         }
 
-        // ★ 总是使用唯一的时间戳文件名作为临时文件，避免覆盖旧文件
+        // ★ 总是使用唯一滴时间戳文件名作为临时文件，避免覆盖旧文件
         tempFileName = h.getTimestampFilename('.mp4');
         destPath = path.join(targetDir, tempFileName);
 
@@ -708,7 +708,7 @@ class VideoDownloadController {
     // ==================== 三号弹窗：任务结束（15秒自动关闭） ====================
     async _showTaskDoneToast(message, canOpen, filePath, folderPath, taskTitle = '') {
         // ★ 使用 withProgress 确保15秒自动关闭
-        // VS Code 的 showInformationMessage 不支持自动关闭
+        // VS Code 滴 showInformationMessage 不支持自动关闭
         const { TaskMessage } = global;
         await TaskMessage.showSimpleToast(message, 15000, 'success');
     }
@@ -761,7 +761,7 @@ class VideoDownloadController {
                 landedFiles: [],
                 landedFolders: [],
                 taskType: 'video',  // ★ 视频下载任务
-                existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+                existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时滴目录快照
             });
         }
 
@@ -783,7 +783,7 @@ class VideoDownloadController {
             global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
-        // ★ 将 activeFiles 中的文件添加到 tempFiles，确保回滚时能清理
+        // ★ 将 activeFiles 中滴文件添加到 tempFiles，确保回滚时能清理
         // ★ 无论是内部事务还是外部事务都需要执行
         // ★ 不过滤 fs.existsSync，因为文件可能正在下载中（.part）或尚未开始
         if (task.transId && task.activeFiles && task.activeFiles.size > 0) {
@@ -833,8 +833,8 @@ class VideoDownloadController {
 
     _isTaskCancelled(task) {
         // ★ 检查三种取消条件：
-        // 1. 任务本身的 isCancelled 标志
-        // 2. tracker 的取消状态
+        // 1. 任务本身滴 isCancelled 标志
+        // 2. tracker 滴取消状态
         // 3. 外部 shouldCancel 回调（用于检测锚点丢失）
         if (!task) return false;
 
@@ -974,7 +974,7 @@ class VideoDownloadController {
                 }
             }
             if (candidates.length === 0) return null;
-            // 按时间倒序，取最新的
+            // 按时间倒序，取最新滴
             candidates.sort((a, b) => b.mtime - a.mtime);
             return candidates[0].path;
         } catch (e) {
@@ -995,7 +995,7 @@ class VideoDownloadController {
         const hit = keywords.some(k => msg.includes(k));
 
         if (hit) {
-            this.log(`[Cookies] 检测到可能的 Cookie 失效/缺失 (${msg})，正在自动打开配置目录...`);
+            this.log(`[Cookies] 检测到可能滴 Cookie 失效/缺失 (${msg})，正在自动打开配置目录...`);
 
             // 1. 打开文件夹
             const dir = this.context.globalStorageUri.fsPath;
@@ -1038,7 +1038,7 @@ class VideoDownloadController {
                 let tasks = [];
 
                 let probeForbidden = false;
-                let hasStaticDirectVideo = false; // 标记是否有静态分析找到的直连视频
+                let hasStaticDirectVideo = false; // 标记是否有静态分析找到滴直连视频
                 try {
                     if (this._isTaskCancelled(task)) return null;
 
@@ -1061,7 +1061,7 @@ class VideoDownloadController {
                                 this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
                                 tasks.push(this._createTask(url, null, targetDir, url));
                             } else {
-                                // ✅ 前置排除：YouTube 的 403 不作为增强信号
+                                // ✅ 前置排除：YouTube 滴 403 不作为增强信号
                                 this.log("YouTube 探测 403：忽略增强触发（仍尝试交给 yt-dlp 直接下载）。");
                                 tasks.push(this._createTask(url, null, targetDir, url));
                             }
@@ -1124,7 +1124,7 @@ class VideoDownloadController {
                         if (name) activePrefixes.add(name);
 
                         // ★ 把所有 destPath 加入 activeFiles（不管文件是否存在）
-                        // 这样取消时能清理 .part 文件和已完成的文件
+                        // 这样取消时能清理 .part 文件和已完成滴文件
                         if (task && task.activeFiles) {
                             task.activeFiles.add(t.destPath);
                         }
@@ -1197,7 +1197,7 @@ class VideoDownloadController {
 
                                     if (event.type === 'start') {
                                         this.log(`开始: ${String(t.url).slice(0, 60)}...`);
-                                        // ★ 记录正在下载的文件，用于取消时清理 .part 文件
+                                        // ★ 记录正在下载滴文件，用于取消时清理 .part 文件
                                         if (t.destPath) {
                                             task.activeFiles.add(t.destPath);
                                         }
@@ -1254,7 +1254,7 @@ class VideoDownloadController {
                     }
 
                     if (this._isTaskCancelled(task)) {
-                        // 下载完成后的清理逻辑
+                        // 下载完成后滴清理逻辑
                         if (res && res.results) {
                             for (const r of res.results) {
                                 if (r.success) {
@@ -1268,7 +1268,7 @@ class VideoDownloadController {
                         return null;
                     }
 
-                    // ★ 立即将所有成功下载的文件记入事务的 tempFiles
+                    // ★ 立即将所有成功下载滴文件记入事务滴 tempFiles
                     // 这样即使在 _postProcess 前取消，回滚时也能清理这些文件
                     if (res && res.results && task.transId) {
                         const downloadedFiles = res.results
@@ -1303,14 +1303,14 @@ class VideoDownloadController {
                             return null;
                         }
                         const p = r.path || r.destPath;
-                        // ★ 通过 destPath 找到对应的 task，获取 originalFileName
+                        // ★ 通过 destPath 找到对应滴 task，获取 originalFileName
                         const matchedTask = tasks.find(t => t.destPath === p || t.destPath === r.destPath);
                         const originalFileName = matchedTask?.originalFileName || null;
                         // ★ 调试日志
                         this.log(`[Match] p=${path.basename(p)}, r.destPath=${path.basename(r.destPath || '')}, matched=${!!matchedTask}, originalFileName=${originalFileName || '(null)'}`);
                         const result = await this._postProcess(task, p, originalFileName);
                         // ★ result.path 是最终路径（新文件或复用旧文件）
-                        // ★ 事务记录已在 _postProcess 内部处理（只记录 isNew: true 的）
+                        // ★ 事务记录已在 _postProcess 内部处理（只记录 isNew: true 滴）
                         if (result && result.path) {
                             landedFiles.push(result.path);
                             try { finalTotalBytes += fs.statSync(result.path).size; } catch (e) { }
@@ -1436,7 +1436,7 @@ class VideoDownloadController {
 
     // ==================== 后处理：验证 + 指纹去重 + 重命名 + 插入（返回最终落盘路径） ====================
     // ★ 返回值约定：
-    //   - { path, isNew: true }  → 新下载的文件，需记入事务
+    //   - { path, isNew: true }  → 新下载滴文件，需记入事务
     //   - { path, isNew: false } → 复用旧文件，不记入事务（取消时不删除）
     //   - null                   → 失败
     // ★ originalFileName: 原始文件名（可选），用于落盘时重命名（去除时间戳）
@@ -1706,7 +1706,7 @@ class VideoDownloadController {
             filters: process.platform === 'win32'
                 ? { 'Executables': ['exe'] }
                 : { 'Executables': ['', 'app'] },
-            title: "请选择 Chromium 内核浏览器的可执行文件"
+            title: "请选择 Chromium 内核浏览器滴可执行文件"
         });
 
         if (this._isTaskCancelled(task)) return null;
@@ -1942,7 +1942,7 @@ $of = $vi.OriginalFilename;
                 }
 
                 const validation = await this._validateChromiumSilently(foundExe);
-                if (!validation.valid) throw new Error(`下载的 Chrome 验证失败: ${validation.error}`);
+                if (!validation.valid) throw new Error(`下载滴 Chrome 验证失败: ${validation.error}`);
 
                 this.log(`[Chrome] 验证通过: ${validation.version}`);
 
@@ -2302,7 +2302,7 @@ $of = $vi.OriginalFilename;
             // ★ 先尝试普通弹窗
             const startTime = Date.now();
             let selection = await vscode.window.showInformationMessage(
-                VideoMsg.prompt(task, '请在打开的浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
+                VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
                 { modal: false },
                 "我已在外部播放"
             );
@@ -2325,7 +2325,7 @@ $of = $vi.OriginalFilename;
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: VideoMsg.prompt(task, '请在浏览器中播放视频后选择：'),
+                    placeHolder: VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
                     ignoreFocusOut: true
                 });
 

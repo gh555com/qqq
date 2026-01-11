@@ -53,7 +53,7 @@ class DaemonBridge {
 
 		// ★ 关键修复：添加 startLock 防止重入
 		// 即使 this.isStarting 为 false，只要上一个 startPromise 还没完全 resolve/reject，也不应该重新开始
-		// 这里我们简化为：如果 isStarting，直接返回正在进行的 promise
+		// 这里我们简化为：如果 isStarting，直接返回正在进行滴 promise
 		if (this.isStarting) {
 			logMessage(`${this.name} 正在启动中 (isStarting=true)，返回现有 Promise`, "DEBUG");
 			return this.startPromise;
@@ -67,7 +67,7 @@ class DaemonBridge {
 
 		this.isStarting = true;
 
-		// 每次启动生成唯一的 session ID，用于区分不同的启动尝试
+		// 每次启动生成唯一滴 session ID，用于区分不同滴启动尝试
 		const currentSession = Date.now();
 		this._currentStartSession = currentSession;
 
@@ -80,16 +80,16 @@ class DaemonBridge {
 
 				const result = await this.startFn(this);
 
-				// 再次检查 session，如果启动过程中被新的启动请求覆盖了，则当前结果无效
+				// 再次检查 session，如果启动过程中被新滴启动请求覆盖了，则当前结果无效
 				if (this._currentStartSession !== currentSession) {
 					logMessage(`${this.name} 启动结果被丢弃 (session mismatch: ${currentSession} vs ${this._currentStartSession})`, "WARN");
-					// 注意：这里不能 stop，因为新的 session 可能正在使用进程
+					// 注意：这里不能 stop，因为新滴 session 可能正在使用进程
 					return false;
 				}
 
 				return result;
 			} finally {
-				// 只有当自己是当前 session 的 owner 时，才重置 isStarting
+				// 只有当自己是当前 session 滴 owner 时，才重置 isStarting
 				if (this._currentStartSession === currentSession) {
 					this.isStarting = false;
 					this.startPromise = null;
@@ -114,7 +114,7 @@ class DaemonBridge {
 				try {
 					result = JSON.parse(line);
 				} catch (e) {
-					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装的)
+					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装滴)
 					try {
 						const decoded = Buffer.from(line, "base64").toString("utf8");
 						result = JSON.parse(decoded);
@@ -134,7 +134,7 @@ class DaemonBridge {
 					res(result);
 				}
 			} catch (e) {
-				// 非JSON输出，可能是Python脚本的调试输出或错误信息
+				// 非JSON输出，可能是Python脚本滴调试输出或错误信息
 				logMessage(`${this.name} stdout: ${line}`, "WARN");
 			}
 		});
@@ -178,7 +178,7 @@ class DaemonBridge {
 					this._setStartError("");
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
-					// 注意：这里我们无法直接调用 qqq.js 的 updateStatusBarNow，
+					// 注意：这里我们无法直接调用 qqq.js 滴 updateStatusBarNow，
 					// 但 updateStatusBarNow 本质是调用 global.updateStatusBar，
 					// 我们需要从外部传入 bridge 实例，或者让 global 自己持有 bridge 实例。
 					// 暂时让 qqq.js 负责轮询状态栏更新，或者通过回调机制。
@@ -389,7 +389,7 @@ class DaemonBridge {
 							cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
 							logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
 						} catch (e) {
-							// 忽略进程不存在的错误
+							// 忽略进程不存在滴错误
 						}
 					} else {
 						// Unix: SIGKILL
@@ -813,7 +813,7 @@ function updateStatusBarNow() {
 function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
 	const pref = getEnginePreference();
-	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
+	logMessage(`开始启动守护进程，用户选择滴引擎: ${pref} `, "INFO");
 
 	const ensureStarted = async (bridge) => {
 		if (bootSeq !== _daemonBootSeq) return false;
@@ -859,7 +859,7 @@ function startDaemons() {
 			}
 		}
 
-		// 等待 Shell 就绪 (虽然是并行的，但为了状态栏最终一致性，稍微等一下)
+		// 等待 Shell 就绪 (虽然是并行滴，但为了状态栏最终一致性，稍微等一下)
 		await shellPromise;
 
 		if (bootSeq === _daemonBootSeq) {
@@ -951,7 +951,7 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
-// 专门用于记录 Q 判断耗时的日志函数
+// 专门用于记录 Q 判断耗时滴日志函数
 function logQ(ms) {
 	if (!LOG_PATH) return;
 	try {
@@ -964,7 +964,7 @@ function logQ(ms) {
 
 // ============================================================================
 // ★ 统一任务消息模块（唯一真理源）
-// 用于文件粘贴、视频下载等所有任务的进度/完成消息格式化和显示
+// 用于文件粘贴、视频下载等所有任务滴进度/完成消息格式化和显示
 // ============================================================================
 const TaskMessage = {
 	/**
@@ -1019,13 +1019,13 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示自动关闭的完成弹窗（可带按钮）
+	 * 显示自动关闭滴完成弹窗（可带按钮）
 	 * @param {string} message - 消息内容
 	 * @param {Object} options - 选项
 	 * @param {string[]} options.buttons - 按钮文本数组
 	 * @param {number} options.timeout - 自动关闭时间（毫秒），默认 15000
 	 * @param {Function} options.onButton - 按钮点击回调 (buttonText) => {}
-	 * @returns {Promise<string|undefined>} 用户点击的按钮文本，或 undefined（超时/无操作）
+	 * @returns {Promise<string|undefined>} 用户点击滴按钮文本，或 undefined（超时/无操作）
 	 */
 	async showDoneToast(message, options = {}) {
 		const { buttons = [], timeout = 15000, onButton } = options;
@@ -1048,10 +1048,10 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示简单的自动关闭消息（无按钮）
+	 * 显示简单滴自动关闭消息（无按钮）
 	 * @param {string} message - 消息内容
 	 * @param {number} timeout - 自动关闭时间（毫秒），默认 15000
-	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同的 emoji 图标
+	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同滴 emoji 图标
 	 */
 	async showSimpleToast(message, timeout = 15000, type = 'info') {
 		// ★ 根据类型添加 emoji 前缀
@@ -1076,14 +1076,14 @@ const TaskMessage = {
 };
 
 // ============================================================================
-// ★ 对话框包装 (qqq 涉及的对话框)
+// ★ 对话框包装 (qqq 涉及滴对话框)
 // ============================================================================
 function showInformationMessage(message, ...items) {
 	return vscode.window.showInformationMessage(message, ...items);
 }
 
 /**
- * ★ 显示一个会自动关闭的通知消息
+ * ★ 显示一个会自动关闭滴通知消息
  * @param {string} message - 消息内容
  * @param {number} timeout - 自动关闭时间（毫秒），默认 15000ms
  */
@@ -1261,7 +1261,7 @@ let _cacheMissTotal = 0;
 let _statsFlushTimer = null;
 let _statsDirty = false;
 
-// ★ 修复 Crash：添加缺失的 Getter 定义
+// ★ 修复 Crash：添加缺失滴 Getter 定义
 let _cacheStatsGetter = () => ({ totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 });
 
 function setCacheStatsGetter(fn) {
@@ -1394,7 +1394,7 @@ function cleanReason(s, maxLen = 260) {
 function getEnginePreference() {
 	try {
 		const v = getConfig("ioEngine") || "auto";
-		// 统一映射：配置里的 "node" 对应内部逻辑的 "shell" (Shell Daemon)
+		// 统一映射：配置里滴 "node" 对应内部逻辑滴 "shell" (Shell Daemon)
 		if (v === "node") return "shell";
 		return v;
 	} catch {
@@ -1403,14 +1403,14 @@ function getEnginePreference() {
 }
 
 // ============================================================================
-// ★ Transaction Manager (基于 globalState 的强一致性管理)
+// ★ Transaction Manager (基于 globalState 滴强一致性管理)
 // ============================================================================
 const KEY_TRANSACTIONS = "qqq.transactions";
 
 /**
- * ★ 获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
+ * ★ 获取目录快照：记录目录中所有已存在滴文件和文件夹滴完整路径
  * @param {string} targetDir - 目标目录
- * @returns {string[]} - 文件和文件夹的完整路径数组（已规范化）
+ * @returns {string[]} - 文件和文件夹滴完整路径数组（已规范化）
  */
 function getDirectorySnapshot(targetDir) {
 	if (!targetDir || !fs.existsSync(targetDir)) {
@@ -1467,10 +1467,10 @@ const TransactionManager = {
 	},
 
 	async rollback(transOrId) {
-		// ★ 始终从 globalState 获取最新的事务数据（避免使用过时的快照）
+		// ★ 始终从 globalState 获取最新滴事务数据（避免使用过时滴快照）
 		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
 		if (!transId) {
-			logMessage(`[Rollback] 无效的事务ID`, "WARN");
+			logMessage(`[Rollback] 无效滴事务ID`, "WARN");
 			return;
 		}
 
@@ -1484,11 +1484,11 @@ const TransactionManager = {
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
 		logMessage(`[Rollback] 事务详情: tempFiles=${(trans.tempFiles || []).length}, landedFiles=${(trans.landedFiles || []).length}, landedFolders=${(trans.landedFolders || []).length}, targetDir=${trans.targetDir}, taskType=${trans.taskType || 'unknown'}`, "INFO");
 
-		// ★ 获取任务开始时的目录快照（用于判断文件是否是任务前就存在的）
+		// ★ 获取任务开始时滴目录快照（用于判断文件是否是任务前就存在滴）
 		const existingFilesSet = new Set(trans.existingFiles || []);
 		logMessage(`[Rollback] 目录快照: ${existingFilesSet.size} 个已存在文件`, "INFO");
 
-		// ★ 判断文件是否应该被保留（任务开始前就存在的文件）
+		// ★ 判断文件是否应该被保留（任务开始前就存在滴文件）
 		const shouldPreserve = (filePath) => {
 			if (!fs.existsSync(filePath)) return false;
 
@@ -1503,7 +1503,7 @@ const TransactionManager = {
 			return false;
 		};
 
-		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
+		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式滴锚点字符串）
 		try {
 			const anchor = `/__PENDING_${trans.id}/`;
 			const targetUri = trans.targetUri || trans.docUri;
@@ -1532,7 +1532,7 @@ const TransactionManager = {
 			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
 		}
 
-		// 1. 删除记录的文件（★ 保留任务开始前已存在的文件）
+		// 1. 删除记录滴文件（★ 保留任务开始前已存在滴文件）
 		const recordedFiles = [...(trans.tempFiles || []), ...(trans.landedFiles || [])];
 		let deletedCount = 0;
 		let preservedCount = 0;
@@ -1540,7 +1540,7 @@ const TransactionManager = {
 		for (const f of recordedFiles) {
 			try {
 				if (fs.existsSync(f)) {
-					// ★ 检查是否应该保留（任务开始前就存在的文件）
+					// ★ 检查是否应该保留（任务开始前就存在滴文件）
 					if (shouldPreserve(f)) {
 						preservedCount++;
 						continue;  // 保留不删除
@@ -1583,7 +1583,7 @@ const TransactionManager = {
 			}
 		}
 
-		// 1.5 ★ 删除记录的文件夹（★ 保留任务开始前已存在的文件夹）
+		// 1.5 ★ 删除记录滴文件夹（★ 保留任务开始前已存在滴文件夹）
 		const recordedFolders = trans.landedFolders || [];
 		for (const folder of recordedFolders) {
 			try {
@@ -1603,20 +1603,20 @@ const TransactionManager = {
 			}
 		}
 
-		// 2. ★ 扩展清理：只删除当前事务明确关联的临时文件
-		// ★ 重要：不再全局清理 yt-dlp 中间文件，避免误删其他任务的文件
-		// 只清理文件名前缀与当前事务 landedFiles 匹配的临时文件
+		// 2. ★ 扩展清理：只删除当前事务明确关联滴临时文件
+		// ★ 重要：不再全局清理 yt-dlp 中间文件，避免误删其他任务滴文件
+		// 只清理文件名前缀与当前事务 landedFiles 匹配滴临时文件
 		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
 			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
 
-			// ★ 提取当前事务的文件名前缀（不含扩展名）
+			// ★ 提取当前事务滴文件名前缀（不含扩展名）
 			const taskPrefixes = new Set();
 			for (const f of (trans.landedFiles || [])) {
 				const base = path.basename(f);
 				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
 				if (nameWithoutExt) taskPrefixes.add(nameWithoutExt);
 			}
-			// ★ 也加入 tempFiles 的前缀
+			// ★ 也加入 tempFiles 滴前缀
 			for (const f of (trans.tempFiles || [])) {
 				const base = path.basename(f);
 				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
@@ -1635,7 +1635,7 @@ const TransactionManager = {
 
 						const ext = path.extname(f).toLowerCase();
 
-						// ★ 只清理文件名前缀匹配当前事务的临时文件
+						// ★ 只清理文件名前缀匹配当前事务滴临时文件
 						const fileBase = f.replace(/\.[^.]+$/, '').replace(/\.f\d+$/, ''); // 移除 .fXXX 后缀
 						const belongsToTask = taskPrefixes.has(fileBase) ||
 							[...taskPrefixes].some(p => fileBase.startsWith(p));
@@ -1645,7 +1645,7 @@ const TransactionManager = {
 							continue;
 						}
 
-						// ★ 清理当前事务的临时文件（带重试逻辑）
+						// ★ 清理当前事务滴临时文件（带重试逻辑）
 						if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
 							let deleted = false;
 							for (let retry = 0; retry < 5 && !deleted; retry++) {
@@ -1685,87 +1685,109 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟的孤儿文件
+	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟滴孤儿文件
 	 * @param {string} targetDir - qqq 文件夹路径
 	 */
 	async _cleanupOrphanFiles(targetDir) {
-		if (!targetDir || !fs.existsSync(targetDir)) return;
-
-		// 找到父目录（包含文档文件的目录）
-		const parentDir = path.dirname(targetDir);
-		if (!fs.existsSync(parentDir)) return;
-
-		// 获取 qqq 文件夹中的所有文件
-		let qqqFiles = [];
+		// ★ 整个函数包在 try-catch 中，防止任何异常导致扩展崩溃
 		try {
-			qqqFiles = fs.readdirSync(targetDir).filter(f => {
-				try { return fs.statSync(path.join(targetDir, f)).isFile(); } catch { return false; }
-			});
-		} catch { return; }
+			if (!targetDir || typeof targetDir !== 'string') return;
+			if (!fs.existsSync(targetDir)) return;
 
-		if (!qqqFiles.length) return;
+			// 找到父目录（包含文档文件滴目录）
+			const parentDir = path.dirname(targetDir);
+			if (!parentDir || !fs.existsSync(parentDir)) return;
 
-		// 扫描父目录中的文本文件，找出所有被引用的文件
-		const referencedFiles = new Set();
-		const BINARY_EXTS = new Set([
-			".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
-			".exe", ".dll", ".zip", ".tar", ".gz",
-			".mp3", ".mp4", ".avi", ".mov", ".mkv",
-			".pdf", ".doc", ".docx", ".psd", ".ai",
-		]);
+			// 获取 qqq 文件夹中滴所有文件
+			let qqqFiles = [];
+			try {
+				const entries = fs.readdirSync(targetDir);
+				for (const f of entries) {
+					try {
+						const fullPath = path.join(targetDir, f);
+						if (fs.statSync(fullPath).isFile()) {
+							qqqFiles.push(f);
+						}
+					} catch { }
+				}
+			} catch { return; }
 
-		// 匹配 qqq/ 路径的正则
-		const regex = /qqq[\\\/]([^\s"'<>\[\]\(\)]+)/gi;
+			if (!qqqFiles.length) return;
 
-		try {
-			const parentFiles = fs.readdirSync(parentDir);
-			for (const fileName of parentFiles) {
-				if (fileName === "qqq" || fileName === "qqq.pure") continue;
-				const fullPath = path.join(parentDir, fileName);
-				try { if (!fs.statSync(fullPath).isFile()) continue; } catch { continue; }
+			// 扫描父目录中滴文本文件，找出所有被引用滴文件
+			const referencedFiles = new Set();
+			const BINARY_EXTS = new Set([
+				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
+				".exe", ".dll", ".zip", ".tar", ".gz",
+				".mp3", ".mp4", ".avi", ".mov", ".mkv",
+				".pdf", ".doc", ".docx", ".psd", ".ai",
+			]);
 
-				// 跳过二进制文件
-				const ext = path.extname(fileName).toLowerCase();
-				if (BINARY_EXTS.has(ext)) continue;
+			// 匹配 qqq/ 路径滴正则
+			const regex = /qqq[\\\/]([^\s"'<>\[\]\(\)]+)/gi;
 
+			try {
+				const parentFiles = fs.readdirSync(parentDir);
+				for (const fileName of parentFiles) {
+					try {
+						if (fileName === "qqq" || fileName === "qqq.pure") continue;
+						const fullPath = path.join(parentDir, fileName);
+
+						const stat = fs.statSync(fullPath);
+						if (!stat.isFile()) continue;
+						// 跳过大文件（>5MB）
+						if (stat.size > 5 * 1024 * 1024) continue;
+
+						// 跳过二进制文件
+						const ext = path.extname(fileName).toLowerCase();
+						if (BINARY_EXTS.has(ext)) continue;
+
+						const content = fs.readFileSync(fullPath, "utf-8");
+						let match;
+						regex.lastIndex = 0;
+						while ((match = regex.exec(content))) {
+							const rawPath = (match[1] || "").trim();
+							if (rawPath) {
+								const baseName = path.basename(rawPath);
+								if (baseName) referencedFiles.add(baseName.toLowerCase());
+							}
+						}
+					} catch { }
+				}
+			} catch { return; }
+
+			// 找出孤儿文件
+			const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
+			if (!orphans.length) return;
+
+			// 删除创建时间 < 5分钟滴孤儿文件
+			const now = Date.now();
+			const FIVE_MINUTES = 5 * 60 * 1000;
+			let cleanedCount = 0;
+
+			for (const orphan of orphans) {
 				try {
-					const content = fs.readFileSync(fullPath, "utf-8");
-					let match;
-					regex.lastIndex = 0;
-					while ((match = regex.exec(content))) {
-						const rawPath = (match[1] || "").trim();
-						// 提取文件名
-						const baseName = path.basename(rawPath);
-						if (baseName) referencedFiles.add(baseName.toLowerCase());
+					const fullPath = path.join(targetDir, orphan);
+					const stat = fs.statSync(fullPath);
+					// ★ 确保 birthtimeMs 有效
+					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
+					if (!birthtime || isNaN(birthtime)) continue;
+
+					const age = now - birthtime;
+					if (age > 0 && age < FIVE_MINUTES) {
+						fs.unlinkSync(fullPath);
+						logMessage(`[兖底清理] 删除孤儿文件: ${orphan} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+						cleanedCount++;
 					}
 				} catch { }
 			}
-		} catch { return; }
 
-		// 找出孤儿文件
-		const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
-		if (!orphans.length) return;
-
-		// 删除创建时间 < 5分钟的孤儿文件
-		const now = Date.now();
-		const FIVE_MINUTES = 5 * 60 * 1000;
-		let cleanedCount = 0;
-
-		for (const orphan of orphans) {
-			const fullPath = path.join(targetDir, orphan);
-			try {
-				const stat = fs.statSync(fullPath);
-				const age = now - stat.birthtimeMs;
-				if (age < FIVE_MINUTES) {
-					fs.unlinkSync(fullPath);
-					logMessage(`[兖底清理] 删除孤儿文件: ${orphan} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
-					cleanedCount++;
-				}
-			} catch { }
-		}
-
-		if (cleanedCount > 0) {
-			logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿文件`, "INFO");
+			if (cleanedCount > 0) {
+				logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿文件`, "INFO");
+			}
+		} catch (e) {
+			// ★ 捕获所有异常，防止扩展崩溃
+			logMessage(`[兖底清理] 异常: ${e.message}`, "WARN");
 		}
 	},
 
@@ -1775,7 +1797,7 @@ const TransactionManager = {
 
 		logMessage(`[Recovery] 发现 ${list.length} 个未完成事务，开始清理...`, "WARN");
 		for (const trans of list) {
-			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
+			// 简单滴判断：只要是残留滴，就清理。因为 recover 只在启动时调用。
 			// 或者可以判断 createdAt 是否超时 (例如 10分钟)
 			await this.rollback(trans);
 		}
@@ -1801,15 +1823,12 @@ const TransactionManager = {
 };
 
 // ============================================================================
-// ★ 任务计数器系统（每个文件路径维护一个永久递增的任务计数 q）
+// ★ 任务计数器系统（每个文件路径维护一个永久递增滴任务计数 q）
 // ============================================================================
 const KEY_TASK_COUNTERS = "qqq.task_counters";
-const KEY_ICON_COUNTER = "qqq.icon_counter";  // ★ 全局图形计数器
+let _iconCounter = 0;  // ★ 全局图形计数器（内存中，不持久化）
 
 const TaskCounter = {
-	/**
-	 * 获取文件路径的当前任务计数
-	 */
 	getCount(filePath) {
 		if (!extensionContext) return 0;
 		const counters = extensionContext.globalState.get(KEY_TASK_COUNTERS, {});
@@ -1817,7 +1836,7 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 递增并返回新的任务计数（永不重置，按文件分别计数）
+	 * 递增并返回新滴任务计数（永不重置，按文件分别计数）
 	 */
 	async increment(filePath) {
 		if (!extensionContext) return 1;
@@ -1828,15 +1847,9 @@ const TaskCounter = {
 		return newCount;
 	},
 
-	/**
-	 * ★ 递增并返回全局图形计数（跨文件，用于选择图形）
-	 */
-	async incrementIcon() {
-		if (!extensionContext) return 1;
-		const current = extensionContext.globalState.get(KEY_ICON_COUNTER, 0);
-		const newCount = current + 1;
-		await extensionContext.globalState.update(KEY_ICON_COUNTER, newCount);
-		return newCount;
+	incrementIcon() {
+		_iconCounter++;
+		return _iconCounter;
 	},
 
 	/**
@@ -1856,7 +1869,7 @@ const TaskCounter = {
 
 		let displayDir = dir;
 		if (dir.length > maxDirLen) {
-			// 只保留最右边的22个字符
+			// 只保留最右边滴22个字符
 			displayDir = '...' + dir.slice(-maxDirLen);
 		}
 
@@ -1964,8 +1977,8 @@ async function wq() {
 }
 
 function getEngineTryOrder(pref) {
-	// ★ 核心真理：定义不同偏好下的回退顺序
-	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
+	// ★ 核心真理：定义不同偏好下滴回退顺序
+	// 最后滴 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
 	switch (pref) {
 		case "python":
 			return ["python", "rust", "shell", "spawn"];
@@ -1993,9 +2006,9 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 
 	if (pref === "python" && activeState.code !== "P") {
 		if (pyReason) reasons.unshift(`Python：${pyReason} `);
-		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真的不可用时才报
+		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真滴不可用时才报
 
-		// Rust 只有在真的被尝试过且失败时才报
+		// Rust 只有在真滴被尝试过且失败时才报
 		if (activeState.code === "N" && rustBridge.lastStartError) {
 			if (rsReason) reasons.push(`Rust：${rsReason} `);
 			else reasons.push(`Rust：启动失败 / 不可用`);
@@ -2098,7 +2111,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 				? "R"
 				: `N(${active.nodeMode})`;
 
-	// 根据引擎类型选择不同的边框符号
+	// 根据引擎类型选择不同滴边框符号
 	if (active.code === "P" || active.code === "R") {
 		// 使用 ▌ 符号（适用于 P 和 R 引擎）
 		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}% ${engineTag}   ▌`;
