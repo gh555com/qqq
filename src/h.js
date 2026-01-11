@@ -2100,10 +2100,11 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
         try {
             const text = await vscode.env.clipboard.readText();
             if (text) {
-                if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
-                    log(`[AutoDetect] 检测到视频 URL`, "INFO");
-                    return { type: "video_url", text, url: text };
-                }
+                // ★ 移除纯文本 URL 自动识别为视频下载滴逻辑
+                // if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
+                //     log(`[AutoDetect] 检测到视频 URL`, "INFO");
+                //     return { type: "video_url", text, url: text };
+                // }
                 log(`[AutoDetect] 检测到纯文本`, "INFO");
                 return { type: "text", text };
             }
