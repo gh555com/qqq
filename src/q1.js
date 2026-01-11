@@ -1417,7 +1417,8 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         startTime: Date.now(),
         taskNum: taskNum,  // ★ 记录任务编号
         taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
-        intentTotalSize: intentTotalSize  // ★ 意图列表总大小（仅本地文件有效）
+        intentTotalSize: intentTotalSize,  // ★ 意图列表总大小（仅本地文件有效）
+        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
     });
 
     // 3. 启动带进度的后台任务

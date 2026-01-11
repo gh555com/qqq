@@ -83,7 +83,30 @@ class ChildProcessTracker {
         await this._sleep(400);
         for (const pid of pids) await this._killPidTree(pid, true);
 
+        // ★ 直接杀死所有 yt-dlp 进程（因为 dow.js 的 spawn 不在 ALS 作用域内）
+        await this._killYtdlpProcesses();
+
         this._procs.clear();
+    }
+
+    // ★ 直接杀死所有 yt-dlp 进程
+    async _killYtdlpProcesses() {
+        const cp = require('child_process');
+        const isWin = process.platform === 'win32';
+
+        try {
+            if (isWin) {
+                // Windows: taskkill /IM yt-dlp.exe /F /T
+                await new Promise(resolve => {
+                    cp.execFile('taskkill', ['/IM', 'yt-dlp.exe', '/F', '/T'], {
+                        windowsHide: true
+                    }, () => resolve());
+                });
+            } else {
+                // macOS/Linux: pkill -9 yt-dlp
+                try { cp.execSync('pkill -9 yt-dlp', { stdio: 'ignore' }); } catch (e) { }
+            }
+        } catch (e) { }
     }
 
     _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -431,12 +454,22 @@ ChildProcessTracker.__excludedCmds = new Set([
     'rundll32.exe', // 有时系统打开会走它
 ]);
 
+// ★ 单例日志通道（避免多个实例创建多个通道）
+let _sharedOutputChannel = null;
+function getSharedOutputChannel() {
+    if (!_sharedOutputChannel) {
+        _sharedOutputChannel = vscode.window.createOutputChannel("qqq: Video Downloader");
+    }
+    return _sharedOutputChannel;
+}
+
 class VideoDownloadController {
     constructor(context, qqqManager) {
         this.context = context;
         this.qqq = qqqManager;
         this.downloader = getSharedDownloader();
-        this.outputChannel = vscode.window.createOutputChannel("qqq: Video Downloader");
+        // ★ 使用共享的 qqq 日志通道
+        this.outputChannel = getSharedOutputChannel();
 
         this.chromeHome = this.context.globalStorageUri.fsPath;
         this.userDataDir = path.join(this.chromeHome, 'user-data');
@@ -519,25 +552,33 @@ class VideoDownloadController {
 
     _createTask(videoUrl, title, targetDir, referer) {
         let destPath = null;
-        let fileName = null;
+        let originalFileName = null;  // ★ 保存原始文件名
+        let tempFileName = null;      // ★ 临时文件名（带时间戳）
 
+        // ★ 计算原始文件名
         if (title && title !== 'Direct Link' && title !== 'Web Resource') {
-            fileName = this._sanitizeFilename(title) + ".mp4";
+            originalFileName = this._sanitizeFilename(title) + ".mp4";
         } else {
+            // ★ 从 URL 提取文件名
             try {
                 const u = new URL(videoUrl);
                 const base = path.basename(u.pathname);
                 if (base && base.match(/\.(mp4|webm|mkv|mov|flv|avi|wmv|m4v|mpg|mpeg|3gp|ts|ogv)$/i)) {
-                    fileName = decodeURIComponent(base);
+                    // ★ 解码后用 _sanitizeFilename 处理，保留中文等字符
+                    const decoded = decodeURIComponent(base);
+                    const ext = path.extname(decoded);
+                    const nameWithoutExt = path.basename(decoded, ext);
+                    const sanitized = this._sanitizeFilename(nameWithoutExt);
+                    if (sanitized && sanitized.length > 0) {
+                        originalFileName = sanitized + ext;
+                    }
                 }
             } catch (e) { }
-
-            if (!fileName || fileName.length > 50 || !/^[a-zA-Z0-9._-]+$/.test(fileName)) {
-                fileName = h.getTimestampFilename('.mp4');
-            }
         }
 
-        if (fileName) destPath = path.join(targetDir, fileName);
+        // ★ 总是使用唯一的时间戳文件名作为临时文件，避免覆盖旧文件
+        tempFileName = h.getTimestampFilename('.mp4');
+        destPath = path.join(targetDir, tempFileName);
 
         const headers = {};
         if (referer) headers["Referer"] = referer;
@@ -545,9 +586,11 @@ class VideoDownloadController {
         return {
             url: videoUrl,
             destPath: destPath,
+            originalFileName: originalFileName,  // ★ 保存原始文件名，用于落盘时重命名
             kind: "video",
             baseDir: targetDir,
-            headers: headers
+            headers: headers,
+            _debug_originalFileName: originalFileName  // ★ 调试用
         };
     }
 
@@ -731,7 +774,8 @@ class VideoDownloadController {
                 tempFiles: [],
                 landedFiles: [],
                 landedFolders: [],
-                taskType: 'video'  // ★ 视频下载任务，赦免时间固定 81s
+                taskType: 'video',  // ★ 视频下载任务
+                existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
             });
         }
 
@@ -740,8 +784,8 @@ class VideoDownloadController {
 
     async _cancelTask(task, reason = '用户取消') {
         if (!task || !task.tracker) return;
-        if (task.tracker.isCancelled()) return;
-
+        // ★ 不再检查 isCancelled，因为可能已经在 _isTaskCancelled 中设置了
+        // ★ 确保设置取消标志
         task.tracker.markCancelled();
         task.isCancelled = true;
         this.log(`qqq: 已标记取消（${reason}），正在清理...`);
@@ -792,9 +836,12 @@ class VideoDownloadController {
 
         // ★ 检查外部取消回调（锚点丢失）
         if (task.shouldCancel && task.shouldCancel()) {
-            // ★ 立即触发取消流程
+            // ★ 立即同步设置取消标志（不等待 async 操作）
             if (!task.isCancelled) {
-                this.log('[AnchorLost] 检测到锚点丢失，触发取消');
+                task.isCancelled = true;
+                if (task.tracker) task.tracker.markCancelled();
+                this.log('[AnchorLost] 检测到锚点丢失，立即标记取消并杀死进程');
+                // ★ 后台执行杀进程和清理（不等待）
                 this._cancelTask(task, '锚点丢失').catch(e => { });
             }
             return true;
@@ -1076,7 +1123,20 @@ class VideoDownloadController {
 
                 try {
                     fileSizeTimer = setInterval(() => {
-                        if (this._isTaskCancelled(task)) return;
+                        // ★ 每 500ms 检查取消状态（包括锚点丢失）
+                        if (this._isTaskCancelled(task)) {
+                            // ★ 检测到取消，立即停止定时器
+                            if (fileSizeTimer) {
+                                clearInterval(fileSizeTimer);
+                                fileSizeTimer = null;
+                            }
+                            // ★ 触发取消回调（如果有）
+                            if (task._cancelResolve) {
+                                task._cancelResolve();
+                                task._cancelResolve = null;
+                            }
+                            return;
+                        }
 
                         let currentDiskBytes = 0;
                         try {
@@ -1106,10 +1166,15 @@ class VideoDownloadController {
 
                     let res;
                     try {
-                        res = await this._runWithSuppressedPopups(async () => {
+                        // ★ 创建取消 Promise，用于 Promise.race
+                        const cancelPromise = new Promise(resolve => {
+                            task._cancelResolve = resolve;
+                        });
+
+                        const downloadPromise = this._runWithSuppressedPopups(async () => {
                             return await this.downloader.downloadAll(tasks, targetDir, {
                                 downloadVideos: "all",
-                                cookiesFilePath: cookiesFilePath, // Pass cookies here
+                                cookiesFilePath: cookiesFilePath,
                                 onProgress: (t, event) => {
                                     if (this._isTaskCancelled(task)) return;
 
@@ -1137,6 +1202,15 @@ class VideoDownloadController {
                                 }
                             });
                         });
+
+                        // ★ 使用 Promise.race：下载完成 或 取消，哪个先到就返回
+                        res = await Promise.race([
+                            downloadPromise,
+                            cancelPromise.then(() => null)  // 取消时返回 null
+                        ]);
+
+                        // ★ 清理取消回调
+                        task._cancelResolve = null;
                     } catch (e) {
                         if (this._isTaskCancelled(task)) return null;
                         throw e;
@@ -1167,7 +1241,12 @@ class VideoDownloadController {
                     for (const r of successResults) {
                         if (this._isTaskCancelled(task)) return null;
                         const p = r.path || r.destPath;
-                        const result = await this._postProcess(task, p);
+                        // ★ 通过 destPath 找到对应的 task，获取 originalFileName
+                        const matchedTask = tasks.find(t => t.destPath === p || t.destPath === r.destPath);
+                        const originalFileName = matchedTask?.originalFileName || null;
+                        // ★ 调试日志
+                        this.log(`[Match] p=${path.basename(p)}, r.destPath=${path.basename(r.destPath || '')}, matched=${!!matchedTask}, originalFileName=${originalFileName || '(null)'}`);
+                        const result = await this._postProcess(task, p, originalFileName);
                         // ★ result.path 是最终路径（新文件或复用旧文件）
                         // ★ 事务记录已在 _postProcess 内部处理（只记录 isNew: true 的）
                         if (result && result.path) {
@@ -1288,12 +1367,15 @@ class VideoDownloadController {
         }
     }
 
-    // ==================== 后处理：验证 + 改名 + 插入（返回最终落盘路径） ====================
+    // ==================== 后处理：验证 + 指纹去重 + 重命名 + 插入（返回最终落盘路径） ====================
     // ★ 返回值约定：
     //   - { path, isNew: true }  → 新下载的文件，需记入事务
     //   - { path, isNew: false } → 复用旧文件，不记入事务（取消时不删除）
     //   - null                   → 失败
-    async _postProcess(task, filePath) {
+    // ★ originalFileName: 原始文件名（可选），用于落盘时重命名（去除时间戳）
+    async _postProcess(task, filePath, originalFileName = null) {
+        // ★ 调试日志
+        this.log(`[_postProcess] filePath=${path.basename(filePath)}, originalFileName=${originalFileName || '(null)'}`);
         if (this._isTaskCancelled(task)) {
             if (filePath && fs.existsSync(filePath)) {
                 try { fs.unlinkSync(filePath); } catch (e) { }
@@ -1317,7 +1399,7 @@ class VideoDownloadController {
 
                     const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
-                        this.log(`发现指纹重复文件（同文件夹），删除新下载文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`);
+                        this.log(`指纹重复，删除临时文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }
                         await this._insertToCursor(task, f, full);
                         // ★ 返回 isNew: false，表示复用旧文件，不记入事务
@@ -1332,26 +1414,54 @@ class VideoDownloadController {
         this.log(`正在验证文件: ${path.basename(filePath)}`);
 
         // 使用公共函数进行 FFmpeg 校验
-        const finalPath = await h.verifyVideoFile(filePath);
-
-        if (finalPath) {
-            // ★ 新文件：记入事务
-            if (task && task.transId) {
-                const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
-                if (trans) {
-                    const newLanded = [...(trans.landedFiles || []), finalPath];
-                    // De-dupe
-                    await global.TransactionManager.updateTransaction(task.transId, { landedFiles: [...new Set(newLanded)] });
-                }
-            }
-
-            await this._insertToCursor(task, path.basename(finalPath), finalPath);
-            // ★ 返回 isNew: true，表示新文件
-            return { path: finalPath, isNew: true };
-        } else {
+        const verifiedPath = await h.verifyVideoFile(filePath);
+        if (!verifiedPath) {
             this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`);
             return null;
         }
+
+        // ★ 重命名为原始文件名（去除时间戳）
+        let finalPath = verifiedPath;
+        if (originalFileName) {
+            const dir = path.dirname(verifiedPath);
+            let targetPath = path.join(dir, originalFileName);
+
+            // ★ 如果目标文件名已存在，添加序号避免覆盖
+            if (fs.existsSync(targetPath) && targetPath !== verifiedPath) {
+                const ext = path.extname(originalFileName);
+                const base = path.basename(originalFileName, ext);
+                let counter = 1;
+                while (fs.existsSync(targetPath)) {
+                    targetPath = path.join(dir, `${base} (${counter})${ext}`);
+                    counter++;
+                }
+            }
+
+            if (targetPath !== verifiedPath) {
+                try {
+                    fs.renameSync(verifiedPath, targetPath);
+                    this.log(`重命名: ${path.basename(verifiedPath)} -> ${path.basename(targetPath)}`);
+                    finalPath = targetPath;
+                } catch (e) {
+                    this.log(`重命名失败: ${e.message}，保留原文件名`);
+                }
+            }
+        }
+
+        // ★ 新文件：记入事务（使用规范化路径）
+        const normalizedPath = path.normalize(finalPath);
+        if (task && task.transId) {
+            const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
+            if (trans) {
+                const newLanded = [...(trans.landedFiles || []), normalizedPath];
+                // De-dupe
+                await global.TransactionManager.updateTransaction(task.transId, { landedFiles: [...new Set(newLanded)] });
+            }
+        }
+
+        await this._insertToCursor(task, path.basename(finalPath), finalPath);
+        // ★ 返回 isNew: true，表示新文件
+        return { path: normalizedPath, isNew: true };
     }
 
     async _insertToCursor(task, fileName, fullPath) {
@@ -1398,6 +1508,10 @@ class VideoDownloadController {
     // ==================== 增强流程入口 ====================
     async _handleForbidden(task, code, url, targetDir, progressCallback) {
         if (this._isTaskCancelled(task)) return null;
+
+        // ★ 先关闭之前的通知，避免多个弹窗同时显示
+        await this._hideToastsBestEffort();
+        await new Promise(r => setTimeout(r, 100));  // ★ 等待通知关闭
 
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
         const selection = await vscode.window.showInformationMessage(
@@ -1453,6 +1567,9 @@ class VideoDownloadController {
 
     async _promptPickThenMaybeDownload(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return null;
+
+        // ★ 先关闭之前的通知
+        await this._hideToastsBestEffort();
 
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
