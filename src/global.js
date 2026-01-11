@@ -1557,10 +1557,27 @@ const TransactionManager = {
 					deletedCount++;
 				}
 				// 同时清理 .part/.ytdl 衍生文件（这些不检查赦免时间）
-				const part = f + ".part";
-				const ytdl = f + ".ytdl";
-				if (fs.existsSync(part)) fs.unlinkSync(part);
-				if (fs.existsSync(ytdl)) fs.unlinkSync(ytdl);
+				// ★ 带重试逻辑，因为 yt-dlp 进程可能还在锁定文件
+				const partExts = ['.part', '.ytdl'];
+				for (const ext of partExts) {
+					const partFile = f + ext;
+					if (fs.existsSync(partFile)) {
+						let deleted = false;
+						for (let retry = 0; retry < 5 && !deleted; retry++) {
+							try {
+								fs.unlinkSync(partFile);
+								logMessage(`[Rollback] 删除衍生文件: ${path.basename(partFile)}`, "INFO");
+								deleted = true;
+							} catch (e) {
+								if (e.code === 'EBUSY' && retry < 4) {
+									await new Promise(r => setTimeout(r, 300 * (retry + 1)));
+								} else {
+									logMessage(`[Rollback] 删除失败 ${path.basename(partFile)}: ${e.message}`, "WARN");
+								}
+							}
+						}
+					}
+				}
 			} catch (e) {
 				logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "ERROR");
 			}
@@ -1628,10 +1645,22 @@ const TransactionManager = {
 							continue;
 						}
 
-						// ★ 清理当前事务的临时文件
+						// ★ 清理当前事务的临时文件（带重试逻辑）
 						if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
-							fs.unlinkSync(fullPath);
-							logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
+							let deleted = false;
+							for (let retry = 0; retry < 5 && !deleted; retry++) {
+								try {
+									fs.unlinkSync(fullPath);
+									logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
+									deleted = true;
+								} catch (e) {
+									if (e.code === 'EBUSY' && retry < 4) {
+										await new Promise(r => setTimeout(r, 300 * (retry + 1)));
+									} else {
+										logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
+									}
+								}
+							}
 						}
 					} catch (e) {
 						logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
