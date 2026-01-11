@@ -1584,13 +1584,26 @@ const TransactionManager = {
 			}
 		}
 
-		// 2. ★ 扩展清理：删除 yt-dlp 临时文件和中间文件
-		// .part, .ytdl, .tmp - 明确的临时文件
-		// .fXXX.mp4, .fXXX.m4a, .fXXX.webm - yt-dlp 分离下载的纯视频/纯音频流
+		// 2. ★ 扩展清理：只删除当前事务明确关联的临时文件
+		// ★ 重要：不再全局清理 yt-dlp 中间文件，避免误删其他任务的文件
+		// 只清理文件名前缀与当前事务 landedFiles 匹配的临时文件
 		if (trans.targetDir && fs.existsSync(trans.targetDir)) {
 			const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
-			// ★ yt-dlp 中间文件模式：.f数字.扩展名 或 .f数字.扩展名.part
-			const ytdlpIntermediatePattern = /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i;
+
+			// ★ 提取当前事务的文件名前缀（不含扩展名）
+			const taskPrefixes = new Set();
+			for (const f of (trans.landedFiles || [])) {
+				const base = path.basename(f);
+				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
+				if (nameWithoutExt) taskPrefixes.add(nameWithoutExt);
+			}
+			// ★ 也加入 tempFiles 的前缀
+			for (const f of (trans.tempFiles || [])) {
+				const base = path.basename(f);
+				const nameWithoutExt = base.replace(/\.[^.]+$/, '');
+				if (nameWithoutExt) taskPrefixes.add(nameWithoutExt);
+			}
+
 			try {
 				const files = fs.readdirSync(trans.targetDir);
 				for (const f of files) {
@@ -1603,18 +1616,20 @@ const TransactionManager = {
 
 						const ext = path.extname(f).toLowerCase();
 
-						// ★ 清理明确的临时文件
-						if (tempExts.includes(ext)) {
-							fs.unlinkSync(fullPath);
-							logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
+						// ★ 只清理文件名前缀匹配当前事务的临时文件
+						const fileBase = f.replace(/\.[^.]+$/, '').replace(/\.f\d+$/, ''); // 移除 .fXXX 后缀
+						const belongsToTask = taskPrefixes.has(fileBase) ||
+							[...taskPrefixes].some(p => fileBase.startsWith(p));
+
+						if (!belongsToTask) {
+							// 不属于当前事务，跳过
 							continue;
 						}
 
-						// ★ 清理 yt-dlp 中间文件（纯视频/纯音频流）
-						if (ytdlpIntermediatePattern.test(f)) {
+						// ★ 清理当前事务的临时文件
+						if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
 							fs.unlinkSync(fullPath);
-							logMessage(`[Rollback] 删除 yt-dlp 中间文件: ${f}`, "INFO");
-							continue;
+							logMessage(`[Rollback] 删除临时文件: ${f}`, "INFO");
 						}
 					} catch (e) {
 						logMessage(`[Rollback] 删除失败 ${f}: ${e.message}`, "WARN");
