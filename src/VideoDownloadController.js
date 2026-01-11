@@ -783,7 +783,29 @@ class VideoDownloadController {
             global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
-        // ★ 事务回滚（后台执行）
+        // ★ 将 activeFiles 中的文件添加到 tempFiles，确保回滚时能清理
+        // ★ 无论是内部事务还是外部事务都需要执行
+        // ★ 不过滤 fs.existsSync，因为文件可能正在下载中（.part）或尚未开始
+        if (task.transId && task.activeFiles && task.activeFiles.size > 0) {
+            try {
+                const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
+                if (trans) {
+                    const allActiveFiles = [...task.activeFiles];
+                    this.log(`[取消] activeFiles 数量: ${allActiveFiles.length}`);
+                    if (allActiveFiles.length > 0) {
+                        const newTempFiles = [...new Set([...(trans.tempFiles || []), ...allActiveFiles])];
+                        await global.TransactionManager.updateTransaction(task.transId, { tempFiles: newTempFiles });
+                        this.log(`[取消] 将 ${allActiveFiles.length} 个 activeFiles 添加到 tempFiles`);
+                    }
+                }
+            } catch (e) {
+                this.log(`[取消] 更新 tempFiles 失败: ${e.message}`);
+            }
+        } else {
+            this.log(`[取消] activeFiles 为空或不存在`);
+        }
+
+        // ★ 内部事务回滚（外部事务由调用方负责回滚）
         if (task.transId && !task.isExternalTrans) {
             const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
             if (trans) {
@@ -1100,13 +1122,14 @@ class VideoDownloadController {
                         const name = path.basename(t.destPath, path.extname(t.destPath));
                         if (name) activePrefixes.add(name);
 
-                        // ★ 只把还不存在的文件加入 activeFiles
-                        // 避免取消时误删已存在的文件（上次成功下载的）
-                        if (task && task.activeFiles && !fs.existsSync(t.destPath)) {
+                        // ★ 把所有 destPath 加入 activeFiles（不管文件是否存在）
+                        // 这样取消时能清理 .part 文件和已完成的文件
+                        if (task && task.activeFiles) {
                             task.activeFiles.add(t.destPath);
                         }
                     }
                 });
+                this.log(`[预注册] activeFiles 数量: ${task.activeFiles.size}`);
 
                 let diskTotalBytes = 0;
                 let logTotalBytes = 0;
@@ -1173,6 +1196,10 @@ class VideoDownloadController {
 
                                     if (event.type === 'start') {
                                         this.log(`开始: ${String(t.url).slice(0, 60)}...`);
+                                        // ★ 记录正在下载的文件，用于取消时清理 .part 文件
+                                        if (t.destPath) {
+                                            task.activeFiles.add(t.destPath);
+                                        }
                                     } else if (event.type === 'progress') {
                                         const p = event.progress;
                                         let currentBytes = 0;
