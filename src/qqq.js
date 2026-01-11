@@ -629,7 +629,7 @@ async function downloadVideosFromUrlCommand() {
 	let lastAnchorCheckTime = 0;
 	const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
 
-	// ★ 锚点检查函数（带节流）
+	// ★ 锚点检查函数（带节流 + 二次确认）
 	const checkAnchorExists = async () => {
 		if (anchorLost) return false;
 
@@ -640,11 +640,21 @@ async function downloadVideosFromUrlCommand() {
 		lastAnchorCheckTime = now;
 
 		try {
-			const doc = await vscode.workspace.openTextDocument(targetUri);
+			// ★ 优先从可见编辑器获取文档（避免重新打开）
+			let doc = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri.toString())?.document;
+			if (!doc) doc = await vscode.workspace.openTextDocument(targetUri);
+
 			const text = doc.getText();
 			const exists = text.includes(anchor);
 
 			if (!exists && !anchorLost) {
+				// ★ 发现锚点丢失，等待 300ms 二次确认（防止粘贴/格式化期间滴瞬时状态导致误判）
+				await new Promise(r => setTimeout(r, 300));
+				if (doc.getText().includes(anchor)) {
+					// global.logMessage(`[AnchorWatch] 虚惊一场，锚点瞬时丢失后恢复`, 'DEBUG');
+					return true;
+				}
+
 				anchorLost = true;
 				global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
 				anchorLostSource.cancel();
@@ -653,6 +663,14 @@ async function downloadVideosFromUrlCommand() {
 			return exists;
 		} catch (e) {
 			if (!anchorLost) {
+				// ★ 异常也进行二次确认
+				await new Promise(r => setTimeout(r, 300));
+				try {
+					let doc2 = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri.toString())?.document;
+					if (!doc2) doc2 = await vscode.workspace.openTextDocument(targetUri);
+					if (doc2.getText().includes(anchor)) return true;
+				} catch { }
+
 				anchorLost = true;
 				global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
 				anchorLostSource.cancel();
@@ -670,7 +688,43 @@ async function downloadVideosFromUrlCommand() {
 		return anchorLost;
 	};
 
-	const downloadResult = await global.withProgress({
+	// 3. 定义结果处理函数（复用）
+	const processResult = async (res) => {
+		if (res && res.needEnhancedAction) {
+			return res;
+		}
+
+		if (res && res.landedFiles && res.landedFiles.length > 0) {
+			const eol = editor.document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+			const relativePaths = res.landedFiles.map(f => {
+				const rel = path.relative(currentDocDir, f).replace(/\\/g, '/');
+				return `/\\${rel}\\/`;
+			});
+			const newText = relativePaths.join(eol);
+
+			// 替换锚点
+			const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);
+			if (replaced) {
+				await global.TransactionManager.removeTransaction(transId);
+				return res;
+			} else {
+				global.logMessage("锚点替换失败，回滚事务", "ERROR");
+				await global.TransactionManager.rollback(transId);
+				return { ...res, anchorLost: true };
+			}
+		} else if (res && res.cancelled) {
+			await global.TransactionManager.rollback(transId);
+			await replaceAnchorInDoc(targetUri, anchor, "");
+			return res;
+		} else {
+			// 下载失败或为 null，回滚
+			await global.TransactionManager.rollback(transId);
+			await replaceAnchorInDoc(targetUri, anchor, "");
+			return { failed: true };
+		}
+	};
+
+	let downloadResult = await global.withProgress({
 		location: vscode.ProgressLocation.Notification,
 		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
 		cancellable: true
@@ -707,38 +761,8 @@ async function downloadVideosFromUrlCommand() {
 				return { cancelled: true };
 			}
 
-			// 3. 处理结果 & 替换锚点
-			if (res && res.landedFiles && res.landedFiles.length > 0) {
-				const eol = editor.document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
-				const relativePaths = res.landedFiles.map(f => {
-					const rel = path.relative(currentDocDir, f).replace(/\\/g, '/');
-					return `/\\${rel}\\/`;
-				});
-				const newText = relativePaths.join(eol);
-
-				// 替换锚点
-				const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);
-				if (replaced) {
-					await global.TransactionManager.removeTransaction(transId);
-					// ★ 成功：返回结果，由外层显示弹窗
-				} else {
-					// ★ 锚点丢失：回滚并标记
-					global.logMessage("锚点替换失败，回滚事务", "ERROR");
-					await global.TransactionManager.rollback(transId);
-					return { ...res, anchorLost: true };
-				}
-			} else if (res && res.cancelled) {
-				// ★ 已取消：回滚并清理锚点
-				await global.TransactionManager.rollback(transId);
-				await replaceAnchorInDoc(targetUri, anchor, "");
-			} else {
-				// 下载失败，回滚
-				await global.TransactionManager.rollback(transId);
-				await replaceAnchorInDoc(targetUri, anchor, "");
-				return { failed: true };
-			}
-
-			return res; // ★ 返回结果给外层
+			// ★ 使用统一处理函数
+			return await processResult(res);
 
 		} catch (e) {
 			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
@@ -748,6 +772,25 @@ async function downloadVideosFromUrlCommand() {
 			return null;
 		}
 	});
+
+	// ★ 处理增强流程（此时前一个弹窗已关闭）
+	if (downloadResult && downloadResult.needEnhancedAction) {
+		const VideoDownloadController = require('./VideoDownloadController');
+		const controller = new VideoDownloadController(downloadContext, module.exports);
+
+		// 调用 handleForbidden 并获取最终结果
+		let enhancedRes = await controller.handleForbidden(
+			downloadResult.task,
+			downloadResult.code,
+			downloadResult.url,
+			downloadResult.targetDir,
+			downloadResult.progressCallback
+		);
+
+		if (!enhancedRes) enhancedRes = { cancelled: true };
+
+		downloadResult = await processResult(enhancedRes);
+	}
 
 	// ★ 进度弹窗结束后，统一显示最终弹窗（唯一真理源）
 	if (downloadResult) {

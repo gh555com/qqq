@@ -20,7 +20,8 @@ const VideoMsg = {
      */
     progress(task, sizeStr, urlSnippet, suffix = '') {
         const suffixPart = suffix ? ` ${suffix}` : '';
-        return TaskMessage.progress(task?.taskTitle, `已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`);
+        // ★ 修复：只保留统一真理源滴前缀，移除 VideoDownloadController 中重复添加滴前缀
+        return `已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
     },
 
     /**
@@ -975,7 +976,9 @@ class VideoDownloadController {
                 }
             } catch (e) { }
 
-            vscode.window.showWarningMessage(`qqq: youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，稍做等待也是一种解决方案。 `);
+            // ★ 修复：使用 prompt 添加统一前缀
+            const promptMsg = VideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，稍做等待也是一种解决方案。');
+            vscode.window.showWarningMessage(promptMsg);
         }
     }
 
@@ -1292,17 +1295,15 @@ class VideoDownloadController {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
                     this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`);
                 } else {
-                    const enhancedResult = await this._handleForbidden(task, outcome.code || 403, url, targetDir, progressCallback);
-                    // ★ 增强流程取消时也要返回 cancelled: true
-                    if (!enhancedResult || this._isTaskCancelled(task)) {
-                        return {
-                            landedFiles: [],
-                            finalTotalBytes: 0,
-                            cancelled: this._isTaskCancelled(task),
-                            targetDir: targetDir
-                        };
-                    }
-                    return enhancedResult;
+                    // ★ 返回特殊标记，让外层 qqq.js 结束 withProgress 弹窗后再调用 handleForbidden
+                    return {
+                        needEnhancedAction: true,
+                        task: task,
+                        code: outcome.code || 403,
+                        url: url,
+                        targetDir: targetDir,
+                        progressCallback: progressCallback
+                    };
                 }
             }
 
@@ -1508,77 +1509,80 @@ class VideoDownloadController {
     }
 
     // ==================== 增强流程入口 ====================
-    async _handleForbidden(task, code, url, targetDir, progressCallback) {
-        if (this._isTaskCancelled(task)) return null;
-
-        // ★ 等待前一个 withProgress 弹窗完全关闭（VS Code UI 有延迟，需要较长时间）
-        await this._sleep(1000);
-
-        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
-
-        // ★ 非模态弹窗（右下角）
-        const startTime = Date.now();
-        let selection = await vscode.window.showInformationMessage(
-            `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
-            { modal: false },
-            "🚀启动增强流程",
-            "选择类似 chrome.exe 滴浏览器入口文件"
-        );
-        const elapsed = Date.now() - startTime;
-
-        // ★ 如果被立即关闭（< 500ms 且 undefined），用 QuickPick 兆底
-        if (selection === undefined && elapsed < 500) {
-            this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
-
+    async handleForbidden(task, code, url, targetDir, progressCallback) {
+        // ★ 必须重新进入 tracker 上下文，否则后续产生滴子进程（如 puppeteer/chrome）无法被追踪和通过 task.tracker 杀死
+        return await ChildProcessTracker.runWithTracker(task.tracker, async () => {
             if (this._isTaskCancelled(task)) return null;
 
-            const items = [
-                { label: '🚀 启动增强流程', value: 'enhanced' },
-                { label: '📂 选择类似 chrome.exe 滴浏览器入口文件', value: 'pick' },
-                { label: '❌ 取消', value: 'cancel' }
-            ];
+            // ★ 此处无需长时间等待，因为外部已结束 withProgress
+            await this._sleep(100);
 
-            const picked = await vscode.window.showQuickPick(items, {
-                placeHolder: `${prefix}下载被拒（${code}），当前可尝试启动增强流程。（窗口被vs code吃掉，固走本下拉框流程，本质是一样）`,
-                ignoreFocusOut: true
-            });
+            const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
 
-            this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`);
+            // ★ 非模态弹窗（右下角）
+            const startTime = Date.now();
+            let selection = await vscode.window.showInformationMessage(
+                `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
+                { modal: false },
+                "🚀启动增强流程",
+                "选择类似 chrome.exe 滴浏览器入口文件"
+            );
+            const elapsed = Date.now() - startTime;
 
-            if (picked?.value === 'enhanced') {
-                selection = "🚀启动增强流程";
-            } else if (picked?.value === 'pick') {
-                selection = "选择类似 chrome.exe 滴浏览器入口文件";
-            } else if (picked === undefined) {
-                // ★ QuickPick 也失败了，用 InputBox 作为终极兆底
-                this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
+            // ★ 如果被立即关闭（< 500ms 且 undefined），用 QuickPick 兆底
+            if (selection === undefined && elapsed < 500) {
+                this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
 
-                const input = await vscode.window.showInputBox({
-                    prompt: `${prefix}下载被拒（${code}），键入 1 启动增强流程，2 选择浏览器，其他取消`,
-                    placeHolder: '键入 1 或 2',
+                if (this._isTaskCancelled(task)) return null;
+
+                const items = [
+                    { label: '🚀 启动增强流程', value: 'enhanced' },
+                    { label: '📂 选择类似 chrome.exe 滴浏览器入口文件', value: 'pick' },
+                    { label: '❌ 取消', value: 'cancel' }
+                ];
+
+                const picked = await vscode.window.showQuickPick(items, {
+                    placeHolder: `${prefix}下载被拒（${code}），当前可尝试启动增强流程。（窗口被vs code吃掉，固走本下拉框流程，本质是一样）`,
                     ignoreFocusOut: true
                 });
 
-                this.log(`[增强] InputBox 返回: ${input}`);
+                this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`);
 
-                if (input?.trim() === '1') {
+                if (picked?.value === 'enhanced') {
                     selection = "🚀启动增强流程";
-                } else if (input?.trim() === '2') {
+                } else if (picked?.value === 'pick') {
                     selection = "选择类似 chrome.exe 滴浏览器入口文件";
+                } else if (picked === undefined) {
+                    // ★ QuickPick 也失败了，用 InputBox 作为终极兆底
+                    this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
+
+                    const input = await vscode.window.showInputBox({
+                        prompt: `${prefix}下载被拒（${code}），键入 1 启动增强流程，2 选择浏览器，其他取消`,
+                        placeHolder: '键入 1 或 2',
+                        ignoreFocusOut: true
+                    });
+
+                    this.log(`[增强] InputBox 返回: ${input}`);
+
+                    if (input?.trim() === '1') {
+                        selection = "🚀启动增强流程";
+                    } else if (input?.trim() === '2') {
+                        selection = "选择类似 chrome.exe 滴浏览器入口文件";
+                    }
                 }
             }
-        }
 
-        if (this._isTaskCancelled(task)) return null;
+            if (this._isTaskCancelled(task)) return null;
 
-        if (selection === "🚀启动增强流程") {
-            return await this._runEnhancedPreferSaved(task, url, targetDir);
-        } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
-            return await this._runEnhancedForcePick(task, url, targetDir);
-        } else {
-            this.log("用户取消增强流程");
-            return null;
-        }
+            if (selection === "🚀启动增强流程") {
+                return await this._runEnhancedPreferSaved(task, url, targetDir);
+            } else if (selection === "选择类似 chrome.exe 滴浏览器入口文件") {
+                return await this._runEnhancedForcePick(task, url, targetDir);
+            } else {
+                this.log("用户取消增强流程");
+                return null;
+            }
+        });
     }
 
     async _runEnhancedPreferSaved(task, url, targetDir) {
@@ -2238,6 +2242,8 @@ $of = $vi.OriginalFilename;
                             task.anchorLost = true;
                             anchorLostDuringWait = true;
                             this._cancelTask(task, '锚点丢失').catch(e => { });
+                            // 尝试停止 sniffer（如果它未被 track 追踪到）
+                            if (sniffer) try { sniffer.stop(); } catch (e) { }
                         }
                     } catch (e) { }
                 }
@@ -2246,7 +2252,7 @@ $of = $vi.OriginalFilename;
             // ★ 先尝试模态弹窗（Windows 级别，阻止其他操作，不会自动消失）
             const startTime = Date.now();
             let selection = await vscode.window.showInformationMessage(
-                VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
+                VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。'),
                 { modal: true },
                 "我已在外部播放"
             );
@@ -2281,7 +2287,7 @@ $of = $vi.OriginalFilename;
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（选择你期望滴分辨率），完成后点击下方按钮。'),
+                    placeHolder: VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。'),
                     ignoreFocusOut: true
                 });
 
@@ -2340,7 +2346,7 @@ $of = $vi.OriginalFilename;
             }
 
             // ★ 等待前一个弹窗关闭（VS Code UI 有延迟，需要较长时间）
-            await this._sleep(1000);
+            await this._sleep(300);
 
             const out = await this._downloadEnhancedOne(task, url, targetDir, best);
             if (!out) return null;
