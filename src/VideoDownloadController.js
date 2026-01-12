@@ -784,17 +784,32 @@ class VideoDownloadController {
             global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
-        // ★ 内部事务回滚（外部事务由调用方负责回滚）
+        // ★ 先执行回滚（删除锚点等），但跳过延迟兜底清理
+        let targetDir = null;
         if (task.transId && !task.isExternalTrans) {
             const trans = global.TransactionManager.getTransactions().find(tr => tr.id === task.transId);
             if (trans) {
-                global.TransactionManager.rollback(trans).catch(e => this.log(`回滚失败: ${e.message}`));
+                targetDir = trans.targetDir;
+                // ★ video 类型任务会自动跳过延迟兜底清理
+                await global.TransactionManager.rollback(trans);
             }
         }
 
+        // ★ 先杀进程（这是关键步骤，否则文件被锁定无法删除）
         try {
             await task.tracker.killAll(reason);
         } catch (e) { }
+
+        // ★ 进程杀完后立即执行兜底清理（pure）
+        // 这样可以确保文件不被锁定
+        if (targetDir) {
+            try {
+                await global.TransactionManager._cleanupOrphanFiles(targetDir);
+                this.log(`[兜底清理] 已在 killAll 后立即执行`);
+            } catch (e) {
+                this.log(`[兜底清理] 失败: ${e.message}`);
+            }
+        }
     }
 
     _isTaskCancelled(task) {

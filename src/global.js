@@ -1524,13 +1524,32 @@ const TransactionManager = {
 				});
 			}, 100);
 
-			// 2. 11秒后执行 pure
-			setTimeout(() => {
-				this._cleanupOrphanFiles(trans.targetDir).catch(e => {
-					logMessage(`[兖底清理] 失败: ${e.message}`, "WARN");
-				});
-			}, 11000);
+			// ★ 根据任务类型决定兜底清理时机
+			const taskType = trans.taskType || '';
+
+			if (taskType === 'video') {
+				// ★ video 类型：跳过此处清理，由 VideoDownloadController 在 killAll 后立即执行
+				// （因为需要先杀死 yt-dlp 进程才能删除文件）
+				logMessage(`[兜底清理] video 类型任务，等待 killAll 后执行`, "INFO");
+			} else if (taskType === 'html') {
+				// ★ html 类型：无长进程，1秒后立即执行清理
+				setTimeout(() => {
+					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
+						logMessage(`[兜底清理] 失败: ${e.message}`, "WARN");
+					});
+				}, 1000);
+			} else {
+				// ★ 其他类型（local_file 等）：11秒后执行 pure 兜底
+				setTimeout(() => {
+					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
+						logMessage(`[兜底清理] 失败: ${e.message}`, "WARN");
+					});
+				}, 11000);
+			}
 		}
+
+		// ★ 返回 trans 便于调用方获取 targetDir
+		return trans;
 	},
 
 	/**
@@ -1584,7 +1603,7 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟滴孤儿文件
+	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟滴孤儿文件和文件夹
 	 * @param {string} targetDir - qqq 文件夹路径
 	 */
 	async _cleanupOrphanFiles(targetDir) {
@@ -1597,24 +1616,23 @@ const TransactionManager = {
 			const parentDir = path.dirname(targetDir);
 			if (!parentDir || !fs.existsSync(parentDir)) return;
 
-			// 获取 qqq 文件夹中滴所有文件
-			let qqqFiles = [];
+			// ★ 获取 qqq 文件夹中滴所有文件和文件夹（一视同仁）
+			let qqqItems = [];  // { name: string, isDir: boolean }
 			try {
 				const entries = fs.readdirSync(targetDir);
 				for (const f of entries) {
 					try {
 						const fullPath = path.join(targetDir, f);
-						if (fs.statSync(fullPath).isFile()) {
-							qqqFiles.push(f);
-						}
+						const stat = fs.statSync(fullPath);
+						qqqItems.push({ name: f, isDir: stat.isDirectory() });
 					} catch { }
 				}
 			} catch { return; }
 
-			if (!qqqFiles.length) return;
+			if (!qqqItems.length) return;
 
-			// 扫描父目录中滴文本文件，找出所有被引用滴文件
-			const referencedFiles = new Set();
+			// ★ 扫描父目录中滴文本文件，找出所有被引用滴文件/文件夹
+			const referencedItems = new Set();
 			const BINARY_EXTS = new Set([
 				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
 				".exe", ".dll", ".zip", ".tar", ".gz",
@@ -1622,8 +1640,8 @@ const TransactionManager = {
 				".pdf", ".doc", ".docx", ".psd", ".ai",
 			]);
 
-			// 匹配 qqq/ 路径滴正则
-			const regex = /qqq[\\\/]([^\s"'<>\[\]\(\)]+)/gi;
+			// ★ 匹配 qqq/ 或 qqq\ 路径滴正则
+			const regex = /qqq[\\/]([^\s"'<>\[\]\(\)]+)/gi;
 
 			try {
 				const parentFiles = fs.readdirSync(parentDir);
@@ -1647,26 +1665,27 @@ const TransactionManager = {
 						while ((match = regex.exec(content))) {
 							const rawPath = (match[1] || "").trim();
 							if (rawPath) {
-								const baseName = path.basename(rawPath);
-								if (baseName) referencedFiles.add(baseName.toLowerCase());
+								// ★ 取第一级子项名称（支持文件夹引用）
+								const firstPart = rawPath.split(/[\\/]/)[0];
+								if (firstPart) referencedItems.add(firstPart.toLowerCase());
 							}
 						}
 					} catch { }
 				}
 			} catch { return; }
 
-			// 找出孤儿文件
-			const orphans = qqqFiles.filter(f => !referencedFiles.has(f.toLowerCase()));
+			// ★ 找出孤儿（文件和文件夹一视同仁）
+			const orphans = qqqItems.filter(item => !referencedItems.has(item.name.toLowerCase()));
 			if (!orphans.length) return;
 
-			// 删除创建时间 < 5分钟滴孤儿文件
+			// ★ 删除创建时间 < 5分钟滴孤儿文件/文件夹
 			const now = Date.now();
 			const FIVE_MINUTES = 5 * 60 * 1000;
 			let cleanedCount = 0;
 
 			for (const orphan of orphans) {
 				try {
-					const fullPath = path.join(targetDir, orphan);
+					const fullPath = path.join(targetDir, orphan.name);
 					const stat = fs.statSync(fullPath);
 					// ★ 确保 birthtimeMs 有效
 					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
@@ -1674,15 +1693,22 @@ const TransactionManager = {
 
 					const age = now - birthtime;
 					if (age > 0 && age < FIVE_MINUTES) {
-						fs.unlinkSync(fullPath);
-						logMessage(`[兖底清理] 删除孤儿文件: ${orphan} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+						if (orphan.isDir) {
+							// ★ 文件夹：使用 rmSync 递归删除
+							fs.rmSync(fullPath, { recursive: true, force: true });
+							logMessage(`[兖底清理] 删除孤儿文件夹: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+						} else {
+							// ★ 文件：使用 unlinkSync 删除
+							fs.unlinkSync(fullPath);
+							logMessage(`[兖底清理] 删除孤儿文件: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+						}
 						cleanedCount++;
 					}
 				} catch { }
 			}
 
 			if (cleanedCount > 0) {
-				logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿文件`, "INFO");
+				logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿项目`, "INFO");
 			}
 		} catch (e) {
 			// ★ 捕获所有异常，防止扩展崩溃
