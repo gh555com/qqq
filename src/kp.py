@@ -80,7 +80,7 @@ def safe_filename(name: str) -> str:
 
 
 def unique_path_in_dir(output_dir: Path, name: str) -> Path:
-    # 简单滴重命名策略，防止覆盖（虽然 Node 侧会再次处理，但这里防止同一次操作内滴冲突）
+    # 简单的重命名策略，防止覆盖（虽然 Node 侧会再次处理，但这里防止同一次操作内的冲突）
     base = output_dir / name
     if not base.exists():
         return base
@@ -435,7 +435,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                     "folders": copied_dirs,
                     "files": copied_files,
                 }
-            return None  # 只有空路径或不存在滴路径
+            return None  # 只有空路径或不存在的路径
         if data_to_process["type"] == "dib":
             try:
                 from PIL import Image

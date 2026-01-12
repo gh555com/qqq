@@ -13,7 +13,7 @@ HTML DOM 结构  ──┬──▶  提取图片位置标记
 **核心思想**：用 **纯文本内容** 替代 HTML 文本（避免乱码），用 **HTML 结构** 仅定位图片位置
 
 ```javascript
-// 方案一滴关键逻辑
+// 方案一的关键逻辑
 const cleanText = await vscode.env.clipboard.readText(); // 获取纯文本
 let textCursor = 0; // 流式消费指针
 
@@ -40,7 +40,7 @@ CF_HTML 原始字节 ──▶ 智能编码检测 ──▶ 解码 ──▶ DOM
 **核心思想**：直接从 HTML 提取一切，完整保留 DOM 顺序
 
 ```javascript
-// 方案二滴关键逻辑
+// 方案二的关键逻辑
 const sliced = _sliceCfHtmlPayload(rawBuf);     // 按 CF_HTML 字节偏移切片
 htmlText = _decodeHtmlBytesSmart(payload);       // 智能编码检测(UTF-8/UTF-16/Latin1)
 htmlText = _repairBrokenAngleTags(htmlText);     // 修复 "?/span>" 等乱码标签

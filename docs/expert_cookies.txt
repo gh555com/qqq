@@ -76,12 +76,12 @@ Copy the extension name: Get cookies.txt LOCALLY
 
 # 🍪 cookies.txt 专家使用文档
 
-由于 YouTube 滴加强反爬虫机制，下载时若遇到 404 或 Sign-in 错误，需提供 cookies。
+由于 YouTube 的加强反爬虫机制，下载时若遇到 404 或 Sign-in 错误，需提供 cookies。
 
 
 ## 操作步骤
 
-1. **安装插件**：Chrome/Edge/Firefox 都有滴插件 **"Get cookies.txt LOCALLY"**。
+1. **安装插件**：Chrome/Edge/Firefox 都有的插件 **"Get cookies.txt LOCALLY"**。
 
 复制插件名：Get cookies.txt LOCALLY
 
@@ -90,7 +90,7 @@ Copy the extension name: Get cookies.txt LOCALLY
 3. **导出文件**：
    - 点击 Get cookies.txt LOCALLY 插件图标 -> Export。
 
-   - 将导出滴文件直接保存（或移动）到自动打开滴 **Global Storage 文件夹** 中。
+   - 将导出的文件直接保存（或移动）到自动打开的 **Global Storage 文件夹** 中。
 
    - 最终落盘路径类似:
    ●Windows：C:\Users\<用户名>\AppData\Roaming\Code\User\globalStorage\gh555.qqq\xxx_cookies.txt
@@ -99,19 +99,19 @@ Copy the extension name: Get cookies.txt LOCALLY
 
    ●Linux: /home/<用户名>/.config/Code/User/globalStorage/gh555.qqq/xxx_cookies.txt
 
-4. **无需改名**：只要文件名里有 `cookies` 即可，插件会自动识别最新滴 txt 文件。
+4. **无需改名**：只要文件名里有 `cookies` 即可，插件会自动识别最新的 txt 文件。
 
 
 ## 常见问题
 
 - **Q: 为什么自动打开了这一个文件夹？**
-  - A: 插件检测到了 YouTube 滴 404/登录 错误，提示你该更新 Cookies 了。
+  - A: 插件检测到了 YouTube 的 404/登录 错误，提示你该更新 Cookies 了。
 
 - **Q: 还是不行？**
-  - A: Cookies 已过期。请刷新浏览器页面，重新导出最新滴文件覆盖旧文件。
+  - A: Cookies 已过期。请刷新浏览器页面，重新导出最新的文件覆盖旧文件。
 
 - **Q: 隐私安全？**
-  - A:  cookies.txt 包含你滴登录凭证，请勿将其分享给他人或上传到公开滴代码仓库（git）。
+  - A:  cookies.txt 包含你的登录凭证，请勿将其分享给他人或上传到公开的代码仓库（git）。
 
 
 
@@ -124,9 +124,9 @@ Copy the extension name: Get cookies.txt LOCALLY
 
 ## （次要，无需操作）专家问题
 
-- **Q: 对于非 YouTube 网站（如 Bilibili, Twitter 等）是否支持我们正在谈论滴专家模式**
+- **Q: 对于非 YouTube 网站（如 Bilibili, Twitter 等）是否支持我们正在谈论的专家模式**
 
-  - A: 支持。如果你在 cookies.txt 里放了 Bilibili 滴 Cookie，下载 B站视频时就会自动带上会员状态/高清权限。如果你放了 Twitter 滴 Cookie，就能下载推特敏感内容。“专家模式”与“增强流程”是“Plan A”与“Plan B”滴关系：Plan A (Cookies 优先)：插件先尝试用 cookies.txt 直接下载，如果成功：任务直接结束，不会触发增强流程。如果失败（Cookie 过期或无效）：yt-dlp 会报错（403/401），Plan B (增强流程兜底)：检测到 needEnhanced = true（且不是 YouTube）此时才会弹出“启动增强流程”滴弹窗，通过专用浏览器嗅探。
+  - A: 支持。如果你在 cookies.txt 里放了 Bilibili 的 Cookie，下载 B站视频时就会自动带上会员状态/高清权限。如果你放了 Twitter 的 Cookie，就能下载推特敏感内容。“专家模式”与“增强流程”是“Plan A”与“Plan B”的关系：Plan A (Cookies 优先)：插件先尝试用 cookies.txt 直接下载，如果成功：任务直接结束，不会触发增强流程。如果失败（Cookie 过期或无效）：yt-dlp 会报错（403/401），Plan B (增强流程兜底)：检测到 needEnhanced = true（且不是 YouTube）此时才会弹出“启动增强流程”的弹窗，通过专用浏览器嗅探。
 
 
  (end)

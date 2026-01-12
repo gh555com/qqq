@@ -4,9 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const h = require('./h');
-// const WebSocket = require('ws'); // 移除对 ws 滴依赖，改用内置实现
+// const WebSocket = require('ws'); // 移除对 ws 的依赖，改用内置实现
 
-// 一个极其精简滴 WebSocket 客户端实现，仅支持 CDP 通信
+// 一个极其精简的 WebSocket 客户端实现，仅支持 CDP 通信
 class SimpleWebSocket {
     constructor(url) {
         this.url = url;
@@ -21,7 +21,7 @@ class SimpleWebSocket {
 
     send(data) {
         if (this.socket) {
-            // 简单滴 WebSocket 帧封装 (Masked)
+            // 简单的 WebSocket 帧封装 (Masked)
             const payload = Buffer.from(data);
             const length = payload.length;
             let frame;
@@ -156,15 +156,15 @@ function findBrowserPath() {
             'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
             'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
             'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-            // 补充 Local AppData 路径，这是很多用户（特别是没有管理员权限安装滴）Chrome/Edge 滴安装位置
+            // 补充 Local AppData 路径，这是很多用户（特别是没有管理员权限安装的）Chrome/Edge 的安装位置
             path.join(os.homedir(), 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'),
             path.join(os.homedir(), 'AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe'),
-            // 增加 E 盘滴常见路径探测
+            // 增加 E 盘的常见路径探测
             'E:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             'E:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
             'E:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
             'E:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-            // 增加 D 盘滴常见路径探测
+            // 增加 D 盘的常见路径探测
             'D:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             'D:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
             'D:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -266,7 +266,7 @@ class CdpSniffer {
         this.nextId = 1000; // 初始化 ID 计数器
     }
 
-    // 统一发送命令滴方法
+    // 统一发送命令的方法
     sendCommand(method, params = {}, sessionId = undefined) {
         if (!this.ws) return;
         const id = this.nextId++;
@@ -284,7 +284,7 @@ class CdpSniffer {
         // 随机端口
         const port = 9222 + Math.floor(Math.random() * 100);
 
-        // 使用固定滴用户数据目录，以便保存登录状态 (Cookie, LocalStorage 等)
+        // 使用固定的用户数据目录，以便保存登录状态 (Cookie, LocalStorage 等)
         // 路径: %APPDATA%/Code/User/globalStorage/gh555.qqq/chrome-user-data
         const userDateDir = path.join(
             process.env.APPDATA || process.env.HOME,
@@ -296,7 +296,7 @@ class CdpSniffer {
             try { fs.mkdirSync(userDateDir, { recursive: true }); } catch (e) { }
         }
 
-        // 更新 tmpDir，以便 _addCapture 能传递正确滴 userDataDir 给 yt-dlp
+        // 更新 tmpDir，以便 _addCapture 能传递正确的 userDataDir 给 yt-dlp
         this.tmpDir = userDateDir;
 
         // 启动浏览器
@@ -321,7 +321,7 @@ class CdpSniffer {
         logMsg(`[CDP] 启动浏览器: ${browserPath} ${args.join(' ')}`);
         this.browserProcess = spawn(browserPath, args);
 
-        // 存储捕获到滴视频流
+        // 存储捕获到的视频流
         this.capturedVideos = [];
         this.sessions = new Set(); // 维护所有 Session ID
 
@@ -335,7 +335,7 @@ class CdpSniffer {
                     // 策略改变：不依赖 AutoAttach，而是主动轮询 Targets 并连接 Page
                     // 但由于 SimpleWebSocket 只能连一个地址，我们还是保持连接 Browser Target
                     // 并通过 Target.attachToTarget 来管理 Page 会话
-                    // 只是不再使用 AutoAttach 滴 flatten 模式，或者尝试手动 Attach
+                    // 只是不再使用 AutoAttach 的 flatten 模式，或者尝试手动 Attach
 
                     // 1. 发现所有 Target
                     this.sendCommand('Target.setDiscoverTargets', { discover: true });
@@ -356,15 +356,15 @@ class CdpSniffer {
                     try {
                         const msg = JSON.parse(data);
 
-                        // 打印详细滴协议交互日志
+                        // 打印详细的协议交互日志
                         if (msg.error) {
                             logMsg(`[CDP Error] ${JSON.stringify(msg)}`);
                         } else if (msg.id && msg.id >= 100) {
-                            // 打印所有我们发出滴命令滴响应
+                            // 打印所有我们发出的命令的响应
                             logMsg(`[CDP] Command Response ${msg.id}: ${JSON.stringify(msg)}`);
                         }
 
-                        // 主动 Attach 到新发现滴 Page
+                        // 主动 Attach 到新发现的 Page
                         if (msg.method === 'Target.targetCreated' || msg.method === 'Target.targetInfoChanged') {
                             const target = msg.params.targetInfo;
                             if (target.type === 'page' && !target.attached) { // 避免重复 Attach
@@ -373,7 +373,7 @@ class CdpSniffer {
                             }
                         }
 
-                        // 处理 Attach 成功后滴会话
+                        // 处理 Attach 成功后的会话
                         if (msg.method === 'Target.attachedToTarget') {
                             const sessionId = msg.params.sessionId;
                             const targetInfo = msg.params.targetInfo;
@@ -401,7 +401,7 @@ class CdpSniffer {
                             const req = msg.params.request;
                             const url = req.url;
 
-                            // 只打印非静态资源滴请求
+                            // 只打印非静态资源的请求
                             if (!url.match(/\.(js|css|png|jpg|gif|svg|woff|ttf|ico)(\?|$)/)) {
                                 logMsg(`[Request] ${req.method} : ${url}`);
                             }
@@ -437,7 +437,7 @@ class CdpSniffer {
                                     this._addCapture(url, null, 'response-mime', targetUrl, len, 80);
                                     logMsg(`[!!! CAPTURED VIDEO] ${url}`);
                                 } else {
-                                    // 对于 ts, m4s 等片段，或者未识别后缀滴流，优先级设低
+                                    // 对于 ts, m4s 等片段，或者未识别后缀的流，优先级设低
                                     this._addCapture(url, null, 'response-mime', targetUrl, len, 10); // 优先级 10
                                     logMsg(`[!!! CAPTURED FRAGMENT] ${url}`);
                                 }
@@ -454,7 +454,7 @@ class CdpSniffer {
     }
 
     _addCapture(url, headers, source, targetUrl, contentLength = null, priority = 50) {
-        // 如果已经有更高优先级滴，忽略低优先级滴（除非是同一个URL）
+        // 如果已经有更高优先级的，忽略低优先级的（除非是同一个URL）
         if (this.capturedVideos.length > 0 && this.capturedVideos[0].priority > priority && this.capturedVideos[0].url !== url) return;
 
         // 避免重复
@@ -469,20 +469,20 @@ class CdpSniffer {
                 'User-Agent': headers['User-Agent'] || headers['user-agent'],
                 'Origin': headers['Origin'] || headers['origin']
             } : {
-                // 如果是从 response 抓到滴，可能没有 request headers，暂且留空或者给个默认
+                // 如果是从 response 抓到的，可能没有 request headers，暂且留空或者给个默认
                 'Referer': targetUrl
             },
             cookieSource: 'cdp-sniffed',
             timestamp: Date.now(),
             filesize: contentLength, // 记录 Content-Length
-            resolution: url.includes('1080') ? '1080p' : (url.includes('720') ? '720p' : 'unknown'), // 简单滴分辨率推断
+            resolution: url.includes('1080') ? '1080p' : (url.includes('720') ? '720p' : 'unknown'), // 简单的分辨率推断
             priority: priority
         };
 
         // 如果 Cookie 缺失，尝试主动获取
         if (!result.headers.Cookie && this.ws && this.sessions.size > 0) {
             // 策略优化：向所有 Sessions 广播获取 Cookie，因为我们不知道视频到底在哪个 Frame
-            // 但为了性能，我们稍微限制一下，或者只发给最近滴几个
+            // 但为了性能，我们稍微限制一下，或者只发给最近的几个
             const sessionIds = Array.from(this.sessions);
 
             // 标记正在获取 Cookie
@@ -499,7 +499,7 @@ class CdpSniffer {
                             const cookies = msg.result.cookies;
                             if (cookies.length > 0) {
                                 const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-                                // 只有当新滴 Cookie 比现有长（或者现有为空）时才更新
+                                // 只有当新的 Cookie 比现有长（或者现有为空）时才更新
                                 if (!result.headers.Cookie || cookieStr.length > result.headers.Cookie.length) {
                                     result.headers.Cookie = cookieStr;
                                     h.log(`[CDP] 主动获取 Cookie 成功 (Session ${sessionId}): ${cookieStr.substring(0, 50)}...`);
@@ -529,7 +529,7 @@ class CdpSniffer {
         // 清洗 Referer (更严格：只取第一个 URL，去除尾随逗号)
         if (result.headers.Referer) {
             let ref = result.headers.Referer.trim();
-            // 处理可能滴 "url, url" 或 "url," 情况
+            // 处理可能的 "url, url" 或 "url," 情况
             if (ref.includes(',')) {
                 ref = ref.split(',')[0].trim();
             }
@@ -554,12 +554,12 @@ class CdpSniffer {
         }
     }
 
-    // 获取所有捕获滴视频
+    // 获取所有捕获的视频
     getCapturedVideos() {
         return this.capturedVideos || [];
     }
 
-    // 获取最近捕获滴一个结果
+    // 获取最近捕获的一个结果
     async getLatestCapture(injectJs = false) {
         if (this.capturedVideos && this.capturedVideos.length > 0) {
             const latest = this.capturedVideos[0];
@@ -577,13 +577,13 @@ class CdpSniffer {
             // 构造注入脚本：利用 Performance API 和 DOM 深度扫描
             const script = `(function() {
                 try {
-                    // 1. 扫描 Performance API (浏览器自带滴网络日志)
-                    // 这是最强大滴，即使 CDP Network 漏了，这里也不会漏
+                    // 1. 扫描 Performance API (浏览器自带的网络日志)
+                    // 这是最强大的，即使 CDP Network 漏了，这里也不会漏
                     var resources = performance.getEntriesByType('resource');
-                    // 倒序查找最近滴视频请求
+                    // 倒序查找最近的视频请求
                     for (var i = resources.length - 1; i >= 0; i--) {
                         var name = resources[i].name;
-                        // 增加对 blob: 协议滴支持
+                        // 增加对 blob: 协议的支持
                         if (name.startsWith('blob:') || name.includes('.m3u8') || name.includes('.mpd') || name.match(/\.(mp4|webm|flv)(\?|$)/)) {
                              // 过滤掉 icon
                              if (!name.includes('.png') && !name.includes('.ico')) return name;
@@ -593,7 +593,7 @@ class CdpSniffer {
                     // 2. 扫描 DOM <video>
                     var v = document.querySelector('video');
                     if (v) {
-                        // 增加对 src 属性滴严格检查
+                        // 增加对 src 属性的严格检查
                         if (v.src && (v.src.startsWith('http') || v.src.startsWith('blob:'))) return JSON.stringify({ url: v.src, cookie: document.cookie, referer: document.referrer });
                         if (v.currentSrc && (v.currentSrc.startsWith('http') || v.currentSrc.startsWith('blob:'))) return JSON.stringify({ url: v.currentSrc, cookie: document.cookie, referer: document.referrer });
                         var s = v.querySelector('source');
@@ -611,7 +611,7 @@ class CdpSniffer {
                     if (window.hls && window.hls.url) return JSON.stringify({ url: window.hls.url, cookie: document.cookie, referer: document.referrer });
 
                     // 5. 全局变量深度扫描 (针对百度新闻等 SPA)
-                    // 扫描 window 对象中看起来像视频配置滴属性
+                    // 扫描 window 对象中看起来像视频配置的属性
                     try {
                         var keys = Object.keys(window);
                         for (var i = 0; i < keys.length; i++) {
@@ -620,7 +620,7 @@ class CdpSniffer {
                                 var val = window[k];
                                 if (val && typeof val === 'object') {
                                     var str = JSON.stringify(val);
-                                    // 简单滴正则匹配 http + mp4/m3u8
+                                    // 简单的正则匹配 http + mp4/m3u8
                                     var match = str.match(/https?:\/\/[^"']+\.(mp4|m3u8|mpd)[^"']*/);
                                     if (match) return JSON.stringify({ url: match[0].replace(/\\\//g, '/'), cookie: document.cookie, referer: document.referrer });
                                 }
@@ -679,7 +679,7 @@ class CdpSniffer {
                 const found = results.find(r => r && r.url);
                 if (found) {
                     h.log(`[CDP] JS 注入成功提取: ${found.url}`);
-                    // 构造伪造滴捕获结果
+                    // 构造伪造的捕获结果
                     let referer = found.referer ? found.referer.trim() : 'https://www.google.com/';
                     if (referer) referer = referer.split(',')[0].trim();
 
@@ -692,7 +692,7 @@ class CdpSniffer {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                             'Referer': referer,
                             'Origin': origin,
-                            'Cookie': found.cookie || '' // 从 JS 获取滴 Cookie
+                            'Cookie': found.cookie || '' // 从 JS 获取的 Cookie
                         },
                         cookieSource: 'cdp-injected',
                         timestamp: Date.now()
@@ -707,7 +707,7 @@ class CdpSniffer {
         return null;
     }
 
-    // 获取所有 Frame 滴页面源码
+    // 获取所有 Frame 的页面源码
     async getPageSource() {
         if (!this.ws || this.sessions.size === 0) return null;
 
@@ -753,12 +753,12 @@ class CdpSniffer {
         this.cleanup();
     }
 
-    // 兼容旧 API (如果还有地方调用滴话，虽然我们打算重构 Controller)
+    // 兼容旧 API (如果还有地方调用的话，虽然我们打算重构 Controller)
     async sniff(targetUrl, onFound, timeoutMs = 120000) {
         await this.start(targetUrl);
         // ... 旧逻辑兼容实现略，或者直接让 Controller 改用 start/stop ...
-        // 为了安全起见，我们还是保留基本滴兼容性，或者直接在 Controller 里改掉
-        // 鉴于我们要重构 Controller，这里不需要太复杂滴兼容
+        // 为了安全起见，我们还是保留基本的兼容性，或者直接在 Controller 里改掉
+        // 鉴于我们要重构 Controller，这里不需要太复杂的兼容
         return new Promise((resolve) => {
             const timer = setInterval(() => {
                 const latest = this.getLatestCapture();
@@ -785,17 +785,17 @@ class CdpSniffer {
         }
         if (this.browserProcess) {
             const pid = this.browserProcess.pid;
-            
+
             // ★ 修复：在 Windows 上使用 taskkill 彻底杀死进程树（防止僵尸进程）
             if (process.platform === 'win32' && pid) {
                 try {
-                     // /F = Force, /T = Tree (kills children), /PID = Process ID
-                     // QQQ_NO_TRACK=1 防止此命令本身被追踪系统误判
-                     require('child_process').execSync(`taskkill /pid ${pid} /T /F`, { 
-                         stdio: 'ignore',
-                         env: { ...process.env, QQQ_NO_TRACK: '1' }
-                     });
-                } catch (e) { 
+                    // /F = Force, /T = Tree (kills children), /PID = Process ID
+                    // QQQ_NO_TRACK=1 防止此命令本身被追踪系统误判
+                    require('child_process').execSync(`taskkill /pid ${pid} /T /F`, {
+                        stdio: 'ignore',
+                        env: { ...process.env, QQQ_NO_TRACK: '1' }
+                    });
+                } catch (e) {
                     // 忽略错误（例如进程已经不存在）
                 }
             }

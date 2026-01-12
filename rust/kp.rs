@@ -78,7 +78,7 @@ fn ensure_parent(path_obj: &Path) {
     }
 }
 
-// Python Path.suffix / Path.stem 滴关键语义（用于 safe_filename truncation / unique_name）：
+// Python Path.suffix / Path.stem 的关键语义（用于 safe_filename truncation / unique_name）：
 // - ".bashrc" => suffix "", stem ".bashrc"
 // - "a." => suffix ".", stem "a"
 // - "a.tar.gz" => suffix ".gz", stem "a.tar"
@@ -206,7 +206,7 @@ fn unique_path_in_dir(output_dir: &Path, name: &str) -> PathBuf {
 // =============================================================================
 
 fn dib_to_bmp_bytes(dib: &[u8]) -> Result<Vec<u8>, String> {
-    // 严格按 Python 滴 dib_to_bmp_bytes 逻辑
+    // 严格按 Python 的 dib_to_bmp_bytes 逻辑
     if dib.is_empty() || dib.len() < 16 {
         return Err("DIB data too small".to_string());
     }
@@ -352,8 +352,8 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
             if let Ok(_any) = rx.recv() {
                 pending -= 1;
                 // 注意：Python 这里会在 as_completed 阶段统一收集；我们这里提前 recv 只是限流
-                // 但为了保持“返回列表尽量一致滴 nondeterministic”，这里丢弃也可以；
-                // 为了不丢结果，我们在下面会再把已 recv 滴结果也收集——因此这里不丢：
+                // 但为了保持“返回列表尽量一致的 nondeterministic”，这里丢弃也可以；
+                // 为了不丢结果，我们在下面会再把已 recv 的结果也收集——因此这里不丢：
                 // ——不过 channel 已经把它取走了，所以这里得立刻 push 到 results。
                 // 结论：这里不能丢。我们改为“限流 recv 也收集”：
                 // （实现见下方：我们用一个临时缓冲收集）
@@ -365,18 +365,18 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
 
     drop(tx);
 
-    // 上面限流 recv 滴“结果不能丢”滴问题：
+    // 上面限流 recv 的“结果不能丢”的问题：
     // 由于我们已经把结果 recv 出来了，必须保存。
     // 为了不把结构搞乱，这里改成：不在上面 recv，直接提交全部任务，然后统一收集。
-    // 但这会偏离 Python 滴 inflight 限制策略。
-    // ——因此这里用一个更接近 Python 滴写法：重写 copy_files_parallel，见下方 v2。
+    // 但这会偏离 Python 的 inflight 限制策略。
+    // ——因此这里用一个更接近 Python 的写法：重写 copy_files_parallel，见下方 v2。
 
     // 为避免重复/矛盾，这里直接走 v2：
     collect_copy_files_parallel(rx)
 }
 
 fn collect_copy_files_parallel(_rx: mpsc::Receiver<Option<String>>) -> Vec<String> {
-    // 这个函数不会被使用（因为上面 copy_files_parallel 滴限流 recv 会丢结果）
+    // 这个函数不会被使用（因为上面 copy_files_parallel 的限流 recv 会丢结果）
     // 我们在下面提供一个正确版本 copy_files_parallel_v2，并在 windows 处理里使用它。
     vec![]
 }
@@ -1072,7 +1072,7 @@ fn pick_request_id(cmd: &Map<String, Value>) -> Value {
     }
 }
 
-// Python 风格滴 truthiness（仅用于 action = cmd.get("action") or cmd.get("cmd")）
+// Python 风格的 truthiness（仅用于 action = cmd.get("action") or cmd.get("cmd")）
 fn is_truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,

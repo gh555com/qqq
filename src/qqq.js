@@ -8,7 +8,7 @@ const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
 
-// 引用 global.js 滴核心对象
+// 引用 global.js 的核心对象
 const {
 	pythonBridge,
 	rustBridge,
@@ -568,13 +568,13 @@ async function downloadVideosFromUrlCommand() {
 	const rawUrl = await vscode.window.showInputBox({
 		prompt: " ",
 		ignoreFocusOut: true,
-		placeHolder: " 直接粘贴 [ 包含视频滴网址 ]",
+		placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
 		validateInput: (text) => {
 			const s = (text || "").trim();
 			if (!s) return null;
 			if (/\s/.test(s)) return "无效网址";
 
-			// 尝试解析 (支持不带协议头滴短链接，如 youtu.be/xxx)
+			// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
 			let toCheck = s;
 			if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
 				toCheck = 'https://' + s;
@@ -618,10 +618,10 @@ async function downloadVideosFromUrlCommand() {
 		landedFiles: [],
 		landedFolders: [],
 		taskType: 'video',  // ★ 视频下载任务
-		existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时滴目录快照
+		existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
 	});
 
-	// 2. 启动带进度条滴弹窗任务
+	// 2. 启动带进度条的弹窗任务
 	// ★ 创建自定义取消源（用于锚点丢失时主动取消）
 	const anchor = `/__PENDING_${transId}/`;
 	const anchorLostSource = new vscode.CancellationTokenSource();
@@ -847,8 +847,9 @@ async function activate(context) {
 					if (val !== currentStored) {
 						global.setConfig(key, val).then(() => {
 							if (key === "ioEngine") {
-								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
-								startDaemons();
+								// ★ 核心设计：三个引擎启动时已全部启动，切换只需更新状态栏
+								global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
+								updateStatusBarNow();
 							}
 						});
 					}
@@ -866,7 +867,7 @@ async function activate(context) {
 		} catch { }
 	}, 5000);
 
-	// ★ 启动时恢复/清理事务 (确保上次崩溃留下滴垃圾被清理)
+	// ★ 启动时恢复/清理事务 (确保上次崩溃留下的垃圾被清理)
 	try {
 		await global.TransactionManager.recover();
 	} catch (e) {
@@ -979,22 +980,22 @@ Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: ()
 
 process.on("uncaughtException", (error) => {
 	const stack = error.stack || "";
-	// ★ 对于文件系统相关滴错误，只记录日志不崩溃
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
 	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 	if (error.code && fsErrorCodes.includes(error.code)) {
 		global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
 	} else {
-		global.logMessage(`未捕获滴异常: ${error.message}\n${error.stack}`, "ERROR");
+		global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
 	}
 });
 
 process.on("unhandledRejection", (reason) => {
 	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-	// ★ 对于文件系统相关滴错误，只记录日志不崩溃
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
 	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 	if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
 		global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
 	} else {
-		global.logMessage(`未处理滴Promise拒绝: ${msg}`, "ERROR");
+		global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
 	}
 });

@@ -267,9 +267,9 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ## 概要
 
-本项目包含三种 IO 处理引擎，各有优劣。本文档从 **12 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎滴适用场景。
+本项目包含三种 IO 处理引擎，各有优劣。本文档从 **12 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
 
-特别对于 **Rust 引擎**：**gh555.com 官方版**滴版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
+特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
 
 
 | 引擎 | 代号 | 实现方式 | 定位 |
@@ -365,17 +365,17 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 
 ### 5. Clipboard – Transparent Image Handling (DIBv5 Alpha)
 
-**这是选择引擎滴关键维度！**
+**这是选择引擎的关键维度！**
 
 | 引擎 | 得分 | 能力 | 问题 |
 |:-----|:----:|:-----|:-----|
 | Python | **10** | 完美还原 | ctypes 直读 CF_DIBV5 + PIL 解码 |
 | Rust | **10** | 完美还原 | Win32 API 直接调用 |
-| Node Shell | 3 | Alpha 丢失 | GDI+ 滴已知缺陷，背景变黑 |
+| Node Shell | 3 | Alpha 丢失 | GDI+ 的已知缺陷，背景变黑 |
 
 **Technical Reasons:**
-* Chrome/Edge 复制带透明通道滴图片时，放入 `CF_DIBV5` 格式
-* PowerShell 滴 `[Clipboard]::GetImage()` 底层依赖 GDI+
+* Chrome/Edge 复制带透明通道的图片时，放入 `CF_DIBV5` 格式
+* PowerShell 的 `[Clipboard]::GetImage()` 底层依赖 GDI+
 * GDI+ 处理 DIBv5 时存在 **预乘 Alpha 错误**，导致透明背景变黑
 * Python/Rust 可以直接读取原始内存块，绕过 GDI+ 缺陷
 
@@ -403,7 +403,7 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 8 | 完整支持 | 需处理编码 |
 | Node Shell | 7 | 基本支持 | Stream 转换有时出问题 |
 
-**Conclusion:** Python 对 HTML Format 滴处理最稳定。
+**Conclusion:** Python 对 HTML Format 的处理最稳定。
 
 ---
 
