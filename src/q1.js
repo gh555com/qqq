@@ -613,10 +613,66 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
 
     if (info?.type === "text_film") {
         // ★ 文本预览特殊逻辑：解决中文乱码 + 静态预览 (最稳定)
-        const fontPath = "C:/Windows/Fonts/msyh.ttc";
+        // 实现跨平台多重字体回退机制
+        const isWin = process.platform === "win32";
+        const isMac = process.platform === "darwin";
+
+        const fontCandidates = [];
+        if (isWin) {
+            fontCandidates.push(
+                "C:/Windows/Fonts/msyh.ttc",   // 微软雅黑
+                "C:/Windows/Fonts/msyh.ttf",
+                "C:/Windows/Fonts/simhei.ttf", // 黑体
+                "C:/Windows/Fonts/simsun.ttc", // 宋体
+                "C:/Windows/Fonts/arial.ttf"   // Arial
+            );
+        } else if (isMac) {
+            fontCandidates.push(
+                "/System/Library/Fonts/PingFang.ttc",            // 萍方
+                "/Library/Fonts/Microsoft/Microsoft YaHei.ttf",   // 微软雅黑 (如果有)
+                "/System/Library/Fonts/STHeiti Light.ttc",        // 华文细黑
+                "/Library/Fonts/Arial.ttf"                        // Arial
+            );
+        } else {
+            // Linux (通用路径)
+            fontCandidates.push(
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", // 文泉驿微米黑
+                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", // Noto Sans
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"
+            );
+        }
+
+        let fontPath = "";
+        for (const f of fontCandidates) {
+            if (fs.existsSync(f)) {
+                fontPath = f;
+                break;
+            }
+        }
+
         let textContent = "";
         try {
-            const rawText = fs.readFileSync(filePath, 'utf8').slice(0, 2000);
+            // ★ 优化提取逻辑：只读取前 8KB 字节，并甄别处理乱码
+            const fd = fs.openSync(filePath, 'r');
+            const readBuffer = Buffer.alloc(8192); // 8KB 足够容纳 2000+ 字符
+            const bytesRead = fs.readSync(fd, readBuffer, 0, 8192, 0);
+            fs.closeSync(fd);
+
+            // 使用 utf8 解码，并初步处理末尾可能截断的字符
+            let rawText = readBuffer.toString('utf8', 0, bytesRead);
+
+            // 甄别乱码：如果包含大量替换字符 \uFFFD，说明编码不对或者文件损坏
+            // 统计 \uFFFD 的出现频率
+            const replacementChars = (rawText.match(/\uFFFD/g) || []).length;
+            if (replacementChars > 10) {
+                // 如果乱码太多，尝试过滤掉这些乱码，只保留能看的部分
+                rawText = rawText.replace(/\uFFFD/g, '');
+            }
+
+            // 限制长度
+            rawText = rawText.slice(0, 2000);
+
             // 简单的自动换行逻辑 (按宽度估算)
             let currentLineLen = 0;
             for (let i = 0; i < rawText.length; i++) {
@@ -652,11 +708,13 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
             textContent = "Read Error";
         }
 
-        const fontPathEscaped = fontPath.replace(/:/g, "\\:");
+        const fontPathEscaped = fontPath ? fontPath.replace(/:/g, "\\:") : "";
+        const fontFilePart = fontPathEscaped ? `fontfile='${fontPathEscaped}':` : "";
+
         // 强制背景时长为 1 秒，但只输出 1 帧
         args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=1`);
         // 使用 [0:v] 显式指定输入流，并确保最后有 [out_v]
-        vf = `[0:v]drawtext=fontfile='${fontPathEscaped}':text='${textContent}':fontcolor=white:fontsize=14:line_spacing=4:x=10:y=10,format=yuva420p[out_v]`;
+        vf = `[0:v]drawtext=${fontFilePart}text='${textContent}':fontcolor=white:fontsize=14:line_spacing=2:x=10:y=10,format=yuva420p[out_v]`;
         args.push("-frames:v", "1");
         expectedWebPDuration = 0;
     } else if (performanceMode === "extreme") {
