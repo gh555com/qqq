@@ -10,14 +10,14 @@
 
 
 
-   那是我滴梦境。
+   那是我的梦境。
 
 
    qqq     <img src="https://i.imgur.com/Tm1WwC0.png">   aaa
 
 
 
-  ещё whisper for my daughter滴梦0.
+  ещё whisper for my daughter的梦0.
 
   gh555.com   ![q](https://i.imgur.com/Tm1WwC0.png)   2005, 2025 All rights reserved.
 

@@ -47,49 +47,30 @@ class DaemonBridge {
 	}
 
 	async start() {
-		logMessage(`${this.name} start 方法被调用`, "DEBUG");
-
 		this._stopping = false;
 
-		// ★ 关键修复：添加 startLock 防止重入
-		// 即使 this.isStarting 为 false，只要上一个 startPromise 还没完全 resolve/reject，也不应该重新开始
-		// 这里我们简化为：如果 isStarting，直接返回正在进行滴 promise
-		if (this.isStarting) {
-			logMessage(`${this.name} 正在启动中 (isStarting=true)，返回现有 Promise`, "DEBUG");
-			return this.startPromise;
-		}
+		// 防止重入
+		if (this.isStarting) return this.startPromise;
 
-		// 检查现有进程状态
+		// 检查现有进程：只有 available === true 才认为健康
 		if (this.process && !this.process.killed) {
-			logMessage(`${this.name} 进程已存在且健康，无需启动`, "DEBUG");
-			return true;
+			if (this.available === true) return true;
+			// 进程存在但不可用，杀掉重启
+			try { this.process.kill(); } catch { }
+			this.process = null;
 		}
 
 		this.isStarting = true;
-
-		// 每次启动生成唯一滴 session ID，用于区分不同滴启动尝试
 		const currentSession = Date.now();
 		this._currentStartSession = currentSession;
 
-		logMessage(`${this.name} 开始新一轮启动流程 (session=${currentSession})`, "DEBUG");
-
 		this.startPromise = (async () => {
 			try {
-				// 再次检查（因为异步间隙可能发生变化）
-				if (this.process && !this.process.killed) return true;
-
+				if (this.process && !this.process.killed && this.available === true) return true;
 				const result = await this.startFn(this);
-
-				// 再次检查 session，如果启动过程中被新滴启动请求覆盖了，则当前结果无效
-				if (this._currentStartSession !== currentSession) {
-					logMessage(`${this.name} 启动结果被丢弃 (session mismatch: ${currentSession} vs ${this._currentStartSession})`, "WARN");
-					// 注意：这里不能 stop，因为新滴 session 可能正在使用进程
-					return false;
-				}
-
+				if (this._currentStartSession !== currentSession) return false;
 				return result;
 			} finally {
-				// 只有当自己是当前 session 滴 owner 时，才重置 isStarting
 				if (this._currentStartSession === currentSession) {
 					this.isStarting = false;
 					this.startPromise = null;
@@ -103,8 +84,6 @@ class DaemonBridge {
 	setupProcess(proc, resolve) {
 		this.process = proc;
 
-		logMessage(`${this.name} setupProcess called`, "DEBUG");
-
 		const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
 		rl.on("line", (line) => {
 			try {
@@ -114,7 +93,7 @@ class DaemonBridge {
 				try {
 					result = JSON.parse(line);
 				} catch (e) {
-					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装滴)
+					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装的)
 					try {
 						const decoded = Buffer.from(line, "base64").toString("utf8");
 						result = JSON.parse(decoded);
@@ -134,7 +113,7 @@ class DaemonBridge {
 					res(result);
 				}
 			} catch (e) {
-				// 非JSON输出，可能是Python脚本滴调试输出或错误信息
+				// 非JSON输出，可能是Python脚本的调试输出或错误信息
 				logMessage(`${this.name} stdout: ${line}`, "WARN");
 			}
 		});
@@ -168,39 +147,27 @@ class DaemonBridge {
 		const attemptPing = async () => {
 			pingAttempts++;
 			try {
-				logMessage(`${this.name} 发送 ping 请求 (尝试 ${pingAttempts}/${maxPingAttempts})`, "DEBUG");
-				// ★ 增加 Ping 超时时间，防止 PowerShell 启动慢导致误判
 				const pong = await this.call("ping", {}, 3000);
-				logMessage(`${this.name} ping 响应: ${JSON.stringify(pong)}`, "DEBUG");
 				if (pong?.status === "alive") {
 					this.restartCount = 0;
 					this.available = true;
 					this._setStartError("");
 					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
-					// 注意：这里我们无法直接调用 qqq.js 滴 updateStatusBarNow，
-					// 但 updateStatusBarNow 本质是调用 global.updateStatusBar，
-					// 我们需要从外部传入 bridge 实例，或者让 global 自己持有 bridge 实例。
-					// 暂时让 qqq.js 负责轮询状态栏更新，或者通过回调机制。
 					return true;
 				}
-			} catch (e) {
-				logMessage(`${this.name} ping 超时 (尝试 ${pingAttempts}/${maxPingAttempts}): ${e.message}`, "DEBUG");
-			}
+			} catch (e) { }
 
-			// 如果还有重试机会，继续尝试
 			if (pingAttempts < maxPingAttempts) {
-				// ★ 每次重试时稍微等一下，给进程喘息机会，避免死循环刷屏
 				setTimeout(attemptPing, 200);
 				return;
 			}
 
-			// 所有ping尝试都失败
+			// 所有 ping 尝试都失败
 			const reason = `ping_failed_after_${maxPingAttempts}_attempts${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
 			this._setStartError(reason);
 			logMessage(`${this.name} ping 失败，已尝试 ${maxPingAttempts} 次`, "WARN");
 			this.available = false;
-			// ★ 关键修复：杀死僵尸进程并清理引用，允许热切换时重新启动
 			try { proc.kill(); } catch { }
 			this.process = null;
 			resolve(false);
@@ -211,24 +178,20 @@ class DaemonBridge {
 	}
 
 	_handleCrash() {
-		logMessage(`${this.name} _handleCrash 方法被调用`, "DEBUG");
 		this.process = null;
 
 		for (const [id, { resolve, timer }] of this.pending) {
-			logMessage(`${this.name} 清理待处理请求，id: ${id}`, "DEBUG");
 			clearTimeout(timer);
 			resolve({ error: "process_crashed" });
 		}
 		this.pending.clear();
 
 		if (this._stopping) {
-			logMessage(`${this.name} stopping=true，忽略自动重启`, "INFO");
 			this.available = false;
 			return;
 		}
 
 		if (this.isPermDisabled) {
-			logMessage(`${this.name} 已被永久禁用，忽略重启`, "WARN");
 			this.available = false;
 			return;
 		}
@@ -284,35 +247,23 @@ class DaemonBridge {
 	}
 
 	async call(action, params = {}, timeout = 5000) {
-		logMessage(`${this.name} call 方法被调用，action: ${action}`, "DEBUG");
-
 		if (this.isPermDisabled) {
 			return { error: `${this.name}_disabled_too_many_crashes` };
 		}
 
-		// 允许再尝试启动/重启（尤其是 cold start/ping race）
-		if (this.available === false) {
-			// 如果进程还活着，给一次机会重新 ping/start
-			this.available = null;
-		}
+		// 允许再尝试启动
+		if (this.available === false) this.available = null;
 
 		if (!this.process || this.process.killed) {
-			logMessage(`${this.name} 进程不存在或已被杀死，尝试启动`, "DEBUG");
 			const started = await this.start();
-			if (!started) {
-				logMessage(`${this.name} 启动失败，返回错误`, "DEBUG");
-				return { error: `${this.name}_not_available` };
-			}
+			if (!started) return { error: `${this.name}_not_available` };
 		}
 
 		const id = ++this.requestId;
 		const cmd = JSON.stringify({ _id: id, action, ...params }) + "\n";
 
-		logMessage(`${this.name} 发送命令: ${cmd}`, "DEBUG");
-
 		return new Promise((resolve) => {
 			const timer = setTimeout(() => {
-				logMessage(`${this.name} 命令超时，id: ${id}`, "DEBUG");
 				if (this.pending.has(id)) {
 					this.pending.delete(id);
 					resolve({ error: "timeout" });
@@ -323,9 +274,7 @@ class DaemonBridge {
 
 			try {
 				this.process.stdin.write(cmd);
-				logMessage(`${this.name} 命令写入成功，id: ${id}`, "DEBUG");
 			} catch (e) {
-				logMessage(`${this.name} 命令写入失败: ${e.message}, id: ${id}`, "ERROR");
 				clearTimeout(timer);
 				this.pending.delete(id);
 				resolve({ error: "write_error" });
@@ -338,8 +287,6 @@ class DaemonBridge {
 	}
 
 	async stop() {
-		logMessage(`${this.name} stop 方法被调用`, "DEBUG");
-
 		this._stopping = true;
 
 		for (const [id, { resolve, timer }] of this.pending) {
@@ -355,55 +302,31 @@ class DaemonBridge {
 		}
 
 		if (!this.process.killed) {
-			logMessage(`${this.name} 尝试优雅退出...`, "DEBUG");
-
-			// ★ 阶段 1：协商退出 (Graceful Exit Protocol)
-			// 发送 exit 指令，让子进程自己清理资源（释放锁、关闭句柄）
+			// 协商退出
 			let exitedCleanly = false;
 			try {
-				// 给它发个信，别回了，直接走吧
 				const exitCmd = JSON.stringify({ _id: 0, action: "exit" }) + "\n";
 				if (this.process.stdin && !this.process.stdin.destroyed) {
 					this.process.stdin.write(exitCmd);
 				}
-
-				// 等待进程退出，最长 1000ms
 				const exitPromise = new Promise(resolve => {
 					this.process.once('exit', () => resolve(true));
 					this.process.once('close', () => resolve(true));
 				});
-
 				const timeoutPromise = new Promise(resolve => setTimeout(() => resolve(false), 1000));
-
 				exitedCleanly = await Promise.race([exitPromise, timeoutPromise]);
-			} catch (e) {
-				logMessage(`${this.name} 发送 exit 指令失败: ${e.message}`, "WARN");
-			}
+			} catch (e) { }
 
-			if (exitedCleanly) {
-				logMessage(`${this.name} 已优雅退出`, "DEBUG");
-			} else {
-				// ★ 阶段 2：强制退出 (Force Kill)
-				logMessage(`${this.name} 协商退出超时，执行强制终止`, "WARN");
+			if (!exitedCleanly) {
+				// 强制退出
 				try {
 					if (process.platform === "win32") {
-						// ★ Windows 专用：使用 taskkill 杀进程树，防止孤儿进程
-						try {
-							cp.execSync(`taskkill /pid ${this.process.pid} /T /F`);
-							logMessage(`${this.name} Windows taskkill 成功`, "DEBUG");
-						} catch (e) {
-							// 忽略进程不存在滴错误
-						}
+						try { cp.execSync(`taskkill /pid ${this.process.pid} /T /F`); } catch { }
 					} else {
-						// Unix: SIGKILL
 						this.process.kill("SIGKILL");
 					}
-				} catch (e) {
-					logMessage(`${this.name} 进程终止失败: ${e.message}`, "ERROR");
-				}
+				} catch { }
 			}
-		} else {
-			logMessage(`${this.name} 进程已被杀死`, "DEBUG");
 		}
 
 		this.process = null;
@@ -450,6 +373,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					settled = true;
 					try { proc.kill(); } catch { }
 					bridge.available = false;
+					bridge.process = null;  // ★ 确保清理 process 引用
 					res(false);
 				};
 
@@ -464,7 +388,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					if (settled) return;
 					settled = true;
 					if (!ok && bridge.lastStartError) {
-						logMessage(`Python Bridge 启动失败原因：${bridge.lastStartError}`, "WARN");
+						logMessage(`Python Bridge 启动失败：${bridge.lastStartError}`, "WARN");
 					}
 					res(!!ok);
 				});
@@ -508,7 +432,12 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				logMessage(`尝试读取 VS Code 官方 Python 配置失败: ${e.message}`, "DEBUG");
 			}
 
-			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError || "unknown"}`, "WARN");
+			// ★ 关键：确保设置兜底错误，防止 lastStartError 为空
+			if (!bridge.lastStartError) {
+				bridge._setStartError("all_attempts_failed");
+			}
+			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError}`, "WARN");
+			bridge.available = false;
 			resolve(false);
 		})().catch((e) => {
 			bridge._setStartError(`start_exception: ${e.message}`);
@@ -836,15 +765,14 @@ function updateStatusBarNow() {
 function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
 	const pref = getEnginePreference();
-	logMessage(`开始启动守护进程，用户选择滴引擎: ${pref} `, "INFO");
+	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
 
 	const ensureStarted = async (bridge) => {
 		if (bootSeq !== _daemonBootSeq) return false;
 		try {
-			// ★ 核心逻辑：有就用，没有就起，绝不杀生
 			if (bridge.isAvailable()) return true;
 
-			logMessage(`尝试启动 ${bridge.name} bridge`, "DEBUG");
+			logMessage(`启动 ${bridge.name} bridge...`, "INFO");
 			const ok = await bridge.start();
 
 			if (bootSeq !== _daemonBootSeq) return false;
@@ -852,11 +780,11 @@ function startDaemons() {
 			if (ok) {
 				logMessage(`${bridge.name} Bridge OK`, "INFO");
 			} else {
-				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"} `, "WARN");
+				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`, "WARN");
 			}
 			return !!ok;
 		} catch (e) {
-			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e} `, "WARN");
+			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e}`, "WARN");
 			return false;
 		} finally {
 			updateStatusBarNow();
@@ -864,26 +792,15 @@ function startDaemons() {
 	};
 
 	(async () => {
-		// 1. 始终优先启动 Shell daemon (作为兜底和常驻服务)
-		// 让它在后台异步启动，不阻塞后续逻辑
+		// ★ 核心设计：三个引擎全部启动，全部待命
+		// 不管用户选什么，能启动滨都启动起来
+		// 切换引擎时只是改变“谁来响应”，不杀不重启
 		const shellPromise = ensureStarted(shellBridge);
+		const pythonPromise = ensureStarted(pythonBridge);
+		const rustPromise = ensureStarted(rustBridge);
 
-		// 2. 根据偏好按需启动高性能引擎
-		if (pref === "python") {
-			await ensureStarted(pythonBridge);
-		} else if (pref === "rust") {
-			await ensureStarted(rustBridge);
-		} else if (pref === "auto") {
-			// 自动模式：优先 Python，失败则尝试 Rust
-			if (!await ensureStarted(pythonBridge)) {
-				if (bootSeq === _daemonBootSeq) {
-					await ensureStarted(rustBridge);
-				}
-			}
-		}
-
-		// 等待 Shell 就绪 (虽然是并行滴，但为了状态栏最终一致性，稍微等一下)
-		await shellPromise;
+		// 并行等待所有引擎启动完成
+		await Promise.all([shellPromise, pythonPromise, rustPromise]);
 
 		if (bootSeq === _daemonBootSeq) {
 			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
@@ -974,7 +891,7 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
-// 专门用于记录 Q 判断耗时滴日志函数
+// 专门用于记录 Q 判断耗时的日志函数
 function logQ(ms) {
 	if (!LOG_PATH) return;
 	try {
@@ -987,7 +904,7 @@ function logQ(ms) {
 
 // ============================================================================
 // ★ 统一任务消息模块（唯一真理源）
-// 用于文件粘贴、视频下载等所有任务滴进度/完成消息格式化和显示
+// 用于文件粘贴、视频下载等所有任务的进度/完成消息格式化和显示
 // ============================================================================
 const TaskMessage = {
 	/**
@@ -1042,13 +959,13 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示自动关闭滴完成弹窗（可带按钮）
+	 * 显示自动关闭的完成弹窗（可带按钮）
 	 * @param {string} message - 消息内容
 	 * @param {Object} options - 选项
 	 * @param {string[]} options.buttons - 按钮文本数组
 	 * @param {number} options.timeout - 自动关闭时间（毫秒），默认 15000
 	 * @param {Function} options.onButton - 按钮点击回调 (buttonText) => {}
-	 * @returns {Promise<string|undefined>} 用户点击滴按钮文本，或 undefined（超时/无操作）
+	 * @returns {Promise<string|undefined>} 用户点击的按钮文本，或 undefined（超时/无操作）
 	 */
 	async showDoneToast(message, options = {}) {
 		const { buttons = [], timeout = 15000, onButton } = options;
@@ -1071,10 +988,10 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示简单滴自动关闭消息（无按钮）
+	 * 显示简单的自动关闭消息（无按钮）
 	 * @param {string} message - 消息内容
 	 * @param {number} timeout - 自动关闭时间（毫秒），默认 15000
-	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同滴 emoji 图标
+	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同的 emoji 图标
 	 */
 	async showSimpleToast(message, timeout = 15000, type = 'info') {
 		// ★ 根据类型添加 emoji 前缀
@@ -1099,14 +1016,14 @@ const TaskMessage = {
 };
 
 // ============================================================================
-// ★ 对话框包装 (qqq 涉及滴对话框)
+// ★ 对话框包装 (qqq 涉及的对话框)
 // ============================================================================
 function showInformationMessage(message, ...items) {
 	return vscode.window.showInformationMessage(message, ...items);
 }
 
 /**
- * ★ 显示一个会自动关闭滴通知消息
+ * ★ 显示一个会自动关闭的通知消息
  * @param {string} message - 消息内容
  * @param {number} timeout - 自动关闭时间（毫秒），默认 15000ms
  */
@@ -1282,7 +1199,7 @@ let _cacheMissTotal = 0;
 let _statsFlushTimer = null;
 let _statsDirty = false;
 
-// ★ 修复 Crash：添加缺失滴 Getter 定义
+// ★ 修复 Crash：添加缺失的 Getter 定义
 let _cacheStatsGetter = () => ({ totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 });
 
 function setCacheStatsGetter(fn) {
@@ -1415,7 +1332,7 @@ function cleanReason(s, maxLen = 260) {
 function getEnginePreference() {
 	try {
 		const v = getConfig("ioEngine") || "auto";
-		// 统一映射：配置里滴 "node" 对应内部逻辑滴 "shell" (Shell Daemon)
+		// 统一映射：配置里的 "node" 对应内部逻辑的 "shell" (Shell Daemon)
 		if (v === "node") return "shell";
 		return v;
 	} catch {
@@ -1424,14 +1341,14 @@ function getEnginePreference() {
 }
 
 // ============================================================================
-// ★ Transaction Manager (基于 globalState 滴强一致性管理)
+// ★ Transaction Manager (基于 globalState 的强一致性管理)
 // ============================================================================
 const KEY_TRANSACTIONS = "qqq.transactions";
 
 /**
- * ★ 获取目录快照：记录目录中所有已存在滴文件和文件夹滴完整路径
+ * ★ 获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
  * @param {string} targetDir - 目标目录
- * @returns {string[]} - 文件和文件夹滴完整路径数组（已规范化）
+ * @returns {string[]} - 文件和文件夹的完整路径数组（已规范化）
  */
 function getDirectorySnapshot(targetDir) {
 	if (!targetDir || !fs.existsSync(targetDir)) {
@@ -1488,10 +1405,10 @@ const TransactionManager = {
 	},
 
 	async rollback(transOrId, options = {}) {
-		// ★ 始终从 globalState 获取最新滴事务数据（避免使用过时滴快照）
+		// ★ 始终从 globalState 获取最新的事务数据（避免使用过时的快照）
 		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
 		if (!transId) {
-			logMessage(`[Rollback] 无效滴事务ID`, "WARN");
+			logMessage(`[Rollback] 无效的事务ID`, "WARN");
 			return;
 		}
 
@@ -1504,7 +1421,7 @@ const TransactionManager = {
 
 		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
 
-		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式滴锚点字符串）
+		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
 		try {
 			const anchor = `/__PENDING_${trans.id}/`;
 			const targetUri = trans.targetUri || trans.docUri;
@@ -1597,7 +1514,7 @@ const TransactionManager = {
 					const stat = fs.statSync(fullPath);
 					if (!stat.isFile()) continue;
 
-					// ★ 只删除创建时间 < 5分钟滴
+					// ★ 只删除创建时间 < 5分钟的
 					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
 					if (!birthtime || isNaN(birthtime)) continue;
 					const age = now - birthtime;
@@ -1624,7 +1541,7 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟滴孤儿文件和文件夹
+	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟的孤儿文件和文件夹
 	 * @param {string} targetDir - qqq 文件夹路径
 	 */
 	async _cleanupOrphanFiles(targetDir) {
@@ -1633,11 +1550,11 @@ const TransactionManager = {
 			if (!targetDir || typeof targetDir !== 'string') return;
 			if (!fs.existsSync(targetDir)) return;
 
-			// 找到父目录（包含文档文件滴目录）
+			// 找到父目录（包含文档文件的目录）
 			const parentDir = path.dirname(targetDir);
 			if (!parentDir || !fs.existsSync(parentDir)) return;
 
-			// ★ 获取 qqq 文件夹中滴所有文件和文件夹（一视同仁）
+			// ★ 获取 qqq 文件夹中的所有文件和文件夹（一视同仁）
 			let qqqItems = [];  // { name: string, isDir: boolean }
 			try {
 				const entries = fs.readdirSync(targetDir);
@@ -1652,7 +1569,7 @@ const TransactionManager = {
 
 			if (!qqqItems.length) return;
 
-			// ★ 扫描父目录中滴文本文件，找出所有被引用滴文件/文件夹
+			// ★ 扫描父目录中的文本文件，找出所有被引用的文件/文件夹
 			const referencedItems = new Set();
 			const BINARY_EXTS = new Set([
 				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
@@ -1661,7 +1578,7 @@ const TransactionManager = {
 				".pdf", ".doc", ".docx", ".psd", ".ai",
 			]);
 
-			// ★ 匹配 qqq/ 或 qqq\ 路径滴正则
+			// ★ 匹配 qqq/ 或 qqq\ 路径的正则
 			const regex = /qqq[\\/]([^\s"'<>\[\]\(\)]+)/gi;
 
 			try {
@@ -1699,7 +1616,7 @@ const TransactionManager = {
 			const orphans = qqqItems.filter(item => !referencedItems.has(item.name.toLowerCase()));
 			if (!orphans.length) return;
 
-			// ★ 删除创建时间 < 5分钟滴孤儿文件/文件夹
+			// ★ 删除创建时间 < 5分钟的孤儿文件/文件夹
 			const now = Date.now();
 			const FIVE_MINUTES = 5 * 60 * 1000;
 			let cleanedCount = 0;
@@ -1743,7 +1660,7 @@ const TransactionManager = {
 
 		logMessage(`[Recovery] 发现 ${list.length} 个未完成事务，开始清理...`, "WARN");
 		for (const trans of list) {
-			// 简单滴判断：只要是残留滴，就清理。因为 recover 只在启动时调用。
+			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
 			// 或者可以判断 createdAt 是否超时 (例如 10分钟)
 			await this.rollback(trans);
 		}
@@ -1769,7 +1686,7 @@ const TransactionManager = {
 };
 
 // ============================================================================
-// ★ 任务计数器系统（每个文件路径维护一个永久递增滴任务计数 q）
+// ★ 任务计数器系统（每个文件路径维护一个永久递增的任务计数 q）
 // ============================================================================
 const KEY_TASK_COUNTERS = "qqq.task_counters";
 let _iconCounter = Math.floor(Math.random() * 17);
@@ -1781,7 +1698,7 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 递增并返回新滴任务计数（永不重置，按文件分别计数）
+	 * 递增并返回新的任务计数（永不重置，按文件分别计数）
 	 */
 	async increment(filePath) {
 		if (!extensionContext) return 1;
@@ -1814,7 +1731,7 @@ const TaskCounter = {
 
 		let displayDir = dir;
 		if (dir.length > maxDirLen) {
-			// 只保留最右边滴22个字符
+			// 只保留最右边的22个字符
 			displayDir = '...' + dir.slice(-maxDirLen);
 		}
 
@@ -1927,8 +1844,8 @@ async function wq() {
 }
 
 function getEngineTryOrder(pref) {
-	// ★ 核心真理：定义不同偏好下滴回退顺序
-	// 最后滴 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
+	// ★ 核心真理：定义不同偏好下的回退顺序
+	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
 	switch (pref) {
 		case "python":
 			return ["python", "rust", "shell", "spawn"];
@@ -1956,9 +1873,9 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 
 	if (pref === "python" && activeState.code !== "P") {
 		if (pyReason) reasons.unshift(`Python：${pyReason} `);
-		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真滴不可用时才报
+		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真的不可用时才报
 
-		// Rust 只有在真滴被尝试过且失败时才报
+		// Rust 只有在真的被尝试过且失败时才报
 		if (activeState.code === "N" && rustBridge.lastStartError) {
 			if (rsReason) reasons.push(`Rust：${rsReason} `);
 			else reasons.push(`Rust：启动失败 / 不可用`);
@@ -2061,13 +1978,13 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 				? "R"
 				: `N(${active.nodeMode})`;
 
-	// 根据引擎类型选择不同滴边框符号
+
 	if (active.code === "P" || active.code === "R") {
-		// 使用 ▌ 符号（适用于 P 和 R 引擎）
-		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}% ${engineTag}   ▌`;
+
+		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%    ${engineTag}   ▌`;
 	} else {
-		// 使用 ▪ 符号（适用于其他引擎）
-		statusBarItem.text = ` ▪ qqq: ⧖ ${h} h  ▥ ${cacheMB.toFixed(0)} m  ⊙ ${hitRate.toFixed(0)}%  ⚡ ${engineTag} ▪ `;
+
+		statusBarItem.text = ` ▪  qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%    ${engineTag} ▪ `;
 	}
 
 	const mismatchReasons = collectMismatchReasons(pref, active, pythonBridge, rustBridge, shellBridge);

@@ -1,7 +1,7 @@
 // File: src/q2.js
 // ★★★ 文件管理器：Webview 界面 + 使用 qqq.js 四级回退 + 防惊群尺寸调度/缓存 ★★★
 // 适配：匹配最新 qqq IO 引擎路径逻辑（跨平台 normalize + 绝对路径保留 + canonical 去重）
-// 说明：本文件内置 normalize/resolve/canonical，若 qqq.js 导出同名函数会自动优先使用 qqq 滴实现
+// 说明：本文件内置 normalize/resolve/canonical，若 qqq.js 导出同名函数会自动优先使用 qqq 的实现
 
 const vscode = require("vscode");
 const path = require("path");
@@ -95,12 +95,12 @@ function _getSystemDriveRoot() {
 }
 
 /**
- * normalizeNavPath：用于“导航/打开/展示”滴路径清洗
+ * normalizeNavPath：用于“导航/打开/展示”的路径清洗
  * - 非 Windows：/ 开头保持绝对路径；~ 支持展开
  * - Windows：
  *   - 盘符/UNC 保持绝对
  *   - "C:" / "C:/" / "C:\" 归一到 "C:\"
- *   - "\foo" 或 "/foo" 视为当前系统盘根路径下滴 "\foo"
+ *   - "\foo" 或 "/foo" 视为当前系统盘根路径下的 "\foo"
  *   - 其他相对路径：只做 normalize（resolve 由 resolveNavPath 负责）
  */
 function normalizeNavPath(rawPath) {
@@ -138,7 +138,7 @@ function normalizeNavPath(rawPath) {
     return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
   }
 
-  // 形如 \foo 或 /foo：视为系统盘根路径下滴绝对路径（更符合文件管理器直觉）
+  // 形如 \foo 或 /foo：视为系统盘根路径下的绝对路径（更符合文件管理器直觉）
   if (clean.startsWith("\\") || clean.startsWith("/")) {
     const sysRoot = _getSystemDriveRoot();
     const rest = clean.replace(/^[\\/]+/, "");
@@ -150,7 +150,7 @@ function normalizeNavPath(rawPath) {
 }
 
 /**
- * resolveNavPath：把用户键入滴 path 解析成最终要访问滴绝对目录
+ * resolveNavPath：把用户键入的 path 解析成最终要访问的绝对目录
  * - 若 normalize 后已是绝对（含 UNC/盘符根），直接返回
  * - 否则按 baseDir 进行 resolve
  */
@@ -174,7 +174,7 @@ function resolveNavPath(rawPath, baseDir) {
 }
 
 /**
- * canonicalizeExistingPath：对“存在于磁盘上滴路径”做统一键（避免重复/缓存穿透）
+ * canonicalizeExistingPath：对“存在于磁盘上的路径”做统一键（避免重复/缓存穿透）
  * - realpath（尽量）
  * - normalize
  * - 去尾分隔符（保留 root）
@@ -1379,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
   adjustSidebarByRatio();
   checkAndApplyResponsive();
 
-  // 注意：真正滴列表刷新由 extension 侧 postMessage(update) 完成
+  // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
 });
 
 // ====== 导出给模板内联 onclick ======
@@ -1694,7 +1694,7 @@ function showSaveAsDialog() {
         try {
           const resolved = resolveNavPath(message.path, currentPath);
 
-          // Windows：若用户点了 drives 滴 "C:"，resolve 后可能仍是 "C:"；这里强制成根
+          // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
           let newPath = resolved;
           if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath = newPath.toUpperCase() + "\\";
 
@@ -1704,7 +1704,7 @@ function showSaveAsDialog() {
             currentPath = newPath;
             refreshWebview();
           } else {
-            global.showErrorMessage("无效滴目录路径: " + newPath);
+            global.showErrorMessage("无效的目录路径: " + newPath);
           }
         } catch (error) {
           global.showErrorMessage("导航失败: " + error.message);

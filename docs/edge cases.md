@@ -12,14 +12,14 @@
 
 
 ## 场景1：复制过程中关闭标签
-根据代码分析，这两个场景滴行为如下：
+根据代码分析，这两个场景的行为如下：
 
 ## 场景1：复制过程中关闭标签
 
 **当前行为**：任务会**继续执行**，不会自动取消
 
 流程：
-1. `withProgress` 滴后台任务**独立运行**，关闭标签不会触发 `token.onCancellationRequested`
+1. `withProgress` 的后台任务**独立运行**，关闭标签不会触发 `token.onCancellationRequested`
 2. 文件复制会**完成**
 3. 当尝试 `replaceAnchorInDoc` 替换锚点时：
    - 如果文件**已保存**：`vscode.workspace.openTextDocument(uri)` 可以重新打开文档 → **替换成功**
@@ -62,7 +62,7 @@ if (!global.hasRecovered) {
 
 `recover()` 会：
 - 遍历所有未完成事务
-- 执行 `rollback()` 删除已复制滴文件
+- 执行 `rollback()` 删除已复制的文件
 - 清理残留锚点
 
 ```

@@ -6,7 +6,7 @@
 
 
 
-baseDir 是“允许写入滴安全根目录”
+baseDir 是“允许写入的安全根目录”
 
 getSharedDownloader 是“全局单例复用下载器（复用 H2 连接池）”
 
@@ -75,10 +75,10 @@ const r = await d.downloadAll(
 );
 
 console.log("ytdlpAvailable:", r.ytdlpAvailable);
-console.log(r.results.filter(x => x.manual)); // 这里能看到“需要 yt-dlp / blob 等”被标记 manual 滴项
+console.log(r.results.filter(x => x.manual)); // 这里能看到“需要 yt-dlp / blob 等”被标记 manual 的项
 d.destroy();
 
-B. UI 预览：probe 滴最佳用法（下载前展示标题/时长/缩略图）
+B. UI 预览：probe 的最佳用法（下载前展示标题/时长/缩略图）
 const { UnifiedMediaDownloader } = require("./unified-media-downloader");
 
 const d = new UnifiedMediaDownloader({ securityLevel: 1 });
@@ -103,10 +103,10 @@ UI 上把 probe_output_too_large 单独提示为：“列表太大，建议直�
 C. 强烈建议你这样组织任务（tag/meta/referrer/maxBytes）
 1）tag：务必稳定唯一（配合 applyResultsToItems）
 
-你滴 applyResultsToItems 用滴是 tag || url 做 key。如果 URL 会重复（同一图多次、不同尺寸同源），不设 tag 容易串结果。
+你的 applyResultsToItems 用的是 tag || url 做 key。如果 URL 会重复（同一图多次、不同尺寸同源），不设 tag 容易串结果。
 推荐：tag = item.id 或 tag = ${id}:${variant}```。
 
-你滴实现会在“反盗链重试”时自动补 Referer/Origin（anti_hotlink_boost）。
+你的实现会在“反盗链重试”时自动补 Referer/Origin（anti_hotlink_boost）。
 建议调用层也能传：referrer: pageUrl（命中率更高、少重试）。
 
 { url, tag, referrer: "https://site.com/page/xxx", headers: { /* 可再补 cookie */ } }
@@ -115,13 +115,13 @@ C. 强烈建议你这样组织任务（tag/meta/referrer/maxBytes）
 
 
 
-D. 安全档位 + overrides 滴“最佳姿势” , 默认用 0  档
+D. 安全档位 + overrides 的“最佳姿势” , 默认用 0  档
 
 
 
-E. 错误码给 UI 滴“最佳提示文案”
+E. 错误码给 UI 的“最佳提示文案”
 
-protocol_not_allowed：不支持滴链接协议（仅允许 http/https）
+protocol_not_allowed：不支持的链接协议（仅允许 http/https）
 
 url_credentials_not_allowed：链接里包含账号密码，不允许
 
@@ -145,4 +145,4 @@ blob_url_unavailable：blob: 链接无法在本地直接下载
 
 
 建议给 onProgress 加一个“最终汇总事件”
-调用侧做 UI 时很方便：比如每个 task 滴最终状态统一走 done/error/manual，你现在已经做得不错了，再加个 batch end 会更丝滑
+调用侧做 UI 时很方便：比如每个 task 的最终状态统一走 done/error/manual，你现在已经做得不错了，再加个 batch end 会更丝滑

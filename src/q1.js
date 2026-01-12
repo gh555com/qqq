@@ -44,7 +44,7 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
     ".ico",
 ]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
-const TEXT_FILM_MAX_SIZE = 50 * 1024 * 1024; // ★ 文本胶片预览滴最大文件限制
+const TEXT_FILM_MAX_SIZE = 50 * 1024 * 1024; // ★ 文本胶片预览的最大文件限制
 
 const IMAGE_EXTS = new Set([
     ".png",
@@ -565,7 +565,7 @@ function determineCacheStrategy(filePath, info) {
     if (performanceMode === "accelerated" || performanceMode === "extreme") qualityLevel = 47;
 
     let isAnimatedOutput = false;
-    const isVideoOrGif = !isStaticSource && (info?.type === "video" || info?.type === "animated_image" || info?.type === "text_film");
+    const isVideoOrGif = !isStaticSource && (info?.type === "video" || info?.type === "animated_image");
     if (isVideoOrGif) {
         if (performanceMode === "extreme") isAnimatedOutput = false;
         else isAnimatedOutput = true;
@@ -612,8 +612,8 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
     let vf = scaleFilter;
 
     if (info?.type === "text_film") {
-        // ★ 文本预览特殊逻辑：像素风格 + Courier New
-        const fontPath = "C\\:/Windows/Fonts/cour.ttf";
+        // ★ 文本预览特殊逻辑：解决中文乱码 + 静态预览 (最稳定)
+        const fontPath = "C:/Windows/Fonts/msyh.ttc";
         let textContent = "";
         try {
             const rawText = fs.readFileSync(filePath, 'utf8').slice(0, 2000);
@@ -638,21 +638,27 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
                 }
             }
 
-            // 简单逃逸 drawtext 需要滴字符
+            // 逃逸 drawtext 需要的字符
+            // ffmpeg 滤镜中，文本需要进行极其严格的转义
             textContent = textContent
-                .replace(/\\/g, "/")
-                .replace(/'/g, "")
-                .replace(/:/g, "\\:")
-                .replace(/%/g, "%%");
+                .replace(/\\/g, '\\\\\\\\') // 转义反斜杠
+                .replace(/'/g, "'\\''")     // 转义单引号 (ffmpeg 滤镜语法)
+                .replace(/:/g, '\\:')       // 转义冒号
+                .replace(/,/g, '\\,')       // 转义逗号
+                .replace(/%/g, '%%')        // 转义百分号
+                .replace(/\r/g, '')         // 移除回车
+                .replace(/\n/g, '\r');      // drawtext 使用 \r 作为换行符
         } catch (e) {
             textContent = "Read Error";
         }
 
-        const pixelScaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=neighbor,format=yuva420p`;
-        args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=3`);
-        vf = `drawtext=fontfile='${fontPath}':text='${textContent}':fontcolor=white:fontsize=12:line_spacing=4:x=10:y=10:text_shaping=0,${pixelScaleFilter},pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2[out_v]`;
-        args.push("-frames:v", "3");
-        expectedWebPDuration = 3;
+        const fontPathEscaped = fontPath.replace(/:/g, "\\:");
+        // 强制背景时长为 1 秒，但只输出 1 帧
+        args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=1`);
+        // 使用 [0:v] 显式指定输入流，并确保最后有 [out_v]
+        vf = `[0:v]drawtext=fontfile='${fontPathEscaped}':text='${textContent}':fontcolor=white:fontsize=14:line_spacing=4:x=10:y=10,format=yuva420p[out_v]`;
+        args.push("-frames:v", "1");
+        expectedWebPDuration = 0;
     } else if (performanceMode === "extreme") {
         args.push("-ss", "0", "-i", filePath);
         vf = `[0:v]${scaleFilter}[out_v]`;
@@ -1091,7 +1097,7 @@ function getDocumentEOL(doc) {
     return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 }
 
-// ★ 统一用 qqq 滴路径真理来源（避免绝对路径/UNC 被破坏）
+// ★ 统一用 qqq 的路径真理来源（避免绝对路径/UNC 被破坏）
 function resolvePathToAbsolute(docUri, rawPath) {
     if (!rawPath) return null;
     let clean = String(rawPath).trim();
@@ -1515,10 +1521,10 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         startTime: Date.now(),
         taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
         intentTotalSize: intentTotalSize,  // ★ 意图列表总大小（仅本地文件有效）
-        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时滴目录快照
+        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
     });
 
-    // 3. 启动带进度滴后台任务
+    // 3. 启动带进度的后台任务
     const taskStartTime = Date.now();  // ★ 记录开始时间
 
     // ★ 创建自定义取消源（用于锚点丢失时主动取消）
@@ -1621,7 +1627,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
 
-                // ★ 根据取消原因显示不同滴弹窗
+                // ★ 根据取消原因显示不同的弹窗
                 if (anchorLost) {
                     TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                 } else {
@@ -1814,8 +1820,8 @@ async function provideCleanlinessEditsAsync(document) {
                     let pxHeight = 0;
 
                     // 特殊处理高风险格式 (ai, eps, cdr)，防止无法渲染时占位过大
-                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用滴假数据)，
-                    //      则必须要有有效滴预览缓存，才分配高度。否则默认不占位。
+                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用的假数据)，
+                    //      则必须要有有效的预览缓存，才分配高度。否则默认不占位。
                     if (info && info.needsConversion && [".ai", ".eps", ".cdr"].includes(ext)) {
                         const contentId = qqq.computeFingerprint(absPath);
                         if (contentId) {
@@ -1906,7 +1912,7 @@ class FileCodeLensProvider {
         const regex = qqq.createPathRegex();
         const text = document.getText();
         let match;
-        const foldersToFetch = new Set(); // ★ 需要异步获取滴文件夹
+        const foldersToFetch = new Set(); // ★ 需要异步获取的文件夹
 
         while ((match = regex.exec(text))) {
             const pos = document.positionAt(match.index);
@@ -1949,7 +1955,7 @@ class FileCodeLensProvider {
                 mtimeMs = st.mtimeMs;
             } catch { }
 
-            // ★ 先添加基本滴 CodeLens（不等待媒体信息）
+            // ★ 先添加基本的 CodeLens（不等待媒体信息）
             lenses.push(
                 new vscode.CodeLens(r, {
                     title: `✎( ${fSizeStr}) 🗀qqq`,
@@ -2002,7 +2008,7 @@ class FileCodeLensProvider {
             );
         }
 
-        // ★ 异步获取未缓存滴文件夹大小
+        // ★ 异步获取未缓存的文件夹大小
         if (foldersToFetch.size > 0) {
             const refreshCb = () => this.debouncedRefresh();
             for (const folder of foldersToFetch) {
@@ -2015,7 +2021,7 @@ class FileCodeLensProvider {
 }
 
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行滴请求
+const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行的请求
 
 function invalidateFolderSizeCacheForPath(filePath) {
     try {
@@ -2041,7 +2047,7 @@ function getQqqFolderSizeSync(folderPath) {
  * ★ 异步获取文件夹大小（带去重，完成后刷新 CodeLens）
  */
 function fetchFolderSizeAsync(folderPath, refreshCallback) {
-    // 如果已经有正在进行滴请求，不重复发起
+    // 如果已经有正在进行的请求，不重复发起
     if (_pendingFolderSizeRequests.has(folderPath)) {
         return;
     }
