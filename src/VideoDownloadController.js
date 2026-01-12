@@ -1007,6 +1007,7 @@ class VideoDownloadController {
 
                 let probeForbidden = false;
                 let hasStaticDirectVideo = false; // 标记是否有静态分析找到滴直连视频
+                const staticDirectVideoUrls = new Set(); // ★ 追踪静态分析找到的直连视频 URL
                 try {
                     if (this._isTaskCancelled(task)) return null;
 
@@ -1053,8 +1054,14 @@ class VideoDownloadController {
                     if (webUrls && webUrls.length > 0) {
                         this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
 
-                        // 检查是否有直连视频 URL
-                        const hasDirectVideo = webUrls.some(u => u.match(/\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i));
+                        // 检查是否有直连视频 URL，并记录这些 URL
+                        const directVideoPattern = /\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i;
+                        webUrls.forEach(u => {
+                            if (u.match(directVideoPattern)) {
+                                staticDirectVideoUrls.add(u);
+                            }
+                        });
+                        const hasDirectVideo = staticDirectVideoUrls.size > 0;
 
                         // 只要找到了直连视频，就设置标志并移除原始 403 任务
                         if (hasDirectVideo) {
@@ -1228,11 +1235,28 @@ class VideoDownloadController {
 
                     const forbiddenErrors = failResults.filter(r => this._isForbidden(r.code || r.httpStatus, r.error));
 
-                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强，静态分析找到直连视频也不触发增强
-                    const needEnhanced = (!isYouTube) && (!hasStaticDirectVideo) && (
+                    // ✅ 线性化 + 前置排除：YouTube 永不触发增强
+                    // ★ 精准判断：静态分析找到的直连视频是否有效
+                    // - 如果这些直连视频 URL 全部都是 403 失败 → 无效，需要触发增强
+                    // - 如果有任何一个成功，或失败但不是 403 → 有效，不触发增强
+                    let staticVideoEffective = false;
+                    if (hasStaticDirectVideo && staticDirectVideoUrls.size > 0) {
+                        // 检查静态直连视频的下载结果
+                        const staticVideoResults = results.filter(r => staticDirectVideoUrls.has(r.url));
+                        const staticVideoAllForbidden = staticVideoResults.length > 0 &&
+                            staticVideoResults.every(r => !r.success && this._isForbidden(r.code || r.httpStatus, r.error));
+                        // 只有当不是全部 403 时，才认为静态分析有效
+                        staticVideoEffective = !staticVideoAllForbidden;
+                        if (staticVideoAllForbidden) {
+                            this.log(`[增强判断] 静态分析的 ${staticVideoResults.length} 个直连视频全部 403 失败，允许进入增强流程`);
+                        }
+                    }
+                    // ★ 只有实际有 403 错误时才触发增强
+                    // - 移除了 "landedFiles.length === 0 && successResults.length > 0" 这个条件
+                    // - 因为百度等网站可能下载了 HTML 而不是视频，这种情况不应触发增强
+                    const needEnhanced = (!isYouTube) && (!staticVideoEffective) && (
                         forbiddenErrors.length > 0 ||
-                        (probeForbidden && landedFiles.length === 0) ||
-                        (landedFiles.length === 0 && successResults.length > 0)
+                        (probeForbidden && landedFiles.length === 0)
                     );
 
                     return {
