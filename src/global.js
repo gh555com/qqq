@@ -469,6 +469,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 		};
 
 		(async () => {
+			// 1. 尝试使用默认 python
 			const ok1 = await spawnWith("python");
 			if (ok1) {
 				logMessage("Python Bridge 使用 python 启动成功", "INFO");
@@ -476,6 +477,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				return;
 			}
 
+			// 2. 非 Windows 尝试使用 python3
 			if (process.platform !== "win32") {
 				const ok2 = await spawnWith("python3");
 				if (ok2) {
@@ -483,6 +485,24 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					resolve(true);
 					return;
 				}
+			}
+
+			// 3. 兜底：尝试从 VS Code 官方 Python 扩展配置中获取路径
+			try {
+				const vscodePythonPath = vscode.workspace.getConfiguration("python").get("defaultInterpreterPath")
+					|| vscode.workspace.getConfiguration("python").get("pythonPath");
+
+				if (vscodePythonPath && vscodePythonPath !== "python" && vscodePythonPath !== "python3") {
+					logMessage(`尝试使用 VS Code 官方配置路径兜底: ${vscodePythonPath}`, "INFO");
+					const ok3 = await spawnWith(vscodePythonPath);
+					if (ok3) {
+						logMessage(`Python Bridge 使用 VS Code 官方配置路径启动成功: ${vscodePythonPath}`, "INFO");
+						resolve(true);
+						return;
+					}
+				}
+			} catch (e) {
+				logMessage(`尝试读取 VS Code 官方 Python 配置失败: ${e.message}`, "DEBUG");
 			}
 
 			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError || "unknown"}`, "WARN");
@@ -1154,7 +1174,6 @@ const DEFAULT_CONFIG = {
 	"frameSizeMode": "fix",
 	"cleanFreak": false,
 	"ioEngine": "auto",
-	"pythonPath": "",
 	"downloadSecurityLevel": "1: 平衡",
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率",
@@ -1181,7 +1200,6 @@ const CONFIG_METADATA = {
 		options: ["auto", "python", "rust", "node"],
 		descriptions: []
 	},
-	"pythonPath": { name: "Python 路径", type: "string" },
 	"downloadSecurityLevel": {
 		name: "下载安全等级", type: "enum",
 		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
@@ -1751,8 +1769,7 @@ const TransactionManager = {
 // ★ 任务计数器系统（每个文件路径维护一个永久递增滴任务计数 q）
 // ============================================================================
 const KEY_TASK_COUNTERS = "qqq.task_counters";
-let _iconCounter = 0;  // ★ 全局图形计数器（内存中，不持久化）
-
+let _iconCounter = Math.floor(Math.random() * 17);
 const TaskCounter = {
 	getCount(filePath) {
 		if (!extensionContext) return 0;
@@ -1809,8 +1826,13 @@ const TaskCounter = {
 	 * @param {string} suffix - 可选后缀描述
 	 */
 	formatTitle(filePath, taskId, iconNum = 1, suffix = '') {
-		// ★ 11个图形固定顺序循环（跨文件全局队列）
-		const ICONS = ['❤️', '💚', '💜', '🧡', '💙', '🤎', '💛', '🖤', '🤍', '⬛', '⬜'];
+		// ★ 17个图形固定顺序循环（跨文件全局队列）
+		// 规则：形状交替（心形 vs 非心形），颜色交替，避免视觉重复
+		const ICONS = [
+			'❤️', '⬛', '💚', '⭐', '💜', '🔵',
+			'💙', '🌸', '🤎', '⬜', '💛', '🔷',
+			'🖤', '🍄', '🤍', '🌺', '🔶'
+		];
 		const icon = ICONS[(iconNum - 1) % ICONS.length];
 
 		const displayPath = this.formatPath(filePath);

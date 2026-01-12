@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.13.4",
+  "version": "15.14.5",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -61,12 +61,6 @@
               "Node 引擎"
             ],
             "markdownDescription": "☀️ 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
-          },
-          "qqq.pythonPath": {
-            "order": 30,
-            "type": "string",
-            "default": "",
-            "markdownDescription": "☀️ 指定 python 可执行文件路径。例如：C:\\Python311\\python.exe；留空则自动探测 python/python3/py。"
           },
           "qqq.transactionLevel": {
             "order": 40,
