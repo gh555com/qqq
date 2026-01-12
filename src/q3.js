@@ -1408,20 +1408,29 @@ async function pureCommand() {
         return;
     }
 
-    let qqqFiles = [];
+    // ★ 同时读取文件和文件夹，文件夹与文件一视同仁
+    let qqqItems = [];  // { name: string, isDir: boolean }
     try {
-        qqqFiles = fs.readdirSync(qqqDir).filter((f) => fs.statSync(path.join(qqqDir, f)).isFile());
+        const entries = fs.readdirSync(qqqDir);
+        for (const entry of entries) {
+            const fullPath = path.join(qqqDir, entry);
+            try {
+                const stat = fs.statSync(fullPath);
+                qqqItems.push({ name: entry, isDir: stat.isDirectory() });
+            } catch { }
+        }
     } catch (e) {
         vscode.window.showErrorMessage("读取 qqq 目录失败");
         return;
     }
 
-    if (!qqqFiles.length) {
+    if (!qqqItems.length) {
         vscode.window.showInformationMessage("qqq 文件夹是空滴");
         return;
     }
 
-    const referencedFiles = new Set();
+    // ★ 收集所有被引用滴文件/文件夹名称（包括直接引用和间接引用）
+    const referencedItems = new Set();
     let parentFiles = [];
 
     try {
@@ -1452,27 +1461,61 @@ async function pureCommand() {
                 const absNorm = path.normalize(absPath).toLowerCase();
                 const qqqNorm = path.normalize(qqqDir).toLowerCase();
 
-                if (absNorm.startsWith(qqqNorm)) {
-                    referencedFiles.add(path.basename(absPath).toLowerCase());
+                // ★ 检查是否在 qqq 目录下（包括直接引用和子路径引用）
+                if (absNorm.startsWith(qqqNorm + path.sep) || absNorm === qqqNorm) {
+                    // 获取相对于 qqq 目录滴路径
+                    const relToQqq = absNorm.slice(qqqNorm.length).replace(/^[\\/]+/, "");
+                    if (relToQqq) {
+                        // 取第一级目录/文件名作为直接子项
+                        const firstPart = relToQqq.split(/[\\/]/)[0];
+                        referencedItems.add(firstPart.toLowerCase());
+                    }
                 }
             }
         } catch { }
     }
 
-    const orphans = qqqFiles.filter((f) => !referencedFiles.has(f.toLowerCase()));
+    // ★ 文件和文件夹一视同仁，找出没有被引用滴孤儿
+    const orphanItems = qqqItems.filter((item) => !referencedItems.has(item.name.toLowerCase()));
 
-    if (!orphans.length) {
-        global.showInformationMessage("未发现孤儿文件");
+    if (!orphanItems.length) {
+        global.showInformationMessage("未发现孤儿文件或文件夹");
         return;
     }
 
-    const orphanPaths = orphans.map((f) => path.join(qqqDir, f));
-    const cmdStr = os.platform() === "win32"
-        ? `del ${orphanPaths.map((p) => `"${p}"`).join(" ")}`
-        : `rm ${orphanPaths.map((p) => `"${p}"`).join(" ")}`;
+    // ★ 分别生成文件和文件夹滴删除命令
+    const orphanFiles = orphanItems.filter(item => !item.isDir).map(item => path.join(qqqDir, item.name));
+    const orphanDirs = orphanItems.filter(item => item.isDir).map(item => path.join(qqqDir, item.name));
+
+    let cmdParts = [];
+    if (os.platform() === "win32") {
+        // Windows: 文件用 del，文件夹用 rmdir /s /q
+        if (orphanFiles.length > 0) {
+            cmdParts.push(`del ${orphanFiles.map((p) => `"${p}"`).join(" ")}`);
+        }
+        if (orphanDirs.length > 0) {
+            // 每个文件夹单独一条 rmdir 命令，用 & 连接
+            for (const d of orphanDirs) {
+                cmdParts.push(`rmdir /s /q "${d}"`);
+            }
+        }
+    } else {
+        // Unix: 文件用 rm，文件夹用 rm -rf
+        if (orphanFiles.length > 0) {
+            cmdParts.push(`rm ${orphanFiles.map((p) => `"${p}"`).join(" ")}`);
+        }
+        if (orphanDirs.length > 0) {
+            cmdParts.push(`rm -rf ${orphanDirs.map((p) => `"${p}"`).join(" ")}`);
+        }
+    }
+
+    const cmdStr = os.platform() === "win32" ? cmdParts.join(" & ") : cmdParts.join(" && ");
+
+    // ★ 所有孤儿路径（文件和文件夹）
+    const allOrphanPaths = orphanItems.map((item) => path.join(qqqDir, item.name));
 
     let content = "\n".repeat(13) + " 请在终端中执行下面命令：\n\n\n " + cmdStr + "\n\n\n";
-    content += orphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
+    content += allOrphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
 
     const purePath = path.join(parentDir, "qqq.pure");
 
