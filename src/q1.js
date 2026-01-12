@@ -673,6 +673,21 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
             // 限制长度
             rawText = rawText.slice(0, 2000);
 
+            // ★ 深度甄别乱码：如果文本中包含大量无法识别的非 ASCII 且非中文常用字符，判定为极端乱码
+            // 统计正常字符比例 (ASCII + 中文范围)
+            let normalCharCount = 0;
+            for (let i = 0; i < rawText.length; i++) {
+                const code = rawText.charCodeAt(i);
+                if (code < 128 || (code >= 0x4E00 && code <= 0x9FFF)) {
+                    normalCharCount++;
+                }
+            }
+            const normalRatio = normalCharCount / rawText.length;
+            if (normalRatio < 0.3 && rawText.length > 20) {
+                // 如果正常字符占比低于 30%，判定为编码极其混乱，此时我们标记为 isExtremeGarbled
+                info._isExtremeGarbled = true;
+            }
+
             // 简单的自动换行逻辑 (按宽度估算)
             let currentLineLen = 0;
             for (let i = 0; i < rawText.length; i++) {
@@ -709,12 +724,15 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
         }
 
         const fontPathEscaped = fontPath ? fontPath.replace(/:/g, "\\:") : "";
-        const fontFilePart = fontPathEscaped ? `fontfile='${fontPathEscaped}':` : "";
+        // 如果识别为极端乱码，则不设置字体，让 ffmpeg 尝试用系统最基础的方式兜底
+        const useFont = !info?._isExtremeGarbled && fontPathEscaped;
+        const fontFilePart = useFont ? `fontfile='${fontPathEscaped}':` : "";
 
         // 强制背景时长为 1 秒，但只输出 1 帧
         args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=1`);
         // 使用 [0:v] 显式指定输入流，并确保最后有 [out_v]
-        vf = `[0:v]drawtext=${fontFilePart}text='${textContent}':fontcolor=white:fontsize=14:line_spacing=2:x=10:y=10,format=yuva420p[out_v]`;
+        // 范例 B：现代控制台风格 (增加半透明背景黑框)
+        vf = `[0:v]drawtext=${fontFilePart}text='${textContent}':fontcolor=white:fontsize=16:line_spacing=2:x=15:y=15:box=1:boxcolor=black@0.6:boxborderw=0,format=yuva420p[out_v]`;
         args.push("-frames:v", "1");
         expectedWebPDuration = 0;
     } else if (performanceMode === "extreme") {
@@ -1326,21 +1344,35 @@ async function renderImages(editor) {
 
                     if (currentRenderVersion !== myVersion) return null;
 
+                    // ★ 增加渲染结果检测与降级重试机制
+                    let finalResult = previewResult;
+                    const isTextFilm = info?.type === "text_film";
+                    const isResultEmpty = !previewResult?.buffer || previewResult.buffer.length < 200; // WebP 头信息通常就占几十字节，如果太小肯定渲染失败了
+
+                    if (isTextFilm && isResultEmpty) {
+                        // 如果是文本胶片且渲染结果为空（透明相框），标记为极端乱码并强制重新生成（不带字体设置）
+                        info._isExtremeGarbled = true;
+                        // 强制绕过缓存，再次请求
+                        finalResult = await getPreviewBuffer(absPath, contentId + "_retry", previewWidth, previewHeight);
+                    }
+
+                    if (currentRenderVersion !== myVersion) return null;
+
                     const deco = { range: anchorRange, renderOptions: {} };
                     let contentUrl = "";
                     let webpDuration = 0;
                     let outputSize = null;
 
-                    if (previewResult?.buffer) {
+                    if (finalResult?.buffer) {
                         let mime = "image/webp";
-                        if (previewResult.isDirect) {
-                            mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
-                        } else if (previewResult.mimeType) {
-                            mime = previewResult.mimeType;
+                        if (finalResult.isDirect) {
+                            mime = finalResult.mimeType || mimeFromExt(finalResult.ext) || "image/webp";
+                        } else if (finalResult.mimeType) {
+                            mime = finalResult.mimeType;
                         }
-                        contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-                        webpDuration = previewResult.webpDuration || 0;
-                        outputSize = previewResult.outputSize;
+                        contentUrl = `url("data:${mime};base64,${finalResult.buffer.toString("base64")}")`;
+                        webpDuration = finalResult.webpDuration || 0;
+                        outputSize = finalResult.outputSize;
                     }
 
                     if (!contentUrl) return null;

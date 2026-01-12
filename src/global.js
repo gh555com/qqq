@@ -1081,8 +1081,13 @@ function setStatusBarMessage(text, hideAfterTimeout) {
 // ============================================================================
 const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
 const KEY_SESSION_START = "qqq_stats_session_start";
+const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush"; // ★ 上次持久化时的时间戳
 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
+
+// ★ 定期持久化定时器
+let _durationFlushTimer = null;
+const DURATION_FLUSH_INTERVAL = 60 * 1000; // 每60秒自动持久化一次
 
 // ============================================================================
 // ★ ConfigManager (Custom GlobalState Storage)
@@ -1249,20 +1254,96 @@ function getPersistentCacheStatsSnapshot() {
 }
 
 function initUserTracking(context) {
+	// ★ 恢复上次异常退出未保存的会话时间
+	const lastSessionStart = context.globalState.get(KEY_SESSION_START);
+	const lastFlushTime = context.globalState.get(KEY_LAST_FLUSH_TIME);
+
+	if (lastSessionStart && lastFlushTime && lastFlushTime > lastSessionStart) {
+		// 上次会话异常退出，恢复 lastFlushTime 到 现在 之间没有记录的时间
+		// 但只恢复到 lastFlushTime 为止（那之后的时间无法确定用户是否在使用）
+		const unrecordedSeconds = (lastFlushTime - lastSessionStart) / 1000;
+		const oldTotal = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+		// 检查是否已经累加过（避免重复累加）
+		const alreadyAdded = context.globalState.get("qqq_stats_pending_recovered");
+		if (!alreadyAdded && unrecordedSeconds > 0) {
+			context.globalState.update(KEY_TOTAL_DURATION, oldTotal + unrecordedSeconds);
+			logMessage(`[UserTracking] 恢复上次未保存的会话时间: ${unrecordedSeconds.toFixed(0)}秒`, "INFO");
+		}
+	} else if (lastSessionStart && !lastFlushTime) {
+		// 旧版本没有 lastFlushTime，按旧逻辑处理
+		const now = Date.now();
+		// 如果上次会话开始时间在合理范围内（比如48小时内），尝试恢复
+		const diffMs = now - lastSessionStart;
+		if (diffMs > 0 && diffMs < 48 * 60 * 60 * 1000) {
+			// 保守估计：假设用户使用了一半时间
+			// 但为了精确，我们不做任何假设，只记录日志
+			logMessage(`[UserTracking] 检测到上次会话未正常关闭，开始时间: ${new Date(lastSessionStart).toISOString()}`, "WARN");
+		}
+	}
+
+	// ★ 清除恢复标记并设置新的会话开始时间
+	context.globalState.update("qqq_stats_pending_recovered", undefined);
 	context.globalState.update(KEY_SESSION_START, Date.now());
+	context.globalState.update(KEY_LAST_FLUSH_TIME, Date.now());
+
 	_loadPersistentStats(context);
+
+	// ★ 启动定期持久化定时器
+	_startDurationFlushTimer();
+}
+
+// ★ 定期持久化累计时间（防止异常退出丢失数据）
+function _flushDurationToStorage() {
+	if (!extensionContext) return;
+
+	const start = extensionContext.globalState.get(KEY_SESSION_START);
+	const lastFlush = extensionContext.globalState.get(KEY_LAST_FLUSH_TIME) || start;
+	const now = Date.now();
+
+	if (start && lastFlush) {
+		// 计算自上次 flush 以来的增量时间
+		const incrementSeconds = (now - lastFlush) / 1000;
+		if (incrementSeconds > 0) {
+			const oldTotal = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+			extensionContext.globalState.update(KEY_TOTAL_DURATION, oldTotal + incrementSeconds);
+			extensionContext.globalState.update(KEY_LAST_FLUSH_TIME, now);
+		}
+	}
+}
+
+function _startDurationFlushTimer() {
+	if (_durationFlushTimer) return;
+
+	_durationFlushTimer = setInterval(() => {
+		try {
+			_flushDurationToStorage();
+		} catch (e) {
+			logMessage(`[UserTracking] 定期持久化失败: ${e.message}`, "WARN");
+		}
+	}, DURATION_FLUSH_INTERVAL);
+}
+
+function _stopDurationFlushTimer() {
+	if (_durationFlushTimer) {
+		clearInterval(_durationFlushTimer);
+		_durationFlushTimer = null;
+	}
 }
 
 function finishUserTracking() {
 	if (!extensionContext) return;
-	const start = extensionContext.globalState.get(KEY_SESSION_START);
-	if (start) {
-		const diff = (Date.now() - start) / 1000;
-		const old = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-		extensionContext.globalState.update(KEY_TOTAL_DURATION, old + (diff > 0 ? diff : 0));
-		extensionContext.globalState.update(KEY_SESSION_START, undefined);
-	}
-	// 强制刷新统计
+
+	// ★ 停止定时器
+	_stopDurationFlushTimer();
+
+	// ★ 最后一次持久化
+	_flushDurationToStorage();
+
+	// ★ 清除会话标记（表示正常退出）
+	extensionContext.globalState.update(KEY_SESSION_START, undefined);
+	extensionContext.globalState.update(KEY_LAST_FLUSH_TIME, undefined);
+
+	// 强制刷新缓存统计
 	if (_statsDirty) {
 		try {
 			extensionContext.globalState.update(KEY_CACHE_HIT_TOTAL, _cacheHitTotal);
@@ -1274,9 +1355,11 @@ function finishUserTracking() {
 function getTotalSecondsIncludingSession() {
 	if (!extensionContext) return 0;
 	const base = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-	const start = extensionContext.globalState.get(KEY_SESSION_START);
-	if (!start) return base;
-	const diff = (Date.now() - start) / 1000;
+	const lastFlush = extensionContext.globalState.get(KEY_LAST_FLUSH_TIME);
+
+	// ★ 计算自上次 flush 以来的未持久化时间
+	if (!lastFlush) return base;
+	const diff = (Date.now() - lastFlush) / 1000;
 	return base + (diff > 0 ? diff : 0);
 }
 
