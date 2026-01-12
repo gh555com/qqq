@@ -1153,6 +1153,13 @@ async function renderImages(editor) {
             const contentId = qqq.computeFingerprint(absPath);
             if (!contentId) continue;
 
+            // ★ 只有图片和视频才渲染相框
+            try {
+                const stat = fs.statSync(absPath);
+                if (stat.isDirectory()) continue;
+                if (!isImageOrVideoExt(path.extname(absPath))) continue;
+            } catch (e) { }
+
             tasks.push(async () => {
                 if (currentRenderVersion !== myVersion) return null;
 
@@ -1296,9 +1303,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
             const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
-            const isLastItem = i === folders.length - 1 && files.length === 0;
-            const gapBelow = calculateBlankLinesExact(LARGE_PREVIEW_HEIGHT, isLastItem);
-            replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+            // 文件夹不渲染相框，不留空行
+            replacement += `/\\${relPath}\\/${eol}`;
             invalidateFolderSizeCacheForPath(folderPath);
         }
 
@@ -1312,8 +1318,10 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
             if (fp) qqq.prefillFingerprint(f, fp);
 
             const relPath = qqq.toSafePath(path.relative(docDir, f));
-            let pxHeight = LARGE_PREVIEW_HEIGHT;
-            if (isImageOrVideoExt(path.extname(f))) {
+            let pxHeight = 0; // 默认不预留相框高度
+            const isMedia = isImageOrVideoExt(path.extname(f));
+            if (isMedia) {
+                pxHeight = LARGE_PREVIEW_HEIGHT;
                 try {
                     const info = await getMediaInfo(f, Date.now());
                     const { height } = getFrameConfig(info);
@@ -1323,8 +1331,12 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
             const isLastItem = i === files.length - 1 && folders.length === 0;
             if (i > 0 || folders.length > 0) replacement += eol;
             replacement += `/\\${relPath}\\/`;
-            const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
-            replacement += eol.repeat(gapBelow);
+            if (isMedia) {
+                const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
+                replacement += eol.repeat(gapBelow);
+            } else {
+                replacement += eol;
+            }
             invalidateFolderSizeCacheForPath(f);
         }
 
@@ -1334,9 +1346,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
             const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
-            const isLastItem = i === folders.length - 1;
-            const gapBelow = calculateBlankLinesExact(LARGE_PREVIEW_HEIGHT, isLastItem);
-            replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+            // 文件夹不渲染相框，不留空行
+            replacement += `/\\${relPath}\\/${eol}`;
             invalidateFolderSizeCacheForPath(folderPath);
         }
     } else if (result.type === "text") {

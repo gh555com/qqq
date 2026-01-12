@@ -200,6 +200,9 @@ class DaemonBridge {
 			this._setStartError(reason);
 			logMessage(`${this.name} ping 失败，已尝试 ${maxPingAttempts} 次`, "WARN");
 			this.available = false;
+			// ★ 关键修复：杀死僵尸进程并清理引用，允许热切换时重新启动
+			try { proc.kill(); } catch { }
+			this.process = null;
 			resolve(false);
 		};
 
