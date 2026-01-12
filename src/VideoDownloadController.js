@@ -450,6 +450,9 @@ function getSharedOutputChannel() {
 // ★ 活跃任务集合（用于避免多任务互相干扰）
 const _activeTasks = new Set();
 
+// ★ 弹窗兜底状态：记录消息弹窗是否被 VS Code “吃掉”（模块级变量，跨任务持久化）
+let _isInfoMessageEaten = false;
+
 class VideoDownloadController {
     constructor(context, qqqManager) {
         this.context = context;
@@ -1107,17 +1110,36 @@ class VideoDownloadController {
                 this.log(`准备下载 ${tasks.length} 个任务...`);
                 progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet) });
 
+                // ★ 精确匹配当前任务滴文件（而非前缀匹配，避免多任务互相干扰）
+                const activeFileNames = new Set();
+                tasks.forEach(t => {
+                    if (t.destPath) {
+                        const fullName = path.basename(t.destPath);  // 包含扩展名
+                        const nameNoExt = path.basename(t.destPath, path.extname(t.destPath));
+                        if (fullName) activeFileNames.add(fullName.toLowerCase());
+                        // ★ 也添加 yt-dlp 可能创建滴临时文件名模式
+                        if (nameNoExt) {
+                            activeFileNames.add((nameNoExt + '.mp4.part').toLowerCase());
+                            activeFileNames.add((nameNoExt + '.webm.part').toLowerCase());
+                            // yt-dlp 段格式: xxx.f123.mp4
+                            // 由于无法预知段 ID，使用前缀匹配但记录前缀
+                        }
+                    }
+                });
+                // ★ 保留前缀集合用于匹配 yt-dlp 段文件
                 const activePrefixes = new Set();
                 tasks.forEach(t => {
                     if (t.destPath) {
-                        const name = path.basename(t.destPath, path.extname(t.destPath));
-                        if (name) activePrefixes.add(name);
+                        const nameNoExt = path.basename(t.destPath, path.extname(t.destPath));
+                        if (nameNoExt) activePrefixes.add(nameNoExt.toLowerCase());
                     }
                 });
 
-                let diskTotalBytes = 0;
                 let logTotalBytes = 0;
                 const logProgressMap = new Map();
+                let useLogOnly = false;       // ★ 一旦 yt-dlp 有进度，就锁定只用它
+                let noProgressTicks = 0;      // ★ 无进度滴计时（每 tick 500ms）
+                const FALLBACK_TICKS = 4;     // ★ 2秒后才启用磁盘扫描兜底
 
                 let fileSizeTimer = null;
 
@@ -1138,26 +1160,49 @@ class VideoDownloadController {
                             return;
                         }
 
-                        let currentDiskBytes = 0;
-                        try {
-                            if (fs.existsSync(targetDir)) {
-                                const files = fs.readdirSync(targetDir);
-                                for (const f of files) {
-                                    for (const prefix of activePrefixes) {
-                                        if (f.startsWith(prefix)) {
-                                            try {
-                                                const s = fs.statSync(path.join(targetDir, f));
-                                                if (s.isFile()) currentDiskBytes += s.size;
-                                            } catch (e) { }
-                                            break;
+                        let finalBytes = 0;
+
+                        // ★ 策略：优先用 yt-dlp 回调进度（准确且隔离）
+                        if (logTotalBytes > 0) {
+                            useLogOnly = true;  // 锁定
+                            finalBytes = logTotalBytes;
+                        } else if (useLogOnly) {
+                            // ★ 已锁定但暂时为 0（可能在切换文件），继续用 log
+                            finalBytes = logTotalBytes;
+                        } else {
+                            // ★ yt-dlp 尚未报告进度，计时
+                            noProgressTicks++;
+                            if (noProgressTicks >= FALLBACK_TICKS) {
+                                // ★ 兜底：扫描磁盘（不准确但至少有显示）
+                                let diskBytes = 0;
+                                try {
+                                    if (fs.existsSync(targetDir)) {
+                                        const files = fs.readdirSync(targetDir);
+                                        for (const f of files) {
+                                            const fLower = f.toLowerCase();
+                                            if (activeFileNames.has(fLower)) {
+                                                try {
+                                                    const s = fs.statSync(path.join(targetDir, f));
+                                                    if (s.isFile()) diskBytes += s.size;
+                                                } catch (e) { }
+                                                continue;
+                                            }
+                                            for (const prefix of activePrefixes) {
+                                                if (fLower.startsWith(prefix + '.f') && /\.f\d+\.(mp4|webm|m4a|mkv|part)$/i.test(f)) {
+                                                    try {
+                                                        const s = fs.statSync(path.join(targetDir, f));
+                                                        if (s.isFile()) diskBytes += s.size;
+                                                    } catch (e) { }
+                                                    break;
+                                                }
+                                            }
                                         }
                                     }
-                                }
+                                } catch (e) { }
+                                finalBytes = diskBytes;
                             }
-                        } catch (e) { }
-                        diskTotalBytes = currentDiskBytes;
+                        }
 
-                        const finalBytes = Math.max(diskTotalBytes, logTotalBytes);
                         const totalStr = this._formatBytesSimple(finalBytes);
                         progress.report({ message: VideoMsg.progress(task, totalStr, urlSnippet) });
                     }, 500);
@@ -1558,21 +1603,37 @@ class VideoDownloadController {
             // ★ 此处无需长时间等待，因为外部已结束 withProgress
             await this._sleep(100);
 
+            // ★ 如果当前没有其他活跃下载任务，重置“弹窗被吃掉”滴状态，以保证优先尝试 Q 弹窗
+            if (_activeTasks.size <= 1) {
+                if (_isInfoMessageEaten) {
+                    this.log(`[增强] 检测到环境已恢复正常（活跃任务数: ${_activeTasks.size}），重置弹窗判断状态。`);
+                    _isInfoMessageEaten = false;
+                }
+            }
+
             const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
 
-            // ★ 非模态弹窗（右下角）
-            const startTime = Date.now();
-            let selection = await vscode.window.showInformationMessage(
-                `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
-                { modal: false },
-                "🚀启动增强流程",
-                "选择类似 chrome.exe 滴浏览器入口文件"
-            );
-            const elapsed = Date.now() - startTime;
+            // ★ 如果之前已知弹窗会被吃掉且任务较多，直接走 QuickPick 流程
+            let selection = undefined;
+            let elapsed = 9999;
+
+            if (!_isInfoMessageEaten) {
+                const startTime = Date.now();
+                selection = await vscode.window.showInformationMessage(
+                    `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`,
+                    { modal: false },
+                    "🚀启动增强流程",
+                    "选择类似 chrome.exe 滴浏览器入口文件"
+                );
+                elapsed = Date.now() - startTime;
+            } else {
+                this.log(`[增强] 处于弹窗被吃掉模式，跳过 InformationMessage 直接尝试兜底逻辑...`);
+            }
 
             // ★ 如果被立即关闭（< 500ms 且 undefined），用 QuickPick 兆底
             if (selection === undefined && elapsed < 500) {
-                this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
+                this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，记录状态并改用下拉选择...`);
+                _isInfoMessageEaten = true;
 
                 if (this._isTaskCancelled(task)) return null;
 
@@ -2137,17 +2198,35 @@ $of = $vi.OriginalFilename;
         return out.map(x => x.path);
     }
 
-    _scanRecentBytes(targetDir, sinceMs) {
+    /**
+     * ★ 获取目录中当前文件列表（用于排除已有文件）
+     */
+    _getExistingFileSet(targetDir) {
+        const set = new Set();
+        try {
+            if (fs.existsSync(targetDir)) {
+                const files = fs.readdirSync(targetDir);
+                for (const f of files) set.add(f.toLowerCase());
+            }
+        } catch (e) { }
+        return set;
+    }
+
+    /**
+     * ★ 扫描新增文件大小（排除任务开始前已存在滴文件，避免多任务互相干扰）
+     */
+    _scanNewBytes(targetDir, existingFiles) {
         let total = 0;
         try {
             if (!fs.existsSync(targetDir)) return 0;
             const files = fs.readdirSync(targetDir);
             for (const f of files) {
+                // ★ 只计算任务开始后新增滴文件
+                if (existingFiles.has(f.toLowerCase())) continue;
                 const full = path.join(targetDir, f);
                 try {
                     const s = fs.statSync(full);
-                    if (!s.isFile()) continue;
-                    if (s.mtimeMs >= sinceMs) total += s.size;
+                    if (s.isFile()) total += s.size;
                 } catch (e) { }
             }
         } catch (e) { }
@@ -2157,6 +2236,8 @@ $of = $vi.OriginalFilename;
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
+        // ★ 记录任务开始前已存在滴文件，避免多任务互相干扰
+        const existingFiles = this._getExistingFileSet(targetDir);
 
         const out = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -2189,7 +2270,8 @@ $of = $vi.OriginalFilename;
                         } catch (e) { }
                     }
 
-                    const bytes = this._scanRecentBytes(targetDir, startMs);
+                    // ★ 使用新增文件扫描，避免多任务互相干扰
+                    const bytes = this._scanNewBytes(targetDir, existingFiles);
                     progress.report({ message: VideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
                 }, 500);
 
@@ -2290,14 +2372,29 @@ $of = $vi.OriginalFilename;
                 }
             }, 500);
 
+            // ★ 如果当前没有其他活跃下载任务，重置“弹窗被吃掉”滴状态
+            if (_activeTasks.size <= 1) {
+                if (_isInfoMessageEaten) {
+                    this.log(`[增强] 嘗探阶段检测到环境已恢复正常，重置弹窗判断状态。`);
+                    _isInfoMessageEaten = false;
+                }
+            }
+
             // ★ 先尝试模态弹窗（Windows 级别，阻止其他操作，不会自动消失）
-            const startTime = Date.now();
-            let selection = await vscode.window.showInformationMessage(
-                VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。'),
-                { modal: true },
-                "我已在外部播放"
-            );
-            const elapsed = Date.now() - startTime;
+            let selection = undefined;
+            let elapsed = 9999;
+
+            if (!_isInfoMessageEaten) {
+                const startTime = Date.now();
+                selection = await vscode.window.showInformationMessage(
+                    VideoMsg.prompt(task, '请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。'),
+                    { modal: true },
+                    "我已在外部播放"
+                );
+                elapsed = Date.now() - startTime;
+            } else {
+                this.log(`[增强] 嘗探阶段处于弹窗被吃掉模式，跳过 InformationMessage 直接尝试兜底逻辑...`);
+            }
 
             // ★ 停止锚点检查定时器
             if (anchorCheckTimer) {
@@ -2315,7 +2412,8 @@ $of = $vi.OriginalFilename;
 
             // ★ 如果被立即关闭，用 QuickPick 兆底
             if (selection === undefined && elapsed < 500) {
-                this.log(`[增强] 嘗探确认弹窗被异常关闭 (${elapsed}ms)，改用下拉选择...`);
+                this.log(`[增强] 嘗探确认弹窗被异常关闭 (${elapsed}ms)，记录状态并改用下拉选择...`);
+                _isInfoMessageEaten = true;
 
                 if (this._isTaskCancelled(task)) {
                     try { await sniffer.stop(); } catch (e) { }

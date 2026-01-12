@@ -846,7 +846,7 @@ async function activate(context) {
 					const currentStored = global.ConfigManager.get(key);
 					if (val !== currentStored) {
 						global.setConfig(key, val).then(() => {
-							if (key === "ioEngine" || key === "pythonPath") {
+							if (key === "ioEngine") {
 								global.logMessage(`配置变更 (${key})，重启守护进程...`, "INFO");
 								startDaemons();
 							}
