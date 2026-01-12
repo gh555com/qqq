@@ -228,6 +228,16 @@ Copying 10,000+ small files (e.g., `node_modules`):
 ---
 
 
+ (end)
+
+
+
+
+
+
+
+
+
 
 
 
@@ -236,9 +246,26 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # IO 引擎多维度量化打分
 
-## 概述
+## 概要
 
 本项目包含三种 IO 处理引擎，各有优劣。本文档从 **12 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎滴适用场景。
 
@@ -253,7 +280,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-## 一、综合评分总表
+## 1. Overall Score Summary
 
 | 维度 | Python | Rust | Node Shell | 权重 | 说明 |
 |:-----|:------:|:----:|:----------:|:----:|:-----|
@@ -270,7 +297,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | 11. 开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
 | 12. 跨平台能力 | 7 | 8 | 6 | ★☆☆ | Win/Mac/Linux 支持程度 |
 
-### 加权总分
+### Weighted Total Scores
 
 | 引擎 | 原始总分 | 加权总分 | 推荐场景 |
 |:-----|:--------:|:--------:|:---------|
@@ -282,9 +309,9 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-## 二、分维度详细分析
+## 2. Detailed Analysis by Dimension
 
-### 1. 冷启动速度 (Cold Start)
+### 1. Cold Start Speed
 
 | 引擎 | 得分 | 典型耗时 | 瓶颈 |
 |:-----|:----:|:--------:|:-----|
@@ -292,11 +319,11 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | Rust | 9 | 50-150ms | 几乎无开销 |
 | Node Shell | 5 | 1000-2000ms | PowerShell CLR 加载 |
 
-**结论**：Rust 冷启动最快，Python/Shell 受限于运行时初始化。
+**Conclusion:** Rust 冷启动最快，Python/Shell 受限于运行时初始化。
 
 ---
 
-### 2. 热响应延迟 (Hot Response)
+### 2. Hot Response Latency
 
 Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 
@@ -306,11 +333,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 10 | 1-5ms | 极低开销 |
 | Node Shell | 7 | 10-50ms | PowerShell 命令解析开销 |
 
-**结论**：Rust 响应最快，Python 次之，Shell 因 cmdlet 解析较慢。
+**Conclusion:** Rust 响应最快，Python 次之，Shell 因 cmdlet 解析较慢。
 
 ---
 
-### 3. 内存占用 (Memory Footprint)
+### 3. Memory Footprint
 
 | 引擎 | 得分 | 常驻内存 | 说明 |
 |:-----|:----:|:--------:|:-----|
@@ -318,11 +345,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 10 | 2-8MB | 静态编译，极简 |
 | Node Shell | 4 | 40-100MB | PowerShell CLR 开销大 |
 
-**结论**：Rust 内存最省，适合低配设备或常驻监听场景。
+**Conclusion:** Rust 内存最省，适合低配设备或常驻监听场景。
 
 ---
 
-### 4. CPU 效率 (CPU Efficiency)
+### 4. CPU Efficiency
 
 批量文件操作时 CPU 占用率：
 
@@ -332,11 +359,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 10 | 5-15% | Rayon 并行，零 GC |
 | Node Shell | 5 | 20-40% | cmdlet 串行，效率低 |
 
-**结论**：Rust CPU 效率最高，Python 受 GIL 限制但可接受。
+**Conclusion:** Rust CPU 效率最高，Python 受 GIL 限制但可接受。
 
 ---
 
-### 5. 剪贴板 - 透明图处理 (DIBv5 Alpha)
+### 5. Clipboard – Transparent Image Handling (DIBv5 Alpha)
 
 **这是选择引擎滴关键维度！**
 
@@ -346,17 +373,17 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | **10** | 完美还原 | Win32 API 直接调用 |
 | Node Shell | 3 | Alpha 丢失 | GDI+ 滴已知缺陷，背景变黑 |
 
-**技术原因**：
-- Chrome/Edge 复制带透明通道滴图片时，放入 `CF_DIBV5` 格式
-- PowerShell 滴 `[Clipboard]::GetImage()` 底层依赖 GDI+
-- GDI+ 处理 DIBv5 时存在 **预乘 Alpha 错误**，导致透明背景变黑
-- Python/Rust 可以直接读取原始内存块，绕过 GDI+ 缺陷
+**Technical Reasons:**
+* Chrome/Edge 复制带透明通道滴图片时，放入 `CF_DIBV5` 格式
+* PowerShell 滴 `[Clipboard]::GetImage()` 底层依赖 GDI+
+* GDI+ 处理 DIBv5 时存在 **预乘 Alpha 错误**，导致透明背景变黑
+* Python/Rust 可以直接读取原始内存块，绕过 GDI+ 缺陷
 
-**结论**：处理透明图必须使用 Python 或 Rust。
+**Conclusion:** 处理透明图必须使用 Python 或 Rust.
 
 ---
 
-### 6. 剪贴板 - 文件读取 (CF_HDROP)
+### 6. Clipboard – File Drop List (CF_HDROP)
 
 | 引擎 | 得分 | 能力 | 说明 |
 |:-----|:----:|:-----|:-----|
@@ -364,11 +391,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 9 | 完整支持 | Win32 API |
 | Node Shell | 8 | 完整支持 | `[Clipboard]::GetFileDropList()` |
 
-**结论**：三者都能正确读取文件列表，差异不大。
+**Conclusion:** 三者都能正确读取文件列表，差异不大。
 
 ---
 
-### 7. 剪贴板 - HTML 内容 (HTML Format)
+### 7. Clipboard – HTML Content (HTML Format)
 
 | 引擎 | 得分 | 能力 | 说明 |
 |:-----|:----:|:-----|:-----|
@@ -376,11 +403,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 8 | 完整支持 | 需处理编码 |
 | Node Shell | 7 | 基本支持 | Stream 转换有时出问题 |
 
-**结论**：Python 对 HTML Format 滴处理最稳定。
+**Conclusion:** Python 对 HTML Format 滴处理最稳定。
 
 ---
 
-### 8. 文件批量复制 (Bulk File Copy)
+### 8. Bulk File Copy (Large-Scale)
 
 复制 10,000+ 小文件（如 node_modules）：
 
@@ -390,11 +417,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | **10** | 极快 | Rayon 数据并行 |
 | Node Shell | 5 | 较慢 | `Copy-Item` 串行 |
 
-**结论**：Rust 在大规模文件操作时优势明显。
+**Conclusion:** Rust 在大规模文件操作时优势明显。
 
 ---
 
-### 9. 系统兼容性 (Compatibility)
+### 9. System Compatibility
 
 | 引擎 | 得分 | 依赖 | 说明 |
 |:-----|:----:|:-----|:-----|
@@ -402,11 +429,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 7 | 需分发二进制 | 不同平台需不同编译 |
 | Node Shell | **10** | 无额外依赖 | PowerShell 系统内置 |
 
-**结论**：Node Shell 兼容性最好，开箱即用。
+**Conclusion:** Node Shell 兼容性最好，开箱即用。
 
 ---
 
-### 10. 稳定性 (Stability)
+### 10. Stability
 
 | 引擎 | 得分 | 崩溃率 | 说明 |
 |:-----|:----:|:------:|:-----|
@@ -414,11 +441,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 9 | 极低 | 内存安全，无 GC 暂停 |
 | Node Shell | 9 | 极低 | 成熟稳定 |
 
-**结论**：三者都比较稳定，Rust 略占优。
+**Conclusion:** 三者都比较稳定，Rust 略占优。
 
 ---
 
-### 11. 开发维护成本 (Maintainability)
+### 11. Development & Maintenance Cost
 
 | 引擎 | 得分 | 代码量 | 迭代效率 |
 |:-----|:----:|:------:|:---------|
@@ -426,11 +453,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 5 | ~1500行 | 低，编译慢，类型严格 |
 | Node Shell | 7 | ~300行 | 中等，PS 语法怪异 |
 
-**结论**：Python 开发效率最高，Rust 门槛最高。
+**Conclusion:** Python 开发效率最高，Rust 门槛最高。
 
 ---
 
-### 12. 跨平台能力 (Cross-Platform)
+### 12. Cross-Platform Capability
 
 | 引擎 | 得分 | Windows | macOS | Linux |
 |:-----|:----:|:-------:|:-----:|:-----:|
@@ -438,11 +465,11 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | Rust | 8 | ★★★ | ★★★ | ★★★ |
 | Node Shell | 6 | ★★★ | ★☆☆ | ★☆☆ |
 
-**结论**：Rust 跨平台最佳，Node Shell 在非 Windows 上功能受限。
+**Conclusion:** Rust 跨平台最佳，Node Shell 在非 Windows 上功能受限。
 
 ---
 
-## 三、场景推荐矩阵
+## 3. Scenario Recommendation Matrix
 
 | 使用场景 | 推荐引擎 | 原因 |
 |:---------|:--------:|:-----|
@@ -454,3 +481,18 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 | 离线环境/无 Python | **Node Shell** | 系统内置，无需安装 |
 
 ---
+
+
+ (end)
+
+
+
+
+
+
+
+
+
+
+
+
