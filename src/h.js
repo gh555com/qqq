@@ -637,6 +637,49 @@ function _isResultQualityAcceptable(blocks) {
 }
 
 // ============================================================================
+// Markdown Format Detection
+// 检测纯文本是否包含 Markdown 格式符号，用于决定是否优先保留纯文本而非 HTML
+// ============================================================================
+function _looksLikeMarkdown(text) {
+    if (!text || text.length < 3) return false;
+
+    // Markdown 格式符号模式
+    const markdownPatterns = [
+        /^#{1,6}\s+\S/m,                    // 标题: # ## ### 等
+        /^\s*[-*+]\s+\S/m,                  // 无序列表: - * +
+        /^\s*\d+\.\s+\S/m,                  // 有序列表: 1. 2. 3.
+        /^\s*>\s+\S/m,                      // 引用: >
+        /^---\s*$/m,                         // 分隔线: ---
+        /^\*\*\*\s*$/m,                      // 分隔线: ***
+        /^___\s*$/m,                         // 分隔线: ___
+        /\*\*[^*]+\*\*/,                     // 粗体: **text**
+        /\*[^*]+\*/,                         // 斜体: *text* (注意排除列表)
+        /`[^`]+`/,                           // 行内代码: `code`
+        /^```/m,                             // 代码块: ```
+        /\[([^\]]+)\]\(([^)]+)\)/,          // 链接: [text](url)
+        /!\[([^\]]*)\]\(([^)]+)\)/,         // 图片: ![alt](url)
+    ];
+
+    // 统计匹配到的模式数量
+    let matchCount = 0;
+    for (const pattern of markdownPatterns) {
+        if (pattern.test(text)) {
+            matchCount++;
+            // 如果匹配到了明确的 Markdown 标记（标题、分隔线、代码块），直接返回 true
+            if (/^#{1,6}\s+\S/m.test(text) ||      // 标题
+                /^---\s*$/m.test(text) ||          // 分隔线
+                /^\*\*\*\s*$/m.test(text) ||       // 分隔线
+                /^```/m.test(text)) {               // 代码块
+                return true;
+            }
+        }
+    }
+
+    // 如果匹配到 2 个以上模式，认为是 Markdown
+    return matchCount >= 2;
+}
+
+// ============================================================================
 // Core HTML Logic (The "Eyes" & "Hands")
 // ============================================================================
 async function _getSmartHtmlFromClipboard(progressCallback, token) {
@@ -2084,6 +2127,35 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
         // ★ 传递预获取滴文件列表，避免重复调用 getFiles
         return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel);
+    }
+
+    // ★★★ Markdown 格式保留检测 ★★★
+    // 当 hasHtml 和 hasText 同时存在时，检测纯文本是否包含 Markdown 格式符号
+    // 如果是 Markdown 文本且 HTML 中没有媒体资源，则优先使用纯文本
+    if (qStatus.hasHtml && qStatus.hasText) {
+        try {
+            const plainText = await vscode.env.clipboard.readText();
+            if (plainText && _looksLikeMarkdown(plainText)) {
+                // 检查 HTML 是否有媒体资源
+                const htmlResult = await _getSmartHtmlFromClipboard(null, token);
+                if (htmlResult && htmlResult.$) {
+                    const $ = htmlResult.$;
+                    const hasMedia = $('img, video, iframe, embed, object, picture, source[type^="video"]').length > 0;
+                    if (!hasMedia) {
+                        log(`[AutoDetect] 检测到 Markdown 格式纯文本，且 HTML 无媒体资源，优先使用纯文本`, "INFO");
+                        return { type: "text", text: plainText };
+                    } else {
+                        log(`[AutoDetect] 检测到 Markdown 格式，但 HTML 包含媒体资源，继续 HTML 处理`, "INFO");
+                    }
+                } else {
+                    // HTML 解析失败，直接使用纯文本
+                    log(`[AutoDetect] HTML 解析失败，使用 Markdown 纯文本`, "INFO");
+                    return { type: "text", text: plainText };
+                }
+            }
+        } catch (e) {
+            log(`[AutoDetect] Markdown 检测失败: ${e.message}`, "WARN");
+        }
     }
 
     if (qStatus.hasHtml) {
