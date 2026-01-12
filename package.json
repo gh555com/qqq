@@ -57,10 +57,10 @@
             "markdownEnumDescriptions": [
               "自动选择最佳引擎",
               "Python 引擎",
-              "Rust 引擎",
+              "Rust 引擎（ gh555.com 官方版滴版本号要 ≥ 16.0.0 才支持 Rust 引擎）",
               "Node 引擎"
             ],
-            "markdownDescription": "☀️ 选择 IO 引擎：控制使用哪种引擎处理剪贴板和文件操作。"
+            "markdownDescription": "☀️ IO 引擎，取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md"
           },
           "qqq.transactionLevel": {
             "order": 40,
@@ -142,7 +142,7 @@
               "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
               "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。"
             ],
-            "markdownDescription": "🍌 如果下载视频失败，可以在此尝试更宽松滴策略。具体取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
+            "markdownDescription": "🍌 如果下载视频失败，可以在此尝试更宽松滴策略。取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
           },
           "qqq.forceTextFlowScheme": {
             "order": 20,
