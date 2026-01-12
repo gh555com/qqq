@@ -44,6 +44,7 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
     ".ico",
 ]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
+const TEXT_FILM_MAX_SIZE = 50 * 1024 * 1024; // ★ 文本胶片预览滴最大文件限制
 
 const IMAGE_EXTS = new Set([
     ".png",
@@ -611,11 +612,45 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
     let vf = scaleFilter;
 
     if (info?.type === "text_film") {
-        // ★ 文本预览特殊逻辑：3 帧，每帧停留 1 秒
-        // 我们通过读取文本流的前部内容，抽取出 3 张图
-        args.push("-f", "tty", "-i", filePath);
-        // 使用 fps=1 确保每帧 1 秒，-frames:v 3 确保只取 3 帧
-        vf = `[0:v]fps=1,${scaleFilter},pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2[out_v]`;
+        // ★ 文本预览特殊逻辑：像素风格 + Courier New
+        const fontPath = "C\\:/Windows/Fonts/cour.ttf";
+        let textContent = "";
+        try {
+            const rawText = fs.readFileSync(filePath, 'utf8').slice(0, 2000);
+            // 简单的自动换行逻辑 (按宽度估算)
+            let currentLineLen = 0;
+            for (let i = 0; i < rawText.length; i++) {
+                const char = rawText[i];
+                const charCode = rawText.charCodeAt(i);
+                const isFullWidth = charCode > 255;
+                const charLen = isFullWidth ? 2 : 1;
+
+                if (char === '\n') {
+                    textContent += '\n';
+                    currentLineLen = 0;
+                } else {
+                    if (currentLineLen + charLen > 60) {
+                        textContent += '\n';
+                        currentLineLen = 0;
+                    }
+                    textContent += char;
+                    currentLineLen += charLen;
+                }
+            }
+
+            // 简单逃逸 drawtext 需要滴字符
+            textContent = textContent
+                .replace(/\\/g, "/")
+                .replace(/'/g, "")
+                .replace(/:/g, "\\:")
+                .replace(/%/g, "%%");
+        } catch (e) {
+            textContent = "Read Error";
+        }
+
+        const pixelScaleFilter = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=neighbor,format=yuva420p`;
+        args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=3`);
+        vf = `drawtext=fontfile='${fontPath}':text='${textContent}':fontcolor=white:fontsize=12:line_spacing=4:x=10:y=10:text_shaping=0,${pixelScaleFilter},pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2[out_v]`;
         args.push("-frames:v", "3");
         expectedWebPDuration = 3;
     } else if (performanceMode === "extreme") {
@@ -1030,7 +1065,7 @@ function isTextFile(filePath) {
         const stat = fs.statSync(filePath);
         if (!stat.isFile()) return false;
         if (stat.size === 0) return false;
-        if (stat.size > 10 * 1024 * 1024) return false; // 超过 10MB 就不当纯文本预览了
+        if (stat.size > TEXT_FILM_MAX_SIZE) return false; // 超过限制就不当纯文本预览了
 
         const buffer = Buffer.alloc(4096);
         const fd = fs.openSync(filePath, 'r');
@@ -1250,7 +1285,7 @@ async function renderImages(editor) {
                     const boxHeight = previewHeight + PREVIEW_BORDER;
 
                     let progressBarUrl = null;
-                    if (webpDuration > 0.1)
+                    if (webpDuration > 0.1 && performanceMode === "optmum")
                         progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
 
                     deco.renderOptions.after = buildAfterStyle({
