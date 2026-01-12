@@ -653,10 +653,10 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
 
         let textContent = "";
         try {
-            // ★ 优化提取逻辑：只读取前 8KB 字节，并甄别处理乱码
+            // ★ 优化提取逻辑：只读取前 1KB 字节，并甄别处理乱码
             const fd = fs.openSync(filePath, 'r');
-            const readBuffer = Buffer.alloc(8192); // 8KB 足够容纳 2000+ 字符
-            const bytesRead = fs.readSync(fd, readBuffer, 0, 8192, 0);
+            const readBuffer = Buffer.alloc(1192);
+            const bytesRead = fs.readSync(fd, readBuffer, 0, 1192, 0);
             fs.closeSync(fd);
 
             // 使用 utf8 解码，并初步处理末尾可能截断的字符
@@ -688,8 +688,12 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
                 info._isExtremeGarbled = true;
             }
 
-            // 简单的自动换行逻辑 (按宽度估算)
+            // 改进的自动换行逻辑：更高效地处理超长行，避免性能问题
             let currentLineLen = 0;
+            let lineStartIndex = 0;
+            const MAX_LINE_WIDTH = 60;
+
+            // 分段处理文本，避免一次性处理过长的字符串
             for (let i = 0; i < rawText.length; i++) {
                 const char = rawText[i];
                 const charCode = rawText.charCodeAt(i);
@@ -697,16 +701,25 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
                 const charLen = isFullWidth ? 2 : 1;
 
                 if (char === '\n') {
-                    textContent += '\n';
+                    // 处理完整行
+                    textContent += rawText.substring(lineStartIndex, i + 1);
+                    lineStartIndex = i + 1;
                     currentLineLen = 0;
                 } else {
-                    if (currentLineLen + charLen > 60) {
-                        textContent += '\n';
-                        currentLineLen = 0;
+                    if (currentLineLen + charLen > MAX_LINE_WIDTH) {
+                        // 插入换行符并处理当前行
+                        textContent += rawText.substring(lineStartIndex, i) + '\n';
+                        lineStartIndex = i;
+                        currentLineLen = charLen;
+                    } else {
+                        currentLineLen += charLen;
                     }
-                    textContent += char;
-                    currentLineLen += charLen;
                 }
+            }
+
+            // 处理剩余的文本
+            if (lineStartIndex < rawText.length) {
+                textContent += rawText.substring(lineStartIndex);
             }
 
             // 逃逸 drawtext 需要的字符
