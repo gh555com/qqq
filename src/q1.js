@@ -324,6 +324,11 @@ function getFrameConfig(info) {
     let width = LARGE_PREVIEW_WIDTH;
     let height = LARGE_PREVIEW_HEIGHT;
 
+    // 文本预览固定使用大分辨率
+    if (info?.type === "text_film") {
+        return { mode, width: 512, height: 288 };
+    }
+
     if (!info || !info.width || !info.height) {
         if (frameSizeMode === "small") {
             mode = "small";
@@ -467,7 +472,18 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
                 } else if (IMAGE_EXTS.has(ext)) {
                     info.type = "image";
                     info.isStaticImage = true;
+                } else if (isTextFile(filePath)) {
+                    info.type = "text_film";
+                    info.width = 512;
+                    info.height = 288;
                 }
+            }
+
+            // 特殊处理：如果 ffmpeg 识别出了 tty/bintext 等 codec，也视为 text_film
+            if (info.codec && (info.codec.includes("tty") || info.codec.includes("bintext") || info.codec.includes("ansi"))) {
+                info.type = "text_film";
+                info.width = 512;
+                info.height = 288;
             }
 
             if (!info.width && [".ai", ".eps", ".psd", ".cdr"].includes(ext)) {
@@ -548,7 +564,7 @@ function determineCacheStrategy(filePath, info) {
     if (performanceMode === "accelerated" || performanceMode === "extreme") qualityLevel = 47;
 
     let isAnimatedOutput = false;
-    const isVideoOrGif = !isStaticSource && (info?.type === "video" || info?.type === "animated_image");
+    const isVideoOrGif = !isStaticSource && (info?.type === "video" || info?.type === "animated_image" || info?.type === "text_film");
     if (isVideoOrGif) {
         if (performanceMode === "extreme") isAnimatedOutput = false;
         else isAnimatedOutput = true;
@@ -566,7 +582,7 @@ function determineCacheStrategy(filePath, info) {
     };
 }
 
-function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnimatedOutput) {
+function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnimatedOutput, info) {
     let targetW = CACHE_BASE_WIDTH;
     let targetH = CACHE_BASE_HEIGHT;
 
@@ -594,7 +610,15 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
         `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
     let vf = scaleFilter;
 
-    if (performanceMode === "extreme") {
+    if (info?.type === "text_film") {
+        // ★ 文本预览特殊逻辑：3 帧，每帧停留 1 秒
+        // 我们通过读取文本流的前部内容，抽取出 3 张图
+        args.push("-f", "tty", "-i", filePath);
+        // 使用 fps=1 确保每帧 1 秒，-frames:v 3 确保只取 3 帧
+        vf = `[0:v]fps=1,${scaleFilter},pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2[out_v]`;
+        args.push("-frames:v", "3");
+        expectedWebPDuration = 3;
+    } else if (performanceMode === "extreme") {
         args.push("-ss", "0", "-i", filePath);
         vf = `[0:v]${scaleFilter}[out_v]`;
         args.push("-frames:v", "1");
@@ -890,7 +914,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         origSize,
         originalDuration,
         cacheStrategy.qualityLevel,
-        cacheStrategy.isAnimatedOutput
+        cacheStrategy.isAnimatedOutput,
+        info
     );
 
     const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
@@ -997,6 +1022,34 @@ function formatDuration(sec) {
 function isImageOrVideoExt(ext) {
     const e = ext.toLowerCase();
     return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e);
+}
+
+function isTextFile(filePath) {
+    try {
+        if (!fs.existsSync(filePath)) return false;
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile()) return false;
+        if (stat.size === 0) return false;
+        if (stat.size > 10 * 1024 * 1024) return false; // 超过 10MB 就不当纯文本预览了
+
+        const buffer = Buffer.alloc(4096);
+        const fd = fs.openSync(filePath, 'r');
+        const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
+        fs.closeSync(fd);
+
+        for (let i = 0; i < bytesRead; i++) {
+            if (buffer[i] === 0) return false; // 含有空字符，判定为二进制
+        }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function isSupportedMedia(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (isImageOrVideoExt(ext)) return true;
+    return isTextFile(filePath);
 }
 
 function getDocumentEOL(doc) {
@@ -1153,11 +1206,11 @@ async function renderImages(editor) {
             const contentId = qqq.computeFingerprint(absPath);
             if (!contentId) continue;
 
-            // ★ 只有图片和视频才渲染相框
+            // ★ 只有图片、视频和特定的文本文件才渲染相框
             try {
                 const stat = fs.statSync(absPath);
                 if (stat.isDirectory()) continue;
-                if (!isImageOrVideoExt(path.extname(absPath))) continue;
+                if (!isSupportedMedia(absPath)) continue;
             } catch (e) { }
 
             tasks.push(async () => {
@@ -1319,7 +1372,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 
             const relPath = qqq.toSafePath(path.relative(docDir, f));
             let pxHeight = 0; // 默认不预留相框高度
-            const isMedia = isImageOrVideoExt(path.extname(f));
+            const isMedia = isSupportedMedia(f);
             if (isMedia) {
                 pxHeight = LARGE_PREVIEW_HEIGHT;
                 try {
