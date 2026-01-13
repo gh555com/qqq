@@ -1,0 +1,53 @@
+ 
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    『的梦作品，极净丝滑』 『的梦项目指纹：q9q2025q0』 『所有功能：1、按 a 快退5秒，按 s 快进5秒。2、以上两个按键支持按住，以实现快进快退。3、按键时显示媒体进度』 『所有入侵界面： 固定在网页左上角显示一个 rewind 5s 滴标志按钮』 『所有可选项：1、不显示标志按钮。2、为防止冲突，需先按下 alt 键』 『特性，经验证，它几乎支持所有网站：b 站、p 站、YouTube......，甚至spotify 视频。
+
+
+
+
+
+
+
+
+  set shell = wscript.createobject("wscript.shell")
+
+i = 1
+while i <= 16  
+    shell.run "c:\n3\vmware.exe -n c:\k\" & i & "\" &  "2a.vmx"
+    wscript.sleep 13000 
+    i = i + 1
+wend 
+
+
+
+
+
+
+
+
+ 
