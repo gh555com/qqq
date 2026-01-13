@@ -205,6 +205,71 @@ function saveCacheMeta() {
 	});
 }
 
+function isValidWebPBuffer(buffer) {
+	if (!buffer || buffer.length < 12) return false;
+	// Check for RIFF header and WEBP signature
+	const isWebP = buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP";
+	if (!isWebP) return false;
+
+	// Basic sanity check: file size shouldn't be suspiciously small for a WebP
+	// (Except for very small icons, but even then < 64 bytes is suspicious)
+	if (buffer.length < 64) return false;
+
+	return true;
+}
+
+/**
+ * Using ffprobe to verify if a file is a valid media file and get its resolution.
+ * This is the "professional tool" approach mentioned by the user.
+ */
+async function verifyMediaFile(filePath) {
+	if (!ffprobePath || !fs.existsSync(filePath)) return null;
+
+	return new Promise((resolve) => {
+		const args = [
+			"-v", "error",
+			"-select_streams", "v:0",
+			"-show_entries", "stream=width,height,duration",
+			"-of", "json",
+			filePath
+		];
+
+		const child = cp.spawn(ffprobePath, args, { windowsHide: true });
+		let stdout = "";
+		child.stdout.on("data", (data) => { stdout += data; });
+		child.on("close", (code) => {
+			if (code !== 0) {
+				resolve(null);
+				return;
+			}
+			try {
+				const data = JSON.parse(stdout);
+				if (data.streams && data.streams[0]) {
+					const s = data.streams[0];
+					if (s.width > 0 && s.height > 0) {
+						resolve({
+							width: parseInt(s.width),
+							height: parseInt(s.height),
+							duration: parseFloat(s.duration) || 0
+						});
+						return;
+					}
+				}
+				resolve(null);
+			} catch (e) {
+				resolve(null);
+			}
+		});
+		child.on("error", () => resolve(null));
+
+		// Timeout after 5 seconds for ffprobe
+		setTimeout(() => {
+			try { child.kill(); } catch (e) { }
+			resolve(null);
+		}, 5000);
+	});
+}
+
 function validateCache() {
 	if (!cacheDir || !cacheMeta) return;
 
@@ -425,11 +490,18 @@ function getCachedBuffer(contentId, quality) {
 
 	try {
 		if (fs.existsSync(filePath)) {
-			entry.atime = Date.now();
-			cacheMeta.stats.hitCount++;
-			global.markCacheHit();
-			updateStatusBarNow();
-			return fs.readFileSync(filePath);
+			const buffer = fs.readFileSync(filePath);
+			if (isValidWebPBuffer(buffer)) {
+				entry.atime = Date.now();
+				cacheMeta.stats.hitCount++;
+				global.markCacheHit();
+				updateStatusBarNow();
+				return buffer;
+			} else {
+				// Corrupted cache file
+				global.logMessage(`Cache file corrupted: ${fileName}`, "WARN");
+				fs.unlinkSync(filePath);
+			}
 		}
 	} catch (e) { }
 
@@ -478,6 +550,23 @@ function findSourceFile(fingerprint) {
 // ============================================================================
 // Clipboard Logic (Delegated to h.js)
 // ============================================================================
+
+function isBrokenFile(contentId) {
+	return !!cacheMeta?.brokenFiles?.[contentId];
+}
+
+function markFileAsBroken(contentId) {
+	if (!cacheMeta) return;
+	if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+	cacheMeta.brokenFiles[contentId] = Date.now();
+	saveCacheMeta();
+}
+
+function unmarkFileAsBroken(contentId) {
+	if (!cacheMeta?.brokenFiles?.[contentId]) return;
+	delete cacheMeta.brokenFiles[contentId];
+	saveCacheMeta();
+}
 
 // VS Code progress adapter
 function makeVsProgressAdapter(progress) {
@@ -1008,6 +1097,8 @@ const exported = {
 	getCacheEntry,
 	getCacheQualityMeta,
 	getCacheStatsSnapshot,
+	verifyMediaFile,
+	isBrokenFile,
 	getPersistentCacheStatsSnapshot: global.getPersistentCacheStatsSnapshot,
 
 	setCacheEntry,
