@@ -1103,7 +1103,8 @@ const DEFAULT_CONFIG = {
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率",
 	"docExportIncludeCipher": true,
-	"transactionLevel": "full"
+	"transactionLevel": "full",
+	"textSlideColorScheme": "light"
 };
 
 const CONFIG_METADATA = {
@@ -1141,6 +1142,11 @@ const CONFIG_METADATA = {
 		name: "事物包裹倾向", type: "enum",
 		options: ["full", "half"],
 		descriptions: ["全包模式: 黄名单全部走事务(a)", "半包模式: 截图和小文件走直粘(q), 其他走事务(a)"]
+	},
+	"textSlideColorScheme": {
+		name: "文本胶片底色", type: "enum",
+		options: ["light", "dark"],
+		descriptions: ["白底黑字", "黑巧克力底白字"]
 	}
 };
 

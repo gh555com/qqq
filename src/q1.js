@@ -32,12 +32,14 @@ const SMALL_PREVIEW_WIDTH = 256;
 const SMALL_PREVIEW_HEIGHT = 144;
 
 const PREVIEW_BORDER = 6;
-const PREVIEW_BG_COLOR = "#fef6e3";
+let PREVIEW_BG_COLOR = "#fef6e3";
 
 // 文本胶片（Plain Text 预览）统一质量与缓存 key
 // 目标：与最优模式静态产物一致（q=71），且磁盘缓存后缀统一呈现为“.71”
 const TEXT_PREVIEW_QUALITY = 71;
-const TEXT_PREVIEW_CACHE_KEY = "71";
+function getTextPreviewCacheKey() {
+    return textSlideColorScheme === "dark" ? "71d" : "71";
+}
 
 // 文本胶片：磁盘缓存只存一份大图（514x290，key=71）
 // small frame 只改显示缩放（宽高各 1/2 => 面积 1/4），不产生第二份缓存
@@ -155,6 +157,7 @@ let enlargeSmallImages = true;
 let performanceMode = "optmum";
 let frameSizeMode = "smart";
 let cleanFreakMode = false;
+let textSlideColorScheme = "light";
 
 let watermarkBase64 = null;
 const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
@@ -204,11 +207,15 @@ function refreshConfig() {
 
         frameSizeMode = config.get("frameSizeMode", "fix");
         cleanFreakMode = config.get("cleanFreak", false);
+        textSlideColorScheme = config.get("textSlideColorScheme", "light");
+        PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
     } catch (e) {
         enlargeSmallImages = true;
         performanceMode = "optmum";
         frameSizeMode = "fix";
         cleanFreakMode = false;
+        textSlideColorScheme = "light";
+        PREVIEW_BG_COLOR = "#fef6e3";
     }
 }
 
@@ -802,8 +809,8 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
         fs.writeFileSync(textTempFile, finalText, 'utf8');
 
-        const bgColor = '#fdf6e3';
-        const textColor = '#333333';
+        const bgColor = textSlideColorScheme === "dark" ? '#1B1411' : '#fef6e3';
+        const textColor = textSlideColorScheme === "dark" ? '#E5E5E5' : '#333333';
 
         const fontPath = getCJKFontPath();
 
@@ -901,7 +908,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
 // Helper: try to get text preview from cache or generate
 async function tryTextPreview(filePath, contentId, renderW, renderH) {
-    const textCacheKey = TEXT_PREVIEW_CACHE_KEY;
+    const textCacheKey = getTextPreviewCacheKey();
     const outSize = getTextPreviewOutputSize(renderW, renderH);
 
     const cached = qqq.getCachedBuffer(contentId, textCacheKey);
@@ -2574,6 +2581,17 @@ async function activate(context) {
         }),
         vscode.window.onDidChangeWindowState((e) => {
             if (e.focused) renderVisibleEditors();
+        }),
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration("qqq.textSlideColorScheme") ||
+                e.affectsConfiguration("qqq.enlargeSmallImages") ||
+                e.affectsConfiguration("qqq.frameSizeMode") ||
+                e.affectsConfiguration("qqq.performanceMode") ||
+                e.affectsConfiguration("qqq.extremePerformance") ||
+                e.affectsConfiguration("qqq.cleanFreak")) {
+                refreshConfig();
+                renderVisibleEditors();
+            }
         }),
         vscode.workspace.onDidChangeTextDocument((e) => {
             const ed = vscode.window.activeTextEditor;
