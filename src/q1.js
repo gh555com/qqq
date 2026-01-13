@@ -38,8 +38,8 @@ let PREVIEW_BG_COLOR = "#fef6e3";
 // 目标：与最优模式静态产物一致（q=71），且磁盘缓存后缀统一呈现为“.71”
 const TEXT_PREVIEW_QUALITY = 71;
 function getTextPreviewCacheKey() {
-	const suffix = textSlideColorScheme === "dark" ? "d" : "";
-	return `71${suffix}_${textSlideFontSize}`;
+	const prefix = textSlideColorScheme === "dark" ? "d_" : "l_";
+	return `${prefix}${textSlideFontSize}`;
 }
 
 // 文本胶片：磁盘缓存只存一份大图（514x290，key=71）
