@@ -40,14 +40,15 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | 10. Stability                     |    8   |    9   |      9     |   ★★★  | Crash rate over long runtimes       |
 | 11. Dev & Maintenance Cost        | **10** |    5   |      7     |   ★☆☆  | Readability, iteration speed        |
 | 12. Cross-Platform Capability     |    7   |    8   |      6     |   ★☆☆  | Win/macOS/Linux coverage            |
+| 13. File Icon Extraction          |    9   |    9   |      8     |   ★★☆  | Win32 SHGetFileInfo vs. PS fallback |
 
 ### Weighted Total Scores
 
 | Engine         | Raw Total | Weighted Total | Recommended Scenarios                                     |
 | :------------- | :-------: | :------------: | :-------------------------------------------------------- |
-| **Python**     |     95    |    **89.2**    | Transparent-image clipboard, everyday advanced operations |
-| **Rust**       |    105    |    **95.8**    | Extreme performance, huge-scale bulk file operations      |
-| **Node Shell** |     76    |    **71.4**    | Zero-dependency fallback, simple text/files               |
+| **Python**     |    104    |    **98.2**    | Transparent-image clipboard, everyday advanced operations |
+| **Rust**       |    114    |   **104.8**    | Extreme performance, huge-scale bulk file operations      |
+| **Node Shell** |     84    |    **79.4**    | Zero-dependency fallback, simple text/files               |
 
 > Weighting formula: ★★★ = 1.2x, ★★☆ = 1.0x, ★☆☆ = 0.8x
 
@@ -214,12 +215,29 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
+### 13. File Icon Extraction (System Level)
+
+| Engine     | Score | Implementation | Stability |
+| :--------- | :---: | :------------- | :-------- |
+| Python     |   9   | Win32 API via ctypes | High |
+| Rust       |   9   | Direct Win32 API | High |
+| Node Shell |   8   | C# Inject -> PS Fallback | Very High |
+
+**Technical Details:**
+- **Python/Rust**: Use `SHGetFileInfo` to retrieve the exact system-registered icon (including folders, shortcuts, and overlays).
+- **Node Shell**: Implements a **two-tier self-healing path**:
+    1. **Tier 1**: C# injection for high-quality 32x32 icons.
+    2. **Tier 2**: Native PowerShell `ExtractAssociatedIcon` fallback for zero-dependency environments.
+
+---
+
 ## 3. Scenario Recommendation Matrix
 
 | Scenario                                    | Recommended Engine | Why                                     |
 | :------------------------------------------ | :----------------: | :-------------------------------------- |
 | Daily screenshot paste (transparent images) |     **Python**     | Perfect DIBv5 handling + fast iteration |
 | Huge directory copy (`node_modules`)        |      **Rust**      | Parallel IO + best CPU efficiency       |
+| System file icon display (Gutter)           |   **Node Shell**   | Multi-tier fallback ensures visibility  |
 | Simple text/file paste                      |   **Node Shell**   | Zero dependencies + good enough speed   |
 | Low-spec device / always-on listener        |      **Rust**      | Lowest memory footprint                 |
 | Rapid prototyping / debugging               |     **Python**     | Edit-and-run; no compilation            |
@@ -296,14 +314,15 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | 10. 稳定性 | 8 | 9 | 9 | ★★★ | 长期运行崩溃率 |
 | 11. 开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
 | 12. 跨平台能力 | 7 | 8 | 6 | ★☆☆ | Win/Mac/Linux 支持程度 |
+| 13. 文件原始图标提取 | 9 | 9 | 8 | ★★☆ | 系统底层 API vs. 兼容性回退 |
 
 ### Weighted Total Scores
 
 | 引擎 | 原始总分 | 加权总分 | 推荐场景 |
 |:-----|:--------:|:--------:|:---------|
-| **Python** | 95 | **89.2** | 透明图剪贴板、日常高级操作 |
-| **Rust** | 105 | **95.8** | 极致性能、超大文件批量操作 |
-| **Node Shell** | 76 | **71.4** | 零依赖兜底、简单文本/文件 |
+| **Python** | 104 | **98.2** | 透明图剪贴板、日常高级操作 |
+| **Rust** | 114 | **104.8** | 极致性能、超大文件批量操作 |
+| **Node Shell** | 84 | **79.4** | 零依赖兜底、简单文本/文件 |
 
 > 加权公式：★★★=1.2x, ★★☆=1.0x, ★☆☆=0.8x
 
@@ -469,12 +488,29 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 
 ---
 
+### 13. 文件原始图标提取 (系统级)
+
+| 引擎 | 得分 | 实现方式 | 稳定性 |
+|:-----|:----:|:---------|:-------|
+| Python | 9 | ctypes 调用 Win32 API | 高 |
+| Rust | 9 | 直接调用 Win32 API | 高 |
+| Node Shell | 8 | C# 注入 -> PS 原生回退 | 极高 |
+
+**技术细节：**
+- **Python/Rust**: 使用 `SHGetFileInfo` 获取系统注册的精确图标（支持文件夹、快捷键及覆盖图标）。
+- **Node Shell**: 实现了 **两层自愈路径**：
+    1. **第一层**: 通过 C# 注入获取 32x32 高质量图标。
+    2. **第二层**: 在无 .NET 编译环境时，回退至原生 PowerShell `ExtractAssociatedIcon` 方案。
+
+---
+
 ## 3. Scenario Recommendation Matrix
 
 | 使用场景 | 推荐引擎 | 原因 |
 |:---------|:--------:|:-----|
 | 日常截图粘贴（透明图） | **Python** | DIBv5 完美处理，开发快 |
 | 超大目录复制（node_modules） | **Rust** | 并行 IO，CPU 效率最高 |
+| 系统文件图标显示 (Gutter) | **Node Shell** | 多层回退机制确保零依赖下的可见性 |
 | 简单文本/文件粘贴 | **Node Shell** | 零依赖，响应够用 |
 | 低配设备/常驻监听 | **Rust** | 内存占用最低 |
 | 快速原型开发/调试 | **Python** | 改完即用，无需编译 |
