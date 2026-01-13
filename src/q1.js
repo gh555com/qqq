@@ -1572,8 +1572,10 @@ async function renderImages(editor) {
 			if (absPath && fs.existsSync(absPath)) {
 				try {
 					const st = fs.statSync(absPath);
-					if (!st.isDirectory() && isSupportedMedia(absPath)) {
-						shouldHide = true;
+					if (!st.isDirectory()) {
+						if (isSupportedMedia(absPath) || process.platform === 'win32') {
+							shouldHide = true;
+						}
 					}
 				} catch { }
 			}
@@ -1599,7 +1601,7 @@ async function renderImages(editor) {
 			try {
 				const stat = fs.statSync(absPath);
 				if (stat.isDirectory()) continue;
-				if (!isSupportedMedia(absPath)) continue;
+				if (!isSupportedMedia(absPath) && process.platform !== 'win32') continue;
 			} catch (e) { }
 
 			tasks.push(async () => {
@@ -1609,27 +1611,41 @@ async function renderImages(editor) {
 					const ext = path.extname(absPath).toLowerCase();
 					const isVidOrImg = isImageOrVideoExt(ext);
 					const isText = !isVidOrImg && isPlainTextFile(absPath);
+					const isSupported = isVidOrImg || isText;
+
+					// 提取图标 (Windows 专用)
+					let iconB64 = null;
+					if (process.platform === 'win32') {
+						iconB64 = await global.getIcon(absPath);
+					}
 
 					let previewWidth = LARGE_PREVIEW_WIDTH;
 					let previewHeight = LARGE_PREVIEW_HEIGHT;
+					let previewResult = null;
 
-					let info = null;
-					if (!isText) {
-						let mtimeMs = 0;
-						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-						info = await getMediaInfo(absPath, mtimeMs);
-						const fc = getFrameConfig(info);
-						previewWidth = fc.width;
-						previewHeight = fc.height;
-					} else {
-						// 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
-						const fc = getFrameConfig(null);
-						previewWidth = fc.width;
-						previewHeight = fc.height;
+					if (isSupported) {
+						let info = null;
+						if (!isText) {
+							let mtimeMs = 0;
+							try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+							info = await getMediaInfo(absPath, mtimeMs);
+							const fc = getFrameConfig(info);
+							previewWidth = fc.width;
+							previewHeight = fc.height;
+						} else {
+							// 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
+							const fc = getFrameConfig(null);
+							previewWidth = fc.width;
+							previewHeight = fc.height;
+						}
+
+						previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
 					}
 
-					const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
 					if (currentRenderVersion !== myVersion) return null;
+
+					// 如果既没有预览也没有图标，就不渲染
+					if (!previewResult && !iconB64) return null;
 
 					const deco = { range: anchorRange, renderOptions: {} };
 					let contentUrl = "";
@@ -1646,6 +1662,20 @@ async function renderImages(editor) {
 						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
 						webpDuration = previewResult.webpDuration || 0;
 						outputSize = previewResult.outputSize;
+					}
+
+					// 如果没有预览但有图标，使用图标作为预览
+					if (!contentUrl && iconB64) {
+						contentUrl = `url("data:image/png;base64,${iconB64}")`;
+						previewWidth = 16;
+						previewHeight = 16;
+						outputSize = { width: 16, height: 16 };
+					}
+
+					// 设置 Gutter 图标
+					if (iconB64) {
+						deco.renderOptions.gutterIconPath = vscode.Uri.parse(`data:image/png;base64,${iconB64}`);
+						deco.renderOptions.gutterIconSize = "contain";
 					}
 
 					if (!contentUrl) return null;
