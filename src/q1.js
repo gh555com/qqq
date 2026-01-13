@@ -39,6 +39,20 @@ const PREVIEW_BG_COLOR = "#fef6e3";
 const TEXT_PREVIEW_QUALITY = 71;
 const TEXT_PREVIEW_CACHE_KEY = "71";
 
+// 文本胶片：磁盘缓存只存一份大图（514x290，key=71）
+// small frame 只改显示缩放（宽高各 1/2 => 面积 1/4），不产生第二份缓存
+const TEXT_PREVIEW_PIXEL_LARGE = { width: 514, height: 290 };
+const TEXT_PREVIEW_PIXEL_SMALL = { width: 257, height: 145 };
+function getTextPreviewOutputSize(renderW, renderH) {
+    const w = Number(renderW) || 0;
+    const h = Number(renderH) || 0;
+    const wantSmall =
+        w > 0 && h > 0 &&
+        w <= SMALL_PREVIEW_WIDTH &&
+        h <= SMALL_PREVIEW_HEIGHT;
+    return wantSmall ? TEXT_PREVIEW_PIXEL_SMALL : TEXT_PREVIEW_PIXEL_LARGE;
+}
+
 const FALLBACK_DIRECT_READ_EXTS = new Set([
     ".png",
     ".jpg",
@@ -723,9 +737,9 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
             .replace(/^\uFEFF/, '')                    // UTF-8 BOM
             .replace(/^[\s\u00A0\u3000\u200B\r\n]+/, ''); // All whitespace types
 
-        // Fixed frame size: 512x288
-        const targetW = 514;
-        const targetH = 290;
+        // Fixed cache frame: 514x290
+        const targetW = TEXT_PREVIEW_PIXEL_LARGE.width;
+        const targetH = TEXT_PREVIEW_PIXEL_LARGE.height;
 
         // Layout: font 14px, line height 18px, padding 4px
         const fontSize = 14;
@@ -886,8 +900,9 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 }
 
 // Helper: try to get text preview from cache or generate
-async function tryTextPreview(filePath, contentId) {
+async function tryTextPreview(filePath, contentId, renderW, renderH) {
     const textCacheKey = TEXT_PREVIEW_CACHE_KEY;
+    const outSize = getTextPreviewOutputSize(renderW, renderH);
 
     const cached = qqq.getCachedBuffer(contentId, textCacheKey);
     if (cached) {
@@ -898,7 +913,7 @@ async function tryTextPreview(filePath, contentId) {
                 buffer: cached,
                 webpDuration: 0,
                 originalDuration: 0,
-                outputSize: { width: 514, height: 290 },
+                outputSize: outSize,
                 fromCache: true,
                 isTextPreview: true,
                 mimeType: 'image/webp',
@@ -906,7 +921,13 @@ async function tryTextPreview(filePath, contentId) {
             };
         }
     }
-    return await generateTextPreview(filePath, contentId, TEXT_PREVIEW_QUALITY, textCacheKey);
+
+    const gen = await generateTextPreview(filePath, contentId, TEXT_PREVIEW_QUALITY, textCacheKey);
+    if (!gen) return null;
+
+    // 同一份磁盘缓存（514x290），按相框尺寸返回不同显示大小
+    gen.outputSize = outSize;
+    return gen;
 }
 
 // ==================== 核心缓存策略（媒体） ====================
@@ -1192,7 +1213,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
     // ★★★ 文本优先：不是看后缀名，而是看实质（照 a）★★★
     if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || isPlainTextFile(filePath))) {
-        return await tryTextPreview(filePath, contentId);
+        return await tryTextPreview(filePath, contentId, renderW, renderH);
     }
 
     let mtimeMs = 0;
@@ -1590,8 +1611,10 @@ async function renderImages(editor) {
                         previewWidth = fc.width;
                         previewHeight = fc.height;
                     } else {
-                        previewWidth = LARGE_PREVIEW_WIDTH;
-                        previewHeight = LARGE_PREVIEW_HEIGHT;
+                        // 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
+                        const fc = getFrameConfig(null);
+                        previewWidth = fc.width;
+                        previewHeight = fc.height;
                     }
 
                     const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
@@ -1701,7 +1724,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
                             pxHeight = height;
                         } catch { }
                     } else if (isPlainTextFile(filePath)) {
-                        pxHeight = LARGE_PREVIEW_HEIGHT;
+                        pxHeight = getFrameConfig(null).height;
                     }
 
                     const gapBelow = pxHeight > 0 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
@@ -1761,7 +1784,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
                     pxHeight = height;
                 } catch { }
             } else if (isPlainTextFile(f)) {
-                pxHeight = LARGE_PREVIEW_HEIGHT;
+                pxHeight = getFrameConfig(null).height;
             }
 
             const isLastItem = i === files.length - 1 && folders.length === 0;
@@ -2133,7 +2156,7 @@ async function provideCleanlinessEditsAsync(document) {
                     pxHeight = height;
                 }
             } else if (isPlainTextFile(absPath)) {
-                pxHeight = LARGE_PREVIEW_HEIGHT;
+                pxHeight = getFrameConfig(null).height;
             }
         }
 
@@ -2282,19 +2305,7 @@ class FileCodeLensProvider {
                     if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
                 }
             } else if (isText) {
-                try {
-                    const SAMPLE_SIZE = 8192;
-                    const fd = fs.openSync(absPath, 'r');
-                    const buf = Buffer.alloc(SAMPLE_SIZE);
-                    const bytesRead = fs.readSync(fd, buf, 0, SAMPLE_SIZE, 0);
-                    fs.closeSync(fd);
-                    const st = fs.statSync(absPath);
-                    const sample = buf.slice(0, bytesRead).toString('utf8');
-                    const sampleLines = sample.split('\n').length;
-                    const estLines = bytesRead < st.size ? Math.round(sampleLines * st.size / bytesRead) : sampleLines;
-                    titleSuffix = `   (~${estLines} lines)`;
-                    tooltipText += `\nType: Plain Text\nLines: ~${estLines}`;
-                } catch { }
+                // 按你的要求：不再估算/显示行数
                 iconPart = "📄";
                 spacePart = " ";
             }
