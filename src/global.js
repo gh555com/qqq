@@ -2185,8 +2185,18 @@ const genScheduler = new TaskScheduler(6);
 const pasteQueue = new TaskQueue();
 const metaSaveQueue = new TaskQueue();
 
+async function getIcon(filePath) {
+	if (!pythonBridge.isAvailable()) return null;
+	const res = await pythonBridge.call("extract_icon", { path: filePath });
+	if (res && res.status === "ok") {
+		return res.icon; // base64 string
+	}
+	return null;
+}
+
 module.exports = {
 	init,
+	getIcon,
 
 	// 调度器与队列
 	TaskScheduler,

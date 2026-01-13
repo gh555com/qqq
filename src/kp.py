@@ -108,6 +108,7 @@ if _IS_WINDOWS:
     user32 = ctypes.windll.user32
     shell32 = ctypes.windll.shell32
     kernel32 = ctypes.windll.kernel32
+    gdi32 = ctypes.windll.gdi32
     CF_TEXT = 1
     CF_BITMAP = 2
     CF_DIB = 8
@@ -143,6 +144,75 @@ if _IS_WINDOWS:
     RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
     RegisterClipboardFormatW.restype = wintypes.UINT
     CF_HTML = RegisterClipboardFormatW("HTML Format")
+
+    # For Icon Extraction
+    class SHFILEINFOW(ctypes.Structure):
+        _fields_ = [
+            ("hIcon", wintypes.HICON),
+            ("iIcon", ctypes.c_int),
+            ("dwAttributes", wintypes.DWORD),
+            ("szDisplayName", wintypes.WCHAR * 260),
+            ("szTypeName", wintypes.WCHAR * 80),
+        ]
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wintypes.DWORD),
+            ("biWidth", wintypes.LONG),
+            ("biHeight", wintypes.LONG),
+            ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD),
+            ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD),
+            ("biXPelsPerMeter", wintypes.LONG),
+            ("biYPelsPerMeter", wintypes.LONG),
+            ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
+        ]
+
+    class BITMAPINFO(ctypes.Structure):
+        _fields_ = [
+            ("bmiHeader", BITMAPINFOHEADER),
+            ("bmiColors", wintypes.DWORD * 3),
+        ]
+
+    DrawIconEx = user32.DrawIconEx
+    DrawIconEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.HICON,
+                           ctypes.c_int, ctypes.c_int, wintypes.UINT, wintypes.HBRUSH, wintypes.UINT]
+    DrawIconEx.restype = wintypes.BOOL
+
+    DestroyIcon = user32.DestroyIcon
+    DestroyIcon.argtypes = [wintypes.HICON]
+    DestroyIcon.restype = wintypes.BOOL
+
+    GetDC = user32.GetDC
+    GetDC.argtypes = [wintypes.HWND]
+    GetDC.restype = wintypes.HDC
+
+    ReleaseDC = user32.ReleaseDC
+    ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
+    ReleaseDC.restype = ctypes.c_int
+
+    CreateCompatibleDC = gdi32.CreateCompatibleDC
+    CreateCompatibleDC.argtypes = [wintypes.HDC]
+    CreateCompatibleDC.restype = wintypes.HDC
+
+    DeleteDC = gdi32.DeleteDC
+    DeleteDC.argtypes = [wintypes.HDC]
+    DeleteDC.restype = wintypes.BOOL
+
+    DeleteObject = gdi32.DeleteObject
+    DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    DeleteObject.restype = wintypes.BOOL
+
+    SelectObject = gdi32.SelectObject
+    SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+    SelectObject.restype = wintypes.HGDIOBJ
+
+    CreateDIBSection = gdi32.CreateDIBSection
+    CreateDIBSection.argtypes = [wintypes.HDC, ctypes.c_void_p,
+                                 wintypes.UINT, ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD]
+    CreateDIBSection.restype = wintypes.HBITMAP
 
 
 def read_global_data(h_mem):
@@ -679,12 +749,102 @@ def get_clipboard_html():
 # =============================================================================
 
 
+def get_file_icon_base64(file_path: str):
+    if not _IS_WINDOWS:
+        return None
+
+    try:
+        import io
+        from PIL import Image
+
+        # Constants for SHGetFileInfo
+        SHGFI_ICON = 0x000000100
+        SHGFI_SMALLICON = 0x000000001
+
+        shfi = SHFILEINFOW()
+        res = shell32.SHGetFileInfoW(
+            str(file_path),
+            0,
+            ctypes.byref(shfi),
+            ctypes.sizeof(shfi),
+            SHGFI_ICON | SHGFI_SMALLICON
+        )
+
+        if not res or not shfi.hIcon:
+            return None
+
+        try:
+            # We use a memory DC to draw the icon and then get its bits
+            hdc_screen = GetDC(0)
+            hdc_mem = CreateCompatibleDC(hdc_screen)
+
+            width = 16
+            height = 16
+
+            bmi = BITMAPINFO()
+            bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+            bmi.bmiHeader.biWidth = width
+            bmi.bmiHeader.biHeight = -height  # Top-down
+            bmi.bmiHeader.biPlanes = 1
+            bmi.bmiHeader.biBitCount = 32
+            bmi.bmiHeader.biCompression = 0  # BI_RGB
+
+            ptr_bits = ctypes.c_void_p()
+            hbmp_dib = CreateDIBSection(
+                hdc_mem, ctypes.byref(bmi), 0, ctypes.byref(ptr_bits), None, 0)
+            hold_bmp = SelectObject(hdc_mem, hbmp_dib)
+
+            # Draw the icon
+            DrawIconEx(hdc_mem, 0, 0, shfi.hIcon, width,
+                       height, 0, None, 0x0003)  # DI_NORMAL
+
+            # Copy bits to PIL
+            size = width * height * 4
+            buffer = (ctypes.c_char * size).from_address(ptr_bits.value)
+            img = Image.frombuffer(
+                "RGBA", (width, height), buffer, "raw", "BGRA", 0, 1)
+
+            # Convert to PNG base64
+            output = io.BytesIO()
+            img.save(output, format="PNG")
+            base64_str = base64.b64encode(output.getvalue()).decode("ascii")
+
+            # Cleanup
+            SelectObject(hdc_mem, hold_bmp)
+            DeleteObject(hbmp_dib)
+            DeleteDC(hdc_mem)
+            ReleaseDC(0, hdc_screen)
+
+            return base64_str
+
+        finally:
+            DestroyIcon(shfi.hIcon)
+
+    except Exception as e:
+        sys.stderr.write(f"extract_icon error: {e}\n")
+        return None
+
+
 def _dispatch_action(cmd):
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
     if action == "ping":
         out["status"] = "alive"
+        return out
+    if action == "extract_icon":
+        path = cmd.get("path")
+        if path:
+            icon_b64 = get_file_icon_base64(path)
+            if icon_b64:
+                out["icon"] = icon_b64
+                out["status"] = "ok"
+            else:
+                out["status"] = "error"
+                out["message"] = "icon extraction failed"
+        else:
+            out["status"] = "error"
+            out["message"] = "no path provided"
         return out
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
