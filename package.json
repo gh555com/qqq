@@ -130,11 +130,7 @@
               "light",
               "dark"
             ],
-            "markdownEnumDescriptions": [
-              "白底黑字：经典配色（默认）",
-              "巧克力底白字：深色配色，使用黑巧克力色背景"
-            ],
-            "markdownDescription": "👁️ 文本胶片底色：控制文本文件的预览配色方案。"
+            "markdownDescription": "👁️ 文本胶片底色："
           },
           "qqq.textSlideFontSize": {
             "order": 50,
