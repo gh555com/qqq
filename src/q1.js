@@ -9,6 +9,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
+const { TextDecoder } = require("util");
 
 const qqq = require("./qqq");
 const q3 = require("./q3");
@@ -33,6 +34,11 @@ const SMALL_PREVIEW_HEIGHT = 144;
 const PREVIEW_BORDER = 6;
 const PREVIEW_BG_COLOR = "#fef6e3";
 
+// 文本胶片（Plain Text 预览）统一质量与缓存 key
+// 目标：与最优模式静态产物一致（q=71），且磁盘缓存后缀统一呈现为“.71”
+const TEXT_PREVIEW_QUALITY = 71;
+const TEXT_PREVIEW_CACHE_KEY = "71";
+
 const FALLBACK_DIRECT_READ_EXTS = new Set([
     ".png",
     ".jpg",
@@ -44,7 +50,6 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
     ".ico",
 ]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
-const TEXT_FILM_MAX_SIZE = 50 * 1024 * 1024; // ★ 文本胶片预览的最大文件限制
 
 const IMAGE_EXTS = new Set([
     ".png",
@@ -90,6 +95,34 @@ const PIPE_SEEK_ERROR_PATTERNS = [
     "Could not write header",
 ];
 
+// ==================== ★ a 的 Text Ext 白名单（照抄） ====================
+const TEXT_EXTS = new Set([
+    ".txt", ".md", ".markdown", ".log", ".ini", ".cfg", ".conf", ".config",
+    ".json", ".xml", ".yaml", ".yml", ".toml",
+    ".js", ".ts", ".jsx", ".tsx", ".mjs", ".cjs",
+    ".py", ".pyw", ".pyi",
+    ".java", ".kt", ".kts", ".scala", ".groovy",
+    ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hxx",
+    ".cs", ".vb", ".fs", ".fsx",
+    ".go", ".rs", ".swift", ".m", ".mm",
+    ".rb", ".php", ".pl", ".pm", ".lua", ".r",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1", ".psm1", ".bat", ".cmd",
+    ".html", ".htm", ".css", ".scss", ".sass", ".less",
+    ".sql", ".graphql", ".gql",
+    ".env", ".gitignore", ".gitattributes", ".editorconfig",
+    ".dockerfile", ".makefile", ".cmake",
+    ".rst", ".tex", ".bib", ".csv", ".tsv",
+    ".vue", ".svelte", ".astro",
+    ".asm", ".s", ".nasm",
+    ".lisp", ".cl", ".el", ".scm", ".rkt",
+    ".hs", ".lhs", ".ml", ".mli", ".elm", ".erl", ".ex", ".exs",
+    ".clj", ".cljs", ".cljc", ".edn",
+    ".nim", ".zig", ".v", ".d",
+    ".proto", ".thrift", ".avsc",
+    ".tf", ".tfvars", ".hcl",
+    ".plist", ".strings"
+]);
+
 // ==================== 全局状态 ====================
 let decorationType = null;
 let markerHideType = null;
@@ -101,7 +134,6 @@ let codeLensProvider = null;
 const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
 const folderSizeCache = new Map();
-const pendingTokens = new Map();
 
 const editorDebounceTimers = new Map();
 
@@ -325,11 +357,6 @@ function getFrameConfig(info) {
     let width = LARGE_PREVIEW_WIDTH;
     let height = LARGE_PREVIEW_HEIGHT;
 
-    // 文本预览固定使用大分辨率
-    if (info?.type === "text_film") {
-        return { mode, width: 512, height: 288 };
-    }
-
     if (!info || !info.width || !info.height) {
         if (frameSizeMode === "small") {
             mode = "small";
@@ -473,18 +500,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
                 } else if (IMAGE_EXTS.has(ext)) {
                     info.type = "image";
                     info.isStaticImage = true;
-                } else if (isTextFile(filePath)) {
-                    info.type = "text_film";
-                    info.width = 512;
-                    info.height = 288;
                 }
-            }
-
-            // 特殊处理：如果 ffmpeg 识别出了 tty/bintext 等 codec，也视为 text_film
-            if (info.codec && (info.codec.includes("tty") || info.codec.includes("bintext") || info.codec.includes("ansi"))) {
-                info.type = "text_film";
-                info.width = 512;
-                info.height = 288;
             }
 
             if (!info.width && [".ai", ".eps", ".psd", ".cdr"].includes(ext)) {
@@ -535,7 +551,365 @@ function getWebPDurationFromBuffer(buffer) {
     return frameCount > 1 ? totalDurationMs / 1000 : 0;
 }
 
-// ==================== 核心缓存策略 ====================
+// ==================== ★ a 的 Plain Text 识别（照抄） ====================
+// Check if a file is likely plain text by reading its header bytes
+function isPlainTextFile(filePath) {
+    try {
+        const ext = path.extname(filePath).toLowerCase();
+
+        // If it's a known image/video extension, definitely not text
+        if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)) return false;
+
+        // If it's a known text extension, return true
+        if (TEXT_EXTS.has(ext)) return true;
+
+        // For unknown extensions or no extension, analyze content
+        const fd = fs.openSync(filePath, 'r');
+        const headerBuf = Buffer.alloc(8192);
+        const bytesRead = fs.readSync(fd, headerBuf, 0, 8192, 0);
+        fs.closeSync(fd);
+
+        if (bytesRead === 0) return true; // Empty file is considered text
+
+        // Check for binary content indicators
+        let nullCount = 0;
+        let controlCount = 0;
+
+        for (let i = 0; i < bytesRead; i++) {
+            const b = headerBuf[i];
+            if (b === 0x00) {
+                nullCount++;
+            } else if (b < 0x09 || (b > 0x0D && b < 0x20 && b !== 0x1B)) {
+                // Control chars except tab, newline, carriage return, escape
+                controlCount++;
+            }
+        }
+
+        // Binary detection heuristics:
+        // 1. Any NULL bytes strongly suggest binary
+        if (nullCount > 0) return false;
+
+        // 2. Too many control characters suggest binary
+        if (controlCount > bytesRead * 0.1) return false;
+
+        // 3. Check for common binary file signatures
+        if (bytesRead >= 4) {
+            const sig = headerBuf.slice(0, 4).toString('hex');
+            const binarySigs = [
+                '89504e47', // PNG
+                'ffd8ffe0', 'ffd8ffe1', 'ffd8ffe2', 'ffd8ffdb', 'ffd8ffee', // JPEG
+                '47494638', // GIF
+                '52494646', // RIFF (WebP, AVI, WAV)
+                '504b0304', // ZIP/DOCX/XLSX
+                '25504446', // PDF
+                '7f454c46', // ELF
+                '4d5a9000', '4d5a5000', '4d5a0000', // PE/MZ executables
+                'cafebabe', // Java class
+                'feedface', 'feedfacf', 'cefaedfe', 'cffaedfe', // Mach-O
+            ];
+            if (binarySigs.some(s => sig.startsWith(s.slice(0, 8)))) return false;
+        }
+
+        // If we get here, it's likely text
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// ==================== ★ a 的 文本预览生成（照抄 + cacheKey 改 q 风格） ====================
+
+// Get a font that supports CJK characters
+function getCJKFontPath() {
+    if (process.platform === 'win32') {
+        const winFonts = [
+            'C:\\Windows\\Fonts\\msyh.ttc',
+            'C:\\Windows\\Fonts\\msyhbd.ttc',
+            'C:\\Windows\\Fonts\\simsun.ttc',
+            'C:\\Windows\\Fonts\\simhei.ttf',
+        ];
+        for (const f of winFonts) {
+            if (fs.existsSync(f)) return f;
+        }
+    } else if (process.platform === 'darwin') {
+        const macFonts = [
+            '/System/Library/Fonts/PingFang.ttc',
+            '/System/Library/Fonts/STHeiti Light.ttc',
+        ];
+        for (const f of macFonts) {
+            if (fs.existsSync(f)) return f;
+        }
+    } else {
+        const linuxFonts = [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+        ];
+        for (const f of linuxFonts) {
+            if (fs.existsSync(f)) return f;
+        }
+    }
+    return null;
+}
+
+// Detect if buffer is valid UTF-8
+function isValidUtf8(buffer) {
+    try {
+        const str = buffer.toString('utf8');
+        // Check for replacement character (indicates invalid UTF-8)
+        if (str.includes('\uFFFD')) return false;
+        // Additional check: encode back and compare
+        const reEncoded = Buffer.from(str, 'utf8');
+        // If lengths differ significantly, probably not UTF-8
+        if (Math.abs(reEncoded.length - buffer.length) > buffer.length * 0.1) return false;
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+// Try to decode buffer with encoding detection
+function decodeTextBuffer(buffer) {
+    // Try UTF-8 first
+    if (isValidUtf8(buffer)) {
+        return buffer.toString('utf8');
+    }
+
+    // Try GBK/GB2312 using TextDecoder (available in Node.js with ICU)
+    try {
+        const decoder = new TextDecoder('gbk');
+        return decoder.decode(buffer);
+    } catch {
+        // GBK not available, try GB2312
+        try {
+            const decoder = new TextDecoder('gb2312');
+            return decoder.decode(buffer);
+        } catch {
+            // Fallback to latin1 (preserves bytes but won't display Chinese correctly)
+            return buffer.toString('latin1');
+        }
+    }
+}
+
+// Calculate visual width of a string (CJK chars = 1.0, ASCII = 0.55)
+function getVisualWidth(str) {
+    let w = 0;
+    for (const ch of str) {
+        const code = ch.charCodeAt(0);
+        if (code > 0x2E7F) w += 1.0; // CJK and other wide chars
+        else w += 0.55; // ASCII and Latin
+    }
+    return w;
+}
+
+// Generate preview image for plain text file using ffmpeg drawtext
+async function generateTextPreview(filePath, contentId, qualityLevel, textCacheKey) {
+    if (!qqq.ffmpegPath) return null;
+
+    try {
+        // Only read first 4KB for preview (enough for ~15 lines of text)
+        // This handles 200MB files efficiently
+        const PREVIEW_READ_SIZE = 4096;
+        const fd = fs.openSync(filePath, 'r');
+        const rawBuffer = Buffer.alloc(PREVIEW_READ_SIZE);
+        const bytesRead = fs.readSync(fd, rawBuffer, 0, PREVIEW_READ_SIZE, 0);
+        fs.closeSync(fd);
+
+        // Only use the bytes actually read
+        const actualBuffer = bytesRead < PREVIEW_READ_SIZE ? rawBuffer.slice(0, bytesRead) : rawBuffer;
+        let textContent = decodeTextBuffer(actualBuffer);
+
+        // Strip BOM and ALL types of leading whitespace/empty lines
+        textContent = textContent
+            .replace(/^\uFEFF/, '')                    // UTF-8 BOM
+            .replace(/^[\s\u00A0\u3000\u200B\r\n]+/, ''); // All whitespace types
+
+        // Fixed frame size: 512x288
+        const targetW = 514;
+        const targetH = 290;
+
+        // Layout: font 14px, line height 18px, padding 4px
+        const fontSize = 14;
+        const lineHeight = 18;
+        const padding = 4;
+        const usableW = targetW - padding * 2;
+        const usableH = targetH - padding * 2;
+        const maxLines = Math.floor(usableH / lineHeight);
+
+        // Max visual width in "em" units (1em = fontSize)
+        const maxVisualWidth = usableW / fontSize;
+
+        // Process text: wrap lines based on visual width
+        const lines = textContent.split('\n');
+        const wrappedLines = [];
+
+        for (const line of lines) {
+            if (wrappedLines.length >= maxLines) break;
+
+            if (line.length === 0) {
+                wrappedLines.push(' ');
+                continue;
+            }
+
+            if (getVisualWidth(line) <= maxVisualWidth) {
+                wrappedLines.push(line);
+            } else {
+                let currentLine = '';
+                let currentWidth = 0;
+
+                for (const ch of line) {
+                    const charWidth = ch.charCodeAt(0) > 0x2E7F ? 1.0 : 0.55;
+                    if (currentWidth + charWidth > maxVisualWidth) {
+                        if (currentLine) wrappedLines.push(currentLine);
+                        if (wrappedLines.length >= maxLines) break;
+                        currentLine = ch;
+                        currentWidth = charWidth;
+                    } else {
+                        currentLine += ch;
+                        currentWidth += charWidth;
+                    }
+                }
+                if (currentLine && wrappedLines.length < maxLines) {
+                    wrappedLines.push(currentLine);
+                }
+            }
+        }
+
+        let finalText = wrappedLines.join('\n');
+        if (!finalText.trim()) finalText = '[Empty File]';
+
+        // Escape special characters for ffmpeg drawtext
+        finalText = finalText.split('%').join('\uFF05');
+        finalText = finalText.split('\\').join('\\\\');
+        finalText = finalText.split("'").join("\\'");
+
+        const rand = Math.random().toString(36).slice(2);
+        const textTempFile = path.join(os.tmpdir(), `qqq_txt_${rand}.txt`);
+        const outputFile = path.join(os.tmpdir(), `qqq_txt_${contentId}_${rand}.webp`);
+
+        fs.writeFileSync(textTempFile, finalText, 'utf8');
+
+        const bgColor = '#fdf6e3';
+        const textColor = '#333333';
+
+        const fontPath = getCJKFontPath();
+
+        let textFileEsc = textTempFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+        let filterParts = [`drawtext=textfile='${textFileEsc}'`];
+        filterParts.push(`fontsize=${fontSize}`);
+        filterParts.push(`fontcolor=${textColor}`);
+        filterParts.push(`x=${padding}`);
+        filterParts.push(`y=${padding}`);
+        filterParts.push(`line_spacing=4`);
+
+        if (fontPath) {
+            let fontEsc = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+            filterParts.push(`fontfile='${fontEsc}'`);
+        }
+
+        const drawTextFilter = filterParts.join(':');
+
+        const args = [
+            '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi',
+            '-i', `color=c=${bgColor}:s=${targetW}x${targetH}:d=1`,
+            '-vf', drawTextFilter,
+            '-frames:v', '1',
+            '-c:v', 'libwebp',
+            '-lossless', '0',
+            '-compression_level', '0',
+            '-q:v', String(qualityLevel),
+            '-y', outputFile
+        ];
+
+        return new Promise((resolve) => {
+            const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: 'pipe' });
+            let resolved = false;
+
+            const cleanup = () => {
+                try { if (fs.existsSync(textTempFile)) fs.unlinkSync(textTempFile); } catch { }
+                try { if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile); } catch { }
+            };
+
+            const timer = setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    try { child.kill(); } catch { }
+                    cleanup();
+                    resolve(null);
+                }
+            }, 15000);
+
+            child.on('close', () => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timer);
+
+                    let buffer = null;
+                    try {
+                        if (fs.existsSync(outputFile)) buffer = fs.readFileSync(outputFile);
+                    } catch { }
+
+                    cleanup();
+
+                    if (!buffer) { resolve(null); return; }
+
+                    // 统一缓存命名：.71（cacheKey="71"）
+                    qqq.setCacheEntry(contentId, textCacheKey, buffer, {
+                        width: targetW,
+                        height: targetH,
+                        type: 'text_preview',
+                        webpDur: 0,
+                        originalDuration: 0
+                    });
+
+                    resolve({
+                        buffer,
+                        webpDuration: 0,
+                        outputSize: { width: targetW, height: targetH },
+                        isTextPreview: true
+                    });
+                }
+            });
+
+            child.on('error', () => {
+                if (!resolved) {
+                    resolved = true;
+                    clearTimeout(timer);
+                    cleanup();
+                    resolve(null);
+                }
+            });
+        });
+    } catch (e) {
+        return null;
+    }
+}
+
+// Helper: try to get text preview from cache or generate
+async function tryTextPreview(filePath, contentId) {
+    const textCacheKey = TEXT_PREVIEW_CACHE_KEY;
+
+    const cached = qqq.getCachedBuffer(contentId, textCacheKey);
+    if (cached) {
+        // 零错图风险：必须校验 meta.type
+        const meta = qqq.getCacheQualityMeta(contentId, textCacheKey);
+        if (meta && meta.type === 'text_preview') {
+            return {
+                buffer: cached,
+                webpDuration: 0,
+                originalDuration: 0,
+                outputSize: { width: 514, height: 290 },
+                fromCache: true,
+                isTextPreview: true,
+                mimeType: 'image/webp',
+                ext: '.webp'
+            };
+        }
+    }
+    return await generateTextPreview(filePath, contentId, TEXT_PREVIEW_QUALITY, textCacheKey);
+}
+
+// ==================== 核心缓存策略（媒体） ====================
 function determineCacheStrategy(filePath, info) {
     const ext = path.extname(filePath).toLowerCase();
     let fileSize = 0;
@@ -611,144 +985,7 @@ function buildUnifiedWebPArgs(filePath, origSize, duration, qualityLevel, isAnim
         `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,format=yuva420p`;
     let vf = scaleFilter;
 
-    if (info?.type === "text_film") {
-        // ★ 文本预览特殊逻辑：解决中文乱码 + 静态预览 (最稳定)
-        // 实现跨平台多重字体回退机制
-        const isWin = process.platform === "win32";
-        const isMac = process.platform === "darwin";
-
-        const fontCandidates = [];
-        if (isWin) {
-            fontCandidates.push(
-                "C:/Windows/Fonts/msyh.ttc",   // 微软雅黑
-                "C:/Windows/Fonts/msyh.ttf",
-                "C:/Windows/Fonts/simhei.ttf", // 黑体
-                "C:/Windows/Fonts/simsun.ttc", // 宋体
-                "C:/Windows/Fonts/arial.ttf"   // Arial
-            );
-        } else if (isMac) {
-            fontCandidates.push(
-                "/System/Library/Fonts/PingFang.ttc",            // 萍方
-                "/Library/Fonts/Microsoft/Microsoft YaHei.ttf",   // 微软雅黑 (如果有)
-                "/System/Library/Fonts/STHeiti Light.ttc",        // 华文细黑
-                "/Library/Fonts/Arial.ttf"                        // Arial
-            );
-        } else {
-            // Linux (通用路径)
-            fontCandidates.push(
-                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", // 文泉驿微米黑
-                "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", // Noto Sans
-                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"
-            );
-        }
-
-        let fontPath = "";
-        for (const f of fontCandidates) {
-            if (fs.existsSync(f)) {
-                fontPath = f;
-                break;
-            }
-        }
-
-        let textContent = "";
-        try {
-            // ★ 优化提取逻辑：只读取前 1KB 字节，并甄别处理乱码
-            const fd = fs.openSync(filePath, 'r');
-            const readBuffer = Buffer.alloc(1192);
-            const bytesRead = fs.readSync(fd, readBuffer, 0, 1192, 0);
-            fs.closeSync(fd);
-
-            // 使用 utf8 解码，并初步处理末尾可能截断的字符
-            let rawText = readBuffer.toString('utf8', 0, bytesRead);
-
-            // 甄别乱码：如果包含大量替换字符 \uFFFD，说明编码不对或者文件损坏
-            // 统计 \uFFFD 的出现频率
-            const replacementChars = (rawText.match(/\uFFFD/g) || []).length;
-            if (replacementChars > 10) {
-                // 如果乱码太多，尝试过滤掉这些乱码，只保留能看的部分
-                rawText = rawText.replace(/\uFFFD/g, '');
-            }
-
-            // 限制长度
-            rawText = rawText.slice(0, 2000);
-
-            // ★ 深度甄别乱码：如果文本中包含大量无法识别的非 ASCII 且非中文常用字符，判定为极端乱码
-            // 统计正常字符比例 (ASCII + 中文范围)
-            let normalCharCount = 0;
-            for (let i = 0; i < rawText.length; i++) {
-                const code = rawText.charCodeAt(i);
-                if (code < 128 || (code >= 0x4E00 && code <= 0x9FFF)) {
-                    normalCharCount++;
-                }
-            }
-            const normalRatio = normalCharCount / rawText.length;
-            if (normalRatio < 0.3 && rawText.length > 20) {
-                // 如果正常字符占比低于 30%，判定为编码极其混乱，此时我们标记为 isExtremeGarbled
-                info._isExtremeGarbled = true;
-            }
-
-            // 改进的自动换行逻辑：更高效地处理超长行，避免性能问题
-            let currentLineLen = 0;
-            let lineStartIndex = 0;
-            const MAX_LINE_WIDTH = 60;
-
-            // 分段处理文本，避免一次性处理过长的字符串
-            for (let i = 0; i < rawText.length; i++) {
-                const char = rawText[i];
-                const charCode = rawText.charCodeAt(i);
-                const isFullWidth = charCode > 255;
-                const charLen = isFullWidth ? 2 : 1;
-
-                if (char === '\n') {
-                    // 处理完整行
-                    textContent += rawText.substring(lineStartIndex, i + 1);
-                    lineStartIndex = i + 1;
-                    currentLineLen = 0;
-                } else {
-                    if (currentLineLen + charLen > MAX_LINE_WIDTH) {
-                        // 插入换行符并处理当前行
-                        textContent += rawText.substring(lineStartIndex, i) + '\n';
-                        lineStartIndex = i;
-                        currentLineLen = charLen;
-                    } else {
-                        currentLineLen += charLen;
-                    }
-                }
-            }
-
-            // 处理剩余的文本
-            if (lineStartIndex < rawText.length) {
-                textContent += rawText.substring(lineStartIndex);
-            }
-
-            // 逃逸 drawtext 需要的字符
-            // ffmpeg 滤镜中，文本需要进行极其严格的转义
-            textContent = textContent
-                .replace(/\\/g, '\\\\\\\\') // 转义反斜杠
-                .replace(/'/g, "'\\''")     // 转义单引号 (ffmpeg 滤镜语法)
-                .replace(/:/g, '\\:')       // 转义冒号
-                .replace(/,/g, '\\,')       // 转义逗号
-                .replace(/%/g, '%%')        // 转义百分号
-                .replace(/\r/g, '')         // 移除回车
-                .replace(/\n/g, '\r');      // drawtext 使用 \r 作为换行符
-        } catch (e) {
-            textContent = "Read Error";
-        }
-
-        const fontPathEscaped = fontPath ? fontPath.replace(/:/g, "\\:") : "";
-        // 如果识别为极端乱码，则不设置字体，让 ffmpeg 尝试用系统最基础的方式兜底
-        const useFont = !info?._isExtremeGarbled && fontPathEscaped;
-        const fontFilePart = useFont ? `fontfile='${fontPathEscaped}':` : "";
-
-        // 强制背景时长为 1 秒，但只输出 1 帧
-        args.push("-f", "lavfi", "-i", `color=c=black:s=${targetW}x${targetH}:d=1`);
-        // 使用 [0:v] 显式指定输入流，并确保最后有 [out_v]
-        // 范例 B：现代控制台风格 (增加半透明背景黑框)
-        vf = `[0:v]drawtext=${fontFilePart}text='${textContent}':fontcolor=white:fontsize=16:line_spacing=2:x=15:y=15:box=1:boxcolor=black@0.6:boxborderw=0,format=yuva420p[out_v]`;
-        args.push("-frames:v", "1");
-        expectedWebPDuration = 0;
-    } else if (performanceMode === "extreme") {
+    if (performanceMode === "extreme") {
         args.push("-ss", "0", "-i", filePath);
         vf = `[0:v]${scaleFilter}[out_v]`;
         args.push("-frames:v", "1");
@@ -947,8 +1184,16 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
     }
 }
 
+// ==================== Preview Buffer（文本优先，照 a 逻辑接入） ====================
 async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     if (!qqq.ffmpegPath) return null;
+
+    const ext = path.extname(filePath).toLowerCase();
+
+    // ★★★ 文本优先：不是看后缀名，而是看实质（照 a）★★★
+    if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || isPlainTextFile(filePath))) {
+        return await tryTextPreview(filePath, contentId);
+    }
 
     let mtimeMs = 0;
     try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
@@ -958,7 +1203,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
         ? { width: info.width, height: info.height, needsConversion: info.needsConversion }
         : null;
     const originalDuration = info?.duration || 0;
-    const ext = path.extname(filePath).toLowerCase();
 
     const cacheStrategy = determineCacheStrategy(filePath, info);
 
@@ -989,32 +1233,34 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     if (!cacheStrategy.shouldBypassCache) {
         const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
         if (cached) {
-            const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey) || {};
+            // 零错图风险：必须校验 meta.type
+            const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+            if (meta && meta.type === "webp_unified") {
+                const cachedWidth = meta.width || info?.width || 0;
+                const cachedHeight = meta.height || info?.height || 0;
+                const cachedOriginalDuration =
+                    meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
 
-            const cachedWidth = meta.width || info?.width || 0;
-            const cachedHeight = meta.height || info?.height || 0;
-            const cachedOriginalDuration =
-                meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
+                const webpDur = getWebPDurationFromBuffer(cached);
 
-            const webpDur = getWebPDurationFromBuffer(cached);
+                const { width: finalCssW, height: finalCssH } = fitIntoBox(
+                    cachedWidth,
+                    cachedHeight,
+                    renderW,
+                    renderH,
+                    enlargeSmallImages
+                );
 
-            const { width: finalCssW, height: finalCssH } = fitIntoBox(
-                cachedWidth,
-                cachedHeight,
-                renderW,
-                renderH,
-                enlargeSmallImages
-            );
-
-            return {
-                buffer: cached,
-                webpDuration: webpDur,
-                originalDuration: cachedOriginalDuration,
-                fromCache: true,
-                outputSize: { width: finalCssW, height: finalCssH },
-                ext: ".webp",
-                mimeType: "image/webp",
-            };
+                return {
+                    buffer: cached,
+                    webpDuration: webpDur,
+                    originalDuration: cachedOriginalDuration,
+                    fromCache: true,
+                    outputSize: { width: finalCssW, height: finalCssH },
+                    ext: ".webp",
+                    mimeType: "image/webp",
+                };
+            }
         }
     }
 
@@ -1053,8 +1299,10 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
     const result = await genScheduler.schedule(taskKey, async () => {
         const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
         if (existing) {
-            const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey) || {};
-            return { success: true, buffer: existing, fromCache: true, meta };
+            const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+            if (meta && meta.type === "webp_unified") {
+                return { success: true, buffer: existing, fromCache: true, meta };
+            }
         }
 
         const isAnimated = expectedWebPDuration > 0.1;
@@ -1154,32 +1402,11 @@ function isImageOrVideoExt(ext) {
     return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e);
 }
 
-function isTextFile(filePath) {
-    try {
-        if (!fs.existsSync(filePath)) return false;
-        const stat = fs.statSync(filePath);
-        if (!stat.isFile()) return false;
-        if (stat.size === 0) return false;
-        if (stat.size > TEXT_FILM_MAX_SIZE) return false; // 超过限制就不当纯文本预览了
-
-        const buffer = Buffer.alloc(4096);
-        const fd = fs.openSync(filePath, 'r');
-        const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
-        fs.closeSync(fd);
-
-        for (let i = 0; i < bytesRead; i++) {
-            if (buffer[i] === 0) return false; // 含有空字符，判定为二进制
-        }
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
-
 function isSupportedMedia(filePath) {
     const ext = path.extname(filePath).toLowerCase();
     if (isImageOrVideoExt(ext)) return true;
-    return isTextFile(filePath);
+    // ★ 文本按 a 的“实质识别”接管
+    return isPlainTextFile(filePath);
 }
 
 function getDocumentEOL(doc) {
@@ -1231,8 +1458,8 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
         // 兼容：如果 lineHeight 太小（<8），按“倍率”理解；否则按像素理解
         let pxPerLine = 0;
         if (lineHeightRaw > 0) {
-            if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw; // 倍率
-            else pxPerLine = lineHeightRaw; // 像素
+            if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw;
+            else pxPerLine = lineHeightRaw;
         } else {
             pxPerLine = fontSize * 1.35;
         }
@@ -1281,18 +1508,16 @@ async function renderImages(editor) {
     if (!documentDecorationsMap.has(docUri)) documentDecorationsMap.set(docUri, new Map());
 
     const currentDecos = documentDecorationsMap.get(docUri);
-    // 注意：hideDecos 不再作为局部 Map 收集，而是直接收集 Range 数组立即应用
     const visibleRanges = editor.visibleRanges;
     if (!visibleRanges?.length) return;
 
     const marginLeft = "100px";
-
     const pathRegex = qqq.createPathRegex();
 
     const tasks = [];
     const newHideRanges = [];
 
-    // 第一阶段：同步扫描，快速隐藏
+    // 第一阶段：同步扫描，快速隐藏（仅对支持渲染的路径隐藏，避免“隐藏了但不渲染”的空洞）
     for (const range of visibleRanges) {
         const text = editor.document.getText(range);
         const rangeOffset = editor.document.offsetAt(range.start);
@@ -1311,11 +1536,14 @@ async function renderImages(editor) {
 
             const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
 
-            // ★★★ 同步检查：存在性 ★★★
-            // 只要文件存在，就视为被接管，立即隐藏
             let shouldHide = false;
             if (absPath && fs.existsSync(absPath)) {
-                shouldHide = true;
+                try {
+                    const st = fs.statSync(absPath);
+                    if (!st.isDirectory() && isSupportedMedia(absPath)) {
+                        shouldHide = true;
+                    }
+                } catch { }
             }
 
             if (shouldHide) {
@@ -1336,7 +1564,6 @@ async function renderImages(editor) {
             const contentId = qqq.computeFingerprint(absPath);
             if (!contentId) continue;
 
-            // ★ 只有图片、视频和特定的文本文件才渲染相框
             try {
                 const stat = fs.statSync(absPath);
                 if (stat.isDirectory()) continue;
@@ -1347,28 +1574,27 @@ async function renderImages(editor) {
                 if (currentRenderVersion !== myVersion) return null;
 
                 try {
-                    let mtimeMs = 0;
-                    try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+                    const ext = path.extname(absPath).toLowerCase();
+                    const isVidOrImg = isImageOrVideoExt(ext);
+                    const isText = !isVidOrImg && isPlainTextFile(absPath);
 
-                    const info = await getMediaInfo(absPath, mtimeMs);
-                    const { width: previewWidth, height: previewHeight } = getFrameConfig(info);
+                    let previewWidth = LARGE_PREVIEW_WIDTH;
+                    let previewHeight = LARGE_PREVIEW_HEIGHT;
 
-                    const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
-
-                    if (currentRenderVersion !== myVersion) return null;
-
-                    // ★ 增加渲染结果检测与降级重试机制
-                    let finalResult = previewResult;
-                    const isTextFilm = info?.type === "text_film";
-                    const isResultEmpty = !previewResult?.buffer || previewResult.buffer.length < 200; // WebP 头信息通常就占几十字节，如果太小肯定渲染失败了
-
-                    if (isTextFilm && isResultEmpty) {
-                        // 如果是文本胶片且渲染结果为空（透明相框），标记为极端乱码并强制重新生成（不带字体设置）
-                        info._isExtremeGarbled = true;
-                        // 强制绕过缓存，再次请求
-                        finalResult = await getPreviewBuffer(absPath, contentId + "_retry", previewWidth, previewHeight);
+                    let info = null;
+                    if (!isText) {
+                        let mtimeMs = 0;
+                        try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+                        info = await getMediaInfo(absPath, mtimeMs);
+                        const fc = getFrameConfig(info);
+                        previewWidth = fc.width;
+                        previewHeight = fc.height;
+                    } else {
+                        previewWidth = LARGE_PREVIEW_WIDTH;
+                        previewHeight = LARGE_PREVIEW_HEIGHT;
                     }
 
+                    const previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
                     if (currentRenderVersion !== myVersion) return null;
 
                     const deco = { range: anchorRange, renderOptions: {} };
@@ -1376,16 +1602,16 @@ async function renderImages(editor) {
                     let webpDuration = 0;
                     let outputSize = null;
 
-                    if (finalResult?.buffer) {
+                    if (previewResult?.buffer) {
                         let mime = "image/webp";
-                        if (finalResult.isDirect) {
-                            mime = finalResult.mimeType || mimeFromExt(finalResult.ext) || "image/webp";
-                        } else if (finalResult.mimeType) {
-                            mime = finalResult.mimeType;
+                        if (previewResult.isDirect) {
+                            mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
+                        } else if (previewResult.mimeType) {
+                            mime = previewResult.mimeType;
                         }
-                        contentUrl = `url("data:${mime};base64,${finalResult.buffer.toString("base64")}")`;
-                        webpDuration = finalResult.webpDuration || 0;
-                        outputSize = finalResult.outputSize;
+                        contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
+                        webpDuration = previewResult.webpDuration || 0;
+                        outputSize = previewResult.outputSize;
                     }
 
                     if (!contentUrl) return null;
@@ -1420,18 +1646,16 @@ async function renderImages(editor) {
         }
     }
 
-    // ★★★ 立即应用隐藏装饰器，解决延迟问题 ★★★
     if (newHideRanges.length > 0) {
         editor.setDecorations(markerHideType, newHideRanges);
     } else {
         editor.setDecorations(markerHideType, []);
     }
 
-    // 第二阶段：异步生成/更新图片
     if (tasks.length > 0) {
         const chunkResults = await Promise.all(tasks.map((t) => t()));
         if (currentRenderVersion !== myVersion) return;
-        if (!decorationType) return; // 防止异步期间 decorationType 被销毁
+        if (!decorationType) return;
 
         for (const res of chunkResults) if (res) currentDecos.set(res.key, res.deco);
     }
@@ -1444,7 +1668,6 @@ async function renderImages(editor) {
 // ==================== 粘贴命令 ====================
 
 // 格式化结果为文本（复用原 replacePendingMarker 逻辑）
-// ★ 新增可选参数：taskTitle, transId, taskStartTime, token 用于显示最终结果弹窗
 async function formatResultToText(result, editor, taskTitle = '', transId = null, taskStartTime = 0, token = null) {
     if (!result) return "";
     const doc = editor.document;
@@ -1465,17 +1688,26 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
                     if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
                     const relPath = qqq.toSafePath(path.relative(docDir, filePath));
                     const isLastItem = i === blocks.length - 1;
-                    let pxHeight = LARGE_PREVIEW_HEIGHT;
-                    try {
-                        const info = await getMediaInfo(filePath, Date.now());
-                        const { height } = getFrameConfig(info);
-                        pxHeight = height;
-                    } catch { }
-                    const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
-                    finalContent.push(`/\\${relPath}\\/${eol.repeat(gapBelow)}`);
+
+                    let pxHeight = 0;
+                    const ext = path.extname(filePath).toLowerCase();
+                    if (isImageOrVideoExt(ext)) {
+                        pxHeight = LARGE_PREVIEW_HEIGHT;
+                        try {
+                            let mtimeMs = 0;
+                            try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
+                            const info = await getMediaInfo(filePath, mtimeMs || Date.now());
+                            const { height } = getFrameConfig(info);
+                            pxHeight = height;
+                        } catch { }
+                    } else if (isPlainTextFile(filePath)) {
+                        pxHeight = LARGE_PREVIEW_HEIGHT;
+                    }
+
+                    const gapBelow = pxHeight > 0 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
+                    finalContent.push(`/\\${relPath}\\/${gapBelow ? eol.repeat(gapBelow) : ""}`);
                     invalidateFolderSizeCacheForPath(filePath);
                 }
-                // Skip pending blocks
             }
         }
         replacement = finalContent.join(eol);
@@ -1485,7 +1717,9 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         const relPath = qqq.toSafePath(path.relative(docDir, filePath));
         let pxHeight = LARGE_PREVIEW_HEIGHT;
         try {
-            const info = await getMediaInfo(filePath, Date.now());
+            let mtimeMs = 0;
+            try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
+            const info = await getMediaInfo(filePath, mtimeMs || Date.now());
             const { height } = getFrameConfig(info);
             pxHeight = height;
         } catch { }
@@ -1500,7 +1734,6 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
             const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
-            // 文件夹不渲染相框，不留空行
             replacement += `/\\${relPath}\\/${eol}`;
             invalidateFolderSizeCacheForPath(folderPath);
         }
@@ -1515,20 +1748,26 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
             if (fp) qqq.prefillFingerprint(f, fp);
 
             const relPath = qqq.toSafePath(path.relative(docDir, f));
-            let pxHeight = 0; // 默认不预留相框高度
-            const isMedia = isSupportedMedia(f);
-            if (isMedia) {
+
+            let pxHeight = 0;
+            const ext = path.extname(f).toLowerCase();
+            if (isImageOrVideoExt(ext)) {
                 pxHeight = LARGE_PREVIEW_HEIGHT;
                 try {
-                    const info = await getMediaInfo(f, Date.now());
+                    let mtimeMs = 0;
+                    try { mtimeMs = fs.statSync(f).mtimeMs; } catch { }
+                    const info = await getMediaInfo(f, mtimeMs || Date.now());
                     const { height } = getFrameConfig(info);
                     pxHeight = height;
                 } catch { }
+            } else if (isPlainTextFile(f)) {
+                pxHeight = LARGE_PREVIEW_HEIGHT;
             }
+
             const isLastItem = i === files.length - 1 && folders.length === 0;
             if (i > 0 || folders.length > 0) replacement += eol;
             replacement += `/\\${relPath}\\/`;
-            if (isMedia) {
+            if (pxHeight > 0) {
                 const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
                 replacement += eol.repeat(gapBelow);
             } else {
@@ -1536,14 +1775,11 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
             }
             invalidateFolderSizeCacheForPath(f);
         }
-
-        const totalCount = files.length + folders.length;
     } else if (result.type === "folder_text") {
         const folders = result.text.split(/\r?\n/).filter(f => f.trim());
         for (let i = 0; i < folders.length; i++) {
             const folderPath = folders[i];
             const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
-            // 文件夹不渲染相框，不留空行
             replacement += `/\\${relPath}\\/${eol}`;
             invalidateFolderSizeCacheForPath(folderPath);
         }
@@ -1557,13 +1793,11 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 // ==================== 锚点替换辅助 ====================
 async function replaceAnchorInDoc(uri, anchor, newText) {
     try {
-        // 尝试打开文档（即使不可见）
         const doc = await vscode.workspace.openTextDocument(uri);
         const text = doc.getText();
         const idx = text.indexOf(anchor);
 
         if (idx === -1) {
-            // 锚点丢失，返回 false 触发回滚
             return false;
         }
 
@@ -1574,7 +1808,6 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
         const edit = new vscode.WorkspaceEdit();
         edit.replace(uri, range, newText);
 
-        // 应用编辑
         return await vscode.workspace.applyEdit(edit);
     } catch (e) {
         console.error("Replace Anchor Failed:", e);
@@ -1583,24 +1816,19 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 }
 
 async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult = null) {
-    // 0. ★ 生成任务标识
     const filePath = editor.document.uri.fsPath;
-    const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
-    const iconNum = await TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
-    const transId = TransactionManager.createTransactionId();  // 六位随机ID（用于锚点）
-    const taskTitle = TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
+    const taskNum = await TaskCounter.increment(filePath);
+    const iconNum = await TaskCounter.incrementIcon();
+    const transId = TransactionManager.createTransactionId();
+    const taskTitle = TaskCounter.formatTitle(filePath, transId, iconNum);
     const anchor = `/__PENDING_${transId}/`;
 
-    // 立即插入锚点
     const success = await TransactionManager.insertAnchor(editor, transId);
-
-    if (!success) return; // 插入失败，直接退出
+    if (!success) return;
 
     const docUri = editor.document.uri;
 
-    // 2. 注册事务 (Pending)
-    // ★ 确定任务类型和总大小（用于回滚赦免时间计算）
-    let taskType = 'local_file';  // 默认本地文件
+    let taskType = 'local_file';
     let intentTotalSize = 0;
     if (typeInfo) {
         if (typeInfo.subType === 'html_rich' || typeInfo.subType === 'html_text') {
@@ -1622,27 +1850,24 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
         landedFiles: [],
         landedFolders: [],
         startTime: Date.now(),
-        taskType: taskType,  // ★ 任务类型: 'local_file' | 'html' | 'video'
-        intentTotalSize: intentTotalSize,  // ★ 意图列表总大小（仅本地文件有效）
-        existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+        taskType: taskType,
+        intentTotalSize: intentTotalSize,
+        existingFiles: global.getDirectorySnapshot(targetDir)
     });
 
-    // 3. 启动带进度的后台任务
-    const taskStartTime = Date.now();  // ★ 记录开始时间
+    const taskStartTime = Date.now();
 
-    // ★ 创建自定义取消源（用于锚点丢失时主动取消）
     const anchorLostSource = new vscode.CancellationTokenSource();
     let anchorLost = false;
     let lastAnchorCheckTime = 0;
-    const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
+    const ANCHOR_CHECK_INTERVAL = 800;
 
-    // ★ 锚点检查函数（带节流）
     const checkAnchorExists = async () => {
-        if (anchorLost) return false;  // 已经检测到丢失，不再检查
+        if (anchorLost) return false;
 
         const now = Date.now();
         if (now - lastAnchorCheckTime < ANCHOR_CHECK_INTERVAL) {
-            return true;  // 节流：还没到检查时间
+            return true;
         }
         lastAnchorCheckTime = now;
 
@@ -1670,24 +1895,18 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: taskTitle,  // ★ 简洁标题，不加额外描述
+        title: taskTitle,
         cancellable: true
     }, async (progress, token) => {
-        // ★ 组合取消检查：用户取消 或 锚点丢失
         const isCancelled = () => token.isCancellationRequested || anchorLostSource.token.isCancellationRequested;
 
         try {
-            // 4. 执行实际粘贴逻辑 (传入 transId 进行文件追踪)
-            // ★ 进度回调中检查锚点，并传递 shouldCancel 回调
             let result = await h.autoDetectAndPaste(targetDir, async (p, msg) => {
                 progress.report({ increment: p, message: msg });
-                // ★ 每次进度更新时检查锚点
                 await checkAnchorExists();
             }, token, transId, null, null, () => anchorLost);
 
-            // ★★★ 视频并发下载接管 ★★★
             if (result && result.type === 'video_url') {
-                // ★ 更新事务类型为视频（影响赦免时间计算）
                 await TransactionManager.updateTransaction(transId, { taskType: 'video' });
 
                 try {
@@ -1698,14 +1917,13 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                         transId,
                         async (p, msg) => {
                             progress.report({ increment: 0, message: msg });
-                            // ★ 视频下载进度更新时也检查锚点
                             await checkAnchorExists();
                         },
                         token,
                         null,
-                        taskTitle,  // ★ 传递 taskTitle
-                        () => anchorLost,  // ★ 传递 shouldCancel 回调
-                        taskNum  // ★ 传递 taskNum
+                        taskTitle,
+                        () => anchorLost,
+                        taskNum
                     );
 
                     if (downloadRes && downloadRes.landedFiles && downloadRes.landedFiles.length > 0) {
@@ -1715,7 +1933,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                             fingerprints: {}
                         };
                     } else {
-                        result = null; // 下载失败或取消
+                        result = null;
                     }
                 } catch (e) {
                     console.error("Video Download Failed:", e);
@@ -1723,14 +1941,11 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                 }
             }
 
-            // ★ 检查是否被取消（用户取消 或 锚点丢失）
             if (isCancelled()) {
-                // ★ 执行回滚
                 const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
 
-                // ★ 根据取消原因显示不同的弹窗
                 if (anchorLost) {
                     TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                 } else {
@@ -1740,26 +1955,21 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
             }
 
             if (result) {
-                // 5. 格式化结果
-                // Mock editor object for formatResultToText
                 const mockEditor = {
                     document: {
                         uri: docUri,
-                        eol: editor.document.eol // Use captured EOL or default
+                        eol: editor.document.eol
                     }
                 };
 
                 const newText = await formatResultToText(result, mockEditor, taskTitle, transId, taskStartTime, token);
 
                 if (newText) {
-                    // 6. 替换锚点 (原子化提交)
                     const replaced = await replaceAnchorInDoc(docUri, anchor, newText);
 
                     if (replaced) {
-                        // 成功：提交事务 (移除记录)
                         await TransactionManager.removeTransaction(transId);
 
-                        // ★ 内存截图不显示弹窗，其他类型显示成功弹窗
                         if (result.type !== 'image') {
                             const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
                             const skippedCount = result.skippedCount || 0;
@@ -1772,36 +1982,26 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
                             TaskMessage.showSimpleToast(msg, 15000, 'success');
                         }
                     } else {
-                        // 失败：锚点丢失 -> 回滚文件
                         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                         if (trans) await TransactionManager.rollback(trans);
-
-                        // ★ 显示锚点丢失弹窗
                         TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
                     }
                 } else {
-                    // 失败：结果为空 -> 回滚
                     const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                     if (trans) await TransactionManager.rollback(trans);
                     await replaceAnchorInDoc(docUri, anchor, "");
-
-                    // ★ 显示失败弹窗
                     TaskMessage.showSimpleToast(`${taskTitle} 处理失败，已回滚`, 15000, 'cancel');
                 }
             } else {
-                // ★ result 为 null：未知类型（如 reaper 片段）-> 静默删除锚点，不显示弹窗
                 const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
                 if (trans) await TransactionManager.rollback(trans);
                 await replaceAnchorInDoc(docUri, anchor, "");
-                // 不显示任何弹窗
             }
         } catch (e) {
             console.error(e);
             const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
             if (trans) await TransactionManager.rollback(trans);
             await replaceAnchorInDoc(docUri, anchor, "");
-
-            // ★ 显示异常弹窗
             TaskMessage.showSimpleToast(`${taskTitle} 发生异常，已回滚`, 15000, 'cancel');
         }
     });
@@ -1822,7 +2022,6 @@ async function executeClipboardCommand() {
         return;
     }
 
-    // Lazy Recovery Trigger (Only once per session)
     if (!global.hasRecovered) {
         global.hasRecovered = true;
         TransactionManager.recover().catch(e => console.error(e));
@@ -1832,28 +2031,21 @@ async function executeClipboardCommand() {
     const targetDir = path.join(currentDocDir, "qqq");
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
-    // 1. 分类 (Check Q) - ★ 单一真理源，返回完整快照
     const snapshot = await wq();
     const config = getConfig('transactionLevel') || 'full';
 
-    let mode = 'a'; // 默认弯粘
+    let mode = 'a';
 
-    // ★ 文件数量阈值：超过此数量必须显示进度弹窗
     const FILE_COUNT_THRESHOLD = 100;
 
-    // 白名单 -> 直粘 (q)
     if (snapshot.type === 'whitelist') {
         mode = 'q';
     } else {
-        // 黄名单
         if (config === 'half') {
-            // 半包模式例外
             if (snapshot.subType === 'image') {
-                mode = 'q'; // 截图 -> q
+                mode = 'q';
             } else if (snapshot.subType === 'file') {
                 const fileCount = snapshot.files?.length || 0;
-                // ★ 文件 < 80MB 且数量 < 10 -> q
-                // 否则使用弯粘模式显示进度弹窗
                 if (snapshot.totalSize < 80 * 1024 * 1024 && fileCount < FILE_COUNT_THRESHOLD) {
                     mode = 'q';
                 }
@@ -1862,10 +2054,7 @@ async function executeClipboardCommand() {
     }
 
     if (mode === 'q') {
-        // 直粘 (q) - 最快速度，无事务
-        // ★ 直接传递完整快照，不再重复调用 Shell
         await h.autoDetectAndPaste(targetDir, null, null, null, snapshot).then(async (result) => {
-            // ★ Handle Video URL in q mode -> Escalate to 'a' (Curved Paste)
             if (result && result.type === 'video_url') {
                 await performCurvedPaste(editor, targetDir, snapshot, result);
                 return;
@@ -1874,7 +2063,6 @@ async function executeClipboardCommand() {
             const newText = await formatResultToText(result, editor);
             if (!newText) return;
 
-            // 确保编辑器仍然活跃
             const activeEditor = vscode.window.activeTextEditor;
             if (!activeEditor || activeEditor.document.uri.toString() !== editor.document.uri.toString()) return;
 
@@ -1884,7 +2072,6 @@ async function executeClipboardCommand() {
             debounceRender(activeEditor, 10);
         });
     } else {
-        // 弯粘 (a) - 事务 + 弹窗 + 锚点
         await performCurvedPaste(editor, targetDir, snapshot);
     }
 }
@@ -1914,17 +2101,14 @@ async function provideCleanlinessEditsAsync(document) {
         let pxHeight = 0;
 
         if (absPath && fs.existsSync(absPath)) {
-            const ext = path.extname(absPath);
+            const ext = path.extname(absPath).toLowerCase();
             if (isImageOrVideoExt(ext)) {
                 try {
                     let mtimeMs = fs.statSync(absPath).mtimeMs;
                     const info = await getMediaInfo(absPath, mtimeMs);
 
-                    let pxHeight = 0;
+                    let pxH = 0;
 
-                    // 特殊处理高风险格式 (ai, eps, cdr)，防止无法渲染时占位过大
-                    // 策略：如果是这些格式，且 needsConversion (说明 ffprobe 没探测出宽高，用的假数据)，
-                    //      则必须要有有效的预览缓存，才分配高度。否则默认不占位。
                     if (info && info.needsConversion && [".ai", ".eps", ".cdr"].includes(ext)) {
                         const contentId = qqq.computeFingerprint(absPath);
                         if (contentId) {
@@ -1932,22 +2116,24 @@ async function provideCleanlinessEditsAsync(document) {
                             const cached = qqq.getCachedBuffer(contentId, strategy.cacheKey);
                             if (cached) {
                                 const { height } = getFrameConfig(info);
-                                pxHeight = height;
+                                pxH = height;
                             } else {
-                                // 无缓存，大概率无法渲染，不占位
-                                pxHeight = 0;
+                                pxH = 0;
                             }
                         } else {
-                            pxHeight = 0;
+                            pxH = 0;
                         }
                     } else {
                         const { height } = getFrameConfig(info);
-                        pxHeight = height;
+                        pxH = height;
                     }
+                    pxHeight = pxH;
                 } catch {
                     const { height } = getFrameConfig(null);
                     pxHeight = height;
                 }
+            } else if (isPlainTextFile(absPath)) {
+                pxHeight = LARGE_PREVIEW_HEIGHT;
             }
         }
 
@@ -1999,7 +2185,6 @@ class FileCodeLensProvider {
     refresh() {
         this._onDidChangeCodeLenses.fire();
     }
-    // ★ 防抖刷新，避免频繁刷新
     debouncedRefresh() {
         if (this._refreshDebounceTimer) {
             clearTimeout(this._refreshDebounceTimer);
@@ -2015,7 +2200,7 @@ class FileCodeLensProvider {
         const regex = qqq.createPathRegex();
         const text = document.getText();
         let match;
-        const foldersToFetch = new Set(); // ★ 需要异步获取的文件夹
+        const foldersToFetch = new Set();
 
         while ((match = regex.exec(text))) {
             const pos = document.positionAt(match.index);
@@ -2029,10 +2214,11 @@ class FileCodeLensProvider {
             const folder = path.dirname(absPath);
             const ext = path.extname(absPath).toLowerCase();
             const isVidOrImg = isImageOrVideoExt(ext);
+            const isText = !isVidOrImg && isPlainTextFile(absPath);
+
             const targetLensLine = pos.line;
             const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
-            // ★ 同步获取文件夹大小（仅从缓存）
             let folderData = getQqqFolderSizeSync(folder);
             let fSizeStr;
             let folderTooltip;
@@ -2041,13 +2227,11 @@ class FileCodeLensProvider {
                 fSizeStr = formatBytes(folderData.size || 0);
                 folderTooltip = folderData.summary;
             } else {
-                // ★ 没有缓存，显示占位符
                 fSizeStr = "●";
                 folderTooltip = "正在计算文件夹大小...";
                 foldersToFetch.add(folder);
             }
 
-            // ★ 同步获取文件信息（这个很快）
             let fileSz = "?";
             let tooltipText = "";
             let mtimeMs = 0;
@@ -2058,7 +2242,6 @@ class FileCodeLensProvider {
                 mtimeMs = st.mtimeMs;
             } catch { }
 
-            // ★ 先添加基本的 CodeLens（不等待媒体信息）
             lenses.push(
                 new vscode.CodeLens(r, {
                     title: `✎( ${fSizeStr}) 🗀qqq`,
@@ -2073,7 +2256,6 @@ class FileCodeLensProvider {
                 })
             );
 
-            // ★ 媒体信息可以异步获取，但这里我们保持同步以简化逻辑
             let titleSuffix = "";
             let iconPart = "";
             let spacePart = "   ";
@@ -2099,6 +2281,22 @@ class FileCodeLensProvider {
 
                     if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
                 }
+            } else if (isText) {
+                try {
+                    const SAMPLE_SIZE = 8192;
+                    const fd = fs.openSync(absPath, 'r');
+                    const buf = Buffer.alloc(SAMPLE_SIZE);
+                    const bytesRead = fs.readSync(fd, buf, 0, SAMPLE_SIZE, 0);
+                    fs.closeSync(fd);
+                    const st = fs.statSync(absPath);
+                    const sample = buf.slice(0, bytesRead).toString('utf8');
+                    const sampleLines = sample.split('\n').length;
+                    const estLines = bytesRead < st.size ? Math.round(sampleLines * st.size / bytesRead) : sampleLines;
+                    titleSuffix = `   (~${estLines} lines)`;
+                    tooltipText += `\nType: Plain Text\nLines: ~${estLines}`;
+                } catch { }
+                iconPart = "📄";
+                spacePart = " ";
             }
 
             lenses.push(
@@ -2111,7 +2309,6 @@ class FileCodeLensProvider {
             );
         }
 
-        // ★ 异步获取未缓存的文件夹大小
         if (foldersToFetch.size > 0) {
             const refreshCb = () => this.debouncedRefresh();
             for (const folder of foldersToFetch) {
@@ -2124,7 +2321,7 @@ class FileCodeLensProvider {
 }
 
 const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
-const _pendingFolderSizeRequests = new Map(); // ★ 跟踪正在进行的请求
+const _pendingFolderSizeRequests = new Map();
 
 function invalidateFolderSizeCacheForPath(filePath) {
     try {
@@ -2133,10 +2330,6 @@ function invalidateFolderSizeCacheForPath(filePath) {
     } catch { }
 }
 
-/**
- * ★ 同步获取文件夹大小（仅从缓存）
- * 返回缓存数据或 null（表示需要异步获取）
- */
 function getQqqFolderSizeSync(folderPath) {
     const now = Date.now();
     const cached = folderSizeCache.get(folderPath);
@@ -2146,18 +2339,13 @@ function getQqqFolderSizeSync(folderPath) {
     return null;
 }
 
-/**
- * ★ 异步获取文件夹大小（带去重，完成后刷新 CodeLens）
- */
 function fetchFolderSizeAsync(folderPath, refreshCallback) {
-    // 如果已经有正在进行的请求，不重复发起
     if (_pendingFolderSizeRequests.has(folderPath)) {
         return;
     }
 
     _pendingFolderSizeRequests.set(folderPath, true);
 
-    // 后台异步获取
     qqq.getFolderInfo(folderPath).then(result => {
         _pendingFolderSizeRequests.delete(folderPath);
 
@@ -2179,7 +2367,6 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
             const data = { size: result.total_size, summary: summaryStr };
             folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
 
-            // ★ 缓存完成，刷新 CodeLens
             if (refreshCallback) {
                 refreshCallback();
             }
@@ -2309,19 +2496,10 @@ function renderVisibleEditors(delay = 50) {
 // ==================== 激活与停用 ====================
 async function activate(context) {
     extensionContext = context;
-    // Inject context into global for state access
+
     try {
         const global = require('./global');
         if (global.ConfigManager) global.ConfigManager.setContext(context);
-        // Also ensure global state is accessible for TransactionManager
-        // global.js uses extensionContext variable if exported or set?
-        // In global.js I used `extensionContext` variable but didn't export a setter.
-        // Wait, global.js has `getConfig` using `vscode.workspace.getConfiguration`.
-        // But `TransactionManager` uses `extensionContext.globalState`.
-        // I need to set `extensionContext` in global.js.
-        // `global.js` has `extensionContext` variable but no setter exported?
-        // Let's check global.js content again.
-        // I might need to add a setter in global.js or pass context to recover.
     } catch (e) { }
 
     isCoreIntegrityValid = verifySystemIntegrity();
@@ -2332,13 +2510,12 @@ async function activate(context) {
     refreshConfig();
     codeLensProvider = new FileCodeLensProvider();
 
-    // ★ 启动时恢复/清理事务
     try {
         await TransactionManager.recover();
-        global.hasRecovered = true;  // ★ 防止 executeClipboardCommand 重复触发
+        global.hasRecovered = true;
     } catch (e) {
         console.error("Transaction Recovery Failed:", e);
-        global.hasRecovered = true;  // ★ 即使失败也标记，防止重复执行
+        global.hasRecovered = true;
     }
 
     context.subscriptions.push(
@@ -2416,13 +2593,12 @@ async function activate(context) {
         })
     );
 
-    // 监听文件系统变化（删除/创建/重命名），及时更新渲染状态
     const watcher = vscode.workspace.createFileSystemWatcher("**/*");
     context.subscriptions.push(watcher);
     const fsChangeHandler = () => {
         if (codeLensProvider) codeLensProvider.refresh();
         renderVisibleEditors(200);
-        clearDecorations(); // 强制刷新缓存
+        clearDecorations();
     };
     context.subscriptions.push(
         watcher.onDidCreate(fsChangeHandler),
