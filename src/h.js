@@ -28,6 +28,8 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Drawing;
+using System.Drawing.Imaging;
 
 public class ClipboardHelper {
     [DllImport("user32.dll", SetLastError = true)]
@@ -77,6 +79,54 @@ public class ClipboardHelper {
             return "Error: " + ex.Message;
         } finally {
             CloseClipboard();
+        }
+    }
+}
+
+public class IconHelper {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct SHFILEINFO {
+        public IntPtr hIcon;
+        public int iIcon;
+        public uint dwAttributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szDisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
+        public string szTypeName;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbSizeFileInfo, uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+    public const uint SHGFI_ICON = 0x100;
+    public const uint SHGFI_LARGEICON = 0x0;
+    public const uint SHGFI_SMALLICON = 0x1;
+    public const uint SHGFI_USEFILEATTRIBUTES = 0x10;
+
+    public static string GetIconBase64(string path) {
+        SHFILEINFO shinfo = new SHFILEINFO();
+        try {
+            // SHGFI_LARGEICON is 32x32
+            IntPtr res = SHGetFileInfo(path, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), SHGFI_ICON | SHGFI_LARGEICON);
+            if (res == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero) return null;
+
+            using (Icon icon = Icon.FromHandle(shinfo.hIcon)) {
+                using (Bitmap bitmap = icon.ToBitmap()) {
+                    using (MemoryStream ms = new MemoryStream()) {
+                        bitmap.Save(ms, ImageFormat.Png);
+                        return Convert.ToBase64String(ms.ToArray());
+                    }
+                }
+            }
+        } catch {
+            return null;
+        } finally {
+            if (shinfo.hIcon != IntPtr.Zero) {
+                DestroyIcon(shinfo.hIcon);
+            }
         }
     }
 }

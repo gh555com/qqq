@@ -2,6 +2,7 @@ const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const crypto = require("crypto");
 const cp = require("child_process"); // Retain for ffmpeg/spawn if needed by q3 or legacy
 
 const q3 = require("./q3");
@@ -167,7 +168,8 @@ function createEmptyMeta() {
 		entries: {},
 		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
 		brokenFiles: {},
-		fileIndex: {} // Persistent Source File Index (Fingerprint -> Path)
+		fileIndex: {}, // Persistent Source File Index (Fingerprint -> Path)
+		icons: {}
 	};
 }
 
@@ -180,6 +182,7 @@ function loadCacheMeta() {
 			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
 			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
+			if (!cacheMeta.icons) cacheMeta.icons = {};
 		} else {
 			cacheMeta = createEmptyMeta();
 		}
@@ -275,6 +278,31 @@ function validateCache() {
 			} else {
 				// Sync to memory
 				h.prefillFingerprint(p, fp);
+			}
+		}
+	}
+
+	// Validate Icons
+	if (cacheMeta.icons) {
+		const iconFiles = Object.keys(cacheMeta.icons);
+		for (const p of iconFiles) {
+			const entry = cacheMeta.icons[p];
+			if (!entry || !entry.hash) {
+				delete cacheMeta.icons[p];
+				changed = true;
+				continue;
+			}
+			const iconFileName = `icon_${entry.hash}.png`;
+			if (!actualFiles.has(iconFileName)) {
+				delete cacheMeta.icons[p];
+				changed = true;
+			} else {
+				actualFiles.delete(iconFileName);
+				try {
+					const st = fs.statSync(path.join(cacheDir, iconFileName));
+					realSize += st.size;
+					realCount++;
+				} catch (e) { }
 			}
 		}
 	}
@@ -916,6 +944,36 @@ async function deactivate() {
 	global.logMessage("qqq 扩展已停用", "INFO");
 }
 
+function getIconCache(filePath) {
+	if (!cacheMeta || !cacheMeta.icons) return null;
+	try {
+		const mtime = fs.existsSync(filePath) ? fs.statSync(filePath).mtimeMs : 0;
+		const entry = cacheMeta.icons[filePath];
+		if (entry && entry.mtime === mtime) {
+			const iconPath = path.join(cacheDir, `icon_${entry.hash}.png`);
+			if (fs.existsSync(iconPath)) {
+				return fs.readFileSync(iconPath).toString("base64");
+			}
+		}
+	} catch (e) { }
+	return null;
+}
+
+function setIconCache(filePath, iconB64) {
+	if (!cacheMeta || !cacheDir) return;
+	if (!cacheMeta.icons) cacheMeta.icons = {};
+
+	try {
+		const mtime = fs.existsSync(filePath) ? fs.statSync(filePath).mtimeMs : 0;
+		const hash = crypto.createHash("md5").update(filePath).digest("hex");
+		const iconPath = path.join(cacheDir, `icon_${hash}.png`);
+
+		fs.writeFileSync(iconPath, Buffer.from(iconB64, "base64"));
+		cacheMeta.icons[filePath] = { hash, mtime };
+		saveCacheMeta();
+	} catch (e) { }
+}
+
 const exported = {
 	activate,
 	deactivate,
@@ -940,6 +998,8 @@ const exported = {
 
 	initCache,
 	validateCache,
+	getIconCache,
+	setIconCache,
 
 	getCacheEntry,
 	getCacheQualityMeta,

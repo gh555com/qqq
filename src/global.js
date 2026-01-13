@@ -529,7 +529,7 @@ try {
     $clipboardHelperCode = @'
 ${clipboardHelperCode}
 '@
-    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp
+    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp -ReferencedAssemblies "System.Drawing", "System.Windows.Forms"
 } catch {
     # Ignore if type already exists
 }
@@ -592,6 +592,21 @@ function Process-Command {
              if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
              else { $result.success = $false }
         }
+      }
+      'extract_icon' {
+         try {
+             $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
+             if ($iconB64) {
+                 $result.icon = $iconB64
+                 $result.status = 'ok'
+             } else {
+                 $result.status = 'error'
+                 $result.message = 'icon extraction failed'
+             }
+         } catch {
+             $result.status = 'error'
+             $result.message = $_.Exception.Message
+         }
       }
       'getHtml' {
         $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
@@ -2186,9 +2201,14 @@ const pasteQueue = new TaskQueue();
 const metaSaveQueue = new TaskQueue();
 
 async function getIcon(filePath) {
-	if (!pythonBridge.isAvailable()) return null;
-	const res = await pythonBridge.call("extract_icon", { path: filePath });
+	const qqq = require("./qqq");
+	const cached = qqq.getIconCache(filePath);
+	if (cached) return cached;
+
+	if (!shellBridge.isAvailable()) return null;
+	const res = await shellBridge.call("extract_icon", { path: filePath });
 	if (res && res.status === "ok") {
+		qqq.setIconCache(filePath, res.icon);
 		return res.icon; // base64 string
 	}
 	return null;

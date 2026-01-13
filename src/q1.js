@@ -1529,7 +1529,10 @@ async function renderImages(editor) {
 	const myVersion = ++currentRenderVersion;
 
 	if (!decorationType)
-		decorationType = vscode.window.createTextEditorDecorationType({ isWholeLine: false });
+		decorationType = vscode.window.createTextEditorDecorationType({
+			isWholeLine: false,
+			gutterIconSize: 'contain'
+		});
 
 	if (!markerHideType)
 		markerHideType = vscode.window.createTextEditorDecorationType({
@@ -1667,14 +1670,14 @@ async function renderImages(editor) {
 					// 如果没有预览但有图标，使用图标作为预览
 					if (!contentUrl && iconB64) {
 						contentUrl = `url("data:image/png;base64,${iconB64}")`;
-						previewWidth = 16;
-						previewHeight = 16;
-						outputSize = { width: 16, height: 16 };
+						previewWidth = 32;
+						previewHeight = 32;
+						outputSize = { width: 32, height: 32 };
 					}
 
 					// 设置 Gutter 图标
 					if (iconB64) {
-						deco.renderOptions.gutterIconPath = vscode.Uri.parse(`data:image/png;base64,${iconB64}`);
+						deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
 						deco.renderOptions.gutterIconSize = "contain";
 					}
 
