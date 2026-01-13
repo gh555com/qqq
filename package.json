@@ -121,6 +121,20 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "👁️ 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+          },
+          "qqq.textSlideColorScheme": {
+            "order": 40,
+            "type": "string",
+            "default": "light",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "markdownEnumDescriptions": [
+              "白底黑字：经典配色（默认）",
+              "巧克力底白字：深色配色，使用黑巧克力色背景"
+            ],
+            "markdownDescription": "👁️ 文本胶片底色：控制文本文件的预览配色方案。"
           }
         }
       },
