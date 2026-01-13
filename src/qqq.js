@@ -261,6 +261,10 @@ function validateCache() {
 	}
 
 	for (const orphan of actualFiles) {
+		// 保护图标文件不被误删，除非它们在 meta 中已不存在
+		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
+			continue;
+		}
 		try {
 			fs.unlinkSync(path.join(cacheDir, orphan));
 			changed = true;
