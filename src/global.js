@@ -595,17 +595,30 @@ function Process-Command {
       }
       'extract_icon' {
          try {
+             # 优先尝试 C# 高质量提取
              $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
              if ($iconB64) {
                  $result.icon = $iconB64
                  $result.status = 'ok'
              } else {
-                 $result.status = 'error'
-                 $result.message = 'icon extraction failed'
+                 throw "C# extraction failed"
              }
          } catch {
-             $result.status = 'error'
-             $result.message = $_.Exception.Message
+             # 回退：纯 PowerShell 原生方案 (虽然只能拿文件关联图标)
+             try {
+                 $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cmd.path)
+                 if ($icon) {
+                     $ms = New-Object System.IO.MemoryStream
+                     $bmp = $icon.ToBitmap()
+                     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                     $result.icon = [Convert]::ToBase64String($ms.ToArray())
+                     $result.status = 'ok'
+                     $bmp.Dispose(); $icon.Dispose(); $ms.Dispose()
+                 } else { $result.status = 'error' }
+             } catch {
+                 $result.status = 'error'
+                 $result.message = $_.Exception.Message
+             }
          }
       }
       'getHtml' {
