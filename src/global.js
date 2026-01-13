@@ -1104,7 +1104,8 @@ const DEFAULT_CONFIG = {
 	"docExportImageResolution": "原始分辨率",
 	"docExportIncludeCipher": true,
 	"transactionLevel": "full",
-	"textSlideColorScheme": "light"
+	"textSlideColorScheme": "light",
+	"textSlideFontSize": 14
 };
 
 const CONFIG_METADATA = {
@@ -1147,6 +1148,9 @@ const CONFIG_METADATA = {
 		name: "文本胶片底色", type: "enum",
 		options: ["light", "dark"],
 		descriptions: ["白底黑字", "黑巧克力底白字"]
+	},
+	"textSlideFontSize": {
+		name: "文本胶片字体大小", type: "number"
 	}
 };
 
