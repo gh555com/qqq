@@ -725,10 +725,22 @@ while ($true) {
   id = $(json_get "$line" "_id")
   case "$action" in
 	ping) echo '{"_id":'"$id"',"status":"alive"}';;
-    hasImage) if command - v pngpaste > /dev/null 2 >& 1 && pngpaste - > /dev/null 2 >& 1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
+    hasImage) if command -v pngpaste > /dev/null 2>&1 && pngpaste - > /dev/null 2>&1; then echo '{"_id":'"$id"',"value":true}'; else echo '{"_id":'"$id"',"value":false}'; fi;;
     saveImage)
-dest = $(json_get "$line" "path")
-if command - v pngpaste > /dev/null 2 >& 1 && pngpaste "$dest" 2 > /dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+      dest=$(json_get "$line" "path")
+      if command -v pngpaste > /dev/null 2>&1 && pngpaste "$dest" 2>/dev/null; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+    extract_icon)
+      path=$(json_get "$line" "path")
+      icon_b64=$(osascript -e "use framework \"AppKit\"
+        set iconImage to (current application's NSWorkspace's sharedWorkspace()'s iconForFile:\"$path\")
+        set bitmapRep to (current application's NSBitmapImageRep's imageRepWithData:(iconImage's TIFFRepresentation()))
+        set pngData to (bitmapRep's representationUsingType:(current application's NSPNGFileType) properties:(missing value))
+        return (pngData's base64EncodedStringWithOptions:0) as text" 2>/dev/null)
+      if [ -n "$icon_b64" ]; then
+        echo '{"_id":'"$id"',"icon":"'"$icon_b64"'","status":"ok"}'
+      else
+        echo '{"_id":'"$id"',"status":"error"}'
+      fi;;
     *) echo '{"_id":'"$id"',"error":"unknown action"}';;
 esac
 done
@@ -748,8 +760,40 @@ while IFS = read - r line; do
 content = $(xclip - selection clipboard - o - t text / html 2 > /dev/null | python3 - c 'import json,sys; print(json.dumps(sys.stdin.read()))')
       echo '{"_id":'"$id"',"value":'$content'}';;
     saveImage)
-dest = $(json_get "$line" "path")
-if command - v xclip > /dev/null 2 >& 1 && xclip - selection clipboard - t image / png - o > "$dest" 2 > /dev/null && [-s "$dest"]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+      dest=$(json_get "$line" "path")
+      if command -v xclip > /dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
+    extract_icon)
+      path=$(json_get "$line" "path")
+      # Linux: 尝试使用 python3 + gi (Gio/GdkPixbuf) 提取图标
+      icon_b64=$(python3 -c "
+import sys, os
+try:
+    import gi
+    gi.require_version('Gio', '2.0')
+    from gi.repository import Gio, GdkPixbuf
+    import base64
+    from io import BytesIO
+
+    file = Gio.File.new_for_path('$path')
+    info = file.query_info('standard::icon', Gio.FileQueryInfoFlags.NONE, None)
+    icon = info.get_icon()
+
+    theme = Gio.IconTheme.get_default()
+    # 尝试查找图标
+    icon_info = theme.lookup_by_gicon(icon, 32, Gio.IconLookupFlags.FORCE_SIZE)
+    if icon_info:
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_info.get_filename(), 32, 32)
+        buffer = BytesIO()
+        pixbuf.save_to_bufferv(buffer, 'png', [], [])
+        print(base64.b64encode(buffer.getvalue()).decode('utf-8'))
+except:
+    pass
+" 2>/dev/null)
+      if [ -n "$icon_b64" ]; then
+        echo '{"_id":'"$id"',"icon":"'"$icon_b64"'","status":"ok"}'
+      else
+        echo '{"_id":'"$id"',"status":"error"}'
+      fi;;
     *) echo '{"_id":'"$id"',"error":"unknown action"}';;
 esac
 done
