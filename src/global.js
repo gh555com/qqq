@@ -2218,9 +2218,13 @@ async function getIcon(filePath) {
 	const cached = qqq.getIconCache(filePath);
 	if (cached) return cached;
 
-	if (!shellBridge.isAvailable()) return null;
-	const res = await shellBridge.call("extract_icon", { path: filePath });
-	if (res && res.status === "ok") {
+	const res = await tryEngineCall({
+		shell: "extract_icon",
+		python: "extract_icon",
+		rust: "extract_icon"
+	}, { path: filePath });
+
+	if (res && res.status === "ok" && res.icon) {
 		qqq.setIconCache(filePath, res.icon);
 		return res.icon; // base64 string
 	}
