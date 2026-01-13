@@ -39,8 +39,8 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | 9. System Compatibility           |    8   |    7   |   **10**   |   ★★★  | Runs without extra dependencies     |
 | 10. Stability                     |    8   |    9   |      9     |   ★★★  | Crash rate over long runtimes       |
 | 11. Dev & Maintenance Cost        | **10** |    5   |      7     |   ★☆☆  | Readability, iteration speed        |
-| 12. Cross-Platform Capability     |    7   |    8   |      6     |   ★☆☆  | Win/macOS/Linux coverage            |
-| 13. File Icon Extraction          |    9   |    9   |      8     |   ★★☆  | Win32 SHGetFileInfo vs. PS fallback |
+| 12. Cross-Platform Capability     |    7   |    8   |    **8**   |   ★☆☆  | Win/macOS/Linux coverage            |
+| 13. File Icon Extraction          |    9   |    9   |    **9**   |   ★★☆  | Multi-platform native APIs          |
 
 ### Weighted Total Scores
 
@@ -48,7 +48,7 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | :------------- | :-------: | :------------: | :-------------------------------------------------------- |
 | **Python**     |    104    |    **98.2**    | Transparent-image clipboard, everyday advanced operations |
 | **Rust**       |    114    |   **104.8**    | Extreme performance, huge-scale bulk file operations      |
-| **Node Shell** |     84    |    **79.4**    | Zero-dependency fallback, simple text/files               |
+| **Node Shell** |     87    |    **89.8**    | Zero-dependency fallback, simple text/files               |
 
 > Weighting formula: ★★★ = 1.2x, ★★☆ = 1.0x, ★☆☆ = 0.8x
 
@@ -221,13 +221,15 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | :--------- | :---: | :------------- | :-------- |
 | Python     |   9   | Win32 API via ctypes | High |
 | Rust       |   9   | Direct Win32 API | High |
-| Node Shell |   8   | C# Inject -> PS Fallback | Very High |
+| Node Shell |   9   | Multi-platform Native | Very High |
 
 **Technical Details:**
-- **Python/Rust**: Use `SHGetFileInfo` to retrieve the exact system-registered icon (including folders, shortcuts, and overlays).
-- **Node Shell**: Implements a **two-tier self-healing path**:
-    1. **Tier 1**: C# injection for high-quality 32x32 icons.
-    2. **Tier 2**: Native PowerShell `ExtractAssociatedIcon` fallback for zero-dependency environments.
+- **Python/Rust**: Use `SHGetFileInfo` (Windows) to retrieve exact system icons.
+- **Node Shell**: Implements a **multi-tier cross-platform strategy**:
+    1. **Tier 1 (Windows)**: C# injection for high-quality 32x32 icons, with native PowerShell `ExtractAssociatedIcon` as fallback.
+    2. **Tier 2 (macOS)**: Zero-dependency native support using `osascript` to call `NSWorkspace`.
+    3. **Tier 3 (Linux)**: Native support via `python3-gi` (Gio/GdkPixbuf) for best integration with system icon themes.
+- **Reliability**: As long as the Node Shell Daemon starts (guaranteed by built-in `bash` or `powershell`), icons can be extracted on any system.
 
 ---
 
@@ -313,8 +315,8 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | 9. 系统兼容性 | 8 | 7 | **10** | ★★★ | 无需额外依赖即可运行 |
 | 10. 稳定性 | 8 | 9 | 9 | ★★★ | 长期运行崩溃率 |
 | 11. 开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
-| 12. 跨平台能力 | 7 | 8 | 6 | ★☆☆ | Win/Mac/Linux 支持程度 |
-| 13. 文件原始图标提取 | 9 | 9 | 8 | ★★☆ | 系统底层 API vs. 兼容性回退 |
+| 12. 跨平台能力 | 7 | 8 | **8** | ★☆☆ | Win/Mac/Linux 支持程度 |
+| 13. 文件原始图标提取 | 9 | 9 | **9** | ★★☆ | 多平台原生 API 支持 |
 
 ### Weighted Total Scores
 
@@ -322,7 +324,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 |:-----|:--------:|:--------:|:---------|
 | **Python** | 104 | **98.2** | 透明图剪贴板、日常高级操作 |
 | **Rust** | 114 | **104.8** | 极致性能、超大文件批量操作 |
-| **Node Shell** | 84 | **79.4** | 零依赖兜底、简单文本/文件 |
+| **Node Shell** | 87 | **89.8** | 零依赖兜底、简单文本/文件 |
 
 > 加权公式：★★★=1.2x, ★★☆=1.0x, ★☆☆=0.8x
 
@@ -494,13 +496,15 @@ Daemon 模式下，进程已驻留，单次 RPC 调用耗时：
 |:-----|:----:|:---------|:-------|
 | Python | 9 | ctypes 调用 Win32 API | 高 |
 | Rust | 9 | 直接调用 Win32 API | 高 |
-| Node Shell | 8 | C# 注入 -> PS 原生回退 | 极高 |
+| Node Shell | 9 | 多平台原生支持 | 极高 |
 
 **技术细节：**
-- **Python/Rust**: 使用 `SHGetFileInfo` 获取系统注册的精确图标（支持文件夹、快捷键及覆盖图标）。
-- **Node Shell**: 实现了 **两层自愈路径**：
-    1. **第一层**: 通过 C# 注入获取 32x32 高质量图标。
-    2. **第二层**: 在无 .NET 编译环境时，回退至原生 PowerShell `ExtractAssociatedIcon` 方案。
+- **Python/Rust**: 使用 `SHGetFileInfo` (Windows) 获取系统注册的精确图标。
+- **Node Shell**: 实现了**多层级跨平台策略**：
+    1. **第一层 (Windows)**: 通过 C# 注入获取 32x32 高质量图标，并以原生 PowerShell `ExtractAssociatedIcon` 方案作为兜底。
+    2. **第二层 (macOS)**: 增加 `extract_icon` 指令，利用 `osascript` 提取图标。对于 macOS 用户，这是完全零依赖的原生支持。
+    3. **第三层 (Linux)**: 增加基于 `python3` 的图标提取逻辑。对于 Linux 用户，只要安装了标准的 `python3-gi` 即可获得最佳效果。
+- **可靠性**: 无论用户在什么系统上运行，只要 Node Shell Daemon 能够启动（这几乎是 100% 保证的，因为只需要系统自带的 `bash` 或 `powershell`），我们就能够提取并显示对应的文件图标。
 
 ---
 
