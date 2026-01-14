@@ -2582,7 +2582,7 @@ class FileCodeLensProvider {
 	}
 }
 
-const FOLDER_SIZE_CACHE_MAX_AGE = 10 * 1000;
+const FOLDER_SIZE_CACHE_MAX_AGE = 15 * 1000;
 const _pendingFolderSizeRequests = new Map();
 
 function invalidateFolderSizeCacheForPath(filePath) {
