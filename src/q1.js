@@ -2515,8 +2515,13 @@ class FileCodeLensProvider {
 
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
+			let isDirectory = false;
+			try {
+				const st = fs.statSync(absPath);
+				isDirectory = st.isDirectory();
+			} catch { }
 			const isVidOrImg = isImageOrVideoExt(ext);
-			const isText = !isVidOrImg && isPlainTextFile(absPath);
+			const isText = !isVidOrImg && !isDirectory && isPlainTextFile(absPath);
 
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
@@ -2562,14 +2567,17 @@ class FileCodeLensProvider {
 			let iconPart = "";
 			let spacePart = "   ";
 
-			if (isVidOrImg) {
+			if (isDirectory) {
+				iconPart = " 📁";
+				spacePart = "";
+			} else if (isVidOrImg) {
 				const info = await getMediaInfo(absPath, mtimeMs);
 				if (info?.width && info?.height) {
 					const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
 					const isRealVideo = info.type === "video";
 					if (isRealVideo) {
 						iconPart = "🎬";
-						spacePart = " ";
+						spacePart = "";
 					}
 					const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
 					const pct = Math.round(scale * 100);
@@ -2585,8 +2593,8 @@ class FileCodeLensProvider {
 				}
 			} else if (isText) {
 
-				iconPart = "📄";
-				spacePart = " ";
+				iconPart = " 📄";
+				spacePart = "";
 			}
 
 			lenses.push(
@@ -2610,7 +2618,7 @@ class FileCodeLensProvider {
 	}
 }
 
-const FOLDER_SIZE_CACHE_MAX_AGE = 25 * 1000;
+const FOLDER_SIZE_CACHE_MAX_AGE = 235 * 1000;
 const _pendingFolderSizeRequests = new Map();
 
 function invalidateFolderSizeCacheForPath(filePath) {
