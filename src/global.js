@@ -1755,8 +1755,8 @@ const TransactionManager = {
 
 						const stat = fs.statSync(fullPath);
 						if (!stat.isFile()) continue;
-						// 跳过大文件（>5MB）
-						if (stat.size > 5 * 1024 * 1024) continue;
+						// 跳过大文件（>55MB）
+						if (stat.size > 55 * 1024 * 1024) continue;
 
 						// 跳过二进制文件
 						const ext = path.extname(fileName).toLowerCase();
