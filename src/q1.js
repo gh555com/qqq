@@ -156,7 +156,7 @@ const editorDebounceTimers = new Map();
 
 let enlargeSmallImages = true;
 let performanceMode = "optmum";
-let frameSizeMode = "smart";
+let frameSizeMode = "fix";
 let cleanFreakMode = false;
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
@@ -1687,18 +1687,22 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		// 钳制：防止异常配置造成爆炸
 		pxPerLine = Math.max(pxPerLine, fontSize * 1.1, 10);
 
+		// 计算相框实际高度（包括边框）
 		const boxH = pxHeight + PREVIEW_BORDER;
 		let baseN = Math.ceil(boxH / pxPerLine);
 
-		let extra = 3;
-		if (performanceMode === "extreme") extra = 2;
+		// 优化：减少额外空间，普遍降低约20%
+		// 根据字号大小动态调整额外空间，字号越大，额外空间相对越小
+		let extra = Math.max(1, Math.floor(2 * (14 / fontSize))); // 基础14号字体时1-2行
+		if (performanceMode === "extreme") extra = 0;
 
-		let n = Math.max(4, baseN + extra);
-		if (isLastItem) n = Math.max(8, n);
+		// 计算最终空白行数量，确保紧凑
+		let n = Math.max(1, baseN + extra);
+		if (isLastItem) n = Math.max(2, n); // 最后一项也保持紧凑
 		return n;
 	} catch (e) {
-		// 异常情况下返回默认行数
-		return 15;
+		// 异常情况下返回较小的默认行数
+		return 8;
 	}
 }
 
@@ -1860,7 +1864,7 @@ async function renderImages(editor) {
 						previewWidth = fc.width;
 						previewHeight = fc.height;
 					} else {
-						// 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
+						// 文本也支持 small/large（fix 时按配置走：small->small，否则 large）
 						const fc = getFrameConfig(null);
 						previewWidth = fc.width;
 						previewHeight = fc.height;
@@ -2556,7 +2560,7 @@ class FileCodeLensProvider {
 					if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 				}
 			} else if (isText) {
-				// 按你的要求：不再估算/显示行数
+
 				iconPart = "📄";
 				spacePart = " ";
 			}
@@ -2582,7 +2586,7 @@ class FileCodeLensProvider {
 	}
 }
 
-const FOLDER_SIZE_CACHE_MAX_AGE = 15 * 1000;
+const FOLDER_SIZE_CACHE_MAX_AGE = 25 * 1000;
 const _pendingFolderSizeRequests = new Map();
 
 function invalidateFolderSizeCacheForPath(filePath) {
