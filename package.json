@@ -23,6 +23,17 @@
   ],
   "main": "./src/qqq.js",
   "contributes": {
+    "colors": [
+      {
+        "id": "editorCodeLens.foreground",
+        "description": "Color of the CodeLens information",
+        "defaults": {
+          "light": "#FF0000",
+          "dark": "#FF0000",
+          "highContrast": "#FF0000"
+        }
+      }
+    ],
     "configuration": [
       {
         "title": "☀️ 核心",
@@ -139,6 +150,12 @@
             "minimum": 1,
             "maximum": 218,
             "markdownDescription": "👁️ 文本胶片字体大小："
+          },
+          "qqq.takeOverCodeLensStyle": {
+            "order": 60,
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
           }
         }
       },

@@ -863,6 +863,29 @@ async function activate(context) {
 
 	startDaemons();
 
+	// 设置 CodeLens 样式
+	function updateCodeLensStyle() {
+		const config = vscode.workspace.getConfiguration("qqq");
+		const takeOver = config.get("takeOverCodeLensStyle", true);
+		if (takeOver) {
+			// 设置 CodeLens 字体和字号
+			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
+			vscode.workspace.getConfiguration("editor").update("codeLensFontSize", 13, vscode.ConfigurationTarget.Global);
+		}
+	}
+
+	// 激活时设置一次
+	updateCodeLensStyle();
+
+	// 监听配置变化
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration("qqq.takeOverCodeLensStyle")) {
+				updateCodeLensStyle();
+			}
+		})
+	);
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
