@@ -1441,38 +1441,121 @@ function isSupportedMedia(filePath) {
 	return isPlainTextFile(filePath);
 }
 
+// shouldUseFrame结果的内存缓存
+const shouldUseFrameCache = new Map();
+const CACHE_EXPIRE_TIME = 5 * 60 * 1000; // 5分钟过期
+
+// 清理过期缓存
+function cleanShouldUseFrameCache() {
+	const now = Date.now();
+	for (const [key, value] of shouldUseFrameCache.entries()) {
+		if (now - value.timestamp > CACHE_EXPIRE_TIME) {
+			shouldUseFrameCache.delete(key);
+		}
+	}
+}
+
+// 定期清理缓存
+setInterval(cleanShouldUseFrameCache, CACHE_EXPIRE_TIME);
+
+// 批量获取图标函数
+async function batchGetIcons(filePaths) {
+	if (!filePaths || filePaths.length === 0) return {};
+
+	// 结果映射
+	const iconResults = {};
+
+	// 任务调度器，控制并发数量
+	const scheduler = new global.TaskScheduler(4); // 限制并发数为4
+
+	// 收集所有获取图标的任务
+	const tasks = filePaths.map(async (filePath) => {
+		return scheduler.schedule(filePath, async () => {
+			try {
+				const iconB64 = await global.getIcon(filePath);
+				iconResults[filePath] = iconB64;
+			} catch (error) {
+				iconResults[filePath] = null;
+			}
+		});
+	});
+
+	// 等待所有任务完成
+	await Promise.all(tasks);
+
+	return iconResults;
+}
+
 // 判断文件是否应该使用相框显示
 async function shouldUseFrame(filePath) {
 	try {
 		// 检查是否为文件夹
+		let isDirectory = false;
+		let mtimeMs = 0;
 		try {
 			const st = fs.statSync(filePath);
-			if (st.isDirectory()) {
+			isDirectory = st.isDirectory();
+			mtimeMs = st.mtimeMs;
+			if (isDirectory) {
 				// 文件夹始终使用图标框显示
 				return false;
 			}
 		} catch { }
 
+		// 构建缓存键：文件路径 + mtime
+		const cacheKey = `${filePath}:${mtimeMs}`;
+
+		// 检查内存缓存
+		const cachedResult = shouldUseFrameCache.get(cacheKey);
+		if (cachedResult) {
+			return cachedResult.result;
+		}
+
 		const ext = path.extname(filePath).toLowerCase();
 
 		// 纯文本文件，使用文本胶片相框
 		if (TEXT_EXTS.has(ext) || isPlainTextFile(filePath)) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: true,
+				timestamp: Date.now()
+			});
 			return true;
 		}
 
 		// 非文本文件，检查是否能生成有效预览
 		const contentId = qqq.computeFingerprint(filePath);
-		if (!contentId) return false;
+		if (!contentId) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: false,
+				timestamp: Date.now()
+			});
+			return false;
+		}
 
 		// 检查文件是否存在
-		if (!fs.existsSync(filePath)) return false;
+		if (!fs.existsSync(filePath)) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: false,
+				timestamp: Date.now()
+			});
+			return false;
+		}
 
 		// 获取媒体信息
-		const mtimeMs = fs.statSync(filePath).mtimeMs;
 		const info = await getMediaInfo(filePath, mtimeMs);
 
 		// 没有媒体信息的文件使用图标框
-		if (!info) return false;
+		if (!info) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: false,
+				timestamp: Date.now()
+			});
+			return false;
+		}
 
 		// 检查缓存是否存在且有效
 		const cacheStrategy = determineCacheStrategy(filePath, info);
@@ -1483,6 +1566,11 @@ async function shouldUseFrame(filePath) {
 			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			// 确保缓存类型正确
 			if (meta && (meta.type === "webp_unified" || meta.type === "text_preview")) {
+				// 缓存结果
+				shouldUseFrameCache.set(cacheKey, {
+					result: true,
+					timestamp: Date.now()
+				});
 				return true;
 			}
 		}
@@ -1490,6 +1578,11 @@ async function shouldUseFrame(filePath) {
 		// 对于简单格式的静态图片，直接使用
 		const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
 		if (simpleFormats.includes(ext) && info.isStaticImage && !info.needsConversion) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: true,
+				timestamp: Date.now()
+			});
 			return true;
 		}
 
@@ -1500,15 +1593,32 @@ async function shouldUseFrame(filePath) {
 		// 如果是视频或动画，检查是否支持
 		if (info.type === "video" || info.type === "animated_image") {
 			// 视频和动画需要缓存支持
-			return qqq.ffmpegPath ? true : false;
+			const result = qqq.ffmpegPath ? true : false;
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: result,
+				timestamp: Date.now()
+			});
+			return result;
 		}
 
 		// 其他需要转换的格式
 		if (info.needsConversion) {
-			return qqq.ffmpegPath ? true : false;
+			const result = qqq.ffmpegPath ? true : false;
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: result,
+				timestamp: Date.now()
+			});
+			return result;
 		}
 
 		// 默认使用图标框
+		// 缓存结果
+		shouldUseFrameCache.set(cacheKey, {
+			result: false,
+			timestamp: Date.now()
+		});
 		return false;
 	} catch (error) {
 		// 任何错误都使用图标框
@@ -1633,6 +1743,8 @@ async function renderImages(editor) {
 
 	const tasks = [];
 	const newHideRanges = [];
+	const iconPaths = []; // 收集需要获取图标的文件路径
+	const renderInfos = []; // 收集渲染信息，用于后续处理
 
 	// 第一阶段：同步扫描，快速隐藏（仅对支持渲染的路径隐藏，避免“隐藏了但不渲染”的空洞）
 	for (const range of visibleRanges) {
@@ -1687,127 +1799,144 @@ async function renderImages(editor) {
 			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
+			let isDirectory = false;
 			try {
 				const stat = fs.statSync(absPath);
+				isDirectory = stat.isDirectory();
 				// 不跳过文件夹，让文件夹也能被渲染
-				if (!stat.isDirectory()) {
-					if (!isSupportedMedia(absPath) && process.platform !== 'win32') continue;
-				}
-			} catch (e) { }
+				if (!isDirectory && !isSupportedMedia(absPath) && process.platform !== 'win32') continue;
+			} catch (e) {
+				continue;
+			}
 
-			tasks.push(async () => {
+			// 收集渲染信息
+			renderInfos.push({
+				absPath,
+				uniqueKey,
+				anchorRange,
+				contentId,
+				isDirectory
+			});
+
+			// 在Windows上，收集需要获取图标的文件路径
+			if (process.platform === 'win32') {
+				iconPaths.push(absPath);
+			}
+		}
+	}
+
+	// 批量获取图标
+	let iconResults = {};
+	if (process.platform === 'win32' && iconPaths.length > 0) {
+		iconResults = await batchGetIcons(iconPaths);
+	}
+
+	// 第二阶段：创建渲染任务
+	for (const renderInfo of renderInfos) {
+		const { absPath, uniqueKey, anchorRange, contentId, isDirectory } = renderInfo;
+
+		tasks.push(async () => {
+			if (currentRenderVersion !== myVersion) return null;
+
+			try {
+				const ext = path.extname(absPath).toLowerCase();
+				const isVidOrImg = isImageOrVideoExt(ext);
+				const isText = !isVidOrImg && isPlainTextFile(absPath);
+
+				// 从批量获取的结果中获取图标
+				let iconB64 = iconResults[absPath] || null;
+
+				// 文件夹始终支持渲染（使用图标）
+				const isSupported = isDirectory || isVidOrImg || isText;
+
+				let previewWidth = LARGE_PREVIEW_WIDTH;
+				let previewHeight = LARGE_PREVIEW_HEIGHT;
+				let previewResult = null;
+
+				if (isSupported) {
+					let info = null;
+					if (!isText) {
+						let mtimeMs = 0;
+						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+						info = await getMediaInfo(absPath, mtimeMs);
+						const fc = getFrameConfig(info);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					} else {
+						// 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
+						const fc = getFrameConfig(null);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					}
+
+					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+				}
+
 				if (currentRenderVersion !== myVersion) return null;
 
-				try {
-					const ext = path.extname(absPath).toLowerCase();
-					const isVidOrImg = isImageOrVideoExt(ext);
-					const isText = !isVidOrImg && isPlainTextFile(absPath);
-					let isDirectory = false;
+				// 如果既没有预览也没有图标，就不渲染
+				if (!previewResult && !iconB64) return null;
 
-					// 检查是否为文件夹
-					try {
-						const st = fs.statSync(absPath);
-						isDirectory = st.isDirectory();
-					} catch { }
+				const deco = { range: anchorRange, renderOptions: {} };
+				let contentUrl = "";
+				let webpDuration = 0;
+				let outputSize = null;
 
-					// 提取图标 (Windows 专用)
-					let iconB64 = null;
-					if (process.platform === 'win32') {
-						iconB64 = await global.getIcon(absPath);
+				if (previewResult?.buffer) {
+					let mime = "image/webp";
+					if (previewResult.isDirect) {
+						mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
+					} else if (previewResult.mimeType) {
+						mime = previewResult.mimeType;
 					}
-
-					// 文件夹始终支持渲染（使用图标）
-					const isSupported = isDirectory || isVidOrImg || isText;
-
-					let previewWidth = LARGE_PREVIEW_WIDTH;
-					let previewHeight = LARGE_PREVIEW_HEIGHT;
-					let previewResult = null;
-
-					if (isSupported) {
-						let info = null;
-						if (!isText) {
-							let mtimeMs = 0;
-							try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-							info = await getMediaInfo(absPath, mtimeMs);
-							const fc = getFrameConfig(info);
-							previewWidth = fc.width;
-							previewHeight = fc.height;
-						} else {
-							// 文本也支持 small/large（smart 时按配置走：small->small，否则 large）
-							const fc = getFrameConfig(null);
-							previewWidth = fc.width;
-							previewHeight = fc.height;
-						}
-
-						previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
-					}
-
-					if (currentRenderVersion !== myVersion) return null;
-
-					// 如果既没有预览也没有图标，就不渲染
-					if (!previewResult && !iconB64) return null;
-
-					const deco = { range: anchorRange, renderOptions: {} };
-					let contentUrl = "";
-					let webpDuration = 0;
-					let outputSize = null;
-
-					if (previewResult?.buffer) {
-						let mime = "image/webp";
-						if (previewResult.isDirect) {
-							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
-						} else if (previewResult.mimeType) {
-							mime = previewResult.mimeType;
-						}
-						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						webpDuration = previewResult.webpDuration || 0;
-						outputSize = previewResult.outputSize;
-					}
-
-					// 如果没有预览但有图标，使用图标作为预览
-					if (!contentUrl && iconB64) {
-						contentUrl = `url("data:image/png;base64,${iconB64}")`;
-						previewWidth = 32;
-						previewHeight = 32;
-						outputSize = { width: 32, height: 32 };
-					}
-
-					// 设置 Gutter 图标
-					if (iconB64) {
-						deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
-						deco.renderOptions.gutterIconSize = "contain";
-					}
-
-					if (!contentUrl) return null;
-
-					const boxWidth = previewWidth + PREVIEW_BORDER;
-					const boxHeight = previewHeight + PREVIEW_BORDER;
-
-					let progressBarUrl = null;
-					if (webpDuration > 0.1 && performanceMode === "optmum")
-						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
-
-					deco.renderOptions.after = buildAfterStyle({
-						marginLeft,
-						boxWidth,
-						boxHeight,
-						previewWidth,
-						previewHeight,
-						contentUrl,
-						outputSize,
-						progressBarUrl,
-						watermarkBase64,
-					});
-
-					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
-					deco.hoverMessage.isTrusted = true;
-
-					return { key: uniqueKey, deco };
-				} catch (e) {
-					return null;
+					contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
+					webpDuration = previewResult.webpDuration || 0;
+					outputSize = previewResult.outputSize;
 				}
-			});
-		}
+
+				// 如果没有预览但有图标，使用图标作为预览
+				if (!contentUrl && iconB64) {
+					contentUrl = `url("data:image/png;base64,${iconB64}")`;
+					previewWidth = 32;
+					previewHeight = 32;
+					outputSize = { width: 32, height: 32 };
+				}
+
+				// 设置 Gutter 图标
+				if (iconB64) {
+					deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
+					deco.renderOptions.gutterIconSize = "contain";
+				}
+
+				if (!contentUrl) return null;
+
+				const boxWidth = previewWidth + PREVIEW_BORDER;
+				const boxHeight = previewHeight + PREVIEW_BORDER;
+
+				let progressBarUrl = null;
+				if (webpDuration > 0.1 && performanceMode === "optmum")
+					progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
+
+				deco.renderOptions.after = buildAfterStyle({
+					marginLeft,
+					boxWidth,
+					boxHeight,
+					previewWidth,
+					previewHeight,
+					contentUrl,
+					outputSize,
+					progressBarUrl,
+					watermarkBase64,
+				});
+
+				deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
+				deco.hoverMessage.isTrusted = true;
+
+				return { key: uniqueKey, deco };
+			} catch (e) {
+				return null;
+			}
+		});
 	}
 
 	if (newHideRanges.length > 0) {
@@ -2700,18 +2829,6 @@ async function activate(context) {
 		vscode.window.onDidChangeWindowState((e) => {
 			if (e.focused) renderVisibleEditors();
 		}),
-		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration("qqq.textSlideColorScheme") ||
-				e.affectsConfiguration("qqq.textSlideFontSize") ||
-				e.affectsConfiguration("qqq.enlargeSmallImages") ||
-				e.affectsConfiguration("qqq.frameSizeMode") ||
-				e.affectsConfiguration("qqq.performanceMode") ||
-				e.affectsConfiguration("qqq.extremePerformance") ||
-				e.affectsConfiguration("qqq.cleanFreak")) {
-				refreshConfig();
-				renderVisibleEditors();
-			}
-		}),
 		vscode.workspace.onDidChangeTextDocument((e) => {
 			const ed = vscode.window.activeTextEditor;
 			if (ed && e.document === ed.document) debounceRender(ed);
@@ -2765,3 +2882,4 @@ async function deactivate() {
 }
 
 module.exports = { activate, deactivate };
+
