@@ -520,7 +520,9 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 			try { clipboardHelperCode = require("./h").CLIPBOARD_HELPER_CS; } catch (e) { }
 
 			const simplePsScript = `
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
+# 确保所有输出使用UTF-8编码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -596,6 +598,7 @@ function Process-Command {
       'extract_icon' {
          try {
              # 优先尝试 C# 高质量提取
+             # 确保路径使用正确的Unicode编码
              $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
              if ($iconB64) {
                  $result.icon = $iconB64
@@ -655,15 +658,19 @@ function Process-Command {
   [Console]::Out.WriteLine($b64)
 }
 
+# 使用UTF-8编码读取输入
+$encoding = [System.Text.Encoding]::UTF8
+$reader = New-Object System.IO.StreamReader([System.Console]::OpenStandardInput(), $encoding)
+
 while ($true) {
-  $line = [Console]::In.ReadLine()
+  $line = $reader.ReadLine()
   if ($line -eq $null) { break }
   try {
     $cmd = ConvertFrom-Json $line
     Process-Command $cmd
   } catch {
     $err = @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress
-    $bytes = [Text.Encoding]::UTF8.GetBytes($err)
+    $bytes = $encoding.GetBytes($err)
     $b64 = [Convert]::ToBase64String($bytes)
     [Console]::Out.WriteLine($b64)
   }
@@ -834,6 +841,173 @@ function updateStatusBarNow() {
 	updateStatusBar(_cacheStatsGetter(), pythonBridge, rustBridge, shellBridge);
 }
 
+// ============================================================================
+// ★ Linux 依赖检测与安装引导
+// ============================================================================
+let _linuxDepsChecked = false;
+
+/**
+ * 检测 Linux 上是否安装了 xclip
+ * @returns {Promise<boolean>}
+ */
+async function checkXclipInstalled() {
+	if (process.platform !== 'linux') return true;
+
+	return new Promise((resolve) => {
+		const child = cp.spawn('which', ['xclip'], { stdio: ['ignore', 'pipe', 'ignore'] });
+		let found = false;
+
+		child.stdout.on('data', (d) => {
+			if (d.toString().trim()) found = true;
+		});
+
+		child.on('close', () => resolve(found));
+		child.on('error', () => resolve(false));
+
+		setTimeout(() => {
+			try { child.kill(); } catch { }
+			resolve(false);
+		}, 3000);
+	});
+}
+
+/**
+ * 检测 Linux 包管理器类型
+ * @returns {Promise<'apt'|'dnf'|'yum'|'pacman'|'zypper'|null>}
+ */
+async function detectLinuxPackageManager() {
+	const managers = [
+		{ name: 'apt', check: 'apt-get' },
+		{ name: 'dnf', check: 'dnf' },
+		{ name: 'yum', check: 'yum' },
+		{ name: 'pacman', check: 'pacman' },
+		{ name: 'zypper', check: 'zypper' }
+	];
+
+	for (const mgr of managers) {
+		const exists = await new Promise((resolve) => {
+			const child = cp.spawn('which', [mgr.check], { stdio: 'ignore' });
+			child.on('close', (code) => resolve(code === 0));
+			child.on('error', () => resolve(false));
+			setTimeout(() => { try { child.kill(); } catch { } resolve(false); }, 2000);
+		});
+		if (exists) return mgr.name;
+	}
+	return null;
+}
+
+/**
+ * 获取安装 xclip 的命令
+ * @param {string} pkgMgr - 包管理器名称
+ * @returns {string}
+ */
+function getXclipInstallCommand(pkgMgr) {
+	switch (pkgMgr) {
+		case 'apt': return 'sudo apt update && sudo apt install -y xclip';
+		case 'dnf': return 'sudo dnf install -y xclip';
+		case 'yum': return 'sudo yum install -y xclip';
+		case 'pacman': return 'sudo pacman -S --noconfirm xclip';
+		case 'zypper': return 'sudo zypper install -y xclip';
+		default: return 'sudo apt install -y xclip';
+	}
+}
+
+/**
+ * 在 VS Code 终端中执行安装命令
+ * @param {string} command - 要执行的命令
+ * @param {string} title - 终端标题
+ * @returns {Promise<void>}
+ */
+async function runInTerminal(command, title) {
+	const terminal = vscode.window.createTerminal({
+		name: title,
+		shellPath: '/bin/bash',
+		shellArgs: ['-c', `${command}; echo ''; echo '按任意键关闭此终端...'; read -n 1`]
+	});
+	terminal.show();
+	return terminal;
+}
+
+/**
+ * 检测并引导安装 Linux 依赖 (xclip)
+ * 只在首次启动时检测一次，避免频繁打扰用户
+ */
+async function checkAndInstallLinuxDeps() {
+	// 仅 Linux 平台检测
+	if (process.platform !== 'linux') return;
+
+	// 避免重复检测
+	if (_linuxDepsChecked) return;
+	_linuxDepsChecked = true;
+
+	// 检查是否已经提示过（用户选择了"不再提示"）
+	const suppressKey = 'xclipInstallSuppressed';
+	if (extensionContext) {
+		const suppressed = extensionContext.globalState.get(suppressKey);
+		if (suppressed) return;
+	}
+
+	// 检测 xclip 是否已安装
+	const hasXclip = await checkXclipInstalled();
+	if (hasXclip) {
+		logMessage('Linux 依赖检测: xclip 已安装', 'INFO');
+		return;
+	}
+
+	logMessage('Linux 依赖检测: xclip 未安装，准备提示用户', 'INFO');
+
+	// 检测包管理器
+	const pkgMgr = await detectLinuxPackageManager();
+	const installCmd = getXclipInstallCommand(pkgMgr);
+
+	// 弹窗询问用户
+	const choice = await vscode.window.showWarningMessage(
+		'qqq: 剪贴板功能需要 xclip，是否立即安装？',
+		{ modal: false },
+		'立即安装',
+		'复制命令',
+		'不再提示'
+	);
+
+	if (choice === '立即安装') {
+		logMessage(`正在安装 xclip，使用命令: ${installCmd}`, 'INFO');
+
+		// 在终端中执行安装命令
+		const terminal = await runInTerminal(installCmd, 'qqq: 安装 xclip');
+
+		// 监听终端关闭，检测是否安装成功
+		const disposable = vscode.window.onDidCloseTerminal(async (closedTerminal) => {
+			if (closedTerminal === terminal) {
+				disposable.dispose();
+
+				// 等待一下让系统刷新
+				await new Promise(r => setTimeout(r, 500));
+
+				// 重新检测
+				const nowHasXclip = await checkXclipInstalled();
+				if (nowHasXclip) {
+					vscode.window.showInformationMessage('qqq: xclip 安装成功！剪贴板功能现已可用。');
+					logMessage('xclip 安装成功', 'INFO');
+				} else {
+					vscode.window.showWarningMessage('qqq: xclip 安装可能未成功，请检查终端输出或手动安装。');
+					logMessage('xclip 安装可能失败', 'WARN');
+				}
+			}
+		});
+
+	} else if (choice === '复制命令') {
+		await vscode.env.clipboard.writeText(installCmd);
+		vscode.window.showInformationMessage(`qqq: 安装命令已复制到剪贴板: ${installCmd}`);
+		logMessage(`用户选择复制安装命令: ${installCmd}`, 'INFO');
+
+	} else if (choice === '不再提示') {
+		if (extensionContext) {
+			await extensionContext.globalState.update(suppressKey, true);
+		}
+		logMessage('用户选择不再提示 xclip 安装', 'INFO');
+	}
+}
+
 function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
 	const pref = getEnginePreference();
@@ -880,6 +1054,13 @@ function startDaemons() {
 				logMessage("All daemons failed, using spawn fallback", "WARN");
 			}
 			updateStatusBarNow();
+
+			// ★ 检测 Linux 依赖（延迟执行，避免阻塞启动流程）
+			setTimeout(() => {
+				checkAndInstallLinuxDeps().catch(e => {
+					logMessage(`Linux 依赖检测异常: ${e?.message || e}`, 'WARN');
+				});
+			}, 2000);
 		}
 	})().catch((e) => {
 		logMessage(`startDaemons 流程异常: ${e?.message || e} `, "WARN");
@@ -1755,8 +1936,8 @@ const TransactionManager = {
 
 						const stat = fs.statSync(fullPath);
 						if (!stat.isFile()) continue;
-						// 跳过大文件（>5MB）
-						if (stat.size > 5 * 1024 * 1024) continue;
+						// 跳过大文件（>55MB）
+						if (stat.size > 55 * 1024 * 1024) continue;
 
 						// 跳过二进制文件
 						const ext = path.extname(fileName).toLowerCase();
@@ -1766,12 +1947,9 @@ const TransactionManager = {
 						let match;
 						regex.lastIndex = 0;
 						while ((match = regex.exec(content))) {
-							const rawPath = (match[1] || "").trim();
-							if (rawPath) {
-								// ★ 取第一级子项名称（支持文件夹引用）
-								const firstPart = rawPath.split(/[\\/]/)[0];
-								if (firstPart) referencedItems.add(firstPart.toLowerCase());
-							}
+							// 直接使用匹配到的第一部分，避免不必要的字符串操作
+							const firstPart = (match[1] || "").trim();
+							if (firstPart) referencedItems.add(firstPart.toLowerCase());
 						}
 					} catch { }
 				}
@@ -2254,6 +2432,7 @@ class TaskQueue {
 
 const probeScheduler = new TaskScheduler(12);
 const genScheduler = new TaskScheduler(6);
+const iconScheduler = new TaskScheduler(4); // 用于图标获取的调度器
 const pasteQueue = new TaskQueue();
 const metaSaveQueue = new TaskQueue();
 
@@ -2284,6 +2463,7 @@ module.exports = {
 	TaskQueue,
 	probeScheduler,
 	genScheduler,
+	iconScheduler,
 	pasteQueue,
 	metaSaveQueue,
 

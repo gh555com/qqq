@@ -1040,12 +1040,23 @@ async function deactivate() {
 function getIconCache(filePath) {
 	if (!cacheMeta || !cacheMeta.icons) return null;
 	try {
-		const mtime = fs.existsSync(filePath) ? fs.statSync(filePath).mtimeMs : 0;
+		// 合并文件系统调用，减少IO操作
+		let mtime = 0;
+		try {
+			const stat = fs.statSync(filePath);
+			mtime = stat.mtimeMs;
+		} catch {
+			return null; // 文件不存在，直接返回
+		}
 		const entry = cacheMeta.icons[filePath];
 		if (entry && entry.mtime === mtime) {
 			const iconPath = path.join(cacheDir, `icon_${entry.hash}.png`);
-			if (fs.existsSync(iconPath)) {
+			try {
+				// 合并existsSync和readFileSync为一次操作
 				return fs.readFileSync(iconPath).toString("base64");
+			} catch {
+				// 图标文件不存在
+				return null;
 			}
 		}
 	} catch (e) { }
