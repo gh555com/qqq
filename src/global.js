@@ -520,7 +520,9 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 			try { clipboardHelperCode = require("./h").CLIPBOARD_HELPER_CS; } catch (e) { }
 
 			const simplePsScript = `
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
+# 确保所有输出使用UTF-8编码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -596,6 +598,7 @@ function Process-Command {
       'extract_icon' {
          try {
              # 优先尝试 C# 高质量提取
+             # 确保路径使用正确的Unicode编码
              $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
              if ($iconB64) {
                  $result.icon = $iconB64
@@ -655,15 +658,19 @@ function Process-Command {
   [Console]::Out.WriteLine($b64)
 }
 
+# 使用UTF-8编码读取输入
+$encoding = [System.Text.Encoding]::UTF8
+$reader = New-Object System.IO.StreamReader([System.Console]::OpenStandardInput(), $encoding)
+
 while ($true) {
-  $line = [Console]::In.ReadLine()
+  $line = $reader.ReadLine()
   if ($line -eq $null) { break }
   try {
     $cmd = ConvertFrom-Json $line
     Process-Command $cmd
   } catch {
     $err = @{ _id = 0; error = $_.Exception.Message } | ConvertTo-Json -Compress
-    $bytes = [Text.Encoding]::UTF8.GetBytes($err)
+    $bytes = $encoding.GetBytes($err)
     $b64 = [Convert]::ToBase64String($bytes)
     [Console]::Out.WriteLine($b64)
   }
