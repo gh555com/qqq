@@ -2651,14 +2651,16 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 			const parts = [];
 			let totalFiles = 0;
 			if (result.ext_stats) {
-				for (const [ext, count] of Object.entries(result.ext_stats)) {
+
+				const sortedExts = Object.entries(result.ext_stats).sort(([, countA], [, countB]) => countB - countA);
+				for (const [ext, count] of sortedExts) {
 					totalFiles += count;
-					parts.push(`${count}_${ext || "无后缀"}`);
+					parts.push(`${count}★ ${ext || "无后缀"}`);
 				}
 			}
 			const summaryStr =
 				parts.length > 0
-					? `${totalFiles}个文件：${parts.join("; ")}`
+					? `${totalFiles}个文件：${parts.join(";  ")}`
 					: result.file_count_root > 0
 						? `${result.file_count_root}个文件`
 						: "空文件夹";
@@ -2684,9 +2686,11 @@ async function getQqqFolderSize(folderPath) {
 		const parts = [];
 		let totalFiles = 0;
 		if (result.ext_stats) {
-			for (const [ext, count] of Object.entries(result.ext_stats)) {
+
+			const sortedExts = Object.entries(result.ext_stats).sort(([, countA], [, countB]) => countB - countA);
+			for (const [ext, count] of sortedExts) {
 				totalFiles += count;
-				parts.push(`${count}_${ext || "无后缀"}`);
+				parts.push(`${count}★ ${ext || "无后缀"}`);
 			}
 		}
 		const summaryStr =
