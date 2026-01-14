@@ -590,6 +590,26 @@ function shouldShowDuration(info) {
 
 let downloadContext = null;
 
+async function savorMomentsCommand() {
+	try {
+		const audioFiles = [1, 2, 3].map(num => path.join(extensionContext.extensionPath, 'assets', `${num}.mp3`));
+		const randomIndex = Math.floor(Math.random() * audioFiles.length);
+		const selectedAudio = audioFiles[randomIndex];
+
+		// 使用系统默认播放器播放音频
+		if (process.platform === 'win32') {
+			cp.exec(`start "" "${selectedAudio}"`);
+		} else if (process.platform === 'darwin') {
+			cp.exec(`open "${selectedAudio}"`);
+		} else {
+			// Linux
+			cp.exec(`xdg-open "${selectedAudio}"`);
+		}
+	} catch (e) {
+		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
+	}
+}
+
 async function downloadVideosFromUrlCommand() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
@@ -892,6 +912,8 @@ async function activate(context) {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
+
 
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			for (const key of Object.keys(global.ConfigManager.getAll())) {
