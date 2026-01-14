@@ -748,17 +748,12 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 			.replace(/^\uFEFF/, '')                    // UTF-8 BOM
 			.replace(/^[\s\u00A0\u3000\u200B\r\n]+/, ''); // All whitespace types
 
-		// Fixed cache frame: 514x290
-		const targetW = TEXT_PREVIEW_PIXEL_LARGE.width;
-		const targetH = TEXT_PREVIEW_PIXEL_LARGE.height;
-
 		// Layout: font size from config, line height 1.3x font size, padding 4px
 		const fontSize = textSlideFontSize;
 		const lineHeight = Math.floor(fontSize * 1.3);
 		const padding = 4;
+		const targetW = TEXT_PREVIEW_PIXEL_LARGE.width;
 		const usableW = targetW - padding * 2;
-		const usableH = targetH - padding * 2;
-		const maxLines = Math.floor(usableH / lineHeight);
 
 		// Max visual width in "em" units (1em = fontSize)
 		const maxVisualWidth = usableW / fontSize;
@@ -767,9 +762,8 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		const lines = textContent.split('\n');
 		const wrappedLines = [];
 
+		// 动态计算实际需要的行数
 		for (const line of lines) {
-			if (wrappedLines.length >= maxLines) break;
-
 			if (line.length === 0) {
 				wrappedLines.push(' ');
 				continue;
@@ -778,28 +772,35 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 			if (getVisualWidth(line) <= maxVisualWidth) {
 				wrappedLines.push(line);
 			} else {
+				// 处理长行换行
+				const words = line.split(' ');
 				let currentLine = '';
-				let currentWidth = 0;
 
-				for (const ch of line) {
-					const charWidth = ch.charCodeAt(0) > 0x2E7F ? 1.0 : 0.55;
-					if (currentWidth + charWidth > maxVisualWidth) {
-						if (currentLine) wrappedLines.push(currentLine);
-						if (wrappedLines.length >= maxLines) break;
-						currentLine = ch;
-						currentWidth = charWidth;
+				for (const word of words) {
+					const testLine = currentLine ? `${currentLine} ${word}` : word;
+					if (getVisualWidth(testLine) <= maxVisualWidth) {
+						currentLine = testLine;
 					} else {
-						currentLine += ch;
-						currentWidth += charWidth;
+						if (currentLine) wrappedLines.push(currentLine);
+						currentLine = word;
 					}
 				}
-				if (currentLine && wrappedLines.length < maxLines) {
-					wrappedLines.push(currentLine);
-				}
+
+				if (currentLine) wrappedLines.push(currentLine);
 			}
 		}
 
-		let finalText = wrappedLines.join('\n');
+		// 根据实际行数计算动态高度，最大不超过原始固定高度
+		const rawMaxHeight = TEXT_PREVIEW_PIXEL_LARGE.height;
+		const maxLines = Math.min(wrappedLines.length, 50); // 限制最大行数
+		const dynamicHeight = Math.max(60, padding * 2 + maxLines * lineHeight);
+		const targetH = Math.min(dynamicHeight, rawMaxHeight);
+		const usableH = targetH - padding * 2;
+		const finalMaxLines = Math.min(maxLines, Math.floor(usableH / lineHeight));
+
+		// 只使用计算出的行数
+		const displayLines = wrappedLines.slice(0, finalMaxLines);
+		let finalText = displayLines.join('\n');
 		if (!finalText.trim()) finalText = '[Empty File]';
 
 		// Escape special characters for ffmpeg drawtext
@@ -814,7 +815,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		fs.writeFileSync(textTempFile, finalText, 'utf8');
 
 		const bgColor = textSlideColorScheme === "dark" ? '#1B1411' : '#fef6e3';
-		const textColor = textSlideColorScheme === "dark" ? '#E5E5E5' : '#333333';
+		const textColor = textSlideColorScheme === "dark" ? '#D4AF37' : '#333333';
 
 		const fontPath = getCJKFontPath();
 
@@ -1690,11 +1691,15 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		const boxH = pxHeight + PREVIEW_BORDER;
 		let baseN = Math.ceil(boxH / pxPerLine);
 
-		let extra = 3;
-		if (performanceMode === "extreme") extra = 2;
+		// 减少额外行数，根据字体大小动态调整
+		// 字体越大，额外空间应该越小（绝对像素）
+		let extra = Math.max(1, Math.floor(3 * (14 / fontSize))); // 基础14号字体时2-3行
+		if (performanceMode === "extreme") extra = 1;
 
-		let n = Math.max(4, baseN + extra);
-		if (isLastItem) n = Math.max(8, n);
+		// 确保最小行数，但不要过大
+		let n = Math.max(2, baseN + extra);
+		if (isLastItem) n = Math.max(4, n); // 最后一项也减少最小行数
+
 		return n;
 	} catch (e) {
 		// 异常情况下返回默认行数
@@ -2051,7 +2056,13 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					pxHeight = height;
 				} catch { }
 			} else if (isPlainTextFile(f)) {
-				pxHeight = getFrameConfig(null).height;
+				// 对于文本文件，根据字体大小动态计算更合适的高度
+				// 不再使用固定的相框高度，这样洁癖模式能更好地适应字体大小变化
+				const config = vscode.workspace.getConfiguration("editor");
+				const fontSize = Number(config.get("fontSize", 14)) || 14;
+				const lineHeight = Math.floor(fontSize * 1.3);
+				// 假设文本文件平均显示10-15行，根据字体大小动态调整
+				pxHeight = Math.min(LARGE_PREVIEW_HEIGHT, lineHeight * 12); // 限制最大高度
 			}
 
 			const isLastItem = i === files.length - 1 && folders.length === 0;
