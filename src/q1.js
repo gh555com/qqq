@@ -1667,41 +1667,65 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	try {
 		// 处理图标框的特殊情况
 		if (pxHeight === -1) {
-			// 图标框：返回1-2行空白行，尽量紧凑
-			return isLastItem ? 2 : 1;
+			const config = vscode.workspace.getConfiguration("editor");
+			const fontSize = Number(config.get("fontSize", 14)) || 14;
+			// 图标框空行数根据字号调整
+			let n;
+			if (fontSize <= 9) {
+				n = 4;  // 字号 6-9
+			} else if (fontSize <= 15) {
+				n = 3;  // 字号 10-15
+			} else {
+				n = 2;  // 字号 16+
+			}
+			if (isLastItem) n = Math.max(n, 2);
+			return n;
 		}
 
 		const config = vscode.workspace.getConfiguration("editor");
 		const fontSize = Number(config.get("fontSize", 14)) || 14;
 		const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
 
-		// 兼容：如果 lineHeight 太小（<8），按“倍率”理解；否则按像素理解
-		let pxPerLine = 0;
+		let pxPerLine;
 		if (lineHeightRaw > 0) {
+			// 用户显式配置了 lineHeight
 			if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw;
 			else pxPerLine = lineHeightRaw;
 		} else {
-			pxPerLine = fontSize * 1.35;
+			// ★ P0修复：基于实测数据的动态行高倍率
+			// VSCode 实际行高在不同字号下表现不同：
+			// - 小字号(6-8): 倍率 ~1.2
+			// - 中等字号(9-20): 倍率 ~1.37
+			// - 大字号(20+): 倍率回归 ~1.2
+			let ratio;
+			if (fontSize <= 6) {
+				ratio = 1.19;
+			} else if (fontSize <= 8) {
+				ratio = 1.22;
+			} else if (fontSize <= 20) {
+				ratio = 1.37;
+			} else {
+				ratio = 1.2;
+			}
+			pxPerLine = fontSize * ratio;
 		}
 
-		// 钳制：防止异常配置造成爆炸
-		pxPerLine = Math.max(pxPerLine, fontSize * 1.1, 10);
+		// 钳制：防止异常配置
+		pxPerLine = Math.max(pxPerLine, 10);
 
 		// 计算相框实际高度（包括边框）
 		const boxH = pxHeight + PREVIEW_BORDER;
-		let baseN = Math.ceil(boxH / pxPerLine);
+		let n = Math.round(boxH / pxPerLine);
 
-		// 优化：减少额外空间，普遍降低约20%
-		// 根据字号大小动态调整额外空间，字号越大，额外空间相对越小
-		let extra = Math.max(1, Math.floor(2 * (14 / fontSize))); // 基础14号字体时1-2行
-		if (performanceMode === "extreme") extra = 0;
+		// extreme 模式可进一步减少
+		if (performanceMode === "extreme") {
+			n = Math.max(1, n - 1);
+		}
 
-		// 计算最终空白行数量，确保紧凑
-		let n = Math.max(1, baseN + extra);
-		if (isLastItem) n = Math.max(2, n); // 最后一项也保持紧凑
+		n = Math.max(1, n);
+		if (isLastItem) n = Math.max(2, n);
 		return n;
 	} catch (e) {
-		// 异常情况下返回较小的默认行数
 		return 8;
 	}
 }
