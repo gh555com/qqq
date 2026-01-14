@@ -1465,12 +1465,9 @@ async function batchGetIcons(filePaths) {
 	// 结果映射
 	const iconResults = {};
 
-	// 任务调度器，控制并发数量
-	const scheduler = new global.TaskScheduler(4); // 限制并发数为4
-
-	// 收集所有获取图标的任务
+	// 收集所有获取图标的任务，使用全局的iconScheduler
 	const tasks = filePaths.map(async (filePath) => {
-		return scheduler.schedule(filePath, async () => {
+		return global.iconScheduler.schedule(filePath, async () => {
 			try {
 				const iconB64 = await global.getIcon(filePath);
 				iconResults[filePath] = iconB64;

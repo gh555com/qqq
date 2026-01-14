@@ -1766,12 +1766,9 @@ const TransactionManager = {
 						let match;
 						regex.lastIndex = 0;
 						while ((match = regex.exec(content))) {
-							const rawPath = (match[1] || "").trim();
-							if (rawPath) {
-								// ★ 取第一级子项名称（支持文件夹引用）
-								const firstPart = rawPath.split(/[\\/]/)[0];
-								if (firstPart) referencedItems.add(firstPart.toLowerCase());
-							}
+							// 直接使用匹配到的第一部分，避免不必要的字符串操作
+							const firstPart = (match[1] || "").trim();
+							if (firstPart) referencedItems.add(firstPart.toLowerCase());
 						}
 					} catch { }
 				}
@@ -2254,6 +2251,7 @@ class TaskQueue {
 
 const probeScheduler = new TaskScheduler(12);
 const genScheduler = new TaskScheduler(6);
+const iconScheduler = new TaskScheduler(4); // 用于图标获取的调度器
 const pasteQueue = new TaskQueue();
 const metaSaveQueue = new TaskQueue();
 
@@ -2284,6 +2282,7 @@ module.exports = {
 	TaskQueue,
 	probeScheduler,
 	genScheduler,
+	iconScheduler,
 	pasteQueue,
 	metaSaveQueue,
 
