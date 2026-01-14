@@ -2735,16 +2735,32 @@ async function renameFileCommand(rawPath, absPath) {
 
 	const currentName = path.basename(absPath);
 	const newName = await global.showInputBox({
-		title: "重命名粘贴文件",
-		prompt: "rename  ",
+		title: "重命名",
+		prompt: " ",
 		value: currentName,
 		ignoreFocusOut: true,
-		validateInput: (v) => (!v || !v.trim() ? "文件名不能为空" : null),
+		validateInput: (v) => {
+			if (!v || !v.trim()) {
+				return "文件名不能为空";
+			}
+			if (v.trim() === currentName) {
+				return null;
+			}
+			const trimmed = v.trim();
+			const newAbs = path.join(path.dirname(absPath), trimmed);
+			try {
+				fs.accessSync(newAbs);
+				return "目标文件已存在";
+			} catch (e) {
+				return null;
+			}
+		},
 	});
 	if (!newName || newName.trim() === currentName) return;
 
 	const trimmed = newName.trim();
 	const newAbs = path.join(path.dirname(absPath), trimmed);
+
 	try {
 		await fs.promises.rename(absPath, newAbs);
 	} catch (e) {
