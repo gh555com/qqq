@@ -1441,6 +1441,81 @@ function isSupportedMedia(filePath) {
 	return isPlainTextFile(filePath);
 }
 
+// 判断文件是否应该使用相框显示
+async function shouldUseFrame(filePath) {
+	try {
+		// 检查是否为文件夹
+		try {
+			const st = fs.statSync(filePath);
+			if (st.isDirectory()) {
+				// 文件夹始终使用图标框显示
+				return false;
+			}
+		} catch { }
+
+		const ext = path.extname(filePath).toLowerCase();
+
+		// 纯文本文件，使用文本胶片相框
+		if (TEXT_EXTS.has(ext) || isPlainTextFile(filePath)) {
+			return true;
+		}
+
+		// 非文本文件，检查是否能生成有效预览
+		const contentId = qqq.computeFingerprint(filePath);
+		if (!contentId) return false;
+
+		// 检查文件是否存在
+		if (!fs.existsSync(filePath)) return false;
+
+		// 获取媒体信息
+		const mtimeMs = fs.statSync(filePath).mtimeMs;
+		const info = await getMediaInfo(filePath, mtimeMs);
+
+		// 没有媒体信息的文件使用图标框
+		if (!info) return false;
+
+		// 检查缓存是否存在且有效
+		const cacheStrategy = determineCacheStrategy(filePath, info);
+		const cachedBuffer = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
+
+		// 如果有缓存，检查缓存是否有效
+		if (cachedBuffer) {
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			// 确保缓存类型正确
+			if (meta && (meta.type === "webp_unified" || meta.type === "text_preview")) {
+				return true;
+			}
+		}
+
+		// 对于简单格式的静态图片，直接使用
+		const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
+		if (simpleFormats.includes(ext) && info.isStaticImage && !info.needsConversion) {
+			return true;
+		}
+
+		// 其他情况尝试生成预览并检查
+		// 注意：这里不实际生成，只是检查是否能生成
+		// 避免性能问题
+
+		// 如果是视频或动画，检查是否支持
+		if (info.type === "video" || info.type === "animated_image") {
+			// 视频和动画需要缓存支持
+			return qqq.ffmpegPath ? true : false;
+		}
+
+		// 其他需要转换的格式
+		if (info.needsConversion) {
+			return qqq.ffmpegPath ? true : false;
+		}
+
+		// 默认使用图标框
+		return false;
+	} catch (error) {
+		// 任何错误都使用图标框
+		return false;
+	}
+}
+
 function getDocumentEOL(doc) {
 	return doc.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
 }
@@ -1483,6 +1558,12 @@ function createProgressSvg(webpDuration, previewWidth) {
 // ★★★ 修复：lineHeight 有人写成 1.4/1.2 当倍率，VSCode 实际是像素，导致 pxPerLine≈1 => 几万空行
 function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	try {
+		// 处理图标框的特殊情况
+		if (pxHeight === -1) {
+			// 图标框：返回1-2行空白行，尽量紧凑
+			return isLastItem ? 2 : 1;
+		}
+
 		const config = vscode.workspace.getConfiguration("editor");
 		const fontSize = Number(config.get("fontSize", 14)) || 14;
 		const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
@@ -1509,6 +1590,7 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		if (isLastItem) n = Math.max(8, n);
 		return n;
 	} catch (e) {
+		// 异常情况下返回默认行数
 		return 15;
 	}
 }
@@ -1575,10 +1657,14 @@ async function renderImages(editor) {
 			if (absPath && fs.existsSync(absPath)) {
 				try {
 					const st = fs.statSync(absPath);
+					// 文件夹和支持的媒体文件都需要隐藏原始文本
 					if (!st.isDirectory()) {
 						if (isSupportedMedia(absPath) || process.platform === 'win32') {
 							shouldHide = true;
 						}
+					} else {
+						// 文件夹也需要隐藏原始文本
+						shouldHide = true;
 					}
 				} catch { }
 			}
@@ -1603,8 +1689,10 @@ async function renderImages(editor) {
 
 			try {
 				const stat = fs.statSync(absPath);
-				if (stat.isDirectory()) continue;
-				if (!isSupportedMedia(absPath) && process.platform !== 'win32') continue;
+				// 不跳过文件夹，让文件夹也能被渲染
+				if (!stat.isDirectory()) {
+					if (!isSupportedMedia(absPath) && process.platform !== 'win32') continue;
+				}
 			} catch (e) { }
 
 			tasks.push(async () => {
@@ -1614,13 +1702,22 @@ async function renderImages(editor) {
 					const ext = path.extname(absPath).toLowerCase();
 					const isVidOrImg = isImageOrVideoExt(ext);
 					const isText = !isVidOrImg && isPlainTextFile(absPath);
-					const isSupported = isVidOrImg || isText;
+					let isDirectory = false;
+
+					// 检查是否为文件夹
+					try {
+						const st = fs.statSync(absPath);
+						isDirectory = st.isDirectory();
+					} catch { }
 
 					// 提取图标 (Windows 专用)
 					let iconB64 = null;
 					if (process.platform === 'win32') {
 						iconB64 = await global.getIcon(absPath);
 					}
+
+					// 文件夹始终支持渲染（使用图标）
+					const isSupported = isDirectory || isVidOrImg || isText;
 
 					let previewWidth = LARGE_PREVIEW_WIDTH;
 					let previewHeight = LARGE_PREVIEW_HEIGHT;
@@ -2168,39 +2265,23 @@ async function provideCleanlinessEditsAsync(document) {
 		let pxHeight = 0;
 
 		if (absPath && fs.existsSync(absPath)) {
-			const ext = path.extname(absPath).toLowerCase();
-			if (isImageOrVideoExt(ext)) {
+			// 使用新的感知逻辑判断是否使用相框
+			const useFrame = await shouldUseFrame(absPath);
+
+			if (useFrame) {
+				// 确定相框尺寸
 				try {
-					let mtimeMs = fs.statSync(absPath).mtimeMs;
+					const mtimeMs = fs.statSync(absPath).mtimeMs;
 					const info = await getMediaInfo(absPath, mtimeMs);
-
-					let pxH = 0;
-
-					if (info && info.needsConversion && [".ai", ".eps", ".cdr"].includes(ext)) {
-						const contentId = qqq.computeFingerprint(absPath);
-						if (contentId) {
-							const strategy = determineCacheStrategy(absPath, info);
-							const cached = qqq.getCachedBuffer(contentId, strategy.cacheKey);
-							if (cached) {
-								const { height } = getFrameConfig(info);
-								pxH = height;
-							} else {
-								pxH = 0;
-							}
-						} else {
-							pxH = 0;
-						}
-					} else {
-						const { height } = getFrameConfig(info);
-						pxH = height;
-					}
-					pxHeight = pxH;
-				} catch {
-					const { height } = getFrameConfig(null);
+					const { height } = getFrameConfig(info);
 					pxHeight = height;
+				} catch {
+					// 默认使用大相框高度
+					pxHeight = LARGE_PREVIEW_HEIGHT;
 				}
-			} else if (isPlainTextFile(absPath)) {
-				pxHeight = getFrameConfig(null).height;
+			} else {
+				// 图标框：使用较小的高度，对应1-2行
+				pxHeight = -1; // 特殊标记，使用图标框的行数计算
 			}
 		}
 
@@ -2211,7 +2292,7 @@ async function provideCleanlinessEditsAsync(document) {
 		const suffix = lineContent.substring(endPos.character);
 		if (suffix.trim().length > 0) edits.push({ range: new vscode.Range(endPos, endPos), newText: eol });
 
-		if (pxHeight > 0) {
+		if (pxHeight !== 0) {
 			const isLastMarkerInDoc = i === markers.length - 1;
 			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
 			let existingBlanks = 0;
