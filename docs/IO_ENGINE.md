@@ -11,12 +11,12 @@
 
 ### Overview
 
-This project includes three different IO processing engines, each with its own strengths and trade-offs. This document provides **quantitative scores across 12 dimensions** (1–10 points, where 10 is best) to help clarify the best-fit scenarios for each engine.
+This project includes three different IO processing engines, each with its own strengths and trade-offs. This document provides **quantitative scores across 13 dimensions** (1–10 points, where 10 is best) to help clarify the best-fit scenarios for each engine.
 
 Especially for the **Rust engine**: the **official gh555.com release** must be **version 16.0.0 or later** to support the Rust engine.
 
 
-| Engine                | Code | Implementation                       | Positioning              |
+| Engine                | Label | Implementation                       | Positioning              |
 | :-------------------- | :--- | :----------------------------------- | :----------------------- |
 | **Python Engine**     | P    | `kp.py` + ctypes/pywin32             | Best value-for-money     |
 | **Rust Engine**       | R    | Compiled binary `.exe`               | Peak performance         |
@@ -287,12 +287,12 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ## 概要
 
-本项目包含三种 IO 处理引擎，各有优劣。本文档从 **12 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
+本项目包含三种 IO 处理引擎，各有优劣。本文档从 **13 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
 
 特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
 
 
-| 引擎 | 代号 | 实现方式 | 定位 |
+| 引擎 | 标志 | 实现方式 | 定位 |
 |:-----|:-----|:---------|:-----|
 | **Python Engine** | P | `kp.py` + ctypes/pywin32 | 最高性价比 |
 | **Rust Engine** | R | 编译二进制 `.exe` | 极致性能 |
