@@ -815,7 +815,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		fs.writeFileSync(textTempFile, finalText, 'utf8');
 
 		const bgColor = textSlideColorScheme === "dark" ? '#1B1411' : '#fef6e3';
-		const textColor = textSlideColorScheme === "dark" ? '#D4AF37' : '#333333';
+		const textColor = textSlideColorScheme === "dark" ? '#E5E5E5' : '#333333';
 
 		const fontPath = getCJKFontPath();
 
@@ -2593,7 +2593,7 @@ class FileCodeLensProvider {
 	}
 }
 
-const FOLDER_SIZE_CACHE_MAX_AGE = 15 * 1000;
+const FOLDER_SIZE_CACHE_MAX_AGE = 25 * 1000;
 const _pendingFolderSizeRequests = new Map();
 
 function invalidateFolderSizeCacheForPath(filePath) {
