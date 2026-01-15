@@ -707,7 +707,7 @@ async function downloadVideosFromUrlCommand() {
 
 	// 2. 启动带进度条的弹窗任务
 	// ★ 创建自定义取消源（用于锚点丢失时主动取消）
-	const anchor = `/ __PENDING_${transId}/`;
+	const anchor = `/__PENDING_${transId}/`;
 	const anchorLostSource = new vscode.CancellationTokenSource();
 	let anchorLost = false;
 	let lastAnchorCheckTime = 0;
