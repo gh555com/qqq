@@ -42,15 +42,13 @@ jobs:
           file dist/*.vsix
 
       - name: Create GitHub Release (auto notes) and upload VSIX
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Create release with all VSIX files
-          VSIX_FILES=$(ls dist/*.vsix)
-          echo "Uploading VSIX files: $VSIX_FILES"
-          gh release create "${GITHUB_REF_NAME}" $VSIX_FILES \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.vsix
 
       - name: Publish to VS Code Marketplace
         run: npm run ci:publish
