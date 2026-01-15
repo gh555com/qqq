@@ -23,6 +23,17 @@
   ],
   "main": "./src/qqq.js",
   "contributes": {
+    "colors": [
+      {
+        "id": "editorCodeLens.foreground",
+        "description": "Color of the CodeLens information",
+        "defaults": {
+          "light": "#FF0000",
+          "dark": "#FF0000",
+          "highContrast": "#FF0000"
+        }
+      }
+    ],
     "configuration": [
       {
         "title": "☀️ 核心",
@@ -139,6 +150,12 @@
             "minimum": 1,
             "maximum": 218,
             "markdownDescription": "👁️ 文本胶片字体大小："
+          },
+          "qqq.takeOverCodeLensStyle": {
+            "order": 60,
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
           }
         }
       },
@@ -247,6 +264,10 @@
       {
         "command": "qqq.downloadVideosFromUrl",
         "title": "qqq: 在光标位置插入 YouTube 等网页视频"
+      },
+      {
+        "command": "qqq.savorMoments",
+        "title": "qqq: savor moments for yourself"
       }
     ],
     "keybindings": [
@@ -278,11 +299,14 @@
     ]
   },
   "scripts": {
+    "ci:test": "vscode-test --config .vscode-test.js",
+    "ci:package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
+    "ci:publish": "npx @vscode/vsce publish --allow-star-activation",
     "package": "npx @vscode/vsce package --allow-missing-repository --allow-star-activation",
-    "publish": "npx @vscode/vsce publish",
+    "publish": "npx @vscode/vsce publish --allow-star-activation",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
     "pub": "yes | npx vsce publish patch",
-    "test": "echo \"Running tests...\" && exit 0"
+    "test": "npm run ci:test"
   },
   "repository": {
     "type": "git",
@@ -446,6 +470,9 @@
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.70.0",
-    "@vscode/vsce": "^3.6.2"
+    "@vscode/vsce": "^3.6.2",
+    "@vscode/test-cli": "^0.0.0",
+    "@vscode/test-electron": "^2.0.0",
+    "mocha": "^10.0.0"
   }
 }
