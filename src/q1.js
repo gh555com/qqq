@@ -1219,7 +1219,6 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 // ==================== Preview Buffer（文本优先，照 a 逻辑接入） ====================
 async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!qqq.ffmpegPath) return null;
-	if (qqq.isBrokenFile(contentId)) return null;
 
 	const ext = path.extname(filePath).toLowerCase();
 
@@ -1350,42 +1349,11 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	});
 
 	if (result.success) {
-		let buffer = result.buffer;
-
-		// 增强验证：确保生成的 WebP 不是损坏的（专业工具校验）
-		let isValid = true;
-		let verifiedMeta = null;
-
-		if (result.fromFile && result.cacheFilePath) {
-			verifiedMeta = await qqq.verifyMediaFile(result.cacheFilePath);
-			if (!verifiedMeta) {
-				isValid = false;
-				try { fs.unlinkSync(result.cacheFilePath); } catch (e) { }
-			}
-		} else if (result.fromPipe && buffer) {
-			if (!qqq.isValidWebPBuffer(buffer)) {
-				isValid = false;
-			} else {
-				const tempVerifyPath = path.join(os.tmpdir(), `qqq_verify_${contentId}_${Math.random().toString(36).slice(2)}.webp`);
-				try {
-					fs.writeFileSync(tempVerifyPath, buffer);
-					verifiedMeta = await qqq.verifyMediaFile(tempVerifyPath);
-					if (!verifiedMeta) isValid = false;
-					try { fs.unlinkSync(tempVerifyPath); } catch (e) { }
-				} catch (e) {
-					isValid = false;
-				}
-			}
-		}
-
-		if (!isValid) {
-			if (contentId) qqq.markFileAsBroken(contentId);
-			return null; // 验证失败，视为生成失败
-		}
+		const buffer = result.buffer;
 
 		const meta = result.meta || {};
-		const outW = verifiedMeta?.width || meta.width || targetW;
-		const outH = verifiedMeta?.height || meta.height || targetH;
+		const outW = meta.width || targetW;
+		const outH = meta.height || targetH;
 		const outOriginalDuration =
 			meta.originalDuration !== undefined ? meta.originalDuration : originalDuration;
 
@@ -1393,8 +1361,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 		if (result.fromPipe || result.fromFile) {
 			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
-				width: outW,
-				height: outH,
+				width: targetW,
+				height: targetH,
 				origWidth: origSize?.width || 0,
 				origHeight: origSize?.height || 0,
 				type: "webp_unified",
@@ -1418,9 +1386,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH },
 		};
 	} else {
-		// Mark as broken so we don't try again immediately
-		if (contentId) qqq.markFileAsBroken(contentId);
-
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
 		if (!fallback) {
@@ -1697,40 +1662,56 @@ function createProgressSvg(webpDuration, previewWidth) {
 	return "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
 }
 
-// 缓存编辑器行高相关参数以提升性能
-let _cachedLineHeightParams = null;
-let _lineHeightCacheTimer = null;
-
-function getLineHeightParams() {
-	if (_cachedLineHeightParams) return _cachedLineHeightParams;
-
-	const config = vscode.workspace.getConfiguration("editor");
-	const fontSize = Number(config.get("fontSize", 14)) || 14;
-	const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
-
-	let pxPerLine = 0;
-	if (lineHeightRaw > 0) {
-		if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw;
-		else pxPerLine = lineHeightRaw;
-	} else {
-		pxPerLine = fontSize * 1.35;
-	}
-	pxPerLine = Math.max(pxPerLine, fontSize * 1.1, 10);
-
-	_cachedLineHeightParams = { pxPerLine, fontSize };
-
-	// 5秒后清除缓存，防止用户修改配置后不生效
-	if (_lineHeightCacheTimer) clearTimeout(_lineHeightCacheTimer);
-	_lineHeightCacheTimer = setTimeout(() => {
-		_cachedLineHeightParams = null;
-	}, 5000);
-
-	return _cachedLineHeightParams;
-}
-
+// ★★★ 修复：lineHeight 有人写成 1.4/1.2 当倍率，VSCode 实际是像素，导致 pxPerLine≈1 => 几万空行
 function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	try {
-		const { pxPerLine } = getLineHeightParams();
+		// 处理图标框的特殊情况
+		if (pxHeight === -1) {
+			const config = vscode.workspace.getConfiguration("editor");
+			const fontSize = Number(config.get("fontSize", 14)) || 14;
+			// 图标框空行数根据字号调整
+			let n;
+			if (fontSize <= 9) {
+				n = 4;  // 字号 6-9
+			} else if (fontSize <= 15) {
+				n = 3;  // 字号 10-15
+			} else {
+				n = 2;  // 字号 16+
+			}
+			if (isLastItem) n = Math.max(n, 2);
+			return n;
+		}
+
+		const config = vscode.workspace.getConfiguration("editor");
+		const fontSize = Number(config.get("fontSize", 14)) || 14;
+		const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
+
+		let pxPerLine;
+		if (lineHeightRaw > 0) {
+			// 用户显式配置了 lineHeight
+			if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw;
+			else pxPerLine = lineHeightRaw;
+		} else {
+			// ★ P0修复：基于实测数据的动态行高倍率
+			// VSCode 实际行高在不同字号下表现不同：
+			// - 小字号(6-8): 倍率 ~1.2
+			// - 中等字号(9-20): 倍率 ~1.37
+			// - 大字号(20+): 倍率回归 ~1.2
+			let ratio;
+			if (fontSize <= 6) {
+				ratio = 1.19;
+			} else if (fontSize <= 8) {
+				ratio = 1.22;
+			} else if (fontSize <= 20) {
+				ratio = 1.37;
+			} else {
+				ratio = 1.2;
+			}
+			pxPerLine = fontSize * ratio;
+		}
+
+		// 钳制：防止异常配置
+		pxPerLine = Math.max(pxPerLine, 10);
 
 		// 计算相框实际高度（包括边框）
 		const boxH = pxHeight + PREVIEW_BORDER;
@@ -1753,72 +1734,6 @@ function getEditorId(editor) {
 	const docUri = editor.document.uri.toString();
 	const viewColumn = editor.viewColumn ?? 0;
 	return `${docUri}::${viewColumn}`;
-}
-
-// ==================== 感知层 ====================
-/**
- * 感知项目类型：决定使用“相框”还是“图标框”
- * @param {string} absPath 绝对路径
- * @param {string} contentId 指纹
- * @returns {Promise<{mode: 'frame'|'icon'|'none', width: number, height: number, previewResult?: any, isText?: boolean}>}
- */
-// 感知结果缓存，避免短时间内重复计算
-let _perceptionCache = new Map();
-let _perceptionCacheTimer = null;
-
-async function getPerceptionResult(absPath, contentId) {
-	if (!absPath) return { mode: 'none', width: 0, height: 0 };
-
-	const cacheKey = `${absPath}:${contentId}`;
-	if (_perceptionCache.has(cacheKey)) return _perceptionCache.get(cacheKey);
-
-	if (!fs.existsSync(absPath)) return { mode: 'none', width: 0, height: 0 };
-
-	try {
-		const st = fs.statSync(absPath);
-		let result;
-
-		// 1. 文件夹：一律图标框
-		if (st.isDirectory()) {
-			result = { mode: 'icon', width: 32, height: 32 };
-		}
-		// 2. 纯文本文件：一律相框（文本胶片）
-		else if (isPlainTextFile(absPath)) {
-			const { width, height } = getFrameConfig(null);
-			result = { mode: 'frame', width, height, isText: true };
-		}
-		// 3. 其他所有文件（exe, bat, psd, png, mp4, .2 等）：尝试获取预览缓存
-		// 无论后缀名是什么，只要能生成有效缓存，就用相框；否则用图标框
-		else {
-			const { width: targetW, height: targetH } = getFrameConfig(null);
-			const previewResult = await getPreviewBuffer(absPath, contentId, targetW, targetH);
-
-			if (previewResult && previewResult.buffer) {
-				const outW = previewResult.outputSize?.width || targetW;
-				const outH = previewResult.outputSize?.height || targetH;
-				result = {
-					mode: 'frame',
-					width: outW,
-					height: outH,
-					previewResult
-				};
-			} else {
-				// 4. 无法生成缓存：一律图标框
-				result = { mode: 'icon', width: 32, height: 32 };
-			}
-		}
-
-		_perceptionCache.set(cacheKey, result);
-		if (!_perceptionCacheTimer) {
-			_perceptionCacheTimer = setTimeout(() => {
-				_perceptionCache.clear();
-				_perceptionCacheTimer = null;
-			}, 10000); // 10秒缓存
-		}
-		return result;
-	} catch (e) {
-		return { mode: 'icon', width: 32, height: 32 };
-	}
 }
 
 // ==================== 主渲染逻辑 ====================
@@ -1856,7 +1771,7 @@ async function renderImages(editor) {
 	const iconPaths = []; // 收集需要获取图标的文件路径
 	const renderInfos = []; // 收集渲染信息，用于后续处理
 
-	// 第一阶段：同步扫描，快速隐藏
+	// 第一阶段：同步扫描，快速隐藏（仅对支持渲染的路径隐藏，避免“隐藏了但不渲染”的空洞）
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
 		const rangeOffset = editor.document.offsetAt(range.start);
@@ -1874,15 +1789,22 @@ async function renderImages(editor) {
 			if (!rawPath) continue;
 
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
-			if (!absPath) continue;
 
-			// 快速初步判断是否需要隐藏锚点（只要文件存在，我们都要决定是渲染相框还是图标）
 			let shouldHide = false;
-			try {
-				if (fs.existsSync(absPath)) {
-					shouldHide = true;
-				}
-			} catch { }
+			if (absPath && fs.existsSync(absPath)) {
+				try {
+					const st = fs.statSync(absPath);
+					// 文件夹和支持的媒体文件都需要隐藏原始文本
+					if (!st.isDirectory()) {
+						if (isSupportedMedia(absPath) || process.platform === 'win32') {
+							shouldHide = true;
+						}
+					} else {
+						// 文件夹也需要隐藏原始文本
+						shouldHide = true;
+					}
+				} catch { }
+			}
 
 			if (shouldHide) {
 				newHideRanges.push(new vscode.Range(pos, endPos));
@@ -1902,83 +1824,99 @@ async function renderImages(editor) {
 			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
-			tasks.push(async () => {
+			let isDirectory = false;
+			try {
+				const stat = fs.statSync(absPath);
+				isDirectory = stat.isDirectory();
+				// 不跳过文件夹，让文件夹也能被渲染
+				if (!isDirectory && !isSupportedMedia(absPath) && process.platform !== 'win32') continue;
+			} catch (e) {
+				continue;
+			}
+
+			// 收集渲染信息
+			renderInfos.push({
+				absPath,
+				uniqueKey,
+				anchorRange,
+				contentId,
+				isDirectory
+			});
+
+			// 在Windows上，收集需要获取图标的文件路径
+			if (process.platform === 'win32') {
+				iconPaths.push(absPath);
+			}
+		}
+	}
+
+	// 批量获取图标
+	let iconResults = {};
+	if (process.platform === 'win32' && iconPaths.length > 0) {
+		iconResults = await batchGetIcons(iconPaths);
+	}
+
+	// 第二阶段：创建渲染任务
+	for (const renderInfo of renderInfos) {
+		const { absPath, uniqueKey, anchorRange, contentId, isDirectory } = renderInfo;
+
+		tasks.push(async () => {
+			if (currentRenderVersion !== myVersion) return null;
+
+			try {
+				const ext = path.extname(absPath).toLowerCase();
+				const isVidOrImg = isImageOrVideoExt(ext);
+				const isText = !isVidOrImg && isPlainTextFile(absPath);
+
+				// 从批量获取的结果中获取图标
+				let iconB64 = iconResults[absPath] || null;
+
+				// 文件夹始终支持渲染（使用图标）
+				const isSupported = isDirectory || isVidOrImg || isText;
+
+				let previewWidth = LARGE_PREVIEW_WIDTH;
+				let previewHeight = LARGE_PREVIEW_HEIGHT;
+				let previewResult = null;
+
+				if (isSupported) {
+					let info = null;
+					if (!isText) {
+						let mtimeMs = 0;
+						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+						info = await getMediaInfo(absPath, mtimeMs);
+						const fc = getFrameConfig(info);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					} else {
+						// 文本也支持 small/large（fix 时按配置走：small->small，否则 large）
+						const fc = getFrameConfig(null);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					}
+
+					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+				}
+
 				if (currentRenderVersion !== myVersion) return null;
 
-				try {
-					// 使用感知层决定渲染模式
-					const perception = await getPerceptionResult(absPath, contentId);
-					if (perception.mode === 'none') return null;
+				// 如果既没有预览也没有图标，就不渲染
+				if (!previewResult && !iconB64) return null;
 
-					// 提取图标 (Windows 专用，无论相框还是图标框，都作为 gutter 或备选)
-					let iconB64 = null;
-					if (process.platform === 'win32') {
-						iconB64 = await global.getIcon(absPath);
+				const deco = { range: anchorRange, renderOptions: {} };
+				let contentUrl = "";
+				let webpDuration = 0;
+				let outputSize = null;
+
+				if (previewResult?.buffer) {
+					let mime = "image/webp";
+					if (previewResult.isDirect) {
+						mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
+					} else if (previewResult.mimeType) {
+						mime = previewResult.mimeType;
 					}
-
-					let previewWidth = perception.width;
-					let previewHeight = perception.height;
-					let previewResult = perception.previewResult;
-
-					// 如果感知层说是图标框，但没拿到预览图，且有图标，则使用图标
-					// 或者感知层已经带回了 previewResult (相框模式)
-
-					const deco = { range: anchorRange, renderOptions: {} };
-					let contentUrl = "";
-					let webpDuration = 0;
-					let outputSize = null;
-
-					if (perception.mode === 'frame' && previewResult?.buffer) {
-						let mime = "image/webp";
-						if (previewResult.isDirect) {
-							mime = previewResult.mimeType || mimeFromExt(previewResult.ext) || "image/webp";
-						} else if (previewResult.mimeType) {
-							mime = previewResult.mimeType;
-						}
-						contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
-						webpDuration = previewResult.webpDuration || 0;
-						outputSize = previewResult.outputSize;
-					} else if (perception.mode === 'icon' && iconB64) {
-						contentUrl = `url("data:image/png;base64,${iconB64}")`;
-						previewWidth = 32;
-						previewHeight = 32;
-						outputSize = { width: 32, height: 32 };
-					}
-
-					// 如果既没有预览也没有内容，不渲染
-					if (!contentUrl) return null;
-
-					// 设置 Gutter 图标
-					if (iconB64) {
-						deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
-						deco.renderOptions.gutterIconSize = "contain";
-					}
-
-					const boxWidth = previewWidth + PREVIEW_BORDER;
-					const boxHeight = previewHeight + PREVIEW_BORDER;
-
-					let progressBarUrl = null;
-					if (webpDuration > 0.1 && performanceMode === "optmum")
-						progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
-
-					deco.renderOptions.after = buildAfterStyle({
-						marginLeft,
-						boxWidth,
-						boxHeight,
-						previewWidth,
-						previewHeight,
-						contentUrl,
-						outputSize,
-						progressBarUrl,
-						watermarkBase64,
-					});
-
-					deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
-					deco.hoverMessage.isTrusted = true;
-
-					return { key: uniqueKey, deco };
-				} catch (e) {
-					return null;
+					contentUrl = `url("data:${mime};base64,${previewResult.buffer.toString("base64")}")`;
+					webpDuration = previewResult.webpDuration || 0;
+					outputSize = previewResult.outputSize;
 				}
 
 				// 如果没有预览但有图标，使用图标作为预览
@@ -2069,9 +2007,20 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					const relPath = qqq.toSafePath(path.relative(docDir, filePath));
 					const isLastItem = i === blocks.length - 1;
 
-					const contentId = block.fingerprint || qqq.computeFingerprint(filePath);
-					const perception = await getPerceptionResult(filePath, contentId);
-					const pxHeight = perception.mode === 'frame' ? perception.height : (perception.mode === 'icon' ? 32 : 0);
+					let pxHeight = 0;
+					const ext = path.extname(filePath).toLowerCase();
+					if (isImageOrVideoExt(ext)) {
+						pxHeight = LARGE_PREVIEW_HEIGHT;
+						try {
+							let mtimeMs = 0;
+							try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
+							const info = await getMediaInfo(filePath, mtimeMs || Date.now());
+							const { height } = getFrameConfig(info);
+							pxHeight = height;
+						} catch { }
+					} else if (isPlainTextFile(filePath)) {
+						pxHeight = getFrameConfig(null).height;
+					}
 
 					const gapBelow = pxHeight > 0 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
 					finalContent.push(`/\\${relPath}\\/${gapBelow ? eol.repeat(gapBelow) : ""}`);
@@ -2084,11 +2033,14 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 		const filePath = result.path;
 		if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
 		const relPath = qqq.toSafePath(path.relative(docDir, filePath));
-
-		const contentId = result.fingerprint || qqq.computeFingerprint(filePath);
-		const perception = await getPerceptionResult(filePath, contentId);
-		const pxHeight = perception.mode === 'frame' ? perception.height : (perception.mode === 'icon' ? 32 : 0);
-
+		let pxHeight = LARGE_PREVIEW_HEIGHT;
+		try {
+			let mtimeMs = 0;
+			try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
+			const info = await getMediaInfo(filePath, mtimeMs || Date.now());
+			const { height } = getFrameConfig(info);
+			pxHeight = height;
+		} catch { }
 		const gapBelow = calculateBlankLinesExact(pxHeight, true);
 		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
@@ -2100,9 +2052,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
 			const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
-			// 文件夹一律使用 32px 图标框的高度（或者至少 1 行，由 calculateBlankLinesExact 保证）
-			const gapBelow = calculateBlankLinesExact(32, false);
-			replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+			replacement += `/\\${relPath}\\/${eol}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 
@@ -2117,9 +2067,20 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 
 			const relPath = qqq.toSafePath(path.relative(docDir, f));
 
-			const contentId = fp || qqq.computeFingerprint(f);
-			const perception = await getPerceptionResult(f, contentId);
-			const pxHeight = perception.mode === 'frame' ? perception.height : (perception.mode === 'icon' ? 32 : 0);
+			let pxHeight = 0;
+			const ext = path.extname(f).toLowerCase();
+			if (isImageOrVideoExt(ext)) {
+				pxHeight = LARGE_PREVIEW_HEIGHT;
+				try {
+					let mtimeMs = 0;
+					try { mtimeMs = fs.statSync(f).mtimeMs; } catch { }
+					const info = await getMediaInfo(f, mtimeMs || Date.now());
+					const { height } = getFrameConfig(info);
+					pxHeight = height;
+				} catch { }
+			} else if (isPlainTextFile(f)) {
+				pxHeight = getFrameConfig(null).height;
+			}
 
 			const isLastItem = i === files.length - 1 && folders.length === 0;
 			if (i > 0 || folders.length > 0) replacement += eol;
@@ -2447,34 +2408,35 @@ async function provideCleanlinessEditsAsync(document) {
 		markers.push({ text: match[0], index: match.index, inner: (match[1] || "").trim() });
 	}
 
-	if (markers.length === 0) return [];
-
-	// 并行获取所有项目的感知结果以提升性能
-	const perceptionTasks = markers.map(async (m) => {
-		const rawPath = m.inner;
-		const absPath = resolvePathToAbsolute(document.uri, rawPath);
-		if (absPath && fs.existsSync(absPath)) {
-			const contentId = qqq.computeFingerprint(absPath);
-			const perception = await getPerceptionResult(absPath, contentId);
-			return { marker: m, perception, absPath };
-		}
-		return { marker: m, perception: { mode: 'none' }, absPath: null };
-	});
-
-	const results = await Promise.all(perceptionTasks);
-
-	// 倒序应用编辑，防止 index 偏移
-	for (let i = results.length - 1; i >= 0; i--) {
-		const { marker: m, perception } = results[i];
+	for (let i = markers.length - 1; i >= 0; i--) {
+		const m = markers[i];
 		const startPos = document.positionAt(m.index);
 		const endPos = document.positionAt(m.index + m.text.length);
 		const markerLine = startPos.line;
 
+		const rawPath = m.inner;
+		const absPath = resolvePathToAbsolute(document.uri, rawPath);
 		let pxHeight = 0;
-		if (perception.mode === 'frame') {
-			pxHeight = perception.height;
-		} else if (perception.mode === 'icon') {
-			pxHeight = 32;
+
+		if (absPath && fs.existsSync(absPath)) {
+			// 使用新的感知逻辑判断是否使用相框
+			const useFrame = await shouldUseFrame(absPath);
+
+			if (useFrame) {
+				// 确定相框尺寸
+				try {
+					const mtimeMs = fs.statSync(absPath).mtimeMs;
+					const info = await getMediaInfo(absPath, mtimeMs);
+					const { height } = getFrameConfig(info);
+					pxHeight = height;
+				} catch {
+					// 默认使用大相框高度
+					pxHeight = LARGE_PREVIEW_HEIGHT;
+				}
+			} else {
+				// 图标框：使用较小的高度，对应1-2行
+				pxHeight = -1; // 特殊标记，使用图标框的行数计算
+			}
 		}
 
 		const lineObj = document.lineAt(markerLine);
@@ -2484,8 +2446,8 @@ async function provideCleanlinessEditsAsync(document) {
 		const suffix = lineContent.substring(endPos.character);
 		if (suffix.trim().length > 0) edits.push({ range: new vscode.Range(endPos, endPos), newText: eol });
 
-		if (pxHeight > 0) {
-			const isLastMarkerInDoc = i === results.length - 1;
+		if (pxHeight !== 0) {
+			const isLastMarkerInDoc = i === markers.length - 1;
 			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
 			let existingBlanks = 0;
 			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
@@ -2536,38 +2498,31 @@ class FileCodeLensProvider {
 	}
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid) return [];
+		const lenses = [];
 		const regex = qqq.createPathRegex();
 		const text = document.getText();
 		let match;
-		const markers = [];
+		const foldersToFetch = new Set();
 
 		while ((match = regex.exec(text))) {
-			markers.push({ text: match[0], index: match.index, inner: (match[1] || "").trim() });
-		}
+			const pos = document.positionAt(match.index);
 
-		if (markers.length === 0) return [];
-
-		const foldersToFetch = new Set();
-		const lensTasks = markers.map(async (m) => {
-			const rawPath = m.inner;
-			if (!rawPath) return null;
+			const rawPath = (match[1] || "").trim();
+			if (!rawPath) continue;
 
 			const absPath = resolvePathToAbsolute(document.uri, rawPath);
-			if (!absPath || !fs.existsSync(absPath)) return null;
+			if (!absPath || !fs.existsSync(absPath)) continue;
 
-			const contentId = qqq.computeFingerprint(absPath);
-			const perception = await getPerceptionResult(absPath, contentId);
-			return { marker: m, perception, absPath, rawPath };
-		});
-
-		const results = await Promise.all(lensTasks);
-		const lenses = [];
-
-		for (const res of results) {
-			if (!res) continue;
-			const { marker: m, perception, absPath, rawPath } = res;
-			const pos = document.positionAt(m.index);
 			const folder = path.dirname(absPath);
+			const ext = path.extname(absPath).toLowerCase();
+			let isDirectory = false;
+			try {
+				const st = fs.statSync(absPath);
+				isDirectory = st.isDirectory();
+			} catch { }
+			const isVidOrImg = isImageOrVideoExt(ext);
+			const isText = !isVidOrImg && !isDirectory && isPlainTextFile(absPath);
+
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
@@ -2612,32 +2567,34 @@ class FileCodeLensProvider {
 			let iconPart = "";
 			let spacePart = "   ";
 
-			if (perception.mode === 'frame') {
-				if (perception.isText) {
-					iconPart = "📄";
-					spacePart = " ";
-				} else {
-					const info = await getMediaInfo(absPath, mtimeMs);
-					if (info?.width && info?.height) {
-						const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
-						const isRealVideo = info.type === "video";
-						if (isRealVideo) {
-							iconPart = "🎬";
-							spacePart = " ";
-						}
-						const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
-						const pct = Math.round(scale * 100);
-						titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
-
-						const displayCodec = info.full_codec_desc || info.codec;
-						if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
-
-						const arStr = calculateAspectRatioString(info.width, info.height);
-						if (arStr) tooltipText += `\n宽高比：${arStr}`;
-
-						if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+			if (isDirectory) {
+				iconPart = " 📁";
+				spacePart = "";
+			} else if (isVidOrImg) {
+				const info = await getMediaInfo(absPath, mtimeMs);
+				if (info?.width && info?.height) {
+					const { width: MAX_W, height: MAX_H } = getFrameConfig(info);
+					const isRealVideo = info.type === "video";
+					if (isRealVideo) {
+						iconPart = "🎬";
+						spacePart = "";
 					}
+					const { scale } = fitIntoBox(info.width, info.height, MAX_W, MAX_H, enlargeSmallImages);
+					const pct = Math.round(scale * 100);
+					titleSuffix = `   (${pct}%)  ${info.width}x${info.height}`;
+
+					const displayCodec = info.full_codec_desc || info.codec;
+					if (displayCodec) tooltipText += `\n编码: ${displayCodec}`;
+
+					const arStr = calculateAspectRatioString(info.width, info.height);
+					if (arStr) tooltipText += `\n宽高比：${arStr}`;
+
+					if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 				}
+			} else if (isText) {
+
+				iconPart = " 📄";
+				spacePart = "";
 			}
 
 			lenses.push(
