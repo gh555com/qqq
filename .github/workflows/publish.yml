@@ -36,6 +36,11 @@ jobs:
       - name: Package VSIX
         run: npm run ci:package
 
+      - name: Verify VSIX file exists
+        run: |
+          ls -la dist/
+          file dist/*.vsix
+
       - name: Publish to VS Code Marketplace
         run: npm run ci:publish
         env:
@@ -45,7 +50,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.vsix \
+          # Create release with all VSIX files
+          VSIX_FILES=$(ls dist/*.vsix)
+          echo "Uploading VSIX files: $VSIX_FILES"
+          gh release create "${GITHUB_REF_NAME}" $VSIX_FILES \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
 
