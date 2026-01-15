@@ -56,7 +56,6 @@
         }
     },
     "default-branch": "qq",
-    "versioning": "semver",
     "draft": false,
     "prerelease": false
 }
