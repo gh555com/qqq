@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.16.6",
+  "version": "15.16.7",
   "description": "soldier",
   "icon": "assets/icon.png",
   "engines": {
@@ -471,8 +471,6 @@
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.70.0",
     "@vscode/vsce": "^3.6.2",
-    "@vscode/test-cli": "^0.0.0",
-    "@vscode/test-electron": "^2.0.0",
     "mocha": "^10.0.0"
   }
 }
