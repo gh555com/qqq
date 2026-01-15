@@ -1,0 +1,33 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - qq
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          command: release-please
+          config-file: release-please-config.json
+          default-branch: qq
+          
+      - name: Check if release was created
+        id: check_release
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: echo "Release was created"
+        
+      - name: Output release information
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: |
+          echo "Version: ${{ steps.release.outputs.version }}"
+          echo "Tag name: ${{ steps.release.outputs.tag_name }}"
+          echo "Release URL: ${{ steps.release.outputs.html_url }}"

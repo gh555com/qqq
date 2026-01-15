@@ -679,6 +679,58 @@ function shouldShowDuration(info) {
 
 let downloadContext = null;
 
+async function savorMomentsCommand() {
+	try {
+		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
+		let selectedAudio;
+
+
+		const randomNumber = Math.floor(Math.random() * 30);
+		if (randomNumber === 0) {
+
+			selectedAudio = path.join(assetsPath, 'q.mp3');
+		} else {
+
+			const randomIndex = Math.floor(Math.random() * 3);
+			const audioNum = randomIndex + 1;
+			selectedAudio = path.join(assetsPath, `${audioNum}.mp3`);
+		}
+
+
+		if (process.platform === 'win32') {
+			cp.exec(`start /min "" "${selectedAudio}"`);
+		} else if (process.platform === 'darwin') {
+			cp.exec(`open -j "${selectedAudio}"`);
+		} else {
+
+			const players = ['mplayer', 'vlc', 'cvlc', 'mpv'];
+			let command = null;
+			for (const player of players) {
+				try {
+					cp.execSync(`which ${player} `, { stdio: 'ignore' });
+					if (player === 'mpv') {
+						command = `${player} --no - terminal "${selectedAudio}"`;
+					} else if (player === 'cvlc') {
+						command = `${player} "${selectedAudio}"`;
+					} else if (player === 'mplayer') {
+						command = `${player} -really - quiet "${selectedAudio}"`;
+					} else {
+						command = `${player} --play - and - exit "${selectedAudio}"`;
+					}
+					break;
+				} catch { }
+			}
+			if (command) {
+				cp.exec(command);
+			} else {
+				cp.exec(`xdg - open "${selectedAudio}"`);
+			}
+		}
+	} catch (e) {
+		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
+	}
+}
+
 async function downloadVideosFromUrlCommand() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
@@ -744,7 +796,7 @@ async function downloadVideosFromUrlCommand() {
 
 	// 2. 启动带进度条的弹窗任务
 	// ★ 创建自定义取消源（用于锚点丢失时主动取消）
-	const anchor = `/__PENDING_${transId}/`;
+	const anchor = `/ __PENDING_${transId}/`;
 	const anchorLostSource = new vscode.CancellationTokenSource();
 	let anchorLost = false;
 	let lastAnchorCheckTime = 0;
@@ -952,12 +1004,37 @@ async function activate(context) {
 
 	startDaemons();
 
+	// 设置 CodeLens 样式
+	function updateCodeLensStyle() {
+		const config = vscode.workspace.getConfiguration("qqq");
+		const takeOver = config.get("takeOverCodeLensStyle", true);
+		if (takeOver) {
+			// 设置 CodeLens 字体和字号
+			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
+			vscode.workspace.getConfiguration("editor").update("codeLensFontSize", 13, vscode.ConfigurationTarget.Global);
+		}
+	}
+
+	// 激活时设置一次
+	updateCodeLensStyle();
+
+	// 监听配置变化
+	context.subscriptions.push(
+		vscode.workspace.onDidChangeConfiguration((event) => {
+			if (event.affectsConfiguration("qqq.takeOverCodeLensStyle")) {
+				updateCodeLensStyle();
+			}
+		})
+	);
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
+
 
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			for (const key of Object.keys(global.ConfigManager.getAll())) {
