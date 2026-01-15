@@ -48,3 +48,31 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/*.vsix \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
+
+      - name: Update CHANGELOG with release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create or update CHANGELOG.md
+          if [ ! -f CHANGELOG.md ]; then
+            echo "# Changelog" > CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "All notable changes to this project will be documented in this file." >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "## 变更日志" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+            echo "本项目所有重要变更将在此文件中记录。" >> CHANGELOG.md
+            echo "" >> CHANGELOG.md
+          fi
+
+          # Get release notes from GitHub
+          RELEASE_NOTES=$(gh release view "${GITHUB_REF_NAME}" --json body --jq .body)
+
+          # Add new release to the top of CHANGELOG
+          TEMP_FILE=$(mktemp)
+          echo "## ${GITHUB_REF_NAME} ($(date +'%Y-%m-%d'))" > $TEMP_FILE
+          echo "" >> $TEMP_FILE
+          echo "${RELEASE_NOTES}" >> $TEMP_FILE
+          echo "" >> $TEMP_FILE
+          cat CHANGELOG.md >> $TEMP_FILE
+          mv $TEMP_FILE CHANGELOG.md
