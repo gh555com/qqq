@@ -592,11 +592,22 @@ let downloadContext = null;
 
 async function savorMomentsCommand() {
 	try {
-		const audioFiles = [1, 2, 3].map(num => path.join(extensionContext.extensionPath, 'assets', `${num}.mp3`));
-		const randomIndex = Math.floor(Math.random() * audioFiles.length);
-		const selectedAudio = audioFiles[randomIndex];
+		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
+		let selectedAudio;
 
-		// 使用系统默认播放器播放音频
+
+		const randomNumber = Math.floor(Math.random() * 30);
+		if (randomNumber === 0) {
+
+			selectedAudio = path.join(assetsPath, 'q.mp3');
+		} else {
+
+			const randomIndex = Math.floor(Math.random() * 3);
+			const audioNum = randomIndex + 1;
+			selectedAudio = path.join(assetsPath, `${audioNum}.mp3`);
+		}
+
+
 		if (process.platform === 'win32') {
 			cp.exec(`start "" "${selectedAudio}"`);
 		} else if (process.platform === 'darwin') {
