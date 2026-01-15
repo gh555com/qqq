@@ -609,12 +609,34 @@ async function savorMomentsCommand() {
 
 
 		if (process.platform === 'win32') {
-			cp.exec(`start "" "${selectedAudio}"`);
+			cp.exec(`start /min "" "${selectedAudio}"`);
 		} else if (process.platform === 'darwin') {
-			cp.exec(`open "${selectedAudio}"`);
+			cp.exec(`open -j "${selectedAudio}"`);
 		} else {
 			// Linux
-			cp.exec(`xdg-open "${selectedAudio}"`);
+			// 使用不同的命令来尝试最小化播放
+			const players = ['mplayer', 'vlc', 'cvlc', 'mpv'];
+			let command = null;
+			for (const player of players) {
+				try {
+					cp.execSync(`which ${player}`, { stdio: 'ignore' });
+					if (player === 'mpv') {
+						command = `${player} --no-terminal "${selectedAudio}"`;
+					} else if (player === 'cvlc') {
+						command = `${player} "${selectedAudio}"`;
+					} else if (player === 'mplayer') {
+						command = `${player} -really-quiet "${selectedAudio}"`;
+					} else {
+						command = `${player} --play-and-exit "${selectedAudio}"`;
+					}
+					break;
+				} catch { }
+			}
+			if (command) {
+				cp.exec(command);
+			} else {
+				cp.exec(`xdg-open "${selectedAudio}"`);
+			}
 		}
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
