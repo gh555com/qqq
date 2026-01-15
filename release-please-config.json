@@ -1,61 +1,12 @@
 {
-    "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-    "release-type": "node",
-    "packages": {
-        ".": {
-            "release-type": "node",
-            "package-name": "qqq",
-            "changelog-sections": [
-                {
-                    "type": "feat",
-                    "section": "Features",
-                    "hidden": false
-                },
-                {
-                    "type": "fix",
-                    "section": "Bug Fixes",
-                    "hidden": false
-                },
-                {
-                    "type": "docs",
-                    "section": "Documentation",
-                    "hidden": false
-                },
-                {
-                    "type": "refactor",
-                    "section": "Refactoring",
-                    "hidden": false
-                },
-                {
-                    "type": "perf",
-                    "section": "Performance Improvements",
-                    "hidden": false
-                },
-                {
-                    "type": "test",
-                    "section": "Tests",
-                    "hidden": false
-                },
-                {
-                    "type": "build",
-                    "section": "Build System",
-                    "hidden": false
-                },
-                {
-                    "type": "ci",
-                    "section": "CI/CD",
-                    "hidden": false
-                }
-            ],
-            "changelog-language": "en",
-            "changelog": {
-                "language": "en",
-                "header": "# Changelog\n\nAll notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.\n",
-                "footer": "\n## 变更日志\n\n本项目所有重要变更将在此文件中记录。\n"
-            }
-        }
-    },
-    "default-branch": "qq",
-    "draft": false,
-    "prerelease": false
+  "packages": {
+    ".": {
+      "changelog-path": "CHANGELOG.md",
+      "release-type": "node",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": false,
+      "draft": false,
+      "prerelease": false
+    }
+  }
 }
