@@ -2061,9 +2061,14 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 						} catch { }
 					} else if (isPlainTextFile(filePath)) {
 						pxHeight = getFrameConfig(null).height;
+					} else {
+						// 图标框：使用特殊标记，调用 calculateBlankLinesExact 计算正确的空行数
+						pxHeight = -1;
 					}
 
-					const gapBelow = pxHeight > 0 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
+					let gapBelow = pxHeight > 0 || pxHeight === -1 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
+					// 对于非最后一个项目，减1以抵消join添加的额外换行符
+					if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 					finalContent.push(`/\\${relPath}\\/${gapBelow ? eol.repeat(gapBelow) : ""}`);
 					invalidateFolderSizeCacheForPath(filePath);
 				}
@@ -2093,7 +2098,12 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
 			const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
-			replacement += `/\\${relPath}\\/${eol}`;
+			const isLastItem = i === folders.length - 1 && files.length === 0;
+			// 文件夹使用图标框的空行数计算
+			let gapBelow = calculateBlankLinesExact(-1, isLastItem);
+
+			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
+			replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 
@@ -2121,13 +2131,18 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 				} catch { }
 			} else if (isPlainTextFile(f)) {
 				pxHeight = getFrameConfig(null).height;
+			} else {
+
+				pxHeight = -1;
 			}
 
 			const isLastItem = i === files.length - 1 && folders.length === 0;
 			if (i > 0 || folders.length > 0) replacement += eol;
 			replacement += `/\\${relPath}\\/`;
-			if (pxHeight > 0) {
-				const gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
+			if (pxHeight > 0 || pxHeight === -1) {
+				let gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
+
+				if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 				replacement += eol.repeat(gapBelow);
 			} else {
 				replacement += eol;
@@ -2330,12 +2345,28 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 						await TransactionManager.removeTransaction(transId);
 
 						if (result.type !== 'image') {
-							const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
-							const skippedCount = result.skippedCount || 0;
 							const elapsedMs = Date.now() - taskStartTime;
-							let detail = `文件/文件夹已复制 ${totalCount}`;
-							if (skippedCount > 0) {
-								detail += ` (跳过 ${skippedCount}个无法访问)`;
+							let detail = '';
+
+							if (result.type === 'html_blocks' || result.type === 'skeleton') {
+								// HTML粘贴：统计成功落地的媒体文件数量
+								const mediaBlocks = result.blocks?.filter(b => b.type === 'media' && b.status === 'ok') || [];
+								const mediaCount = mediaBlocks.length;
+								detail = `共落盘${mediaCount}个文件`;
+								// 如果有baseUrl，添加来源信息
+								if (result.baseUrl) {
+									// 截断URL以保持消息简洁
+									const urlSnippet = result.baseUrl.length > 33 ? result.baseUrl.substring(0, 33) + '...' : result.baseUrl;
+									detail += `，从 ${urlSnippet}`;
+								}
+							} else {
+								// 文件/文件夹粘贴：原逻辑
+								const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
+								const skippedCount = result.skippedCount || 0;
+								detail = `文件/文件夹已复制 ${totalCount}`;
+								if (skippedCount > 0) {
+									detail += ` (跳过 ${skippedCount}个无法访问)`;
+								}
 							}
 							const msg = TaskMessage.done(taskTitle, detail, elapsedMs, taskNum);
 							TaskMessage.showSimpleToast(msg, 15000, 'success');
@@ -2489,7 +2520,9 @@ async function provideCleanlinessEditsAsync(document) {
 
 		if (pxHeight !== 0) {
 			const isLastMarkerInDoc = i === markers.length - 1;
-			const neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
+			let neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
+			// 对于非最后一个标记，减1以与直接粘贴体验一致
+			if (!isLastMarkerInDoc) neededLines = Math.max(neededLines - 1, 0);
 			let existingBlanks = 0;
 			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
 				if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
