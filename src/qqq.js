@@ -246,11 +246,15 @@ function updateStatusBarThrottled() {
 // Fingerprint memoization (dramatically reduces redundant hashing on re-render)
 const _fpCache = new Map(); // key -> fingerprint
 const FP_CACHE_MAX = 2048;
+const _computeFingerprintRaw = h.computeFingerprint;
+
 function computeFingerprintCached(filePath) {
 	if (!filePath) return null;
 	let st = null;
 	try { st = fs.statSync(filePath); } catch { /* ignore */ }
+
 	const sig = st ? `${cacheKeyForPath(filePath)}|${st.mtimeMs}|${st.size}` : `${cacheKeyForPath(filePath)}|nostat`;
+
 	const cached = _fpCache.get(sig);
 	if (cached) {
 		// LRU touch
@@ -258,7 +262,8 @@ function computeFingerprintCached(filePath) {
 		_fpCache.set(sig, cached);
 		return cached;
 	}
-	const fp = computeFingerprintCached(filePath);
+
+	const fp = _computeFingerprintRaw(filePath);
 	if (fp) {
 		_fpCache.set(sig, fp);
 		if (_fpCache.size > FP_CACHE_MAX) {
