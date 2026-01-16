@@ -41,21 +41,47 @@ jobs:
       # 编译 Rust 引擎
       - name: Build Rust daemon
         run: |
+          # 添加调试信息
+          echo "Current directory: $(pwd)"
+          echo "Rust version: $(cargo --version)"
+          echo "Rustc version: $(rustc --version)"
+
+          # 进入rust目录
           cd rust
-          # 只编译Linux x64平台的二进制文件
+          echo "In rust directory: $(pwd)"
+
+          # 显示目录内容
+          echo "Rust directory contents:"
+          ls -la
+
+          # 显示Cargo配置
+          echo "Cargo.toml content:"
+          cat Cargo.toml
+
+          # 编译Rust代码
           echo "Building Linux x64..."
-          cargo build --release --target x86_64-unknown-linux-gnu
+          cargo build --release --target x86_64-unknown-linux-gnu --verbose
 
-          # 确保assets目录存在
-          mkdir -p ../assets
+          # 检查编译结果
+          if [ $? -eq 0 ]; then
+            echo "Compilation successful!"
 
-          # 复制编译好的二进制文件
-          cp target/x86_64-unknown-linux-gnu/release/q ../assets/q_linux_x64
-          chmod +x ../assets/q_linux_x64
+            # 确保assets目录存在
+            mkdir -p ../assets
 
-          # 显示编译结果
-          echo "Compilation complete!"
-          ls -la ../assets/
+            # 复制编译好的二进制文件
+            echo "Copying binary file..."
+            ls -la target/x86_64-unknown-linux-gnu/release/
+            cp target/x86_64-unknown-linux-gnu/release/q ../assets/q_linux_x64
+            chmod +x ../assets/q_linux_x64
+
+            # 显示编译结果
+            echo "Final assets directory:"
+            ls -la ../assets/
+          else
+            echo "Compilation failed!"
+            exit 1
+          fi
 
       # 验证编译结果（暂时跳过）
       - name: Verify Rust binaries built
