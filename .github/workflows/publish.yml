@@ -38,23 +38,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mingw-w64
 
-      # 编译 Rust 引擎（暂时跳过，后续解决）
+      # 编译 Rust 引擎（暂时跳过，不创建占位符）
       - name: Build Rust daemon
         run: |
           echo "Skipping Rust compilation for now"
           echo "This will be addressed in a future release"
-
-          # 确保assets目录存在
-          mkdir -p assets
-
-          # 创建一个简单的占位符脚本，而不是空文件
-          echo "#!/bin/bash
-echo 'This is a placeholder for the Rust daemon. It will be replaced in a future release.'" > assets/q_linux_x64
-          chmod +x assets/q_linux_x64
-
-          # 显示结果
-          echo "Created placeholder binary"
-          ls -la assets/
 
       # 验证编译结果（暂时跳过）
       - name: Verify Rust binaries built
@@ -110,15 +98,20 @@ echo 'This is a placeholder for the Rust daemon. It will be replaced in a future
             --data-binary "@$VSIX_FILE" \
             "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $VSIX_FILE)"
 
-          # 上传Rust二进制文件
-          for BINARY in assets/q_*; do
-            echo "Uploading $BINARY..."
-            curl -s -X POST \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary "@$BINARY" \
-              "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $BINARY)"
-          done
+          # 上传Rust二进制文件（如果存在）
+          if [ -d "assets" ] && [ "$(ls -A assets/q_* 2>/dev/null)" ]; then
+            echo "Uploading Rust binary files..."
+            for BINARY in assets/q_*; do
+              echo "Uploading $BINARY..."
+              curl -s -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@$BINARY" \
+                "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $BINARY)"
+            done
+          else
+            echo "No Rust binary files found. Skipping upload."
+          fi
 
       - name: Publish to VS Code Marketplace
         run: npm run ci:publish
