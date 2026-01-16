@@ -23,6 +23,33 @@ jobs:
       - name: Install
         run: npm install
 
+      # 设置 Rust 编译环境
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-gnu
+          override: true
+          components: rustfmt, clippy
+
+      # 安装交叉编译依赖（用于编译 Windows 版本）
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+
+      # 编译 Rust 引擎
+      - name: Build Rust daemon
+        run: |
+          cd rust
+          bash build.sh
+
+      # 验证编译结果
+      - name: Verify Rust binaries built
+        run: |
+          ls -la assets/
+          file assets/q_*
+
       - name: Verify version matches tag
         run: |
           TAG="${GITHUB_REF_NAME#v}"
