@@ -70,18 +70,46 @@ jobs:
 
       - name: Create GitHub Release and upload files
         run: |
-          # 安装GitHub CLI
-          sudo apt-get install -y gh
+          # 安装jq工具（用于解析JSON响应）
+          sudo apt-get install -y jq
 
-          # 设置GitHub CLI认证
-          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          # 获取版本号
+          VERSION="${{ github.ref_name }}"
+
+          # 显示当前目录和文件
+          echo "Current directory: $(pwd)"
+          ls -la dist/
+          ls -la assets/
 
           # 创建Release
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            dist/*.vsix \
-            assets/q_*
+          echo "Creating Release $VERSION..."
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/gh555com/qqq/releases \
+            -d '{"tag_name":"'$VERSION'","name":"'$VERSION'","generate_release_notes":true}' \
+            | jq -r '.id')
+
+          echo "Release ID: $RELEASE_ID"
+
+          # 上传VSIX文件
+          VSIX_FILE=$(ls dist/*.vsix)
+          echo "Uploading $VSIX_FILE..."
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$VSIX_FILE" \
+            "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $VSIX_FILE)"
+
+          # 上传Rust二进制文件
+          for BINARY in assets/q_*; do
+            echo "Uploading $BINARY..."
+            curl -s -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$BINARY" \
+              "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $BINARY)"
+          done
 
       - name: Publish to VS Code Marketplace
         run: npm run ci:publish
