@@ -38,14 +38,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mingw-w64
 
-      # 编译 Rust 引擎（暂时跳过，后续解决）
+      # 编译 Rust 引擎
       - name: Build Rust daemon
         run: |
-          echo "Skipping Rust compilation for now"
-          # 创建一个空的二进制文件作为占位符
-          mkdir -p assets
-          touch assets/q_linux_x64
-          chmod +x assets/q_linux_x64
+          cd rust
+          # 只编译Linux x64平台的二进制文件
+          echo "Building Linux x64..."
+          cargo build --release --target x86_64-unknown-linux-gnu
+
+          # 确保assets目录存在
+          mkdir -p ../assets
+
+          # 复制编译好的二进制文件
+          cp target/x86_64-unknown-linux-gnu/release/q ../assets/q_linux_x64
+          chmod +x ../assets/q_linux_x64
+
+          # 显示编译结果
+          echo "Compilation complete!"
+          ls -la ../assets/
 
       # 验证编译结果（暂时跳过）
       - name: Verify Rust binaries built
