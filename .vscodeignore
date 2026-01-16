@@ -37,3 +37,26 @@ dist/**
 # 其他开发文件
 .eslintrc.json
 tsconfig.json
+
+# 原始材料文件夹 - 减小包体积
+res/
+
+# 未使用的图片文件
+assets/al.gif
+
+# 文档和测试文件
+docs/
+test/
+*.md
+
+# 开发工具文件
+rust/
+.idea/
+.git/
+*.log
+*.tmp
+*.bak
+
+# 根目录临时文件
+qq
+时间参数提前
