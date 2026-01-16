@@ -14,6 +14,5 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         with:
-          command: release
           config-file: release-please-config.json
-          default-branch: qq
+          target-branch: qq
