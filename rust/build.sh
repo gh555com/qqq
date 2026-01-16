@@ -77,7 +77,7 @@
 #!/bin/bash
 set -e
 
-cd rust
+# cd rust (already in rust directory from publish.yml)
 
 echo "=== Building Rust daemon for all platforms ==="
 
