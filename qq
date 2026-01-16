@@ -411,3 +411,125 @@ git push origin qq
 1. 按规范提交代码 → 2. 推送到qq分支 → 3. 等待自动PR → 4. 合并PR → 5. 自动完成发布
 
 整个过程中，您只需要做"提交代码"、"推送到qq分支"和"合并PR"这三个操作，其他所有步骤都会自动完成！
+
+
+
+
+
+
+
+
+
+✅ **最新完整的VS Code扩展发布流程（基于release-please自动版本管理）**
+
+### 一、开发阶段（日常工作）
+1. **开发代码**：根据需求开发新功能或修复bug
+2. **提交代码**：使用**语义化提交信息**进行git提交和推送
+   ```bash
+   git add .
+   git commit -m "feat: 添加新功能"  # 使用规范的语义化提交
+   # 支持的类型：feat(新功能), fix(修复), docs(文档), style(格式), refactor(重构), perf(性能), test(测试), chore(构建)
+   git push origin qq
+   ```
+3. **运行测试**：确保代码质量
+   ```bash
+   npm test  # 运行冒烟测试
+   ```
+
+### 二、自动版本管理流程（release-please自动执行）
+1. **自动触发**：当代码推送到qq分支时，`release-please.yml`工作流自动运行
+2. **版本分析**：
+   - release-please分析提交历史，根据语义化提交信息确定版本号
+   - `feat` → 次要版本（Y+1），`fix` → 补丁版本（Z+1），含`BREAKING CHANGE` → 主要版本（X+1）
+3. **创建发布PR**：
+   - 自动生成包含版本更新、CHANGELOG变更的PR
+   - PR标题格式：`chore(main): release vX.Y.Z`
+   - 自动更新`package.json`和`CHANGELOG.md`
+
+### 三、发布操作（核心1步）
+1. **合并发布PR**：
+   - 审核release-please生成的发布PR
+   - 确认版本号和CHANGELOG内容无误后合并PR
+   - ⚠️ **无需手动更新版本号或创建标签**
+
+### 四、自动触发的发布流程（GitHub Actions自动执行）
+1. **合并触发**：当发布PR合并后，release-please自动：
+   - 创建git标签（格式：`vX.Y.Z`）
+   - 更新`package.json`中的版本号
+   - 更新`CHANGELOG.md`文件
+2. **标签触发发布**：标签创建后，`publish.yml`工作流自动运行：
+   - **依赖安装**：使用`npm install`安装项目依赖
+   - **版本验证**：检查标签版本与package.json版本是否一致
+   - **打包VSIX**：生成扩展的VSIX安装文件（`dist/qqq-X.Y.Z.vsix`）
+   - **VSIX验证**：确认VSIX文件存在并完整
+   - **GitHub Release**：
+     - 创建X.Y.Z的Release记录
+     - 自动生成Release Notes
+     - 上传VSIX文件到Release中
+   - **VS Code Marketplace发布**：
+     - 上传扩展到VS Code Marketplace（使用PAT权限）
+     - 失败时不影响GitHub Release（`continue-on-error: true`）
+
+### 五、发布完成后的检查
+1. **GitHub Releases**：查看最新的Release记录，确认VSIX文件可下载
+   - 地址：`https://github.com/gh555com/qqq/releases`
+2. **VS Code Marketplace**：确认扩展已更新到最新版本
+3. **CHANGELOG.md**：查看release-please自动生成的双语变更记录
+4. **package.json**：确认版本号已自动更新
+
+### 六、核心配置文件
+1. **`release-please-config.json`**（项目根目录）：
+   ```json
+   {
+     "release-type": "node",
+     "package-name": "qqq",
+     "default-branch": "qq",
+     "versioning": "semver",
+     "changelog": {
+       "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n## 变更日志\n\n本项目所有重要变更将在此文件中记录。\n"
+     }
+   }
+   ```
+
+2. **`.github/workflows/release-please.yml`**：
+   - 触发条件：qq分支推送
+   - 权限：读写内容和PR
+   - 使用googleapis/release-please-action@v4
+
+3. **`.github/workflows/publish.yml`**：
+   - 触发条件：v*.*.*标签推送
+   - 权限：写内容
+   - 使用softprops/action-gh-release@v2上传VSIX
+
+### 七、优势与特点
+- **全自动版本管理**：从版本分析到发布完成，全程自动化
+- **语义化版本控制**：基于提交信息自动确定版本号
+- **智能CHANGELOG**：自动生成中英文双语变更记录
+- **标准化流程**：统一的版本管理和发布规范
+- **双渠道发布**：同时发布到GitHub Releases和VS Code Marketplace
+- **零手动操作**：无需手动更新版本、创建标签或编辑CHANGELOG
+- **可追溯性**：完整的版本历史和变更记录
+- **可靠性高**：减少人为错误，提高发布质量
+
+### 八、紧急手动发布流程（可选）
+如需绕过release-please进行紧急发布：
+1. **手动更新版本**：修改`package.json`中的version字段
+2. **提交版本更新**：
+   ```bash
+   git add package.json
+   git commit -m "chore: bump version to X.Y.Z"
+   git push origin qq
+   ```
+3. **创建标签**：
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+4. **后续流程**：与自动发布相同（标签触发publish.yml）
+
+这个流程已经过全面优化，结合了release-please的自动版本管理和可靠的VSIX发布机制，实现了真正的"一键发布"体验！
+
+
+
+
+
