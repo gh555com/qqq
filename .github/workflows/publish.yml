@@ -73,6 +73,7 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.vsix
+            assets/q_*
 
       - name: Publish to VS Code Marketplace
         run: npm run ci:publish
