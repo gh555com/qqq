@@ -3,10 +3,14 @@
   "release-type": "node",
   "package-name": "qqq",
   "default-branch": "qq",
+  "target-branch": "qq",
   "versioning": "semver",
   "draft": false,
   "prerelease": false,
   "changelog-language": "en",
+  "include-component-in-tag": false,
+  "labels": ["autorelease: pending"],
+  "extra-files": ["README.md"],
   "changelog": {
     "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n## 变更日志\n\n本项目所有重要变更将在此文件中记录。\n"
   }
