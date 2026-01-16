@@ -87,7 +87,7 @@ mkdir -p ../assets
 # Windows x64 (需要安装 mingw 或在 Windows 上编译)
 echo "Building Windows x64..."
 if command -v x86_64-w64-mingw32-gcc &> /dev/null; then
-    cargo build --release --target x86_64-pc-windows-gnu
+    cargo build --release --target x86_64-pc-windows-gnu --manifest-path Cargo_win.toml
     cp target/x86_64-pc-windows-gnu/release/q.exe ../assets/q_win_x64.exe
     echo "✓ Windows x64 done"
 else

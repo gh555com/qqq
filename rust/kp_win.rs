@@ -2,13 +2,16 @@
 // Rust port of the given Python "dumb saver" clipboard daemon.
 // - 极简模式：只负责读取系统剪贴板并保存到指定目录（dumb saver）
 // - 移除所有指纹计算、去重逻辑
-// - 移除 HTML 解析逻辑（由 Node.js 侧处理） -> 这里 get_html 返回“原始字节”
+// - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 // - 仅处理：纯文本、文件复制、原生图片保存
 //
 // 目标：按用户贴出的 Python 版本“行为等同”：
 // - daemon 协议：stdin JSON line -> stdout JSON line
 // - JSON dumps：默认 separators (", ", ": ")；ensure_ascii 默认 True；exit 时 ensure_ascii=False
 // - actions: ping / extract_icon / clipboard_peek(peek) / get_clipboard_files / get_html / exit / clipboard(paste) / folder_info(get_folder_info)
+// - Windows：文本、CF_HDROP 文件/文件夹复制、CF_DIB/CF_DIBV5 截图保存
+//
+// 说明：PNG 编码字节可能与 PIL 不逐字节一致，但行为/字段/格式对齐。
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Datelike, Local};
@@ -21,22 +24,14 @@ use serde::ser::{SerializeMap, SerializeSeq};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::io::{self, BufRead, BufWriter, Write};
+use std::io::{self, BufRead, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use threadpool::ThreadPool;
-use url::Url;
 use walkdir::WalkDir;
-
-// clipboard-rs
-use clipboard_rs::{Clipboard, ClipboardContext};
-use clipboard_rs::common::RustImage;
-
-// file_icon_provider
-use file_icon_provider::get_file_icon;
 
 // =============================================================================
 //  配置
@@ -116,6 +111,7 @@ fn pyv_from_json(v: &Value) -> PyV {
         Value::String(s) => PyV::Str(s.clone()),
         Value::Array(a) => PyV::Arr(a.iter().map(pyv_from_json).collect()),
         Value::Object(o) => {
+            // 输入对象字段顺序不重要；这里只做“尽量保留”，但不会用于“严格顺序对齐”的输出对象
             let mut out = Vec::with_capacity(o.len());
             for (k, v) in o {
                 out.push((k.clone(), pyv_from_json(v)));
@@ -294,8 +290,100 @@ fn unique_path_in_dir(output_dir: &Path, name: &str) -> PathBuf {
 }
 
 // =============================================================================
-//  PNG 编码（图标 RGBA -> PNG）
+//  DIB / DIBV5 转 BMP
 // =============================================================================
+
+fn dib_to_bmp_bytes(dib: &[u8]) -> Result<Vec<u8>, String> {
+    // 严格按 Python 的 dib_to_bmp_bytes 逻辑
+    if dib.is_empty() || dib.len() < 16 {
+        return Err("DIB data too small".to_string());
+    }
+
+    let header_size = u32::from_le_bytes([dib[0], dib[1], dib[2], dib[3]]) as usize;
+    if header_size < 12 || header_size > dib.len() {
+        return Err(format!("Invalid DIB header size: {}", header_size));
+    }
+
+    let (bpp, compression, colors_used, palette_entry_size) = if header_size == 12 {
+        let bpp = u16::from_le_bytes([dib[10], dib[11]]) as u32;
+        (bpp, 0u32, 0u32, 3u32)
+    } else {
+        let bpp = u16::from_le_bytes([dib[14], dib[15]]) as u32;
+        let compression = u32::from_le_bytes([dib[16], dib[17], dib[18], dib[19]]);
+        let colors_used = if dib.len() >= 36 {
+            u32::from_le_bytes([dib[32], dib[33], dib[34], dib[35]])
+        } else {
+            0u32
+        };
+        (bpp, compression, colors_used, 4u32)
+    };
+
+    let palette_colors = if colors_used != 0 {
+        colors_used
+    } else if (0 < bpp) && (bpp <= 8) {
+        1u32 << bpp
+    } else {
+        0u32
+    };
+
+    let palette_size = palette_colors * palette_entry_size;
+
+    let mut bitfields_size = 0u32;
+    const BI_BITFIELDS: u32 = 3;
+    const BI_ALPHABITFIELDS: u32 = 6;
+
+    if header_size == 40 && (compression == BI_BITFIELDS || compression == BI_ALPHABITFIELDS) {
+        bitfields_size = if compression == BI_BITFIELDS { 12 } else { 16 };
+    }
+
+    let bf_off_bits = 14u32 + (header_size as u32) + bitfields_size + palette_size;
+    let bf_size = 14u32 + (dib.len() as u32);
+
+    let mut file_header = Vec::<u8>::with_capacity(14 + dib.len());
+    file_header.extend_from_slice(b"BM");
+    file_header.extend_from_slice(&bf_size.to_le_bytes());
+    file_header.extend_from_slice(&0u32.to_le_bytes()); // reserved
+    file_header.extend_from_slice(&bf_off_bits.to_le_bytes());
+
+    let mut out = file_header;
+    out.extend_from_slice(dib);
+    Ok(out)
+}
+
+// =============================================================================
+//  PNG 写出（对齐 Python：有 alpha 就 RGBA，否则 RGB；compress_level=6 的“默认”等效）
+// =============================================================================
+
+fn save_image_as_png(img: image::DynamicImage, path: &Path) -> Result<(), String> {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ColorType;
+
+    ensure_parent(path);
+
+    let file = fs::File::create(path).map_err(|e| e.to_string())?;
+    let mut w = BufWriter::new(file);
+
+    let has_alpha = img.color().has_alpha();
+
+    if has_alpha {
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let encoder = PngEncoder::new_with_quality(&mut w, CompressionType::Default, FilterType::Adaptive);
+        encoder
+            .encode(rgba.as_raw(), width, height, ColorType::Rgba8)
+            .map_err(|e| e.to_string())?;
+    } else {
+        let rgb = img.to_rgb8();
+        let (width, height) = rgb.dimensions();
+        let encoder = PngEncoder::new_with_quality(&mut w, CompressionType::Default, FilterType::Adaptive);
+        encoder
+            .encode(rgb.as_raw(), width, height, ColorType::Rgb8)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let _ = w.flush();
+    Ok(())
+}
 
 fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::codecs::png::{CompressionType, FilterType, PngEncoder};
@@ -367,6 +455,7 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
 
         pending += 1;
 
+        // Python _wait_some: 超过阈值就 wait FIRST_COMPLETED
         while pending > inflight {
             if let Ok(opt) = rx.recv() {
                 pending -= 1;
@@ -381,6 +470,7 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
 
     drop(tx);
 
+    // drain remaining
     for opt in rx {
         if let Some(p) = opt {
             results.push(p);
@@ -475,10 +565,7 @@ fn python_like_ext_lower(path: &Path) -> String {
     // Python:
     // ext = p.suffix.lower().replace(".", "") or "no_ext"
     // Path.suffix 对 ".bashrc" => ""，所以应为 no_ext
-    let name = path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let suf = py_suffix(&name);
     let mut ext = suf.to_ascii_lowercase().replace('.', "");
     if ext.is_empty() {
@@ -626,8 +713,10 @@ fn py_str_like(v: Option<&Value>) -> String {
             format!("[{}]", parts.join(", "))
         }
         Some(Value::Object(o)) => {
+            // dict(str) 近似：{'k': v, ...}（仅用于错误消息，尽量贴近）
             let mut parts: Vec<String> = Vec::new();
             for (k, v) in o {
+                // Python dict 的 key 若是 str 会带引号（单引号）。这里尽量近似。
                 let key = format!("'{}'", k.replace('\'', "\\'"));
                 let val = match v {
                     Value::String(s) => format!("'{}'", s.replace('\'', "\\'")),
@@ -652,221 +741,439 @@ fn pick_request_id(cmd: &serde_json::Map<String, Value>) -> PyV {
 }
 
 // =============================================================================
-//  跨平台：剪贴板 + 图标
+//  Windows 实现
 // =============================================================================
 
-fn open_clipboard() -> Result<ClipboardContext, String> {
-    ClipboardContext::new().map_err(|e| e.to_string())
-}
+#[cfg(windows)]
+mod win {
+    use super::*;
+    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::System::DataExchange::*;
+    use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::UI::Shell::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-fn fix_file_uri_for_linux(s: &str) -> String {
-    // 有些环境可能给 "file://home/user/a"（少一个 slash）；尽量修正为 file:///home/user/a
-    if s.starts_with("file://") && !s.starts_with("file:///") && !s.starts_with("file://localhost/") {
-        let rest = s.trim_start_matches("file://").trim_start_matches('/');
-        return format!("file:///{}", rest);
+    unsafe fn read_global_data(h_mem: isize) -> Option<Vec<u8>> {
+        if h_mem == 0 {
+            return None;
+        }
+        let ptr = GlobalLock(h_mem) as *const u8;
+        if ptr.is_null() {
+            return None;
+        }
+        let size = GlobalSize(h_mem) as usize;
+        if size == 0 {
+            let _ = GlobalUnlock(h_mem);
+            return None;
+        }
+        let slice = std::slice::from_raw_parts(ptr, size);
+        let data = slice.to_vec();
+        let _ = GlobalUnlock(h_mem);
+        Some(data)
     }
-    s.to_string()
-}
 
-fn file_entry_to_pathbuf(s: &str) -> Option<PathBuf> {
-    if s.starts_with("file://") {
-        let fixed = fix_file_uri_for_linux(s);
-        if let Ok(u) = Url::parse(&fixed) {
-            if let Ok(p) = u.to_file_path() {
-                return Some(p);
+    fn to_wide_null(s: &str) -> Vec<u16> {
+        let mut v: Vec<u16> = s.encode_utf16().collect();
+        v.push(0);
+        v
+    }
+
+    enum DataToProcess {
+        Text(String),
+        Files(Vec<String>),
+        Dib(Vec<u8>),
+    }
+
+    pub fn handle_clipboard(output_dir: &Path) -> PyV {
+        // 对齐 Python handle_windows_ctypes（含“阶段1快速读、阶段2慢处理”）
+        let mut data_to_process: Option<DataToProcess> = None;
+
+        unsafe {
+            if OpenClipboard(0) == 0 {
+                return PyV::Obj(vec![("error".to_string(), PyV::Str("Cannot open clipboard".to_string()))]);
             }
-        }
-        // fallback：直接去掉 file:// 前缀（不做百分号解码的兜底）
-        let rest = s.trim_start_matches("file://");
-        if !rest.is_empty() {
-            return Some(PathBuf::from(rest));
-        }
-        return None;
-    }
-    Some(PathBuf::from(s))
-}
 
-fn normalize_file_list(items: Vec<String>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for it in items {
-        if let Some(p) = file_entry_to_pathbuf(&it) {
-            out.push(p);
-        }
-    }
-    out
-}
+            let has_files = IsClipboardFormatAvailable(CF_HDROP) != 0;
+            let has_text = (IsClipboardFormatAvailable(CF_UNICODETEXT) != 0) || (IsClipboardFormatAvailable(CF_TEXT) != 0);
+            let has_dib = (IsClipboardFormatAvailable(CF_DIBV5) != 0) || (IsClipboardFormatAvailable(CF_DIB) != 0);
 
-fn handle_clipboard(output_dir: &Path) -> PyV {
-    // 逻辑对齐 Python：优先 files，其次 image，最后 text（仅在没有 files/image 时）
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => {
-            return PyV::Obj(vec![("error".to_string(), PyV::Str("Cannot open clipboard".to_string()))]);
-        }
-    };
+            if has_text && !has_files && !has_dib {
+                if IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 {
+                    let h_mem = GetClipboardData(CF_UNICODETEXT);
+                    if h_mem != 0 {
+                        let ptr = GlobalLock(h_mem) as *const u16;
+                        if !ptr.is_null() {
+                            let size = GlobalSize(h_mem) as usize;
+                            let max_wchars = size / 2;
+                            let mut len = 0usize;
+                            while len < max_wchars {
+                                if *ptr.add(len) == 0 {
+                                    break;
+                                }
+                                len += 1;
+                            }
+                            let slice = std::slice::from_raw_parts(ptr, len);
+                            let text = String::from_utf16_lossy(slice);
+                            let _ = GlobalUnlock(h_mem);
 
-    // 1) files
-    if let Ok(files) = ctx.get_files() {
-        if !files.is_empty() {
-            let paths = normalize_file_list(files);
-            let mut src_dirs: Vec<PathBuf> = Vec::new();
-            let mut src_files: Vec<PathBuf> = Vec::new();
+                            if !text.trim().is_empty() {
+                                data_to_process = Some(DataToProcess::Text(text));
+                            }
+                        } else {
+                            let _ = GlobalUnlock(h_mem);
+                        }
+                    }
+                }
+            } else if has_files {
+                let h_drop = GetClipboardData(CF_HDROP);
+                if h_drop != 0 {
+                    let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+                    let mut paths: Vec<String> = Vec::new();
 
-            for p in paths {
-                if p.exists() {
-                    if p.is_dir() {
-                        src_dirs.push(p);
-                    } else if p.is_file() {
-                        src_files.push(p);
+                    for i in 0..count {
+                        let needed = DragQueryFileW(h_drop, i, std::ptr::null_mut(), 0) + 1;
+                        if needed == 0 {
+                            continue;
+                        }
+                        let mut buf: Vec<u16> = vec![0; needed as usize];
+                        DragQueryFileW(h_drop, i, buf.as_mut_ptr(), needed);
+                        if let Some(pos) = buf.iter().position(|&c| c == 0) {
+                            buf.truncate(pos);
+                        }
+                        paths.push(String::from_utf16_lossy(&buf));
+                    }
+
+                    if !paths.is_empty() {
+                        data_to_process = Some(DataToProcess::Files(paths));
+                    }
+                }
+            } else if has_dib {
+                let mut fmts: Vec<u32> = Vec::new();
+                if IsClipboardFormatAvailable(CF_DIBV5) != 0 {
+                    fmts.push(CF_DIBV5);
+                }
+                if IsClipboardFormatAvailable(CF_DIB) != 0 {
+                    fmts.push(CF_DIB);
+                }
+
+                for fmt in fmts {
+                    let h_mem = GetClipboardData(fmt);
+                    if h_mem == 0 {
+                        continue;
+                    }
+                    if let Some(dib) = read_global_data(h_mem) {
+                        if !dib.is_empty() {
+                            data_to_process = Some(DataToProcess::Dib(dib));
+                            break;
+                        }
                     }
                 }
             }
 
-            let mut copied_dirs: Vec<String> = Vec::new();
-            let mut copied_files: Vec<String> = Vec::new();
-
-            let _ = fs::create_dir_all(output_dir);
-
-            if !src_dirs.is_empty() {
-                for d in src_dirs {
-                    if let Some(dst) = copytree_parallel(&d, output_dir) {
-                        copied_dirs.push(dst);
-                    }
-                }
-            }
-
-            if !src_files.is_empty() {
-                copied_files = copy_files_parallel(src_files, output_dir);
-            }
-
-            if !copied_dirs.is_empty() || !copied_files.is_empty() {
-                let folders_v = copied_dirs.into_iter().map(PyV::Str).collect::<Vec<PyV>>();
-                let files_v = copied_files.into_iter().map(PyV::Str).collect::<Vec<PyV>>();
-                return PyV::Obj(vec![
-                    ("type".to_string(), PyV::Str("file_folder".to_string())),
-                    ("folders".to_string(), PyV::Arr(folders_v)),
-                    ("files".to_string(), PyV::Arr(files_v)),
-                ]);
-            }
-
-            return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
-        }
-    }
-
-    // 2) image
-    if let Ok(img) = ctx.get_image() {
-        let fname = get_timestamp_filename(".png");
-        let out_path = unique_path_in_dir(output_dir, &fname);
-        ensure_parent(&out_path);
-
-        let saved = (|| -> Result<(), String> {
-            let png_buf = img.to_png().map_err(|e| e.to_string())?;
-            fs::write(&out_path, png_buf.get_bytes()).map_err(|e| e.to_string())?;
-            Ok(())
-        })();
-
-        if saved.is_ok() {
-            return PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("image".to_string())),
-                ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
-            ]);
+            CloseClipboard();
         }
 
-        return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
-    }
-
-    // 3) text（只有在没有 files/image 时才走到这）
-    if let Ok(text) = ctx.get_text() {
-        if !text.trim().is_empty() {
-            return PyV::Obj(vec![
+        // 阶段2：锁外慢处理
+        match data_to_process {
+            None => PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
+            Some(DataToProcess::Text(text)) => PyV::Obj(vec![
                 ("type".to_string(), PyV::Str("text".to_string())),
                 ("text".to_string(), PyV::Str(text)),
-            ]);
-        }
-    }
+            ]),
+            Some(DataToProcess::Files(paths)) => {
+                let mut src_dirs: Vec<PathBuf> = Vec::new();
+                let mut src_files: Vec<PathBuf> = Vec::new();
 
-    PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
-}
+                for fp in paths {
+                    let p = PathBuf::from(fp);
+                    if p.exists() {
+                        if p.is_dir() {
+                            src_dirs.push(p);
+                        } else if p.is_file() {
+                            src_files.push(p);
+                        }
+                    }
+                }
 
-fn get_clipboard_files_only() -> PyV {
-    // 对齐 Python：失败返回 unknown，不抛 error
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    };
+                let mut copied_dirs: Vec<String> = Vec::new();
+                let mut copied_files: Vec<String> = Vec::new();
 
-    match ctx.get_files() {
-        Ok(files) if !files.is_empty() => {
-            let paths = normalize_file_list(files)
-                .into_iter()
-                .map(|p| PyV::Str(p.to_string_lossy().to_string()))
-                .collect::<Vec<PyV>>();
-            PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("file_paths".to_string())),
-                ("paths".to_string(), PyV::Arr(paths)),
-            ])
-        }
-        _ => PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    }
-}
+                if !src_dirs.is_empty() {
+                    for d in src_dirs {
+                        if let Some(dst) = copytree_parallel(&d, output_dir) {
+                            copied_dirs.push(dst);
+                        }
+                    }
+                }
 
-fn get_clipboard_html_raw() -> PyV {
-    // 返回“原始字节”：Windows 用 "HTML Format"（CF_HTML 原样字节，不做头解析）
-    // macOS 常见为 "public.html"
-    // Linux(X11) 常见为 "text/html"
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    };
+                if !src_files.is_empty() {
+                    copied_files = copy_files_parallel(src_files, output_dir);
+                }
 
-    let mut candidates: Vec<&str> = Vec::new();
-    if cfg!(target_os = "windows") {
-        candidates.push("HTML Format");
-    } else if cfg!(target_os = "macos") {
-        candidates.push("public.html");
-        candidates.push("public.utf8-plain-text"); // 兜底（有些 App 给奇怪类型）
-    } else {
-        candidates.push("text/html");
-        candidates.push("text/html;charset=utf-8");
-        candidates.push("text/html;charset=UTF-8");
-    }
+                if !copied_dirs.is_empty() || !copied_files.is_empty() {
+                    let folders_v = copied_dirs.into_iter().map(PyV::Str).collect::<Vec<PyV>>();
+                    let files_v = copied_files.into_iter().map(PyV::Str).collect::<Vec<PyV>>();
+                    PyV::Obj(vec![
+                        ("type".to_string(), PyV::Str("file_folder".to_string())),
+                        ("folders".to_string(), PyV::Arr(folders_v)),
+                        ("files".to_string(), PyV::Arr(files_v)),
+                    ])
+                } else {
+                    PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+                }
+            }
+            Some(DataToProcess::Dib(dib)) => {
+                let res = (|| -> Result<PyV, String> {
+                    let bmp = dib_to_bmp_bytes(&dib)?;
+                    let img = image::load_from_memory_with_format(&bmp, image::ImageFormat::Bmp).map_err(|e| e.to_string())?;
 
-    for fmt in candidates {
-        if let Ok(buf) = ctx.get_buffer(fmt) {
-            if let Ok(s) = String::from_utf8(buf.clone()) {
-                return PyV::Obj(vec![
-                    ("type".to_string(), PyV::Str("html".to_string())),
-                    ("value".to_string(), PyV::Str(s)),
-                ]);
-            } else {
-                let b64 = general_purpose::STANDARD.encode(buf);
-                return PyV::Obj(vec![
-                    ("type".to_string(), PyV::Str("html".to_string())),
-                    ("value_base64".to_string(), PyV::Str(b64)),
-                ]);
+                    let fname = get_timestamp_filename(".png");
+                    let out_path = unique_path_in_dir(output_dir, &fname);
+                    ensure_parent(&out_path);
+                    save_image_as_png(img, &out_path)?;
+
+                    Ok(PyV::Obj(vec![
+                        ("type".to_string(), PyV::Str("image".to_string())),
+                        ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
+                    ]))
+                })();
+
+                match res {
+                    Ok(v) => v,
+                    Err(_) => PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
+                }
             }
         }
     }
 
-    // 最后兜底：如果库能直接给 html 字符串，也给（仍不做额外解析）
-    if let Ok(s) = ctx.get_html() {
-        if !s.is_empty() {
-            return PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("html".to_string())),
-                ("value".to_string(), PyV::Str(s)),
-            ]);
+    pub fn get_clipboard_files_only() -> PyV {
+        // 对齐 Python get_clipboard_files_only：优先 ctypes 路径，失败返回 unknown（不抛 error）
+        unsafe {
+            if OpenClipboard(0) == 0 {
+                return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
+            }
+
+            if IsClipboardFormatAvailable(CF_HDROP) != 0 {
+                let h_drop = GetClipboardData(CF_HDROP);
+                if h_drop != 0 {
+                    let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+                    let mut paths: Vec<PyV> = Vec::new();
+
+                    for i in 0..count {
+                        let needed = DragQueryFileW(h_drop, i, std::ptr::null_mut(), 0) + 1;
+                        if needed == 0 {
+                            continue;
+                        }
+                        let mut buf: Vec<u16> = vec![0; needed as usize];
+                        DragQueryFileW(h_drop, i, buf.as_mut_ptr(), needed);
+
+                        if let Some(pos) = buf.iter().position(|&c| c == 0) {
+                            buf.truncate(pos);
+                        }
+                        paths.push(PyV::Str(String::from_utf16_lossy(&buf)));
+                    }
+
+                    CloseClipboard();
+
+                    if !paths.is_empty() {
+                        return PyV::Obj(vec![
+                            ("type".to_string(), PyV::Str("file_paths".to_string())),
+                            ("paths".to_string(), PyV::Arr(paths)),
+                        ]);
+                    }
+
+                    return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
+                }
+            }
+
+            CloseClipboard();
+            PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
         }
     }
 
-    PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+    pub fn get_clipboard_html() -> PyV {
+        // 对齐 Python get_clipboard_html：读取 HTML Format；UTF-8 decode 失败则 base64
+        unsafe {
+            if OpenClipboard(0) == 0 {
+                return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
+            }
+
+            let cf_html = RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr());
+            if cf_html != 0 && IsClipboardFormatAvailable(cf_html) != 0 {
+                let h_mem = GetClipboardData(cf_html);
+                if h_mem != 0 {
+                    let ptr = GlobalLock(h_mem) as *const u8;
+                    if !ptr.is_null() {
+                        let size = GlobalSize(h_mem) as usize;
+                        let slice = std::slice::from_raw_parts(ptr, size);
+                        let data = slice.to_vec();
+                        let _ = GlobalUnlock(h_mem);
+
+                        CloseClipboard();
+
+                        if let Ok(s) = String::from_utf8(data.clone()) {
+                            return PyV::Obj(vec![
+                                ("type".to_string(), PyV::Str("html".to_string())),
+                                ("value".to_string(), PyV::Str(s)),
+                            ]);
+                        } else {
+                            let b64 = general_purpose::STANDARD.encode(data);
+                            return PyV::Obj(vec![
+                                ("type".to_string(), PyV::Str("html".to_string())),
+                                ("value_base64".to_string(), PyV::Str(b64)),
+                            ]);
+                        }
+                    } else {
+                        let _ = GlobalUnlock(h_mem);
+                    }
+                }
+            }
+
+            CloseClipboard();
+            PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+        }
+    }
+
+    // =============================================================================
+    //  extract_icon —— 对齐 Python get_file_icon_base64
+    // =============================================================================
+
+    #[repr(C)]
+    struct BITMAPINFO32 {
+        bmiHeader: BITMAPINFOHEADER,
+        bmiColors: [u32; 3],
+    }
+
+    pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
+        // Python 逻辑：
+        // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_SMALLICON)
+        // - CreateCompatibleDC + CreateDIBSection 32bpp top-down
+        // - DrawIconEx
+        // - BGRA -> PNG base64
+        unsafe {
+            let wide = to_wide_null(file_path);
+
+            let mut shfi: SHFILEINFOW = std::mem::zeroed();
+            let res = SHGetFileInfoW(
+                wide.as_ptr(),
+                0,
+                &mut shfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_SMALLICON,
+            );
+
+            if res == 0 || shfi.hIcon == 0 {
+                return None;
+            }
+
+            let hicon = shfi.hIcon;
+
+            let mut ok = None;
+
+            // 尽量与 Python 一样：无论中途如何，最后 DestroyIcon
+            // 资源清理按顺序做
+            let hdc_screen = GetDC(0);
+            if hdc_screen == 0 {
+                DestroyIcon(hicon);
+                return None;
+            }
+
+            let hdc_mem = CreateCompatibleDC(hdc_screen);
+            if hdc_mem == 0 {
+                ReleaseDC(0, hdc_screen);
+                DestroyIcon(hicon);
+                return None;
+            }
+
+            let width: i32 = 16;
+            let height: i32 = 16;
+
+            let mut bmi = BITMAPINFO32 {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: width,
+                    biHeight: -height, // top-down
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB,
+                    biSizeImage: 0,
+                    biXPelsPerMeter: 0,
+                    biYPelsPerMeter: 0,
+                    biClrUsed: 0,
+                    biClrImportant: 0,
+                },
+                bmiColors: [0u32; 3],
+            };
+
+            let mut bits_ptr: *mut core::ffi::c_void = std::ptr::null_mut();
+            let hbmp = CreateDIBSection(
+                hdc_mem,
+                (&mut bmi as *mut BITMAPINFO32) as *mut BITMAPINFO,
+                DIB_RGB_COLORS,
+                &mut bits_ptr,
+                0,
+                0,
+            );
+
+            if hbmp == 0 || bits_ptr.is_null() {
+                DeleteDC(hdc_mem);
+                ReleaseDC(0, hdc_screen);
+                DestroyIcon(hicon);
+                return None;
+            }
+
+            let hold = SelectObject(hdc_mem, hbmp as _);
+            // DI_NORMAL == 0x0003（Python 用 0x0003）
+            let _ = DrawIconEx(hdc_mem, 0, 0, hicon, width, height, 0, 0, 0x0003);
+
+            // 读取 BGRA
+            let size = (width * height * 4) as usize;
+            let src = std::slice::from_raw_parts(bits_ptr as *const u8, size);
+
+            // 转 RGBA（PIL frombuffer("RGBA", raw="BGRA") 等效）
+            let mut rgba: Vec<u8> = Vec::with_capacity(size);
+            for px in src.chunks_exact(4) {
+                let b = px[0];
+                let g = px[1];
+                let r = px[2];
+                let a = px[3];
+                rgba.push(r);
+                rgba.push(g);
+                rgba.push(b);
+                rgba.push(a);
+            }
+
+            if let Ok(png) = png_bytes_from_rgba(width as u32, height as u32, &rgba) {
+                ok = Some(general_purpose::STANDARD.encode(png));
+            }
+
+            // cleanup
+            let _ = SelectObject(hdc_mem, hold);
+            let _ = DeleteObject(hbmp as _);
+            let _ = DeleteDC(hdc_mem);
+            let _ = ReleaseDC(0, hdc_screen);
+            let _ = DestroyIcon(hicon);
+
+            ok
+        }
+    }
 }
 
-fn get_file_icon_base64(file_path: &str) -> Option<String> {
-    // 统一跨平台：file_icon_provider
-    let p = PathBuf::from(file_path);
-    let icon = get_file_icon(p, 16).ok()?;
-    let png = png_bytes_from_rgba(icon.width, icon.height, &icon.pixels).ok()?;
-    Some(general_purpose::STANDARD.encode(png))
+#[cfg(not(windows))]
+mod win {
+    use super::*;
+    pub fn handle_clipboard(_output_dir: &Path) -> PyV {
+        PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+    }
+    pub fn get_clipboard_files_only() -> PyV {
+        PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+    }
+    pub fn get_clipboard_html() -> PyV {
+        PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+    }
+    pub fn get_file_icon_base64(_file_path: &str) -> Option<String> {
+        None
+    }
 }
 
 // =============================================================================
@@ -875,6 +1182,7 @@ fn get_file_icon_base64(file_path: &str) -> Option<String> {
 
 fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
     // returns: (response_value, exit_now, exit_ensure_ascii_false)
+    // 对齐 Python _dispatch_action
     let cmd = match cmd_v.as_object() {
         Some(o) => o,
         None => {
@@ -916,9 +1224,19 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             (PyV::Obj(out_pairs), false, false)
         }
         "extract_icon" => {
+            // Python:
+            // path = cmd.get("path")
+            // if path:
+            //   icon_b64 = get_file_icon_base64(path)
+            //   if icon_b64:
+            //     out["icon"]=...; out["status"]="ok"
+            //   else:
+            //     out["status"]="error"; out["message"]="icon extraction failed"
+            // else:
+            //   out["status"]="error"; out["message"]="no path provided"
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
-                if let Some(icon) = get_file_icon_base64(p) {
+                if let Some(icon) = win::get_file_icon_base64(p) {
                     out_pairs.push(("icon".to_string(), PyV::Str(icon)));
                     out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
                 } else {
@@ -939,13 +1257,14 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             (PyV::Obj(out_pairs), false, false)
         }
         "get_clipboard_files" => {
-            if let PyV::Obj(extra) = get_clipboard_files_only() {
+            // Python: out.update(get_clipboard_files_only())
+            if let PyV::Obj(extra) = win::get_clipboard_files_only() {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
         }
         "get_html" => {
-            if let PyV::Obj(extra) = get_clipboard_html_raw() {
+            if let PyV::Obj(extra) = win::get_clipboard_html() {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
@@ -961,8 +1280,7 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 .and_then(|v| v.as_str())
                 .or_else(|| cmd.get("output_dir").and_then(|v| v.as_str()));
             let output_dir = resolve_output_dir(target_dir);
-
-            if let PyV::Obj(extra) = handle_clipboard(&output_dir) {
+            if let PyV::Obj(extra) = win::handle_clipboard(&output_dir) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
@@ -983,6 +1301,7 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
 }
 
 fn daemon_mode() {
+    // Python debug: log startup
     eprintln!("Daemon started. PID={}", process::id());
 
     let stdin = io::stdin();
@@ -992,6 +1311,7 @@ fn daemon_mode() {
         let mut line_bytes: Vec<u8> = Vec::new();
         match reader.read_until(b'\n', &mut line_bytes) {
             Ok(0) => {
+                // EOF
                 eprintln!("Daemon stdin EOF.");
                 thread::sleep(Duration::from_secs(1));
                 continue;
@@ -1054,19 +1374,20 @@ fn main() {
             let out_dir = Some(args[2].as_str());
             let output_dir = resolve_output_dir(out_dir);
 
-            let res = handle_clipboard(&output_dir);
+            let res = win::handle_clipboard(&output_dir);
             let s = dumps_py(&res, true); // ensure_ascii=True
             println!("{}", s);
             return;
         }
 
+        // default
         let output_dir = resolve_output_dir(None);
-        let res = handle_clipboard(&output_dir);
+        let res = win::handle_clipboard(&output_dir);
         let s = dumps_py(&res, true);
         println!("{}", s);
     } else {
         let output_dir = resolve_output_dir(None);
-        let res = handle_clipboard(&output_dir);
+        let res = win::handle_clipboard(&output_dir);
         let s = dumps_py(&res, true);
         println!("{}", s);
     }
