@@ -14,8 +14,9 @@ const { TextDecoder } = require("util");
 const qqq = require("./qqq");
 const q3 = require("./q3");
 
-const CORE_INTEGRITY_HASH =
-	"dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
+// 新水印的SHA256哈希值
+const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
+const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
 let isCoreIntegrityValid = false;
 
 // ==================== 配置常量 ====================
@@ -161,8 +162,11 @@ let cleanFreakMode = false;
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
 
-let watermarkBase64 = null;
-const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
+// 大小相框水印
+let largeWatermarkBase64 = null;
+let smallWatermarkBase64 = null;
+const LARGE_WATERMARK_PATH = path.join(__dirname, "..", "assets", "al.png");
+const SMALL_WATERMARK_PATH = path.join(__dirname, "..", "assets", "as.png");
 
 // ==================== ★★★ 调度器（分层）★★★ ====================
 const probeScheduler =
@@ -178,23 +182,43 @@ const genScheduler =
 // ==================== 初始化 ====================
 function verifySystemIntegrity() {
 	try {
-		if (!fs.existsSync(WATERMARK_PATH)) return false;
-		const buf = fs.readFileSync(WATERMARK_PATH);
-		const hash = crypto.createHash("sha256").update(buf).digest("hex");
-		return hash === CORE_INTEGRITY_HASH;
+		// 验证大相框水印
+		if (!fs.existsSync(LARGE_WATERMARK_PATH)) return false;
+		const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
+		const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
+		if (largeHash !== LARGE_WATERMARK_HASH) return false;
+
+		// 验证小相框水印
+		if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
+		const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
+		const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
+		if (smallHash !== SMALL_WATERMARK_HASH) return false;
+
+		return true;
 	} catch (e) {
 		return false;
 	}
 }
 
 function loadWatermarkResource() {
+	// 加载大相框水印
 	try {
-		if (fs.existsSync(WATERMARK_PATH)) {
-			const buf = fs.readFileSync(WATERMARK_PATH);
-			watermarkBase64 = "data:image/gif;base64," + buf.toString("base64");
+		if (fs.existsSync(LARGE_WATERMARK_PATH)) {
+			const buf = fs.readFileSync(LARGE_WATERMARK_PATH);
+			largeWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
 		}
 	} catch (e) {
-		watermarkBase64 = null;
+		largeWatermarkBase64 = null;
+	}
+
+	// 加载小相框水印
+	try {
+		if (fs.existsSync(SMALL_WATERMARK_PATH)) {
+			const buf = fs.readFileSync(SMALL_WATERMARK_PATH);
+			smallWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
+		}
+	} catch (e) {
+		smallWatermarkBase64 = null;
 	}
 }
 
@@ -1983,6 +2007,14 @@ async function renderImages(editor) {
 				if (webpDuration > 0.1 && performanceMode === "optmum")
 					progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
 
+				// 根据相框大小选择水印
+				let selectedWatermark = null;
+				if (previewWidth === LARGE_PREVIEW_WIDTH && previewHeight === LARGE_PREVIEW_HEIGHT) {
+					selectedWatermark = largeWatermarkBase64;
+				} else if (previewWidth === SMALL_PREVIEW_WIDTH && previewHeight === SMALL_PREVIEW_HEIGHT) {
+					selectedWatermark = smallWatermarkBase64;
+				}
+
 				deco.renderOptions.after = buildAfterStyle({
 					marginLeft,
 					boxWidth,
@@ -1992,7 +2024,7 @@ async function renderImages(editor) {
 					contentUrl,
 					outputSize,
 					progressBarUrl,
-					watermarkBase64,
+					watermarkBase64: selectedWatermark,
 				});
 
 				deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
