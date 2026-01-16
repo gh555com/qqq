@@ -33,3 +33,10 @@
      你好你好你好  ![GH HEALTH](https://i.imgur.com/Tm1WwC0.png)   ![GH HEALqH](https://i.imgur.com/XKDPUjX.png)
 
 <img src="https://i.imgur.com/Tm1WwC0.png">  我好我好我好
+
+## 新增功能：测试release-please自动发布
+
+- 添加了release-please自动版本管理功能
+- 支持语义化版本控制
+- 自动生成双语CHANGELOG
+- 实现一键发布体验
