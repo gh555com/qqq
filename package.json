@@ -4,7 +4,7 @@
   "publisher": "gh555",
   "version": "15.16.8",
   "description": "soldier",
-  "icon": "assets/icon.png",
+  "icon": "assets/q.gif",
   "engines": {
     "vscode": "^1.73.0"
   },
