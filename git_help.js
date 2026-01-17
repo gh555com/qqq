@@ -62,7 +62,7 @@ class LocalAIReleaseAssistant {
     // 核心：更新版本、添加所有文件并提交推送
     async _smartCommitAndPush(newVersion, message, targetBranch = 'qq') {
         console.log(`📊 版本递增: ${newVersion}`);
-        
+
         // 1. 同步更新 package.json
         const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
         pkg.version = newVersion;
@@ -77,7 +77,7 @@ class LocalAIReleaseAssistant {
         // 3. 执行全量提交
         this.execGit('add .');
         this.execGit(`commit -m "${message}"`);
-        
+
         // 4. 执行推送
         console.log(`📤 正在推送至 ${targetBranch}...`);
         this.execGit(`push origin ${targetBranch}`);
@@ -102,7 +102,7 @@ class LocalAIReleaseAssistant {
 
         this.execGit(`checkout -b ${branch}`);
         await this._smartCommitAndPush(next, `release: prepare v${next} (q1)`, branch);
-        
+
         this.execGit('checkout qq');
         console.log(`✅ q1 完成：已推送分支 ${branch}，现已切回 qq 分支`);
     }
