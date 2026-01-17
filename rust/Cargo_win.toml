@@ -20,7 +20,7 @@ num_cpus = "1.16"
 threadpool = "1.8"
 walkdir = "2.5"
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
-windows-sys = { version = "0.52", features = [
+windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
