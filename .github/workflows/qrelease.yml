@@ -1,28 +1,20 @@
 name: 🚀 Full-Stack Release System (q1/q2)
 
 on:
-  # 1. 监听对话式指令
   issue_comment:
     types: [created]
-  # 2. 监听发布PR合并
-  pull_request:
-    types: [closed]
-    branches: [qq]
-  # 3. 监听本地直接推送 (q2)
   push:
     branches: [qq]
-  # 4. 允许手动触发
   workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
-  packages: write
 
 jobs:
   # ==========================================
-  # 1. q1: 创建发布PR (对话式触发)
+  # 1. q1: 创建发布PR
   # ==========================================
   q1-create-pr:
     name: "🔄 q1: Create Release PR"
@@ -30,61 +22,120 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
       - name: Calculate Next Version
         id: version
         run: |
           CURRENT=$(node -p "require('./package.json').version")
-          # 简单逻辑：q1默认递增minor
           NEXT=$(echo $CURRENT | awk -F. '{print $1"."($2+1)".0"}')
           echo "next=$NEXT" >> $GITHUB_OUTPUT
           echo "branch=release/v$NEXT" >> $GITHUB_OUTPUT
-
       - name: Create Release Branch
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b ${{ steps.version.outputs.branch }}
-          # 更新版本号
           node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json')); p.version='${{ steps.version.outputs.next }}'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n');"
           git add .
           git commit -m "release: prepare v${{ steps.version.outputs.next }} (q1)"
           git push origin ${{ steps.version.outputs.branch }}
-
-      - name: Open Pull Request
-        uses: repo-sync/pull-request@v2
+      - uses: repo-sync/pull-request@v2
         with:
           source_branch: ${{ steps.version.outputs.branch }}
           destination_branch: "qq"
           pr_title: "🚀 Release v${{ steps.version.outputs.next }} (q1)"
-          pr_body: "此 PR 由 q1 指令自动创建。合并后将触发全平台构建和正式发布。"
-
-      - name: Feedback
-        uses: peter-evans/create-or-update-comment@v3
+          pr_body: "此 PR 由 q1 指令自动创建。合并后将触发全平台真实构建。"
+      - uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.issue.number }}
-          body: "✅ **q1 执行成功**！已创建发布分支和 PR。合并 PR 即可完成发布。"
+          body: "✅ **q1 执行成功**！已创建发布分支和 PR。"
 
   # ==========================================
-  # 2. q2: 完整发布流程 (对话式或PR合并触发)
+  # 2. 核心构建 Job (Matrix 矩阵并行)
   # ==========================================
-  q2-full-release:
-    name: "🎉 q2: Full Release & Build"
+  build:
+    name: 🏗️ Build ${{ matrix.target }}
     if: |
       (github.event_name == 'push' && contains(github.event.head_commit.message, '(q2)')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset_name: q_linux_x64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset_name: q_mac_x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset_name: q_mac_arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: q_win_x64.exe
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            asset_name: q_win_x86.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            asset_name: q_win_arm64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🛠️ Install Linux Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libglib2.0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev
+
+      - name: ⚙️ Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 🔨 Real Cargo Build
+        run: |
+          cd rust
+          # 如果是 Windows，先准备好特定的 Cargo.toml
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp Cargo_win.toml Cargo.toml
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: 📦 Prepare Artifact
+        shell: bash
+        run: |
+          mkdir -p ../dist-assets
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            cp rust/target/${{ matrix.target }}/release/q*.exe ./dist-assets/${{ matrix.asset_name }}
+          else
+            cp rust/target/${{ matrix.target }}/release/q* ./dist-assets/${{ matrix.asset_name }}
+            chmod +x ./dist-assets/${{ matrix.asset_name }}
+          fi
+
+      - name: 📤 Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist-assets/${{ matrix.asset_name }}
+
+  # ==========================================
+  # 3. 发布 Job (汇总所有产物)
+  # ==========================================
+  q2-release:
+    name: "🚀 q2: Finalize Release"
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
+          path: all-assets
+          merge-multiple: true
 
       - name: Get Version
         id: get_version
@@ -92,83 +143,19 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # ------------------------------------------
-      # 跨平台构建逻辑 (真正的 Rust 编译)
-      # ------------------------------------------
-      - name: Install Rust Toolchains
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: |
-            x86_64-unknown-linux-gnu
-            x86_64-pc-windows-msvc
-            i686-pc-windows-msvc
-            aarch64-pc-windows-msvc
-            x86_64-apple-darwin
-            aarch64-apple-darwin
-
-      - name: Build All Platforms
-        run: |
-          mkdir -p assets
-          cd rust
-
-          # 1. Linux x64
-          cargo build --release --target x86_64-unknown-linux-gnu
-          cp target/x86_64-unknown-linux-gnu/release/q* ../assets/q_linux_x64
-
-          # 2. macOS (x64 & ARM64)
-          cargo build --release --target x86_64-apple-darwin
-          cp target/x86_64-apple-darwin/release/q* ../assets/q_mac_x64
-          cargo build --release --target aarch64-apple-darwin
-          cp target/aarch64-apple-darwin/release/q* ../assets/q_mac_arm64
-
-          # 3. Windows (x64, x86, ARM64) - 使用 Cargo_win.toml
-          cp Cargo_win.toml Cargo.toml
-          cargo build --release --target x86_64-pc-windows-msvc
-          cp target/x86_64-pc-windows-msvc/release/q*.exe ../assets/q_win_x64.exe
-          cargo build --release --target i686-pc-windows-msvc
-          cp target/i686-pc-windows-msvc/release/q*.exe ../assets/q_win_x86.exe
-          cargo build --release --target aarch64-pc-windows-msvc
-          cp target/aarch64-pc-windows-msvc/release/q*.exe ../assets/q_win_arm64.exe
-
-          echo "✅ 所有平台构建完成"
-
-      # ------------------------------------------
-      # 发布资产
-      # ------------------------------------------
-      - name: Create GitHub Release
-        id: create_release
+      - name: 🏷️ Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
           name: Release v${{ steps.get_version.outputs.version }}
-          files: |
-            assets/q_linux_x64
-            assets/q_mac_x64
-            assets/q_mac_arm64
-            assets/q_win_x64.exe
-            assets/q_win_x86.exe
-            assets/q_win_arm64.exe
+          files: all-assets/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Feedback Completion
+      - name: Feedback
         if: github.event.issue.number
         uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.issue.number }}
-          body: "🎉 **q2 执行成功**！版本 v${{ steps.get_version.outputs.version }} 已发布至 GitHub Release 并完成构建。"
-
-  # ==========================================
-  # 3. 错误处理
-  # ==========================================
-  error-notify:
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Notify Failure
-        if: github.event.issue.number
-        uses: peter-evans/create-or-update-comment@v3
-        with:
-          issue-number: ${{ github.event.issue.number }}
-          body: "❌ **发布流程失败**！请检查 Actions 日志排查问题。"
+          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.version }} 的全平台真实产物已上传。"
