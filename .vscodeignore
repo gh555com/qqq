@@ -41,6 +41,9 @@ tsconfig.json
 # 原始材料文件夹 - 减小包体积
 res/
 
+# 构建产物assets文件夹 - 在release阶段单独处理
+assets/
+
 # 未使用的图片文件
 assets/al.gif
 
