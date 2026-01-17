@@ -20,12 +20,16 @@ jobs:
         include:
           - os: ubuntu-latest
             asset_name: q_linux_x64
+          - os: ubuntu-latest
+            asset_name: q_linux_arm64
           - os: windows-latest
             asset_name: q_win_x64.exe
           - os: windows-latest
             asset_name: q_win_x86.exe
           - os: macos-latest
             asset_name: q_mac_x64
+          - os: macos-latest
+            asset_name: q_mac_arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -57,16 +61,32 @@ jobs:
               cp target/release/q.exe ../${{ matrix.asset_name }}
             fi
           elif [ "${{ matrix.os }}" == "macos-latest" ]; then
-            # macOS: build for x86_64 Mac
-            rustup target add x86_64-apple-darwin
-            cargo build --release --target x86_64-apple-darwin
-            cp target/x86_64-apple-darwin/release/q ../${{ matrix.asset_name }}
+            # macOS: build for both architectures
+            if [ "${{ matrix.asset_name }}" == "q_mac_arm64" ]; then
+              # Apple Silicon (ARM64)
+              rustup target add aarch64-apple-darwin
+              cargo build --release --target aarch64-apple-darwin
+              cp target/aarch64-apple-darwin/release/q ../${{ matrix.asset_name }}
+            else
+              # Intel Mac (x86_64)
+              rustup target add x86_64-apple-darwin
+              cargo build --release --target x86_64-apple-darwin
+              cp target/x86_64-apple-darwin/release/q ../${{ matrix.asset_name }}
+            fi
             chmod +x ../${{ matrix.asset_name }}
           else
-            # Linux: build for x86_64 Linux
-            rustup target add x86_64-unknown-linux-gnu
-            cargo build --release --target x86_64-unknown-linux-gnu
-            cp target/x86_64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
+            # Linux: build for different architectures
+            if [ "${{ matrix.asset_name }}" == "q_linux_arm64" ]; then
+              # ARM64 Linux
+              rustup target add aarch64-unknown-linux-gnu
+              cargo build --release --target aarch64-unknown-linux-gnu
+              cp target/aarch64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
+            else
+              # x86_64 Linux
+              rustup target add x86_64-unknown-linux-gnu
+              cargo build --release --target x86_64-unknown-linux-gnu
+              cp target/x86_64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
+            fi
             chmod +x ../${{ matrix.asset_name }}
           fi
 
@@ -118,7 +138,9 @@ jobs:
           files: |
             assets/qqq-*.vsix
             assets/q_linux_x64
+            assets/q_linux_arm64
             assets/q_mac_x64
+            assets/q_mac_arm64
             assets/q_win_x64.exe
             assets/q_win_x86.exe
             dist/*.vsix
