@@ -150,11 +150,10 @@ impl serde_json::ser::Formatter for PyFormatter {
     }
 }
 
-fn dumps_py(value: &PyV, ensure_ascii: bool) -> String {
+fn dumps_py(value: &PyV, _ensure_ascii: bool) -> String {
     let mut buf: Vec<u8> = Vec::new();
     let formatter = PyFormatter;
     let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
-    ser.escape_non_ascii(ensure_ascii);
     let _ = value.serialize(&mut ser);
     String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
 }
@@ -355,8 +354,8 @@ fn dib_to_bmp_bytes(dib: &[u8]) -> Result<Vec<u8>, String> {
 // =============================================================================
 
 fn save_image_as_png(img: image::DynamicImage, path: &Path) -> Result<(), String> {
-    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-    use image::ColorType;
+    use image::codecs::png::PngEncoder;
+    use image::{ColorType, ImageEncoder};
 
     ensure_parent(path);
 
@@ -368,17 +367,17 @@ fn save_image_as_png(img: image::DynamicImage, path: &Path) -> Result<(), String
     if has_alpha {
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
-        let encoder = PngEncoder::new_with_quality(&mut w, CompressionType::Default, FilterType::Adaptive);
+        let encoder = PngEncoder::new(&mut w);
         encoder
-            .encode(rgba.as_raw(), width, height, ColorType::Rgba8)
-            .map_err(|e| e.to_string())?;
+            .write_image(rgba.as_raw(), width, height, ColorType::Rgba8.into())
+            .map_err(|e: image::ImageError| e.to_string())?;
     } else {
         let rgb = img.to_rgb8();
         let (width, height) = rgb.dimensions();
-        let encoder = PngEncoder::new_with_quality(&mut w, CompressionType::Default, FilterType::Adaptive);
+        let encoder = PngEncoder::new(&mut w);
         encoder
-            .encode(rgb.as_raw(), width, height, ColorType::Rgb8)
-            .map_err(|e| e.to_string())?;
+            .write_image(rgb.as_raw(), width, height, ColorType::Rgb8.into())
+            .map_err(|e: image::ImageError| e.to_string())?;
     }
 
     let _ = w.flush();
@@ -386,15 +385,15 @@ fn save_image_as_png(img: image::DynamicImage, path: &Path) -> Result<(), String
 }
 
 fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
-    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-    use image::ColorType;
+    use image::codecs::png::PngEncoder;
+    use image::{ColorType, ImageEncoder};
 
     let mut out: Vec<u8> = Vec::new();
     {
-        let encoder = PngEncoder::new_with_quality(&mut out, CompressionType::Default, FilterType::Adaptive);
+        let encoder = PngEncoder::new(&mut out);
         encoder
-            .encode(rgba, width, height, ColorType::Rgba8)
-            .map_err(|e| e.to_string())?;
+            .write_image(rgba, width, height, ColorType::Rgba8.into())
+            .map_err(|e: image::ImageError| e.to_string())?;
     }
     Ok(out)
 }
@@ -752,6 +751,21 @@ mod win {
     use windows_sys::Win32::System::Memory::*;
     use windows_sys::Win32::UI::Shell::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+    // Explicitly import constants that often cause trouble in windows-sys
+    // Some are in DataExchange, some in UI
+    #[allow(unused_imports)]
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_DIB,
+        CF_DIBV5, CF_HDROP, CF_TEXT, CF_UNICODETEXT,
+    };
+    #[allow(unused_imports)]
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    #[allow(unused_imports)]
+    use windows_sys::Win32::UI::Shell::DragQueryFileW;
+
+    // Re-export or use full paths if the wildcards are failing for some reason
+    // In windows-sys 0.52, these should be available in the modules above.
 
     unsafe fn read_global_data(h_mem: isize) -> Option<Vec<u8>> {
         if h_mem == 0 {
