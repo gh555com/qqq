@@ -93,7 +93,7 @@ class LocalAIReleaseAssistant {
         await this._smartCommitAndPush(next, msg);
         console.log(`✅ q3 完成：工作区已清空，版本升至 v${next}`);
     }
-    
+
     // q1: 半自动化 PR
     async handleQ1(summary = '') {
         console.log('🔄 执行 q1 - 创建发布分支与 PR');
@@ -101,14 +101,14 @@ class LocalAIReleaseAssistant {
         const next = this.bumpVersion(current, 'minor');
         const branch = `release/v${next}`;
         const msg = `release: prepare v${next} (q1)${summary ? ' - ' + summary : ''}`;
-    
+
         this.execGit(`checkout -b ${branch}`);
         await this._smartCommitAndPush(next, msg, branch);
-            
+
         this.execGit('checkout qq');
         console.log(`✅ q1 完成：已推送分支 ${branch}，现已切回 qq 分支`);
     }
-    
+
     // q2: 完整自动化发布
     async handleQ2(summary = '') {
         console.log('🎉 执行 q2 - 完整发布流水线');
@@ -118,11 +118,11 @@ class LocalAIReleaseAssistant {
         await this._smartCommitAndPush(next, msg);
         console.log(`✅ q2 完成：版本 v${next} 已推送到主分支，触发远程全家桶发布`);
     }
-    
+
     // 处理用户指令
     async processCommand(command, summary = '') {
         const cmd = command.trim().toLowerCase();
-            
+
         switch (cmd) {
             case 'q3':
                 await this.handleQ3(summary);
