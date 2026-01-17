@@ -42,8 +42,9 @@ jobs:
         run: |
           cd rust
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            # Windows: use Cargo_win.toml and build Windows-specific binary
-            cargo build --release --manifest-path Cargo_win.toml
+            # Windows: copy Cargo_win.toml to Cargo.toml and build
+            cp Cargo_win.toml Cargo.toml
+            cargo build --release
             cp target/release/q.exe ../${{ matrix.asset_name }}
           elif [ "${{ matrix.os }}" == "macos-latest" ]; then
             # macOS: build for x86_64 Mac
