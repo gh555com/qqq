@@ -5,9 +5,9 @@
 // - 移除所有指纹计算、去重逻辑
 // - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 // - 仅处理：纯文本、文件复制、原生图片保存
-// Triggering automation workflow.
-//
-// 目标：按你贴出的 Python 版本“行为等同”：
+ // Automated release test.
+ //
+ // 目标：按你贴出的 Python 版本“行为等同”：
 // - daemon 协议：stdin JSON line -> stdout JSON line
 // - JSON dumps：默认 separators (", ", ": ")；ensure_ascii 默认 True；exit 时 ensure_ascii=False
 // - actions: ping / extract_icon / clipboard_peek(peek) / get_clipboard_files / get_html / exit / clipboard(paste) / folder_info(get_folder_info)
