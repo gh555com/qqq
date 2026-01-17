@@ -85,50 +85,53 @@ class LocalAIReleaseAssistant {
     }
 
     // q3: 快速保存
-    async handleQ3() {
+    async handleQ3(summary = '') {
         console.log('🚀 执行 q3 - 极速保存快照');
         const current = this.getCurrentVersion();
         const next = this.bumpVersion(current, 'patch');
-        await this._smartCommitAndPush(next, `chore: quick save v${next} (q3)`);
+        const msg = `chore: v${next} (q3)${summary ? ' - ' + summary : ''}`;
+        await this._smartCommitAndPush(next, msg);
         console.log(`✅ q3 完成：工作区已清空，版本升至 v${next}`);
     }
-
+    
     // q1: 半自动化 PR
-    async handleQ1() {
+    async handleQ1(summary = '') {
         console.log('🔄 执行 q1 - 创建发布分支与 PR');
         const current = this.getCurrentVersion();
         const next = this.bumpVersion(current, 'minor');
         const branch = `release/v${next}`;
-
+        const msg = `release: prepare v${next} (q1)${summary ? ' - ' + summary : ''}`;
+    
         this.execGit(`checkout -b ${branch}`);
-        await this._smartCommitAndPush(next, `release: prepare v${next} (q1)`, branch);
-
+        await this._smartCommitAndPush(next, msg, branch);
+            
         this.execGit('checkout qq');
         console.log(`✅ q1 完成：已推送分支 ${branch}，现已切回 qq 分支`);
     }
-
+    
     // q2: 完整自动化发布
-    async handleQ2() {
+    async handleQ2(summary = '') {
         console.log('🎉 执行 q2 - 完整发布流水线');
         const current = this.getCurrentVersion();
         const next = this.bumpVersion(current, 'minor');
-        await this._smartCommitAndPush(next, `release: v${next} (q2)`);
+        const msg = `release: v${next} (q2)${summary ? ' - ' + summary : ''}`;
+        await this._smartCommitAndPush(next, msg);
         console.log(`✅ q2 完成：版本 v${next} 已推送到主分支，触发远程全家桶发布`);
     }
-
+    
     // 处理用户指令
-    async processCommand(command) {
+    async processCommand(command, summary = '') {
         const cmd = command.trim().toLowerCase();
-
+            
         switch (cmd) {
             case 'q3':
-                await this.handleQ3();
+                await this.handleQ3(summary);
                 break;
             case 'q1':
-                await this.handleQ1();
+                await this.handleQ1(summary);
                 break;
             case 'q2':
-                await this.handleQ2();
+                await this.handleQ2(summary);
                 break;
             case 'help':
             case '帮助':
@@ -162,7 +165,8 @@ async function main() {
     // 如果有命令行参数，直接执行
     if (process.argv.length > 2) {
         const command = process.argv[2];
-        await assistant.processCommand(command);
+        const summary = process.argv.slice(3).join(' '); // 获取后面所有的参数作为总结
+        await assistant.processCommand(command, summary);
         return;
     }
 
