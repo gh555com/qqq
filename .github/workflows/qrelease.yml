@@ -86,33 +86,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 🛠️ Install Linux Dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libglib2.0-dev libxcb-shape0-dev libxcb-xfixes0-dev libx11-dev
+          sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
 
       - name: ⚙️ Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: 🔨 Real Cargo Build
+        shell: bash
         run: |
           cd rust
-          # 如果是 Windows，先准备好特定的 Cargo.toml
-          if [ "${{ runner.os }}" == "Windows" ]; then
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
             cp Cargo_win.toml Cargo.toml
           fi
+          rustup target add ${{ matrix.target }}
           cargo build --release --target ${{ matrix.target }}
 
       - name: 📦 Prepare Artifact
         shell: bash
         run: |
           mkdir -p ../dist-assets
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            cp rust/target/${{ matrix.target }}/release/q*.exe ./dist-assets/${{ matrix.asset_name }}
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
+            cp rust/target/${{ matrix.target }}/release/q.exe ./dist-assets/${{ matrix.asset_name }}
           else
-            cp rust/target/${{ matrix.target }}/release/q* ./dist-assets/${{ matrix.asset_name }}
+            cp rust/target/${{ matrix.target }}/release/q ./dist-assets/${{ matrix.asset_name }}
             chmod +x ./dist-assets/${{ matrix.asset_name }}
           fi
 
