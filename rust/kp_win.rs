@@ -752,12 +752,16 @@ mod win {
     use windows_sys::Win32::UI::Shell::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-    // Explicitly import constants that often cause trouble in windows-sys
-    // Some are in DataExchange, some in UI
+    // Manually define clipboard format constants since they're missing in windows-sys 0.61
+    const CF_TEXT: u32 = 1;
+    const CF_UNICODETEXT: u32 = 13;
+    const CF_HDROP: u32 = 15;
+    const CF_DIB: u32 = 8;
+    const CF_DIBV5: u32 = 17;
+
     #[allow(unused_imports)]
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_DIB,
-        CF_DIBV5, CF_HDROP, CF_TEXT, CF_UNICODETEXT,
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     };
     #[allow(unused_imports)]
     use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
@@ -767,8 +771,8 @@ mod win {
     // Re-export or use full paths if the wildcards are failing for some reason
     // In windows-sys 0.52, these should be available in the modules above.
 
-    unsafe fn read_global_data(h_mem: isize) -> Option<Vec<u8>> {
-        if h_mem == 0 {
+    unsafe fn read_global_data(h_mem: *mut core::ffi::c_void) -> Option<Vec<u8>> {
+        if h_mem.is_null() {
             return None;
         }
         let ptr = GlobalLock(h_mem) as *const u8;
@@ -803,7 +807,7 @@ mod win {
         let mut data_to_process: Option<DataToProcess> = None;
 
         unsafe {
-            if OpenClipboard(0) == 0 {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
                 return PyV::Obj(vec![("error".to_string(), PyV::Str("Cannot open clipboard".to_string()))]);
             }
 
@@ -814,7 +818,7 @@ mod win {
             if has_text && !has_files && !has_dib {
                 if IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 {
                     let h_mem = GetClipboardData(CF_UNICODETEXT);
-                    if h_mem != 0 {
+                    if h_mem != std::ptr::null_mut() {
                         let ptr = GlobalLock(h_mem) as *const u16;
                         if !ptr.is_null() {
                             let size = GlobalSize(h_mem) as usize;
@@ -840,7 +844,7 @@ mod win {
                 }
             } else if has_files {
                 let h_drop = GetClipboardData(CF_HDROP);
-                if h_drop != 0 {
+                if h_drop != std::ptr::null_mut() {
                     let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
                     let mut paths: Vec<String> = Vec::new();
 
@@ -872,7 +876,7 @@ mod win {
 
                 for fmt in fmts {
                     let h_mem = GetClipboardData(fmt);
-                    if h_mem == 0 {
+                    if h_mem == std::ptr::null_mut() {
                         continue;
                     }
                     if let Some(dib) = read_global_data(h_mem) {
@@ -963,13 +967,13 @@ mod win {
     pub fn get_clipboard_files_only() -> PyV {
         // 对齐 Python get_clipboard_files_only：优先 ctypes 路径，失败返回 unknown（不抛 error）
         unsafe {
-            if OpenClipboard(0) == 0 {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
                 return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
             }
 
             if IsClipboardFormatAvailable(CF_HDROP) != 0 {
                 let h_drop = GetClipboardData(CF_HDROP);
-                if h_drop != 0 {
+                if h_drop != std::ptr::null_mut() {
                     let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
                     let mut paths: Vec<PyV> = Vec::new();
 
@@ -1008,14 +1012,14 @@ mod win {
     pub fn get_clipboard_html() -> PyV {
         // 对齐 Python get_clipboard_html：读取 HTML Format；UTF-8 decode 失败则 base64
         unsafe {
-            if OpenClipboard(0) == 0 {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
                 return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
             }
 
             let cf_html = RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr());
             if cf_html != 0 && IsClipboardFormatAvailable(cf_html) != 0 {
                 let h_mem = GetClipboardData(cf_html);
-                if h_mem != 0 {
+                if h_mem != std::ptr::null_mut() {
                     let ptr = GlobalLock(h_mem) as *const u8;
                     if !ptr.is_null() {
                         let size = GlobalSize(h_mem) as usize;
@@ -1086,15 +1090,15 @@ mod win {
 
             // 尽量与 Python 一样：无论中途如何，最后 DestroyIcon
             // 资源清理按顺序做
-            let hdc_screen = GetDC(0);
-            if hdc_screen == 0 {
+            let hdc_screen = GetDC(std::ptr::null_mut());
+            if hdc_screen == std::ptr::null_mut() {
                 DestroyIcon(hicon);
                 return None;
             }
 
             let hdc_mem = CreateCompatibleDC(hdc_screen);
-            if hdc_mem == 0 {
-                ReleaseDC(0, hdc_screen);
+            if hdc_mem == std::ptr::null_mut() {
+                ReleaseDC(std::ptr::null_mut(), hdc_screen);
                 DestroyIcon(hicon);
                 return None;
             }
@@ -1125,13 +1129,13 @@ mod win {
                 (&mut bmi as *mut BITMAPINFO32) as *mut BITMAPINFO,
                 DIB_RGB_COLORS,
                 &mut bits_ptr,
-                0,
+                std::ptr::null_mut(),
                 0,
             );
 
-            if hbmp == 0 || bits_ptr.is_null() {
+            if hbmp == std::ptr::null_mut() || bits_ptr.is_null() {
                 DeleteDC(hdc_mem);
-                ReleaseDC(0, hdc_screen);
+                ReleaseDC(std::ptr::null_mut(), hdc_screen);
                 DestroyIcon(hicon);
                 return None;
             }
@@ -1165,7 +1169,7 @@ mod win {
             let _ = SelectObject(hdc_mem, hold);
             let _ = DeleteObject(hbmp as _);
             let _ = DeleteDC(hdc_mem);
-            let _ = ReleaseDC(0, hdc_screen);
+            let _ = ReleaseDC(std::ptr::null_mut(), hdc_screen);
             let _ = DestroyIcon(hicon);
 
             ok
