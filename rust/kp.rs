@@ -1,14 +1,19 @@
 // -*- coding: utf-8 -*-
+//
 // Rust port of the given Python "dumb saver" clipboard daemon.
 // - 极简模式：只负责读取系统剪贴板并保存到指定目录（dumb saver）
 // - 移除所有指纹计算、去重逻辑
-// - 移除 HTML 解析逻辑（由 Node.js 侧处理） -> 这里 get_html 返回“原始字节”
+// - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 // - 仅处理：纯文本、文件复制、原生图片保存
 //
-// 目标：按用户贴出的 Python 版本“行为等同”：
+// 目标：按你贴出的 Python 版本“行为等同”：
 // - daemon 协议：stdin JSON line -> stdout JSON line
 // - JSON dumps：默认 separators (", ", ": ")；ensure_ascii 默认 True；exit 时 ensure_ascii=False
 // - actions: ping / extract_icon / clipboard_peek(peek) / get_clipboard_files / get_html / exit / clipboard(paste) / folder_info(get_folder_info)
+//
+// 说明：本文件为 *Linux/macOS* 版本（Windows 请继续用你之前那份）。
+
+#![cfg(not(windows))]
 
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{Datelike, Local};
@@ -21,22 +26,15 @@ use serde::ser::{SerializeMap, SerializeSeq};
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::io::{self, BufRead, BufWriter, Write};
+use std::io::{self, BufRead, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 use url::Url;
 use walkdir::WalkDir;
-
-// clipboard-rs
-use clipboard_rs::{Clipboard, ClipboardContext};
-use clipboard_rs::common::RustImage;
-
-// file_icon_provider
-use file_icon_provider::get_file_icon;
 
 // =============================================================================
 //  配置
@@ -53,7 +51,7 @@ fn compute_max_workers() -> usize {
 static MAX_WORKERS: Lazy<usize> = Lazy::new(compute_max_workers);
 static IO_POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(*MAX_WORKERS));
 
-static RE_INVALID_FILENAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[<>:"/\\|?*]+"#).unwrap());
+static RE_INVALID_FILENAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[<>:\"/\\|?*]+"#).unwrap());
 
 static VALID_CHARS: Lazy<Vec<char>> = Lazy::new(|| {
     // Python:
@@ -181,10 +179,10 @@ fn ensure_parent(path_obj: &Path) {
     }
 }
 
-// Python Path.suffix / Path.stem 的关键语义（用于 safe_filename truncation / unique_name）：
-// - ".bashrc" => suffix "", stem ".bashrc"
-// - "a." => suffix ".", stem "a"
-// - "a.tar.gz" => suffix ".gz", stem "a.tar"
+// Python Path.suffix / Path.stem 的关键语义：
+// - ".bashrc" => suffix ""  stem ".bashrc"
+// - "a."     => suffix "." stem "a"
+// - "a.tar.gz" => suffix ".gz" stem "a.tar"
 fn py_suffix(name: &str) -> String {
     if let Some(pos) = name.rfind('.') {
         if pos == 0 {
@@ -232,7 +230,7 @@ fn safe_filename(name: &str) -> String {
     // Python:
     // if not name: return get_timestamp_filename(".bin")
     // n = str(name).strip().replace("\x00", "")
-    // n = re.sub(r'[<>:"/\\\\|?*]+', "_", n)
+    // n = re.sub(r'[<>:"/\\|?*]+', "_", n)
     // n = n.strip(" .\t\r\n")
     // if not n: return get_timestamp_filename(".bin")
     // if len(n) > 180:
@@ -267,14 +265,6 @@ fn safe_filename(name: &str) -> String {
 }
 
 fn unique_path_in_dir(output_dir: &Path, name: &str) -> PathBuf {
-    // Python:
-    // base = output_dir / name
-    // if not base.exists(): return base
-    // stem = base.stem; ext = base.suffix
-    // for i in range(1, 1000):
-    //   new_name = f"{stem}_{i}{ext}"
-    //   if not exists: return
-    // return base
     let base = output_dir.join(name);
     if !base.exists() {
         return base;
@@ -294,7 +284,7 @@ fn unique_path_in_dir(output_dir: &Path, name: &str) -> PathBuf {
 }
 
 // =============================================================================
-//  PNG 编码（图标 RGBA -> PNG）
+//  PNG 编码（图标/图片统一用 PNG 输出）
 // =============================================================================
 
 fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
@@ -316,23 +306,22 @@ fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, 
 // =============================================================================
 
 fn copy2_like(src: &Path, dst: &Path) -> Result<(), String> {
-    // shutil.copy2: copy data + metadata
     ensure_parent(dst);
 
     fs::copy(src, dst).map_err(|e| e.to_string())?;
 
-    let meta = fs::metadata(src).map_err(|e| e.to_string())?;
-    let _ = fs::set_permissions(dst, meta.permissions());
+    if let Ok(meta) = fs::metadata(src) {
+        let _ = fs::set_permissions(dst, meta.permissions());
 
-    let atime = FileTime::from_last_access_time(&meta);
-    let mtime = FileTime::from_last_modification_time(&meta);
-    let _ = set_file_times(dst, atime, mtime);
+        let atime = FileTime::from_last_access_time(&meta);
+        let mtime = FileTime::from_last_modification_time(&meta);
+        let _ = set_file_times(dst, atime, mtime);
+    }
 
     Ok(())
 }
 
 fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String> {
-    // 对齐 Python copy_files_parallel 的“限流 + 完成即收集”的行为（结果顺序非确定）
     if src_files.is_empty() {
         return vec![];
     }
@@ -366,10 +355,9 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
         });
 
         pending += 1;
-
         while pending > inflight {
             if let Ok(opt) = rx.recv() {
-                pending -= 1;
+                pending = pending.saturating_sub(1);
                 if let Some(p) = opt {
                     results.push(p);
                 }
@@ -391,12 +379,6 @@ fn copy_files_parallel(src_files: Vec<PathBuf>, output_dir: &Path) -> Vec<String
 }
 
 fn copytree_parallel(src_dir: &Path, output_dir: &Path) -> Option<String> {
-    // Python copytree_parallel 语义：
-    // - 若 src_dir 不存在或不是 dir => None
-    // - dst_dir = output_dir / safe_filename(src_dir.name)
-    // - 若存在 => unique_path_in_dir
-    // - os.walk 遍历：创建目录；对 files submit copy2；等全部完成
-    // - 返回 dst_dir 字符串；异常 => None
     if !src_dir.exists() || !src_dir.is_dir() {
         return None;
     }
@@ -452,7 +434,7 @@ fn copytree_parallel(src_dir: &Path, output_dir: &Path) -> Option<String> {
         pending += 1;
         while pending > inflight {
             if rx.recv().is_ok() {
-                pending -= 1;
+                pending = pending.saturating_sub(1);
             } else {
                 pending = pending.saturating_sub(1);
             }
@@ -472,13 +454,7 @@ fn copytree_parallel(src_dir: &Path, output_dir: &Path) -> Option<String> {
 // =============================================================================
 
 fn python_like_ext_lower(path: &Path) -> String {
-    // Python:
-    // ext = p.suffix.lower().replace(".", "") or "no_ext"
-    // Path.suffix 对 ".bashrc" => ""，所以应为 no_ext
-    let name = path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let suf = py_suffix(&name);
     let mut ext = suf.to_ascii_lowercase().replace('.', "");
     if ext.is_empty() {
@@ -488,15 +464,6 @@ fn python_like_ext_lower(path: &Path) -> String {
 }
 
 fn get_folder_info(folder_path: &str) -> PyV {
-    // Python:
-    // if not folder_path or not isinstance(folder_path, str):
-    //   return {"success": False, "error": "empty path"}
-    // if not exists or not isdir:
-    //   return {"success": False, "error": "path not a directory"}
-    // total_size=0; file_count=0; ext_counts={}
-    // walk and sum
-    // return {"success": True, "total_size":..., "file_count_root":..., "ext_stats": ext_counts}
-
     if folder_path.is_empty() {
         return PyV::Obj(vec![
             ("success".to_string(), PyV::Bool(false)),
@@ -515,7 +482,6 @@ fn get_folder_info(folder_path: &str) -> PyV {
     let mut total_size: u64 = 0;
     let mut file_count: u64 = 0;
 
-    // Python dict 是“首次出现的扩展名”决定插入顺序
     let mut ext_keys: Vec<String> = Vec::new();
     let mut ext_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
@@ -609,7 +575,6 @@ fn is_truthy(v: &Value) -> bool {
     }
 }
 
-// Python f-string 对常见类型的 str() 近似（主要用于 unknown action）
 fn py_str_like(v: Option<&Value>) -> String {
     match v {
         None => "None".to_string(),
@@ -652,67 +617,354 @@ fn pick_request_id(cmd: &serde_json::Map<String, Value>) -> PyV {
 }
 
 // =============================================================================
-//  跨平台：剪贴板 + 图标
+//  平台：Linux/macOS（Windows 用你之前的文件）
 // =============================================================================
 
-fn open_clipboard() -> Result<ClipboardContext, String> {
-    ClipboardContext::new().map_err(|e| e.to_string())
-}
+mod platform {
+    use super::*;
+    use clipboard_rs::{Clipboard, ClipboardContext};
 
-fn fix_file_uri_for_linux(s: &str) -> String {
-    // 有些环境可能给 "file://home/user/a"（少一个 slash）；尽量修正为 file:///home/user/a
-    if s.starts_with("file://") && !s.starts_with("file:///") && !s.starts_with("file://localhost/") {
-        let rest = s.trim_start_matches("file://").trim_start_matches('/');
-        return format!("file:///{}", rest);
+    #[cfg(target_os = "linux")]
+    use clipboard_rs::ClipboardContextX11Options;
+
+    #[cfg(feature = "icons")]
+    use file_icon_provider::get_file_icon;
+
+    const WL_PASTE_TIMEOUT: Duration = Duration::from_millis(2000);
+
+    fn setup_clipboard() -> Result<ClipboardContext, String> {
+        #[cfg(target_os = "linux")]
+        {
+            // X11 读取大图像时 500ms 默认超时会误伤；这里设一个“足够大但不至于永久挂死”的上限。
+            // 如需更激进可调大；但不要 None（避免无限阻塞）。
+            let opts = ClipboardContextX11Options {
+                read_timeout: Some(Duration::from_secs(10)),
+            };
+            ClipboardContext::new_with_options(opts).map_err(|e| e.to_string())
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            ClipboardContext::new().map_err(|e| e.to_string())
+        }
     }
-    s.to_string()
-}
 
-fn file_entry_to_pathbuf(s: &str) -> Option<PathBuf> {
-    if s.starts_with("file://") {
-        let fixed = fix_file_uri_for_linux(s);
-        if let Ok(u) = Url::parse(&fixed) {
-            if let Ok(p) = u.to_file_path() {
-                return Some(p);
+    // ----------------------------
+    // Wayland wl-paste 增强（仅 Linux）
+    // ----------------------------
+
+    #[cfg(target_os = "linux")]
+    fn is_wayland_session() -> bool {
+        std::env::var("WAYLAND_DISPLAY").map(|s| !s.is_empty()).unwrap_or(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn has_wl_paste() -> bool {
+        // 不引入额外依赖：直接尝试执行。
+        match std::process::Command::new("wl-paste").arg("--version").output() {
+            Ok(o) => o.status.success(),
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn run_cmd_capture(mut cmd: std::process::Command, timeout: Duration) -> Option<Vec<u8>> {
+        let mut child = cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+        let start = Instant::now();
+
+        loop {
+            if let Ok(Some(_status)) = child.try_wait() {
+                break;
+            }
+            if start.elapsed() >= timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let mut out = Vec::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            let _ = stdout.read_to_end(&mut out);
+        }
+        if out.is_empty() {
+            None
+        } else {
+            Some(out)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wl_paste_bytes(mime: Option<&str>) -> Option<Vec<u8>> {
+        let mut c = std::process::Command::new("wl-paste");
+        c.arg("--no-newline");
+        if let Some(t) = mime {
+            c.arg("--type").arg(t);
+        }
+        run_cmd_capture(c, WL_PASTE_TIMEOUT)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wl_paste_list_types() -> Option<Vec<String>> {
+        let mut c = std::process::Command::new("wl-paste");
+        c.arg("--list-types");
+        let out = run_cmd_capture(c, WL_PASTE_TIMEOUT)?;
+        let s = decode_utf8_ignore(&out);
+        let mut v = Vec::new();
+        for line in s.lines() {
+            let t = line.trim();
+            if !t.is_empty() {
+                v.push(t.to_string());
             }
         }
-        // fallback：直接去掉 file:// 前缀（不做百分号解码的兜底）
-        let rest = s.trim_start_matches("file://");
-        if !rest.is_empty() {
-            return Some(PathBuf::from(rest));
-        }
-        return None;
+        if v.is_empty() { None } else { Some(v) }
     }
-    Some(PathBuf::from(s))
-}
 
-fn normalize_file_list(items: Vec<String>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for it in items {
-        if let Some(p) = file_entry_to_pathbuf(&it) {
-            out.push(p);
+    #[cfg(target_os = "linux")]
+    fn parse_uri_list_to_paths(bytes: &[u8]) -> Vec<PathBuf> {
+        // text/uri-list: RFC 2483-ish, newline separated; lines starting with # are comments.
+        let s = decode_utf8_ignore(bytes);
+        let mut out = Vec::new();
+        for line in s.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            // file:///... 或普通路径
+            if let Ok(url) = Url::parse(t) {
+                if url.scheme() == "file" {
+                    if let Ok(p) = url.to_file_path() {
+                        out.push(p);
+                    }
+                }
+            } else {
+                out.push(PathBuf::from(t));
+            }
+        }
+        out
+    }
+
+    // ----------------------------
+    // 统一读取：files / image / text / html
+    // ----------------------------
+
+    fn normalize_file_entry(s: &str) -> Option<PathBuf> {
+        let t = s.trim();
+        if t.is_empty() {
+            return None;
+        }
+        if let Ok(url) = Url::parse(t) {
+            if url.scheme() == "file" {
+                return url.to_file_path().ok();
+            }
+        }
+        Some(PathBuf::from(t))
+    }
+
+    fn read_files_from_clipboard() -> Vec<PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            // Wayland 优先：wl-paste -t text/uri-list
+            if is_wayland_session() && has_wl_paste() {
+                if let Some(bytes) = wl_paste_bytes(Some("text/uri-list")) {
+                    let v = parse_uri_list_to_paths(&bytes);
+                    if !v.is_empty() {
+                        return v;
+                    }
+                }
+            }
+        }
+
+        // 兜底：clipboard-rs
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(list) = ctx.get_files() {
+                let mut out = Vec::new();
+                for s in list {
+                    if let Some(p) = normalize_file_entry(&s) {
+                        out.push(p);
+                    }
+                }
+                if !out.is_empty() {
+                    return out;
+                }
+            }
+
+            // 再兜底：尝试从 text/uri-list 读取
+            if let Ok(types) = ctx.available_formats() {
+                let has_uri = types.iter().any(|t| t.to_ascii_lowercase().contains("uri-list"));
+                if has_uri {
+                    // 常见：text/uri-list
+                    if let Ok(buf) = ctx.get_buffer("text/uri-list") {
+                        let mut out = Vec::new();
+                        for p in buf.split(|&b| b == b'\n' || b == b'\r') {
+                            let s = decode_utf8_ignore(p).trim().to_string();
+                            if s.is_empty() || s.starts_with('#') {
+                                continue;
+                            }
+                            if let Some(p) = normalize_file_entry(&s) {
+                                out.push(p);
+                            }
+                        }
+                        if !out.is_empty() {
+                            return out;
+                        }
+                    }
+                }
+            }
+        }
+
+        Vec::new()
+    }
+
+    fn read_text_from_clipboard() -> Option<String> {
+        #[cfg(target_os = "linux")]
+        {
+            if is_wayland_session() && has_wl_paste() {
+                if let Some(bytes) = wl_paste_bytes(None) {
+                    let s = decode_utf8_ignore(&bytes);
+                    let s = s.trim().to_string();
+                    if !s.is_empty() {
+                        return Some(s);
+                    }
+                }
+            }
+        }
+
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(s) = ctx.get_text() {
+                let t = s.trim().to_string();
+                if !t.is_empty() {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+
+    fn read_image_png_bytes_from_clipboard() -> Option<Vec<u8>> {
+        #[cfg(target_os = "linux")]
+        {
+            // Wayland 优先（PNG 直接写出）
+            if is_wayland_session() && has_wl_paste() {
+                // wl-paste 支持泛型 image，但我们优先明确 image/png
+                if let Some(bytes) = wl_paste_bytes(Some("image/png")) {
+                    return Some(bytes);
+                }
+                // 再尝试 "image" 让它自动挑
+                if let Some(bytes) = wl_paste_bytes(Some("image")) {
+                    return Some(bytes);
+                }
+            }
+        }
+
+        // clipboard-rs: get_image() -> RustImageData; to_png() -> RustImageBuffer
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(img) = ctx.get_image() {
+                if let Ok(buf) = img.to_png() {
+                    let b = buf.get_bytes().to_vec();
+                    if !b.is_empty() {
+                        return Some(b);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn get_clipboard_files_only() -> PyV {
+        let mut paths: Vec<PyV> = Vec::new();
+        for p in read_files_from_clipboard() {
+            paths.push(PyV::Str(p.to_string_lossy().to_string()));
+        }
+
+        if !paths.is_empty() {
+            PyV::Obj(vec![
+                ("type".to_string(), PyV::Str("file_paths".to_string())),
+                ("paths".to_string(), PyV::Arr(paths)),
+            ])
+        } else {
+            PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
         }
     }
-    out
-}
 
-fn handle_clipboard(output_dir: &Path) -> PyV {
-    // 逻辑对齐 Python：优先 files，其次 image，最后 text（仅在没有 files/image 时）
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => {
-            return PyV::Obj(vec![("error".to_string(), PyV::Str("Cannot open clipboard".to_string()))]);
+    pub fn get_clipboard_html() -> PyV {
+        #[cfg(target_os = "linux")]
+        {
+            if is_wayland_session() && has_wl_paste() {
+                if let Some(bytes) = wl_paste_bytes(Some("text/html")) {
+                    if let Ok(s) = String::from_utf8(bytes.clone()) {
+                        return PyV::Obj(vec![
+                            ("type".to_string(), PyV::Str("html".to_string())),
+                            ("value".to_string(), PyV::Str(s)),
+                        ]);
+                    }
+                    let b64 = general_purpose::STANDARD.encode(bytes);
+                    return PyV::Obj(vec![
+                        ("type".to_string(), PyV::Str("html".to_string())),
+                        ("value_base64".to_string(), PyV::Str(b64)),
+                    ]);
+                }
+            }
         }
-    };
 
-    // 1) files
-    if let Ok(files) = ctx.get_files() {
-        if !files.is_empty() {
-            let paths = normalize_file_list(files);
+        // 先用 get_html（最常见）
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(s) = ctx.get_html() {
+                if !s.trim().is_empty() {
+                    return PyV::Obj(vec![
+                        ("type".to_string(), PyV::Str("html".to_string())),
+                        ("value".to_string(), PyV::Str(s)),
+                    ]);
+                }
+            }
+
+            // 再尝试 raw buffer：优先挑出包含 "html" 的格式
+            if let Ok(types) = ctx.available_formats() {
+                // 兼容 macOS 的 public.html；Linux 的 text/html
+                let mut candidates: Vec<String> = types
+                    .into_iter()
+                    .filter(|t| t.to_ascii_lowercase().contains("html"))
+                    .collect();
+
+                // 稳定排序：更具体的优先
+                candidates.sort_by_key(|s| s.len());
+
+                for fmt in candidates {
+                    if let Ok(buf) = ctx.get_buffer(&fmt) {
+                        if buf.is_empty() {
+                            continue;
+                        }
+                        if let Ok(s) = String::from_utf8(buf.clone()) {
+                            return PyV::Obj(vec![
+                                ("type".to_string(), PyV::Str("html".to_string())),
+                                ("value".to_string(), PyV::Str(s)),
+                            ]);
+                        }
+                        let b64 = general_purpose::STANDARD.encode(buf);
+                        return PyV::Obj(vec![
+                            ("type".to_string(), PyV::Str("html".to_string())),
+                            ("value_base64".to_string(), PyV::Str(b64)),
+                        ]);
+                    }
+                }
+            }
+        }
+
+        PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
+    }
+
+    pub fn handle_clipboard(output_dir: &Path) -> PyV {
+        // 行为对齐（优先级）：files > image > text > unknown
+
+        // 1) 文件/文件夹
+        let raw_paths = read_files_from_clipboard();
+        if !raw_paths.is_empty() {
             let mut src_dirs: Vec<PathBuf> = Vec::new();
             let mut src_files: Vec<PathBuf> = Vec::new();
 
-            for p in paths {
+            for p in raw_paths {
                 if p.exists() {
                     if p.is_dir() {
                         src_dirs.push(p);
@@ -724,8 +976,6 @@ fn handle_clipboard(output_dir: &Path) -> PyV {
 
             let mut copied_dirs: Vec<String> = Vec::new();
             let mut copied_files: Vec<String> = Vec::new();
-
-            let _ = fs::create_dir_all(output_dir);
 
             if !src_dirs.is_empty() {
                 for d in src_dirs {
@@ -751,122 +1001,67 @@ fn handle_clipboard(output_dir: &Path) -> PyV {
 
             return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
         }
-    }
 
-    // 2) image
-    if let Ok(img) = ctx.get_image() {
-        let fname = get_timestamp_filename(".png");
-        let out_path = unique_path_in_dir(output_dir, &fname);
-        ensure_parent(&out_path);
+        // 2) 图片
+        if let Some(png_bytes) = read_image_png_bytes_from_clipboard() {
+            let _ = fs::create_dir_all(output_dir);
+            let fname = get_timestamp_filename(".png");
+            let out_path = unique_path_in_dir(output_dir, &fname);
+            ensure_parent(&out_path);
 
-        let saved = (|| -> Result<(), String> {
-            let png_buf = img.to_png().map_err(|e| e.to_string())?;
-            fs::write(&out_path, png_buf.get_bytes()).map_err(|e| e.to_string())?;
-            Ok(())
-        })();
+            if fs::write(&out_path, png_bytes).is_ok() {
+                return PyV::Obj(vec![
+                    ("type".to_string(), PyV::Str("image".to_string())),
+                    ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
+                ]);
+            }
 
-        if saved.is_ok() {
-            return PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("image".to_string())),
-                ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
-            ]);
+            return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
         }
 
-        return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]);
-    }
-
-    // 3) text（只有在没有 files/image 时才走到这）
-    if let Ok(text) = ctx.get_text() {
-        if !text.trim().is_empty() {
+        // 3) 文本
+        if let Some(text) = read_text_from_clipboard() {
             return PyV::Obj(vec![
                 ("type".to_string(), PyV::Str("text".to_string())),
                 ("text".to_string(), PyV::Str(text)),
             ]);
         }
+
+        PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
     }
 
-    PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
-}
-
-fn get_clipboard_files_only() -> PyV {
-    // 对齐 Python：失败返回 unknown，不抛 error
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    };
-
-    match ctx.get_files() {
-        Ok(files) if !files.is_empty() => {
-            let paths = normalize_file_list(files)
-                .into_iter()
-                .map(|p| PyV::Str(p.to_string_lossy().to_string()))
-                .collect::<Vec<PyV>>();
-            PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("file_paths".to_string())),
-                ("paths".to_string(), PyV::Arr(paths)),
-            ])
-        }
-        _ => PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    }
-}
-
-fn get_clipboard_html_raw() -> PyV {
-    // 返回“原始字节”：Windows 用 "HTML Format"（CF_HTML 原样字节，不做头解析）
-    // macOS 常见为 "public.html"
-    // Linux(X11) 常见为 "text/html"
-    let ctx = match open_clipboard() {
-        Ok(c) => c,
-        Err(_) => return PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))]),
-    };
-
-    let mut candidates: Vec<&str> = Vec::new();
-    if cfg!(target_os = "windows") {
-        candidates.push("HTML Format");
-    } else if cfg!(target_os = "macos") {
-        candidates.push("public.html");
-        candidates.push("public.utf8-plain-text"); // 兜底（有些 App 给奇怪类型）
-    } else {
-        candidates.push("text/html");
-        candidates.push("text/html;charset=utf-8");
-        candidates.push("text/html;charset=UTF-8");
-    }
-
-    for fmt in candidates {
-        if let Ok(buf) = ctx.get_buffer(fmt) {
-            if let Ok(s) = String::from_utf8(buf.clone()) {
-                return PyV::Obj(vec![
-                    ("type".to_string(), PyV::Str("html".to_string())),
-                    ("value".to_string(), PyV::Str(s)),
-                ]);
-            } else {
-                let b64 = general_purpose::STANDARD.encode(buf);
-                return PyV::Obj(vec![
-                    ("type".to_string(), PyV::Str("html".to_string())),
-                    ("value_base64".to_string(), PyV::Str(b64)),
-                ]);
+    pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
+        #[cfg(feature = "icons")]
+        {
+            // file_icon_provider: pixels 已经是 RGBA。Linux caveat：必须在主线程调用（我们在 dispatch_action 里主线程调用）。
+            let icon = get_file_icon(file_path, 16).ok()?;
+            if icon.width == 0 || icon.height == 0 {
+                return None;
             }
+            if icon.pixels.len() != (icon.width as usize) * (icon.height as usize) * 4 {
+                return None;
+            }
+            let png = png_bytes_from_rgba(icon.width, icon.height, &icon.pixels).ok()?;
+            Some(general_purpose::STANDARD.encode(png))
+        }
+
+        #[cfg(not(feature = "icons"))]
+        {
+            let _ = file_path;
+            None
         }
     }
 
-    // 最后兜底：如果库能直接给 html 字符串，也给（仍不做额外解析）
-    if let Ok(s) = ctx.get_html() {
-        if !s.is_empty() {
-            return PyV::Obj(vec![
-                ("type".to_string(), PyV::Str("html".to_string())),
-                ("value".to_string(), PyV::Str(s)),
-            ]);
+    // 用于更“硬核”的诊断：Wayland 是否能拿到 HTML/Files
+    #[allow(dead_code)]
+    #[cfg(target_os = "linux")]
+    fn _debug_wayland_types() -> Option<Vec<String>> {
+        if is_wayland_session() && has_wl_paste() {
+            wl_paste_list_types()
+        } else {
+            None
         }
     }
-
-    PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
-}
-
-fn get_file_icon_base64(file_path: &str) -> Option<String> {
-    // 统一跨平台：file_icon_provider
-    let p = PathBuf::from(file_path);
-    let icon = get_file_icon(p, 16).ok()?;
-    let png = png_bytes_from_rgba(icon.width, icon.height, &icon.pixels).ok()?;
-    Some(general_purpose::STANDARD.encode(png))
 }
 
 // =============================================================================
@@ -875,6 +1070,7 @@ fn get_file_icon_base64(file_path: &str) -> Option<String> {
 
 fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
     // returns: (response_value, exit_now, exit_ensure_ascii_false)
+
     let cmd = match cmd_v.as_object() {
         Some(o) => o,
         None => {
@@ -887,11 +1083,8 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
     };
 
     let request_id = pick_request_id(cmd);
-
-    // Python: out = {"_id": request_id}
     let mut out_pairs: Vec<(String, PyV)> = vec![("_id".to_string(), request_id)];
 
-    // Python: action = cmd.get("action") or cmd.get("cmd")  （按 truthiness）
     let a1 = cmd.get("action");
     let a2 = cmd.get("cmd");
 
@@ -918,7 +1111,7 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         "extract_icon" => {
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
-                if let Some(icon) = get_file_icon_base64(p) {
+                if let Some(icon) = platform::get_file_icon_base64(p) {
                     out_pairs.push(("icon".to_string(), PyV::Str(icon)));
                     out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
                 } else {
@@ -939,20 +1132,19 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             (PyV::Obj(out_pairs), false, false)
         }
         "get_clipboard_files" => {
-            if let PyV::Obj(extra) = get_clipboard_files_only() {
+            if let PyV::Obj(extra) = platform::get_clipboard_files_only() {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
         }
         "get_html" => {
-            if let PyV::Obj(extra) = get_clipboard_html_raw() {
+            if let PyV::Obj(extra) = platform::get_clipboard_html() {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
         }
         "exit" => {
             out_pairs.push(("status".to_string(), PyV::Str("exiting".to_string())));
-            // Python: ensure_ascii=False here
             (PyV::Obj(out_pairs), true, true)
         }
         "clipboard" | "paste" => {
@@ -961,8 +1153,7 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 .and_then(|v| v.as_str())
                 .or_else(|| cmd.get("output_dir").and_then(|v| v.as_str()));
             let output_dir = resolve_output_dir(target_dir);
-
-            if let PyV::Obj(extra) = handle_clipboard(&output_dir) {
+            if let PyV::Obj(extra) = platform::handle_clipboard(&output_dir) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
@@ -1023,7 +1214,6 @@ fn daemon_mode() {
             }
         };
 
-        // Python: normal ensure_ascii=True; exit ensure_ascii=False
         let ensure_ascii = !exit_ascii_false;
         let s = dumps_py(&res, ensure_ascii);
 
@@ -1039,7 +1229,6 @@ fn daemon_mode() {
 }
 
 fn main() {
-    // 对齐 Python main()
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() > 1 {
@@ -1051,22 +1240,21 @@ fn main() {
         }
 
         if arg1 == "paste" && args.len() >= 3 {
-            let out_dir = Some(args[2].as_str());
-            let output_dir = resolve_output_dir(out_dir);
-
-            let res = handle_clipboard(&output_dir);
+            let output_dir = resolve_output_dir(Some(args[2].as_str()));
+            let res = platform::handle_clipboard(&output_dir);
             let s = dumps_py(&res, true); // ensure_ascii=True
             println!("{}", s);
             return;
         }
 
+        // default
         let output_dir = resolve_output_dir(None);
-        let res = handle_clipboard(&output_dir);
+        let res = platform::handle_clipboard(&output_dir);
         let s = dumps_py(&res, true);
         println!("{}", s);
     } else {
         let output_dir = resolve_output_dir(None);
-        let res = handle_clipboard(&output_dir);
+        let res = platform::handle_clipboard(&output_dir);
         let s = dumps_py(&res, true);
         println!("{}", s);
     }

@@ -1,50 +1,4 @@
 
-# File: LICENSE
-
-
-
-
-四川的梦科技有限公司 源代码公开可见声明
-
-本声明适用于四川的梦科技有限公司（以下简称“本公司”）在 GitHub (mhttps://github.com/gh555com) 等公共平台公开的全部项目源代码（以下简称“本代码”）。
-
-对于本代码，本公司保留所有权利（All Rights Reserved）。
-
-我们的目标是： 在实现代码完全透明、安全可信的同时，坚决捍卫我们作为缔造者的核心知识产权价值，确保我们产品的独特性和品牌识别度。
-
-
-禁止： 未经我们明确的书面授权，严禁创建在理念、视觉和交互上“混淆性相似 (Confusingly Similar)”的衍生产品；不得模仿本代码的设计、功能、结构或任何核心思想；严禁在您的项目中使用或在视觉上模仿我们的用户界面布局、交互模式、CSS 样式或任何其他构成我们“整体商业外观”的元素。
-
-
-通过访问和查看本代码，即表示您已理解并同意遵守本声明的所有条款。
-
-特此声明。
-
-版权所有 © 2025 四川的梦科技有限公司
-2025年10月24日
-
-
-
-
-
-
-
-
-
-
-
- README.md
-
-【允许】
-- 个人学习、研究和非商业用途的查看
-
-【明确禁止】
-1. 用于任何商业目的，包括但不限于：销售、提供付费服务、广告盈利
-2. 再分发、复制、修改或创建衍生作品
-3. 移除或修改本版权声明
-
-【商业授权】
-如需商业使用授权，请联系：a15802858204@gmail.com
 
 
 
@@ -59,4 +13,165 @@
 
 
 
+
+
+
+
+# (EN) Sichuan Dream Technology Co., Ltd. — Source Code Public & Auditable Notice (Non-Open-Source License)
+
+**Version:** 1.0
+**Effective Date:** 24 Oct 2025
+
+This notice applies to all source code, documentation, and related assets (collectively, the “Code”) that Sichuan Dream Technology Co., Ltd. (the “Company”) publicly displays or makes accessible on GitHub ([https://github.com/gh555com](https://github.com/gh555com)) and any other public platform.
+
+**This notice is NOT an open-source license.** Except for the limited permission expressly granted below, the Company reserves all rights in the Code (All Rights Reserved).
+By accessing, viewing, or using the Code, you acknowledge that you have read and agree to comply with this notice.
+
+## 1. Ownership; All Rights Reserved
+
+The Company retains all right, title, and interest in and to the Code. No license is granted other than as explicitly stated in this notice.
+
+## 2. Limited Permission (Personal, Non-Commercial Only)
+
+Subject to full compliance with this notice, the Company grants you a **revocable, non-exclusive, non-transferable, royalty-free** permission solely to:
+
+* view the Code for **personal learning, research, and security/audit review**; and
+* download/clone the Code **to your local device** for the purposes above.
+
+No other rights are granted.
+
+## 3. Explicitly Prohibited Uses
+
+Without the Company’s prior **written** authorization, you may not (including but not limited to):
+
+### 3.1 Commercial Use
+
+Use the Code for any commercial purpose, including but not limited to: selling, offering paid services, SaaS/hosting, advertising monetization, enterprise delivery, or using the Code to enhance any commercial product or service.
+
+### 3.2 Redistribution / Public Availability (including forks and mirrors)
+
+Copy, redistribute, mirror, publish, or otherwise make the Code (or any portion of it) available to any third party in any form, including but not limited to:
+
+* **forking**, mirroring, re-uploading, or hosting the Code on any platform;
+* packaging the Code for download or providing access credentials/links;
+* sharing substantial portions in public posts, videos, courses, or paid communities.
+
+### 3.3 Modification / Derivative Works
+
+Modify, adapt, translate, merge, or create derivative works based on the Code, or provide any modified/derived version to others, whether free of charge or for a fee.
+
+### 3.4 Confusingly Similar Products & Trade Dress / UI Imitation
+
+Create any product or service that is **confusingly similar** to the Company’s products in concept, overall structure, feature composition, user flows, interaction patterns, or visual presentation.
+You may not use or imitate the Company’s **user interface layout, interaction patterns, CSS styles, icons, color schemes, typography choices, motion/animation style, or any elements that constitute the Company’s overall trade dress**.
+
+### 3.5 Removal of Notices
+
+Remove, alter, or obscure this notice, copyright statements, trademark notices, or any other proprietary notices.
+
+## 4. Trademarks and Branding
+
+“Sichuan Dream Technology Co., Ltd.” is the Company’s legal name. **“的梦”** and related logos, product names, UI style, and overall trade dress are trademarks/identifiers owned by or legally controlled by the Company. **“的梦” is a registered trademark of the Company (registered for six years).**
+
+No trademark, logo, product name, or trade dress rights are granted under this notice. Except for necessary **nominative use** to truthfully refer to the Company or its products, you may not:
+
+1. use “的梦” or any confusingly similar mark to name, market, brand, or promote your product/service;
+2. imply endorsement, partnership, affiliation, or authorization by the Company;
+3. remove, obscure, replace, or alter trademark/copyright/proprietary notices included in the Code.
+
+## 5. Disclaimer; Limitation of Liability
+
+THE CODE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE COMPANY SHALL NOT BE LIABLE FOR ANY CLAIMS OR DAMAGES ARISING FROM OR RELATING TO THE CODE OR ITS USE.
+
+## 6. Termination
+
+Any violation of this notice automatically terminates the permission granted herein. Upon termination, you must immediately cease use and delete all copies of the Code in your possession or control (except where retention is required by law).
+
+## 7. Commercial Licensing
+
+For commercial licensing or any use beyond this notice, contact:
+**[a15802858204@gmail.com](mailto:a15802858204@gmail.com)**
+
+**Copyright © 2025 Sichuan Dream Technology Co., Ltd. All Rights Reserved.**
+
+---
+
+# (中文) 四川的梦科技有限公司 — 源代码公开、可审计声明（非开源许可）
+
+**版本：**1.0
+**生效日期：**2025年10月24日
+
+本声明适用于四川的梦科技有限公司（以下简称“本公司”）在 GitHub（[https://github.com/gh555com）及其他公共平台**公开展示或可访问**的全部项目源代码、文档与相关资源（统称“本代码”）。](https://github.com/gh555com）及其他公共平台**公开展示或可访问**的全部项目源代码、文档与相关资源（统称“本代码”）。)
+
+**本声明不是开源许可证。**除本声明明确授予的有限许可外，本公司对本代码**保留所有权利（All Rights Reserved）**。
+您访问、查看或使用本代码，即视为您已阅读、理解并同意遵守本声明全部条款。
+
+## 1. 权利归属与保留
+
+本公司对本代码享有完整的权利、所有权和利益。除本声明明确授予的权限外，不授予您任何其他许可或权利。
+
+## 2. 有限许可（仅限个人、非商业）
+
+在您完全遵守本声明全部条款的前提下，本公司授予您一项**可撤销、非排他、不可转让、免许可费**的有限许可，仅用于：
+
+* 出于**个人学习、研究、安全/审计**目的查看本代码；以及
+* 为上述目的将本代码**下载/克隆到本地设备**进行必要的本地查看、编译或运行（如适用）。
+
+除此之外，不授予您任何其他权利。
+
+## 3. 明确禁止的行为
+
+未经本公司事先**书面授权**，您不得（包括但不限于）：
+
+### 3.1 商业用途
+
+将本代码用于任何商业目的，包括但不限于：销售、提供付费服务、SaaS/托管服务、广告盈利、企业项目交付，或以任何方式利用本代码提升任何商业产品/服务价值。
+
+### 3.2 再分发 / 对外公开（包括 fork 与镜像）
+
+以任何形式复制、再分发、镜像、发布或向任何第三方提供本代码或其任何部分，包括但不限于：
+
+* 在任何平台进行**fork**、镜像仓库、重新上传或托管；
+* 打包提供下载或提供可替代获取方式（链接/口令/凭据等）；
+* 在公开文章/视频/课程资料/付费社群中分享本代码的大段内容。
+
+### 3.3 修改 / 衍生作品
+
+对本代码进行修改、改编、翻译、合并，或基于本代码创建任何衍生作品；以及向任何第三方提供或使用上述修改版/衍生作品（无论是否收费）。
+
+### 3.4 混淆性相似产品与商业外观（Trade Dress）/界面模仿
+
+创建在理念、整体结构、功能组合、用户流程、交互模式、视觉呈现上与本公司产品或服务构成**混淆性相似（Confusingly Similar）**的任何产品或服务。
+不得使用或模仿本公司**用户界面布局、交互模式、CSS 样式、图标、配色方案、字体选择、动效/动画风格**或任何构成本公司整体“商业外观（Trade Dress）”的元素。
+
+### 3.5 声明与权利信息移除
+
+移除、修改或隐藏本声明、版权声明、商标声明或任何其他权利标识。
+
+## 4. 商标与品牌标识
+
+“四川的梦科技有限公司”为本公司企业名称。**“的梦”**及其相关 Logo、产品名称、界面风格与整体商业外观（Trade Dress）为本公司拥有或依法享有权利的商标/标识/商业外观。**“的梦”为本公司注册商标。**
+
+本声明**不授予**任何商标、Logo、产品名称或商业外观的使用许可。除为客观指代本公司或本公司产品所必需的**指示性使用**外，您不得：
+
+1. 使用“的梦”或任何近似标识为您的产品/服务命名、宣传、品牌化展示或推广；
+2. 以任何方式暗示您与本公司存在授权、合作、关联或背书关系；
+3. 移除、遮盖、替换或篡改本代码中包含的商标/版权/权利声明或标识。
+
+## 5. 免责声明与责任限制
+
+本代码按“现状（AS IS）”提供，不提供任何明示或暗示保证，包括但不限于适销性、特定用途适用性、非侵权。
+在法律允许的最大范围内，本公司不对因本代码或其使用引起或相关的任何索赔或损失承担责任。
+
+## 6. 终止
+
+如您违反本声明任一条款，本声明授予的有限许可将自动终止。终止后，您应立即停止使用并删除您控制范围内的全部本代码副本（法律要求保留的除外）。
+
+## 7. 商业授权
+
+如需获得商业授权或任何超出本声明范围的使用许可，请联系：
+**[a15802858204@gmail.com](mailto:a15802858204@gmail.com)**
+
+**版权所有 © 2025 四川的梦科技有限公司 保留所有权利。**
 
