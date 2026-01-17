@@ -6,199 +6,94 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write  # 需要创建 GitHub Release
+  contents: write
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build-rust:
+    name: Build Rust for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_name: q_linux_x64
+          - os: windows-latest
+            asset_name: q_win_x64.exe
+          - os: macos-latest
+            asset_name: q_mac_x64
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install
-        run: npm install
-
-      # 设置 Rust 编译环境
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, x86_64-apple-darwin
-          components: rustfmt, clippy
-
-      # 安装交叉编译依赖（用于编译 Windows 和 macOS 版本）和Rust编译依赖
-      - name: Install cross-compilation dependencies
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 pkg-config libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
-          # 安装 macOS 交叉编译依赖
-          sudo apt-get install -y clang libclang-dev llvm-dev libssl-dev libxml2-dev libz3-dev
+          sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
 
-          # 调试信息：检查安装的依赖
-          echo "Checking installed packages..."
-          dpkg -l | grep -E 'libglib2.0-dev|libcairo2-dev|libpango1.0-dev|libgdk-pixbuf2.0-dev|libgtk-3-dev'
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-          # 调试信息：检查pkg-config文件
-          echo "Checking pkg-config files..."
-          # 使用安全的方式检查pkg-config文件，即使找不到也不会导致脚本失败
-          find /usr/lib/pkgconfig -name "*.pc" 2>/dev/null | grep -E 'glib-2.0|cairo|pango|gdk-pixbuf-2.0|gdk-3.0' || true
-          find /usr/share/pkgconfig -name "*.pc" 2>/dev/null | grep -E 'glib-2.0|cairo|pango|gdk-pixbuf-2.0|gdk-3.0' || true
-
-          # 设置PKG_CONFIG_PATH环境变量
-          echo "Setting PKG_CONFIG_PATH..."
-          export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/share/pkgconfig
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
-
-          # 测试pkg-config是否能找到库
-          echo "Testing pkg-config..."
-          pkg-config --libs --cflags glib-2.0 || echo "glib-2.0 not found"
-          pkg-config --libs --cflags cairo || echo "cairo not found"
-          pkg-config --libs --cflags pango-1.0 || echo "pango-1.0 not found"
-          pkg-config --libs --cflags gdk-pixbuf-2.0 || echo "gdk-pixbuf-2.0 not found"
-          pkg-config --libs --cflags gdk-3.0 || echo "gdk-3.0 not found"
-
-      # 编译 Rust 引擎
-      - name: Build Rust daemon
+      - name: Build Rust binary
+        shell: bash
         run: |
-          # 添加调试信息
-          echo "Current directory: $(pwd)"
-          echo "Rust version: $(cargo --version)"
-          echo "Rustc version: $(rustc --version)"
-
-          # 进入rust目录
           cd rust
-          echo "In rust directory: $(pwd)"
-
-          # 显示目录内容
-          echo "Rust directory contents:"
-          ls -la
-
-          # 显示Cargo配置
-          echo "Cargo.toml content:"
-          cat Cargo.toml
-
-          # 确保assets目录存在
-          mkdir -p ../assets
-
-          # 编译Linux x64版本
-          echo "Building Linux x64..."
-          cargo build --release --target x86_64-unknown-linux-gnu --verbose
-          if [ $? -eq 0 ]; then
-            echo "Linux x64 compilation successful!"
-            cp target/x86_64-unknown-linux-gnu/release/q ../assets/q_linux_x64
-            chmod +x ../assets/q_linux_x64
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            # Windows: use Cargo_win.toml
+            cp Cargo_win.toml Cargo.toml
+            cargo build --release
+            cp target/release/q.exe ../${{ matrix.asset_name }}
           else
-            echo "Linux x64 compilation failed!"
-            exit 1
+            # Linux/Mac: use default Cargo.toml
+            cargo build --release
+            cp target/release/q ../${{ matrix.asset_name }}
+            chmod +x ../${{ matrix.asset_name }}
           fi
 
-          # 编译Windows x64版本
-          echo "Building Windows x64..."
-          cargo build --release --target x86_64-pc-windows-gnu --verbose --manifest-path Cargo_win.toml
-          if [ $? -eq 0 ]; then
-            echo "Windows x64 compilation successful!"
-            cp target/x86_64-pc-windows-gnu/release/q.exe ../assets/q_win_x64.exe
-          else
-            echo "Windows x64 compilation failed!"
-            exit 1
-          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
 
-          # 编译macOS x64版本
-          echo "Building macOS x64..."
-          cargo build --release --target x86_64-apple-darwin --verbose
-          if [ $? -eq 0 ]; then
-            echo "macOS x64 compilation successful!"
-            cp target/x86_64-apple-darwin/release/q ../assets/q_mac_x64
-            chmod +x ../assets/q_mac_x64
-          else
-            echo "macOS x64 compilation failed!"
-            exit 1
-          fi
+  release:
+    needs: build-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
 
-          # 显示编译结果
-          echo "Final assets directory:"
-          ls -la ../assets/
-
-      # 验证编译结果
-      - name: Verify Rust binaries built
-        run: |
-          ls -la assets/
-          file assets/q_*
-
-      - name: Verify version matches tag
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(node -p "require('./package.json').version")
-          echo "tag=$TAG package.json=$PKG"
-          test "$TAG" = "$PKG"
+      - name: Install dependencies
+        run: npm install
 
       - name: Package VSIX
         run: npm run ci:package
 
-      - name: Verify VSIX file exists
-        run: |
-          ls -la dist/
-          file dist/*.vsix
-
-      - name: Create GitHub Release and upload files
-        run: |
-          # 安装jq工具（用于解析JSON响应）
-          sudo apt-get install -y jq
-
-          # 获取版本号
-          VERSION="${{ github.ref_name }}"
-
-          # 显示当前目录和文件
-          echo "Current directory: $(pwd)"
-          ls -la dist/
-          ls -la assets/
-
-          # 创建Release
-          echo "Creating Release $VERSION..."
-          RELEASE_ID=$(curl -s -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/gh555com/qqq/releases \
-            -d '{"tag_name":"'$VERSION'","name":"'$VERSION'","generate_release_notes":true}' \
-            | jq -r '.id')
-
-          echo "Release ID: $RELEASE_ID"
-
-          # 上传VSIX文件
-          VSIX_FILE=$(ls dist/*.vsix)
-          echo "Uploading $VSIX_FILE..."
-          curl -s -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary "@$VSIX_FILE" \
-            "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $VSIX_FILE)"
-
-          # 上传Rust二进制文件（如果存在）
-          if [ -d "assets" ] && [ "$(ls -A assets/q_* 2>/dev/null)" ]; then
-            echo "Uploading Rust binary files..."
-            for BINARY in assets/q_*; do
-              echo "Uploading $BINARY..."
-              curl -s -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Content-Type: application/octet-stream" \
-                --data-binary "@$BINARY" \
-                "https://uploads.github.com/repos/gh555com/qqq/releases/$RELEASE_ID/assets?name=$(basename $BINARY)"
-            done
-          else
-            echo "No Rust binary files found. Skipping upload."
-          fi
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            assets/*
+            dist/*.vsix
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to VS Code Marketplace
+        if: success()
         run: npm run ci:publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        continue-on-error: true  # 即使Marketplace发布失败，也继续执行
-
-

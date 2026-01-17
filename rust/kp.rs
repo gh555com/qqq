@@ -5,6 +5,7 @@
 // - 移除所有指纹计算、去重逻辑
 // - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 // - 仅处理：纯文本、文件复制、原生图片保存
+// Triggering automation workflow.
 //
 // 目标：按你贴出的 Python 版本“行为等同”：
 // - daemon 协议：stdin JSON line -> stdout JSON line
