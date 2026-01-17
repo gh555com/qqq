@@ -93,24 +93,44 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       # ------------------------------------------
-      # 跨平台构建逻辑 (Rust)
+      # 跨平台构建逻辑 (真正的 Rust 编译)
       # ------------------------------------------
-      - name: Install Rust
+      - name: Install Rust Toolchains
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, aarch64-apple-darwin
+          targets: |
+            x86_64-unknown-linux-gnu
+            x86_64-pc-windows-msvc
+            i686-pc-windows-msvc
+            aarch64-pc-windows-msvc
+            x86_64-apple-darwin
+            aarch64-apple-darwin
 
       - name: Build All Platforms
         run: |
           mkdir -p assets
-          echo "🔨 正在模拟跨平台构建..."
-          # 这里以后可以扩展为真正的多平台矩阵构建
-          # 目前先创建占位符确保流程通畅 (确保文件大小 > 0)
-          echo "dummy content" > assets/q_linux_x64
-          echo "dummy content" > assets/q_win_x64.exe
-          echo "dummy content" > assets/q_win_arm64.exe
-          echo "dummy content" > assets/q_mac_arm64
-          echo "✅ 构建完成"
+          cd rust
+          
+          # 1. Linux x64
+          cargo build --release --target x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/q* ../assets/q_linux_x64
+
+          # 2. macOS (x64 & ARM64)
+          cargo build --release --target x86_64-apple-darwin
+          cp target/x86_64-apple-darwin/release/q* ../assets/q_mac_x64
+          cargo build --release --target aarch64-apple-darwin
+          cp target/aarch64-apple-darwin/release/q* ../assets/q_mac_arm64
+
+          # 3. Windows (x64, x86, ARM64) - 使用 Cargo_win.toml
+          cp Cargo_win.toml Cargo.toml
+          cargo build --release --target x86_64-pc-windows-msvc
+          cp target/x86_64-pc-windows-msvc/release/q*.exe ../assets/q_win_x64.exe
+          cargo build --release --target i686-pc-windows-msvc
+          cp target/i686-pc-windows-msvc/release/q*.exe ../assets/q_win_x86.exe
+          cargo build --release --target aarch64-pc-windows-msvc
+          cp target/aarch64-pc-windows-msvc/release/q*.exe ../assets/q_win_arm64.exe
+          
+          echo "✅ 所有平台构建完成"
 
       # ------------------------------------------
       # 发布资产
