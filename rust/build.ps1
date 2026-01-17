@@ -96,6 +96,12 @@ cargo build --release --target x86_64-pc-windows-msvc --manifest-path Cargo_win.
 Copy-Item target\x86_64-pc-windows-msvc\release\q.exe ..\assets\q_win_x64.exe -Force
 Write-Host "✓ Windows x64 done" -ForegroundColor Green
 
+# Windows x86 (32-bit)
+Write-Host "Building Windows x86..." -ForegroundColor Yellow
+cargo build --release --target i686-pc-windows-msvc --manifest-path Cargo_win.toml
+Copy-Item target\i686-pc-windows-msvc\release\q.exe ..\assets\q_win_x86.exe -Force
+Write-Host "✓ Windows x86 done" -ForegroundColor Green
+
 # Windows ARM64 (如果有 ARM64 工具链)
 Write-Host "Building Windows ARM64..." -ForegroundColor Yellow
 try {
