@@ -42,14 +42,20 @@ jobs:
         run: |
           cd rust
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
-            # Windows: use Cargo_win.toml
-            cp Cargo_win.toml Cargo.toml
-            cargo build --release
+            # Windows: use Cargo_win.toml and build Windows-specific binary
+            cargo build --release --manifest-path Cargo_win.toml
             cp target/release/q.exe ../${{ matrix.asset_name }}
+          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+            # macOS: build for x86_64 Mac
+            rustup target add x86_64-apple-darwin
+            cargo build --release --target x86_64-apple-darwin
+            cp target/x86_64-apple-darwin/release/q ../${{ matrix.asset_name }}
+            chmod +x ../${{ matrix.asset_name }}
           else
-            # Linux/Mac: use default Cargo.toml
-            cargo build --release
-            cp target/release/q ../${{ matrix.asset_name }}
+            # Linux: build for x86_64 Linux
+            rustup target add x86_64-unknown-linux-gnu
+            cargo build --release --target x86_64-unknown-linux-gnu
+            cp target/x86_64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
             chmod +x ../${{ matrix.asset_name }}
           fi
 
