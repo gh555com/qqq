@@ -22,7 +22,7 @@ jobs:
   # 1. q1: 创建发布PR (对话式触发)
   # ==========================================
   q1-create-pr:
-    name: 🔄 q1: Create Release PR
+    name: "🔄 q1: Create Release PR"
     if: github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q1')
     runs-on: ubuntu-latest
     steps:
@@ -72,7 +72,7 @@ jobs:
   # 2. q2: 完整发布流程 (对话式或PR合并触发)
   # ==========================================
   q2-full-release:
-    name: 🎉 q2: Full Release & Build
+    name: "🎉 q2: Full Release & Build"
     if: |
       (github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
       (github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
