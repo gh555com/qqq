@@ -1234,6 +1234,9 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		}),
+		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
+			global.showStatusPanel();
+		}),
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
 		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
 
