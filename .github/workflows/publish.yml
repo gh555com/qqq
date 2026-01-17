@@ -18,18 +18,29 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # Linux: 使用Ubuntu 20.04 LTS获得最大兼容性
+          - os: ubuntu-20.04
             asset_name: q_linux_x64
-          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-20.04
             asset_name: q_linux_arm64
-          - os: windows-latest
+            target: aarch64-unknown-linux-gnu
+
+          # Windows: 使用Windows 2019获得更广兼容性
+          - os: windows-2019
             asset_name: q_win_x64.exe
-          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-2019
             asset_name: q_win_x86.exe
-          - os: macos-latest
+            target: i686-pc-windows-msvc
+
+          # macOS: 使用较早版本确保兼容性
+          - os: macos-13
             asset_name: q_mac_x64
-          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-13
             asset_name: q_mac_arm64
+            target: aarch64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -60,48 +71,31 @@ jobs:
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             # Windows: copy Cargo_win.toml to Cargo.toml and build
             cp Cargo_win.toml Cargo.toml
-            if [ "${{ matrix.asset_name }}" == "q_win_x86.exe" ]; then
-              # 32-bit Windows
-              rustup target add i686-pc-windows-msvc
-              cargo build --release --target i686-pc-windows-msvc
-              cp target/i686-pc-windows-msvc/release/q.exe ../${{ matrix.asset_name }}
-            else
-              # 64-bit Windows
-              cargo build --release
-              cp target/release/q.exe ../${{ matrix.asset_name }}
-            fi
+            # Windows: 统一使用指定target构建
+            rustup target add ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
           elif [ "${{ matrix.os }}" == "macos-latest" ]; then
             # macOS: build for both architectures
-            if [ "${{ matrix.asset_name }}" == "q_mac_arm64" ]; then
-              # Apple Silicon (ARM64)
-              rustup target add aarch64-apple-darwin
-              cargo build --release --target aarch64-apple-darwin
-              cp target/aarch64-apple-darwin/release/q ../${{ matrix.asset_name }}
-            else
-              # Intel Mac (x86_64)
-              rustup target add x86_64-apple-darwin
-              cargo build --release --target x86_64-apple-darwin
-              cp target/x86_64-apple-darwin/release/q ../${{ matrix.asset_name }}
-            fi
+            # macOS: 统一使用指定target构建
+            rustup target add ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/q ../${{ matrix.asset_name }}
             chmod +x ../${{ matrix.asset_name }}
           else
             # Linux: build for different architectures
+            # Linux: 使用Ubuntu 20.04确保广泛兼容性
+            rustup target add ${{ matrix.target }}
             if [ "${{ matrix.asset_name }}" == "q_linux_arm64" ]; then
-              # ARM64 Linux
-              rustup target add aarch64-unknown-linux-gnu
+              # ARM64交叉编译配置
               export PKG_CONFIG_ALLOW_CROSS=1
               export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
               export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-              cargo build --release --target aarch64-unknown-linux-gnu
-              cp target/aarch64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
-            else
-              # x86_64 Linux
-              rustup target add x86_64-unknown-linux-gnu
-              cargo build --release --target x86_64-unknown-linux-gnu
-              cp target/x86_64-unknown-linux-gnu/release/q ../${{ matrix.asset_name }}
             fi
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/q ../${{ matrix.asset_name }}
             chmod +x ../${{ matrix.asset_name }}
           fi
 
