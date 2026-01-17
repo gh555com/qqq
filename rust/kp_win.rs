@@ -1080,7 +1080,7 @@ mod win {
                 SHGFI_ICON | SHGFI_SMALLICON,
             );
 
-            if res == 0 || shfi.hIcon == 0 {
+            if res == 0 || shfi.hIcon == std::ptr::null_mut() {
                 return None;
             }
 
@@ -1142,7 +1142,7 @@ mod win {
 
             let hold = SelectObject(hdc_mem, hbmp as _);
             // DI_NORMAL == 0x0003（Python 用 0x0003）
-            let _ = DrawIconEx(hdc_mem, 0, 0, hicon, width, height, 0, 0, 0x0003);
+            let _ = DrawIconEx(hdc_mem, 0, 0, hicon, width, height, 0, std::ptr::null_mut(), 0x0003);
 
             // 读取 BGRA
             let size = (width * height * 4) as usize;
