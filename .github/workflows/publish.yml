@@ -25,28 +25,11 @@ jobs:
 
       # 设置 Rust 编译环境
       - name: Set up Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, x86_64-apple-darwin, aarch64-apple-darwin
-          override: true
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu
           components: rustfmt, clippy
-
-      # 安装 macOS 交叉编译工具链
-      - name: Install macOS cross-compilation tools
-        run: |
-          # 安装 osxcross 依赖
-          sudo apt-get install -y clang llvm-dev libxml2-dev libssl-dev liblzma-dev
-
-          # 克隆 osxcross 仓库
-          git clone https://github.com/tpoechtrager/osxcross.git
-          cd osxcross
-
-          # 下载 macOS SDK
-          ./tools/get_darwin_sdk.py -s 13.3
-
-          # 安装 osxcross
-          UNATTENDED=1 ./build.sh
 
       # 安装交叉编译依赖（用于编译 Windows 版本）和Rust编译依赖
       - name: Install cross-compilation dependencies
@@ -124,37 +107,7 @@ jobs:
             exit 1
           fi
 
-          # 编译macOS Intel (x86_64)版本
-          echo "Building macOS Intel (x86_64)..."
-          export PKG_CONFIG_ALLOW_CROSS=1
-          export PATH="$PATH:/osxcross/target/bin"
-          export CC="x86_64-apple-darwin22.4-clang"
-          export CXX="x86_64-apple-darwin22.4-clang++"
-          cargo build --release --target x86_64-apple-darwin --verbose
-          if [ $? -eq 0 ]; then
-            echo "macOS Intel compilation successful!"
-            cp target/x86_64-apple-darwin/release/q ../assets/q_macos_x86_64
-            chmod +x ../assets/q_macos_x86_64
-          else
-            echo "macOS Intel compilation failed!"
-            exit 1
-          fi
 
-          # 编译macOS ARM (aarch64)版本
-          echo "Building macOS ARM (aarch64)..."
-          export PKG_CONFIG_ALLOW_CROSS=1
-          export PATH="$PATH:/osxcross/target/bin"
-          export CC="aarch64-apple-darwin22.4-clang"
-          export CXX="aarch64-apple-darwin22.4-clang++"
-          cargo build --release --target aarch64-apple-darwin --verbose
-          if [ $? -eq 0 ]; then
-            echo "macOS ARM compilation successful!"
-            cp target/aarch64-apple-darwin/release/q ../assets/q_macos_arm64
-            chmod +x ../assets/q_macos_arm64
-          else
-            echo "macOS ARM compilation failed!"
-            exit 1
-          fi
 
           # 显示编译结果
           echo "Final assets directory:"
