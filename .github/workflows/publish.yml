@@ -99,14 +99,17 @@ jobs:
             VERSION="v$(node -p "require('./package.json').version")-$(date +%Y%m%d-%H%M%S)"
             echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           fi
-          
+
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: Release ${{ steps.get_version.outputs.VERSION }}
           files: |
-            assets/*
+            assets/qqq-*.vsix
+            assets/q_linux_x64
+            assets/q_mac_x64
+            assets/q_win_x64.exe
             dist/*.vsix
           generate_release_notes: true
           draft: false
