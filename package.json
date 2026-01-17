@@ -19,7 +19,8 @@
     "onCommand:qqq.revealFileInFolder",
     "onCommand:qqq.renameFile",
     "onCommand:qqq.exportDoc",
-    "onCommand:qqq.exportZip"
+    "onCommand:qqq.exportZip",
+    "onCommand:qqq.showStatusPanel"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -268,6 +269,10 @@
       {
         "command": "qqq.savorMoments",
         "title": "qqq: savor moments for yourself"
+      },
+      {
+        "command": "qqq.showStatusPanel",
+        "title": "qqq: 显示状态面板"
       }
     ],
     "keybindings": [
