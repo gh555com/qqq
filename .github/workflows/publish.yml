@@ -18,13 +18,10 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux: 使用Ubuntu 22.04获得更好的GitHub Actions支持
+          # Linux: 使用Ubuntu 22.04，专注x64支持
           - os: ubuntu-22.04
             asset_name: q_linux_x64
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-22.04
-            asset_name: q_linux_arm64
-            target: aarch64-unknown-linux-gnu
 
           # Windows: 使用Windows 2022但保持向下兼容
           - os: windows-2022
@@ -50,16 +47,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
-          # For ARM64 cross-compilation
-          if [ "${{ matrix.asset_name }}" == "q_linux_arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-            # Install ARM64 sysroot (minimal approach)
-            sudo apt-get install -y debootstrap
-            sudo debootstrap --arch=arm64 noble /tmp/arm64-sysroot http://ports.ubuntu.com/ubuntu-ports
-            # Set up pkg-config for cross-compilation
-            sudo mkdir -p /usr/lib/aarch64-linux-gnu/pkgconfig
-            sudo ln -sf /tmp/arm64-sysroot/usr/lib/aarch64-linux-gnu/pkgconfig/* /usr/lib/aarch64-linux-gnu/pkgconfig/
-          fi
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
