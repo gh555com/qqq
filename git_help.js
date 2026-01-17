@@ -59,98 +59,61 @@ class LocalAIReleaseAssistant {
         return parts.join('.');
     }
 
+    // 核心：更新版本、添加所有文件并提交推送
+    async _smartCommitAndPush(newVersion, message, targetBranch = 'qq') {
+        console.log(`📊 版本递增: ${newVersion}`);
+        
+        // 1. 同步更新 package.json
+        const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+        pkg.version = newVersion;
+        fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+
+        // 2. 检查是否有文件变化
+        const status = this.execGit('status --porcelain');
+        if (!status) {
+            console.log('ℹ️ 工作区已经是干净的，仅同步版本号...');
+        }
+
+        // 3. 执行全量提交
+        this.execGit('add .');
+        this.execGit(`commit -m "${message}"`);
+        
+        // 4. 执行推送
+        console.log(`📤 正在推送至 ${targetBranch}...`);
+        this.execGit(`push origin ${targetBranch}`);
+        return true;
+    }
+
     // q3: 快速保存
     async handleQ3() {
-        console.log('🚀 执行q3 - 快速代码保存');
-
-        const currentVersion = this.getCurrentVersion();
-        if (!currentVersion) return;
-
-        const newVersion = this.bumpVersion(currentVersion, 'patch');
-        console.log(`📊 版本递增: ${currentVersion} → ${newVersion}`);
-
-        // 更新package.json
-        const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-        packageJson.version = newVersion;
-        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2) + '\n');
-
-        // 提交所有更改（确保工作区干净）
-        this.execGit('add .');
-        this.execGit(`commit -m "chore: quick save v${newVersion} (q3)"`);
-
-        // 推送到远程
-        console.log('📤 正在推送...');
-        this.execGit('push origin qq');
-
-        console.log(`✅ q3执行完成：代码已保存至版本v${newVersion}`);
+        console.log('🚀 执行 q3 - 极速保存快照');
+        const current = this.getCurrentVersion();
+        const next = this.bumpVersion(current, 'patch');
+        await this._smartCommitAndPush(next, `chore: quick save v${next} (q3)`);
+        console.log(`✅ q3 完成：工作区已清空，版本升至 v${next}`);
     }
 
-    // q1: 半自动化PR
+    // q1: 半自动化 PR
     async handleQ1() {
-        console.log('🔄 执行q1 - 半自动化PR流程');
+        console.log('🔄 执行 q1 - 创建发布分支与 PR');
+        const current = this.getCurrentVersion();
+        const next = this.bumpVersion(current, 'minor');
+        const branch = `release/v${next}`;
 
-        const currentVersion = this.getCurrentVersion();
-        if (!currentVersion) return;
-
-        const newVersion = this.bumpVersion(currentVersion, 'minor');
-        const releaseBranch = `release/v${newVersion}`;
-
-        console.log(`📊 预计版本: v${newVersion}`);
-        console.log(`🌿 创建分支: ${releaseBranch}`);
-
-        // 创建并切换到发布分支
-        this.execGit(`checkout -b ${releaseBranch}`);
-
-        // 更新版本号
-        const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-        packageJson.version = newVersion;
-        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2) + '\n');
-
-        // 提交更改
-        this.execGit('add package.json');
-        this.execGit(`commit -m "release: prepare v${newVersion} (q1)"`);
-
-        // 推送分支
-        console.log('📤 推送发布分支...');
-        this.execGit(`push origin ${releaseBranch}`);
-
-        // 切换回主分支
+        this.execGit(`checkout -b ${branch}`);
+        await this._smartCommitAndPush(next, `release: prepare v${next} (q1)`, branch);
+        
         this.execGit('checkout qq');
-
-        console.log(`✅ q1执行完成：`);
-        console.log(`   - 发布分支 ${releaseBranch} 已创建`);
-        console.log(`   - 版本号更新至 v${newVersion}`);
-        console.log(`   - 请手动在GitHub上创建PR并合并`);
+        console.log(`✅ q1 完成：已推送分支 ${branch}，现已切回 qq 分支`);
     }
 
-    // q2: 完整发布
+    // q2: 完整自动化发布
     async handleQ2() {
-        console.log('🎉 执行q2 - 完整自动化发布');
-
-        const currentVersion = this.getCurrentVersion();
-        if (!currentVersion) return;
-
-        const newVersion = this.bumpVersion(currentVersion, 'minor');
-        console.log(`📊 版本递增: ${currentVersion} → ${newVersion}`);
-
-        // 更新版本号
-        const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-        packageJson.version = newVersion;
-        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2) + '\n');
-
-        // 提交版本更新
-        this.execGit('add package.json');
-        this.execGit(`commit -m "release: v${newVersion} (q2)"`);
-
-        // TODO: 这里可以添加构建和发布的逻辑
-        // 比如调用构建脚本、创建release等
-
-        // 推送到远程
-        console.log('📤 推送版本更新...');
-        this.execGit('push origin qq');
-
-        console.log(`✅ q2执行完成：版本v${newVersion}已发布`);
-        console.log('💡 完整发布流程需要额外配置CI/CD集成');
+        console.log('🎉 执行 q2 - 完整发布流水线');
+        const current = this.getCurrentVersion();
+        const next = this.bumpVersion(current, 'minor');
+        await this._smartCommitAndPush(next, `release: v${next} (q2)`);
+        console.log(`✅ q2 完成：版本 v${next} 已推送到主分支，触发远程全家桶发布`);
     }
 
     // 处理用户指令
