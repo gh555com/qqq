@@ -8,7 +8,10 @@ on:
   pull_request:
     types: [closed]
     branches: [qq]
-  # 3. 允许手动触发
+  # 3. 监听本地直接推送 (q2)
+  push:
+    branches: [qq]
+  # 4. 允许手动触发
   workflow_dispatch:
 
 permissions:
@@ -74,8 +77,9 @@ jobs:
   q2-full-release:
     name: "🎉 q2: Full Release & Build"
     if: |
-      (github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
-      (github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '(q2)')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
