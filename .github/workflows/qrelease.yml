@@ -128,7 +128,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: assets
+          path: build-artifacts
           merge-multiple: true
 
       - name: Setup Node
@@ -155,7 +155,7 @@ jobs:
           tag_name: v${{ steps.get_version.outputs.VERSION }}
           name: Release v${{ steps.get_version.outputs.VERSION }}
           files: |
-            assets/*
+            build-artifacts/*
             dist/*.vsix
           generate_release_notes: true
         env:
