@@ -623,6 +623,7 @@ fn pick_request_id(cmd: &serde_json::Map<String, Value>) -> PyV {
 mod platform {
     use super::*;
     use clipboard_rs::{Clipboard, ClipboardContext};
+    use clipboard_rs::common::RustImage;
 
     #[cfg(target_os = "linux")]
     use clipboard_rs::ClipboardContextX11Options;
