@@ -156,12 +156,23 @@ fn dumps_py(value: &PyV, ensure_ascii: bool) -> String {
     let mut buf: Vec<u8> = Vec::new();
     let formatter = PyFormatter;
     let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
-    // Configure escape mode
-    if ensure_ascii {
-        ser = ser.with_escape(serde_json::ser::EscapeAscii);
-    }
+    // Serialize with appropriate options
     let _ = value.serialize(&mut ser);
-    String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
+    let mut result = String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string());
+
+    // Apply ASCII escaping if needed
+    if ensure_ascii {
+        // Simple ASCII escaping for non-ASCII characters
+        result = result.chars().map(|c| {
+            if c.is_ascii() {
+                c.to_string()
+            } else {
+                format!("\\u{:04x}", c as u32)
+            }
+        }).collect();
+    }
+
+    result
 }
 
 // =============================================================================
@@ -299,7 +310,7 @@ fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, 
     {
         let encoder = PngEncoder::new_with_quality(&mut out, CompressionType::Default, FilterType::Adaptive);
         encoder
-            .write_image(rgba, width, height, ColorType::Rgba8)
+            .write_image(rgba, width, height, ColorType::Rgba8.into())
             .map_err(|e| e.to_string())?;
     }
     Ok(out)
@@ -627,7 +638,7 @@ fn pick_request_id(cmd: &serde_json::Map<String, Value>) -> PyV {
 mod platform {
     use super::*;
     use clipboard_rs::{Clipboard, ClipboardContext};
-    use clipboard_rs::common::{RustImage, RustImageBuffer};
+    use clipboard_rs::common::RustImage;
 
     #[cfg(target_os = "linux")]
     use clipboard_rs::ClipboardContextX11Options;
@@ -867,7 +878,7 @@ mod platform {
         if let Ok(ctx) = setup_clipboard() {
             if let Ok(img) = ctx.get_image() {
                 // Explicit type annotation to resolve compilation error
-                let buf: clipboard_rs::RustImageBuffer = img.to_png().ok()?;
+                let buf = img.to_png().ok()?;
                 let b = buf.get_bytes().to_vec();
                 if !b.is_empty() {
                     return Some(b);
