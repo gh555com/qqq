@@ -861,11 +861,11 @@ mod platform {
         // clipboard-rs: get_image() -> RustImageData; to_png() -> RustImageBuffer
         if let Ok(ctx) = setup_clipboard() {
             if let Ok(img) = ctx.get_image() {
-                if let Ok(buf) = img.to_png() {
-                    let b = buf.get_bytes().to_vec();
-                    if !b.is_empty() {
-                        return Some(b);
-                    }
+                // Explicit type annotation to resolve compilation error
+                let buf: clipboard_rs::RustImageBuffer = img.to_png().ok()?;
+                let b = buf.get_bytes().to_vec();
+                if !b.is_empty() {
+                    return Some(b);
                 }
             }
         }
