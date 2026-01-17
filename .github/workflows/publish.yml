@@ -33,7 +33,7 @@ jobs:
           - os: windows-2022
             asset_name: q_win_x86.exe
             target: i686-pc-windows-msvc
-                    
+
           # macOS: 使用macOS 14平衡兼容性和可用性
           - os: macos-14
             asset_name: q_mac_x64
@@ -68,14 +68,14 @@ jobs:
         shell: bash
         run: |
           cd rust
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
             # Windows: copy Cargo_win.toml to Cargo.toml and build
             cp Cargo_win.toml Cargo.toml
             # Windows: 统一使用指定target构建
             rustup target add ${{ matrix.target }}
             cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
-          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+          elif [[ "${{ matrix.os }}" == *"macos"* ]]; then
             # macOS: build for both architectures
             # macOS: 统一使用指定target构建
             rustup target add ${{ matrix.target }}
