@@ -1209,7 +1209,7 @@ async function activate(context) {
 	// 设置 CodeLens 样式
 	function updateCodeLensStyle() {
 		const config = vscode.workspace.getConfiguration("qqq");
-		const takeOver = config.get("takeOverCodeLensStyle", true);
+		const takeOver = config.get("takeOverCodelensStyle", true);
 		if (takeOver) {
 			// 设置 CodeLens 字体和字号
 			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
@@ -1223,7 +1223,7 @@ async function activate(context) {
 	// 监听配置变化
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration("qqq.takeOverCodeLensStyle")) {
+			if (event.affectsConfiguration("qqq.takeOverCodelensStyle")) {
 				updateCodeLensStyle();
 			}
 		})

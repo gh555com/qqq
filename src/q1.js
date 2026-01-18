@@ -161,7 +161,7 @@ let frameSizeMode = "fix";
 let cleanFreakMode = false;
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
-let codeLensLevel = "3";
+let codelensLevel = "3";
 
 // 大小相框水印
 let largeWatermarkBase64 = null;
@@ -236,7 +236,7 @@ function refreshConfig() {
 		cleanFreakMode = config.get("cleanFreak", false);
 		textSlideColorScheme = config.get("textSlideColorScheme", "light");
 		textSlideFontSize = config.get("textSlideFontSize", 14);
-		codeLensLevel = String(config.get("codeLensLevel", "3"));
+		codelensLevel = String(config.get("codelensLevel", "3"));
 		PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
 	} catch (e) {
 		enlargeSmallImages = true;
@@ -245,7 +245,7 @@ function refreshConfig() {
 		cleanFreakMode = false;
 		textSlideColorScheme = "light";
 		textSlideFontSize = 14;
-		codeLensLevel = "3";
+		codelensLevel = "3";
 		PREVIEW_BG_COLOR = "#fef6e3";
 	}
 }
@@ -2606,7 +2606,7 @@ class FileCodeLensProvider {
 		}, 300);
 	}
 	async provideCodeLenses(document) {
-		if (!isCoreIntegrityValid || codeLensLevel === "0") return [];
+		if (!isCoreIntegrityValid || codelensLevel === "0") return [];
 		const lenses = [];
 		const regex = qqq.createPathRegex();
 		const text = document.getText();
@@ -2645,7 +2645,7 @@ class FileCodeLensProvider {
 				mtimeMs = st.mtimeMs;
 			} catch { }
 
-			if (codeLensLevel === "3") {
+			if (codelensLevel === "3") {
 				let folderData = getQqqFolderSizeSync(folder);
 				let fSizeStr;
 				let folderTooltip;
@@ -2709,7 +2709,7 @@ class FileCodeLensProvider {
 			}
 
 			let titlePrefix = "✎";
-			if (codeLensLevel === "1") {
+			if (codelensLevel === "1") {
 				titlePrefix = "";
 			}
 
