@@ -237,6 +237,25 @@
         }
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "qqqStatusView",
+          "title": "qqq 状态",
+          "icon": "assets/q1.png"
+        }
+      ]
+    },
+    "views": {
+      "qqqStatusView": [
+        {
+          "id": "qqq.statusView",
+          "name": "状态面板",
+          "type": "webview",
+          "when": "true"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "qqq.q1",

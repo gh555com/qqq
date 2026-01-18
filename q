@@ -2369,25 +2369,84 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 let statusPanel = null;
 let statusPanelAlive = false;
 
-// 侧边栏状态视图提供者实例
-let statusViewProvider = null;
-
-// 设置状态视图提供者
-function setStatusViewProvider(provider) {
-	statusViewProvider = provider;
-}
-
 function showStatusPanel() {
-	// 如果侧边栏视图已经注册，直接聚焦到它
-	if (statusViewProvider) {
-		// 聚焦到侧边栏视图
-		vscode.commands.executeCommand('workbench.view.extension.qqqStatusView');
+	if (statusPanel && statusPanelAlive) {
+		statusPanel.reveal(vscode.ViewColumn.Active);
 		return;
 	}
 
-	// 如果还没有注册侧边栏视图，则什么也不做
-	// 注册工作应该在扩展激活时完成
-	logMessage("状态面板已在侧边栏中可用，请点击侧边栏的 qqq 状态图标查看", "INFO");
+	statusPanel = vscode.window.createWebviewPanel(
+		"qqqStatus",
+		"qqq 状态面板",
+		vscode.ViewColumn.Active,
+		{
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			enableFindWidget: true
+		}
+	);
+
+	statusPanelAlive = true;
+
+	// 设置面板图标
+	const iconPath = path.join(__dirname, "..", "assets", "icon.png");
+	if (fs.existsSync(iconPath)) {
+		statusPanel.iconPath = vscode.Uri.file(iconPath);
+	}
+
+	statusPanel.onDidDispose(() => {
+		statusPanelAlive = false;
+		statusPanel = null;
+	});
+
+	// 获取当前状态数据
+	const cacheStats = _cacheStatsGetter ? _cacheStatsGetter() : { totalSize: 0 };
+	const totalSeconds = getTotalSecondsIncludingSession();
+	const { h, m } = formatCompactTime(totalSeconds);
+	const cacheMB = cacheStats.totalSize / (1024 * 1024);
+
+	const pstats = getPersistentCacheStatsSnapshot();
+	const denom = pstats.hitTotal + pstats.missTotal;
+	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+
+	const activeEngine = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
+	const engineTag = activeEngine.code === "P" ? "Python" :
+		activeEngine.code === "R" ? "Rust" :
+			`Node (${activeEngine.nodeMode === "D" ? "Shell daemon" : "Spawn"})`;
+
+	statusPanel.webview.html = getStatusPanelContent(h, m, cacheMB, hitRate, engineTag);
+
+	// 处理面板消息
+	statusPanel.webview.onDidReceiveMessage(async (message) => {
+		switch (message.command) {
+			case "openSettings":
+				vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+				break;
+			case "refresh":
+				// 刷新面板内容
+				const newCacheStats = _cacheStatsGetter ? _cacheStatsGetter() : { totalSize: 0 };
+				const newTotalSeconds = getTotalSecondsIncludingSession();
+				const { h: newH, m: newM } = formatCompactTime(newTotalSeconds);
+				const newCacheMB = newCacheStats.totalSize / (1024 * 1024);
+
+				const newPstats = getPersistentCacheStatsSnapshot();
+				const newDenom = newPstats.hitTotal + newPstats.missTotal;
+				const newHitRate = newDenom > 0 ? (newPstats.hitTotal / newDenom) * 100 : 0;
+
+				const newActiveEngine = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
+				const newEngineTag = newActiveEngine.code === "P" ? "Python" :
+					newActiveEngine.code === "R" ? "Rust" :
+						`Node (${newActiveEngine.nodeMode === "D" ? "Shell daemon" : "Spawn"})`;
+
+				statusPanel.webview.html = getStatusPanelContent(newH, newM, newCacheMB, newHitRate, newEngineTag);
+				break;
+			case "close":
+				if (statusPanel && statusPanelAlive) {
+					statusPanel.dispose();
+				}
+				break;
+		}
+	});
 }
 
 function getStatusPanelContent(hours, minutes, cacheMB, hitRate, engineName) {
@@ -2820,7 +2879,6 @@ module.exports = {
 	disposeStatusBar,
 	updateStatusBar,
 	showStatusPanel,
-	setStatusViewProvider,
 
 	cleanReason,
 
