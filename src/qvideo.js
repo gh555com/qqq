@@ -10,7 +10,7 @@ const global = require('./global');
 const { TaskCounter, TaskMessage } = require('./global');
 
 // ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
-const VideoMsg = {
+const QvideoMsg = {
     /**
      * 生成进度消息
      * @param {Object} task - 任务对象（含 taskTitle）
@@ -20,7 +20,7 @@ const VideoMsg = {
      */
     progress(task, sizeStr, urlSnippet, suffix = '') {
         const suffixPart = suffix ? ` ${suffix}` : '';
-        // ★ 修复：只保留统一真理源的前缀，移除 VideoDownloadController 中重复添加的前缀
+        // ★ 修复：只保留统一真理源的前缀，移除 Qvideo 中重复添加的前缀
         // 但如果前缀缺失，需要补上
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
         return `${prefix}已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
@@ -453,7 +453,7 @@ const _activeTasks = new Set();
 // ★ 弹窗兜底状态：记录消息弹窗是否被 VS Code “吃掉”（模块级变量，跨任务持久化）
 let _isInfoMessageEaten = false;
 
-class VideoDownloadController {
+class Qvideo {
     constructor(context, qqqManager) {
         this.context = context;
         this.qqq = qqqManager;
@@ -844,7 +844,7 @@ class VideoDownloadController {
 
     // ==================== 任务结束打印（★ 使用统一格式化器） ====================
     _buildDoneMessage(task, landedCount, totalStr, urlSnippet) {
-        return VideoMsg.done(task, landedCount, totalStr, urlSnippet);
+        return QvideoMsg.done(task, landedCount, totalStr, urlSnippet);
     }
 
     // ==================== start ====================
@@ -997,7 +997,7 @@ class VideoDownloadController {
             } catch (e) { }
 
             // ★ 修复：使用 prompt 添加统一前缀
-            const promptMsg = VideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开的文档)。 另一方面，稍做等待也是一种解决方案。');
+            const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开的文档)。 另一方面，稍做等待也是一种解决方案。');
             vscode.window.showWarningMessage(promptMsg);
         }
     }
@@ -1010,7 +1010,7 @@ class VideoDownloadController {
 
             const runLogic = async (progress, token) => {
                 // ★ 使用统一格式化器 (progress 方法已去除了重复前缀，现在只需传递纯内容)
-                progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet, '(正在解析...)') });
+                progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet, '(正在解析...)') });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -1108,7 +1108,7 @@ class VideoDownloadController {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet) });
+                progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet) });
 
                 // ★ 精确匹配当前任务的文件（而非前缀匹配，避免多任务互相干扰）
                 const activeFileNames = new Set();
@@ -1204,7 +1204,7 @@ class VideoDownloadController {
                         }
 
                         const totalStr = this._formatBytesSimple(finalBytes);
-                        progress.report({ message: VideoMsg.progress(task, totalStr, urlSnippet) });
+                        progress.report({ message: QvideoMsg.progress(task, totalStr, urlSnippet) });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -2245,7 +2245,7 @@ $of = $vi.OriginalFilename;
             cancellable: true
         }, async (progress, token) => {
             // ★ 使用统一格式化器
-            progress.report({ message: VideoMsg.progress(task, '0k', urlSnippet, '(增强下载中...)') });
+            progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet, '(增强下载中...)') });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -2272,7 +2272,7 @@ $of = $vi.OriginalFilename;
 
                     // ★ 使用新增文件扫描，避免多任务互相干扰
                     const bytes = this._scanNewBytes(targetDir, existingFiles);
-                    progress.report({ message: VideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
+                    progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -2387,7 +2387,7 @@ $of = $vi.OriginalFilename;
             if (!_isInfoMessageEaten) {
                 const startTime = Date.now();
                 selection = await vscode.window.showInformationMessage(
-                    VideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
+                    QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
                     { modal: true },
                     "我已在外部播放"
                 );
@@ -2426,7 +2426,7 @@ $of = $vi.OriginalFilename;
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: VideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
+                    placeHolder: QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
                     ignoreFocusOut: true
                 });
 
@@ -2439,7 +2439,7 @@ $of = $vi.OriginalFilename;
                     this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
 
                     const input = await vscode.window.showInputBox({
-                        prompt: VideoMsg.prompt(task, '请在浏览器中播放视频，然后键入 ok 并回车'),
+                        prompt: QvideoMsg.prompt(task, '请在浏览器中播放视频，然后键入 ok 并回车'),
                         placeHolder: '键入 ok 确认',
                         ignoreFocusOut: true
                     });
@@ -2520,4 +2520,4 @@ $of = $vi.OriginalFilename;
     }
 }
 
-module.exports = VideoDownloadController;
+module.exports = Qvideo;

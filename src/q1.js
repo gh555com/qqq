@@ -2,7 +2,7 @@
 const global = require('./global');
 const { wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
 const h = require('./h');
-const VideoDownloadController = require('./VideoDownloadController');
+const Qvideo = require('./qvideo');
 const vscode = require("vscode");
 const cp = require("child_process");
 const path = require("path");
@@ -2319,7 +2319,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 				await TransactionManager.updateTransaction(transId, { taskType: 'video' });
 
 				try {
-					const vc = new VideoDownloadController(extensionContext);
+					const vc = new Qvideo(extensionContext);
 					const downloadRes = await vc.downloadEntry(
 						result.url,
 						targetDir,
