@@ -465,28 +465,59 @@ class SidebarWebViewProvider {
     </div>
 
     <script>
-        // 禁用 ServiceWorker 以防止注册错误
-        if (navigator && navigator.serviceWorker) {
-            navigator.serviceWorker = {
-                register: function() { return Promise.reject(new Error('ServiceWorker registration disabled')); },
-                getRegistration: function() { return Promise.resolve(null); },
-                getRegistrations: function() { return Promise.resolve([]); },
-                ready: Promise.reject(new Error('ServiceWorker ready rejected'))
-            };
+        // 彻底禁用 ServiceWorker 以防止所有相关错误
+        if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+            try {
+                // 完全重写 ServiceWorker 对象
+                Object.defineProperty(navigator, 'serviceWorker', {
+                    value: {
+                        register: function() {
+                            console.warn('ServiceWorker registration disabled in WebView');
+                            return Promise.resolve({ unregister: () => Promise.resolve() });
+                        },
+                        getRegistration: function() { return Promise.resolve(null); },
+                        getRegistrations: function() { return Promise.resolve([]); },
+                        ready: Promise.resolve({
+                            active: null,
+                            waiting: null,
+                            installing: null,
+                            addEventListener: function() {},
+                            removeEventListener: function() {},
+                            postMessage: function() {}
+                        })
+                    },
+                    writable: false,
+                    configurable: false
+                });
+            } catch (e) {
+                // 静默处理可能的权限错误
+            }
         }
 
-        const vscode = acquireVsCodeApi();
+        // 安全获取 VS Code API
+        let vscode;
+        try {
+            vscode = acquireVsCodeApi();
+        } catch (e) {
+            console.error('Failed to acquire VS Code API:', e);
+        }
 
         function openSettings() {
-            vscode.postMessage({ command: 'openSettings' });
+            if (vscode) {
+                vscode.postMessage({ command: 'openSettings' });
+            }
         }
 
         function refreshData() {
-            vscode.postMessage({ command: 'refresh' });
+            if (vscode) {
+                vscode.postMessage({ command: 'refresh' });
+            }
         }
 
         // 自动刷新数据
-        setInterval(refreshData, 5000);
+        if (typeof setInterval !== 'undefined') {
+            setInterval(refreshData, 5000);
+        }
     </script>
 </body>
 </html>`;
@@ -536,17 +567,38 @@ class SidebarWebViewProvider {
     <button class="btn" onclick="location.reload()">🔄 重新加载</button>
 
     <script>
-        // 禁用 ServiceWorker 以防止注册错误
-        if (navigator && navigator.serviceWorker) {
-            navigator.serviceWorker = {
-                register: function() { return Promise.reject(new Error('ServiceWorker registration disabled')); },
-                getRegistration: function() { return Promise.resolve(null); },
-                getRegistrations: function() { return Promise.resolve([]); },
-                ready: Promise.reject(new Error('ServiceWorker ready rejected'))
-            };
+        // 彻底禁用 ServiceWorker
+        if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
+            try {
+                Object.defineProperty(navigator, 'serviceWorker', {
+                    value: {
+                        register: function() { return Promise.resolve({ unregister: () => Promise.resolve() }); },
+                        getRegistration: function() { return Promise.resolve(null); },
+                        getRegistrations: function() { return Promise.resolve([]); },
+                        ready: Promise.resolve({
+                            active: null,
+                            waiting: null,
+                            installing: null,
+                            addEventListener: function() {},
+                            removeEventListener: function() {},
+                            postMessage: function() {}
+                        })
+                    },
+                    writable: false,
+                    configurable: false
+                });
+            } catch (e) {
+                // 静默处理
+            }
         }
 
-        const vscode = acquireVsCodeApi();
+        // 安全获取 VS Code API
+        let vscode;
+        try {
+            vscode = acquireVsCodeApi();
+        } catch (e) {
+            console.error('Failed to acquire VS Code API:', e);
+        }
     </script>
 </body>
 </html>`;
