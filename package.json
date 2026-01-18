@@ -157,6 +157,22 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
+          },
+          "qqq.codeLensLevel": {
+            "order": 70,
+            "type": "string",
+            "default": "3",
+            "enum": [
+              "0",
+              "1",
+              "3"
+            ],
+            "markdownEnumDescriptions": [
+              "0: 没有任何 codelens 打印",
+              "1: 只打印文件名（即现在 选三 的时候，rename 右边那一项）",
+              "3: 等同于现在的 codelens 打印"
+            ],
+            "markdownDescription": "👁️ codelens level："
           }
         }
       },
