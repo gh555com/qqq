@@ -13,9 +13,13 @@ class SidebarWebViewProvider {
     resolveWebviewView(webviewView, context, token) {
         this._view = webviewView;
 
+        const extensionUri = vscode.Uri.file(this.context.extensionPath);
+
         webviewView.webview.options = {
             enableScripts: true,
-            retainContextWhenHidden: true
+            retainContextWhenHidden: true,
+            localResourceRoots: [extensionUri],
+            contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;`
         };
 
         // 设置面板图标
@@ -59,19 +63,65 @@ class SidebarWebViewProvider {
         if (!this._view) return;
 
         try {
-            // 获取当前状态数据
-            const cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() : { totalSize: 0 };
-            const totalSeconds = this.global.getTotalSecondsIncludingSession ?
-                this.global.getTotalSecondsIncludingSession() : 0;
-            const { h, m } = this.global.formatCompactTime ?
-                this.global.formatCompactTime(totalSeconds) : { h: 0, m: 0 };
+            // 使用现有状态栏的统一数据获取方式（唯一真理源）
+            const cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
+                { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+
+            // 直接调用 global.js 中的现有函数（如果可用）
+            let totalSeconds = 0;
+            let h = 0, m = 0;
+            let hitRate = 0;
+
+            // 尝试使用 global.js 导出的函数
+            if (typeof this.global.getTotalSecondsIncludingSession === 'function') {
+                totalSeconds = this.global.getTotalSecondsIncludingSession();
+                const timeResult = typeof this.global.formatCompactTime === 'function' ?
+                    this.global.formatCompactTime(totalSeconds) :
+                    { h: Math.floor(totalSeconds / 3600), m: Math.floor((totalSeconds % 3600) / 60) };
+                h = timeResult.h;
+                m = timeResult.m;
+            } else {
+                // 回退到手动计算
+                if (this.global.extensionContext) {
+                    const context = this.global.extensionContext;
+                    const KEY_TOTAL_DURATION = "qqq_stats_total_duration";
+                    const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
+
+                    const base = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+                    const lastFlush = context.globalState.get(KEY_LAST_FLUSH_TIME);
+
+                    if (lastFlush) {
+                        const diff = (Date.now() - lastFlush) / 1000;
+                        totalSeconds = base + (diff > 0 ? diff : 0);
+                    } else {
+                        totalSeconds = base;
+                    }
+
+                    h = Math.floor(totalSeconds / 3600);
+                    m = Math.floor((totalSeconds % 3600) / 60);
+                }
+            }
+
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
 
-            const pstats = this.global.getPersistentCacheStatsSnapshot ?
-                this.global.getPersistentCacheStatsSnapshot() :
-                { hitTotal: 0, missTotal: 0 };
-            const denom = pstats.hitTotal + pstats.missTotal;
-            const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+            // 获取缓存命中率
+            if (typeof this.global.getPersistentCacheStatsSnapshot === 'function') {
+                const pstats = this.global.getPersistentCacheStatsSnapshot();
+                const denom = pstats.hitTotal + pstats.missTotal;
+                hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+            } else {
+                // 回退到手动获取
+                if (this.global.extensionContext) {
+                    const context = this.global.extensionContext;
+                    const KEY_CACHE_HIT_TOTAL = "qqq_cache_hit_total";
+                    const KEY_CACHE_MISS_TOTAL = "qqq_cache_miss_total";
+
+                    const hitTotal = context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
+                    const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
+                    const denom = hitTotal + missTotal;
+                    hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
+                }
+            }
 
             const activeEngine = this.getActiveEngineInfo();
 
