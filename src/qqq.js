@@ -1121,8 +1121,8 @@ async function downloadVideosFromUrlCommand() {
 			global.logMessage('[AnchorLost] 锚点丢失触发取消', 'WARN');
 		});
 
-		const VideoDownloadController = require('./VideoDownloadController');
-		const controller = new VideoDownloadController(downloadContext, module.exports);
+		const Qvideo = require('./qvideo');
+		const controller = new Qvideo(downloadContext, module.exports);
 
 		// ★ 进度回调中检查锚点
 		const progressAdapter = async (pct, msg) => {
@@ -1158,8 +1158,8 @@ async function downloadVideosFromUrlCommand() {
 
 	// ★ 处理增强流程（此时前一个弹窗已关闭）
 	if (downloadResult && downloadResult.needEnhancedAction) {
-		const VideoDownloadController = require('./VideoDownloadController');
-		const controller = new VideoDownloadController(downloadContext, module.exports);
+		const Qvideo = require('./qvideo');
+		const controller = new Qvideo(downloadContext, module.exports);
 
 		// 调用 handleForbidden 并获取最终结果
 		let enhancedRes = await controller.handleForbidden(
@@ -1256,10 +1256,10 @@ async function activate(context) {
 	);
 
 	// 注册侧边栏 WebView 状态面板
-	const SidebarWebViewProvider = require('./sidebarWebViewProvider');
+	const SidebarWebViewProvider = require('./q4');
 	const sidebarProvider = new SidebarWebViewProvider(context, global);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('qqq.statusView', sidebarProvider, {
+		vscode.window.registerWebviewViewProvider('qqq.Viewq', sidebarProvider, {
 			webviewOptions: {
 				retainContextWhenHidden: true
 			}
@@ -1270,7 +1270,7 @@ async function activate(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
 			// 聚焦到侧边栏视图
-			vscode.commands.executeCommand('workbench.view.extension.qqqStatusView');
+			vscode.commands.executeCommand('workbench.view.extension.qqqView');
 		}),
 		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
@@ -1492,3 +1492,6 @@ process.on("unhandledRejection", (reason) => {
 		global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
 	}
 });
+
+// 导出扩展激活函数
+module.exports = exported;

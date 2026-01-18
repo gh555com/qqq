@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.27.0",
+  "version": "15.27.1",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -240,17 +240,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "qqqStatusView",
+          "id": "qqqView",
           "title": "qqq",
           "icon": "assets/q4.png"
         }
       ]
     },
     "views": {
-      "qqqStatusView": [
+      "qqqView": [
         {
-          "id": "qqq.statusView",
-          "name": "状态面板",
+          "id": "qqq.Viewq",
+          "name": "1",
           "type": "webview",
           "when": "true"
         }
