@@ -1,196 +1,493 @@
-可以“缓解”和“兜底”，但**没法 100% 在你扩展代码里把它“绕过去”**——因为你看到的这个报错，发生在 **VS Code 内核创建 webview/注册它自己的 service worker** 这一步，**在你的 webview HTML/JS 甚至还没机会执行之前**。也就是说：当它卡在 “register service worker” 的阶段，你的页面代码根本没上场，自然也就谈不上捕获/忽略那个错误然后继续跑。
+const vscode = require('vscode');
+const path = require('path');
+const fs = require('fs');
 
-不过你确实可以做到两件很实用的事，让用户体验上“即便没关干净也不至于死”：
-
-1. **尽量避免你自己的页面再去碰 Service Worker / PWA（避免雪上加霜）**
-2. **做“自愈流程”：检测 webview 没启动 → 自动重建一次 → 仍失败就给用户一个一键修复入口（重载窗口/提示清缓存）**
-
-下面给你一套我觉得够硬的方案（TypeScript，VS Code 扩展常规写法）。
-
----
-
-## 1) 你的页面里务必禁用自家的 SW 注册（如果你用了 PWA/Workbox 之类）
-
-很多前端模板会默认注册 SW。VS Code webview 环境里这类东西经常会引出各种玄学问题（哪怕不是你这次的根因，也建议禁掉）：
-
-```js
-// webview 侧：不要在 vscode webview 里注册你自己的 service worker
-const inVsCodeWebview =
-  location.protocol === 'vscode-webview:' || location.protocol === 'vscode-resource:';
-
-if (!inVsCodeWebview) {
-  // registerServiceWorker(); // 只在普通浏览器环境启用
-}
-```
-
----
-
-## 2) 扩展侧做“握手 + 超时判定 + 自动重建 + 一键重载窗口”
-
-思路：
-
-* webview 正常的话，页面加载后会立刻回一条 “ready” 消息给扩展
-* 扩展等待 N 秒没等到，就认为本次 webview 创建失败（包括你说的那种“没关干净导致 invalid state”）
-* 自动 dispose 重建一次；如果还是不行，就弹框给用户：**重载窗口（最有效）** / 打开帮助文档 /（可选）清理缓存指引
-
-### 扩展侧（extension.ts）
-
-```ts
-import * as vscode from "vscode";
-
-let panel: vscode.WebviewPanel | undefined;
-
-export function activate(context: vscode.ExtensionContext) {
-  context.subscriptions.push(
-    vscode.commands.registerCommand("yourExt.open", () => openWebview(context)),
-  );
-}
-
-async function openWebview(context: vscode.ExtensionContext) {
-  const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
-
-  if (panel) {
-    panel.reveal(column);
-    return;
-  }
-
-  // 第一次创建
-  await createPanelWithSelfHeal(context, column);
-}
-
-async function createPanelWithSelfHeal(context: vscode.ExtensionContext, column: vscode.ViewColumn) {
-  let retry = 0;
-
-  while (true) {
-    panel = vscode.window.createWebviewPanel(
-      "yourExt.view",
-      "Your Webview",
-      column,
-      {
-        enableScripts: true,
-        // 建议先别开 retainContextWhenHidden，减少奇怪状态残留的概率
-        retainContextWhenHidden: false,
-        localResourceRoots: [context.extensionUri],
-      },
-    );
-
-    panel.onDidDispose(() => {
-      panel = undefined;
-    });
-
-    const ok = await loadAndHandshake(panel, context, 2000);
-
-    if (ok) return;
-
-    // 没握手成功：dispose 掉，尝试重建一次
-    panel.dispose();
-    panel = undefined;
-
-    if (retry < 1) {
-      retry++;
-      continue;
+class SidebarWebViewProvider {
+    constructor(context, globalModule) {
+        this.context = context;
+        this.global = globalModule;
+        this._view = null;
+        this.updateInterval = null;
     }
 
-    // 仍失败：给用户操作入口（最靠谱的是 Reload Window）
-    const choice = await vscode.window.showErrorMessage(
-      "Webview 没能启动（常见原因是上次 VS Code/IDE 未正常退出导致 webview 内部状态异常）。",
-      "重载窗口",
-      "我知道了",
-    );
+    resolveWebviewView(webviewView, context, token) {
+        this._view = webviewView;
 
-    if (choice === "重载窗口") {
-      await vscode.commands.executeCommand("workbench.action.reloadWindow");
-    }
-    return;
-  }
-}
+        const extensionUri = vscode.Uri.file(this.context.extensionPath);
 
-async function loadAndHandshake(
-  panel: vscode.WebviewPanel,
-  context: vscode.ExtensionContext,
-  timeoutMs: number,
-): Promise<boolean> {
-  panel.webview.html = getHtml(panel.webview, context.extensionUri);
+        webviewView.webview.options = {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [extensionUri],
+            contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;`
+        };
 
-  return new Promise<boolean>((resolve) => {
-    let done = false;
-
-    const timer = setTimeout(() => {
-      if (!done) {
-        done = true;
-        resolve(false);
-      }
-    }, timeoutMs);
-
-    const sub = panel.webview.onDidReceiveMessage((msg) => {
-      if (msg?.type === "ready") {
-        clearTimeout(timer);
-        if (!done) {
-          done = true;
-          sub.dispose();
-          resolve(true);
+        // 设置面板图标
+        const iconPath = path.join(this.context.extensionPath, "assets", "q.gif");
+        if (fs.existsSync(iconPath)) {
+            webviewView.webview.iconPath = vscode.Uri.file(iconPath);
         }
-      }
-    });
-  });
-}
 
-function getHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
-  // 你自己的资源引用注意用 webview.asWebviewUri
-  // 这里演示最小可运行握手
-  const nonce = String(Date.now());
-  const csp = [
-    `default-src 'none';`,
-    `img-src ${webview.cspSource} https: data:;`,
-    `style-src ${webview.cspSource} 'unsafe-inline';`,
-    `script-src 'nonce-${nonce}';`,
-  ].join(" ");
+        this.updateContent();
 
-  return /* html */ `<!doctype html>
-<html>
+        // 定期更新数据
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+        }
+        this.updateInterval = setInterval(() => {
+            this.updateContent();
+        }, 5000);
+
+        // 处理来自 webview 的消息
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            switch (message.command) {
+                case "openSettings":
+                    vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+                    break;
+                case "refresh":
+                    this.updateContent();
+                    break;
+            }
+        });
+
+        // 清理定时器
+        webviewView.onDidDispose(() => {
+            if (this.updateInterval) {
+                clearInterval(this.updateInterval);
+                this.updateInterval = null;
+            }
+        });
+    }
+
+    updateContent() {
+        if (!this._view) return;
+
+        try {
+            // 使用现有状态栏的统一数据获取方式（唯一真理源）
+            const cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
+                { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+
+            // 直接调用 global.js 中的现有函数（如果可用）
+            let totalSeconds = 0;
+            let h = 0, m = 0;
+            let hitRate = 0;
+
+            // 尝试使用 global.js 导出的函数
+            if (typeof this.global.getTotalSecondsIncludingSession === 'function') {
+                totalSeconds = this.global.getTotalSecondsIncludingSession();
+                const timeResult = typeof this.global.formatCompactTime === 'function' ?
+                    this.global.formatCompactTime(totalSeconds) :
+                    { h: Math.floor(totalSeconds / 3600), m: Math.floor((totalSeconds % 3600) / 60) };
+                h = timeResult.h;
+                m = timeResult.m;
+            } else {
+                // 回退到手动计算
+                if (this.global.extensionContext) {
+                    const context = this.global.extensionContext;
+                    const KEY_TOTAL_DURATION = "qqq_stats_total_duration";
+                    const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
+
+                    const base = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+                    const lastFlush = context.globalState.get(KEY_LAST_FLUSH_TIME);
+
+                    if (lastFlush) {
+                        const diff = (Date.now() - lastFlush) / 1000;
+                        totalSeconds = base + (diff > 0 ? diff : 0);
+                    } else {
+                        totalSeconds = base;
+                    }
+
+                    h = Math.floor(totalSeconds / 3600);
+                    m = Math.floor((totalSeconds % 3600) / 60);
+                }
+            }
+
+            const cacheMB = cacheStats.totalSize / (1024 * 1024);
+
+            // 获取缓存命中率
+            if (typeof this.global.getPersistentCacheStatsSnapshot === 'function') {
+                const pstats = this.global.getPersistentCacheStatsSnapshot();
+                const denom = pstats.hitTotal + pstats.missTotal;
+                hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+            } else {
+                // 回退到手动获取
+                if (this.global.extensionContext) {
+                    const context = this.global.extensionContext;
+                    const KEY_CACHE_HIT_TOTAL = "qqq_cache_hit_total";
+                    const KEY_CACHE_MISS_TOTAL = "qqq_cache_miss_total";
+
+                    const hitTotal = context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
+                    const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
+                    const denom = hitTotal + missTotal;
+                    hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
+                }
+            }
+
+            const activeEngine = this.getActiveEngineInfo();
+
+            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine);
+        } catch (error) {
+            console.error('更新侧边栏内容失败:', error);
+            this._view.webview.html = this.getErrorContent(error.message);
+        }
+    }
+
+    getActiveEngineInfo() {
+        try {
+            if (this.global.getActiveEngineState) {
+                const state = this.global.getActiveEngineState(
+                    this.global.pythonBridge,
+                    this.global.rustBridge,
+                    this.global.shellBridge
+                );
+
+                let name, details;
+                switch (state.code) {
+                    case 'P':
+                        name = 'Python';
+                        details = 'Python 引擎';
+                        break;
+                    case 'R':
+                        name = 'Rust';
+                        details = 'Rust 引擎';
+                        break;
+                    default:
+                        name = 'Node';
+                        details = state.nodeMode === 'D' ? 'Shell daemon 模式' : 'Spawn 模式';
+                }
+
+                return {
+                    code: state.code,
+                    name: name,
+                    details: details
+                };
+            }
+        } catch (error) {
+            console.error('获取引擎信息失败:', error);
+        }
+
+        return {
+            code: 'N',
+            name: '未知',
+            details: '无法确定当前引擎'
+        };
+    }
+
+    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo) {
+        return `
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}">
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Webview</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>qqq 状态面板</title>
+    <style>
+        /* 自定义主题颜色 - 适配侧边栏 */
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50c878;
+            --accent-color: #ff6b6b;
+            --background-color: var(--vscode-sideBar-background, #1e1e1e);
+            --card-bg: var(--vscode-sideBarSectionHeader-background, #2d2d30);
+            --text-primary: var(--vscode-sideBar-foreground, #ffffff);
+            --text-secondary: var(--vscode-descriptionForeground, #cccccc);
+            --border-color: var(--vscode-sideBarSectionHeader-border, #3c3c3c);
+            --shadow-color: rgba(0, 0, 0, 0.3);
+        }
+
+        body {
+            margin: 0;
+            padding: 15px;
+            font-family: var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif);
+            font-size: var(--vscode-font-size, 13px);
+            background: var(--background-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--shadow-color);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.4em;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 1px 4px var(--shadow-color);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 3px 10px var(--shadow-color);
+        }
+
+        .stat-card.python { border-left: 3px solid #3776ab; }
+        .stat-card.rust { border-left: 3px solid #dea584; }
+        .stat-card.node { border-left: 3px solid #68a063; }
+        .stat-card.cache { border-left: 3px solid var(--secondary-color); }
+
+        .stat-title {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-size: 1.6em;
+            font-weight: 600;
+            margin: 8px 0;
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-desc {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+
+        .engine-info {
+            background: var(--card-bg);
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .engine-label {
+            font-size: 0.9em;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .engine-name {
+            font-size: 1.2em;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #357abd;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(74, 144, 226, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+            transform: translateY(-1px);
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            color: var(--text-secondary);
+            font-size: 0.8em;
+        }
+
+        /* 动画效果 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .stat-card {
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+    </style>
 </head>
 <body>
-  <div>Loading...</div>
+    <div class="container">
+        <div class="header">
+            <h1>📊 qqq 状态</h1>
+        </div>
 
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    // 页面只要能执行到这里，就说明 webview 真正加载起来了
-    vscode.postMessage({ type: "ready" });
-  </script>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">⏱️ 使用时间</div>
+                <div class="stat-value">${hours}<span style="font-size: 0.7em;">h</span> ${minutes}<span style="font-size: 0.7em;">m</span></div>
+                <div class="stat-desc">累计使用时长</div>
+            </div>
+
+            <div class="stat-card cache">
+                <div class="stat-title">💾 磁盘缓存</div>
+                <div class="stat-value">${cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
+                <div class="stat-desc">已缓存的数据量</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-title">🎯 缓存命中率</div>
+                <div class="stat-value">${hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
+                <div class="stat-desc">缓存效率指标</div>
+            </div>
+
+            <div class="stat-card ${engineInfo.name.includes('Python') ? 'python' : engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
+                <div class="stat-title">⚡ IO 引擎</div>
+                <div class="stat-value" style="font-size: 1.2em;">${engineInfo.name}</div>
+                <div class="stat-desc">当前运行引擎</div>
+            </div>
+        </div>
+
+        <div class="engine-info">
+            <div class="engine-label">引擎详情</div>
+            <div class="engine-name">${engineInfo.details}</div>
+        </div>
+
+        <div class="actions">
+            <button class="btn btn-primary" onclick="openSettings()">
+                ⚙️ 打开设置
+            </button>
+            <button class="btn btn-secondary" onclick="refreshData()">
+                🔄 刷新数据
+            </button>
+        </div>
+
+        <div class="footer">
+            <p>qqq 扩展 - 状态监控</p>
+            <p>每5秒自动更新</p>
+        </div>
+    </div>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+
+        function openSettings() {
+            vscode.postMessage({ command: 'openSettings' });
+        }
+
+        function refreshData() {
+            vscode.postMessage({ command: 'refresh' });
+        }
+
+        // 自动刷新数据
+        setInterval(refreshData, 5000);
+    </script>
 </body>
 </html>`;
+    }
+
+    getErrorContent(errorMessage) {
+        return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: var(--vscode-font-family, Arial, sans-serif);
+            font-size: var(--vscode-font-size, 13px);
+            background-color: var(--vscode-sideBar-background, #1e1e1e);
+            color: var(--vscode-sideBar-foreground, #ffffff);
+            padding: 20px;
+        }
+        .error {
+            color: var(--vscode-errorForeground, #f48771);
+            background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
+            border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .btn {
+            background: var(--vscode-button-background, #0e639c);
+            color: var(--vscode-button-foreground, #ffffff);
+            border: none;
+            padding: 8px 16px;
+            border-radius: 2px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .btn:hover {
+            background: var(--vscode-button-hoverBackground, #1177bb);
+        }
+    </style>
+</head>
+<body>
+    <h3>❌ 状态面板加载失败</h3>
+    <div class="error">
+        <strong>错误信息:</strong> ${errorMessage}
+    </div>
+    <button class="btn" onclick="location.reload()">🔄 重新加载</button>
+
+    <script>
+        const vscode = acquireVsCodeApi();
+    </script>
+</body>
+</html>`;
+    }
+
+    dispose() {
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+    }
 }
-```
 
-这套的效果是：
-
-* **webview 能起来** → 立刻握手成功
-* **webview 起不来**（你说那种 invalid state）→ **2 秒超时** → 自动重建一次 → 仍不行就让用户点“重载窗口”
-
-重载窗口 `workbench.action.reloadWindow` 是目前“扩展能调用的、最接近修复底层状态”的操作了。
-
----
-
-## 3) 能不能自动“清理 VS Code 的 Service Worker 缓存”来硬修？
-
-理论上你可以写代码去删那些目录，但我不建议默认这么干，原因很现实：
-
-* **路径因 IDE/发行版不同而不同**（Code / Insiders / VSCodium / Cursor…）
-* **Remote/WSL/SSH 场景下扩展跑在远端**，你删不到本地客户端的数据（而 webview 的问题恰恰在本地客户端）
-* **属于高侵入操作**：删错目录会让用户一堆扩展重新登录/丢缓存，用户会骂你（也可能影响上架审核/信任）
-
-如果你真想做，建议做成一个 **“可选命令 + modal 二次确认 + 只清理最小范围”** 的“修复工具”，而不是自动执行。
-
----
-
-## 一句话结论
-
-* **彻底“绕过”不行**：因为错误发生在 VS Code 内核创建 webview 的阶段，你的页面代码还没机会跑。
-* **能做得很接近“即便没关干净也能用”**：用“握手超时 → 自动重建 → 一键 Reload Window”的自愈流程，把“打不开”变成“点一下就恢复”。
-
-如果你把你扩展的 webview 形态说一下（WebviewPanel 还是 WebviewView？有没有 Remote 场景？用不用 React/Vite/Workbox？），我可以把上面这套再贴合到你项目结构里（含资源加载、CSP、消息通道、热重载策略）。
+module.exports = SidebarWebViewProvider;

@@ -250,7 +250,7 @@
       "qqqStatusView": [
         {
           "id": "qqq.statusView",
-          "name": "111",
+          "name": "状态面板",
           "type": "webview",
           "when": "true"
         }
