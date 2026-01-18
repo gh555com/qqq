@@ -8,7 +8,7 @@ class LocalAIReleaseAssistant {
     constructor() {
         this.repoPath = process.cwd();
         console.log('🤖 本地AI发布助手已启动');
-        console.log('请输入指令：q3 / q1 / q2');
+        console.log('请键入指令：q3 / q1 / q2');
     }
 
     // 执行git命令

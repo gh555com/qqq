@@ -2,12 +2,21 @@ const vscode = require('vscode');
 const path = require('path');
 const fs = require('fs');
 
+// 从 global.js 导入 extensionContext
+const globalModule = require('./global');
+let extensionContext = globalModule.extensionContext;
+
 class SidebarWebViewProvider {
     constructor(context, globalModule) {
         this.context = context;
         this.global = globalModule;
         this._view = null;
         this.updateInterval = null;
+
+        // 确保可以访问 extensionContext
+        if (!this.global.extensionContext && typeof extensionContext !== 'undefined') {
+            this.global.extensionContext = extensionContext;
+        }
     }
 
     resolveWebviewView(webviewView, context, token) {
@@ -28,19 +37,19 @@ class SidebarWebViewProvider {
             webviewView.webview.iconPath = vscode.Uri.file(iconPath);
         }
 
-        this.updateContent();
-
-        // 定期更新数据
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-        }
-        this.updateInterval = setInterval(() => {
-            this.updateContent();
-        }, 5000);
+        // 实现握手机制检测 webview 是否成功加载
+        this.setupWebviewHandshake(webviewView);
 
         // 处理来自 webview 的消息
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
+                case "ready":
+                    // 握手成功，清除超时定时器
+                    if (this.webviewHandshakeTimeout) {
+                        clearTimeout(this.webviewHandshakeTimeout);
+                        this.webviewHandshakeTimeout = null;
+                    }
+                    break;
                 case "openSettings":
                     vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
                     break;
@@ -56,7 +65,56 @@ class SidebarWebViewProvider {
                 clearInterval(this.updateInterval);
                 this.updateInterval = null;
             }
+            if (this.webviewHandshakeTimeout) {
+                clearTimeout(this.webviewHandshakeTimeout);
+                this.webviewHandshakeTimeout = null;
+            }
         });
+    }
+
+    setupWebviewHandshake(webviewView) {
+        // 立即更新内容
+        this.updateContent();
+
+        // 设置握手超时检测
+        const HANDSHAKE_TIMEOUT = 2000; // 2秒超时
+
+        this.webviewHandshakeTimeout = setTimeout(async () => {
+            // 超时：webview 可能没有成功加载
+            console.log('Webview 握手超时，尝试重新加载...');
+
+            // 尝试重新加载
+            try {
+                this.updateContent();
+
+                // 再次设置超时检测
+                setTimeout(() => {
+                    if (this._view) {
+                        console.log('Webview 重新加载后仍未响应，显示错误信息');
+                        // 显示错误信息，提供重载窗口的选项
+                        vscode.window.showErrorMessage(
+                            'Webview 没能启动（常见原因是上次 VS Code/IDE 未正常退出导致 webview 内部状态异常）。',
+                            '重载窗口',
+                            '我知道了'
+                        ).then(choice => {
+                            if (choice === '重载窗口') {
+                                vscode.commands.executeCommand('workbench.action.reloadWindow');
+                            }
+                        });
+                    }
+                }, HANDSHAKE_TIMEOUT);
+            } catch (error) {
+                console.error('重新加载 webview 失败:', error);
+            }
+        }, HANDSHAKE_TIMEOUT);
+
+        // 设置定期更新
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+        }
+        this.updateInterval = setInterval(() => {
+            this.updateContent();
+        }, 5000);
     }
 
     updateContent() {
@@ -64,63 +122,94 @@ class SidebarWebViewProvider {
 
         try {
             // 使用现有状态栏的统一数据获取方式（唯一真理源）
-            const cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
+            let cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
                 { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 
-            // 直接调用 global.js 中的现有函数（如果可用）
+            // 如果缓存统计为零，尝试直接计算缓存目录的实际大小
+            if (cacheStats.totalSize === 0) {
+                cacheStats = this.calculateActualCacheSize();
+            }
+
+            // 完全模仿状态栏的实现方式
             let totalSeconds = 0;
             let h = 0, m = 0;
             let hitRate = 0;
 
-            // 尝试使用 global.js 导出的函数
-            if (typeof this.global.getTotalSecondsIncludingSession === 'function') {
-                totalSeconds = this.global.getTotalSecondsIncludingSession();
-                const timeResult = typeof this.global.formatCompactTime === 'function' ?
-                    this.global.formatCompactTime(totalSeconds) :
-                    { h: Math.floor(totalSeconds / 3600), m: Math.floor((totalSeconds % 3600) / 60) };
-                h = timeResult.h;
-                m = timeResult.m;
-            } else {
-                // 回退到手动计算
-                if (this.global.extensionContext) {
-                    const context = this.global.extensionContext;
-                    const KEY_TOTAL_DURATION = "qqq_stats_total_duration";
-                    const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
+            console.log('[调试] this.context:', this.context);
 
-                    const base = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-                    const lastFlush = context.globalState.get(KEY_LAST_FLUSH_TIME);
+            // 直接使用传入的 context
+            if (this.context && this.context.globalState) {
+                const context = this.context;
+                const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
+                const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
 
-                    if (lastFlush) {
-                        const diff = (Date.now() - lastFlush) / 1000;
-                        totalSeconds = base + (diff > 0 ? diff : 0);
-                    } else {
-                        totalSeconds = base;
-                    }
-
-                    h = Math.floor(totalSeconds / 3600);
-                    m = Math.floor((totalSeconds % 3600) / 60);
+                // 调试：检查所有相关的键
+                console.log('[调试] 检查所有状态键:');
+                try {
+                    const allKeys = context.globalState.keys();
+                    console.log('[调试] 所有键:', allKeys);
+                } catch (e) {
+                    console.log('[调试] 获取键列表失败:', e);
                 }
+
+                const keysToCheck = [
+                    "qqq_stats_total_seconds",
+                    "qqq_stats_total_duration",
+                    "qqq_stats_session_start",
+                    "qqq_stats_last_flush",
+                    "qqq_stats_cache_hit_total",
+                    "qqq_stats_cache_miss_total"
+                ];
+
+                keysToCheck.forEach(key => {
+                    try {
+                        const value = context.globalState.get(key);
+                        console.log(`[调试] ${key}:`, value);
+                    } catch (e) {
+                        console.log(`[调试] 获取 ${key} 失败:`, e);
+                    }
+                });
+
+                const base = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+                const lastFlush = context.globalState.get(KEY_LAST_FLUSH_TIME);
+
+                console.log('[调试] base:', base, 'lastFlush:', lastFlush);
+
+                if (lastFlush) {
+                    const diff = (Date.now() - lastFlush) / 1000;
+                    totalSeconds = base + (diff > 0 ? diff : 0);
+                } else {
+                    totalSeconds = base;
+                }
+
+                // 完全相同的格式化逻辑
+                h = Math.floor(totalSeconds / 3600);
+                m = Math.floor((totalSeconds % 3600) / 60);
+
+                console.log('[调试] totalSeconds:', totalSeconds, 'h:', h, 'm:', m);
+            } else {
+                console.log('[调试] context 不可用');
+                console.log('[调试] this.context:', this.context);
+                console.log('[调试] this.context.globalState:', this.context?.globalState);
             }
 
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
+            console.log('[调试] cacheStats:', cacheStats, 'cacheMB:', cacheMB);
 
-            // 获取缓存命中率
-            if (typeof this.global.getPersistentCacheStatsSnapshot === 'function') {
-                const pstats = this.global.getPersistentCacheStatsSnapshot();
-                const denom = pstats.hitTotal + pstats.missTotal;
-                hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+            // 直接实现缓存命中率计算
+            if (this.context && this.context.globalState) {
+                const context = this.context;
+                const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
+                const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
+
+                const hitTotal = context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
+                const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
+                const denom = hitTotal + missTotal;
+                hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
+
+                console.log('[调试] hitTotal:', hitTotal, 'missTotal:', missTotal, 'hitRate:', hitRate);
             } else {
-                // 回退到手动获取
-                if (this.global.extensionContext) {
-                    const context = this.global.extensionContext;
-                    const KEY_CACHE_HIT_TOTAL = "qqq_cache_hit_total";
-                    const KEY_CACHE_MISS_TOTAL = "qqq_cache_miss_total";
-
-                    const hitTotal = context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
-                    const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
-                    const denom = hitTotal + missTotal;
-                    hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
-                }
+                console.log('[调试] 缓存统计: context 不可用');
             }
 
             const activeEngine = this.getActiveEngineInfo();
@@ -132,33 +221,100 @@ class SidebarWebViewProvider {
         }
     }
 
+    calculateActualCacheSize() {
+        try {
+            // 获取缓存目录路径
+            const cacheDirName = "qqq_cache";
+            const cacheDir = path.join(this.context.globalStorageUri.fsPath, cacheDirName);
+
+            console.log('[调试] 缓存目录路径:', cacheDir);
+
+            // 检查目录是否存在
+            if (!fs.existsSync(cacheDir)) {
+                console.log('[调试] 缓存目录不存在');
+                return { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+            }
+
+            // 递归计算目录大小
+            let totalSize = 0;
+            let fileCount = 0;
+
+            function calculateDirSize(dirPath) {
+                try {
+                    const items = fs.readdirSync(dirPath);
+                    for (const item of items) {
+                        const itemPath = path.join(dirPath, item);
+                        const stats = fs.statSync(itemPath);
+
+                        if (stats.isDirectory()) {
+                            calculateDirSize(itemPath);
+                        } else {
+                            totalSize += stats.size;
+                            fileCount++;
+                        }
+                    }
+                } catch (error) {
+                    console.log('[调试] 计算目录大小时出错:', error);
+                }
+            }
+
+            calculateDirSize(cacheDir);
+
+            console.log('[调试] 实际缓存大小计算结果:', {
+                totalSize,
+                fileCount,
+                cacheDir
+            });
+
+            return {
+                totalSize: totalSize,
+                fileCount: fileCount,
+                hitCount: 0, // 这些需要从全局状态获取
+                missCount: 0
+            };
+
+        } catch (error) {
+            console.error('[调试] 计算实际缓存大小失败:', error);
+            return { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+        }
+    }
+
     getActiveEngineInfo() {
         try {
-            if (this.global.getActiveEngineState) {
-                const state = this.global.getActiveEngineState(
+            // 直接使用全局函数获取引擎信息
+            if (this.global.getActiveEngineCode && this.global.getActiveEngineName) {
+                const code = this.global.getActiveEngineCode(
                     this.global.pythonBridge,
                     this.global.rustBridge,
                     this.global.shellBridge
                 );
 
-                let name, details;
-                switch (state.code) {
+                const name = this.global.getActiveEngineName(
+                    this.global.pythonBridge,
+                    this.global.rustBridge,
+                    this.global.shellBridge
+                );
+
+                let details;
+                switch (code) {
                     case 'P':
-                        name = 'Python';
                         details = 'Python 引擎';
                         break;
                     case 'R':
-                        name = 'Rust';
                         details = 'Rust 引擎';
                         break;
                     default:
-                        name = 'Node';
-                        details = state.nodeMode === 'D' ? 'Shell daemon 模式' : 'Spawn 模式';
+                        // 对于 Node 引擎，需要额外判断模式
+                        if (this.global.shellBridge?.isAvailable?.()) {
+                            details = 'Shell daemon 模式';
+                        } else {
+                            details = 'Spawn 模式';
+                        }
                 }
 
                 return {
-                    code: state.code,
-                    name: name,
+                    code: code,
+                    name: name.includes('Node') ? 'Node' : name,
                     details: details
                 };
             }
@@ -416,6 +572,9 @@ class SidebarWebViewProvider {
 
     <script>
         const vscode = acquireVsCodeApi();
+
+        // 发送 ready 消息完成握手
+        vscode.postMessage({ command: 'ready' });
 
         function openSettings() {
             vscode.postMessage({ command: 'openSettings' });
