@@ -2377,12 +2377,11 @@ function showStatusPanel() {
 
 	statusPanel = vscode.window.createWebviewPanel(
 		"qqqStatus",
-		"qqq 状态面板",
+		"qqq 状态概览",
 		vscode.ViewColumn.Active,
 		{
 			enableScripts: true,
 			retainContextWhenHidden: true,
-			enableFindWidget: true
 		}
 	);
 
@@ -2399,54 +2398,183 @@ function showStatusPanel() {
 		statusPanel = null;
 	});
 
-	// 获取当前状态数据
-	const cacheStats = _cacheStatsGetter ? _cacheStatsGetter() : { totalSize: 0 };
-	const totalSeconds = getTotalSecondsIncludingSession();
-	const { h, m } = formatCompactTime(totalSeconds);
-	const cacheMB = cacheStats.totalSize / (1024 * 1024);
-
-	const pstats = getPersistentCacheStatsSnapshot();
-	const denom = pstats.hitTotal + pstats.missTotal;
-	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
-
-	const activeEngine = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
-	const engineTag = activeEngine.code === "P" ? "Python" :
-		activeEngine.code === "R" ? "Rust" :
-			`Node (${activeEngine.nodeMode === "D" ? "Shell daemon" : "Spawn"})`;
-
-	statusPanel.webview.html = getStatusPanelContent(h, m, cacheMB, hitRate, engineTag);
+	statusPanel.webview.html = getTestCardContent();
 
 	// 处理面板消息
 	statusPanel.webview.onDidReceiveMessage(async (message) => {
 		switch (message.command) {
 			case "openSettings":
-				vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-				break;
-			case "refresh":
-				// 刷新面板内容
-				const newCacheStats = _cacheStatsGetter ? _cacheStatsGetter() : { totalSize: 0 };
-				const newTotalSeconds = getTotalSecondsIncludingSession();
-				const { h: newH, m: newM } = formatCompactTime(newTotalSeconds);
-				const newCacheMB = newCacheStats.totalSize / (1024 * 1024);
-
-				const newPstats = getPersistentCacheStatsSnapshot();
-				const newDenom = newPstats.hitTotal + newPstats.missTotal;
-				const newHitRate = newDenom > 0 ? (newPstats.hitTotal / newDenom) * 100 : 0;
-
-				const newActiveEngine = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
-				const newEngineTag = newActiveEngine.code === "P" ? "Python" :
-					newActiveEngine.code === "R" ? "Rust" :
-						`Node (${newActiveEngine.nodeMode === "D" ? "Shell daemon" : "Spawn"})`;
-
-				statusPanel.webview.html = getStatusPanelContent(newH, newM, newCacheMB, newHitRate, newEngineTag);
-				break;
-			case "close":
-				if (statusPanel && statusPanelAlive) {
-					statusPanel.dispose();
-				}
+				vscode.commands.executeCommand("qqq.allSettings");
+				if (statusPanel) statusPanel.dispose();
 				break;
 		}
 	});
+}
+
+function getTestCardContent() {
+	return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<style>
+		body {
+			margin: 0;
+			padding: 0;
+			display: flex;
+			justify-content: center;
+			align-items: center;
+			height: 100vh;
+			background-color: transparent;
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+		}
+		.card {
+			background-color: #fdf6e3; /* Solarized Base3 */
+			border: 1px solid #eee8d5; /* Solarized Base2 */
+			border-radius: 12px;
+			box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+			width: 340px;
+			padding: 20px;
+			text-align: left;
+			animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+		}
+		@keyframes slideUp {
+			from { transform: translateY(10px); opacity: 0; }
+			to { transform: translateY(0); opacity: 1; }
+		}
+		.header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 20px;
+		}
+		.title {
+			color: #073642; /* Solarized Base02 */
+			font-size: 16px;
+			font-weight: 600;
+		}
+		.refresh-icon {
+			color: #93a1a1; /* Solarized Base1 */
+			cursor: pointer;
+		}
+		.item {
+			margin-bottom: 16px;
+		}
+		.item-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 6px;
+			font-size: 13px;
+			color: #586e75; /* Solarized Base01 */
+		}
+		.tag {
+			background-color: #eee8d5;
+			color: #859900; /* Solarized Green */
+			padding: 2px 6px;
+			border-radius: 4px;
+			font-size: 11px;
+			margin-left: 8px;
+		}
+		.progress-bg {
+			height: 6px;
+			background-color: #eee8d5;
+			border-radius: 3px;
+			overflow: hidden;
+		}
+		.progress-fill {
+			height: 100%;
+			background-color: #859900; /* Solarized Green */
+			width: 96%;
+		}
+		.info-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			font-size: 13px;
+			color: #586e75;
+			margin-top: 12px;
+		}
+		.link {
+			color: #268bd2; /* Solarized Blue */
+			text-decoration: none;
+			font-weight: 500;
+		}
+		.footer {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-top: 20px;
+			padding-top: 15px;
+			border-top: 1px solid #eee8d5;
+		}
+		.footer-text {
+			font-size: 13px;
+			color: #586e75;
+		}
+		.orange-btn {
+			background-color: #cb4b16; /* Solarized Orange */
+			color: white;
+			border: none;
+			padding: 6px 16px;
+			border-radius: 6px;
+			font-size: 13px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: all 0.2s;
+		}
+		.orange-btn:hover {
+			opacity: 0.9;
+			transform: scale(1.02);
+		}
+	</style>
+</head>
+<body>
+	<div class="card">
+		<div class="header">
+			<div class="title">用量概览</div>
+			<div class="refresh-icon">↻</div>
+		</div>
+		
+		<div class="item">
+			<div class="item-header">
+				<div>套餐内 Credits <span class="tag">Pro Plus</span></div>
+				<div>96% &nbsp; 5750 / 6000</div>
+			</div>
+			<div class="progress-bg">
+				<div class="progress-fill"></div>
+			</div>
+		</div>
+
+		<div class="info-row">
+			<div>将于 2026年2月10日 续订</div>
+			<a href="#" class="link">查看详情</a>
+		</div>
+
+		<div class="item" style="margin-top: 12px;">
+			<div class="item-header">
+				<div>附加 Credits</div>
+				<div>100% &nbsp; 154 / 154</div>
+			</div>
+			<div class="progress-bg">
+				<div class="progress-fill" style="width: 100%;"></div>
+			</div>
+		</div>
+
+		<div class="footer">
+			<div class="footer-text">测试性配置访问</div>
+			<button class="orange-btn" onclick="openSettings()">All Settings</button>
+		</div>
+	</div>
+	<script>
+		const vscode = acquireVsCodeApi();
+		function openSettings() {
+			vscode.postMessage({ command: 'openSettings' });
+		}
+	</script>
+</body>
+</html>
+	`;
 }
 
 function getStatusPanelContent(hours, minutes, cacheMB, hitRate, engineName) {
