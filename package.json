@@ -164,7 +164,7 @@
             "markdownEnumDescriptions": [
               "none",
               "open file",
-              "✎open folder   ✎rename   ✎open file "
+              "✎open folder  ✎rename  ✎open file "
             ],
             "markdownDescription": "👁️ codelens level："
           },
@@ -241,7 +241,7 @@
       "activitybar": [
         {
           "id": "qqqStatusView",
-          "title": " qqq ",
+          "title": "qqq",
           "icon": "assets/q4.png"
         }
       ]
@@ -250,7 +250,7 @@
       "qqqStatusView": [
         {
           "id": "qqq.statusView",
-          "name": "状态面板",
+          "name": "111",
           "type": "webview",
           "when": "true"
         }
