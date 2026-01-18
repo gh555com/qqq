@@ -3050,5 +3050,14 @@ async function deactivate() {
 	// 用户时长统计由 qqq.js 中控统一管理
 }
 
-module.exports = { activate, deactivate };
+// 导出工具函数供其他模块使用
+const q1Utils = {
+	calculateBlankLinesExact,
+	getMediaInfo,
+	getFrameConfig,
+	LARGE_PREVIEW_HEIGHT,
+	PREVIEW_BORDER
+};
+
+module.exports = { activate, deactivate, ...q1Utils };
 

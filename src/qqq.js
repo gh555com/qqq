@@ -8,6 +8,7 @@ const cp = require("child_process"); // Retain for ffmpeg/spawn if needed by q3 
 const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
+const q1 = require("./q1");
 
 // 引用 global.js 的核心对象
 const {
@@ -1057,7 +1058,32 @@ async function downloadVideosFromUrlCommand() {
 				const rel = path.relative(currentDocDir, f).replace(/\\/g, '/');
 				return `/\\${rel}\\/`;
 			});
-			const newText = relativePaths.join(eol);
+			// 按照 q1.js 的洁癖标准处理每个视频文件
+			let replacement = "";
+			for (let i = 0; i < res.landedFiles.length; i++) {
+				const f = res.landedFiles[i];
+				const relPath = path.relative(currentDocDir, f).replace(/\\/g, '/');
+				const isLastItem = i === res.landedFiles.length - 1;
+
+				// 添加文件路径
+				if (i > 0) replacement += eol;
+				replacement += `/\\${relPath}\\/`;
+
+				// 为视频文件计算精确的空行数（遵循洁癖标准）
+				let pxHeight = q1.LARGE_PREVIEW_HEIGHT;
+				try {
+					let mtimeMs = 0;
+					try { mtimeMs = fs.statSync(f).mtimeMs; } catch { }
+					const info = await q1.getMediaInfo(f, mtimeMs || Date.now());
+					const { height } = q1.getFrameConfig(info);
+					pxHeight = height;
+				} catch { }
+
+				let gapBelow = q1.calculateBlankLinesExact(pxHeight, isLastItem);
+				if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
+				replacement += eol.repeat(gapBelow);
+			}
+			const newText = replacement;
 
 			// 替换锚点
 			const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);

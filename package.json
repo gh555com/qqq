@@ -152,14 +152,8 @@
             "maximum": 218,
             "markdownDescription": "👁️ 文本胶片字体大小："
           },
-          "qqq.takeOverCodelensStyle": {
-            "order": 60,
-            "type": "boolean",
-            "default": true,
-            "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
-          },
           "qqq.codelensLevel": {
-            "order": 70,
+            "order": 60,
             "type": "string",
             "default": "3",
             "enum": [
@@ -168,11 +162,17 @@
               "3"
             ],
             "markdownEnumDescriptions": [
-              "0: 没有任何 codelens 打印",
-              "1: 只打印文件名（即现在 选三 的时候，rename 右边那一项）",
-              "3: 等同于现在的 codelens 打印"
+              "none",
+              "open file",
+              "✎open folder   ✎rename   ✎open file "
             ],
             "markdownDescription": "👁️ codelens level："
+          },
+          "qqq.takeOverCodelensStyle": {
+            "order": 70,
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
           }
         }
       },
