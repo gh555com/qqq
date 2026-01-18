@@ -2708,9 +2708,14 @@ class FileCodeLensProvider {
 				spacePart = "";
 			}
 
+			let titlePrefix = "✎";
+			if (codeLensLevel === "1") {
+				titlePrefix = "";
+			}
+
 			lenses.push(
 				new vscode.CodeLens(r, {
-					title: `✎( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
+					title: `${titlePrefix}( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
 					command: "qqq.openFile",
 					arguments: [absPath],
 					tooltip: tooltipText,
