@@ -1255,13 +1255,26 @@ async function activate(context) {
 		})
 	);
 
+	// 注册侧边栏 WebView 状态面板
+	const SidebarWebViewProvider = require('./sidebarWebViewProvider');
+	const sidebarProvider = new SidebarWebViewProvider(context, global);
 	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider('qqq.statusView', sidebarProvider, {
+			webviewOptions: {
+				retainContextWhenHidden: true
+			}
+		})
+	);
+
+	// 保留原来的命令，但现在只是聚焦到侧边栏
+	context.subscriptions.push(
+		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
+			// 聚焦到侧边栏视图
+			vscode.commands.executeCommand('workbench.view.extension.qqqStatusView');
+		}),
 		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
 		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-		}),
-		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
-			global.showStatusPanel();
 		}),
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
 		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
