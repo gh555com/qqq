@@ -9,6 +9,7 @@ const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
+const ClipboardHistoryManager = require("./clipboard-history");
 
 // 引用 global.js 的核心对象
 const {
@@ -50,6 +51,7 @@ let extensionContext = null;
 let cacheDir = null;
 let cacheMeta = null;
 let _statusBarTimer = null;
+let clipboardHistoryManager = null;
 
 // ============================================================================
 // Cache Meta Logic (Retained in qqq)
@@ -1225,6 +1227,11 @@ async function activate(context) {
 	global.init(context);
 
 	initCache(context);
+
+	// 初始化剪切板历史管理器
+	clipboardHistoryManager = new ClipboardHistoryManager(context);
+	global.clipboardHistoryManager = clipboardHistoryManager; // 暴露给全局使用
+	clipboardHistoryManager.startWatching();
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
 	global.setLogPath(path.join(cacheDir, "err.log"));
 	global.initStatusBar();
@@ -1339,6 +1346,11 @@ async function deactivate() {
 	pythonBridge.stop();
 	rustBridge.stop();
 	shellBridge.stop();
+
+	// 停止剪切板监听
+	if (clipboardHistoryManager) {
+		clipboardHistoryManager.dispose();
+	}
 
 	global.finishUserTracking();
 
@@ -1493,5 +1505,4 @@ process.on("unhandledRejection", (reason) => {
 	}
 });
 
-// 导出扩展激活函数
-module.exports = exported;
+

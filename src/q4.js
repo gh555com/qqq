@@ -52,6 +52,26 @@ class SidebarWebViewProvider {
                 case "refresh":
                     this.updateContent();
                     break;
+                case "copyToClipboard":
+                    // 复制历史项到剪切板
+                    if (this.global.clipboardHistoryManager && message.itemId) {
+                        const item = this.global.clipboardHistoryManager.getItemById(message.itemId);
+                        if (item) {
+                            await this.global.clipboardHistoryManager.copyToClipboard(item.content);
+                            vscode.window.showInformationMessage('已复制到剪切板');
+                        }
+                    }
+                    break;
+                case "deleteHistoryItem":
+                    // 删除历史项
+                    if (this.global.clipboardHistoryManager && message.itemId) {
+                        const success = this.global.clipboardHistoryManager.removeItem(message.itemId);
+                        if (success) {
+                            this.updateContent(); // 刷新显示
+                            vscode.window.showInformationMessage('已删除历史记录');
+                        }
+                    }
+                    break;
             }
         });
 
@@ -68,22 +88,49 @@ class SidebarWebViewProvider {
         if (!this._view) return;
 
         try {
+            // 获取剪切板历史数据
+            let clipboardHistory = [];
+            if (this.global.clipboardHistoryManager) {
+                clipboardHistory = this.global.clipboardHistoryManager.getHistory(20); // 显示最近20条
+            }
+
             // 使用现有状态栏的统一数据获取方式（唯一真理源）
             let cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
                 { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 
+            // 测试打印：缓存统计获取来源
+            console.log('📊 缓存统计来源:', this.global._cacheStatsGetter ? '唯一真理源（全局函数）' : '默认值');
+
             // 如果缓存统计为零，尝试直接计算缓存目录的实际大小
             if (cacheStats.totalSize === 0) {
+                console.log('📊 缓存统计为零，使用降级方案：直接计算目录大小');
                 cacheStats = this.calculateActualCacheSize();
             }
 
-            // 完全模仿状态栏的实现方式
+            // 使用统一的全局函数获取数据（唯一真理来源）
             let totalSeconds = 0;
             let h = 0, m = 0;
             let hitRate = 0;
 
-            // 直接使用传入的 context
-            if (this.context && this.context.globalState) {
+            // 优先使用全局的使用时间计算函数
+            if (this.global && this.global.getTotalSecondsIncludingSession) {
+                console.log('⏱️ 使用时间来源: 唯一真理源（全局函数 getTotalSecondsIncludingSession）');
+                totalSeconds = this.global.getTotalSecondsIncludingSession();
+                // 使用全局的时间格式化函数
+                if (this.global.formatCompactTime) {
+                    console.log('⏱️ 时间格式化来源: 唯一真理源（全局函数 formatCompactTime）');
+                    const timeObj = this.global.formatCompactTime(totalSeconds);
+                    h = timeObj.h;
+                    m = timeObj.m;
+                } else {
+                    console.log('⏱️ 时间格式化来源: 降级方案（自己实现）');
+                    // 降级：自己格式化时间
+                    h = Math.floor(totalSeconds / 3600);
+                    m = Math.floor((totalSeconds % 3600) / 60);
+                }
+            } else if (this.context && this.context.globalState) {
+                console.log('⏱️ 使用时间来源: 最终降级方案（自己获取）');
+                // 最终降级：自己获取使用时间
                 const context = this.context;
                 const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
                 const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
@@ -98,15 +145,23 @@ class SidebarWebViewProvider {
                     totalSeconds = base;
                 }
 
-                // 完全相同的格式化逻辑
                 h = Math.floor(totalSeconds / 3600);
                 m = Math.floor((totalSeconds % 3600) / 60);
+            } else {
+                console.log('⏱️ 使用时间来源: 初始默认值（0）');
             }
 
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
 
-            // 直接实现缓存命中率计算
-            if (this.context && this.context.globalState) {
+            // 优先使用全局的缓存命中率函数
+            if (this.global && this.global.getPersistentCacheStatsSnapshot) {
+                console.log('🎯 缓存命中率来源: 唯一真理源（全局函数 getPersistentCacheStatsSnapshot）');
+                const pstats = this.global.getPersistentCacheStatsSnapshot();
+                const denom = pstats.hitTotal + pstats.missTotal;
+                hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
+            } else if (this.context && this.context.globalState) {
+                console.log('🎯 缓存命中率来源: 最终降级方案（自己计算）');
+                // 最终降级：自己计算缓存命中率
                 const context = this.context;
                 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
                 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
@@ -115,11 +170,14 @@ class SidebarWebViewProvider {
                 const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
                 const denom = hitTotal + missTotal;
                 hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
+            } else {
+                console.log('🎯 缓存命中率来源: 初始默认值（0%）');
             }
 
             const activeEngine = this.getActiveEngineInfo();
 
-            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine);
+            // 传递clipboardHistory参数
+            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory);
         } catch (error) {
             this._view.webview.html = this.getErrorContent(error.message);
         }
@@ -223,7 +281,81 @@ class SidebarWebViewProvider {
         };
     }
 
-    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo) {
+    /**
+     * 获取内容类型显示名称
+     */
+    getTypeDisplayName(type) {
+        const typeMap = {
+            'text': '文本',
+            'url': '链接',
+            'file': '文件',
+            'email': '邮箱',
+            'code': '代码'
+        };
+        return typeMap[type] || '未知';
+    }
+
+    /**
+     * 获取格式化时间显示
+     */
+    getFormattedTime(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diffInSeconds = Math.floor((now - date) / 1000);
+
+        if (diffInSeconds < 60) {
+            return '刚刚';
+        } else if (diffInSeconds < 3600) {
+            return `${Math.floor(diffInSeconds / 60)}分钟前`;
+        } else if (diffInSeconds < 86400) {
+            return `${Math.floor(diffInSeconds / 3600)}小时前`;
+        } else {
+            return date.toLocaleDateString('zh-CN');
+        }
+    }
+
+    /**
+     * HTML转义
+     */
+    escapeHtml(text) {
+        if (!text) return '';
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = []) {
+        // 构建剪切板历史HTML
+        let historyHtml = '';
+        if (clipboardHistory.length > 0) {
+            historyHtml = clipboardHistory.map(item => `
+                <div class="history-item" data-id="${item.id}">
+                    <div class="item-header">
+                        <span class="item-type type-${item.type}">
+                            ${this.getTypeDisplayName(item.type)}
+                        </span>
+                        <span class="item-time">${this.getFormattedTime(item.timestamp)}</span>
+                    </div>
+                    <div class="item-preview">${this.escapeHtml(item.preview)}</div>
+                    <div class="item-actions">
+                        <button class="action-btn copy-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
+                        <button class="action-btn delete-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            historyHtml = `
+                <div class="empty-history">
+                    <div class="empty-history-icon">📭</div>
+                    <div>暂无剪切板历史记录</div>
+                    <div style="font-size: 0.8em; margin-top: 5px;">复制内容到剪切板即可开始记录</div>
+                </div>
+            `;
+        }
+
         return `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -396,6 +528,148 @@ class SidebarWebViewProvider {
             font-size: 0.8em;
         }
 
+        /* 剪切板历史样式 */
+        .clipboard-section {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .clipboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .clipboard-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .clipboard-stats {
+            font-size: 0.85em;
+            color: var(--text-secondary);
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .history-item {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .history-item:hover {
+            transform: translateX(4px);
+            border-color: var(--primary-color);
+            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
+        }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .item-type {
+            font-size: 0.75em;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .type-text { background: #4a90e220; color: #4a90e2; }
+        .type-url { background: #50c87820; color: #50c878; }
+        .type-file { background: #ff6b6b20; color: #ff6b6b; }
+        .type-email { background: #9b59b620; color: #9b59b6; }
+        .type-code { background: #f39c1220; color: #f39c12; }
+
+        .item-time {
+            font-size: 0.75em;
+            color: var(--text-secondary);
+        }
+
+        .item-preview {
+            font-size: 0.9em;
+            color: var(--text-primary);
+            line-height: 1.4;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 80px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .item-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .history-item:hover .item-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            padding: 4px 8px;
+            font-size: 0.75em;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .copy-btn {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .copy-btn:hover {
+            background: #357abd;
+            transform: translateY(-1px);
+        }
+
+        .delete-btn {
+            background: #ff4757;
+            color: white;
+        }
+
+        .delete-btn:hover {
+            background: #ff2e42;
+            transform: translateY(-1px);
+        }
+
+        .empty-history {
+            text-align: center;
+            padding: 30px 20px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .empty-history-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+
         /* 动画效果 */
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -410,6 +684,10 @@ class SidebarWebViewProvider {
         .stat-card:nth-child(2) { animation-delay: 0.2s; }
         .stat-card:nth-child(3) { animation-delay: 0.3s; }
         .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+        .history-item {
+            animation: fadeIn 0.3s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -447,6 +725,22 @@ class SidebarWebViewProvider {
         <div class="engine-info">
             <div class="engine-label">引擎详情</div>
             <div class="engine-name">${engineInfo.details}</div>
+        </div>
+
+        <!-- 剪切板历史部分 -->
+        <div class="clipboard-section">
+            <div class="clipboard-header">
+                <div class="clipboard-title">
+                    📋 剪切板历史
+                </div>
+                <div class="clipboard-stats">
+                    ${clipboardHistory.length} 个项目
+                </div>
+            </div>
+
+            <div class="history-list" id="historyList">
+                ${historyHtml}
+            </div>
         </div>
 
         <div class="actions">
@@ -511,6 +805,27 @@ class SidebarWebViewProvider {
         function refreshData() {
             if (vscode) {
                 vscode.postMessage({ command: 'refresh' });
+            }
+        }
+
+        // 剪切板历史操作函数
+        function copyToClipboard(itemId) {
+            if (vscode) {
+                vscode.postMessage({
+                    command: 'copyToClipboard',
+                    itemId: itemId
+                });
+            }
+        }
+
+        function deleteHistoryItem(itemId) {
+            if (confirm('确定要删除这条历史记录吗？')) {
+                if (vscode) {
+                    vscode.postMessage({
+                        command: 'deleteHistoryItem',
+                        itemId: itemId
+                    });
+                }
             }
         }
 
