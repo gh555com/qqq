@@ -94,49 +94,19 @@ class SidebarWebViewProvider {
                 clipboardHistory = this.global.clipboardHistoryManager.getHistory(20); // 显示最近20条
             }
 
-            // 使用现有状态栏的统一数据获取方式（唯一真理源）
-            let cacheStats = this.global._cacheStatsGetter ? this.global._cacheStatsGetter() :
-                { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+            // 直接使用降级方案计算实际缓存大小（根据日志分析，这是最常用的路径）
+            const cacheStats = this.calculateActualCacheSize();
 
-            // 测试打印：缓存统计获取来源
-            console.log('📊 缓存统计来源:', this.global._cacheStatsGetter ? '唯一真理源（全局函数）' : '默认值');
-
-            // 如果缓存统计为零，尝试直接计算缓存目录的实际大小
-            if (cacheStats.totalSize === 0) {
-                console.log('📊 缓存统计为零，使用降级方案：直接计算目录大小');
-                cacheStats = this.calculateActualCacheSize();
-            }
-
-            // 使用统一的全局函数获取数据（唯一真理来源）
+            // 使用最可靠的方式获取使用时间（根据日志分析，总是回退到context.globalState）
             let totalSeconds = 0;
             let h = 0, m = 0;
-            let hitRate = 0;
 
-            // 优先使用全局的使用时间计算函数
-            if (this.global && this.global.getTotalSecondsIncludingSession) {
-                console.log('⏱️ 使用时间来源: 唯一真理源（全局函数 getTotalSecondsIncludingSession）');
-                totalSeconds = this.global.getTotalSecondsIncludingSession();
-                // 使用全局的时间格式化函数
-                if (this.global.formatCompactTime) {
-                    console.log('⏱️ 时间格式化来源: 唯一真理源（全局函数 formatCompactTime）');
-                    const timeObj = this.global.formatCompactTime(totalSeconds);
-                    h = timeObj.h;
-                    m = timeObj.m;
-                } else {
-                    console.log('⏱️ 时间格式化来源: 降级方案（自己实现）');
-                    // 降级：自己格式化时间
-                    h = Math.floor(totalSeconds / 3600);
-                    m = Math.floor((totalSeconds % 3600) / 60);
-                }
-            } else if (this.context && this.context.globalState) {
-                console.log('⏱️ 使用时间来源: 最终降级方案（自己获取）');
-                // 最终降级：自己获取使用时间
-                const context = this.context;
+            if (this.context && this.context.globalState) {
                 const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
                 const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
 
-                const base = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-                const lastFlush = context.globalState.get(KEY_LAST_FLUSH_TIME);
+                const base = this.context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
+                const lastFlush = this.context.globalState.get(KEY_LAST_FLUSH_TIME);
 
                 if (lastFlush) {
                     const diff = (Date.now() - lastFlush) / 1000;
@@ -147,36 +117,28 @@ class SidebarWebViewProvider {
 
                 h = Math.floor(totalSeconds / 3600);
                 m = Math.floor((totalSeconds % 3600) / 60);
-            } else {
-                console.log('⏱️ 使用时间来源: 初始默认值（0）');
             }
 
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
 
-            // 优先使用全局的缓存命中率函数
+            // 优先使用全局的缓存命中率函数（根据日志分析，这是唯一能命中的全局函数）
+            let hitRate = 0;
             if (this.global && this.global.getPersistentCacheStatsSnapshot) {
-                console.log('🎯 缓存命中率来源: 唯一真理源（全局函数 getPersistentCacheStatsSnapshot）');
                 const pstats = this.global.getPersistentCacheStatsSnapshot();
                 const denom = pstats.hitTotal + pstats.missTotal;
                 hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
             } else if (this.context && this.context.globalState) {
-                console.log('🎯 缓存命中率来源: 最终降级方案（自己计算）');
-                // 最终降级：自己计算缓存命中率
-                const context = this.context;
                 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
                 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 
-                const hitTotal = context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
-                const missTotal = context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
+                const hitTotal = this.context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
+                const missTotal = this.context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
                 const denom = hitTotal + missTotal;
                 hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
-            } else {
-                console.log('🎯 缓存命中率来源: 初始默认值（0%）');
             }
 
             const activeEngine = this.getActiveEngineInfo();
 
-            // 传递clipboardHistory参数
             this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory);
         } catch (error) {
             this._view.webview.html = this.getErrorContent(error.message);
