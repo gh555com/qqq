@@ -661,7 +661,11 @@ def handle_windows_ctypes(output_dir: Path):
     return {"type": "unknown"}
 
 
-def handle_clipboard(target_dir=None):
+def handle_clipboard(target_dir=None, only_files=False):
+    if only_files:
+        # 只获取文件路径，不复制
+        return get_clipboard_files_only()
+    
     output_dir = resolve_output_dir(target_dir)
     sys_name = platform.system()
     if sys_name == "Windows":
@@ -699,7 +703,22 @@ def get_clipboard_files_only():
                                 buf = ctypes.create_unicode_buffer(n)
                                 DragQueryFileW(h_drop, i, buf, n)
                                 paths.append(buf.value)
-                            return {"type": "file_paths", "paths": paths}
+                            
+                            # 分离文件夹和文件
+                            folders = []
+                            files = []
+                            for p in paths:
+                                try:
+                                    if os.path.isdir(p):
+                                        folders.append(p)
+                                    elif os.path.isfile(p):
+                                        files.append(p)
+                                    else:
+                                        files.append(p)  # 其他类型视为文件
+                                except:
+                                    files.append(p)
+                                    
+                            return {"type": "file_folder", "folders": folders, "files": files}
                 finally:
                     CloseClipboard()
         except:
@@ -712,7 +731,22 @@ def get_clipboard_files_only():
             try:
                 if wcb.IsClipboardFormatAvailable(wcon.CF_HDROP):
                     paths = wcb.GetClipboardData(wcon.CF_HDROP) or []
-                    return {"type": "file_paths", "paths": list(paths)}
+                    
+                    # 分离文件夹和文件
+                    folders = []
+                    files = []
+                    for p in paths:
+                        try:
+                            if os.path.isdir(p):
+                                folders.append(p)
+                            elif os.path.isfile(p):
+                                files.append(p)
+                            else:
+                                files.append(p)  # 其他类型视为文件
+                        except:
+                            files.append(p)
+                            
+                    return {"type": "file_folder", "folders": folders, "files": files}
             finally:
                 wcb.CloseClipboard()
         except:
@@ -1004,7 +1038,8 @@ def _dispatch_action(cmd):
     if action in ("clipboard", "paste", "save_snapshot", "saveImage"):
         target_dir = cmd.get("target_dir", cmd.get(
             "output_dir", cmd.get("path")))
-        out.update(handle_clipboard(target_dir))
+        only_files = cmd.get("only_files", False)
+        out.update(handle_clipboard(target_dir, only_files))
         return out
     if action in ("folder_info", "get_folder_info"):
         out.update(get_folder_info(cmd.get("path", "")))

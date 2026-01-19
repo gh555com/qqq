@@ -116,10 +116,23 @@ class ClipboardHistoryManager {
      */
     async capturePythonSnapshot() {
         try {
-            // 调用 Python 的 clipboard 接口，直接保存到快照目录
-            const result = await this.pythonBridge.call('clipboard', {
-                target_dir: this.snapshotDir
-            }, 10000);
+            // 调用 Python 的 clipboard 接口，获取内容类型
+            const peek = await this.pythonBridge.call('wq', {}, 2000);
+            if (!peek || peek.error) return null;
+
+            let result;
+            if (peek.hasFile) {
+                // 文件类型：只获取文件路径，不保存
+                result = await this.pythonBridge.call('clipboard', {
+                    target_dir: null, // 不指定目标目录，只获取路径
+                    only_files: true   // 只获取文件信息
+                }, 10000);
+            } else {
+                // 非文件类型：正常保存
+                result = await this.pythonBridge.call('clipboard', {
+                    target_dir: this.snapshotDir
+                }, 10000);
+            }
 
             if (!result || result.error) {
                 console.debug('[ClipboardHistory] Python 快照失败:', result?.error);
@@ -137,7 +150,12 @@ class ClipboardHistoryManager {
                 return {
                     type: 'image',
                     content: '🖼️ 截图快照',
-                    snapshot: { type: 'image', path: result.path }
+                    snapshot: {
+                        type: 'image',
+                        path: result.path,
+                        hash: peek.imgHash || null, // 添加图像哈希
+                        size: peek.imgSize || null  // 添加图像大小
+                    }
                 };
             } else if (result.type === 'file_folder') {
                 const allFiles = [...(result.folders || []), ...(result.files || [])];
@@ -207,7 +225,15 @@ class ClipboardHistoryManager {
         // 检查是否已存在相同内容（去重）
         const existingIndex = this.history.findIndex(item => {
             if (item.type === 'image' && clipboardInfo.type === 'image') {
-                // 如果都有快照路径，比较路径（文件名包含时间戳/指纹）
+                // 如果都有图像哈希，使用哈希比较（最可靠）
+                if (item.snapshot && item.snapshot.hash && clipboardInfo.snapshot && clipboardInfo.snapshot.hash) {
+                    return item.snapshot.hash === clipboardInfo.snapshot.hash;
+                }
+                // 如果有大小信息，可以结合大小比较
+                if (item.snapshot && item.snapshot.size && clipboardInfo.snapshot && clipboardInfo.snapshot.size) {
+                    return item.snapshot.size === clipboardInfo.snapshot.size;
+                }
+                // 如果都有快照路径，比较路径（作为最后手段）
                 if (item.snapshot && item.snapshot.path && clipboardInfo.snapshot && clipboardInfo.snapshot.path) {
                     // 比较文件名（去除目录部分，防止不同会话路径变化）
                     return path.basename(item.snapshot.path) === path.basename(clipboardInfo.snapshot.path);
@@ -241,6 +267,9 @@ class ClipboardHistoryManager {
 
         // 保存到持久化存储
         this.saveHistory();
+
+        // 通知侧边栏更新
+        this.notifySidebarUpdate();
     }
 
     /**
@@ -538,9 +567,31 @@ class ClipboardHistoryManager {
                 }
             } else if (snapshot.type === 'file' && snapshot.files) {
                 if (this.pythonBridge && this.pythonBridge.isAvailable()) {
+                    // 验证文件路径是否存在，只保留存在的文件
+                    const validFiles = [];
+                    for (const filePath of snapshot.files) {
+                        try {
+                            // 使用 fs.existsSync 验证文件是否存在
+                            if (fs.existsSync(filePath)) {
+                                validFiles.push(filePath);
+                            } else {
+                                console.debug(`[ClipboardHistory] 文件不存在，跳过: ${filePath}`);
+                            }
+                        } catch (error) {
+                            console.debug(`[ClipboardHistory] 验证文件路径失败: ${filePath}, 错误: ${error.message}`);
+                        }
+                    }
+
+                    // 如果没有有效文件，返回失败
+                    if (validFiles.length === 0) {
+                        console.debug('[ClipboardHistory] 没有有效的文件路径可以恢复');
+                        return false;
+                    }
+
+                    // 将有效文件设置到剪贴板
                     const res = await this.pythonBridge.call('set_clipboard', {
                         type: 'files',
-                        files: snapshot.files
+                        files: validFiles
                     });
                     return !!res.success;
                 }
