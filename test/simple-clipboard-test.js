@@ -20,7 +20,7 @@ class SimpleClipboardHistoryManager {
             id: this.generateId(),
             content: content,
             timestamp: Date.now(),
-            type: this.detectContentType(content),
+            type: 'text',
             preview: this.getContentPreview(content)
         };
 
@@ -179,14 +179,8 @@ class SimpleClipboardHistoryManager {
      * 获取统计信息
      */
     getStats() {
-        const typeCounts = {};
-        this.history.forEach(item => {
-            typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
-        });
-
         return {
             totalCount: this.history.length,
-            typeCounts: typeCounts,
             lastUpdated: this.history.length > 0 ? this.history[0].timestamp : null
         };
     }
@@ -217,29 +211,11 @@ async function runTest() {
         console.log(`${index + 1}. [${item.type}] ${item.preview} (${manager.getFormattedTime(item.timestamp)})`);
     });
 
-    // 测试类型检测
-    console.log('\n🔍 测试内容类型检测...');
-    const testCases = [
-        '普通文本内容',
-        'https://www.google.com',
-        '/path/to/file.txt',
-        'C:\\Windows\\System32\\cmd.exe',
-        'user@example.com',
-        'function hello() { console.log("world"); }',
-        'const x = 10;',
-        'if (condition) { doSomething(); }'
-    ];
-
-    testCases.forEach(content => {
-        const type = manager.detectContentType(content);
-        console.log(`"${content.substring(0, 30)}..." -> ${type}`);
-    });
-
     // 测试统计信息
     console.log('\n📊 测试统计信息...');
     const stats = manager.getStats();
     console.log(`总计: ${stats.totalCount} 项`);
-    console.log('类型分布:', stats.typeCounts);
+    console.log('最后更新时间:', stats.lastUpdated);
 
     // 测试重复内容去重
     console.log('\n🔄 测试重复内容去重...');

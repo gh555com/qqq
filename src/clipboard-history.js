@@ -1,6 +1,4 @@
 const vscode = require('vscode');
-const fs = require('fs');
-const path = require('path');
 const crypto = require('crypto');
 
 class ClipboardHistoryManager {
@@ -70,16 +68,17 @@ class ClipboardHistoryManager {
             id: this.generateId(),
             content: content,
             timestamp: Date.now(),
-            type: this.detectContentType(content),
+            type: 'text',
             preview: this.getContentPreview(content)
         };
 
         // 检查是否已存在相同内容（去重）
         const existingIndex = this.history.findIndex(item => item.content === content);
         if (existingIndex !== -1) {
-            // 如果已存在，移到最前面并更新时间戳
+            // 如果已存在，移到最前面并更新时间戳和类型
             const [existingItem] = this.history.splice(existingIndex, 1);
             existingItem.timestamp = Date.now();
+            existingItem.type = 'text'; // 确保类型为文本
             this.history.unshift(existingItem);
         } else {
             // 添加新项目到开头
@@ -102,33 +101,7 @@ class ClipboardHistoryManager {
         return crypto.randomUUID();
     }
 
-    /**
-     * 检测内容类型
-     */
-    detectContentType(content) {
-        // 检查是否为URL
-        if (this.isValidUrl(content)) {
-            return 'url';
-        }
 
-        // 检查是否为文件路径
-        if (this.isFilePath(content)) {
-            return 'file';
-        }
-
-        // 检查是否为邮箱
-        if (this.isEmail(content)) {
-            return 'email';
-        }
-
-        // 检查是否为代码片段
-        if (this.isCodeSnippet(content)) {
-            return 'code';
-        }
-
-        // 默认为文本
-        return 'text';
-    }
 
     /**
      * 获取内容预览
@@ -149,55 +122,7 @@ class ClipboardHistoryManager {
         return preview;
     }
 
-    /**
-     * 验证URL
-     */
-    isValidUrl(string) {
-        try {
-            const url = new URL(string);
-            return url.protocol === 'http:' || url.protocol === 'https:';
-        } catch (_) {
-            return false;
-        }
-    }
 
-    /**
-     * 检查是否为文件路径
-     */
-    isFilePath(content) {
-        // 简单的文件路径检测
-        return content.includes('\\') || content.includes('/') ||
-            content.match(/^[A-Za-z]:\\/); // Windows驱动器路径
-    }
-
-    /**
-     * 检查是否为邮箱
-     */
-    isEmail(content) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        return emailRegex.test(content.trim());
-    }
-
-    /**
-     * 检查是否为代码片段
-     */
-    isCodeSnippet(content) {
-        // 检查常见的代码特征
-        const codeIndicators = [
-            /function\s+\w+/,
-            /\w+\s*\([^)]*\)\s*{/,
-            /if\s*\([^)]*\)/,
-            /for\s*\([^)]*\)/,
-            /while\s*\([^)]*\)/,
-            /console\.log/,
-            /import\s+.+from/,
-            /export\s+(default\s+)?(function|class|const|let|var)/,
-            /class\s+\w+/,
-            /const\s+\w+\s*=/
-        ];
-
-        return codeIndicators.some(regex => regex.test(content));
-    }
 
     /**
      * 获取格式化的时间显示
@@ -309,14 +234,8 @@ class ClipboardHistoryManager {
      * 获取统计信息
      */
     getStats() {
-        const typeCounts = {};
-        this.history.forEach(item => {
-            typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
-        });
-
         return {
             totalCount: this.history.length,
-            typeCounts: typeCounts,
             lastUpdated: this.history.length > 0 ? this.history[0].timestamp : null
         };
     }
