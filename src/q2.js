@@ -15,17 +15,25 @@ const qqq = require("./qqq");
 const global = require("./global");
 
 // ==================== 完整性校验（与 q1 对齐，可选） ====================
-const CORE_INTEGRITY_HASH =
-  "dc10f424bef818e80eea0a5175bbb6cca07cbee34c8510c7b64069ef1661c88e";
-const WATERMARK_PATH = path.join(__dirname, "..", "assets", "q2.gif");
+const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
+const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
+const LARGE_WATERMARK_PATH = path.join(__dirname, "..", "assets", "al.png");
+const SMALL_WATERMARK_PATH = path.join(__dirname, "..", "assets", "as.png");
 let isCoreIntegrityValid = false;
 
 function verifySystemIntegrity() {
   try {
-    if (!fs.existsSync(WATERMARK_PATH)) return false;
-    const buf = fs.readFileSync(WATERMARK_PATH);
-    const hash = crypto.createHash("sha256").update(buf).digest("hex");
-    return hash === CORE_INTEGRITY_HASH;
+    // 校验大水印
+    if (!fs.existsSync(LARGE_WATERMARK_PATH)) return false;
+    const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
+    const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
+    if (largeHash !== LARGE_WATERMARK_HASH) return false;
+    
+    // 校验小水印
+    if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
+    const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
+    const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
+    return smallHash === SMALL_WATERMARK_HASH;
   } catch {
     return false;
   }
@@ -1889,7 +1897,6 @@ async function activate(context) {
 
   isCoreIntegrityValid = verifySystemIntegrity();
   qqq.logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
-  if (!isCoreIntegrityValid) return;
 
   getConfig();
   qqq.logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
