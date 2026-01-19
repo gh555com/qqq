@@ -1662,7 +1662,7 @@ function formatBytes(size) {
 		val /= 1024;
 		idx++;
 	}
-	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]} `;
+	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]}`;
 }
 
 function formatHours(totalSeconds) {
@@ -2344,18 +2344,18 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `;
 	}
 
-	const ioLine = `** IO 引擎：** ${active.name}${mismatchText} `;
+	const ioLine = `${active.name}${mismatchText}`;
 
 	const tooltip = new vscode.MarkdownString(
-		[
-			`< div style = "background:#fff !important; color:#000 !important; padding:8px; border-radius:4px; border:1px solid #ddd;" > `,
-			`** 累计使用时间：** ${formatHours(totalSeconds)} `,
-			`** 磁盘缓存：** ${formatBytes(cacheBytes)} `,
-			`** 缓存命中率：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})`,
-			ioLine,
-			`</div > `,
-		].join("\n\n")
+		`⏱️ **总陪伴：** ${formatHours(totalSeconds)}
+
+💾 **磁盘缓存：** ${formatBytes(cacheBytes)}
+
+🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})
+
+⚡ **IO 引擎：** ${ioLine}`
 	);
+
 	tooltip.isTrusted = true;
 	tooltip.supportHtml = true;
 
