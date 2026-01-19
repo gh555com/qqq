@@ -53,12 +53,16 @@ class SidebarWebViewProvider {
                     this.updateContent();
                     break;
                 case "copyToClipboard":
-                    // 复制历史项到剪切板
+                    // 恢复历史项到剪切板
                     if (this.global.clipboardHistoryManager && message.itemId) {
                         const item = this.global.clipboardHistoryManager.getItemById(message.itemId);
                         if (item) {
-                            await this.global.clipboardHistoryManager.copyToClipboard(item.content);
-                            vscode.window.showInformationMessage('已复制到剪切板');
+                            const success = await this.global.clipboardHistoryManager.restoreToClipboard(item);
+                            if (success) {
+                                vscode.window.showInformationMessage('✅ 已恢复到剪切板');
+                            } else {
+                                vscode.window.showWarningMessage('⚠️ 恢复失败，请检查快照文件是否存在');
+                            }
                         }
                     }
                     break;
@@ -257,7 +261,9 @@ class SidebarWebViewProvider {
             'url': '链接',
             'file': '文件',
             'email': '邮箱',
-            'code': '代码'
+            'code': '代码',
+            'image': '图片',
+            'html': 'HTML'
         };
         return typeMap[type] || '未知';
     }
@@ -298,7 +304,14 @@ class SidebarWebViewProvider {
         // 构建剪切板历史HTML
         let historyHtml = '';
         if (clipboardHistory.length > 0) {
-            historyHtml = clipboardHistory.map(item => `
+            historyHtml = clipboardHistory.map(item => {
+                // 根据引擎类型添加快照标识
+                const hasSnapshot = item.snapshot && item.snapshot.type;
+                const engineBadge = item.engine === 'python'
+                    ? '<span style="background: rgba(38, 139, 210, 0.3); color: var(--blue); padding: 2px 6px; border-radius: 10px; font-size: 0.7em; margin-left: 6px;">★ 快照</span>'
+                    : '<span style="background: rgba(147, 93, 245, 0.2); color: var(--violet); padding: 2px 6px; border-radius: 10px; font-size: 0.7em; margin-left: 6px;">☆ 文本</span>';
+
+                return `
                 <div class="history-item" data-id="${item.id}">
                     <div class="item-header">
                         <span class="item-type type-${item.type}">
@@ -306,13 +319,17 @@ class SidebarWebViewProvider {
                         </span>
                         <span class="item-time">${this.getFormattedTime(item.timestamp)}</span>
                     </div>
-                    <div class="item-preview">${this.escapeHtml(item.preview)}</div>
+                    <div class="item-preview">
+                        ${this.escapeHtml(item.preview)}
+                        ${engineBadge}
+                    </div>
                     <div class="item-actions">
-                        <button class="action-btn copy-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
-                        <button class="action-btn delete-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
+                        <button class="action-btn copy-btn" onclick="copyToClipboard('${item.id}')"> 📋 恢复</button>
+                        <button class="action-btn delete-btn" onclick="deleteHistoryItem('${item.id}')"> 🗑️ 删除</button>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         } else {
             historyHtml = `
                 <div class="empty-history">
@@ -571,6 +588,8 @@ class SidebarWebViewProvider {
         .type-file { background: rgba(220, 50, 47, 0.2); color: var(--red); }
         .type-email { background: rgba(108, 113, 196, 0.2); color: var(--violet); }
         .type-code { background: rgba(181, 137, 0, 0.2); color: var(--yellow); }
+        .type-image { background: rgba(42, 161, 152, 0.2); color: var(--cyan); }
+        .type-html { background: rgba(147, 93, 245, 0.2); color: var(--violet); }
 
         .item-time {
             font-size: 0.75em;

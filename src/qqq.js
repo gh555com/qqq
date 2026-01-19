@@ -1228,16 +1228,17 @@ async function activate(context) {
 
 	initCache(context);
 
-	// 初始化剪切板历史管理器
-	clipboardHistoryManager = new ClipboardHistoryManager(context);
+	// ★ 先启动 Daemons，确保引擎可用
+	startDaemons();
+
+	// 初始化剪切板历史管理器（传入 bridge 引用）
+	clipboardHistoryManager = new ClipboardHistoryManager(context, pythonBridge, shellBridge);
 	global.clipboardHistoryManager = clipboardHistoryManager; // 暴露给全局使用
 	clipboardHistoryManager.startWatching();
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
 	global.setLogPath(path.join(cacheDir, "err.log"));
 	global.initStatusBar();
 	updateStatusBarThrottled();
-
-	startDaemons();
 
 	// 设置 CodeLens 样式
 	function updateCodeLensStyle() {

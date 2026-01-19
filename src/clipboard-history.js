@@ -4,16 +4,41 @@ const path = require('path');
 const crypto = require('crypto');
 
 class ClipboardHistoryManager {
-    constructor(context) {
+    constructor(context, pythonBridge, shellBridge) {
         this.context = context;
+        this.pythonBridge = pythonBridge;
+        this.shellBridge = shellBridge;
         this.history = [];
         this.maxHistoryItems = 100; // 最大历史记录数
         this.clipboardWatcher = null;
         this.lastClipboardContent = '';
         this.isWatching = false;
 
+        // 快照存储目录
+        this.snapshotDir = path.join(context.globalStorageUri.fsPath, 'clipboard_snapshots');
+        if (!fs.existsSync(this.snapshotDir)) {
+            fs.mkdirSync(this.snapshotDir, { recursive: true });
+        }
+
+        // 检测当前 IO 引擎
+        this.currentEngine = 'node'; // 默认 node
+        this.detectEngine();
+
         // 初始化历史记录
         this.loadHistory();
+    }
+
+    /**
+     * 检测当前可用的 IO 引擎
+     */
+    detectEngine() {
+        if (this.pythonBridge && this.pythonBridge.isAvailable()) {
+            this.currentEngine = 'python';
+            console.log('[ClipboardHistory] 使用 Python 引擎 - 完整快照模式');
+        } else {
+            this.currentEngine = 'node';
+            console.log('[ClipboardHistory] 使用 Node 引擎 - 仅文本模式');
+        }
     }
 
     /**
@@ -23,28 +48,110 @@ class ClipboardHistoryManager {
         if (this.isWatching) return;
 
         this.isWatching = true;
-        this.lastClipboardContent = '';
+        this.lastClipboardInfo = { type: 'none', content: '' };
+
+        // 重新检测引擎
+        this.detectEngine();
+
+        console.log(`[ClipboardHistory] 剪切板监听已启动 - 引擎: ${this.currentEngine}`);
 
         // 定期检查剪切板内容
         this.clipboardWatcher = setInterval(async () => {
             try {
-                const currentContent = await vscode.env.clipboard.readText();
-
-                // 只有当内容发生变化且非空时才记录
-                if (currentContent && currentContent !== this.lastClipboardContent) {
-                    this.addToHistory(currentContent);
-                    this.lastClipboardContent = currentContent;
-
-                    // 通知侧边栏更新
-                    this.notifySidebarUpdate();
-                }
+                await this.checkAndCaptureClipboard();
             } catch (error) {
-                // 静默处理错误，避免影响主流程
-                console.debug('剪切板读取失败:', error.message);
+                console.debug('[ClipboardHistory] 剪切板读取失败:', error.message);
             }
         }, 1000); // 每秒检查一次
+    }
 
-        console.log('剪切板监听已启动');
+    /**
+     * 检查并捕获剪切板内容（核心逻辑）
+     */
+    async checkAndCaptureClipboard() {
+        // 重新检测引擎状态（防止中途切换）
+        this.detectEngine();
+
+        let clipboardInfo = null;
+
+        if (this.currentEngine === 'python') {
+            // ============ Python 引擎：完整快照模式 ============
+            clipboardInfo = await this.capturePythonSnapshot();
+        } else {
+            // ============ Node 引擎：仅文本模式 ============
+            clipboardInfo = await this.captureNodeText();
+        }
+
+        // 只有当内容发生变化时才记录
+        if (clipboardInfo && JSON.stringify(clipboardInfo) !== JSON.stringify(this.lastClipboardInfo)) {
+            await this.addToHistory(clipboardInfo);
+            this.lastClipboardInfo = clipboardInfo;
+            this.notifySidebarUpdate();
+        }
+    }
+
+    /**
+     * Python 引擎：捕获完整快照（图片、文件、HTML、文本）
+     */
+    async capturePythonSnapshot() {
+        try {
+            // 调用 Python 的 clipboard 接口，直接保存到快照目录
+            const result = await this.pythonBridge.call('clipboard', {
+                target_dir: this.snapshotDir
+            }, 10000);
+
+            if (!result || result.error) {
+                console.debug('[ClipboardHistory] Python 快照失败:', result?.error);
+                return null;
+            }
+
+            // 根据 Python 返回的类型构建剪切板信息
+            if (result.type === 'text' && result.text) {
+                return {
+                    type: this.detectContentType(result.text),
+                    content: result.text,
+                    snapshot: { type: 'text', text: result.text }
+                };
+            } else if (result.type === 'image' && result.path) {
+                return {
+                    type: 'image',
+                    content: '🖼️ 截图快照',
+                    snapshot: { type: 'image', path: result.path }
+                };
+            } else if (result.type === 'file_folder') {
+                const allFiles = [...(result.folders || []), ...(result.files || [])];
+                return {
+                    type: 'file',
+                    content: allFiles,
+                    snapshot: { type: 'file', files: allFiles }
+                };
+            } else {
+                return null;
+            }
+        } catch (error) {
+            console.debug('[ClipboardHistory] Python 快照异常:', error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Node 引擎：仅捕获文本
+     */
+    async captureNodeText() {
+        try {
+            const text = await vscode.env.clipboard.readText();
+            if (text && text.trim()) {
+                return {
+                    type: this.detectContentType(text),
+                    content: text,
+                    snapshot: { type: 'text', text: text }
+                };
+            }
+            return null;
+        } catch (error) {
+            console.debug('[ClipboardHistory] Node 文本读取失败:', error.message);
+            return null;
+        }
     }
 
     /**
@@ -62,24 +169,30 @@ class ClipboardHistoryManager {
     /**
      * 添加内容到历史记录
      */
-    addToHistory(content) {
-        if (!content || typeof content !== 'string') return;
+    async addToHistory(clipboardInfo) {
+        if (!clipboardInfo || !clipboardInfo.content) return;
 
         // 创建历史项
         const historyItem = {
             id: this.generateId(),
-            content: content,
+            content: clipboardInfo.content,
             timestamp: Date.now(),
-            type: this.detectContentType(content),
-            preview: this.getContentPreview(content)
+            type: clipboardInfo.type,
+            preview: this.getContentPreview(clipboardInfo),
+            engine: this.currentEngine, // 标记使用的引擎
+            snapshot: clipboardInfo.snapshot || null // 快照数据
         };
 
         // 检查是否已存在相同内容（去重）
-        const existingIndex = this.history.findIndex(item => item.content === content);
+        const existingIndex = this.history.findIndex(item =>
+            JSON.stringify(item.content) === JSON.stringify(clipboardInfo.content) &&
+            item.type === clipboardInfo.type
+        );
         if (existingIndex !== -1) {
-            // 如果已存在，移到最前面并更新时间戳
+            // 如果已存在，移到最前面并更新时间戳和快照
             const [existingItem] = this.history.splice(existingIndex, 1);
             existingItem.timestamp = Date.now();
+            existingItem.snapshot = clipboardInfo.snapshot || existingItem.snapshot;
             this.history.unshift(existingItem);
         } else {
             // 添加新项目到开头
@@ -87,12 +200,50 @@ class ClipboardHistoryManager {
 
             // 限制历史记录数量
             if (this.history.length > this.maxHistoryItems) {
+                // 清理超出的历史项的快照文件
+                const removed = this.history.slice(this.maxHistoryItems);
+                for (const item of removed) {
+                    this.cleanupSnapshot(item);
+                }
                 this.history = this.history.slice(0, this.maxHistoryItems);
             }
         }
 
         // 保存到持久化存储
         this.saveHistory();
+    }
+
+    /**
+     * 清理快照文件
+     */
+    cleanupSnapshot(item) {
+        if (!item.snapshot) return;
+
+        try {
+            if (item.snapshot.type === 'image' && item.snapshot.path) {
+                if (fs.existsSync(item.snapshot.path)) {
+                    fs.unlinkSync(item.snapshot.path);
+                }
+            } else if (item.snapshot.type === 'file' && item.snapshot.files) {
+                // 删除复制的文件（小心操作）
+                for (const filePath of item.snapshot.files) {
+                    if (filePath.startsWith(this.snapshotDir) && fs.existsSync(filePath)) {
+                        try {
+                            const stat = fs.statSync(filePath);
+                            if (stat.isDirectory()) {
+                                fs.rmSync(filePath, { recursive: true, force: true });
+                            } else {
+                                fs.unlinkSync(filePath);
+                            }
+                        } catch (e) {
+                            console.debug('[ClipboardHistory] 清理快照失败:', e.message);
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.debug('[ClipboardHistory] 清理快照异常:', error.message);
+        }
     }
 
     /**
@@ -133,20 +284,44 @@ class ClipboardHistoryManager {
     /**
      * 获取内容预览
      */
-    getContentPreview(content, maxLength = 100) {
-        if (!content) return '';
+    getContentPreview(clipboardInfo, maxLength = 100) {
+        if (!clipboardInfo || !clipboardInfo.content) return '';
 
-        let preview = content.trim();
+        const { type, content } = clipboardInfo;
 
-        // 移除多余空白字符
-        preview = preview.replace(/\s+/g, ' ');
+        switch (type) {
+            case 'file':
+                if (Array.isArray(content) && content.length > 0) {
+                    if (content.length === 1) {
+                        // 单个文件显示文件名
+                        return path.basename(content[0]);
+                    } else {
+                        // 多个文件显示数量
+                        return `📁 ${content.length}个文件`;
+                    }
+                }
+                return '📁 文件';
 
-        // 截取预览
-        if (preview.length > maxLength) {
-            preview = preview.substring(0, maxLength) + '...';
+            case 'image':
+                return '🖼️ 图片';
+
+            case 'html':
+                return '🌐 HTML内容';
+
+            default:
+                // 文本类型预览
+                let preview = typeof content === 'string' ? content.trim() : String(content);
+
+                // 移除多余空白字符
+                preview = preview.replace(/\s+/g, ' ');
+
+                // 截取预览
+                if (preview.length > maxLength) {
+                    preview = preview.substring(0, maxLength) + '...';
+                }
+
+                return preview;
         }
-
-        return preview;
     }
 
     /**
@@ -241,7 +416,9 @@ class ClipboardHistoryManager {
     removeItem(id) {
         const index = this.history.findIndex(item => item.id === id);
         if (index !== -1) {
-            this.history.splice(index, 1);
+            const [removedItem] = this.history.splice(index, 1);
+            // 清理快照文件
+            this.cleanupSnapshot(removedItem);
             this.saveHistory();
             this.notifySidebarUpdate();
             return true;
@@ -253,6 +430,10 @@ class ClipboardHistoryManager {
      * 清空所有历史记录
      */
     clearHistory() {
+        // 清理所有快照文件
+        for (const item of this.history) {
+            this.cleanupSnapshot(item);
+        }
         this.history = [];
         this.saveHistory();
         this.notifySidebarUpdate();
@@ -293,14 +474,80 @@ class ClipboardHistoryManager {
     }
 
     /**
-     * 将内容复制到剪切板
+     * 将历史项恢复到剪切板（核心功能）
      */
-    async copyToClipboard(content) {
+    async restoreToClipboard(item) {
+        if (!item) return false;
+
         try {
-            await vscode.env.clipboard.writeText(content);
+            // 如果有快照数据，优先使用快照
+            if (item.snapshot) {
+                return await this.restoreFromSnapshot(item.snapshot);
+            } else {
+                // 没有快照，只能复制文本内容
+                return await this.copyTextToClipboard(item.content);
+            }
+        } catch (error) {
+            console.error('[ClipboardHistory] 恢复到剪切板失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 从快照恢复到剪切板
+     */
+    async restoreFromSnapshot(snapshot) {
+        if (snapshot.type === 'text') {
+            // 文本快照
+            return await this.copyTextToClipboard(snapshot.text);
+        } else if (snapshot.type === 'image' && snapshot.path) {
+            // 图片快照：使用 Python 引擎写入剪切板
+            if (this.pythonBridge && this.pythonBridge.isAvailable()) {
+                // TODO: 需要在 kp.py 中实现 set_clipboard_image 功能
+                vscode.window.showWarningMessage('图片恢复功能需要扩展 kp.py，暂时只能打开文件');
+                await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(snapshot.path));
+                return true;
+            } else {
+                vscode.window.showWarningMessage('图片恢复需要 Python 引擎，当前不可用');
+                return false;
+            }
+        } else if (snapshot.type === 'file' && snapshot.files) {
+            // 文件快照：直接打开或复制路径
+            if (snapshot.files.length === 1) {
+                const filePath = snapshot.files[0];
+                if (fs.existsSync(filePath)) {
+                    const stat = fs.statSync(filePath);
+                    if (stat.isDirectory()) {
+                        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
+                    } else {
+                        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+                    }
+                    return true;
+                }
+            } else {
+                // 多个文件，复制路径列表
+                return await this.copyTextToClipboard(snapshot.files.join('\n'));
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 复制纯文本到剪切板
+     */
+    async copyTextToClipboard(content) {
+        try {
+            if (Array.isArray(content)) {
+                await vscode.env.clipboard.writeText(content.join('\n'));
+            } else if (typeof content === 'string') {
+                await vscode.env.clipboard.writeText(content);
+            } else {
+                await vscode.env.clipboard.writeText(String(content));
+            }
             return true;
         } catch (error) {
-            console.error('复制到剪切板失败:', error);
+            console.error('[ClipboardHistory] 复制文本失败:', error);
             return false;
         }
     }
