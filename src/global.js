@@ -2209,6 +2209,10 @@ async function wq() {
 
 			// 保存到globalState
 			extensionContext.globalState.update("qqq_wq_stats", wqStats);
+			// 触发状态栏更新
+			if (typeof updateStatusBarNow === 'function') {
+				updateStatusBarNow();
+			}
 		}
 	}
 
@@ -2378,7 +2382,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 
 	// 格式化wq时间显示
 	const recentTimesStr = wqStats.recentTimes.join(', ');
-	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大：${wqStats.maxTime}]` : ''}）` : ''}`;
+	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`;
 
 	const tooltip = new vscode.MarkdownString(
 		`⏱️ **总陪伴：** ${formatHours(totalSeconds)}

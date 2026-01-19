@@ -2384,10 +2384,23 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 							let detail = '';
 
 							if (result.type === 'html_blocks' || result.type === 'skeleton') {
-								// HTML粘贴：统计成功落地的媒体文件数量
+								// HTML粘贴：统计成功落地的媒体文件数量和总大小
 								const mediaBlocks = result.blocks?.filter(b => b.type === 'media' && b.status === 'ok') || [];
 								const mediaCount = mediaBlocks.length;
-								detail = `共落盘${mediaCount}个文件`;
+								// 计算总大小
+								const totalSize = mediaBlocks.reduce((sum, block) => sum + (block.size || 0), 0);
+								// 格式化大小显示
+								let sizeStr = '';
+								if (totalSize > 0) {
+									if (totalSize < 1024) {
+										sizeStr = `${totalSize}b`;
+									} else if (totalSize < 1024 * 1024) {
+										sizeStr = `${(totalSize / 1024).toFixed(1)}k`;
+									} else {
+										sizeStr = `${(totalSize / (1024 * 1024)).toFixed(1)}m`;
+									}
+								}
+								detail = `共落盘${mediaCount}个文件${sizeStr ? ` ${sizeStr}` : ''}`;
 								// 如果有baseUrl，添加来源信息
 								if (result.baseUrl) {
 									// 截断URL以保持消息简洁
