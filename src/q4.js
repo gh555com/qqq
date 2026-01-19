@@ -376,21 +376,7 @@ class SidebarWebViewProvider {
             max-width: 100%;
         }
 
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            border-radius: 8px;
-            box-shadow: 0 2px 8px var(--shadow-color);
-        }
 
-        .header h1 {
-            margin: 0;
-            font-size: 1.4em;
-            font-weight: 500;
-            letter-spacing: 0.5px;
-        }
 
         .stats-grid {
             display: grid;
@@ -400,11 +386,10 @@ class SidebarWebViewProvider {
         }
 
         .stat-card {
-            background: var(--card-bg);
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
             padding: 15px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 1px 4px var(--shadow-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--shadow-color);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
@@ -420,7 +405,7 @@ class SidebarWebViewProvider {
 
         .stat-title {
             font-size: 0.9em;
-            color: var(--text-secondary);
+            color: white;
             margin-bottom: 8px;
             font-weight: 500;
         }
@@ -429,15 +414,12 @@ class SidebarWebViewProvider {
             font-size: 1.6em;
             font-weight: 600;
             margin: 8px 0;
-            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            color: white;
         }
 
         .stat-desc {
             font-size: 0.8em;
-            color: var(--text-secondary);
+            color: rgba(255, 255, 255, 0.85);
         }
 
         .engine-info {
@@ -677,9 +659,7 @@ class SidebarWebViewProvider {
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📊 qqq 状态</h1>
-        </div>
+
 
         <div class="stats-grid">
             <div class="stat-card">
