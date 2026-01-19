@@ -334,9 +334,9 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-## 2. Detailed Analysis by Dimension
+## 2. 按 维度详细分析
 
-### 1. Cold Start Speed
+### 1. 冷启动速度
 
 | 引擎 | 得分 | 典型耗时 | 瓶颈 |
 |:-----|:----:|:--------:|:-----|
