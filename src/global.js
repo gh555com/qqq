@@ -2121,7 +2121,7 @@ async function wq() {
 			const startTime = Date.now(); // 只在核心操作前开始计时
 			const res = await shellBridge.call("wq", {}, 3000);
 			wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
-			
+
 			if (res && !res.error) {
 				status = res;
 				handled = true;
@@ -2416,14 +2416,6 @@ ${wqLine}
 	statusBarItem.show();
 }
 
-// ============================================================================
-// ★ 状态面板功能
-// ============================================================================
-// 侧边栏状态面板相关（已移至 sidebarWebViewProvider）
-
-// ============================================================================
-// ★ IO Scheduler & Queue (从 qqq.js 迁移)
-// ============================================================================
 class TaskScheduler {
 	constructor(maxConcurrency = 8) {
 		this.maxConcurrency = Math.max(1, maxConcurrency | 0);
