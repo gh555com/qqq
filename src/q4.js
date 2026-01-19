@@ -25,7 +25,7 @@ class SidebarWebViewProvider {
             enableScripts: true,
             retainContextWhenHidden: true,
             localResourceRoots: [extensionUri],
-            contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;`
+            contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:; media-src vscode-webview-resource:;`
         };
 
         // 设置面板图标
@@ -124,62 +124,61 @@ class SidebarWebViewProvider {
             // 获取剪切板历史数据
             let clipboardHistory = [];
             if (this.global.clipboardHistoryManager) {
-                clipboardHistory = this.global.clipboardHistoryManager.getHistory(20); // 显示最近20条
+                clipboardHistory = this.global.clipboardHistoryManager.getHistory(20);
             }
 
-            // 直接使用降级方案计算实际缓存大小（根据日志分析，这是最常用的路径）
             const cacheStats = this.calculateActualCacheSize();
-
-            // 使用最可靠的方式获取使用时间（根据日志分析，总是回退到context.globalState）
-            let totalSeconds = 0;
-            let h = 0, m = 0;
+            let totalSeconds = 0, h = 0, m = 0;
 
             if (this.context && this.context.globalState) {
-                const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
-                const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush";
-
-                const base = this.context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-                const lastFlush = this.context.globalState.get(KEY_LAST_FLUSH_TIME);
-
+                const base = this.context.globalState.get("qqq_stats_total_seconds", 0) || 0;
+                const lastFlush = this.context.globalState.get("qqq_stats_last_flush");
                 if (lastFlush) {
-                    const diff = (Date.now() - lastFlush) / 1000;
-                    totalSeconds = base + (diff > 0 ? diff : 0);
+                    totalSeconds = base + ((Date.now() - lastFlush) / 1000);
                 } else {
                     totalSeconds = base;
                 }
-
                 h = Math.floor(totalSeconds / 3600);
                 m = Math.floor((totalSeconds % 3600) / 60);
-
-                // 更新视图标题为使用时间
-                if (this._view) {
-                    this._view.title = `${h}h ${m}m`;
-                }
+                this._view.title = `${h}h ${m}m`;
             }
 
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
-
-            // 优先使用全局的缓存命中率函数（根据日志分析，这是唯一能命中的全局函数）
             let hitRate = 0;
             if (this.global && this.global.getPersistentCacheStatsSnapshot) {
                 const pstats = this.global.getPersistentCacheStatsSnapshot();
                 const denom = pstats.hitTotal + pstats.missTotal;
                 hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
-            } else if (this.context && this.context.globalState) {
-                const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
-                const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
-
-                const hitTotal = this.context.globalState.get(KEY_CACHE_HIT_TOTAL, 0) || 0;
-                const missTotal = this.context.globalState.get(KEY_CACHE_MISS_TOTAL, 0) || 0;
-                const denom = hitTotal + missTotal;
-                hitRate = denom > 0 ? (hitTotal / denom) * 100 : 0;
             }
 
             const activeEngine = this.getActiveEngineInfo();
 
-            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition);
+            // 物理读取音频（仅在第一次或刷新时需要，但为了逻辑简单，每次都计算 Base64 开销极小）
+            let audioBase64 = '';
+            try {
+                const soundPath = path.join(this.context.extensionPath, "assets", "q.mp3");
+                if (fs.existsSync(soundPath)) {
+                    audioBase64 = fs.readFileSync(soundPath).toString('base64');
+                }
+            } catch (e) { }
+
+            // 核心逻辑：如果 HTML 已经加载过，则发送消息更新数据，而不是重载整个页面
+            if (this._view.webview.html && this._view.webview.html.length > 100) {
+                this._view.webview.postMessage({
+                    command: 'updateData',
+                    stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
+                    history: clipboardHistory.map(item => ({
+                        id: item.id,
+                        time: this.getFormattedTime(item.timestamp),
+                        preview: item.preview
+                    }))
+                });
+            } else {
+                // 仅在第一次渲染时设置 HTML
+                this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, audioBase64);
+            }
         } catch (error) {
-            this._view.webview.html = this.getErrorContent(error.message);
+            console.error('更新内容失败:', error);
         }
     }
 
@@ -315,7 +314,7 @@ class SidebarWebViewProvider {
             .replace(/'/g, '&#039;');
     }
 
-    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null) {
+    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioBase64 = '') {
         // 构建剪切板历史HTML
 
         let historyHtml = '';
@@ -907,6 +906,17 @@ class SidebarWebViewProvider {
                     itemId: itemId
                 });
             }
+
+            // 播放复制音效（需确保是用户主动触发）
+            try {
+                if ('${audioBase64}') {
+                    const audio = new Audio('data:audio/mp3;base64,${audioBase64}');
+                    audio.volume = 0.5;
+                    audio.play().catch(err => console.log('播放音效被浏览器拦截:', err));
+                }
+            } catch (error) {
+                console.log('播放音效失败:', error);
+            }
         }
 
         function deleteHistoryItem(itemId) {
@@ -1028,6 +1038,71 @@ class SidebarWebViewProvider {
 
         // 窗口大小变化时更新滚动条
         window.addEventListener('resize', updateCustomScrollbar);
+
+        // 处理来自扩展的消息
+        window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'updateData') {
+                // 更新统计数据
+                document.querySelector('.stats-grid').innerHTML = \`
+                    <div class="stat-card">
+                        <div class="stat-title">⏱️ 使用时间</div>
+                        <div class="stat-value">\${message.stats.h}<span style="font-size: 0.7em;">h</span> \${message.stats.m}<span style="font-size: 0.7em;">m</span></div>
+                        <div class="stat-desc">累计使用时长</div>
+                    </div>
+                    <div class="stat-card cache">
+                        <div class="stat-title">💾 磁盘缓存</div>
+                        <div class="stat-value">\${message.stats.cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
+                        <div class="stat-desc">已缓存的数据量</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-title">🎯 缓存命中率</div>
+                        <div class="stat-value">\${message.stats.hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
+                        <div class="stat-desc">缓存效率指标</div>
+                    </div>
+                    <div class="stat-card \${message.stats.engineInfo.name.includes('Python') ? 'python' : message.stats.engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
+                        <div class="stat-title">⚡ IO 引擎</div>
+                        <div class="stat-value" style="font-size: 1.2em;">\${message.stats.engineInfo.name}</div>
+                        <div class="stat-desc">当前运行引擎</div>
+                    </div>
+                \`;
+                document.querySelector('.engine-name').innerText = message.stats.engineInfo.details;
+
+                // 更新剪切板列表 (保持滚动位置)
+                const list = document.getElementById('historyList');
+                const statsText = document.querySelector('.clipboard-stats');
+                statsText.innerText = \`\${message.history.length} 个项目\`;
+
+                if (message.history.length > 0) {
+                    list.innerHTML = message.history.map(item => \`
+                        <div class="history-item" data-id="\${item.id}">
+                            <div class="item-header">
+                                <span class="item-time">\${item.time}</span>
+                            </div>
+                            <div class="item-preview">\${escapeHtml(item.preview)}</div>
+                            <div class="item-actions">
+                                <button class="action-btn copy-btn" onclick="copyToClipboard('\${item.id}')">📋 复制</button>
+                                <button class="action-btn delete-btn" onclick="deleteHistoryItem('\${item.id}')">🗑️ 删除</button>
+                            </div>
+                        </div>
+                    \`).join('');
+                } else {
+                    list.innerHTML = \`
+                        <div class="empty-history">
+                            <div class="empty-history-icon">📭</div>
+                            <div>暂无剪切板历史记录</div>
+                        </div>
+                    \`;
+                }
+                updateCustomScrollbar();
+            }
+        });
+
+        // 辅助转义函数
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
 
         // 初始更新滚动条
         updateCustomScrollbar();
