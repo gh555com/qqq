@@ -2109,16 +2109,19 @@ const TaskCounter = {
  * - rawStatus: 原始状态 { hasFile, hasHtml, hasImage, hasText }
  */
 async function wq() {
-	const startTime = Date.now();
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
 	let handled = false;
 	let files = [];
 	let totalSize = 0;
+	let wqExecutionTime = 0;
 
 	// 1. 尝试使用 Daemon Bridge (高性能)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
+			const startTime = Date.now(); // 只在核心操作前开始计时
 			const res = await shellBridge.call("wq", {}, 3000);
+			wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
+			
 			if (res && !res.error) {
 				status = res;
 				handled = true;
@@ -2138,11 +2141,11 @@ async function wq() {
 				}
 			}
 		} catch (e) { }
-	}
-
-	// 2. 备选方案 (VS Code API)
-	if (!handled) {
+	} else {
+		// 2. 备选方案 (VS Code API)
+		const startTime = Date.now(); // 只在核心操作前开始计时
 		const text = await vscode.env.clipboard.readText();
+		wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
 		if (text) status.hasText = true;
 	}
 
@@ -2151,6 +2154,8 @@ async function wq() {
 
 	// A. 白名单识别 (1.纯文本 2.纯文字HTML)
 	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
+		// 保存统计数据
+		saveWqStats(wqExecutionTime);
 		return { type: 'whitelist', subType: 'text', ...baseResult };
 	}
 
@@ -2161,7 +2166,11 @@ async function wq() {
 			if (res && res.$) {
 				const $ = res.$;
 				const hasImg = $('img, video, iframe, embed, object').length > 0;
-				if (!hasImg) return { type: 'whitelist', subType: 'html_text', ...baseResult };
+				if (!hasImg) {
+					// 保存统计数据
+					saveWqStats(wqExecutionTime);
+					return { type: 'whitelist', subType: 'html_text', ...baseResult };
+				}
 			}
 		} catch (e) { }
 	}
@@ -2179,10 +2188,16 @@ async function wq() {
 		}
 	}
 
-	const elapsedTime = Date.now() - startTime;
+	// 保存统计数据
+	saveWqStats(wqExecutionTime);
 
+	return { type: 'yellowlist', subType, ...baseResult };
+}
+
+// 保存wq统计数据的辅助函数
+function saveWqStats(wqExecutionTime) {
 	// 异常值过滤：只统计1ms到1000ms之间的时间
-	if (elapsedTime >= 1 && elapsedTime <= 1000) {
+	if (wqExecutionTime >= 1 && wqExecutionTime <= 1000) {
 		// 持久化统计到globalState
 		if (extensionContext) {
 			const wqStats = extensionContext.globalState.get("qqq_wq_stats", {
@@ -2193,18 +2208,18 @@ async function wq() {
 			});
 
 			// 更新统计数据
-			wqStats.totalTime += elapsedTime;
+			wqStats.totalTime += wqExecutionTime;
 			wqStats.count += 1;
 
 			// 更新最近7次时间（使用环形缓冲区）
-			wqStats.recentTimes.push(elapsedTime);
+			wqStats.recentTimes.push(wqExecutionTime);
 			if (wqStats.recentTimes.length > 7) {
 				wqStats.recentTimes.shift();
 			}
 
 			// 更新最大时间
-			if (elapsedTime > wqStats.maxTime) {
-				wqStats.maxTime = elapsedTime;
+			if (wqExecutionTime > wqStats.maxTime) {
+				wqStats.maxTime = wqExecutionTime;
 			}
 
 			// 保存到globalState
@@ -2215,8 +2230,6 @@ async function wq() {
 			}
 		}
 	}
-
-	return { type: 'yellowlist', subType, ...baseResult };
 }
 
 function getEngineTryOrder(pref) {
