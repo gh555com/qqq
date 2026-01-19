@@ -16,6 +16,7 @@ from datetime import datetime
 import random
 import concurrent.futures
 from collections import OrderedDict
+import zlib
 import re
 import base64
 # =============================================================================
@@ -927,12 +928,40 @@ def _dispatch_action(cmd):
         return out
     if action == "wq":
         # 实现 wq 接口
-        out["hasFile"] = IsClipboardFormatAvailable(CF_HDROP)
-        out["hasHtml"] = IsClipboardFormatAvailable(CF_HTML)
-        out["hasImage"] = IsClipboardFormatAvailable(
+        has_file = IsClipboardFormatAvailable(CF_HDROP)
+        has_html = IsClipboardFormatAvailable(CF_HTML)
+        has_dib = IsClipboardFormatAvailable(
             CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB)
-        out["hasText"] = IsClipboardFormatAvailable(
+        has_text = IsClipboardFormatAvailable(
             CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT)
+
+        out["hasFile"] = has_file
+        out["hasHtml"] = has_html
+        out["hasImage"] = has_dib
+        out["hasText"] = has_text
+
+        if has_dib:
+            # 尝试获取 DIB 大小和哈希作为指纹的一部分
+            try:
+                if OpenClipboard(None):
+                    h_mem = GetClipboardData(CF_DIB)
+                    if h_mem:
+                        size = GlobalSize(h_mem)
+                        out["imgSize"] = size
+                        # 计算前 1MB 的 CRC32 作为快速指纹
+                        ptr = GlobalLock(h_mem)
+                        if ptr:
+                            try:
+                                sample_size = min(size, 1024 * 1024)
+                                # 直接从内存读取，不复制整个 buffer
+                                buf = (ctypes.c_char *
+                                       sample_size).from_address(ptr)
+                                out["imgHash"] = zlib.crc32(buf) & 0xFFFFFFFF
+                            finally:
+                                GlobalUnlock(h_mem)
+                    CloseClipboard()
+            except:
+                pass
         return out
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
@@ -942,7 +971,29 @@ def _dispatch_action(cmd):
         out.update(get_clipboard_files_only())
         return out
     if action == "get_html":
-        out.update(get_clipboard_html())
+        try:
+            if not _IS_WINDOWS:
+                out["html"] = ""
+            else:
+                if OpenClipboard(None):
+                    try:
+                        if IsClipboardFormatAvailable(CF_HTML):
+                            h_mem = GetClipboardData(CF_HTML)
+                            if h_mem:
+                                data = read_global_data(h_mem)
+                                if data:
+                                    out["html"] = data.decode(
+                                        'utf-8', errors='ignore')
+                                else:
+                                    out["html"] = ""
+                        else:
+                            out["html"] = ""
+                    finally:
+                        CloseClipboard()
+                else:
+                    out["html"] = ""
+        except Exception as e:
+            out["error"] = str(e)
         return out
     if action == "exit":
         # ★ 优雅退出指令
@@ -950,8 +1001,9 @@ def _dispatch_action(cmd):
         # 先打印响应，再退出
         print(json.dumps(out, ensure_ascii=False), flush=True)
         sys.exit(0)
-    if action in ("clipboard", "paste"):
-        target_dir = cmd.get("target_dir", cmd.get("output_dir"))
+    if action in ("clipboard", "paste", "save_snapshot", "saveImage"):
+        target_dir = cmd.get("target_dir", cmd.get(
+            "output_dir", cmd.get("path")))
         out.update(handle_clipboard(target_dir))
         return out
     if action in ("folder_info", "get_folder_info"):

@@ -81,6 +81,8 @@ class ClipboardHistoryManager {
 
             // 构造一个唯一指纹
             currentFingerprint = `py_${peek.hasFile}_${peek.hasImage}_${peek.hasHtml}_${peek.hasText}`;
+            if (peek.imgSize) currentFingerprint += `_sz${peek.imgSize}`;
+            if (peek.imgHash) currentFingerprint += `_hsh${peek.imgHash}`;
 
             // 如果是文本，加个文本预览做指纹
             if (peek.hasText && !peek.hasFile && !peek.hasImage) {
@@ -203,10 +205,19 @@ class ClipboardHistoryManager {
         };
 
         // 检查是否已存在相同内容（去重）
-        const existingIndex = this.history.findIndex(item =>
-            JSON.stringify(item.content) === JSON.stringify(clipboardInfo.content) &&
-            item.type === clipboardInfo.type
-        );
+        const existingIndex = this.history.findIndex(item => {
+            if (item.type === 'image' && clipboardInfo.type === 'image') {
+                // 如果都有快照路径，比较路径（文件名包含时间戳/指纹）
+                if (item.snapshot && item.snapshot.path && clipboardInfo.snapshot && clipboardInfo.snapshot.path) {
+                    // 比较文件名（去除目录部分，防止不同会话路径变化）
+                    return path.basename(item.snapshot.path) === path.basename(clipboardInfo.snapshot.path);
+                }
+                // 如果没有路径（Node模式），退而求其次比较 content
+                return item.content === clipboardInfo.content;
+            }
+            return JSON.stringify(item.content) === JSON.stringify(clipboardInfo.content) &&
+                item.type === clipboardInfo.type;
+        });
         if (existingIndex !== -1) {
             // 如果已存在，移到最前面并更新时间戳和快照
             const [existingItem] = this.history.splice(existingIndex, 1);
