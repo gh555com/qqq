@@ -326,17 +326,40 @@ class SidebarWebViewProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>qqq 状态面板</title>
     <style>
-        /* 自定义主题颜色 - 适配侧边栏 */
+        /* Solarized Light 配色方案 */
         :root {
-            --primary-color: #4a90e2;
-            --secondary-color: #50c878;
-            --accent-color: #ff6b6b;
-            --background-color: var(--vscode-sideBar-background, #1e1e1e);
-            --card-bg: var(--vscode-sideBarSectionHeader-background, #2d2d30);
-            --text-primary: var(--vscode-sideBar-foreground, #ffffff);
-            --text-secondary: var(--vscode-descriptionForeground, #cccccc);
-            --border-color: var(--vscode-sideBarSectionHeader-border, #3c3c3c);
-            --shadow-color: rgba(0, 0, 0, 0.3);
+            --base03: #002b36;
+            --base02: #073642;
+            --base01: #586e75;
+            --base00: #657b83;
+            --base0: #839496;
+            --base1: #93a1a1;
+            --base2: #eee8d5;
+            --base3: #fdf6e3;
+            --yellow: #b58900;
+            --orange: #cb4b16;
+            --red: #dc322f;
+            --magenta: #d33682;
+            --violet: #6c71c4;
+            --blue: #268bd2;
+            --cyan: #2aa198;
+            --green: #859900;
+
+            --primary-color: var(--blue);
+            --secondary-color: var(--green);
+            --accent-color: var(--red);
+            --background-color: var(--base3);
+            --card-bg: var(--base2);
+            --text-primary: var(--base00);
+            --text-secondary: var(--base01);
+            --border-color: var(--base1);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            forced-color-adjust: none;
+            -ms-high-contrast-adjust: none;
         }
 
         body {
@@ -390,9 +413,9 @@ class SidebarWebViewProvider {
             box-shadow: 0 3px 10px var(--shadow-color);
         }
 
-        .stat-card.python { border-left: 3px solid #3776ab; }
-        .stat-card.rust { border-left: 3px solid #dea584; }
-        .stat-card.node { border-left: 3px solid #68a063; }
+        .stat-card.python { border-left: 3px solid var(--blue); }
+        .stat-card.rust { border-left: 3px solid var(--base01); }
+        .stat-card.node { border-left: 3px solid var(--green); }
         .stat-card.cache { border-left: 3px solid var(--secondary-color); }
 
         .stat-title {
@@ -556,11 +579,11 @@ class SidebarWebViewProvider {
             font-weight: 500;
         }
 
-        .type-text { background: #4a90e220; color: #4a90e2; }
-        .type-url { background: #50c87820; color: #50c878; }
-        .type-file { background: #ff6b6b20; color: #ff6b6b; }
-        .type-email { background: #9b59b620; color: #9b59b6; }
-        .type-code { background: #f39c1220; color: #f39c12; }
+        .type-text { background: rgba(38, 139, 210, 0.2); color: var(--blue); }
+        .type-url { background: rgba(133, 153, 0, 0.2); color: var(--green); }
+        .type-file { background: rgba(220, 50, 47, 0.2); color: var(--red); }
+        .type-email { background: rgba(108, 113, 196, 0.2); color: var(--violet); }
+        .type-code { background: rgba(181, 137, 0, 0.2); color: var(--yellow); }
 
         .item-time {
             font-size: 0.75em;
@@ -605,17 +628,17 @@ class SidebarWebViewProvider {
         }
 
         .copy-btn:hover {
-            background: #357abd;
+            background: #2076c0;
             transform: translateY(-1px);
         }
 
         .delete-btn {
-            background: #ff4757;
+            background: var(--red);
             color: white;
         }
 
         .delete-btn:hover {
-            background: #ff2e42;
+            background: #b32421;
             transform: translateY(-1px);
         }
 
