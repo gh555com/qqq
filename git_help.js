@@ -100,7 +100,7 @@ class LocalAIReleaseAssistant {
         const current = this.getCurrentVersion();
         const next = this.bumpVersion(current, 'minor');
         const branch = `release/v${next}`;
-        const msg = `release: prepare v${next} (q1)${summary ? ' - ' + summary : ''}`;
+        const msg = `release: prepare v${next} (q1)${summary ? ' - ' + summary : ''} (q2)`;
 
         this.execGit(`checkout -b ${branch}`);
         await this._smartCommitAndPush(next, msg, branch);
