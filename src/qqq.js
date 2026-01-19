@@ -1427,7 +1427,6 @@ const exported = {
 
 	logMessage: global.logMessage,
 	logMessageRateLimited: global.logMessageRateLimited,
-	logQ: global.logQ,
 
 	// Delegate to h.js
 	computeFingerprint: computeFingerprintCached,

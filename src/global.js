@@ -1150,17 +1150,6 @@ function logMessage(message, level = "INFO") {
 	}
 }
 
-// 专门用于记录 Q 判断耗时的日志函数
-function logQ(ms) {
-	if (!LOG_PATH) return;
-	try {
-		// q.log 与 err.log 同级
-		const qLogPath = path.join(path.dirname(LOG_PATH), "q.log");
-		const line = `${ms} `; // 纯数字，每行一个
-		fs.appendFileSync(qLogPath, line + "\n");
-	} catch (e) { }
-}
-
 // ============================================================================
 // ★ 统一任务消息模块（唯一真理源）
 // 用于文件粘贴、视频下载等所有任务的进度/完成消息格式化和显示
@@ -2120,6 +2109,7 @@ const TaskCounter = {
  * - rawStatus: 原始状态 { hasFile, hasHtml, hasImage, hasText }
  */
 async function wq() {
+	const startTime = Date.now();
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
 	let handled = false;
 	let files = [];
@@ -2186,6 +2176,39 @@ async function wq() {
 		const { isPlatformOrSegmentVideo } = require('./dow');
 		if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
 			subType = 'video_url';
+		}
+	}
+
+	const elapsedTime = Date.now() - startTime;
+
+	// 异常值过滤：只统计1ms到1000ms之间的时间
+	if (elapsedTime >= 1 && elapsedTime <= 1000) {
+		// 持久化统计到globalState
+		if (extensionContext) {
+			const wqStats = extensionContext.globalState.get("qqq_wq_stats", {
+				totalTime: 0,
+				count: 0,
+				recentTimes: [],
+				maxTime: 0
+			});
+
+			// 更新统计数据
+			wqStats.totalTime += elapsedTime;
+			wqStats.count += 1;
+
+			// 更新最近7次时间（使用环形缓冲区）
+			wqStats.recentTimes.push(elapsedTime);
+			if (wqStats.recentTimes.length > 7) {
+				wqStats.recentTimes.shift();
+			}
+
+			// 更新最大时间
+			if (elapsedTime > wqStats.maxTime) {
+				wqStats.maxTime = elapsedTime;
+			}
+
+			// 保存到globalState
+			extensionContext.globalState.update("qqq_wq_stats", wqStats);
 		}
 	}
 
@@ -2317,6 +2340,13 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const denom = pstats.hitTotal + pstats.missTotal;
 	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
 
+	// 获取wq前摇时间统计
+	let wqStats = { totalTime: 0, count: 0, recentTimes: [], maxTime: 0 };
+	if (extensionContext) {
+		wqStats = extensionContext.globalState.get("qqq_wq_stats", wqStats);
+	}
+	const averageTime = wqStats.count > 0 ? Math.round(wqStats.totalTime / wqStats.count) : 0;
+
 	const pref = getEnginePreference();
 	const active = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
 
@@ -2346,12 +2376,18 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 
 	const ioLine = `${active.name}${mismatchText}`;
 
+	// 格式化wq时间显示
+	const recentTimesStr = wqStats.recentTimes.join(', ');
+	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大：${wqStats.maxTime}]` : ''}）` : ''}`;
+
 	const tooltip = new vscode.MarkdownString(
 		`⏱️ **总陪伴：** ${formatHours(totalSeconds)}
 
 💾 **磁盘缓存：** ${formatBytes(cacheBytes)}
 
 🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})
+
+${wqLine}
 
 ⚡ **IO 引擎：** ${ioLine}`
 	);
@@ -2484,7 +2520,6 @@ module.exports = {
 	logMessage,
 	logMessageRateLimited,
 	bridgeStderrKey,
-	logQ,
 
 	// 对话框
 	showInformationMessage,

@@ -1556,6 +1556,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         b.filename = path.basename(finalPath);
                         b.path = finalPath;
                         b.fingerprint = fp || null;
+                        b.size = fs.statSync(finalPath).size;
                         b.status = "ok";
 
                         // ★ Register Transaction（使用规范化路径）
@@ -1591,6 +1592,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     b.filename = path.basename(finalPath);
                     b.path = finalPath;
                     b.fingerprint = fp || null;
+                    b.size = fs.statSync(finalPath).size;
                     b.status = "ok";
 
                     // ★ Register Transaction（使用规范化路径）
@@ -1636,6 +1638,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     block.status = "ok";
                     block.path = finalPath;
                     block.filename = path.basename(finalPath);
+                    block.size = fs.statSync(finalPath).size;
                     block.fingerprint = computeFingerprint(block.path);
                     if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
