@@ -117,6 +117,11 @@ class SidebarWebViewProvider {
 
                 h = Math.floor(totalSeconds / 3600);
                 m = Math.floor((totalSeconds % 3600) / 60);
+
+                // 更新视图标题为使用时间
+                if (this._view) {
+                    this._view.title = `${h}h ${m}m`;
+                }
             }
 
             const cacheMB = cacheStats.totalSize / (1024 * 1024);
