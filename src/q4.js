@@ -252,14 +252,7 @@ class SidebarWebViewProvider {
      * 获取内容类型显示名称
      */
     getTypeDisplayName(type) {
-        const typeMap = {
-            'text': '文本',
-            'url': '链接',
-            'file': '文件',
-            'email': '邮箱',
-            'code': '代码'
-        };
-        return typeMap[type] || '未知';
+        return '文本';
     }
 
     /**
@@ -301,9 +294,6 @@ class SidebarWebViewProvider {
             historyHtml = clipboardHistory.map(item => `
                 <div class="history-item" data-id="${item.id}">
                     <div class="item-header">
-                        <span class="item-type type-${item.type}">
-                            ${this.getTypeDisplayName(item.type)}
-                        </span>
                         <span class="item-time">${this.getFormattedTime(item.timestamp)}</span>
                     </div>
                     <div class="item-preview">${this.escapeHtml(item.preview)}</div>
