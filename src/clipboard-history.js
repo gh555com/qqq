@@ -9,10 +9,11 @@ class ClipboardHistoryManager {
         this.pythonBridge = pythonBridge;
         this.shellBridge = shellBridge;
         this.history = [];
-        this.maxHistoryItems = 100; // 最大历史记录数
+        this.maxHistoryItems = 100;
         this.clipboardWatcher = null;
-        this.lastClipboardContent = '';
+        this.lastClipboardFingerprint = ''; // 使用指纹替代完整内容
         this.isWatching = false;
+        this.isInternalCopy = false; // 标志位：是否由扩展内部触发的复制
 
         // 快照存储目录
         this.snapshotDir = path.join(context.globalStorageUri.fsPath, 'clipboard_snapshots');
@@ -20,11 +21,8 @@ class ClipboardHistoryManager {
             fs.mkdirSync(this.snapshotDir, { recursive: true });
         }
 
-        // 检测当前 IO 引擎
-        this.currentEngine = 'node'; // 默认 node
+        this.currentEngine = 'node';
         this.detectEngine();
-
-        // 初始化历史记录
         this.loadHistory();
     }
 
@@ -65,27 +63,48 @@ class ClipboardHistoryManager {
         }, 1000); // 每秒检查一次
     }
 
-    /**
-     * 检查并捕获剪切板内容（核心逻辑）
-     */
     async checkAndCaptureClipboard() {
-        // 重新检测引擎状态（防止中途切换）
+        if (this.isInternalCopy) {
+            console.log('[ClipboardHistory] 跳过内部触发的复制检测');
+            return;
+        }
+
         this.detectEngine();
 
         let clipboardInfo = null;
+        let currentFingerprint = '';
 
         if (this.currentEngine === 'python') {
-            // ============ Python 引擎：完整快照模式 ============
+            // 先偷看一眼，不保存，防止无限复制
+            const peek = await this.pythonBridge.call('wq', {}, 2000);
+            if (!peek || peek.error) return;
+
+            // 构造一个唯一指纹
+            currentFingerprint = `py_${peek.hasFile}_${peek.hasImage}_${peek.hasHtml}_${peek.hasText}`;
+
+            // 如果是文本，加个文本预览做指纹
+            if (peek.hasText && !peek.hasFile && !peek.hasImage) {
+                const text = await vscode.env.clipboard.readText();
+                currentFingerprint += `_${text.slice(0, 100)}_${text.length}`;
+            }
+
+            if (currentFingerprint === this.lastClipboardFingerprint) return;
+
+            // 指纹变了，真正捕获快照
+            console.log('[ClipboardHistory] 检测到剪切板变化，开始捕获快照...');
             clipboardInfo = await this.capturePythonSnapshot();
         } else {
-            // ============ Node 引擎：仅文本模式 ============
+            const text = await vscode.env.clipboard.readText();
+            if (!text || !text.trim()) return;
+            currentFingerprint = `node_${text.slice(0, 100)}_${text.length}`;
+
+            if (currentFingerprint === this.lastClipboardFingerprint) return;
             clipboardInfo = await this.captureNodeText();
         }
 
-        // 只有当内容发生变化时才记录
-        if (clipboardInfo && JSON.stringify(clipboardInfo) !== JSON.stringify(this.lastClipboardInfo)) {
+        if (clipboardInfo) {
             await this.addToHistory(clipboardInfo);
-            this.lastClipboardInfo = clipboardInfo;
+            this.lastClipboardFingerprint = currentFingerprint;
             this.notifySidebarUpdate();
         }
     }
@@ -493,44 +512,33 @@ class ClipboardHistoryManager {
         }
     }
 
-    /**
-     * 从快照恢复到剪切板
-     */
     async restoreFromSnapshot(snapshot) {
-        if (snapshot.type === 'text') {
-            // 文本快照
-            return await this.copyTextToClipboard(snapshot.text);
-        } else if (snapshot.type === 'image' && snapshot.path) {
-            // 图片快照：使用 Python 引擎写入剪切板
-            if (this.pythonBridge && this.pythonBridge.isAvailable()) {
-                // TODO: 需要在 kp.py 中实现 set_clipboard_image 功能
-                vscode.window.showWarningMessage('图片恢复功能需要扩展 kp.py，暂时只能打开文件');
-                await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(snapshot.path));
-                return true;
-            } else {
-                vscode.window.showWarningMessage('图片恢复需要 Python 引擎，当前不可用');
-                return false;
-            }
-        } else if (snapshot.type === 'file' && snapshot.files) {
-            // 文件快照：直接打开或复制路径
-            if (snapshot.files.length === 1) {
-                const filePath = snapshot.files[0];
-                if (fs.existsSync(filePath)) {
-                    const stat = fs.statSync(filePath);
-                    if (stat.isDirectory()) {
-                        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
-                    } else {
-                        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
-                    }
-                    return true;
+        this.isInternalCopy = true;
+        try {
+            if (snapshot.type === 'text') {
+                return await this.copyTextToClipboard(snapshot.text);
+            } else if (snapshot.type === 'image' && snapshot.path) {
+                if (this.pythonBridge && this.pythonBridge.isAvailable()) {
+                    const res = await this.pythonBridge.call('set_clipboard', {
+                        type: 'image',
+                        path: snapshot.path
+                    });
+                    return !!res.success;
                 }
-            } else {
-                // 多个文件，复制路径列表
-                return await this.copyTextToClipboard(snapshot.files.join('\n'));
+            } else if (snapshot.type === 'file' && snapshot.files) {
+                if (this.pythonBridge && this.pythonBridge.isAvailable()) {
+                    const res = await this.pythonBridge.call('set_clipboard', {
+                        type: 'files',
+                        files: snapshot.files
+                    });
+                    return !!res.success;
+                }
             }
+            return false;
+        } finally {
+            // 延迟重置标志位，确保检测循环能跳过这次变化
+            setTimeout(() => { this.isInternalCopy = false; }, 2000);
         }
-
-        return false;
     }
 
     /**

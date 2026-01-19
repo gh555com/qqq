@@ -140,6 +140,10 @@ if _IS_WINDOWS:
     IsClipboardFormatAvailable = user32.IsClipboardFormatAvailable
     IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
     IsClipboardFormatAvailable.restype = wintypes.BOOL
+    RegisterClipboardFormatW = user32.RegisterClipboardFormatW
+    RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+    RegisterClipboardFormatW.restype = wintypes.UINT
+    CF_HTML = RegisterClipboardFormatW("HTML Format")
     EmptyClipboard = user32.EmptyClipboard
     EmptyClipboard.argtypes = []
     EmptyClipboard.restype = wintypes.BOOL
@@ -722,7 +726,8 @@ def set_clipboard_text(text):
         if not OpenClipboard(None):
             return False
         EmptyClipboard()
-        h_global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (len(text) + 1) * ctypes.sizeof(ctypes.c_wchar))
+        h_global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (len(
+            text) + 1) * ctypes.sizeof(ctypes.c_wchar))
         ptr = GlobalLock(h_global)
         ctypes.memmove(ptr, text, len(text) * ctypes.sizeof(ctypes.c_wchar))
         GlobalUnlock(h_global)
@@ -740,20 +745,21 @@ def set_clipboard_files(paths):
         # 构造 DROPFILES 结构
         files_str = "\0".join(paths) + "\0\0"
         files_bytes = files_str.encode("utf-16le")
-        
+
         df = DROPFILES()
         df.pFiles = ctypes.sizeof(DROPFILES)
         df.fWide = True
-        
+
         total_size = ctypes.sizeof(DROPFILES) + len(files_bytes)
         h_global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, total_size)
         ptr = GlobalLock(h_global)
-        
+
         ctypes.memmove(ptr, ctypes.byref(df), ctypes.sizeof(DROPFILES))
-        ctypes.memmove(ctypes.c_void_p(ptr + ctypes.sizeof(DROPFILES)), files_bytes, len(files_bytes))
-        
+        ctypes.memmove(ctypes.c_void_p(
+            ptr + ctypes.sizeof(DROPFILES)), files_bytes, len(files_bytes))
+
         GlobalUnlock(h_global)
-        
+
         if not OpenClipboard(None):
             return False
         EmptyClipboard()
@@ -777,12 +783,12 @@ def set_clipboard_image(img_path):
         bmp_data = output.getvalue()
         # BMP 文件头是 14 字节，DIB 是去掉这 14 字节后的内容
         dib_data = bmp_data[14:]
-        
+
         h_global = GlobalAlloc(GMEM_MOVEABLE, len(dib_data))
         ptr = GlobalLock(h_global)
         ctypes.memmove(ptr, dib_data, len(dib_data))
         GlobalUnlock(h_global)
-        
+
         if not OpenClipboard(None):
             return False
         EmptyClipboard()
@@ -906,7 +912,8 @@ def _dispatch_action(cmd):
         out["success"] = success
         return out
     if action == "hasImage":
-        out["value"] = IsClipboardFormatAvailable(CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB)
+        out["value"] = IsClipboardFormatAvailable(
+            CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB)
         return out
     if action == "hasFiles":
         out["value"] = IsClipboardFormatAvailable(CF_HDROP)
@@ -915,14 +922,17 @@ def _dispatch_action(cmd):
         out["value"] = IsClipboardFormatAvailable(CF_HTML)
         return out
     if action == "hasText":
-        out["value"] = IsClipboardFormatAvailable(CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT)
+        out["value"] = IsClipboardFormatAvailable(
+            CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT)
         return out
     if action == "wq":
         # 实现 wq 接口
         out["hasFile"] = IsClipboardFormatAvailable(CF_HDROP)
         out["hasHtml"] = IsClipboardFormatAvailable(CF_HTML)
-        out["hasImage"] = IsClipboardFormatAvailable(CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB)
-        out["hasText"] = IsClipboardFormatAvailable(CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT)
+        out["hasImage"] = IsClipboardFormatAvailable(
+            CF_DIBV5) or IsClipboardFormatAvailable(CF_DIB)
+        out["hasText"] = IsClipboardFormatAvailable(
+            CF_UNICODETEXT) or IsClipboardFormatAvailable(CF_TEXT)
         return out
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
