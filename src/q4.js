@@ -1126,3 +1126,5 @@ class SidebarWebViewProvider {
 }
 
 module.exports = SidebarWebViewProvider;
+
+
