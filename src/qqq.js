@@ -233,7 +233,7 @@ function updateStatusBarThrottled() {
 	const now = Date.now();
 	if (now >= _nextStatusBarAt) {
 		_nextStatusBarAt = now + 400;
-		try { updateStatusBarThrottled(); } catch { }
+		try { updateStatusBarNow(); } catch { }
 		return;
 	}
 	if (_statusBarPending) return;
@@ -242,7 +242,7 @@ function updateStatusBarThrottled() {
 	setTimeout(() => {
 		_statusBarPending = false;
 		_nextStatusBarAt = Date.now() + 400;
-		try { updateStatusBarThrottled(); } catch { }
+		try { updateStatusBarNow(); } catch { }
 	}, delay);
 }
 
