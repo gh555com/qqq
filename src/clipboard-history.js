@@ -177,18 +177,27 @@ class ClipboardHistoryManager {
     /**
      * 清空所有历史记录
      */
-    clearHistory() {
+    async clearHistory() {
+        console.log('ClipboardHistoryManager: 开始物理清空所有历史记录');
         this.history = [];
-        this.saveHistory();
+        this.lastClipboardContent = '';
+
+        // 彻底从 globalState 中移除该键值，而不仅仅是设为空数组
+        await this.context.globalState.update('qqq_clipboard_history', undefined);
+        await this.context.globalState.update('qqq_clipboard_history', []);
+
         this.notifySidebarUpdate();
+        console.log('ClipboardHistoryManager: 物理清空完成');
     }
 
     /**
      * 保存历史记录到全局状态
      */
-    saveHistory() {
+    async saveHistory() {
         try {
-            this.context.globalState.update('qqq_clipboard_history', this.history);
+            // 强制使用 await 确保写入成功
+            await this.context.globalState.update('qqq_clipboard_history', this.history);
+            console.log('ClipboardHistoryManager: 成功保存历史记录，当前长度:', this.history.length);
         } catch (error) {
             console.error('保存剪切板历史失败:', error);
         }
@@ -201,6 +210,11 @@ class ClipboardHistoryManager {
         try {
             const savedHistory = this.context.globalState.get('qqq_clipboard_history', []);
             this.history = Array.isArray(savedHistory) ? savedHistory : [];
+
+            // 确保所有历史记录项的类型都是 'text'
+            this.history.forEach(item => {
+                item.type = 'text';
+            });
         } catch (error) {
             console.error('加载剪切板历史失败:', error);
             this.history = [];

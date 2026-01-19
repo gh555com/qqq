@@ -8,6 +8,7 @@ class SidebarWebViewProvider {
         this.global = globalModule;
         this._view = null;
         this.updateInterval = null;
+        this.scrollPosition = null;
 
         // 确保可以访问 extensionContext
         if (!this.global.extensionContext && typeof extensionContext !== 'undefined') {
@@ -45,15 +46,18 @@ class SidebarWebViewProvider {
 
         // 处理来自 webview 的消息
         webviewView.webview.onDidReceiveMessage(async (message) => {
+            console.log('收到 Webview 消息:', message.command, message.itemId);
             switch (message.command) {
                 case "openSettings":
                     vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
                     break;
                 case "refresh":
+                    if (message.scrollPosition) {
+                        this.scrollPosition = message.scrollPosition;
+                    }
                     this.updateContent();
                     break;
                 case "copyToClipboard":
-                    // 复制历史项到剪切板
                     if (this.global.clipboardHistoryManager && message.itemId) {
                         const item = this.global.clipboardHistoryManager.getItemById(message.itemId);
                         if (item) {
@@ -63,13 +67,42 @@ class SidebarWebViewProvider {
                     }
                     break;
                 case "deleteHistoryItem":
-                    // 删除历史项
-                    if (this.global.clipboardHistoryManager && message.itemId) {
+                    if (!this.global.clipboardHistoryManager) {
+                        console.error('致命错误: clipboardHistoryManager 未初始化');
+                        vscode.window.showErrorMessage('内部错误: 剪切板管理器未就绪');
+                        break;
+                    }
+                    if (message.itemId) {
+                        console.log('Webview 请求删除项目 ID:', message.itemId);
                         const success = this.global.clipboardHistoryManager.removeItem(message.itemId);
                         if (success) {
-                            this.updateContent(); // 刷新显示
-                            vscode.window.showInformationMessage('已删除历史记录');
+                            this.updateContent();
+                            vscode.window.setStatusBarMessage('已删除该条历史', 3000);
+                        } else {
+                            console.warn('删除失败，可能是 ID 不匹配，强制刷新视图');
+                            this.updateContent();
                         }
+                    }
+                    break;
+                case "clearAllHistory":
+                    if (!this.global.clipboardHistoryManager) {
+                        console.error('致命错误: clipboardHistoryManager 未初始化');
+                        vscode.window.showErrorMessage('内部错误: 剪切板管理器未就绪');
+                        break;
+                    }
+
+                    // 在后台调用 VS Code 原生确认框，不会被拦截
+                    const answer = await vscode.window.showWarningMessage(
+                        '确定要清空所有的剪切板历史记录吗？此操作不可撤销。',
+                        { modal: true },
+                        '确定清空'
+                    );
+
+                    if (answer === '确定清空') {
+                        console.log('Webview 请求清空所有历史');
+                        await this.global.clipboardHistoryManager.clearHistory();
+                        this.updateContent();
+                        vscode.window.showInformationMessage('剪切板数据库已物理清空');
                     }
                     break;
             }
@@ -144,7 +177,7 @@ class SidebarWebViewProvider {
 
             const activeEngine = this.getActiveEngineInfo();
 
-            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory);
+            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition);
         } catch (error) {
             this._view.webview.html = this.getErrorContent(error.message);
         }
@@ -248,12 +281,7 @@ class SidebarWebViewProvider {
         };
     }
 
-    /**
-     * 获取内容类型显示名称
-     */
-    getTypeDisplayName(type) {
-        return '文本';
-    }
+
 
     /**
      * 获取格式化时间显示
@@ -287,8 +315,9 @@ class SidebarWebViewProvider {
             .replace(/'/g, '&#039;');
     }
 
-    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = []) {
+    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null) {
         // 构建剪切板历史HTML
+
         let historyHtml = '';
         if (clipboardHistory.length > 0) {
             historyHtml = clipboardHistory.map(item => `
@@ -482,6 +511,17 @@ class SidebarWebViewProvider {
             transform: translateY(-1px);
         }
 
+        .btn-danger {
+            background: var(--red);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #b32421;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(220, 50, 47, 0.4);
+        }
+
         .footer {
             text-align: center;
             margin-top: 20px;
@@ -526,6 +566,50 @@ class SidebarWebViewProvider {
             overflow-y: auto;
         }
 
+        /* 隐藏默认滚动条，实现自定义滚动 */
+        .history-container {
+            position: relative;
+            max-height: 400px;
+            overflow: hidden;
+        }
+
+        .history-list {
+            max-height: 400px;
+            overflow-y: scroll;
+            /* 隐藏所有浏览器的滚动条 */
+            scrollbar-width: none;
+        }
+
+        .history-list::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* 自定义滚动块 */
+        .custom-scrollbar {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 3px; /* 很窄的滚动块 */
+            height: 100%;
+            background: transparent;
+            display: none;
+            z-index: 10;
+        }
+
+        .custom-scrollbar-thumb {
+            position: absolute;
+            right: 0;
+            width: 100%;
+            background-color: rgba(189, 26, 26, 0.7); /* 半透明暗红色 */
+            border-radius: 1.5px; /* 圆角，与宽度匹配 */
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .custom-scrollbar-thumb:hover {
+            background-color: rgba(189, 26, 26, 0.9); /* 鼠标悬停时不透明度增加 */
+        }
+
         .history-item {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -549,18 +633,7 @@ class SidebarWebViewProvider {
             margin-bottom: 8px;
         }
 
-        .item-type {
-            font-size: 0.75em;
-            padding: 3px 8px;
-            border-radius: 12px;
-            font-weight: 500;
-        }
 
-        .type-text { background: rgba(38, 139, 210, 0.2); color: var(--blue); }
-        .type-url { background: rgba(133, 153, 0, 0.2); color: var(--green); }
-        .type-file { background: rgba(220, 50, 47, 0.2); color: var(--red); }
-        .type-email { background: rgba(108, 113, 196, 0.2); color: var(--violet); }
-        .type-code { background: rgba(181, 137, 0, 0.2); color: var(--yellow); }
 
         .item-time {
             font-size: 0.75em;
@@ -698,8 +771,13 @@ class SidebarWebViewProvider {
                 </div>
             </div>
 
-            <div class="history-list" id="historyList">
-                ${historyHtml}
+            <div class="history-container" id="historyContainer">
+                <div class="history-list" id="historyList">
+                    ${historyHtml}
+                </div>
+                <div class="custom-scrollbar" id="customScrollbar">
+                    <div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div>
+                </div>
             </div>
         </div>
 
@@ -709,6 +787,9 @@ class SidebarWebViewProvider {
             </button>
             <button class="btn btn-secondary" onclick="refreshData()">
                 🔄 刷新数据
+            </button>
+            <button class="btn btn-danger" onclick="clearAllHistory()">
+                🗑️ 清空历史记录
             </button>
         </div>
 
@@ -762,9 +843,59 @@ class SidebarWebViewProvider {
             }
         }
 
+        // 保存滚动位置
+        function saveScrollPosition() {
+            const historyList = document.getElementById('historyList');
+            if (historyList) {
+                return {
+                    scrollTop: historyList.scrollTop,
+                    scrollHeight: historyList.scrollHeight,
+                    clientHeight: historyList.clientHeight,
+                    timestamp: Date.now()
+                };
+            }
+            return null;
+        }
+
+        // 恢复滚动位置
+        function restoreScrollPosition(scrollPos) {
+            if (!scrollPos) return;
+
+            const historyList = document.getElementById('historyList');
+            if (historyList) {
+                // 使用多种策略确保滚动位置恢复
+                const restore = () => {
+                    // 方法1: 直接设置滚动位置
+                    historyList.scrollTop = scrollPos.scrollTop;
+
+                    // 方法2: 如果直接设置失败，尝试按比例设置
+                    if (historyList.scrollTop !== scrollPos.scrollTop && scrollPos.scrollHeight > 0) {
+                        const scrollRatio = scrollPos.scrollTop / scrollPos.scrollHeight;
+                        const newScrollTop = scrollRatio * historyList.scrollHeight;
+                        historyList.scrollTop = newScrollTop;
+                    }
+                };
+
+                // 立即尝试恢复
+                restore();
+
+                // 在下一个事件循环再次尝试（等待DOM完全渲染）
+                setTimeout(restore, 10);
+
+                // 再次延迟确保完全恢复
+                setTimeout(restore, 100);
+            }
+        }
+
+        // 刷新数据时保存和恢复滚动位置
         function refreshData() {
             if (vscode) {
-                vscode.postMessage({ command: 'refresh' });
+                const scrollPos = saveScrollPosition();
+                // 将滚动位置信息发送给扩展
+                vscode.postMessage({
+                    command: 'refresh',
+                    scrollPosition: scrollPos
+                });
             }
         }
 
@@ -779,13 +910,21 @@ class SidebarWebViewProvider {
         }
 
         function deleteHistoryItem(itemId) {
-            if (confirm('确定要删除这条历史记录吗？')) {
-                if (vscode) {
-                    vscode.postMessage({
-                        command: 'deleteHistoryItem',
-                        itemId: itemId
-                    });
-                }
+            // 移除被拦截的 confirm，直接发消息给后台处理
+            if (vscode) {
+                vscode.postMessage({
+                    command: 'deleteHistoryItem',
+                    itemId: itemId
+                });
+            }
+        }
+
+        function clearAllHistory() {
+            // 移除被拦截的 confirm，直接发消息给后台处理
+            if (vscode) {
+                vscode.postMessage({
+                    command: 'clearAllHistory'
+                });
             }
         }
 
@@ -793,6 +932,105 @@ class SidebarWebViewProvider {
         if (typeof setInterval !== 'undefined') {
             setInterval(refreshData, 5000);
         }
+
+        // 页面加载完成后恢复滚动位置
+        const initialScrollPos = ${JSON.stringify(scrollPosition)};
+        if (initialScrollPos) {
+            restoreScrollPosition(initialScrollPos);
+        }
+
+        // 自定义滚动条实现
+        const historyList = document.getElementById('historyList');
+
+        // 禁用默认右键菜单
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        const historyContainer = document.getElementById('historyContainer');
+        const customScrollbar = document.getElementById('customScrollbar');
+        const customScrollbarThumb = document.getElementById('customScrollbarThumb');
+
+        // 更新滚动条显示和位置
+        function updateCustomScrollbar() {
+            if (!historyList || !customScrollbar || !customScrollbarThumb) return;
+
+            const containerHeight = historyContainer.clientHeight;
+            const contentHeight = historyList.scrollHeight;
+            const scrollTop = historyList.scrollTop;
+
+            if (contentHeight > containerHeight) {
+                customScrollbar.style.display = 'block';
+
+                // 计算滚动块高度和位置
+                const thumbHeight = Math.max(20, (containerHeight / contentHeight) * containerHeight);
+                const thumbTop = (scrollTop / (contentHeight - containerHeight)) * (containerHeight - thumbHeight);
+
+                customScrollbarThumb.style.height = thumbHeight + 'px';
+                customScrollbarThumb.style.top = thumbTop + 'px';
+            } else {
+                customScrollbar.style.display = 'none';
+            }
+        }
+
+        // 滚动条点击事件 - 修复点击定位
+        customScrollbar.addEventListener('click', (e) => {
+            if (!historyList || !historyContainer) return;
+
+            const scrollbarRect = customScrollbar.getBoundingClientRect();
+            const clickY = e.clientY - scrollbarRect.top;
+            const containerHeight = historyContainer.clientHeight;
+            const contentHeight = historyList.scrollHeight;
+
+            // 计算新的滚动位置
+            const newScrollTop = (clickY / containerHeight) * (contentHeight - containerHeight);
+
+            // 设置新的滚动位置
+            historyList.scrollTop = newScrollTop;
+            updateCustomScrollbar();
+        });
+
+        // 滚动块拖动事件
+        let isDragging = false;
+        let startY = 0;
+        let startScrollTop = 0;
+
+        customScrollbarThumb.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startY = e.clientY;
+            startScrollTop = historyList.scrollTop;
+
+            // 内联处理鼠标移动和释放事件
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+
+                const deltaY = e.clientY - startY;
+                const containerHeight = historyContainer.clientHeight;
+                const contentHeight = historyList.scrollHeight;
+                const thumbHeight = customScrollbarThumb.offsetHeight;
+
+                const scrollDelta = (deltaY / (containerHeight - thumbHeight)) * (contentHeight - containerHeight);
+                historyList.scrollTop = startScrollTop + scrollDelta;
+                updateCustomScrollbar();
+            };
+
+            const handleMouseUp = () => {
+                isDragging = false;
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+            };
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            e.preventDefault();
+        });
+
+        // 列表滚动事件
+        historyList.addEventListener('scroll', updateCustomScrollbar);
+
+        // 窗口大小变化时更新滚动条
+        window.addEventListener('resize', updateCustomScrollbar);
+
+        // 初始更新滚动条
+        updateCustomScrollbar();
     </script>
 </body>
 </html>`;
