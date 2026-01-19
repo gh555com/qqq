@@ -2734,6 +2734,18 @@ class FileCodeLensProvider {
 					tooltip: tooltipText,
 				})
 			);
+
+			// 只对文本文件显示✎qode按钮，且仅在codelensLevel为3时
+			if (codelensLevel === "3" && isText) {
+				lenses.push(
+					new vscode.CodeLens(r, {
+						title: "✎qode",
+						command: "qqq.openFileInRightGroup",
+						arguments: [absPath],
+						tooltip: "在右边分组打开文件并进入编辑状态",
+					})
+				);
+			}
 		}
 
 		if (foldersToFetch.size > 0) {
@@ -2844,6 +2856,38 @@ function openFileCommand(filePath) {
 		else cp.exec(`xdg-open "${filePath}"`);
 	} catch {
 		vscode.env.openExternal(vscode.Uri.file(filePath));
+	}
+}
+
+function openFileInRightGroupCommand(filePath) {
+	if (!fs.existsSync(filePath)) return;
+	try {
+		const uri = vscode.Uri.file(filePath);
+		vscode.workspace.openTextDocument(uri).then(doc => {
+			// 确定右边的视图列
+			let targetColumn = vscode.ViewColumn.Beside;
+
+			// 检查是否有多个标签组
+			if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
+				const allGroups = vscode.window.tabGroups.all;
+				if (allGroups.length > 1) {
+					// 找到最右边的标签组
+					const sortedGroups = allGroups
+						.filter(g => typeof g.viewColumn === "number")
+						.sort((a, b) => a.viewColumn - b.viewColumn);
+					targetColumn = sortedGroups[sortedGroups.length - 1].viewColumn;
+				}
+			}
+
+			// 在目标列打开文件，确保进入编辑状态（preserveFocus: false）
+			vscode.window.showTextDocument(doc, {
+				viewColumn: targetColumn,
+				preserveFocus: false,
+				preview: false
+			});
+		});
+	} catch (error) {
+		vscode.window.showErrorMessage("打开文件失败: " + error.message);
 	}
 }
 
@@ -2981,6 +3025,7 @@ async function activate(context) {
 		}),
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
+		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
 		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
 		vscode.commands.registerCommand("qqq.setInOrder", () => {

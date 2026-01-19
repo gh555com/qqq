@@ -2385,7 +2385,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`;
 
 	const tooltip = new vscode.MarkdownString(
-		`⏱️ **总陪伴：** ${formatHours(totalSeconds)}
+		`⏱️ **陪伴时间：** ${formatHours(totalSeconds)}
 
 💾 **磁盘缓存：** ${formatBytes(cacheBytes)}
 
