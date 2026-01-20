@@ -15,12 +15,8 @@
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
     "onCommand:qqq.setInOrder",
-    "onCommand:qqq.openFile",
-    "onCommand:qqq.revealFileInFolder",
-    "onCommand:qqq.renameFile",
     "onCommand:qqq.exportDoc",
-    "onCommand:qqq.exportZip",
-    "onCommand:qqq.showStatusPanel"
+    "onCommand:qqq.exportZip"
   ],
   "main": "./src/qqq.js",
   "contributes": {
@@ -259,11 +255,11 @@
     "commands": [
       {
         "command": "qqq.q1",
-        "title": "qqq: Paste (Ctrl+V)"
+        "title": "qqq: Paste everything ( Ctrl+V or F2 )"
       },
       {
         "command": "qqq.q2",
-        "title": "qqq: Navigate (F2)"
+        "title": "qqq: Roam everywhere ( Tab or F6 )"
       },
       {
         "command": "qqq.pure",
@@ -275,19 +271,7 @@
       },
       {
         "command": "qqq.setInOrder",
-        "title": "qqq: set in order (全局整理)"
-      },
-      {
-        "command": "qqq.openFile",
-        "title": "qqq: open file"
-      },
-      {
-        "command": "qqq.revealFileInFolder",
-        "title": "qqq: reveal in folder"
-      },
-      {
-        "command": "qqq.renameFile",
-        "title": "qqq: rename file"
+        "title": "qqq: clean up"
       },
       {
         "command": "qqq.exportDoc",
@@ -299,15 +283,11 @@
       },
       {
         "command": "qqq.downloadVideosFromUrl",
-        "title": "qqq: 在光标位置插入 YouTube 等网页视频"
+        "title": "qqq: insert Videos From Url"
       },
       {
         "command": "qqq.savorMoments",
         "title": "qqq: savor moments for yourself"
-      },
-      {
-        "command": "qqq.showStatusPanel",
-        "title": "qqq: 显示状态面板"
       }
     ],
     "keybindings": [
