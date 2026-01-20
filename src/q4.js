@@ -668,18 +668,24 @@ class SidebarWebViewProvider {
             z-index: 10;
         }
 
+        /* 全局滚动条特殊样式 */
+        .global-scrollbar {
+            position: fixed;
+            z-index: 100;
+        }
+
         .custom-scrollbar-thumb {
             position: absolute;
             right: 0;
             width: 100%;
-            background-color: rgba(189, 26, 26, 0.7); /* 半透明暗红色 */
+            background-color: rgba(0, 0, 0, 0.7); /* 黑色滚动块 */
             border-radius: 1.5px; /* 圆角，与宽度匹配 */
             cursor: pointer;
             transition: background-color 0.2s ease;
         }
 
         .custom-scrollbar-thumb:hover {
-            background-color: rgba(189, 26, 26, 0.9); /* 鼠标悬停时不透明度增加 */
+            background-color: rgba(0, 0, 0, 0.9); /* 鼠标悬停时不透明度增加 */
         }
 
         .history-item {
@@ -798,6 +804,11 @@ class SidebarWebViewProvider {
     </style>
 </head>
 <body>
+    <!-- 全局自定义滚动条 -->
+    <div class="custom-scrollbar global-scrollbar" id="globalScrollbar">
+        <div class="custom-scrollbar-thumb" id="globalScrollbarThumb"></div>
+    </div>
+
     <div class="container">
         <!-- Captain 区块 - 命令按钮区 -->
         <div class="captain-section">
@@ -1137,6 +1148,91 @@ class SidebarWebViewProvider {
 
         // 窗口大小变化时更新滚动条
         window.addEventListener('resize', updateCustomScrollbar);
+
+        // 全局自定义滚动条实现
+        const globalScrollbar = document.getElementById('globalScrollbar');
+        const globalScrollbarThumb = document.getElementById('globalScrollbarThumb');
+
+        // 更新全局滚动条显示和位置
+        function updateGlobalScrollbar() {
+            if (!globalScrollbar || !globalScrollbarThumb) return;
+
+            const containerHeight = window.innerHeight;
+            const contentHeight = document.body.scrollHeight;
+            const scrollTop = document.body.scrollTop || document.documentElement.scrollTop;
+
+            if (contentHeight > containerHeight) {
+                globalScrollbar.style.display = 'block';
+
+                // 计算滚动块高度和位置
+                const thumbHeight = Math.max(20, (containerHeight / contentHeight) * containerHeight);
+                const thumbTop = (scrollTop / (contentHeight - containerHeight)) * (containerHeight - thumbHeight);
+
+                globalScrollbarThumb.style.height = thumbHeight + 'px';
+                globalScrollbarThumb.style.top = thumbTop + 'px';
+            } else {
+                globalScrollbar.style.display = 'none';
+            }
+        }
+
+        // 全局滚动条点击事件
+        globalScrollbar.addEventListener('click', (e) => {
+            const scrollbarRect = globalScrollbar.getBoundingClientRect();
+            const clickY = e.clientY - scrollbarRect.top;
+            const containerHeight = window.innerHeight;
+            const contentHeight = document.body.scrollHeight;
+
+            // 计算新的滚动位置
+            const newScrollTop = (clickY / containerHeight) * (contentHeight - containerHeight);
+
+            // 设置新的滚动位置
+            window.scrollTo(0, newScrollTop);
+            updateGlobalScrollbar();
+        });
+
+        // 全局滚动块拖动事件
+        let isGlobalDragging = false;
+        let globalStartY = 0;
+        let globalStartScrollTop = 0;
+
+        globalScrollbarThumb.addEventListener('mousedown', (e) => {
+            isGlobalDragging = true;
+            globalStartY = e.clientY;
+            globalStartScrollTop = window.scrollY;
+
+            // 内联处理鼠标移动和释放事件
+            const handleMouseMove = (e) => {
+                if (!isGlobalDragging) return;
+
+                const deltaY = e.clientY - globalStartY;
+                const containerHeight = window.innerHeight;
+                const contentHeight = document.body.scrollHeight;
+                const thumbHeight = globalScrollbarThumb.offsetHeight;
+
+                const scrollDelta = (deltaY / (containerHeight - thumbHeight)) * (contentHeight - containerHeight);
+                window.scrollTo(0, globalStartScrollTop + scrollDelta);
+                updateGlobalScrollbar();
+            };
+
+            const handleMouseUp = () => {
+                isGlobalDragging = false;
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+            };
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            e.preventDefault();
+        });
+
+        // 页面滚动事件
+        window.addEventListener('scroll', updateGlobalScrollbar);
+
+        // 窗口大小变化时更新全局滚动条
+        window.addEventListener('resize', updateGlobalScrollbar);
+
+        // 初始更新全局滚动条
+        updateGlobalScrollbar();
 
         // 处理来自扩展的消息
         window.addEventListener('message', event => {
