@@ -344,7 +344,7 @@ class DaemonBridge {
 // Python bridge：优先 python，其次 python3（非 win32）
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
-		const scriptPath = path.join(__dirname, "kp.py");
+		const scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
 		if (!fs.existsSync(scriptPath)) {
 			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
 			bridge.available = false;
@@ -467,8 +467,8 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		const candidates = [
-			path.join(__dirname, "..", "assets", filename),
-			path.join(__dirname, "assets", filename),
+			path.join(extensionContext.extensionPath, "assets", "q_engine" + (platform === "win32" ? ".exe" : "")),
+			path.join(extensionContext.extensionPath, "assets", filename),
 		];
 
 		let exePath = null;

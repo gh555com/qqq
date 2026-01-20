@@ -17,8 +17,8 @@ const global = require("./global");
 // ==================== 完整性校验（与 q1 对齐，可选） ====================
 const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
-const LARGE_WATERMARK_PATH = path.join(__dirname, "..", "assets", "al.png");
-const SMALL_WATERMARK_PATH = path.join(__dirname, "..", "assets", "as.png");
+let LARGE_WATERMARK_PATH = "";
+let SMALL_WATERMARK_PATH = "";
 let isCoreIntegrityValid = false;
 
 function verifySystemIntegrity() {
@@ -28,7 +28,7 @@ function verifySystemIntegrity() {
     const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
     const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
     if (largeHash !== LARGE_WATERMARK_HASH) return false;
-    
+
     // 校验小水印
     if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
     const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
@@ -1416,7 +1416,7 @@ function getWebviewContent(currentPath) {
 
   let htmlTemplate = "";
   try {
-    htmlTemplate = fs.readFileSync(path.join(__dirname, "q2.html"), "utf8");
+    htmlTemplate = require("./q2.html");
   } catch (error) {
     qqq.logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
     return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
@@ -1525,8 +1525,8 @@ function showSaveAsDialog() {
         : canonicalizeExistingPath(os.homedir() || "/");
   }
 
-  const extensionUri = vscode.Uri.file(path.join(__dirname, ".."));
-  
+  const extensionUri = globalContext.extensionUri;
+
   const panel = vscode.window.createWebviewPanel(
     "q2",
     "qqq new 新建",
@@ -1541,7 +1541,7 @@ function showSaveAsDialog() {
   activePanel = panel;
   activePanelAlive = true;
 
-  const iconPath = path.join(__dirname, "..", "assets", "icon.png");
+  const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
   panel.onDidDispose(() => {
@@ -1894,6 +1894,8 @@ function showSaveAsDialog() {
 // ==================== 扩展激活 ====================
 async function activate(context) {
   globalContext = context;
+  LARGE_WATERMARK_PATH = path.join(context.extensionPath, "assets", "al.png");
+  SMALL_WATERMARK_PATH = path.join(context.extensionPath, "assets", "as.png");
 
   isCoreIntegrityValid = verifySystemIntegrity();
   qqq.logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");

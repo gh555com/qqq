@@ -99,7 +99,7 @@ class LocalAIReleaseAssistant {
         const missing = requiredAssets.filter(asset => !fs.existsSync(path.join('assets', asset)));
         if (missing.length > 0) {
             console.warn(`⚠️ 警告: 以下二进制文件在 assets 中缺失: ${missing.join(', ')}`);
-            console.warn('💡 请确保在发布前已运行 build 脚本并将产物放入 assets 文件夹。');
+            console.warn('ℹ️ 这在本地环境是正常的，云端流水线会自动处理这些二进制。');
         } else {
             console.log('✅ assets 二进制文件验证通过。');
         }
@@ -155,6 +155,54 @@ class LocalAIReleaseAssistant {
         console.log(`✅ q2 完成：版本 v${next} 已推送到主分支，触发远程全家桶发布`);
     }
 
+    // 包装 vsce package
+    async packagePlatformSpecificVSIX(target = null) {
+        const platforms = {
+            'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe' },
+            'win32-arm64': { bin: 'q_win_arm64.exe', engine: 'q_engine.exe' },
+            'linux-x64': { bin: 'q_linux_x64', engine: 'q_engine' },
+            'darwin-x64': { bin: 'q_mac_x64', engine: 'q_engine' },
+            'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine' }
+        };
+
+        const targets = target ? [target] : Object.keys(platforms);
+        const version = this.getCurrentVersion();
+
+        console.log(`📦 开始打包平台专用 VSIX (版本: v${version})...`);
+
+        for (const t of targets) {
+            const config = platforms[t];
+            if (!config) {
+                console.error(`❌ 未知平台: ${t}`);
+                continue;
+            }
+
+            const srcBin = path.join('assets', config.bin);
+            const destBin = path.join('assets', config.engine);
+
+            if (!fs.existsSync(srcBin)) {
+                console.error(`❌ 缺失二进制文件: ${srcBin}，跳过 ${t}`);
+                continue;
+            }
+
+            console.log(`🔧 正在为 ${t} 准备二进制环境...`);
+            fs.copyFileSync(srcBin, destBin);
+
+            try {
+                console.log(`🔨 正在打包 ${t}...`);
+                const outputName = `dist/qqq-${version}-${t}.vsix`;
+                execSync(`npx @vscode/vsce package --target ${t} -o ${outputName} --allow-missing-repository`, { stdio: 'inherit' });
+                console.log(`✅ 打包成功: ${outputName}`);
+            } catch (e) {
+                console.error(`❌ 打包 ${t} 失败:`, e.message);
+            } finally {
+                if (fs.existsSync(destBin)) {
+                    fs.unlinkSync(destBin);
+                }
+            }
+        }
+    }
+
     // 处理用户指令
     async processCommand(command, summary = '') {
         const cmd = command.trim().toLowerCase();
@@ -168,6 +216,17 @@ class LocalAIReleaseAssistant {
                 break;
             case 'q2':
                 await this.handleQ2(summary);
+                break;
+            case 'package':
+                // 先执行编译
+                console.log('📦 正在执行 esbuild 打包...');
+                try {
+                    execSync('npm run bundle', { stdio: 'inherit' });
+                } catch (e) {
+                    console.error('❌ esbuild 打包失败，中止发布');
+                    return;
+                }
+                await this.packagePlatformSpecificVSIX();
                 break;
             case 'help':
             case '帮助':
@@ -184,10 +243,11 @@ class LocalAIReleaseAssistant {
 🤖 本地AI发布助手使用说明：
 
 指令列表：
-  q3    - 快速保存代码版本（仅递增版本号并推送）
-  q1    - 半自动化PR流程（创建发布分支等待手动合并）
-  q2    - 完整自动化发布（递增版本并推送，需额外配置）
-  help  - 显示此帮助信息
+  q3      - 快速保存代码版本（仅递增版本号并推送）
+  q1      - 半自动化PR流程（创建发布分支等待手动合并）
+  q2      - 完整自动化发布（递增版本并推送，需额外配置）
+  package - 极致减肥打包：执行 esbuild 并生成 5 个平台的专用 VSIX
+  help    - 显示此帮助信息
 
 当前工作目录: ${this.repoPath}
         `);

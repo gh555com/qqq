@@ -32,10 +32,26 @@ Thumbs.db
 
 # 编译输出
 out/**
-dist/**
 build-artifacts/**
 build/**
 target/**
+
+# Bundling: 排除源码和依赖，保留 bundle 产物
+src/**
+node_modules/**
+!dist/qqq.js
+!dist/qqq.js.map
+
+# 平台二进制：排除特定平台的，保留统一命名的 q_engine
+assets/q_win_x64.exe
+assets/q_win_x86.exe
+assets/q_win_arm64.exe
+assets/q_linux_x64
+assets/q_linux_arm64
+assets/q_mac_x64
+assets/q_mac_arm64
+!assets/q_engine
+!assets/q_engine.exe
 
 # 其他开发文件
 .eslintrc.json

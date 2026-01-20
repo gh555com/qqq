@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.30.0",
+  "version": "15.31.0",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -18,7 +18,7 @@
     "onCommand:qqq.exportDoc",
     "onCommand:qqq.exportZip"
   ],
-  "main": "./src/qqq.js",
+  "main": "./dist/qqq.js",
   "contributes": {
     "colors": [
       {
@@ -314,10 +314,11 @@
     ]
   },
   "scripts": {
+    "bundle": "node esbuild.config.js",
     "ci:test": "vscode-test --config .vscode-test.js",
-    "ci:package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
+    "ci:package": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
     "ci:publish": "npx @vscode/vsce publish --allow-star-activation",
-    "package": "npx @vscode/vsce package --allow-missing-repository --allow-star-activation",
+    "package": "node git_help.js package",
     "publish": "npx @vscode/vsce publish --allow-star-activation",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
     "pub": "yes | npx vsce publish patch",
@@ -486,6 +487,7 @@
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.70.0",
     "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.20.0",
     "mocha": "^10.0.0"
   }
 }
