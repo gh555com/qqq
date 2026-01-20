@@ -404,6 +404,14 @@ class SidebarWebViewProvider {
             background: var(--background-color);
             color: var(--text-primary);
             min-height: 100vh;
+            overflow-y: auto;
+            /* 隐藏所有浏览器的默认滚动条 */
+            scrollbar-width: none;
+            position: relative;
+        }
+
+        body::-webkit-scrollbar {
+            display: none;
         }
 
         .container {
@@ -548,17 +556,11 @@ class SidebarWebViewProvider {
             margin-bottom: 15px;
             padding-bottom: 5px;
             border-bottom: 1px solid var(--border-color);
-            text-align: center;
         }
 
         /* Captain 区块样式 */
         .captain-section {
             margin-bottom: 25px;
-            background: var(--card-bg);
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 2px 4px var(--shadow-color);
         }
 
         .captain-buttons {
@@ -579,8 +581,6 @@ class SidebarWebViewProvider {
             background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
             color: white;
             box-shadow: 0 2px 6px var(--shadow-color);
-            word-wrap: break-word;
-            overflow-wrap: break-word;
         }
 
         .captain-btn:hover {
@@ -600,28 +600,6 @@ class SidebarWebViewProvider {
             margin-bottom: 25px;
             padding-top: 20px;
             border-top: 1px solid var(--border-color);
-        }
-
-        /* 调整容器内边距 */
-        .container {
-            max-width: 100%;
-            padding: 0 5px;
-        }
-
-        /* 调整统计卡片样式 */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px var(--shadow-color);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
         /* 剪切板历史样式 */
