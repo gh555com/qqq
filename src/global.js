@@ -361,6 +361,13 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			return new Promise((res) => {
 				let proc;
 				try {
+					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
+					// 检查 bin 是否为绝对路径且存在
+					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
+						logMessage(`[Python] 路径不存在: ${bin}`, "WARN");
+						res(false);
+						return;
+					}
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
 						windowsHide: true,
@@ -490,7 +497,13 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		try {
-			logMessage(`Rust Bridge 尝试启动: ${exePath}`, "INFO");
+			logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
+			if (!fs.existsSync(exePath)) {
+				logMessage(`[Rust] 路径不存在: ${exePath}`, "WARN");
+				bridge._setStartError(`exe_not_found_real: ${exePath}`);
+				resolve(false);
+				return;
+			}
 			const proc = cp.spawn(exePath, ["--daemon"], {
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,

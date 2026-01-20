@@ -445,10 +445,24 @@ async function getMediaInfo(filePath, mtimeMs) {
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
-	if (!qqq.ffmpegPath) return null;
+	if (!qqq.ffmpegPath) {
+		logMessage("ffmpegPath 未设置，无法获取媒体信息", "WARN");
+		return null;
+	}
+	if (!fs.existsSync(qqq.ffmpegPath)) {
+		logMessage(`ffmpegPath 文件不存在: ${qqq.ffmpegPath}`, "WARN");
+		return null;
+	}
 
 	return new Promise((resolve) => {
-		const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
+		let child;
+		try {
+			child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
+		} catch (e) {
+			logMessage(`spawn FFmpeg 失败: ${e.message}`, "ERROR");
+			resolve(null);
+			return;
+		}
 		let stderr = "";
 
 		child.stderr.on("data", (d) => {

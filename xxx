@@ -1,0 +1,748 @@
+index.js:1823 undefined
+workbench.desktop.main.js:4046 This document requires 'TrustedScriptURL' assignment.
+Scr @ workbench.desktop.main.js:4046
+workbench.desktop.main.js:4049  [AppLog WEB SDK] [instance: tea_711126] appid: 711126, userInfo:{"user_unique_id":"7575435981126436368","user_id":"4343531977314740","user_is_login":true,"device_id":"7575435981126436368"}
+workbench.desktop.main.js:4049  [AppLog WEB SDK] [instance: tea_711126] appid: 711126, sdk is ready, version type is full, version is 5.3.7, you can report now !!!
+workbench.desktop.main.js:34  WARN Skipping extension /E:/s/d/1211/f/e/theme-solarized-light in favour of the builtin extension /e:/s/d/kae/resources/app/extensions/theme-solarized-light.
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:3687 [SANDBOX_TO_MAIN_GET_SETUP_PAGE_LOGIN_FAILED_STATUS] reason: 
+(anonymous) @ workbench.desktop.main.js:3687
+index.js:14501 This document requires 'TrustedScript' assignment.
+(anonymous) @ index.js:14501
+index.js:14501 The JavaScript Function constructor does not accept TrustedString arguments. See https://github.com/w3c/webappsec-trusted-types/wiki/Trusted-Types-for-function-constructor for more information.
+workbench.desktop.main.js:34   ERR [ai-chat]getFileList error: Error: snapshot not found
+    at BP.getFileList (index.js:39427:186368)
+    at async WD.processMessageAndSetFileDiffDirtyStore (index.js:39472:66763)
+    at async By.getSessionMessages (index.js:39427:174340)
+    at async FU.switchToSession (index.js:39431:93332)
+    at async FU.loadPreviousSessionOrCreateNewIfNeeded (index.js:39431:87403)
+    at async Promise.all (index 0)
+    at async index.js:40677:6987
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34   ERR [Extension Host] (node:37772) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `1 --trace-deprecation ...` to show where the warning was created)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] (node:37772) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `1 --trace-deprecation ...` to show where the warning was created)
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1010.919921875kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c][ports-active] data persistence undefined
+workbench.desktop.main.js:538 [Extension Host] 剪切板监听已启动
+workbench.desktop.main.js:34  WARN [git]: Couldn't find message for key command.generateSimpleCommitMessage.
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1010.919921875kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+workbench.desktop.main.js:538 [Extension Host] [cueflow.proposed.registerIDECustomClientProposed] null Object
+workbench.desktop.main.js:538 [Extension Host] Error: Trying to add a disposable to a DisposableStore that has already been disposed of. The added object will be leaked!
+	at wM.add (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:25:1511)
+	at IA.o (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:119:1995)
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] Error: Trying to add a disposable to a DisposableStore that has already been disposed of. The added object will be leaked!
+	at wM.add (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:25:1511)
+	at IA.o (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:119:2088)
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] Error: Trying to add a disposable to a DisposableStore that has already been disposed of. The added object will be leaked!
+	at wM.add (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:25:1511)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:119:1348
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] Error: Trying to add a disposable to a DisposableStore that has already been disposed of. The added object will be leaked!
+	at wM.add (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:25:1511)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:119:3011
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] Error: Trying to add a disposable to a DisposableStore that has already been disposed of. The added object will be leaked!
+	at wM.add (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:25:1511)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:119:2552
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34  WARN [GitRepos] getGitReposForWorkspace via api returned empty repos, checking workspace folders
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.582 [info] [client] RegionImpl.getCachedRegions: cn
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.584 [info] [client] RegionImpl.getCachedRegions: cn
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.701 [info] [client] [CKG-Analyzer] TreeSitter.init: start to init tree-sitter instance with resourcesRootPath 'e:\s\d\kae\resources\app\extensions\ai-completion/resource/aiserver/resources', lazyLoadWasm: undefined
+workbench.desktop.main.js:538 [Extension Host] Command setContext not registered
+workbench.desktop.main.js:538 [Extension Host] Command python-helper.environmentChanged not registered
+workbench.desktop.main.js:34   ERR [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.728 [error] [client] global exception: [unhandledRejection]Python extension is not installed or is disabled, 
+Error: Python extension is not installed or is disabled
+	at Object.api (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:475:19)
+	at new iCubeCommandCenter (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:15434:37)
+	at createInstanceWithInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48239:20)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48229:22)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at childRequests.reduce.constructorInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48205:25)
+	at Array.reduce (<anonymous>)
+	at _resolveRequests (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48204:26)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48223:24)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at resolve (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48537:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49734:26
+	at __webpack_modules__.25891.Container._get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49702:38)
+	at __webpack_modules__.25891.Container._getButThrowIfAsync (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49705:27)
+	at __webpack_modules__.25891.Container.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49480:21)
+	at ServiceContainer.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:17041:89)
+	at activateLegacy (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12320:38)
+	at async activateComponents (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12272:36)
+	at async activateUnsafe (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123046:33)
+	at async activate (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123011:9)
+	at async Ny.n (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13382)
+	at async Ny.m (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13345)
+	at async Ny.l (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:12801)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.728 [error] [client] global exception: [unhandledRejection]Python extension is not installed or is disabled, 
+Error: Python extension is not installed or is disabled
+	at Object.api (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:475:19)
+	at new iCubeCommandCenter (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:15434:37)
+	at createInstanceWithInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48239:20)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48229:22)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at childRequests.reduce.constructorInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48205:25)
+	at Array.reduce (<anonymous>)
+	at _resolveRequests (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48204:26)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48223:24)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at resolve (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48537:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49734:26
+	at __webpack_modules__.25891.Container._get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49702:38)
+	at __webpack_modules__.25891.Container._getButThrowIfAsync (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49705:27)
+	at __webpack_modules__.25891.Container.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49480:21)
+	at ServiceContainer.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:17041:89)
+	at activateLegacy (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12320:38)
+	at async activateComponents (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12272:36)
+	at async activateUnsafe (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123046:33)
+	at async activate (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123011:9)
+	at async Ny.n (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13382)
+	at async Ny.m (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13345)
+	at async Ny.l (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:12801)
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.780 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language typescript done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.783 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language javascript done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.816 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language go done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.822 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language python done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.827 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language ruby done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.830 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language java done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.840 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language typescriptreact done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.843 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language c done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.851 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language cpp done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.861 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language c-sharp done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.872 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language kotlin done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.888 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language dart done
+workbench.desktop.main.js:2882 [git.contribution] Refactor agent is disabled via AB config, skipping
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.910 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language php done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.917 [info] [client] [CKG-Analyzer] TreeSitter.loadLanguage: load language rust done
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.918 [info] [client] [CKG-Analyzer] TreeSitter.init: init done with resourcesRootPath 'e:\s\d\kae\resources\app\extensions\ai-completion/resource/aiserver/resources'
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.921 [info] [client] start connect ahaServer name: cueServer
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:33:59.922 [info] [client] ahaServer connect success
+workbench.desktop.main.js:3094 debug toolbar use contrastBorderColor
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:34:00.038 [info] [client] RegionImpl.getCachedRegions: cn
+workbench.desktop.main.js:538 [Extension Host] rejected promise not handled within 1 second: Error: Python extension is not installed or is disabled
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:538 [Extension Host] stack trace: Error: Python extension is not installed or is disabled
+	at Object.api (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:475:19)
+	at new iCubeCommandCenter (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:15434:37)
+	at createInstanceWithInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48239:20)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48229:22)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at childRequests.reduce.constructorInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48205:25)
+	at Array.reduce (<anonymous>)
+	at _resolveRequests (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48204:26)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48223:24)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at resolve (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48537:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49734:26
+	at __webpack_modules__.25891.Container._get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49702:38)
+	at __webpack_modules__.25891.Container._getButThrowIfAsync (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49705:27)
+	at __webpack_modules__.25891.Container.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49480:21)
+	at ServiceContainer.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:17041:89)
+	at activateLegacy (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12320:38)
+	at async activateComponents (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12272:36)
+	at async activateUnsafe (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123046:33)
+	at async activate (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123011:9)
+	at async Ny.n (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13382)
+	at async Ny.m (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13345)
+	at async Ny.l (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:12801)
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:562 [byted-icube.python-enhance]Python extension is not installed or is disabled
+$onExtensionRuntimeError @ workbench.desktop.main.js:562
+workbench.desktop.main.js:562 Error: Python extension is not installed or is disabled
+	at Object.api (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:475:19)
+	at new iCubeCommandCenter (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:15434:37)
+	at createInstanceWithInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48239:20)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48229:22)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at childRequests.reduce.constructorInjections (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48205:25)
+	at Array.reduce (<anonymous>)
+	at _resolveRequests (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48204:26)
+	at _createInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48223:24)
+	at resolveInstance (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48324:18)
+	at _getResolvedFromBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48421:22)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48439:22
+	at _resolveInScope (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48433:14)
+	at _resolveBinding (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48438:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48400:20
+	at resolve (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:48537:12)
+	at e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49734:26
+	at __webpack_modules__.25891.Container._get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49702:38)
+	at __webpack_modules__.25891.Container._getButThrowIfAsync (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49705:27)
+	at __webpack_modules__.25891.Container.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:49480:21)
+	at ServiceContainer.get (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:17041:89)
+	at activateLegacy (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12320:38)
+	at async activateComponents (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:12272:36)
+	at async activateUnsafe (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123046:33)
+	at async activate (e:\s\d\kae\resources\app\extensions\byted-icube.python-enhance\out\client\extension.js:123011:9)
+	at async Ny.n (/e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13382)
+	at async Ny.m (/e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:13345)
+	at async Ny.l (/e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:112:12801)
+$onExtensionRuntimeError @ workbench.desktop.main.js:562
+workbench.desktop.main.js:34   ERR An unknown error occurred. Please consult the log for more details.
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:34:02.348 [info] [client] features response error:AxiosError: Request failed with status code 503
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]isIPv6Only: false
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]isBytedanceInternal: false
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]configurationPrefix: icube-devtool-ports
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]Extension language. en undefined
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]Service is available on ports
+workbench.desktop.main.js:538 [Extension Host] [node][1209ce36-d377-4586-a95b-9951c8236c4c]Start AutomaticPortForwarder
+workbench.desktop.main.js:538 [Extension Host] initBaseClient log sessionId: a5c3bc0b-d600-4fde-bdcc-eb97f3745a71, runtime: node
+workbench.desktop.main.js:538 [Extension Host] [Remote-SSH (TRAE)] activated
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1010.923828125kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34   ERR [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:34:13.393 [error] [client] features response error:AxiosError: Request failed with status code 503
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:538 [Extension Host] [node][2e1eeef2-c2cb-4676-9afe-c2fe5778c176]2026-01-20 22:34:13.393 [error] [client] features response error:AxiosError: Request failed with status code 503
+aen @ workbench.desktop.main.js:538
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+workbench.desktop.main.js:3982 An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing.
+mountTo @ workbench.desktop.main.js:3982
+index.html:87 Uncaught SyntaxError: Failed to execute 'write' on 'Document': missing ) after argument list
+    at index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1098:23
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:65795)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLSpanElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:65491)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66771)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66546)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66437)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66324)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66199)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66324)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66437)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66546)
+index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1 Uncaught ReferenceError: exec is not defined
+    at HTMLDivElement.onclick (index.html?id=97676f1d-33cd-4d0b-8f17-29c6f170a210&parentId=2&origin=a7caee70-4fd4-4563-a0b2-0db60fa30214&swVersion=4&extensionId=gh555.qqq&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&purpose=webviewView:1:66051)
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web:1  Failed to load resource: net::ERR_CONNECTION_CLOSED
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1010.923828125kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+workbench.desktop.main.js:34   ERR spawn UNKNOWN: Error: spawn UNKNOWN
+	at ChildProcess.spawn (node:internal/child_process:420:11)
+	at Object.spawn (node:child_process:800:9)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2420
+	at new Promise (<anonymous>)
+	at wye (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2395)
+	at e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2346
+	at Object.schedule (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:512:15899)
+	at wa (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:515:2326)
+	at H6.provideCodeLenses (e:\s\d\1211\f\e\gh555.qqq-15.38.0-win32-x64\dist\qqq.js:535:493)
+	at t1.provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:131769)
+	at file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160490
+	at ni.G (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:159330)
+	at ni.$provideCodeLenses (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:145:160478)
+	at oE.S (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122847)
+	at oE.Q (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:122627)
+	at oE.M (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:121633)
+	at oE.L (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:120776)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:119573)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at Gd.value (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:24984)
+	at k.C (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2372)
+	at k.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:27:2590)
+	at Lo.fire (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:29:9615)
+	at MessagePortMain.<anonymous> (file:///e:/s/d/kae/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:398:23194)
+	at MessagePortMain.emit (node:events:519:28)
+	at MessagePortMain.emit (node:domain:489:12)
+	at MessagePortMain._internalPort.emit (node:electron/js2c/utility_init:2:5311)
+error @ workbench.desktop.main.js:34
+workbench.desktop.main.js:4046  POST https://mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web net::ERR_CONNECTION_CLOSED
+(anonymous) @ workbench.desktop.main.js:4046
+a @ workbench.desktop.main.js:4046
+i.useRequest @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+i.send @ workbench.desktop.main.js:4049
+i.sliceEvent @ workbench.desktop.main.js:4049
+i.report @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1017.318359375kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:3679
+getExtensionStateRaw @ workbench.desktop.main.js:570
+(anonymous) @ workbench.desktop.main.js:570
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+(anonymous) @ workbench.desktop.main.js:27
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+resume @ workbench.desktop.main.js:29
+y @ workbench.desktop.main.js:424
+store @ workbench.desktop.main.js:424
+setExtensionState @ workbench.desktop.main.js:570
+$setValue @ workbench.desktop.main.js:570
+S @ workbench.desktop.main.js:3715
+Q @ workbench.desktop.main.js:3715
+M @ workbench.desktop.main.js:3715
+L @ workbench.desktop.main.js:3715
+(anonymous) @ workbench.desktop.main.js:3715
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:565
+c.onmessage @ workbench.desktop.main.js:3726
+workbench.desktop.main.js:538 [Extension Host] ClipboardHistoryManager: 成功保存历史记录，当前长度: 100
+workbench.desktop.main.js:4046  POST https://mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web net::ERR_CONNECTION_CLOSED
+(anonymous) @ workbench.desktop.main.js:4046
+a @ workbench.desktop.main.js:4046
+i.useRequest @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+i.send @ workbench.desktop.main.js:4049
+i.sliceEvent @ workbench.desktop.main.js:4049
+i.report @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+setTimeout
+e.setTimeout @ workbench.desktop.main.js:1179
+i.event @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+i._emit @ workbench.desktop.main.js:4049
+i.emit @ workbench.desktop.main.js:4049
+i.emit @ workbench.desktop.main.js:4062
+i.event @ workbench.desktop.main.js:4062
+collect @ workbench.desktop.main.js:4062
+(anonymous) @ workbench.desktop.main.js:4046
+await in (anonymous)
+(anonymous) @ workbench.desktop.main.js:4062
+await in (anonymous)
+invokeFunction @ workbench.desktop.main.js:1845
+n @ workbench.desktop.main.js:1799
+executeCommand @ workbench.desktop.main.js:1799
+d @ workbench.desktop.main.js:4062
+report @ workbench.desktop.main.js:4062
+N @ workbench.desktop.main.js:3687
+(anonymous) @ workbench.desktop.main.js:70
+setTimeout
+e.setTimeout @ workbench.desktop.main.js:1179
+(anonymous) @ workbench.desktop.main.js:70
+cb @ workbench.desktop.main.js:3687
+(anonymous) @ workbench.desktop.main.js:3687
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1017.318359375kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:3679
+getExtensionStateRaw @ workbench.desktop.main.js:570
+(anonymous) @ workbench.desktop.main.js:570
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+(anonymous) @ workbench.desktop.main.js:27
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+u @ workbench.desktop.main.js:424
+(anonymous) @ workbench.desktop.main.js:3679
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+resume @ workbench.desktop.main.js:29
+u @ workbench.desktop.main.js:424
+(anonymous) @ workbench.desktop.main.js:424
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+h @ workbench.desktop.main.js:1801
+(anonymous) @ workbench.desktop.main.js:1801
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+c @ workbench.desktop.main.js:565
+t @ workbench.desktop.main.js:565
+s @ workbench.desktop.main.js:565
+(anonymous) @ workbench.desktop.main.js:564
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+A @ workbench.desktop.main.js:27
+emit @ VM4 sandbox_bundle:2
+onMessage @ VM4 sandbox_bundle:2
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1017.318359375kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:3679
+getExtensionStateRaw @ workbench.desktop.main.js:570
+(anonymous) @ workbench.desktop.main.js:570
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+(anonymous) @ workbench.desktop.main.js:27
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+resume @ workbench.desktop.main.js:29
+y @ workbench.desktop.main.js:424
+store @ workbench.desktop.main.js:424
+setExtensionState @ workbench.desktop.main.js:570
+$setValue @ workbench.desktop.main.js:570
+S @ workbench.desktop.main.js:3715
+Q @ workbench.desktop.main.js:3715
+M @ workbench.desktop.main.js:3715
+L @ workbench.desktop.main.js:3715
+(anonymous) @ workbench.desktop.main.js:3715
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:565
+c.onmessage @ workbench.desktop.main.js:3726
+workbench.desktop.main.js:4046  POST https://mcs.zijieapi.com/list?aid=711126&sdk_version=5.3.7&device_platform=web net::ERR_CONNECTION_CLOSED
+(anonymous) @ workbench.desktop.main.js:4046
+a @ workbench.desktop.main.js:4046
+i.useRequest @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+i.send @ workbench.desktop.main.js:4049
+i.sliceEvent @ workbench.desktop.main.js:4049
+i.report @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+setTimeout
+e.setTimeout @ workbench.desktop.main.js:1179
+i.event @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+(anonymous) @ workbench.desktop.main.js:4049
+i._emit @ workbench.desktop.main.js:4049
+i.emit @ workbench.desktop.main.js:4049
+i.emit @ workbench.desktop.main.js:4062
+i.event @ workbench.desktop.main.js:4062
+collect @ workbench.desktop.main.js:4062
+(anonymous) @ workbench.desktop.main.js:4046
+await in (anonymous)
+(anonymous) @ workbench.desktop.main.js:4062
+await in (anonymous)
+invokeFunction @ workbench.desktop.main.js:1845
+n @ workbench.desktop.main.js:1799
+executeCommand @ workbench.desktop.main.js:1799
+d @ workbench.desktop.main.js:4062
+report @ workbench.desktop.main.js:4062
+N @ workbench.desktop.main.js:3687
+(anonymous) @ workbench.desktop.main.js:70
+setTimeout
+e.setTimeout @ workbench.desktop.main.js:1179
+(anonymous) @ workbench.desktop.main.js:70
+$ @ workbench.desktop.main.js:3687
+(anonymous) @ workbench.desktop.main.js:70
+setTimeout
+e.setTimeout @ workbench.desktop.main.js:1179
+(anonymous) @ workbench.desktop.main.js:70
+Xte.S @ workbench.desktop.main.js:3687
+Xte.X @ workbench.desktop.main.js:3687
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1017.318359375kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:3679
+getExtensionStateRaw @ workbench.desktop.main.js:570
+(anonymous) @ workbench.desktop.main.js:570
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+(anonymous) @ workbench.desktop.main.js:27
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+u @ workbench.desktop.main.js:424
+(anonymous) @ workbench.desktop.main.js:3679
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+resume @ workbench.desktop.main.js:29
+u @ workbench.desktop.main.js:424
+(anonymous) @ workbench.desktop.main.js:424
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+h @ workbench.desktop.main.js:1801
+(anonymous) @ workbench.desktop.main.js:1801
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+c @ workbench.desktop.main.js:565
+t @ workbench.desktop.main.js:565
+s @ workbench.desktop.main.js:565
+(anonymous) @ workbench.desktop.main.js:564
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+A @ workbench.desktop.main.js:27
+emit @ VM4 sandbox_bundle:2
+onMessage @ VM4 sandbox_bundle:2
+workbench.desktop.main.js:34  WARN [mainThreadStorage] large extension state detected (extensionId: gh555.qqq, global: true): 1017.318359375kb. Consider to use 'storageUri' or 'globalStorageUri' to store this data on disk instead.
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:34
+warn @ workbench.desktop.main.js:3679
+getExtensionStateRaw @ workbench.desktop.main.js:570
+(anonymous) @ workbench.desktop.main.js:570
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+(anonymous) @ workbench.desktop.main.js:27
+C @ workbench.desktop.main.js:29
+D @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+resume @ workbench.desktop.main.js:29
+y @ workbench.desktop.main.js:424
+store @ workbench.desktop.main.js:424
+setExtensionState @ workbench.desktop.main.js:570
+$setValue @ workbench.desktop.main.js:570
+S @ workbench.desktop.main.js:3715
+Q @ workbench.desktop.main.js:3715
+M @ workbench.desktop.main.js:3715
+L @ workbench.desktop.main.js:3715
+(anonymous) @ workbench.desktop.main.js:3715
+C @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:29
+fire @ workbench.desktop.main.js:565
+c.onmessage @ workbench.desktop.main.js:3726
