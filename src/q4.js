@@ -898,6 +898,35 @@ class SidebarWebViewProvider {
             }
         }
 
+        // 播放音效公共函数
+        function playNotificationSound(times) {
+            try {
+                if ('${audioBase64}') {
+                    const audio = new Audio('data:audio/mp3;base64,${audioBase64}');
+                    audio.volume = 0.5;
+
+                    if (times === 0) {
+                        // 无限循环模式
+                        audio.loop = true;
+                    } else {
+                        // 指定次数模式
+                        let playCount = 1;
+                        audio.addEventListener('ended', () => {
+                            if (playCount < times) {
+                                playCount++;
+                                audio.currentTime = 0;
+                                audio.play();
+                            }
+                        });
+                    }
+
+                    audio.play().catch(err => console.log('播放音效被浏览器拦截:', err));
+                }
+            } catch (error) {
+                console.log('播放音效失败:', error);
+            }
+        }
+
         // 剪切板历史操作函数
         function copyToClipboard(itemId) {
             if (vscode) {
@@ -907,16 +936,9 @@ class SidebarWebViewProvider {
                 });
             }
 
-            // 播放复制音效（需确保是用户主动触发）
-            try {
-                if ('${audioBase64}') {
-                    const audio = new Audio('data:audio/mp3;base64,${audioBase64}');
-                    audio.volume = 0.5;
-                    audio.play().catch(err => console.log('播放音效被浏览器拦截:', err));
-                }
-            } catch (error) {
-                console.log('播放音效失败:', error);
-            }
+            // 调用公共音效函数：目前设置为播放 3 次
+            // 如果想无限循环，请传 0
+            playNotificationSound(3);
         }
 
         function deleteHistoryItem(itemId) {
