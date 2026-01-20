@@ -48,6 +48,11 @@ class SidebarWebViewProvider {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             console.log('收到 Webview 消息:', message.command, message.itemId);
             switch (message.command) {
+                case "executeCommand":
+                    if (message.cmd) {
+                        vscode.commands.executeCommand(message.cmd);
+                    }
+                    break;
                 case "openSettings":
                     vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
                     break;
@@ -315,819 +320,328 @@ class SidebarWebViewProvider {
     }
 
     getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioBase64 = '') {
-        // 构建剪切板历史HTML
-
-        let historyHtml = '';
-        if (clipboardHistory.length > 0) {
-            historyHtml = clipboardHistory.map(item => `
+        const historyHtml = clipboardHistory.length > 0
+            ? clipboardHistory.map(item => `
                 <div class="history-item" data-id="${item.id}">
-                    <div class="item-header">
-                        <span class="item-time">${this.getFormattedTime(item.timestamp)}</span>
-                    </div>
+                    <div class="item-time">${item.time}</div>
                     <div class="item-preview">${this.escapeHtml(item.preview)}</div>
                     <div class="item-actions">
-                        <button class="action-btn copy-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
-                        <button class="action-btn delete-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
+                        <button class="action-mini-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
+                        <button class="action-mini-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
                     </div>
-                </div>
-            `).join('');
-        } else {
-            historyHtml = `
-                <div class="empty-history">
-                    <div class="empty-history-icon">📭</div>
-                    <div>暂无剪切板历史记录</div>
-                    <div style="font-size: 0.8em; margin-top: 5px;">复制内容到剪切板即可开始记录</div>
-                </div>
-            `;
-        }
+                </div>`).join('')
+            : '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
 
-        return `
-<!DOCTYPE html>
+        return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>qqq 状态面板</title>
+    <meta name="color-scheme" content="light">
     <style>
-        /* Solarized Light 配色方案 */
         :root {
-            --base03: #002b36;
-            --base02: #073642;
-            --base01: #586e75;
-            --base00: #657b83;
-            --base0: #839496;
-            --base1: #93a1a1;
-            --base2: #eee8d5;
-            --base3: #fdf6e3;
-            --yellow: #b58900;
-            --orange: #cb4b16;
-            --red: #dc322f;
-            --magenta: #d33682;
-            --violet: #6c71c4;
-            --blue: #268bd2;
-            --cyan: #2aa198;
-            --green: #859900;
-
-            --primary-color: var(--blue);
-            --secondary-color: var(--green);
-            --accent-color: var(--red);
-            --background-color: var(--base3);
-            --card-bg: var(--base2);
-            --text-primary: var(--base00);
-            --text-secondary: var(--base01);
-            --border-color: var(--base1);
-            --shadow-color: rgba(0, 0, 0, 0.1);
+            --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
+            --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
+            --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
+            --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
+            --primary-color: var(--blue); --secondary-color: var(--green);
+            --background-color: var(--base3); --card-bg: var(--base2);
+            --text-primary: var(--base00); --text-secondary: var(--base01);
+            --border-color: var(--base1); --shadow-color: rgba(0, 0, 0, 0.1);
         }
+
+        /* 强力破解 Windows 高对比度模式，强制保留自定义配色 */
+        html {
+            forced-color-adjust: none !important;
+            -ms-high-contrast-adjust: none !important;
+        }
+
+        ::-webkit-scrollbar { display: none !important; }
 
         * {
+            scrollbar-width: none !important;
+            -ms-overflow-style: none !important;
             box-sizing: border-box;
-            forced-color-adjust: none;
-            -ms-high-contrast-adjust: none;
+            forced-color-adjust: none !important;
+            -ms-high-contrast-adjust: none !important;
         }
 
-        body {
-            margin: 0;
-            padding: 15px;
-            font-family: var(--vscode-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif);
-            font-size: var(--vscode-font-size, 13px);
-            background: var(--background-color);
-            color: var(--text-primary);
-            min-height: 100vh;
+        html, body {
+            margin: 0; padding: 0; height: 100vh; overflow: hidden;
+            font-family: var(--vscode-font-family, sans-serif);
+            background: var(--background-color) !important;
+            color: var(--text-primary) !important;
         }
 
-        .container {
-            max-width: 100%;
-        }
-
-
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .stat-card {
-            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px var(--shadow-color);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 3px 10px var(--shadow-color);
-        }
-
-        .stat-card.python { border-left: 3px solid var(--blue); }
-        .stat-card.rust { border-left: 3px solid var(--base01); }
-        .stat-card.node { border-left: 3px solid var(--green); }
-        .stat-card.cache { border-left: 3px solid var(--secondary-color); }
-
-        .stat-title {
-            font-size: 0.9em;
-            color: white;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-
-        .stat-value {
-            font-size: 1.6em;
-            font-weight: 600;
-            margin: 8px 0;
-            color: white;
-        }
-
-        .stat-desc {
-            font-size: 0.8em;
-            color: rgba(255, 255, 255, 0.85);
-        }
-
-        .engine-info {
-            background: var(--card-bg);
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .engine-label {
-            font-size: 0.9em;
-            color: var(--text-primary);
-            margin-bottom: 6px;
-            font-weight: 500;
-        }
-
-        .engine-name {
-            font-size: 1.2em;
-            color: var(--primary-color);
-            font-weight: 600;
-        }
-
-        .actions {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .btn {
-            padding: 10px 15px;
-            border: none;
+        /* 音乐播放器样式 */
+        .music-player {
+            background: var(--base02);
+            color: var(--base3);
+            padding: 10px;
             border-radius: 4px;
-            font-size: 0.9em;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
-            gap: 6px;
-            justify-content: center;
-        }
-
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #357abd;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 6px rgba(74, 144, 226, 0.4);
-        }
-
-        .btn-secondary {
-            background: var(--card-bg);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
-
-        .btn-secondary:hover {
-            background: var(--border-color);
-            transform: translateY(-1px);
-        }
-
-        .btn-danger {
-            background: var(--red);
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #b32421;
-            transform: translateY(-1px);
-            box-shadow: 0 2px 6px rgba(220, 50, 47, 0.4);
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 20px;
-            padding: 15px;
-            color: var(--text-secondary);
-            font-size: 0.8em;
-        }
-
-        /* 剪切板历史样式 */
-        .clipboard-section {
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 1px solid var(--border-color);
-        }
-
-        .clipboard-header {
-            display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .clipboard-title {
-            font-size: 1.1em;
-            font-weight: 600;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .clipboard-stats {
-            font-size: 0.85em;
-            color: var(--text-secondary);
-        }
-
-        .history-list {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        /* 隐藏默认滚动条，实现自定义滚动 */
-        .history-container {
-            position: relative;
-            max-height: 400px;
-            overflow: hidden;
-        }
-
-        .history-list {
-            max-height: 400px;
-            overflow-y: scroll;
-            /* 隐藏所有浏览器的滚动条 */
-            scrollbar-width: none;
-        }
-
-        .history-list::-webkit-scrollbar {
-            display: none;
-        }
-
-        /* 自定义滚动块 */
-        .custom-scrollbar {
-            position: absolute;
-            right: 0;
-            top: 0;
-            width: 3px; /* 很窄的滚动块 */
-            height: 100%;
-            background: transparent;
-            display: none;
-            z-index: 10;
-        }
-
-        .custom-scrollbar-thumb {
-            position: absolute;
-            right: 0;
-            width: 100%;
-            background-color: rgba(189, 26, 26, 0.7); /* 半透明暗红色 */
-            border-radius: 1.5px; /* 圆角，与宽度匹配 */
-            cursor: pointer;
-            transition: background-color 0.2s ease;
-        }
-
-        .custom-scrollbar-thumb:hover {
-            background-color: rgba(189, 26, 26, 0.9); /* 鼠标悬停时不透明度增加 */
-        }
-
-        .history-item {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 12px;
-            transition: all 0.2s ease;
-            cursor: pointer;
-            position: relative;
-        }
-
-        .history-item:hover {
-            transform: translateX(4px);
-            border-color: var(--primary-color);
-            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2);
-        }
-
-        .item-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-
-
-
-        .item-time {
-            font-size: 0.75em;
-            color: var(--text-secondary);
-        }
-
-        .item-preview {
             font-size: 0.9em;
-            color: var(--text-primary);
-            line-height: 1.4;
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 80px;
-            overflow: hidden;
-            position: relative;
+        }
+        .music-info { display: flex; align-items: center; gap: 8px; }
+        .music-btns { display: flex; gap: 10px; }
+        .music-btn { cursor: pointer; opacity: 0.8; transition: 0.2s; }
+        .music-btn:hover { opacity: 1; transform: scale(1.1); }
+        .music-playing { color: var(--green); font-weight: bold; }
+
+        .main-content {
+            height: 100%; overflow-y: scroll; padding: 12px; overflow-x: hidden;
         }
 
-        .item-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-            opacity: 0;
-            transition: opacity 0.2s ease;
+        .section-title {
+            font-size: 1.1em; font-weight: 700; margin: 20px 0 12px 0;
+            padding-bottom: 5px; border-bottom: 2px solid var(--primary-color) !important;
+            color: var(--primary-color) !important; text-transform: uppercase;
         }
 
-        .history-item:hover .item-actions {
-            opacity: 1;
+        /* Captain Style */
+        .captain-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 20px; }
+        .cmd-btn {
+            background: var(--card-bg) !important; border: 1px solid var(--border-color) !important;
+            border-radius: 4px; padding: 12px; cursor: pointer;
+            display: flex; align-items: center; gap: 10px;
+            transition: all 0.2s ease; position: relative; overflow: hidden;
+            color: var(--text-primary) !important; text-decoration: none;
         }
+        .cmd-btn:hover { border-color: var(--primary-color) !important; background: white !important; transform: translateX(2px); }
+        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color) !important; opacity: 0.6; }
 
-        .action-btn {
-            padding: 4px 8px;
-            font-size: 0.75em;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        /* Dial Style */
+        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .stat-card { background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important; padding: 10px; border-radius: 6px; color: white !important; box-shadow: 0 2px 4px var(--shadow-color); }
+        .stat-card.engine-card { grid-column: span 2; background: var(--base02) !important; }
+        .stat-title { font-size: 0.8em; opacity: 0.9; }
+        .stat-value { font-size: 1.1em; font-weight: 700; }
+
+        /* Passed by Style */
+        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
+        .history-list { max-height: 400px; overflow-y: scroll; padding: 8px; overflow-x: hidden; }
+        .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
+        .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px var(--shadow-color); }
+        .item-time { font-size: 0.7em; color: var(--text-secondary); }
+        .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 50px; overflow: hidden; }
+        .item-actions { display: flex; gap: 6px; margin-top: 5px; }
+
+        .action-mini-btn {
+            padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color);
+            border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary);
         }
+        .action-mini-btn:hover { background: var(--primary-color); color: white; }
 
-        .copy-btn {
-            background: var(--primary-color);
-            color: white;
-        }
+        /* Custom Scrollbars */
+        .scrollbar-outer { position: absolute; right: 2px; top: 0; width: 4px; height: 100%; z-index: 100; }
+        .scrollbar-outer-thumb { position: absolute; right: 0; width: 100%; background: #000 !important; border-radius: 2px; opacity: 0.6; cursor: pointer; forced-color-adjust: none !important; }
 
-        .copy-btn:hover {
-            background: #2076c0;
-            transform: translateY(-1px);
-        }
+        .scrollbar-inner { position: absolute; right: 2px; top: 0; width: 4px; height: 100%; z-index: 10; }
+        .scrollbar-inner-thumb { position: absolute; right: 0; width: 100%; background: var(--red) !important; border-radius: 2px; opacity: 0.6; cursor: pointer; forced-color-adjust: none !important; }
 
-        .delete-btn {
-            background: var(--red);
-            color: white;
-        }
-
-        .delete-btn:hover {
-            background: #b32421;
-            transform: translateY(-1px);
-        }
-
-        .empty-history {
-            text-align: center;
-            padding: 30px 20px;
-            color: var(--text-secondary);
-            font-style: italic;
-        }
-
-        .empty-history-icon {
-            font-size: 2em;
-            margin-bottom: 10px;
-            opacity: 0.5;
-        }
-
-        /* 动画效果 */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .stat-card {
-            animation: fadeIn 0.3s ease-out;
-        }
-
-        .stat-card:nth-child(1) { animation-delay: 0.1s; }
-        .stat-card:nth-child(2) { animation-delay: 0.2s; }
-        .stat-card:nth-child(3) { animation-delay: 0.3s; }
-        .stat-card:nth-child(4) { animation-delay: 0.4s; }
-
-        .history-item {
-            animation: fadeIn 0.3s ease-out;
-        }
+        .footer { text-align: center; padding: 20px; font-size: 0.8em; opacity: 0.6; }
     </style>
 </head>
 <body>
-    <div class="container">
-
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-title">⏱️ 使用时间</div>
-                <div class="stat-value">${hours}<span style="font-size: 0.7em;">h</span> ${minutes}<span style="font-size: 0.7em;">m</span></div>
-                <div class="stat-desc">累计使用时长</div>
-            </div>
-
-            <div class="stat-card cache">
-                <div class="stat-title">💾 磁盘缓存</div>
-                <div class="stat-value">${cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
-                <div class="stat-desc">已缓存的数据量</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-title">🎯 缓存命中率</div>
-                <div class="stat-value">${hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
-                <div class="stat-desc">缓存效率指标</div>
-            </div>
-
-            <div class="stat-card ${engineInfo.name.includes('Python') ? 'python' : engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
-                <div class="stat-title">⚡ IO 引擎</div>
-                <div class="stat-value" style="font-size: 1.2em;">${engineInfo.name}</div>
-                <div class="stat-desc">当前运行引擎</div>
-            </div>
-        </div>
-
-        <div class="engine-info">
-            <div class="engine-label">引擎详情</div>
-            <div class="engine-name">${engineInfo.details}</div>
-        </div>
-
-        <!-- 剪切板历史部分 -->
-        <div class="clipboard-section">
-            <div class="clipboard-header">
-                <div class="clipboard-title">
-                    📋 剪切板历史
+    <div class="main-wrapper">
+        <div class="main-content" id="mainContent">
+            <!-- 音乐播放器 -->
+            <div class="music-player">
+                <div class="music-info">
+                    <span>🎵</span>
+                    <span id="musicStatus">Ready to Savor</span>
                 </div>
-                <div class="clipboard-stats">
-                    ${clipboardHistory.length} 个项目
+                <div class="music-btns">
+                    <span class="music-btn" onclick="exec('qqq.savorMoments')" title="播放">▶️</span>
+                    <span class="music-btn" onclick="stopMusic()" title="停止">⏹️</span>
                 </div>
             </div>
 
+            <div class="section-title">Captain</div>
+            <div class="captain-grid">
+                <div class="cmd-btn" onclick="exec('qqq.savorMoments')"><span>✨</span> <span>savor moments for yourself</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.q1')"><span>📋</span> <span>Paste everything ("Ctrl+V" or "F2")</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.q2')"><span>🌍</span> <span>Roam everywhere ("Tab" or "F6")</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.downloadVideosFromUrl')"><span>🎥</span> <span>insert Videos From Url</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.cleanUp')"><span>🧹</span> <span>clean up</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.exportDoc')"><span>📄</span> <span>exportDoc</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.pure')"><span>💎</span> <span>Pure</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.exportZip')"><span>📦</span> <span>exportZip</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.allSettings')"><span>⚙️</span> <span>allSettings</span></div>
+            </div>
+
+            <div class="section-title">Passed by</div>
             <div class="history-container" id="historyContainer">
-                <div class="history-list" id="historyList">
-                    ${historyHtml}
-                </div>
-                <div class="custom-scrollbar" id="customScrollbar">
-                    <div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div>
-                </div>
+                <div class="history-list" id="historyList">${historyHtml}</div>
+                <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-        </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                <button class="action-mini-btn" style="flex: 1;" onclick="refreshData()">🔄 刷新</button>
+                <button class="action-mini-btn" style="flex: 1;" onclick="clearAllHistory()">🗑️ 清空</button>
+            </div>
 
-        <div class="actions">
-            <button class="btn btn-primary" onclick="openSettings()">
-                ⚙️ 打开设置
-            </button>
-            <button class="btn btn-secondary" onclick="refreshData()">
-                🔄 刷新数据
-            </button>
-            <button class="btn btn-danger" onclick="clearAllHistory()">
-                🗑️ 清空历史记录
-            </button>
-        </div>
+            <div class="section-title">Dial</div>
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">${hours}h ${minutes}m</div></div>
+                <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">${cacheMB.toFixed(1)}MB</div></div>
+                <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">${hitRate.toFixed(1)}%</div></div>
+                <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">${engineInfo.name}</div></div>
+                <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">${engineInfo.details}</div></div>
+            </div>
 
-        <div class="footer">
-            <p>qqq 扩展 - 状态监控</p>
-            <p>每5秒自动更新</p>
+            <div class="footer">qqq 扩展 - 领航员面板</div>
         </div>
+        <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
     </div>
 
     <script>
-        // 彻底禁用 ServiceWorker 以防止所有相关错误
-        if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
-            try {
-                // 完全重写 ServiceWorker 对象
-                Object.defineProperty(navigator, 'serviceWorker', {
-                    value: {
-                        register: function() {
-                            console.warn('ServiceWorker registration disabled in WebView');
-                            return Promise.resolve({ unregister: () => Promise.resolve() });
-                        },
-                        getRegistration: function() { return Promise.resolve(null); },
-                        getRegistrations: function() { return Promise.resolve([]); },
-                        ready: Promise.resolve({
-                            active: null,
-                            waiting: null,
-                            installing: null,
-                            addEventListener: function() {},
-                            removeEventListener: function() {},
-                            postMessage: function() {}
-                        })
-                    },
-                    writable: false,
-                    configurable: false
-                });
-            } catch (e) {
-                // 静默处理可能的权限错误
-            }
-        }
+        const vscode = acquireVsCodeApi();
 
-        // 安全获取 VS Code API
-        let vscode;
-        try {
-            vscode = acquireVsCodeApi();
-        } catch (e) {
-            console.error('Failed to acquire VS Code API:', e);
-        }
+        function exec(cmd) { vscode.postMessage({ command: 'executeCommand', cmd: cmd }); playNotificationSound(1); }
+        function copyToClipboard(id) { vscode.postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
+        function deleteHistoryItem(id) { vscode.postMessage({ command: 'deleteHistoryItem', itemId: id }); }
+        function clearAllHistory() { vscode.postMessage({ command: 'clearAllHistory' }); }
 
-        function openSettings() {
-            if (vscode) {
-                vscode.postMessage({ command: 'openSettings' });
-            }
-        }
-
-        // 保存滚动位置
-        function saveScrollPosition() {
-            const historyList = document.getElementById('historyList');
-            if (historyList) {
-                return {
-                    scrollTop: historyList.scrollTop,
-                    scrollHeight: historyList.scrollHeight,
-                    clientHeight: historyList.clientHeight,
-                    timestamp: Date.now()
-                };
-            }
-            return null;
-        }
-
-        // 恢复滚动位置
-        function restoreScrollPosition(scrollPos) {
-            if (!scrollPos) return;
-
-            const historyList = document.getElementById('historyList');
-            if (historyList) {
-                // 使用多种策略确保滚动位置恢复
-                const restore = () => {
-                    // 方法1: 直接设置滚动位置
-                    historyList.scrollTop = scrollPos.scrollTop;
-
-                    // 方法2: 如果直接设置失败，尝试按比例设置
-                    if (historyList.scrollTop !== scrollPos.scrollTop && scrollPos.scrollHeight > 0) {
-                        const scrollRatio = scrollPos.scrollTop / scrollPos.scrollHeight;
-                        const newScrollTop = scrollRatio * historyList.scrollHeight;
-                        historyList.scrollTop = newScrollTop;
-                    }
-                };
-
-                // 立即尝试恢复
-                restore();
-
-                // 在下一个事件循环再次尝试（等待DOM完全渲染）
-                setTimeout(restore, 10);
-
-                // 再次延迟确保完全恢复
-                setTimeout(restore, 100);
-            }
-        }
-
-        // 刷新数据时保存和恢复滚动位置
         function refreshData() {
-            if (vscode) {
-                const scrollPos = saveScrollPosition();
-                // 将滚动位置信息发送给扩展
-                vscode.postMessage({
-                    command: 'refresh',
-                    scrollPosition: scrollPos
-                });
+            const list = document.getElementById('historyList');
+            const scrollPos = list ? { scrollTop: list.scrollTop, scrollHeight: list.scrollHeight } : null;
+            vscode.postMessage({ command: 'refresh', scrollPosition: scrollPos });
+        }
+
+        let currentAudio = null;
+
+        function stopMusic() {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+                currentAudio = null;
+                document.getElementById('musicStatus').innerText = 'Stopped';
+                document.getElementById('musicStatus').classList.remove('music-playing');
             }
         }
 
-        // 播放音效公共函数
         function playNotificationSound(times) {
             try {
                 if ('${audioBase64}') {
+                    stopMusic();
                     const audio = new Audio('data:audio/mp3;base64,${audioBase64}');
+                    currentAudio = audio;
                     audio.volume = 0.5;
 
-                    if (times === 0) {
-                        // 无限循环模式
-                        audio.loop = true;
-                    } else {
-                        // 指定次数模式
+                    document.getElementById('musicStatus').innerText = 'Savoring...';
+                    document.getElementById('musicStatus').classList.add('music-playing');
+
+                    if (times === 0) { audio.loop = true; } else {
                         let playCount = 1;
                         audio.addEventListener('ended', () => {
                             if (playCount < times) {
-                                playCount++;
-                                audio.currentTime = 0;
-                                audio.play();
+                                playCount++; audio.currentTime = 0; audio.play();
+                            } else {
+                                document.getElementById('musicStatus').innerText = 'Finished';
+                                document.getElementById('musicStatus').classList.remove('music-playing');
                             }
                         });
                     }
-
-                    audio.play().catch(err => console.log('播放音效被浏览器拦截:', err));
+                    audio.play().catch(e => console.log('Audio blocked:', e));
                 }
-            } catch (error) {
-                console.log('播放音效失败:', error);
-            }
+            } catch (e) { console.log('Audio error:', e); }
         }
 
-        // 剪切板历史操作函数
-        function copyToClipboard(itemId) {
-            if (vscode) {
-                vscode.postMessage({
-                    command: 'copyToClipboard',
-                    itemId: itemId
-                });
-            }
+        function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
 
-            // 调用公共音效函数：目前设置为播放 3 次
-            // 如果想无限循环，请传 0
-            playNotificationSound(3);
-        }
-
-        function deleteHistoryItem(itemId) {
-            // 移除被拦截的 confirm，直接发消息给后台处理
-            if (vscode) {
-                vscode.postMessage({
-                    command: 'deleteHistoryItem',
-                    itemId: itemId
-                });
-            }
-        }
-
-        function clearAllHistory() {
-            // 移除被拦截的 confirm，直接发消息给后台处理
-            if (vscode) {
-                vscode.postMessage({
-                    command: 'clearAllHistory'
-                });
-            }
-        }
-
-        // 自动刷新数据
-        if (typeof setInterval !== 'undefined') {
-            setInterval(refreshData, 5000);
-        }
-
-        // 页面加载完成后恢复滚动位置
-        const initialScrollPos = ${JSON.stringify(scrollPosition)};
-        if (initialScrollPos) {
-            restoreScrollPosition(initialScrollPos);
-        }
-
-        // 自定义滚动条实现
-        const historyList = document.getElementById('historyList');
-
-        // 禁用默认右键菜单
-        window.addEventListener('contextmenu', e => e.preventDefault());
-
-        const historyContainer = document.getElementById('historyContainer');
-        const customScrollbar = document.getElementById('customScrollbar');
-        const customScrollbarThumb = document.getElementById('customScrollbarThumb');
-
-        // 更新滚动条显示和位置
-        function updateCustomScrollbar() {
-            if (!historyList || !customScrollbar || !customScrollbarThumb) return;
-
-            const containerHeight = historyContainer.clientHeight;
-            const contentHeight = historyList.scrollHeight;
-            const scrollTop = historyList.scrollTop;
-
-            if (contentHeight > containerHeight) {
-                customScrollbar.style.display = 'block';
-
-                // 计算滚动块高度和位置
-                const thumbHeight = Math.max(20, (containerHeight / contentHeight) * containerHeight);
-                const thumbTop = (scrollTop / (contentHeight - containerHeight)) * (containerHeight - thumbHeight);
-
-                customScrollbarThumb.style.height = thumbHeight + 'px';
-                customScrollbarThumb.style.top = thumbTop + 'px';
-            } else {
-                customScrollbar.style.display = 'none';
-            }
-        }
-
-        // 滚动条点击事件 - 修复点击定位
-        customScrollbar.addEventListener('click', (e) => {
-            if (!historyList || !historyContainer) return;
-
-            const scrollbarRect = customScrollbar.getBoundingClientRect();
-            const clickY = e.clientY - scrollbarRect.top;
-            const containerHeight = historyContainer.clientHeight;
-            const contentHeight = historyList.scrollHeight;
-
-            // 计算新的滚动位置
-            const newScrollTop = (clickY / containerHeight) * (contentHeight - containerHeight);
-
-            // 设置新的滚动位置
-            historyList.scrollTop = newScrollTop;
-            updateCustomScrollbar();
-        });
-
-        // 滚动块拖动事件
-        let isDragging = false;
-        let startY = 0;
-        let startScrollTop = 0;
-
-        customScrollbarThumb.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            startY = e.clientY;
-            startScrollTop = historyList.scrollTop;
-
-            // 内联处理鼠标移动和释放事件
-            const handleMouseMove = (e) => {
-                if (!isDragging) return;
-
-                const deltaY = e.clientY - startY;
-                const containerHeight = historyContainer.clientHeight;
-                const contentHeight = historyList.scrollHeight;
-                const thumbHeight = customScrollbarThumb.offsetHeight;
-
-                const scrollDelta = (deltaY / (containerHeight - thumbHeight)) * (contentHeight - containerHeight);
-                historyList.scrollTop = startScrollTop + scrollDelta;
-                updateCustomScrollbar();
-            };
-
-            const handleMouseUp = () => {
-                isDragging = false;
-                document.removeEventListener('mousemove', handleMouseMove);
-                document.removeEventListener('mouseup', handleMouseUp);
-            };
-
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-            e.preventDefault();
-        });
-
-        // 列表滚动事件
-        historyList.addEventListener('scroll', updateCustomScrollbar);
-
-        // 窗口大小变化时更新滚动条
-        window.addEventListener('resize', updateCustomScrollbar);
-
-        // 处理来自扩展的消息
-        window.addEventListener('message', event => {
-            const message = event.data;
-            if (message.command === 'updateData') {
-                // 更新统计数据
+        // Message Handling
+        window.addEventListener('message', e => {
+            const m = e.data;
+            if (m.command === 'updateData') {
+                // Update Dial
                 document.querySelector('.stats-grid').innerHTML = \`
-                    <div class="stat-card">
-                        <div class="stat-title">⏱️ 使用时间</div>
-                        <div class="stat-value">\${message.stats.h}<span style="font-size: 0.7em;">h</span> \${message.stats.m}<span style="font-size: 0.7em;">m</span></div>
-                        <div class="stat-desc">累计使用时长</div>
-                    </div>
-                    <div class="stat-card cache">
-                        <div class="stat-title">💾 磁盘缓存</div>
-                        <div class="stat-value">\${message.stats.cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
-                        <div class="stat-desc">已缓存的数据量</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-title">🎯 缓存命中率</div>
-                        <div class="stat-value">\${message.stats.hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
-                        <div class="stat-desc">缓存效率指标</div>
-                    </div>
-                    <div class="stat-card \${message.stats.engineInfo.name.includes('Python') ? 'python' : message.stats.engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
-                        <div class="stat-title">⚡ IO 引擎</div>
-                        <div class="stat-value" style="font-size: 1.2em;">\${message.stats.engineInfo.name}</div>
-                        <div class="stat-desc">当前运行引擎</div>
-                    </div>
-                \`;
-                document.querySelector('.engine-name').innerText = message.stats.engineInfo.details;
+                    <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">\${m.stats.h}h \${m.stats.m}m</div></div>
+                    <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">\${m.stats.cacheMB.toFixed(1)}MB</div></div>
+                    <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">\${m.stats.hitRate.toFixed(1)}%</div></div>
+                    <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">\${m.stats.engineInfo.name}</div></div>
+                    <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">\${m.stats.engineInfo.details}</div></div>\`;
 
-                // 更新剪切板列表 (保持滚动位置)
+                // Update History
                 const list = document.getElementById('historyList');
-                const statsText = document.querySelector('.clipboard-stats');
-                statsText.innerText = \`\${message.history.length} 个项目\`;
-
-                if (message.history.length > 0) {
-                    list.innerHTML = message.history.map(item => \`
+                if (m.history.length > 0) {
+                    list.innerHTML = m.history.map(item => \`
                         <div class="history-item" data-id="\${item.id}">
-                            <div class="item-header">
-                                <span class="item-time">\${item.time}</span>
-                            </div>
+                            <div class="item-time">\${item.time}</div>
                             <div class="item-preview">\${escapeHtml(item.preview)}</div>
                             <div class="item-actions">
-                                <button class="action-btn copy-btn" onclick="copyToClipboard('\${item.id}')">📋 复制</button>
-                                <button class="action-btn delete-btn" onclick="deleteHistoryItem('\${item.id}')">🗑️ 删除</button>
+                                <button class="action-mini-btn" onclick="copyToClipboard('\${item.id}')">📋 复制</button>
+                                <button class="action-mini-btn" onclick="deleteHistoryItem('\${item.id}')">🗑️ 删除</button>
                             </div>
-                        </div>
-                    \`).join('');
+                        </div>\`).join('');
                 } else {
-                    list.innerHTML = \`
-                        <div class="empty-history">
-                            <div class="empty-history-icon">📭</div>
-                            <div>暂无剪切板历史记录</div>
-                        </div>
-                    \`;
+                    list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
                 }
-                updateCustomScrollbar();
+                updateAllScrollbars();
             }
         });
 
-        // 辅助转义函数
-        function escapeHtml(text) {
-            if (!text) return '';
-            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        // Scrollbar Logic
+        function setupScrollbar(containerId, scrollbarId, thumbId) {
+            const container = document.getElementById(containerId);
+            const scrollbar = document.getElementById(scrollbarId);
+            const thumb = document.getElementById(thumbId);
+            if (!container || !thumb) return () => {};
+
+            function update() {
+                const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+                if (sh > ch) {
+                    scrollbar.style.display = 'block';
+                    const th = Math.max(20, (ch / sh) * ch);
+                    thumb.style.height = th + 'px';
+                    thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
+                } else { scrollbar.style.display = 'none'; }
+            }
+
+            container.onscroll = update;
+
+            let isDragging = false, startY, startST;
+            thumb.onmousedown = e => {
+                isDragging = true; startY = e.clientY; startST = container.scrollTop;
+                document.onmousemove = e => {
+                    if (!isDragging) return;
+                    const dy = e.clientY - startY;
+                    const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
+                    container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
+                    update();
+                };
+                document.onmouseup = () => { isDragging = false; document.onmousemove = null; };
+                e.preventDefault();
+            };
+
+            scrollbar.onclick = e => {
+                if (e.target === thumb) return;
+                const rect = scrollbar.getBoundingClientRect();
+                const clickY = e.clientY - rect.top;
+                const ch = container.clientHeight, sh = container.scrollHeight;
+                container.scrollTop = (clickY / ch) * sh - ch / 2;
+                update();
+            };
+
+            return update;
         }
 
-        // 初始更新滚动条
-        updateCustomScrollbar();
+        const updateOuter = setupScrollbar('mainContent', 'outerScrollbar', 'outerThumb');
+        const updateInner = setupScrollbar('historyList', 'innerScrollbar', 'innerThumb');
+
+        function updateAllScrollbars() { updateOuter(); updateInner(); }
+        window.onresize = updateAllScrollbars;
+
+        // Init
+        const initialPos = ${JSON.stringify(scrollPosition)};
+        if (initialPos && document.getElementById('historyList')) {
+            document.getElementById('historyList').scrollTop = initialPos.scrollTop;
+        }
+
+        updateAllScrollbars();
+        setInterval(refreshData, 5000);
     </script>
 </body>
 </html>`;
