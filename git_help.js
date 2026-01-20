@@ -68,17 +68,53 @@ class LocalAIReleaseAssistant {
         pkg.version = newVersion;
         fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
 
-        // 2. 检查是否有文件变化
+        // 2. 清理多余的 build-artifacts 并确保 assets 是唯一真理
+        const artifactsFolders = ['build-artifacts', 'build', 'target'];
+        artifactsFolders.forEach(folder => {
+            try {
+                if (fs.existsSync(folder)) {
+                    console.log(`🧹 正在清理 ${folder} 目录...`);
+                    fs.rmSync(folder, { recursive: true, force: true });
+                }
+            } catch (e) {
+                console.error(`❌ 清理 ${folder} 失败:`, e.message);
+            }
+        });
+
+        // 3. 验证 assets 目录中的二进制文件
+        const requiredAssets = [
+            'q_win_x64.exe',
+            'q_win_x86.exe',
+            'q_linux_x64',
+            'q_mac_x64',
+            'q_mac_arm64'
+        ];
+
+        console.log('🔍 检查 assets 目录二进制完整性...');
+        if (!fs.existsSync('assets')) {
+            console.error('❌ 错误: assets 目录不存在！');
+            return false;
+        }
+
+        const missing = requiredAssets.filter(asset => !fs.existsSync(path.join('assets', asset)));
+        if (missing.length > 0) {
+            console.warn(`⚠️ 警告: 以下二进制文件在 assets 中缺失: ${missing.join(', ')}`);
+            console.warn('💡 请确保在发布前已运行 build 脚本并将产物放入 assets 文件夹。');
+        } else {
+            console.log('✅ assets 二进制文件验证通过。');
+        }
+
+        // 4. 检查是否有文件变化
         const status = this.execGit('status --porcelain');
         if (!status) {
             console.log('ℹ️ 工作区已经是干净的，仅同步版本号...');
         }
 
-        // 3. 执行全量提交
+        // 5. 执行全量提交
         this.execGit('add .');
         this.execGit(`commit -m "${message}"`);
 
-        // 4. 执行推送
+        // 6. 执行推送
         console.log(`📤 正在推送至 ${targetBranch}...`);
         this.execGit(`push origin ${targetBranch}`);
         return true;

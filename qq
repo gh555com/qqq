@@ -1,535 +1,221 @@
-的梦，可以做，而且这三件事（自动发布 / 自动更新日志 / 自动回归测试）放在一起，最稳的做法就是：
+3) 你该怎么做（推荐走 esbuild，最省事）
 
-* **发布到 Marketplace：用 `@vscode/vsce` + `VSCE_PAT`**
-* **生成 Release Notes：用 GitHub 自动生成（或 `gh release create --generate-notes`）**
-* **回归测试：用官方的 `@vscode/test-cli` + `@vscode/test-electron` 跑 integration tests**
+官方文档里就给了完整的 esbuild 方案（含 external: ['vscode']、输出到 dist/extension.js、以及 vscode:prepublish 在发布前自动跑打包脚本）。
+Visual Studio Code
 
-下面给你一套“直接抄走就能跑”的最小落地方案（GitHub Actions 版）。
+Step A：确定“入口文件”
 
----
+看你 package.json 的 main 指向哪个文件（比如 ./src/qqq.js 或 ./out/extension.js）。
+这个就是 bundler 的 entry。
 
-## 1) 准备 PAT（发布令牌）+ GitHub Secret
+你现在目录里看是纯 JS（不是 TS），更简单：直接以你的主入口 JS 作为 entry 就行。
 
-VS Code Marketplace 发布依赖 Azure DevOps 的 **Personal Access Token**，并且 scope 要选 **Marketplace (Manage)**。官方步骤写得很清楚：在 Azure DevOps 的 Personal access tokens 里新建 token，Organization 选 “All accessible organizations”，Scopes 里展开 Marketplace 选 Manage。([Visual Studio Code][1])
+Step B：用 esbuild 输出一个 bundle
 
-然后把这个 PAT 放到 GitHub：
+你可以照官方思路做一个 esbuild.js，核心参数就是：
 
-* Repo → Settings → Secrets and variables → Actions → New repository secret
-* 名字建议就叫：`VSCE_PAT`（后面 workflow 直接用）([Visual Studio Code][2])
+bundle: true
 
----
+platform: 'node'
 
-## 2) package.json：加上发布脚本（不把 token 写进仓库）
+format: 'cjs'（VS Code 扩展宿主一般走 CommonJS）
 
-官方 CI 文档建议：把 `vsce` 作为 devDependency，并声明一个不含 token 的 `deploy` 脚本；CI 里通过环境变量 `VSCE_PAT` 注入。([Visual Studio Code][2])
+external: ['vscode']
 
-示例（你按自己项目改）：
+outfile: 'dist/extension.js'
+Visual Studio Code
 
-```json
-{
-  "devDependencies": {
-    "@vscode/vsce": "^x.y.z",
-    "@vscode/test-cli": "^x.y.z",
-    "@vscode/test-electron": "^x.y.z"
-  },
-  "scripts": {
-    "compile": "tsc -p .",
-    "lint": "eslint .",
-    "test": "vscode-test",
-    "package": "vsce package -o dist/extension.vsix",
-    "deploy": "vsce publish"
-  }
-}
-```
+Step C：把发布流程接起来（关键是 vscode:prepublish）
 
-> 小坑：**尽量只在 Linux 上发布**。官方说明从 Windows 打包/发布可能丢 POSIX 可执行位，导致某些依赖失效。([Visual Studio Code][1])
+官方明确：vscode:prepublish 会被 vsce 在发布前调用，你把 bundle 放进 package 脚本里，就能保证每次打包/发布前一定先生成 dist/extension.js。
+Visual Studio Code
++1
 
----
+Step D：更新 .vscodeignore（把 node_modules 扔出去）
 
-## 3) 自动回归测试：接入官方 VS Code Test CLI
+你的目标是：VSIX 里只带 dist + 必要资源，把开发用的和依赖大户排除掉。
 
-官方推荐的快速方案是装：
+一个常见的方向（按需改）：
 
-* `@vscode/test-cli`
-* `@vscode/test-electron`
+# 源码不必进包（你已经打成 dist 了）
+src/**
 
-然后 `npm test` 直接跑，会下载 VS Code 并在 Extension Host 下执行 Mocha 测试。([Visual Studio Code][3])
+# 依赖不必进包（已经进 bundle 了）
+node_modules/**
 
-### 3.1 新增 `.vscode-test.js`（最小配置）
+# 构建产物里只留你需要的（比如 dist + assets + 你那套平台二进制）
+# 例如你要保留 assets：
+# assets/**   （不要写进 ignore）
 
-```js
-// .vscode-test.js
-const { defineConfig } = require('@vscode/test-cli');
 
-module.exports = defineConfig({
-  files: 'out/test/**/*.test.js'
-});
-```
+官方也提醒了：最后要更新 .vscodeignore，确保“编译后的文件（bundle 输出）会被包含进发布包”。
+Visual Studio Code
 
-（官方示例就是这种结构：`defineConfig({ files: ... })`）([Visual Studio Code][3])
+4) 你这种项目要注意的坑（很常见）
 
----
+动态 require / 路径拼接 require
+比如 require("./" + name)、require(someVar)，bundler 可能分析不出来，导致运行时报缺模块。遇到这种，要么改成静态 import，要么把对应包/文件标为 external 并随 VSIX 带上。
 
-## 4) GitHub Actions：打 tag → 测试 → 打包 → 发布 → 生成 Release Notes（并上传 vsix）
+非 JS 资源文件（mp3/gif/html 等）不会自动进 bundle
+你有 assets/*.mp3、q2.html 这种：
 
-把下面文件保存为：`.github/workflows/publish.yml`
+如果运行时是按文件路径读取（fs.readFile / vscode.Uri.joinPath(context.extensionUri, ...)），那就别在 .vscodeignore 里排除它们，让它们作为静态文件随包带上。
 
-```yaml
-name: publish
+如果你希望也“打进 JS 里”，那就得配 bundler loader/plugin（webpack 比 esbuild 更常见）。
 
-on:
-  push:
-    tags:
-      - "v*.*.*"
+bundling 只解决 node_modules，不解决你那堆平台二进制
+你前面说的 build-artifacts/ 六个二进制，是另一个维度的问题：要用“平台专用 VSIX（--target）”去拆包。（这个我们前面聊过。）
 
-permissions:
-  contents: write   # 创建 GitHub Release 需要
+5) 一句话总结你的最优解
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
+先做 bundling + .vscodeignore 排除 node_modules：立刻瘦一大圈（尤其你 node_modules 82MB 这个）。
+Visual Studio Code
 
-    steps:
-      - uses: actions/checkout@v4
+再做平台专用 VSIX（--target）：把二进制按平台拆开。
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
+如果你把下面两样贴出来（直接复制文本就行）：
 
-      - name: Install
-        run: npm ci
+你的 package.json 里 main 是什么
 
-      - name: Lint
-        run: npm run lint --if-present
+你运行二进制的那段代码（spawn 的路径怎么拼的）
 
-      - name: Build
-        run: npm run compile --if-present
+我就能按你现在的项目结构，给你一套“最少改动”的 esbuild + .vscodeignore +（可选）多平台打包脚本，确保你扩展安装后路径不崩、资源文件也都在。
 
-      - name: Test (VS Code integration tests)
-        run: npm test
+你说：
+  bundling 大概能减肥多少？  bundling 减肥滴原理是什吗, 相比直接把 node_modules 打进去, 最大滴风险市啥？
+ChatGPT 说：
+已思考 1m 1s
 
-      # 可选：确保 tag 版本与 package.json 一致（强烈建议）
-      - name: Verify version matches tag
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(node -p "require('./package.json').version")
-          echo "tag=$TAG package.json=$PKG"
-          test "$TAG" = "$PKG"
+老板，bundling 能瘦多少，取决于你现在 VSIX 里到底塞进了多少 node_modules（以及里面有多少“其实没用到”的依赖）。
 
-      - name: Package VSIX
-        run: npm run package
+bundling 大概能减肥多少？
 
-      - name: Publish to VS Code Marketplace
-        run: npm run deploy
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+按经验给你三个很实用的区间（先看你这项目的量级：node_modules 82.7MB + 二进制 17.7MB）：
 
-      # 生成 GitHub Release + 自动 Release Notes + 上传 vsix
-      - name: Create GitHub Release (auto notes) and upload VSIX
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.vsix \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
-```
+只解决 node_modules（不动二进制）：通常能把“JS 依赖部分”砍掉 60%～95%
 
-这里用的是 GitHub CLI 的 `gh release create --generate-notes`，会生成 GitHub 的“自动 Release Notes”。([GitHub CLI][4])
+如果你现在 VSIX 真的把 node_modules 基本都打进去了，那单这一项就可能直接少 几十 MB（接近你 node_modules 的体积）。
 
----
+你这类项目的最终 VSIX：大概率会落在 “二进制体积 + assets + 1 个 bundle 文件”
 
-## 5) 自动生成“用户可读”的 CHANGELOG：推荐 release-please（可选但很值）
+也就是大致 18MB～30MB 这个量级（因为你二进制就 17.7MB 了，bundling 解决不了它）。
 
-如果你现在是“手动改版本号 + 手动写 changelog + 手动打 tag”，那 CI 虽然能跑，但更新日志还是累。
+要想比 18MB 还小：那就得结合“平台专用 VSIX / 或运行时下载二进制”，否则二进制是硬底。
 
-更省事的模式是：
+官方推荐 bundling 的理由之一就是：扩展依赖多、文件多会拖慢安装和运行，“加载 100 个小文件比加载 1 个大文件慢”，所以建议把多个小文件合成一个 bundle。
+Visual Studio Code
 
-* 平时按 **Conventional Commits** 写 commit
-* `release-please` 自动开一个 Release PR：里面自动改版本号、更新 CHANGELOG
-* 你一 merge，它自动打 tag、建 GitHub Release
-  然后上面的 `publish.yml` 会因为 tag 推送而自动发布 Marketplace。
+bundling 减肥的原理是啥？为啥比直接打包 node_modules 小？
 
-官方 action 在这里：`googleapis/release-please-action` ([GitHub][5])
+bundling 的本质：把你的入口文件 + 依赖图，合并成一个（或少数几个）输出文件。
+Visual Studio Code
 
-如果你想走这条路，我可以按你仓库结构（TS/JS、monorepo、是否已有 CHANGELOG、tag 命名等）把 release-please 的两份文件也给你配好。
+它变小主要靠这几招：
 
----
+减少文件数量
+不再需要把 node_modules 里成千上万个文件都带上；只带一个 dist/extension.js（或类似）。官方示例就是把 src/extension.ts 打成 dist/extension.js 一个文件。
+Visual Studio Code
 
-## 常见坑快速排雷（你很可能会遇到）
+去掉没用到的代码（tree-shaking/死代码删除，视你的模块形态而定）
+很多库你只用到 5%，直接打包 node_modules 会把 100% 带上；bundler 有机会只保留被引用的部分。（CommonJS 场景效果可能没 ESM 那么夸张，但通常仍然能省不少。）
 
-* **PAT 权限不对**：scope 必须是 `Marketplace (Manage)`，Organization 建议 “All accessible organizations”，否则容易 401/403。([Visual Studio Code][1])
-* **tag 和版本号不一致**：Marketplace 不允许重复版本；上面 workflow 已经加了校验。
-* **Linux 上跑测试报显示/DBus 问题**：可以加 `xvfb`（需要的话我再给你补一个最小改法）。
+压缩（minify）
+官方的 esbuild 脚本里就会在 --production 时 minify 来生成更小的 bundle。
+Visual Studio Code
 
----
+然后你就能在 .vscodeignore 里排除 node_modules
+官方发布章节明确说：既然已经 bundled 到 dist/extension.js，就可以把 node_modules（以及 out/src 等）排除掉。
+Visual Studio Code
 
-如果你把下面三样贴给我（任意一种也行）：
+相比“直接把 node_modules 打进去”，bundling 的最大风险是啥？
 
-1. 你的扩展仓库 `package.json` 的 scripts 段
-2. 你现在的测试目录结构（有没有 `src/test`、用不用 mocha）
-3. 你希望的发布节奏（手动打 tag / merge 自动发）
+一句话：“你以为都打进去了，其实运行时会缺东西 / 行为变了”。
 
-我就能把上面的 YAML 和测试配置“对你项目定制到一次就过”。
+最常见、最致命的风险按概率排序：
 
-[1]: https://code.visualstudio.com/api/working-with-extensions/publishing-extension "Publishing Extensions | Visual Studio Code Extension
-API"
-[2]: https://code.visualstudio.com/api/working-with-extensions/continuous-integration "Continuous Integration | Visual Studio Code Extension
-API"
-[3]: https://code.visualstudio.com/api/working-with-extensions/testing-extension "Testing Extensions | Visual Studio Code Extension
-API"
-[4]: https://cli.github.com/manual/gh_release_create?utm_source=chatgpt.com "gh release create - GitHub CLI"
-[5]: https://github.com/googleapis/release-please-action?utm_source=chatgpt.com "googleapis/release-please-action - GitHub"
-好的的梦，我按你这份 `package.json` 给你一套**可直接落地的“完整版”**：包含
+1) 动态 require / 依赖在运行时才决定（最常见）
 
-1. **自动回归测试**（最小 smoke test，确保扩展能被加载激活）
-2. **打 tag 自动打包 + 发布到 Marketplace**（用 `VSCE_PAT`）
-3. **自动生成 GitHub Release Notes 并上传 `.vsix`**
-4. （可选）**release-please 自动维护版本号 + CHANGELOG + 发 tag**
+比如：
 
-> 发布 token 的注入方式、以及建议用 Linux runner 发布，按官方建议来。
-> GitHub Release Notes 用 `gh release create --generate-notes`。
-> 回归测试用官方 `@vscode/test-cli` / `@vscode/test-electron` 方式。
+require(someVar)
 
----
+require('./' + name)
 
-## A) 先改 package.json（给你一份可直接替换的 scripts + devDependencies）
+用 eval/插件机制加载模块
 
-把你现在的 `scripts` 改成下面这样（保留你原来那几个也行，但 CI 我建议用 `ci:*` 这套，避免误 bump 版本）：
+bundler 可能静态分析不到，结果它没被打进 bundle，运行时直接爆 “Cannot find module …”。
 
-```json
-{
-  "scripts": {
-    "ci:test": "vscode-test --config .vscode-test.js",
-    "ci:package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
-    "ci:publish": "npx @vscode/vsce publish --allow-star-activation",
+✅ 缓解：把这类依赖标成 external，并把对应文件/目录仍然随包带上，或者改成静态 import。
 
-    "package": "npx @vscode/vsce package --allow-missing-repository --allow-star-activation",
-    "publish": "npx @vscode/vsce publish --allow-star-activation",
+2) 依赖“必须按文件路径存在”（读模板、读 package.json、读 wasm/词典/二进制数据）
 
-    "test": "npm run ci:test"
-  },
-  "devDependencies": {
-    "@types/node": "^18.0.0",
-    "@types/vscode": "^1.70.0",
-    "@vscode/vsce": "^3.6.2",
-    "@vscode/test-cli": "^0.0.0",
-    "@vscode/test-electron": "^2.0.0",
-    "mocha": "^10.0.0"
-  }
-}
-```
+你如果有 fs.readFile(path.join(__dirname,'...')) 之类逻辑，打包后路径结构变了、文件没被包含，就挂。
 
-> 说明：`@vscode/test-cli` / `@vscode/test-electron` 的版本你也可以 later 再锁定成具体号；先跑通流程最重要。
+✅ 缓解：这些资源别指望自动进 bundle：要么让它们作为静态文件随 VSIX（别在 .vscodeignore 排除），要么用 bundler loader/plugin 显式打进去。
 
----
+3) 原生模块（.node）/ 平台相关依赖
 
-## B) 加 2 个测试文件（最小回归测试）
+如果你依赖了 native addon（很多性能库/加密库/数据库库会这样），它往往要和 VS Code 自带的 Electron/Node ABI 匹配，有时还涉及 rebuild。GitHub 上也有人讨论“最终用户不得不 rebuild 原生模块”的麻烦。
+GitHub
 
-### 1) 新建 `.vscode-test.js`
+✅ 缓解：尽量避免 native addon；或走“按平台拆包/单独分发”。
 
-放到仓库根目录：
+4) 调试变困难（尤其是 production minify）
 
-```js
-const { defineConfig } = require('@vscode/test-cli');
+官方也提到：production 会压缩变小，但会让调试变难；开发时通常保留 sourcemap，生产时换策略。
+Visual Studio Code
 
-module.exports = defineConfig({
-  files: 'test/**/*.test.js'
-});
-```
+✅ 缓解：开发用 sourcemap，发布用 hidden-source-map 或保留 map 但别暴露源码（看你需求）。
 
-（官方就是用 `defineConfig({ files: ... })` 这种形式。）
 
-### 2) 新建 `test/smoke.test.js`
 
-```js
-const assert = require('assert');
-const vscode = require('vscode');
+A) 发布“平台专用 VSIX”（推荐，官方支持）
 
-suite('qqq smoke', () => {
-  test('extension can activate', async () => {
-    const ext = vscode.extensions.getExtension('gh555.qqq'); // publisher.name
-    assert.ok(ext, 'Extension gh555.qqq not found');
+VS Code/Marketplace 支持同一个扩展 ID 发布 多个 platform target 的 VSIX：Windows/Linux/mac 各自只带自己需要的二进制，VS Code 会自动给用户装匹配平台的包。平台专用包通过 --target 指定；如果你再发布一个不带 --target 的“通用包”，它会作为没有匹配平台包时的 fallback。
+Visual Studio Code
 
-    await ext.activate();
-    assert.ok(true, 'activated');
-  });
-});
-```
+官方列出的 target 包括：win32-x64, win32-arm64, linux-x64, linux-arm64, darwin-x64, darwin-arm64 等。
+Visual Studio Code
 
-> 这个 smoke test 的目的就是：每次发版至少保证“扩展能被 VS Code 加载激活”，不至于一发就炸导致差评。
+你关心的点：能不能发 Windows / Linux / mac 三个不同版本？
 
----
+可以，但mac 通常要分两份（Intel：darwin-x64，Apple Silicon：darwin-arm64）。除非你明确只支持 Apple Silicon。
+Visual Studio Code
 
-## C) GitHub Actions：打 tag 自动发布（发布到 Marketplace + GitHub Release Notes + 上传 vsix）
+实操思路（最省事且好维护）
 
-新建文件：`.github/workflows/publish.yml`
+不要把 build-artifacts/ 整包打进 VSIX
+用 .vscodeignore 排除它：
 
-> 触发方式：推送 tag `v15.14.6` 这种（必须跟 package.json 版本一致）
+# .vscodeignore
+build-artifacts/**
+# 下面这个看你是否做了 bundling（见后文 B）
+# node_modules/**
+src/**
+.vscode/**
+**/*.map
 
-```yaml
-name: publish
 
-on:
-  push:
-    tags:
-      - "v*.*.*"
+打包前把对应平台那一个二进制 复制成统一路径（比如 bin/q 或 bin/q.exe），然后再 vsce package --target ...
+这样每个 target 的 VSIX 里只会有“那一个平台的二进制”。
 
-permissions:
-  contents: write  # 需要创建 GitHub Release
+发布时用 vsce publish --target ...（vsce 从 1.99.0 开始支持一次性带多个 target）。
+Visual Studio Code
 
-jobs:
-  publish:
-    runs-on: ubuntu-latest
+例如（按你现在已有的产物）：
 
-    steps:
-      - uses: actions/checkout@v4
+# 例：发布 win x64 + win arm64 + linux x64 + mac x64 + mac arm64
+vsce publish --target win32-x64 win32-arm64 linux-x64 darwin-x64 darwin-arm64
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
 
-      - name: Install
-        run: npm ci
+或者你也可以先分别打包再上传：
+Visual Studio Code
 
-      - name: Test
-        run: npm run ci:test
+vsce package --target win32-x64
+vsce publish --packagePath PATH_TO_WIN32X64_VSIX
 
-      - name: Verify version matches tag
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(node -p "require('./package.json').version")
-          echo "tag=$TAG package.json=$PKG"
-          test "$TAG" = "$PKG"
 
-      - name: Package VSIX
-        run: npm run ci:package
-
-      - name: Publish to VS Code Marketplace
-        run: npm run ci:publish
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
-      - name: Create GitHub Release (auto notes) and upload VSIX
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${GITHUB_REF_NAME}" dist/*.vsix \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
-```
-
-关键点：
-
-* Marketplace 发布用 `VSCE_PAT` 环境变量注入（你已经在 GitHub Secrets 配好了）。
-* GitHub Release Notes 用 `--generate-notes` 自动生成。
-* 用 Linux runner 发布，避免 Windows 打包可能出现的可执行位问题（官方提醒）。
-
----
-
-## D) 你以后怎么发版（两种选一种）
-
-### 方案 1：你手动控制版本（最快）
-
-1. 改 `package.json` 的 `"version": "15.14.7"`
-2. 提交并 push
-3. 打 tag 并 push：
-
-   ```bash
-   git tag v15.14.7
-   git push origin v15.14.7
-   ```
-4. Actions 自动：测试 → 打包 → 发布 Marketplace → 建 GitHub Release
-
-### 方案 2（可选）：release-please 自动维护 CHANGELOG + 版本 + tag
-
-你如果想“合并 PR 就自动出 Release PR / 更新 changelog / 打 tag”，我也可以把 release-please 的 workflow + 配置给你一份**完全可用的**（但你需要告诉我：你默认分支是 `qq` 还是 `main`？你截图里像是 `qq`）。
-
----
-
-
-
-
- ### 最基础的使用步骤（从代码提交到自动发布）
-
-#### 1. **准备工作（已完成）**
-我们已经配置好了所有自动化系统，包括：
-- 自动回归测试
-- release-please版本管理
-- GitHub Actions自动发布工作流
-
-#### 2. **编写代码并提交**
-按照**规范格式**提交代码，这是自动版本管理的基础：
-
-```bash
-# 编写代码...
-
-# 添加所有修改
-git add .
-
-# 提交代码（必须使用规范格式）
-# 新功能用 feat:
-git commit -m "feat: 添加新功能描述"
-
-# 修复bug用 fix:
-git commit -m "fix: 修复某个问题"
-
-# 文档更新用 docs:
-git commit -m "docs: 更新文档"
-```
-
-#### 3. **推送到默认分支**
-将代码推送到 `qq` 分支（我们的默认分支）：
-
-```bash
-git push origin qq
-```
-
-#### 4. **等待自动PR**
-- release-please会检测到您的规范提交
-- 自动创建一个包含版本更新和CHANGELOG的PR（Pull Request）
-- 这个PR会显示在GitHub仓库的"Pull requests"页面
-
-#### 5. **合并PR**
-- 检查PR中的版本更新和CHANGELOG
-- 确认无误后，点击"Merge pull request"合并PR
-
-#### 6. **自动发布流程**
-合并PR后，系统会自动执行：
-- 更新 `package.json` 中的版本号
-- 生成中英文双语的CHANGELOG
-- 创建GitHub Release并上传VSIX文件
-- 打 `v*.*.*` 格式的标签
-- 触发发布工作流，自动发布到VS Code Marketplace
-
-#### 7. **验证发布结果**
-- 检查GitHub仓库的"Releases"页面
-- 查看VS Code Marketplace中的最新版本
-
-### 简单总结：
-1. 按规范提交代码 → 2. 推送到qq分支 → 3. 等待自动PR → 4. 合并PR → 5. 自动完成发布
-
-整个过程中，您只需要做"提交代码"、"推送到qq分支"和"合并PR"这三个操作，其他所有步骤都会自动完成！
-
-
-
-
-
-
-
-
-
-✅ **最新完整的VS Code扩展发布流程（基于release-please自动版本管理）**
-
-### 一、开发阶段（日常工作）
-1. **开发代码**：根据需求开发新功能或修复bug
-2. **提交代码**：使用**语义化提交信息**进行git提交和推送
-   ```bash
-   git add .
-   git commit -m "feat: 添加新功能"  # 使用规范的语义化提交
-   # 支持的类型：feat(新功能), fix(修复), docs(文档), style(格式), refactor(重构), perf(性能), test(测试), chore(构建)
-   git push origin qq
-   ```
-3. **运行测试**：确保代码质量
-   ```bash
-   npm test  # 运行冒烟测试
-   ```
-
-### 二、自动版本管理流程（release-please自动执行）
-1. **自动触发**：当代码推送到qq分支时，`release-please.yml`工作流自动运行
-2. **版本分析**：
-   - release-please分析提交历史，根据语义化提交信息确定版本号
-   - `feat` → 次要版本（Y+1），`fix` → 补丁版本（Z+1），含`BREAKING CHANGE` → 主要版本（X+1）
-3. **创建发布PR**：
-   - 自动生成包含版本更新、CHANGELOG变更的PR
-   - PR标题格式：`chore(main): release vX.Y.Z`
-   - 自动更新`package.json`和`CHANGELOG.md`
-
-### 三、发布操作（核心1步）
-1. **合并发布PR**：
-   - 审核release-please生成的发布PR
-   - 确认版本号和CHANGELOG内容无误后合并PR
-   - ⚠️ **无需手动更新版本号或创建标签**
-
-### 四、自动触发的发布流程（GitHub Actions自动执行）
-1. **合并触发**：当发布PR合并后，release-please自动：
-   - 创建git标签（格式：`vX.Y.Z`）
-   - 更新`package.json`中的版本号
-   - 更新`CHANGELOG.md`文件
-2. **标签触发发布**：标签创建后，`publish.yml`工作流自动运行：
-   - **依赖安装**：使用`npm install`安装项目依赖
-   - **版本验证**：检查标签版本与package.json版本是否一致
-   - **打包VSIX**：生成扩展的VSIX安装文件（`dist/qqq-X.Y.Z.vsix`）
-   - **VSIX验证**：确认VSIX文件存在并完整
-   - **GitHub Release**：
-     - 创建X.Y.Z的Release记录
-     - 自动生成Release Notes
-     - 上传VSIX文件到Release中
-   - **VS Code Marketplace发布**：
-     - 上传扩展到VS Code Marketplace（使用PAT权限）
-     - 失败时不影响GitHub Release（`continue-on-error: true`）
-
-### 五、发布完成后的检查
-1. **GitHub Releases**：查看最新的Release记录，确认VSIX文件可下载
-   - 地址：`https://github.com/gh555com/qqq/releases`
-2. **VS Code Marketplace**：确认扩展已更新到最新版本
-3. **CHANGELOG.md**：查看release-please自动生成的双语变更记录
-4. **package.json**：确认版本号已自动更新
-
-### 六、核心配置文件
-1. **`release-please-config.json`**（项目根目录）：
-   ```json
-   {
-     "release-type": "node",
-     "package-name": "qqq",
-     "default-branch": "qq",
-     "versioning": "semver",
-     "changelog": {
-       "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n## 变更日志\n\n本项目所有重要变更将在此文件中记录。\n"
-     }
-   }
-   ```
-
-2. **`.github/workflows/release-please.yml`**：
-   - 触发条件：qq分支推送
-   - 权限：读写内容和PR
-   - 使用googleapis/release-please-action@v4
-
-3. **`.github/workflows/publish.yml`**：
-   - 触发条件：v*.*.*标签推送
-   - 权限：写内容
-   - 使用softprops/action-gh-release@v2上传VSIX
-
-### 七、优势与特点
-- **全自动版本管理**：从版本分析到发布完成，全程自动化
-- **语义化版本控制**：基于提交信息自动确定版本号
-- **智能CHANGELOG**：自动生成中英文双语变更记录
-- **标准化流程**：统一的版本管理和发布规范
-- **双渠道发布**：同时发布到GitHub Releases和VS Code Marketplace
-- **零手动操作**：无需手动更新版本、创建标签或编辑CHANGELOG
-- **可追溯性**：完整的版本历史和变更记录
-- **可靠性高**：减少人为错误，提高发布质量
-
-### 八、紧急手动发布流程（可选）
-如需绕过release-please进行紧急发布：
-1. **手动更新版本**：修改`package.json`中的version字段
-2. **提交版本更新**：
-   ```bash
-   git add package.json
-   git commit -m "chore: bump version to X.Y.Z"
-   git push origin qq
-   ```
-3. **创建标签**：
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-4. **后续流程**：与自动发布相同（标签触发publish.yml）
-
-这个流程已经过全面优化，结合了release-please的自动版本管理和可靠的VSIX发布机制，实现了真正的"一键发布"体验！
-
-
+议：如果你希望极致减肥，可以考虑在打包前执行 npm prune --production，确保没有把 devDependencies 带进去（虽然 vsce 理论上会处理，但手动清理更稳）。
 
 
 
