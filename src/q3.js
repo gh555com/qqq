@@ -724,7 +724,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 没有打开的文档");
+        global.showWarningMessage("qqq: 请选择打开滴文档");
         return;
     }
 
@@ -1086,7 +1086,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 没有打开的文档");
+        global.showWarningMessage("qqq: 请选择打开滴文档");
         return;
     }
 

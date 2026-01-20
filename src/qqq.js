@@ -52,6 +52,7 @@ let cacheDir = null;
 let cacheMeta = null;
 let _statusBarTimer = null;
 let clipboardHistoryManager = null;
+let activeSidebarProvider = null;
 
 // ============================================================================
 // Cache Meta Logic (Retained in qqq)
@@ -887,48 +888,39 @@ let downloadContext = null;
 async function savorMomentsCommand() {
 	try {
 		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
-		let selectedAudio;
-
+		let selectedAudioPath;
 
 		const randomNumber = Math.floor(Math.random() * 30);
 		if (randomNumber === 0) {
-
-			selectedAudio = path.join(assetsPath, 'q.mp3');
+			selectedAudioPath = path.join(assetsPath, 'q.mp3');
 		} else {
-
 			const randomIndex = Math.floor(Math.random() * 3);
 			const audioNum = randomIndex + 1;
-			selectedAudio = path.join(assetsPath, `${audioNum}.mp3`);
+			selectedAudioPath = path.join(assetsPath, `${audioNum}.mp3`);
 		}
 
-
-		if (process.platform === 'win32') {
-			cp.exec(`start /min "" "${selectedAudio}"`);
-		} else if (process.platform === 'darwin') {
-			cp.exec(`open -j "${selectedAudio}"`);
-		} else {
-
-			const players = ['mplayer', 'vlc', 'cvlc', 'mpv'];
-			let command = null;
-			for (const player of players) {
-				try {
-					cp.execSync(`which ${player} `, { stdio: 'ignore' });
-					if (player === 'mpv') {
-						command = `${player} --no - terminal "${selectedAudio}"`;
-					} else if (player === 'cvlc') {
-						command = `${player} "${selectedAudio}"`;
-					} else if (player === 'mplayer') {
-						command = `${player} -really - quiet "${selectedAudio}"`;
-					} else {
-						command = `${player} --play - and - exit "${selectedAudio}"`;
-					}
-					break;
-				} catch { }
-			}
-			if (command) {
-				cp.exec(command);
+		if (fs.existsSync(selectedAudioPath)) {
+			const audioBase64 = fs.readFileSync(selectedAudioPath).toString('base64');
+			if (activeSidebarProvider) {
+				activeSidebarProvider.postMessage({
+					command: 'playAudio',
+					base64: audioBase64,
+					times: 1
+				});
 			} else {
-				cp.exec(`xdg - open "${selectedAudio}"`);
+				// 如果侧边栏未打开，回退到系统播放器（或者静默，根据用户需求）
+				// 用户说不要弹出系统播放器，所以这里我们尝试聚焦侧边栏
+				vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
+					setTimeout(() => {
+						if (activeSidebarProvider) {
+							activeSidebarProvider.postMessage({
+								command: 'playAudio',
+								base64: audioBase64,
+								times: 1
+							});
+						}
+					}, 500);
+				});
 			}
 		}
 	} catch (e) {
@@ -1265,6 +1257,7 @@ async function activate(context) {
 	// 注册侧边栏 WebView 状态面板
 	const SidebarWebViewProvider = require('./q4');
 	const sidebarProvider = new SidebarWebViewProvider(context, global);
+	activeSidebarProvider = sidebarProvider;
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider('qqq.Viewq', sidebarProvider, {
 			webviewOptions: {
