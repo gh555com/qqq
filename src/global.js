@@ -344,7 +344,12 @@ class DaemonBridge {
 // Python bridge：优先 python，其次 python3（非 win32）
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
-		const scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
+		// Python 引擎优先在 dist 中寻找（针对 Bundle 环境），如果找不到则尝试 src
+		let scriptPath = path.join(extensionContext.extensionPath, "dist", "kp.py");
+		if (!fs.existsSync(scriptPath)) {
+			scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
+		}
+		
 		if (!fs.existsSync(scriptPath)) {
 			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
 			bridge.available = false;

@@ -42,8 +42,18 @@ const FINGERPRINT_TAIL = 128;
 let ffmpegPath = null;
 let ffprobePath = null;
 try {
-	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-	ffmpegPath = ffmpegInstaller.path;
+	// 优先从扩展自带的 assets 目录中寻找 FFmpeg（针对 Bundle 瘦身版）
+	const isWin = process.platform === "win32";
+	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
+	const fpName = isWin ? "ffprobe.exe" : "ffprobe";
+	
+	// 在 activate 时会通过 extensionContext 确定绝对路径，这里先尝试相对路径作为占位
+	// 真正的初始化在 activate 函数中再次校验
+	ffmpegPath = path.join(__dirname, "..", "assets", ffName);
+	if (!fs.existsSync(ffmpegPath)) {
+		const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+		ffmpegPath = ffmpegInstaller.path;
+	}
 	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
 } catch (e) { }
 
@@ -1217,6 +1227,16 @@ async function activate(context) {
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
+
+	// 重新校验 FFmpeg 绝对路径
+	const isWin = process.platform === "win32";
+	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
+	const ffInAssets = path.join(context.extensionPath, "assets", ffName);
+	if (fs.existsSync(ffInAssets)) {
+		ffmpegPath = ffInAssets;
+		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
+		global.logMessage(`[INFO] 使用内置 FFmpeg: ${ffmpegPath}`, "INFO");
+	}
 
 	initCache(context);
 
