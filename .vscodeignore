@@ -33,6 +33,9 @@ Thumbs.db
 # 编译输出
 out/**
 dist/**
+build-artifacts/**
+build/**
+target/**
 
 # 其他开发文件
 .eslintrc.json

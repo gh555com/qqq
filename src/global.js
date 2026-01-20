@@ -152,9 +152,11 @@ class DaemonBridge {
 					this.restartCount = 0;
 					this.available = true;
 					this._setStartError("");
-					logMessage(`${this.name} started`, "INFO");
+					logMessage(`${this.name} bridge started and handshaked`, "INFO");
 					resolve(true);
 					return true;
+				} else {
+					logMessage(`${this.name} ping response invalid: ${JSON.stringify(pong)}`, "WARN");
 				}
 			} catch (e) { }
 
@@ -173,8 +175,8 @@ class DaemonBridge {
 			resolve(false);
 		};
 
-		// 启动ping尝试，将初始延迟恢复为 5ms，解决 500ms 延迟问题
-		setTimeout(attemptPing, 5);
+		// 启动ping尝试，增加初始延迟到 100ms，给进程一点启动时间
+		setTimeout(attemptPing, 100);
 	}
 
 	_handleCrash() {
@@ -465,10 +467,8 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		const candidates = [
-			path.join(__dirname, "..", "build-artifacts", filename),
 			path.join(__dirname, "..", "assets", filename),
 			path.join(__dirname, "assets", filename),
-			path.join(__dirname, filename),
 		];
 
 		let exePath = null;

@@ -151,11 +151,8 @@ impl serde_json::ser::Formatter for PyFormatter {
 }
 
 fn dumps_py(value: &PyV, _ensure_ascii: bool) -> String {
-    let mut buf: Vec<u8> = Vec::new();
-    let formatter = PyFormatter;
-    let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
-    let _ = value.serialize(&mut ser);
-    String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
+    // 简化：不再尝试模拟 Python 的 separators 细节，直接用标准 JSON 确保 100% 合法
+    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
 }
 
 // =============================================================================
@@ -1323,36 +1320,39 @@ fn daemon_mode() {
     eprintln!("Daemon started. PID={}", process::id());
 
     let stdin = io::stdin();
-    let mut reader = stdin.lock();
+    let mut reader = io::BufReader::new(stdin.lock());
+    let mut stdout = io::stdout();
 
     loop {
-        let mut line_bytes: Vec<u8> = Vec::new();
-        match reader.read_until(b'\n', &mut line_bytes) {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
             Ok(0) => {
                 // EOF
-                eprintln!("Daemon stdin EOF.");
-                thread::sleep(Duration::from_secs(1));
-                continue;
+                eprintln!("Daemon stdin EOF. Exiting.");
+                process::exit(0);
             }
             Ok(_) => {}
             Err(e) => {
-                eprintln!("Daemon loop error: {}", e);
-                thread::sleep(Duration::from_millis(50));
+                eprintln!("Daemon loop read error: {}", e);
+                thread::sleep(Duration::from_millis(100));
                 continue;
             }
         }
 
-        let line = decode_utf8_ignore(&line_bytes);
-        let line = line.trim().to_string();
+        let line = line.trim();
         if line.is_empty() {
             continue;
         }
 
-        let parsed: Result<Value, _> = serde_json::from_str(&line);
+        // Trace received command (optional, can be noisy)
+        // eprintln!("Received: {}", line);
+
+        let parsed: Result<Value, _> = serde_json::from_str(line);
 
         let (res, exit_now, exit_ascii_false) = match parsed {
             Ok(cmd) => dispatch_action(&cmd),
             Err(e) => {
+                eprintln!("JSON parse error: {} | line: {}", e, line);
                 let out = PyV::Obj(vec![
                     ("_id".to_string(), py_num_u64(0)),
                     ("error".to_string(), PyV::Str(e.to_string())),
@@ -1365,12 +1365,12 @@ fn daemon_mode() {
         let ensure_ascii = !exit_ascii_false;
         let s = dumps_py(&res, ensure_ascii);
 
-        let mut stdout = io::stdout();
         let _ = stdout.write_all(s.as_bytes());
         let _ = stdout.write_all(b"\n");
         let _ = stdout.flush();
 
         if exit_now {
+            eprintln!("Daemon exit requested.");
             process::exit(0);
         }
     }
