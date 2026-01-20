@@ -46,7 +46,7 @@ class SidebarWebViewProvider {
 
         // 处理来自 webview 的消息
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            console.log('收到 Webview 消息:', message.command, message.itemId);
+            console.log('收到 Webview 消息:', message.command, message.itemId || message.commandId);
             switch (message.command) {
                 case "openSettings":
                     vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
@@ -103,6 +103,17 @@ class SidebarWebViewProvider {
                         await this.global.clipboardHistoryManager.clearHistory();
                         this.updateContent();
                         vscode.window.showInformationMessage('剪切板数据库已物理清空');
+                    }
+                    break;
+                case "executeCommand":
+                    if (message.commandId) {
+                        console.log('Webview 请求执行命令:', message.commandId);
+                        try {
+                            await vscode.commands.executeCommand(message.commandId);
+                        } catch (error) {
+                            console.error('执行命令失败:', error);
+                            vscode.window.showErrorMessage(`执行命令失败: ${error.message}`);
+                        }
                     }
                     break;
             }
@@ -529,6 +540,90 @@ class SidebarWebViewProvider {
             font-size: 0.8em;
         }
 
+        /* 区块标题样式 */
+        .section-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        /* Captain 区块样式 */
+        .captain-section {
+            margin-bottom: 25px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 2px 4px var(--shadow-color);
+        }
+
+        .captain-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .captain-btn {
+            padding: 12px 15px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9em;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            box-shadow: 0 2px 6px var(--shadow-color);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .captain-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 3px 8px rgba(74, 144, 226, 0.4);
+            opacity: 0.95;
+        }
+
+        /* 区块间距样式 */
+        .passed-by-section {
+            margin-bottom: 25px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .dial-section {
+            margin-bottom: 25px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* 调整容器内边距 */
+        .container {
+            max-width: 100%;
+            padding: 0 5px;
+        }
+
+        /* 调整统计卡片样式 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px var(--shadow-color);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
         /* 剪切板历史样式 */
         .clipboard-section {
             margin-top: 25px;
@@ -726,45 +821,26 @@ class SidebarWebViewProvider {
 </head>
 <body>
     <div class="container">
-
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-title">⏱️ 使用时间</div>
-                <div class="stat-value">${hours}<span style="font-size: 0.7em;">h</span> ${minutes}<span style="font-size: 0.7em;">m</span></div>
-                <div class="stat-desc">累计使用时长</div>
-            </div>
-
-            <div class="stat-card cache">
-                <div class="stat-title">💾 磁盘缓存</div>
-                <div class="stat-value">${cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
-                <div class="stat-desc">已缓存的数据量</div>
-            </div>
-
-            <div class="stat-card">
-                <div class="stat-title">🎯 缓存命中率</div>
-                <div class="stat-value">${hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
-                <div class="stat-desc">缓存效率指标</div>
-            </div>
-
-            <div class="stat-card ${engineInfo.name.includes('Python') ? 'python' : engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
-                <div class="stat-title">⚡ IO 引擎</div>
-                <div class="stat-value" style="font-size: 1.2em;">${engineInfo.name}</div>
-                <div class="stat-desc">当前运行引擎</div>
+        <!-- Captain 区块 - 命令按钮区 -->
+        <div class="captain-section">
+            <h2 class="section-title">Captain</h2>
+            <div class="captain-buttons">
+                <button class="captain-btn" onclick="executeCommand('qqq.savorMoments')">savor moments for yourself</button>
+                <button class="captain-btn" onclick="executeCommand('editor.action.clipboardPasteAction')">Paste everything ("Ctrl+V" or "F2")</button>
+                <button class="captain-btn" onclick="executeCommand('editor.action.toggleTabFocusMode')">Roam everywhere ("Tab" or "F6")</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.downloadVideosFromUrl')">insert Videos From Url</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.cleanup')">clean up</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.exportDoc')">exportDoc</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.pure')">Pure</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.exportZip')">exportZip</button>
+                <button class="captain-btn" onclick="executeCommand('qqq.allSettings')">allSettings</button>
             </div>
         </div>
 
-        <div class="engine-info">
-            <div class="engine-label">引擎详情</div>
-            <div class="engine-name">${engineInfo.details}</div>
-        </div>
-
-        <!-- 剪切板历史部分 -->
-        <div class="clipboard-section">
+        <!-- Passed by 区块 - 剪切板历史 -->
+        <div class="passed-by-section">
+            <h2 class="section-title">Passed by</h2>
             <div class="clipboard-header">
-                <div class="clipboard-title">
-                    📋 剪切板历史
-                </div>
                 <div class="clipboard-stats">
                     ${clipboardHistory.length} 个项目
                 </div>
@@ -780,16 +856,39 @@ class SidebarWebViewProvider {
             </div>
         </div>
 
-        <div class="actions">
-            <button class="btn btn-primary" onclick="openSettings()">
-                ⚙️ 打开设置
-            </button>
-            <button class="btn btn-secondary" onclick="refreshData()">
-                🔄 刷新数据
-            </button>
-            <button class="btn btn-danger" onclick="clearAllHistory()">
-                🗑️ 清空历史记录
-            </button>
+        <!-- Dial 区块 - 统计卡片 -->
+        <div class="dial-section">
+            <h2 class="section-title">Dial</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-title">⏱️ 使用时间</div>
+                    <div class="stat-value">${hours}<span style="font-size: 0.7em;">h</span> ${minutes}<span style="font-size: 0.7em;">m</span></div>
+                    <div class="stat-desc">累计使用时长</div>
+                </div>
+
+                <div class="stat-card cache">
+                    <div class="stat-title">💾 磁盘缓存</div>
+                    <div class="stat-value">${cacheMB.toFixed(1)}<span style="font-size: 0.7em;">MB</span></div>
+                    <div class="stat-desc">已缓存的数据量</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-title">🎯 缓存命中率</div>
+                    <div class="stat-value">${hitRate.toFixed(1)}<span style="font-size: 0.7em;">%</span></div>
+                    <div class="stat-desc">缓存效率指标</div>
+                </div>
+
+                <div class="stat-card ${engineInfo.name.includes('Python') ? 'python' : engineInfo.name.includes('Rust') ? 'rust' : 'node'}">
+                    <div class="stat-title">⚡ IO 引擎</div>
+                    <div class="stat-value" style="font-size: 1.2em;">${engineInfo.name}</div>
+                    <div class="stat-desc">当前运行引擎</div>
+                </div>
+            </div>
+
+            <div class="engine-info">
+                <div class="engine-label">引擎详情</div>
+                <div class="engine-name">${engineInfo.details}</div>
+            </div>
         </div>
 
         <div class="footer">
@@ -1119,6 +1218,13 @@ class SidebarWebViewProvider {
                 updateCustomScrollbar();
             }
         });
+
+        // 执行命令函数
+        function executeCommand(commandId) {
+            if (vscode) {
+                vscode.postMessage({ command: 'executeCommand', commandId: commandId });
+            }
+        }
 
         // 辅助转义函数
         function escapeHtml(text) {
