@@ -469,22 +469,22 @@ class SidebarWebViewProvider {
                     <span id="musicStatus">Ready to Savor</span>
                 </div>
                 <div class="music-btns">
-                    <span class="music-btn" onclick="exec('qqq.savorMoments')" title="播放">▶️</span>
+                    <span class="music-btn" onclick="executeCommand('qqq.savorMoments')" title="播放">▶️</span>
                     <span class="music-btn" onclick="stopMusic()" title="停止">⏹️</span>
                 </div>
             </div>
 
             <div class="section-title">Captain</div>
             <div class="captain-grid">
-                <div class="cmd-btn" onclick="exec('qqq.savorMoments')"><span>✨</span> <span>savor moments for yourself</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.q1')"><span>📋</span> <span>Paste everything ("Ctrl+V" or "F2")</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.q2')"><span>🌍</span> <span>Roam everywhere ("Tab" or "F6")</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.downloadVideosFromUrl')"><span>🎥</span> <span>insert Videos From Url</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.cleanUp')"><span>🧹</span> <span>clean up</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.exportDoc')"><span>📄</span> <span>exportDoc</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.pure')"><span>💎</span> <span>Pure</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.exportZip')"><span>📦</span> <span>exportZip</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.allSettings')"><span>⚙️</span> <span>allSettings</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.savorMoments')"><span>✨</span> <span>savor moments for yourself</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.q1')"><span>📋</span> <span>Paste everything ("Ctrl+V" or "F2")</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.q2')"><span>🌍</span> <span>Roam everywhere ("Tab" or "F6")</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.downloadVideosFromUrl')"><span>🎥</span> <span>insert Videos From Url</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.cleanUp')"><span>🧹</span> <span>clean up</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.exportDoc')"><span>📄</span> <span>exportDoc</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.pure')"><span>💎</span> <span>Pure</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.exportZip')"><span>📦</span> <span>exportZip</span></div>
+                <div class="cmd-btn" onclick="executeCommand('qqq.allSettings')"><span>⚙️</span> <span>allSettings</span></div>
             </div>
 
             <div class="section-title">Passed by</div>
@@ -514,7 +514,7 @@ class SidebarWebViewProvider {
     <script>
         const vscode = acquireVsCodeApi();
 
-        function exec(cmd) {
+        function executeCommand(cmd) {
             vscode.postMessage({ command: 'executeCommand', cmd: cmd });
             if (cmd !== 'qqq.savorMoments') {
                 playNotificationSound(1);
@@ -543,8 +543,9 @@ class SidebarWebViewProvider {
         }
 
         function playNotificationSound(times) {
-            if ('${audioBase64}') {
-                playAudio('${audioBase64}', times);
+            const base64Data = '${audioBase64}';
+            if (base64Data && base64Data !== 'undefined' && base64Data !== 'null') {
+                playAudio(base64Data, times);
             }
         }
 
@@ -559,20 +560,29 @@ class SidebarWebViewProvider {
                     document.getElementById('musicStatus').innerText = 'Savoring...';
                     document.getElementById('musicStatus').classList.add('music-playing');
 
-                    if (times === 0) { audio.loop = true; } else {
+                    if (times === 0) {
+                        audio.loop = true;
+                    } else {
                         let playCount = 1;
                         audio.addEventListener('ended', () => {
                             if (playCount < times) {
-                                playCount++; audio.currentTime = 0; audio.play();
+                                playCount++;
+                                audio.currentTime = 0;
+                                audio.play().catch(e => console.log('Audio loop failed:', e));
                             } else {
                                 document.getElementById('musicStatus').innerText = 'Finished';
                                 document.getElementById('musicStatus').classList.remove('music-playing');
                             }
                         });
                     }
-                    audio.play().catch(e => console.log('Audio blocked:', e));
+                    audio.play().catch(e => {
+                        console.log('Audio blocked:', e);
+                        document.getElementById('musicStatus').innerText = 'Playback Blocked';
+                    });
                 }
-            } catch (e) { console.log('Audio error:', e); }
+            } catch (e) {
+                console.log('Audio error:', e);
+            }
         }
 
         function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
