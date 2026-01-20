@@ -158,7 +158,7 @@ class SidebarWebViewProvider {
 
             const activeEngine = this.getActiveEngineInfo();
 
-            // 物理读取音频（仅在第一次或刷新时需要，但为了逻辑简单，每次都计算 Base64 开销极小）
+            // 物理读取音频（仅在第一次或刷新时需要）
             let audioBase64 = '';
             try {
                 const soundPath = path.join(this.context.extensionPath, "assets", "q.mp3");
@@ -169,7 +169,7 @@ class SidebarWebViewProvider {
 
             // 核心逻辑：如果 HTML 已经加载过，则发送消息更新数据，而不是重载整个页面
             if (this._view.webview.html && this._view.webview.html.length > 100) {
-                this._view.webview.postMessage({
+                this.postMessage({
                     command: 'updateData',
                     stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
                     history: clipboardHistory.map(item => ({
@@ -184,6 +184,12 @@ class SidebarWebViewProvider {
             }
         } catch (error) {
             console.error('更新内容失败:', error);
+        }
+    }
+
+    postMessage(message) {
+        if (this._view && this._view.webview) {
+            this._view.webview.postMessage(message);
         }
     }
 
@@ -344,7 +350,7 @@ class SidebarWebViewProvider {
             --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
             --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
             --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
-            --primary-color: var(--blue); --secondary-color: var(--green);
+            --primary-color: var(--yellow); --secondary-color: var(--orange);
             --background-color: var(--base3); --card-bg: var(--base2);
             --text-primary: var(--base00); --text-secondary: var(--base01);
             --border-color: var(--base1); --shadow-color: rgba(0, 0, 0, 0.1);
@@ -364,10 +370,11 @@ class SidebarWebViewProvider {
             box-sizing: border-box;
             forced-color-adjust: none !important;
             -ms-high-contrast-adjust: none !important;
+            overflow-x: hidden !important;
         }
 
         html, body {
-            margin: 0; padding: 0; height: 100vh; overflow: hidden;
+            margin: 0; padding: 0; height: 100vh; width: 100%; overflow: hidden;
             font-family: var(--vscode-font-family, sans-serif);
             background: var(--background-color) !important;
             color: var(--text-primary) !important;
@@ -391,8 +398,13 @@ class SidebarWebViewProvider {
         .music-btn:hover { opacity: 1; transform: scale(1.1); }
         .music-playing { color: var(--green); font-weight: bold; }
 
+        .main-wrapper {
+            height: 100vh; width: 100%; position: relative; overflow: hidden;
+            background: var(--background-color) !important;
+        }
+
         .main-content {
-            height: 100%; overflow-y: scroll; padding: 12px; overflow-x: hidden;
+            height: 100%; overflow-y: scroll; padding: 12px; overflow-x: hidden !important;
         }
 
         .section-title {
@@ -422,7 +434,7 @@ class SidebarWebViewProvider {
 
         /* Passed by Style */
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
-        .history-list { max-height: 800px; overflow-y: scroll; padding: 8px; overflow-x: hidden; }
+        .history-list { max-height: 800px; overflow-y: scroll; padding: 8px; overflow-x: hidden !important; }
         .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px var(--shadow-color); }
         .item-time { font-size: 0.7em; color: var(--text-secondary); }
@@ -436,11 +448,13 @@ class SidebarWebViewProvider {
         .action-mini-btn:hover { background: var(--primary-color); color: white; }
 
         /* Custom Scrollbars */
-        .scrollbar-outer { position: absolute; right: 2px; top: 0; width: 4px; height: 100%; z-index: 100; }
-        .scrollbar-outer-thumb { position: absolute; right: 0; width: 100%; background: #000 !important; border-radius: 2px; opacity: 0.6; cursor: pointer; forced-color-adjust: none !important; }
+        .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
+        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
+        .scrollbar-outer-thumb:hover { opacity: 0.7; width: 6px; right: 0; }
 
-        .scrollbar-inner { position: absolute; right: 2px; top: 0; width: 4px; height: 100%; z-index: 10; }
-        .scrollbar-inner-thumb { position: absolute; right: 0; width: 100%; background: var(--red) !important; border-radius: 2px; opacity: 0.6; cursor: pointer; forced-color-adjust: none !important; }
+        .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
+        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
+        .scrollbar-inner-thumb:hover { opacity: 0.7; width: 6px; right: 0; }
 
         .footer { text-align: center; padding: 20px; font-size: 0.8em; opacity: 0.6; }
     </style>
@@ -500,7 +514,12 @@ class SidebarWebViewProvider {
     <script>
         const vscode = acquireVsCodeApi();
 
-        function exec(cmd) { vscode.postMessage({ command: 'executeCommand', cmd: cmd }); playNotificationSound(1); }
+        function exec(cmd) {
+            vscode.postMessage({ command: 'executeCommand', cmd: cmd });
+            if (cmd !== 'qqq.savorMoments') {
+                playNotificationSound(1);
+            }
+        }
         function copyToClipboard(id) { vscode.postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
         function deleteHistoryItem(id) { vscode.postMessage({ command: 'deleteHistoryItem', itemId: id }); }
         function clearAllHistory() { vscode.postMessage({ command: 'clearAllHistory' }); }
@@ -524,10 +543,16 @@ class SidebarWebViewProvider {
         }
 
         function playNotificationSound(times) {
+            if ('${audioBase64}') {
+                playAudio('${audioBase64}', times);
+            }
+        }
+
+        function playAudio(base64, times = 1) {
             try {
-                if ('${audioBase64}') {
+                if (base64) {
                     stopMusic();
-                    const audio = new Audio('data:audio/mp3;base64,${audioBase64}');
+                    const audio = new Audio('data:audio/mp3;base64,' + base64);
                     currentAudio = audio;
                     audio.volume = 0.5;
 
@@ -558,28 +583,30 @@ class SidebarWebViewProvider {
             if (m.command === 'updateData') {
                 // Update Dial
                 document.querySelector('.stats-grid').innerHTML = \`
-                    <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">\${m.stats.h}h \${m.stats.m}m</div></div>
-                    <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">\${m.stats.cacheMB.toFixed(1)}MB</div></div>
-                    <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">\${m.stats.hitRate.toFixed(1)}%</div></div>
-                    <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">\${m.stats.engineInfo.name}</div></div>
-                    <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">\${m.stats.engineInfo.details}</div></div>\`;
+                    <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">\\\${m.stats.h}h \\\${m.stats.m}m</div></div>
+                    <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">\\\${m.stats.cacheMB.toFixed(1)}MB</div></div>
+                    <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">\\\${m.stats.hitRate.toFixed(1)}%</div></div>
+                    <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">\\\${m.stats.engineInfo.name}</div></div>
+                    <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">\\\${m.stats.engineInfo.details}</div></div>\`;
 
                 // Update History
                 const list = document.getElementById('historyList');
                 if (m.history.length > 0) {
                     list.innerHTML = m.history.map(item => \`
-                        <div class="history-item" data-id="\${item.id}">
-                            <div class="item-time">\${item.time}</div>
-                            <div class="item-preview">\${escapeHtml(item.preview)}</div>
+                        <div class="history-item" data-id="\\\${item.id}">
+                            <div class="item-time">\\\${item.time}</div>
+                            <div class="item-preview">\\\${escapeHtml(item.preview)}</div>
                             <div class="item-actions">
-                                <button class="action-mini-btn" onclick="copyToClipboard('\${item.id}')">📋 复制</button>
-                                <button class="action-mini-btn" onclick="deleteHistoryItem('\${item.id}')">🗑️ 删除</button>
+                                <button class="action-mini-btn" onclick="copyToClipboard('\\\${item.id}')">📋 复制</button>
+                                <button class="action-mini-btn" onclick="deleteHistoryItem('\\\${item.id}')">🗑️ 删除</button>
                             </div>
                         </div>\`).join('');
                 } else {
                     list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
                 }
                 updateAllScrollbars();
+            } else if (m.command === 'playAudio') {
+                playAudio(m.base64, m.times || 1);
             }
         });
 
@@ -600,7 +627,7 @@ class SidebarWebViewProvider {
                 } else { scrollbar.style.display = 'none'; }
             }
 
-            container.onscroll = update;
+            container.addEventListener('scroll', update);
 
             let isDragging = false, startY, startST;
             thumb.onmousedown = e => {
