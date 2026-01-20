@@ -422,7 +422,7 @@ class SidebarWebViewProvider {
 
         /* Passed by Style */
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
-        .history-list { max-height: 400px; overflow-y: scroll; padding: 8px; overflow-x: hidden; }
+        .history-list { max-height: 800px; overflow-y: scroll; padding: 8px; overflow-x: hidden; }
         .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px var(--shadow-color); }
         .item-time { font-size: 0.7em; color: var(--text-secondary); }
