@@ -845,14 +845,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
 		const fontPath = getCJKFontPath();
 
-		let textFileEsc = textTempFile.replace(
-
-
-
-
-
-			/\\/
-g, '/').replace(/:/g, '\\:');
+		let textFileEsc = textTempFile.replace(/\\/g, '/').replace(/:/g, '\\:');
 		let filterParts = [`drawtext=textfile='${textFileEsc}'`];
 		filterParts.push(`fontsize=${fontSize}`);
 		filterParts.push(`fontcolor=${textColor}`);
@@ -861,14 +854,7 @@ g, '/').replace(/:/g, '\\:');
 		filterParts.push(`line_spacing=${lineHeight - fontSize}`);
 
 		if (fontPath) {
-			let fontEsc = fontPath.replace(
-
-
-
-
-
-				/\\/
-g, '/').replace(/:/g, '\\:');
+			let fontEsc = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 			filterParts.push(`fontfile='${fontEsc}'`);
 		}
 
@@ -2172,6 +2158,7 @@ ${eol.repeat(gapBelow)}`;
 
 
 
+
 					/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
@@ -2213,6 +2200,7 @@ ${eol.repeat(gapBelow)}`;
 		}
 	} else if (result.type === "folder_text") {
 		const folders = result.text.split(
+
 
 
 

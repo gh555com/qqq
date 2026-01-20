@@ -349,7 +349,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 		if (!fs.existsSync(scriptPath)) {
 			scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
 		}
-		
+
 		if (!fs.existsSync(scriptPath)) {
 			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
 			bridge.available = false;
