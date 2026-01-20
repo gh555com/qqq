@@ -40,7 +40,8 @@ target/**
 src/**
 node_modules/**
 !dist/qqq.js
-!dist/qqq.js.map
+!dist/kp.py
+esbuild.config.js
 
 # 平台二进制：排除特定平台的，保留统一命名的 q_engine
 assets/q_win_x64.exe
