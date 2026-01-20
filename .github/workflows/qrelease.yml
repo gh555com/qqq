@@ -142,8 +142,7 @@ jobs:
 
       - name: Build and Package Platform-Specific VSIXs
         run: |
-          npm run bundle
-          node git_help.js package
+          node q package
 
       - name: Get version
         id: get_version
