@@ -845,7 +845,14 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
 		const fontPath = getCJKFontPath();
 
-		let textFileEsc = textTempFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+		let textFileEsc = textTempFile.replace(
+
+
+
+
+
+			/\\/
+g, '/').replace(/:/g, '\\:');
 		let filterParts = [`drawtext=textfile='${textFileEsc}'`];
 		filterParts.push(`fontsize=${fontSize}`);
 		filterParts.push(`fontcolor=${textColor}`);
@@ -854,7 +861,14 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		filterParts.push(`line_spacing=${lineHeight - fontSize}`);
 
 		if (fontPath) {
-			let fontEsc = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+			let fontEsc = fontPath.replace(
+
+
+
+
+
+				/\\/
+g, '/').replace(/:/g, '\\:');
 			filterParts.push(`fontfile='${fontEsc}'`);
 		}
 
@@ -2104,7 +2118,9 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					let gapBelow = pxHeight > 0 || pxHeight === -1 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
 					// 对于非最后一个项目，减1以抵消join添加的额外换行符
 					if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-					finalContent.push(`/\\${relPath}\\/${gapBelow ? eol.repeat(gapBelow) : ""}`);
+					finalContent.push(`
+/\\${relPath}\\/
+${gapBelow ? eol.repeat(gapBelow) : ""}`);
 					invalidateFolderSizeCacheForPath(filePath);
 				}
 			}
@@ -2123,7 +2139,9 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			pxHeight = height;
 		} catch { }
 		const gapBelow = calculateBlankLinesExact(pxHeight, true);
-		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
+		replacement = `
+/\\${relPath}\\/
+` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
 	} else if (result.type === "file" || result.type === "file_folder") {
 		const files = result.files || [];
@@ -2138,7 +2156,9 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			let gapBelow = calculateBlankLinesExact(-1, isLastItem);
 
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-			replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
+			replacement += `
+/\\${relPath}\\/
+${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 
@@ -2146,7 +2166,13 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			const f = files[i];
 			let fp = fingerprints[f];
 			if (!fp) {
-				const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
+				const tryKey = process.platform === 'win32' ? f.replace(
+
+
+
+
+
+					/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
 			if (fp) qqq.prefillFingerprint(f, fp);
@@ -2173,7 +2199,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 
 			const isLastItem = i === files.length - 1 && folders.length === 0;
 			if (i > 0 || folders.length > 0) replacement += eol;
-			replacement += `/\\${relPath}\\/`;
+			replacement += `/\\${relPath}\\/
+`;
 			if (pxHeight > 0 || pxHeight === -1) {
 				let gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
 
@@ -2185,11 +2212,20 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			invalidateFolderSizeCacheForPath(f);
 		}
 	} else if (result.type === "folder_text") {
-		const folders = result.text.split(/\r?\n/).filter(f => f.trim());
+		const folders = result.text.split(
+
+
+
+
+
+			/\r?\n/).filter(f => f.trim());
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
-			replacement += `/\\${relPath}\\/${eol}`;
+			const relPath = path.relative(docDir, folderPath).replace(/\\/
+g, "/");
+			replacement += `
+/\\${relPath}\\/
+${eol}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 	} else if (result.type === "text") {
@@ -2956,7 +2992,9 @@ async function renameFileCommand(rawPath, absPath) {
 		}
 	}
 	if (ranges.length)
-		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `/\\${newRaw}\\/`)));
+		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `
+/\\${newRaw}\\/
+`)));
 
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();

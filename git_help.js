@@ -164,55 +164,71 @@ class LocalAIReleaseAssistant {
     // 包装 vsce package/publish
     async packagePlatformSpecificVSIX(isPublish = false) {
         const platforms = {
-            'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe' },
-            'win32-arm64': { bin: 'q_win_arm64.exe', engine: 'q_engine.exe' },
-            'win32-ia32': { bin: 'q_win_x86.exe', engine: 'q_engine.exe' },
-            'linux-x64': { bin: 'q_linux_x64', engine: 'q_engine' },
-            'darwin-x64': { bin: 'q_mac_x64', engine: 'q_engine' },
-            'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine' },
-            'universal': { bin: null, engine: null } // 兜底版
+            'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
+            'win32-arm64': { bin: 'q_win_arm64.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
+            'win32-ia32': { bin: 'q_win_x86.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
+            'linux-x64': { bin: 'q_linux_x64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
+            'darwin-x64': { bin: 'q_mac_x64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
+            'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
+            'universal': { bin: null, engine: null, ffmpeg: null } // 兜底版
         };
-
+    
         const targets = Object.keys(platforms);
         const version = this.getCurrentVersion();
         const action = isPublish ? 'publish' : 'package';
-
+    
         console.log(`📦 开始执行多平台 ${action} (版本: v${version})...`);
-
+    
         if (!fs.existsSync('dist')) fs.mkdirSync('dist');
-
+    
         for (const t of targets) {
             const config = platforms[t];
             console.log(`\n🛠️  正在处理平台: ${t}...`);
-
+    
+            // 1. 准备 Rust 引擎
             const srcBin = config.bin ? path.join('assets', config.bin) : null;
             const destBin = config.engine ? path.join('assets', config.engine) : null;
-
             if (srcBin) {
-                if (!fs.existsSync(srcBin)) {
-                    console.warn(`⚠️ 缺失二进制文件: ${srcBin}，跳过 ${t}`);
-                    continue;
+                if (fs.existsSync(srcBin)) {
+                    fs.copyFileSync(srcBin, destBin);
+                } else {
+                    console.warn(`⚠️ 缺失 Rust 引擎: ${srcBin}`);
                 }
-                fs.copyFileSync(srcBin, destBin);
             }
-
+    
+            // 2. 准备 FFmpeg (从 node_modules 捞出)
+            const ffDest = config.ffmpeg ? path.join('assets', config.ffmpeg) : null;
+            if (ffDest) {
+                try {
+                    // 动态查找 ffmpeg-installer 的二进制路径
+                    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+                    if (fs.existsSync(ffmpegPath)) {
+                        fs.copyFileSync(ffmpegPath, ffDest);
+                        console.log(`✅ 已嵌入 FFmpeg: ${ffDest}`);
+                    }
+                } catch (e) {
+                    console.warn(`⚠️ FFmpeg 准备失败: ${e.message}`);
+                }
+            }
+    
             try {
                 const outputName = `dist/qqq-${version}-${t}.vsix`;
                 const targetFlag = t === 'universal' ? '' : `--target ${t}`;
+                // 注意：发布到商店必须带 --target
                 const cmd = `npx @vscode/vsce ${action} ${targetFlag} -o ${outputName} --allow-missing-repository --no-dependencies`;
-                
+                    
                 console.log(`🚀 执行: ${cmd}`);
                 execSync(cmd, { stdio: 'inherit' });
             } catch (e) {
                 console.error(`❌ ${action} ${t} 失败:`, e.message);
             } finally {
-                if (destBin && fs.existsSync(destBin)) {
-                    fs.unlinkSync(destBin);
-                }
+                // 清理临时重命名的文件
+                if (destBin && fs.existsSync(destBin)) fs.unlinkSync(destBin);
+                if (ffDest && fs.existsSync(ffDest)) fs.unlinkSync(ffDest);
             }
         }
     }
-
+    
     // 处理用户指令
     async processCommand(command, summary = '') {
         const cmd = command.trim().toLowerCase();
@@ -236,7 +252,18 @@ class LocalAIReleaseAssistant {
                     console.error('❌ esbuild 打包失败，中止发布');
                     return;
                 }
-                await this.packagePlatformSpecificVSIX();
+                await this.packagePlatformSpecificVSIX(false);
+                break;
+            case 'publish':
+                // 商店发布流程
+                console.log('🚀 正在执行多平台商店发布...');
+                try {
+                    execSync('npm run bundle', { stdio: 'inherit' });
+                } catch (e) {
+                    console.error('❌ esbuild 打包失败，中止发布');
+                    return;
+                }
+                await this.packagePlatformSpecificVSIX(true);
                 break;
             case 'help':
             case '帮助':

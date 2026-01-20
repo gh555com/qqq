@@ -15,11 +15,11 @@ async function build() {
             entryPoints: ['./src/qqq.js'],
             bundle: true,
             outfile: './dist/qqq.js',
-            external: ['vscode', '@ffmpeg-installer/ffmpeg'],
+            external: ['vscode'],
             format: 'cjs',
             platform: 'node',
-            minify: process.env.NODE_ENV === 'production',
-            sourcemap: true,
+            minify: true,
+            sourcemap: false, // 生产环境关闭 sourcemap
             // 处理特殊库的动态加载风险
             loader: {
                 '.html': 'text',
@@ -33,6 +33,11 @@ async function build() {
             }
         });
         console.log('✅ Bundling finished: dist/qqq.js');
+        // 拷贝 kp.py 到 dist，确保它在包里
+        if (fs.existsSync('./src/kp.py')) {
+            fs.copyFileSync('./src/kp.py', './dist/kp.py');
+            console.log('✅ Python script copied to dist/kp.py');
+        }
     } catch (e) {
         console.error('❌ Bundling failed:', e);
         process.exit(1);
