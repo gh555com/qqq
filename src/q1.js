@@ -166,8 +166,8 @@ let codelensLevel = "3";
 // 大小相框水印
 let largeWatermarkBase64 = null;
 let smallWatermarkBase64 = null;
-const LARGE_WATERMARK_PATH = path.join(__dirname, "..", "assets", "al.png");
-const SMALL_WATERMARK_PATH = path.join(__dirname, "..", "assets", "as.png");
+let LARGE_WATERMARK_PATH = "";
+let SMALL_WATERMARK_PATH = "";
 
 // ==================== ★★★ 调度器（分层）★★★ ====================
 const probeScheduler =
@@ -2987,6 +2987,8 @@ function renderVisibleEditors(delay = 50) {
 // ==================== 激活与停用 ====================
 async function activate(context) {
 	extensionContext = context;
+	LARGE_WATERMARK_PATH = path.join(context.extensionPath, "assets", "al.png");
+	SMALL_WATERMARK_PATH = path.join(context.extensionPath, "assets", "as.png");
 
 	try {
 		const global = require('./global');
