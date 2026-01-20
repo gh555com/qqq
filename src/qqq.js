@@ -46,7 +46,7 @@ try {
 	const isWin = process.platform === "win32";
 	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
 	const fpName = isWin ? "ffprobe.exe" : "ffprobe";
-	
+
 	// 在 activate 时会通过 extensionContext 确定绝对路径，这里先尝试相对路径作为占位
 	// 真正的初始化在 activate 函数中再次校验
 	ffmpegPath = path.join(__dirname, "..", "assets", ffName);

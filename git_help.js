@@ -172,19 +172,19 @@ class LocalAIReleaseAssistant {
             'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
             'universal': { bin: null, engine: null, ffmpeg: null } // 兜底版
         };
-    
+
         const targets = Object.keys(platforms);
         const version = this.getCurrentVersion();
         const action = isPublish ? 'publish' : 'package';
-    
+
         console.log(`📦 开始执行多平台 ${action} (版本: v${version})...`);
-    
+
         if (!fs.existsSync('dist')) fs.mkdirSync('dist');
-    
+
         for (const t of targets) {
             const config = platforms[t];
             console.log(`\n🛠️  正在处理平台: ${t}...`);
-    
+
             // 1. 准备 Rust 引擎
             const srcBin = config.bin ? path.join('assets', config.bin) : null;
             const destBin = config.engine ? path.join('assets', config.engine) : null;
@@ -195,7 +195,7 @@ class LocalAIReleaseAssistant {
                     console.warn(`⚠️ 缺失 Rust 引擎: ${srcBin}`);
                 }
             }
-    
+
             // 2. 准备 FFmpeg (从 node_modules 捞出)
             const ffDest = config.ffmpeg ? path.join('assets', config.ffmpeg) : null;
             if (ffDest) {
@@ -210,13 +210,13 @@ class LocalAIReleaseAssistant {
                     console.warn(`⚠️ FFmpeg 准备失败: ${e.message}`);
                 }
             }
-    
+
             try {
                 const outputName = `dist/qqq-${version}-${t}.vsix`;
                 const targetFlag = t === 'universal' ? '' : `--target ${t}`;
                 // 注意：发布到商店必须带 --target
                 const cmd = `npx @vscode/vsce ${action} ${targetFlag} -o ${outputName} --allow-missing-repository --no-dependencies`;
-                    
+
                 console.log(`🚀 执行: ${cmd}`);
                 execSync(cmd, { stdio: 'inherit' });
             } catch (e) {
@@ -228,7 +228,7 @@ class LocalAIReleaseAssistant {
             }
         }
     }
-    
+
     // 处理用户指令
     async processCommand(command, summary = '') {
         const cmd = command.trim().toLowerCase();
