@@ -582,25 +582,26 @@ class SidebarWebViewProvider {
             const m = e.data;
             if (m.command === 'updateData') {
                 // Update Dial
-                document.querySelector('.stats-grid').innerHTML = \`
-                    <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">\\\${m.stats.h}h \\\${m.stats.m}m</div></div>
-                    <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">\\\${m.stats.cacheMB.toFixed(1)}MB</div></div>
-                    <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">\\\${m.stats.hitRate.toFixed(1)}%</div></div>
-                    <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">\\\${m.stats.engineInfo.name}</div></div>
-                    <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">\\\${m.stats.engineInfo.details}</div></div>\`;
+                document.querySelector('.stats-grid').innerHTML =
+                    '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + m.stats.h + 'h ' + m.stats.m + 'm</div></div>' +
+                    '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + m.stats.cacheMB.toFixed(1) + 'MB</div></div>' +
+                    '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + m.stats.hitRate.toFixed(1) + '%</div></div>' +
+                    '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + m.stats.engineInfo.name + '</div></div>' +
+                    '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + m.stats.engineInfo.details + '</div></div>';
 
                 // Update History
                 const list = document.getElementById('historyList');
-                if (m.history.length > 0) {
-                    list.innerHTML = m.history.map(item => \`
-                        <div class="history-item" data-id="\\\${item.id}">
-                            <div class="item-time">\\\${item.time}</div>
-                            <div class="item-preview">\\\${escapeHtml(item.preview)}</div>
-                            <div class="item-actions">
-                                <button class="action-mini-btn" onclick="copyToClipboard('\\\${item.id}')">📋 复制</button>
-                                <button class="action-mini-btn" onclick="deleteHistoryItem('\\\${item.id}')">🗑️ 删除</button>
-                            </div>
-                        </div>\`).join('');
+                if (m.history && m.history.length > 0) {
+                    list.innerHTML = m.history.map(item =>
+                        '<div class="history-item" data-id="' + item.id + '">' +
+                            '<div class="item-time">' + item.time + '</div>' +
+                            '<div class="item-preview">' + escapeHtml(item.preview) + '</div>' +
+                            '<div class="item-actions">' +
+                                '<button class="action-mini-btn" onclick="copyToClipboard(\'' + item.id + '\')">📋 复制</button>' +
+                                '<button class="action-mini-btn" onclick="deleteHistoryItem(\'' + item.id + '\')">🗑️ 删除</button>' +
+                            '</div>' +
+                        '</div>'
+                    ).join('');
                 } else {
                     list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
                 }

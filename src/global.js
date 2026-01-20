@@ -465,6 +465,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		const candidates = [
+			path.join(__dirname, "..", "build-artifacts", filename),
 			path.join(__dirname, "..", "assets", filename),
 			path.join(__dirname, "assets", filename),
 			path.join(__dirname, filename),
