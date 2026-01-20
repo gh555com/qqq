@@ -2199,18 +2199,10 @@ ${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(f);
 		}
 	} else if (result.type === "folder_text") {
-		const folders = result.text.split(
-
-
-
-
-
-
-			/\r?\n/).filter(f => f.trim());
+		const folders = result.text.split(/\r?\n/).filter(f => f.trim());
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = path.relative(docDir, folderPath).replace(/\\/
-g, "/");
+			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
 			replacement += `
 /\\${relPath}\\/
 ${eol}`;
