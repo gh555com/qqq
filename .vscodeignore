@@ -49,14 +49,28 @@ docs/
 test/
 *.md
 
-# 开发工具文件
-rust/
-.idea/
-.git/
+# CI/CD & Release Tools
+**/workflows/**
+.github/**
+.release-please-manifest.json
+release-please-config.json
+git_help.js
+version-manager/**
+
+# Development & Test
+.vscode-test.js
+package-lock.json
+CHANGELOG.md
+test/**
+docs/**
+rust/**
+.idea/**
+.git/**
 *.log
 *.tmp
 *.bak
 
-# 根目录临时文件
+# Root Temp Files
 qq
 时间参数提前
+*.vsix
