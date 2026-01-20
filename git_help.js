@@ -114,10 +114,16 @@ class LocalAIReleaseAssistant {
         this.execGit('add .');
         this.execGit(`commit -m "${message}"`);
 
-        // 6. 执行推送
-        console.log(`📤 正在推送至 ${targetBranch}...`);
-        this.execGit(`push origin ${targetBranch}`);
-        return true;
+        // 6. 执行推送 (参考 q 的稳健逻辑)
+        console.log(`📤 正在推送至 origin/${targetBranch}...`);
+        try {
+            // 显式指定推送到远程 qq 分支，并确保 Action 触发
+            execSync(`git push origin HEAD:${targetBranch} --force`, { cwd: this.repoPath, stdio: 'inherit' });
+            return true;
+        } catch (e) {
+            console.error('❌ 推送失败:', e.message);
+            return false;
+        }
     }
 
     // q3: 快速保存
@@ -155,48 +161,52 @@ class LocalAIReleaseAssistant {
         console.log(`✅ q2 完成：版本 v${next} 已推送到主分支，触发远程全家桶发布`);
     }
 
-    // 包装 vsce package
-    async packagePlatformSpecificVSIX(target = null) {
+    // 包装 vsce package/publish
+    async packagePlatformSpecificVSIX(isPublish = false) {
         const platforms = {
             'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe' },
             'win32-arm64': { bin: 'q_win_arm64.exe', engine: 'q_engine.exe' },
+            'win32-ia32': { bin: 'q_win_x86.exe', engine: 'q_engine.exe' },
             'linux-x64': { bin: 'q_linux_x64', engine: 'q_engine' },
             'darwin-x64': { bin: 'q_mac_x64', engine: 'q_engine' },
-            'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine' }
+            'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine' },
+            'universal': { bin: null, engine: null } // 兜底版
         };
 
-        const targets = target ? [target] : Object.keys(platforms);
+        const targets = Object.keys(platforms);
         const version = this.getCurrentVersion();
+        const action = isPublish ? 'publish' : 'package';
 
-        console.log(`📦 开始打包平台专用 VSIX (版本: v${version})...`);
+        console.log(`📦 开始执行多平台 ${action} (版本: v${version})...`);
+
+        if (!fs.existsSync('dist')) fs.mkdirSync('dist');
 
         for (const t of targets) {
             const config = platforms[t];
-            if (!config) {
-                console.error(`❌ 未知平台: ${t}`);
-                continue;
+            console.log(`\n🛠️  正在处理平台: ${t}...`);
+
+            const srcBin = config.bin ? path.join('assets', config.bin) : null;
+            const destBin = config.engine ? path.join('assets', config.engine) : null;
+
+            if (srcBin) {
+                if (!fs.existsSync(srcBin)) {
+                    console.warn(`⚠️ 缺失二进制文件: ${srcBin}，跳过 ${t}`);
+                    continue;
+                }
+                fs.copyFileSync(srcBin, destBin);
             }
-
-            const srcBin = path.join('assets', config.bin);
-            const destBin = path.join('assets', config.engine);
-
-            if (!fs.existsSync(srcBin)) {
-                console.error(`❌ 缺失二进制文件: ${srcBin}，跳过 ${t}`);
-                continue;
-            }
-
-            console.log(`🔧 正在为 ${t} 准备二进制环境...`);
-            fs.copyFileSync(srcBin, destBin);
 
             try {
-                console.log(`🔨 正在打包 ${t}...`);
                 const outputName = `dist/qqq-${version}-${t}.vsix`;
-                execSync(`npx @vscode/vsce package --target ${t} -o ${outputName} --allow-missing-repository`, { stdio: 'inherit' });
-                console.log(`✅ 打包成功: ${outputName}`);
+                const targetFlag = t === 'universal' ? '' : `--target ${t}`;
+                const cmd = `npx @vscode/vsce ${action} ${targetFlag} -o ${outputName} --allow-missing-repository --no-dependencies`;
+                
+                console.log(`🚀 执行: ${cmd}`);
+                execSync(cmd, { stdio: 'inherit' });
             } catch (e) {
-                console.error(`❌ 打包 ${t} 失败:`, e.message);
+                console.error(`❌ ${action} ${t} 失败:`, e.message);
             } finally {
-                if (fs.existsSync(destBin)) {
+                if (destBin && fs.existsSync(destBin)) {
                     fs.unlinkSync(destBin);
                 }
             }
