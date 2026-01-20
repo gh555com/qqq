@@ -14,7 +14,7 @@
     "onCommand:qqq.q2",
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
-    "onCommand:qqq.setInOrder",
+    "onCommand:qqq.cleanUp",
     "onCommand:qqq.exportDoc",
     "onCommand:qqq.exportZip"
   ],
@@ -270,7 +270,7 @@
         "title": "qqq: all settings"
       },
       {
-        "command": "qqq.setInOrder",
+        "command": "qqq.cleanUp",
         "title": "qqq: clean up"
       },
       {
@@ -310,11 +310,6 @@
         "command": "qqq.q2",
         "key": "f6",
         "when": "editorTextFocus && !editorReadonly"
-      },
-      {
-        "command": "qqq.exportDoc",
-        "key": "ctrl+alt+p",
-        "when": "editorTextFocus"
       }
     ]
   },
