@@ -16,10 +16,81 @@
 
 
 
+## Radar Unification, Execution Differentiation. （下方有中文版）
+
+### 1. Detection Phase: Only Recognize the "One True Source" `wq`
+
+No matter which engine you choose (Python/Rust/Node), **"Radar" detection is always handled by `wq` in the PowerShell version in `global.js`**.
+
+* **Reason**: As you envisioned, PowerShell detection for all formats is fast and does not require starting a heavy environment, ensuring that no matter what IO mode is switched to, the detection results (such as `hasFile`, `hasImage`, etc.) are absolutely consistent and will not lead to conflicts like "Python thinks there's an image but Rust thinks there isn't."
+
+### 2. Backend Tasks (Execution Phase): Who's Doing the Work?
+
+This depends on "what tasks you're doing":
+
+* **Storing images/icons/getting folder size**: ✅ **Indeed, the engine you choose is doing the work.**
+
+  * When you paste an image, `h.js` will call the current engine's `saveImage` via `tryOneByOne`. If you selected Python, it will use `kp.py` to convert the in-memory DIB to PNG.
+  * When you check the folder size in the file manager, `qqq.js`'s `getFolderInfo` will prioritize calling Python's `folder_info`.
+
+* **File/Folder copy**: ❌ **Currently, Node.js is doing the work.**
+
+  * **Current Status**: In `h.js`'s `handleClipboardShell`, after obtaining the file path from `wq`, the program will directly call Node.js's `processFilesForClipboardWithProgress` (underlying `fs.copyFileSync`).
+  * **Reason**: This is mainly for **fine-grained control**. Node.js can handle per-file progress callbacks, download cancellation, transaction rollbacks (`landedFiles` registration), and compute fingerprints synchronously during copying. If it were handled by Python's `paste` command, it would be a "black box," not returning until several hundred GB are copied, during which the UI wouldn't show accurate progress.
+
+### Summary of the Results:
+
+| Action              | Detection (Radar) | Execution (Backend Tasks)          |
+| :------------------ | :---------------- | :--------------------------------- |
+| **Image Paste**     | PowerShell (`wq`) | **Python / Rust** (`saveImage`)    |
+| **Folder Size**     | N/A               | **Python / Rust** (`folder_info`)  |
+| **Icon Extraction** | N/A               | **Python / Rust** (`extract_icon`) |
+| **File Paste**      | PowerShell (`wq`) | **Node.js** (`fs.copyFileSync`)    |
+
+**My Assessment**:
+This division of labor is currently the most "stable." It leverages the **high-performance computation capabilities of Python/Rust** (for handling images and directory traversal), while also utilizing the **powerful asynchronous control of Node.js** (for handling file streams, UI progress feedback, and transaction rollbacks).
+
+**Your original design intention was to have Python handle everything, including file transfers, right?**
+If you want Python to handle everything (including file transfers), we would need to refactor `h.js` to not let Node handle the file transfer once the file is detected but instead send the `clipboard` command directly to Python. However, this would sacrifice real-time progress bars and the atomicity of "undo" actions during transfers. The current "unified radar, outsourced heavy tasks, and autonomous transportation" model is the optimal solution you previously came up with, balancing performance and interactivity.
+
+Radar (Detection / “Scan”): PowerShell wq command.
+Orchestrator (Scheduling & Progress Feedback): Node.js (h.js / qvideo.js).
+Heavy Lifter (Bulk File Transfer): Node.js (fs module).
+Specialist (Special Ops: save images, extract icons): Python / Rust.
+
+
+(end)
 
 
 
-**雷达统一化，执行差异化。**
+
+
+
+
+
+
+
+
+
+
+
+
+
+//===================================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 雷达统一化，执行差异化。
 
 ### 1. 探测阶段：确实只认“唯一真理源” `wq`
 不管你选什么引擎（Python/Rust/Node），**“雷达”探测始终由 `global.js` 中的 PowerShell 版 `wq` 负责**。
@@ -55,3 +126,18 @@ Radar（雷达/看）：PowerShell wq 指令。
 Orchestrator（调度与进度反馈）：Node.js (h.js / qvideo.js)。
 Heavy Lifter（重物搬运）：Node.js (fs 模块)。
 Specialist（特种任务：存图、取图标）：Python / Rust。
+
+
+
+
+
+(end)
+
+
+
+
+
+
+
+
+
