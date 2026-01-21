@@ -803,6 +803,9 @@ class Qvideo {
             await task.tracker.killAll(reason);
         } catch (e) { }
 
+        // ★ 进程杀完后，稍微等待一下（给 OS 时间释放文件句柄）
+        await new Promise(resolve => setTimeout(resolve, 300));
+
         // ★ 进程杀完后立即执行兜底清理（pure）
         // 这样可以确保文件不被锁定
         if (targetDir) {
@@ -1109,6 +1112,21 @@ class Qvideo {
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
                 progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet) });
+
+                // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
+                // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
+                if (task.transId) {
+                    try {
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === task.transId);
+                        if (trans) {
+                            const allDestPaths = tasks.map(t => t.destPath).filter(Boolean);
+                            const newTempFiles = [...(trans.tempFiles || []), ...allDestPaths];
+                            await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(newTempFiles)] });
+                        }
+                    } catch (e) {
+                        this.log(`[事务] 预注册 tempFiles 失败: ${e.message}`);
+                    }
+                }
 
                 // ★ 精确匹配当前任务的文件（而非前缀匹配，避免多任务互相干扰）
                 const activeFileNames = new Set();
