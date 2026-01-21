@@ -120,7 +120,7 @@ function nowTsForFilename() {
     return new Date()
         .toISOString()
         .replace(/[-:]/g, ".")
-        .replace("T", " ")
+        .replace("T", "_")
         .slice(0, 23);
 }
 
@@ -145,7 +145,7 @@ function generateFilename(url, kind) {
     const ext = guessExtension(url, kind) || (kind === "video" ? ".mp4" : ".png");
     const ts = nowTsForFilename();
     const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-    return `${rand}. ${ts}${ext}`;
+    return `${rand}_${ts}${ext}`;
 }
 
 function isPlatformOrSegmentVideo(url) {
