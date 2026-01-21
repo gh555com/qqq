@@ -540,7 +540,7 @@ class SidebarWebViewProvider {
         }
 
         function playNotificationSound(times) {
-            const audioUrl = ${JSON.stringify(audioUri).replace(/</g, '\\u003c')};
+            const audioUrl = ${JSON.stringify(audioUri || null).replace(/</g, '\\u003c')};
             if (audioUrl && audioUrl !== 'undefined' && audioUrl !== 'null') {
                 playAudio(audioUrl, times);
             }
@@ -670,7 +670,7 @@ class SidebarWebViewProvider {
         window.onresize = updateAllScrollbars;
 
         // Init
-        const initialPos = ${JSON.stringify(scrollPosition).replace(/</g, '\\u003c')};
+        const initialPos = ${JSON.stringify(scrollPosition || null).replace(/</g, '\\u003c')};
         if (initialPos && document.getElementById('historyList')) {
             document.getElementById('historyList').scrollTop = initialPos.scrollTop;
         }
