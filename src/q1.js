@@ -2743,13 +2743,13 @@ class FileCodeLensProvider {
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: `✎( ${fSizeStr}) 🗀qqq`,
-						command: "getQqq().revealFileInFolder",
+						command: "qqq.revealFileInFolder",
 						arguments: [absPath],
 						tooltip: folderTooltip,
 					}),
 					new vscode.CodeLens(r, {
 						title: "✎rename",
-						command: "getQqq().renameFile",
+						command: "qqq.renameFile",
 						arguments: [rawPath, absPath],
 					})
 				);
@@ -2797,7 +2797,7 @@ class FileCodeLensProvider {
 			lenses.push(
 				new vscode.CodeLens(r, {
 					title: `${titlePrefix}( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-					command: "getQqq().openFile",
+					command: "qqq.openFile",
 					arguments: [absPath],
 					tooltip: tooltipText,
 				})
@@ -2808,7 +2808,7 @@ class FileCodeLensProvider {
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: "✎qode",
-						command: "getQqq().openFileInRightGroup",
+						command: "qqq.openFileInRightGroup",
 						arguments: [absPath],
 						tooltip: "在右边分组打开文件并进入编辑状态",
 					})
@@ -3080,14 +3080,14 @@ async function activate(context) {
 	const _qqq = getQqq();
 
 	if (!isCoreIntegrityValid) {
-		if (_qqq) _getQqq().logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+		if (_qqq) getQqq().logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
 		else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
 		return;
 	}
 
 	if (_qqq) {
-		_getQqq().logMessage(`Integrity: PASSED`, "INFO");
-		_getQqq().logMessage(`FFmpeg Path: ${_getQqq().ffmpegPath}`, "INFO");
+		getQqq().logMessage(`Integrity: PASSED`, "INFO");
+		getQqq().logMessage(`FFmpeg Path: ${getQqq().ffmpegPath}`, "INFO");
 	} else {
 		global.logMessage(`Integrity: PASSED`, "INFO");
 	}
@@ -3118,18 +3118,18 @@ async function activate(context) {
 				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
-		vscode.commands.registerCommand("getQqq().q1", executeClipboardCommand),
-		vscode.commands.registerCommand("getQqq().openFile", openFileCommand),
-		vscode.commands.registerCommand("getQqq().openFileInRightGroup", openFileInRightGroupCommand),
-		vscode.commands.registerCommand("getQqq().revealFileInFolder", revealFileInFolder),
-		vscode.commands.registerCommand("getQqq().renameFile", renameFileCommand),
-		vscode.commands.registerCommand("getQqq().cleanUp", () => {
+		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
+		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
+		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
+		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
+		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
+		vscode.commands.registerCommand("qqq.cleanUp", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
-		vscode.commands.registerCommand("getQqq().exportDoc", () => {
+		vscode.commands.registerCommand("qqq.exportDoc", () => {
 			q3.executeExportDocCommand(isCoreIntegrityValid);
 		}),
-		vscode.commands.registerCommand("getQqq().exportZip", () => {
+		vscode.commands.registerCommand("qqq.exportZip", () => {
 			q3.executeExportZipCommand(isCoreIntegrityValid);
 		}),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
