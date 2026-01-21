@@ -825,12 +825,80 @@ def get_file_icon_base64(file_path: str):
         return None
 
 
+def save_clipboard_image_to_path(dest_path: str):
+    if not _IS_WINDOWS:
+        return {"success": False, "error": "not_supported_on_platform"}
+
+    try:
+        # 1. 尝试 pywin32
+        try:
+            import win32clipboard as wcb
+            import win32con as wcon
+            wcb.OpenClipboard()
+            try:
+                dibv5_format = getattr(wcon, "CF_DIBV5", 17)
+                fmt = None
+                if wcb.IsClipboardFormatAvailable(dibv5_format):
+                    fmt = dibv5_format
+                elif wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
+                    fmt = wcon.CF_DIB
+
+                if fmt is not None:
+                    dib_obj = wcb.GetClipboardData(fmt)
+                    dib = bytes_from_pywin32_blob(dib_obj)
+                    if dib:
+                        from PIL import Image
+                        import io
+                        bmp = dib_to_bmp_bytes(dib)
+                        img = Image.open(io.BytesIO(bmp))
+                        out_path = Path(dest_path)
+                        ensure_parent(out_path)
+                        save_image_as_png(img, out_path)
+                        return {"success": True, "path": str(out_path)}
+            finally:
+                wcb.CloseClipboard()
+        except:
+            pass
+
+        # 2. 尝试 ctypes
+        if OpenClipboard(None):
+            try:
+                fmt = None
+                if IsClipboardFormatAvailable(CF_DIBV5):
+                    fmt = CF_DIBV5
+                elif IsClipboardFormatAvailable(CF_DIB):
+                    fmt = CF_DIB
+
+                if fmt is not None:
+                    h_mem = GetClipboardData(fmt)
+                    if h_mem:
+                        dib = read_global_data(h_mem)
+                        if dib:
+                            from PIL import Image
+                            import io
+                            bmp = dib_to_bmp_bytes(dib)
+                            img = Image.open(io.BytesIO(bmp))
+                            out_path = Path(dest_path)
+                            ensure_parent(out_path)
+                            save_image_as_png(img, out_path)
+                            return {"success": True, "path": str(out_path)}
+            finally:
+                CloseClipboard()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": False, "error": "no_image_in_clipboard"}
+
+
 def _dispatch_action(cmd):
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
     if action == "ping":
         out["status"] = "alive"
+        return out
+    if action in ("folder_info", "get_folder_info"):
+        out.update(get_folder_info(cmd.get("path", "")))
         return out
     if action == "extract_icon":
         path = cmd.get("path")
@@ -853,14 +921,22 @@ def _dispatch_action(cmd):
                 out["value"] = False
                 return out
             try:
-                # CF_DIB (8) or CF_DIBV5 (17)
+                # CF_DIB (8), CF_DIBV5 (17) or CF_BITMAP (2)
                 has_dib = IsClipboardFormatAvailable(
-                    8) or IsClipboardFormatAvailable(17)
+                    8) or IsClipboardFormatAvailable(17) or IsClipboardFormatAvailable(2)
                 out["value"] = bool(has_dib)
             finally:
                 CloseClipboard()
         except:
             out["value"] = False
+        return out
+    if action == "saveImage":
+        dest_path = cmd.get("path")
+        if not dest_path:
+            out["success"] = False
+            out["error"] = "no path provided"
+        else:
+            out.update(save_clipboard_image_to_path(dest_path))
         return out
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
@@ -881,9 +957,6 @@ def _dispatch_action(cmd):
     if action in ("clipboard", "paste"):
         target_dir = cmd.get("target_dir", cmd.get("output_dir"))
         out.update(handle_clipboard(target_dir))
-        return out
-    if action in ("folder_info", "get_folder_info"):
-        out.update(get_folder_info(cmd.get("path", "")))
         return out
     out["error"] = f"unknown action: {action}"
     return out

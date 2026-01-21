@@ -799,6 +799,78 @@ mod win {
         Dib(Vec<u8>),
     }
 
+    pub fn has_image() -> bool {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return false;
+            }
+            let has = IsClipboardFormatAvailable(CF_DIB) != 0
+                || IsClipboardFormatAvailable(CF_DIBV5) != 0
+                || IsClipboardFormatAvailable(2 /* CF_BITMAP */) != 0;
+            CloseClipboard();
+            has
+        }
+    }
+
+    pub fn save_image(dest_path: &str) -> PyV {
+        let mut dib_data: Option<Vec<u8>> = None;
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("Cannot open clipboard".to_string())),
+                ]);
+            }
+            let mut fmts = Vec::new();
+            if IsClipboardFormatAvailable(CF_DIBV5) != 0 {
+                fmts.push(CF_DIBV5);
+            }
+            if IsClipboardFormatAvailable(CF_DIB) != 0 {
+                fmts.push(CF_DIB);
+            }
+
+            for fmt in fmts {
+                let h_mem = GetClipboardData(fmt);
+                if h_mem != std::ptr::null_mut() {
+                    if let Some(dib) = read_global_data(h_mem) {
+                        if !dib.is_empty() {
+                            dib_data = Some(dib);
+                            break;
+                        }
+                    }
+                }
+            }
+            CloseClipboard();
+        }
+
+        if let Some(dib) = dib_data {
+            let res = (|| -> Result<PyV, String> {
+                let bmp = dib_to_bmp_bytes(&dib)?;
+                let img = image::load_from_memory_with_format(&bmp, image::ImageFormat::Bmp)
+                    .map_err(|e| e.to_string())?;
+                let out_path = Path::new(dest_path);
+                ensure_parent(out_path);
+                save_image_as_png(img, out_path)?;
+                Ok(PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(true)),
+                    ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
+                ]))
+            })();
+            match res {
+                Ok(v) => v,
+                Err(e) => PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(e)),
+                ]),
+            }
+        } else {
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no_image_in_clipboard".to_string())),
+            ])
+        }
+    }
+
     pub fn handle_clipboard(output_dir: &Path) -> PyV {
         // 对齐 Python handle_windows_ctypes（含“阶段1快速读、阶段2慢处理”）
         let mut data_to_process: Option<DataToProcess> = None;
@@ -1239,16 +1311,6 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             (PyV::Obj(out_pairs), false, false)
         }
         "extract_icon" => {
-            // Python:
-            // path = cmd.get("path")
-            // if path:
-            //   icon_b64 = get_file_icon_base64(path)
-            //   if icon_b64:
-            //     out["icon"]=...; out["status"]="ok"
-            //   else:
-            //     out["status"]="error"; out["message"]="icon extraction failed"
-            // else:
-            //   out["status"]="error"; out["message"]="no path provided"
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
                 if let Some(icon) = win::get_file_icon_base64(p) {
@@ -1264,6 +1326,17 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             } else {
                 out_pairs.push(("status".to_string(), PyV::Str("error".to_string())));
                 out_pairs.push(("message".to_string(), PyV::Str("no path provided".to_string())));
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "hasImage" => {
+            out_pairs.push(("value".to_string(), PyV::Bool(win::has_image())));
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "saveImage" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = win::save_image(path) {
+                out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
         }

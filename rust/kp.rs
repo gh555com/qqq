@@ -972,6 +972,41 @@ mod platform {
         PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
     }
 
+    pub fn has_image() -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            if is_wayland_session() && has_wl_paste() {
+                if let Some(types) = wl_paste_list_types() {
+                    return types.iter().any(|t| t.to_ascii_lowercase().contains("image"));
+                }
+            }
+        }
+
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(types) = ctx.available_formats() {
+                return types.iter().any(|t| t.to_ascii_lowercase().contains("image"));
+            }
+        }
+        false
+    }
+
+    pub fn save_image(dest_path: &str) -> PyV {
+        if let Some(png_bytes) = read_image_png_bytes_from_clipboard() {
+            let out_path = Path::new(dest_path);
+            ensure_parent(out_path);
+            if fs::write(out_path, png_bytes).is_ok() {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(true)),
+                    ("path".to_string(), PyV::Str(out_path.to_string_lossy().to_string())),
+                ]);
+            }
+        }
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("no_image_in_clipboard".to_string())),
+        ])
+    }
+
     pub fn handle_clipboard(output_dir: &Path) -> PyV {
         // 行为对齐（优先级）：files > image > text > unknown
 
@@ -1141,6 +1176,17 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             } else {
                 out_pairs.push(("status".to_string(), PyV::Str("error".to_string())));
                 out_pairs.push(("message".to_string(), PyV::Str("no path provided".to_string())));
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "hasImage" => {
+            out_pairs.push(("value".to_string(), PyV::Bool(platform::has_image())));
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "saveImage" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = platform::save_image(path) {
+                out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
         }
