@@ -314,11 +314,11 @@
     ]
   },
   "scripts": {
-    "bundle": "node esbuild.config.js",
+    "bundle": "node qqqworkflow/esbuild.config.js",
     "ci:test": "vscode-test --config .vscode-test.js",
     "ci:package": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
-    "ci:publish": "node git_help.js publish",
-    "package": "node git_help.js package",
+    "ci:publish": "node qqqworkflow/git_help.js publish",
+    "package": "node qqqworkflow/git_help.js package",
     "publish": "npx @vscode/vsce publish --allow-star-activation",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
     "pub": "yes | npx vsce publish patch",
