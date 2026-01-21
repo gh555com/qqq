@@ -1175,60 +1175,17 @@ function init(context) {
 				ffmpegSource = "ASSETS (Verified)";
 				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
 			} else {
+				ffmpegSource = "NOT_FOUND";
 				const errDetail = result.error ? result.error.message : `status=${result.status}, signal=${result.signal}`;
-				logMessage(`[WARN] FFmpeg in assets is invalid (${errDetail}), trying fallback`, "WARN");
-				// 记录 stderr 以便排查是否是架构错误（如 "not a valid win32 application"）
-				if (result.stderr && result.stderr.length > 0) {
-					logMessage(`[DEBUG] FFmpeg validation stderr: ${result.stderr.toString().slice(0, 200)}`, "DEBUG");
-				}
+				logMessage(`[ERROR] FFmpeg in assets is invalid (${errDetail})`, "ERROR");
 			}
 		} catch (e) {
-			logMessage(`[WARN] FFmpeg in assets is not executable: ${e.message}, trying fallback`, "WARN");
-		}
-	}
-
-	if (!ffValid) {
-		try {
-			// 1. 尝试直接 require
-			const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-			if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
-				ffmpegPath = ffmpegInstaller.path;
-				ffValid = true;
-				ffmpegSource = "INSTALLER (Require)";
-				logMessage(`[INFO] Global FFmpeg from installer (require): ${ffmpegPath}`, "INFO");
-			}
-		} catch (e) { }
-	}
-
-	if (!ffValid) {
-		// 2. 尝试手动从 node_modules 寻找 (针对某些打包环境)
-		try {
-			const possiblePaths = [
-				path.join(extensionPath, "node_modules", "@ffmpeg-installer", isWin ? "win32-x64" : (process.platform + "-" + process.arch), isWin ? "ffmpeg.exe" : "ffmpeg"),
-				path.join(extensionPath, "node_modules", "@ffmpeg-installer", "ffmpeg", "node_modules", "@ffmpeg-installer", isWin ? "win32-x64" : (process.platform + "-" + process.arch), isWin ? "ffmpeg.exe" : "ffmpeg")
-			];
-			for (const p of possiblePaths) {
-				if (fs.existsSync(p)) {
-					ffmpegPath = p;
-					ffValid = true;
-					ffmpegSource = "NODE_MODULES (Manual)";
-					logMessage(`[INFO] Global FFmpeg found manually in node_modules: ${ffmpegPath}`, "INFO");
-					break;
-				}
-			}
-		} catch (e) { }
-	}
-
-	if (!ffValid) {
-		// 3. 最后的挣扎：即便 assets 下的校验失败，如果它是存在的，也勉强用着
-		if (fs.existsSync(ffInAssets)) {
-			ffmpegPath = ffInAssets;
-			ffmpegSource = "ASSETS (Last Resort)";
-			logMessage(`[WARN] Using assets FFmpeg despite validation failure (last resort)`, "WARN");
-		} else {
 			ffmpegSource = "NOT_FOUND";
-			logMessage(`[WARN] FFmpeg not found in assets or via installer`, "WARN");
+			logMessage(`[ERROR] FFmpeg in assets is not executable: ${e.message}`, "ERROR");
 		}
+	} else {
+		ffmpegSource = "NOT_FOUND";
+		logMessage(`[ERROR] FFmpeg not found in assets!`, "ERROR");
 	}
 
 	if (ffmpegPath) {
