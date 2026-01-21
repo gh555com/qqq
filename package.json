@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.47.0",
+  "version": "15.47.1",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -474,12 +474,6 @@
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",
-    "@ffmpeg-installer/darwin-arm64": "4.1.5",
-    "@ffmpeg-installer/darwin-x64": "4.1.0",
-    "@ffmpeg-installer/linux-arm64": "4.1.4",
-    "@ffmpeg-installer/linux-x64": "4.1.0",
-    "@ffmpeg-installer/win32-ia32": "4.1.0",
-    "@ffmpeg-installer/win32-x64": "4.1.0",
     "archiver": "^5.3.1",
     "axios": "^1.6.0",
     "cheerio": "1.0.0-rc.12",
