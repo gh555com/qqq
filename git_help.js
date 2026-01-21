@@ -222,14 +222,6 @@ class LocalAIReleaseAssistant {
                         }
                     }
 
-                    if (!ffSrc && t !== 'universal') {
-                        // 尝试最后兜底：如果是当前宿主平台
-                        const hostFfmpeg = require('@ffmpeg-installer/ffmpeg').path;
-                        if (hostFfmpeg && fs.existsSync(hostFfmpeg) && t.includes(process.arch)) {
-                            ffSrc = hostFfmpeg;
-                        }
-                    }
-
                     if (ffSrc) {
                         fs.copyFileSync(ffSrc, ffDest);
                         const stats = fs.statSync(ffDest);
