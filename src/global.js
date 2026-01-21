@@ -2049,18 +2049,30 @@ const TransactionManager = {
 
 			if (!qqqItems.length) return;
 
-			// ★ 扫描父目录中的文本文件，找出所有被引用的文件/文件夹
+			// ★ 扫描父目录中的文本文件，以及当前所有打开的编辑器（保护未保存的更改）
 			const referencedItems = new Set();
+
+			// 1. 扫描当前打开的所有文档（内存保护优先）
+			try {
+				vscode.workspace.textDocuments.forEach(doc => {
+					try {
+						// 只检查同一目录下的文档
+						const docDir = path.dirname(doc.uri.fsPath);
+						if (path.normalize(docDir).toLowerCase() === path.normalize(parentDir).toLowerCase()) {
+							const content = doc.getText();
+							this._extractReferences(content, referencedItems);
+						}
+					} catch { }
+				});
+			} catch { }
+
+			// 2. 扫描磁盘上的文件
 			const BINARY_EXTS = new Set([
 				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
 				".exe", ".dll", ".zip", ".tar", ".gz",
 				".mp3", ".mp4", ".avi", ".mov", ".mkv",
 				".pdf", ".doc", ".docx", ".psd", ".ai",
 			]);
-
-			// ★ 匹配 qqq/ 或 qqq\ 路径的正则
-			const regex = /qqq[\\/]([^\s"'<>\[\]\(\)]+)/gi;
-
 			try {
 				const parentFiles = fs.readdirSync(parentDir);
 				for (const fileName of parentFiles) {
@@ -2078,16 +2090,29 @@ const TransactionManager = {
 						if (BINARY_EXTS.has(ext)) continue;
 
 						const content = fs.readFileSync(fullPath, "utf-8");
-						let match;
-						regex.lastIndex = 0;
-						while ((match = regex.exec(content))) {
-							// 直接使用匹配到的第一部分，避免不必要的字符串操作
-							const firstPart = (match[1] || "").trim();
-							if (firstPart) referencedItems.add(firstPart.toLowerCase());
-						}
+						this._extractReferences(content, referencedItems);
 					} catch { }
 				}
 			} catch { return; }
+
+			// 3. ★ 扫描所有其他活跃事务（防止删除正在并行处理的文件）
+			try {
+				const allTrans = this.getTransactions();
+				for (const otherTrans of allTrans) {
+					// landedFiles 中的文件必须保护
+					if (Array.isArray(otherTrans.landedFiles)) {
+						otherTrans.landedFiles.forEach(f => {
+							referencedItems.add(path.basename(f).toLowerCase());
+						});
+					}
+					// tempFiles 中的文件也必须保护
+					if (Array.isArray(otherTrans.tempFiles)) {
+						otherTrans.tempFiles.forEach(f => {
+							referencedItems.add(path.basename(f).toLowerCase());
+						});
+					}
+				}
+			} catch { }
 
 			// ★ 找出孤儿（文件和文件夹一视同仁）
 			const orphans = qqqItems.filter(item => !referencedItems.has(item.name.toLowerCase()));
@@ -2144,13 +2169,32 @@ const TransactionManager = {
 	},
 
 	createTransactionId() {
-
 		const chars = 'ABEGHJKLNQRVWXYZabeghjknqrvwxyz234567890O1lI';
 		let id = '';
 		for (let i = 0; i < 6; i++) {
 			id += chars[Math.floor(Math.random() * chars.length)];
 		}
 		return id;
+	},
+
+	/**
+	 * ★ 辅助函数：从内容中提取所有引用的 qqq 文件名
+	 * 改进的正则：支持包含空格和特殊字符的文件名，直到遇到常见的结束符
+	 */
+	_extractReferences(content, set) {
+		if (!content) return;
+		// 改进后的正则：
+		// 1. 匹配 qqq/ 或 qqq\
+		// 2. 匹配后续字符，直到遇到引号、尖括号、方括号、圆括号、换行符 或 我们特有的 \/ 结束符
+		const regex = /qqq[\\/]([^"'<>\[\]\(\)\r\n]+?)(?=[\\"']|[\r\n]|\\\/|\s*[\)\}\]]|$)/gi;
+		let match;
+		regex.lastIndex = 0;
+		while ((match = regex.exec(content))) {
+			let name = (match[1] || "").trim();
+			// 如果文件名末尾有反斜杠（可能是我们的 /\\...\\/ 格式），去掉它
+			if (name.endsWith('\\')) name = name.slice(0, -1).trim();
+			if (name) set.add(name.toLowerCase());
+		}
 	},
 
 	async insertAnchor(editor, transId) {
