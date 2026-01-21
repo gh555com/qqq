@@ -4,6 +4,9 @@ on:
   issue_comment:
     types: [created]
   push:
+    branches: [qq, 'release/**']
+  pull_request:
+    types: [closed]
     branches: [qq]
   workflow_dispatch:
 
@@ -18,33 +21,51 @@ jobs:
   # ==========================================
   q1-create-pr:
     name: "🔄 q1: Create Release PR"
-    if: github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q1')
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q1')) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Calculate Next Version
-        id: version
+
+      - name: Detect Branch and Version
+        id: info
         run: |
-          CURRENT=$(node -p "require('./package.json').version")
-          NEXT=$(echo $CURRENT | awk -F. '{print $1"."($2+1)".0"}')
-          echo "next=$NEXT" >> $GITHUB_OUTPUT
-          echo "branch=release/v$NEXT" >> $GITHUB_OUTPUT
-      - name: Create Release Branch
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            BRANCH_NAME=${GITHUB_REF#refs/heads/}
+            VERSION_NAME=${BRANCH_NAME#release/v}
+            echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "version=$VERSION_NAME" >> $GITHUB_OUTPUT
+            echo "is_push=true" >> $GITHUB_OUTPUT
+          else
+            CURRENT=$(node -p "require('./package.json').version")
+            NEXT=$(echo $CURRENT | awk -F. '{print $1"."($2+1)".0"}')
+            echo "branch=release/v$NEXT" >> $GITHUB_OUTPUT
+            echo "version=$NEXT" >> $GITHUB_OUTPUT
+            echo "is_push=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Release Branch (Comment Only)
+        if: steps.info.outputs.is_push == 'false'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b ${{ steps.version.outputs.branch }}
-          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json')); p.version='${{ steps.version.outputs.next }}'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n');"
+          git checkout -b ${{ steps.info.outputs.branch }}
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json')); p.version='${{ steps.info.outputs.version }}'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n');"
           git add .
-          git commit -m "release: prepare v${{ steps.version.outputs.next }} (q1)"
-          git push origin ${{ steps.version.outputs.branch }}
+          git commit -m "release: prepare v${{ steps.info.outputs.version }} (q1)"
+          git push origin ${{ steps.info.outputs.branch }}
+
       - uses: repo-sync/pull-request@v2
         with:
-          source_branch: ${{ steps.version.outputs.branch }}
+          source_branch: ${{ steps.info.outputs.branch }}
           destination_branch: "qq"
-          pr_title: "🚀 Release v${{ steps.version.outputs.next }} (q1)"
+          pr_title: "🚀 Release v${{ steps.info.outputs.version }} (q1)"
           pr_body: "此 PR 由 q1 指令自动创建。合并后将触发全平台构建和发布。"
-      - uses: peter-evans/create-or-update-comment@v3
+
+      - name: Notification (Comment Only)
+        if: github.event.issue.number && steps.info.outputs.is_push == 'false'
+        uses: peter-evans/create-or-update-comment@v3
         with:
           issue-number: ${{ github.event.issue.number }}
           body: "✅ **q1 执行成功**！已创建发布分支和 PR。"
@@ -55,9 +76,9 @@ jobs:
   build-rust:
     name: 🏗️ Build ${{ matrix.target }}
     if: |
-      (github.event_name == 'push' && contains(github.event.head_commit.message, '(q2)')) ||
+      (github.event_name == 'push' && (contains(github.event.head_commit.message, '(q2)') || contains(github.event.head_commit.message, 'Merge pull request'))) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
+      (github.event.name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
