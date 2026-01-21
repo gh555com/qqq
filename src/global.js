@@ -1936,8 +1936,8 @@ const TransactionManager = {
 		// ★ 后台清理（不阻塞弹窗和用户交互）
 		if (trans.targetDir) {
 			setTimeout(() => {
-				// 1. 清理 .part/.ytdl 临时文件
-				this._cleanupTempFiles(trans.targetDir).catch(e => {
+				// 1. 清理 .part/.ytdl 临时文件 (传入 trans 以便清理预注册的 tempFiles)
+				this._cleanupTempFiles(trans.targetDir, trans).catch(e => {
 					logMessage(`[临时文件清理] 失败: ${e.message}`, "WARN");
 				});
 			}, 100);
@@ -1971,53 +1971,141 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 后台清理临时文件（.part/.ytdl 等）
+	 * ★ 后台清理临时文件（.part/.ytdl 等，以及事务预注册的 tempFiles）
+	 * @param {string} targetDir
+	 * @param {object} trans - 可选的事务对象，包含显式的 tempFiles 列表
 	 */
-	async _cleanupTempFiles(targetDir) {
+	async _cleanupTempFiles(targetDir, trans = null) {
 		if (!targetDir || !fs.existsSync(targetDir)) return;
 
 		const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
 		const now = Date.now();
 		const FIVE_MINUTES = 5 * 60 * 1000;
 
+		// 收集需要清理的文件
+		const filesToDelete = new Set();
+
+		// 1. 扫描目录下的临时后缀文件
 		try {
 			const files = fs.readdirSync(targetDir);
 			for (const f of files) {
-				try {
-					const ext = path.extname(f).toLowerCase();
-					// ★ 只清理临时文件后缀
-					if (!tempExts.includes(ext) && !/\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
-						continue;
+				const ext = path.extname(f).toLowerCase();
+				if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
+					filesToDelete.add(path.normalize(path.join(targetDir, f)));
+				}
+			}
+		} catch { }
+
+		// 2. 加上事务显式记录的 tempFiles
+		if (trans && Array.isArray(trans.tempFiles)) {
+			trans.tempFiles.forEach(f => {
+				if (f && typeof f === 'string') filesToDelete.add(path.normalize(f));
+			});
+		}
+
+		if (filesToDelete.size === 0) return;
+
+		// ★ 关键修复：在删除任何文件之前，先获取全量引用“白名单”
+		// 这样即便文件在 tempFiles 中，只要有文档正在引用它，就绝不删除
+		const referencedItems = this._getReferencedItemsSync(targetDir);
+
+		// 3. 执行删除
+		for (const fullPath of filesToDelete) {
+			try {
+				const fileName = path.basename(fullPath).toLowerCase();
+				// ★ 引用保护：如果在白名单中，跳过
+				if (referencedItems.has(fileName)) {
+					continue;
+				}
+
+				if (!fs.existsSync(fullPath)) continue;
+				const stat = fs.statSync(fullPath);
+				if (!stat.isFile()) continue;
+
+				// ★ 只删除创建时间 < 5分钟的 (放松到 6分钟，容忍误差)
+				const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
+				if (!birthtime || isNaN(birthtime)) continue;
+				const age = now - birthtime;
+				if (age > 6 * 60 * 1000) continue; // 允许 age 为负数（系统时钟微差）
+
+				// ★ 带重试逻辑
+				let deleted = false;
+				for (let retry = 0; retry < 5 && !deleted; retry++) {
+					try {
+						fs.unlinkSync(fullPath);
+						logMessage(`[临时文件清理] 删除: ${path.basename(fullPath)}`, "INFO");
+						deleted = true;
+					} catch (e) {
+						if ((e.code === 'EBUSY' || e.code === 'EPERM') && retry < 4) {
+							await new Promise(r => setTimeout(r, 500 * (retry + 1)));
+						} else { break; }
 					}
+				}
+			} catch { }
+		}
+	},
 
-					const fullPath = path.join(targetDir, f);
-					const stat = fs.statSync(fullPath);
-					if (!stat.isFile()) continue;
+	/**
+	 * ★ 同步/快速获取当前目录下的所有引用（用于清理前的白名单检查）
+	 * 包含：内存文档、磁盘文档、活跃事务
+	 */
+	_getReferencedItemsSync(targetDir) {
+		const referencedItems = new Set();
+		try {
+			const parentDir = path.dirname(targetDir);
+			if (!parentDir || !fs.existsSync(parentDir)) return referencedItems;
 
-					// ★ 只删除创建时间 < 5分钟的
-					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
-					if (!birthtime || isNaN(birthtime)) continue;
-					const age = now - birthtime;
-					if (age <= 0 || age >= FIVE_MINUTES) continue;
-
-					// ★ 带重试逻辑（yt-dlp 可能还在锁定文件）
-					let deleted = false;
-					for (let retry = 0; retry < 5 && !deleted; retry++) {
-						try {
-							fs.unlinkSync(fullPath);
-							logMessage(`[临时文件清理] 删除: ${f}`, "INFO");
-							deleted = true;
-						} catch (e) {
-							if (e.code === 'EBUSY' && retry < 4) {
-								await new Promise(r => setTimeout(r, 300 * (retry + 1)));
-							}
-						}
+			// 1. 扫描当前打开的所有文档（内存保护）
+			vscode.workspace.textDocuments.forEach(doc => {
+				try {
+					const docDir = path.dirname(doc.uri.fsPath);
+					if (path.normalize(docDir).toLowerCase() === path.normalize(parentDir).toLowerCase()) {
+						this._extractReferences(doc.getText(), referencedItems);
 					}
 				} catch { }
+			});
+
+			// 2. 扫描磁盘上的文件（仅限文本文件）
+			const BINARY_EXTS = new Set([
+				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
+				".exe", ".dll", ".zip", ".tar", ".gz",
+				".mp3", ".mp4", ".avi", ".mov", ".mkv",
+				".pdf", ".doc", ".docx", ".psd", ".ai",
+			]);
+			const parentFiles = fs.readdirSync(parentDir);
+			for (const fileName of parentFiles) {
+				try {
+					if (fileName === "qqq" || fileName === "qqq.pure") continue;
+					const fullPath = path.join(parentDir, fileName);
+					const ext = path.extname(fileName).toLowerCase();
+					if (BINARY_EXTS.has(ext)) continue;
+
+					const stat = fs.statSync(fullPath);
+					if (!stat.isFile() || stat.size > 30 * 1024 * 1024) continue; // 缩小范围提高速度
+
+					const content = fs.readFileSync(fullPath, "utf-8");
+					this._extractReferences(content, referencedItems);
+				} catch { }
+			}
+
+			// 3. 扫描所有活跃事务（保护正在下载的文件）
+			const allTrans = this.getTransactions();
+			for (const otherTrans of allTrans) {
+				if (Array.isArray(otherTrans.landedFiles)) {
+					otherTrans.landedFiles.forEach(f => {
+						if (f) referencedItems.add(path.basename(f).toLowerCase());
+					});
+				}
+				if (Array.isArray(otherTrans.tempFiles)) {
+					otherTrans.tempFiles.forEach(f => {
+						if (f) referencedItems.add(path.basename(f).toLowerCase());
+					});
+				}
 			}
 		} catch (e) {
-			logMessage(`[临时文件清理] 扫描失败: ${e.message}`, "WARN");
+			logMessage(`[引用扫描] 失败: ${e.message}`, "WARN");
 		}
+		return referencedItems;
 	},
 
 	/**
@@ -2030,9 +2118,8 @@ const TransactionManager = {
 			if (!targetDir || typeof targetDir !== 'string') return;
 			if (!fs.existsSync(targetDir)) return;
 
-			// 找到父目录（包含文档文件的目录）
-			const parentDir = path.dirname(targetDir);
-			if (!parentDir || !fs.existsSync(parentDir)) return;
+			// ★ 使用统一的引用扫描逻辑 (内存 + 磁盘 + 事务)
+			const referencedItems = this._getReferencedItemsSync(targetDir);
 
 			// ★ 获取 qqq 文件夹中的所有文件和文件夹（一视同仁）
 			let qqqItems = [];  // { name: string, isDir: boolean }
@@ -2048,71 +2135,6 @@ const TransactionManager = {
 			} catch { return; }
 
 			if (!qqqItems.length) return;
-
-			// ★ 扫描父目录中的文本文件，以及当前所有打开的编辑器（保护未保存的更改）
-			const referencedItems = new Set();
-
-			// 1. 扫描当前打开的所有文档（内存保护优先）
-			try {
-				vscode.workspace.textDocuments.forEach(doc => {
-					try {
-						// 只检查同一目录下的文档
-						const docDir = path.dirname(doc.uri.fsPath);
-						if (path.normalize(docDir).toLowerCase() === path.normalize(parentDir).toLowerCase()) {
-							const content = doc.getText();
-							this._extractReferences(content, referencedItems);
-						}
-					} catch { }
-				});
-			} catch { }
-
-			// 2. 扫描磁盘上的文件
-			const BINARY_EXTS = new Set([
-				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
-				".exe", ".dll", ".zip", ".tar", ".gz",
-				".mp3", ".mp4", ".avi", ".mov", ".mkv",
-				".pdf", ".doc", ".docx", ".psd", ".ai",
-			]);
-			try {
-				const parentFiles = fs.readdirSync(parentDir);
-				for (const fileName of parentFiles) {
-					try {
-						if (fileName === "qqq" || fileName === "qqq.pure") continue;
-						const fullPath = path.join(parentDir, fileName);
-
-						const stat = fs.statSync(fullPath);
-						if (!stat.isFile()) continue;
-						// 跳过大文件（>55MB）
-						if (stat.size > 55 * 1024 * 1024) continue;
-
-						// 跳过二进制文件
-						const ext = path.extname(fileName).toLowerCase();
-						if (BINARY_EXTS.has(ext)) continue;
-
-						const content = fs.readFileSync(fullPath, "utf-8");
-						this._extractReferences(content, referencedItems);
-					} catch { }
-				}
-			} catch { return; }
-
-			// 3. ★ 扫描所有其他活跃事务（防止删除正在并行处理的文件）
-			try {
-				const allTrans = this.getTransactions();
-				for (const otherTrans of allTrans) {
-					// landedFiles 中的文件必须保护
-					if (Array.isArray(otherTrans.landedFiles)) {
-						otherTrans.landedFiles.forEach(f => {
-							referencedItems.add(path.basename(f).toLowerCase());
-						});
-					}
-					// tempFiles 中的文件也必须保护
-					if (Array.isArray(otherTrans.tempFiles)) {
-						otherTrans.tempFiles.forEach(f => {
-							referencedItems.add(path.basename(f).toLowerCase());
-						});
-					}
-				}
-			} catch { }
 
 			// ★ 找出孤儿（文件和文件夹一视同仁）
 			const orphans = qqqItems.filter(item => !referencedItems.has(item.name.toLowerCase()));
@@ -2132,15 +2154,26 @@ const TransactionManager = {
 					if (!birthtime || isNaN(birthtime)) continue;
 
 					const age = now - birthtime;
-					if (age > 0 && age < FIVE_MINUTES) {
+					// ★ 放宽限制：允许 age < 0 (系统时钟微调)，且扩展到 6分钟
+					if (age < 6 * 60 * 1000) {
 						if (orphan.isDir) {
 							// ★ 文件夹：使用 rmSync 递归删除
 							fs.rmSync(fullPath, { recursive: true, force: true });
 							logMessage(`[兖底清理] 删除孤儿文件夹: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
 						} else {
-							// ★ 文件：使用 unlinkSync 删除
-							fs.unlinkSync(fullPath);
-							logMessage(`[兖底清理] 删除孤儿文件: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+							// ★ 文件：带重试逻辑的 unlink
+							let deleted = false;
+							for (let retry = 0; retry < 3 && !deleted; retry++) {
+								try {
+									fs.unlinkSync(fullPath);
+									logMessage(`[兖底清理] 删除孤儿文件: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+									deleted = true;
+								} catch (e) {
+									if ((e.code === 'EBUSY' || e.code === 'EPERM') && retry < 2) {
+										await new Promise(r => setTimeout(r, 500 * (retry + 1)));
+									} else { break; }
+								}
+							}
 						}
 						cleanedCount++;
 					}

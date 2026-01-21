@@ -1644,7 +1644,12 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         block.status = "ok";
                         block.path = finalPath;
                         block.filename = path.basename(finalPath);
-                        block.size = fs.statSync(finalPath).size;
+                        try {
+                            block.size = fs.statSync(finalPath).size;
+                        } catch (e) {
+                            block.size = 0;
+                            log(`[Dedupe] Warning: Unable to stat finalPath: ${finalPath}`, "WARN");
+                        }
                         block.fingerprint = computeFingerprint(block.path);
                         if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
