@@ -481,48 +481,46 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 	const ff = global.ffmpegPath();
 	const ext = path.extname(filePath).toLowerCase();
 
-	// ★ 兜底策略：如果是图片，优先尝试使用 image-size 获取尺寸，这不依赖 FFmpeg
-	if (IMAGE_EXTS.has(ext)) {
-		try {
-			const sizeOf = require("image-size");
-			const dimensions = sizeOf(filePath);
-			if (dimensions && dimensions.width && dimensions.height) {
-				const info = {
-					mtime: mtimeMs,
-					res: `${dimensions.width}x${dimensions.height}`,
-					width: dimensions.width,
-					height: dimensions.height,
-					type: "image",
-					isStaticImage: true,
-					isMjpegStatic: false,
-					needsConversion: false,
-					fromImageSize: true
-				};
-				resolutionCache.set(filePath, info);
-				return info;
-			}
-		} catch (e) {
-			// image-size 失败则继续尝试 FFmpeg
-		}
-	}
+	// ... existing code ...
 
 	if (!ff || typeof ff !== 'string' || !fs.existsSync(ff)) {
-		geq().logMessage(`ffmpegPath 无效或不存在: ${ff}`, "WARN");
-		return null;
+		geq().logMessage(`ffmpegPath 无效或不存在: ${ff}, 尝试使用系统 ffmpeg`, "WARN");
+		// 如果内置路径无效，尝试直接用 'ffmpeg'
 	}
 
 	return new Promise((resolve) => {
 		let child;
-		try {
-			child = cp.spawn(ff, ["-hide_banner", "-i", filePath], {
-				windowsHide: true,
-				env: process.env
-			});
-		} catch (e) {
-			geq().logMessage(`spawn FFmpeg 失败 (path=${ff}): ${e.message}`, "ERROR");
+		const trySpawn = (cmd, args) => {
+			try {
+				return cp.spawn(cmd, args, {
+					windowsHide: true,
+					env: process.env
+				});
+			} catch (e) {
+				return null;
+			}
+		};
+
+		const spawnFfmpeg = () => {
+			// 1. 优先使用内置路径
+			if (ff && fs.existsSync(ff)) {
+				const c = trySpawn(ff, ["-hide_banner", "-i", filePath]);
+				if (c) return c;
+			}
+			// 2. 兜底使用环境变量中的 ffmpeg
+			const c2 = trySpawn("ffmpeg", ["-hide_banner", "-i", filePath]);
+			if (c2) return c2;
+			return null;
+		};
+
+		child = spawnFfmpeg();
+
+		if (!child) {
+			geq().logMessage(`spawn FFmpeg 失败: 内置路径和系统路径均不可用`, "ERROR");
 			resolve(null);
 			return;
 		}
+
 		let stderr = "";
 
 		child.stderr.on("data", (d) => {
@@ -596,6 +594,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 					if (isStaticByDuration) {
 						info.type = "image";
 						info.isStaticImage = true;
+						info.isMjpegStatic = false; // Gif 不被视为 MJPEG
 					} else {
 						info.type = "animated_image";
 					}
@@ -649,7 +648,10 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			resolve(info.width ? info : null);
 		});
 
-		child.on("error", () => resolve(null));
+		child.on("error", (err) => {
+			geq().logMessage(`FFmpeg 进程错误: ${err.message}`, "WARN");
+			resolve(null);
+		});
 
 		setTimeout(() => {
 			try { child.kill(); } catch (e) { }

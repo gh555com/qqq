@@ -36,6 +36,8 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           npm install
+          # 安装所有平台的 FFmpeg 二进制，确保 git_help.js 能在 Linux 上打包所有平台的 VSIX
+          npm install @ffmpeg-installer/win32-x64 @ffmpeg-installer/win32-arm64 @ffmpeg-installer/linux-x64 @ffmpeg-installer/linux-arm64 @ffmpeg-installer/darwin-x64 @ffmpeg-installer/darwin-arm64 --no-save
           cd version-manager && npm install
 
       # 4. 智能版本分析

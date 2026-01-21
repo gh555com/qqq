@@ -1488,26 +1488,29 @@ Object.defineProperty(module.exports, "LOG_PATH", { enumerable: true, get: () =>
 Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => global.ffmpegPath() });
 Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => global.ffprobePath() });
 
-process.on("uncaughtException", (error) => {
-	const stack = error.stack || "";
-	// ★ 对于文件系统相关的错误，只记录日志不崩溃
-	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
-	if (error.code && fsErrorCodes.includes(error.code)) {
-		global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
-	} else {
-		global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
-	}
-});
+if (!process.__qqq_error_listeners_attached) {
+	process.__qqq_error_listeners_attached = true;
+	process.on("uncaughtException", (error) => {
+		const stack = error.stack || "";
+		// ★ 对于文件系统相关的错误，只记录日志不崩溃
+		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+		if (error.code && fsErrorCodes.includes(error.code)) {
+			global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
+		} else {
+			global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+		}
+	});
 
-process.on("unhandledRejection", (reason) => {
-	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-	// ★ 对于文件系统相关的错误，只记录日志不崩溃
-	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
-	if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
-		global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
-	} else {
-		global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
-	}
-});
+	process.on("unhandledRejection", (reason) => {
+		const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+		// ★ 对于文件系统相关的错误，只记录日志不崩溃
+		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+		if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
+			global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
+		} else {
+			global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+		}
+	});
+}
 
 

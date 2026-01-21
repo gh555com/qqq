@@ -1163,13 +1163,21 @@ function init(context) {
 	if (fs.existsSync(ffInAssets)) {
 		try {
 			// 尝试运行以验证是否为有效的可执行文件
-			const result = cp.spawnSync(ffInAssets, ["-version"], { windowsHide: true });
+			const result = cp.spawnSync(ffInAssets, ["-version"], { 
+				windowsHide: true,
+				timeout: 5000 // 增加超时防止卡死
+			});
 			if (result.status === 0) {
 				ffmpegPath = ffInAssets;
 				ffValid = true;
 				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
 			} else {
-				logMessage(`[WARN] FFmpeg in assets is invalid (exit code ${result.status}), trying fallback`, "WARN");
+				const errDetail = result.error ? result.error.message : `status=${result.status}, signal=${result.signal}`;
+				logMessage(`[WARN] FFmpeg in assets is invalid (${errDetail}), trying fallback`, "WARN");
+				// 记录 stderr 以便排查是否是架构错误（如 "not a valid win32 application"）
+				if (result.stderr && result.stderr.length > 0) {
+					logMessage(`[DEBUG] FFmpeg validation stderr: ${result.stderr.toString().slice(0, 200)}`, "DEBUG");
+				}
 			}
 		} catch (e) {
 			logMessage(`[WARN] FFmpeg in assets is not executable: ${e.message}, trying fallback`, "WARN");
