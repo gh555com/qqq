@@ -39,23 +39,8 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 // Keep ffmpeg loading in qqq as it was
-let ffmpegPath = null;
-let ffprobePath = null;
-try {
-	// 优先从扩展自带的 assets 目录中寻找 FFmpeg（针对 Bundle 瘦身版）
-	const isWin = process.platform === "win32";
-	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
-	const fpName = isWin ? "ffprobe.exe" : "ffprobe";
-
-	// 在 activate 时会通过 extensionContext 确定绝对路径，这里先尝试相对路径作为占位
-	// 真正的初始化在 activate 函数中再次校验
-	ffmpegPath = path.join(__dirname, "..", "assets", ffName);
-	if (!fs.existsSync(ffmpegPath)) {
-		const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-		ffmpegPath = ffmpegInstaller.path;
-	}
-	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
-} catch (e) { }
+let _localFfmpegPath = null;
+let _localFfprobePath = null;
 
 let extensionContext = null;
 let cacheDir = null;
@@ -436,7 +421,7 @@ function shouldVerifySourceAfterFailure(stderr) {
  * Returns {width,height,duration} or null. Skips remote paths by default.
  */
 async function verifyMediaFile(filePath, opts = {}) {
-	if (!ffprobePath) return null;
+	if (!global.ffprobePath()) return null;
 	if (!filePath || !fs.existsSync(filePath)) return null;
 
 	if (!opts.allowRemote && _isRemoteLikePath(filePath)) return null;
@@ -452,7 +437,7 @@ async function verifyMediaFile(filePath, opts = {}) {
 			filePath
 		];
 
-		const child = cp.spawn(ffprobePath, args, { windowsHide: true });
+		const child = cp.spawn(global.ffprobePath(), args, { windowsHide: true });
 		let stdout = "";
 		let done = false;
 
@@ -1244,15 +1229,7 @@ async function activate(context) {
 		return;
 	}
 
-	// 重新校验 FFmpeg 绝对路径
-	const isWin = process.platform === "win32";
-	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
-	const ffInAssets = path.join(extensionPath, "assets", ffName);
-	if (fs.existsSync(ffInAssets)) {
-		ffmpegPath = ffInAssets;
-		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
-		global.logMessage(`[INFO] 使用内置 FFmpeg: ${ffmpegPath}`, "INFO");
-	}
+	// 已经移至 global.init(context)
 
 	initCache(context);
 
@@ -1508,8 +1485,8 @@ const exported = {
 Object.assign(module.exports, exported);
 
 Object.defineProperty(module.exports, "LOG_PATH", { enumerable: true, get: () => global.getLogPath() });
-Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => ffmpegPath });
-Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => ffprobePath });
+Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => global.ffmpegPath() });
+Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => global.ffprobePath() });
 
 process.on("uncaughtException", (error) => {
 	const stack = error.stack || "";

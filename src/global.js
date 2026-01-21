@@ -1147,9 +1147,49 @@ async function startDaemons() {
 // ★ 全局上下文
 // ============================================================================
 let extensionContext = null;
+let ffmpegPath = null;
+let ffprobePath = null;
 
 function init(context) {
 	extensionContext = context;
+
+	// 初始化 FFmpeg 路径
+	const isWin = process.platform === "win32";
+	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
+	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+	const ffInAssets = path.join(extensionPath, "assets", ffName);
+
+	let ffValid = false;
+	if (fs.existsSync(ffInAssets)) {
+		try {
+			// 尝试运行以验证是否为有效的可执行文件
+			const result = cp.spawnSync(ffInAssets, ["-version"], { windowsHide: true });
+			if (result.status === 0) {
+				ffmpegPath = ffInAssets;
+				ffValid = true;
+				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
+			} else {
+				logMessage(`[WARN] FFmpeg in assets is invalid (exit code ${result.status}), trying fallback`, "WARN");
+			}
+		} catch (e) {
+			logMessage(`[WARN] FFmpeg in assets is not executable: ${e.message}, trying fallback`, "WARN");
+		}
+	}
+
+	if (!ffValid) {
+		try {
+			const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+			ffmpegPath = ffmpegInstaller.path;
+			logMessage(`[INFO] Global FFmpeg from installer: ${ffmpegPath}`, "INFO");
+		} catch (e) {
+			logMessage(`[WARN] FFmpeg not found in assets or via installer`, "WARN");
+		}
+	}
+
+	if (ffmpegPath) {
+		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
+	}
+
 	initUserTracking(context);
 }
 
@@ -2646,6 +2686,8 @@ module.exports = {
 	tryEngineCall,
 	getActiveEngineCode,
 	getActiveEngineName,
+	ffmpegPath: () => ffmpegPath,
+	ffprobePath: () => ffprobePath,
 
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
