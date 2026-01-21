@@ -84,7 +84,7 @@ class LocalAIReleaseAssistant {
         // 3. 验证 assets 目录中的二进制文件
         const requiredAssets = [
             'q_win_x64.exe',
-            'q_win_x86.exe',
+            'q_win_arm64.exe',
             'q_linux_x64',
             'q_mac_x64',
             'q_mac_arm64'
@@ -205,7 +205,6 @@ class LocalAIReleaseAssistant {
                     // 映射打包平台 ID 到 npm 包名
                     const pkgMap = {
                         'win32-x64': 'win32-x64',
-                        'win32-ia32': 'win32-ia32',
                         'win32-arm64': 'win32-x64', // win32-arm64 暂用 x64 兼容版
                         'linux-x64': 'linux-x64',
                         'linux-arm64': 'linux-arm64',
