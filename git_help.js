@@ -195,18 +195,42 @@ class LocalAIReleaseAssistant {
                 }
             }
 
-            // 2. 准备 FFmpeg (从 node_modules 捞出)
+            // 2. 准备 FFmpeg (精准寻找对应平台的二进制)
             const ffDest = config.ffmpeg ? path.join('assets', config.ffmpeg) : null;
             if (ffDest) {
                 try {
-                    // 动态查找 ffmpeg-installer 的二进制路径
-                    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-                    if (fs.existsSync(ffmpegPath)) {
-                        fs.copyFileSync(ffmpegPath, ffDest);
+                    let ffSrc = null;
+
+                    // 优先尝试从 node_modules 中的平台专有包捞出 (如 @ffmpeg-installer/win32-x64)
+                    const platformSpecificPath = path.join('node_modules', '@ffmpeg-installer', t, config.ffmpeg);
+                    if (fs.existsSync(platformSpecificPath)) {
+                        ffSrc = platformSpecificPath;
+                        console.log(`🎯 发现 ${t} 专有 FFmpeg: ${ffSrc}`);
+                    } else {
+                        // 兜底：如果是当前平台，尝试使用 require('@ffmpeg-installer/ffmpeg').path
+                        const currentPlatform = process.platform + '-' + process.arch;
+                        const isCurrentPlatform = (t === 'win32-x64' && currentPlatform === 'win32-x64') ||
+                                                 (t === 'linux-x64' && currentPlatform === 'linux-x64') ||
+                                                 (t === 'darwin-x64' && currentPlatform === 'darwin-x64') ||
+                                                 (t === 'darwin-arm64' && currentPlatform === 'darwin-arm64');
+
+                        if (isCurrentPlatform) {
+                            const hostFfmpeg = require('@ffmpeg-installer/ffmpeg').path;
+                            if (fs.existsSync(hostFfmpeg)) {
+                                ffSrc = hostFfmpeg;
+                                console.log(`🏠 使用宿主平台 FFmpeg: ${ffSrc}`);
+                            }
+                        }
+                    }
+
+                    if (ffSrc) {
+                        fs.copyFileSync(ffSrc, ffDest);
                         console.log(`✅ 已嵌入 FFmpeg: ${ffDest}`);
+                    } else {
+                        console.warn(`⚠️ 无法为平台 ${t} 找到对应的 FFmpeg 二进制文件，发布包可能不完整。`);
                     }
                 } catch (e) {
-                    console.warn(`⚠️ FFmpeg 准备失败: ${e.message}`);
+                    console.warn(`⚠️ FFmpeg 准备过程中出错: ${e.message}`);
                 }
             }
 
