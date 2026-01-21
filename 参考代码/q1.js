@@ -11,19 +11,7 @@ const crypto = require("crypto");
 const os = require("os");
 const { TextDecoder } = require("util");
 
-// 延迟加载 qqq 以避免循环依赖
-let qqq = null;
-function geq() {
-	if (!qqq) {
-		try {
-			qqq = require("./qqq");
-		} catch (e) {
-			global.logMessage(`Failed to lazy-load qqq: ${e.message}`, "ERROR");
-		}
-	}
-	return qqq;
-}
-
+const qqq = require("./qqq");
 const q3 = require("./q3");
 
 // 新水印的SHA256哈希值
@@ -178,27 +166,19 @@ let codelensLevel = "3";
 // 大小相框水印
 let largeWatermarkBase64 = null;
 let smallWatermarkBase64 = null;
-let LARGE_WATERMARK_PATH = "";
-let SMALL_WATERMARK_PATH = "";
+const LARGE_WATERMARK_PATH = path.join(__dirname, "..", "assets", "al.png");
+const SMALL_WATERMARK_PATH = path.join(__dirname, "..", "assets", "as.png");
 
-// ==================== ★★★ Schedulers (Layered) ★★★ ====================
-async function scheduleProbe(key, fn) {
-	const _qqq = geq();
-	const s = _qqq?.probeScheduler;
-	if (s && typeof s.schedule === "function") {
-		return s.schedule(key, fn);
-	}
-	return fn();
-}
+// ==================== ★★★ 调度器（分层）★★★ ====================
+const probeScheduler =
+	qqq?.probeScheduler && typeof qqq.probeScheduler.schedule === "function"
+		? qqq.probeScheduler
+		: { schedule: async (_k, fn) => fn() };
 
-async function scheduleGen(key, fn) {
-	const _qqq = geq();
-	const s = _qqq?.genScheduler;
-	if (s && typeof s.schedule === "function") {
-		return s.schedule(key, fn);
-	}
-	return fn();
-}
+const genScheduler =
+	qqq?.genScheduler && typeof qqq.genScheduler.schedule === "function"
+		? qqq.genScheduler
+		: { schedule: async (_k, fn) => fn() };
 
 // ==================== 初始化 ====================
 function verifySystemIntegrity() {
@@ -296,12 +276,12 @@ function clearAllEditorDebounceTimers() {
 // ==================== 错误日志 ====================
 function logCriticalError(filePath, errorMsg) {
 	try {
-		if (!geq().LOG_PATH) return;
+		if (!qqq.LOG_PATH) return;
 		const timestamp = new Date().toISOString();
 		const shortPath = filePath.length > 100 ? "..." + filePath.slice(-97) : filePath;
 		const shortErr = errorMsg.length > 500 ? errorMsg.slice(0, 500) + "..." : errorMsg;
 		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
-		fs.appendFileSync(geq().LOG_PATH, logLine);
+		fs.appendFileSync(qqq.LOG_PATH, logLine);
 	} catch (e) { }
 }
 
@@ -312,7 +292,7 @@ function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
 		const key = `ffmpeg_fallback:${e}:${err}`;
 		const shortPath = filePath.length > 140 ? "..." + filePath.slice(-137) : filePath;
 		const shortStderr = (stderr || "").toString().slice(0, 300);
-		geq().logMessageRateLimited(
+		qqq.logMessageRateLimited(
 			key,
 			`FFMPEG_FAIL -> fallbackDirectRead: ${shortPath}  ext=${e}  err=${err}${shortStderr ? `  stderr=${shortStderr}` : ""}`,
 			"WARN",
@@ -323,11 +303,7 @@ function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
 
 // ==================== CSS 计算辅助 ====================
 function fitIntoBox(srcW, srcH, boxW, boxH, enlarge) {
-	if (!srcW || !srcH) {
-		// 如果宽高未知，不应该直接返回满屏，这会导致拉伸。
-		// 应该维持一个默认比例或者原样显示。
-		return { width: boxW, height: boxH, scale: 1, unknown: true };
-	}
+	if (!srcW || !srcH) return { width: boxW, height: boxH, scale: 1 };
 
 	let finalW, finalH, s;
 	if (enlarge) {
@@ -399,8 +375,7 @@ function buildAfterStyle({
 	}
 
 	layers.push(contentUrl);
-	// 如果 outputSize 未知，使用 contain 保持比例而不拉伸
-	sizes.push(outputSize && !outputSize.unknown ? `${outputSize.width}px ${outputSize.height}px` : "contain");
+	sizes.push(outputSize ? `${outputSize.width}px ${outputSize.height}px` : "contain");
 	positions.push("center center");
 	repeats.push("no-repeat");
 
@@ -466,55 +441,14 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (cached && cached.mtime === mtimeMs) return cached;
 
 	const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
-	return scheduleProbe(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
+	return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
-	const ff = global.ffmpegPath();
-	const ext = path.extname(filePath).toLowerCase();
-
-	// ★ 兜底策略：如果是图片，优先尝试使用 image-size 获取尺寸，这不依赖 FFmpeg
-	if (IMAGE_EXTS.has(ext)) {
-		try {
-			const sizeOf = require("image-size");
-			const dimensions = sizeOf(filePath);
-			if (dimensions && dimensions.width && dimensions.height) {
-				const info = {
-					mtime: mtimeMs,
-					res: `${dimensions.width}x${dimensions.height}`,
-					width: dimensions.width,
-					height: dimensions.height,
-					type: "image",
-					isStaticImage: true,
-					isMjpegStatic: false,
-					needsConversion: false,
-					fromImageSize: true
-				};
-				resolutionCache.set(filePath, info);
-				return info;
-			}
-		} catch (e) {
-			// image-size 失败则继续尝试 FFmpeg
-		}
-	}
-
-	if (!ff || typeof ff !== 'string' || !fs.existsSync(ff)) {
-		geq().logMessage(`ffmpegPath 无效或不存在: ${ff}`, "WARN");
-		return null;
-	}
+	if (!qqq.ffmpegPath) return null;
 
 	return new Promise((resolve) => {
-		let child;
-		try {
-			child = cp.spawn(ff, ["-hide_banner", "-i", filePath], {
-				windowsHide: true,
-				env: process.env
-			});
-		} catch (e) {
-			geq().logMessage(`spawn FFmpeg 失败 (path=${ff}): ${e.message}`, "ERROR");
-			resolve(null);
-			return;
-		}
+		const child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		let stderr = "";
 
 		child.stderr.on("data", (d) => {
@@ -525,12 +459,6 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
-
-			if (!resMatch && !durMatch) {
-				const shortPath = filePath.length > 60 ? "..." + filePath.slice(-57) : filePath;
-				const cleanStderr = stderr.replace(/\r\n/g, " ").slice(0, 200);
-				geq().logMessage(`FFprobe info failed for ${shortPath}: ${cleanStderr}`, "WARN");
-			}
 
 			const ext = path.extname(filePath).toLowerCase();
 
@@ -827,7 +755,7 @@ function getVisualWidth(str) {
 
 // Generate preview image for plain text file using ffmpeg drawtext
 async function generateTextPreview(filePath, contentId, qualityLevel, textCacheKey) {
-	if (!global.ffmpegPath()) return null;
+	if (!qqq.ffmpegPath) return null;
 
 	try {
 		// Only read first 4KB for preview (enough for ~15 lines of text)
@@ -946,7 +874,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		];
 
 		return new Promise((resolve) => {
-			const child = cp.spawn(global.ffmpegPath(), args, { windowsHide: true, stdio: 'pipe' });
+			const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: 'pipe' });
 			let resolved = false;
 
 			const cleanup = () => {
@@ -978,7 +906,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 					if (!buffer) { resolve(null); return; }
 
 					// 统一缓存命名：.71（cacheKey="71"）
-					geq().setCacheEntry(contentId, textCacheKey, buffer, {
+					qqq.setCacheEntry(contentId, textCacheKey, buffer, {
 						width: targetW,
 						height: targetH,
 						type: 'text_preview',
@@ -1014,10 +942,10 @@ async function tryTextPreview(filePath, contentId, renderW, renderH) {
 	const textCacheKey = getTextPreviewCacheKey();
 	const outSize = getTextPreviewOutputSize(renderW, renderH);
 
-	const cached = geq().getCachedBuffer(contentId, textCacheKey);
+	const cached = qqq.getCachedBuffer(contentId, textCacheKey);
 	if (cached) {
 		// 零错图风险：必须校验 meta.type
-		const meta = geq().getCacheQualityMeta(contentId, textCacheKey);
+		const meta = qqq.getCacheQualityMeta(contentId, textCacheKey);
 		if (meta && meta.type === 'text_preview') {
 			return {
 				buffer: cached,
@@ -1189,11 +1117,9 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
 			return;
 		}
 		const pipeArgs = [...args, "pipe:1"];
-		const ff = global.ffmpegPath();
-		const child = cp.spawn(ff, pipeArgs, {
+		const child = cp.spawn(qqq.ffmpegPath, pipeArgs, {
 			windowsHide: true,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: process.env
 		});
 		const chunks = [];
 		let stderr = "";
@@ -1237,11 +1163,9 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 	return new Promise((resolve) => {
 		const tmpPath = cacheFilePath + ".tmp";
 		const fileArgs = [...args, "-y", tmpPath];
-		const ff = global.ffmpegPath();
-		const child = cp.spawn(ff, fileArgs, {
+		const child = cp.spawn(qqq.ffmpegPath, fileArgs, {
 			windowsHide: true,
 			stdio: ["ignore", "ignore", "pipe"],
-			env: process.env
 		});
 		let stderr = "";
 		let resolved = false;
@@ -1321,11 +1245,10 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 
 // ==================== Preview Buffer（文本优先，照 a 逻辑接入） ====================
 async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
-	// 移除对 ffmpegPath 的硬性拦截，因为图片预览可能通过 image-size 兜底
-	// if (!global.ffmpegPath()) return null;
+	if (!qqq.ffmpegPath) return null;
 
 	// 性能优先：已知必失败的源文件直接短路（避免反复 ffmpeg）
-	if (geq().isBrokenFile && geq().isBrokenFile(contentId, filePath)) {
+	if (qqq.isBrokenFile && qqq.isBrokenFile(contentId, filePath)) {
 		return null;
 	}
 
@@ -1334,7 +1257,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	// ★★★ 文本优先：不是看后缀名，而是看实质（照 a）★★★
 	if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || isPlainTextFile(filePath))) {
 		const t = await tryTextPreview(filePath, contentId, renderW, renderH);
-		if (t && geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
+		if (t && qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
 		return t;
 	}
 
@@ -1374,10 +1297,10 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	}
 
 	if (!cacheStrategy.shouldBypassCache) {
-		const cached = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
+		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
 			// 零错图风险：必须校验 meta.type
-			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
 				const cachedWidth = meta.width || info?.width || 0;
 				const cachedHeight = meta.height || info?.height || 0;
@@ -1439,12 +1362,12 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 	const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
 
-	const result = await scheduleGen(taskKey, async () => {
-		const existing = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
+	const result = await genScheduler.schedule(taskKey, async () => {
+		const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (existing) {
-			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
-				if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
+				if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
 				return { success: true, buffer: existing, fromCache: true, meta };
 			}
 		}
@@ -1474,18 +1397,16 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
-		geq().logMessage(`Preview generated: ${path.basename(filePath)}, size=${buffer.length}, dur=${finalWebPDuration}`, "INFO");
-
 		// 快速校验：防止 ffmpeg 产出截断/损坏 WebP 被写入缓存导致长期“坏命中”
-		if (geq().isValidWebPBuffer && !geq().isValidWebPBuffer(buffer)) {
-			if (geq().markFileAsBroken) geq().markFileAsBroken(contentId, filePath, "invalid_webp_output");
+		if (qqq.isValidWebPBuffer && !qqq.isValidWebPBuffer(buffer)) {
+			if (qqq.markFileAsBroken) qqq.markFileAsBroken(contentId, filePath, "invalid_webp_output");
 			try { if (result.cacheFilePath && fs.existsSync(result.cacheFilePath)) fs.unlinkSync(result.cacheFilePath); } catch { }
 			return null;
 		}
 
 
 		if (result.fromPipe || result.fromFile) {
-			geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
 				origWidth: origSize?.width || 0,
@@ -1504,7 +1425,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			enlargeSmallImages
 		);
 
-		if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
+		if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
 		return {
 			buffer,
 			webpDuration: finalWebPDuration,
@@ -1518,26 +1439,26 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			const stderr = result.stderr || "";
 
 			// 失败熔断：记录失败并逐步延长冷却时间，避免滚动/重绘时反复 spawn ffmpeg
-			const brokenRec = geq().markFileAsBroken ? geq().markFileAsBroken(contentId, filePath, result.error || "FFMPEG_FAIL") : null;
+			const brokenRec = qqq.markFileAsBroken ? qqq.markFileAsBroken(contentId, filePath, result.error || "FFMPEG_FAIL") : null;
 
 			// 只有在“强烈怀疑源文件损坏”且连续失败时才用 ffprobe 进一步确认（昂贵，但这里极少发生）
 			if (
 				brokenRec &&
 				brokenRec.count >= 2 &&
-				geq().shouldVerifySourceAfterFailure &&
-				geq().shouldVerifySourceAfterFailure(stderr) &&
-				geq().verifyMediaFile
+				qqq.shouldVerifySourceAfterFailure &&
+				qqq.shouldVerifySourceAfterFailure(stderr) &&
+				qqq.verifyMediaFile
 			) {
 				try {
-					const v = await geq().verifyMediaFile(filePath, { timeoutMs: 2000, allowRemote: false });
+					const v = await qqq.verifyMediaFile(filePath, { timeoutMs: 2000, allowRemote: false });
 					if (!v) {
 						// 确认严重损坏：延长冷却到上限（避免无意义重试）
-						geq().markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 24 * 60 * 60 * 1000 });
+						qqq.markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 24 * 60 * 60 * 1000 });
 					}
 				} catch { }
 			}
 			if (stderr.includes("moov atom not found")) {
-				geq().logMessageRateLimited(
+				qqq.logMessageRateLimited(
 					`corrupt_video:${filePath}`,
 					`Corrupt video file (moov atom not found): ${path.basename(filePath)}`,
 					"WARN"
@@ -1547,7 +1468,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			}
 		} else {
 			logFallbackUsedRateLimited(filePath, ext, result.error, result.stderr || "");
-			if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
+			if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
 		}
 		return fallback;
 	}
@@ -1668,7 +1589,7 @@ async function shouldUseFrame(filePath) {
 		}
 
 		// 非文本文件，检查是否能生成有效预览
-		const contentId = geq().computeFingerprint(filePath);
+		const contentId = qqq.computeFingerprint(filePath);
 		if (!contentId) {
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
@@ -1703,11 +1624,11 @@ async function shouldUseFrame(filePath) {
 
 		// 检查缓存是否存在且有效
 		const cacheStrategy = determineCacheStrategy(filePath, info);
-		const cachedBuffer = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
+		const cachedBuffer = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
 
 		// 如果有缓存，检查缓存是否有效
 		if (cachedBuffer) {
-			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			// 确保缓存类型正确
 			if (meta && (meta.type === "webp_unified" || meta.type === "text_preview")) {
 				// 缓存结果
@@ -1737,7 +1658,7 @@ async function shouldUseFrame(filePath) {
 		// 如果是视频或动画，检查是否支持
 		if (info.type === "video" || info.type === "animated_image") {
 			// 视频和动画需要缓存支持
-			const result = global.ffmpegPath() ? true : false;
+			const result = qqq.ffmpegPath ? true : false;
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
 				result: result,
@@ -1748,7 +1669,7 @@ async function shouldUseFrame(filePath) {
 
 		// 其他需要转换的格式
 		if (info.needsConversion) {
-			const result = global.ffmpegPath() ? true : false;
+			const result = qqq.ffmpegPath ? true : false;
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
 				result: result,
@@ -1782,9 +1703,8 @@ function resolvePathToAbsolute(docUri, rawPath) {
 
 	clean = clean.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
 
-	const fsPath = docUri ? docUri.fsPath : null;
-	const baseDir = fsPath ? path.dirname(fsPath) : process.cwd();
-	const abs = geq().resolveNavPath(clean, baseDir);
+	const baseDir = path.dirname(docUri.fsPath);
+	const abs = qqq.resolveNavPath(clean, baseDir);
 	return abs ? path.normalize(abs) : null;
 }
 
@@ -1886,9 +1806,7 @@ function getEditorId(editor) {
 
 // ==================== 主渲染逻辑 ====================
 async function renderImages(editor) {
-	if (!editor) return;
-	if (!isCoreIntegrityValid) {
-		geq().logMessage(`renderImages: Integrity is invalid, skipping.`, "WARN");
+	if (!editor || !isCoreIntegrityValid) {
 		clearDecorations();
 		return;
 	}
@@ -1914,7 +1832,7 @@ async function renderImages(editor) {
 	if (!visibleRanges?.length) return;
 
 	const marginLeft = "100px";
-	const pathRegex = geq().createPathRegex();
+	const pathRegex = qqq.createPathRegex();
 
 	const tasks = [];
 	const newHideRanges = [];
@@ -1971,7 +1889,7 @@ async function renderImages(editor) {
 			if (targetLine >= editor.document.lineCount) continue;
 
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-			const contentId = geq().computeFingerprint(absPath);
+			const contentId = qqq.computeFingerprint(absPath);
 			if (!contentId) continue;
 
 			let isDirectory = false;
@@ -2034,9 +1952,6 @@ async function renderImages(editor) {
 						let mtimeMs = 0;
 						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 						info = await getMediaInfo(absPath, mtimeMs);
-						if (!info) {
-							geq().logMessage(`renderImages: getMediaInfo failed for ${absPath}`, "DEBUG");
-						}
 						const fc = getFrameConfig(info);
 						previewWidth = fc.width;
 						previewHeight = fc.height;
@@ -2048,9 +1963,6 @@ async function renderImages(editor) {
 					}
 
 					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
-					if (!previewResult) {
-						geq().logMessage(`renderImages: getPreviewBuffer returned null for ${absPath}`, "DEBUG");
-					}
 				}
 
 				if (currentRenderVersion !== myVersion) return null;
@@ -2167,8 +2079,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			} else if (block.type === "media") {
 				if (block.path) {
 					const filePath = block.path;
-					if (block.fingerprint) geq().prefillFingerprint(filePath, block.fingerprint);
-					const relPath = geq().toSafePath(path.relative(docDir, filePath));
+					if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
+					const relPath = qqq.toSafePath(path.relative(docDir, filePath));
 					const isLastItem = i === blocks.length - 1;
 
 					let pxHeight = 0;
@@ -2192,9 +2104,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					let gapBelow = pxHeight > 0 || pxHeight === -1 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
 					// 对于非最后一个项目，减1以抵消join添加的额外换行符
 					if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-					finalContent.push(`
-/\\${relPath}\\/
-${gapBelow ? eol.repeat(gapBelow) : ""}`);
+					finalContent.push(`/\\${relPath}\\/${gapBelow ? eol.repeat(gapBelow) : ""}`);
 					invalidateFolderSizeCacheForPath(filePath);
 				}
 			}
@@ -2202,8 +2112,8 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 		replacement = finalContent.join(eol);
 	} else if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
-		if (result.fingerprint) geq().prefillFingerprint(filePath, result.fingerprint);
-		const relPath = geq().toSafePath(path.relative(docDir, filePath));
+		if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
+		const relPath = qqq.toSafePath(path.relative(docDir, filePath));
 		let pxHeight = LARGE_PREVIEW_HEIGHT;
 		try {
 			let mtimeMs = 0;
@@ -2213,9 +2123,7 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 			pxHeight = height;
 		} catch { }
 		const gapBelow = calculateBlankLinesExact(pxHeight, true);
-		replacement = `
-/\\${relPath}\\/
-` + eol.repeat(gapBelow);
+		replacement = `/\\${relPath}\\/` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
 	} else if (result.type === "file" || result.type === "file_folder") {
 		const files = result.files || [];
@@ -2224,15 +2132,13 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = geq().toSafePath(path.relative(docDir, folderPath));
+			const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
 			const isLastItem = i === folders.length - 1 && files.length === 0;
 			// 文件夹使用图标框的空行数计算
 			let gapBelow = calculateBlankLinesExact(-1, isLastItem);
 
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-			replacement += `
-/\\${relPath}\\/
-${eol.repeat(gapBelow)}`;
+			replacement += `/\\${relPath}\\/${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 
@@ -2240,20 +2146,12 @@ ${eol.repeat(gapBelow)}`;
 			const f = files[i];
 			let fp = fingerprints[f];
 			if (!fp) {
-				const tryKey = process.platform === 'win32' ? f.replace(
-
-
-
-
-
-
-
-					/\//g, '\\') : f;
+				const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
-			if (fp) geq().prefillFingerprint(f, fp);
+			if (fp) qqq.prefillFingerprint(f, fp);
 
-			const relPath = geq().toSafePath(path.relative(docDir, f));
+			const relPath = qqq.toSafePath(path.relative(docDir, f));
 
 			let pxHeight = 0;
 			const ext = path.extname(f).toLowerCase();
@@ -2275,8 +2173,7 @@ ${eol.repeat(gapBelow)}`;
 
 			const isLastItem = i === files.length - 1 && folders.length === 0;
 			if (i > 0 || folders.length > 0) replacement += eol;
-			replacement += `/\\${relPath}\\/
-`;
+			replacement += `/\\${relPath}\\/`;
 			if (pxHeight > 0 || pxHeight === -1) {
 				let gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
 
@@ -2292,9 +2189,7 @@ ${eol.repeat(gapBelow)}`;
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
 			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
-			replacement += `
-/\\${relPath}\\/
-${eol}`;
+			replacement += `/\\${relPath}\\/${eol}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 	} else if (result.type === "text") {
@@ -2489,23 +2384,10 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 							let detail = '';
 
 							if (result.type === 'html_blocks' || result.type === 'skeleton') {
-								// HTML粘贴：统计成功落地的媒体文件数量和总大小
+								// HTML粘贴：统计成功落地的媒体文件数量
 								const mediaBlocks = result.blocks?.filter(b => b.type === 'media' && b.status === 'ok') || [];
 								const mediaCount = mediaBlocks.length;
-								// 计算总大小
-								const totalSize = mediaBlocks.reduce((sum, block) => sum + (block.size || 0), 0);
-								// 格式化大小显示
-								let sizeStr = '';
-								if (totalSize > 0) {
-									if (totalSize < 1024) {
-										sizeStr = `${totalSize}b`;
-									} else if (totalSize < 1024 * 1024) {
-										sizeStr = `${(totalSize / 1024).toFixed(1)}k`;
-									} else {
-										sizeStr = `${(totalSize / (1024 * 1024)).toFixed(1)}m`;
-									}
-								}
-								detail = `共落盘${mediaCount}个文件${sizeStr ? ` ${sizeStr}` : ''}`;
+								detail = `共落盘${mediaCount}个文件`;
 								// 如果有baseUrl，添加来源信息
 								if (result.baseUrl) {
 									// 截断URL以保持消息简洁
@@ -2624,7 +2506,7 @@ async function provideCleanlinessEditsAsync(document) {
 	if (!document) return [];
 	const edits = [];
 	const text = document.getText();
-	const regex = geq().createPathRegex();
+	const regex = qqq.createPathRegex();
 	const eol = getDocumentEOL(document);
 	let match;
 	const markers = [];
@@ -2726,7 +2608,7 @@ class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid || codelensLevel === "0") return [];
 		const lenses = [];
-		const regex = geq().createPathRegex();
+		const regex = qqq.createPathRegex();
 		const text = document.getText();
 		let match;
 		const foldersToFetch = new Set();
@@ -2764,7 +2646,7 @@ class FileCodeLensProvider {
 			} catch { }
 
 			if (codelensLevel === "3") {
-				let folderData = geqFolderSizeSync(folder);
+				let folderData = getQqqFolderSizeSync(folder);
 				let fSizeStr;
 				let folderTooltip;
 
@@ -2818,7 +2700,7 @@ class FileCodeLensProvider {
 					const arStr = calculateAspectRatioString(info.width, info.height);
 					if (arStr) tooltipText += `\n宽高比：${arStr}`;
 
-					if (geq().shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+					if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 				}
 			} else if (isText) {
 
@@ -2839,18 +2721,6 @@ class FileCodeLensProvider {
 					tooltip: tooltipText,
 				})
 			);
-
-			// 只对文本文件显示✎qode按钮，且仅在codelensLevel为3时
-			if (codelensLevel === "3" && isText) {
-				lenses.push(
-					new vscode.CodeLens(r, {
-						title: "✎qode",
-						command: "qqq.openFileInRightGroup",
-						arguments: [absPath],
-						tooltip: "在右边分组打开文件并进入编辑状态",
-					})
-				);
-			}
 		}
 
 		if (foldersToFetch.size > 0) {
@@ -2874,7 +2744,7 @@ function invalidateFolderSizeCacheForPath(filePath) {
 	} catch { }
 }
 
-function geqFolderSizeSync(folderPath) {
+function getQqqFolderSizeSync(folderPath) {
 	const now = Date.now();
 	const cached = folderSizeCache.get(folderPath);
 	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
@@ -2890,7 +2760,7 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 
 	_pendingFolderSizeRequests.set(folderPath, true);
 
-	geq().getFolderInfo(folderPath).then(result => {
+	qqq.getFolderInfo(folderPath).then(result => {
 		_pendingFolderSizeRequests.delete(folderPath);
 
 		if (result?.success) {
@@ -2922,12 +2792,12 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 	});
 }
 
-async function geqFolderSize(folderPath) {
+async function getQqqFolderSize(folderPath) {
 	const now = Date.now();
 	const cached = folderSizeCache.get(folderPath);
 	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
 
-	const result = await geq().getFolderInfo(folderPath);
+	const result = await qqq.getFolderInfo(folderPath);
 	if (result?.success) {
 		const parts = [];
 		let totalFiles = 0;
@@ -2961,38 +2831,6 @@ function openFileCommand(filePath) {
 		else cp.exec(`xdg-open "${filePath}"`);
 	} catch {
 		vscode.env.openExternal(vscode.Uri.file(filePath));
-	}
-}
-
-function openFileInRightGroupCommand(filePath) {
-	if (!fs.existsSync(filePath)) return;
-	try {
-		const uri = vscode.Uri.file(filePath);
-		vscode.workspace.openTextDocument(uri).then(doc => {
-			// 确定右边的视图列
-			let targetColumn = vscode.ViewColumn.Beside;
-
-			// 检查是否有多个标签组
-			if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
-				const allGroups = vscode.window.tabGroups.all;
-				if (allGroups.length > 1) {
-					// 找到最右边的标签组
-					const sortedGroups = allGroups
-						.filter(g => typeof g.viewColumn === "number")
-						.sort((a, b) => a.viewColumn - b.viewColumn);
-					targetColumn = sortedGroups[sortedGroups.length - 1].viewColumn;
-				}
-			}
-
-			// 在目标列打开文件，确保进入编辑状态（preserveFocus: false）
-			vscode.window.showTextDocument(doc, {
-				viewColumn: targetColumn,
-				preserveFocus: false,
-				preview: false
-			});
-		});
-	} catch (error) {
-		vscode.window.showErrorMessage("打开文件失败: " + error.message);
 	}
 }
 
@@ -3051,7 +2889,7 @@ async function renameFileCommand(rawPath, absPath) {
 		? rawPath.substring(0, rawPath.lastIndexOf("/") + 1) + trimmed
 		: trimmed;
 
-	const regex = geq().createPathRegex();
+	const regex = qqq.createPathRegex();
 	const ranges = [];
 	let m;
 	while ((m = regex.exec(doc.getText()))) {
@@ -3061,9 +2899,7 @@ async function renameFileCommand(rawPath, absPath) {
 		}
 	}
 	if (ranges.length)
-		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `
-/\\${newRaw}\\/
-`)));
+		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `/\\${newRaw}\\/`)));
 
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
@@ -3091,43 +2927,18 @@ function renderVisibleEditors(delay = 50) {
 	if (editors?.length) editors.forEach((e) => debounceRender(e, delay));
 }
 
-// ==================== Initialization ====================
+// ==================== 激活与停用 ====================
 async function activate(context) {
-	if (!context) {
-		global.logMessage("q1.activate: context is undefined!", "ERROR");
-		return;
-	}
-
 	extensionContext = context;
-	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-
-	if (!extensionPath) {
-		global.logMessage("q1.activate: extensionPath is undefined!", "ERROR");
-		return;
-	}
-
-	LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
-	SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");
 
 	try {
+		const global = require('./global');
 		if (global.ConfigManager) global.ConfigManager.setContext(context);
 	} catch (e) { }
 
 	isCoreIntegrityValid = verifySystemIntegrity();
-	const _qqq = geq();
-
-	if (!isCoreIntegrityValid) {
-		if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-		else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-		return;
-	}
-
-	if (_qqq) {
-		_qqq.logMessage(`Integrity: PASSED`, "INFO");
-		_qqq.logMessage(`FFmpeg Path: ${_qqq.ffmpegPath}`, "INFO");
-	} else {
-		global.logMessage(`Integrity: PASSED`, "INFO");
-	}
+	qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
+	if (!isCoreIntegrityValid) return;
 
 	loadWatermarkResource();
 	refreshConfig();
@@ -3157,10 +2968,9 @@ async function activate(context) {
 		}),
 		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
 		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
 		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.cleanUp", () => {
+		vscode.commands.registerCommand("qqq.setInOrder", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
 		vscode.commands.registerCommand("qqq.exportDoc", () => {
@@ -3237,7 +3047,7 @@ async function activate(context) {
 async function deactivate() {
 	clearAllEditorDebounceTimers();
 	clearDecorations();
-	// 用户时长统计由 geq().js 中控统一管理
+	// 用户时长统计由 qqq.js 中控统一管理
 }
 
 // 导出工具函数供其他模块使用

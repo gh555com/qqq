@@ -152,11 +152,9 @@ class DaemonBridge {
 					this.restartCount = 0;
 					this.available = true;
 					this._setStartError("");
-					logMessage(`${this.name} bridge started and handshaked`, "INFO");
+					logMessage(`${this.name} started`, "INFO");
 					resolve(true);
 					return true;
-				} else {
-					logMessage(`${this.name} ping response invalid: ${JSON.stringify(pong)}`, "WARN");
 				}
 			} catch (e) { }
 
@@ -175,8 +173,8 @@ class DaemonBridge {
 			resolve(false);
 		};
 
-		// 启动ping尝试，增加初始延迟到 100ms，给进程一点启动时间
-		setTimeout(attemptPing, 100);
+		// 启动ping尝试，将初始延迟恢复为 5ms，解决 500ms 延迟问题
+		setTimeout(attemptPing, 5);
 	}
 
 	_handleCrash() {
@@ -344,12 +342,7 @@ class DaemonBridge {
 // Python bridge：优先 python，其次 python3（非 win32）
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
-		// Python 引擎优先在 dist 中寻找（针对 Bundle 环境），如果找不到则尝试 src
-		let scriptPath = path.join(extensionContext.extensionPath, "dist", "kp.py");
-		if (!fs.existsSync(scriptPath)) {
-			scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
-		}
-
+		const scriptPath = path.join(__dirname, "kp.py");
 		if (!fs.existsSync(scriptPath)) {
 			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
 			bridge.available = false;
@@ -361,14 +354,6 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			return new Promise((res) => {
 				let proc;
 				try {
-					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
-
-					// 检查 bin 是否为绝对路径且存在
-					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
-						logMessage(`[Python] 路径不存在: ${bin}`, "WARN");
-						res(false);
-						return;
-					}
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
 						windowsHide: true,
@@ -480,8 +465,9 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		const candidates = [
-			path.join(extensionContext.extensionPath, "assets", "q_engine" + (platform === "win32" ? ".exe" : "")),
-			path.join(extensionContext.extensionPath, "assets", filename),
+			path.join(__dirname, "..", "assets", filename),
+			path.join(__dirname, "assets", filename),
+			path.join(__dirname, filename),
 		];
 
 		let exePath = null;
@@ -498,13 +484,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		}
 
 		try {
-			logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
-			if (!fs.existsSync(exePath)) {
-				logMessage(`[Rust] 路径不存在: ${exePath}`, "WARN");
-				bridge._setStartError(`exe_not_found_real: ${exePath}`);
-				resolve(false);
-				return;
-			}
+			logMessage(`Rust Bridge 尝试启动: ${exePath}`, "INFO");
 			const proc = cp.spawn(exePath, ["--daemon"], {
 				stdio: ["pipe", "pipe", "pipe"],
 				windowsHide: true,
@@ -1034,57 +1014,8 @@ async function checkAndInstallLinuxDeps() {
 	}
 }
 
-/**
- * ★ 幽灵进程肃清协议 (Ghost Process Purgatory)
- * 在插件启动初始化时执行，确保环境中没有旧版本的守护进程残留。
- */
-async function cleanupGhostDaemons() {
-	const isWin = process.platform === "win32";
-
-	// 1. 定义清理目标 (Rust 引擎所有可能的平台二进制名)
-	const rustBins = [
-		"q_engine_win_x64.exe", "q_engine_win_arm64.exe",
-		"q_engine_linux_x64", "q_engine_linux_arm64",
-		"q_engine_mac_x64", "q_engine_mac_arm64"
-	];
-
-	try {
-		if (isWin) {
-			// Windows: 使用 PowerShell 精准匹配命令行中的 kp.py，避免误杀用户其他 Python 任务
-			const pyKill = `Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe'" | Where-Object { $_.CommandLine -like '*kp.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-			try { cp.execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${pyKill}"`, { stdio: 'ignore' }); } catch (e) { }
-
-			// 清理 Rust 引擎残留
-			for (const bin of rustBins) {
-				if (bin.endsWith(".exe")) {
-					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore' }); } catch (e) { }
-				}
-			}
-		} else {
-			// Linux/macOS: 使用 pkill -f 匹配全路径/全命令行
-			try { cp.execSync(`pkill -9 -f "kp.py"`, { stdio: 'ignore' }); } catch (e) { }
-			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore' }); } catch (e) { }
-		}
-	} catch (e) { }
-}
-
-async function startDaemons() {
-	// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
-	try { await cleanupGhostDaemons(); } catch (e) { }
-
+function startDaemons() {
 	const bootSeq = ++_daemonBootSeq;
-
-	// ★ 关键点：打印唯一版本标识，确保日志溯源准确
-	try {
-		const pkg = require(path.join(extensionContext.extensionPath, 'package.json'));
-		const buildTime = new Date().toLocaleString();
-		logMessage(`====================================================`, "INFO");
-		logMessage(`🚀 Q-ENGINE STARTING | VERSION: ${pkg.version} | ${buildTime}`, "INFO");
-		logMessage(`====================================================`, "INFO");
-	} catch (e) {
-		logMessage(`🚀 Q-ENGINE STARTING | (Failed to read version)`, "INFO");
-	}
-
 	const pref = getEnginePreference();
 	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
 
@@ -1147,79 +1078,9 @@ async function startDaemons() {
 // ★ 全局上下文
 // ============================================================================
 let extensionContext = null;
-let ffmpegPath = null;
-let ffprobePath = null;
 
 function init(context) {
 	extensionContext = context;
-
-	// 初始化 FFmpeg 路径
-	const isWin = process.platform === "win32";
-	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
-	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-	const ffInAssets = path.join(extensionPath, "assets", ffName);
-
-	let ffValid = false;
-	if (fs.existsSync(ffInAssets)) {
-		try {
-			// 尝试运行以验证是否为有效的可执行文件
-			const result = cp.spawnSync(ffInAssets, ["-version"], { windowsHide: true });
-			if (result.status === 0) {
-				ffmpegPath = ffInAssets;
-				ffValid = true;
-				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
-			} else {
-				logMessage(`[WARN] FFmpeg in assets is invalid (exit code ${result.status}), trying fallback`, "WARN");
-			}
-		} catch (e) {
-			logMessage(`[WARN] FFmpeg in assets is not executable: ${e.message}, trying fallback`, "WARN");
-		}
-	}
-
-	if (!ffValid) {
-		try {
-			// 1. 尝试直接 require
-			const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
-			if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
-				ffmpegPath = ffmpegInstaller.path;
-				ffValid = true;
-				logMessage(`[INFO] Global FFmpeg from installer (require): ${ffmpegPath}`, "INFO");
-			}
-		} catch (e) { }
-	}
-
-	if (!ffValid) {
-		// 2. 尝试手动从 node_modules 寻找 (针对某些打包环境)
-		try {
-			const possiblePaths = [
-				path.join(extensionPath, "node_modules", "@ffmpeg-installer", isWin ? "win32-x64" : (process.platform + "-" + process.arch), isWin ? "ffmpeg.exe" : "ffmpeg"),
-				path.join(extensionPath, "node_modules", "@ffmpeg-installer", "ffmpeg", "node_modules", "@ffmpeg-installer", isWin ? "win32-x64" : (process.platform + "-" + process.arch), isWin ? "ffmpeg.exe" : "ffmpeg")
-			];
-			for (const p of possiblePaths) {
-				if (fs.existsSync(p)) {
-					ffmpegPath = p;
-					ffValid = true;
-					logMessage(`[INFO] Global FFmpeg found manually in node_modules: ${ffmpegPath}`, "INFO");
-					break;
-				}
-			}
-		} catch (e) { }
-	}
-
-	if (!ffValid) {
-		// 3. 最后的挣扎：即便 assets 下的校验失败，如果它是存在的，也勉强用着，总比 null 强（用户反馈上一轮图片能显示，说明当时虽然校验失败但勉强能跑）
-		if (fs.existsSync(ffInAssets)) {
-			ffmpegPath = ffInAssets;
-			logMessage(`[WARN] Using assets FFmpeg despite validation failure (last resort)`, "WARN");
-		} else {
-			logMessage(`[WARN] FFmpeg not found in assets or via installer`, "WARN");
-		}
-	}
-
-	if (ffmpegPath) {
-		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
-	}
-
 	initUserTracking(context);
 }
 
@@ -1287,6 +1148,17 @@ function logMessage(message, level = "INFO") {
 			fs.appendFileSync(LOG_PATH, line + "\n");
 		} catch (e) { }
 	}
+}
+
+// 专门用于记录 Q 判断耗时的日志函数
+function logQ(ms) {
+	if (!LOG_PATH) return;
+	try {
+		// q.log 与 err.log 同级
+		const qLogPath = path.join(path.dirname(LOG_PATH), "q.log");
+		const line = `${ms} `; // 纯数字，每行一个
+		fs.appendFileSync(qLogPath, line + "\n");
+	} catch (e) { }
 }
 
 // ============================================================================
@@ -1790,7 +1662,7 @@ function formatBytes(size) {
 		val /= 1024;
 		idx++;
 	}
-	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]}`;
+	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]} `;
 }
 
 function formatHours(totalSeconds) {
@@ -2252,15 +2124,11 @@ async function wq() {
 	let handled = false;
 	let files = [];
 	let totalSize = 0;
-	let wqExecutionTime = 0;
 
 	// 1. 尝试使用 Daemon Bridge (高性能)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
-			const startTime = Date.now(); // 只在核心操作前开始计时
 			const res = await shellBridge.call("wq", {}, 3000);
-			wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
-
 			if (res && !res.error) {
 				status = res;
 				handled = true;
@@ -2280,11 +2148,11 @@ async function wq() {
 				}
 			}
 		} catch (e) { }
-	} else {
-		// 2. 备选方案 (VS Code API)
-		const startTime = Date.now(); // 只在核心操作前开始计时
+	}
+
+	// 2. 备选方案 (VS Code API)
+	if (!handled) {
 		const text = await vscode.env.clipboard.readText();
-		wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
 		if (text) status.hasText = true;
 	}
 
@@ -2293,8 +2161,6 @@ async function wq() {
 
 	// A. 白名单识别 (1.纯文本 2.纯文字HTML)
 	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
-		// 保存统计数据
-		saveWqStats(wqExecutionTime);
 		return { type: 'whitelist', subType: 'text', ...baseResult };
 	}
 
@@ -2305,11 +2171,7 @@ async function wq() {
 			if (res && res.$) {
 				const $ = res.$;
 				const hasImg = $('img, video, iframe, embed, object').length > 0;
-				if (!hasImg) {
-					// 保存统计数据
-					saveWqStats(wqExecutionTime);
-					return { type: 'whitelist', subType: 'html_text', ...baseResult };
-				}
+				if (!hasImg) return { type: 'whitelist', subType: 'html_text', ...baseResult };
 			}
 		} catch (e) { }
 	}
@@ -2327,48 +2189,7 @@ async function wq() {
 		}
 	}
 
-	// 保存统计数据
-	saveWqStats(wqExecutionTime);
-
 	return { type: 'yellowlist', subType, ...baseResult };
-}
-
-// 保存wq统计数据的辅助函数
-function saveWqStats(wqExecutionTime) {
-	// 异常值过滤：只统计1ms到1000ms之间的时间
-	if (wqExecutionTime >= 1 && wqExecutionTime <= 1000) {
-		// 持久化统计到globalState
-		if (extensionContext) {
-			const wqStats = extensionContext.globalState.get("qqq_wq_stats", {
-				totalTime: 0,
-				count: 0,
-				recentTimes: [],
-				maxTime: 0
-			});
-
-			// 更新统计数据
-			wqStats.totalTime += wqExecutionTime;
-			wqStats.count += 1;
-
-			// 更新最近7次时间（使用环形缓冲区）
-			wqStats.recentTimes.push(wqExecutionTime);
-			if (wqStats.recentTimes.length > 7) {
-				wqStats.recentTimes.shift();
-			}
-
-			// 更新最大时间
-			if (wqExecutionTime > wqStats.maxTime) {
-				wqStats.maxTime = wqExecutionTime;
-			}
-
-			// 保存到globalState
-			extensionContext.globalState.update("qqq_wq_stats", wqStats);
-			// 触发状态栏更新
-			if (typeof updateStatusBarNow === 'function') {
-				updateStatusBarNow();
-			}
-		}
-	}
 }
 
 function getEngineTryOrder(pref) {
@@ -2496,13 +2317,6 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const denom = pstats.hitTotal + pstats.missTotal;
 	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
 
-	// 获取wq前摇时间统计
-	let wqStats = { totalTime: 0, count: 0, recentTimes: [], maxTime: 0 };
-	if (extensionContext) {
-		wqStats = extensionContext.globalState.get("qqq_wq_stats", wqStats);
-	}
-	const averageTime = wqStats.count > 0 ? Math.round(wqStats.totalTime / wqStats.count) : 0;
-
 	const pref = getEnginePreference();
 	const active = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
 
@@ -2530,24 +2344,18 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `;
 	}
 
-	const ioLine = `${active.name}${mismatchText}`;
-
-	// 格式化wq时间显示
-	const recentTimesStr = wqStats.recentTimes.join(', ');
-	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`;
+	const ioLine = `** IO 引擎：** ${active.name}${mismatchText} `;
 
 	const tooltip = new vscode.MarkdownString(
-		`⏱️ **陪伴时间：** ${formatHours(totalSeconds)}
-
-💾 **磁盘缓存：** ${formatBytes(cacheBytes)}
-
-🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})
-
-${wqLine}
-
-⚡ **IO 引擎：** ${ioLine}`
+		[
+			`< div style = "background:#fff !important; color:#000 !important; padding:8px; border-radius:4px; border:1px solid #ddd;" > `,
+			`** 累计使用时间：** ${formatHours(totalSeconds)} `,
+			`** 磁盘缓存：** ${formatBytes(cacheBytes)} `,
+			`** 缓存命中率：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})`,
+			ioLine,
+			`</div > `,
+		].join("\n\n")
 	);
-
 	tooltip.isTrusted = true;
 	tooltip.supportHtml = true;
 
@@ -2555,6 +2363,14 @@ ${wqLine}
 	statusBarItem.show();
 }
 
+// ============================================================================
+// ★ 状态面板功能
+// ============================================================================
+// 侧边栏状态面板相关（已移至 sidebarWebViewProvider）
+
+// ============================================================================
+// ★ IO Scheduler & Queue (从 qqq.js 迁移)
+// ============================================================================
 class TaskScheduler {
 	constructor(maxConcurrency = 8) {
 		this.maxConcurrency = Math.max(1, maxConcurrency | 0);
@@ -2668,6 +2484,7 @@ module.exports = {
 	logMessage,
 	logMessageRateLimited,
 	bridgeStderrKey,
+	logQ,
 
 	// 对话框
 	showInformationMessage,
@@ -2716,8 +2533,6 @@ module.exports = {
 	tryEngineCall,
 	getActiveEngineCode,
 	getActiveEngineName,
-	ffmpegPath: () => ffmpegPath,
-	ffprobePath: () => ffprobePath,
 
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
