@@ -506,7 +506,7 @@ class SidebarWebViewProvider {
     </div>
 
     <script>
-        // 稳定性保障：尝试获取 VS Code API，如果失败则静默
+        // --- 1. 稳定性保障：立即定义核心函数 ---
         let vscode;
         try {
             vscode = acquireVsCodeApi();
@@ -517,8 +517,6 @@ class SidebarWebViewProvider {
         function postMessage(msg) {
             if (vscode) {
                 vscode.postMessage(msg);
-            } else {
-                console.error("VS Code API not available");
             }
         }
 
@@ -528,114 +526,86 @@ class SidebarWebViewProvider {
                 playNotificationSound(1);
             }
         }
+
         function copyToClipboard(id) { postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
         function deleteHistoryItem(id) { postMessage({ command: 'deleteHistoryItem', itemId: id }); }
         function clearAllHistory() { postMessage({ command: 'clearAllHistory' }); }
-
         function refreshData() {
             const list = document.getElementById('historyList');
             const scrollPos = list ? { scrollTop: list.scrollTop, scrollHeight: list.scrollHeight } : null;
             postMessage({ command: 'refresh', scrollPosition: scrollPos });
         }
 
-        let currentAudio = null;
+        function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
 
+        // --- 2. 媒体处理 ---
+        let currentAudio = null;
         function stopMusic() {
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio.currentTime = 0;
                 currentAudio = null;
-                document.getElementById('musicStatus').innerText = 'Stopped';
-                document.getElementById('musicStatus').classList.remove('music-playing');
-            }
-        }
-
-        function playNotificationSound(times) {
-            const audioUrl = ${JSON.stringify(audioUri || null).replace(/</g, '\\u003c')};
-            if (audioUrl && audioUrl !== 'undefined' && audioUrl !== 'null') {
-                playAudio(audioUrl, times);
+                const status = document.getElementById('musicStatus');
+                if (status) {
+                    status.innerText = 'Stopped';
+                    status.classList.remove('music-playing');
+                }
             }
         }
 
         function playAudio(url, times = 1) {
             try {
-                if (url) {
-                    stopMusic();
-                    // 处理可能的 base64 (由 qqq.js 传过来)
-                    let source = url;
-                    if (typeof url === 'string' && !url.startsWith('http') && !url.startsWith('vscode-webview-resource') && !url.startsWith('data:')) {
-                        source = 'data:audio/mp3;base64,' + url;
-                    }
+                if (!url) return;
+                stopMusic();
+                let source = url;
+                if (typeof url === 'string' && !url.startsWith('http') && !url.startsWith('vscode-webview-resource') && !url.startsWith('data:')) {
+                    source = 'data:audio/mp3;base64,' + url;
+                }
 
-                    const audio = new Audio(source);
-                    currentAudio = audio;
-                    audio.volume = 0.5;
+                const audio = new Audio(source);
+                currentAudio = audio;
+                audio.volume = 0.5;
 
-                    document.getElementById('musicStatus').innerText = 'Savoring...';
-                    document.getElementById('musicStatus').classList.add('music-playing');
+                const status = document.getElementById('musicStatus');
+                if (status) {
+                    status.innerText = 'Savoring...';
+                    status.classList.add('music-playing');
+                }
 
-                    if (times === 0) {
-                        audio.loop = true;
-                    } else {
-                        let playCount = 1;
-                        audio.addEventListener('ended', () => {
-                            if (playCount < times) {
-                                playCount++;
-                                audio.currentTime = 0;
-                                audio.play().catch(e => console.log('Audio loop failed:', e));
-                            } else {
-                                document.getElementById('musicStatus').innerText = 'Finished';
-                                document.getElementById('musicStatus').classList.remove('music-playing');
+                if (times === 0) {
+                    audio.loop = true;
+                } else {
+                    let playCount = 1;
+                    audio.addEventListener('ended', () => {
+                        if (playCount < times) {
+                            playCount++;
+                            audio.currentTime = 0;
+                            audio.play().catch(e => console.log('Audio loop failed:', e));
+                        } else {
+                            if (status) {
+                                status.innerText = 'Finished';
+                                status.classList.remove('music-playing');
                             }
-                        });
-                    }
-                    audio.play().catch(e => {
-                        console.log('Audio blocked:', e);
-                        document.getElementById('musicStatus').innerText = 'Playback Blocked';
+                        }
                     });
                 }
+                audio.play().catch(e => {
+                    console.log('Audio blocked:', e);
+                    if (status) status.innerText = 'Playback Blocked';
+                });
             } catch (e) {
                 console.log('Audio error:', e);
             }
         }
 
-        function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
-
-        // Message Handling
-        window.addEventListener('message', e => {
-            const m = e.data;
-            if (m.command === 'updateData') {
-                // Update Dial
-                document.querySelector('.stats-grid').innerHTML =
-                    '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + m.stats.h + 'h ' + m.stats.m + 'm</div></div>' +
-                    '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + m.stats.cacheMB.toFixed(1) + 'MB</div></div>' +
-                    '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + m.stats.hitRate.toFixed(1) + '%</div></div>' +
-                    '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + m.stats.engineInfo.name + '</div></div>' +
-                    '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + m.stats.engineInfo.details + '</div></div>';
-
-                // Update History
-                const list = document.getElementById('historyList');
-                if (m.history && m.history.length > 0) {
-                    list.innerHTML = m.history.map(item =>
-                        '<div class="history-item" data-id="' + item.id + '">' +
-                            '<div class="item-time">' + item.time + '</div>' +
-                            '<div class="item-preview">' + escapeHtml(item.preview) + '</div>' +
-                            '<div class="item-actions">' +
-                                '<button class="action-mini-btn" onclick="copyToClipboard(\'' + item.id + '\')">📋 复制</button>' +
-                                '<button class="action-mini-btn" onclick="deleteHistoryItem(\'' + item.id + '\')">🗑️ 删除</button>' +
-                            '</div>' +
-                        '</div>'
-                    ).join('');
-                } else {
-                    list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
-                }
-                updateAllScrollbars();
-            } else if (m.command === 'playAudio') {
-                playAudio(m.audioUrl || m.base64, m.times || 1);
+        function playNotificationSound(times) {
+            const audioUrl = ${JSON.stringify(audioUri || null)};
+            if (audioUrl && audioUrl !== 'null') {
+                playAudio(audioUrl, times);
             }
-        });
+        }
 
-        // Scrollbar Logic
+        // --- 3. 滚动条逻辑 ---
         function setupScrollbar(containerId, scrollbarId, thumbId) {
             const container = document.getElementById(containerId);
             const scrollbar = document.getElementById(scrollbarId);
@@ -682,18 +652,54 @@ class SidebarWebViewProvider {
 
         const updateOuter = setupScrollbar('mainContent', 'outerScrollbar', 'outerThumb');
         const updateInner = setupScrollbar('historyList', 'innerScrollbar', 'innerThumb');
-
         function updateAllScrollbars() { updateOuter(); updateInner(); }
         window.onresize = updateAllScrollbars;
 
-        // Init
-        const initialPos = ${JSON.stringify(scrollPosition || null).replace(/</g, '\\u003c')};
-        if (initialPos && document.getElementById('historyList')) {
-            document.getElementById('historyList').scrollTop = initialPos.scrollTop;
-        }
+        // --- 4. 消息处理 ---
+        window.addEventListener('message', e => {
+            const m = e.data;
+            if (m.command === 'updateData') {
+                const grid = document.querySelector('.stats-grid');
+                if (grid) {
+                    grid.innerHTML =
+                        '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + m.stats.h + 'h ' + m.stats.m + 'm</div></div>' +
+                        '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + m.stats.cacheMB.toFixed(1) + 'MB</div></div>' +
+                        '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + m.stats.hitRate.toFixed(1) + '%</div></div>' +
+                        '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + m.stats.engineInfo.name + '</div></div>' +
+                        '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + m.stats.engineInfo.details + '</div></div>';
+                }
 
-        updateAllScrollbars();
-        // 移除重复的 setInterval，由 extension 主动 push 数据
+                const list = document.getElementById('historyList');
+                if (list) {
+                    if (m.history && m.history.length > 0) {
+                        list.innerHTML = m.history.map(item =>
+                            '<div class="history-item" data-id="' + item.id + '">' +
+                                '<div class="item-time">' + item.time + '</div>' +
+                                '<div class="item-preview">' + escapeHtml(item.preview) + '</div>' +
+                                '<div class="item-actions">' +
+                                    '<button class="action-mini-btn" onclick="copyToClipboard(\'' + item.id + '\')">📋 复制</button>' +
+                                    '<button class="action-mini-btn" onclick="deleteHistoryItem(\'' + item.id + '\')">🗑️ 删除</button>' +
+                                '</div>' +
+                            '</div>'
+                        ).join('');
+                    } else {
+                        list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+                    }
+                }
+                updateAllScrollbars();
+            } else if (m.command === 'playAudio') {
+                playAudio(m.audioUrl || m.base64, m.times || 1);
+            }
+        });
+
+        // --- 5. 初始化 ---
+        (function() {
+            const initialPos = ${JSON.stringify(scrollPosition)};
+            if (initialPos && document.getElementById('historyList')) {
+                document.getElementById('historyList').scrollTop = initialPos.scrollTop;
+            }
+            updateAllScrollbars();
+        })();
     </script>
 </body>
 </html>`;
