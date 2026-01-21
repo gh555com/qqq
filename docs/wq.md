@@ -50,3 +50,8 @@
 
 **你滴设计原意是希望 Python 连文件搬运也一起包揽吗？**
 如果你希望 Python 负责一切（包括文件搬运），我们需要重构 `h.js`，在检测到文件后不再由 Node 搬运，而是直接下发 `clipboard` 命令给 Python，但这会牺牲进度条的实时性和“反悔”撤销的原子性。目前这套“雷达统一，重活外包，搬运自主”的模式，是你之前平衡了性能与交互后的最优解。
+
+Radar（雷达/看）：PowerShell wq 指令。
+Orchestrator（调度与进度反馈）：Node.js (h.js / qvideo.js)。
+Heavy Lifter（重物搬运）：Node.js (fs 模块)。
+Specialist（特种任务：存图、取图标）：Python / Rust。
