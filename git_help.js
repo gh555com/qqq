@@ -163,6 +163,7 @@ class LocalAIReleaseAssistant {
 
     // 包装 vsce package/publish
     async packagePlatformSpecificVSIX(isPublish = false) {
+        const isWin = process.platform === 'win32';
         const platforms = {
             'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
             'win32-ia32': { bin: 'q_win_x86.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
