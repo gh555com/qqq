@@ -1073,6 +1073,18 @@ async function startDaemons() {
 	try { await cleanupGhostDaemons(); } catch (e) { }
 
 	const bootSeq = ++_daemonBootSeq;
+
+	// ★ 关键点：打印唯一版本标识，确保日志溯源准确
+	try {
+		const pkg = require(path.join(extensionContext.extensionPath, 'package.json'));
+		const buildTime = new Date().toLocaleString();
+		logMessage(`====================================================`, "INFO");
+		logMessage(`🚀 Q-ENGINE STARTING | VERSION: ${pkg.version} | ${buildTime}`, "INFO");
+		logMessage(`====================================================`, "INFO");
+	} catch (e) {
+		logMessage(`🚀 Q-ENGINE STARTING | (Failed to read version)`, "INFO");
+	}
+
 	const pref = getEnginePreference();
 	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
 
