@@ -166,9 +166,9 @@ class LocalAIReleaseAssistant {
         const isWin = process.platform === 'win32';
         const platforms = {
             'win32-x64': { bin: 'q_win_x64.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
-            'win32-ia32': { bin: 'q_win_x86.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
             'win32-arm64': { bin: 'q_win_arm64.exe', engine: 'q_engine.exe', ffmpeg: 'ffmpeg.exe' },
             'linux-x64': { bin: 'q_linux_x64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
+            'linux-arm64': { bin: 'q_linux_arm64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
             'darwin-x64': { bin: 'q_mac_x64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
             'darwin-arm64': { bin: 'q_mac_arm64', engine: 'q_engine', ffmpeg: 'ffmpeg' },
             'universal': { bin: null, engine: null, ffmpeg: null }
