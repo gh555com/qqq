@@ -123,13 +123,16 @@ class SidebarWebViewProvider {
     }
 
     updateContent() {
-        if (!this._view) return;
+        if (!this._view || !this._view.webview) return;
 
         try {
-            // 获取剪切板历史数据
+            // 获取剪切板历史数据 (进一步限制以确保稳定性)
             let clipboardHistory = [];
             if (this.global.clipboardHistoryManager) {
-                clipboardHistory = this.global.clipboardHistoryManager.getHistory(20);
+                clipboardHistory = this.global.clipboardHistoryManager.getHistory(30).map(item => ({
+                    ...item,
+                    preview: item.preview ? (item.preview.length > 200 ? item.preview.substring(0, 200) + '...' : item.preview) : ''
+                }));
             }
 
             const cacheStats = this.calculateActualCacheSize();
@@ -157,31 +160,16 @@ class SidebarWebViewProvider {
             }
 
             const activeEngine = this.getActiveEngineInfo();
+            // 转义引擎详情和名称，防止破坏 HTML
+            activeEngine.name = this.escapeHtml(activeEngine.name);
+            activeEngine.details = this.escapeHtml(activeEngine.details);
 
-            // 物理读取音频（仅在第一次或刷新时需要）
-            let audioBase64 = '';
-            try {
-                const soundPath = path.join(this.context.extensionPath, "assets", "q.mp3");
-                if (fs.existsSync(soundPath)) {
-                    audioBase64 = fs.readFileSync(soundPath).toString('base64');
-                }
-            } catch (e) { }
+            // 使用 asWebviewUri 获取音频 URI，避免注入巨大的 base64 导致 SyntaxError
+            const soundUri = this._view.webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, "assets", "q.mp3")));
 
-            // 核心逻辑：如果 HTML 已经加载过，则发送消息更新数据，而不是重载整个页面
-            if (this._view.webview.html && this._view.webview.html.length > 100) {
-                this.postMessage({
-                    command: 'updateData',
-                    stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
-                    history: clipboardHistory.map(item => ({
-                        id: item.id,
-                        time: this.getFormattedTime(item.timestamp),
-                        preview: item.preview
-                    }))
-                });
-            } else {
-                // 仅在第一次渲染时设置 HTML
-                this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, audioBase64);
-            }
+            // 总是设置 HTML 以确保脚本正确加载和监听器注册
+            // 之前的 "仅在第一次渲染时设置 HTML" 优化在脚本有错误时会导致无法恢复
+            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
         } catch (error) {
             console.error('更新内容失败:', error);
         }
@@ -325,7 +313,7 @@ class SidebarWebViewProvider {
             .replace(/'/g, '&#039;');
     }
 
-    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioBase64 = '') {
+    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioUri = '') {
         const historyHtml = clipboardHistory.length > 0
             ? clipboardHistory.map(item => `
                 <div class="history-item" data-id="${item.id}">
@@ -543,17 +531,17 @@ class SidebarWebViewProvider {
         }
 
         function playNotificationSound(times) {
-            const base64Data = '${audioBase64}';
-            if (base64Data && base64Data !== 'undefined' && base64Data !== 'null') {
-                playAudio(base64Data, times);
+            const audioUrl = ${JSON.stringify(audioUri || null).replace(/</g, '\\u003c')};
+            if (audioUrl && audioUrl !== 'undefined' && audioUrl !== 'null') {
+                playAudio(audioUrl, times);
             }
         }
 
-        function playAudio(base64, times = 1) {
+        function playAudio(url, times = 1) {
             try {
-                if (base64) {
+                if (url) {
                     stopMusic();
-                    const audio = new Audio('data:audio/mp3;base64,' + base64);
+                    const audio = new Audio(url);
                     currentAudio = audio;
                     audio.volume = 0.5;
 
@@ -617,7 +605,7 @@ class SidebarWebViewProvider {
                 }
                 updateAllScrollbars();
             } else if (m.command === 'playAudio') {
-                playAudio(m.base64, m.times || 1);
+                playAudio(m.audioUrl || m.base64, m.times || 1);
             }
         });
 
@@ -673,7 +661,7 @@ class SidebarWebViewProvider {
         window.onresize = updateAllScrollbars;
 
         // Init
-        const initialPos = ${JSON.stringify(scrollPosition)};
+        const initialPos = ${JSON.stringify(scrollPosition || null).replace(/</g, '\\u003c')};
         if (initialPos && document.getElementById('historyList')) {
             document.getElementById('historyList').scrollTop = initialPos.scrollTop;
         }
