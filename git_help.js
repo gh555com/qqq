@@ -210,9 +210,9 @@ class LocalAIReleaseAssistant {
                         // 兜底：如果是当前平台，尝试使用 require('@ffmpeg-installer/ffmpeg').path
                         const currentPlatform = process.platform + '-' + process.arch;
                         const isCurrentPlatform = (t === 'win32-x64' && currentPlatform === 'win32-x64') ||
-                                                 (t === 'linux-x64' && currentPlatform === 'linux-x64') ||
-                                                 (t === 'darwin-x64' && currentPlatform === 'darwin-x64') ||
-                                                 (t === 'darwin-arm64' && currentPlatform === 'darwin-arm64');
+                            (t === 'linux-x64' && currentPlatform === 'linux-x64') ||
+                            (t === 'darwin-x64' && currentPlatform === 'darwin-x64') ||
+                            (t === 'darwin-arm64' && currentPlatform === 'darwin-arm64');
 
                         if (isCurrentPlatform) {
                             const hostFfmpeg = require('@ffmpeg-installer/ffmpeg').path;

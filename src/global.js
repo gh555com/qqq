@@ -1080,6 +1080,7 @@ async function startDaemons() {
 		const buildTime = new Date().toLocaleString();
 		logMessage(`====================================================`, "INFO");
 		logMessage(`🚀 Q-ENGINE STARTING | VERSION: ${pkg.version} | ${buildTime}`, "INFO");
+		logMessage(`🎯 ACTIVE FFmpeg: ${ffmpegPath || "NONE"} (${ffmpegSource})`, "INFO");
 		logMessage(`====================================================`, "INFO");
 	} catch (e) {
 		logMessage(`🚀 Q-ENGINE STARTING | (Failed to read version)`, "INFO");
@@ -1149,6 +1150,7 @@ async function startDaemons() {
 let extensionContext = null;
 let ffmpegPath = null;
 let ffprobePath = null;
+let ffmpegSource = "NOT_FOUND";
 
 function init(context) {
 	extensionContext = context;
@@ -1163,13 +1165,14 @@ function init(context) {
 	if (fs.existsSync(ffInAssets)) {
 		try {
 			// 尝试运行以验证是否为有效的可执行文件
-			const result = cp.spawnSync(ffInAssets, ["-version"], { 
+			const result = cp.spawnSync(ffInAssets, ["-version"], {
 				windowsHide: true,
 				timeout: 5000 // 增加超时防止卡死
 			});
 			if (result.status === 0) {
 				ffmpegPath = ffInAssets;
 				ffValid = true;
+				ffmpegSource = "ASSETS (Verified)";
 				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
 			} else {
 				const errDetail = result.error ? result.error.message : `status=${result.status}, signal=${result.signal}`;
@@ -1191,6 +1194,7 @@ function init(context) {
 			if (ffmpegInstaller && ffmpegInstaller.path && fs.existsSync(ffmpegInstaller.path)) {
 				ffmpegPath = ffmpegInstaller.path;
 				ffValid = true;
+				ffmpegSource = "INSTALLER (Require)";
 				logMessage(`[INFO] Global FFmpeg from installer (require): ${ffmpegPath}`, "INFO");
 			}
 		} catch (e) { }
@@ -1207,6 +1211,7 @@ function init(context) {
 				if (fs.existsSync(p)) {
 					ffmpegPath = p;
 					ffValid = true;
+					ffmpegSource = "NODE_MODULES (Manual)";
 					logMessage(`[INFO] Global FFmpeg found manually in node_modules: ${ffmpegPath}`, "INFO");
 					break;
 				}
@@ -1215,11 +1220,13 @@ function init(context) {
 	}
 
 	if (!ffValid) {
-		// 3. 最后的挣扎：即便 assets 下的校验失败，如果它是存在的，也勉强用着，总比 null 强（用户反馈上一轮图片能显示，说明当时虽然校验失败但勉强能跑）
+		// 3. 最后的挣扎：即便 assets 下的校验失败，如果它是存在的，也勉强用着
 		if (fs.existsSync(ffInAssets)) {
 			ffmpegPath = ffInAssets;
+			ffmpegSource = "ASSETS (Last Resort)";
 			logMessage(`[WARN] Using assets FFmpeg despite validation failure (last resort)`, "WARN");
 		} else {
+			ffmpegSource = "NOT_FOUND";
 			logMessage(`[WARN] FFmpeg not found in assets or via installer`, "WARN");
 		}
 	}
