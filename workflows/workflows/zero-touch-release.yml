@@ -36,7 +36,7 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           npm install
-          # 确保所有平台的 FFmpeg 都在 node_modules 中准备就绪
+          # 仅仅在打包时按需拉取平台包，确保 git_help.js 有源可查，且版本由 ffmpeg@1.1.0 自动决定
           npm install @ffmpeg-installer/win32-x64 @ffmpeg-installer/win32-ia32 @ffmpeg-installer/linux-x64 @ffmpeg-installer/linux-arm64 @ffmpeg-installer/darwin-x64 @ffmpeg-installer/darwin-arm64 --no-save
           cd version-manager && npm install
 
