@@ -189,6 +189,13 @@ class LocalAIReleaseAssistant {
             // 1. 准备 Rust 引擎
             const srcBin = config.bin ? path.join('assets', config.bin) : null;
             const destBin = config.engine ? path.join('assets', config.engine) : null;
+            let originalBinExists = false;
+
+            if (destBin && fs.existsSync(destBin)) {
+                originalBinExists = true;
+                fs.renameSync(destBin, destBin + '.bak');
+            }
+
             if (srcBin) {
                 if (fs.existsSync(srcBin)) {
                     fs.copyFileSync(srcBin, destBin);
@@ -199,6 +206,13 @@ class LocalAIReleaseAssistant {
 
             // 2. 准备 FFmpeg (强制嵌入对应平台的二进制)
             const ffDest = config.ffmpeg ? path.join('assets', config.ffmpeg) : null;
+            let originalFFExists = false;
+
+            if (ffDest && fs.existsSync(ffDest)) {
+                originalFFExists = true;
+                fs.renameSync(ffDest, ffDest + '.bak');
+            }
+
             if (ffDest) {
                 try {
                     let ffSrc = null;
@@ -246,9 +260,12 @@ class LocalAIReleaseAssistant {
             } catch (e) {
                 console.error(`❌ ${action} ${t} 失败:`, e.message);
             } finally {
-                // 清理临时重命名的文件
+                // 清理临时重命名的文件，恢复本地调试环境
                 if (destBin && fs.existsSync(destBin)) fs.unlinkSync(destBin);
+                if (originalBinExists) fs.renameSync(destBin + '.bak', destBin);
+
                 if (ffDest && fs.existsSync(ffDest)) fs.unlinkSync(ffDest);
+                if (originalFFExists) fs.renameSync(ffDest + '.bak', ffDest);
             }
         }
     }

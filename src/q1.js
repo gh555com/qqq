@@ -534,7 +534,8 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 
 			if (!resMatch && !durMatch) {
 				const shortPath = filePath.length > 60 ? "..." + filePath.slice(-57) : filePath;
-				const cleanStderr = stderr.replace(/\r\n/g, " ").slice(0, 200);
+				const cleanStderr = stderr.replace(
+					/\r\n/g, " ").slice(0, 200);
 				geq().logMessage(`FFprobe info failed for ${shortPath}: ${cleanStderr}`, "WARN");
 			}
 
@@ -927,7 +928,8 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
 		const fontPath = getCJKFontPath();
 
-		let textFileEsc = textTempFile.replace(/\\/g, '/').replace(/:/g, '\\:');
+		let textFileEsc = textTempFile.replace(/\\/
+g, '/').replace(/:/g, '\\:');
 		let filterParts = [`drawtext=textfile='${textFileEsc}'`];
 		filterParts.push(`fontsize=${fontSize}`);
 		filterParts.push(`fontcolor=${textColor}`);
@@ -936,7 +938,9 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		filterParts.push(`line_spacing=${lineHeight - fontSize}`);
 
 		if (fontPath) {
-			let fontEsc = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+			let fontEsc = fontPath.replace(
+				/\\/
+g, '/').replace(/:/g, '\\:');
 			filterParts.push(`fontfile='${fontEsc}'`);
 		}
 
@@ -2258,6 +2262,7 @@ ${eol.repeat(gapBelow)}`;
 
 
 
+
 					/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
@@ -2298,10 +2303,12 @@ ${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(f);
 		}
 	} else if (result.type === "folder_text") {
-		const folders = result.text.split(/\r?\n/).filter(f => f.trim());
+		const folders = result.text.split(
+			/\r?\n/).filter(f => f.trim());
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
+			const relPath = path.relative(docDir, folderPath).replace(/\\/
+g, "/");
 			replacement += `
 /\\${relPath}\\/
 ${eol}`;
