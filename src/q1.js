@@ -928,8 +928,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 
 		const fontPath = getCJKFontPath();
 
-		let textFileEsc = textTempFile.replace(/\\/
-g, '/').replace(/:/g, '\\:');
+		let textFileEsc = textTempFile.replace(/\\/g, '/').replace(/:/g, '\\:');
 		let filterParts = [`drawtext=textfile='${textFileEsc}'`];
 		filterParts.push(`fontsize=${fontSize}`);
 		filterParts.push(`fontcolor=${textColor}`);
@@ -938,9 +937,7 @@ g, '/').replace(/:/g, '\\:');
 		filterParts.push(`line_spacing=${lineHeight - fontSize}`);
 
 		if (fontPath) {
-			let fontEsc = fontPath.replace(
-				/\\/
-g, '/').replace(/:/g, '\\:');
+			let fontEsc = fontPath.replace(/\\/g, '/').replace(/:/g, '\\:');
 			filterParts.push(`fontfile='${fontEsc}'`);
 		}
 
@@ -2142,10 +2139,12 @@ async function renderImages(editor) {
 		});
 	}
 
-	if (newHideRanges.length > 0) {
-		editor.setDecorations(markerHideType, newHideRanges);
-	} else {
-		editor.setDecorations(markerHideType, []);
+	if (markerHideType) {
+		if (newHideRanges.length > 0) {
+			editor.setDecorations(markerHideType, newHideRanges);
+		} else {
+			editor.setDecorations(markerHideType, []);
+		}
 	}
 
 	if (tasks.length > 0) {
@@ -2307,8 +2306,7 @@ ${eol.repeat(gapBelow)}`;
 			/\r?\n/).filter(f => f.trim());
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = path.relative(docDir, folderPath).replace(/\\/
-g, "/");
+			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
 			replacement += `
 /\\${relPath}\\/
 ${eol}`;

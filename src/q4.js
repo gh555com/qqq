@@ -126,7 +126,7 @@ class SidebarWebViewProvider {
         if (!this._view || !this._view.webview) return;
 
         try {
-            // 获取剪切板历史数据 (进一步限制以确保稳定性)
+            // 获取剪切板历史数据
             let clipboardHistory = [];
             if (this.global.clipboardHistoryManager) {
                 clipboardHistory = this.global.clipboardHistoryManager.getHistory(30).map(item => ({
@@ -160,16 +160,22 @@ class SidebarWebViewProvider {
             }
 
             const activeEngine = this.getActiveEngineInfo();
-            // 转义引擎详情和名称，防止破坏 HTML
+            // 转义引擎详情和名称
             activeEngine.name = this.escapeHtml(activeEngine.name);
             activeEngine.details = this.escapeHtml(activeEngine.details);
 
-            // 使用 asWebviewUri 获取音频 URI，避免注入巨大的 base64 导致 SyntaxError
             const soundUri = this._view.webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, "assets", "q.mp3")));
 
-            // 总是设置 HTML 以确保脚本正确加载和监听器注册
-            // 之前的 "仅在第一次渲染时设置 HTML" 优化在脚本有错误时会导致无法恢复
-            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
+            // 如果已经有 HTML，则通过 postMessage 更新数据，避免重新加载导致脚本崩溃
+            if (this._view.webview.html && this._view.webview.html.length > 100) {
+                this._view.webview.postMessage({
+                    command: 'updateData',
+                    stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
+                    history: clipboardHistory
+                });
+            } else {
+                this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
+            }
         } catch (error) {
             console.error('更新内容失败:', error);
         }
@@ -500,22 +506,36 @@ class SidebarWebViewProvider {
     </div>
 
     <script>
-        const vscode = acquireVsCodeApi();
+        // 稳定性保障：尝试获取 VS Code API，如果失败则静默
+        let vscode;
+        try {
+            vscode = acquireVsCodeApi();
+        } catch (e) {
+            console.error("acquireVsCodeApi failed:", e);
+        }
+
+        function postMessage(msg) {
+            if (vscode) {
+                vscode.postMessage(msg);
+            } else {
+                console.error("VS Code API not available");
+            }
+        }
 
         function executeCommand(cmd) {
-            vscode.postMessage({ command: 'executeCommand', cmd: cmd });
+            postMessage({ command: 'executeCommand', cmd: cmd });
             if (cmd !== 'qqq.savorMoments') {
                 playNotificationSound(1);
             }
         }
-        function copyToClipboard(id) { vscode.postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
-        function deleteHistoryItem(id) { vscode.postMessage({ command: 'deleteHistoryItem', itemId: id }); }
-        function clearAllHistory() { vscode.postMessage({ command: 'clearAllHistory' }); }
+        function copyToClipboard(id) { postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
+        function deleteHistoryItem(id) { postMessage({ command: 'deleteHistoryItem', itemId: id }); }
+        function clearAllHistory() { postMessage({ command: 'clearAllHistory' }); }
 
         function refreshData() {
             const list = document.getElementById('historyList');
             const scrollPos = list ? { scrollTop: list.scrollTop, scrollHeight: list.scrollHeight } : null;
-            vscode.postMessage({ command: 'refresh', scrollPosition: scrollPos });
+            postMessage({ command: 'refresh', scrollPosition: scrollPos });
         }
 
         let currentAudio = null;
@@ -541,7 +561,13 @@ class SidebarWebViewProvider {
             try {
                 if (url) {
                     stopMusic();
-                    const audio = new Audio(url);
+                    // 处理可能的 base64 (由 qqq.js 传过来)
+                    let source = url;
+                    if (typeof url === 'string' && !url.startsWith('http') && !url.startsWith('vscode-webview-resource') && !url.startsWith('data:')) {
+                        source = 'data:audio/mp3;base64,' + url;
+                    }
+
+                    const audio = new Audio(source);
                     currentAudio = audio;
                     audio.volume = 0.5;
 
@@ -667,7 +693,7 @@ class SidebarWebViewProvider {
         }
 
         updateAllScrollbars();
-        setInterval(refreshData, 5000);
+        // 移除重复的 setInterval，由 extension 主动 push 数据
     </script>
 </body>
 </html>`;
