@@ -363,14 +363,6 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				try {
 					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
 
-					// ★ 强力清理旧 Python 进程 (针对 Windows)
-					if (process.platform === "win32") {
-						try {
-							// 尝试找出已经在运行的 kp.py 并杀掉，确保我们用的是最新的
-							cp.execSync(`taskkill /F /FI "IMAGENAME eq python.exe" /FI "WINDOWTITLE eq kp.py"`, { stdio: 'ignore' });
-						} catch (e) { }
-					}
-
 					// 检查 bin 是否为绝对路径且存在
 					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
 						logMessage(`[Python] 路径不存在: ${bin}`, "WARN");
@@ -1042,7 +1034,44 @@ async function checkAndInstallLinuxDeps() {
 	}
 }
 
-function startDaemons() {
+/**
+ * ★ 幽灵进程肃清协议 (Ghost Process Purgatory)
+ * 在插件启动初始化时执行，确保环境中没有旧版本的守护进程残留。
+ */
+async function cleanupGhostDaemons() {
+	const isWin = process.platform === "win32";
+
+	// 1. 定义清理目标 (Rust 引擎所有可能的平台二进制名)
+	const rustBins = [
+		"q_engine_win_x64.exe", "q_engine_win_arm64.exe",
+		"q_engine_linux_x64", "q_engine_linux_arm64",
+		"q_engine_mac_x64", "q_engine_mac_arm64"
+	];
+
+	try {
+		if (isWin) {
+			// Windows: 使用 PowerShell 精准匹配命令行中的 kp.py，避免误杀用户其他 Python 任务
+			const pyKill = `Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe'" | Where-Object { $_.CommandLine -like '*kp.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
+			try { cp.execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${pyKill}"`, { stdio: 'ignore' }); } catch (e) { }
+
+			// 清理 Rust 引擎残留
+			for (const bin of rustBins) {
+				if (bin.endsWith(".exe")) {
+					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore' }); } catch (e) { }
+				}
+			}
+		} else {
+			// Linux/macOS: 使用 pkill -f 匹配全路径/全命令行
+			try { cp.execSync(`pkill -9 -f "kp.py"`, { stdio: 'ignore' }); } catch (e) { }
+			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore' }); } catch (e) { }
+		}
+	} catch (e) { }
+}
+
+async function startDaemons() {
+	// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
+	try { await cleanupGhostDaemons(); } catch (e) { }
+
 	const bootSeq = ++_daemonBootSeq;
 	const pref = getEnginePreference();
 	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
