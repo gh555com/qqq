@@ -362,6 +362,15 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				let proc;
 				try {
 					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
+
+					// ★ 强力清理旧 Python 进程 (针对 Windows)
+					if (process.platform === "win32") {
+						try {
+							// 尝试找出已经在运行的 kp.py 并杀掉，确保我们用的是最新的
+							cp.execSync(`taskkill /F /FI "IMAGENAME eq python.exe" /FI "WINDOWTITLE eq kp.py"`, { stdio: 'ignore' });
+						} catch (e) { }
+					}
+
 					// 检查 bin 是否为绝对路径且存在
 					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
 						logMessage(`[Python] 路径不存在: ${bin}`, "WARN");

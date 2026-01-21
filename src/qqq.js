@@ -171,7 +171,12 @@ function cacheKeyForPath(p) {
 // Cache Initialization & Management
 // ============================================================================
 function initCache(context) {
-	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	const globalStoragePath = context.globalStorageUri?.fsPath || context.globalStoragePath;
+	if (!globalStoragePath) {
+		global.logMessage("initCache: globalStoragePath is undefined!", "ERROR");
+		return;
+	}
+	cacheDir = path.join(globalStoragePath, CACHE_DIR_NAME);
 	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 	loadCacheMeta();
 	validateCache();
@@ -1224,14 +1229,25 @@ let q2Module = null;
 async function activate(context) {
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
 
+	if (!context) {
+		global.logMessage("activate: context is undefined!", "ERROR");
+		return;
+	}
+
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
 
+	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+	if (!extensionPath) {
+		global.logMessage("activate: extensionPath is undefined!", "ERROR");
+		return;
+	}
+
 	// 重新校验 FFmpeg 绝对路径
 	const isWin = process.platform === "win32";
 	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
-	const ffInAssets = path.join(context.extensionPath, "assets", ffName);
+	const ffInAssets = path.join(extensionPath, "assets", ffName);
 	if (fs.existsSync(ffInAssets)) {
 		ffmpegPath = ffInAssets;
 		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
