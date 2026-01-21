@@ -11,7 +11,19 @@ const crypto = require("crypto");
 const os = require("os");
 const { TextDecoder } = require("util");
 
-const qqq = require("./qqq");
+// 延迟加载 qqq 以避免循环依赖
+let qqq = null;
+function getQqq() {
+	if (!qqq) {
+		try {
+			qqq = require("./qqq");
+		} catch (e) {
+			global.logMessage(`Failed to lazy-load qqq: ${e.message}`, "ERROR");
+		}
+	}
+	return qqq;
+}
+
 const q3 = require("./q3");
 
 // 新水印的SHA256哈希值
@@ -169,16 +181,24 @@ let smallWatermarkBase64 = null;
 let LARGE_WATERMARK_PATH = "";
 let SMALL_WATERMARK_PATH = "";
 
-// ==================== ★★★ 调度器（分层）★★★ ====================
-const probeScheduler =
-	qqq?.probeScheduler && typeof qqq.probeScheduler.schedule === "function"
-		? qqq.probeScheduler
-		: { schedule: async (_k, fn) => fn() };
+// ==================== ★★★ Schedulers (Layered) ★★★ ====================
+async function scheduleProbe(key, fn) {
+	const _qqq = getQqq();
+	const s = _qqq?.probeScheduler;
+	if (s && typeof s.schedule === "function") {
+		return s.schedule(key, fn);
+	}
+	return fn();
+}
 
-const genScheduler =
-	qqq?.genScheduler && typeof qqq.genScheduler.schedule === "function"
-		? qqq.genScheduler
-		: { schedule: async (_k, fn) => fn() };
+async function scheduleGen(key, fn) {
+	const _qqq = getQqq();
+	const s = _qqq?.genScheduler;
+	if (s && typeof s.schedule === "function") {
+		return s.schedule(key, fn);
+	}
+	return fn();
+}
 
 // ==================== 初始化 ====================
 function verifySystemIntegrity() {
@@ -276,12 +296,12 @@ function clearAllEditorDebounceTimers() {
 // ==================== 错误日志 ====================
 function logCriticalError(filePath, errorMsg) {
 	try {
-		if (!qqq.LOG_PATH) return;
+		if (!getQqq().LOG_PATH) return;
 		const timestamp = new Date().toISOString();
 		const shortPath = filePath.length > 100 ? "..." + filePath.slice(-97) : filePath;
 		const shortErr = errorMsg.length > 500 ? errorMsg.slice(0, 500) + "..." : errorMsg;
 		const logLine = `[${timestamp}] FFMPEG_FAIL: ${shortPath}\n${shortErr}\n\n`;
-		fs.appendFileSync(qqq.LOG_PATH, logLine);
+		fs.appendFileSync(getQqq().LOG_PATH, logLine);
 	} catch (e) { }
 }
 
@@ -292,7 +312,7 @@ function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
 		const key = `ffmpeg_fallback:${e}:${err}`;
 		const shortPath = filePath.length > 140 ? "..." + filePath.slice(-137) : filePath;
 		const shortStderr = (stderr || "").toString().slice(0, 300);
-		qqq.logMessageRateLimited(
+		getQqq().logMessageRateLimited(
 			key,
 			`FFMPEG_FAIL -> fallbackDirectRead: ${shortPath}  ext=${e}  err=${err}${shortStderr ? `  stderr=${shortStderr}` : ""}`,
 			"WARN",
@@ -441,25 +461,25 @@ async function getMediaInfo(filePath, mtimeMs) {
 	if (cached && cached.mtime === mtimeMs) return cached;
 
 	const cacheKey = `probe:info:${filePath}:${mtimeMs}`;
-	return probeScheduler.schedule(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
+	return scheduleProbe(cacheKey, async () => _getMediaInfoInternal(filePath, mtimeMs));
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
-	if (!qqq.ffmpegPath) {
-		logMessage("ffmpegPath 未设置，无法获取媒体信息", "WARN");
+	if (!getQqq().ffmpegPath) {
+		getQqq().logMessage("ffmpegPath 未设置，无法获取媒体信息", "WARN");
 		return null;
 	}
-	if (!fs.existsSync(qqq.ffmpegPath)) {
-		logMessage(`ffmpegPath 文件不存在: ${qqq.ffmpegPath}`, "WARN");
+	if (!fs.existsSync(getQqq().ffmpegPath)) {
+		getQqq().logMessage(`ffmpegPath 文件不存在: ${getQqq().ffmpegPath}`, "WARN");
 		return null;
 	}
 
 	return new Promise((resolve) => {
 		let child;
 		try {
-			child = cp.spawn(qqq.ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
+			child = cp.spawn(getQqq().ffmpegPath, ["-hide_banner", "-i", filePath], { windowsHide: true });
 		} catch (e) {
-			logMessage(`spawn FFmpeg 失败: ${e.message}`, "ERROR");
+			getQqq().logMessage(`spawn FFmpeg 失败: ${e.message}`, "ERROR");
 			resolve(null);
 			return;
 		}
@@ -473,6 +493,12 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			const resMatch = /Stream.*Video:.*,\s*(\d+)x(\d+)/i.exec(stderr);
 			const codecMatch = /Stream.*Video:\s*(.*?)(?:,|$)/i.exec(stderr);
 			const durMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i.exec(stderr);
+
+			if (!resMatch && !durMatch) {
+				const shortPath = filePath.length > 60 ? "..." + filePath.slice(-57) : filePath;
+				const cleanStderr = stderr.replace(/\r\n/g, " ").slice(0, 200);
+				getQqq().logMessage(`FFprobe info failed for ${shortPath}: ${cleanStderr}`, "WARN");
+			}
 
 			const ext = path.extname(filePath).toLowerCase();
 
@@ -769,7 +795,7 @@ function getVisualWidth(str) {
 
 // Generate preview image for plain text file using ffmpeg drawtext
 async function generateTextPreview(filePath, contentId, qualityLevel, textCacheKey) {
-	if (!qqq.ffmpegPath) return null;
+	if (!getQqq().ffmpegPath) return null;
 
 	try {
 		// Only read first 4KB for preview (enough for ~15 lines of text)
@@ -888,7 +914,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 		];
 
 		return new Promise((resolve) => {
-			const child = cp.spawn(qqq.ffmpegPath, args, { windowsHide: true, stdio: 'pipe' });
+			const child = cp.spawn(getQqq().ffmpegPath, args, { windowsHide: true, stdio: 'pipe' });
 			let resolved = false;
 
 			const cleanup = () => {
@@ -920,7 +946,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 					if (!buffer) { resolve(null); return; }
 
 					// 统一缓存命名：.71（cacheKey="71"）
-					qqq.setCacheEntry(contentId, textCacheKey, buffer, {
+					getQqq().setCacheEntry(contentId, textCacheKey, buffer, {
 						width: targetW,
 						height: targetH,
 						type: 'text_preview',
@@ -956,10 +982,10 @@ async function tryTextPreview(filePath, contentId, renderW, renderH) {
 	const textCacheKey = getTextPreviewCacheKey();
 	const outSize = getTextPreviewOutputSize(renderW, renderH);
 
-	const cached = qqq.getCachedBuffer(contentId, textCacheKey);
+	const cached = getQqq().getCachedBuffer(contentId, textCacheKey);
 	if (cached) {
 		// 零错图风险：必须校验 meta.type
-		const meta = qqq.getCacheQualityMeta(contentId, textCacheKey);
+		const meta = getQqq().getCacheQualityMeta(contentId, textCacheKey);
 		if (meta && meta.type === 'text_preview') {
 			return {
 				buffer: cached,
@@ -1131,7 +1157,7 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
 			return;
 		}
 		const pipeArgs = [...args, "pipe:1"];
-		const child = cp.spawn(qqq.ffmpegPath, pipeArgs, {
+		const child = cp.spawn(getQqq().ffmpegPath, pipeArgs, {
 			windowsHide: true,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -1177,7 +1203,7 @@ function runFFmpegToFile(args, cacheFilePath, timeoutMs = 30000) {
 	return new Promise((resolve) => {
 		const tmpPath = cacheFilePath + ".tmp";
 		const fileArgs = [...args, "-y", tmpPath];
-		const child = cp.spawn(qqq.ffmpegPath, fileArgs, {
+		const child = cp.spawn(getQqq().ffmpegPath, fileArgs, {
 			windowsHide: true,
 			stdio: ["ignore", "ignore", "pipe"],
 		});
@@ -1259,10 +1285,10 @@ function tryFallbackDirectRead(filePath, renderW, renderH, info) {
 
 // ==================== Preview Buffer（文本优先，照 a 逻辑接入） ====================
 async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
-	if (!qqq.ffmpegPath) return null;
+	if (!getQqq().ffmpegPath) return null;
 
 	// 性能优先：已知必失败的源文件直接短路（避免反复 ffmpeg）
-	if (qqq.isBrokenFile && qqq.isBrokenFile(contentId, filePath)) {
+	if (getQqq().isBrokenFile && getQqq().isBrokenFile(contentId, filePath)) {
 		return null;
 	}
 
@@ -1271,7 +1297,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	// ★★★ 文本优先：不是看后缀名，而是看实质（照 a）★★★
 	if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || isPlainTextFile(filePath))) {
 		const t = await tryTextPreview(filePath, contentId, renderW, renderH);
-		if (t && qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
+		if (t && getQqq().unmarkFileAsBroken) getQqq().unmarkFileAsBroken(contentId);
 		return t;
 	}
 
@@ -1311,10 +1337,10 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	}
 
 	if (!cacheStrategy.shouldBypassCache) {
-		const cached = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
+		const cached = getQqq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
 			// 零错图风险：必须校验 meta.type
-			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = getQqq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
 				const cachedWidth = meta.width || info?.width || 0;
 				const cachedHeight = meta.height || info?.height || 0;
@@ -1376,12 +1402,12 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 	const taskKey = `gen:${contentId}:${cacheStrategy.cacheKey}`;
 
-	const result = await genScheduler.schedule(taskKey, async () => {
-		const existing = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
+	const result = await scheduleGen(taskKey, async () => {
+		const existing = getQqq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (existing) {
-			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = getQqq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
-				if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
+				if (getQqq().unmarkFileAsBroken) getQqq().unmarkFileAsBroken(contentId);
 				return { success: true, buffer: existing, fromCache: true, meta };
 			}
 		}
@@ -1411,16 +1437,18 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
+		getQqq().logMessage(`Preview generated: ${path.basename(filePath)}, size=${buffer.length}, dur=${finalWebPDuration}`, "INFO");
+
 		// 快速校验：防止 ffmpeg 产出截断/损坏 WebP 被写入缓存导致长期“坏命中”
-		if (qqq.isValidWebPBuffer && !qqq.isValidWebPBuffer(buffer)) {
-			if (qqq.markFileAsBroken) qqq.markFileAsBroken(contentId, filePath, "invalid_webp_output");
+		if (getQqq().isValidWebPBuffer && !getQqq().isValidWebPBuffer(buffer)) {
+			if (getQqq().markFileAsBroken) getQqq().markFileAsBroken(contentId, filePath, "invalid_webp_output");
 			try { if (result.cacheFilePath && fs.existsSync(result.cacheFilePath)) fs.unlinkSync(result.cacheFilePath); } catch { }
 			return null;
 		}
 
 
 		if (result.fromPipe || result.fromFile) {
-			qqq.setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+			getQqq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
 				origWidth: origSize?.width || 0,
@@ -1439,7 +1467,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			enlargeSmallImages
 		);
 
-		if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
+		if (getQqq().unmarkFileAsBroken) getQqq().unmarkFileAsBroken(contentId);
 		return {
 			buffer,
 			webpDuration: finalWebPDuration,
@@ -1453,26 +1481,26 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			const stderr = result.stderr || "";
 
 			// 失败熔断：记录失败并逐步延长冷却时间，避免滚动/重绘时反复 spawn ffmpeg
-			const brokenRec = qqq.markFileAsBroken ? qqq.markFileAsBroken(contentId, filePath, result.error || "FFMPEG_FAIL") : null;
+			const brokenRec = getQqq().markFileAsBroken ? getQqq().markFileAsBroken(contentId, filePath, result.error || "FFMPEG_FAIL") : null;
 
 			// 只有在“强烈怀疑源文件损坏”且连续失败时才用 ffprobe 进一步确认（昂贵，但这里极少发生）
 			if (
 				brokenRec &&
 				brokenRec.count >= 2 &&
-				qqq.shouldVerifySourceAfterFailure &&
-				qqq.shouldVerifySourceAfterFailure(stderr) &&
-				qqq.verifyMediaFile
+				getQqq().shouldVerifySourceAfterFailure &&
+				getQqq().shouldVerifySourceAfterFailure(stderr) &&
+				getQqq().verifyMediaFile
 			) {
 				try {
-					const v = await qqq.verifyMediaFile(filePath, { timeoutMs: 2000, allowRemote: false });
+					const v = await getQqq().verifyMediaFile(filePath, { timeoutMs: 2000, allowRemote: false });
 					if (!v) {
 						// 确认严重损坏：延长冷却到上限（避免无意义重试）
-						qqq.markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 24 * 60 * 60 * 1000 });
+						getQqq().markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 24 * 60 * 60 * 1000 });
 					}
 				} catch { }
 			}
 			if (stderr.includes("moov atom not found")) {
-				qqq.logMessageRateLimited(
+				getQqq().logMessageRateLimited(
 					`corrupt_video:${filePath}`,
 					`Corrupt video file (moov atom not found): ${path.basename(filePath)}`,
 					"WARN"
@@ -1482,7 +1510,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			}
 		} else {
 			logFallbackUsedRateLimited(filePath, ext, result.error, result.stderr || "");
-			if (qqq.unmarkFileAsBroken) qqq.unmarkFileAsBroken(contentId);
+			if (getQqq().unmarkFileAsBroken) getQqq().unmarkFileAsBroken(contentId);
 		}
 		return fallback;
 	}
@@ -1603,7 +1631,7 @@ async function shouldUseFrame(filePath) {
 		}
 
 		// 非文本文件，检查是否能生成有效预览
-		const contentId = qqq.computeFingerprint(filePath);
+		const contentId = getQqq().computeFingerprint(filePath);
 		if (!contentId) {
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
@@ -1638,11 +1666,11 @@ async function shouldUseFrame(filePath) {
 
 		// 检查缓存是否存在且有效
 		const cacheStrategy = determineCacheStrategy(filePath, info);
-		const cachedBuffer = qqq.getCachedBuffer(contentId, cacheStrategy.cacheKey);
+		const cachedBuffer = getQqq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 
 		// 如果有缓存，检查缓存是否有效
 		if (cachedBuffer) {
-			const meta = qqq.getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
+			const meta = getQqq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			// 确保缓存类型正确
 			if (meta && (meta.type === "webp_unified" || meta.type === "text_preview")) {
 				// 缓存结果
@@ -1672,7 +1700,7 @@ async function shouldUseFrame(filePath) {
 		// 如果是视频或动画，检查是否支持
 		if (info.type === "video" || info.type === "animated_image") {
 			// 视频和动画需要缓存支持
-			const result = qqq.ffmpegPath ? true : false;
+			const result = getQqq().ffmpegPath ? true : false;
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
 				result: result,
@@ -1683,7 +1711,7 @@ async function shouldUseFrame(filePath) {
 
 		// 其他需要转换的格式
 		if (info.needsConversion) {
-			const result = qqq.ffmpegPath ? true : false;
+			const result = getQqq().ffmpegPath ? true : false;
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
 				result: result,
@@ -1717,8 +1745,9 @@ function resolvePathToAbsolute(docUri, rawPath) {
 
 	clean = clean.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1");
 
-	const baseDir = path.dirname(docUri.fsPath);
-	const abs = qqq.resolveNavPath(clean, baseDir);
+	const fsPath = docUri ? docUri.fsPath : null;
+	const baseDir = fsPath ? path.dirname(fsPath) : process.cwd();
+	const abs = getQqq().resolveNavPath(clean, baseDir);
 	return abs ? path.normalize(abs) : null;
 }
 
@@ -1820,7 +1849,9 @@ function getEditorId(editor) {
 
 // ==================== 主渲染逻辑 ====================
 async function renderImages(editor) {
-	if (!editor || !isCoreIntegrityValid) {
+	if (!editor) return;
+	if (!isCoreIntegrityValid) {
+		getQqq().logMessage(`renderImages: Integrity is invalid, skipping.`, "WARN");
 		clearDecorations();
 		return;
 	}
@@ -1846,7 +1877,7 @@ async function renderImages(editor) {
 	if (!visibleRanges?.length) return;
 
 	const marginLeft = "100px";
-	const pathRegex = qqq.createPathRegex();
+	const pathRegex = getQqq().createPathRegex();
 
 	const tasks = [];
 	const newHideRanges = [];
@@ -1903,7 +1934,7 @@ async function renderImages(editor) {
 			if (targetLine >= editor.document.lineCount) continue;
 
 			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-			const contentId = qqq.computeFingerprint(absPath);
+			const contentId = getQqq().computeFingerprint(absPath);
 			if (!contentId) continue;
 
 			let isDirectory = false;
@@ -1966,6 +1997,9 @@ async function renderImages(editor) {
 						let mtimeMs = 0;
 						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 						info = await getMediaInfo(absPath, mtimeMs);
+						if (!info) {
+							getQqq().logMessage(`renderImages: getMediaInfo failed for ${absPath}`, "DEBUG");
+						}
 						const fc = getFrameConfig(info);
 						previewWidth = fc.width;
 						previewHeight = fc.height;
@@ -1977,6 +2011,9 @@ async function renderImages(editor) {
 					}
 
 					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+					if (!previewResult) {
+						getQqq().logMessage(`renderImages: getPreviewBuffer returned null for ${absPath}`, "DEBUG");
+					}
 				}
 
 				if (currentRenderVersion !== myVersion) return null;
@@ -2093,8 +2130,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			} else if (block.type === "media") {
 				if (block.path) {
 					const filePath = block.path;
-					if (block.fingerprint) qqq.prefillFingerprint(filePath, block.fingerprint);
-					const relPath = qqq.toSafePath(path.relative(docDir, filePath));
+					if (block.fingerprint) getQqq().prefillFingerprint(filePath, block.fingerprint);
+					const relPath = getQqq().toSafePath(path.relative(docDir, filePath));
 					const isLastItem = i === blocks.length - 1;
 
 					let pxHeight = 0;
@@ -2128,8 +2165,8 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 		replacement = finalContent.join(eol);
 	} else if (result.type === "image" || result.type === "ikge") {
 		const filePath = result.path;
-		if (result.fingerprint) qqq.prefillFingerprint(filePath, result.fingerprint);
-		const relPath = qqq.toSafePath(path.relative(docDir, filePath));
+		if (result.fingerprint) getQqq().prefillFingerprint(filePath, result.fingerprint);
+		const relPath = getQqq().toSafePath(path.relative(docDir, filePath));
 		let pxHeight = LARGE_PREVIEW_HEIGHT;
 		try {
 			let mtimeMs = 0;
@@ -2150,7 +2187,7 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
-			const relPath = qqq.toSafePath(path.relative(docDir, folderPath));
+			const relPath = getQqq().toSafePath(path.relative(docDir, folderPath));
 			const isLastItem = i === folders.length - 1 && files.length === 0;
 			// 文件夹使用图标框的空行数计算
 			let gapBelow = calculateBlankLinesExact(-1, isLastItem);
@@ -2177,9 +2214,9 @@ ${eol.repeat(gapBelow)}`;
 					/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
-			if (fp) qqq.prefillFingerprint(f, fp);
+			if (fp) getQqq().prefillFingerprint(f, fp);
 
-			const relPath = qqq.toSafePath(path.relative(docDir, f));
+			const relPath = getQqq().toSafePath(path.relative(docDir, f));
 
 			let pxHeight = 0;
 			const ext = path.extname(f).toLowerCase();
@@ -2550,7 +2587,7 @@ async function provideCleanlinessEditsAsync(document) {
 	if (!document) return [];
 	const edits = [];
 	const text = document.getText();
-	const regex = qqq.createPathRegex();
+	const regex = getQqq().createPathRegex();
 	const eol = getDocumentEOL(document);
 	let match;
 	const markers = [];
@@ -2652,7 +2689,7 @@ class FileCodeLensProvider {
 	async provideCodeLenses(document) {
 		if (!isCoreIntegrityValid || codelensLevel === "0") return [];
 		const lenses = [];
-		const regex = qqq.createPathRegex();
+		const regex = getQqq().createPathRegex();
 		const text = document.getText();
 		let match;
 		const foldersToFetch = new Set();
@@ -2706,13 +2743,13 @@ class FileCodeLensProvider {
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: `✎( ${fSizeStr}) 🗀qqq`,
-						command: "qqq.revealFileInFolder",
+						command: "getQqq().revealFileInFolder",
 						arguments: [absPath],
 						tooltip: folderTooltip,
 					}),
 					new vscode.CodeLens(r, {
 						title: "✎rename",
-						command: "qqq.renameFile",
+						command: "getQqq().renameFile",
 						arguments: [rawPath, absPath],
 					})
 				);
@@ -2744,7 +2781,7 @@ class FileCodeLensProvider {
 					const arStr = calculateAspectRatioString(info.width, info.height);
 					if (arStr) tooltipText += `\n宽高比：${arStr}`;
 
-					if (qqq.shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
+					if (getQqq().shouldShowDuration(info)) tooltipText += `\n⌛原始时长：${formatDuration(info.duration)}`;
 				}
 			} else if (isText) {
 
@@ -2760,7 +2797,7 @@ class FileCodeLensProvider {
 			lenses.push(
 				new vscode.CodeLens(r, {
 					title: `${titlePrefix}( ${fileSz})${iconPart}${spacePart}${absPath}${titleSuffix}`,
-					command: "qqq.openFile",
+					command: "getQqq().openFile",
 					arguments: [absPath],
 					tooltip: tooltipText,
 				})
@@ -2771,7 +2808,7 @@ class FileCodeLensProvider {
 				lenses.push(
 					new vscode.CodeLens(r, {
 						title: "✎qode",
-						command: "qqq.openFileInRightGroup",
+						command: "getQqq().openFileInRightGroup",
 						arguments: [absPath],
 						tooltip: "在右边分组打开文件并进入编辑状态",
 					})
@@ -2816,7 +2853,7 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 
 	_pendingFolderSizeRequests.set(folderPath, true);
 
-	qqq.getFolderInfo(folderPath).then(result => {
+	getQqq().getFolderInfo(folderPath).then(result => {
 		_pendingFolderSizeRequests.delete(folderPath);
 
 		if (result?.success) {
@@ -2853,7 +2890,7 @@ async function getQqqFolderSize(folderPath) {
 	const cached = folderSizeCache.get(folderPath);
 	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
 
-	const result = await qqq.getFolderInfo(folderPath);
+	const result = await getQqq().getFolderInfo(folderPath);
 	if (result?.success) {
 		const parts = [];
 		let totalFiles = 0;
@@ -2977,7 +3014,7 @@ async function renameFileCommand(rawPath, absPath) {
 		? rawPath.substring(0, rawPath.lastIndexOf("/") + 1) + trimmed
 		: trimmed;
 
-	const regex = qqq.createPathRegex();
+	const regex = getQqq().createPathRegex();
 	const ranges = [];
 	let m;
 	while ((m = regex.exec(doc.getText()))) {
@@ -3017,20 +3054,43 @@ function renderVisibleEditors(delay = 50) {
 	if (editors?.length) editors.forEach((e) => debounceRender(e, delay));
 }
 
-// ==================== 激活与停用 ====================
+// ==================== Initialization ====================
 async function activate(context) {
+	if (!context) {
+		global.logMessage("q1.activate: context is undefined!", "ERROR");
+		return;
+	}
+
 	extensionContext = context;
-	LARGE_WATERMARK_PATH = path.join(context.extensionPath, "assets", "al.png");
-	SMALL_WATERMARK_PATH = path.join(context.extensionPath, "assets", "as.png");
+	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+
+	if (!extensionPath) {
+		global.logMessage("q1.activate: extensionPath is undefined!", "ERROR");
+		return;
+	}
+
+	LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
+	SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");
 
 	try {
-		const global = require('./global');
 		if (global.ConfigManager) global.ConfigManager.setContext(context);
 	} catch (e) { }
 
 	isCoreIntegrityValid = verifySystemIntegrity();
-	qqq.logMessage(`Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
-	if (!isCoreIntegrityValid) return;
+	const _qqq = getQqq();
+
+	if (!isCoreIntegrityValid) {
+		if (_qqq) _getQqq().logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+		else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+		return;
+	}
+
+	if (_qqq) {
+		_getQqq().logMessage(`Integrity: PASSED`, "INFO");
+		_getQqq().logMessage(`FFmpeg Path: ${_getQqq().ffmpegPath}`, "INFO");
+	} else {
+		global.logMessage(`Integrity: PASSED`, "INFO");
+	}
 
 	loadWatermarkResource();
 	refreshConfig();
@@ -3058,18 +3118,18 @@ async function activate(context) {
 				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
-		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
-		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
-		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
-		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.cleanUp", () => {
+		vscode.commands.registerCommand("getQqq().q1", executeClipboardCommand),
+		vscode.commands.registerCommand("getQqq().openFile", openFileCommand),
+		vscode.commands.registerCommand("getQqq().openFileInRightGroup", openFileInRightGroupCommand),
+		vscode.commands.registerCommand("getQqq().revealFileInFolder", revealFileInFolder),
+		vscode.commands.registerCommand("getQqq().renameFile", renameFileCommand),
+		vscode.commands.registerCommand("getQqq().cleanUp", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		}),
-		vscode.commands.registerCommand("qqq.exportDoc", () => {
+		vscode.commands.registerCommand("getQqq().exportDoc", () => {
 			q3.executeExportDocCommand(isCoreIntegrityValid);
 		}),
-		vscode.commands.registerCommand("qqq.exportZip", () => {
+		vscode.commands.registerCommand("getQqq().exportZip", () => {
 			q3.executeExportZipCommand(isCoreIntegrityValid);
 		}),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
@@ -3140,7 +3200,7 @@ async function activate(context) {
 async function deactivate() {
 	clearAllEditorDebounceTimers();
 	clearDecorations();
-	// 用户时长统计由 qqq.js 中控统一管理
+	// 用户时长统计由 getQqq().js 中控统一管理
 }
 
 // 导出工具函数供其他模块使用

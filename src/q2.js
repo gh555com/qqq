@@ -1,7 +1,7 @@
 // File: src/q2.js
-// ★★★ 文件管理器：Webview 界面 + 使用 qqq.js 四级回退 + 防惊群尺寸调度/缓存 ★★★
+// ★★★ 文件管理器：Webview 界面 + 使用 getQqq().js 四级回退 + 防惊群尺寸调度/缓存 ★★★
 // 适配：匹配最新 qqq IO 引擎路径逻辑（跨平台 normalize + 绝对路径保留 + canonical 去重）
-// 说明：本文件内置 normalize/resolve/canonical，若 qqq.js 导出同名函数会自动优先使用 qqq 的实现
+// 说明：本文件内置 normalize/resolve/canonical，若 getQqq().js 导出同名函数会自动优先使用 qqq 的实现
 
 const vscode = require("vscode");
 const path = require("path");
@@ -10,8 +10,19 @@ const crypto = require("crypto");
 const os = require("os");
 // const trash = require("trash"); // trash 7.x is ESM only, use dynamic import instead
 
-// ==================== 从 qqq.js 导入核心接口 ====================
-const qqq = require("./qqq");
+// ==================== 从 getQqq().js 导入核心接口 ====================
+// 延迟加载 qqq 以避免循环依赖
+let qqq = null;
+function getQqq() {
+  if (!qqq) {
+    try {
+      qqq = require("./qqq");
+    } catch (e) {
+      global.logMessage(`Failed to lazy-load qqq in q2: ${e.message}`, "ERROR");
+    }
+  }
+  return qqq;
+}
 const global = require("./global");
 
 // ==================== 完整性校验（与 q1 对齐，可选） ====================
@@ -113,9 +124,10 @@ function _getSystemDriveRoot() {
  */
 function normalizeNavPath(rawPath) {
   // 如果 qqq.js 新增了同名函数，优先使用（向后兼容你“最新 IO 引擎”）
-  if (qqq && typeof qqq.normalizeNavPath === "function") {
+  const _qqq = getQqq();
+  if (_qqq && typeof _qqq.normalizeNavPath === "function") {
     try {
-      return qqq.normalizeNavPath(rawPath);
+      return _qqq.normalizeNavPath(rawPath);
     } catch {
       /* fallthrough */
     }
@@ -164,9 +176,10 @@ function normalizeNavPath(rawPath) {
  */
 function resolveNavPath(rawPath, baseDir) {
   // 如果 qqq.js 新增了同名函数，优先使用
-  if (qqq && typeof qqq.resolveNavPath === "function") {
+  const _qqq = getQqq();
+  if (_qqq && typeof _qqq.resolveNavPath === "function") {
     try {
-      return qqq.resolveNavPath(rawPath, baseDir);
+      return _qqq.resolveNavPath(rawPath, baseDir);
     } catch {
       /* fallthrough */
     }
@@ -190,9 +203,10 @@ function resolveNavPath(rawPath, baseDir) {
  */
 function canonicalizeExistingPath(p) {
   // 如果 qqq.js 新增了同名函数，优先使用（保证 q2/q1/其它模块 canonical 一致）
-  if (qqq && typeof qqq.canonicalizeExistingPath === "function") {
+  const _qqq = getQqq();
+  if (_qqq && typeof _qqq.canonicalizeExistingPath === "function") {
     try {
-      return qqq.canonicalizeExistingPath(p);
+      return _qqq.canonicalizeExistingPath(p);
     } catch {
       /* fallthrough */
     }
@@ -228,9 +242,10 @@ function canonicalizeExistingPath(p) {
 
 function cacheKeyForPath(p) {
   // 如果 qqq.js 导出了 cacheKeyForPath，优先用（保持统一 cacheKey 口径）
-  if (qqq && typeof qqq.cacheKeyForPath === "function") {
+  const _qqq = getQqq();
+  if (_qqq && typeof _qqq.cacheKeyForPath === "function") {
     try {
-      return qqq.cacheKeyForPath(p);
+      return _qqq.cacheKeyForPath(p);
     } catch {
       /* fallthrough */
     }
@@ -324,7 +339,7 @@ function escapeJsStringLiteral(str) {
     .replace(/\u2029/g, "\\u2029");
 }
 
-// ==================== 文件夹大小获取（使用 qqq.js 四级回退 + 缓存 + 调度）====================
+// ==================== 文件夹大小获取（使用 getQqq().js 四级回退 + 缓存 + 调度）====================
 async function getFolderSize(folderPath) {
   const canon = canonicalizeExistingPath(folderPath);
   const key = cacheKeyForPath(canon);
@@ -341,7 +356,7 @@ async function getFolderSize(folderPath) {
     if (again && now2 - again.ts < SIZE_CACHE_MAX_AGE_MS) return again.size;
 
     try {
-      const result = await qqq.getFolderInfo(canon);
+      const result = await getQqq().getFolderInfo(canon);
       if (result && result.success) {
         const sz = Number(result.total_size) || 0;
         folderSizeCache.set(key, { size: sz, ts: Date.now() });
@@ -351,7 +366,7 @@ async function getFolderSize(folderPath) {
       if (result && result.error) throw new Error(result.error);
       throw new Error("unknown_error");
     } catch (error) {
-      qqq.logMessage(`获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
+      getQqq().logMessage(`获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
       throw error;
     }
   });
@@ -448,7 +463,7 @@ function getFileSizeDisplayAsync(itemPath, mode) {
         return handleSize(folderSz);
       }
     } catch (err) {
-      qqq.logMessage(`计算大小失败: ${canon} - ${err.message}`, "ERROR");
+      getQqq().logMessage(`计算大小失败: ${canon} - ${err.message}`, "ERROR");
       return " ...err ";
     }
   });
@@ -634,7 +649,7 @@ function getDrives() {
         if (driveMatch) drives.push(driveMatch[1]);
       }
     } catch (error) {
-      qqq.logMessage("获取驱动器列表失败: " + error.message, "ERROR");
+      getQqq().logMessage("获取驱动器列表失败: " + error.message, "ERROR");
       drives.push("C:");
     }
   } else {
@@ -669,7 +684,7 @@ function getDirectoryContents(dirPath) {
     contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
     contents.files.sort((a, b) => collator.compare(a.name, b.name));
   } catch (error) {
-    qqq.logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
+    getQqq().logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
   }
 
   return contents;
@@ -1418,7 +1433,7 @@ function getWebviewContent(currentPath) {
   try {
     htmlTemplate = require("./q2.html");
   } catch (error) {
-    qqq.logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+    getQqq().logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
     return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
   }
 
@@ -1603,7 +1618,7 @@ function showSaveAsDialog() {
         items,
       });
     } catch (error) {
-      qqq.logMessage(`更新资源展示区失败: ${error}`, "ERROR");
+      getQqq().logMessage(`更新资源展示区失败: ${error}`, "ERROR");
     }
   }
 
@@ -1619,7 +1634,7 @@ function showSaveAsDialog() {
         } catch { }
       }, 100);
     } catch (e) {
-      qqq.logMessage("Refresh Webview failed: " + e.message, "ERROR");
+      getQqq().logMessage("Refresh Webview failed: " + e.message, "ERROR");
     }
   }
 
@@ -1893,15 +1908,25 @@ function showSaveAsDialog() {
 
 // ==================== 扩展激活 ====================
 async function activate(context) {
+  if (!context) {
+    global.logMessage("q2.activate: context is undefined!", "ERROR");
+    return;
+  }
   globalContext = context;
-  LARGE_WATERMARK_PATH = path.join(context.extensionPath, "assets", "al.png");
-  SMALL_WATERMARK_PATH = path.join(context.extensionPath, "assets", "as.png");
+  const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+  if (!extensionPath) {
+    global.logMessage("q2.activate: extensionPath is undefined!", "ERROR");
+    return;
+  }
+
+  LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
+  SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");
 
   isCoreIntegrityValid = verifySystemIntegrity();
-  qqq.logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
+  getQqq().logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
 
   getConfig();
-  qqq.logMessage("Q2: 文件管理器已激活（使用 qqq.js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
+  getQqq().logMessage("Q2: 文件管理器已激活（使用 getQqq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
 
   context.subscriptions.push(
     vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),

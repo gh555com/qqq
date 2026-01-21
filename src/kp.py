@@ -846,6 +846,22 @@ def _dispatch_action(cmd):
             out["status"] = "error"
             out["message"] = "no path provided"
         return out
+    if action == "hasImage":
+        # Check if clipboard contains image format
+        try:
+            if not OpenClipboard(None):
+                out["value"] = False
+                return out
+            try:
+                # CF_DIB (8) or CF_DIBV5 (17)
+                has_dib = IsClipboardFormatAvailable(
+                    8) or IsClipboardFormatAvailable(17)
+                out["value"] = bool(has_dib)
+            finally:
+                CloseClipboard()
+        except:
+            out["value"] = False
+        return out
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
         out["type"] = "peek"

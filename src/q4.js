@@ -506,7 +506,7 @@ class SidebarWebViewProvider {
                 <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">${engineInfo.details}</div></div>
             </div>
 
-            <div class="footer">qqq 扩展 - 领航员面板</div>
+            <div class="footer">的梦gaea  GH HEALTH</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
     </div>
