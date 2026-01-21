@@ -98,10 +98,10 @@ class ClipboardHistoryManager {
     cleanupExpiredItems() {
         const now = Date.now();
         const cutoffTime = now - (this.autoCleanupDays * 24 * 60 * 60 * 1000);
-        
+
         const originalLength = this.history.length;
         this.history = this.history.filter(item => item.timestamp >= cutoffTime);
-        
+
         if (this.history.length < originalLength) {
             console.log(`ClipboardHistoryManager: 清理了 ${originalLength - this.history.length} 条过期记录`);
             this.saveHistory();
@@ -116,23 +116,27 @@ class ClipboardHistoryManager {
             // 使用 globalStorageUri 作为存储位置
             const storagePath = this.context.globalStorageUri.fsPath;
             const clipboardDir = path.join(storagePath, 'clipboard-history');
-            
+
             // 确保目录存在
             if (!fs.existsSync(clipboardDir)) {
                 fs.mkdirSync(clipboardDir, { recursive: true });
             }
-            
+
             // 根据优化级别选择存储格式
             const fileExtension = msgpack ? 'bin' : 'json';
             this.historyFilePath = path.join(clipboardDir, `history.${fileExtension}`);
-            
+
             // 初始化内存缓存
             this.memoryCache = {
                 history: [],
                 lastUpdated: 0,
-                size: 0
+                size: 0,
+                maxSize: 25 * 1024 * 1024, // 5MB 内存缓存限制
+                expiryTime: 25 * 60 * 1000, // 5分钟缓存过期时间
+                hitCount: 0,
+                missCount: 0
             };
-            
+
             console.log('ClipboardHistoryManager: 存储路径初始化完成:', this.historyFilePath);
             console.log('ClipboardHistoryManager: 优化级别:', this.optimizationLevel);
             console.log('ClipboardHistoryManager: 序列化方式:', msgpack ? 'MessagePack' : 'JSON');
@@ -148,9 +152,39 @@ class ClipboardHistoryManager {
      */
     warmupCache() {
         if (this.memoryCacheEnabled) {
-            this.memoryCache.history = [...this.history];
+            // 计算当前数据大小
+            const currentSize = this.calculateMemorySize(this.history);
+
+            // 检查是否超过内存缓存限制
+            if (currentSize > this.memoryCache.maxSize) {
+                console.warn(`ClipboardHistoryManager: 数据大小 (${(currentSize / 1024 / 1024).toFixed(2)}MB) 超过内存缓存限制 (${(this.memoryCache.maxSize / 1024 / 1024).toFixed(2)}MB)，减少缓存数据`);
+
+                // 按时间戳排序，只保留最新的一部分数据
+                const sortedHistory = [...this.history].sort((a, b) => b.timestamp - a.timestamp);
+                let trimmedHistory = [];
+                let trimmedSize = 0;
+
+                // 逐步添加数据，直到接近内存限制
+                for (const item of sortedHistory) {
+                    const itemSize = this.calculateMemorySize([item]);
+                    if (trimmedSize + itemSize < this.memoryCache.maxSize * 0.9) { // 预留10%空间
+                        trimmedHistory.push(item);
+                        trimmedSize += itemSize;
+                    } else {
+                        break;
+                    }
+                }
+
+                this.memoryCache.history = trimmedHistory;
+                this.memoryCache.size = trimmedSize;
+                console.log(`ClipboardHistoryManager: 内存缓存已裁剪，保留 ${trimmedHistory.length} 项，大小: ${(trimmedSize / 1024).toFixed(2)}KB`);
+            } else {
+                // 正常缓存所有数据
+                this.memoryCache.history = [...this.history];
+                this.memoryCache.size = currentSize;
+            }
+
             this.memoryCache.lastUpdated = Date.now();
-            this.memoryCache.size = this.calculateMemorySize(this.history);
             console.log(`ClipboardHistoryManager: 内存缓存预热完成，大小: ${(this.memoryCache.size / 1024).toFixed(2)}KB`);
         }
     }
@@ -235,7 +269,7 @@ class ClipboardHistoryManager {
             // 使用哈希表进行高效去重
             let existingIndex = -1;
             const contentHash = this.generateContentHash(content);
-            
+
             // 快速查找重复内容
             for (let i = 0; i < this.history.length; i++) {
                 const itemHash = this.history[i].hash || this.generateContentHash(this.history[i].content);
@@ -361,25 +395,51 @@ class ClipboardHistoryManager {
         const startTime = performance.now();
 
         let result;
-        
+
+        // 检查内存缓存是否过期
+        const now = Date.now();
+        const isCacheExpired = now - this.memoryCache.lastUpdated > this.memoryCache.expiryTime;
+
         // 使用内存缓存
-        if (this.memoryCacheEnabled && this.memoryCache.history.length > 0) {
+        if (this.memoryCacheEnabled && this.memoryCache.history.length > 0 && !isCacheExpired) {
+            // 缓存命中
+            this.memoryCache.hitCount++;
+
             if (limit) {
                 result = this.memoryCache.history.slice(0, limit);
             } else {
                 result = [...this.memoryCache.history]; // 返回副本
             }
         } else {
+            // 缓存未命中或过期
+            this.memoryCache.missCount++;
+
+            if (isCacheExpired) {
+                console.log('ClipboardHistoryManager: 内存缓存已过期，使用原始数据');
+            }
+
             if (limit) {
                 result = this.history.slice(0, limit);
             } else {
                 result = [...this.history]; // 返回副本
+            }
+
+            // 如果缓存过期，重新预热缓存
+            if (isCacheExpired && this.memoryCacheEnabled) {
+                this.warmupCache();
             }
         }
 
         const getTime = performance.now() - startTime;
         if (getTime > 10) {
             console.log(`ClipboardHistoryManager: 获取历史记录耗时: ${getTime.toFixed(2)}ms`);
+        }
+
+        // 每100次操作打印一次缓存统计
+        if ((this.memoryCache.hitCount + this.memoryCache.missCount) % 100 === 0) {
+            const total = this.memoryCache.hitCount + this.memoryCache.missCount;
+            const hitRate = total > 0 ? (this.memoryCache.hitCount / total * 100).toFixed(1) : '0.0';
+            console.log(`ClipboardHistoryManager: 内存缓存统计 - 命中: ${this.memoryCache.hitCount}, 未命中: ${this.memoryCache.missCount}, 命中率: ${hitRate}%`);
         }
 
         return result;
@@ -608,7 +668,7 @@ class ClipboardHistoryManager {
             console.error('ClipboardHistoryManager: 保存剪切板历史失败:', error);
         } finally {
             this.isSaving = false;
-            
+
             // 处理队列中的保存请求
             if (this.saveQueue) {
                 setTimeout(() => this.forceSave(), 100);
@@ -629,12 +689,21 @@ class ClipboardHistoryManager {
                 return;
             }
 
-            // 读取文件
+            // 读取文件（使用异步读取，避免阻塞事件循环）
+            const fileReadStart = performance.now();
             const data = await fs.promises.readFile(this.historyFilePath);
+            const fileReadTime = performance.now() - fileReadStart;
+            if (fileReadTime > 100) {
+                console.log(`ClipboardHistoryManager: 文件读取耗时: ${fileReadTime.toFixed(2)}ms`);
+            }
+
+            // 反序列化数据
+            const deserializeStart = performance.now();
             let parsedData;
 
-            // 尝试使用 MessagePack 反序列化
-            if (msgpack) {
+            // 快速判断文件类型并选择反序列化方式
+            const fileExtension = path.extname(this.historyFilePath).toLowerCase();
+            if (fileExtension === '.bin' && msgpack) {
                 try {
                     parsedData = msgpack.decode(data);
                 } catch (error) {
@@ -646,25 +715,53 @@ class ClipboardHistoryManager {
                     }
                 }
             } else {
+                // 直接使用 JSON 反序列化
                 parsedData = JSON.parse(data.toString('utf8'));
+            }
+
+            const deserializeTime = performance.now() - deserializeStart;
+            if (deserializeTime > 100) {
+                console.log(`ClipboardHistoryManager: 反序列化耗时: ${deserializeTime.toFixed(2)}ms`);
             }
 
             // 验证数据格式
             if (parsedData && Array.isArray(parsedData.history)) {
-                this.history = parsedData.history;
-                
-                // 确保所有历史记录项的类型都是 'text'
-                this.history.forEach(item => {
-                    item.type = 'text';
+                const processStart = performance.now();
+
+                // 批量处理历史记录
+                this.history = parsedData.history.map(item => {
                     // 确保所有必需字段存在
-                    if (!item.id) item.id = this.generateId();
-                    if (!item.timestamp) item.timestamp = Date.now();
-                    if (!item.preview) item.preview = this.getContentPreview(item.content);
-                    if (!item.contentLength) item.contentLength = item.content.length;
+                    return {
+                        id: item.id || this.generateId(),
+                        content: item.content || '',
+                        timestamp: item.timestamp || Date.now(),
+                        type: 'text', // 强制设置为文本类型
+                        preview: item.preview || this.getContentPreview(item.content || ''),
+                        contentLength: item.contentLength || (item.content ? item.content.length : 0),
+                        hash: item.hash || (item.content ? this.generateContentHash(item.content) : '')
+                    };
                 });
 
                 // 按时间戳排序（最新的在前面）
                 this.history.sort((a, b) => b.timestamp - a.timestamp);
+
+                // 限制历史记录数量
+                if (this.history.length > this.maxHistoryItems) {
+                    this.history = this.history.slice(0, this.maxHistoryItems);
+                }
+
+                const processTime = performance.now() - processStart;
+                if (processTime > 100) {
+                    console.log(`ClipboardHistoryManager: 数据处理耗时: ${processTime.toFixed(2)}ms`);
+                }
+
+                // 更新内存缓存
+                if (this.memoryCacheEnabled) {
+                    this.warmupCache();
+                }
+
+                // 构建ID映射表
+                this.buildIdMap();
 
                 const loadTime = performance.now() - startTime;
                 this.perfStats.loadTime += loadTime;

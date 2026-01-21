@@ -131,6 +131,7 @@ class SidebarWebViewProvider {
             if (this.global.clipboardHistoryManager) {
                 clipboardHistory = this.global.clipboardHistoryManager.getHistory(30).map(item => ({
                     ...item,
+                    time: this.getFormattedTime(item.timestamp),
                     preview: item.preview ? (item.preview.length > 200 ? item.preview.substring(0, 200) + '...' : item.preview) : ''
                 }));
             }
@@ -138,6 +139,7 @@ class SidebarWebViewProvider {
             const cacheStats = this.calculateActualCacheSize();
             let totalSeconds = 0, h = 0, m = 0;
 
+            // 使用 globalState 获取统计数据（保持原有逻辑）
             if (this.context && this.context.globalState) {
                 const base = this.context.globalState.get("qqq_stats_total_seconds", 0) || 0;
                 const lastFlush = this.context.globalState.get("qqq_stats_last_flush");
@@ -322,12 +324,12 @@ class SidebarWebViewProvider {
     getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioUri = '') {
         const historyHtml = clipboardHistory.length > 0
             ? clipboardHistory.map(item => `
-                <div class="history-item" data-id="${item.id}">
+                <div class="history-item" data-id="${this.escapeHtml(item.id)}">
                     <div class="item-time">${item.time}</div>
                     <div class="item-preview">${this.escapeHtml(item.preview)}</div>
                     <div class="item-actions">
-                        <button class="action-mini-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
-                        <button class="action-mini-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
+                        <button class="action-mini-btn" onclick="handleCopy(this)">📋 复制</button>
+                        <button class="action-mini-btn" onclick="handleDelete(this)">🗑️ 删除</button>
                     </div>
                 </div>`).join('')
             : '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
@@ -453,7 +455,7 @@ class SidebarWebViewProvider {
         .footer { text-align: center; padding: 20px; font-size: 0.8em; opacity: 0.6; }
     </style>
 </head>
-<body>
+<body data-audio-uri="${this.escapeHtml(audioUri)}" data-initial-scroll-top="${scrollPosition ? (scrollPosition.scrollTop || 0) : 0}">
     <div class="main-wrapper">
         <div class="main-content" id="mainContent">
             <!-- 音乐播放器 -->
@@ -506,7 +508,7 @@ class SidebarWebViewProvider {
     </div>
 
     <script>
-        // --- 1. 稳定性保障：立即定义核心函数 ---
+        // --- 1. 核心变量和函数定义 ---
         let vscode;
         try {
             vscode = acquireVsCodeApi();
@@ -514,29 +516,50 @@ class SidebarWebViewProvider {
             console.error("acquireVsCodeApi failed:", e);
         }
 
+        // 消息传递函数
         function postMessage(msg) {
             if (vscode) {
                 vscode.postMessage(msg);
             }
         }
 
+        // 核心功能函数
         function executeCommand(cmd) {
+            if (!cmd) return;
             postMessage({ command: 'executeCommand', cmd: cmd });
             if (cmd !== 'qqq.savorMoments') {
                 playNotificationSound(1);
             }
         }
 
-        function copyToClipboard(id) { postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
-        function deleteHistoryItem(id) { postMessage({ command: 'deleteHistoryItem', itemId: id }); }
-        function clearAllHistory() { postMessage({ command: 'clearAllHistory' }); }
+        function copyToClipboard(id) {
+            if (!id) return;
+            postMessage({ command: 'copyToClipboard', itemId: id });
+            playNotificationSound(3);
+        }
+
+        function deleteHistoryItem(id) {
+            if (!id) return;
+            if (confirm('确定要删除这条记录吗？')) {
+                postMessage({ command: 'deleteHistoryItem', itemId: id });
+            }
+        }
+
+        function clearAllHistory() {
+            if (confirm('确定要清空所有历史记录吗？此操作不可撤销。')) {
+                postMessage({ command: 'clearAllHistory' });
+            }
+        }
+
         function refreshData() {
             const list = document.getElementById('historyList');
             const scrollPos = list ? { scrollTop: list.scrollTop, scrollHeight: list.scrollHeight } : null;
             postMessage({ command: 'refresh', scrollPosition: scrollPos });
         }
 
-        function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
+        function escapeHtml(t) {
+            return t ? t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;') : '';
+        }
 
         // --- 2. 媒体处理 ---
         let currentAudio = null;
@@ -599,107 +622,151 @@ class SidebarWebViewProvider {
         }
 
         function playNotificationSound(times) {
-            const audioUrl = ${JSON.stringify(audioUri || null)};
-            if (audioUrl && audioUrl !== 'null') {
+            const audioUrl = document.body.dataset.audioUri;
+            if (audioUrl && audioUrl !== '') {
                 playAudio(audioUrl, times);
             }
         }
 
         // --- 3. 滚动条逻辑 ---
-        function setupScrollbar(containerId, scrollbarId, thumbId) {
-            const container = document.getElementById(containerId);
-            const scrollbar = document.getElementById(scrollbarId);
-            const thumb = document.getElementById(thumbId);
-            if (!container || !thumb) return () => {};
+        function setupScrollbars() {
+            // 外部滚动条
+            const mainContent = document.getElementById('mainContent');
+            const outerScrollbar = document.getElementById('outerScrollbar');
+            const outerThumb = document.getElementById('outerThumb');
 
-            function update() {
-                const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+            // 内部滚动条
+            const historyList = document.getElementById('historyList');
+            const innerScrollbar = document.getElementById('innerScrollbar');
+            const innerThumb = document.getElementById('innerThumb');
+
+            function updateScrollbar(container, scrollbar, thumb) {
+                if (!container || !thumb) return;
+
+                const ch = container.clientHeight;
+                const sh = container.scrollHeight;
+                const st = container.scrollTop;
+
                 if (sh > ch) {
                     scrollbar.style.display = 'block';
                     const th = Math.max(20, (ch / sh) * ch);
                     thumb.style.height = th + 'px';
                     thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
-                } else { scrollbar.style.display = 'none'; }
+                } else {
+                    scrollbar.style.display = 'none';
+                }
             }
 
-            container.addEventListener('scroll', update);
+            // 外部滚动条事件
+            if (mainContent && outerThumb) {
+                mainContent.addEventListener('scroll', () => {
+                    updateScrollbar(mainContent, outerScrollbar, outerThumb);
+                });
+            }
 
-            let isDragging = false, startY, startST;
-            thumb.onmousedown = e => {
-                isDragging = true; startY = e.clientY; startST = container.scrollTop;
-                document.onmousemove = e => {
-                    if (!isDragging) return;
-                    const dy = e.clientY - startY;
-                    const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
-                    container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
-                    update();
-                };
-                document.onmouseup = () => { isDragging = false; document.onmousemove = null; };
-                e.preventDefault();
-            };
+            // 内部滚动条事件
+            if (historyList && innerThumb) {
+                historyList.addEventListener('scroll', () => {
+                    updateScrollbar(historyList, innerScrollbar, innerThumb);
+                });
+            }
 
-            scrollbar.onclick = e => {
-                if (e.target === thumb) return;
-                const rect = scrollbar.getBoundingClientRect();
-                const clickY = e.clientY - rect.top;
-                const ch = container.clientHeight, sh = container.scrollHeight;
-                container.scrollTop = (clickY / ch) * sh - ch / 2;
-                update();
-            };
+            // 初始化滚动条
+            updateScrollbar(mainContent, outerScrollbar, outerThumb);
+            updateScrollbar(historyList, innerScrollbar, innerThumb);
 
-            return update;
+            // 窗口大小变化时更新
+            window.addEventListener('resize', () => {
+                updateScrollbar(mainContent, outerScrollbar, outerThumb);
+                updateScrollbar(historyList, innerScrollbar, innerThumb);
+            });
         }
-
-        const updateOuter = setupScrollbar('mainContent', 'outerScrollbar', 'outerThumb');
-        const updateInner = setupScrollbar('historyList', 'innerScrollbar', 'innerThumb');
-        function updateAllScrollbars() { updateOuter(); updateInner(); }
-        window.onresize = updateAllScrollbars;
 
         // --- 4. 消息处理 ---
         window.addEventListener('message', e => {
-            const m = e.data;
-            if (m.command === 'updateData') {
-                const grid = document.querySelector('.stats-grid');
-                if (grid) {
-                    grid.innerHTML =
-                        '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + m.stats.h + 'h ' + m.stats.m + 'm</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + m.stats.cacheMB.toFixed(1) + 'MB</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + m.stats.hitRate.toFixed(1) + '%</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + m.stats.engineInfo.name + '</div></div>' +
-                        '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + m.stats.engineInfo.details + '</div></div>';
+            try {
+                const m = e.data;
+                if (!m || typeof m !== 'object') {
+                    return;
                 }
 
-                const list = document.getElementById('historyList');
-                if (list) {
-                    if (m.history && m.history.length > 0) {
-                        list.innerHTML = m.history.map(item =>
-                            '<div class="history-item" data-id="' + item.id + '">' +
-                                '<div class="item-time">' + item.time + '</div>' +
-                                '<div class="item-preview">' + escapeHtml(item.preview) + '</div>' +
-                                '<div class="item-actions">' +
-                                    '<button class="action-mini-btn" onclick="copyToClipboard(\'' + item.id + '\')">📋 复制</button>' +
-                                    '<button class="action-mini-btn" onclick="deleteHistoryItem(\'' + item.id + '\')">🗑️ 删除</button>' +
-                                '</div>' +
-                            '</div>'
-                        ).join('');
-                    } else {
-                        list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+                if (m.command === 'updateData') {
+                    // 更新统计数据
+                    const grid = document.querySelector('.stats-grid');
+                    if (grid) {
+                        const stats = m.stats || {};
+                        const engineInfo = stats.engineInfo || { name: '未知', details: '未知' };
+                        grid.innerHTML =
+                            '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + (stats.h || 0) + 'h ' + (stats.m || 0) + 'm</div></div>' +
+                            '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + (stats.cacheMB ? stats.cacheMB.toFixed(1) : '0.0') + 'MB</div></div>' +
+                            '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + (stats.hitRate ? stats.hitRate.toFixed(1) : '0.0') + '%</div></div>' +
+                            '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + (engineInfo.name || '未知') + '</div></div>' +
+                            '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + (engineInfo.details || '未知') + '</div></div>';
                     }
+
+                    // 更新历史记录
+                    const list = document.getElementById('historyList');
+                    if (list) {
+                        if (m.history && Array.isArray(m.history) && m.history.length > 0) {
+                            list.innerHTML = m.history.map(item => {
+                                const id = escapeHtml(item.id || '');
+                                return '<div class="history-item" data-id="' + id + '">' +
+                                    '<div class="item-time">' + (item.time || '未知时间') + '</div>' +
+                                    '<div class="item-preview">' + escapeHtml(item.preview || '') + '</div>' +
+                                    '<div class="item-actions">' +
+                                        '<button class="action-mini-btn" onclick="handleCopy(this)">📋 复制</button>' +
+                                        '<button class="action-mini-btn" onclick="handleDelete(this)">🗑️ 删除</button>' +
+                                    '</div>' +
+                                '</div>';
+                            }).join('');
+                        } else {
+                            list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+                        }
+                    }
+
+                    // 更新滚动条
+                    setupScrollbars();
+                } else if (m.command === 'playAudio') {
+                    playAudio(m.audioUrl || m.base64, m.times || 1);
                 }
-                updateAllScrollbars();
-            } else if (m.command === 'playAudio') {
-                playAudio(m.audioUrl || m.base64, m.times || 1);
+            } catch (error) {
+                console.error('Message handling error:', error);
             }
         });
 
         // --- 5. 初始化 ---
         (function() {
-            const initialPos = ${JSON.stringify(scrollPosition)};
-            if (initialPos && document.getElementById('historyList')) {
-                document.getElementById('historyList').scrollTop = initialPos.scrollTop;
+            try {
+                // 恢复滚动位置
+                const initialScrollTop = parseInt(document.body.dataset.initialScrollTop || '0');
+                if (initialScrollTop > 0 && document.getElementById('historyList')) {
+                    document.getElementById('historyList').scrollTop = initialScrollTop;
+                }
+
+                // 设置滚动条
+                setupScrollbars();
+
+                // 显示初始化完成信息
+                console.log('Sidebar initialized successfully');
+            } catch (error) {
+                console.error('Initialization error:', error);
             }
-            updateAllScrollbars();
         })();
+
+        // --- 6. 辅助函数 ---
+        function handleCopy(btn) {
+            const item = btn.closest('.history-item');
+            if (item && item.dataset.id) {
+                copyToClipboard(item.dataset.id);
+            }
+        }
+
+        function handleDelete(btn) {
+            const item = btn.closest('.history-item');
+            if (item && item.dataset.id) {
+                deleteHistoryItem(item.dataset.id);
+            }
+        }
     </script>
 </body>
 </html>`;
