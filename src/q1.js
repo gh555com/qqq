@@ -470,6 +470,14 @@ async function getMediaInfo(filePath, mtimeMs) {
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
+	if (!filePath || !fs.existsSync(filePath)) return null;
+	try {
+		const stat = fs.statSync(filePath);
+		if (stat.isDirectory()) return null; // 目录不需要获取媒体信息
+	} catch (e) {
+		return null;
+	}
+
 	const ff = global.ffmpegPath();
 	const ext = path.extname(filePath).toLowerCase();
 

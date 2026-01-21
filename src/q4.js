@@ -160,25 +160,16 @@ class SidebarWebViewProvider {
             }
 
             const activeEngine = this.getActiveEngineInfo();
+            // 转义引擎详情和名称，防止破坏 HTML
+            activeEngine.name = this.escapeHtml(activeEngine.name);
+            activeEngine.details = this.escapeHtml(activeEngine.details);
 
             // 使用 asWebviewUri 获取音频 URI，避免注入巨大的 base64 导致 SyntaxError
             const soundUri = this._view.webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, "assets", "q.mp3")));
 
-            // 核心逻辑：如果 HTML 已经加载过，则发送消息更新数据，而不是重载整个页面
-            if (this._view.webview.html && this._view.webview.html.length > 500) {
-                this.postMessage({
-                    command: 'updateData',
-                    stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
-                    history: clipboardHistory.map(item => ({
-                        id: item.id,
-                        time: this.getFormattedTime(item.timestamp),
-                        preview: item.preview
-                    }))
-                });
-            } else {
-                // 仅在第一次渲染时设置 HTML
-                this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
-            }
+            // 总是设置 HTML 以确保脚本正确加载和监听器注册
+            // 之前的 "仅在第一次渲染时设置 HTML" 优化在脚本有错误时会导致无法恢复
+            this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
         } catch (error) {
             console.error('更新内容失败:', error);
         }

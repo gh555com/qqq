@@ -201,9 +201,14 @@ function _tryGlobalDeduplicate(filePath) {
         // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
         const dir = path.dirname(filePath);
         const files = fs.readdirSync(dir);
+        const isWin = process.platform === "win32";
+        const normalizedFilePath = isWin ? filePath.toLowerCase() : filePath;
+
         for (const f of files) {
             const full = path.join(dir, f);
-            if (full === filePath) continue;
+            const normalizedFull = isWin ? full.toLowerCase() : full;
+
+            if (normalizedFull === normalizedFilePath) continue;
             try {
                 if (!fs.statSync(full).isFile()) continue;
             } catch { continue; }
@@ -1617,56 +1622,60 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 onProgress: (t, e) => { if (e.type === "done" || e.type === "error") { doneCount++; if (progressCallback) progressCallback((doneCount / total) * 100, `下载中 ${doneCount}/${total}`); } }
             });
             for (const res of r.results) {
-                const block = taskMap.get(res.tag);
-                if (!block) continue;
-                if (res.success) {
-                    let dlPath = res.path || res.destPath;
+                try {
+                    const block = taskMap.get(res.tag);
+                    if (!block) continue;
+                    if (res.success) {
+                        let dlPath = res.path || res.destPath;
 
-                    if (block.kind === "video") {
-                        dlPath = await verifyVideoFile(dlPath);
-                        if (!dlPath) {
-                            block.status = "failed";
-                            block.error = "Video verification failed";
-                            continue;
+                        if (block.kind === "video") {
+                            dlPath = await verifyVideoFile(dlPath);
+                            if (!dlPath) {
+                                block.status = "failed";
+                                block.error = "Video verification failed";
+                                continue;
+                            }
                         }
-                    }
 
-                    // 下载完成后，尝试全局去重
-                    const finalPath = _tryGlobalDeduplicate(dlPath);
-                    const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
+                        // 下载完成后，尝试全局去重
+                        const finalPath = _tryGlobalDeduplicate(dlPath);
+                        const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
 
-                    block.status = "ok";
-                    block.path = finalPath;
-                    block.filename = path.basename(finalPath);
-                    block.size = fs.statSync(finalPath).size;
-                    block.fingerprint = computeFingerprint(block.path);
-                    if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
+                        block.status = "ok";
+                        block.path = finalPath;
+                        block.filename = path.basename(finalPath);
+                        block.size = fs.statSync(finalPath).size;
+                        block.fingerprint = computeFingerprint(block.path);
+                        if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
-                    // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
-                    // 复用的旧文件不记入，取消时不删除
-                    if (transId && isNewFile) {
-                        const global = getGlobal();
-                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                        if (trans) {
-                            const normalizedPath = path.normalize(finalPath);
-                            const newLanded = [...(trans.landedFiles || []), normalizedPath];
-                            // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
-                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
-                            await global.TransactionManager.updateTransaction(transId, {
-                                landedFiles: [...new Set(newLanded)],
-                                tempFiles: newTempFiles
-                            });
+                        // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
+                        // 复用的旧文件不记入，取消时不删除
+                        if (transId && isNewFile) {
+                            const global = getGlobal();
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                            if (trans) {
+                                const normalizedPath = path.normalize(finalPath);
+                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
+                                // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
+                                const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
+                                await global.TransactionManager.updateTransaction(transId, {
+                                    landedFiles: [...new Set(newLanded)],
+                                    tempFiles: newTempFiles
+                                });
+                            }
+                        } else if (transId && !isNewFile) {
+                            // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
+                            const global = getGlobal();
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                            if (trans) {
+                                const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath);
+                                await global.TransactionManager.updateTransaction(transId, { tempFiles: newTempFiles });
+                            }
                         }
-                    } else if (transId && !isNewFile) {
-                        // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
-                        const global = getGlobal();
-                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                        if (trans) {
-                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath);
-                            await global.TransactionManager.updateTransaction(transId, { tempFiles: newTempFiles });
-                        }
-                    }
-                } else { block.status = "failed"; block.error = res.error; }
+                    } else { block.status = "failed"; block.error = res.error; }
+                } catch (e) {
+                    log(`处理下载结果失败 (${res.tag}): ${e.message}`, "ERROR");
+                }
             }
         } catch (e) { log(`dow.js downloadAll failed: ${e.message}`, "ERROR"); }
     }
