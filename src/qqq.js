@@ -9,7 +9,8 @@ const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
-const ClipboardHistoryManager = require("./clipboard-history");
+const q4 = require("./q4");
+const { ClipboardHistoryManager } = q4;
 
 // 引用 global.js 的核心对象
 const {
@@ -1236,9 +1237,13 @@ async function activate(context) {
 	initCache(context);
 
 	// 初始化剪切板历史管理器
-	clipboardHistoryManager = new ClipboardHistoryManager(context);
-	global.clipboardHistoryManager = clipboardHistoryManager; // 暴露给全局使用
-	clipboardHistoryManager.startWatching();
+	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
+	try {
+		const q4Api = q4.activate(context);
+		global.clipboardHistoryManager = q4Api; // 保持全局引用兼容性
+	} catch (e) {
+		global.logMessage(`q4 (剪切板/侧边栏) 加载失败: ${e.message}`, "ERROR");
+	}
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
 	global.setLogPath(path.join(cacheDir, "err.log"));
 	global.initStatusBar();
@@ -1269,17 +1274,8 @@ async function activate(context) {
 		})
 	);
 
-	// 注册侧边栏 WebView 状态面板
-	const SidebarWebViewProvider = require('./q4');
-	const sidebarProvider = new SidebarWebViewProvider(context, global);
-	activeSidebarProvider = sidebarProvider;
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('qqq.Viewq', sidebarProvider, {
-			webviewOptions: {
-				retainContextWhenHidden: true
-			}
-		})
-	);
+	// 侧边栏 WebView 现在由 q4.activate(context) 内部自动注册
+	// activeSidebarProvider 通过 q4Api 机制获取 (如有需要)
 
 	// 保留原来的命令，但现在只是聚焦到侧边栏
 	context.subscriptions.push(
@@ -1367,11 +1363,6 @@ async function deactivate() {
 		shellBridge.stop(),
 		global.killAllProcesses()
 	]);
-
-	// 停止剪切板监听
-	if (clipboardHistoryManager) {
-		clipboardHistoryManager.dispose();
-	}
 
 	global.finishUserTracking();
 
