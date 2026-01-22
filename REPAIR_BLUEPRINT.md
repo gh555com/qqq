@@ -152,3 +152,98 @@
 1. **不要** 在每个子模块里定义局部的 `isDeactivated`，统一用 `global.js` 的。
 2. **不要** 在同步操作里加防御，只在有 `await` 之后（即可能产生执行断层的地方）加检查。
 3. **不要** 手动调用 `dispose()` 那些已经丢进 `subscriptions` 的对象，VS Code 会自动处理。
+为了解决“启动瞬间状态不一致”的风险，同时保持性能最优，我建议针对以下三类核心 Command 增加拦截。
+
+### 1. 必须拦截的 Command 名单
+
+这些命令由于深度依赖后台尚未完成的 `recover()` 或 `history load` 逻辑，如果不拦截，会导致功能失效或产生脏数据。
+
+1.  **`qqq.downloadVideosFromUrl` (视频下载)**：
+    *   **原因**：它需要读取 `TransactionManager` 以确定任务 ID 和锚点状态。如果 `recover()` 没跑完，可能会导致 ID 冲突或无法正确处理“已存在”的任务。
+2.  **`qqq.cleanUp` (事故清理)**：
+    *   **原因**：这是最危险的。如果后台还没把“哪些文件是有效的”扫描清楚，清理逻辑可能会误删正在恢复中的任务文件。
+3.  **`qqq.q1` / `qqq.q2` (剪切板历史/漫游器)**：
+    *   **原因**：剪切板历史通常有几百 KB 到几 MB，如果加载慢了，用户点开后看到的是“空列表”，体验非常糟糕。
+
+---
+
+### 2. 最合理、性能最优的实现架构
+
+**核心思想**：**“注册不等待，执行必等待”**。
+不要用定时器去轮询状态，而是使用 **Promise 信号灯机制**。
+
+#### **A. 基础设施 (global.js)**
+在 `global.js` 中维护一个 `readyPromise`。Promise 的特性是：一旦 resolve（解决），后续所有的 `await` 都会**瞬间穿透**，没有任何性能损耗。
+
+```javascript
+// global.js
+let _resolveReady;
+const _readyPromise = new Promise(resolve => {
+    _resolveReady = resolve;
+});
+
+module.exports = {
+    markReady: () => _resolveReady?.(), // 供 qqq.js 调用
+    ensureReady: () => _readyPromise,   // 供 Command 调用
+};
+```
+
+#### **B. 拦截时机 (qqq.js)**
+在 `activate` 的末尾，当所有的后台初始化（`recover`, `startDaemons`, `historyLoad`）完成后，推开信号灯。
+
+```javascript
+// qqq.js -> activate() 底部
+Promise.all([
+    global.TransactionManager.recover(),
+    clipboardHistoryManager.load(), // 假设有这个
+]).finally(() => {
+    global.markReady(); // 告诉全世界：基座已就绪
+});
+```
+
+#### **C. 最优性能的拦截写法 (Command 内部)**
+在 Command 的函数体第一行加入 `await global.ensureReady()`。
+
+**为什么这样性能最优？**
+1.  **零阻塞注册**：VS Code 启动时完全不等待，插件秒开。
+2.  **零轮询开销**：当 Ready 后，`await` 几乎不消耗 CPU 周期。
+3.  **优雅的 UX**：如果初始化确实很慢（比如用户硬盘卡了），我们可以加一个“超时自动提示”。
+
+```javascript
+async function executeCommand() {
+    // 性能最优：如果已经 Ready，这行代码耗时 < 0.1ms
+    // 如果还没 Ready，它会静默挂起执行流
+    await global.ensureReady();
+
+    // 真正的逻辑开始...
+}
+```
+
+---
+
+### 3. 进阶优化：解决“用户点完没反应”的尴尬
+
+如果 `ensureReady` 超过 300ms 还没返回，用户可能会觉得点击失效了。**极致的体验应该是：**
+
+```javascript
+async function executeCommand() {
+    const timeout = setTimeout(() => {
+        vscode.window.setStatusBarMessage("$(sync~spin) qqq 正在初始化环境，请稍候...", 3000);
+    }, 300);
+
+    await global.ensureReady();
+    clearTimeout(timeout);
+
+    // 执行逻辑...
+}
+```
+
+### 总结
+*   **拦截范围**：仅限 **下载、清理、历史加载** 这三个涉及核心持久化状态的命令。
+*   **实现方式**：基于 `global.js` 的 **Promise 信号灯**。
+*   **收益**：
+    1.  **100% 避免**了启动瞬间的竞态 Bug。
+    2.  **100% 保持**了我们好不容易拿到的“秒开”启动速度。
+    3.  **零** 垃圾代码残留。
+
+**如果您认可这个架构，我可以在下一次施工中为您在基座里埋下这盏“信号灯”。**
