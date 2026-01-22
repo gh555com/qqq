@@ -18,6 +18,10 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const global = require('./global');
+
+// ★ 终极最优解：全局实例追踪，用于生命周期强杀
+let _currentHistoryManager = null;
 const zlib = require('zlib');
 const { performance } = require('perf_hooks');
 
@@ -295,6 +299,8 @@ class ClipboardHistoryManager {
         if (this._cleanupTimer) clearInterval(this._cleanupTimer);
         this._cleanupTimer = setInterval(() => {
             try {
+                // ★ 终极最优解：红灯预检
+                if (global.isDeactivated?.()) return;
                 const changed = this._cleanupExpiredItems();
                 if (changed) this.requestSave();
             } catch {
@@ -599,7 +605,8 @@ class ClipboardHistoryManager {
         this._lastClipboardContent = '';
 
         this._clipboardTimer = setInterval(async () => {
-            if (this._watcherBusy) return;
+            // ★ 终极最优解：红灯预检，防止插件停用后继续执行
+            if (global.isDeactivated?.() || this._watcherBusy) return;
             this._watcherBusy = true;
             try {
                 const cur = await vscode.env.clipboard.readText();
@@ -876,9 +883,17 @@ class ClipboardHistoryManager {
 
             let raw = dataBuf;
             try {
+                // ★ 严密保护解压逻辑
                 raw = await gunzipAsync(dataBuf);
-            } catch {
-                raw = dataBuf;
+            } catch (e) {
+                console.error('[Q4] 历史文件解压失败 (可能损坏):', e.message);
+                // 如果解压失败，检查是否可能原本就是未压缩的 JSON
+                if (dataBuf[0] === 0x7b) { // '{'
+                    raw = dataBuf;
+                } else {
+                    await this._quarantineCorruptFile(chosen).catch(() => { });
+                    return;
+                }
             }
 
             const mp = getMsgpack();
@@ -1076,6 +1091,15 @@ class ClipboardHistorySidebarProvider {
         this._startWatchdog();
     }
 
+    dispose() {
+        this._stopPeriodicUpdate();
+        if (this._watchdogTimer) {
+            clearInterval(this._watchdogTimer);
+            this._watchdogTimer = null;
+        }
+        this._view = null;
+    }
+
     _startPeriodicUpdate() {
         this._stopPeriodicUpdate();
         this._updateTimer = setInterval(() => {
@@ -1253,7 +1277,9 @@ class ClipboardHistorySidebarProvider {
     _postMessage(msg) {
         try {
             if (this._view && this._view.webview) {
-                this._view.webview.postMessage(msg).then(undefined, () => { });
+                // ★ 终极最优解：强制 POJO 转换，彻底解决 toJSON 报错与 Webview 崩溃风险
+                const safeMsg = JSON.parse(JSON.stringify(msg));
+                this._view.webview.postMessage(safeMsg).then(undefined, () => { });
             }
         } catch {
             // ignore
@@ -1944,15 +1970,6 @@ class ClipboardHistorySidebarProvider {
 </body>
 </html>`;
     }
-
-    dispose() {
-        this._stopPeriodicUpdate();
-        if (this._watchdogTimer) {
-            clearInterval(this._watchdogTimer);
-            this._watchdogTimer = null;
-        }
-        this._view = null;
-    }
 }
 
 // ============================================================================
@@ -2042,16 +2059,81 @@ async function importHistoryCommand(historyManager) {
     }
 }
 
+// ============================================================================
+// 终极清理函数 qsc(a)
+// ============================================================================
+/**
+ * @param {number} a 清理级别：1-缓存, 2-剪切板, 3-globalState, 0-全清
+ * @param {ClipboardHistoryManager} historyManager
+ */
+async function qsc(a, historyManager) {
+    const context = historyManager?.context;
+
+    // 1. 清理 qqq_cache 文件夹
+    const clearCache = async () => {
+        try {
+            const root = context?.globalStorageUri?.fsPath;
+            if (!root) return;
+            const cacheDir = path.join(root, 'qqq_cache');
+            if (fs.existsSync(cacheDir)) {
+                const files = fs.readdirSync(cacheDir);
+                for (const file of files) {
+                    const filePath = path.join(cacheDir, file);
+                    // ★ 终极最优解：为每一项文件操作加 try-catch，防止因单个文件占用导致清理中断
+                    try {
+                        if (fs.statSync(filePath).isFile()) {
+                            fs.unlinkSync(filePath);
+                        }
+                    } catch (fileErr) {
+                        console.warn(`[QSC] 跳过无法访问的文件: ${file}`, fileErr.message);
+                    }
+                }
+                console.log('[QSC] qqq_cache 已清空');
+            }
+        } catch (e) { console.error('[QSC] 清理 cache 失败:', e.message); }
+    };
+
+    // 2. 清空剪切板历史
+    const clearHistory = async () => {
+        if (historyManager) {
+            await historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
+            console.log('[QSC] 剪切板历史已清空');
+        }
+    };
+
+    // 3. 清空 globalState (高危操作)
+    const clearGlobalState = async () => {
+        if (!context?.globalState) return;
+        try {
+            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history'];
+            for (const key of keys) {
+                await context.globalState.update(key, undefined);
+            }
+            console.log('[QSC] globalState 已清空');
+        } catch (e) { console.error('[QSC] 清理 globalState 失败:', e.message); }
+    };
+
+    if (a === 1) await clearCache();
+    else if (a === 2) await clearHistory();
+    else if (a === 3) await clearGlobalState();
+    else if (a === 0) {
+        await clearCache();
+        await clearHistory();
+        await clearGlobalState();
+    }
+}
+
 async function clearHistoryCommand(historyManager) {
     const confirm = await vscode.window.showWarningMessage(
-        '确定要清空所有剪贴板历史吗？此操作不可恢复。',
+        '确定要执行清空操作吗？此操作不可恢复。',
         { modal: true },
         '确定清空'
     );
 
     if (confirm === '确定清空') {
-        await historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
-        vscode.window.showInformationMessage('剪贴板历史已清空');
+        // 默认执行 a=2 (清空剪切板)
+        await qsc(2, historyManager);
+        vscode.window.showInformationMessage('剪切板历史已清空');
     }
 }
 
@@ -2158,12 +2240,15 @@ function activate(context) {
         },
     });
 
+    // ★ 终极最优解：同步记录当前实例，供 deactivate 强杀
+    _currentHistoryManager = historyManager;
+
     historyManager.startWatching();
 
     sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager);
 
     const sidebarDisposable = vscode.window.registerWebviewViewProvider(
-        'qqqClipboardHistoryView',
+        'qqq.Viewq',
         sidebarProvider,
         { webviewOptions: { retainContextWhenHidden: true } }
     );
@@ -2250,8 +2335,16 @@ function activate(context) {
 // ============================================================================
 // 扩展停用
 // ============================================================================
-function deactivate() {
-    console.log('[Q4] QQQ Clipboard History (fusion-final) deactivated.');
+async function deactivate() {
+    console.log('[Q4] QQQ Clipboard History (fusion-final) deactivating...');
+    if (_currentHistoryManager) {
+        try {
+            await _currentHistoryManager.dispose();
+        } catch (e) {
+            console.error('[Q4] Dispose error:', e);
+        }
+        _currentHistoryManager = null;
+    }
 }
 
 // ============================================================================
