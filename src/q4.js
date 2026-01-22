@@ -140,7 +140,8 @@ function gunzipAsync(buf) {
 function estimateBytes(obj) {
     try {
         const mp = getMsgpack();
-        if (mp) return Buffer.from(mp.encode(obj)).length;
+        // ★ 直接计算 encode 后的长度，不重复创建 Buffer
+        if (mp) return mp.encode(obj).length;
         return Buffer.byteLength(JSON.stringify(obj), 'utf8');
     } catch {
         return 0;
@@ -161,7 +162,8 @@ function formatTime(timestamp) {
     if (diff < CONSTANTS.MS_PER_HOUR) return `${Math.floor(diff / CONSTANTS.MS_PER_MINUTE)}分钟前`;
     if (diff < CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_HOUR)}小时前`;
     if (diff < 7 * CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_DAY)}天前`;
-    return new Date(t).toLocaleDateString('zh-CN');
+    // ★ 消除过时警告
+    return new Intl.DateTimeFormat('zh-CN').format(new Date(t));
 }
 
 // ============================================================================
@@ -808,8 +810,12 @@ class ClipboardHistoryManager {
             const mp = getMsgpack();
             let rawBuf;
             try {
-                if (this._preferMsgpack && mp) rawBuf = Buffer.from(mp.encode(payload));
-                else rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+
+                if (this._preferMsgpack && mp) {
+                    rawBuf = mp.encode(payload);
+                } else {
+                    rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+                }
             } catch {
                 rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
             }
