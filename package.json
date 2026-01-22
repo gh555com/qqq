@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.54.0",
+  "version": "15.54.1",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -480,6 +480,7 @@
     "docx": "^8.5.0",
     "docx-parser": "^0.2.1",
     "image-size": "^2.0.2",
+    "msgpack-lite": "^0.1.26",
     "node-fetch": "^2.7.0",
     "trash": "^7.2.0"
   },
