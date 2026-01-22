@@ -1212,6 +1212,8 @@ let q1Module = null;
 let q2Module = null;
 
 async function activate(context) {
+	// ★ 终极最优解：启动时立即重置状态，且后续注册必须早于任何 await
+	global.setDeactivated(false);
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
 
 	if (!context) {
@@ -1322,12 +1324,15 @@ async function activate(context) {
 		} catch { }
 	}, 5000);
 
-	// ★ 启动时恢复/清理事务 (确保上次崩溃留下的垃圾被清理)
-	try {
-		await global.TransactionManager.recover();
-	} catch (e) {
-		global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
-	}
+	// ★ 终极最优解：启动时恢复/清理事务 (移至 activate 底部或后台执行)
+	// 不要让它阻塞主注册流程
+	(async () => {
+		try {
+			await global.TransactionManager.recover();
+		} catch (e) {
+			global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
+		}
+	})();
 
 	global.logMessage("qqq 扩展激活完成", "INFO");
 }
@@ -1349,9 +1354,16 @@ function loadSubModules(context) {
 }
 
 async function deactivate() {
-	pythonBridge.stop();
-	rustBridge.stop();
-	shellBridge.stop();
+	// ★ 终极最优解：焦土政策，第一时间设置停用标志位
+	global.setDeactivated(true);
+
+	// ★ 终极最优解：Await 所有 bridge 停止，且强杀所有追踪中的子进程
+	await Promise.allSettled([
+		pythonBridge.stop(),
+		rustBridge.stop(),
+		shellBridge.stop(),
+		global.killAllProcesses()
+	]);
 
 	// 停止剪切板监听
 	if (clipboardHistoryManager) {
@@ -1371,6 +1383,10 @@ async function deactivate() {
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch { }
+	}
+
+	if (q2Module?.deactivate) {
+		try { await q2Module.deactivate(); } catch { }
 	}
 
 	global.logMessage("qqq 扩展已停用", "INFO");

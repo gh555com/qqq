@@ -249,6 +249,9 @@ class DaemonBridge {
 	}
 
 	async call(action, params = {}, timeout = 5000) {
+		if (_isDeactivated) {
+			return { error: "extension_deactivated" };
+		}
 		if (this.isPermDisabled) {
 			return { error: `${this.name}_disabled_too_many_crashes` };
 		}
@@ -1114,6 +1117,9 @@ async function startDaemons() {
 	};
 
 	(async () => {
+		// ★ 终极最优解：启动前检查是否已停用
+		if (_isDeactivated) return;
+
 		// ★ 核心设计：三个引擎全部启动，全部待命
 		// 不管用户选什么，能启动滨都启动起来
 		// 切换引擎时只是改变“谁来响应”，不杀不重启
@@ -1152,7 +1158,44 @@ let ffmpegPath = null;
 let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
 
+// ★ 终极最优解：全局停用标志位
+let _isDeactivated = false;
+
+// ★ 终极最优解：全局进程追踪器
+const _activeProcesses = new Set();
+
+function trackProcess(proc) {
+	if (!proc) return;
+	_activeProcesses.add(proc);
+	proc.on("exit", () => _activeProcesses.delete(proc));
+	proc.on("error", () => _activeProcesses.delete(proc));
+}
+
+async function killAllProcesses() {
+	const procs = Array.from(_activeProcesses);
+	_activeProcesses.clear();
+
+	const killPromises = procs.map(proc => {
+		return new Promise((resolve) => {
+			if (proc.killed) return resolve();
+			proc.once('exit', () => resolve());
+			try {
+				if (process.platform === "win32") {
+					cp.exec(`taskkill /pid ${proc.pid} /T /F`, () => resolve());
+				} else {
+					proc.kill("SIGKILL");
+					resolve();
+				}
+			} catch { resolve(); }
+			// 兜底超时
+			setTimeout(resolve, 1000);
+		});
+	});
+	await Promise.all(killPromises);
+}
+
 function init(context) {
+	_isDeactivated = false; // 启动时重置
 	extensionContext = context;
 
 	// 初始化 FFmpeg 路径
@@ -1833,12 +1876,50 @@ const TransactionManager = {
 
 	async saveTransaction(trans) {
 		if (!extensionContext) return;
-		const list = this.getTransactions();
-		list.push({
-			...trans,
-			createdAt: Date.now(),
-			status: 'pending'
-		});
+		let list = this.getTransactions();
+
+		// ★ 终极最优解：完美白名单字段清洗 (防止 1.8MB 爆炸)
+		const cleanTrans = {
+			id: trans.id,
+			targetDir: trans.targetDir,
+			// 使用 toString() 替代 fsPath，确保 100% 兼容所有协议
+			targetUri: typeof trans.targetUri === 'string' ? trans.targetUri : trans.targetUri?.toString(),
+			docUri: typeof trans.docUri === 'string' ? trans.docUri : trans.docUri?.toString(),
+			tempFiles: Array.isArray(trans.tempFiles) ? trans.tempFiles : [],
+			status: 'pending',
+			createdAt: trans.createdAt || Date.now(),
+			taskType: trans.taskType || 'unknown',
+			// 预留元数据空间 (仅限简单类型)
+			extra: trans.extra || {}
+		};
+
+		list.push(cleanTrans);
+
+		// ★ 终极最优解：200/100 优先级截断逻辑
+		if (list.length > 200) {
+			const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+			const now = Date.now();
+
+			// 定义清理权重：已结案(success/cancelled) 权重最高，超期(>60天) 权重次之
+			const getWeight = (t) => {
+				let weight = 0;
+				if (t.status === 'success' || t.status === 'cancelled') weight += 2;
+				if (now - (t.createdAt || 0) > SIXTY_DAYS) weight += 1;
+				return weight;
+			};
+
+			// 按权重从大到小排序，权重相同按时间从老到新排序
+			const sortedForDeletion = [...list].sort((a, b) => {
+				const wA = getWeight(a);
+				const wB = getWeight(b);
+				if (wA !== wB) return wB - wA; // 权重大的在前
+				return (a.createdAt || 0) - (b.createdAt || 0); // 时间老的在前
+			});
+
+			const toDeleteIds = new Set(sortedForDeletion.slice(0, 100).map(t => t.id));
+			list = list.filter(t => !toDeleteIds.has(t.id));
+		}
+
 		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
 	},
 
@@ -2776,5 +2857,11 @@ module.exports = {
 	wq,
 	TransactionManager,
 	TaskCounter,
-	getDirectorySnapshot  // ★ 目录快照函数
+	getDirectorySnapshot,  // ★ 目录快照函数
+
+	// ★ 终极最优解：进程与状态管理接口
+	trackProcess,
+	killAllProcesses,
+	setDeactivated: (v) => { _isDeactivated = !!v; },
+	isDeactivated: () => _isDeactivated
 };

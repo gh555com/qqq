@@ -3148,14 +3148,7 @@ async function activate(context) {
 	refreshConfig();
 	codeLensProvider = new FileCodeLensProvider();
 
-	try {
-		await TransactionManager.recover();
-		global.hasRecovered = true;
-	} catch (e) {
-		console.error("Transaction Recovery Failed:", e);
-		global.hasRecovered = true;
-	}
-
+	// ★ 终极最优解：注册权提升，严禁在注册前使用 await
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("qqq")) {
@@ -3244,6 +3237,17 @@ async function activate(context) {
 		watcher.onDidDelete(fsChangeHandler),
 		watcher.onDidChange(fsChangeHandler)
 	);
+
+	// ★ 终极最优解：异步恢复移至函数末尾，且使用后台执行模式
+	(async () => {
+		try {
+			await TransactionManager.recover();
+			global.hasRecovered = true;
+		} catch (e) {
+			global.logMessage(`q1 事务恢复失败: ${e.message}`, "ERROR");
+			global.hasRecovered = true;
+		}
+	})();
 
 	const editor = vscode.window.activeTextEditor;
 	if (editor) renderImages(editor);
