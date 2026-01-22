@@ -1611,14 +1611,41 @@ function showSaveAsDialog() {
         )}</span></div></div>`;
       });
 
-      panel.webview.postMessage({
-        command: "update",
-        currentPath,
-        fileListHtml,
-        items,
-      });
+      // Async postMessage to catch errors
+      (async () => {
+        try {
+          await panel.webview.postMessage({
+            command: "update",
+            currentPath,
+            fileListHtml,
+            items,
+          });
+        } catch (error) {
+          if (error.message && error.message.includes('Method not found: toJSON')) {
+            if (geq().logMessage) {
+              geq().logMessage(`[Suppressed] Webview IPC Error: ${error.message}`, "WARN");
+            }
+            return;
+          }
+          if (geq().logMessage) {
+            geq().logMessage(`Webview postMessage error: ${error.message}`, "WARN");
+          }
+        }
+      })();
+
     } catch (error) {
-      geq().logMessage(`更新资源展示区失败: ${error}`, "ERROR");
+      if (error.message && error.message.includes('Method not found: toJSON')) {
+        // Log to panel instead of silent return, as requested
+        if (geq().logMessage) {
+          geq().logMessage(`[Suppressed] Webview IPC Error: ${error.message}`, "WARN");
+        }
+        return;
+      }
+      if (geq().logMessage) {
+        geq().logMessage(`Webview postMessage error: ${error.message}`, "WARN");
+      } else {
+        geq().logMessage(`更新资源展示区失败: ${error}`, "ERROR");
+      }
     }
   }
 
@@ -1907,9 +1934,11 @@ function showSaveAsDialog() {
 }
 
 // ==================== 扩展激活 ====================
+// ★ 已移除模块级 isDeactivated，统一使用 global.isDeactivated()
+
 async function activate(context) {
+  if (global.isDeactivated()) return; // 启动前检查
   if (!context) {
-    global.logMessage("q2.activate: context is undefined!", "ERROR");
     return;
   }
   globalContext = context;
@@ -1925,16 +1954,35 @@ async function activate(context) {
   isCoreIntegrityValid = verifySystemIntegrity();
   geq().logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
 
+  // ★ Version Marker
+  geq().logMessage(`[VER_CHECK] q2.js active | Time: ${new Date().toISOString()}`, "INFO");
+
   getConfig();
   geq().logMessage("Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
-    vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog)
-  );
+  const safePush = (disposable) => {
+    if (global.isDeactivated()) {
+      try { disposable.dispose(); } catch { }
+      return;
+    }
+    try {
+      if (context && context.subscriptions) {
+        context.subscriptions.push(disposable);
+      } else {
+        disposable.dispose();
+      }
+    } catch (e) {
+      global.logMessage(`q2.activate: Failed to push disposable: ${e.message}`, "WARN");
+      try { disposable.dispose(); } catch { }
+    }
+  };
+
+  safePush(vscode.commands.registerCommand("qqq.q2", showSaveAsDialog));
+  safePush(vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog));
 }
 
 function deactivate() {
+  // 全局停用由 qqq.js 通过 global.setDeactivated(true) 统一管理
   if (activePanel && activePanelAlive) {
     try {
       activePanel.dispose();

@@ -1,0 +1,3 @@
+[submodule "qqqworkflow"]
+	path = qqqworkflow
+	url = https://github.com/kkn1n/qqqworkflow.git

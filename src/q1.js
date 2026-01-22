@@ -30,6 +30,7 @@ const q3 = require("./q3");
 const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
 let isCoreIntegrityValid = false;
+// ★ 已移除模块级 isDeactivated，统一使用 global.isDeactivated()
 
 // ==================== 配置常量 ====================
 const SCROLL_DEBOUNCE_MS = 200;
@@ -3108,6 +3109,7 @@ function renderVisibleEditors(delay = 50) {
 
 // ==================== Initialization ====================
 async function activate(context) {
+	if (global.isDeactivated()) return; // 启动前检查
 	if (!context) {
 		global.logMessage("q1.activate: context is undefined!", "ERROR");
 		return;
@@ -3144,6 +3146,9 @@ async function activate(context) {
 		global.logMessage(`Integrity: PASSED`, "INFO");
 	}
 
+	// ★ Version Marker for User Verification
+	global.logMessage(`[VER_CHECK] q1.js active | Time: ${new Date().toISOString()}`, "INFO");
+
 	loadWatermarkResource();
 	refreshConfig();
 	codeLensProvider = new FileCodeLensProvider();
@@ -3156,8 +3161,32 @@ async function activate(context) {
 		global.hasRecovered = true;
 	}
 
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration((e) => {
+	// ★ Fix: 如果在 await 期间插件已被停用，直接返回，避免操作已释放的 subscriptions
+	if (global.isDeactivated()) {
+		global.logMessage("q1.activate: Extension deactivated during startup, aborting.", "WARN");
+		return;
+	}
+
+	// 辅助函数：安全注册资源
+	const safePush = (disposable) => {
+		if (global.isDeactivated()) {
+			try { disposable.dispose(); } catch { }
+			return;
+		}
+		try {
+			if (context && context.subscriptions) {
+				context.subscriptions.push(disposable);
+			} else {
+				disposable.dispose();
+			}
+		} catch (e) {
+			global.logMessage(`q1.activate: Failed to push disposable: ${e.message}`, "WARN");
+			try { disposable.dispose(); } catch { }
+		}
+	};
+
+	try {
+		safePush(vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("qqq")) {
 				refreshConfig();
 				clearDecorations();
@@ -3169,23 +3198,24 @@ async function activate(context) {
 				refreshConfig();
 				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
-		}),
-		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
-		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
-		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
-		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.cleanUp", () => {
+		}));
+
+		safePush(vscode.commands.registerCommand("qqq.q1", executeClipboardCommand));
+		safePush(vscode.commands.registerCommand("qqq.openFile", openFileCommand));
+		safePush(vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand));
+		safePush(vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder));
+		safePush(vscode.commands.registerCommand("qqq.renameFile", renameFileCommand));
+		safePush(vscode.commands.registerCommand("qqq.cleanUp", () => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
-		}),
-		vscode.commands.registerCommand("qqq.exportDoc", () => {
+		}));
+		safePush(vscode.commands.registerCommand("qqq.exportDoc", () => {
 			q3.executeExportDocCommand(isCoreIntegrityValid);
-		}),
-		vscode.commands.registerCommand("qqq.exportZip", () => {
+		}));
+		safePush(vscode.commands.registerCommand("qqq.exportZip", () => {
 			q3.executeExportZipCommand(isCoreIntegrityValid);
-		}),
-		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
-		vscode.workspace.onWillSaveTextDocument((e) => {
+		}));
+		safePush(vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider));
+		safePush(vscode.workspace.onWillSaveTextDocument((e) => {
 			if (cleanFreakMode && e.document) {
 				e.waitUntil(
 					provideCleanlinessEditsAsync(e.document).then((edits) => {
@@ -3193,23 +3223,23 @@ async function activate(context) {
 					})
 				);
 			}
-		}),
-		vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+		}));
+		safePush(vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
 			debounceRender(e.textEditor);
-		}),
-		vscode.window.onDidChangeActiveTextEditor((e) => {
+		}));
+		safePush(vscode.window.onDidChangeActiveTextEditor((e) => {
 			if (e) debounceRender(e);
-		}),
-		vscode.window.onDidChangeWindowState((e) => {
+		}));
+		safePush(vscode.window.onDidChangeWindowState((e) => {
 			if (e.focused) renderVisibleEditors();
-		}),
-		vscode.workspace.onDidChangeTextDocument((e) => {
+		}));
+		safePush(vscode.workspace.onDidChangeTextDocument((e) => {
 			const ed = vscode.window.activeTextEditor;
 			if (ed && e.document === ed.document) debounceRender(ed);
 			if (e.document === ed?.document && e.contentChanges.length > 0)
 				documentDecorationsMap.delete(e.document.uri.toString());
-		}),
-		vscode.workspace.onDidCloseTextDocument((doc) => {
+		}));
+		safePush(vscode.workspace.onDidCloseTextDocument((doc) => {
 			const docUri = doc.uri.toString();
 			documentDecorationsMap.delete(docUri);
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
@@ -3218,8 +3248,8 @@ async function activate(context) {
 					editorDebounceTimers.delete(editorId);
 				}
 			}
-		}),
-		vscode.window.onDidChangeVisibleTextEditors((editors) => {
+		}));
+		safePush(vscode.window.onDidChangeVisibleTextEditors((editors) => {
 			const visibleEditorIds = new Set(editors.map((e) => getEditorId(e)));
 			for (const [editorId, timer] of editorDebounceTimers.entries()) {
 				if (!visibleEditorIds.has(editorId)) {
@@ -3229,27 +3259,28 @@ async function activate(context) {
 			}
 			renderVisibleEditors();
 			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
-		})
-	);
+		}));
 
-	const watcher = vscode.workspace.createFileSystemWatcher("**/*");
-	context.subscriptions.push(watcher);
-	const fsChangeHandler = () => {
-		if (codeLensProvider) codeLensProvider.refresh();
-		renderVisibleEditors(200);
-		clearDecorations();
-	};
-	context.subscriptions.push(
-		watcher.onDidCreate(fsChangeHandler),
-		watcher.onDidDelete(fsChangeHandler),
-		watcher.onDidChange(fsChangeHandler)
-	);
+		const watcher = vscode.workspace.createFileSystemWatcher("**/*");
+		safePush(watcher);
+		const fsChangeHandler = () => {
+			if (codeLensProvider) codeLensProvider.refresh();
+			renderVisibleEditors(200);
+			clearDecorations();
+		};
+		safePush(watcher.onDidCreate(fsChangeHandler));
+		safePush(watcher.onDidDelete(fsChangeHandler));
+		safePush(watcher.onDidChange(fsChangeHandler));
+	} catch (e) {
+		global.logMessage(`q1.activate: Failed to register subscriptions: ${e.message}`, "ERROR");
+	}
 
 	const editor = vscode.window.activeTextEditor;
 	if (editor) renderImages(editor);
 }
 
 async function deactivate() {
+	// 全局停用由 qqq.js 通过 global.setDeactivated(true) 统一管理
 	clearAllEditorDebounceTimers();
 	clearDecorations();
 	// 用户时长统计由 geq().js 中控统一管理

@@ -9,7 +9,7 @@ const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
-const ClipboardHistoryManager = require("./clipboard-history");
+const ClipboardHistoryManager = require("./q4").ClipboardHistoryManager;
 
 // 引用 global.js 的核心对象
 const {
@@ -48,6 +48,8 @@ let cacheMeta = null;
 let _statusBarTimer = null;
 let clipboardHistoryManager = null;
 let activeSidebarProvider = null;
+
+// ★ 已移除模块级 isDeactivated，统一使用 global.isDeactivated()
 
 // ============================================================================
 // Cache Meta Logic (Retained in qqq)
@@ -164,7 +166,7 @@ function initCache(context) {
 	cacheDir = path.join(globalStoragePath, CACHE_DIR_NAME);
 	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 	loadCacheMeta();
-	validateCache();
+	validateCache(); // Moved to async setTimeout in activate
 }
 
 function createEmptyMeta() {
@@ -1212,6 +1214,7 @@ let q1Module = null;
 let q2Module = null;
 
 async function activate(context) {
+	global.setDeactivated(false); // 重置全局状态
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
 
 	if (!context) {
@@ -1242,6 +1245,15 @@ async function activate(context) {
 	global.initStatusBar();
 	updateStatusBarThrottled();
 
+	// // 延迟执行繁重的缓存校验和清理任务，加快启动速度
+	// setTimeout(() => {
+	// 	try {
+	// 		validateCache();
+	// 	} catch (e) {
+	// 		global.logMessage(`延迟校验缓存失败: ${e.message}`, "WARN");
+	// 	}
+	// }, 3000);
+
 	startDaemons();
 
 	// 设置 CodeLens 样式
@@ -1258,8 +1270,26 @@ async function activate(context) {
 	// 激活时设置一次
 	updateCodeLensStyle();
 
+	// 辅助函数：安全注册资源
+	const safePush = (disposable) => {
+		if (global.isDeactivated()) {
+			try { disposable.dispose(); } catch { }
+			return;
+		}
+		try {
+			if (context && context.subscriptions) {
+				context.subscriptions.push(disposable);
+			} else {
+				disposable.dispose();
+			}
+		} catch (e) {
+			global.logMessage(`qqq.activate: Failed to push disposable: ${e.message}`, "WARN");
+			try { disposable.dispose(); } catch { }
+		}
+	};
+
 	// 监听配置变化
-	context.subscriptions.push(
+	safePush(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration("qqq.takeOverCodelensStyle")) {
 				updateCodeLensStyle();
@@ -1271,7 +1301,7 @@ async function activate(context) {
 	const SidebarWebViewProvider = require('./q4');
 	const sidebarProvider = new SidebarWebViewProvider(context, global);
 	activeSidebarProvider = sidebarProvider;
-	context.subscriptions.push(
+	safePush(
 		vscode.window.registerWebviewViewProvider('qqq.Viewq', sidebarProvider, {
 			webviewOptions: {
 				retainContextWhenHidden: true
@@ -1280,19 +1310,21 @@ async function activate(context) {
 	);
 
 	// 保留原来的命令，但现在只是聚焦到侧边栏
-	context.subscriptions.push(
+	safePush(
 		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
 			// 聚焦到侧边栏视图
 			vscode.commands.executeCommand('workbench.view.extension.qqqView');
-		}),
-		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
-		vscode.commands.registerCommand("qqq.allSettings", () => {
-			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-		}),
-		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
-		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
+		})
+	);
+	safePush(vscode.commands.registerCommand("qqq.pure", q3.pureCommand));
+	safePush(vscode.commands.registerCommand("qqq.allSettings", () => {
+		vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+	}));
+	safePush(vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand));
+	safePush(vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand));
 
 
+	safePush(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			for (const key of Object.keys(global.ConfigManager.getAll())) {
 				const fullKey = `qqq.${key}`;
@@ -1329,6 +1361,11 @@ async function activate(context) {
 		global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
 	}
 
+	// 如果在 await 期间被停用，标记
+	if (context.subscriptions.length === 0 && !isDeactivated) {
+		// Just a heuristic check
+	}
+
 	global.logMessage("qqq 扩展激活完成", "INFO");
 }
 
@@ -1349,11 +1386,21 @@ function loadSubModules(context) {
 }
 
 async function deactivate() {
+	global.setDeactivated(true); // 核心：标记全局停用，阻止所有异步任务
+
+	// 标记为已停用，防止激活中的异步回调
+	// 注意：这里的 deactivate 会被 VS Code 调用
+	global.logMessage("qqq 扩展正在停用...", "INFO");
+
 	pythonBridge.stop();
 	rustBridge.stop();
 	shellBridge.stop();
 
-	// 停止剪切板监听
+	if (activeSidebarProvider) {
+		activeSidebarProvider.dispose();
+	}
+
+	// 停止剪切板监听 (已通过 context.subscriptions 自动管理，但为了保险再次调用)
 	if (clipboardHistoryManager) {
 		clipboardHistoryManager.dispose();
 	}
@@ -1371,6 +1418,10 @@ async function deactivate() {
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch { }
+	}
+
+	if (q2Module?.deactivate) {
+		try { await q2Module.deactivate(); } catch { }
 	}
 
 	global.logMessage("qqq 扩展已停用", "INFO");

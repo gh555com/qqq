@@ -1,6 +1,625 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+class ClipboardHistoryManager {
+    constructor(context) {
+        this.context = context;
+        this.history = [];
+        this.maxHistoryItems = 100; // 最大历史记录数
+        this.clipboardWatcher = null;
+        this.lastClipboardContent = '';
+        this.isWatching = false;
+
+        // 确定存储路径：使用 globalStorageUri 避免 GlobalState 警告
+        // 确保 globalStorageUri 存在（VS Code 可能会返回 undefined，虽然现在的版本通常都有）
+        if (this.context.globalStorageUri) {
+            this.storageDir = this.context.globalStorageUri.fsPath;
+            this.storageFile = path.join(this.storageDir, 'clipboard-history.json');
+        } else {
+            // 回退方案：使用 globalStoragePath (已弃用但可能需要作为兼容) 或其他路径
+            // 这里为了安全，如果真的没有 globalStorageUri，我们可能只能回退到 globalState 或者临时目录
+            // 但通常扩展激活时会有这个 URI
+            this.storageDir = path.join(this.context.extensionPath, 'storage'); // 不推荐，但作为最后手段
+            this.storageFile = path.join(this.storageDir, 'clipboard-history.json');
+        }
+
+        // 初始化
+        this.memoryCache = {
+            history: [],
+            lastUpdated: 0,
+            size: 0,
+            maxSize: 25 * 1024 * 1024,     // 25MB 内存限制
+            expiryTime: 25 * 60 * 1000,    // 25分钟过期
+            hitCount: 0,
+            missCount: 0
+        };
+
+        this.pendingChanges = 0;
+        this.batchSaveThreshold = 5;
+        this.saveThrottleInterval = 1000;
+        this.isSaving = false;
+        this.saveQueue = false;
+        this.autoCleanupDays = 30;
+
+        this.perfStats = {
+            saveTime: 0,
+            loadTime: 0,
+            addTime: 0,
+            operations: 0
+        };
+        this._isDisposed = false;
+
+        // 异步初始化，不阻塞构造函数
+        this.initPromise = this.init();
+    }
+
+    async init() {
+        // 1. 初始化存储 (关键路径)
+        await this.initStorage();
+
+        // 2. 启动自动清理 (次要路径)
+        this.startAutoCleanup();
+
+        // 3. 延迟清理旧数据 (低优先级)
+        setTimeout(() => this.cleanupLegacyStorage(), 5000);
+    }
+
+    /**
+     * 生成内容哈希 (MD5)
+     */
+    generateContentHash(content) {
+        return crypto.createHash('md5').update(content).digest('hex');
+    }
+
+    /**
+     * 构建ID映射表
+     */
+    buildIdMap() {
+        this.idMap = {};
+        for (let i = 0; i < this.history.length; i++) {
+            this.idMap[this.history[i].id] = i;
+        }
+    }
+
+    /**
+     * 根据ID获取特定历史项 (优化版)
+     */
+    getItemById(id) {
+        if (this.idMap && this.idMap[id] !== undefined) {
+            this.memoryCache.hitCount++;
+            return this.history[this.idMap[id]];
+        }
+        // 回退查找
+        const item = this.history.find(item => item.id === id);
+        if (item) this.memoryCache.missCount++;
+        return item;
+    }
+
+    async cleanupLegacyStorage() {
+        try {
+            // 清理可能导致 "large extension state" 警告的旧 GlobalState 数据
+            const legacyKey = 'qqq_clipboard_history';
+            // 检查是否存在（虽然 get 返回 undefined 表示不存在，但为了保险起见，我们显式清理）
+            // 注意：VS Code 的 globalState.get 默认值机制，这里我们不传默认值
+            const legacyData = this.context.globalState.get(legacyKey);
+
+            if (legacyData !== undefined) {
+                console.log('ClipboardHistoryManager: 检测到旧的 GlobalState 数据，正在清理...');
+                // 更新为 undefined 以删除键
+                await this.context.globalState.update(legacyKey, undefined);
+                console.log('ClipboardHistoryManager: 旧的 GlobalState 数据已清除');
+            }
+        } catch (error) {
+            console.error('ClipboardHistoryManager: 清理旧数据失败:', error);
+        }
+    }
+
+    async initStorage() {
+        try {
+            // 尝试创建目录，如果已存在会抛错 (EEXIST)，忽略即可
+            // 使用 mkdir 而不是 access+mkdir 以减少系统调用
+            await fs.promises.mkdir(this.storageDir, { recursive: true });
+        } catch (error) {
+            // 忽略目录已存在错误
+            if (error.code !== 'EEXIST') {
+                console.error('存储目录创建失败:', error);
+            }
+        }
+        await this.loadHistory();
+    }
+
+    /**
+     * 开始监听剪切板变化
+     */
+    startWatching() {
+        if (this._isDisposed) return;
+        if (this.isWatching) return;
+
+        this.isWatching = true;
+        this.lastClipboardContent = '';
+
+        // 使用 setInterval 轮询剪切板变化
+        // 相比 VS Code 的 clipboard API 事件，轮询更可靠且能捕获外部变化
+        if (this.watchInterval) clearInterval(this.watchInterval);
+
+        this.watchInterval = setInterval(async () => {
+            if (this._isDisposed) {
+                if (this.watchInterval) clearInterval(this.watchInterval);
+                return;
+            }
+            await this.checkClipboard();
+        }, 1000); // 1秒检查一次
+
+        console.log('ClipboardHistoryManager: 剪切板监听已启动');
+    }
+
+    /**
+     * 检查剪切板内容
+     */
+    async checkClipboard() {
+        try {
+            const currentContent = await vscode.env.clipboard.readText();
+
+            // 只有当内容发生变化且非空时才记录
+            if (currentContent && currentContent !== this.lastClipboardContent) {
+                this.addToHistory(currentContent);
+                this.lastClipboardContent = currentContent;
+
+                // 通知侧边栏更新
+                this.notifySidebarUpdate();
+            }
+        } catch (error) {
+            // 静默处理错误，避免影响主流程
+            console.debug('剪切板读取失败:', error.message);
+        }
+    }
+
+    /**
+     * 停止监听剪切板变化
+     */
+    stopWatching() {
+        if (this.watchInterval) {
+            clearInterval(this.watchInterval);
+            this.watchInterval = null;
+        }
+        this.isWatching = false;
+        console.log('ClipboardHistoryManager: 剪切板监听已停止');
+    }
+
+    /**
+     * 启动自动清理
+     */
+    startAutoCleanup() {
+        // 每天执行一次
+        this.cleanupTimer = setInterval(() => {
+            if (this._isDisposed) {
+                if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+                return;
+            }
+            this.cleanupExpiredItems();
+        }, 24 * 60 * 60 * 1000);
+
+        // 启动时也检查一次
+        setTimeout(() => {
+            if (!this._isDisposed) this.cleanupExpiredItems();
+        }, 5000);
+    }
+
+    /**
+     * 清理过期项目
+     */
+    cleanupExpiredItems() {
+        try {
+            const cutoffTime = Date.now() - (this.autoCleanupDays * 24 * 60 * 60 * 1000);
+            const initialLength = this.history.length;
+
+            this.history = this.history.filter(item => item.timestamp >= cutoffTime);
+
+            if (this.history.length < initialLength) {
+                console.log(`自动清理: 移除了 ${initialLength - this.history.length} 个过期项目`);
+                this.buildIdMap();
+                this.saveHistory();
+            }
+        } catch (error) {
+            console.error('自动清理失败:', error);
+        }
+    }
+
+    /**
+     * 添加内容到历史记录 (优化版)
+     */
+    addToHistory(content) {
+        if (!content || typeof content !== 'string') return;
+
+        const startTime = performance.now();
+
+        // 计算哈希用于去重
+        const contentHash = this.generateContentHash(content);
+
+        // O(n) -> O(1) 优化去重逻辑 (这里仍然需要遍历，但可以用哈希比对加速字符串比较)
+        // 如果有 contentMap 会更快，但为了节省内存暂时只用哈希
+        // 实际上我们可以维护一个 Set<Hash> 来快速判断是否存在，但这会增加复杂性
+        // 对于 100 条记录，线性查找足够快，关键是比较大字符串时哈希更快
+
+        let existingIndex = -1;
+        // 优化查找
+        for (let i = 0; i < this.history.length; i++) {
+            // 简单的长度检查预筛选
+            if (this.history[i].content.length === content.length) {
+                // 这里可以缓存 history item 的 hash，进一步加速
+                if (this.history[i].content === content) {
+                    existingIndex = i;
+                    break;
+                }
+            }
+        }
+
+        if (existingIndex !== -1) {
+            // 移动到最前
+            const [existingItem] = this.history.splice(existingIndex, 1);
+            existingItem.timestamp = Date.now();
+            this.history.unshift(existingItem);
+        } else {
+            // 新建
+            const historyItem = {
+                id: this.generateId(),
+                content: content,
+                timestamp: Date.now(),
+                type: 'text', // 强制回归纯文本，不再进行复杂的类型检测
+                preview: this.getContentPreview(content)
+            };
+
+            this.history.unshift(historyItem);
+
+            // 限制数量
+            if (this.history.length > this.maxHistoryItems) {
+                this.history = this.history.slice(0, this.maxHistoryItems);
+            }
+        }
+
+        // 重建索引
+        this.buildIdMap();
+
+        // 性能统计
+        this.perfStats.addTime += (performance.now() - startTime);
+        this.perfStats.operations++;
+
+        // 保存 (带节流)
+        this.saveHistory();
+    }
+
+    /**
+     * 保存历史记录 (带节流和并发控制)
+     */
+    async saveHistory() {
+        if (this._isDisposed) return;
+        // 批处理逻辑
+        if (this.pendingChanges < this.batchSaveThreshold) {
+            this.pendingChanges++;
+            if (this.saveTimer) clearTimeout(this.saveTimer);
+            this.saveTimer = setTimeout(() => {
+                if (!this._isDisposed) this.forceSave();
+            }, this.saveThrottleInterval);
+            return;
+        }
+        await this.forceSave();
+    }
+
+    /**
+     * 强制保存
+     */
+    async forceSave() {
+        // 并发控制
+        if (this.isSaving) {
+            this.saveQueue = true;
+            return;
+        }
+
+        this.isSaving = true;
+        this.pendingChanges = 0;
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+
+        const startTime = performance.now();
+
+        try {
+            if (!fs.existsSync(this.storageDir)) {
+                await fs.promises.mkdir(this.storageDir, { recursive: true });
+            }
+
+            // 使用 Buffer 写入，略微优于字符串，但主要瓶颈在 I/O
+            // 如果未来有 msgpack，这里替换为 msgpack.encode
+            const data = JSON.stringify(this.history);
+            await fs.promises.writeFile(this.storageFile, data, 'utf8');
+
+            this.perfStats.saveTime += (performance.now() - startTime);
+
+        } catch (error) {
+            console.error('保存剪切板历史失败:', error);
+        } finally {
+            this.isSaving = false;
+            if (this.saveQueue && !this._isDisposed) {
+                this.saveQueue = false;
+                setTimeout(() => {
+                    if (!this._isDisposed) this.forceSave();
+                }, 100);
+            }
+        }
+    }
+
+    /**
+     * 检测内容类型
+     */
+    detectContentType(content) {
+        // 检查是否为URL
+        if (this.isValidUrl(content)) {
+            return 'url';
+        }
+
+        // 检查是否为文件路径
+        if (this.isFilePath(content)) {
+            return 'file';
+        }
+
+        // 检查是否为邮箱
+        if (this.isEmail(content)) {
+            return 'email';
+        }
+
+        // 检查是否为代码片段
+        if (this.isCodeSnippet(content)) {
+            return 'code';
+        }
+
+        // 默认为文本
+        return 'text';
+    }
+
+    /**
+     * 验证URL
+     */
+    isValidUrl(string) {
+        try {
+            const url = new URL(string);
+            return url.protocol === 'http:' || url.protocol === 'https:';
+        } catch (_) {
+            return false;
+        }
+    }
+
+    /**
+     * 检查是否为文件路径
+     */
+    isFilePath(content) {
+        // 简单的文件路径检测
+        return content.includes('\\') || content.includes('/') ||
+            content.match(/^[A-Za-z]:\\/); // Windows驱动器路径
+    }
+
+    /**
+     * 检查是否为邮箱
+     */
+    isEmail(content) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(content.trim());
+    }
+
+    /**
+     * 检查是否为代码片段
+     */
+    isCodeSnippet(content) {
+        // 检查常见的代码特征
+        const codeIndicators = [
+            /function\s+\w+/,
+            /\w+\s*\([^)]*\)\s*{/,
+            /if\s*\([^)]*\)/,
+            /for\s*\([^)]*\)/,
+            /while\s*\([^)]*\)/,
+            /console\.log/,
+            /import\s+.+from/,
+            /export\s+(default\s+)?(function|class|const|let|var)/,
+            /class\s+\w+/,
+            /const\s+\w+\s*=/
+        ];
+
+        return codeIndicators.some(regex => regex.test(content));
+    }
+
+    /**
+     * 生成唯一ID
+     */
+    generateId() {
+        return crypto.randomUUID();
+    }
+
+    /**
+     * 获取内容预览
+     */
+    getContentPreview(content, maxLength = 100) {
+        if (!content) return '';
+
+        let preview = content.trim();
+
+        // 移除多余空白字符
+        preview = preview.replace(/\s+/g, ' ');
+
+        // 截取预览
+        if (preview.length > maxLength) {
+            preview = preview.substring(0, maxLength) + '...';
+        }
+
+        return preview;
+    }
+
+    /**
+     * 获取格式化的时间显示
+     */
+    getFormattedTime(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diffInSeconds = Math.floor((now - date) / 1000);
+
+        if (diffInSeconds < 60) {
+            return '刚刚';
+        } else if (diffInSeconds < 3600) {
+            return `${Math.floor(diffInSeconds / 60)}分钟前`;
+        } else if (diffInSeconds < 86400) {
+            return `${Math.floor(diffInSeconds / 3600)}小时前`;
+        } else {
+            return date.toLocaleDateString('zh-CN');
+        }
+    }
+
+    /**
+     * 获取历史记录
+     */
+    getHistory(limit = null) {
+        if (limit) {
+            return this.history.slice(0, limit);
+        }
+        return [...this.history]; // 返回副本
+    }
+
+    /**
+     * 删除历史项
+     */
+    removeItem(id) {
+        const index = this.history.findIndex(item => item.id === id);
+        if (index !== -1) {
+            this.history.splice(index, 1);
+            this.saveHistory();
+            this.notifySidebarUpdate();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 清空所有历史记录
+     */
+    async clearHistory() {
+        console.log('ClipboardHistoryManager: 开始物理清空所有历史记录');
+        this.history = [];
+        this.lastClipboardContent = '';
+
+        try {
+            if (fs.existsSync(this.storageFile)) {
+                await fs.promises.unlink(this.storageFile);
+            }
+        } catch (error) {
+            console.error('清空历史文件失败:', error);
+        }
+
+        this.notifySidebarUpdate();
+        console.log('ClipboardHistoryManager: 物理清空完成');
+    }
+
+    /**
+     * 从文件加载历史记录
+     * 使用异步读取以避免阻塞
+     */
+    async loadHistory() {
+        const startTime = performance.now();
+        try {
+            const data = await fs.promises.readFile(this.storageFile, 'utf8');
+            if (data) {
+                // 将 JSON.parse 放在 try 块中，但不包含在 readFile 的 await 中
+                const savedHistory = JSON.parse(data);
+                this.history = Array.isArray(savedHistory) ? savedHistory : [];
+
+                // 确保所有历史记录项的类型都是 'text'
+                // 使用普通的 for 循环通常比 forEach 快一点点，且无闭包开销
+                for (let i = 0; i < this.history.length; i++) {
+                    this.history[i].type = 'text';
+                }
+            }
+        } catch (error) {
+            // 文件不存在是正常情况，初始化为空数组
+            if (error.code === 'ENOENT') {
+                this.history = [];
+            } else {
+                console.error('加载剪切板历史失败:', error);
+                this.history = [];
+            }
+        } finally {
+            // 无论成功失败，都记录耗时并构建索引
+            const duration = performance.now() - startTime;
+            this.perfStats.loadTime += duration;
+
+            // 立即构建索引，加速后续查找
+            this.buildIdMap();
+
+            console.log(`ClipboardHistoryManager: 历史记录加载完成 | 条目数: ${this.history.length} | 耗时: ${duration.toFixed(2)}ms`);
+        }
+    }
+
+    /**
+     * 通知侧边栏更新
+     */
+    notifySidebarUpdate() {
+        // 通过事件或全局变量通知侧边栏刷新
+        if (global && global.clipboardHistoryUpdated) {
+            global.clipboardHistoryUpdated();
+        }
+    }
+
+    /**
+     * 将内容复制到剪切板
+     */
+    async copyToClipboard(content) {
+        try {
+            await vscode.env.clipboard.writeText(content);
+            return true;
+        } catch (error) {
+            console.error('复制到剪切板失败:', error);
+            return false;
+        }
+    }
+
+    /**
+     * 获取统计信息
+     */
+    getStats() {
+        const typeCounts = {};
+        this.history.forEach(item => {
+            typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
+        });
+
+        return {
+            totalCount: this.history.length,
+            typeCounts: typeCounts,
+            lastUpdated: this.history.length > 0 ? this.history[0].timestamp : null
+        };
+    }
+
+    /**
+     * 销毁管理器
+     */
+    dispose() {
+        this._isDisposed = true;
+        this.stopWatching();
+
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer);
+            this.cleanupTimer = null;
+        }
+
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+
+        // 尝试同步保存一次，确保数据不丢失（但不要太久）
+        try {
+            if (this.history.length > 0 && fs.existsSync(this.storageDir)) {
+                fs.writeFileSync(this.storageFile, JSON.stringify(this.history), 'utf8');
+            }
+        } catch (e) {
+            console.error('Dispose save failed:', e);
+        }
+    }
+}
 
 class SidebarWebViewProvider {
     constructor(context, globalModule) {
@@ -9,6 +628,7 @@ class SidebarWebViewProvider {
         this._view = null;
         this.updateInterval = null;
         this.scrollPosition = null;
+        this._isDisposed = false;
 
         // 确保可以访问 extensionContext
         if (!this.global.extensionContext && typeof extensionContext !== 'undefined') {
@@ -17,6 +637,7 @@ class SidebarWebViewProvider {
     }
 
     resolveWebviewView(webviewView, context, token) {
+        if (this._isDisposed) return;
         this._view = webviewView;
 
         const extensionUri = vscode.Uri.file(this.context.extensionPath);
@@ -41,12 +662,22 @@ class SidebarWebViewProvider {
             clearInterval(this.updateInterval);
         }
         this.updateInterval = setInterval(() => {
+            if (this._isDisposed) {
+                if (this.updateInterval) clearInterval(this.updateInterval);
+                return;
+            }
             this.updateContent();
         }, 5000);
 
         // 处理来自 webview 的消息
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            console.log('收到 Webview 消息:', message.command, message.itemId);
+            if (this._isDisposed) return;
+            // 过滤掉 updateData 消息，这是前端误发的
+            if (message.command === 'updateData') return;
+            // 过滤掉无效的 playAudio 消息
+            if (message.command === 'playAudio' && !message.audioUrl && !message.base64) return;
+
+            // console.log('收到 Webview 消息:', message.command, message.itemId); // 减少日志噪音
             switch (message.command) {
                 case "executeCommand":
                     if (message.cmd) {
@@ -89,6 +720,34 @@ class SidebarWebViewProvider {
                         }
                     }
                     break;
+                case "openUrl":
+                    if (message.url) {
+                        vscode.env.openExternal(vscode.Uri.parse(message.url));
+                    }
+                    break;
+                case "openFile":
+                    if (message.path) {
+                        vscode.workspace.openTextDocument(message.path).then(doc => {
+                            vscode.window.showTextDocument(doc);
+                        }, err => {
+                            vscode.window.showErrorMessage('无法打开文件: ' + err.message);
+                        });
+                    }
+                    break;
+                case "insertText":
+                    if (message.text) {
+                        const editor = vscode.window.activeTextEditor;
+                        if (editor) {
+                            editor.edit(editBuilder => {
+                                editBuilder.insert(editor.selection.active, message.text);
+                            });
+                        } else {
+                            // 如果没有活动编辑器，则回退到复制
+                            vscode.env.clipboard.writeText(message.text);
+                            vscode.window.showInformationMessage('没有活动的编辑器，内容已复制到剪切板');
+                        }
+                    }
+                    break;
                 case "clearAllHistory":
                     if (!this.global.clipboardHistoryManager) {
                         console.error('致命错误: clipboardHistoryManager 未初始化');
@@ -123,7 +782,7 @@ class SidebarWebViewProvider {
     }
 
     updateContent() {
-        if (!this._view || !this._view.webview) return;
+        if (this._isDisposed || !this._view || !this._view.webview) return;
 
         try {
             // 获取剪切板历史数据
@@ -136,7 +795,16 @@ class SidebarWebViewProvider {
                 }));
             }
 
-            const cacheStats = this.calculateActualCacheSize();
+            // 使用全局统计快照替代同步文件扫描，避免阻塞主线程
+            let cacheStats = { totalSize: 0 };
+            if (this.global && this.global.getCacheStatsSnapshot) {
+                cacheStats = this.global.getCacheStatsSnapshot();
+            } else {
+                // 回退方案：如果全局不可用且这是第一次运行，执行一次轻量检查
+                // 注意：由于 calculateActualCacheSize 是同步的，我们尽量避免在这里调用它
+                cacheStats = { totalSize: 0 };
+            }
+
             let totalSeconds = 0, h = 0, m = 0;
 
             // 使用 globalState 获取统计数据（保持原有逻辑）
@@ -168,9 +836,9 @@ class SidebarWebViewProvider {
 
             const soundUri = this._view.webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, "assets", "q.mp3")));
 
-            // 如果已经有 HTML，则通过 postMessage 更新数据，避免重新加载导致脚本崩溃
+            // 如果已经有 HTML，则通过安全的 postMessage 接口更新数据
             if (this._view.webview.html && this._view.webview.html.length > 100) {
-                this._view.webview.postMessage({
+                this.postMessage({
                     command: 'updateData',
                     stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
                     history: clipboardHistory
@@ -183,9 +851,27 @@ class SidebarWebViewProvider {
         }
     }
 
-    postMessage(message) {
-        if (this._view && this._view.webview) {
-            this._view.webview.postMessage(message);
+    dispose() {
+        this._isDisposed = true;
+        if (this.updateInterval) {
+            clearInterval(this.updateInterval);
+            this.updateInterval = null;
+        }
+        this._view = null;
+    }
+
+    async postMessage(message) {
+        if (this._isDisposed || !this._view || !this._view.webview) return;
+
+        try {
+            // 确保消息对象是纯粹的 POJO，防止 toJSON 序列化错误
+            const safeMessage = JSON.parse(JSON.stringify(message));
+            await this._view.webview.postMessage(safeMessage);
+        } catch (e) {
+            // 记录到日志，不再引发 IDE 级联错误
+            if (this.global && this.global.logMessage) {
+                this.global.logMessage(`Sidebar postMessage failed: ${e.message}`, "WARN");
+            }
         }
     }
 
@@ -323,15 +1009,24 @@ class SidebarWebViewProvider {
 
     getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioUri = '') {
         const historyHtml = clipboardHistory.length > 0
-            ? clipboardHistory.map(item => `
-                <div class="history-item" data-id="${this.escapeHtml(item.id)}">
-                    <div class="item-time">${item.time}</div>
+            ? clipboardHistory.map(item => {
+                // 强制回归纯文本
+                let typeIcon = '📄';
+                let typeClass = 'type-text';
+
+                return `
+                <div class="history-item ${typeClass}" data-id="${this.escapeHtml(item.id)}">
+                    <div class="item-header">
+                        <span class="item-type" title="text">${typeIcon}</span>
+                        <span class="item-time">${item.time}</span>
+                    </div>
                     <div class="item-preview">${this.escapeHtml(item.preview)}</div>
                     <div class="item-actions">
                         <button class="action-mini-btn" onclick="handleCopy(this)">📋 复制</button>
                         <button class="action-mini-btn" onclick="handleDelete(this)">🗑️ 删除</button>
                     </div>
-                </div>`).join('')
+                </div>`;
+            }).join('')
             : '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
 
         return `<!DOCTYPE html>
@@ -431,11 +1126,17 @@ class SidebarWebViewProvider {
         /* Passed by Style */
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
         .history-list { max-height: 800px; overflow-y: scroll; padding: 8px; overflow-x: hidden !important; }
-        .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
+        .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; position: relative; }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px var(--shadow-color); }
+
+        .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .item-type { font-size: 1.2em; margin-right: 5px; }
         .item-time { font-size: 0.7em; color: var(--text-secondary); }
         .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 50px; overflow: hidden; }
         .item-actions { display: flex; gap: 6px; margin-top: 5px; }
+
+        /* Type specific styles */
+        .type-text .item-preview { color: var(--text-primary); }
 
         .action-mini-btn {
             padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color);
@@ -710,8 +1411,15 @@ class SidebarWebViewProvider {
                         if (m.history && Array.isArray(m.history) && m.history.length > 0) {
                             list.innerHTML = m.history.map(item => {
                                 const id = escapeHtml(item.id || '');
-                                return '<div class="history-item" data-id="' + id + '">' +
-                                    '<div class="item-time">' + (item.time || '未知时间') + '</div>' +
+                                // 强制回归纯文本图标和样式
+                                let typeIcon = '📄';
+                                let typeClass = 'type-text';
+
+                                return '<div class="history-item ' + typeClass + '" data-id="' + id + '">' +
+                                    '<div class="item-header">' +
+                                        '<span class="item-type" title="text">' + typeIcon + '</span>' +
+                                        '<div class="item-time">' + (item.time || '未知时间') + '</div>' +
+                                    '</div>' +
                                     '<div class="item-preview">' + escapeHtml(item.preview || '') + '</div>' +
                                     '<div class="item-actions">' +
                                         '<button class="action-mini-btn" onclick="handleCopy(this)">📋 复制</button>' +
@@ -852,15 +1560,7 @@ class SidebarWebViewProvider {
 </body>
 </html>`;
     }
-
-    dispose() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-            this.updateInterval = null;
-        }
-    }
 }
 
 module.exports = SidebarWebViewProvider;
-
-
+module.exports.ClipboardHistoryManager = ClipboardHistoryManager;

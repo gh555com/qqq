@@ -1,5 +1,5 @@
 // 剪切板历史功能测试
-const ClipboardHistoryManager = require('../src/clipboard-history');
+const ClipboardHistoryManager = require('../src/q4').ClipboardHistoryManager;
 
 // 模拟 VS Code 上下文
 const mockContext = {

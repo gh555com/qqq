@@ -1152,7 +1152,11 @@ let ffmpegPath = null;
 let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
 
+// ★ 统一停用标志位管理，确保所有子模块同步感知环境状态
+let _isDeactivated = false;
+
 function init(context) {
+	_isDeactivated = false; // 重置
 	extensionContext = context;
 
 	// 初始化 FFmpeg 路径
@@ -1833,12 +1837,18 @@ const TransactionManager = {
 
 	async saveTransaction(trans) {
 		if (!extensionContext) return;
-		const list = this.getTransactions();
+		let list = this.getTransactions();
 		list.push({
 			...trans,
 			createdAt: Date.now(),
 			status: 'pending'
 		});
+
+		// 限制事务列表大小，防止 globalState 爆炸
+		if (list.length > 20) {
+			list = list.slice(-10);
+		}
+
 		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
 	},
 
@@ -2776,5 +2786,9 @@ module.exports = {
 	wq,
 	TransactionManager,
 	TaskCounter,
-	getDirectorySnapshot  // ★ 目录快照函数
+	getDirectorySnapshot,  // ★ 目录快照函数
+
+	// ★ 停用状态统一接口
+	setDeactivated: (v) => { _isDeactivated = !!v; },
+	isDeactivated: () => _isDeactivated
 };
