@@ -1194,6 +1194,20 @@ async function killAllProcesses() {
 	await Promise.all(killPromises);
 }
 
+// ★ 终极最优解：启动就绪信号灯
+let _resolveReady;
+const _readyPromise = new Promise(resolve => { _resolveReady = resolve; });
+
+/**
+ * 高阶函数：包装需要等待就绪的函数
+ */
+function withReady(fn) {
+	return async (...args) => {
+		await _readyPromise;
+		return fn(...args);
+	};
+}
+
 function init(context) {
 	_isDeactivated = false; // 启动时重置
 	extensionContext = context;
@@ -2862,6 +2876,13 @@ module.exports = {
 	// ★ 终极最优解：进程与状态管理接口
 	trackProcess,
 	killAllProcesses,
+	markReady: () => {
+		if (_resolveReady) {
+			_resolveReady();
+			_resolveReady = null; // 释放引用
+		}
+	},
+	withReady,
 	setDeactivated: (v) => { _isDeactivated = !!v; },
 	isDeactivated: () => _isDeactivated
 };

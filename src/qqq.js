@@ -1283,16 +1283,16 @@ async function activate(context) {
 
 	// 保留原来的命令，但现在只是聚焦到侧边栏
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
+		vscode.commands.registerCommand("qqq.showStatusPanel", global.withReady(() => {
 			// 聚焦到侧边栏视图
 			vscode.commands.executeCommand('workbench.view.extension.qqqView');
-		}),
-		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
-		vscode.commands.registerCommand("qqq.allSettings", () => {
+		})),
+		vscode.commands.registerCommand("qqq.pure", global.withReady(q3.pureCommand)),
+		vscode.commands.registerCommand("qqq.allSettings", global.withReady(() => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-		}),
-		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
-		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
+		})),
+		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
+		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 
 
 		vscode.workspace.onDidChangeConfiguration((event) => {
@@ -1331,6 +1331,9 @@ async function activate(context) {
 			await global.TransactionManager.recover();
 		} catch (e) {
 			global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
+		} finally {
+			// ★ 无论成功失败，推开信号灯，允许命令执行
+			global.markReady();
 		}
 	})();
 

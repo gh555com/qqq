@@ -1,799 +1,2265 @@
+// ============================================================================
+// Q4.js - QQQ Clipboard History Ultimate Fusion (A+Q Final Value Edition)
+// 作者: 的梦 (q)
+// 版本: 4.0.0-fusion-final
+//
+// ✅ Solarized Dark + 暗金配色（强制自定义颜色）
+// ✅ forced-color-adjust: none 破 Windows 高对比度主题（保证自定义配色可见）
+// ✅ 已彻底移除一切 VS Code globalState / workspaceState 相关代码与迁移/清理逻辑（向前看，不兼容历史）
+// ✅ CSP 安全：全 nonce，无 unsafe-inline，无内联事件
+// ✅ O(1) 去重/查找：hashMap + idMap + 双向链表（move-to-front）
+// ✅ 文件持久化：globalStorageUri + gzip + (msgpack 可选) + 原子写 + 损坏隔离
+// ✅ 功能：搜索、导入/导出、复制、粘贴、插入编辑器、QuickPick、统计、状态栏
+// ============================================================================
+
+'use strict';
+
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const zlib = require('zlib');
+const { performance } = require('perf_hooks');
 
-class SidebarWebViewProvider {
-    constructor(context, globalModule) {
+// ============================================================================
+// 常量
+// ============================================================================
+const CONSTANTS = Object.freeze({
+    VERSION: 4,
+
+    // 存储
+    STORAGE_DIR: 'clipboard-history',
+    FILE_BIN_GZ: 'history.bin.gz',
+    FILE_JSON_GZ: 'history.json.gz',
+
+    // 限制
+    MAX_HISTORY_ITEMS: 100,
+    UI_HISTORY_LIMIT: 30,
+    MAX_CONTENT_LENGTH: 100000,
+    PREVIEW_LENGTH: 200,
+
+    // 监听
+    CLIPBOARD_POLL_MS: 1000,
+    SIDEBAR_UPDATE_MS: 5000,
+
+    // 保存（批处理 + 节流 + 串行写入）
+    BATCH_SAVE_THRESHOLD: 5,
+    SAVE_THROTTLE_MS: 1000,
+    SAVE_RETRY_DELAY_MS: 120,
+
+    // 原子写
+    SAVE_TEMP_SUFFIX: '.tmp',
+
+    // 损坏隔离
+    CORRUPT_SUFFIX_PREFIX: '.corrupt-',
+
+    // 自动清理
+    AUTO_CLEANUP_DAYS: 30,
+    AUTO_CLEANUP_INTERVAL_MS: 24 * 60 * 60 * 1000,
+
+    // watchdog
+    WATCHDOG_REFRESH_MS: 30000,
+    WATCHDOG_STALE_MS: 15000,
+
+    // 时间
+    MS_PER_MINUTE: 60 * 1000,
+    MS_PER_HOUR: 60 * 60 * 1000,
+    MS_PER_DAY: 24 * 60 * 60 * 1000,
+});
+
+// ============================================================================
+// 正则
+// ============================================================================
+const REGEX = Object.freeze({
+    WHITESPACE_ONLY: /^\s*$/,
+    WHITESPACE_COLLAPSE: /\s+/g,
+    HTML_ESCAPE: /[&<>"']/g,
+});
+
+// ============================================================================
+// HTML escape（仅用于 attribute 字符串拼接）
+// ============================================================================
+const HTML_ESCAPE_MAP = Object.freeze({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+});
+function escapeHtmlAttr(text) {
+    if (text === null || text === undefined) return '';
+    return String(text).replace(REGEX.HTML_ESCAPE, (ch) => HTML_ESCAPE_MAP[ch] || ch);
+}
+
+// ============================================================================
+// msgpack（可选）惰性加载
+// ============================================================================
+let _msgpack = null;
+let _msgpackLoaded = false;
+function getMsgpack() {
+    if (_msgpackLoaded) return _msgpack;
+    _msgpackLoaded = true;
+    try {
+        // eslint-disable-next-line global-require
+        _msgpack = require('msgpack-lite');
+    } catch {
+        _msgpack = null;
+    }
+    return _msgpack;
+}
+
+// ============================================================================
+// 工具函数
+// ============================================================================
+function randomId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return crypto.randomBytes(16).toString('hex');
+}
+function md5Hex(s) {
+    return crypto.createHash('md5').update(String(s)).digest('hex');
+}
+function nonceHex() {
+    return crypto.randomBytes(16).toString('hex');
+}
+function clampInt(n, min, max) {
+    const x = Number.isFinite(n) ? Math.trunc(n) : min;
+    return Math.min(max, Math.max(min, x));
+}
+function gzipAsync(buf) {
+    if (zlib.promises?.gzip) return zlib.promises.gzip(buf);
+    return new Promise((resolve, reject) => zlib.gzip(buf, (err, out) => (err ? reject(err) : resolve(out))));
+}
+function gunzipAsync(buf) {
+    if (zlib.promises?.gunzip) return zlib.promises.gunzip(buf);
+    return new Promise((resolve, reject) => zlib.gunzip(buf, (err, out) => (err ? reject(err) : resolve(out))));
+}
+function estimateBytes(obj) {
+    try {
+        const mp = getMsgpack();
+        if (mp) return Buffer.from(mp.encode(obj)).length;
+        return Buffer.byteLength(JSON.stringify(obj), 'utf8');
+    } catch {
+        return 0;
+    }
+}
+function makePreview(content, maxLen = CONSTANTS.PREVIEW_LENGTH) {
+    if (!content) return '';
+    let s = String(content).trim().replace(REGEX.WHITESPACE_COLLAPSE, ' ');
+    if (s.length > maxLen) s = s.slice(0, maxLen) + '...';
+    return s;
+}
+function formatTime(timestamp) {
+    const now = Date.now();
+    const t = Number(timestamp) || now;
+    const diff = now - t;
+
+    if (diff < CONSTANTS.MS_PER_MINUTE) return '刚刚';
+    if (diff < CONSTANTS.MS_PER_HOUR) return `${Math.floor(diff / CONSTANTS.MS_PER_MINUTE)}分钟前`;
+    if (diff < CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_HOUR)}小时前`;
+    if (diff < 7 * CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_DAY)}天前`;
+    return new Date(t).toLocaleDateString('zh-CN');
+}
+
+// ============================================================================
+// 双向链表节点 typedef
+// ============================================================================
+/**
+ * @typedef {Object} HistoryNode
+ * @property {string} id
+ * @property {string} content
+ * @property {number} timestamp
+ * @property {string} type
+ * @property {string} preview
+ * @property {number} contentLength
+ * @property {string} hash
+ * @property {HistoryNode|null} prev
+ * @property {HistoryNode|null} next
+ */
+
+// ============================================================================
+// ClipboardHistoryManager
+// ============================================================================
+class ClipboardHistoryManager {
+    /**
+     * @param {vscode.ExtensionContext} context
+     * @param {{ onChange?: Function }=} opts
+     */
+    constructor(context, opts = {}) {
         this.context = context;
-        this.global = globalModule;
-        this._view = null;
-        this.updateInterval = null;
-        this.scrollPosition = null;
 
-        // 确保可以访问 extensionContext
-        if (!this.global.extensionContext && typeof extensionContext !== 'undefined') {
-            this.global.extensionContext = extensionContext;
+        /** @type {HistoryNode|null} */
+        this._head = null;
+        /** @type {HistoryNode|null} */
+        this._tail = null;
+        this._size = 0;
+
+        this._idMap = new Map();   // id -> node
+        this._hashMap = new Map(); // hash -> node
+
+        // 快照缓存
+        this._version = 0;
+        this._snapshotVersion = -1;
+        /** @type {Array<any>|null} */
+        this._snapshotAll = null;
+
+        // UI/Search 缓存（轻量）
+        this._cache = {
+            version: -1,
+            uiLimit: -1,
+            uiList: null,
+            uiBytes: 0,
+            lastSearchKey: '',
+            searchList: null,
+            searchBytes: 0,
+            hit: 0,
+            miss: 0,
+            maxBytes: 25 * 1024 * 1024, // 25MB
+        };
+
+        // 存储
+        this._storageDir = null;
+        this._fileBinGz = null;
+        this._fileJsonGz = null;
+
+        // 序列化策略：优先 msgpack（若存在）
+        this._preferMsgpack = !!getMsgpack();
+
+        // 保存：串行 + 节流/批处理
+        this._saveChain = Promise.resolve();
+        this._saveTimer = null;
+        this._pendingChanges = 0;
+        this._dirty = false;
+
+        // 监听剪贴板
+        this._clipboardTimer = null;
+        this._isWatching = false;
+        this._watcherBusy = false;
+        this._lastClipboardContent = '';
+
+        // 自动清理
+        this._cleanupTimer = null;
+
+        // 回调
+        this._onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
+
+        // 性能统计
+        this.perfStats = {
+            saveTimeMs: 0,
+            loadTimeMs: 0,
+            addTimeMs: 0,
+            removeTimeMs: 0,
+            clearTimeMs: 0,
+            operations: 0,
+            lastSaveBytes: 0,
+            lastLoadBytes: 0,
+            quarantinedFiles: 0,
+        };
+
+        // 会话开始时间（不用任何 state，纯内存）
+        this.sessionStartedAt = Date.now();
+
+        this._initStorage();
+        this._initHistory().catch(() => { });
+        this._startAutoCleanup();
+    }
+
+    _initStorage() {
+        try {
+            const root = this.context.globalStorageUri?.fsPath;
+            if (!root) throw new Error('globalStorageUri 不可用');
+
+            this._storageDir = path.join(root, CONSTANTS.STORAGE_DIR);
+            fs.mkdirSync(this._storageDir, { recursive: true });
+
+            this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
+            this._fileJsonGz = path.join(this._storageDir, CONSTANTS.FILE_JSON_GZ);
+        } catch {
+            this._storageDir = null;
+            this._fileBinGz = null;
+            this._fileJsonGz = null;
         }
     }
 
-    resolveWebviewView(webviewView, context, token) {
-        this._view = webviewView;
+    async _initHistory() {
+        const t0 = performance.now();
+        try {
+            await this._loadHistory();
+            this._cleanupExpiredItems();
+        } finally {
+            this.perfStats.loadTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
 
-        const extensionUri = vscode.Uri.file(this.context.extensionPath);
+    _startAutoCleanup() {
+        if (this._cleanupTimer) clearInterval(this._cleanupTimer);
+        this._cleanupTimer = setInterval(() => {
+            try {
+                const changed = this._cleanupExpiredItems();
+                if (changed) this.requestSave();
+            } catch {
+                // ignore
+            }
+        }, CONSTANTS.AUTO_CLEANUP_INTERVAL_MS);
+    }
+
+    _cleanupExpiredItems() {
+        const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
+        let changed = false;
+
+        while (this._tail && this._tail.timestamp < cutoff) {
+            this._removeNode(this._tail);
+            changed = true;
+        }
+
+        if (changed) this._touch();
+        return changed;
+    }
+
+    _touch() {
+        this._version++;
+        this._snapshotVersion = -1;
+        this._snapshotAll = null;
+
+        this._cache.version = -1;
+        this._cache.uiList = null;
+        this._cache.searchList = null;
+        this._cache.uiBytes = 0;
+        this._cache.searchBytes = 0;
+    }
+
+    _resetInMemory() {
+        this._head = null;
+        this._tail = null;
+        this._size = 0;
+        this._idMap.clear();
+        this._hashMap.clear();
+        this._lastClipboardContent = '';
+        this._touch();
+    }
+
+    _insertHead(node) {
+        node.prev = null;
+        node.next = this._head;
+        if (this._head) this._head.prev = node;
+        this._head = node;
+        if (!this._tail) this._tail = node;
+        this._size++;
+    }
+
+    _removeNode(node) {
+        if (!node) return;
+
+        const { prev, next } = node;
+        if (prev) prev.next = next;
+        if (next) next.prev = prev;
+
+        if (this._head === node) this._head = next;
+        if (this._tail === node) this._tail = prev;
+
+        node.prev = null;
+        node.next = null;
+
+        this._size--;
+        this._idMap.delete(node.id);
+        this._hashMap.delete(node.hash);
+    }
+
+    _moveToHead(node) {
+        if (!node || this._head === node) return;
+
+        const { prev, next } = node;
+        if (prev) prev.next = next;
+        if (next) next.prev = prev;
+        if (this._tail === node) this._tail = prev;
+
+        node.prev = null;
+        node.next = this._head;
+        if (this._head) this._head.prev = node;
+        this._head = node;
+        if (!this._tail) this._tail = node;
+    }
+
+    _popTail() {
+        if (!this._tail) return null;
+        const node = this._tail;
+        this._removeNode(node);
+        return node;
+    }
+
+    _toArrayAll() {
+        if (this._snapshotAll && this._snapshotVersion === this._version) return this._snapshotAll;
+
+        const arr = [];
+        let cur = this._head;
+        while (cur) {
+            arr.push({
+                id: cur.id,
+                content: cur.content,
+                timestamp: cur.timestamp,
+                type: cur.type,
+                preview: cur.preview,
+                contentLength: cur.contentLength,
+                hash: cur.hash,
+            });
+            cur = cur.next;
+        }
+
+        this._snapshotAll = arr;
+        this._snapshotVersion = this._version;
+        return arr;
+    }
+
+    getHistory(limit = CONSTANTS.UI_HISTORY_LIMIT) {
+        const lim = clampInt(limit, 1, CONSTANTS.MAX_HISTORY_ITEMS);
+
+        if (this._cache.uiList && this._cache.version === this._version && this._cache.uiLimit === lim) {
+            this._cache.hit++;
+            return this._cache.uiList;
+        }
+        this._cache.miss++;
+
+        const out = [];
+        let cur = this._head;
+        while (cur && out.length < lim) {
+            out.push({
+                id: cur.id,
+                content: cur.content,
+                timestamp: cur.timestamp,
+                type: cur.type,
+                preview: cur.preview,
+                contentLength: cur.contentLength,
+                hash: cur.hash,
+            });
+            cur = cur.next;
+        }
+
+        const bytes = estimateBytes(out);
+        if (bytes <= this._cache.maxBytes) {
+            this._cache.uiList = out;
+            this._cache.uiLimit = lim;
+            this._cache.version = this._version;
+            this._cache.uiBytes = bytes;
+        }
+        return out;
+    }
+
+    searchHistory(keyword, limit = CONSTANTS.UI_HISTORY_LIMIT) {
+        const kw = String(keyword || '').trim();
+        const lim = clampInt(limit, 1, CONSTANTS.MAX_HISTORY_ITEMS);
+        if (!kw) return this.getHistory(lim);
+
+        const cacheKey = `${this._version}|${lim}|${kw.toLowerCase()}`;
+        if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) {
+            this._cache.hit++;
+            return this._cache.searchList;
+        }
+        this._cache.miss++;
+
+        const needle = kw.toLowerCase();
+        const out = [];
+        let cur = this._head;
+        while (cur && out.length < lim) {
+            const hay = (cur.content || '').toLowerCase();
+            if (hay.includes(needle)) {
+                out.push({
+                    id: cur.id,
+                    content: cur.content,
+                    timestamp: cur.timestamp,
+                    type: cur.type,
+                    preview: cur.preview,
+                    contentLength: cur.contentLength,
+                    hash: cur.hash,
+                });
+            }
+            cur = cur.next;
+        }
+
+        const bytes = estimateBytes(out);
+        if (bytes <= this._cache.maxBytes) {
+            this._cache.searchList = out;
+            this._cache.searchBytes = bytes;
+            this._cache.lastSearchKey = cacheKey;
+        }
+        return out;
+    }
+
+    getItemById(id) {
+        return this._idMap.get(String(id || ''));
+    }
+
+    async addToHistory(content) {
+        const t0 = performance.now();
+        try {
+            if (typeof content !== 'string') return;
+            let text = content;
+            if (!text || REGEX.WHITESPACE_ONLY.test(text)) return;
+
+            if (text.length > CONSTANTS.MAX_CONTENT_LENGTH) {
+                text = text.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
+            }
+
+            // watcher 同轮重复跳过
+            if (text === this._lastClipboardContent) return;
+
+            const hash = md5Hex(text);
+            const existed = this._hashMap.get(hash);
+
+            if (existed) {
+                existed.timestamp = Date.now();
+                existed.content = text;
+                existed.contentLength = text.length;
+                existed.preview = makePreview(text);
+                this._moveToHead(existed);
+            } else {
+                /** @type {HistoryNode} */
+                const node = {
+                    id: randomId(),
+                    content: text,
+                    timestamp: Date.now(),
+                    type: 'text',
+                    preview: makePreview(text),
+                    contentLength: text.length,
+                    hash,
+                    prev: null,
+                    next: null,
+                };
+
+                this._insertHead(node);
+                this._idMap.set(node.id, node);
+                this._hashMap.set(hash, node);
+
+                if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+                    this._popTail();
+                }
+            }
+
+            this._lastClipboardContent = text;
+            this._touch();
+            this._notifyChange();
+
+            this.requestSave();
+        } finally {
+            this.perfStats.addTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
+
+    async removeItem(id) {
+        const t0 = performance.now();
+        try {
+            const node = this._idMap.get(String(id || ''));
+            if (!node) return false;
+
+            this._removeNode(node);
+            this._touch();
+            this._notifyChange();
+            this.requestSave();
+            return true;
+        } catch {
+            return false;
+        } finally {
+            this.perfStats.removeTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
+
+    async clearHistory({ deleteFiles = true, writeEmptyFile = true } = {}) {
+        const t0 = performance.now();
+        try {
+            this._resetInMemory();
+            this._notifyChange();
+
+            if (deleteFiles) {
+                const targets = [this._fileBinGz, this._fileJsonGz].filter(Boolean);
+                for (const fp of targets) {
+                    try {
+                        if (fp && fs.existsSync(fp)) await fs.promises.unlink(fp);
+                    } catch {
+                        // ignore
+                    }
+                }
+            }
+
+            if (writeEmptyFile) {
+                this._dirty = true;
+                await this.forceSave();
+            }
+
+            return true;
+        } finally {
+            this.perfStats.clearTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
+
+    startWatching() {
+        if (this._isWatching) return;
+        this._isWatching = true;
+        this._lastClipboardContent = '';
+
+        this._clipboardTimer = setInterval(async () => {
+            if (this._watcherBusy) return;
+            this._watcherBusy = true;
+            try {
+                const cur = await vscode.env.clipboard.readText();
+                if (cur && cur !== this._lastClipboardContent) {
+                    await this.addToHistory(cur);
+                }
+            } catch {
+                // ignore
+            } finally {
+                this._watcherBusy = false;
+            }
+        }, CONSTANTS.CLIPBOARD_POLL_MS);
+    }
+
+    stopWatching() {
+        if (this._clipboardTimer) {
+            clearInterval(this._clipboardTimer);
+            this._clipboardTimer = null;
+        }
+        this._isWatching = false;
+    }
+
+    async copyToClipboard(content) {
+        try {
+            const s = String(content ?? '');
+            await vscode.env.clipboard.writeText(s);
+            this._lastClipboardContent = s; // 避免 watcher 立刻反灌
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async insertToEditor(content) {
+        try {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor) return false;
+
+            const text = String(content ?? '');
+            await editor.edit((editBuilder) => {
+                if (editor.selection.isEmpty) editBuilder.insert(editor.selection.active, text);
+                else editBuilder.replace(editor.selection, text);
+            });
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    // =========================
+    // 导出 / 导入（字符串）
+    // =========================
+    async exportHistoryString() {
+        const doc = {
+            version: CONSTANTS.VERSION,
+            exportedAt: Date.now(),
+            history: this._toArrayAll(),
+        };
+        return JSON.stringify(doc, null, 2);
+    }
+
+    async importHistoryString(jsonString) {
+        try {
+            const parsed = JSON.parse(String(jsonString || ''));
+            const arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.history) ? parsed.history : []);
+            if (!Array.isArray(arr)) return { success: false, error: 'invalid format' };
+
+            let imported = 0;
+            for (const it of arr) {
+                const content = String((it && it.content) || '');
+                if (!content || REGEX.WHITESPACE_ONLY.test(content)) continue;
+
+                let fixed = content;
+                if (fixed.length > CONSTANTS.MAX_CONTENT_LENGTH) fixed = fixed.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
+
+                const hash = String((it && it.hash) || md5Hex(fixed));
+                if (this._hashMap.has(hash)) continue;
+
+                /** @type {HistoryNode} */
+                const node = {
+                    id: String((it && it.id) || randomId()),
+                    content: fixed,
+                    timestamp: Number((it && it.timestamp) || Date.now()),
+                    type: String((it && it.type) || 'text'),
+                    preview: String((it && it.preview) || makePreview(fixed)),
+                    contentLength: Number((it && it.contentLength) || fixed.length),
+                    hash,
+                    prev: null,
+                    next: null,
+                };
+
+                this._insertHead(node);
+                this._idMap.set(node.id, node);
+                this._hashMap.set(node.hash, node);
+                imported++;
+            }
+
+            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
+
+            this._touch();
+            this._notifyChange();
+            this._dirty = true;
+            await this.forceSave();
+
+            return { success: true, imported };
+        } catch (e) {
+            return { success: false, error: e?.message || 'parse failed' };
+        }
+    }
+
+    // =========================
+    // 导出 / 导入（文件）
+    // =========================
+    async exportToJsonFile() {
+        const uri = await vscode.window.showSaveDialog({
+            title: '导出剪贴板历史（JSON）',
+            filters: { JSON: ['json'] },
+            saveLabel: '导出',
+            defaultUri: vscode.Uri.file(`clipboard-history-${Date.now()}.json`),
+        });
+        if (!uri) return false;
+
+        try {
+            const txt = await this.exportHistoryString();
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(txt, 'utf8'));
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async importFromJsonFile() {
+        const uris = await vscode.window.showOpenDialog({
+            title: '导入剪贴板历史（JSON）',
+            canSelectMany: false,
+            filters: { JSON: ['json'] },
+            openLabel: '导入',
+        });
+        if (!uris || !uris[0]) return { success: false, error: 'cancelled' };
+
+        try {
+            const buf = await vscode.workspace.fs.readFile(uris[0]);
+            return await this.importHistoryString(buf.toString());
+        } catch (e) {
+            return { success: false, error: e?.message || 'read failed' };
+        }
+    }
+
+    // =========================
+    // 保存
+    // =========================
+    requestSave() {
+        if (!this._fileBinGz && !this._fileJsonGz) return;
+
+        this._dirty = true;
+        this._pendingChanges++;
+
+        if (this._pendingChanges >= CONSTANTS.BATCH_SAVE_THRESHOLD) {
+            this.forceSave().catch(() => { });
+            return;
+        }
+
+        if (this._saveTimer) clearTimeout(this._saveTimer);
+        this._saveTimer = setTimeout(() => {
+            this.forceSave().catch(() => { });
+        }, CONSTANTS.SAVE_THROTTLE_MS);
+    }
+
+    async forceSave() {
+        if (!this._fileBinGz && !this._fileJsonGz) return;
+
+        if (this._saveTimer) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = null;
+        }
+
+        this._saveChain = this._saveChain
+            .then(() => this._doSaveOnce())
+            .catch(() => this._doSaveOnce());
+
+        return this._saveChain;
+    }
+
+    async _doSaveOnce() {
+        if (!this._dirty) return;
+
+        const t0 = performance.now();
+
+        // 先把 dirty 拉下去；如写失败会再置回
+        this._dirty = false;
+
+        try {
+            const payload = {
+                version: CONSTANTS.VERSION,
+                savedAt: Date.now(),
+                history: this._toArrayAll(),
+            };
+
+            const mp = getMsgpack();
+            let rawBuf;
+            try {
+                if (this._preferMsgpack && mp) rawBuf = Buffer.from(mp.encode(payload));
+                else rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+            } catch {
+                rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
+            }
+
+            let outBuf = rawBuf;
+            try {
+                outBuf = await gzipAsync(rawBuf);
+            } catch {
+                outBuf = rawBuf;
+            }
+
+            const targetPath = (this._preferMsgpack && this._fileBinGz) ? this._fileBinGz : this._fileJsonGz;
+            if (!targetPath) return;
+
+            await this._writeFileAtomic(targetPath, outBuf);
+
+            this.perfStats.lastSaveBytes = outBuf.length;
+            this._pendingChanges = 0;
+        } catch {
+            // 写失败：恢复 dirty 并稍后重试
+            this._dirty = true;
+            setTimeout(() => {
+                if (this._dirty) this.forceSave().catch(() => { });
+            }, CONSTANTS.SAVE_RETRY_DELAY_MS);
+        } finally {
+            this.perfStats.saveTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
+
+    async _writeFileAtomic(targetPath, buf) {
+        const dir = path.dirname(targetPath);
+        const tmpName = `${path.basename(targetPath)}${CONSTANTS.SAVE_TEMP_SUFFIX}.${randomId()}`;
+        const tmpPath = path.join(dir, tmpName);
+
+        await fs.promises.writeFile(tmpPath, buf);
+
+        // Windows rename 覆盖可能失败：先 unlink 再 rename
+        try {
+            await fs.promises.rename(tmpPath, targetPath);
+        } catch {
+            try { await fs.promises.unlink(targetPath); } catch { /* ignore */ }
+            await fs.promises.rename(tmpPath, targetPath);
+        }
+    }
+
+    // =========================
+    // 加载（只认本版本的两种文件：bin.gz / json.gz；不做任何 state 迁移）
+    // =========================
+    async _loadHistory() {
+        const t0 = performance.now();
+        try {
+            const candidates = [this._fileBinGz, this._fileJsonGz].filter(Boolean);
+
+            let chosen = null;
+            for (const fp of candidates) {
+                if (fp && fs.existsSync(fp)) {
+                    chosen = fp;
+                    break;
+                }
+            }
+            if (!chosen) return;
+
+            let dataBuf;
+            try {
+                dataBuf = await fs.promises.readFile(chosen);
+            } catch {
+                return;
+            }
+            this.perfStats.lastLoadBytes = dataBuf.length;
+
+            let raw = dataBuf;
+            try {
+                raw = await gunzipAsync(dataBuf);
+            } catch {
+                raw = dataBuf;
+            }
+
+            const mp = getMsgpack();
+            let parsed = null;
+
+            if (mp) {
+                try {
+                    parsed = mp.decode(raw);
+                } catch {
+                    try { parsed = JSON.parse(raw.toString('utf8')); } catch { parsed = null; }
+                }
+            } else {
+                try { parsed = JSON.parse(raw.toString('utf8')); } catch { parsed = null; }
+            }
+
+            if (!parsed) {
+                await this._quarantineCorruptFile(chosen).catch(() => { });
+                this._resetInMemory();
+                return;
+            }
+
+            const historyArr = Array.isArray(parsed)
+                ? parsed
+                : (parsed && Array.isArray(parsed.history) ? parsed.history : []);
+
+            this._resetInMemory();
+
+            const normalized = historyArr
+                .map((it) => {
+                    const content = String((it && it.content) || '');
+                    if (!content || REGEX.WHITESPACE_ONLY.test(content)) return null;
+
+                    let fixed = content;
+                    if (fixed.length > CONSTANTS.MAX_CONTENT_LENGTH) fixed = fixed.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
+
+                    const ts = Number((it && it.timestamp) || Date.now());
+                    const h = String((it && it.hash) || md5Hex(fixed));
+                    const id = String((it && it.id) || randomId());
+                    const type = String((it && it.type) || 'text');
+                    const contentLength = Number((it && it.contentLength) || fixed.length);
+                    const preview = String((it && it.preview) || makePreview(fixed));
+                    return { id, content: fixed, timestamp: ts, type, preview, contentLength, hash: h };
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .slice(0, CONSTANTS.MAX_HISTORY_ITEMS);
+
+            for (let i = normalized.length - 1; i >= 0; i--) {
+                const it = normalized[i];
+                /** @type {HistoryNode} */
+                const node = { ...it, prev: null, next: null };
+                if (this._hashMap.has(node.hash)) continue;
+
+                this._insertHead(node);
+                this._idMap.set(node.id, node);
+                this._hashMap.set(node.hash, node);
+            }
+
+            this._touch();
+            this._notifyChange();
+        } finally {
+            this.perfStats.loadTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
+        }
+    }
+
+    async _quarantineCorruptFile(filePath) {
+        try {
+            const dir = path.dirname(filePath);
+            const base = path.basename(filePath);
+            const corrupted = path.join(dir, `${base}${CONSTANTS.CORRUPT_SUFFIX_PREFIX}${Date.now()}`);
+            await fs.promises.rename(filePath, corrupted);
+            this.perfStats.quarantinedFiles++;
+        } catch {
+            try { await fs.promises.unlink(filePath); } catch { /* ignore */ }
+            this.perfStats.quarantinedFiles++;
+        }
+    }
+
+    _notifyChange() {
+        if (typeof this._onChange === 'function') {
+            try { this._onChange(); } catch { /* ignore */ }
+        }
+    }
+
+    getStatsSnapshot() {
+        const ops = this.perfStats.operations || 1;
+
+        const denom = this._cache.hit + this._cache.miss;
+        const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
+
+        const uptimeSec = Math.max(0, Math.floor((Date.now() - this.sessionStartedAt) / 1000));
+        const uptimeH = Math.floor(uptimeSec / 3600);
+        const uptimeM = Math.floor((uptimeSec % 3600) / 60);
+
+        return {
+            historyCount: this._size,
+            maxHistoryItems: CONSTANTS.MAX_HISTORY_ITEMS,
+            isWatching: this._isWatching,
+            uptime: { h: uptimeH, m: uptimeM },
+            cache: {
+                hit: this._cache.hit,
+                miss: this._cache.miss,
+                hitRate: cacheHitRate,
+                uiBytes: this._cache.uiBytes,
+                searchBytes: this._cache.searchBytes,
+                maxBytes: this._cache.maxBytes,
+            },
+            perf: {
+                avgSaveMs: this.perfStats.saveTimeMs / ops,
+                avgAddMs: this.perfStats.addTimeMs / ops,
+                avgLoadMs: this.perfStats.loadTimeMs / ops,
+                lastSaveBytes: this.perfStats.lastSaveBytes,
+                lastLoadBytes: this.perfStats.lastLoadBytes,
+                quarantinedFiles: this.perfStats.quarantinedFiles,
+            },
+        };
+    }
+
+    async dispose() {
+        this.stopWatching();
+
+        if (this._cleanupTimer) {
+            clearInterval(this._cleanupTimer);
+            this._cleanupTimer = null;
+        }
+        if (this._saveTimer) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = null;
+        }
+
+        try {
+            this._dirty = true;
+            await this.forceSave();
+        } catch {
+            // ignore
+        }
+    }
+}
+
+// ============================================================================
+// Sidebar Webview Provider（Solarized Dark + 暗金 + 破高对比度）
+// ============================================================================
+class ClipboardHistorySidebarProvider {
+    /**
+     * @param {vscode.ExtensionContext} context
+     * @param {ClipboardHistoryManager} historyManager
+     */
+    constructor(context, historyManager) {
+        this._context = context;
+        this._historyManager = historyManager;
+
+        /** @type {vscode.WebviewView|null} */
+        this._view = null;
+
+        this._updateTimer = null;
+        this._watchdogTimer = null;
+        this._currentNonce = '';
+
+        this._lastHeartbeat = 0;
+        this._lastKeyword = '';
+    }
+
+    resolveWebviewView(webviewView) {
+        this._view = webviewView;
 
         webviewView.webview.options = {
             enableScripts: true,
-            retainContextWhenHidden: true,
-            localResourceRoots: [extensionUri],
-            contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:; media-src vscode-webview-resource:;`
+            localResourceRoots: [this._context.extensionUri],
         };
 
-        // 设置面板图标
-        const iconPath = path.join(this.context.extensionPath, "assets", "q.gif");
-        if (fs.existsSync(iconPath)) {
-            webviewView.webview.iconPath = vscode.Uri.file(iconPath);
-        }
+        this._currentNonce = nonceHex();
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, this._currentNonce);
 
-        this.updateContent();
+        webviewView.webview.onDidReceiveMessage(
+            (msg) => this._handleMessage(msg),
+            null,
+            this._context.subscriptions
+        );
 
-        // 定期更新数据
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-        }
-        this.updateInterval = setInterval(() => {
-            this.updateContent();
-        }, 5000);
-
-        // 处理来自 webview 的消息
-        webviewView.webview.onDidReceiveMessage(async (message) => {
-            console.log('收到 Webview 消息:', message.command, message.itemId);
-            switch (message.command) {
-                case "executeCommand":
-                    if (message.cmd) {
-                        vscode.commands.executeCommand(message.cmd);
-                    }
-                    break;
-                case "openSettings":
-                    vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-                    break;
-                case "refresh":
-                    if (message.scrollPosition) {
-                        this.scrollPosition = message.scrollPosition;
-                    }
-                    this.updateContent();
-                    break;
-                case "copyToClipboard":
-                    if (this.global.clipboardHistoryManager && message.itemId) {
-                        const item = this.global.clipboardHistoryManager.getItemById(message.itemId);
-                        if (item) {
-                            await this.global.clipboardHistoryManager.copyToClipboard(item.content);
-                            vscode.window.showInformationMessage('已复制到剪切板');
-                        }
-                    }
-                    break;
-                case "deleteHistoryItem":
-                    if (!this.global.clipboardHistoryManager) {
-                        console.error('致命错误: clipboardHistoryManager 未初始化');
-                        vscode.window.showErrorMessage('内部错误: 剪切板管理器未就绪');
-                        break;
-                    }
-                    if (message.itemId) {
-                        console.log('Webview 请求删除项目 ID:', message.itemId);
-                        const success = this.global.clipboardHistoryManager.removeItem(message.itemId);
-                        if (success) {
-                            this.updateContent();
-                            vscode.window.setStatusBarMessage('已删除该条历史', 3000);
-                        } else {
-                            console.warn('删除失败，可能是 ID 不匹配，强制刷新视图');
-                            this.updateContent();
-                        }
-                    }
-                    break;
-                case "clearAllHistory":
-                    if (!this.global.clipboardHistoryManager) {
-                        console.error('致命错误: clipboardHistoryManager 未初始化');
-                        vscode.window.showErrorMessage('内部错误: 剪切板管理器未就绪');
-                        break;
-                    }
-
-                    // 在后台调用 VS Code 原生确认框，不会被拦截
-                    const answer = await vscode.window.showWarningMessage(
-                        '确定要清空所有的剪切板历史记录吗？此操作不可撤销。',
-                        { modal: true },
-                        '确定清空'
-                    );
-
-                    if (answer === '确定清空') {
-                        console.log('Webview 请求清空所有历史');
-                        await this.global.clipboardHistoryManager.clearHistory();
-                        this.updateContent();
-                        vscode.window.showInformationMessage('剪切板数据库已物理清空');
-                    }
-                    break;
-            }
-        });
-
-        // 清理定时器
-        webviewView.onDidDispose(() => {
-            if (this.updateInterval) {
-                clearInterval(this.updateInterval);
-                this.updateInterval = null;
-            }
-        });
-    }
-
-    updateContent() {
-        if (!this._view || !this._view.webview) return;
-
-        try {
-            // 获取剪切板历史数据
-            let clipboardHistory = [];
-            if (this.global.clipboardHistoryManager) {
-                clipboardHistory = this.global.clipboardHistoryManager.getHistory(30).map(item => ({
-                    ...item,
-                    preview: item.preview ? (item.preview.length > 200 ? item.preview.substring(0, 200) + '...' : item.preview) : ''
-                }));
-            }
-
-            const cacheStats = this.calculateActualCacheSize();
-            let totalSeconds = 0, h = 0, m = 0;
-
-            if (this.context && this.context.globalState) {
-                const base = this.context.globalState.get("qqq_stats_total_seconds", 0) || 0;
-                const lastFlush = this.context.globalState.get("qqq_stats_last_flush");
-                if (lastFlush) {
-                    totalSeconds = base + ((Date.now() - lastFlush) / 1000);
-                } else {
-                    totalSeconds = base;
-                }
-                h = Math.floor(totalSeconds / 3600);
-                m = Math.floor((totalSeconds % 3600) / 60);
-                this._view.title = `${h}h ${m}m`;
-            }
-
-            const cacheMB = cacheStats.totalSize / (1024 * 1024);
-            let hitRate = 0;
-            if (this.global && this.global.getPersistentCacheStatsSnapshot) {
-                const pstats = this.global.getPersistentCacheStatsSnapshot();
-                const denom = pstats.hitTotal + pstats.missTotal;
-                hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
-            }
-
-            const activeEngine = this.getActiveEngineInfo();
-            // 转义引擎详情和名称
-            activeEngine.name = this.escapeHtml(activeEngine.name);
-            activeEngine.details = this.escapeHtml(activeEngine.details);
-
-            const soundUri = this._view.webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, "assets", "q.mp3")));
-
-            // 如果已经有 HTML，则通过 postMessage 更新数据，避免重新加载导致脚本崩溃
-            if (this._view.webview.html && this._view.webview.html.length > 100) {
-                this._view.webview.postMessage({
-                    command: 'updateData',
-                    stats: { h, m, cacheMB, hitRate, engineInfo: activeEngine },
-                    history: clipboardHistory
-                });
+        webviewView.onDidChangeVisibility(() => {
+            if (webviewView.visible) {
+                this._sendUpdate(this._lastKeyword);
+                this._startPeriodicUpdate();
             } else {
-                this._view.webview.html = this.getWebviewContent(h, m, cacheMB, hitRate, activeEngine, clipboardHistory, this.scrollPosition, soundUri.toString());
+                this._stopPeriodicUpdate();
             }
-        } catch (error) {
-            console.error('更新内容失败:', error);
+        });
+
+        if (webviewView.visible) {
+            this._sendUpdate('');
+            this._startPeriodicUpdate();
+        }
+
+        this._startWatchdog();
+    }
+
+    _startPeriodicUpdate() {
+        this._stopPeriodicUpdate();
+        this._updateTimer = setInterval(() => {
+            this._sendUpdate(this._lastKeyword);
+        }, CONSTANTS.SIDEBAR_UPDATE_MS);
+    }
+
+    _stopPeriodicUpdate() {
+        if (this._updateTimer) {
+            clearInterval(this._updateTimer);
+            this._updateTimer = null;
         }
     }
 
-    postMessage(message) {
-        if (this._view && this._view.webview) {
-            this._view.webview.postMessage(message);
+    _startWatchdog() {
+        if (this._watchdogTimer) clearInterval(this._watchdogTimer);
+        this._watchdogTimer = setInterval(() => {
+            const now = Date.now();
+            if (this._lastHeartbeat > 0 && (now - this._lastHeartbeat) > CONSTANTS.WATCHDOG_STALE_MS) {
+                this._forceRefreshWebview();
+            }
+        }, CONSTANTS.WATCHDOG_REFRESH_MS);
+    }
+
+    _forceRefreshWebview() {
+        if (this._view && this._view.visible) {
+            this._currentNonce = nonceHex();
+            this._view.webview.html = this._getHtmlForWebview(this._view.webview, this._currentNonce);
+            this._lastHeartbeat = Date.now();
+            this._sendUpdate(this._lastKeyword);
         }
     }
 
-    calculateActualCacheSize() {
-        try {
-            // 获取缓存目录路径
-            const cacheDirName = "qqq_cache";
-            const cacheDir = path.join(this.context.globalStorageUri.fsPath, cacheDirName);
+    async _handleMessage(msg) {
+        if (!msg || typeof msg.command !== 'string') return;
 
-            // 检查目录是否存在
-            if (!fs.existsSync(cacheDir)) {
-                return { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+        switch (msg.command) {
+            case 'heartbeat':
+                this._lastHeartbeat = Date.now();
+                break;
+
+            case 'ready':
+                this._lastHeartbeat = Date.now();
+                this._sendUpdate(this._lastKeyword);
+                break;
+
+            case 'refresh':
+                this._sendUpdate(this._lastKeyword);
+                break;
+
+            case 'search': {
+                const kw = String(msg.keyword || '').trim();
+                this._lastKeyword = kw;
+                this._sendUpdate(kw);
+                break;
             }
 
-            // 递归计算目录大小
-            let totalSize = 0;
-            let fileCount = 0;
-
-            function calculateDirSize(dirPath) {
-                try {
-                    const items = fs.readdirSync(dirPath);
-                    for (const item of items) {
-                        const itemPath = path.join(dirPath, item);
-                        const stats = fs.statSync(itemPath);
-
-                        if (stats.isDirectory()) {
-                            calculateDirSize(itemPath);
-                        } else {
-                            totalSize += stats.size;
-                            fileCount++;
-                        }
-                    }
-                } catch (error) {
-                    // 静默处理错误
+            case 'copy': {
+                const id = String(msg.id || '');
+                const node = this._historyManager.getItemById(id);
+                if (node) {
+                    await this._historyManager.copyToClipboard(node.content);
+                    vscode.window.setStatusBarMessage('已复制到剪贴板', 2000);
                 }
+                break;
             }
 
-            calculateDirSize(cacheDir);
+            case 'paste': {
+                const id = String(msg.id || '');
+                const node = this._historyManager.getItemById(id);
+                if (node) {
+                    await this._historyManager.copyToClipboard(node.content);
+                    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+                }
+                break;
+            }
 
-            return {
-                totalSize: totalSize,
-                fileCount: fileCount,
-                hitCount: 0,
-                missCount: 0
-            };
+            case 'insert': {
+                const id = String(msg.id || '');
+                const node = this._historyManager.getItemById(id);
+                if (node) {
+                    const ok = await this._historyManager.insertToEditor(node.content);
+                    vscode.window.setStatusBarMessage(ok ? '已插入到编辑器' : '插入失败（无活动编辑器？）', 2000);
+                }
+                break;
+            }
 
-        } catch (error) {
-            return { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+            case 'delete': {
+                const id = String(msg.id || '');
+                await this._historyManager.removeItem(id);
+                this._sendUpdate(this._lastKeyword);
+                break;
+            }
+
+            case 'clear': {
+                const confirm = await vscode.window.showWarningMessage(
+                    '确定要清空所有剪贴板历史吗？此操作不可恢复。',
+                    { modal: true },
+                    '确定清空'
+                );
+                if (confirm === '确定清空') {
+                    await this._historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
+                    this._lastKeyword = '';
+                    this._sendUpdate('');
+                }
+                break;
+            }
+
+            case 'export': {
+                const ok = await this._historyManager.exportToJsonFile();
+                if (ok) vscode.window.showInformationMessage('导出成功');
+                else vscode.window.showErrorMessage('导出失败');
+                break;
+            }
+
+            case 'import': {
+                const result = await this._historyManager.importFromJsonFile();
+                if (result && result.success) {
+                    vscode.window.showInformationMessage(`导入成功：${result.imported} 条`);
+                    this._sendUpdate(this._lastKeyword);
+                } else {
+                    vscode.window.showErrorMessage('导入失败：' + (result?.error || '未知错误'));
+                }
+                break;
+            }
+
+            case 'stats': {
+                const snap = this._historyManager.getStatsSnapshot();
+                this._postMessage({ command: 'statsSnapshot', stats: snap });
+                break;
+            }
+
+            default:
+                break;
         }
     }
 
-    getActiveEngineInfo() {
-        try {
-            // 直接使用全局函数获取引擎信息
-            if (this.global.getActiveEngineCode && this.global.getActiveEngineName) {
-                const code = this.global.getActiveEngineCode(
-                    this.global.pythonBridge,
-                    this.global.rustBridge,
-                    this.global.shellBridge
-                );
+    refresh() {
+        this._sendUpdate(this._lastKeyword);
+    }
 
-                const name = this.global.getActiveEngineName(
-                    this.global.pythonBridge,
-                    this.global.rustBridge,
-                    this.global.shellBridge
-                );
+    _buildUiPayload(keyword = '') {
+        const kw = String(keyword || '').trim();
 
-                let details;
-                switch (code) {
-                    case 'P':
-                        details = 'Python 引擎';
-                        break;
-                    case 'R':
-                        details = 'Rust 引擎';
-                        break;
-                    default:
-                        // 对于 Node 引擎，需要额外判断模式
-                        if (this.global.shellBridge?.isAvailable?.()) {
-                            details = 'Shell daemon 模式';
-                        } else {
-                            details = 'Spawn 模式';
-                        }
-                }
+        const raw = kw
+            ? this._historyManager.searchHistory(kw, CONSTANTS.UI_HISTORY_LIMIT)
+            : this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT);
 
-                return {
-                    code: code,
-                    name: name.includes('Node') ? 'Node' : name,
-                    details: details
-                };
-            }
-        } catch (error) {
-            // 静默处理错误
-        }
+        const history = raw.map((it) => ({
+            id: String(it.id || ''),
+            time: formatTime(it.timestamp),
+            preview: String(it.preview || makePreview(it.content)).slice(0, CONSTANTS.PREVIEW_LENGTH),
+            contentLength: Number(it.contentLength || (it.content ? String(it.content).length : 0)) || 0,
+        }));
+
+        const snap = this._historyManager.getStatsSnapshot();
 
         return {
-            code: 'N',
-            name: '未知',
-            details: '无法确定当前引擎'
+            keyword: kw,
+            history,
+            stats: {
+                historyCount: snap.historyCount,
+                uptime: snap.uptime,
+                cacheHitRate: snap.cache.hitRate,
+                perf: snap.perf,
+            },
         };
     }
 
+    _sendUpdate(keyword = '') {
+        const payload = this._buildUiPayload(keyword);
+        this._postMessage({ command: 'updateData', ...payload });
+    }
 
-
-    /**
-     * 获取格式化时间显示
-     */
-    getFormattedTime(timestamp) {
-        const date = new Date(timestamp);
-        const now = new Date();
-        const diffInSeconds = Math.floor((now - date) / 1000);
-
-        if (diffInSeconds < 60) {
-            return '刚刚';
-        } else if (diffInSeconds < 3600) {
-            return `${Math.floor(diffInSeconds / 60)}分钟前`;
-        } else if (diffInSeconds < 86400) {
-            return `${Math.floor(diffInSeconds / 3600)}小时前`;
-        } else {
-            return date.toLocaleDateString('zh-CN');
+    _postMessage(msg) {
+        try {
+            if (this._view && this._view.webview) {
+                this._view.webview.postMessage(msg).then(undefined, () => { });
+            }
+        } catch {
+            // ignore
         }
     }
 
-    /**
-     * HTML转义
-     */
-    escapeHtml(text) {
-        if (!text) return '';
-        return text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    getWebviewContent(hours, minutes, cacheMB, hitRate, engineInfo, clipboardHistory = [], scrollPosition = null, audioUri = '') {
-        const historyHtml = clipboardHistory.length > 0
-            ? clipboardHistory.map(item => `
-                <div class="history-item" data-id="${item.id}">
-                    <div class="item-time">${item.time}</div>
-                    <div class="item-preview">${this.escapeHtml(item.preview)}</div>
-                    <div class="item-actions">
-                        <button class="action-mini-btn" onclick="copyToClipboard('${item.id}')">📋 复制</button>
-                        <button class="action-mini-btn" onclick="deleteHistoryItem('${item.id}')">🗑️ 删除</button>
-                    </div>
-                </div>`).join('')
-            : '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+    _getHtmlForWebview(webview, nonce) {
+        const csp = [
+            `default-src 'none'`,
+            `img-src ${webview.cspSource} data:`,
+            `media-src ${webview.cspSource} data:`,
+            `style-src 'nonce-${nonce}'`,
+            `script-src 'nonce-${nonce}'`,
+            `font-src ${webview.cspSource}`,
+            `base-uri 'none'`,
+            `form-action 'none'`,
+            `frame-ancestors 'none'`,
+        ].join('; ');
 
         return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
-    <style>
-        :root {
-            --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
-            --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
-            --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
-            --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
-            --primary-color: var(--yellow); --secondary-color: var(--orange);
-            --background-color: var(--base3); --card-bg: var(--base2);
-            --text-primary: var(--base00); --text-secondary: var(--base01);
-            --border-color: var(--base1); --shadow-color: rgba(0, 0, 0, 0.1);
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}">
+  <meta name="color-scheme" content="dark">
+  <title>剪贴板历史</title>
 
-        /* 强力破解 Windows 高对比度模式，强制保留自定义配色 */
-        html {
-            forced-color-adjust: none !important;
-            -ms-high-contrast-adjust: none !important;
-        }
+  <style nonce="${nonce}">
+    /* =========================================================================
+       Solarized Dark + 暗金 / 破高对比度主题（forced-colors）
+       ========================================================================= */
+    :root{
+      --base03:#002b36;
+      --base02:#073642;
+      --base01:#586e75;
+      --base00:#657b83;
+      --base0:#839496;
+      --base1:#93a1a1;
+      --base2:#eee8d5;
+      --base3:#fdf6e3;
 
-        ::-webkit-scrollbar { display: none !important; }
+      --gold:#b58900;
+      --goldDeep:#a47e00;
+      --orange:#cb4b16;
+      --red:#dc322f;
+      --green:#859900;
 
-        * {
-            scrollbar-width: none !important;
-            -ms-overflow-style: none !important;
-            box-sizing: border-box;
-            forced-color-adjust: none !important;
-            -ms-high-contrast-adjust: none !important;
-            overflow-x: hidden !important;
-        }
+      --bg:var(--base03);
+      --panel:var(--base02);
+      --panel2:#0b3d4a;
+      --text:var(--base1);
+      --muted:var(--base01);
+      --border:rgba(147,161,161,0.18);
+      --shadow:rgba(0,0,0,0.35);
 
-        html, body {
-            margin: 0; padding: 0; height: 100vh; width: 100%; overflow: hidden;
-            font-family: var(--vscode-font-family, sans-serif);
-            background: var(--background-color) !important;
-            color: var(--text-primary) !important;
-        }
-
-        /* 音乐播放器样式 */
-        .music-player {
-            background: var(--base02);
-            color: var(--base3);
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 0.9em;
-        }
-        .music-info { display: flex; align-items: center; gap: 8px; }
-        .music-btns { display: flex; gap: 10px; }
-        .music-btn { cursor: pointer; opacity: 0.8; transition: 0.2s; }
-        .music-btn:hover { opacity: 1; transform: scale(1.1); }
-        .music-playing { color: var(--green); font-weight: bold; }
-
-        .main-wrapper {
-            height: 100vh; width: 100%; position: relative; overflow: hidden;
-            background: var(--background-color) !important;
-        }
-
-        .main-content {
-            height: 100%; overflow-y: scroll; padding: 12px; overflow-x: hidden !important;
-        }
-
-        .section-title {
-            font-size: 1.1em; font-weight: 700; margin: 20px 0 12px 0;
-            padding-bottom: 5px; border-bottom: 2px solid var(--primary-color) !important;
-            color: var(--primary-color) !important; text-transform: uppercase;
-        }
-
-        /* Captain Style */
-        .captain-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 20px; }
-        .cmd-btn {
-            background: var(--card-bg) !important; border: 1px solid var(--border-color) !important;
-            border-radius: 4px; padding: 12px; cursor: pointer;
-            display: flex; align-items: center; gap: 10px;
-            transition: all 0.2s ease; position: relative; overflow: hidden;
-            color: var(--text-primary) !important; text-decoration: none;
-        }
-        .cmd-btn:hover { border-color: var(--primary-color) !important; background: white !important; transform: translateX(2px); }
-        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color) !important; opacity: 0.6; }
-
-        /* Dial Style */
-        .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-        .stat-card { background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important; padding: 10px; border-radius: 6px; color: white !important; box-shadow: 0 2px 4px var(--shadow-color); }
-        .stat-card.engine-card { grid-column: span 2; background: var(--base02) !important; }
-        .stat-title { font-size: 0.8em; opacity: 0.9; }
-        .stat-value { font-size: 1.1em; font-weight: 700; }
-
-        /* Passed by Style */
-        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
-        .history-list { max-height: 800px; overflow-y: scroll; padding: 8px; overflow-x: hidden !important; }
-        .history-item { background: white; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; cursor: pointer; transition: 0.2s; }
-        .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px var(--shadow-color); }
-        .item-time { font-size: 0.7em; color: var(--text-secondary); }
-        .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 50px; overflow: hidden; }
-        .item-actions { display: flex; gap: 6px; margin-top: 5px; }
-
-        .action-mini-btn {
-            padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color);
-            border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary);
-        }
-        .action-mini-btn:hover { background: var(--primary-color); color: white; }
-
-        /* Custom Scrollbars */
-        .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
-        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
-        .scrollbar-outer-thumb:hover { opacity: 0.7; width: 6px; right: 0; }
-
-        .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
-        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
-        .scrollbar-inner-thumb:hover { opacity: 0.7; width: 6px; right: 0; }
-
-        .footer { text-align: center; padding: 20px; font-size: 0.8em; opacity: 0.6; }
-    </style>
-</head>
-<body>
-    <div class="main-wrapper">
-        <div class="main-content" id="mainContent">
-            <!-- 音乐播放器 -->
-            <div class="music-player">
-                <div class="music-info">
-                    <span>🎵</span>
-                    <span id="musicStatus">Ready to Savor</span>
-                </div>
-                <div class="music-btns">
-                    <span class="music-btn" onclick="executeCommand('qqq.savorMoments')" title="播放">▶️</span>
-                    <span class="music-btn" onclick="stopMusic()" title="停止">⏹️</span>
-                </div>
-            </div>
-
-            <div class="section-title">Captain</div>
-            <div class="captain-grid">
-                <div class="cmd-btn" onclick="executeCommand('qqq.savorMoments')"><span>✨</span> <span>savor moments for yourself</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.q1')"><span>📋</span> <span>Paste everything ("Ctrl+V" or "F2")</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.q2')"><span>🌍</span> <span>Roam everywhere ("Tab" or "F6")</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.downloadVideosFromUrl')"><span>🎥</span> <span>insert Videos From Url</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.cleanUp')"><span>🧹</span> <span>clean up</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.exportDoc')"><span>📄</span> <span>exportDoc</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.pure')"><span>💎</span> <span>Pure</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.exportZip')"><span>📦</span> <span>exportZip</span></div>
-                <div class="cmd-btn" onclick="executeCommand('qqq.allSettings')"><span>⚙️</span> <span>allSettings</span></div>
-            </div>
-
-            <div class="section-title">Passed by</div>
-            <div class="history-container" id="historyContainer">
-                <div class="history-list" id="historyList">${historyHtml}</div>
-                <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
-            </div>
-            <div style="display: flex; gap: 8px; margin-bottom: 20px;">
-                <button class="action-mini-btn" style="flex: 1;" onclick="refreshData()">🔄 刷新</button>
-                <button class="action-mini-btn" style="flex: 1;" onclick="clearAllHistory()">🗑️ 清空</button>
-            </div>
-
-            <div class="section-title">Dial</div>
-            <div class="stats-grid">
-                <div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">${hours}h ${minutes}m</div></div>
-                <div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">${cacheMB.toFixed(1)}MB</div></div>
-                <div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">${hitRate.toFixed(1)}%</div></div>
-                <div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">${engineInfo.name}</div></div>
-                <div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">${engineInfo.details}</div></div>
-            </div>
-
-            <div class="footer">的梦gaea  GH HEALTH</div>
-        </div>
-        <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
-    </div>
-
-    <script>
-        // --- 1. 稳定性保障：立即定义核心函数 ---
-        let vscode;
-        try {
-            vscode = acquireVsCodeApi();
-        } catch (e) {
-            console.error("acquireVsCodeApi failed:", e);
-        }
-
-        function postMessage(msg) {
-            if (vscode) {
-                vscode.postMessage(msg);
-            }
-        }
-
-        function executeCommand(cmd) {
-            postMessage({ command: 'executeCommand', cmd: cmd });
-            if (cmd !== 'qqq.savorMoments') {
-                playNotificationSound(1);
-            }
-        }
-
-        function copyToClipboard(id) { postMessage({ command: 'copyToClipboard', itemId: id }); playNotificationSound(3); }
-        function deleteHistoryItem(id) { postMessage({ command: 'deleteHistoryItem', itemId: id }); }
-        function clearAllHistory() { postMessage({ command: 'clearAllHistory' }); }
-        function refreshData() {
-            const list = document.getElementById('historyList');
-            const scrollPos = list ? { scrollTop: list.scrollTop, scrollHeight: list.scrollHeight } : null;
-            postMessage({ command: 'refresh', scrollPosition: scrollPos });
-        }
-
-        function escapeHtml(t) { return t?t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'):''; }
-
-        // --- 2. 媒体处理 ---
-        let currentAudio = null;
-        function stopMusic() {
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.currentTime = 0;
-                currentAudio = null;
-                const status = document.getElementById('musicStatus');
-                if (status) {
-                    status.innerText = 'Stopped';
-                    status.classList.remove('music-playing');
-                }
-            }
-        }
-
-        function playAudio(url, times = 1) {
-            try {
-                if (!url) return;
-                stopMusic();
-                let source = url;
-                if (typeof url === 'string' && !url.startsWith('http') && !url.startsWith('vscode-webview-resource') && !url.startsWith('data:')) {
-                    source = 'data:audio/mp3;base64,' + url;
-                }
-
-                const audio = new Audio(source);
-                currentAudio = audio;
-                audio.volume = 0.5;
-
-                const status = document.getElementById('musicStatus');
-                if (status) {
-                    status.innerText = 'Savoring...';
-                    status.classList.add('music-playing');
-                }
-
-                if (times === 0) {
-                    audio.loop = true;
-                } else {
-                    let playCount = 1;
-                    audio.addEventListener('ended', () => {
-                        if (playCount < times) {
-                            playCount++;
-                            audio.currentTime = 0;
-                            audio.play().catch(e => console.log('Audio loop failed:', e));
-                        } else {
-                            if (status) {
-                                status.innerText = 'Finished';
-                                status.classList.remove('music-playing');
-                            }
-                        }
-                    });
-                }
-                audio.play().catch(e => {
-                    console.log('Audio blocked:', e);
-                    if (status) status.innerText = 'Playback Blocked';
-                });
-            } catch (e) {
-                console.log('Audio error:', e);
-            }
-        }
-
-        function playNotificationSound(times) {
-            const audioUrl = ${JSON.stringify(audioUri || null)};
-            if (audioUrl && audioUrl !== 'null') {
-                playAudio(audioUrl, times);
-            }
-        }
-
-        // --- 3. 滚动条逻辑 ---
-        function setupScrollbar(containerId, scrollbarId, thumbId) {
-            const container = document.getElementById(containerId);
-            const scrollbar = document.getElementById(scrollbarId);
-            const thumb = document.getElementById(thumbId);
-            if (!container || !thumb) return () => {};
-
-            function update() {
-                const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
-                if (sh > ch) {
-                    scrollbar.style.display = 'block';
-                    const th = Math.max(20, (ch / sh) * ch);
-                    thumb.style.height = th + 'px';
-                    thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
-                } else { scrollbar.style.display = 'none'; }
-            }
-
-            container.addEventListener('scroll', update);
-
-            let isDragging = false, startY, startST;
-            thumb.onmousedown = e => {
-                isDragging = true; startY = e.clientY; startST = container.scrollTop;
-                document.onmousemove = e => {
-                    if (!isDragging) return;
-                    const dy = e.clientY - startY;
-                    const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
-                    container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
-                    update();
-                };
-                document.onmouseup = () => { isDragging = false; document.onmousemove = null; };
-                e.preventDefault();
-            };
-
-            scrollbar.onclick = e => {
-                if (e.target === thumb) return;
-                const rect = scrollbar.getBoundingClientRect();
-                const clickY = e.clientY - rect.top;
-                const ch = container.clientHeight, sh = container.scrollHeight;
-                container.scrollTop = (clickY / ch) * sh - ch / 2;
-                update();
-            };
-
-            return update;
-        }
-
-        const updateOuter = setupScrollbar('mainContent', 'outerScrollbar', 'outerThumb');
-        const updateInner = setupScrollbar('historyList', 'innerScrollbar', 'innerThumb');
-        function updateAllScrollbars() { updateOuter(); updateInner(); }
-        window.onresize = updateAllScrollbars;
-
-        // --- 4. 消息处理 ---
-        window.addEventListener('message', e => {
-            const m = e.data;
-            if (m.command === 'updateData') {
-                const grid = document.querySelector('.stats-grid');
-                if (grid) {
-                    grid.innerHTML =
-                        '<div class="stat-card"><div class="stat-title">⏱️ 陪伴时间</div><div class="stat-value">' + m.stats.h + 'h ' + m.stats.m + 'm</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">💾 缓存量</div><div class="stat-value">' + m.stats.cacheMB.toFixed(1) + 'MB</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">🎯 命中率</div><div class="stat-value">' + m.stats.hitRate.toFixed(1) + '%</div></div>' +
-                        '<div class="stat-card"><div class="stat-title">⚡ 引擎</div><div class="stat-value">' + m.stats.engineInfo.name + '</div></div>' +
-                        '<div class="stat-card engine-card"><div class="stat-title">ℹ️ 引擎详情</div><div class="stat-value" style="font-size: 0.85em;">' + m.stats.engineInfo.details + '</div></div>';
-                }
-
-                const list = document.getElementById('historyList');
-                if (list) {
-                    if (m.history && m.history.length > 0) {
-                        list.innerHTML = m.history.map(item =>
-                            '<div class="history-item" data-id="' + item.id + '">' +
-                                '<div class="item-time">' + item.time + '</div>' +
-                                '<div class="item-preview">' + escapeHtml(item.preview) + '</div>' +
-                                '<div class="item-actions">' +
-                                    '<button class="action-mini-btn" onclick="copyToClipboard(\'' + item.id + '\')">📋 复制</button>' +
-                                    '<button class="action-mini-btn" onclick="deleteHistoryItem(\'' + item.id + '\')">🗑️ 删除</button>' +
-                                '</div>' +
-                            '</div>'
-                        ).join('');
-                    } else {
-                        list.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
-                    }
-                }
-                updateAllScrollbars();
-            } else if (m.command === 'playAudio') {
-                playAudio(m.audioUrl || m.base64, m.times || 1);
-            }
-        });
-
-        // --- 5. 初始化 ---
-        (function() {
-            const initialPos = ${JSON.stringify(scrollPosition)};
-            if (initialPos && document.getElementById('historyList')) {
-                document.getElementById('historyList').scrollTop = initialPos.scrollTop;
-            }
-            updateAllScrollbars();
-        })();
-    </script>
-</body>
-</html>`;
+      --btnBg:rgba(181,137,0,0.10);
+      --btnHover:rgba(181,137,0,0.18);
+      --dangerBg:rgba(220,50,47,0.14);
+      --dangerHover:rgba(220,50,47,0.22);
     }
 
-    getErrorContent(errorMessage) {
-        return `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            font-family: var(--vscode-font-family, Arial, sans-serif);
-            font-size: var(--vscode-font-size, 13px);
-            background-color: var(--vscode-sideBar-background, #1e1e1e);
-            color: var(--vscode-sideBar-foreground, #ffffff);
-            padding: 20px;
-        }
-        .error {
-            color: var(--vscode-errorForeground, #f48771);
-            background: var(--vscode-inputValidation-errorBackground, #5a1d1d);
-            border: 1px solid var(--vscode-inputValidation-errorBorder, #be1100);
-            padding: 15px;
-            border-radius: 4px;
-            margin: 10px 0;
-        }
-        .btn {
-            background: var(--vscode-button-background, #0e639c);
-            color: var(--vscode-button-foreground, #ffffff);
-            border: none;
-            padding: 8px 16px;
-            border-radius: 2px;
-            cursor: pointer;
-            margin: 5px;
-        }
-        .btn:hover {
-            background: var(--vscode-button-hoverBackground, #1177bb);
-        }
-    </style>
+    /* 破 Windows 高对比度主题：强制使用我们自定义颜色 */
+    html{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
+    body{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
+    *{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
+    @media (forced-colors: active){
+      html, body, *{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{
+      margin:0; padding:0;
+      height:100%;
+      background:var(--bg) !important;
+      color:var(--text) !important;
+      font-family: var(--vscode-font-family, system-ui, -apple-system, Segoe UI, sans-serif);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow:hidden;
+    }
+
+    .root{
+      display:flex;
+      flex-direction:column;
+      height:100vh;
+      padding:10px;
+      gap:10px;
+    }
+
+    .topbar{
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+
+    .search{
+      flex:1;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+
+    .search input{
+      width:100%;
+      padding:8px 10px;
+      border-radius:6px;
+      border:1px solid var(--border) !important;
+      background:var(--panel) !important;
+      color:var(--text) !important;
+      outline:none;
+    }
+    .search input:focus{
+      border-color:rgba(181,137,0,0.65) !important;
+      box-shadow:0 0 0 2px rgba(181,137,0,0.18);
+    }
+    .search input::placeholder{
+      color:rgba(147,161,161,0.55) !important;
+    }
+
+    .btn{
+      padding:8px 10px;
+      border-radius:6px;
+      border:1px solid var(--border) !important;
+      background:var(--btnBg) !important;
+      color:var(--text) !important;
+      cursor:pointer;
+      user-select:none;
+      transition: transform .06s ease, background .12s ease, border-color .12s ease;
+      white-space:nowrap;
+    }
+    .btn:hover{
+      background:var(--btnHover) !important;
+      border-color:rgba(181,137,0,0.45) !important;
+    }
+    .btn:active{ transform: scale(0.98); }
+
+    .btn-danger{
+      background:var(--dangerBg) !important;
+      border-color:rgba(220,50,47,0.35) !important;
+    }
+    .btn-danger:hover{
+      background:var(--dangerHover) !important;
+      border-color:rgba(220,50,47,0.55) !important;
+    }
+
+    .panel{
+      background:linear-gradient(180deg, rgba(7,54,66,0.98), rgba(0,43,54,0.98)) !important;
+      border:1px solid var(--border) !important;
+      border-radius:10px;
+      box-shadow: 0 8px 24px var(--shadow);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+      flex:1;
+    }
+
+    .panel-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:10px 12px;
+      border-bottom:1px solid var(--border) !important;
+    }
+
+    .title{
+      font-weight:700;
+      letter-spacing:0.3px;
+      color:rgba(181,137,0,0.95) !important;
+      text-transform:uppercase;
+      font-size:12px;
+    }
+
+    .meta{
+      font-size:11px;
+      color:rgba(147,161,161,0.65) !important;
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+
+    .list{
+      padding:10px;
+      overflow:auto;
+      min-height:0;
+    }
+
+    .item{
+      border:1px solid var(--border) !important;
+      border-radius:10px;
+      background:rgba(11,61,74,0.55) !important;
+      padding:10px;
+      margin-bottom:10px;
+      cursor:pointer;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+    .item:hover{
+      transform: translateX(2px);
+      border-color:rgba(181,137,0,0.42) !important;
+      background:rgba(11,61,74,0.70) !important;
+    }
+    .item.selected{
+      outline:2px solid rgba(181,137,0,0.55);
+    }
+
+    .row1{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      margin-bottom:8px;
+    }
+    .time{
+      font-size:11px;
+      color:rgba(147,161,161,0.75) !important;
+    }
+    .size{
+      font-size:11px;
+      color:rgba(147,161,161,0.55) !important;
+    }
+
+    .preview{
+      font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+      font-size:12px;
+      color:rgba(238,232,213,0.90) !important;
+      white-space:pre-wrap;
+      word-break:break-all;
+      max-height: 84px;
+      overflow:hidden;
+      line-height:1.5;
+    }
+
+    .actions{
+      display:flex;
+      gap:8px;
+      margin-top:10px;
+      flex-wrap:wrap;
+    }
+
+    .mini{
+      padding:6px 10px;
+      font-size:12px;
+      border-radius:8px;
+      border:1px solid var(--border) !important;
+      background:rgba(181,137,0,0.10) !important;
+      color:rgba(238,232,213,0.92) !important;
+      cursor:pointer;
+      user-select:none;
+    }
+    .mini:hover{ background:rgba(181,137,0,0.18) !important; }
+
+    .mini-danger{
+      background:rgba(220,50,47,0.12) !important;
+      border-color:rgba(220,50,47,0.35) !important;
+    }
+    .mini-danger:hover{
+      background:rgba(220,50,47,0.20) !important;
+      border-color:rgba(220,50,47,0.55) !important;
+    }
+
+    .empty{
+      padding:22px 10px;
+      text-align:center;
+      color:rgba(147,161,161,0.65) !important;
+    }
+
+    .footer{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:flex-start;
+      padding:10px 12px;
+      border-top:1px solid var(--border) !important;
+      background:rgba(0,43,54,0.85) !important;
+      font-size:11px;
+      color:rgba(147,161,161,0.70) !important;
+    }
+
+    .stats{
+      white-space:pre-wrap;
+      font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+      color:rgba(238,232,213,0.85) !important;
+      line-height:1.35;
+    }
+
+    .hidden{ display:none !important; }
+  </style>
 </head>
+
 <body>
-    <h3>❌ 状态面板加载失败</h3>
-    <div class="error">
-        <strong>错误信息:</strong> ${errorMessage}
+  <div class="root">
+    <div class="topbar">
+      <div class="search">
+        <input id="searchInput" type="text" placeholder="🔍 搜索历史（Enter 不提交，只过滤）" />
+      </div>
+
+      <button class="btn" id="btnRefresh" type="button" title="刷新">🔄</button>
+      <button class="btn" id="btnImport" type="button" title="导入">📥</button>
+      <button class="btn" id="btnExport" type="button" title="导出">📤</button>
+      <button class="btn btn-danger" id="btnClear" type="button" title="清空">🗑️</button>
     </div>
-    <button class="btn" onclick="location.reload()">🔄 重新加载</button>
 
-    <script>
-        // 彻底禁用 ServiceWorker
-        if (typeof navigator !== 'undefined' && navigator.serviceWorker) {
-            try {
-                Object.defineProperty(navigator, 'serviceWorker', {
-                    value: {
-                        register: function() { return Promise.resolve({ unregister: () => Promise.resolve() }); },
-                        getRegistration: function() { return Promise.resolve(null); },
-                        getRegistrations: function() { return Promise.resolve([]); },
-                        ready: Promise.resolve({
-                            active: null,
-                            waiting: null,
-                            installing: null,
-                            addEventListener: function() {},
-                            removeEventListener: function() {},
-                            postMessage: function() {}
-                        })
-                    },
-                    writable: false,
-                    configurable: false
-                });
-            } catch (e) {
-                // 静默处理
+    <div class="panel">
+      <div class="panel-header">
+        <div class="title">Clipboard History</div>
+        <div class="meta">
+          <span id="metaCount">0 items</span>
+          <span id="metaUptime">0h 0m</span>
+          <button class="btn" id="btnStats" type="button" title="统计">📊</button>
+        </div>
+      </div>
+
+      <div class="list" id="list">
+        <div class="empty">加载中...</div>
+      </div>
+
+      <div class="footer">
+        <div>Solarized + 暗金 · forced-color-adjust:none · CSP safe</div>
+        <div id="statsBox" class="stats hidden">-</div>
+      </div>
+    </div>
+  </div>
+
+  <script nonce="${nonce}">
+    (function(){
+      'use strict';
+
+      let vscodeApi = null;
+      try { vscodeApi = acquireVsCodeApi(); } catch(e) {}
+
+      function postMessage(msg){
+        if(vscodeApi) vscodeApi.postMessage(msg);
+      }
+
+      const el = {
+        searchInput: document.getElementById('searchInput'),
+        btnRefresh: document.getElementById('btnRefresh'),
+        btnImport: document.getElementById('btnImport'),
+        btnExport: document.getElementById('btnExport'),
+        btnClear: document.getElementById('btnClear'),
+        btnStats: document.getElementById('btnStats'),
+        list: document.getElementById('list'),
+        metaCount: document.getElementById('metaCount'),
+        metaUptime: document.getElementById('metaUptime'),
+        statsBox: document.getElementById('statsBox')
+      };
+
+      let current = [];
+      let selectedIndex = -1;
+      let selectedId = '';
+      let showStats = false;
+      let lastKeyword = '';
+      let debounceTimer = null;
+
+      function formatSize(n){
+        const bytes = Number(n||0);
+        if(bytes < 1024) return bytes + 'B';
+        if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'KB';
+        return (bytes/1024/1024).toFixed(2) + 'MB';
+      }
+
+      function clearChildren(node){
+        while(node && node.firstChild) node.removeChild(node.firstChild);
+      }
+
+      function setSelectedById(id){
+        selectedId = id || '';
+        const items = el.list ? el.list.querySelectorAll('.item') : [];
+        selectedIndex = -1;
+        for(let i=0;i<items.length;i++){
+          const it = items[i];
+          if(it && it.dataset && it.dataset.id === selectedId){
+            selectedIndex = i;
+            it.classList.add('selected');
+          } else {
+            it.classList.remove('selected');
+          }
+        }
+      }
+
+      function ensureSelectedVisible(){
+        if(!el.list) return;
+        if(selectedIndex < 0) return;
+        const items = el.list.querySelectorAll('.item');
+        const item = items[selectedIndex];
+        if(!item) return;
+
+        const top = item.offsetTop;
+        const bottom = top + item.offsetHeight;
+        const viewTop = el.list.scrollTop;
+        const viewBottom = viewTop + el.list.clientHeight;
+
+        if(top < viewTop) el.list.scrollTop = top;
+        else if(bottom > viewBottom) el.list.scrollTop = bottom - el.list.clientHeight;
+      }
+
+      function renderList(history){
+        current = Array.isArray(history) ? history : [];
+
+        clearChildren(el.list);
+
+        if(current.length === 0){
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = '暂无记录';
+          el.list.appendChild(empty);
+
+          selectedIndex = -1;
+          selectedId = '';
+          return;
+        }
+
+        const frag = document.createDocumentFragment();
+
+        for(let i=0;i<current.length;i++){
+          const it = current[i] || {};
+          const id = String(it.id || '');
+          const time = String(it.time || '');
+          const preview = String(it.preview || '');
+          const len = Number(it.contentLength || 0);
+
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.dataset.id = id;
+
+          const row1 = document.createElement('div');
+          row1.className = 'row1';
+
+          const timeEl = document.createElement('div');
+          timeEl.className = 'time';
+          timeEl.textContent = time;
+
+          const sizeEl = document.createElement('div');
+          sizeEl.className = 'size';
+          sizeEl.textContent = formatSize(len);
+
+          row1.appendChild(timeEl);
+          row1.appendChild(sizeEl);
+
+          const prevEl = document.createElement('div');
+          prevEl.className = 'preview';
+          prevEl.textContent = preview;
+
+          const actions = document.createElement('div');
+          actions.className = 'actions';
+
+          const btnCopy = document.createElement('button');
+          btnCopy.type = 'button';
+          btnCopy.className = 'mini';
+          btnCopy.dataset.action = 'copy';
+          btnCopy.textContent = '📋 复制';
+
+          const btnPaste = document.createElement('button');
+          btnPaste.type = 'button';
+          btnPaste.className = 'mini';
+          btnPaste.dataset.action = 'paste';
+          btnPaste.textContent = '📌 粘贴';
+
+          const btnInsert = document.createElement('button');
+          btnInsert.type = 'button';
+          btnInsert.className = 'mini';
+          btnInsert.dataset.action = 'insert';
+          btnInsert.textContent = '📝 插入';
+
+          const btnDel = document.createElement('button');
+          btnDel.type = 'button';
+          btnDel.className = 'mini mini-danger';
+          btnDel.dataset.action = 'delete';
+          btnDel.textContent = '🗑️ 删除';
+
+          actions.appendChild(btnCopy);
+          actions.appendChild(btnPaste);
+          actions.appendChild(btnInsert);
+          actions.appendChild(btnDel);
+
+          item.appendChild(row1);
+          item.appendChild(prevEl);
+          item.appendChild(actions);
+
+          frag.appendChild(item);
+        }
+
+        el.list.appendChild(frag);
+
+        // 默认选中第一条
+        if(selectedId){
+          setSelectedById(selectedId);
+        }else{
+          const first = el.list.querySelector('.item');
+          if(first && first.dataset && first.dataset.id){
+            setSelectedById(first.dataset.id);
+          }
+        }
+      }
+
+      function renderMeta(stats, historyCount){
+        stats = stats || {};
+        const uptime = stats.uptime || {h:0,m:0};
+
+        if(el.metaCount) el.metaCount.textContent = String((historyCount||0) + ' items');
+        if(el.metaUptime) el.metaUptime.textContent = String((uptime.h||0) + 'h ' + (uptime.m||0) + 'm');
+
+        if(showStats && el.statsBox){
+          const perf = stats.perf || {};
+          const hitRate = stats.cacheHitRate || 0;
+
+          const line1 = 'count: ' + (historyCount||0);
+          const line2 = 'cacheHit: ' + hitRate.toFixed(1) + '%';
+          const line3 = 'avgSave: ' + (perf.avgSaveMs||0).toFixed(2) + 'ms  avgAdd: ' + (perf.avgAddMs||0).toFixed(2) + 'ms';
+          const line4 = 'avgLoad: ' + (perf.avgLoadMs||0).toFixed(2) + 'ms  quarantined: ' + (perf.quarantinedFiles||0);
+          el.statsBox.textContent = line1 + '\\n' + line2 + '\\n' + line3 + '\\n' + line4;
+        }
+      }
+
+      function toggleStats(){
+        showStats = !showStats;
+        if(el.statsBox){
+          if(showStats) el.statsBox.classList.remove('hidden');
+          else el.statsBox.classList.add('hidden');
+        }
+        postMessage({ command: 'stats' });
+      }
+
+      function requestRefresh(){
+        postMessage({ command: 'refresh' });
+      }
+
+      function requestSearch(kw){
+        postMessage({ command: 'search', keyword: kw || '' });
+      }
+
+      function requestCopy(id){
+        postMessage({ command: 'copy', id: id });
+      }
+      function requestPaste(id){
+        postMessage({ command: 'paste', id: id });
+      }
+      function requestInsert(id){
+        postMessage({ command: 'insert', id: id });
+      }
+      function requestDelete(id){
+        postMessage({ command: 'delete', id: id });
+      }
+
+      function bindUI(){
+        if(el.btnRefresh) el.btnRefresh.addEventListener('click', requestRefresh);
+        if(el.btnImport) el.btnImport.addEventListener('click', function(){ postMessage({ command: 'import' }); });
+        if(el.btnExport) el.btnExport.addEventListener('click', function(){ postMessage({ command: 'export' }); });
+        if(el.btnClear) el.btnClear.addEventListener('click', function(){ postMessage({ command: 'clear' }); });
+        if(el.btnStats) el.btnStats.addEventListener('click', toggleStats);
+
+        if(el.searchInput){
+          el.searchInput.addEventListener('input', function(){
+            const kw = String(el.searchInput.value || '').trim();
+            lastKeyword = kw;
+            if(debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function(){
+              requestSearch(kw);
+            }, 250);
+          });
+        }
+
+        if(el.list){
+          el.list.addEventListener('click', function(e){
+            const btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
+            if(btn){
+              const action = btn.dataset.action || '';
+              const item = btn.closest('.item');
+              const id = item ? (item.dataset.id || '') : '';
+
+              if(action === 'copy') requestCopy(id);
+              if(action === 'paste') requestPaste(id);
+              if(action === 'insert') requestInsert(id);
+              if(action === 'delete') requestDelete(id);
+              return;
             }
+
+            const item = e.target && e.target.closest ? e.target.closest('.item') : null;
+            if(item && item.dataset && item.dataset.id){
+              setSelectedById(item.dataset.id);
+              requestCopy(item.dataset.id); // 点整行 = 复制
+            }
+          });
         }
 
-        // 安全获取 VS Code API
-        let vscode;
-        try {
-            vscode = acquireVsCodeApi();
-        } catch (e) {
-            console.error('Failed to acquire VS Code API:', e);
+        // 键盘：上下选择 / Enter 复制 / Ctrl+Enter 粘贴 / Delete 删除 / Ctrl+F 搜索
+        document.addEventListener('keydown', function(e){
+          const active = document.activeElement;
+          const inInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+
+          if(e.ctrlKey && (e.key === 'f' || e.key === 'F')){
+            if(el.searchInput){
+              el.searchInput.focus();
+              el.searchInput.select();
+              e.preventDefault();
+            }
+            return;
+          }
+
+          if(inInput) return;
+          if(!el.list) return;
+
+          const items = el.list.querySelectorAll('.item');
+          if(!items || items.length === 0) return;
+
+          if(e.key === 'ArrowDown'){
+            selectedIndex = (selectedIndex < 0) ? 0 : Math.min(items.length - 1, selectedIndex + 1);
+            const id = items[selectedIndex].dataset.id;
+            setSelectedById(id);
+            ensureSelectedVisible();
+            e.preventDefault();
+            return;
+          }
+
+          if(e.key === 'ArrowUp'){
+            selectedIndex = (selectedIndex < 0) ? 0 : Math.max(0, selectedIndex - 1);
+            const id = items[selectedIndex].dataset.id;
+            setSelectedById(id);
+            ensureSelectedVisible();
+            e.preventDefault();
+            return;
+          }
+
+          if(e.key === 'Enter'){
+            if(selectedIndex >= 0 && items[selectedIndex]){
+              const id = items[selectedIndex].dataset.id;
+              if(e.ctrlKey) requestPaste(id);
+              else requestCopy(id);
+              e.preventDefault();
+            }
+            return;
+          }
+
+          if(e.key === 'Delete'){
+            if(selectedIndex >= 0 && items[selectedIndex]){
+              requestDelete(items[selectedIndex].dataset.id);
+              e.preventDefault();
+            }
+          }
+        });
+      }
+
+      // 接收扩展端数据
+      window.addEventListener('message', function(ev){
+        const msg = ev.data;
+        if(!msg || typeof msg !== 'object') return;
+
+        if(msg.command === 'updateData'){
+          // 同步 keyword（仅当 input 未聚焦，避免打断输入）
+          if(el.searchInput && typeof msg.keyword === 'string'){
+            if(document.activeElement !== el.searchInput){
+              el.searchInput.value = msg.keyword;
+            }
+          }
+
+          renderList(msg.history || []);
+          renderMeta(msg.stats || {}, (msg.history && msg.history.length) ? msg.history.length : 0);
+
+          // 如开启 stats，刷新一次快照面板
+          if(showStats) postMessage({ command: 'stats' });
         }
-    </script>
+
+        if(msg.command === 'statsSnapshot'){
+          if(!showStats) return;
+          const stats = msg.stats || {};
+          const historyCount = (typeof stats.historyCount === 'number') ? stats.historyCount : (current ? current.length : 0);
+
+          // 这里复用 renderMeta 的 stats 结构要求
+          renderMeta({
+            uptime: stats.uptime,
+            cacheHitRate: stats.cache ? stats.cache.hitRate : 0,
+            perf: stats.perf
+          }, historyCount);
+        }
+      });
+
+      // 心跳
+      setInterval(function(){
+        postMessage({ command: 'heartbeat' });
+      }, 10000);
+
+      // init
+      bindUI();
+      postMessage({ command: 'ready' });
+    })();
+  </script>
 </body>
 </html>`;
     }
 
     dispose() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-            this.updateInterval = null;
+        this._stopPeriodicUpdate();
+        if (this._watchdogTimer) {
+            clearInterval(this._watchdogTimer);
+            this._watchdogTimer = null;
         }
+        this._view = null;
     }
 }
 
-module.exports = SidebarWebViewProvider;
+// ============================================================================
+// QuickPick 命令
+// ============================================================================
+async function showHistoryQuickPick(historyManager) {
+    const history = historyManager.getHistory(50);
 
+    if (history.length === 0) {
+        vscode.window.showInformationMessage('剪贴板历史为空');
+        return;
+    }
 
+    const items = history.map((item) => ({
+        label: item.preview || makePreview(item.content),
+        description: formatTime(item.timestamp),
+        detail: `${item.contentLength || (item.content ? item.content.length : 0)} 字符`,
+        id: item.id,
+        content: item.content,
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: '选择要粘贴的历史记录',
+        matchOnDescription: true,
+        matchOnDetail: true,
+    });
+
+    if (selected) {
+        await historyManager.copyToClipboard(selected.content);
+        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    }
+}
+
+// ============================================================================
+// 搜索历史命令（QuickPick）
+// ============================================================================
+async function searchHistoryCommand(historyManager) {
+    const keyword = await vscode.window.showInputBox({
+        placeHolder: '输入搜索关键词',
+        prompt: '搜索剪贴板历史',
+    });
+
+    if (!keyword) return;
+
+    const results = historyManager.searchHistory(keyword, 30);
+
+    if (results.length === 0) {
+        vscode.window.showInformationMessage(`未找到包含 "${keyword}" 的记录`);
+        return;
+    }
+
+    const items = results.map((item) => ({
+        label: item.preview || makePreview(item.content),
+        description: formatTime(item.timestamp),
+        detail: `${item.contentLength || (item.content ? item.content.length : 0)} 字符`,
+        id: item.id,
+        content: item.content,
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: `找到 ${results.length} 条结果`,
+        matchOnDescription: true,
+        matchOnDetail: true,
+    });
+
+    if (selected) {
+        await historyManager.copyToClipboard(selected.content);
+        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+    }
+}
+
+// ============================================================================
+// 导出 / 导入 / 清空 / 统计 命令
+// ============================================================================
+async function exportHistoryCommand(historyManager) {
+    const ok = await historyManager.exportToJsonFile();
+    if (ok) vscode.window.showInformationMessage('剪贴板历史导出成功');
+    else vscode.window.showErrorMessage('导出失败');
+}
+
+async function importHistoryCommand(historyManager) {
+    const result = await historyManager.importFromJsonFile();
+    if (result && result.success) {
+        vscode.window.showInformationMessage(`导入成功：${result.imported} 条`);
+    } else {
+        vscode.window.showErrorMessage('导入失败：' + (result?.error || '未知错误'));
+    }
+}
+
+async function clearHistoryCommand(historyManager) {
+    const confirm = await vscode.window.showWarningMessage(
+        '确定要清空所有剪贴板历史吗？此操作不可恢复。',
+        { modal: true },
+        '确定清空'
+    );
+
+    if (confirm === '确定清空') {
+        await historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
+        vscode.window.showInformationMessage('剪贴板历史已清空');
+    }
+}
+
+function showStatsCommand(historyManager) {
+    const snap = historyManager.getStatsSnapshot();
+
+    const message = [
+        `📊 剪贴板历史统计`,
+        ``,
+        `总记录数: ${snap.historyCount}`,
+        `监听中: ${snap.isWatching ? '是' : '否'}`,
+        `会话时长: ${snap.uptime.h}h ${snap.uptime.m}m`,
+        ``,
+        `缓存命中率: ${snap.cache.hitRate.toFixed(1)}%`,
+        `avgSave: ${snap.perf.avgSaveMs.toFixed(2)}ms`,
+        `avgAdd:  ${snap.perf.avgAddMs.toFixed(2)}ms`,
+        `avgLoad: ${snap.perf.avgLoadMs.toFixed(2)}ms`,
+        `隔离损坏文件数: ${snap.perf.quarantinedFiles}`,
+    ].join('\n');
+
+    vscode.window.showInformationMessage(message, { modal: true });
+}
+
+// ============================================================================
+// 复制选中内容到历史
+// ============================================================================
+async function copyToHistoryCommand(historyManager) {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showWarningMessage('没有活动的编辑器');
+        return;
+    }
+
+    const selection = editor.selection;
+    const text = editor.document.getText(selection);
+
+    if (!text || text.trim() === '') {
+        vscode.window.showWarningMessage('没有选中任何文本');
+        return;
+    }
+
+    await historyManager.copyToClipboard(text);
+    await historyManager.addToHistory(text);
+    vscode.window.showInformationMessage('已复制到剪贴板并添加到历史');
+}
+
+// ============================================================================
+// 状态栏项
+// ============================================================================
+class StatusBarManager {
+    /**
+     * @param {ClipboardHistoryManager} historyManager
+     */
+    constructor(historyManager) {
+        this._historyManager = historyManager;
+
+        this._statusBarItem = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            100
+        );
+
+        this._statusBarItem.command = 'qqq.showHistoryQuickPick';
+        this._statusBarItem.tooltip = '点击打开剪贴板历史';
+        this._updateTimer = null;
+
+        this._update();
+        this._startAutoUpdate();
+    }
+
+    _update() {
+        const count = this._historyManager ? this._historyManager._size : 0;
+        this._statusBarItem.text = `$(clippy) ${count}`;
+        this._statusBarItem.show();
+    }
+
+    _startAutoUpdate() {
+        this._updateTimer = setInterval(() => this._update(), 5000);
+    }
+
+    refresh() { this._update(); }
+
+    dispose() {
+        if (this._updateTimer) {
+            clearInterval(this._updateTimer);
+            this._updateTimer = null;
+        }
+        this._statusBarItem.dispose();
+    }
+}
+
+// ============================================================================
+// 扩展激活入口
+// ============================================================================
+function activate(context) {
+    console.log('[Q4] QQQ Clipboard History (fusion-final) activating...');
+
+    let sidebarProvider = null;
+    let statusBarManager = null;
+
+    const historyManager = new ClipboardHistoryManager(context, {
+        onChange: () => {
+            if (sidebarProvider) sidebarProvider.refresh();
+            if (statusBarManager) statusBarManager.refresh();
+        },
+    });
+
+    historyManager.startWatching();
+
+    sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager);
+
+    const sidebarDisposable = vscode.window.registerWebviewViewProvider(
+        'qqqClipboardHistoryView',
+        sidebarProvider,
+        { webviewOptions: { retainContextWhenHidden: true } }
+    );
+    context.subscriptions.push(sidebarDisposable);
+
+    statusBarManager = new StatusBarManager(historyManager);
+    context.subscriptions.push(statusBarManager);
+
+    // 命令注册
+    context.subscriptions.push(
+        vscode.commands.registerCommand('qqq.showHistoryQuickPick', () => showHistoryQuickPick(historyManager)),
+        vscode.commands.registerCommand('qqq.searchHistory', () => searchHistoryCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.clearHistory', () => clearHistoryCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.showStats', () => showStatsCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager)),
+
+        vscode.commands.registerCommand('qqq.refreshSidebar', () => {
+            if (sidebarProvider) sidebarProvider.refresh();
+        }),
+
+        vscode.commands.registerCommand('qqq.pasteLastItem', async () => {
+            const h = historyManager.getHistory(1);
+            if (h.length > 0) {
+                await historyManager.copyToClipboard(h[0].content);
+                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+            } else {
+                vscode.window.showInformationMessage('剪贴板历史为空');
+            }
+        }),
+
+        vscode.commands.registerCommand('qqq.pasteNthItem', async () => {
+            const input = await vscode.window.showInputBox({
+                placeHolder: '输入序号 (1-10)',
+                prompt: '粘贴第 N 条历史记录',
+                validateInput: (value) => {
+                    const n = parseInt(value, 10);
+                    if (Number.isNaN(n) || n < 1 || n > 10) return '请输入 1-10 之间的数字';
+                    return null;
+                },
+            });
+
+            if (!input) return;
+            const n = parseInt(input, 10);
+
+            const history = historyManager.getHistory(n);
+            if (history.length >= n) {
+                const item = history[n - 1];
+                await historyManager.copyToClipboard(item.content);
+                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+            } else {
+                vscode.window.showWarningMessage(`历史记录不足 ${n} 条`);
+            }
+        }),
+
+        vscode.commands.registerCommand('qqq.copyAndAddToHistory', async () => {
+            await vscode.commands.executeCommand('editor.action.clipboardCopyAction');
+            const content = await vscode.env.clipboard.readText();
+            if (content) await historyManager.addToHistory(content);
+        })
+    );
+
+    // 清理
+    context.subscriptions.push({
+        dispose: () => {
+            historyManager.dispose().catch(() => { });
+            if (sidebarProvider) sidebarProvider.dispose();
+            if (statusBarManager) statusBarManager.dispose();
+        },
+    });
+
+    console.log('[Q4] QQQ Clipboard History (fusion-final) activated.');
+
+    return {
+        getHistory: (limit) => historyManager.getHistory(limit),
+        addToHistory: (content) => historyManager.addToHistory(content),
+        searchHistory: (keyword, limit) => historyManager.searchHistory(keyword, limit),
+        clearHistory: () => historyManager.clearHistory(),
+        getStats: () => historyManager.getStatsSnapshot(),
+    };
+}
+
+// ============================================================================
+// 扩展停用
+// ============================================================================
+function deactivate() {
+    console.log('[Q4] QQQ Clipboard History (fusion-final) deactivated.');
+}
+
+// ============================================================================
+// 导出
+// ============================================================================
+module.exports = {
+    activate,
+    deactivate,
+    ClipboardHistoryManager,
+    ClipboardHistorySidebarProvider,
+};
