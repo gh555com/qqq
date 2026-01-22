@@ -484,9 +484,13 @@ function getConfig() {
 
   if (!globalContext) return defaultConfig;
 
-  const config = globalContext.globalState.get("qqq_config", defaultConfig);
+  // ★ 终极最优解：容错性配置加载，防止 globalState 返回非预期值
+  const storedConfig = globalContext.globalState.get("qqq_config") || {};
+  const config = { ...defaultConfig, ...storedConfig };
 
-  if (!config.recentDirs) config.recentDirs = [];
+  // 确保数组字段存在
+  if (!Array.isArray(config.recentDirs)) config.recentDirs = [];
+  if (!Array.isArray(config.recycleBin)) config.recycleBin = [];
   if (typeof config.lineSpacing !== "number") config.lineSpacing = -2;
   if (typeof config.sidebarWidth !== "number") config.sidebarWidth = 100;
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
@@ -1929,8 +1933,8 @@ async function activate(context) {
   geq().logMessage("Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("qqq.q2", showSaveAsDialog),
-    vscode.commands.registerCommand("qqq.saveAsDialog", showSaveAsDialog)
+    vscode.commands.registerCommand("qqq.q2", global.withReady(showSaveAsDialog)),
+    vscode.commands.registerCommand("qqq.saveAsDialog", global.withReady(showSaveAsDialog))
   );
 }
 

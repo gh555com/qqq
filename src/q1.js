@@ -3163,20 +3163,20 @@ async function activate(context) {
 				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
-		vscode.commands.registerCommand("qqq.q1", executeClipboardCommand),
-		vscode.commands.registerCommand("qqq.openFile", openFileCommand),
-		vscode.commands.registerCommand("qqq.openFileInRightGroup", openFileInRightGroupCommand),
-		vscode.commands.registerCommand("qqq.revealFileInFolder", revealFileInFolder),
-		vscode.commands.registerCommand("qqq.renameFile", renameFileCommand),
-		vscode.commands.registerCommand("qqq.cleanUp", () => {
+		vscode.commands.registerCommand("qqq.q1", global.withReady(executeClipboardCommand)),
+		vscode.commands.registerCommand("qqq.openFile", global.withReady(openFileCommand)),
+		vscode.commands.registerCommand("qqq.openFileInRightGroup", global.withReady(openFileInRightGroupCommand)),
+		vscode.commands.registerCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
+		vscode.commands.registerCommand("qqq.renameFile", global.withReady(renameFileCommand)),
+		vscode.commands.registerCommand("qqq.cleanUp", global.withReady(() => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
-		}),
-		vscode.commands.registerCommand("qqq.exportDoc", () => {
+		})),
+		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
 			q3.executeExportDocCommand(isCoreIntegrityValid);
-		}),
-		vscode.commands.registerCommand("qqq.exportZip", () => {
+		})),
+		vscode.commands.registerCommand("qqq.exportZip", global.withReady(() => {
 			q3.executeExportZipCommand(isCoreIntegrityValid);
-		}),
+		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
 			if (cleanFreakMode && e.document) {
