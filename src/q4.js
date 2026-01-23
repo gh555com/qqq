@@ -104,9 +104,9 @@ function getMsgpack() {
     if (_msgpackLoaded) return _msgpack;
     _msgpackLoaded = true;
     try {
-        // eslint-disable-next-line global-require
         _msgpack = require('msgpack-lite');
-    } catch {
+    } catch (e) {
+        console.error('[Q4] 严重错误：无法加载 msgpack-lite 依赖', e.message);
         _msgpack = null;
     }
     return _msgpack;
@@ -265,32 +265,29 @@ class ClipboardHistoryManager {
         const t0 = performance.now();
         try {
             const dataBuf = await fs.promises.readFile(this._fileBinGz);
-            let raw;
-            try {
-                raw = await gunzipAsync(dataBuf);
-            } catch (e) {
-                // 如果解压失败，检查是否为未压缩的 JSON
-                if (dataBuf[0] === 0x7b) { // '{'
-                    raw = dataBuf;
-                } else {
-                    throw e;
-                }
+
+            // 1. 解压 Gzip
+            const raw = await gunzipAsync(dataBuf);
+
+            // 2. 长度预检
+            if (!raw || raw.length === 0) {
+                this._resetInMemory();
+                return;
             }
 
+            // 3. 唯一来源：Msgpack 解码
             const mp = getMsgpack();
-            let parsed = null;
-            if (mp) {
-                try { parsed = mp.decode(raw); } catch { try { parsed = JSON.parse(raw.toString('utf8')); } catch { } }
-            } else {
-                try { parsed = JSON.parse(raw.toString('utf8')); } catch { }
-            }
+            if (!mp) throw new Error('Msgpack 引擎不可用');
 
-            if (!parsed || (!Array.isArray(parsed) && !Array.isArray(parsed.history))) throw new Error('Invalid format');
+            const parsed = mp.decode(raw);
+            if (!parsed || (!Array.isArray(parsed) && !Array.isArray(parsed.history))) {
+                throw new Error('无效的二进制存储格式');
+            }
 
             const historyArr = Array.isArray(parsed) ? parsed : parsed.history;
             this._resetInMemory();
 
-            // 逆序插入以恢复链表顺序
+            // 逆序插入链表
             historyArr.slice().reverse().forEach(it => {
                 if (!it.content) return;
                 const node = {
@@ -311,7 +308,7 @@ class ClipboardHistoryManager {
             this._touch();
             this._notifyChange();
         } catch (e) {
-            console.error('[Q4] 加载失败，执行物理隔离:', e.message);
+            console.error('[Q4] 二进制加载失败，执行隔离:', e.message);
             await this._quarantineCorruptFile(this._fileBinGz);
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
@@ -463,11 +460,19 @@ class ClipboardHistoryManager {
         this._dirty = false;
         try {
             const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
+
             const mp = getMsgpack();
-            const rawBuf = (this._preferMsgpack && mp) ? mp.encode(payload) : Buffer.from(JSON.stringify(payload), 'utf8');
+            if (!mp) throw new Error('Msgpack 引擎丢失');
+
+            const rawBuf = mp.encode(payload);
             const outBuf = await gzipAsync(rawBuf);
+
             await this._writeFileAtomic(this._fileBinGz, outBuf);
-        } catch { this._dirty = true; }
+            console.log(`[Q4] 存储：${outBuf.length} bytes (Msgpack+Gzip)`);
+        } catch (e) {
+            console.error('[Q4] 存储严重故障:', e.message);
+            this._dirty = true;
+        }
     }
 
     async _writeFileAtomic(targetPath, buf) {
