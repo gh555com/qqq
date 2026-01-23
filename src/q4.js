@@ -36,7 +36,8 @@ const CONSTANTS = Object.freeze({
     FILE_BIN_GZ: 'history.bin.gz',
 
     // 限制
-    MAX_HISTORY_ITEMS: 100,
+    MAX_HISTORY_ITEMS: 2000,
+    CLEANUP_BATCH_SIZE: 1000,
     UI_HISTORY_LIMIT: 30,
     MAX_CONTENT_LENGTH: 100000,
     PREVIEW_LENGTH: 200,
@@ -199,6 +200,7 @@ class ClipboardHistoryManager {
             version: -1,
             uiList: null,
             uiBytes: 0,
+            lastUiKey: '', // 新增：用于跟踪 limit 变化
             lastSearchKey: '',
             searchList: null,
             searchBytes: 0,
@@ -228,26 +230,6 @@ class ClipboardHistoryManager {
 
         this._initStorage();
         this._loadHistory().catch(() => { });
-        this._startAutoCleanup();
-    }
-
-    _startAutoCleanup() {
-        if (this._cleanupTimer) clearInterval(this._cleanupTimer);
-        this._cleanupTimer = setInterval(() => {
-            // 异步执行清理，不阻塞主线程
-            (async () => {
-                const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
-                let changed = false;
-                while (this._tail && this._tail.timestamp < cutoff) {
-                    this._removeNode(this._tail);
-                    changed = true;
-                }
-                if (changed) {
-                    this._touch();
-                    this.requestSave();
-                }
-            })().catch(() => { });
-        }, CONSTANTS.AUTO_CLEANUP_INTERVAL_MS);
     }
 
     _initStorage() {
@@ -327,6 +309,7 @@ class ClipboardHistoryManager {
         this._cache.version = -1;
         this._cache.uiList = null;
         this._cache.uiBytes = 0;
+        this._cache.lastUiKey = '';
         this._cache.searchList = null;
         this._cache.searchBytes = 0;
         this._cache.lastSearchKey = '';
@@ -403,7 +386,8 @@ class ClipboardHistoryManager {
     }
 
     getHistory(limit = CONSTANTS.UI_HISTORY_LIMIT) {
-        if (this._cache.uiList && this._cache.version === this._version) return this._cache.uiList;
+        const cacheKey = `${this._version}|${limit}`;
+        if (this._cache.uiList && this._cache.lastUiKey === cacheKey) return this._cache.uiList;
 
         const pinned = [];
         const others = [];
@@ -433,6 +417,7 @@ class ClipboardHistoryManager {
         if (bytes <= this._cache.maxBytes) {
             this._cache.uiList = out;
             this._cache.version = this._version;
+            this._cache.lastUiKey = cacheKey;
             this._cache.uiBytes = bytes;
         }
         return out;
@@ -525,7 +510,14 @@ class ClipboardHistoryManager {
                 this._insertHead(node);
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
-                if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
+
+                // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
+                if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
+                    console.log('[Q4] 触发容量熔断，执行批量清理...');
+                    for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
+                        if (this._tail) this._popTail();
+                    }
+                }
             }
             this._lastClipboardContent = text;
             this._touch();
@@ -912,40 +904,44 @@ class ClipboardHistorySidebarProvider {
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
-        /* 极致炫酷：三连金刃风暴 (Triple-Blade Gold Storm) */
+        /* 极致强烈：金刃狂飙 4.0 (Hyper-Gold Storm Max) */
         .history-container.storm::after {
             content: '';
             position: absolute;
-            top: -100%; left: -100%; right: -100%; bottom: -100%;
+            top: -150%; left: -150%; right: -150%; bottom: -150%;
             pointer-events: none;
-            z-index: 100;
+            z-index: 1000;
             background: linear-gradient(45deg,
-                transparent 40%,
-                rgba(181, 137, 0, 0.3) 42%,
-                rgba(255, 255, 255, 0.9) 45%,
-                rgba(181, 137, 0, 0.3) 48%,
-                transparent 50%,
-                rgba(181, 137, 0, 0.2) 52%,
-                rgba(255, 255, 255, 0.6) 55%,
-                rgba(181, 137, 0, 0.2) 58%,
-                transparent 60%
+                transparent 35%,
+                rgba(181, 137, 0, 0.9) 38%,
+                rgba(255, 255, 255, 1) 40%,
+                rgba(181, 137, 0, 0.9) 42%,
+                transparent 45%,
+                rgba(181, 137, 0, 0.7) 47%,
+                rgba(255, 255, 255, 1) 50%,
+                rgba(181, 137, 0, 0.7) 53%,
+                transparent 55%,
+                rgba(181, 137, 0, 0.5) 57%,
+                rgba(255, 255, 255, 1) 60%,
+                rgba(181, 137, 0, 0.5) 63%,
+                transparent 65%
             );
-            filter: blur(1px) contrast(1.2);
+            filter: blur(3px) brightness(2.5) contrast(1.5);
             opacity: 0;
-            animation: triple-blade 1.1s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+            animation: hyper-storm 0.7s cubic-bezier(0.15, 0, 0.15, 1) forwards;
         }
-        @keyframes triple-blade {
-            0% { transform: translate(-50%, 50%) scale(0.7); opacity: 0; }
-            15% { opacity: 1; transform: translate(-35%, 35%) scale(1); }
-            30% { transform: translate(-33%, 33%) rotate(1deg); } /* 高能震颤 */
-            100% { transform: translate(50%, -50%) scale(1.3); opacity: 0; }
+        @keyframes hyper-storm {
+            0% { transform: translate(-40%, 40%) rotate(-10deg) scale(0.5); opacity: 0; }
+            15% { opacity: 1; transform: translate(-20%, 20%) rotate(0deg) scale(1.5) skewX(5deg); }
+            30% { transform: translate(-18%, 18%) scale(1.6) rotate(1deg); } /* 高能震颤点 */
+            100% { transform: translate(40%, -40%) rotate(10deg) scale(3); opacity: 0; }
         }
 
         .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
-        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); margin-right: 2px; }
-        .history-item:hover { border-color: var(--primary-color); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
+        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #5a5a5a; margin-right: 2px; }
+        .history-item:hover { border-color: var(--primary-color); background: #fffdfa; color: #000000; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); color: #000000; }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
         .item-info { display: none; }
         .item-time { font-size: 13px; color: var(--base2); }
@@ -978,7 +974,7 @@ class ClipboardHistorySidebarProvider {
         }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
 
-        .action-mini-btn { padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); }
+        .action-mini-btn { padding: 2px 6px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); font-family: Tahoma, sans-serif; line-height: 1.2; }
         .action-mini-btn:hover { background: var(--primary-color); color: #fff; }
 
         .music-player { background: var(--base02); color: var(--base3); padding: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
