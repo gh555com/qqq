@@ -299,6 +299,8 @@ class ClipboardHistoryManager {
                     hash: it.hash || md5Hex(it.content),
                     preview: it.preview || makePreview(it.content),
                     size: it.size || Buffer.byteLength(it.content, 'utf8'),
+                    pinned: !!it.pinned,
+                    pinTimestamp: it.pinTimestamp || 0,
                     prev: null, next: null
                 };
                 if (!this._hashMap.has(node.hash)) {
@@ -384,7 +386,16 @@ class ClipboardHistoryManager {
         const arr = [];
         let cur = this._head;
         while (cur) {
-            arr.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0, hash: cur.hash });
+            arr.push({
+                id: cur.id,
+                content: cur.content,
+                timestamp: cur.timestamp,
+                preview: cur.preview,
+                size: cur.size || 0,
+                pinned: !!cur.pinned,
+                pinTimestamp: cur.pinTimestamp || 0,
+                hash: cur.hash
+            });
             cur = cur.next;
         }
         this._snapshotAll = arr;
@@ -394,12 +405,29 @@ class ClipboardHistoryManager {
 
     getHistory(limit = CONSTANTS.UI_HISTORY_LIMIT) {
         if (this._cache.uiList && this._cache.version === this._version) return this._cache.uiList;
-        const out = [];
+
+        const pinned = [];
+        const others = [];
         let cur = this._head;
-        while (cur && out.length < limit) {
-            out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0 });
+        while (cur) {
+            const item = {
+                id: cur.id,
+                content: cur.content,
+                timestamp: cur.timestamp,
+                preview: cur.preview,
+                size: cur.size || 0,
+                pinned: !!cur.pinned,
+                pinTimestamp: cur.pinTimestamp || 0
+            };
+            if (cur.pinned) pinned.push(item);
+            else others.push(item);
             cur = cur.next;
         }
+
+        // 置顶项按置顶时间先后排序（最新的置顶在最前）
+        pinned.sort((a, b) => b.pinTimestamp - a.pinTimestamp);
+
+        const out = [...pinned, ...others].slice(0, limit);
 
         // 激活内存检查：熔断机制，防止超大缓存撑爆内存
         const bytes = estimateBytes(out);
@@ -419,14 +447,30 @@ class ClipboardHistoryManager {
         if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) return this._cache.searchList;
 
         const needle = kw.toLowerCase();
-        const out = [];
+        const pinned = [];
+        const others = [];
         let cur = this._head;
-        while (cur && out.length < limit) {
+        while (cur) {
             if (cur.content.toLowerCase().includes(needle)) {
-                out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0 });
+                const item = {
+                    id: cur.id,
+                    content: cur.content,
+                    timestamp: cur.timestamp,
+                    preview: cur.preview,
+                    size: cur.size || 0,
+                    pinned: !!cur.pinned,
+                    pinTimestamp: cur.pinTimestamp || 0
+                };
+                if (cur.pinned) pinned.push(item);
+                else others.push(item);
             }
             cur = cur.next;
         }
+
+        // 搜索结果中的置顶项也按置顶时间排序
+        pinned.sort((a, b) => b.pinTimestamp - a.pinTimestamp);
+
+        const out = [...pinned, ...others].slice(0, limit);
 
         // 搜索结果缓存 + 内存防御
         const bytes = estimateBytes(out);
@@ -436,6 +480,19 @@ class ClipboardHistoryManager {
             this._cache.lastSearchKey = cacheKey;
         }
         return out;
+    }
+
+    async togglePin(id) {
+        const node = this._idMap.get(String(id || ''));
+        if (!node) return false;
+        node.pinned = !node.pinned;
+        // 记录置顶时刻，用于排序
+        node.pinTimestamp = node.pinned ? Date.now() : 0;
+
+        this._touch();
+        this._notifyChange('pin');
+        this.requestSave();
+        return true;
     }
 
     getItemById(id) { return this._idMap.get(String(id || '')); }
@@ -461,6 +518,7 @@ class ClipboardHistoryManager {
                     timestamp: Date.now(),
                     preview: makePreview(text),
                     size: Buffer.byteLength(text, 'utf8'),
+                    pinned: false,
                     hash,
                     prev: null,
                     next: null
@@ -472,7 +530,7 @@ class ClipboardHistoryManager {
             }
             this._lastClipboardContent = text;
             this._touch();
-            this._notifyChange();
+            this._notifyChange('add');
             this.requestSave();
         } finally {
             this.perfStats.addTimeMs += (performance.now() - t0);
@@ -484,7 +542,7 @@ class ClipboardHistoryManager {
         if (!node) return false;
         this._removeNode(node);
         this._touch();
-        this._notifyChange();
+        this._notifyChange('remove');
         this.requestSave();
         return true;
     }
@@ -493,7 +551,7 @@ class ClipboardHistoryManager {
         this._head = null; this._tail = null; this._size = 0;
         this._idMap.clear(); this._hashMap.clear();
         this._touch();
-        this._notifyChange();
+        this._notifyChange('clear');
         if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
             try { fs.unlinkSync(this._fileBinGz); } catch { }
         }
@@ -599,7 +657,7 @@ class ClipboardHistoryManager {
         } catch { return false; }
     }
 
-    _notifyChange() { if (this._onChange) this._onChange(); }
+    _notifyChange(reason) { if (this._onChange) this._onChange(reason); }
 
     getStatsSnapshot() {
         const uptimeSec = Math.floor((Date.now() - this.sessionStartedAt) / 1000);
@@ -682,6 +740,12 @@ class ClipboardHistorySidebarProvider {
                         this.updateContent();
                     }
                     break;
+                case 'togglePinHistoryItem':
+                    if (msg.itemId) {
+                        await this._historyManager.togglePin(msg.itemId);
+                        this.updateContent();
+                    }
+                    break;
                 case 'clearAllHistory': {
                     const confirm = await vscode.window.showWarningMessage(
                         '确定要清空所有剪贴板历史吗？此操作不可恢复。',
@@ -728,14 +792,15 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    updateContent() {
+    updateContent(reason) {
         if (!this._view || !this._view.visible) return;
         try {
             const history = this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
                 preview: item.preview,
-                size: item.size || 0
+                size: item.size || 0,
+                pinned: !!item.pinned
             }));
 
             const audioBase64 = this._getAudioBase64();
@@ -747,7 +812,8 @@ class ClipboardHistorySidebarProvider {
 
             this._postMessage({
                 command: 'updateData',
-                history: history
+                history: history,
+                triggerStorm: (reason === 'add' || reason === 'pin')
             });
 
             const count = this._historyManager._size;
@@ -816,11 +882,31 @@ class ClipboardHistorySidebarProvider {
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
+
+        /* 极致白金高能脉冲动画 (Quantum Burst) */
+        .history-container.storm::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 100px;
+            pointer-events: none;
+            z-index: 100;
+            background: linear-gradient(180deg, rgba(255,255,255,0.9), var(--cyan), transparent);
+            filter: blur(8px);
+            opacity: 0;
+            animation: burst-down 0.4s ease-out forwards;
+        }
+        @keyframes burst-down {
+            0% { transform: translateY(-100%) scaleY(0.5); opacity: 0; }
+            20% { opacity: 1; }
+            100% { transform: translateY(300%) scaleY(2); opacity: 0; }
+        }
+
         .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
+        .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
         .item-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
         .item-time { font-size: 0.7em; color: var(--base01); }
         .item-size { font-size: 0.7em; color: var(--base01); opacity: 0.7; font-family: monospace; }
@@ -884,6 +970,7 @@ class ClipboardHistorySidebarProvider {
         (function() {
             const vscode = acquireVsCodeApi();
             const el = {
+                historyContainer: document.getElementById('historyContainer'),
                 historyList: document.getElementById('historyList'),
                 btnRefresh: document.getElementById('btnRefresh'),
                 btnClear: document.getElementById('btnClear'),
@@ -899,14 +986,24 @@ class ClipboardHistorySidebarProvider {
             let selectedId = '';
             let selectedIndex = -1;
             let currentHistory = [];
+            let lastTopId = null;
 
             function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
 
             // 禁用右键菜单
             window.addEventListener('contextmenu', e => e.preventDefault());
 
-            function renderList(history) {
-                currentHistory = history || [];
+            function renderList(history, triggerStorm) {
+                const newHistory = history || [];
+
+                // 触发风暴逻辑
+                if (triggerStorm) {
+                    el.historyContainer.classList.remove('storm');
+                    void el.historyContainer.offsetWidth; // 触发重绘
+                    el.historyContainer.classList.add('storm');
+                }
+
+                currentHistory = newHistory;
                 el.historyList.innerHTML = '';
                 if (currentHistory.length === 0) {
                     el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
@@ -920,6 +1017,7 @@ class ClipboardHistorySidebarProvider {
                     const div = document.createElement('div');
                     div.className = 'history-item';
                     if (item.id === selectedId) div.classList.add('selected');
+                    if (item.pinned) div.classList.add('pinned');
                     div.dataset.id = item.id;
                     div.dataset.index = idx;
 
@@ -940,12 +1038,16 @@ class ClipboardHistorySidebarProvider {
                     const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
 
                     const actions = document.createElement('div'); actions.className = 'item-actions';
-                    const btnCopy = document.createElement('button'); btnCopy.className = 'action-mini-btn'; btnCopy.dataset.action = 'copy'; btnCopy.textContent = '📋 复制';
-                    const btnPaste = document.createElement('button'); btnPaste.className = 'action-mini-btn'; btnPaste.dataset.action = 'paste'; btnPaste.textContent = '📌 粘贴';
-                    const btnInsert = document.createElement('button'); btnInsert.className = 'action-mini-btn'; btnInsert.dataset.action = 'insert'; btnInsert.textContent = '📝 插入';
+
+                    const btnPin = document.createElement('button');
+                    btnPin.className = 'action-mini-btn';
+                    btnPin.dataset.action = 'pin';
+                    btnPin.textContent = item.pinned ? '📍 取消置顶' : '📌 置顶';
+
                     const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️ 删除';
 
-                    actions.appendChild(btnCopy); actions.appendChild(btnPaste); actions.appendChild(btnInsert); actions.appendChild(btnDel);
+                    actions.appendChild(btnPin);
+                    actions.appendChild(btnDel);
                     info.appendChild(time);
                     info.appendChild(size);
                     div.appendChild(info);
@@ -1001,6 +1103,7 @@ class ClipboardHistorySidebarProvider {
                     if (action === 'paste') post('pasteToEditor', { itemId: id });
                     if (action === 'insert') post('insertToEditor', { itemId: id });
                     if (action === 'delete') post('deleteHistoryItem', { itemId: id });
+                    if (action === 'pin') post('togglePinHistoryItem', { itemId: id });
                     e.stopPropagation();
                     return;
                 }
@@ -1023,7 +1126,7 @@ class ClipboardHistorySidebarProvider {
             window.addEventListener('message', e => {
                 const m = e.data;
                 if (m.command === 'updateData') {
-                    renderList(m.history);
+                    renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64);
                 }
@@ -1356,8 +1459,8 @@ function activate(context) {
     let statusBarManager = null;
 
     const historyManager = new ClipboardHistoryManager(context, {
-        onChange: () => {
-            if (sidebarProvider) sidebarProvider.updateContent();
+        onChange: (reason) => {
+            if (sidebarProvider) sidebarProvider.updateContent(reason);
             if (statusBarManager) statusBarManager.refresh();
         },
     });
