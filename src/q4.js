@@ -1316,60 +1316,45 @@ class ClipboardHistorySidebarProvider {
 // 维护与辅助工具
 // ============================================================================
 
-async function showHistoryQuickPick(historyManager) {
-    const history = historyManager.getHistory(50);
-    if (history.length === 0) {
-        vscode.window.showInformationMessage('剪贴板历史为空');
-        return;
-    }
+async function searchHistoryCommand(historyManager) {
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.placeholder = '搜索剪贴板历史... (Enter 复制并粘贴)';
 
-    const items = history.map(it => ({
-        label: it.preview,
-        description: formatTime(it.timestamp),
-        detail: it.content.length > 100 ? it.content.slice(0, 100) + '...' : it.content,
-        id: it.id
-    }));
+    const updateItems = (keyword) => {
+        // 初始加载 171 条，搜索时加载 100 条匹配项
+        const limit = keyword ? 100 : 171;
+        const results = historyManager.searchHistory(keyword, limit);
 
-    const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: '选择要粘贴的历史记录',
-        matchOnDescription: true,
-        matchOnDetail: true
+        quickPick.items = results.map(it => ({
+            label: it.preview,
+            description: formatTime(it.timestamp),
+            // 详情预览去除换行符，保证 QuickPick 显示整洁
+            detail: it.content.length > 100
+                ? it.content.slice(0, 100).replace(/\s+/g, ' ') + '...'
+                : it.content.replace(/\s+/g, ' '),
+            id: it.id,
+            content: it.content
+        }));
+    };
+
+    quickPick.onDidChangeValue(value => updateItems(value));
+
+    quickPick.onDidAccept(async () => {
+        const selected = quickPick.selectedItems[0];
+        if (selected) {
+            const node = historyManager.getItemById(selected.id);
+            if (node) {
+                await historyManager.copyToClipboard(node.content);
+                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+            }
+            quickPick.hide();
+        }
     });
 
-    if (selected) {
-        const node = historyManager.getItemById(selected.id);
-        if (node) {
-            await historyManager.copyToClipboard(node.content);
-            await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-        }
-    }
-}
+    quickPick.onDidHide(() => quickPick.dispose());
 
-async function searchHistoryCommand(historyManager) {
-    const keyword = await vscode.window.showInputBox({ prompt: '输入搜索关键词' });
-    if (!keyword) return;
-
-    const results = historyManager.searchHistory(keyword, 100);
-
-    if (results.length === 0) {
-        vscode.window.showInformationMessage(`未找到包含 "${keyword}" 的记录`);
-        return;
-    }
-
-    const items = results.map(it => ({
-        label: it.preview,
-        description: formatTime(it.timestamp),
-        id: it.id
-    }));
-
-    const selected = await vscode.window.showQuickPick(items, { placeHolder: `搜索结果: ${keyword}` });
-    if (selected) {
-        const node = historyManager.getItemById(selected.id);
-        if (node) {
-            await historyManager.copyToClipboard(node.content);
-            await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-        }
-    }
+    updateItems('');
+    quickPick.show();
 }
 
 async function exportHistoryCommand(historyManager) {
@@ -1467,8 +1452,8 @@ class StatusBarManager {
             100
         );
 
-        this._statusBarItem.command = 'qqq.showHistoryQuickPick';
-        this._statusBarItem.tooltip = '点击打开剪贴板历史';
+        this._statusBarItem.command = 'qqq.searchHistory';
+        this._statusBarItem.tooltip = '点击搜索/粘贴剪贴板历史';
         this._updateTimer = null;
 
         this._update();
@@ -1599,7 +1584,6 @@ function activate(context) {
             });
             if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
         }),
-        vscode.commands.registerCommand('qqq.showHistoryQuickPick', () => showHistoryQuickPick(historyManager)),
         vscode.commands.registerCommand('qqq.searchHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
