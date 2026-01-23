@@ -1047,70 +1047,103 @@ class ClipboardHistorySidebarProvider {
     /**
      * @param {vscode.ExtensionContext} context
      * @param {ClipboardHistoryManager} historyManager
+     * @param {any} globalModule
      */
-    constructor(context, historyManager) {
+    constructor(context, historyManager, globalModule) {
         this._context = context;
         this._historyManager = historyManager;
-
-        /** @type {vscode.WebviewView|null} */
+        this._global = globalModule;
         this._view = null;
-
         this._updateTimer = null;
-        this._watchdogTimer = null;
-        this._currentNonce = '';
-
-        this._lastHeartbeat = 0;
-        this._lastKeyword = '';
     }
 
     resolveWebviewView(webviewView) {
         this._view = webviewView;
-
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._context.extensionUri],
         };
 
-        this._currentNonce = nonceHex();
-        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview, this._currentNonce);
+        // 初始内容与定时刷新
+        this.updateContent();
+        this._startPeriodicUpdate();
 
-        webviewView.webview.onDidReceiveMessage(
-            (msg) => this._handleMessage(msg),
-            null,
-            this._context.subscriptions
-        );
+        webviewView.webview.onDidReceiveMessage(async (msg) => {
+            switch (msg.command) {
+                case 'executeCommand':
+                    if (msg.cmd) vscode.commands.executeCommand(msg.cmd);
+                    break;
+                case 'copyToClipboard': {
+                    const node = this._historyManager.getItemById(msg.itemId);
+                    if (node) {
+                        await this._historyManager.copyToClipboard(node.content);
+                        vscode.window.setStatusBarMessage('已复制到剪切板', 2000);
+                    }
+                    break;
+                }
+                case 'pasteToEditor': {
+                    const node = this._historyManager.getItemById(msg.itemId);
+                    if (node) {
+                        await this._historyManager.copyToClipboard(node.content);
+                        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+                    }
+                    break;
+                }
+                case 'insertToEditor': {
+                    const node = this._historyManager.getItemById(msg.itemId);
+                    if (node) {
+                        const ok = await this._historyManager.insertToEditor(node.content);
+                        vscode.window.setStatusBarMessage(ok ? '已插入到编辑器' : '插入失败', 2000);
+                    }
+                    break;
+                }
+                case 'deleteHistoryItem':
+                    if (msg.itemId) {
+                        await this._historyManager.removeItem(msg.itemId);
+                        this.updateContent();
+                    }
+                    break;
+                case 'clearAllHistory': {
+                    const confirm = await vscode.window.showWarningMessage(
+                        '确定要清空所有剪贴板历史吗？此操作不可恢复。',
+                        { modal: true },
+                        '确定清空'
+                    );
+                    if (confirm === '确定清空') {
+                        await qsc(2, this._historyManager);
+                        this.updateContent();
+                    }
+                    break;
+                }
+                case 'refresh':
+                    this.updateContent();
+                    break;
+                case 'ready':
+                    this.updateContent();
+                    break;
+                case 'heartbeat':
+                    // 保持活动
+                    break;
+            }
+        });
 
         webviewView.onDidChangeVisibility(() => {
             if (webviewView.visible) {
-                this._sendUpdate(this._lastKeyword);
+                this.updateContent();
                 this._startPeriodicUpdate();
             } else {
                 this._stopPeriodicUpdate();
             }
         });
 
-        if (webviewView.visible) {
-            this._sendUpdate('');
-            this._startPeriodicUpdate();
-        }
-
-        this._startWatchdog();
-    }
-
-    dispose() {
-        this._stopPeriodicUpdate();
-        if (this._watchdogTimer) {
-            clearInterval(this._watchdogTimer);
-            this._watchdogTimer = null;
-        }
-        this._view = null;
+        webviewView.onDidDispose(() => {
+            this._stopPeriodicUpdate();
+        });
     }
 
     _startPeriodicUpdate() {
         this._stopPeriodicUpdate();
-        this._updateTimer = setInterval(() => {
-            this._sendUpdate(this._lastKeyword);
-        }, CONSTANTS.SIDEBAR_UPDATE_MS);
+        this._updateTimer = setInterval(() => this.updateContent(), CONSTANTS.SIDEBAR_UPDATE_MS);
     }
 
     _stopPeriodicUpdate() {
@@ -1120,164 +1153,69 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _startWatchdog() {
-        if (this._watchdogTimer) clearInterval(this._watchdogTimer);
-        this._watchdogTimer = setInterval(() => {
-            const now = Date.now();
-            if (this._lastHeartbeat > 0 && (now - this._lastHeartbeat) > CONSTANTS.WATCHDOG_STALE_MS) {
-                this._forceRefreshWebview();
-            }
-        }, CONSTANTS.WATCHDOG_REFRESH_MS);
-    }
+    updateContent() {
+        if (!this._view || !this._view.visible) return;
+        try {
+            const history = this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT).map(item => ({
+                id: item.id,
+                time: formatTime(item.timestamp),
+                preview: item.preview
+            }));
 
-    _forceRefreshWebview() {
-        if (this._view && this._view.visible) {
-            this._currentNonce = nonceHex();
-            this._view.webview.html = this._getHtmlForWebview(this._view.webview, this._currentNonce);
-            this._lastHeartbeat = Date.now();
-            this._sendUpdate(this._lastKeyword);
+            const stats = this._getDialStats();
+            const audioBase64 = this._getAudioBase64();
+
+            // 如果 HTML 为空（首次加载），则初始化 HTML
+            if (!this._view.webview.html || this._view.webview.html.length < 100) {
+                this._view.webview.html = this._getHtml(stats, history, audioBase64);
+            }
+
+            // 发送数据更新
+            this._postMessage({
+                command: 'updateData',
+                stats: stats,
+                history: history
+            });
+
+            this._view.title = `${stats.h}h ${stats.m}m`;
+        } catch (e) {
+            console.error('[Q4-UI] Update failed:', e);
         }
     }
 
-    async _handleMessage(msg) {
-        if (!msg || typeof msg.command !== 'string') return;
+    _getDialStats() {
+        let h = 0, m = 0;
+        const base = this._context.globalState.get("qqq_stats_total_seconds", 0) || 0;
+        const lastFlush = this._context.globalState.get("qqq_stats_last_flush") || Date.now();
+        const totalSeconds = base + ((Date.now() - lastFlush) / 1000);
+        h = Math.floor(totalSeconds / 3600);
+        m = Math.floor((totalSeconds % 3600) / 60);
 
-        switch (msg.command) {
-            case 'heartbeat':
-                this._lastHeartbeat = Date.now();
-                break;
-
-            case 'ready':
-                this._lastHeartbeat = Date.now();
-                this._sendUpdate(this._lastKeyword);
-                break;
-
-            case 'refresh':
-                this._sendUpdate(this._lastKeyword);
-                break;
-
-            case 'search': {
-                const kw = String(msg.keyword || '').trim();
-                this._lastKeyword = kw;
-                this._sendUpdate(kw);
-                break;
+        let cacheMB = 0;
+        try {
+            const root = this._context.globalStorageUri?.fsPath;
+            const cacheDir = path.join(root, 'qqq_cache');
+            if (fs.existsSync(cacheDir)) {
+                cacheMB = fs.readdirSync(cacheDir).reduce((acc, f) => {
+                    try { return acc + fs.statSync(path.join(cacheDir, f)).size; } catch { return acc; }
+                }, 0) / (1024 * 1024);
             }
+        } catch { }
 
-            case 'copy': {
-                const id = String(msg.id || '');
-                const node = this._historyManager.getItemById(id);
-                if (node) {
-                    await this._historyManager.copyToClipboard(node.content);
-                    vscode.window.setStatusBarMessage('已复制到剪贴板', 2000);
-                }
-                break;
-            }
-
-            case 'paste': {
-                const id = String(msg.id || '');
-                const node = this._historyManager.getItemById(id);
-                if (node) {
-                    await this._historyManager.copyToClipboard(node.content);
-                    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-                }
-                break;
-            }
-
-            case 'insert': {
-                const id = String(msg.id || '');
-                const node = this._historyManager.getItemById(id);
-                if (node) {
-                    const ok = await this._historyManager.insertToEditor(node.content);
-                    vscode.window.setStatusBarMessage(ok ? '已插入到编辑器' : '插入失败（无活动编辑器？）', 2000);
-                }
-                break;
-            }
-
-            case 'delete': {
-                const id = String(msg.id || '');
-                await this._historyManager.removeItem(id);
-                this._sendUpdate(this._lastKeyword);
-                break;
-            }
-
-            case 'clear': {
-                const confirm = await vscode.window.showWarningMessage(
-                    '确定要清空所有剪贴板历史吗？此操作不可恢复。',
-                    { modal: true },
-                    '确定清空'
-                );
-                if (confirm === '确定清空') {
-                    await this._historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
-                    this._lastKeyword = '';
-                    this._sendUpdate('');
-                }
-                break;
-            }
-
-            case 'export': {
-                const ok = await this._historyManager.exportToJsonFile();
-                if (ok) vscode.window.showInformationMessage('导出成功');
-                else vscode.window.showErrorMessage('导出失败');
-                break;
-            }
-
-            case 'import': {
-                const result = await this._historyManager.importFromJsonFile();
-                if (result && result.success) {
-                    vscode.window.showInformationMessage(`导入成功：${result.imported} 条`);
-                    this._sendUpdate(this._lastKeyword);
-                } else {
-                    vscode.window.showErrorMessage('导入失败：' + (result?.error || '未知错误'));
-                }
-                break;
-            }
-
-            case 'stats': {
-                const snap = this._historyManager.getStatsSnapshot();
-                this._postMessage({ command: 'statsSnapshot', stats: snap });
-                break;
-            }
-
-            default:
-                break;
+        const engineInfo = { name: 'Node', details: 'Spawn 模式' };
+        if (this._global?.getActiveEngineName) {
+            engineInfo.name = this._global.getActiveEngineName(this._global.pythonBridge, this._global.rustBridge, this._global.shellBridge);
+            engineInfo.details = engineInfo.name.includes('Python') ? 'Python 引擎' : (engineInfo.name.includes('Rust') ? 'Rust 引擎' : 'Node 引擎');
         }
+
+        return { h, m, cacheMB, hitRate: 0, engineInfo };
     }
 
-    refresh() {
-        this._sendUpdate(this._lastKeyword);
-    }
-
-    _buildUiPayload(keyword = '') {
-        const kw = String(keyword || '').trim();
-
-        const raw = kw
-            ? this._historyManager.searchHistory(kw, CONSTANTS.UI_HISTORY_LIMIT)
-            : this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT);
-
-        const history = raw.map((it) => ({
-            id: String(it.id || ''),
-            time: formatTime(it.timestamp),
-            preview: String(it.preview || makePreview(it.content)).slice(0, CONSTANTS.PREVIEW_LENGTH),
-            contentLength: Number(it.contentLength || (it.content ? String(it.content).length : 0)) || 0,
-        }));
-
-        const snap = this._historyManager.getStatsSnapshot();
-
-        return {
-            keyword: kw,
-            history,
-            stats: {
-                historyCount: snap.historyCount,
-                uptime: snap.uptime,
-                cacheHitRate: snap.cache.hitRate,
-                perf: snap.perf,
-            },
-        };
-    }
-
-    _sendUpdate(keyword = '') {
-        const payload = this._buildUiPayload(keyword);
-        this._postMessage({ command: 'updateData', ...payload });
+    _getAudioBase64() {
+        try {
+            const p = path.join(this._context.extensionPath, "assets", "q.mp3");
+            return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '';
+        } catch { return ''; }
     }
 
     _postMessage(msg) {
@@ -1292,776 +1230,330 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtmlForWebview(webview, nonce) {
+    _getHtml(stats, history, audioBase64) {
+        // ★ 核心逻辑：Webview 内部完全采用 createElement 渲染，不再依赖扩展端预生成的 HTML 字符串
+        // 此处仅生成基础框架
+        const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
-            `img-src ${webview.cspSource} data:`,
-            `media-src ${webview.cspSource} data:`,
-            `style-src 'nonce-${nonce}'`,
+            `img-src ${this._view.webview.cspSource} data:`,
+            `media-src ${this._view.webview.cspSource} data:`,
+            `style-src 'unsafe-inline' ${this._view.webview.cspSource}`,
             `script-src 'nonce-${nonce}'`,
-            `font-src ${webview.cspSource}`,
+            `font-src ${this._view.webview.cspSource}`,
             `base-uri 'none'`,
-            `form-action 'none'`,
-            `frame-ancestors 'none'`,
         ].join('; ');
 
         return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="${csp}">
-  <meta name="color-scheme" content="dark">
-  <title>剪贴板历史</title>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="${csp}">
+    <style>
+        :root {
+            --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
+            --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
+            --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
+            --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
+            --primary-color: var(--yellow); --background-color: var(--base3);
+            --card-bg: var(--base2); --text-primary: var(--base00); --border-color: var(--base1);
+        }
+        html { forced-color-adjust: none !important; }
+        body { margin: 0; padding: 0; font-family: sans-serif; background: var(--background-color); color: var(--text-primary); overflow: hidden; }
+        .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
+        .main-content { height: 100%; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
+        .main-content::-webkit-scrollbar { display: none; }
+        .section-title { font-size: 1.1em; font-weight: 700; margin: 20px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); }
 
-  <style nonce="${nonce}">
-    /* =========================================================================
-       Solarized Dark + 暗金 / 破高对比度主题（forced-colors）
-       ========================================================================= */
-    :root{
-      --base03:#002b36;
-      --base02:#073642;
-      --base01:#586e75;
-      --base00:#657b83;
-      --base0:#839496;
-      --base1:#93a1a1;
-      --base2:#eee8d5;
-      --base3:#fdf6e3;
+        .captain-grid { display: grid; gap: 8px; margin-bottom: 20px; }
+        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 0.9em; color: var(--text-primary); }
+        .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
+        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
-      --gold:#b58900;
-      --goldDeep:#a47e00;
-      --orange:#cb4b16;
-      --red:#dc322f;
-      --green:#859900;
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .stat-card { background: linear-gradient(135deg, var(--primary-color), var(--orange)); padding: 8px; border-radius: 4px; color: #fff; }
+        .stat-card.engine-card { grid-column: span 2; background: var(--base02); }
+        .stat-title { font-size: 0.75em; opacity: 0.8; }
+        .stat-value { font-size: 1em; font-weight: bold; }
 
-      --bg:var(--base03);
-      --panel:var(--base02);
-      --panel2:#0b3d4a;
-      --text:var(--base1);
-      --muted:var(--base01);
-      --border:rgba(147,161,161,0.18);
-      --shadow:rgba(0,0,0,0.35);
+        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
+        .history-list { max-height: 400px; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
+        .history-list::-webkit-scrollbar { display: none; }
+        .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
+        .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
+        .item-time { font-size: 0.7em; color: var(--base01); }
+        .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
+        .item-actions { margin-top: 5px; display: flex; gap: 5px; }
+        .action-mini-btn { padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); }
+        .action-mini-btn:hover { background: var(--primary-color); color: #fff; }
 
-      --btnBg:rgba(181,137,0,0.10);
-      --btnHover:rgba(181,137,0,0.18);
-      --dangerBg:rgba(220,50,47,0.14);
-      --dangerHover:rgba(220,50,47,0.22);
-    }
+        .music-player { background: var(--base02); color: var(--base3); padding: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
 
-    /* 破 Windows 高对比度主题：强制使用我们自定义颜色 */
-    html{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
-    body{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
-    *{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
-    @media (forced-colors: active){
-      html, body, *{ forced-color-adjust:none !important; -ms-high-contrast-adjust:none !important; }
-    }
-
-    *{ box-sizing:border-box; }
-    html,body{
-      margin:0; padding:0;
-      height:100%;
-      background:var(--bg) !important;
-      color:var(--text) !important;
-      font-family: var(--vscode-font-family, system-ui, -apple-system, Segoe UI, sans-serif);
-      font-size: 13px;
-      line-height: 1.45;
-      overflow:hidden;
-    }
-
-    .root{
-      display:flex;
-      flex-direction:column;
-      height:100vh;
-      padding:10px;
-      gap:10px;
-    }
-
-    .topbar{
-      display:flex;
-      gap:8px;
-      align-items:center;
-    }
-
-    .search{
-      flex:1;
-      display:flex;
-      gap:8px;
-      align-items:center;
-    }
-
-    .search input{
-      width:100%;
-      padding:8px 10px;
-      border-radius:6px;
-      border:1px solid var(--border) !important;
-      background:var(--panel) !important;
-      color:var(--text) !important;
-      outline:none;
-    }
-    .search input:focus{
-      border-color:rgba(181,137,0,0.65) !important;
-      box-shadow:0 0 0 2px rgba(181,137,0,0.18);
-    }
-    .search input::placeholder{
-      color:rgba(147,161,161,0.55) !important;
-    }
-
-    .btn{
-      padding:8px 10px;
-      border-radius:6px;
-      border:1px solid var(--border) !important;
-      background:var(--btnBg) !important;
-      color:var(--text) !important;
-      cursor:pointer;
-      user-select:none;
-      transition: transform .06s ease, background .12s ease, border-color .12s ease;
-      white-space:nowrap;
-    }
-    .btn:hover{
-      background:var(--btnHover) !important;
-      border-color:rgba(181,137,0,0.45) !important;
-    }
-    .btn:active{ transform: scale(0.98); }
-
-    .btn-danger{
-      background:var(--dangerBg) !important;
-      border-color:rgba(220,50,47,0.35) !important;
-    }
-    .btn-danger:hover{
-      background:var(--dangerHover) !important;
-      border-color:rgba(220,50,47,0.55) !important;
-    }
-
-    .panel{
-      background:linear-gradient(180deg, rgba(7,54,66,0.98), rgba(0,43,54,0.98)) !important;
-      border:1px solid var(--border) !important;
-      border-radius:10px;
-      box-shadow: 0 8px 24px var(--shadow);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      min-height:0;
-      flex:1;
-    }
-
-    .panel-header{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:10px 12px;
-      border-bottom:1px solid var(--border) !important;
-    }
-
-    .title{
-      font-weight:700;
-      letter-spacing:0.3px;
-      color:rgba(181,137,0,0.95) !important;
-      text-transform:uppercase;
-      font-size:12px;
-    }
-
-    .meta{
-      font-size:11px;
-      color:rgba(147,161,161,0.65) !important;
-      display:flex;
-      gap:10px;
-      align-items:center;
-    }
-
-    .list{
-      padding:10px;
-      overflow:auto;
-      min-height:0;
-    }
-
-    .item{
-      border:1px solid var(--border) !important;
-      border-radius:10px;
-      background:rgba(11,61,74,0.55) !important;
-      padding:10px;
-      margin-bottom:10px;
-      cursor:pointer;
-      transition: transform .12s ease, border-color .12s ease, background .12s ease;
-    }
-    .item:hover{
-      transform: translateX(2px);
-      border-color:rgba(181,137,0,0.42) !important;
-      background:rgba(11,61,74,0.70) !important;
-    }
-    .item.selected{
-      outline:2px solid rgba(181,137,0,0.55);
-    }
-
-    .row1{
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      align-items:center;
-      margin-bottom:8px;
-    }
-    .time{
-      font-size:11px;
-      color:rgba(147,161,161,0.75) !important;
-    }
-    .size{
-      font-size:11px;
-      color:rgba(147,161,161,0.55) !important;
-    }
-
-    .preview{
-      font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-      font-size:12px;
-      color:rgba(238,232,213,0.90) !important;
-      white-space:pre-wrap;
-      word-break:break-all;
-      max-height: 84px;
-      overflow:hidden;
-      line-height:1.5;
-    }
-
-    .actions{
-      display:flex;
-      gap:8px;
-      margin-top:10px;
-      flex-wrap:wrap;
-    }
-
-    .mini{
-      padding:6px 10px;
-      font-size:12px;
-      border-radius:8px;
-      border:1px solid var(--border) !important;
-      background:rgba(181,137,0,0.10) !important;
-      color:rgba(238,232,213,0.92) !important;
-      cursor:pointer;
-      user-select:none;
-    }
-    .mini:hover{ background:rgba(181,137,0,0.18) !important; }
-
-    .mini-danger{
-      background:rgba(220,50,47,0.12) !important;
-      border-color:rgba(220,50,47,0.35) !important;
-    }
-    .mini-danger:hover{
-      background:rgba(220,50,47,0.20) !important;
-      border-color:rgba(220,50,47,0.55) !important;
-    }
-
-    .empty{
-      padding:22px 10px;
-      text-align:center;
-      color:rgba(147,161,161,0.65) !important;
-    }
-
-    .footer{
-      display:flex;
-      justify-content:space-between;
-      gap:10px;
-      align-items:flex-start;
-      padding:10px 12px;
-      border-top:1px solid var(--border) !important;
-      background:rgba(0,43,54,0.85) !important;
-      font-size:11px;
-      color:rgba(147,161,161,0.70) !important;
-    }
-
-    .stats{
-      white-space:pre-wrap;
-      font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
-      color:rgba(238,232,213,0.85) !important;
-      line-height:1.35;
-    }
-
-    .hidden{ display:none !important; }
-  </style>
+        .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
+        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
+        .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
+        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
+    </style>
 </head>
-
 <body>
-  <div class="root">
-    <div class="topbar">
-      <div class="search">
-        <input id="searchInput" type="text" placeholder="🔍 搜索历史（Enter 不提交，只过滤）" />
-      </div>
-
-      <button class="btn" id="btnRefresh" type="button" title="刷新">🔄</button>
-      <button class="btn" id="btnImport" type="button" title="导入">📥</button>
-      <button class="btn" id="btnExport" type="button" title="导出">📤</button>
-      <button class="btn btn-danger" id="btnClear" type="button" title="清空">🗑️</button>
-    </div>
-
-    <div class="panel">
-      <div class="panel-header">
-        <div class="title">Clipboard History</div>
-        <div class="meta">
-          <span id="metaCount">0 items</span>
-          <span id="metaUptime">0h 0m</span>
-          <button class="btn" id="btnStats" type="button" title="统计">📊</button>
+    <div class="main-wrapper">
+        <div class="main-content" id="mainContent">
+            <div class="music-player">
+                <div style="font-size:0.9em">🎵 <span id="ms">Ready to Savor</span></div>
+                <div>
+                    <span style="cursor:pointer" id="btnPlayAudio">▶️</span>
+                    <span style="cursor:pointer" id="btnStopAudio">⏹️</span>
+                </div>
+            </div>
+            <div class="section-title">Captain</div>
+            <div class="captain-grid">
+                <div class="cmd-btn" data-cmd="qqq.q1">📋 Paste Everything (F2)</div>
+                <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
+                <div class="cmd-btn" data-cmd="qqq.downloadVideosFromUrl">🎥 Insert Videos</div>
+                <div class="cmd-btn" data-cmd="qqq.cleanUp">扫帚 Clean Up</div>
+            </div>
+            <div class="section-title">Passed by</div>
+            <div class="history-container" id="historyContainer">
+                <div class="history-list" id="historyList">
+                    <div style="text-align:center;padding:20px;opacity:0.5;">加载中...</div>
+                </div>
+                <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom: 20px;">
+                <button class="action-mini-btn" style="flex:1" id="btnRefresh">🔄 刷新</button>
+                <button class="action-mini-btn" style="flex:1" id="btnClear">🗑️ 清空</button>
+            </div>
+            <div class="section-title">Dial</div>
+            <div class="stats-grid" id="statsGrid"></div>
+            <div style="text-align:center; padding:20px; font-size:0.7em; opacity:0.5;">qqq 领航员</div>
         </div>
-      </div>
-
-      <div class="list" id="list">
-        <div class="empty">加载中...</div>
-      </div>
-
-      <div class="footer">
-        <div>Solarized + 暗金 · forced-color-adjust:none · CSP safe</div>
-        <div id="statsBox" class="stats hidden">-</div>
-      </div>
+        <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
     </div>
-  </div>
+    <script nonce="${nonce}">
+        (function() {
+            const vscode = acquireVsCodeApi();
+            const el = {
+                historyList: document.getElementById('historyList'),
+                statsGrid: document.getElementById('statsGrid'),
+                btnRefresh: document.getElementById('btnRefresh'),
+                btnClear: document.getElementById('btnClear'),
+                btnPlay: document.getElementById('btnPlayAudio'),
+                btnStop: document.getElementById('btnStopAudio'),
+                mainContent: document.getElementById('mainContent'),
+                innerThumb: document.getElementById('innerThumb'),
+                outerThumb: document.getElementById('outerThumb'),
+                innerScrollbar: document.getElementById('innerScrollbar'),
+                outerScrollbar: document.getElementById('outerScrollbar')
+            };
 
-  <script nonce="${nonce}">
-    (function(){
-      'use strict';
+            let selectedId = '';
+            let selectedIndex = -1;
+            let currentHistory = [];
 
-      let vscodeApi = null;
-      try { vscodeApi = acquireVsCodeApi(); } catch(e) {}
+            function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
 
-      function postMessage(msg){
-        if(vscodeApi) vscodeApi.postMessage(msg);
-      }
+            function renderStats(stats) {
+                if (!el.statsGrid || !stats) return;
+                el.statsGrid.innerHTML = '';
+                const frag = document.createDocumentFragment();
 
-      const el = {
-        searchInput: document.getElementById('searchInput'),
-        btnRefresh: document.getElementById('btnRefresh'),
-        btnImport: document.getElementById('btnImport'),
-        btnExport: document.getElementById('btnExport'),
-        btnClear: document.getElementById('btnClear'),
-        btnStats: document.getElementById('btnStats'),
-        list: document.getElementById('list'),
-        metaCount: document.getElementById('metaCount'),
-        metaUptime: document.getElementById('metaUptime'),
-        statsBox: document.getElementById('statsBox')
-      };
+                const createCard = (title, value, isEngine) => {
+                    const card = document.createElement('div');
+                    card.className = isEngine ? 'stat-card engine-card' : 'stat-card';
+                    const t = document.createElement('div'); t.className = 'stat-title'; t.textContent = title;
+                    const v = document.createElement('div'); v.className = 'stat-value'; v.textContent = value;
+                    card.appendChild(t); card.appendChild(v);
+                    return card;
+                };
 
-      let current = [];
-      let selectedIndex = -1;
-      let selectedId = '';
-      let showStats = false;
-      let lastKeyword = '';
-      let debounceTimer = null;
-
-      function formatSize(n){
-        const bytes = Number(n||0);
-        if(bytes < 1024) return bytes + 'B';
-        if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'KB';
-        return (bytes/1024/1024).toFixed(2) + 'MB';
-      }
-
-      function clearChildren(node){
-        while(node && node.firstChild) node.removeChild(node.firstChild);
-      }
-
-      function setSelectedById(id){
-        selectedId = id || '';
-        const items = el.list ? el.list.querySelectorAll('.item') : [];
-        selectedIndex = -1;
-        for(let i=0;i<items.length;i++){
-          const it = items[i];
-          if(it && it.dataset && it.dataset.id === selectedId){
-            selectedIndex = i;
-            it.classList.add('selected');
-          } else {
-            it.classList.remove('selected');
-          }
-        }
-      }
-
-      function ensureSelectedVisible(){
-        if(!el.list) return;
-        if(selectedIndex < 0) return;
-        const items = el.list.querySelectorAll('.item');
-        const item = items[selectedIndex];
-        if(!item) return;
-
-        const top = item.offsetTop;
-        const bottom = top + item.offsetHeight;
-        const viewTop = el.list.scrollTop;
-        const viewBottom = viewTop + el.list.clientHeight;
-
-        if(top < viewTop) el.list.scrollTop = top;
-        else if(bottom > viewBottom) el.list.scrollTop = bottom - el.list.clientHeight;
-      }
-
-      function renderList(history){
-        current = Array.isArray(history) ? history : [];
-
-        clearChildren(el.list);
-
-        if(current.length === 0){
-          const empty = document.createElement('div');
-          empty.className = 'empty';
-          empty.textContent = '暂无记录';
-          el.list.appendChild(empty);
-
-          selectedIndex = -1;
-          selectedId = '';
-          return;
-        }
-
-        const frag = document.createDocumentFragment();
-
-        for(let i=0;i<current.length;i++){
-          const it = current[i] || {};
-          const id = String(it.id || '');
-          const time = String(it.time || '');
-          const preview = String(it.preview || '');
-          const len = Number(it.contentLength || 0);
-
-          const item = document.createElement('div');
-          item.className = 'item';
-          item.dataset.id = id;
-
-          const row1 = document.createElement('div');
-          row1.className = 'row1';
-
-          const timeEl = document.createElement('div');
-          timeEl.className = 'time';
-          timeEl.textContent = time;
-
-          const sizeEl = document.createElement('div');
-          sizeEl.className = 'size';
-          sizeEl.textContent = formatSize(len);
-
-          row1.appendChild(timeEl);
-          row1.appendChild(sizeEl);
-
-          const prevEl = document.createElement('div');
-          prevEl.className = 'preview';
-          prevEl.textContent = preview;
-
-          const actions = document.createElement('div');
-          actions.className = 'actions';
-
-          const btnCopy = document.createElement('button');
-          btnCopy.type = 'button';
-          btnCopy.className = 'mini';
-          btnCopy.dataset.action = 'copy';
-          btnCopy.textContent = '📋 复制';
-
-          const btnPaste = document.createElement('button');
-          btnPaste.type = 'button';
-          btnPaste.className = 'mini';
-          btnPaste.dataset.action = 'paste';
-          btnPaste.textContent = '📌 粘贴';
-
-          const btnInsert = document.createElement('button');
-          btnInsert.type = 'button';
-          btnInsert.className = 'mini';
-          btnInsert.dataset.action = 'insert';
-          btnInsert.textContent = '📝 插入';
-
-          const btnDel = document.createElement('button');
-          btnDel.type = 'button';
-          btnDel.className = 'mini mini-danger';
-          btnDel.dataset.action = 'delete';
-          btnDel.textContent = '🗑️ 删除';
-
-          actions.appendChild(btnCopy);
-          actions.appendChild(btnPaste);
-          actions.appendChild(btnInsert);
-          actions.appendChild(btnDel);
-
-          item.appendChild(row1);
-          item.appendChild(prevEl);
-          item.appendChild(actions);
-
-          frag.appendChild(item);
-        }
-
-        el.list.appendChild(frag);
-
-        // 默认选中第一条
-        if(selectedId){
-          setSelectedById(selectedId);
-        }else{
-          const first = el.list.querySelector('.item');
-          if(first && first.dataset && first.dataset.id){
-            setSelectedById(first.dataset.id);
-          }
-        }
-      }
-
-      function renderMeta(stats, historyCount){
-        stats = stats || {};
-        const uptime = stats.uptime || {h:0,m:0};
-
-        if(el.metaCount) el.metaCount.textContent = String((historyCount||0) + ' items');
-        if(el.metaUptime) el.metaUptime.textContent = String((uptime.h||0) + 'h ' + (uptime.m||0) + 'm');
-
-        if(showStats && el.statsBox){
-          const perf = stats.perf || {};
-          const hitRate = stats.cacheHitRate || 0;
-
-          const line1 = 'count: ' + (historyCount||0);
-          const line2 = 'cacheHit: ' + hitRate.toFixed(1) + '%';
-          const line3 = 'avgSave: ' + (perf.avgSaveMs||0).toFixed(2) + 'ms  avgAdd: ' + (perf.avgAddMs||0).toFixed(2) + 'ms';
-          const line4 = 'avgLoad: ' + (perf.avgLoadMs||0).toFixed(2) + 'ms  quarantined: ' + (perf.quarantinedFiles||0);
-          el.statsBox.textContent = line1 + '\\n' + line2 + '\\n' + line3 + '\\n' + line4;
-        }
-      }
-
-      function toggleStats(){
-        showStats = !showStats;
-        if(el.statsBox){
-          if(showStats) el.statsBox.classList.remove('hidden');
-          else el.statsBox.classList.add('hidden');
-        }
-        postMessage({ command: 'stats' });
-      }
-
-      function requestRefresh(){
-        postMessage({ command: 'refresh' });
-      }
-
-      function requestSearch(kw){
-        postMessage({ command: 'search', keyword: kw || '' });
-      }
-
-      function requestCopy(id){
-        postMessage({ command: 'copy', id: id });
-      }
-      function requestPaste(id){
-        postMessage({ command: 'paste', id: id });
-      }
-      function requestInsert(id){
-        postMessage({ command: 'insert', id: id });
-      }
-      function requestDelete(id){
-        postMessage({ command: 'delete', id: id });
-      }
-
-      function bindUI(){
-        if(el.btnRefresh) el.btnRefresh.addEventListener('click', requestRefresh);
-        if(el.btnImport) el.btnImport.addEventListener('click', function(){ postMessage({ command: 'import' }); });
-        if(el.btnExport) el.btnExport.addEventListener('click', function(){ postMessage({ command: 'export' }); });
-        if(el.btnClear) el.btnClear.addEventListener('click', function(){ postMessage({ command: 'clear' }); });
-        if(el.btnStats) el.btnStats.addEventListener('click', toggleStats);
-
-        if(el.searchInput){
-          el.searchInput.addEventListener('input', function(){
-            const kw = String(el.searchInput.value || '').trim();
-            lastKeyword = kw;
-            if(debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(function(){
-              requestSearch(kw);
-            }, 250);
-          });
-        }
-
-        if(el.list){
-          el.list.addEventListener('click', function(e){
-            const btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
-            if(btn){
-              const action = btn.dataset.action || '';
-              const item = btn.closest('.item');
-              const id = item ? (item.dataset.id || '') : '';
-
-              if(action === 'copy') requestCopy(id);
-              if(action === 'paste') requestPaste(id);
-              if(action === 'insert') requestInsert(id);
-              if(action === 'delete') requestDelete(id);
-              return;
+                frag.appendChild(createCard('陪伴时间', stats.h + 'h ' + stats.m + 'm'));
+                frag.appendChild(createCard('缓存量', stats.cacheMB.toFixed(1) + 'MB'));
+                frag.appendChild(createCard('引擎', stats.engineInfo.name + ' (' + stats.engineInfo.details + ')', true));
+                el.statsGrid.appendChild(frag);
             }
 
-            const item = e.target && e.target.closest ? e.target.closest('.item') : null;
-            if(item && item.dataset && item.dataset.id){
-              setSelectedById(item.dataset.id);
-              requestCopy(item.dataset.id); // 点整行 = 复制
+            function renderList(history) {
+                currentHistory = history || [];
+                el.historyList.innerHTML = '';
+                if (currentHistory.length === 0) {
+                    el.historyList.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+                    selectedId = '';
+                    selectedIndex = -1;
+                    return;
+                }
+
+                const frag = document.createDocumentFragment();
+                currentHistory.forEach((item, idx) => {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    if (item.id === selectedId) div.classList.add('selected');
+                    div.dataset.id = item.id;
+                    div.dataset.index = idx;
+
+                    const time = document.createElement('div'); time.className = 'item-time'; time.textContent = item.time;
+                    const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
+
+                    const actions = document.createElement('div'); actions.className = 'item-actions';
+                    const btnCopy = document.createElement('button'); btnCopy.className = 'action-mini-btn'; btnCopy.dataset.action = 'copy'; btnCopy.textContent = '📋 复制';
+                    const btnPaste = document.createElement('button'); btnPaste.className = 'action-mini-btn'; btnPaste.dataset.action = 'paste'; btnPaste.textContent = '📌 粘贴';
+                    const btnInsert = document.createElement('button'); btnInsert.className = 'action-mini-btn'; btnInsert.dataset.action = 'insert'; btnInsert.textContent = '📝 插入';
+                    const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️ 删除';
+
+                    actions.appendChild(btnCopy); actions.appendChild(btnPaste); actions.appendChild(btnInsert); actions.appendChild(btnDel);
+                    div.appendChild(time); div.appendChild(prev); div.appendChild(actions);
+                    frag.appendChild(div);
+                });
+                el.historyList.appendChild(frag);
+
+                // ★ 100% 同步 qq 的防御细节：如无选中项，自动选中第一条
+                if (selectedId) {
+                    setSelectedById(selectedId);
+                } else {
+                    const first = el.historyList.querySelector('.history-item');
+                    if (first) setSelectedById(first.dataset.id);
+                }
+
+                setTimeout(updateAllScrollbars, 50);
             }
-          });
-        }
 
-        // 键盘：上下选择 / Enter 复制 / Ctrl+Enter 粘贴 / Delete 删除 / Ctrl+F 搜索
-        document.addEventListener('keydown', function(e){
-          const active = document.activeElement;
-          const inInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
-
-          if(e.ctrlKey && (e.key === 'f' || e.key === 'F')){
-            if(el.searchInput){
-              el.searchInput.focus();
-              el.searchInput.select();
-              e.preventDefault();
+            function setSelectedById(id) {
+                selectedId = id;
+                const items = el.historyList.querySelectorAll('.history-item');
+                selectedIndex = -1;
+                items.forEach((it, i) => {
+                    if (it.dataset.id === selectedId) {
+                        it.classList.add('selected');
+                        selectedIndex = i;
+                    } else {
+                        it.classList.remove('selected');
+                    }
+                });
             }
-            return;
-          }
 
-          if(inInput) return;
-          if(!el.list) return;
-
-          const items = el.list.querySelectorAll('.item');
-          if(!items || items.length === 0) return;
-
-          if(e.key === 'ArrowDown'){
-            selectedIndex = (selectedIndex < 0) ? 0 : Math.min(items.length - 1, selectedIndex + 1);
-            const id = items[selectedIndex].dataset.id;
-            setSelectedById(id);
-            ensureSelectedVisible();
-            e.preventDefault();
-            return;
-          }
-
-          if(e.key === 'ArrowUp'){
-            selectedIndex = (selectedIndex < 0) ? 0 : Math.max(0, selectedIndex - 1);
-            const id = items[selectedIndex].dataset.id;
-            setSelectedById(id);
-            ensureSelectedVisible();
-            e.preventDefault();
-            return;
-          }
-
-          if(e.key === 'Enter'){
-            if(selectedIndex >= 0 && items[selectedIndex]){
-              const id = items[selectedIndex].dataset.id;
-              if(e.ctrlKey) requestPaste(id);
-              else requestCopy(id);
-              e.preventDefault();
+            function ensureSelectedVisible() {
+                if (selectedIndex < 0) return;
+                const item = el.historyList.querySelectorAll('.history-item')[selectedIndex];
+                if (!item) return;
+                const top = item.offsetTop, bottom = top + item.offsetHeight;
+                const vTop = el.historyList.scrollTop, vBottom = vTop + el.historyList.clientHeight;
+                if (top < vTop) el.historyList.scrollTop = top;
+                else if (bottom > vBottom) el.historyList.scrollTop = bottom - el.historyList.clientHeight;
             }
-            return;
-          }
 
-          if(e.key === 'Delete'){
-            if(selectedIndex >= 0 && items[selectedIndex]){
-              requestDelete(items[selectedIndex].dataset.id);
-              e.preventDefault();
+            // 事件委托
+            el.historyList.addEventListener('click', e => {
+                const btn = e.target.closest('button[data-action]');
+                const item = e.target.closest('.history-item');
+                if (btn) {
+                    const action = btn.dataset.action;
+                    const id = item.dataset.id;
+                    if (action === 'copy') post('copyToClipboard', { itemId: id });
+                    if (action === 'paste') post('pasteToEditor', { itemId: id });
+                    if (action === 'insert') post('insertToEditor', { itemId: id });
+                    if (action === 'delete') post('deleteHistoryItem', { itemId: id });
+                    e.stopPropagation();
+                    return;
+                }
+                if (item) {
+                    setSelectedById(item.dataset.id);
+                    post('copyToClipboard', { itemId: item.dataset.id });
+                }
+            });
+
+            document.addEventListener('click', e => {
+                const cmdBtn = e.target.closest('.cmd-btn');
+                if (cmdBtn) post('executeCommand', { cmd: cmdBtn.dataset.cmd });
+            });
+
+            el.btnRefresh.onclick = () => post('refresh');
+            el.btnClear.onclick = () => post('clearAllHistory');
+            el.btnPlay.onclick = () => post('executeCommand', { cmd: 'qqq.savorMoments' });
+            el.btnStop.onclick = stopAudio;
+
+            window.addEventListener('message', e => {
+                const m = e.data;
+                if (m.command === 'updateData') {
+                    renderStats(m.stats);
+                    renderList(m.history);
+                } else if (m.command === 'playAudio') {
+                    playAudio(m.base64);
+                }
+            });
+
+            // 键盘导航 (100% 同步 qq 键盘核心)
+            document.addEventListener('keydown', e => {
+                if (currentHistory.length === 0) return;
+                if (e.key === 'ArrowDown') {
+                    selectedIndex = (selectedIndex < 0) ? 0 : Math.min(currentHistory.length - 1, selectedIndex + 1);
+                    setSelectedById(currentHistory[selectedIndex].id);
+                    ensureSelectedVisible();
+                    e.preventDefault();
+                } else if (e.key === 'ArrowUp') {
+                    selectedIndex = (selectedIndex < 0) ? 0 : Math.max(0, selectedIndex - 1);
+                    setSelectedById(currentHistory[selectedIndex].id);
+                    ensureSelectedVisible();
+                    e.preventDefault();
+                } else if (e.key === 'Enter' && selectedIndex >= 0) {
+                    const id = currentHistory[selectedIndex].id;
+                    if (e.ctrlKey) post('pasteToEditor', { itemId: id });
+                    else post('copyToClipboard', { itemId: id });
+                    e.preventDefault();
+                } else if (e.key === 'Delete' && selectedIndex >= 0) {
+                    post('deleteHistoryItem', { itemId: currentHistory[selectedIndex].id });
+                    e.preventDefault();
+                }
+            });
+
+            // 心跳
+            setInterval(() => post('heartbeat'), 10000);
+
+            // 音乐播放
+            let currentAudio = null;
+            function stopAudio() { if(currentAudio) { currentAudio.pause(); currentAudio = null; document.getElementById('ms').innerText = 'Stopped'; } }
+            function playAudio(base64) {
+                stopAudio();
+                const audio = new Audio('data:audio/mp3;base64,' + base64);
+                currentAudio = audio; document.getElementById('ms').innerText = 'Savoring...';
+                audio.play();
             }
-          }
-        });
-      }
 
-      // 接收扩展端数据
-      window.addEventListener('message', function(ev){
-        const msg = ev.data;
-        if(!msg || typeof msg !== 'object') return;
-
-        if(msg.command === 'updateData'){
-          // 同步 keyword（仅当 input 未聚焦，避免打断输入）
-          if(el.searchInput && typeof msg.keyword === 'string'){
-            if(document.activeElement !== el.searchInput){
-              el.searchInput.value = msg.keyword;
+            // 滚动条逻辑
+            function setupScrollbar(container, scrollbar, thumb) {
+                function update() {
+                    const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+                    if (sh > ch) {
+                        scrollbar.style.display = 'block';
+                        const th = Math.max(20, (ch / sh) * ch);
+                        thumb.style.height = th + 'px';
+                        thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
+                    } else { scrollbar.style.display = 'none'; }
+                }
+                container.addEventListener('scroll', update);
+                let isDragging = false, startY, startST;
+                thumb.onmousedown = e => {
+                    isDragging = true; startY = e.clientY; startST = container.scrollTop;
+                    document.onmousemove = e => {
+                        if (!isDragging) return;
+                        const dy = e.clientY - startY;
+                        const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
+                        container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
+                    };
+                    document.onmouseup = () => { isDragging = false; document.onmousemove = null; };
+                    e.preventDefault();
+                };
+                return update;
             }
-          }
+            const upO = setupScrollbar(el.mainContent, el.outerScrollbar, el.outerThumb);
+            const upI = setupScrollbar(el.historyList, el.innerScrollbar, el.innerThumb);
+            function updateAllScrollbars() { upO(); upI(); }
+            window.onresize = updateAllScrollbars;
 
-          renderList(msg.history || []);
-          renderMeta(msg.stats || {}, (msg.history && msg.history.length) ? msg.history.length : 0);
-
-          // 如开启 stats，刷新一次快照面板
-          if(showStats) postMessage({ command: 'stats' });
-        }
-
-        if(msg.command === 'statsSnapshot'){
-          if(!showStats) return;
-          const stats = msg.stats || {};
-          const historyCount = (typeof stats.historyCount === 'number') ? stats.historyCount : (current ? current.length : 0);
-
-          // 这里复用 renderMeta 的 stats 结构要求
-          renderMeta({
-            uptime: stats.uptime,
-            cacheHitRate: stats.cache ? stats.cache.hitRate : 0,
-            perf: stats.perf
-          }, historyCount);
-        }
-      });
-
-      // 心跳
-      setInterval(function(){
-        postMessage({ command: 'heartbeat' });
-      }, 10000);
-
-      // init
-      bindUI();
-      postMessage({ command: 'ready' });
-    })();
-  </script>
+            post('refresh');
+        })();
+    </script>
 </body>
 </html>`;
-    }
-}
-
-// ============================================================================
-// QuickPick 命令
-// ============================================================================
-async function showHistoryQuickPick(historyManager) {
-    const history = historyManager.getHistory(50);
-
-    if (history.length === 0) {
-        vscode.window.showInformationMessage('剪贴板历史为空');
-        return;
-    }
-
-    const items = history.map((item) => ({
-        label: item.preview || makePreview(item.content),
-        description: formatTime(item.timestamp),
-        detail: `${item.contentLength || (item.content ? item.content.length : 0)} 字符`,
-        id: item.id,
-        content: item.content,
-    }));
-
-    const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: '选择要粘贴的历史记录',
-        matchOnDescription: true,
-        matchOnDetail: true,
-    });
-
-    if (selected) {
-        await historyManager.copyToClipboard(selected.content);
-        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-    }
-}
-
-// ============================================================================
-// 搜索历史命令（QuickPick）
-// ============================================================================
-async function searchHistoryCommand(historyManager) {
-    const keyword = await vscode.window.showInputBox({
-        placeHolder: '输入搜索关键词',
-        prompt: '搜索剪贴板历史',
-    });
-
-    if (!keyword) return;
-
-    const results = historyManager.searchHistory(keyword, 30);
-
-    if (results.length === 0) {
-        vscode.window.showInformationMessage(`未找到包含 "${keyword}" 的记录`);
-        return;
-    }
-
-    const items = results.map((item) => ({
-        label: item.preview || makePreview(item.content),
-        description: formatTime(item.timestamp),
-        detail: `${item.contentLength || (item.content ? item.content.length : 0)} 字符`,
-        id: item.id,
-        content: item.content,
-    }));
-
-    const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `找到 ${results.length} 条结果`,
-        matchOnDescription: true,
-        matchOnDetail: true,
-    });
-
-    if (selected) {
-        await historyManager.copyToClipboard(selected.content);
-        await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-    }
-}
-
-// ============================================================================
-// 导出 / 导入 / 清空 / 统计 命令
-// ============================================================================
-async function exportHistoryCommand(historyManager) {
-    const ok = await historyManager.exportToJsonFile();
-    if (ok) vscode.window.showInformationMessage('剪贴板历史导出成功');
-    else vscode.window.showErrorMessage('导出失败');
-}
-
-async function importHistoryCommand(historyManager) {
-    const result = await historyManager.importFromJsonFile();
-    if (result && result.success) {
-        vscode.window.showInformationMessage(`导入成功：${result.imported} 条`);
-    } else {
-        vscode.window.showErrorMessage('导入失败：' + (result?.error || '未知错误'));
     }
 }
 
@@ -2085,7 +1577,6 @@ async function qsc(a, historyManager) {
                 const files = fs.readdirSync(cacheDir);
                 for (const file of files) {
                     const filePath = path.join(cacheDir, file);
-                    // ★ 终极最优解：为每一项文件操作加 try-catch，防止因单个文件占用导致清理中断
                     try {
                         if (fs.statSync(filePath).isFile()) {
                             fs.unlinkSync(filePath);
@@ -2099,11 +1590,21 @@ async function qsc(a, historyManager) {
         } catch (e) { console.error('[QSC] 清理 cache 失败:', e.message); }
     };
 
-    // 2. 清空剪切板历史
     const clearHistory = async () => {
         if (historyManager) {
             await historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
-            console.log('[QSC] 剪切板历史已清空');
+            // 强力手术：物理删除所有可能的文件格式，根除 BAD_DECRYPT
+            try {
+                const root = context?.globalStorageUri?.fsPath;
+                if (root) {
+                    const targets = ['q_history.msgpack', 'q_history.meta', 'history.bin.gz', 'history.json.gz'];
+                    targets.forEach(t => {
+                        const p = path.join(root, t);
+                        if (fs.existsSync(p)) fs.unlinkSync(p);
+                    });
+                }
+            } catch { }
+            console.log('[QSC] 剪贴板历史及物理文件已强力清空');
         }
     };
 
@@ -2111,11 +1612,15 @@ async function qsc(a, historyManager) {
     const clearGlobalState = async () => {
         if (!context?.globalState) return;
         try {
-            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history'];
+            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history', 'qqq_history_manager_state'];
             for (const key of keys) {
                 await context.globalState.update(key, undefined);
             }
-            console.log('[QSC] globalState 已清空');
+            // 同时清理物理存储文件以解决 BAD_DECRYPT
+            const storagePath = path.join(context.globalStorageUri.fsPath, 'q_history.msgpack');
+            const metaPath = path.join(context.globalStorageUri.fsPath, 'q_history.meta');
+            [storagePath, metaPath].forEach(p => { if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch { } });
+            console.log('[QSC] globalState 及物理数据已清空');
         } catch (e) { console.error('[QSC] 清理 globalState 失败:', e.message); }
     };
 
@@ -2236,6 +1741,16 @@ class StatusBarManager {
 function activate(context) {
     console.log('[Q4] QQQ Clipboard History (fusion-final) activating...');
 
+    // ★ 终极加固：启动时强制清理 globalState 中的大键值，解决日志中的 2MB 报警
+    const obsoleteKeys = ['qqq_clipboard_history', 'qqq_history_manager_state', 'qqq.transactions.backup'];
+    obsoleteKeys.forEach(key => {
+        if (context.globalState.get(key) !== undefined) {
+            context.globalState.update(key, undefined).then(() => {
+                console.log(`[Q4] 已成功从 globalState 卸载旧数据键: ${key}`);
+            }, () => {});
+        }
+    });
+
     let sidebarProvider = null;
     let statusBarManager = null;
 
@@ -2251,7 +1766,8 @@ function activate(context) {
 
     historyManager.startWatching();
 
-    sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager);
+    // 修复实例化：传入 context, historyManager 和 global 模块
+    sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager, require('./global'));
 
     const sidebarDisposable = vscode.window.registerWebviewViewProvider(
         'qqq.Viewq',
