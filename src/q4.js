@@ -905,23 +905,33 @@ class ClipboardHistorySidebarProvider {
 
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
 
-        /* 极致暗金斜向脉冲 (Diagonal Gold Pulse) */
+        /* 极致炫酷：三连金刃风暴 (Triple-Blade Gold Storm) */
         .history-container.storm::after {
             content: '';
             position: absolute;
-            top: -50%; left: -50%; right: -50%; bottom: -50%;
+            top: -100%; left: -100%; right: -100%; bottom: -100%;
             pointer-events: none;
             z-index: 100;
-            background: linear-gradient(45deg, transparent, var(--yellow), transparent);
-            background-size: 200% 200%;
+            background: linear-gradient(45deg,
+                transparent 40%,
+                rgba(181, 137, 0, 0.3) 42%,
+                rgba(255, 255, 255, 0.9) 45%,
+                rgba(181, 137, 0, 0.3) 48%,
+                transparent 50%,
+                rgba(181, 137, 0, 0.2) 52%,
+                rgba(255, 255, 255, 0.6) 55%,
+                rgba(181, 137, 0, 0.2) 58%,
+                transparent 60%
+            );
+            filter: blur(1px) contrast(1.2);
             opacity: 0;
-            animation: diagonal-burst 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+            animation: triple-blade 1.1s cubic-bezier(0.19, 1, 0.22, 1) forwards;
         }
-        @keyframes diagonal-burst {
-            0% { transform: translate(-35%, 35%); opacity: 0; }
-            30% { opacity: 0.8; }
-            70% { opacity: 0.8; }
-            100% { transform: translate(35%, -35%); opacity: 0; }
+        @keyframes triple-blade {
+            0% { transform: translate(-50%, 50%) scale(0.7); opacity: 0; }
+            15% { opacity: 1; transform: translate(-35%, 35%) scale(1); }
+            30% { transform: translate(-33%, 33%) rotate(1deg); } /* 高能震颤 */
+            100% { transform: translate(50%, -50%) scale(1.3); opacity: 0; }
         }
 
         .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
