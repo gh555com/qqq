@@ -183,85 +183,47 @@ function formatTime(timestamp) {
  */
 
 // ============================================================================
-// ClipboardHistoryManager
+// ClipboardHistoryManager - O(1) 双向链表 + 物理隔离版本
 // ============================================================================
 class ClipboardHistoryManager {
-    /**
-     * @param {vscode.ExtensionContext} context
-     * @param {{ onChange?: Function }=} opts
-     */
     constructor(context, opts = {}) {
         this.context = context;
-
-        /** @type {HistoryNode|null} */
         this._head = null;
-        /** @type {HistoryNode|null} */
         this._tail = null;
         this._size = 0;
-
         this._idMap = new Map();   // id -> node
         this._hashMap = new Map(); // hash -> node
 
-        // 快照缓存
         this._version = 0;
         this._snapshotVersion = -1;
-        /** @type {Array<any>|null} */
         this._snapshotAll = null;
 
-        // UI/Search 缓存（轻量）
         this._cache = {
             version: -1,
-            uiLimit: -1,
             uiList: null,
             uiBytes: 0,
-            lastSearchKey: '',
-            searchList: null,
-            searchBytes: 0,
-            hit: 0,
-            miss: 0,
-            maxBytes: 25 * 1024 * 1024, // 25MB
+            maxBytes: 25 * 1024 * 1024,
         };
 
-        // 存储
         this._storageDir = null;
         this._fileBinGz = null;
-        this._fileJsonGz = null;
-
-        // 序列化策略：优先 msgpack（若存在）
         this._preferMsgpack = !!getMsgpack();
 
-        // 保存：串行 + 节流/批处理
         this._saveChain = Promise.resolve();
         this._saveTimer = null;
-        this._pendingChanges = 0;
         this._dirty = false;
 
-        // 监听剪贴板
         this._clipboardTimer = null;
         this._isWatching = false;
         this._watcherBusy = false;
         this._lastClipboardContent = '';
 
-        // 自动清理
-        this._cleanupTimer = null;
-
-        // 回调
         this._onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 
-        // 性能统计
         this.perfStats = {
-            saveTimeMs: 0,
-            loadTimeMs: 0,
-            addTimeMs: 0,
-            removeTimeMs: 0,
-            clearTimeMs: 0,
-            operations: 0,
-            lastSaveBytes: 0,
-            lastLoadBytes: 0,
-            quarantinedFiles: 0,
+            saveTimeMs: 0, loadTimeMs: 0, addTimeMs: 0,
+            operations: 0, quarantinedFiles: 0,
         };
-
-        // 会话开始时间（不用任何 state，纯内存）
         this.sessionStartedAt = Date.now();
 
         this._initStorage();
@@ -269,81 +231,49 @@ class ClipboardHistoryManager {
         this._startAutoCleanup();
     }
 
+    _startAutoCleanup() {
+        if (this._cleanupTimer) clearInterval(this._cleanupTimer);
+        this._cleanupTimer = setInterval(() => {
+            if (global.isDeactivated?.()) return;
+            const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
+            let changed = false;
+            while (this._tail && this._tail.timestamp < cutoff) {
+                this._removeNode(this._tail);
+                changed = true;
+            }
+            if (changed) {
+                this._touch();
+                this.requestSave();
+            }
+        }, CONSTANTS.AUTO_CLEANUP_INTERVAL_MS);
+    }
+
     _initStorage() {
         try {
             const root = this.context.globalStorageUri?.fsPath;
-            if (!root) throw new Error('globalStorageUri 不可用');
-
+            if (!root) return;
             this._storageDir = path.join(root, CONSTANTS.STORAGE_DIR);
-            fs.mkdirSync(this._storageDir, { recursive: true });
-
+            if (!fs.existsSync(this._storageDir)) fs.mkdirSync(this._storageDir, { recursive: true });
             this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
-            this._fileJsonGz = path.join(this._storageDir, CONSTANTS.FILE_JSON_GZ);
-        } catch {
-            this._storageDir = null;
-            this._fileBinGz = null;
-            this._fileJsonGz = null;
-        }
+        } catch { }
     }
 
     async _initHistory() {
         const t0 = performance.now();
         try {
             await this._loadHistory();
-            this._cleanupExpiredItems();
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
             this.perfStats.operations++;
         }
     }
 
-    _startAutoCleanup() {
-        if (this._cleanupTimer) clearInterval(this._cleanupTimer);
-        this._cleanupTimer = setInterval(() => {
-            try {
-                // ★ 终极最优解：红灯预检
-                if (global.isDeactivated?.()) return;
-                const changed = this._cleanupExpiredItems();
-                if (changed) this.requestSave();
-            } catch {
-                // ignore
-            }
-        }, CONSTANTS.AUTO_CLEANUP_INTERVAL_MS);
-    }
-
-    _cleanupExpiredItems() {
-        const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
-        let changed = false;
-
-        while (this._tail && this._tail.timestamp < cutoff) {
-            this._removeNode(this._tail);
-            changed = true;
-        }
-
-        if (changed) this._touch();
-        return changed;
-    }
-
     _touch() {
         this._version++;
         this._snapshotVersion = -1;
         this._snapshotAll = null;
-
         this._cache.version = -1;
         this._cache.uiList = null;
-        this._cache.searchList = null;
-        this._cache.uiBytes = 0;
-        this._cache.searchBytes = 0;
-    }
-
-    _resetInMemory() {
-        this._head = null;
-        this._tail = null;
-        this._size = 0;
-        this._idMap.clear();
-        this._hashMap.clear();
-        this._lastClipboardContent = '';
-        this._touch();
     }
 
     _insertHead(node) {
@@ -357,17 +287,12 @@ class ClipboardHistoryManager {
 
     _removeNode(node) {
         if (!node) return;
-
         const { prev, next } = node;
         if (prev) prev.next = next;
         if (next) next.prev = prev;
-
         if (this._head === node) this._head = next;
         if (this._tail === node) this._tail = prev;
-
-        node.prev = null;
-        node.next = null;
-
+        node.prev = null; node.next = null;
         this._size--;
         this._idMap.delete(node.id);
         this._hashMap.delete(node.hash);
@@ -375,17 +300,14 @@ class ClipboardHistoryManager {
 
     _moveToHead(node) {
         if (!node || this._head === node) return;
-
         const { prev, next } = node;
         if (prev) prev.next = next;
         if (next) next.prev = prev;
         if (this._tail === node) this._tail = prev;
-
         node.prev = null;
         node.next = this._head;
         if (this._head) this._head.prev = node;
         this._head = node;
-        if (!this._tail) this._tail = node;
     }
 
     _popTail() {
@@ -397,237 +319,171 @@ class ClipboardHistoryManager {
 
     _toArrayAll() {
         if (this._snapshotAll && this._snapshotVersion === this._version) return this._snapshotAll;
-
         const arr = [];
         let cur = this._head;
         while (cur) {
-            arr.push({
-                id: cur.id,
-                content: cur.content,
-                timestamp: cur.timestamp,
-                type: cur.type,
-                preview: cur.preview,
-                contentLength: cur.contentLength,
-                hash: cur.hash,
-            });
+            arr.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, hash: cur.hash });
             cur = cur.next;
         }
-
         this._snapshotAll = arr;
         this._snapshotVersion = this._version;
         return arr;
     }
 
     getHistory(limit = CONSTANTS.UI_HISTORY_LIMIT) {
-        const lim = clampInt(limit, 1, CONSTANTS.MAX_HISTORY_ITEMS);
-
-        if (this._cache.uiList && this._cache.version === this._version && this._cache.uiLimit === lim) {
-            this._cache.hit++;
-            return this._cache.uiList;
-        }
-        this._cache.miss++;
-
+        if (this._cache.uiList && this._cache.version === this._version) return this._cache.uiList;
         const out = [];
         let cur = this._head;
-        while (cur && out.length < lim) {
-            out.push({
-                id: cur.id,
-                content: cur.content,
-                timestamp: cur.timestamp,
-                type: cur.type,
-                preview: cur.preview,
-                contentLength: cur.contentLength,
-                hash: cur.hash,
-            });
+        while (cur && out.length < limit) {
+            out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview });
             cur = cur.next;
         }
-
-        const bytes = estimateBytes(out);
-        if (bytes <= this._cache.maxBytes) {
-            this._cache.uiList = out;
-            this._cache.uiLimit = lim;
-            this._cache.version = this._version;
-            this._cache.uiBytes = bytes;
-        }
+        this._cache.uiList = out;
+        this._cache.version = this._version;
         return out;
     }
 
-    searchHistory(keyword, limit = CONSTANTS.UI_HISTORY_LIMIT) {
-        const kw = String(keyword || '').trim();
-        const lim = clampInt(limit, 1, CONSTANTS.MAX_HISTORY_ITEMS);
-        if (!kw) return this.getHistory(lim);
-
-        const cacheKey = `${this._version}|${lim}|${kw.toLowerCase()}`;
-        if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) {
-            this._cache.hit++;
-            return this._cache.searchList;
-        }
-        this._cache.miss++;
-
-        const needle = kw.toLowerCase();
-        const out = [];
-        let cur = this._head;
-        while (cur && out.length < lim) {
-            const hay = (cur.content || '').toLowerCase();
-            if (hay.includes(needle)) {
-                out.push({
-                    id: cur.id,
-                    content: cur.content,
-                    timestamp: cur.timestamp,
-                    type: cur.type,
-                    preview: cur.preview,
-                    contentLength: cur.contentLength,
-                    hash: cur.hash,
-                });
-            }
-            cur = cur.next;
-        }
-
-        const bytes = estimateBytes(out);
-        if (bytes <= this._cache.maxBytes) {
-            this._cache.searchList = out;
-            this._cache.searchBytes = bytes;
-            this._cache.lastSearchKey = cacheKey;
-        }
-        return out;
-    }
-
-    getItemById(id) {
-        return this._idMap.get(String(id || ''));
-    }
+    getItemById(id) { return this._idMap.get(String(id || '')); }
 
     async addToHistory(content) {
         const t0 = performance.now();
         try {
-            if (typeof content !== 'string') return;
-            let text = content;
-            if (!text || REGEX.WHITESPACE_ONLY.test(text)) return;
-
-            if (text.length > CONSTANTS.MAX_CONTENT_LENGTH) {
-                text = text.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
-            }
-
-            // watcher 同轮重复跳过
+            if (typeof content !== 'string' || !content.trim()) return;
+            const text = content.length > CONSTANTS.MAX_CONTENT_LENGTH ? content.slice(0, CONSTANTS.MAX_CONTENT_LENGTH) : content;
             if (text === this._lastClipboardContent) return;
 
             const hash = md5Hex(text);
             const existed = this._hashMap.get(hash);
-
             if (existed) {
                 existed.timestamp = Date.now();
                 existed.content = text;
-                existed.contentLength = text.length;
                 existed.preview = makePreview(text);
                 this._moveToHead(existed);
             } else {
-                /** @type {HistoryNode} */
-                const node = {
-                    id: randomId(),
-                    content: text,
-                    timestamp: Date.now(),
-                    type: 'text',
-                    preview: makePreview(text),
-                    contentLength: text.length,
-                    hash,
-                    prev: null,
-                    next: null,
-                };
-
+                const node = { id: randomId(), content: text, timestamp: Date.now(), preview: makePreview(text), hash, prev: null, next: null };
                 this._insertHead(node);
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
-
-                if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
-                    this._popTail();
-                }
+                if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
             }
-
             this._lastClipboardContent = text;
             this._touch();
             this._notifyChange();
-
             this.requestSave();
         } finally {
             this.perfStats.addTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
         }
     }
 
     async removeItem(id) {
-        const t0 = performance.now();
-        try {
-            const node = this._idMap.get(String(id || ''));
-            if (!node) return false;
+        const node = this._idMap.get(String(id || ''));
+        if (!node) return false;
+        this._removeNode(node);
+        this._touch();
+        this._notifyChange();
+        this.requestSave();
+        return true;
+    }
 
-            this._removeNode(node);
-            this._touch();
-            this._notifyChange();
-            this.requestSave();
-            return true;
+    async clearHistory({ deleteFiles = true } = {}) {
+        this._head = null; this._tail = null; this._size = 0;
+        this._idMap.clear(); this._hashMap.clear();
+        this._touch();
+        this._notifyChange();
+        if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
+            try { fs.unlinkSync(this._fileBinGz); } catch { }
+        }
+        this._dirty = true;
+        await this.forceSave();
+    }
+
+    requestSave() {
+        this._dirty = true;
+        if (this._saveTimer) clearTimeout(this._saveTimer);
+        this._saveTimer = setTimeout(() => this.forceSave(), CONSTANTS.SAVE_THROTTLE_MS);
+    }
+
+    async forceSave() {
+        if (!this._fileBinGz) return;
+        this._saveChain = this._saveChain.then(() => this._doSaveOnce()).catch(() => this._doSaveOnce());
+        return this._saveChain;
+    }
+
+    async _doSaveOnce() {
+        if (!this._dirty) return;
+        this._dirty = false;
+        try {
+            const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
+            const mp = getMsgpack();
+            const rawBuf = (this._preferMsgpack && mp) ? mp.encode(payload) : Buffer.from(JSON.stringify(payload), 'utf8');
+            const outBuf = await gzipAsync(rawBuf);
+            await this._writeFileAtomic(this._fileBinGz, outBuf);
+        } catch { this._dirty = true; }
+    }
+
+    async _writeFileAtomic(targetPath, buf) {
+        const tmpPath = targetPath + '.' + randomId() + '.tmp';
+        await fs.promises.writeFile(tmpPath, buf);
+        try {
+            await fs.promises.rename(tmpPath, targetPath);
         } catch {
-            return false;
-        } finally {
-            this.perfStats.removeTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
+            if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+            await fs.promises.rename(tmpPath, targetPath);
         }
     }
 
-    async clearHistory({ deleteFiles = true, writeEmptyFile = true } = {}) {
-        const t0 = performance.now();
+    async _loadHistory() {
+        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
         try {
-            this._resetInMemory();
-            this._notifyChange();
+            const dataBuf = await fs.promises.readFile(this._fileBinGz);
+            let raw = await gunzipAsync(dataBuf);
+            const mp = getMsgpack();
+            let parsed = mp ? mp.decode(raw) : JSON.parse(raw.toString('utf8'));
+            if (!parsed || !Array.isArray(parsed.history)) throw new Error('Invalid format');
 
-            if (deleteFiles) {
-                const targets = [this._fileBinGz, this._fileJsonGz].filter(Boolean);
-                for (const fp of targets) {
-                    try {
-                        if (fp && fs.existsSync(fp)) await fs.promises.unlink(fp);
-                    } catch {
-                        // ignore
-                    }
+            parsed.history.reverse().forEach(it => {
+                if (!it.content) return;
+                const node = { ...it, id: it.id || randomId(), hash: it.hash || md5Hex(it.content), prev: null, next: null };
+                if (!this._hashMap.has(node.hash)) {
+                    this._insertHead(node);
+                    this._idMap.set(node.id, node);
+                    this._hashMap.set(node.hash, node);
                 }
-            }
+            });
+            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
+            this._touch();
+            this._notifyChange();
+        } catch (e) {
+            console.error('[Q4] 加载失败，执行隔离:', e.message);
+            await this._quarantineCorruptFile(this._fileBinGz);
+        }
+    }
 
-            if (writeEmptyFile) {
-                this._dirty = true;
-                await this.forceSave();
-            }
-
-            return true;
-        } finally {
-            this.perfStats.clearTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
+    async _quarantineCorruptFile(filePath) {
+        try {
+            const corrupted = filePath + '.corrupt-' + Date.now();
+            if (fs.existsSync(filePath)) fs.renameSync(filePath, corrupted);
+            this.perfStats.quarantinedFiles++;
+        } catch {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         }
     }
 
     startWatching() {
         if (this._isWatching) return;
         this._isWatching = true;
-        this._lastClipboardContent = '';
-
         this._clipboardTimer = setInterval(async () => {
-            // ★ 终极最优解：红灯预检，防止插件停用后继续执行
             if (global.isDeactivated?.() || this._watcherBusy) return;
             this._watcherBusy = true;
             try {
                 const cur = await vscode.env.clipboard.readText();
-                if (cur && cur !== this._lastClipboardContent) {
-                    await this.addToHistory(cur);
-                }
-            } catch {
-                // ignore
-            } finally {
-                this._watcherBusy = false;
-            }
+                if (cur && cur !== this._lastClipboardContent) await this.addToHistory(cur);
+            } catch { } finally { this._watcherBusy = false; }
         }, CONSTANTS.CLIPBOARD_POLL_MS);
     }
 
     stopWatching() {
-        if (this._clipboardTimer) {
-            clearInterval(this._clipboardTimer);
-            this._clipboardTimer = null;
-        }
+        if (this._clipboardTimer) clearInterval(this._clipboardTimer);
         this._isWatching = false;
     }
 
@@ -635,408 +491,39 @@ class ClipboardHistoryManager {
         try {
             const s = String(content ?? '');
             await vscode.env.clipboard.writeText(s);
-            this._lastClipboardContent = s; // 避免 watcher 立刻反灌
+            this._lastClipboardContent = s;
             return true;
-        } catch {
-            return false;
-        }
+        } catch { return false; }
     }
 
     async insertToEditor(content) {
         try {
             const editor = vscode.window.activeTextEditor;
             if (!editor) return false;
-
-            const text = String(content ?? '');
-            await editor.edit((editBuilder) => {
-                if (editor.selection.isEmpty) editBuilder.insert(editor.selection.active, text);
-                else editBuilder.replace(editor.selection, text);
+            await editor.edit(eb => {
+                if (editor.selection.isEmpty) eb.insert(editor.selection.active, content);
+                else eb.replace(editor.selection, content);
             });
             return true;
-        } catch {
-            return false;
-        }
+        } catch { return false; }
     }
 
-    // =========================
-    // 导出 / 导入（字符串）
-    // =========================
-    async exportHistoryString() {
-        const doc = {
-            version: CONSTANTS.VERSION,
-            exportedAt: Date.now(),
-            history: this._toArrayAll(),
-        };
-        return JSON.stringify(doc, null, 2);
-    }
-
-    async importHistoryString(jsonString) {
-        try {
-            const parsed = JSON.parse(String(jsonString || ''));
-            const arr = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.history) ? parsed.history : []);
-            if (!Array.isArray(arr)) return { success: false, error: 'invalid format' };
-
-            let imported = 0;
-            for (const it of arr) {
-                const content = String((it && it.content) || '');
-                if (!content || REGEX.WHITESPACE_ONLY.test(content)) continue;
-
-                let fixed = content;
-                if (fixed.length > CONSTANTS.MAX_CONTENT_LENGTH) fixed = fixed.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
-
-                const hash = String((it && it.hash) || md5Hex(fixed));
-                if (this._hashMap.has(hash)) continue;
-
-                /** @type {HistoryNode} */
-                const node = {
-                    id: String((it && it.id) || randomId()),
-                    content: fixed,
-                    timestamp: Number((it && it.timestamp) || Date.now()),
-                    type: String((it && it.type) || 'text'),
-                    preview: String((it && it.preview) || makePreview(fixed)),
-                    contentLength: Number((it && it.contentLength) || fixed.length),
-                    hash,
-                    prev: null,
-                    next: null,
-                };
-
-                this._insertHead(node);
-                this._idMap.set(node.id, node);
-                this._hashMap.set(node.hash, node);
-                imported++;
-            }
-
-            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
-
-            this._touch();
-            this._notifyChange();
-            this._dirty = true;
-            await this.forceSave();
-
-            return { success: true, imported };
-        } catch (e) {
-            return { success: false, error: e?.message || 'parse failed' };
-        }
-    }
-
-    // =========================
-    // 导出 / 导入（文件）
-    // =========================
-    async exportToJsonFile() {
-        const uri = await vscode.window.showSaveDialog({
-            title: '导出剪贴板历史（JSON）',
-            filters: { JSON: ['json'] },
-            saveLabel: '导出',
-            defaultUri: vscode.Uri.file(`clipboard-history-${Date.now()}.json`),
-        });
-        if (!uri) return false;
-
-        try {
-            const txt = await this.exportHistoryString();
-            await vscode.workspace.fs.writeFile(uri, Buffer.from(txt, 'utf8'));
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    async importFromJsonFile() {
-        const uris = await vscode.window.showOpenDialog({
-            title: '导入剪贴板历史（JSON）',
-            canSelectMany: false,
-            filters: { JSON: ['json'] },
-            openLabel: '导入',
-        });
-        if (!uris || !uris[0]) return { success: false, error: 'cancelled' };
-
-        try {
-            const buf = await vscode.workspace.fs.readFile(uris[0]);
-            return await this.importHistoryString(buf.toString());
-        } catch (e) {
-            return { success: false, error: e?.message || 'read failed' };
-        }
-    }
-
-    // =========================
-    // 保存
-    // =========================
-    requestSave() {
-        if (!this._fileBinGz && !this._fileJsonGz) return;
-
-        this._dirty = true;
-        this._pendingChanges++;
-
-        if (this._pendingChanges >= CONSTANTS.BATCH_SAVE_THRESHOLD) {
-            this.forceSave().catch(() => { });
-            return;
-        }
-
-        if (this._saveTimer) clearTimeout(this._saveTimer);
-        this._saveTimer = setTimeout(() => {
-            this.forceSave().catch(() => { });
-        }, CONSTANTS.SAVE_THROTTLE_MS);
-    }
-
-    async forceSave() {
-        if (!this._fileBinGz && !this._fileJsonGz) return;
-
-        if (this._saveTimer) {
-            clearTimeout(this._saveTimer);
-            this._saveTimer = null;
-        }
-
-        this._saveChain = this._saveChain
-            .then(() => this._doSaveOnce())
-            .catch(() => this._doSaveOnce());
-
-        return this._saveChain;
-    }
-
-    async _doSaveOnce() {
-        if (!this._dirty) return;
-
-        const t0 = performance.now();
-
-        // 先把 dirty 拉下去；如写失败会再置回
-        this._dirty = false;
-
-        try {
-            const payload = {
-                version: CONSTANTS.VERSION,
-                savedAt: Date.now(),
-                history: this._toArrayAll(),
-            };
-
-            const mp = getMsgpack();
-            let rawBuf;
-            try {
-
-                if (this._preferMsgpack && mp) {
-                    rawBuf = mp.encode(payload);
-                } else {
-                    rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
-                }
-            } catch {
-                rawBuf = Buffer.from(JSON.stringify(payload), 'utf8');
-            }
-
-            let outBuf = rawBuf;
-            try {
-                outBuf = await gzipAsync(rawBuf);
-            } catch {
-                outBuf = rawBuf;
-            }
-
-            const targetPath = (this._preferMsgpack && this._fileBinGz) ? this._fileBinGz : this._fileJsonGz;
-            if (!targetPath) return;
-
-            await this._writeFileAtomic(targetPath, outBuf);
-
-            this.perfStats.lastSaveBytes = outBuf.length;
-            this._pendingChanges = 0;
-        } catch {
-            // 写失败：恢复 dirty 并稍后重试
-            this._dirty = true;
-            setTimeout(() => {
-                if (this._dirty) this.forceSave().catch(() => { });
-            }, CONSTANTS.SAVE_RETRY_DELAY_MS);
-        } finally {
-            this.perfStats.saveTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
-        }
-    }
-
-    async _writeFileAtomic(targetPath, buf) {
-        const dir = path.dirname(targetPath);
-        const tmpName = `${path.basename(targetPath)}${CONSTANTS.SAVE_TEMP_SUFFIX}.${randomId()}`;
-        const tmpPath = path.join(dir, tmpName);
-
-        await fs.promises.writeFile(tmpPath, buf);
-
-        // Windows rename 覆盖可能失败：先 unlink 再 rename
-        try {
-            await fs.promises.rename(tmpPath, targetPath);
-        } catch {
-            try { await fs.promises.unlink(targetPath); } catch { /* ignore */ }
-            await fs.promises.rename(tmpPath, targetPath);
-        }
-    }
-
-    // =========================
-    // 加载（只认本版本的两种文件：bin.gz / json.gz；不做任何 state 迁移）
-    // =========================
-    async _loadHistory() {
-        const t0 = performance.now();
-        try {
-            const candidates = [this._fileBinGz, this._fileJsonGz].filter(Boolean);
-
-            let chosen = null;
-            for (const fp of candidates) {
-                if (fp && fs.existsSync(fp)) {
-                    chosen = fp;
-                    break;
-                }
-            }
-            if (!chosen) return;
-
-            let dataBuf;
-            try {
-                dataBuf = await fs.promises.readFile(chosen);
-            } catch {
-                return;
-            }
-            this.perfStats.lastLoadBytes = dataBuf.length;
-
-            let raw = dataBuf;
-            try {
-                // ★ 严密保护解压逻辑
-                raw = await gunzipAsync(dataBuf);
-            } catch (e) {
-                console.error('[Q4] 历史文件解压失败 (可能损坏):', e.message);
-                // 如果解压失败，检查是否可能原本就是未压缩的 JSON
-                if (dataBuf[0] === 0x7b) { // '{'
-                    raw = dataBuf;
-                } else {
-                    await this._quarantineCorruptFile(chosen).catch(() => { });
-                    return;
-                }
-            }
-
-            const mp = getMsgpack();
-            let parsed = null;
-
-            if (mp) {
-                try {
-                    parsed = mp.decode(raw);
-                } catch {
-                    try { parsed = JSON.parse(raw.toString('utf8')); } catch { parsed = null; }
-                }
-            } else {
-                try { parsed = JSON.parse(raw.toString('utf8')); } catch { parsed = null; }
-            }
-
-            if (!parsed) {
-                await this._quarantineCorruptFile(chosen).catch(() => { });
-                this._resetInMemory();
-                return;
-            }
-
-            const historyArr = Array.isArray(parsed)
-                ? parsed
-                : (parsed && Array.isArray(parsed.history) ? parsed.history : []);
-
-            this._resetInMemory();
-
-            const normalized = historyArr
-                .map((it) => {
-                    const content = String((it && it.content) || '');
-                    if (!content || REGEX.WHITESPACE_ONLY.test(content)) return null;
-
-                    let fixed = content;
-                    if (fixed.length > CONSTANTS.MAX_CONTENT_LENGTH) fixed = fixed.slice(0, CONSTANTS.MAX_CONTENT_LENGTH);
-
-                    const ts = Number((it && it.timestamp) || Date.now());
-                    const h = String((it && it.hash) || md5Hex(fixed));
-                    const id = String((it && it.id) || randomId());
-                    const type = String((it && it.type) || 'text');
-                    const contentLength = Number((it && it.contentLength) || fixed.length);
-                    const preview = String((it && it.preview) || makePreview(fixed));
-                    return { id, content: fixed, timestamp: ts, type, preview, contentLength, hash: h };
-                })
-                .filter(Boolean)
-                .sort((a, b) => b.timestamp - a.timestamp)
-                .slice(0, CONSTANTS.MAX_HISTORY_ITEMS);
-
-            for (let i = normalized.length - 1; i >= 0; i--) {
-                const it = normalized[i];
-                /** @type {HistoryNode} */
-                const node = { ...it, prev: null, next: null };
-                if (this._hashMap.has(node.hash)) continue;
-
-                this._insertHead(node);
-                this._idMap.set(node.id, node);
-                this._hashMap.set(node.hash, node);
-            }
-
-            this._touch();
-            this._notifyChange();
-        } finally {
-            this.perfStats.loadTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
-        }
-    }
-
-    async _quarantineCorruptFile(filePath) {
-        try {
-            const dir = path.dirname(filePath);
-            const base = path.basename(filePath);
-            const corrupted = path.join(dir, `${base}${CONSTANTS.CORRUPT_SUFFIX_PREFIX}${Date.now()}`);
-            await fs.promises.rename(filePath, corrupted);
-            this.perfStats.quarantinedFiles++;
-        } catch {
-            try { await fs.promises.unlink(filePath); } catch { /* ignore */ }
-            this.perfStats.quarantinedFiles++;
-        }
-    }
-
-    _notifyChange() {
-        if (typeof this._onChange === 'function') {
-            try { this._onChange(); } catch { /* ignore */ }
-        }
-    }
+    _notifyChange() { if (this._onChange) this._onChange(); }
 
     getStatsSnapshot() {
-        const ops = this.perfStats.operations || 1;
-
-        const denom = this._cache.hit + this._cache.miss;
-        const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
-
-        const uptimeSec = Math.max(0, Math.floor((Date.now() - this.sessionStartedAt) / 1000));
-        const uptimeH = Math.floor(uptimeSec / 3600);
-        const uptimeM = Math.floor((uptimeSec % 3600) / 60);
-
+        const uptimeSec = Math.floor((Date.now() - this.sessionStartedAt) / 1000);
         return {
             historyCount: this._size,
-            maxHistoryItems: CONSTANTS.MAX_HISTORY_ITEMS,
             isWatching: this._isWatching,
-            uptime: { h: uptimeH, m: uptimeM },
-            cache: {
-                hit: this._cache.hit,
-                miss: this._cache.miss,
-                hitRate: cacheHitRate,
-                uiBytes: this._cache.uiBytes,
-                searchBytes: this._cache.searchBytes,
-                maxBytes: this._cache.maxBytes,
-            },
-            perf: {
-                avgSaveMs: this.perfStats.saveTimeMs / ops,
-                avgAddMs: this.perfStats.addTimeMs / ops,
-                avgLoadMs: this.perfStats.loadTimeMs / ops,
-                lastSaveBytes: this.perfStats.lastSaveBytes,
-                lastLoadBytes: this.perfStats.lastLoadBytes,
-                quarantinedFiles: this.perfStats.quarantinedFiles,
-            },
+            uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
+            perf: { quarantinedFiles: this.perfStats.quarantinedFiles }
         };
     }
 
     async dispose() {
         this.stopWatching();
-
-        if (this._cleanupTimer) {
-            clearInterval(this._cleanupTimer);
-            this._cleanupTimer = null;
-        }
-        if (this._saveTimer) {
-            clearTimeout(this._saveTimer);
-            this._saveTimer = null;
-        }
-
-        try {
-            this._dirty = true;
-            await this.forceSave();
-        } catch {
-            // ignore
-        }
+        if (this._saveTimer) clearTimeout(this._saveTimer);
+        if (this._dirty) await this.forceSave();
     }
 }
 
@@ -1219,29 +706,25 @@ class ClipboardHistorySidebarProvider {
     }
 
     _postMessage(msg) {
+        if (!this._view) return;
         try {
-            if (this._view && this._view.webview) {
-                // ★ 终极最优解：强制 POJO 转换，彻底解决 toJSON 报错与 Webview 崩溃风险
-                const safeMsg = JSON.parse(JSON.stringify(msg));
-                this._view.webview.postMessage(safeMsg).then(undefined, () => { });
-            }
-        } catch {
-            // ignore
+            // ★ 基因加固：深度纯净化，彻底根除 toJSON 报错与内部对象污染
+            const safeMsg = JSON.parse(JSON.stringify(msg));
+            this._view.webview.postMessage(safeMsg).then(undefined, () => { });
+        } catch (e) {
+            console.warn('[Q4] IPC 消息序列化失败:', e.message);
         }
     }
 
-    _getHtml(stats, history, audioBase64) {
-        // ★ 核心逻辑：Webview 内部完全采用 createElement 渲染，不再依赖扩展端预生成的 HTML 字符串
-        // 此处仅生成基础框架
+    _getHtml(stats, history) {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
             `img-src ${this._view.webview.cspSource} data:`,
             `media-src ${this._view.webview.cspSource} data:`,
-            `style-src 'unsafe-inline' ${this._view.webview.cspSource}`,
+            `style-src ${this._view.webview.cspSource} 'nonce-${nonce}'`,
             `script-src 'nonce-${nonce}'`,
             `font-src ${this._view.webview.cspSource}`,
-            `base-uri 'none'`,
         ].join('; ');
 
         return `<!DOCTYPE html>
@@ -1249,7 +732,7 @@ class ClipboardHistorySidebarProvider {
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="${csp}">
-    <style>
+    <style nonce="${nonce}">
         :root {
             --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
             --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
@@ -1263,8 +746,8 @@ class ClipboardHistorySidebarProvider {
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
         .main-content { height: 100%; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
         .main-content::-webkit-scrollbar { display: none; }
-        .section-title { font-size: 1.1em; font-weight: 700; margin: 20px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); }
 
+        .section-title { font-size: 1.1em; font-weight: 700; margin: 20px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); }
         .captain-grid { display: grid; gap: 8px; margin-bottom: 20px; }
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 0.9em; color: var(--text-primary); }
         .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
@@ -1285,25 +768,35 @@ class ClipboardHistorySidebarProvider {
         .item-time { font-size: 0.7em; color: var(--base01); }
         .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
+
         .action-mini-btn { padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); }
         .action-mini-btn:hover { background: var(--primary-color); color: #fff; }
 
         .music-player { background: var(--base02); color: var(--base3); padding: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .player-info { font-size: 0.9em; }
+        .player-controls { display: flex; gap: 10px; }
+        .player-btn { cursor: pointer; }
+
+        .btn-group { display: flex; gap: 8px; margin-bottom: 20px; }
+        .flex-btn { flex: 1; }
 
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
         .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
         .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
         .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
+
+        .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
+        .footer-hint { text-align: center; padding: 20px; font-size: 0.7em; opacity: 0.5; }
     </style>
 </head>
 <body>
     <div class="main-wrapper">
         <div class="main-content" id="mainContent">
             <div class="music-player">
-                <div style="font-size:0.9em">🎵 <span id="ms">Ready to Savor</span></div>
-                <div>
-                    <span style="cursor:pointer" id="btnPlayAudio">▶️</span>
-                    <span style="cursor:pointer" id="btnStopAudio">⏹️</span>
+                <div class="player-info">🎵 <span id="ms">Ready to Savor</span></div>
+                <div class="player-controls">
+                    <span class="player-btn" id="btnPlayAudio">▶️</span>
+                    <span class="player-btn" id="btnStopAudio">⏹️</span>
                 </div>
             </div>
             <div class="section-title">Captain</div>
@@ -1316,17 +809,17 @@ class ClipboardHistorySidebarProvider {
             <div class="section-title">Passed by</div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
-                    <div style="text-align:center;padding:20px;opacity:0.5;">加载中...</div>
+                    <div class="empty-hint">加载中...</div>
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-            <div style="display:flex; gap:8px; margin-bottom: 20px;">
-                <button class="action-mini-btn" style="flex:1" id="btnRefresh">🔄 刷新</button>
-                <button class="action-mini-btn" style="flex:1" id="btnClear">🗑️ 清空</button>
+            <div class="btn-group">
+                <button class="action-mini-btn flex-btn" id="btnRefresh">🔄 刷新</button>
+                <button class="action-mini-btn flex-btn" id="btnClear">🗑️ 清空</button>
             </div>
             <div class="section-title">Dial</div>
             <div class="stats-grid" id="statsGrid"></div>
-            <div style="text-align:center; padding:20px; font-size:0.7em; opacity:0.5;">qqq 领航员</div>
+            <div class="footer-hint">qqq 领航员</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
     </div>
@@ -1745,7 +1238,8 @@ class StatusBarManager {
 function activate(context) {
     console.log('[Q4] QQQ Clipboard History (fusion-final) activating...');
 
-    // ★ 终极加固：启动时强制清理 globalState 中的大键值，解决日志中的 2MB 报警
+    // ★ 历史注记：曾经用于清理 2MB globalState 残留的逻辑，现已完成使命，改为注释
+    /*
     const obsoleteKeys = ['qqq_clipboard_history', 'qqq_history_manager_state', 'qqq.transactions.backup'];
     obsoleteKeys.forEach(key => {
         if (context.globalState.get(key) !== undefined) {
@@ -1754,6 +1248,7 @@ function activate(context) {
             }, () => { });
         }
     });
+    */
 
     let sidebarProvider = null;
     let statusBarManager = null;
