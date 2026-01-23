@@ -1601,6 +1601,10 @@ async function qsc(a, historyManager) {
                     targets.forEach(t => {
                         const p = path.join(root, t);
                         if (fs.existsSync(p)) fs.unlinkSync(p);
+
+                        // 同时清理子目录中的文件
+                        const subP = path.join(root, 'clipboard-history', t);
+                        if (fs.existsSync(subP)) fs.unlinkSync(subP);
                     });
                 }
             } catch { }
@@ -1747,7 +1751,7 @@ function activate(context) {
         if (context.globalState.get(key) !== undefined) {
             context.globalState.update(key, undefined).then(() => {
                 console.log(`[Q4] 已成功从 globalState 卸载旧数据键: ${key}`);
-            }, () => {});
+            }, () => { });
         }
     });
 
