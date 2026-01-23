@@ -765,9 +765,6 @@ class ClipboardHistorySidebarProvider {
                         this.updateContent(null, msg.limit, msg.keyword);
                     }
                     break;
-                case 'refresh':
-                    this.updateContent();
-                    break;
                 case 'ready':
                     this.updateContent();
                     break;
@@ -934,8 +931,8 @@ class ClipboardHistorySidebarProvider {
         .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
-        /* Hover：边框颜色变红，文字变黑，边框宽度样式保持不变，防止布局抖动 */
-        .history-item:hover { border-color: var(--red); color: #000000; }
+        /* Hover：边框变虚线，颜色变红，文字变黑，边框宽度保持不变，防止布局抖动 */
+        .history-item:hover { border-color: var(--red); border-style: dashed; color: #000000; }
         /* 移除点击后的永久边框效果 */
         .history-item.selected { color: #000000; }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
@@ -1036,7 +1033,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-            <div class="footer-hint">qqq 领航员</div>
+            <div class="footer-hint">GH HEALTH</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
         <div id="tooltip"></div>
