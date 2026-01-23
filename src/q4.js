@@ -824,8 +824,8 @@ class ClipboardHistorySidebarProvider {
                 triggerStorm: (reason === 'add' || reason === 'pin')
             });
 
-            const count = this._historyManager._size;
-            this._view.title = `History (${count})`;
+            const ver = this._context.extension.packageJSON.version;
+            this._view.title = `v${ver}`;
         } catch (e) {
             console.error('[Q4-UI] Update failed:', e);
         }
