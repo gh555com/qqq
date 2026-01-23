@@ -255,25 +255,74 @@ class ClipboardHistoryManager {
             this._storageDir = path.join(root, CONSTANTS.STORAGE_DIR);
             if (!fs.existsSync(this._storageDir)) fs.mkdirSync(this._storageDir, { recursive: true });
             this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
+
+            // ★ 终极自愈预警：如果发现 history.json.gz (旧版遗留)，将其迁移或清理（可选，此处暂保持纯净）
         } catch { }
     }
 
-    async _initHistory() {
+    async _loadHistory() {
+        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
         const t0 = performance.now();
         try {
-            await this._loadHistory();
+            const dataBuf = await fs.promises.readFile(this._fileBinGz);
+            let raw;
+            try {
+                raw = await gunzipAsync(dataBuf);
+            } catch (e) {
+                // 如果解压失败，检查是否为未压缩的 JSON
+                if (dataBuf[0] === 0x7b) { // '{'
+                    raw = dataBuf;
+                } else {
+                    throw e;
+                }
+            }
+
+            const mp = getMsgpack();
+            let parsed = null;
+            if (mp) {
+                try { parsed = mp.decode(raw); } catch { try { parsed = JSON.parse(raw.toString('utf8')); } catch { } }
+            } else {
+                try { parsed = JSON.parse(raw.toString('utf8')); } catch { }
+            }
+
+            if (!parsed || (!Array.isArray(parsed) && !Array.isArray(parsed.history))) throw new Error('Invalid format');
+
+            const historyArr = Array.isArray(parsed) ? parsed : parsed.history;
+            this._resetInMemory();
+
+            // 逆序插入以恢复链表顺序
+            historyArr.slice().reverse().forEach(it => {
+                if (!it.content) return;
+                const node = {
+                    ...it,
+                    id: it.id || randomId(),
+                    hash: it.hash || md5Hex(it.content),
+                    preview: it.preview || makePreview(it.content),
+                    prev: null, next: null
+                };
+                if (!this._hashMap.has(node.hash)) {
+                    this._insertHead(node);
+                    this._idMap.set(node.id, node);
+                    this._hashMap.set(node.hash, node);
+                }
+            });
+
+            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
+            this._touch();
+            this._notifyChange();
+        } catch (e) {
+            console.error('[Q4] 加载失败，执行物理隔离:', e.message);
+            await this._quarantineCorruptFile(this._fileBinGz);
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
-            this.perfStats.operations++;
         }
     }
 
-    _touch() {
-        this._version++;
-        this._snapshotVersion = -1;
-        this._snapshotAll = null;
-        this._cache.version = -1;
-        this._cache.uiList = null;
+    _resetInMemory() {
+        this._head = null; this._tail = null; this._size = 0;
+        this._idMap.clear(); this._hashMap.clear();
+        this._lastClipboardContent = '';
+        this._touch();
     }
 
     _insertHead(node) {
@@ -422,12 +471,19 @@ class ClipboardHistoryManager {
     }
 
     async _writeFileAtomic(targetPath, buf) {
-        const tmpPath = targetPath + '.' + randomId() + '.tmp';
+        const dir = path.dirname(targetPath);
+        const tmpPath = path.join(dir, `${path.basename(targetPath)}.${randomId()}.tmp`);
+
         await fs.promises.writeFile(tmpPath, buf);
+
+        // ★ 终极最优解：Windows 强力原子写
+        // Rename 在文件被锁时会报错，所以先尝试 unlink 旧文件再 rename，比单纯 rename 覆盖更稳
         try {
             await fs.promises.rename(tmpPath, targetPath);
         } catch {
-            if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+            try {
+                if (fs.existsSync(targetPath)) await fs.promises.unlink(targetPath);
+            } catch { /* ignore */ }
             await fs.promises.rename(tmpPath, targetPath);
         }
     }
@@ -542,6 +598,8 @@ class ClipboardHistorySidebarProvider {
         this._global = globalModule;
         this._view = null;
         this._updateTimer = null;
+        this._watchdogTimer = null;
+        this._lastHeartbeat = Date.now();
     }
 
     resolveWebviewView(webviewView) {
@@ -554,9 +612,14 @@ class ClipboardHistorySidebarProvider {
         // 初始内容与定时刷新
         this.updateContent();
         this._startPeriodicUpdate();
+        this._startWatchdog();
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
+                case 'heartbeat':
+                    this._lastHeartbeat = Date.now();
+                    break;
+                case 'executeCommand':
                 case 'executeCommand':
                     if (msg.cmd) vscode.commands.executeCommand(msg.cmd);
                     break;
@@ -638,6 +701,20 @@ class ClipboardHistorySidebarProvider {
             clearInterval(this._updateTimer);
             this._updateTimer = null;
         }
+    }
+
+    _startWatchdog() {
+        if (this._watchdogTimer) clearInterval(this._watchdogTimer);
+        this._watchdogTimer = setInterval(() => {
+            const now = Date.now();
+            // 如果超过 30 秒没心跳，强制重载 HTML
+            if (this._view && this._view.visible && (now - this._lastHeartbeat) > CONSTANTS.WATCHDOG_STALE_MS) {
+                console.warn('[Q4] Webview 心跳丢失，执行强制自愈重载');
+                this._lastHeartbeat = Date.now();
+                this._view.webview.html = ''; // 强制清空触发重新渲染
+                this.updateContent();
+            }
+        }, CONSTANTS.WATCHDOG_REFRESH_MS);
     }
 
     updateContent() {
@@ -744,7 +821,7 @@ class ClipboardHistorySidebarProvider {
         html { forced-color-adjust: none !important; }
         body { margin: 0; padding: 0; font-family: sans-serif; background: var(--background-color); color: var(--text-primary); overflow: hidden; }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
-        .main-content { height: 100%; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
+        .main-content { height: 100%; overflow-x: hidden; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
         .main-content::-webkit-scrollbar { display: none; }
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 20px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); }
@@ -759,8 +836,8 @@ class ClipboardHistorySidebarProvider {
         .stat-title { font-size: 0.75em; opacity: 0.8; }
         .stat-value { font-size: 1em; font-weight: bold; }
 
-        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; }
-        .history-list { max-height: 400px; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
+        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
+        .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -781,9 +858,10 @@ class ClipboardHistorySidebarProvider {
         .flex-btn { flex: 1; }
 
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
-        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
+        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
         .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
-        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.4; cursor: pointer; pointer-events: auto; }
+        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
+        .scrollbar-inner-thumb:hover { width: 6px; right: 0; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
         .footer-hint { text-align: center; padding: 20px; font-size: 0.7em; opacity: 0.5; }
@@ -1233,29 +1311,77 @@ class StatusBarManager {
 }
 
 // ============================================================================
+// 终极维护工具 qsc(a)
+// ============================================================================
+/**
+ * @param {number} a 清理级别：1-缓存, 2-剪切板, 3-globalState, 0-全清
+ * @param {ClipboardHistoryManager} historyManager
+ */
+async function qsc(a, historyManager) {
+    const context = historyManager?.context;
+    console.log(`[QSC] 执行清理任务，级别: ${a}`);
+
+    // 1. 清理 qqq_cache 文件夹
+    const clearCache = async () => {
+        try {
+            const root = context?.globalStorageUri?.fsPath;
+            if (!root) return;
+            const cacheDir = path.join(root, 'qqq_cache');
+            if (fs.existsSync(cacheDir)) {
+                const files = fs.readdirSync(cacheDir);
+                for (const file of files) {
+                    const filePath = path.join(cacheDir, file);
+                    try {
+                        if (fs.statSync(filePath).isFile()) fs.unlinkSync(filePath);
+                    } catch { }
+                }
+                console.log('[QSC] qqq_cache 已清空');
+            }
+        } catch (e) { console.error('[QSC] 清理 cache 失败:', e.message); }
+    };
+
+    // 2. 清空剪切板历史
+    const clearHistory = async () => {
+        if (historyManager) {
+            await historyManager.clearHistory({ deleteFiles: true });
+            console.log('[QSC] 剪切板历史已清空');
+        }
+    };
+
+    // 3. 清空 globalState (高危操作)
+    const clearGlobalState = async () => {
+        if (!context?.globalState) return;
+        try {
+            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history', 'qqq_history_manager_state', 'qqq.transactions.backup'];
+            for (const key of keys) {
+                await context.globalState.update(key, undefined);
+            }
+            console.log('[QSC] globalState 已清空');
+        } catch (e) { console.error('[QSC] 清理 globalState 失败:', e.message); }
+    };
+
+    if (a === 1) await clearCache();
+    else if (a === 2) await clearHistory();
+    else if (a === 3) await clearGlobalState();
+    else if (a === 0) {
+        await clearCache();
+        await clearHistory();
+        await clearGlobalState();
+    }
+}
+
+// ============================================================================
 // 扩展激活入口
 // ============================================================================
 function activate(context) {
     console.log('[Q4] QQQ Clipboard History (fusion-final) activating...');
-
-    // ★ 历史注记：曾经用于清理 2MB globalState 残留的逻辑，现已完成使命，改为注释
-    /*
-    const obsoleteKeys = ['qqq_clipboard_history', 'qqq_history_manager_state', 'qqq.transactions.backup'];
-    obsoleteKeys.forEach(key => {
-        if (context.globalState.get(key) !== undefined) {
-            context.globalState.update(key, undefined).then(() => {
-                console.log(`[Q4] 已成功从 globalState 卸载旧数据键: ${key}`);
-            }, () => { });
-        }
-    });
-    */
 
     let sidebarProvider = null;
     let statusBarManager = null;
 
     const historyManager = new ClipboardHistoryManager(context, {
         onChange: () => {
-            if (sidebarProvider) sidebarProvider.refresh();
+            if (sidebarProvider) sidebarProvider.updateContent();
             if (statusBarManager) statusBarManager.refresh();
         },
     });
@@ -1266,7 +1392,7 @@ function activate(context) {
     historyManager.startWatching();
 
     // 修复实例化：传入 context, historyManager 和 global 模块
-    sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager, require('./global'));
+    sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager, global);
 
     const sidebarDisposable = vscode.window.registerWebviewViewProvider(
         'qqq.Viewq',
@@ -1280,6 +1406,13 @@ function activate(context) {
 
     // 命令注册
     context.subscriptions.push(
+        vscode.commands.registerCommand('qqq.qsc', async () => {
+            const input = await vscode.window.showInputBox({
+                placeHolder: '级别: 1-缓存, 2-历史, 3-State, 0-全清',
+                prompt: '执行 QSC 终极清理'
+            });
+            if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
+        }),
         vscode.commands.registerCommand('qqq.showHistoryQuickPick', () => showHistoryQuickPick(historyManager)),
         vscode.commands.registerCommand('qqq.searchHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
@@ -1350,11 +1483,12 @@ function activate(context) {
         searchHistory: (keyword, limit) => historyManager.searchHistory(keyword, limit),
         clearHistory: () => historyManager.clearHistory(),
         getStats: () => historyManager.getStatsSnapshot(),
+        qsc: (a) => qsc(a, historyManager)
     };
 }
 
 // ============================================================================
-// 扩展停用
+// 扩展停用（全生命周期强杀保护）
 // ============================================================================
 async function deactivate() {
     console.log('[Q4] QQQ Clipboard History (fusion-final) deactivating...');
@@ -1362,7 +1496,7 @@ async function deactivate() {
         try {
             await _currentHistoryManager.dispose();
         } catch (e) {
-            console.error('[Q4] Dispose error:', e);
+            console.error('[Q4] Dispose 强杀失败:', e.message);
         }
         _currentHistoryManager = null;
     }
