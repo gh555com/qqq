@@ -34,7 +34,6 @@ const CONSTANTS = Object.freeze({
     // 存储
     STORAGE_DIR: 'clipboard-history',
     FILE_BIN_GZ: 'history.bin.gz',
-    FILE_JSON_GZ: 'history.json.gz',
 
     // 限制
     MAX_HISTORY_ITEMS: 100,
@@ -120,7 +119,7 @@ function randomId() {
     return crypto.randomBytes(16).toString('hex');
 }
 function md5Hex(s) {
-    return crypto.createHash('md5').update(String(s)).digest('hex');
+    return crypto.createHash('md5').update(Buffer.from(String(s))).digest('hex');
 }
 function nonceHex() {
     return crypto.randomBytes(16).toString('hex');
@@ -140,7 +139,6 @@ function gunzipAsync(buf) {
 function estimateBytes(obj) {
     try {
         const mp = getMsgpack();
-        // ★ 直接计算 encode 后的长度，不重复创建 Buffer
         if (mp) return mp.encode(obj).length;
         return Buffer.byteLength(JSON.stringify(obj), 'utf8');
     } catch {
@@ -227,24 +225,26 @@ class ClipboardHistoryManager {
         this.sessionStartedAt = Date.now();
 
         this._initStorage();
-        this._initHistory().catch(() => { });
+        this._loadHistory().catch(() => { });
         this._startAutoCleanup();
     }
 
     _startAutoCleanup() {
         if (this._cleanupTimer) clearInterval(this._cleanupTimer);
         this._cleanupTimer = setInterval(() => {
-            if (global.isDeactivated?.()) return;
-            const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
-            let changed = false;
-            while (this._tail && this._tail.timestamp < cutoff) {
-                this._removeNode(this._tail);
-                changed = true;
-            }
-            if (changed) {
-                this._touch();
-                this.requestSave();
-            }
+            // 异步执行清理，不阻塞主线程
+            (async () => {
+                const cutoff = Date.now() - CONSTANTS.AUTO_CLEANUP_DAYS * CONSTANTS.MS_PER_DAY;
+                let changed = false;
+                while (this._tail && this._tail.timestamp < cutoff) {
+                    this._removeNode(this._tail);
+                    changed = true;
+                }
+                if (changed) {
+                    this._touch();
+                    this.requestSave();
+                }
+            })().catch(() => { });
         }, CONSTANTS.AUTO_CLEANUP_INTERVAL_MS);
     }
 
@@ -313,6 +313,14 @@ class ClipboardHistoryManager {
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
         }
+    }
+
+    _touch() {
+        this._version++;
+        this._snapshotVersion = -1;
+        this._snapshotAll = null;
+        this._cache.version = -1;
+        this._cache.uiList = null;
     }
 
     _resetInMemory() {
@@ -468,7 +476,6 @@ class ClipboardHistoryManager {
             const outBuf = await gzipAsync(rawBuf);
 
             await this._writeFileAtomic(this._fileBinGz, outBuf);
-            console.log(`[Q4] 存储：${outBuf.length} bytes (Msgpack+Gzip)`);
         } catch (e) {
             console.error('[Q4] 存储严重故障:', e.message);
             this._dirty = true;
@@ -490,33 +497,6 @@ class ClipboardHistoryManager {
                 if (fs.existsSync(targetPath)) await fs.promises.unlink(targetPath);
             } catch { /* ignore */ }
             await fs.promises.rename(tmpPath, targetPath);
-        }
-    }
-
-    async _loadHistory() {
-        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
-        try {
-            const dataBuf = await fs.promises.readFile(this._fileBinGz);
-            let raw = await gunzipAsync(dataBuf);
-            const mp = getMsgpack();
-            let parsed = mp ? mp.decode(raw) : JSON.parse(raw.toString('utf8'));
-            if (!parsed || !Array.isArray(parsed.history)) throw new Error('Invalid format');
-
-            parsed.history.reverse().forEach(it => {
-                if (!it.content) return;
-                const node = { ...it, id: it.id || randomId(), hash: it.hash || md5Hex(it.content), prev: null, next: null };
-                if (!this._hashMap.has(node.hash)) {
-                    this._insertHead(node);
-                    this._idMap.set(node.id, node);
-                    this._hashMap.set(node.hash, node);
-                }
-            });
-            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
-            this._touch();
-            this._notifyChange();
-        } catch (e) {
-            console.error('[Q4] 加载失败，执行隔离:', e.message);
-            await this._quarantineCorruptFile(this._fileBinGz);
         }
     }
 
@@ -614,17 +594,11 @@ class ClipboardHistorySidebarProvider {
             localResourceRoots: [this._context.extensionUri],
         };
 
-        // 初始内容与定时刷新
+        // 初始内容
         this.updateContent();
-        this._startPeriodicUpdate();
-        this._startWatchdog();
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
-                case 'heartbeat':
-                    this._lastHeartbeat = Date.now();
-                    break;
-                case 'executeCommand':
                 case 'executeCommand':
                     if (msg.cmd) vscode.commands.executeCommand(msg.cmd);
                     break;
@@ -676,9 +650,6 @@ class ClipboardHistorySidebarProvider {
                 case 'ready':
                     this.updateContent();
                     break;
-                case 'heartbeat':
-                    // 保持活动
-                    break;
             }
         });
 
@@ -697,8 +668,7 @@ class ClipboardHistorySidebarProvider {
     }
 
     _startPeriodicUpdate() {
-        this._stopPeriodicUpdate();
-        this._updateTimer = setInterval(() => this.updateContent(), CONSTANTS.SIDEBAR_UPDATE_MS);
+        // 彻底停用 5 秒定时刷新，剪贴板变化会通过 onChange 自动触发更新
     }
 
     _stopPeriodicUpdate() {
@@ -706,20 +676,6 @@ class ClipboardHistorySidebarProvider {
             clearInterval(this._updateTimer);
             this._updateTimer = null;
         }
-    }
-
-    _startWatchdog() {
-        if (this._watchdogTimer) clearInterval(this._watchdogTimer);
-        this._watchdogTimer = setInterval(() => {
-            const now = Date.now();
-            // 如果超过 30 秒没心跳，强制重载 HTML
-            if (this._view && this._view.visible && (now - this._lastHeartbeat) > CONSTANTS.WATCHDOG_STALE_MS) {
-                console.warn('[Q4] Webview 心跳丢失，执行强制自愈重载');
-                this._lastHeartbeat = Date.now();
-                this._view.webview.html = ''; // 强制清空触发重新渲染
-                this.updateContent();
-            }
-        }, CONSTANTS.WATCHDOG_REFRESH_MS);
     }
 
     updateContent() {
@@ -731,53 +687,23 @@ class ClipboardHistorySidebarProvider {
                 preview: item.preview
             }));
 
-            const stats = this._getDialStats();
             const audioBase64 = this._getAudioBase64();
 
-            // 如果 HTML 为空（首次加载），则初始化 HTML
+            // ★ 极致纯净：移除 stats，只初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(stats, history, audioBase64);
+                this._view.webview.html = this._getHtml(history, audioBase64);
             }
 
-            // 发送数据更新
             this._postMessage({
                 command: 'updateData',
-                stats: stats,
                 history: history
             });
 
-            this._view.title = `${stats.h}h ${stats.m}m`;
+            const count = this._historyManager._size;
+            this._view.title = `History (${count})`;
         } catch (e) {
             console.error('[Q4-UI] Update failed:', e);
         }
-    }
-
-    _getDialStats() {
-        let h = 0, m = 0;
-        const base = this._context.globalState.get("qqq_stats_total_seconds", 0) || 0;
-        const lastFlush = this._context.globalState.get("qqq_stats_last_flush") || Date.now();
-        const totalSeconds = base + ((Date.now() - lastFlush) / 1000);
-        h = Math.floor(totalSeconds / 3600);
-        m = Math.floor((totalSeconds % 3600) / 60);
-
-        let cacheMB = 0;
-        try {
-            const root = this._context.globalStorageUri?.fsPath;
-            const cacheDir = path.join(root, 'qqq_cache');
-            if (fs.existsSync(cacheDir)) {
-                cacheMB = fs.readdirSync(cacheDir).reduce((acc, f) => {
-                    try { return acc + fs.statSync(path.join(cacheDir, f)).size; } catch { return acc; }
-                }, 0) / (1024 * 1024);
-            }
-        } catch { }
-
-        const engineInfo = { name: 'Node', details: 'Spawn 模式' };
-        if (this._global?.getActiveEngineName) {
-            engineInfo.name = this._global.getActiveEngineName(this._global.pythonBridge, this._global.rustBridge, this._global.shellBridge);
-            engineInfo.details = engineInfo.name.includes('Python') ? 'Python 引擎' : (engineInfo.name.includes('Rust') ? 'Rust 引擎' : 'Node 引擎');
-        }
-
-        return { h, m, cacheMB, hitRate: 0, engineInfo };
     }
 
     _getAudioBase64() {
@@ -798,7 +724,7 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(stats, history) {
+    _getHtml(history, audioBase64) {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -834,12 +760,6 @@ class ClipboardHistorySidebarProvider {
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 0.9em; color: var(--text-primary); }
         .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
-
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .stat-card { background: linear-gradient(135deg, var(--primary-color), var(--orange)); padding: 8px; border-radius: 4px; color: #fff; }
-        .stat-card.engine-card { grid-column: span 2; background: var(--base02); }
-        .stat-title { font-size: 0.75em; opacity: 0.8; }
-        .stat-value { font-size: 1em; font-weight: bold; }
 
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
         .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
@@ -900,8 +820,6 @@ class ClipboardHistorySidebarProvider {
                 <button class="action-mini-btn flex-btn" id="btnRefresh">🔄 刷新</button>
                 <button class="action-mini-btn flex-btn" id="btnClear">🗑️ 清空</button>
             </div>
-            <div class="section-title">Dial</div>
-            <div class="stats-grid" id="statsGrid"></div>
             <div class="footer-hint">qqq 领航员</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
@@ -911,7 +829,6 @@ class ClipboardHistorySidebarProvider {
             const vscode = acquireVsCodeApi();
             const el = {
                 historyList: document.getElementById('historyList'),
-                statsGrid: document.getElementById('statsGrid'),
                 btnRefresh: document.getElementById('btnRefresh'),
                 btnClear: document.getElementById('btnClear'),
                 btnPlay: document.getElementById('btnPlayAudio'),
@@ -928,26 +845,6 @@ class ClipboardHistorySidebarProvider {
             let currentHistory = [];
 
             function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
-
-            function renderStats(stats) {
-                if (!el.statsGrid || !stats) return;
-                el.statsGrid.innerHTML = '';
-                const frag = document.createDocumentFragment();
-
-                const createCard = (title, value, isEngine) => {
-                    const card = document.createElement('div');
-                    card.className = isEngine ? 'stat-card engine-card' : 'stat-card';
-                    const t = document.createElement('div'); t.className = 'stat-title'; t.textContent = title;
-                    const v = document.createElement('div'); v.className = 'stat-value'; v.textContent = value;
-                    card.appendChild(t); card.appendChild(v);
-                    return card;
-                };
-
-                frag.appendChild(createCard('陪伴时间', stats.h + 'h ' + stats.m + 'm'));
-                frag.appendChild(createCard('缓存量', stats.cacheMB.toFixed(1) + 'MB'));
-                frag.appendChild(createCard('引擎', stats.engineInfo.name + ' (' + stats.engineInfo.details + ')', true));
-                el.statsGrid.appendChild(frag);
-            }
 
             function renderList(history) {
                 currentHistory = history || [];
@@ -1050,7 +947,6 @@ class ClipboardHistorySidebarProvider {
             window.addEventListener('message', e => {
                 const m = e.data;
                 if (m.command === 'updateData') {
-                    renderStats(m.stats);
                     renderList(m.history);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64);
@@ -1080,9 +976,6 @@ class ClipboardHistorySidebarProvider {
                     e.preventDefault();
                 }
             });
-
-            // 心跳
-            setInterval(() => post('heartbeat'), 10000);
 
             // 音乐播放
             let currentAudio = null;
@@ -1134,83 +1027,91 @@ class ClipboardHistorySidebarProvider {
 }
 
 // ============================================================================
-// 终极清理函数 qsc(a)
+// 维护与辅助工具
 // ============================================================================
-/**
- * @param {number} a 清理级别：1-缓存, 2-剪切板, 3-globalState, 0-全清
- * @param {ClipboardHistoryManager} historyManager
- */
-async function qsc(a, historyManager) {
-    const context = historyManager?.context;
 
-    // 1. 清理 qqq_cache 文件夹
-    const clearCache = async () => {
-        try {
-            const root = context?.globalStorageUri?.fsPath;
-            if (!root) return;
-            const cacheDir = path.join(root, 'qqq_cache');
-            if (fs.existsSync(cacheDir)) {
-                const files = fs.readdirSync(cacheDir);
-                for (const file of files) {
-                    const filePath = path.join(cacheDir, file);
-                    try {
-                        if (fs.statSync(filePath).isFile()) {
-                            fs.unlinkSync(filePath);
-                        }
-                    } catch (fileErr) {
-                        console.warn(`[QSC] 跳过无法访问的文件: ${file}`, fileErr.message);
-                    }
-                }
-                console.log('[QSC] qqq_cache 已清空');
-            }
-        } catch (e) { console.error('[QSC] 清理 cache 失败:', e.message); }
-    };
+async function showHistoryQuickPick(historyManager) {
+    const history = historyManager.getHistory(50);
+    if (history.length === 0) {
+        vscode.window.showInformationMessage('剪贴板历史为空');
+        return;
+    }
 
-    const clearHistory = async () => {
-        if (historyManager) {
-            await historyManager.clearHistory({ deleteFiles: true, writeEmptyFile: true });
-            // 强力手术：物理删除所有可能的文件格式，根除 BAD_DECRYPT
-            try {
-                const root = context?.globalStorageUri?.fsPath;
-                if (root) {
-                    const targets = ['q_history.msgpack', 'q_history.meta', 'history.bin.gz', 'history.json.gz'];
-                    targets.forEach(t => {
-                        const p = path.join(root, t);
-                        if (fs.existsSync(p)) fs.unlinkSync(p);
+    const items = history.map(it => ({
+        label: it.preview,
+        description: formatTime(it.timestamp),
+        detail: it.content.length > 100 ? it.content.slice(0, 100) + '...' : it.content,
+        id: it.id
+    }));
 
-                        // 同时清理子目录中的文件
-                        const subP = path.join(root, 'clipboard-history', t);
-                        if (fs.existsSync(subP)) fs.unlinkSync(subP);
-                    });
-                }
-            } catch { }
-            console.log('[QSC] 剪贴板历史及物理文件已强力清空');
+    const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: '选择要粘贴的历史记录',
+        matchOnDescription: true,
+        matchOnDetail: true
+    });
+
+    if (selected) {
+        const node = historyManager.getItemById(selected.id);
+        if (node) {
+            await historyManager.copyToClipboard(node.content);
+            await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
         }
-    };
+    }
+}
 
-    // 3. 清空 globalState (高危操作)
-    const clearGlobalState = async () => {
-        if (!context?.globalState) return;
-        try {
-            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history', 'qqq_history_manager_state'];
-            for (const key of keys) {
-                await context.globalState.update(key, undefined);
+async function searchHistoryCommand(historyManager) {
+    const keyword = await vscode.window.showInputBox({ prompt: '输入搜索关键词' });
+    if (!keyword) return;
+
+    const history = historyManager.getHistory(100);
+    const results = history.filter(it => it.content.toLowerCase().includes(keyword.toLowerCase()));
+
+    if (results.length === 0) {
+        vscode.window.showInformationMessage(`未找到包含 "${keyword}" 的记录`);
+        return;
+    }
+
+    const items = results.map(it => ({
+        label: it.preview,
+        description: formatTime(it.timestamp),
+        id: it.id
+    }));
+
+    const selected = await vscode.window.showQuickPick(items, { placeHolder: `搜索结果: ${keyword}` });
+    if (selected) {
+        const node = historyManager.getItemById(selected.id);
+        if (node) {
+            await historyManager.copyToClipboard(node.content);
+            await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+        }
+    }
+}
+
+async function exportHistoryCommand(historyManager) {
+    const history = historyManager._toArrayAll();
+    const content = JSON.stringify(history, null, 2);
+    const doc = await vscode.workspace.openTextDocument({ content, language: 'json' });
+    await vscode.window.showTextDocument(doc);
+    vscode.window.showInformationMessage('历史记录已导出到新编辑器');
+}
+
+async function importHistoryCommand(historyManager) {
+    const input = await vscode.window.showInputBox({ prompt: '请将导出的 JSON 历史记录粘贴到此处' });
+    if (!input) return;
+
+    try {
+        const imported = JSON.parse(input);
+        const arr = Array.isArray(imported) ? imported : (imported.history || []);
+        let count = 0;
+        for (const item of arr) {
+            if (item.content) {
+                await historyManager.addToHistory(item.content);
+                count++;
             }
-            // 同时清理物理存储文件以解决 BAD_DECRYPT
-            const storagePath = path.join(context.globalStorageUri.fsPath, 'q_history.msgpack');
-            const metaPath = path.join(context.globalStorageUri.fsPath, 'q_history.meta');
-            [storagePath, metaPath].forEach(p => { if (fs.existsSync(p)) try { fs.unlinkSync(p); } catch { } });
-            console.log('[QSC] globalState 及物理数据已清空');
-        } catch (e) { console.error('[QSC] 清理 globalState 失败:', e.message); }
-    };
-
-    if (a === 1) await clearCache();
-    else if (a === 2) await clearHistory();
-    else if (a === 3) await clearGlobalState();
-    else if (a === 0) {
-        await clearCache();
-        await clearHistory();
-        await clearGlobalState();
+        }
+        vscode.window.showInformationMessage(`成功导入 ${count} 条记录`);
+    } catch (e) {
+        vscode.window.showErrorMessage('导入失败：无效的 JSON 格式');
     }
 }
 
@@ -1237,12 +1138,7 @@ function showStatsCommand(historyManager) {
         `总记录数: ${snap.historyCount}`,
         `监听中: ${snap.isWatching ? '是' : '否'}`,
         `会话时长: ${snap.uptime.h}h ${snap.uptime.m}m`,
-        ``,
-        `缓存命中率: ${snap.cache.hitRate.toFixed(1)}%`,
-        `avgSave: ${snap.perf.avgSaveMs.toFixed(2)}ms`,
-        `avgAdd:  ${snap.perf.avgAddMs.toFixed(2)}ms`,
-        `avgLoad: ${snap.perf.avgLoadMs.toFixed(2)}ms`,
-        `隔离损坏文件数: ${snap.perf.quarantinedFiles}`,
+        `物理文件隔离数: ${snap.perf.quarantinedFiles}`,
     ].join('\n');
 
     vscode.window.showInformationMessage(message, { modal: true });
