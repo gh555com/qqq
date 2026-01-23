@@ -407,8 +407,11 @@ class ClipboardHistoryManager {
             cur = cur.next;
         }
 
-        // 置顶项按置顶时间先后排序（最新的置顶在最前）
-        pinned.sort((a, b) => b.pinTimestamp - a.pinTimestamp);
+        // 1. 置顶项按置顶时间从小到大排序 (最近置顶的在置顶区最下方)
+        pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
+
+        // 2. 普通项按复制时间从近到远排序 (最近复制的在最上方)
+        others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
@@ -451,8 +454,11 @@ class ClipboardHistoryManager {
             cur = cur.next;
         }
 
-        // 搜索结果中的置顶项也按置顶时间排序
-        pinned.sort((a, b) => b.pinTimestamp - a.pinTimestamp);
+        // 1. 搜索结果中的置顶项也按置顶时间从小到大排序
+        pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
+
+        // 2. 搜索结果中的普通项按时间从近到远排序
+        others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
