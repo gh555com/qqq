@@ -889,11 +889,11 @@ class ClipboardHistorySidebarProvider {
     <style nonce="${nonce}">
         :root {
             --base03: #002b36; --base02: #073642; --base01: #586e75; --base00: #657b83;
-            --base0: #839496; --base1: #93a1a1; --base2: #eee8d5; --base3: #fdf6e3;
+            --base0: #839496; --base1: #93a1a1; --base2: #fdf6e3; --base3: #eee8d5;
             --yellow: #b58900; --orange: #cb4b16; --red: #dc322f; --magenta: #d33682;
             --violet: #6c71c4; --blue: #268bd2; --cyan: #2aa198; --green: #859900;
             --primary-color: var(--yellow); --background-color: var(--base3);
-            --card-bg: var(--base2); --text-primary: var(--base00); --border-color: var(--base1);
+            --card-bg: var(--base2); --text-primary: #2a211c; --border-color: #d3c6aa;
         }
         html { forced-color-adjust: none !important; }
         body {
@@ -901,15 +901,16 @@ class ClipboardHistorySidebarProvider {
             user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
         }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; display: flex; flex-direction: column; }
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 8px 4px 8px 6px; scrollbar-width: none; }
+        .main-content::-webkit-scrollbar { display: none; }
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
-        .captain-grid { display: grid; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
+        .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); }
         .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
-        .history-container { flex: 1; min-height: 400px; position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
+        .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
         /* 极致炫酷：三连金刃风暴 (Triple-Blade Gold Storm) */
         .history-container.storm::after {
@@ -940,10 +941,10 @@ class ClipboardHistorySidebarProvider {
             100% { transform: translate(50%, -50%) scale(1.3); opacity: 0; }
         }
 
-        .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
+        .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
-        .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
-        .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); margin-right: 2px; }
+        .history-item:hover { border-color: var(--primary-color); background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
         .item-info { display: none; }
@@ -989,7 +990,9 @@ class ClipboardHistorySidebarProvider {
         .flex-btn { flex: 1; }
 
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
-        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; }
+        .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
+        .scrollbar-outer-thumb:hover { width: 6px; right: 0; }
+
         .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
         .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
         .scrollbar-inner-thumb:hover { width: 6px; right: 0; }
