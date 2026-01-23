@@ -1318,23 +1318,49 @@ class ClipboardHistorySidebarProvider {
 
 async function searchHistoryCommand(historyManager) {
     const quickPick = vscode.window.createQuickPick();
-    quickPick.placeholder = '搜索剪贴板历史... (Enter 复制并粘贴)';
+    quickPick.placeholder = '搜索历史或输入命令 (如 :ppp)...';
+
+    // 定义全局双语命令菜单：仅保留导入导出核心
+    const META_COMMANDS = [
+        { label: '📦 全量导出', detail: 'Full Export (JSON)', cmd: 'qqq.exportHistory' },
+        { label: '📥 增量导入', detail: 'Incremental Import (JSON)', cmd: 'qqq.importHistory' }
+    ];
 
     const updateItems = (keyword) => {
-        // 初始加载 171 条，搜索时加载 100 条匹配项
-        const limit = keyword ? 100 : 171;
-        const results = historyManager.searchHistory(keyword, limit);
+        const kw = keyword.trim().toLowerCase();
+        let items = [];
 
-        quickPick.items = results.map(it => ({
-            label: it.preview,
-            description: formatTime(it.timestamp),
-            // 详情预览去除换行符，保证 QuickPick 显示整洁
-            detail: it.content.length > 100
-                ? it.content.slice(0, 100).replace(/\s+/g, ' ') + '...'
-                : it.content.replace(/\s+/g, ' '),
-            id: it.id,
-            content: it.content
-        }));
+        // 1. 处理指令匹配
+        if (!kw) {
+            items.push({ label: '--- 指令 COMMANDS ---', kind: vscode.QuickPickItemKind.Separator });
+            items.push(...META_COMMANDS);
+        } else {
+            const matchedCmds = META_COMMANDS.filter(c =>
+                c.label.toLowerCase().includes(kw) ||
+                c.detail.toLowerCase().includes(kw)
+            );
+            if (matchedCmds.length > 0) {
+                items.push({ label: '--- 匹配指令 MATCHED ---', kind: vscode.QuickPickItemKind.Separator });
+                items.push(...matchedCmds);
+            }
+        }
+
+        // 2. 处理历史记录
+        const limit = kw ? 100 : 171;
+        const results = historyManager.searchHistory(kw, limit);
+
+        if (results.length > 0) {
+            items.push({ label: '--- 历史记录 HISTORY ---', kind: vscode.QuickPickItemKind.Separator });
+            items.push(...results.map(it => ({
+                label: it.preview,
+                detail: ` ${formatTime(it.timestamp)}   📏 ${(it.size || 0).toLocaleString()}b`,
+                id: it.id,
+                content: it.content,
+                isHistory: true
+            })));
+        }
+
+        quickPick.items = items;
     };
 
     quickPick.onDidChangeValue(value => updateItems(value));
@@ -1342,10 +1368,18 @@ async function searchHistoryCommand(historyManager) {
     quickPick.onDidAccept(async () => {
         const selected = quickPick.selectedItems[0];
         if (selected) {
-            const node = historyManager.getItemById(selected.id);
-            if (node) {
-                await historyManager.copyToClipboard(node.content);
-                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+            if (selected.isHistory) {
+                const node = historyManager.getItemById(selected.id);
+                if (node) {
+                    await historyManager.copyToClipboard(node.content);
+                    await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+                }
+            } else if (selected.cmd) {
+                if (selected.cmd === 'qqq.qsc_all') {
+                    await qsc(0, historyManager);
+                } else if (selected.cmd !== 'qqq.clipboardHistory') {
+                    vscode.commands.executeCommand(selected.cmd);
+                }
             }
             quickPick.hide();
         }
@@ -1358,30 +1392,50 @@ async function searchHistoryCommand(historyManager) {
 }
 
 async function exportHistoryCommand(historyManager) {
-    const history = historyManager._toArrayAll();
-    const content = JSON.stringify(history, null, 2);
-    const doc = await vscode.workspace.openTextDocument({ content, language: 'json' });
-    await vscode.window.showTextDocument(doc);
-    vscode.window.showInformationMessage('历史记录已导出到新编辑器');
+    const uri = await vscode.window.showSaveDialog({
+        title: '全量导出剪贴板历史 (JSON)',
+        filters: { 'JSON': ['json'] },
+        defaultUri: vscode.Uri.file(`q4-history-${Date.now()}.json`)
+    });
+    if (!uri) return;
+
+    try {
+        const data = {
+            version: 4,
+            exportedAt: Date.now(),
+            history: historyManager._toArrayAll()
+        };
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(data, null, 2), 'utf8'));
+        vscode.window.showInformationMessage('📦 历史记录已全量导出');
+    } catch (e) {
+        vscode.window.showErrorMessage('导出失败: ' + e.message);
+    }
 }
 
 async function importHistoryCommand(historyManager) {
-    const input = await vscode.window.showInputBox({ prompt: '请将导出的 JSON 历史记录粘贴到此处' });
-    if (!input) return;
+    const uris = await vscode.window.showOpenDialog({
+        title: '增量导入剪贴板历史 (JSON)',
+        canSelectMany: false,
+        filters: { 'JSON': ['json'] }
+    });
+    if (!uris || !uris[0]) return;
 
     try {
-        const imported = JSON.parse(input);
-        const arr = Array.isArray(imported) ? imported : (imported.history || []);
+        const buf = await vscode.workspace.fs.readFile(uris[0]);
+        const parsed = JSON.parse(buf.toString());
+        const arr = Array.isArray(parsed) ? parsed : (parsed.history || []);
+
         let count = 0;
         for (const item of arr) {
             if (item.content) {
+                // 内部 addToHistory 会自动进行 MD5 哈希查重，实现“增量”
                 await historyManager.addToHistory(item.content);
                 count++;
             }
         }
-        vscode.window.showInformationMessage(`成功导入 ${count} 条记录`);
+        vscode.window.showInformationMessage(`📥 成功增量导入 ${count} 条记录`);
     } catch (e) {
-        vscode.window.showErrorMessage('导入失败：无效的 JSON 格式');
+        vscode.window.showErrorMessage('导入失败: ' + e.message);
     }
 }
 
@@ -1452,7 +1506,7 @@ class StatusBarManager {
             100
         );
 
-        this._statusBarItem.command = 'qqq.searchHistory';
+        this._statusBarItem.command = 'qqq.clipboardHistory';
         this._statusBarItem.tooltip = '点击搜索/粘贴剪贴板历史';
         this._updateTimer = null;
 
@@ -1584,7 +1638,7 @@ function activate(context) {
             });
             if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
         }),
-        vscode.commands.registerCommand('qqq.searchHistory', () => searchHistoryCommand(historyManager)),
+        vscode.commands.registerCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.clearHistory', () => clearHistoryCommand(historyManager)),

@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.56.1",
+  "version": "15.56.2",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -15,7 +15,7 @@
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
     "onCommand:qqq.cleanUp",
-    "onCommand:qqq.searchHistory",
+    "onCommand:qqq.clipboardHistory",
     "onCommand:qqq.exportDoc",
     "onCommand:qqq.exportZip"
   ],
@@ -275,7 +275,7 @@
         "title": "qqq: clean up"
       },
       {
-        "command": "qqq.searchHistory",
+        "command": "qqq.clipboardHistory",
         "title": "qqq: 🔍 搜索并粘贴剪贴板历史"
       },
       {
