@@ -156,11 +156,10 @@ function formatTime(timestamp) {
     const t = Number(timestamp) || now;
     const diff = now - t;
 
-    if (diff < CONSTANTS.MS_PER_MINUTE) return '刚刚';
+    if (diff < CONSTANTS.MS_PER_MINUTE) return `${Math.floor(diff / 1000)}秒前`;
     if (diff < CONSTANTS.MS_PER_HOUR) return `${Math.floor(diff / CONSTANTS.MS_PER_MINUTE)}分钟前`;
     if (diff < CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_HOUR)}小时前`;
     if (diff < 7 * CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_DAY)}天前`;
-    // ★ 消除过时警告
     return new Intl.DateTimeFormat('zh-CN').format(new Date(t));
 }
 
@@ -693,6 +692,7 @@ class ClipboardHistorySidebarProvider {
         this._updateTimer = null;
         this._watchdogTimer = null;
         this._lastHeartbeat = Date.now();
+        this._lastAudioIdx = -1;
     }
 
     resolveWebviewView(webviewView) {
@@ -713,8 +713,23 @@ class ClipboardHistorySidebarProvider {
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
+                        // 1. 随机音效逻辑 (不连续重复，且第一时间触发)
+                        let audioIdx;
+                        do { audioIdx = Math.floor(Math.random() * 7) + 1; } while (audioIdx === this._lastAudioIdx);
+                        this._lastAudioIdx = audioIdx;
+
+                        const audioBase64 = this._getKopeAudioBase64(audioIdx);
+                        if (audioBase64) {
+                            this._postMessage({ command: 'playAudio', base64: audioBase64 });
+                        }
+
+                        // 2. 执行物理复制
                         await this._historyManager.copyToClipboard(node.content);
-                        vscode.window.setStatusBarMessage('已复制到剪切板', 2000);
+
+                        // 3. 弹出通知 (前47个字符，11秒消失逻辑)
+                        const preview = node.content.length > 47 ? node.content.slice(0, 47) : node.content;
+                        vscode.window.showInformationMessage(`已复制：${preview}`);
+                        vscode.window.setStatusBarMessage(`已复制：${preview}`, 11000);
                     }
                     break;
                 }
@@ -830,6 +845,13 @@ class ClipboardHistorySidebarProvider {
         } catch { return ''; }
     }
 
+    _getKopeAudioBase64(idx) {
+        try {
+            const p = path.join(this._context.extensionPath, "assets", "kope", `${idx}.mp3`);
+            return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '';
+        } catch { return ''; }
+    }
+
     _postMessage(msg) {
         if (!this._view) return;
         try {
@@ -883,22 +905,23 @@ class ClipboardHistorySidebarProvider {
 
         .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
 
-        /* 极致白金高能脉冲动画 (Quantum Burst) */
+        /* 极致暗金斜向脉冲 (Diagonal Gold Pulse) */
         .history-container.storm::after {
             content: '';
             position: absolute;
-            top: 0; left: 0; right: 0; height: 100px;
+            top: -50%; left: -50%; right: -50%; bottom: -50%;
             pointer-events: none;
             z-index: 100;
-            background: linear-gradient(180deg, rgba(255,255,255,0.9), var(--cyan), transparent);
-            filter: blur(8px);
+            background: linear-gradient(45deg, transparent, var(--yellow), transparent);
+            background-size: 200% 200%;
             opacity: 0;
-            animation: burst-down 0.4s ease-out forwards;
+            animation: diagonal-burst 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
         }
-        @keyframes burst-down {
-            0% { transform: translateY(-100%) scaleY(0.5); opacity: 0; }
-            20% { opacity: 1; }
-            100% { transform: translateY(300%) scaleY(2); opacity: 0; }
+        @keyframes diagonal-burst {
+            0% { transform: translate(-35%, 35%); opacity: 0; }
+            30% { opacity: 0.8; }
+            70% { opacity: 0.8; }
+            100% { transform: translate(35%, -35%); opacity: 0; }
         }
 
         .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
@@ -907,7 +930,8 @@ class ClipboardHistorySidebarProvider {
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
-        .item-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .item-info { display: none; justify-content: flex-start; align-items: center; margin-bottom: 4px; }
+        .history-item:hover .item-info { display: flex; }
         .item-time { font-size: 0.7em; color: var(--base01); }
         .item-size { font-size: 0.7em; color: var(--base01); opacity: 0.7; font-family: monospace; }
         .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
@@ -1024,16 +1048,20 @@ class ClipboardHistorySidebarProvider {
                     const info = document.createElement('div');
                     info.className = 'item-info';
 
+                    const size = document.createElement('span');
+                    size.className = 'item-size';
+                    size.textContent = (item.size || 0).toLocaleString() + ' _b';
+
+                    const gap = document.createElement('span');
+                    gap.innerHTML = '&nbsp;&nbsp;&nbsp;'; // 3个空格
+
                     const time = document.createElement('span');
                     time.className = 'item-time';
                     time.textContent = item.time;
 
-                    const size = document.createElement('span');
-                    size.className = 'item-size';
-                    size.textContent = (item.size || 0).toLocaleString() + 'b';
-
-                    info.appendChild(time);
                     info.appendChild(size);
+                    info.appendChild(gap);
+                    info.appendChild(time);
 
                     const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
 
@@ -1042,16 +1070,14 @@ class ClipboardHistorySidebarProvider {
                     const btnPin = document.createElement('button');
                     btnPin.className = 'action-mini-btn';
                     btnPin.dataset.action = 'pin';
-                    btnPin.textContent = item.pinned ? '📍 取消置顶' : '📌 置顶';
+                    btnPin.textContent = item.pinned ? '📍' : '📌';
 
-                    const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️ 删除';
+                    const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️';
 
                     actions.appendChild(btnPin);
                     actions.appendChild(btnDel);
-                    info.appendChild(time);
-                    info.appendChild(size);
-                    div.appendChild(info);
                     div.appendChild(prev);
+                    div.appendChild(info);
                     div.appendChild(actions);
                     frag.appendChild(div);
                 });
