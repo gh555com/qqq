@@ -384,7 +384,7 @@ class ClipboardHistoryManager {
         const arr = [];
         let cur = this._head;
         while (cur) {
-            arr.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, hash: cur.hash });
+            arr.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0, hash: cur.hash });
             cur = cur.next;
         }
         this._snapshotAll = arr;
@@ -397,7 +397,7 @@ class ClipboardHistoryManager {
         const out = [];
         let cur = this._head;
         while (cur && out.length < limit) {
-            out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview });
+            out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0 });
             cur = cur.next;
         }
 
@@ -423,7 +423,7 @@ class ClipboardHistoryManager {
         let cur = this._head;
         while (cur && out.length < limit) {
             if (cur.content.toLowerCase().includes(needle)) {
-                out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview });
+                out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview, size: cur.size || 0 });
             }
             cur = cur.next;
         }
@@ -801,7 +801,10 @@ class ClipboardHistorySidebarProvider {
             --card-bg: var(--base2); --text-primary: var(--base00); --border-color: var(--base1);
         }
         html { forced-color-adjust: none !important; }
-        body { margin: 0; padding: 0; font-family: sans-serif; background: var(--background-color); color: var(--text-primary); overflow: hidden; }
+        body {
+            margin: 0; padding: 0; font-family: sans-serif; background: var(--background-color); color: var(--text-primary); overflow: hidden;
+            user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
+        }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
         .main-content { height: 100%; overflow-x: hidden; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
         .main-content::-webkit-scrollbar { display: none; }
@@ -898,6 +901,9 @@ class ClipboardHistorySidebarProvider {
             let currentHistory = [];
 
             function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
+
+            // 禁用右键菜单
+            window.addEventListener('contextmenu', e => e.preventDefault());
 
             function renderList(history) {
                 currentHistory = history || [];
