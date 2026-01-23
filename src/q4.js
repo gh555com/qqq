@@ -693,6 +693,7 @@ class ClipboardHistorySidebarProvider {
         this._watchdogTimer = null;
         this._lastHeartbeat = Date.now();
         this._lastAudioIdx = -1;
+        this._currentLimit = CONSTANTS.UI_HISTORY_LIMIT;
     }
 
     resolveWebviewView(webviewView) {
@@ -761,6 +762,11 @@ class ClipboardHistorySidebarProvider {
                         this.updateContent();
                     }
                     break;
+                case 'requestData':
+                    if (msg.limit) {
+                        this.updateContent(null, msg.limit);
+                    }
+                    break;
                 case 'clearAllHistory': {
                     const confirm = await vscode.window.showWarningMessage(
                         '确定要清空所有剪贴板历史吗？此操作不可恢复。',
@@ -807,10 +813,11 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    updateContent(reason) {
+    updateContent(reason, limit) {
         if (!this._view || !this._view.visible) return;
+        if (limit) this._currentLimit = limit;
         try {
-            const history = this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT).map(item => ({
+            const history = this._historyManager.getHistory(this._currentLimit).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
                 preview: item.preview,
@@ -893,17 +900,16 @@ class ClipboardHistorySidebarProvider {
             margin: 0; padding: 0; font-family: Tahoma, sans-serif; font-size: 13px; background: var(--background-color); color: var(--text-primary); overflow: hidden;
             user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
         }
-        .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
-        .main-content { height: 100%; overflow-x: hidden; overflow-y: scroll; padding: 12px; scrollbar-width: none; }
-        .main-content::-webkit-scrollbar { display: none; }
+        .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; display: flex; flex-direction: column; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
 
-        .section-title { font-size: 1.1em; font-weight: 700; margin: 20px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); }
-        .captain-grid { display: grid; gap: 8px; margin-bottom: 20px; }
-        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 0.9em; color: var(--text-primary); }
+        .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
+        .captain-grid { display: grid; gap: 8px; margin-bottom: 10px; flex-shrink: 0; }
+        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); }
         .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
-        .history-container { position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; overflow: hidden; }
+        .history-container { flex: 1; min-height: 400px; position: relative; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
         /* 极致炫酷：三连金刃风暴 (Triple-Blade Gold Storm) */
         .history-container.storm::after {
@@ -934,7 +940,7 @@ class ClipboardHistorySidebarProvider {
             100% { transform: translate(50%, -50%) scale(1.3); opacity: 0; }
         }
 
-        .history-list { max-height: 400px; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
+        .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 8px; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -943,7 +949,14 @@ class ClipboardHistorySidebarProvider {
         .item-info { display: none; }
         .item-time { font-size: 13px; color: var(--base2); }
         .item-size { font-size: 13px; color: var(--base2); font-family: Tahoma, sans-serif; }
-        .item-preview { font-size: 13px; font-family: Tahoma, sans-serif; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
+        .item-preview {
+            font-size: 13px; font-family: Tahoma, sans-serif;
+            white-space: pre-wrap; word-break: break-all;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 6;
+            -webkit-box-orient: vertical;
+        }
 
         /* 光标跟随提示框 */
         #tooltip {
@@ -1039,12 +1052,35 @@ class ClipboardHistorySidebarProvider {
             let selectedId = '';
             let selectedIndex = -1;
             let currentHistory = [];
-            let lastTopId = null;
+            let currentLimit = 0;
+            let batchSize = 20;
 
             function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
 
             // 禁用右键菜单
             window.addEventListener('contextmenu', e => e.preventDefault());
+
+            function initDynamicSizing() {
+                const containerH = el.historyContainer.clientHeight;
+                // 估算卡片平均高度：Tahoma 13px 6行约 110px，加上 padding 和间距取 120
+                batchSize = Math.max(10, Math.ceil(containerH / 120));
+                if (currentLimit === 0) {
+                    currentLimit = batchSize * 2;
+                    post('requestData', { limit: currentLimit });
+                }
+            }
+
+            el.historyList.onscroll = () => {
+                const list = el.historyList;
+                // 接近底部 100px 时扩容
+                if (list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
+                    if (currentHistory.length >= currentLimit) {
+                        currentLimit += batchSize;
+                        post('requestData', { limit: currentLimit });
+                    }
+                }
+                updateAllScrollbars();
+            };
 
             function renderList(history, triggerStorm) {
                 const newHistory = history || [];
@@ -1247,9 +1283,14 @@ class ClipboardHistorySidebarProvider {
             const upO = setupScrollbar(el.mainContent, el.outerScrollbar, el.outerThumb);
             const upI = setupScrollbar(el.historyList, el.innerScrollbar, el.innerThumb);
             function updateAllScrollbars() { upO(); upI(); }
-            window.onresize = updateAllScrollbars;
+            window.onresize = () => {
+                initDynamicSizing();
+                updateAllScrollbars();
+            };
 
-            post('refresh');
+            // 初始激活
+            setTimeout(initDynamicSizing, 100);
+            post('ready');
         })();
     </script>
 </body>
