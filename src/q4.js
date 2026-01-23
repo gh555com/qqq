@@ -945,10 +945,27 @@ class ClipboardHistorySidebarProvider {
 
         .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
-        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #5a5a5a; margin-right: 2px; }
-        .history-item:hover { border-color: var(--primary-color); background: #fffdfa; color: #000000; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); color: #000000; }
+        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
+        /* Hover：边框变粗、虚线、暗红，背景色不变 */
+        .history-item:hover { border: 3px dashed var(--red); color: #000000; }
+        /* 移除点击后的永久边框效果 */
+        .history-item.selected { color: #000000; }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
+
+        /* 卡片内扫光特效 */
+        .history-item.executing::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -150%; width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
+            z-index: 10;
+            pointer-events: none;
+            animation: card-flash 0.4s ease-out forwards;
+        }
+        @keyframes card-flash {
+            0% { left: -150%; }
+            100% { left: 150%; }
+        }
 
         .search-container { margin-bottom: 8px; flex-shrink: 0; }
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
@@ -1204,9 +1221,17 @@ class ClipboardHistorySidebarProvider {
             el.historyList.addEventListener('click', e => {
                 const btn = e.target.closest('button[data-action]');
                 const item = e.target.closest('.history-item');
+                if (!item) return;
+
+                const id = item.dataset.id;
+
+                // 触发卡片闪光特效
+                item.classList.remove('executing');
+                void item.offsetWidth; // 触发重绘
+                item.classList.add('executing');
+
                 if (btn) {
                     const action = btn.dataset.action;
-                    const id = item.dataset.id;
                     if (action === 'copy') post('copyToClipboard', { itemId: id });
                     if (action === 'paste') post('pasteToEditor', { itemId: id });
                     if (action === 'insert') post('insertToEditor', { itemId: id });
@@ -1215,10 +1240,9 @@ class ClipboardHistorySidebarProvider {
                     e.stopPropagation();
                     return;
                 }
-                if (item) {
-                    setSelectedById(item.dataset.id);
-                    post('copyToClipboard', { itemId: item.dataset.id });
-                }
+
+                setSelectedById(id);
+                post('copyToClipboard', { itemId: id });
             });
 
             document.addEventListener('click', e => {
