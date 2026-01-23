@@ -756,7 +756,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 case 'requestData':
                     if (msg.limit) {
-                        this.updateContent(null, msg.limit);
+                        this.updateContent(null, msg.limit, msg.keyword);
                     }
                     break;
                 case 'clearAllHistory': {
@@ -805,11 +805,11 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    updateContent(reason, limit) {
+    updateContent(reason, limit, keyword) {
         if (!this._view || !this._view.visible) return;
         if (limit) this._currentLimit = limit;
         try {
-            const history = this._historyManager.getHistory(this._currentLimit).map(item => ({
+            const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
                 preview: item.preview,
@@ -943,6 +943,11 @@ class ClipboardHistorySidebarProvider {
         .history-item:hover { border-color: var(--primary-color); background: #fffdfa; color: #000000; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); color: #000000; }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
+
+        .search-container { margin-bottom: 8px; flex-shrink: 0; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
+
         .item-info { display: none; }
         .item-time { font-size: 13px; color: var(--base2); }
         .item-size { font-size: 13px; color: var(--base2); font-family: Tahoma, sans-serif; }
@@ -1015,6 +1020,9 @@ class ClipboardHistorySidebarProvider {
                 <div class="cmd-btn" data-cmd="qqq.cleanUp">扫帚 Clean Up</div>
             </div>
             <div class="section-title">Passed by</div>
+            <div class="search-container">
+                <input type="text" class="search-input" id="searchBox" placeholder="搜索历史记录..." spellcheck="false">
+            </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
                     <div class="empty-hint">加载中...</div>
@@ -1037,6 +1045,7 @@ class ClipboardHistorySidebarProvider {
                 historyContainer: document.getElementById('historyContainer'),
                 historyList: document.getElementById('historyList'),
                 tooltip: document.getElementById('tooltip'),
+                searchBox: document.getElementById('searchBox'),
                 btnRefresh: document.getElementById('btnRefresh'),
                 btnClear: document.getElementById('btnClear'),
                 btnPlay: document.getElementById('btnPlayAudio'),
@@ -1065,9 +1074,15 @@ class ClipboardHistorySidebarProvider {
                 batchSize = Math.max(10, Math.ceil(containerH / 120));
                 if (currentLimit === 0) {
                     currentLimit = batchSize * 2;
-                    post('requestData', { limit: currentLimit });
+                    post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                 }
             }
+
+            el.searchBox.oninput = () => {
+                // 搜索时重置滚动位置
+                el.historyList.scrollTop = 0;
+                post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
+            };
 
             el.historyList.onscroll = () => {
                 const list = el.historyList;
@@ -1075,7 +1090,7 @@ class ClipboardHistorySidebarProvider {
                 if (list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
                     if (currentHistory.length >= currentLimit) {
                         currentLimit += batchSize;
-                        post('requestData', { limit: currentLimit });
+                        post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                     }
                 }
                 updateAllScrollbars();
