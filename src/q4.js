@@ -1052,10 +1052,6 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-            <div class="btn-group">
-                <button class="action-mini-btn flex-btn" id="btnRefresh">🔄 刷新</button>
-                <button class="action-mini-btn flex-btn" id="btnClear">🗑️ 清空</button>
-            </div>
             <div class="footer-hint">qqq 领航员</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
@@ -1069,8 +1065,6 @@ class ClipboardHistorySidebarProvider {
                 historyList: document.getElementById('historyList'),
                 tooltip: document.getElementById('tooltip'),
                 searchBox: document.getElementById('searchBox'),
-                btnRefresh: document.getElementById('btnRefresh'),
-                btnClear: document.getElementById('btnClear'),
                 btnPlay: document.getElementById('btnPlayAudio'),
                 btnStop: document.getElementById('btnStopAudio'),
                 mainContent: document.getElementById('mainContent'),
@@ -1250,8 +1244,6 @@ class ClipboardHistorySidebarProvider {
                 if (cmdBtn) post('executeCommand', { cmd: cmdBtn.dataset.cmd });
             });
 
-            el.btnRefresh.onclick = () => post('refresh');
-            el.btnClear.onclick = () => post('clearAllHistory');
             el.btnPlay.onclick = () => post('executeCommand', { cmd: 'qqq.savorMoments' });
             el.btnStop.onclick = stopAudio;
 
@@ -1348,9 +1340,8 @@ class ClipboardHistorySidebarProvider {
 
 async function searchHistoryCommand(historyManager) {
     const quickPick = vscode.window.createQuickPick();
-    quickPick.placeholder = '搜索历史或输入命令 (如 :ppp)...';
+    quickPick.placeholder = '键入搜索';
 
-    // 定义全局双语命令菜单：仅保留导入导出核心
     const META_COMMANDS = [
         { label: '📦 全量导出', detail: 'Full Export (JSON)', cmd: 'qqq.exportHistory' },
         { label: '📥 增量导入', detail: 'Incremental Import (JSON)', cmd: 'qqq.importHistory' }
