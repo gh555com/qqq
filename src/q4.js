@@ -765,18 +765,6 @@ class ClipboardHistorySidebarProvider {
                         this.updateContent(null, msg.limit, msg.keyword);
                     }
                     break;
-                case 'clearAllHistory': {
-                    const confirm = await vscode.window.showWarningMessage(
-                        '确定要清空所有剪贴板历史吗？此操作不可恢复。',
-                        { modal: true },
-                        '确定清空'
-                    );
-                    if (confirm === '确定清空') {
-                        await qsc(2, this._historyManager);
-                        this.updateContent();
-                    }
-                    break;
-                }
                 case 'refresh':
                     this.updateContent();
                     break;
@@ -1010,9 +998,6 @@ class ClipboardHistorySidebarProvider {
         .player-controls { display: flex; gap: 10px; }
         .player-btn { cursor: pointer; }
 
-        .btn-group { display: flex; gap: 8px; margin-bottom: 20px; }
-        .flex-btn { flex: 1; }
-
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
         .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
         .scrollbar-outer-thumb:hover { width: 6px; right: 0; }
@@ -1040,7 +1025,6 @@ class ClipboardHistorySidebarProvider {
                 <div class="cmd-btn" data-cmd="qqq.q1">📋 Paste Everything (F2)</div>
                 <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
                 <div class="cmd-btn" data-cmd="qqq.downloadVideosFromUrl">🎥 Insert Videos</div>
-                <div class="cmd-btn" data-cmd="qqq.cleanUp">扫帚 Clean Up</div>
             </div>
             <div class="section-title">Passed by</div>
             <div class="search-container">
@@ -1460,20 +1444,6 @@ async function importHistoryCommand(historyManager) {
     }
 }
 
-async function clearHistoryCommand(historyManager) {
-    const confirm = await vscode.window.showWarningMessage(
-        '确定要执行清空操作吗？此操作不可恢复。',
-        { modal: true },
-        '确定清空'
-    );
-
-    if (confirm === '确定清空') {
-        // 默认执行 a=2 (清空剪切板)
-        await qsc(2, historyManager);
-        vscode.window.showInformationMessage('剪切板历史已清空');
-    }
-}
-
 function showStatsCommand(historyManager) {
     const snap = historyManager.getStatsSnapshot();
 
@@ -1662,13 +1632,8 @@ function activate(context) {
         vscode.commands.registerCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.clearHistory', () => clearHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.showStats', () => showStatsCommand(historyManager)),
         vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager)),
-
-        vscode.commands.registerCommand('qqq.refreshSidebar', () => {
-            if (sidebarProvider) sidebarProvider.refresh();
-        }),
 
         vscode.commands.registerCommand('qqq.pasteLastItem', async () => {
             const h = historyManager.getHistory(1);
