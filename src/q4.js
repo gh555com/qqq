@@ -890,7 +890,7 @@ class ClipboardHistorySidebarProvider {
         }
         html { forced-color-adjust: none !important; }
         body {
-            margin: 0; padding: 0; font-family: sans-serif; background: var(--background-color); color: var(--text-primary); overflow: hidden;
+            margin: 0; padding: 0; font-family: Tahoma, sans-serif; font-size: 13px; background: var(--background-color); color: var(--text-primary); overflow: hidden;
             user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
         }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; }
@@ -930,11 +930,28 @@ class ClipboardHistorySidebarProvider {
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
-        .item-info { display: none; justify-content: flex-start; align-items: center; margin-bottom: 4px; }
-        .history-item:hover .item-info { display: flex; }
-        .item-time { font-size: 0.7em; color: var(--base01); }
-        .item-size { font-size: 0.7em; color: var(--base01); opacity: 0.7; font-family: monospace; }
-        .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
+        .item-info { display: none; }
+        .item-time { font-size: 13px; color: var(--base2); }
+        .item-size { font-size: 13px; color: var(--base2); font-family: Tahoma, sans-serif; }
+        .item-preview { font-size: 13px; font-family: Tahoma, sans-serif; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
+
+        /* 光标跟随提示框 */
+        #tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: rgb(35, 30, 0); /* 近乎黑色的土黄色，B=0 */
+            color: var(--base2);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: Tahoma, sans-serif;
+            font-size: 13px;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            white-space: nowrap;
+            border: 1px solid var(--primary-color);
+            transform: translateX(-50%); /* 水平居中 */
+        }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
 
         .action-mini-btn { padding: 2px 8px; font-size: 0.75em; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); }
@@ -989,6 +1006,7 @@ class ClipboardHistorySidebarProvider {
             <div class="footer-hint">qqq 领航员</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
+        <div id="tooltip"></div>
     </div>
     <script nonce="${nonce}">
         (function() {
@@ -996,6 +1014,7 @@ class ClipboardHistorySidebarProvider {
             const el = {
                 historyContainer: document.getElementById('historyContainer'),
                 historyList: document.getElementById('historyList'),
+                tooltip: document.getElementById('tooltip'),
                 btnRefresh: document.getElementById('btnRefresh'),
                 btnClear: document.getElementById('btnClear'),
                 btnPlay: document.getElementById('btnPlayAudio'),
@@ -1045,23 +1064,18 @@ class ClipboardHistorySidebarProvider {
                     div.dataset.id = item.id;
                     div.dataset.index = idx;
 
-                    const info = document.createElement('div');
-                    info.className = 'item-info';
-
-                    const size = document.createElement('span');
-                    size.className = 'item-size';
-                    size.textContent = (item.size || 0).toLocaleString() + ' _b';
-
-                    const gap = document.createElement('span');
-                    gap.innerHTML = '&nbsp;&nbsp;&nbsp;'; // 3个空格
-
-                    const time = document.createElement('span');
-                    time.className = 'item-time';
-                    time.textContent = item.time;
-
-                    info.appendChild(size);
-                    info.appendChild(gap);
-                    info.appendChild(time);
+                    // 绑定光标跟随逻辑
+                    div.onmouseenter = (e) => {
+                        el.tooltip.innerHTML = item.time;
+                        el.tooltip.style.display = 'block';
+                    };
+                    div.onmousemove = (e) => {
+                        el.tooltip.style.left = e.clientX + 'px';
+                        el.tooltip.style.top = (e.clientY + 22) + 'px';
+                    };
+                    div.onmouseleave = () => {
+                        el.tooltip.style.display = 'none';
+                    };
 
                     const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
 
@@ -1072,12 +1086,14 @@ class ClipboardHistorySidebarProvider {
                     btnPin.dataset.action = 'pin';
                     btnPin.textContent = item.pinned ? '📍' : '📌';
 
-                    const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️';
+                    const btnDel = document.createElement('button');
+                    btnDel.className = 'action-mini-btn';
+                    btnDel.dataset.action = 'delete';
+                    btnDel.textContent = '🗑️ ' + (item.size || 0).toLocaleString();
 
                     actions.appendChild(btnPin);
                     actions.appendChild(btnDel);
                     div.appendChild(prev);
-                    div.appendChild(info);
                     div.appendChild(actions);
                     frag.appendChild(div);
                 });
