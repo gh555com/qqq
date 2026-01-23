@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.56.9",
+  "version": "15.56.10",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -14,7 +14,7 @@
     "onCommand:qqq.q2",
     "onCommand:qqq.pure",
     "onCommand:qqq.allSettings",
-    "onCommand:qqq.cleanUp",
+    "onCommand:qqq.weave",
     "onCommand:qqq.clipboardHistory",
     "onCommand:qqq.exportDoc",
     "onCommand:qqq.exportZip"
@@ -271,8 +271,8 @@
         "title": "qqq: all settings"
       },
       {
-        "command": "qqq.cleanUp",
-        "title": "qqq: clean up"
+        "command": "qqq.weave",
+        "title": "qqq: weave"
       },
       {
         "command": "qqq.clipboardHistory",

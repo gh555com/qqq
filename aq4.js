@@ -480,7 +480,7 @@ class SidebarWebViewProvider {
                 <div class="cmd-btn" onclick="exec('qqq.q1')"><span>📋</span> <span>Paste everything ("Ctrl+V" or "F2")</span></div>
                 <div class="cmd-btn" onclick="exec('qqq.q2')"><span>🌍</span> <span>Roam everywhere ("Tab" or "F6")</span></div>
                 <div class="cmd-btn" onclick="exec('qqq.downloadVideosFromUrl')"><span>🎥</span> <span>insert Videos From Url</span></div>
-                <div class="cmd-btn" onclick="exec('qqq.cleanUp')"><span>🧹</span> <span>clean up</span></div>
+                <div class="cmd-btn" onclick="exec('qqq.weave')"><span>🧹</span> <span>weave</span></div>
                 <div class="cmd-btn" onclick="exec('qqq.exportDoc')"><span>📄</span> <span>exportDoc</span></div>
                 <div class="cmd-btn" onclick="exec('qqq.pure')"><span>💎</span> <span>Pure</span></div>
                 <div class="cmd-btn" onclick="exec('qqq.exportZip')"><span>📦</span> <span>exportZip</span></div>
