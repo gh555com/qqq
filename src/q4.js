@@ -140,7 +140,7 @@ function estimateBytes(obj) {
     try {
         const mp = getMsgpack();
         if (mp) return mp.encode(obj).length;
-        return Buffer.byteLength(JSON.stringify(obj), 'utf8');
+        return 0; // Msgpack 缺失时，不再尝试 JSON 估算
     } catch {
         return 0;
     }
@@ -200,6 +200,9 @@ class ClipboardHistoryManager {
             version: -1,
             uiList: null,
             uiBytes: 0,
+            lastSearchKey: '',
+            searchList: null,
+            searchBytes: 0,
             maxBytes: 25 * 1024 * 1024,
         };
 
@@ -295,6 +298,7 @@ class ClipboardHistoryManager {
                     id: it.id || randomId(),
                     hash: it.hash || md5Hex(it.content),
                     preview: it.preview || makePreview(it.content),
+                    size: it.size || Buffer.byteLength(it.content, 'utf8'),
                     prev: null, next: null
                 };
                 if (!this._hashMap.has(node.hash)) {
@@ -321,6 +325,10 @@ class ClipboardHistoryManager {
         this._snapshotAll = null;
         this._cache.version = -1;
         this._cache.uiList = null;
+        this._cache.uiBytes = 0;
+        this._cache.searchList = null;
+        this._cache.searchBytes = 0;
+        this._cache.lastSearchKey = '';
     }
 
     _resetInMemory() {
@@ -392,8 +400,41 @@ class ClipboardHistoryManager {
             out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview });
             cur = cur.next;
         }
-        this._cache.uiList = out;
-        this._cache.version = this._version;
+
+        // 激活内存检查：熔断机制，防止超大缓存撑爆内存
+        const bytes = estimateBytes(out);
+        if (bytes <= this._cache.maxBytes) {
+            this._cache.uiList = out;
+            this._cache.version = this._version;
+            this._cache.uiBytes = bytes;
+        }
+        return out;
+    }
+
+    searchHistory(keyword, limit = CONSTANTS.UI_HISTORY_LIMIT) {
+        const kw = String(keyword || '').trim();
+        if (!kw) return this.getHistory(limit);
+
+        const cacheKey = `${this._version}|${limit}|${kw.toLowerCase()}`;
+        if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) return this._cache.searchList;
+
+        const needle = kw.toLowerCase();
+        const out = [];
+        let cur = this._head;
+        while (cur && out.length < limit) {
+            if (cur.content.toLowerCase().includes(needle)) {
+                out.push({ id: cur.id, content: cur.content, timestamp: cur.timestamp, preview: cur.preview });
+            }
+            cur = cur.next;
+        }
+
+        // 搜索结果缓存 + 内存防御
+        const bytes = estimateBytes(out);
+        if (bytes <= this._cache.maxBytes) {
+            this._cache.searchList = out;
+            this._cache.searchBytes = bytes;
+            this._cache.lastSearchKey = cacheKey;
+        }
         return out;
     }
 
@@ -414,7 +455,16 @@ class ClipboardHistoryManager {
                 existed.preview = makePreview(text);
                 this._moveToHead(existed);
             } else {
-                const node = { id: randomId(), content: text, timestamp: Date.now(), preview: makePreview(text), hash, prev: null, next: null };
+                const node = {
+                    id: randomId(),
+                    content: text,
+                    timestamp: Date.now(),
+                    preview: makePreview(text),
+                    size: Buffer.byteLength(text, 'utf8'),
+                    hash,
+                    prev: null,
+                    next: null
+                };
                 this._insertHead(node);
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
@@ -684,7 +734,8 @@ class ClipboardHistorySidebarProvider {
             const history = this._historyManager.getHistory(CONSTANTS.UI_HISTORY_LIMIT).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
-                preview: item.preview
+                preview: item.preview,
+                size: item.size || 0
             }));
 
             const audioBase64 = this._getAudioBase64();
@@ -730,7 +781,7 @@ class ClipboardHistorySidebarProvider {
             `default-src 'none'`,
             `img-src ${this._view.webview.cspSource} data:`,
             `media-src ${this._view.webview.cspSource} data:`,
-            `style-src ${this._view.webview.cspSource} 'nonce-${nonce}'`,
+            `style-src ${this._view.webview.cspSource} 'nonce-${nonce}' 'unsafe-inline'`,
             `script-src 'nonce-${nonce}'`,
             `font-src ${this._view.webview.cspSource}`,
         ].join('; ');
@@ -767,7 +818,9 @@ class ClipboardHistorySidebarProvider {
         .history-item { background: #fff; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: var(--text-primary); }
         .history-item:hover { border-color: var(--primary-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .history-item.selected { outline: 2px solid var(--primary-color); border-color: var(--primary-color); }
+        .item-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
         .item-time { font-size: 0.7em; color: var(--base01); }
+        .item-size { font-size: 0.7em; color: var(--base01); opacity: 0.7; font-family: monospace; }
         .item-preview { font-size: 0.85em; white-space: pre-wrap; word-break: break-all; max-height: 4.5em; overflow: hidden; }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
 
@@ -850,7 +903,7 @@ class ClipboardHistorySidebarProvider {
                 currentHistory = history || [];
                 el.historyList.innerHTML = '';
                 if (currentHistory.length === 0) {
-                    el.historyList.innerHTML = '<div style="text-align:center;padding:20px;opacity:0.5;">暂无记录</div>';
+                    el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
                     selectedId = '';
                     selectedIndex = -1;
                     return;
@@ -864,7 +917,20 @@ class ClipboardHistorySidebarProvider {
                     div.dataset.id = item.id;
                     div.dataset.index = idx;
 
-                    const time = document.createElement('div'); time.className = 'item-time'; time.textContent = item.time;
+                    const info = document.createElement('div');
+                    info.className = 'item-info';
+
+                    const time = document.createElement('span');
+                    time.className = 'item-time';
+                    time.textContent = item.time;
+
+                    const size = document.createElement('span');
+                    size.className = 'item-size';
+                    size.textContent = (item.size || 0).toLocaleString() + 'b';
+
+                    info.appendChild(time);
+                    info.appendChild(size);
+
                     const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
 
                     const actions = document.createElement('div'); actions.className = 'item-actions';
@@ -874,7 +940,11 @@ class ClipboardHistorySidebarProvider {
                     const btnDel = document.createElement('button'); btnDel.className = 'action-mini-btn'; btnDel.dataset.action = 'delete'; btnDel.textContent = '🗑️ 删除';
 
                     actions.appendChild(btnCopy); actions.appendChild(btnPaste); actions.appendChild(btnInsert); actions.appendChild(btnDel);
-                    div.appendChild(time); div.appendChild(prev); div.appendChild(actions);
+                    info.appendChild(time);
+                    info.appendChild(size);
+                    div.appendChild(info);
+                    div.appendChild(prev);
+                    div.appendChild(actions);
                     frag.appendChild(div);
                 });
                 el.historyList.appendChild(frag);
@@ -1063,8 +1133,7 @@ async function searchHistoryCommand(historyManager) {
     const keyword = await vscode.window.showInputBox({ prompt: '输入搜索关键词' });
     if (!keyword) return;
 
-    const history = historyManager.getHistory(100);
-    const results = history.filter(it => it.content.toLowerCase().includes(keyword.toLowerCase()));
+    const results = historyManager.searchHistory(keyword, 100);
 
     if (results.length === 0) {
         vscode.window.showInformationMessage(`未找到包含 "${keyword}" 的记录`);
