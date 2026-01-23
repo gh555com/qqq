@@ -3168,7 +3168,7 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.openFileInRightGroup", global.withReady(openFileInRightGroupCommand)),
 		vscode.commands.registerCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
 		vscode.commands.registerCommand("qqq.renameFile", global.withReady(renameFileCommand)),
-		vscode.commands.registerCommand("qqq.cleanUp", global.withReady(() => {
+		vscode.commands.registerCommand("qqq.weave", global.withReady(() => {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		})),
 		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
