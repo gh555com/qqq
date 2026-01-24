@@ -804,10 +804,10 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'requestSavorAudio': {
-                    const base64 = this._getSavorAudio();
-                    if (base64) {
+                    const result = this._getSavorAudio();
+                    if (result && result.base64) {
                         const count = msg.mode === 'loop' ? -1 : (Math.floor(Math.random() * 5) + 2); // 2-6次
-                        this._postMessage({ command: 'playAudio', base64, count });
+                        this._postMessage({ command: 'playAudio', base64: result.base64, count, rate: result.rate });
                     }
                     break;
                 }
@@ -918,15 +918,19 @@ class ClipboardHistorySidebarProvider {
     _getSavorAudio() {
         const rand = Math.floor(Math.random() * 30);
         let audioPath;
+        let rate = 1.0;
         if (rand === 0) { // 1/30
             audioPath = path.join(this._context.extensionPath, "assets", "q.mp3");
+            rate = 1.0;
         } else { // 29/30
             const subRand = Math.floor(Math.random() * 3); // 0, 1, 2
             audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
+            rate = 0.5 + Math.random() * 0.2; // 0.5 to 0.7
         }
         try {
-            return fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
-        } catch { return ''; }
+            const base64 = fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
+            return { base64, rate };
+        } catch { return { base64: '', rate: 1.0 }; }
     }
 
     _getKopeAudioBase64(idx) {
@@ -1347,7 +1351,7 @@ class ClipboardHistorySidebarProvider {
                     }
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
-                    playAudio(m.base64, m.count);
+                    playAudio(m.base64, m.count, m.rate);
                 }
             });
 
@@ -1355,6 +1359,7 @@ class ClipboardHistorySidebarProvider {
             let currentAudio = null;
             let loopRemaining = 0;
             let playStartTime = 0;
+            let currentRate = 1.0;
 
             function updateSavorText() {
                 const elLabel = document.getElementById('ms-label');
@@ -1386,10 +1391,12 @@ class ClipboardHistorySidebarProvider {
                 updateSavorText();
                 document.querySelector('.icon-loop')?.classList.remove('spinning');
             }
-            function playAudio(base64, count) {
+            function playAudio(base64, count, rate) {
                 stopAudio();
                 loopRemaining = count || 1; // -1 为永久循环，正数为次数
+                currentRate = rate || 1.0;
                 const audio = new Audio('data:audio/mp3;base64,' + base64);
+                audio.playbackRate = currentRate;
                 currentAudio = audio;
                 playStartTime = Date.now();
 
@@ -1402,10 +1409,12 @@ class ClipboardHistorySidebarProvider {
                 audio.onended = () => {
                     if (loopRemaining === -1) {
                         audio.currentTime = 0;
+                        audio.playbackRate = currentRate;
                         audio.play();
                     } else if (loopRemaining > 1) {
                         loopRemaining--;
                         audio.currentTime = 0;
+                        audio.playbackRate = currentRate;
                         audio.play();
                     } else {
                         stopAudio();
