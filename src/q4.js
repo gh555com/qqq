@@ -1078,7 +1078,7 @@ class ClipboardHistorySidebarProvider {
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
         #savorCard:hover, #videoCard:hover { transform: none; }
-        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
+        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 2px; background: var(--primary-color); }
 
         .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; align-items: center; }
         .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-family: Tahoma, sans-serif; font-size: 13px; }
@@ -1094,7 +1094,7 @@ class ClipboardHistorySidebarProvider {
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
         #videoCard { height: 48px; overflow: visible; }
-        .input-box-wrapper { position: relative; width: 147px; height: 30px; flex-shrink: 0; }
+        .input-box-wrapper { position: relative; width: 155px; height: 30px; flex-shrink: 0; margin-left: -4px; }
         .inline-input {
             background: var(--base2);
             color: #000;
@@ -1283,7 +1283,7 @@ class ClipboardHistorySidebarProvider {
                 <div class="cmd-btn" id="videoCard">
                     <div class="btn-group">
                         <div class="input-box-wrapper">
-                            <input type="text" class="inline-input" id="videoInput" placeholder="Video Url" spellcheck="false">
+                            <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
                             <button id="btnVideoStart" title="Download"><span class="icon-play"></span></button>
                             <div class="error-tip" id="urlErrorTip">无效网址</div>
                         </div>
@@ -1301,7 +1301,7 @@ class ClipboardHistorySidebarProvider {
             </div>
             <div class="section-title">Passed by</div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="clipboardHistory" spellcheck="false">
+                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
             </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
