@@ -153,27 +153,15 @@ impl serde_json::ser::Formatter for PyFormatter {
     }
 }
 
-fn dumps_py(value: &PyV, ensure_ascii: bool) -> String {
+fn dumps_py(value: &PyV, _ensure_ascii: bool) -> String {
     let mut buf: Vec<u8> = Vec::new();
     let formatter = PyFormatter;
     let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
-    // Serialize with appropriate options
-    let _ = value.serialize(&mut ser);
-    let mut result = String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string());
-
-    // Apply ASCII escaping if needed
-    if ensure_ascii {
-        // Simple ASCII escaping for non-ASCII characters
-        result = result.chars().map(|c| {
-            if c.is_ascii() {
-                c.to_string()
-            } else {
-                format!("\\u{:04x}", c as u32)
-            }
-        }).collect();
+    if value.serialize(&mut ser).is_ok() {
+        String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
     }
-
-    result
 }
 
 // =============================================================================
@@ -1246,9 +1234,8 @@ fn daemon_mode() {
         let mut line_bytes: Vec<u8> = Vec::new();
         match reader.read_until(b'\n', &mut line_bytes) {
             Ok(0) => {
-                eprintln!("Daemon stdin EOF.");
-                thread::sleep(Duration::from_secs(1));
-                continue;
+                eprintln!("Daemon stdin EOF. Exiting.");
+                process::exit(0);
             }
             Ok(_) => {}
             Err(e) => {

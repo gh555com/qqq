@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
@@ -151,8 +151,14 @@ impl serde_json::ser::Formatter for PyFormatter {
 }
 
 fn dumps_py(value: &PyV, _ensure_ascii: bool) -> String {
-    // 简化：不再尝试模拟 Python 的 separators 细节，直接用标准 JSON 确保 100% 合法
-    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+    let mut buf: Vec<u8> = Vec::new();
+    let formatter = PyFormatter;
+    let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
+    if value.serialize(&mut ser).is_ok() {
+        String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    }
 }
 
 // =============================================================================
@@ -1397,12 +1403,12 @@ fn daemon_mode() {
     eprintln!("Daemon started. PID={}", process::id());
 
     let stdin = io::stdin();
-    let mut reader = io::BufReader::new(stdin.lock());
+    let mut reader = stdin.lock();
     let mut stdout = io::stdout();
 
     loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
+        let mut line_bytes: Vec<u8> = Vec::new();
+        match reader.read_until(b'\n', &mut line_bytes) {
             Ok(0) => {
                 // EOF
                 eprintln!("Daemon stdin EOF. Exiting.");
@@ -1416,6 +1422,7 @@ fn daemon_mode() {
             }
         }
 
+        let line = decode_utf8_ignore(&line_bytes);
         let line = line.trim();
         if line.is_empty() {
             continue;
