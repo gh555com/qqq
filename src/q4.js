@@ -668,8 +668,18 @@ class ClipboardHistoryManager {
             isWatching: this._isWatching,
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
             perf: { quarantinedFiles: this.perfStats.quarantinedFiles },
-            savor: this._getSavorStats()
+            savor: this._getSavorStats(),
+            paste: this._getPasteStats()
         };
+    }
+
+    _getPasteStats() {
+        const gs = this.context.globalState;
+        return gs.get('qqq_paste_stats', {
+            count: 0,
+            totalSize: 0,
+            firstUse: Date.now()
+        });
     }
 
     _getSavorStats() {
@@ -859,6 +869,7 @@ class ClipboardHistorySidebarProvider {
         try {
             const stats = this._historyManager.getStatsSnapshot();
             const savorStats = this._formatSavorStats(stats.savor);
+            const pasteStats = this._formatPasteStats(stats.paste);
 
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -872,14 +883,15 @@ class ClipboardHistorySidebarProvider {
 
             // ★ 极致纯净：移除 stats，只初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64, savorStats);
+                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats);
             }
 
             this._postMessage({
                 command: 'updateData',
                 history: history,
                 triggerStorm: (reason === 'add' || reason === 'pin'),
-                savorStats: savorStats
+                savorStats: savorStats,
+                pasteStats: pasteStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -906,6 +918,23 @@ class ClipboardHistorySidebarProvider {
         const avgStr = formatDuration(avgMs);
 
         return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}.`;
+    }
+
+    _formatPasteStats(s) {
+        if (!s) return '';
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0b';
+            const k = 1024;
+            const sizes = ['b', 'k', 'm', 'g', 't'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+        };
+
+        const sizeStr = formatBytes(s.totalSize || 0);
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const avgCount = (s.count / days).toFixed(1);
+
+        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times.`;
     }
 
     _getAudioBase64() {
@@ -947,7 +976,7 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(history, audioBase64, savorStats = '') {
+    _getHtml(history, audioBase64, savorStats = '', pasteStats = '') {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -1123,7 +1152,11 @@ class ClipboardHistorySidebarProvider {
                         <span id="ms-stats">${savorStats}</span>
                     </div>
                 </div>
-                <div class="cmd-btn" data-cmd="qqq.q1">📋 Paste Everything (F2)</div>
+                <div class="cmd-btn" data-cmd="qqq.q1">
+                    <div class="text-content">
+                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") + <span id="paste-stats">${pasteStats}</span>.
+                    </div>
+                </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
                 <div class="cmd-btn" data-cmd="qqq.downloadVideosFromUrl">🎥 Insert Videos</div>
             </div>
@@ -1153,7 +1186,8 @@ class ClipboardHistorySidebarProvider {
                 savorCard: document.getElementById('savorCard'),
                 btnSavorLoop: document.getElementById('btnSavorLoop'),
                 btnSavorStop: document.getElementById('btnSavorStop'),
-                ms: document.getElementById('ms'),
+                msStats: document.getElementById('ms-stats'),
+                pasteStats: document.getElementById('paste-stats'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1344,6 +1378,9 @@ class ClipboardHistorySidebarProvider {
                     if (m.savorStats !== undefined) {
                         currentStats = m.savorStats;
                         updateSavorText();
+                    }
+                    if (m.pasteStats !== undefined && el.pasteStats) {
+                        el.pasteStats.textContent = m.pasteStats;
                     }
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {

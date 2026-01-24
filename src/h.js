@@ -1796,6 +1796,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     const totalItems = folders.length + validFiles.length;
     let processedItems = 0;
     let skippedCount = 0;
+    let totalSize = 0;
 
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
@@ -1860,6 +1861,21 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
+                // 累加文件夹大小
+                try {
+                    const getFolderSize = (dir) => {
+                        let size = 0;
+                        const items = fs.readdirSync(dir);
+                        for (const it of items) {
+                            const p = path.join(dir, it);
+                            const st = fs.statSync(p);
+                            if (st.isDirectory()) size += getFolderSize(p);
+                            else size += st.size;
+                        }
+                        return size;
+                    };
+                    totalSize += getFolderSize(destFolder);
+                } catch { }
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
                     log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
@@ -1914,6 +1930,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const dest = path.join(targetDir, fname);
 
             fs.copyFileSync(f, dest);
+            try { totalSize += fs.statSync(dest).size; } catch { }
             if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
             copiedFiles.push(dest);
         } catch (e) {
@@ -1938,7 +1955,8 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         folders: copiedFolders,
         fingerprints: fingerprints,
         skippedCount: skippedCount,
-        totalRequested: totalItems
+        totalRequested: totalItems,
+        totalSize: totalSize
     };
 }
 
@@ -1996,23 +2014,27 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
-                    if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
-                        // ✅ 关键：内存截图也要走全局去重
-                        const finalPath = _tryGlobalDeduplicate(dest);
-                        const fp = computeFingerprint(finalPath);
+                    if (saved?.success && fs.existsSync(dest)) {
+                        const st = fs.statSync(dest);
+                        if (st.size > 0) {
+                            // ✅ 关键：内存截图也要走全局去重
+                            const finalPath = _tryGlobalDeduplicate(dest);
+                            const fp = computeFingerprint(finalPath);
+                            const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
 
-                        // ★ Register Transaction（使用规范化路径）
-                        if (transId) {
-                            const global = getGlobal();
-                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                            if (trans) {
-                                const normalizedPath = path.normalize(finalPath);
-                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
-                                await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                            // ★ Register Transaction（使用规范化路径）
+                            if (transId) {
+                                const global = getGlobal();
+                                const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                                if (trans) {
+                                    const normalizedPath = path.normalize(finalPath);
+                                    const newLanded = [...(trans.landedFiles || []), normalizedPath];
+                                    await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
+                                }
                             }
-                        }
 
-                        return { type: "image", path: finalPath, fingerprint: fp };
+                            return { type: "image", path: finalPath, fingerprint: fp, totalSize: finalSize };
+                        }
                     }
                 }
             } catch (e) { }
