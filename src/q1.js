@@ -1,6 +1,6 @@
 // src/q1.js
 const global = require('./global');
-const { savePasteStats, wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
+const { savePasteStats, saveVideoStats, wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
 const h = require('./h');
 const Qvideo = require('./qvideo');
 const vscode = require("vscode");
@@ -2559,7 +2559,11 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 						}
 
 						// ★ 统一上报统计
-						savePasteStats(totalSizeForStats);
+						if (taskType === 'video') {
+							saveVideoStats(totalSizeForStats);
+						} else {
+							savePasteStats(totalSizeForStats);
+						}
 					} else {
 						const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
 						if (trans) await TransactionManager.rollback(trans);

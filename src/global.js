@@ -2539,6 +2539,28 @@ function savePasteStats(sizeInBytes) {
 	}
 }
 
+// 保存视频下载统计数据的辅助函数
+function saveVideoStats(sizeInBytes) {
+	if (extensionContext) {
+		const stats = extensionContext.globalState.get("qqq_video_stats", {
+			count: 0,
+			totalSize: 0,
+			firstUse: Date.now()
+		});
+
+		stats.count += 1;
+		stats.totalSize += (sizeInBytes || 0);
+
+		if (!stats.firstUse) stats.firstUse = Date.now();
+
+		extensionContext.globalState.update("qqq_video_stats", stats);
+
+		if (typeof updateStatusBarNow === 'function') {
+			updateStatusBarNow();
+		}
+	}
+}
+
 function getEngineTryOrder(pref) {
 	// ★ 核心真理：定义不同偏好下的回退顺序
 	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
@@ -2893,6 +2915,7 @@ module.exports = {
 
 	// ★ 核心逻辑导出
 	savePasteStats,
+	saveVideoStats,
 	wq,
 	TransactionManager,
 	TaskCounter,
