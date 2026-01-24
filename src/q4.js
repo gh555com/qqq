@@ -884,7 +884,7 @@ class ClipboardHistorySidebarProvider {
             user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
         }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; display: flex; flex-direction: column; }
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 8px 4px 8px 6px; scrollbar-width: none; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 8px 4px 8px 4px; scrollbar-width: none; }
         .main-content::-webkit-scrollbar { display: none; }
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
