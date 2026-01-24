@@ -933,9 +933,10 @@ class ClipboardHistorySidebarProvider {
         .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
         /* Hover：边框变虚线，颜色变红，文字变黑，边框宽度保持不变，防止布局抖动 */
         .history-item:hover { border-color: var(--red); border-style: dashed; color: #000000; }
-        /* 移除点击后的永久边框效果 */
-        .history-item.selected { color: #000000; }
-        .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); }
+        /* 选中项（最后一次点击）使用淡雅橙色 */
+        .history-item.selected { color: #e67e22; }
+        /* 置顶项文字永固黑色，优先级高于选中色 */
+        .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); color: #000000 !important; }
 
         /* 卡片内扫光特效 */
         .history-item.executing::before {
