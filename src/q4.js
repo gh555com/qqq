@@ -1277,7 +1277,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
+                        &nbsp;Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
@@ -1295,7 +1295,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">
                     <div class="text-content">
-                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span id="roam-stats">${roamStats}</span>
+                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Tab" or "F6") <span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
             </div>
