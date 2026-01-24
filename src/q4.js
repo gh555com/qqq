@@ -1060,31 +1060,35 @@ class ClipboardHistorySidebarProvider {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-play { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
-        #videoCard { height: 48px; }
-        .input-box-wrapper { position: relative; width: 132px; height: 24px; flex-shrink: 0; }
+        #videoCard { height: 48px; overflow: visible; }
+        .input-box-wrapper { position: relative; width: 147px; height: 30px; flex-shrink: 0; }
         .inline-input {
-            background: var(--vscode-input-background, #fff);
-            color: var(--vscode-input-foreground, #000);
+            background: var(--base2);
+            color: #000;
             border: 1px solid var(--vscode-input-border, #d3c6aa);
             border-radius: 2px;
-            padding: 2px 24px 2px 6px;
+            padding: 2px 36px 2px 6px;
             font-size: 14px;
-            height: 24px;
+            height: 30px;
             width: 100%;
             outline: none;
             box-sizing: border-box;
             font-family: Tahoma, sans-serif;
         }
-        .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
+        .inline-input::selection { background: #FFD302; color: #000; }
+        .inline-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
+        .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); font-size: 13px; }
 
         #btnVideoStart {
             position: absolute;
-            right: 2px;
+            right: -2px;
             top: 50%;
-            transform: translateY(-50%);
+            transform: translateY(calc(-50% + 2px));
             background: transparent;
             border: none;
             cursor: pointer;
@@ -1096,32 +1100,25 @@ class ClipboardHistorySidebarProvider {
             opacity: 0.7;
         }
         #btnVideoStart:hover { opacity: 1; }
-        #btnVideoStart .icon-play { background-size: contain; width: 12px; height: 12px; }
+        #btnVideoStart .icon-play { background-size: contain; width: 25px; height: 25px; }
 
         .error-tip {
             position: absolute;
-            top: -24px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--red);
-            color: #fff;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 11px;
+            top: 110%;
+            left: 0;
+            background: #f8d7da;
+            color: #721c24;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: Tahoma, sans-serif;
+            font-size: 13px;
             white-space: nowrap;
             display: none;
             z-index: 100;
+            border: 1px solid #f5c6cb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .error-tip::after {
-            content: '';
-            position: absolute;
-            bottom: -4px;
-            left: 50%;
-            margin-left: -4px;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 4px solid var(--red);
-        }
+        .error-tip::after { display: none; }
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -1185,6 +1182,8 @@ class ClipboardHistorySidebarProvider {
 
         .search-container { margin-bottom: 8px; flex-shrink: 0; }
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-input::selection { background: #FFD302; color: #000; }
+        .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
         .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
 
         .item-info { display: none; }
@@ -1250,13 +1249,13 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
+                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
                     <div class="btn-group">
                         <div class="input-box-wrapper">
-                            <input type="text" class="inline-input" id="videoInput" placeholder="insert Videos From Url" spellcheck="false">
+                            <input type="text" class="inline-input" id="videoInput" placeholder="Video Url" spellcheck="false">
                             <button id="btnVideoStart" title="Download"><span class="icon-play"></span></button>
                             <div class="error-tip" id="urlErrorTip">无效网址</div>
                         </div>
@@ -1266,11 +1265,15 @@ class ClipboardHistorySidebarProvider {
                         <span id="video-stats">${videoStats}</span>
                     </div>
                 </div>
-                <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
+                <div class="cmd-btn" data-cmd="qqq.q2">
+                    <div class="text-content">
+                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span id="video-stats-roam">${videoStats}</span>
+                    </div>
+                </div>
             </div>
             <div class="section-title">Passed by</div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="搜索历史记录..." spellcheck="false">
+                <input type="text" class="search-input" id="searchBox" placeholder="clipboardHistory" spellcheck="false">
             </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
@@ -1316,6 +1319,7 @@ class ClipboardHistorySidebarProvider {
                 videoInput: document.getElementById('videoInput'),
                 btnVideoStart: document.getElementById('btnVideoStart'),
                 videoStats: document.getElementById('video-stats'),
+                videoStatsRoam: document.getElementById('video-stats-roam'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1535,7 +1539,10 @@ class ClipboardHistorySidebarProvider {
                 if (m.command === 'updateData') {
                     if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
-                    if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
+                    if (m.videoStats !== undefined) {
+                        if (el.videoStats) el.videoStats.textContent = m.videoStats;
+                        if (el.videoStatsRoam) el.videoStatsRoam.textContent = m.videoStats;
+                    }
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
