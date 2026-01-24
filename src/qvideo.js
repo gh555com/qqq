@@ -883,6 +883,10 @@ class Qvideo {
         // ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
         if (result && result.doneMessage && !result.cancelled) {
             global.TaskMessage.showSimpleToast(result.doneMessage, 15000, 'success');
+            // ★ 报告统计数据 (仅当独立启动时，headless 模式由 q1.js 报告)
+            if (result.finalTotalBytes) {
+                global.saveVideoStats(result.finalTotalBytes);
+            }
         }
     }
 

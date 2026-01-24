@@ -669,8 +669,18 @@ class ClipboardHistoryManager {
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
             perf: { quarantinedFiles: this.perfStats.quarantinedFiles },
             savor: this._getSavorStats(),
-            paste: this._getPasteStats()
+            paste: this._getPasteStats(),
+            video: this._getVideoStats()
         };
+    }
+
+    _getVideoStats() {
+        const gs = this.context.globalState;
+        return gs.get('qqq_video_stats', {
+            count: 0,
+            totalSize: 0,
+            firstUse: Date.now()
+        });
     }
 
     _getPasteStats() {
@@ -756,7 +766,13 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'executeCommand':
-                    if (msg.cmd) vscode.commands.executeCommand(msg.cmd);
+                    if (msg.cmd) {
+                        if (msg.args && Array.isArray(msg.args)) {
+                            vscode.commands.executeCommand(msg.cmd, ...msg.args);
+                        } else {
+                            vscode.commands.executeCommand(msg.cmd);
+                        }
+                    }
                     break;
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
@@ -870,6 +886,7 @@ class ClipboardHistorySidebarProvider {
             const stats = this._historyManager.getStatsSnapshot();
             const savorStats = this._formatSavorStats(stats.savor);
             const pasteStats = this._formatPasteStats(stats.paste);
+            const videoStats = this._formatVideoStats(stats.video);
 
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -883,7 +900,7 @@ class ClipboardHistorySidebarProvider {
 
             // ★ 极致纯净：移除 stats，只初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats);
+                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats, videoStats);
             }
 
             this._postMessage({
@@ -891,7 +908,8 @@ class ClipboardHistorySidebarProvider {
                 history: history,
                 triggerStorm: (reason === 'add' || reason === 'pin'),
                 savorStats: savorStats,
-                pasteStats: pasteStats
+                pasteStats: pasteStats,
+                videoStats: videoStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -920,6 +938,23 @@ class ClipboardHistorySidebarProvider {
         return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}.`;
     }
 
+    _formatVideoStats(s) {
+        if (!s) return '';
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0b';
+            const k = 1024;
+            const sizes = ['b', 'k', 'm', 'g', 't'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+        };
+
+        const sizeStr = formatBytes(s.totalSize || 0);
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const avgCount = Math.round(s.count / days);
+
+        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times.`;
+    }
+
     _formatPasteStats(s) {
         if (!s) return '';
         const formatBytes = (bytes) => {
@@ -932,7 +967,7 @@ class ClipboardHistorySidebarProvider {
 
         const sizeStr = formatBytes(s.totalSize || 0);
         const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
-        const avgCount = (s.count / days).toFixed(1);
+        const avgCount = Math.round(s.count / days);
 
         return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times.`;
     }
@@ -976,7 +1011,7 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(history, audioBase64, savorStats = '', pasteStats = '') {
+    _getHtml(history, audioBase64, savorStats = '', pasteStats = '', videoStats = '') {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -1014,18 +1049,79 @@ class ClipboardHistorySidebarProvider {
         .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
-        #savorCard:hover { transform: none; }
+        #savorCard:hover, #videoCard:hover { transform: none; }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
-        .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; }
-        .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+        .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; align-items: center; }
+        .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-family: Tahoma, sans-serif; font-size: 13px; }
 
         .icon-loop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDRWMUw4IDVsNCA0VjZjMy4zMSAwIDYgMi42OSA2IDYgMCAxLjAxLS4yNSAxLjk3LS43IDIuOGwxLjQ2IDEuNDZBNy45MyA3LjkzIDAgMCAwIDIwIDEyYzAtNC40Mi0zLjU4LTgtOC04em0wIDE0Yy0zLjMxIDAtNi0yLjY5LTYtNiAwLTEuMDEuMjUtMS45Ny43LTIuOEw1LjI0IDcuNzRBNy45MyA3LjkzIDAgMCAwIDQgMTJjMCA0LjQyIDMuNTggOCA4IDh2M2w0LTQtNC00djN6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-loop.spinning { animation: spin 2s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-play { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
+
+        #videoCard { height: 48px; }
+        .input-box-wrapper { position: relative; width: 132px; height: 24px; flex-shrink: 0; }
+        .inline-input {
+            background: var(--vscode-input-background, #fff);
+            color: var(--vscode-input-foreground, #000);
+            border: 1px solid var(--vscode-input-border, #d3c6aa);
+            border-radius: 2px;
+            padding: 2px 24px 2px 6px;
+            font-size: 13px;
+            height: 24px;
+            width: 100%;
+            outline: none;
+            box-sizing: border-box;
+            font-family: Tahoma, sans-serif;
+        }
+        .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
+
+        #btnVideoStart {
+            position: absolute;
+            right: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 11;
+            opacity: 0.7;
+        }
+        #btnVideoStart:hover { opacity: 1; }
+        #btnVideoStart .icon-play { background-size: contain; width: 12px; height: 12px; }
+
+        .error-tip {
+            position: absolute;
+            top: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--red);
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            white-space: nowrap;
+            display: none;
+            z-index: 100;
+        }
+        .error-tip::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 50%;
+            margin-left: -4px;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 4px solid var(--red);
+        }
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -1154,11 +1250,23 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") + <span id="paste-stats">${pasteStats}</span>.
+                        Paste <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span class="spacer-5"></span> <span id="paste-stats">${pasteStats}</span>
+                    </div>
+                </div>
+                <div class="cmd-btn" id="videoCard">
+                    <div class="btn-group">
+                        <div class="input-box-wrapper">
+                            <input type="text" class="inline-input" id="videoInput" placeholder="insert Videos From Url" spellcheck="false">
+                            <button id="btnVideoStart" title="Download"><span class="icon-play"></span></button>
+                            <div class="error-tip" id="urlErrorTip">无效网址</div>
+                        </div>
+                    </div>
+                    <span class="spacer-5"></span>
+                    <div class="text-content">
+                        <span id="video-stats">${videoStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
-                <div class="cmd-btn" data-cmd="qqq.downloadVideosFromUrl">🎥 Insert Videos</div>
             </div>
             <div class="section-title">Passed by</div>
             <div class="search-container">
@@ -1177,8 +1285,8 @@ class ClipboardHistorySidebarProvider {
     </div>
     <script nonce="${nonce}">
         (function() {
-            const vscode = acquireVsCodeApi();
-            const el = {
+            var vscode = acquireVsCodeApi();
+            var el = {
                 historyContainer: document.getElementById('historyContainer'),
                 historyList: document.getElementById('historyList'),
                 tooltip: document.getElementById('tooltip'),
@@ -1188,6 +1296,10 @@ class ClipboardHistorySidebarProvider {
                 btnSavorStop: document.getElementById('btnSavorStop'),
                 msStats: document.getElementById('ms-stats'),
                 pasteStats: document.getElementById('paste-stats'),
+                videoCard: document.getElementById('videoCard'),
+                videoInput: document.getElementById('videoInput'),
+                btnVideoStart: document.getElementById('btnVideoStart'),
+                videoStats: document.getElementById('video-stats'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1195,21 +1307,25 @@ class ClipboardHistorySidebarProvider {
                 outerScrollbar: document.getElementById('outerScrollbar')
             };
 
-            let selectedId = '';
-            let selectedIndex = -1;
-            let currentHistory = [];
-            let currentLimit = 0;
-            let batchSize = 20;
-            let currentStats = '${savorStats}';
+            var selectedId = '';
+            var selectedIndex = -1;
+            var currentHistory = [];
+            var currentLimit = 0;
+            var batchSize = 20;
+            var currentStats = '${savorStats}';
 
-            function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
+            function post(cmd, data) {
+                var d = data || {};
+                d.command = cmd;
+                vscode.postMessage(d);
+            }
 
             // 禁用右键菜单
-            window.addEventListener('contextmenu', e => e.preventDefault());
+            window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
             function initDynamicSizing() {
-                const containerH = el.historyContainer.clientHeight;
-                // 估算卡片平均高度：Tahoma 13px 6行约 110px，加上 padding 和间距取 120
+                var containerH = el.historyContainer.clientHeight;
+                // 估算卡片平均高度
                 batchSize = Math.max(10, Math.ceil(containerH / 120));
                 if (currentLimit === 0) {
                     currentLimit = batchSize * 2;
@@ -1217,16 +1333,14 @@ class ClipboardHistorySidebarProvider {
                 }
             }
 
-            el.searchBox.oninput = () => {
-                // 搜索时重置滚动位置并立即隐藏时间提示
+            el.searchBox.oninput = function() {
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
             };
 
-            el.historyList.onscroll = () => {
-                const list = el.historyList;
-                // 接近底部 100px 时扩容
+            el.historyList.onscroll = function() {
+                var list = el.historyList;
                 if (list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
                     if (currentHistory.length >= currentLimit) {
                         currentLimit += batchSize;
@@ -1237,59 +1351,59 @@ class ClipboardHistorySidebarProvider {
             };
 
             function renderList(history, triggerStorm) {
-                const newHistory = history || [];
-
-                // 触发风暴逻辑
+                var newHistory = history || [];
                 if (triggerStorm) {
                     el.historyContainer.classList.remove('storm');
-                    void el.historyContainer.offsetWidth; // 触发重绘
+                    void el.historyContainer.offsetWidth;
                     el.historyContainer.classList.add('storm');
                 }
 
                 currentHistory = newHistory;
                 el.historyList.innerHTML = '';
-                el.tooltip.style.display = 'none'; // 切换数据时立即隐藏之前的提示框
+                el.tooltip.style.display = 'none';
 
                 if (currentHistory.length === 0) {
                     el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
                     selectedId = '';
                     selectedIndex = -1;
-                    setTimeout(updateAllScrollbars, 50); // 确保滚动条在清空后正确消失
+                    setTimeout(updateAllScrollbars, 50);
                     return;
                 }
 
-                const frag = document.createDocumentFragment();
-                currentHistory.forEach((item, idx) => {
-                    const div = document.createElement('div');
+                var frag = document.createDocumentFragment();
+                currentHistory.forEach(function(item, idx) {
+                    var div = document.createElement('div');
                     div.className = 'history-item';
                     if (item.id === selectedId) div.classList.add('selected');
                     if (item.pinned) div.classList.add('pinned');
                     div.dataset.id = item.id;
                     div.dataset.index = idx;
 
-                    // 绑定光标跟随逻辑
-                    div.onmouseenter = (e) => {
+                    div.onmouseenter = function(e) {
                         el.tooltip.innerHTML = item.time;
                         el.tooltip.style.display = 'block';
                     };
-                    div.onmousemove = (e) => {
+                    div.onmousemove = function(e) {
                         el.tooltip.style.left = e.clientX + 'px';
                         el.tooltip.style.top = (e.clientY + 22) + 'px';
                     };
-                    div.onmouseleave = () => {
+                    div.onmouseleave = function() {
                         el.tooltip.style.display = 'none';
                     };
 
-                    const prev = document.createElement('div'); prev.className = 'item-preview'; prev.textContent = item.preview;
+                    var prev = document.createElement('div');
+                    prev.className = 'item-preview';
+                    prev.textContent = item.preview;
 
-                    const actions = document.createElement('div'); actions.className = 'item-actions';
+                    var actions = document.createElement('div');
+                    actions.className = 'item-actions';
 
-                    const btnPin = document.createElement('button');
+                    var btnPin = document.createElement('button');
                     btnPin.className = 'action-mini-btn';
                     btnPin.dataset.action = 'pin';
                     btnPin.textContent = item.pinned ? '📍' : '📌';
 
-                    const btnDel = document.createElement('button');
+                    var btnDel = document.createElement('button');
                     btnDel.className = 'action-mini-btn';
                     btnDel.dataset.action = 'delete';
                     btnDel.textContent = '🗑️ ' + (item.size || 0).toLocaleString();
@@ -1302,46 +1416,42 @@ class ClipboardHistorySidebarProvider {
                 });
                 el.historyList.appendChild(frag);
 
-                // ★ 100% 同步 qq 的防御细节：如无选中项，自动选中第一条
                 if (selectedId) {
                     setSelectedById(selectedId);
                 } else {
-                    const first = el.historyList.querySelector('.history-item');
+                    var first = el.historyList.querySelector('.history-item');
                     if (first) setSelectedById(first.dataset.id);
                 }
-
                 setTimeout(updateAllScrollbars, 50);
             }
 
             function setSelectedById(id) {
                 selectedId = id;
-                const items = el.historyList.querySelectorAll('.history-item');
+                var items = el.historyList.querySelectorAll('.history-item');
                 selectedIndex = -1;
-                items.forEach((it, i) => {
+                for (var i = 0; i < items.length; i++) {
+                    var it = items[i];
                     if (it.dataset.id === selectedId) {
                         it.classList.add('selected');
                         selectedIndex = i;
                     } else {
                         it.classList.remove('selected');
                     }
-                });
+                }
             }
 
-            // 事件委托
-            el.historyList.addEventListener('click', e => {
-                const btn = e.target.closest('button[data-action]');
-                const item = e.target.closest('.history-item');
+            el.historyList.addEventListener('click', function(e) {
+                var btn = e.target.closest('button[data-action]');
+                var item = e.target.closest('.history-item');
                 if (!item) return;
+                var id = item.dataset.id;
 
-                const id = item.dataset.id;
-
-                // 触发卡片闪光特效
                 item.classList.remove('executing');
-                void item.offsetWidth; // 触发重绘
+                void item.offsetWidth;
                 item.classList.add('executing');
 
                 if (btn) {
-                    const action = btn.dataset.action;
+                    var action = btn.dataset.action;
                     if (action === 'copy') post('copyToClipboard', { itemId: id });
                     if (action === 'paste') post('pasteToEditor', { itemId: id });
                     if (action === 'insert') post('insertToEditor', { itemId: id });
@@ -1350,38 +1460,66 @@ class ClipboardHistorySidebarProvider {
                     e.stopPropagation();
                     return;
                 }
-
                 setSelectedById(id);
                 post('copyToClipboard', { itemId: id });
             });
 
-            document.addEventListener('click', e => {
-                const cmdBtn = e.target.closest('.cmd-btn');
+            document.addEventListener('click', function(e) {
+                var cmdBtn = e.target.closest('.cmd-btn');
                 if (cmdBtn) post('executeCommand', { cmd: cmdBtn.dataset.cmd });
             });
 
-            el.savorCard.onclick = () => {
-                post('requestSavorAudio', { mode: 'normal' });
-            };
-            el.btnSavorLoop.onclick = (e) => {
-                e.stopPropagation();
-                post('requestSavorAudio', { mode: 'loop' });
-            };
-            el.btnSavorStop.onclick = (e) => {
-                e.stopPropagation();
-                stopAudio();
-            };
+            el.savorCard.onclick = function() { post('requestSavorAudio', { mode: 'normal' }); };
+            el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
+            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); stopAudio(); };
 
-            window.addEventListener('message', e => {
-                const m = e.data;
+            function isValidUrl(s) {
+                if (!s) return false;
+                var val = s.trim();
+                if (!val || /\s/.test(val)) return false;
+                // 使用纯正则代替 URL 对象和 try-catch
+                var pattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/i;
+                if (val.indexOf('localhost') !== -1) return true;
+                return pattern.test(val);
+            }
+
+            function showErrorTip() {
+                var tip = document.getElementById('urlErrorTip');
+                if (tip) {
+                    tip.style.display = 'block';
+                    setTimeout(function() { tip.style.display = 'none'; }, 2000);
+                }
+                el.videoInput.className = 'inline-input invalid';
+            }
+
+            el.videoInput.oninput = function() { el.videoInput.className = 'inline-input'; };
+            el.videoInput.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    var val = el.videoInput.value.trim();
+                    if (isValidUrl(val)) {
+                        post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                        el.videoInput.value = '';
+                    } else if (val) { showErrorTip(); }
+                }
+                e.stopPropagation();
+            };
+            el.btnVideoStart.onclick = function(e) {
+                e.stopPropagation();
+                var val = el.videoInput.value.trim();
+                if (isValidUrl(val)) {
+                    post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                    el.videoInput.value = '';
+                } else if (val) { showErrorTip(); }
+            };
+            el.videoCard.onclick = function() { el.videoInput.focus(); };
+
+            window.addEventListener('message', function(e) {
+                var m = e.data;
+                if (!m) return;
                 if (m.command === 'updateData') {
-                    if (m.savorStats !== undefined) {
-                        currentStats = m.savorStats;
-                        updateSavorText();
-                    }
-                    if (m.pasteStats !== undefined && el.pasteStats) {
-                        el.pasteStats.textContent = m.pasteStats;
-                    }
+                    if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
+                    if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
+                    if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
@@ -1390,42 +1528,32 @@ class ClipboardHistorySidebarProvider {
                 }
             });
 
-            // 音乐播放
-            let currentAudio = null;
-            let currentSfx = null;
-            let loopRemaining = 0;
-            let playStartTime = 0;
+            var currentAudio = null;
+            var currentSfx = null;
+            var loopRemaining = 0;
+            var playStartTime = 0;
 
             function playSfx(base64) {
-                if (currentSfx) {
-                    currentSfx.pause();
-                    currentSfx = null;
-                }
-                const audio = new Audio('data:audio/mp3;base64,' + base64);
+                if (currentSfx) { currentSfx.pause(); currentSfx = null; }
+                var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentSfx = audio;
                 audio.play();
             }
 
             function updateSavorText() {
-                const elLabel = document.getElementById('ms-label');
-                const elStats = document.getElementById('ms-stats');
+                var elLabel = document.getElementById('ms-label');
+                var elStats = document.getElementById('ms-stats');
                 if (!elLabel || !elStats) return;
-
                 elStats.innerText = currentStats;
-
-                if (!currentAudio) {
-                    elLabel.innerText = 'Savor moments for yourself';
-                } else if (loopRemaining === -1) {
-                    elLabel.innerText = 'Looping...';
-                } else {
-                    elLabel.innerText = 'Savoring...';
-                }
+                if (!currentAudio) elLabel.innerText = 'Savor moments for yourself';
+                else if (loopRemaining === -1) elLabel.innerText = 'Looping...';
+                else elLabel.innerText = 'Savoring...';
             }
 
             function stopAudio() {
                 if(currentAudio) {
                     if (playStartTime > 0) {
-                        const dur = Date.now() - playStartTime;
+                        var dur = Date.now() - playStartTime;
                         if (dur > 500) post('recordSavorUsage', { durationMs: dur });
                     }
                     currentAudio.pause();
@@ -1434,76 +1562,60 @@ class ClipboardHistorySidebarProvider {
                     playStartTime = 0;
                 }
                 updateSavorText();
-                document.querySelector('.icon-loop')?.classList.remove('spinning');
+                var iconLoop = document.querySelector('.icon-loop');
+                if (iconLoop) iconLoop.classList.remove('spinning');
             }
             function playAudio(base64, count) {
                 stopAudio();
-                loopRemaining = count || 1; // -1 为永久循环，正数为次数
-                const audio = new Audio('data:audio/mp3;base64,' + base64);
+                loopRemaining = count || 1;
+                var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
                 playStartTime = Date.now();
-
                 updateSavorText();
-
                 if (loopRemaining === -1) {
-                    document.querySelector('.icon-loop')?.classList.add('spinning');
+                    var iconLoop = document.querySelector('.icon-loop');
+                    if (iconLoop) iconLoop.classList.add('spinning');
                 }
-
-                audio.onended = () => {
-                    if (loopRemaining === -1) {
-                        audio.currentTime = 0;
-                        audio.play();
-                    } else if (loopRemaining > 1) {
-                        loopRemaining--;
-                        audio.currentTime = 0;
-                        audio.play();
-                    } else {
-                        stopAudio();
-                    }
+                audio.onended = function() {
+                    if (loopRemaining === -1) { audio.currentTime = 0; audio.play(); }
+                    else if (loopRemaining > 1) { loopRemaining--; audio.currentTime = 0; audio.play(); }
+                    else { stopAudio(); }
                 };
                 audio.play();
             }
 
-            // 滚动条逻辑
             function setupScrollbar(container, scrollbar, thumb) {
                 function update() {
-                    const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+                    var ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
                     if (sh > ch) {
                         scrollbar.style.display = 'block';
-                        const th = Math.max(20, (ch / sh) * ch);
+                        var th = Math.max(20, (ch / sh) * ch);
                         thumb.style.height = th + 'px';
                         thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
                     } else { scrollbar.style.display = 'none'; }
                 }
                 container.addEventListener('scroll', update);
-                let isDragging = false, startY, startST;
-                thumb.onmousedown = e => {
+                var isDragging = false, startY, startST;
+                thumb.onmousedown = function(e) {
                     isDragging = true; startY = e.clientY; startST = container.scrollTop;
-                    document.onmousemove = e => {
+                    document.onmousemove = function(e) {
                         if (!isDragging) return;
-                        const dy = e.clientY - startY;
-                        const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
+                        var dy = e.clientY - startY;
+                        var ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
                         container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
                     };
-                    document.onmouseup = () => { isDragging = false; document.onmousemove = null; };
+                    document.onmouseup = function() { isDragging = false; document.onmousemove = null; };
                     e.preventDefault();
                 };
                 return update;
             }
-            const upO = setupScrollbar(el.mainContent, el.outerScrollbar, el.outerThumb);
-            const upI = setupScrollbar(el.historyList, el.innerScrollbar, el.innerThumb);
+            var upO = setupScrollbar(el.mainContent, el.outerScrollbar, el.outerThumb);
+            var upI = setupScrollbar(el.historyList, el.innerScrollbar, el.innerThumb);
             function updateAllScrollbars() { upO(); upI(); }
-            window.onresize = () => {
-                initDynamicSizing();
-                updateAllScrollbars();
-            };
-
-            // 初始激活
+            window.onresize = function() { initDynamicSizing(); updateAllScrollbars(); };
             setTimeout(initDynamicSizing, 100);
-
-            window.addEventListener('focus', () => post('focusState', { focused: true }));
-            window.addEventListener('blur', () => post('focusState', { focused: false }));
-
+            window.addEventListener('focus', function() { post('focusState', { focused: true }); });
+            window.addEventListener('blur', function() { post('focusState', { focused: false }); });
             post('ready');
         })();
     </script>

@@ -929,39 +929,42 @@ async function savorMomentsCommand() {
 	}
 }
 
-async function downloadVideosFromUrlCommand() {
+async function downloadVideosFromUrlCommand(urlArg) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		vscode.window.showErrorMessage("请先打开一个文档");
 		return;
 	}
 
-	const rawUrl = await vscode.window.showInputBox({
-		prompt: " ",
-		ignoreFocusOut: true,
-		placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
-		validateInput: (text) => {
-			const s = (text || "").trim();
-			if (!s) return null;
-			if (/\s/.test(s)) return "无效网址";
+	let rawUrl = urlArg;
+	if (!rawUrl) {
+		rawUrl = await vscode.window.showInputBox({
+			prompt: " ",
+			ignoreFocusOut: true,
+			placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
+			validateInput: (text) => {
+				const s = (text || "").trim();
+				if (!s) return null;
+				if (/\s/.test(s)) return "无效网址";
 
-			// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
-			let toCheck = s;
-			if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
-				toCheck = 'https://' + s;
-			}
-
-			try {
-				const u = new URL(toCheck);
-				// 至少包含一个点或者是 localhost
-				if (u.hostname.includes('.') || u.hostname === 'localhost') {
-					return null;
+				// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
+				let toCheck = s;
+				if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
+					toCheck = 'https://' + s;
 				}
-			} catch { }
 
-			return "无效网址";
-		}
-	});
+				try {
+					const u = new URL(toCheck);
+					// 至少包含一个点或者是 localhost
+					if (u.hostname.includes('.') || u.hostname === 'localhost') {
+						return null;
+					}
+				} catch { }
+
+				return "无效网址";
+			}
+		});
+	}
 	if (!rawUrl) return;
 
 	const currentDocDir = path.dirname(editor.document.uri.fsPath);
