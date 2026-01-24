@@ -984,7 +984,7 @@ class ClipboardHistorySidebarProvider {
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
         .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
-        .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
+        .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
         #savorCard:hover { transform: none; }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
 
