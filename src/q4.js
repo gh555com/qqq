@@ -930,12 +930,12 @@ class ClipboardHistorySidebarProvider {
 
         .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
-        .history-item { background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
+        .history-item { background: var(--base3); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
         /* Hover：边框变虚线，颜色变红，文字变黑，边框宽度保持不变，防止布局抖动 */
         .history-item:hover { border-color: var(--red); border-style: dashed; color: #000000; }
         /* 选中项（最后一次点击）使用淡雅橙色 */
         .history-item.selected { color: #e67e22; }
-        /* 置顶项文字永固黑色，优先级高于选中色 */
+        /* 置顶项文字永固黑色，优先级高于选中色，背景恢复浅色 base2 */
         .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); color: #000000 !important; }
 
         /* 卡片内扫光特效 */
