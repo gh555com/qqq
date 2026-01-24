@@ -671,8 +671,30 @@ class ClipboardHistoryManager {
             savor: this._getSavorStats(),
             paste: this._getPasteStats(),
             video: this._getVideoStats(),
-            roam: this._getRoamStats()
+            roam: this._getRoamStats(),
+            weave: this._getGenericStats('weave'),
+            exportDoc: this._getGenericStats('exportDoc'),
+            pure: this._getGenericStats('pure'),
+            exportZip: this._getGenericStats('exportZip'),
+            allSettings: this._getGenericStats('allSettings')
         };
+    }
+
+    _getGenericStats(type) {
+        const gs = this.context.globalState;
+        return gs.get(`qqq_${type}_stats`, {
+            count: 0,
+            firstUse: Date.now()
+        });
+    }
+
+    async recordGenericUsage(type) {
+        const gs = this.context.globalState;
+        const key = `qqq_${type}_stats`;
+        const stats = gs.get(key, { count: 0, firstUse: Date.now() });
+        stats.count++;
+        await gs.update(key, stats);
+        this._notifyChange(`${type}_stats`);
     }
 
     _getVideoStats() {
@@ -862,6 +884,9 @@ class ClipboardHistorySidebarProvider {
                 case 'recordSavorUsage':
                     if (msg.durationMs) await this._historyManager.recordSavorUsage(msg.durationMs);
                     break;
+                case 'recordGenericUsage':
+                    if (msg.type) await this._historyManager.recordGenericUsage(msg.type);
+                    break;
             }
         });
 
@@ -907,6 +932,11 @@ class ClipboardHistorySidebarProvider {
             const pasteStats = this._formatPasteStats(stats.paste);
             const videoStats = this._formatVideoStats(stats.video);
             const roamStats = this._formatRoamStats(stats.roam);
+            const weaveStats = this._formatGenericStats(stats.weave);
+            const exportDocStats = this._formatGenericStats(stats.exportDoc);
+            const pureStats = this._formatGenericStats(stats.pure);
+            const exportZipStats = this._formatGenericStats(stats.exportZip);
+            const allSettingsStats = this._formatGenericStats(stats.allSettings);
 
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -918,9 +948,12 @@ class ClipboardHistorySidebarProvider {
 
             const audioBase64 = this._getAudioBase64();
 
-            // ★ 极致纯净：移除 stats，只初始化必要的 HTML
+            // ★ 极致纯净：初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats, videoStats, roamStats);
+                this._view.webview.html = this._getHtml(history, audioBase64, {
+                    savorStats, pasteStats, videoStats, roamStats,
+                    weaveStats, exportDocStats, pureStats, exportZipStats, allSettingsStats
+                });
             }
 
             this._postMessage({
@@ -930,7 +963,12 @@ class ClipboardHistorySidebarProvider {
                 savorStats: savorStats,
                 pasteStats: pasteStats,
                 videoStats: videoStats,
-                roamStats: roamStats
+                roamStats: roamStats,
+                weaveStats: weaveStats,
+                exportDocStats: exportDocStats,
+                pureStats: pureStats,
+                exportZipStats: exportZipStats,
+                allSettingsStats: allSettingsStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -938,6 +976,13 @@ class ClipboardHistorySidebarProvider {
         } catch (e) {
             console.error('[Q4-UI] Update failed:', e);
         }
+    }
+
+    _formatGenericStats(s) {
+        if (!s) return '';
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const avgCount = Math.round(s.count / days);
+        return `${s.count} times; Avg per day: ${avgCount} times`;
     }
 
     _formatSavorStats(s) {
@@ -1039,7 +1084,11 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(history, audioBase64, savorStats = '', pasteStats = '', videoStats = '', roamStats = '') {
+    _getHtml(history, audioBase64, statsObj = {}) {
+        const {
+            savorStats = '', pasteStats = '', videoStats = '', roamStats = '',
+            weaveStats = '', exportDocStats = '', pureStats = '', exportZipStats = '', allSettingsStats = ''
+        } = statsObj;
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -1075,13 +1124,13 @@ class ClipboardHistorySidebarProvider {
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
         .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
-        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
+        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 14px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
         #savorCard:hover, #videoCard:hover { transform: none; }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 2px; background: var(--primary-color); }
 
         .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; align-items: center; }
-        .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-family: Tahoma, sans-serif; font-size: 13px; }
+        .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-family: Tahoma, sans-serif; font-size: 14px; }
 
         .icon-loop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDRWMUw4IDVsNCA0VjZjMy4zMSAwIDYgMi42OSA2IDYgMCAxLjAxLS4yNSAxLjk3LS43IDIuOGwxLjQ2IDEuNDZBNy45MyA3LjkzIDAgMCAwIDIwIDEyYzAtNC40Mi0zLjU4LTgtOC04em0wIDE0Yy0zLjMxIDAtNi0yLjY5LTYtNiAwLTEuMDEuMjUtMS45Ny43LTIuOEw1LjI0IDcuNzRBNy45MyA3LjkzIDAgMCAwIDQgMTJjMCA0LjQyIDMuNTggOCA4IDh2M2w0LTQtNC00djN6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-loop.spinning { animation: spin 2s linear infinite; }
@@ -1089,7 +1138,12 @@ class ClipboardHistorySidebarProvider {
         .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-play { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
-        .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-weave { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE3IDdIN2MtMS4xIDAtMiAuOS0yIDJ2NmMwIDEuMS45IDIgMiAyaDEwYzEuMSAwIDItLjkgMi0yVjljMC0xLjEtLjktMi0yLTJ6bTAgOGgtMnYtMmgydjJ6bTAtNGgtMnYtMmgydjJ6bS00IDRoLTJ2LTJoMnYyek03IDl2NmgyVjloLTJ6bTQgMGgydjJoLTJWOXoiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-export-doc { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE0IDJINmMtMS4xIDAtMiAuOS0yIDJ2MTZjMCAxLjEuODkgMiAxLjk5IDJIMThjMS4xIDAgMi0uOSAyLTJWOGwtNi02em00IDE4SDZWNmg3djVoNVYyMHpNMTEgMTNoMnY0aC0ydjJ6bTMtNmgtMnYtMmgydjJ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-pure { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJsMy4wOSA2LjI2TDkyIDEwbC01IDQuODcgMS4xOCA2Ljg4TDEyIDE3Ljc3bC02LjE4IDMuMjVMMTcgMTQuODcgMiAxMGw2LjkxLTEuNzRMMTIgMnoiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-export-zip { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTIwIDZoLThsLTItMkg0Yy0xLjEgMC0xLjk5LjktMS45OSAyTDIgMThjMCAxLjEuOSAyIDIgMmgxNmMxLjEgMCAyLS45IDItM1Y4YzAtMS4xLS45LTItMi0yek0xNCAxNmgtMnYtMmgydjJ6bTAtNGgtMnYtMmgydjJ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
@@ -1110,7 +1164,7 @@ class ClipboardHistorySidebarProvider {
         }
         .inline-input::selection { background: #FFD302; color: #000; }
         .inline-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
-        .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); font-size: 13px; }
+        .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); font-size: 14px; }
 
         #btnVideoStart {
             position: absolute;
@@ -1298,6 +1352,31 @@ class ClipboardHistorySidebarProvider {
                         <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Tab" or "F6") <span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
+                <div class="cmd-btn" data-cmd="qqq.weave">
+                    <div class="text-content">
+                        <span class="icon-weave"></span> <span class="spacer-5"></span> Weave <span class="spacer-5"></span> <span id="weave-stats">${weaveStats}</span>
+                    </div>
+                </div>
+                <div class="cmd-btn" data-cmd="qqq.exportDoc">
+                    <div class="text-content">
+                        <span class="icon-export-doc"></span> <span class="spacer-5"></span> Export Doc <span class="spacer-5"></span> <span id="exportDoc-stats">${exportDocStats}</span>
+                    </div>
+                </div>
+                <div class="cmd-btn" data-cmd="qqq.pure">
+                    <div class="text-content">
+                        <span class="icon-pure"></span> <span class="spacer-5"></span> Pure <span class="spacer-5"></span> <span id="pure-stats">${pureStats}</span>
+                    </div>
+                </div>
+                <div class="cmd-btn" data-cmd="qqq.exportZip">
+                    <div class="text-content">
+                        <span class="icon-export-zip"></span> <span class="spacer-5"></span> Export Zip <span class="spacer-5"></span> <span id="exportZip-stats">${exportZipStats}</span>
+                    </div>
+                </div>
+                <div class="cmd-btn" data-cmd="qqq.allSettings">
+                    <div class="text-content">
+                        <span class="icon-all-settings"></span> <span class="spacer-5"></span> All Settings <span class="spacer-5"></span> <span id="allSettings-stats">${allSettingsStats}</span>
+                    </div>
+                </div>
             </div>
             <div class="section-title">Passed by</div>
             <div class="search-container">
@@ -1348,6 +1427,11 @@ class ClipboardHistorySidebarProvider {
                 btnVideoStart: document.getElementById('btnVideoStart'),
                 videoStats: document.getElementById('video-stats'),
                 roamStats: document.getElementById('roam-stats'),
+                weaveStats: document.getElementById('weave-stats'),
+                exportDocStats: document.getElementById('exportDoc-stats'),
+                pureStats: document.getElementById('pure-stats'),
+                exportZipStats: document.getElementById('exportZip-stats'),
+                allSettingsStats: document.getElementById('allSettings-stats'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1514,7 +1598,20 @@ class ClipboardHistorySidebarProvider {
 
             document.addEventListener('click', function(e) {
                 var cmdBtn = e.target.closest('.cmd-btn');
-                if (cmdBtn) post('executeCommand', { cmd: cmdBtn.dataset.cmd });
+                if (cmdBtn && cmdBtn.dataset.cmd) {
+                    var cmd = cmdBtn.dataset.cmd;
+                    post('executeCommand', { cmd: cmd });
+
+                    // 记录通用命令的使用次数
+                    var generics = ['qqq.weave', 'qqq.exportDoc', 'qqq.pure', 'qqq.exportZip', 'qqq.allSettings'];
+                    for (var i = 0; i < generics.length; i++) {
+                        if (generics[i] === cmd) {
+                            var type = cmd.split('.')[1];
+                            post('recordGenericUsage', { type: type });
+                            break;
+                        }
+                    }
+                }
             });
 
             el.savorCard.onclick = function() { post('requestSavorAudio', { mode: 'normal' }); };
@@ -1569,6 +1666,11 @@ class ClipboardHistorySidebarProvider {
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
                     if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
                     if (m.roamStats !== undefined && el.roamStats) el.roamStats.textContent = m.roamStats;
+                    if (m.weaveStats !== undefined && el.weaveStats) el.weaveStats.textContent = m.weaveStats;
+                    if (m.exportDocStats !== undefined && el.exportDocStats) el.exportDocStats.textContent = m.exportDocStats;
+                    if (m.pureStats !== undefined && el.pureStats) el.pureStats.textContent = m.pureStats;
+                    if (m.exportZipStats !== undefined && el.exportZipStats) el.exportZipStats.textContent = m.exportZipStats;
+                    if (m.allSettingsStats !== undefined && el.allSettingsStats) el.allSettingsStats.textContent = m.allSettingsStats;
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
