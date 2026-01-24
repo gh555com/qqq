@@ -936,7 +936,7 @@ class ClipboardHistorySidebarProvider {
         /* 选中项（最后一次点击）使用淡雅橙色 */
         .history-item.selected { color: #e67e22; }
         /* 置顶项文字永固黑色，优先级高于选中色，背景恢复浅色 base2 */
-        .history-item.pinned { border-left: 4px solid var(--red); background: var(--base2); color: #000000 !important; }
+        .history-item.pinned { background: var(--base2); color: #000000 !important; }
 
         /* 卡片内扫光特效 */
         .history-item.executing::before {
