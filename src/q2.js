@@ -1794,6 +1794,15 @@ function showSaveAsDialog() {
             }
             fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
             saveRecentDirectory(currentPath);
+
+            // 联动 Q4 统计：累加新建文件数
+            try {
+              const q4 = vscode.extensions.getExtension('gh555.qqq')?.exports;
+              if (q4 && typeof q4.recordRoamUsage === 'function') {
+                q4.recordRoamUsage({ filesCreated: 1 });
+              }
+            } catch (e) { }
+
             vscode.workspace.openTextDocument(fullFilePath).then((doc) => {
               global.showTextDocument(doc, getShowOptions(openInCurrentGroup)).then(() => {
                 if (!isPinned) {

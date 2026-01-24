@@ -670,7 +670,8 @@ class ClipboardHistoryManager {
             perf: { quarantinedFiles: this.perfStats.quarantinedFiles },
             savor: this._getSavorStats(),
             paste: this._getPasteStats(),
-            video: this._getVideoStats()
+            video: this._getVideoStats(),
+            roam: this._getRoamStats()
         };
     }
 
@@ -679,6 +680,15 @@ class ClipboardHistoryManager {
         return gs.get('qqq_video_stats', {
             count: 0,
             totalSize: 0,
+            firstUse: Date.now()
+        });
+    }
+
+    _getRoamStats() {
+        const gs = this.context.globalState;
+        return gs.get('qqq_roam_stats', {
+            count: 0,
+            filesCreated: 0,
             firstUse: Date.now()
         });
     }
@@ -713,6 +723,15 @@ class ClipboardHistoryManager {
         await gs.update('qqq_savor_count', count);
         await gs.update('qqq_savor_total_ms', totalMs);
         this._notifyChange('savor_stats');
+    }
+
+    async recordRoamUsage({ filesCreated = 0 } = {}) {
+        const gs = this.context.globalState;
+        const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now() });
+        stats.count++;
+        stats.filesCreated += filesCreated;
+        await gs.update('qqq_roam_stats', stats);
+        this._notifyChange('roam_stats');
     }
 
     async dispose() {
@@ -887,6 +906,7 @@ class ClipboardHistorySidebarProvider {
             const savorStats = this._formatSavorStats(stats.savor);
             const pasteStats = this._formatPasteStats(stats.paste);
             const videoStats = this._formatVideoStats(stats.video);
+            const roamStats = this._formatRoamStats(stats.roam);
 
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -900,7 +920,7 @@ class ClipboardHistorySidebarProvider {
 
             // ★ 极致纯净：移除 stats，只初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats, videoStats);
+                this._view.webview.html = this._getHtml(history, audioBase64, savorStats, pasteStats, videoStats, roamStats);
             }
 
             this._postMessage({
@@ -909,7 +929,8 @@ class ClipboardHistorySidebarProvider {
                 triggerStorm: (reason === 'add' || reason === 'pin'),
                 savorStats: savorStats,
                 pasteStats: pasteStats,
-                videoStats: videoStats
+                videoStats: videoStats,
+                roamStats: roamStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -936,6 +957,13 @@ class ClipboardHistorySidebarProvider {
         const avgStr = formatDuration(avgMs);
 
         return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}`;
+    }
+
+    _formatRoamStats(s) {
+        if (!s) return '';
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const avgCount = Math.round(s.count / days);
+        return `${s.count} times, ${s.filesCreated || 0} files; Avg per day: ${avgCount} times`;
     }
 
     _formatVideoStats(s) {
@@ -1011,7 +1039,7 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(history, audioBase64, savorStats = '', pasteStats = '', videoStats = '') {
+    _getHtml(history, audioBase64, savorStats = '', pasteStats = '', videoStats = '', roamStats = '') {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -1267,7 +1295,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">
                     <div class="text-content">
-                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span id="video-stats-roam">${videoStats}</span>
+                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
             </div>
@@ -1319,7 +1347,7 @@ class ClipboardHistorySidebarProvider {
                 videoInput: document.getElementById('videoInput'),
                 btnVideoStart: document.getElementById('btnVideoStart'),
                 videoStats: document.getElementById('video-stats'),
-                videoStatsRoam: document.getElementById('video-stats-roam'),
+                roamStats: document.getElementById('roam-stats'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1539,10 +1567,8 @@ class ClipboardHistorySidebarProvider {
                 if (m.command === 'updateData') {
                     if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
-                    if (m.videoStats !== undefined) {
-                        if (el.videoStats) el.videoStats.textContent = m.videoStats;
-                        if (el.videoStatsRoam) el.videoStatsRoam.textContent = m.videoStats;
-                    }
+                    if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
+                    if (m.roamStats !== undefined && el.roamStats) el.roamStats.textContent = m.roamStats;
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
@@ -1982,7 +2008,8 @@ function activate(context) {
         searchHistory: (keyword, limit) => historyManager.searchHistory(keyword, limit),
         clearHistory: () => historyManager.clearHistory(),
         getStats: () => historyManager.getStatsSnapshot(),
-        qsc: (a) => qsc(a, historyManager)
+        qsc: (a) => qsc(a, historyManager),
+        recordRoamUsage: (args) => historyManager.recordRoamUsage(args)
     };
 }
 
