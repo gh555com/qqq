@@ -981,7 +981,7 @@ class ClipboardHistorySidebarProvider {
             font-size: 13px;
             z-index: 9999;
             display: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
             white-space: nowrap;
             border: 1px solid var(--primary-color);
             transform: translateX(-50%); /* 水平居中 */
@@ -1107,10 +1107,13 @@ class ClipboardHistorySidebarProvider {
 
                 currentHistory = newHistory;
                 el.historyList.innerHTML = '';
+                el.tooltip.style.display = 'none'; // 切换数据时立即隐藏之前的提示框
+
                 if (currentHistory.length === 0) {
                     el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
                     selectedId = '';
                     selectedIndex = -1;
+                    setTimeout(updateAllScrollbars, 50); // 确保滚动条在清空后正确消失
                     return;
                 }
 
