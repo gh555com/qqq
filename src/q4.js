@@ -487,45 +487,46 @@ class ClipboardHistoryManager {
 
     getItemById(id) { return this._idMap.get(String(id || '')); }
 
-    async addToHistory(content) {
+    async addToHistory(content, { forceUpdate = false } = {}) {
         const t0 = performance.now();
         try {
             if (typeof content !== 'string' || !content.trim()) return;
             const text = content.length > CONSTANTS.MAX_CONTENT_LENGTH ? content.slice(0, CONSTANTS.MAX_CONTENT_LENGTH) : content;
-            if (text === this._lastClipboardContent) return;
+
+            // 除非是强制更新（内部点击），否则外部如果文本内容完全一致则跳过，避免轮询重复触发
+            if (!forceUpdate && text === this._lastClipboardContent) return;
 
             const hash = md5Hex(text);
             const existed = this._hashMap.get(hash);
-
-            // 如果内容已存在，则保持原样（不更新时间，不移动位置）
             if (existed) {
-                this._lastClipboardContent = text;
-                return;
-            }
+                existed.timestamp = Date.now();
+                existed.content = text;
+                existed.preview = makePreview(text);
+                this._moveToHead(existed);
+            } else {
+                const node = {
+                    id: randomId(),
+                    content: text,
+                    timestamp: Date.now(),
+                    preview: makePreview(text),
+                    size: Buffer.byteLength(text, 'utf8'),
+                    pinned: false,
+                    hash,
+                    prev: null,
+                    next: null
+                };
+                this._insertHead(node);
+                this._idMap.set(node.id, node);
+                this._hashMap.set(hash, node);
 
-            const node = {
-                id: randomId(),
-                content: text,
-                timestamp: Date.now(),
-                preview: makePreview(text),
-                size: Buffer.byteLength(text, 'utf8'),
-                pinned: false,
-                hash,
-                prev: null,
-                next: null
-            };
-            this._insertHead(node);
-            this._idMap.set(node.id, node);
-            this._hashMap.set(hash, node);
-
-            // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
-            if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
-                console.log('[Q4] 触发容量熔断，执行批量清理...');
-                for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
-                    if (this._tail) this._popTail();
+                // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
+                if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
+                    console.log('[Q4] 触发容量熔断，执行批量清理...');
+                    for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
+                        if (this._tail) this._popTail();
+                    }
                 }
             }
-
             this._lastClipboardContent = text;
             this._touch();
             this._notifyChange('add');
@@ -693,6 +694,9 @@ class ClipboardHistorySidebarProvider {
         this._lastHeartbeat = Date.now();
         this._lastAudioIdx = -1;
         this._currentLimit = CONSTANTS.UI_HISTORY_LIMIT;
+        this._isFocused = false;
+        this._needsUpdate = false;
+        this._pendingReason = null;
     }
 
     resolveWebviewView(webviewView) {
@@ -703,17 +707,24 @@ class ClipboardHistorySidebarProvider {
         };
 
         // 初始内容
-        this.updateContent();
+        this.updateContent(null, null, null, true);
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
+                case 'focusState':
+                    this._isFocused = !!msg.focused;
+                    if (!this._isFocused && this._needsUpdate) {
+                        this._needsUpdate = false;
+                        this.updateContent(this._pendingReason, null, null, true);
+                    }
+                    break;
                 case 'executeCommand':
                     if (msg.cmd) vscode.commands.executeCommand(msg.cmd);
                     break;
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
-                        // 1. 随机音效逻辑 (不连续重复，且第一时间触发)
+                        // 1. 随机音效逻辑
                         let audioIdx;
                         do { audioIdx = Math.floor(Math.random() * 7) + 1; } while (audioIdx === this._lastAudioIdx);
                         this._lastAudioIdx = audioIdx;
@@ -723,13 +734,12 @@ class ClipboardHistorySidebarProvider {
                             this._postMessage({ command: 'playAudio', base64: audioBase64 });
                         }
 
-                        // 2. 执行物理复制
+                        // 2. 执行物理复制 + 强制更新历史时间戳
                         await this._historyManager.copyToClipboard(node.content);
+                        await this._historyManager.addToHistory(node.content, { forceUpdate: true });
 
-                        // 3. 弹出通知 (前47个字符，11秒消失逻辑)
-                        // const preview = node.content.length > 47 ? node.content.slice(0, 47) : node.content;
-                        // vscode.window.showInformationMessage(`已复制：${preview}`);
-                        // vscode.window.setStatusBarMessage(`已复制：${preview}`, 11000);
+                        // 3. 弹出通知 (已注释)
+                        // ...
                     }
                     break;
                 }
@@ -797,9 +807,17 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    updateContent(reason, limit, keyword) {
+    updateContent(reason, limit, keyword, force = false) {
         if (!this._view || !this._view.visible) return;
         if (limit) this._currentLimit = limit;
+
+        // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新，则挂起更新
+        if (!force && this._isFocused && !keyword) {
+            this._needsUpdate = true;
+            this._pendingReason = reason;
+            return;
+        }
+
         try {
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -1079,8 +1097,9 @@ class ClipboardHistorySidebarProvider {
             }
 
             el.searchBox.oninput = () => {
-                // 搜索时重置滚动位置
+                // 搜索时重置滚动位置并立即隐藏时间提示
                 el.historyList.scrollTop = 0;
+                el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
             };
 
@@ -1278,6 +1297,10 @@ class ClipboardHistorySidebarProvider {
 
             // 初始激活
             setTimeout(initDynamicSizing, 100);
+
+            window.addEventListener('focus', () => post('focusState', { focused: true }));
+            window.addEventListener('blur', () => post('focusState', { focused: false }));
+
             post('ready');
         })();
     </script>
