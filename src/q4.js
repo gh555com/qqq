@@ -776,6 +776,14 @@ class ClipboardHistorySidebarProvider {
                         this.updateContent(null, msg.limit, msg.keyword);
                     }
                     break;
+                case 'requestSavorAudio': {
+                    const base64 = this._getSavorAudio();
+                    if (base64) {
+                        const count = msg.mode === 'loop' ? -1 : (Math.floor(Math.random() * 5) + 2); // 2-6次
+                        this._postMessage({ command: 'playAudio', base64, count });
+                    }
+                    break;
+                }
                 case 'ready':
                     this.updateContent();
                     break;
@@ -854,6 +862,20 @@ class ClipboardHistorySidebarProvider {
         } catch { return ''; }
     }
 
+    _getSavorAudio() {
+        const rand = Math.floor(Math.random() * 30);
+        let audioPath;
+        if (rand === 0) { // 1/30
+            audioPath = path.join(this._context.extensionPath, "assets", "q.mp3");
+        } else { // 29/30
+            const subRand = Math.floor(Math.random() * 3); // 0, 1, 2
+            audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
+        }
+        try {
+            return fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
+        } catch { return ''; }
+    }
+
     _getKopeAudioBase64(idx) {
         try {
             const p = path.join(this._context.extensionPath, "assets", "kope", `${idx}.mp3`);
@@ -908,9 +930,18 @@ class ClipboardHistorySidebarProvider {
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
         .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
-        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); }
+        .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 13px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color); background: #fff; transform: translateX(2px); }
+        #savorCard:hover { transform: none; }
         .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); }
+
+        .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; }
+        .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+
+        .icon-loop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDRWMUw4IDVsNCA0VjZjMy4zMSAwIDYgMi42OSA2IDYgMCAxLjAxLS4yNSAxLjk3LS43IDIuOGwxLjQ2IDEuNDZBNy45MyA3LjkzIDAgMCAwIDIwIDEyYzAtNC40Mi0zLjU4LTgtOC04em0wIDE0Yy0zLjMxIDAtNi0yLjY5LTYtNiAwLTEuMDEuMjUtMS45Ny43LTIuOEw1LjI0IDcuNzRBNy45MyA3LjkzIDAgMCAwIDQgMTJjMCA0LjQyIDMuNTggOCA4IDh2M2w0LTQtNC00djN6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; }
+        .icon-loop.spinning { animation: spin 2s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; }
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -1010,11 +1041,6 @@ class ClipboardHistorySidebarProvider {
         .action-mini-btn { padding: 2px 6px; font-size: 13px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--base3); cursor: pointer; color: var(--text-primary); font-family: Tahoma, sans-serif; line-height: 1.2; }
         .action-mini-btn:hover { background: var(--primary-color); color: #fff; }
 
-        .music-player { background: var(--base02); color: var(--base3); padding: 8px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-        .player-info { font-size: 0.9em; }
-        .player-controls { display: flex; gap: 10px; }
-        .player-btn { cursor: pointer; }
-
         .scrollbar-outer { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 1000; pointer-events: none; }
         .scrollbar-outer-thumb { position: absolute; right: 1px; width: 4px; background: #000 !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
         .scrollbar-outer-thumb:hover { width: 6px; right: 0; }
@@ -1030,15 +1056,14 @@ class ClipboardHistorySidebarProvider {
 <body>
     <div class="main-wrapper">
         <div class="main-content" id="mainContent">
-            <div class="music-player">
-                <div class="player-info">🎵 <span id="ms">Ready to Savor</span></div>
-                <div class="player-controls">
-                    <span class="player-btn" id="btnPlayAudio">▶️</span>
-                    <span class="player-btn" id="btnStopAudio">⏹️</span>
-                </div>
-            </div>
-            <div class="section-title">Captain</div>
             <div class="captain-grid">
+                <div class="cmd-btn" id="savorCard">
+                    <div class="btn-group">
+                        <button class="action-mini-btn" id="btnSavorLoop" title="Infinite Loop"><span class="icon-loop"></span></button>
+                        <button class="action-mini-btn" id="btnSavorStop" title="Stop"><span class="icon-stop"></span></button>
+                    </div>
+                    <div class="text-content">🎵 <span id="ms">Ready to Savor</span></div>
+                </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">📋 Paste Everything (F2)</div>
                 <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
                 <div class="cmd-btn" data-cmd="qqq.downloadVideosFromUrl">🎥 Insert Videos</div>
@@ -1066,8 +1091,10 @@ class ClipboardHistorySidebarProvider {
                 historyList: document.getElementById('historyList'),
                 tooltip: document.getElementById('tooltip'),
                 searchBox: document.getElementById('searchBox'),
-                btnPlay: document.getElementById('btnPlayAudio'),
-                btnStop: document.getElementById('btnStopAudio'),
+                savorCard: document.getElementById('savorCard'),
+                btnSavorLoop: document.getElementById('btnSavorLoop'),
+                btnSavorStop: document.getElementById('btnSavorStop'),
+                ms: document.getElementById('ms'),
                 mainContent: document.getElementById('mainContent'),
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
@@ -1239,25 +1266,62 @@ class ClipboardHistorySidebarProvider {
                 if (cmdBtn) post('executeCommand', { cmd: cmdBtn.dataset.cmd });
             });
 
-            el.btnPlay.onclick = () => post('executeCommand', { cmd: 'qqq.savorMoments' });
-            el.btnStop.onclick = stopAudio;
+            el.savorCard.onclick = () => {
+                post('requestSavorAudio', { mode: 'normal' });
+            };
+            el.btnSavorLoop.onclick = (e) => {
+                e.stopPropagation();
+                post('requestSavorAudio', { mode: 'loop' });
+            };
+            el.btnSavorStop.onclick = (e) => {
+                e.stopPropagation();
+                stopAudio();
+            };
 
             window.addEventListener('message', e => {
                 const m = e.data;
                 if (m.command === 'updateData') {
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
-                    playAudio(m.base64);
+                    playAudio(m.base64, m.count);
                 }
             });
 
             // 音乐播放
             let currentAudio = null;
-            function stopAudio() { if(currentAudio) { currentAudio.pause(); currentAudio = null; document.getElementById('ms').innerText = 'Stopped'; } }
-            function playAudio(base64) {
+            let loopRemaining = 0;
+            function stopAudio() {
+                if(currentAudio) {
+                    currentAudio.pause();
+                    currentAudio.onended = null;
+                    currentAudio = null;
+                }
+                document.getElementById('ms').innerText = 'Stopped';
+                document.querySelector('.icon-loop')?.classList.remove('spinning');
+            }
+            function playAudio(base64, count) {
                 stopAudio();
+                loopRemaining = count || 1; // -1 为永久循环，正数为次数
                 const audio = new Audio('data:audio/mp3;base64,' + base64);
-                currentAudio = audio; document.getElementById('ms').innerText = 'Savoring...';
+                currentAudio = audio;
+                document.getElementById('ms').innerText = (loopRemaining === -1 ? 'Looping...' : 'Savoring...');
+
+                if (loopRemaining === -1) {
+                    document.querySelector('.icon-loop')?.classList.add('spinning');
+                }
+
+                audio.onended = () => {
+                    if (loopRemaining === -1) {
+                        audio.currentTime = 0;
+                        audio.play();
+                    } else if (loopRemaining > 1) {
+                        loopRemaining--;
+                        audio.currentTime = 0;
+                        audio.play();
+                    } else {
+                        stopAudio();
+                    }
+                };
                 audio.play();
             }
 
