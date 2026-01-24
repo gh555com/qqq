@@ -935,7 +935,7 @@ class ClipboardHistorySidebarProvider {
         const avgMs = Math.floor(s.totalMs / days);
         const avgStr = formatDuration(avgMs);
 
-        return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}.`;
+        return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}`;
     }
 
     _formatVideoStats(s) {
@@ -952,7 +952,7 @@ class ClipboardHistorySidebarProvider {
         const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
         const avgCount = Math.round(s.count / days);
 
-        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times.`;
+        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;
     }
 
     _formatPasteStats(s) {
@@ -969,7 +969,7 @@ class ClipboardHistorySidebarProvider {
         const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
         const avgCount = Math.round(s.count / days);
 
-        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times.`;
+        return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;
     }
 
     _getAudioBase64() {
@@ -1017,7 +1017,7 @@ class ClipboardHistorySidebarProvider {
             `default-src 'none'`,
             `img-src ${this._view.webview.cspSource} data:`,
             `media-src ${this._view.webview.cspSource} data:`,
-            `style-src ${this._view.webview.cspSource} 'nonce-${nonce}' 'unsafe-inline'`,
+            `style-src ${this._view.webview.cspSource} 'nonce-${nonce}'`,
             `script-src 'nonce-${nonce}'`,
             `font-src ${this._view.webview.cspSource}`,
         ].join('; ');
@@ -1071,7 +1071,7 @@ class ClipboardHistorySidebarProvider {
             border: 1px solid var(--vscode-input-border, #d3c6aa);
             border-radius: 2px;
             padding: 2px 24px 2px 6px;
-            font-size: 13px;
+            font-size: 14px;
             height: 24px;
             width: 100%;
             outline: none;
@@ -1250,7 +1250,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        Paste <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span class="spacer-5"></span> <span id="paste-stats">${pasteStats}</span>
+                        Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
@@ -1285,6 +1285,22 @@ class ClipboardHistorySidebarProvider {
     </div>
     <script nonce="${nonce}">
         (function() {
+            // ---- ES5/老环境兜底：closest/matches polyfill ----
+            if (!Element.prototype.matches) {
+                Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.webkitMatchesSelector;
+            }
+            if (!Element.prototype.closest) {
+                Element.prototype.closest = function(sel) {
+                    var el0 = this;
+                    while (el0 && el0.nodeType === 1) {
+                        if (el0.matches && el0.matches(sel)) return el0;
+                        el0 = el0.parentElement || el0.parentNode;
+                    }
+                    return null;
+                };
+            }
+            // --------------------------------------------------
+
             var vscode = acquireVsCodeApi();
             var el = {
                 historyContainer: document.getElementById('historyContainer'),
@@ -1475,11 +1491,11 @@ class ClipboardHistorySidebarProvider {
 
             function isValidUrl(s) {
                 if (!s) return false;
-                var val = s.trim();
-                if (!val || /\s/.test(val)) return false;
-                // 使用纯正则代替 URL 对象和 try-catch
-                var pattern = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/i;
-                if (val.indexOf('localhost') !== -1) return true;
+                var val = ('' + s).replace(/^\\s+|\\s+$/g, '');
+                if (!val) return false;
+                if (/\\s/.test(val)) return false;
+                if (/^(https?:\\/\\/)?(localhost|127\\.0\\.0\\.1|\\[::1\\])(:\\d+)?(\\/.*)?$/i.test(val)) return true;
+                var pattern = /^(https?:\\/\\/)?([a-z0-9-]+\\.)+[a-z]{2,}(?::\\d+)?(\\/[^\\s]*)?$/i;
                 return pattern.test(val);
             }
 
