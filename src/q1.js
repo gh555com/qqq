@@ -1,6 +1,6 @@
 // src/q1.js
 const global = require('./global');
-const { wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
+const { savePasteStats, wq, TransactionManager, getConfig, TaskCounter, TaskMessage } = global;
 const h = require('./h');
 const Qvideo = require('./qvideo');
 const vscode = require("vscode");
@@ -2499,6 +2499,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 					if (replaced) {
 						await TransactionManager.removeTransaction(transId);
 
+						let totalSizeForStats = 0;
 						if (result.type !== 'image') {
 							const elapsedMs = Date.now() - taskStartTime;
 							let detail = '';
@@ -2509,6 +2510,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 								const mediaCount = mediaBlocks.length;
 								// 计算总大小
 								const totalSize = mediaBlocks.reduce((sum, block) => sum + (block.size || 0), 0);
+								totalSizeForStats = totalSize;
 								// 格式化大小显示
 								let sizeStr = '';
 								if (totalSize > 0) {
@@ -2535,10 +2537,29 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 								if (skippedCount > 0) {
 									detail += ` (跳过 ${skippedCount}个无法访问)`;
 								}
+
+								// 尝试从 snapshot 或结果中获取总大小
+								if (result.totalSize) {
+									totalSizeForStats = result.totalSize;
+								} else if (typeInfo && typeInfo.totalSize) {
+									totalSizeForStats = typeInfo.totalSize;
+								} else if (result.files) {
+									for (const f of result.files) {
+										try { totalSizeForStats += fs.statSync(f).size; } catch { }
+									}
+								}
 							}
 							const msg = TaskMessage.done(taskTitle, detail, elapsedMs, taskNum);
 							TaskMessage.showSimpleToast(msg, 15000, 'success');
+						} else {
+							// 图片粘贴：统计落盘后的真实大小
+							if (result.path) {
+								try { totalSizeForStats = fs.statSync(result.path).size; } catch { }
+							}
 						}
+
+						// ★ 统一上报统计
+						savePasteStats(totalSizeForStats);
 					} else {
 						const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
 						if (trans) await TransactionManager.rollback(trans);
@@ -2627,6 +2648,26 @@ async function executeClipboardCommand() {
 			await activeEditor.edit((editBuilder) => {
 				editBuilder.replace(activeEditor.selection, newText);
 			});
+
+			// ★ 统计简单粘贴
+			if (result) {
+				let size = 0;
+				if (result.type === 'text') {
+					size = Buffer.byteLength(result.text || '', 'utf8');
+				} else if (result.totalSize) {
+					size = result.totalSize;
+				} else if (result.type === 'image' && result.path) {
+					try { size = fs.statSync(result.path).size; } catch { }
+				} else if ((result.type === 'file' || result.type === 'file_folder') && result.files) {
+					for (const f of result.files) {
+						try { size += fs.statSync(f).size; } catch { }
+					}
+				} else if (snapshot && snapshot.totalSize) {
+					size = snapshot.totalSize;
+				}
+				savePasteStats(size);
+			}
+
 			debounceRender(activeEditor, 10);
 		});
 	} else {

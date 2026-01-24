@@ -2515,6 +2515,30 @@ function saveWqStats(wqExecutionTime) {
 	}
 }
 
+// 保存粘贴统计数据的辅助函数
+function savePasteStats(sizeInBytes) {
+	if (extensionContext) {
+		const stats = extensionContext.globalState.get("qqq_paste_stats", {
+			count: 0,
+			totalSize: 0,
+			firstUse: Date.now()
+		});
+
+		stats.count += 1;
+		stats.totalSize += (sizeInBytes || 0);
+
+		// 如果是首次使用且未设置，初始化时间（兼容旧数据）
+		if (!stats.firstUse) stats.firstUse = Date.now();
+
+		extensionContext.globalState.update("qqq_paste_stats", stats);
+
+		// 触发侧边栏更新（如果有 Webview 正在监听）
+		if (typeof updateStatusBarNow === 'function') {
+			updateStatusBarNow();
+		}
+	}
+}
+
 function getEngineTryOrder(pref) {
 	// ★ 核心真理：定义不同偏好下的回退顺序
 	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
@@ -2868,6 +2892,7 @@ module.exports = {
 	formatHours,
 
 	// ★ 核心逻辑导出
+	savePasteStats,
 	wq,
 	TransactionManager,
 	TaskCounter,
