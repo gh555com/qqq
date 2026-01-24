@@ -496,35 +496,36 @@ class ClipboardHistoryManager {
 
             const hash = md5Hex(text);
             const existed = this._hashMap.get(hash);
-            if (existed) {
-                existed.timestamp = Date.now();
-                existed.content = text;
-                existed.preview = makePreview(text);
-                this._moveToHead(existed);
-            } else {
-                const node = {
-                    id: randomId(),
-                    content: text,
-                    timestamp: Date.now(),
-                    preview: makePreview(text),
-                    size: Buffer.byteLength(text, 'utf8'),
-                    pinned: false,
-                    hash,
-                    prev: null,
-                    next: null
-                };
-                this._insertHead(node);
-                this._idMap.set(node.id, node);
-                this._hashMap.set(hash, node);
 
-                // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
-                if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
-                    console.log('[Q4] 触发容量熔断，执行批量清理...');
-                    for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
-                        if (this._tail) this._popTail();
-                    }
+            // 如果内容已存在，则保持原样（不更新时间，不移动位置）
+            if (existed) {
+                this._lastClipboardContent = text;
+                return;
+            }
+
+            const node = {
+                id: randomId(),
+                content: text,
+                timestamp: Date.now(),
+                preview: makePreview(text),
+                size: Buffer.byteLength(text, 'utf8'),
+                pinned: false,
+                hash,
+                prev: null,
+                next: null
+            };
+            this._insertHead(node);
+            this._idMap.set(node.id, node);
+            this._hashMap.set(hash, node);
+
+            // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
+            if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
+                console.log('[Q4] 触发容量熔断，执行批量清理...');
+                for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
+                    if (this._tail) this._popTail();
                 }
             }
+
             this._lastClipboardContent = text;
             this._touch();
             this._notifyChange('add');
