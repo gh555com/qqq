@@ -284,3 +284,30 @@ qqq_history_manager_state：旧版存索引的键。
 qqq.transactions.backup：注意这个 .backup 后缀，这是旧版用来存备份的。
 新版安全：按照 REPAIR_BLUEPRINT.md 设计，新版的实时事务键名是 qqq.transactions（没有 backup 后缀）。
 结论：obsoleteKeys 即使取消注释执行，也绝对不会碰到新版的事务数据。它们在命名空间上是完全物理隔离的。您现在的决定是“永远不再执行”，这更加稳妥。
+
+
+ qq
+
+
+. POJO 转换的触发频率
+它的触发频率与 UI 刷新率 严格对齐：
+动作触发：每次您 Ctrl+C 复制新内容、删除某项、或清空历史时，都会触发一次。
+定时刷新：目前设定的 SIDEBAR_UPDATE_MS 是 5 秒一次（用于更新“ Dial”仪表盘的时间）。
+
+
+. obsoleteKeys 到底是清理了哪些“陈年旧账”？
+我的清理逻辑遵循您“向前看”的原则，在 activate 瞬间直接执行了以下物理卸载：
+qqq_clipboard_history：这是旧版本直接存放在 VS Code 内部数据库（SQLite/LevelDB）里的全部剪贴板文本。它通常是那 2MB 报警的罪魁祸首。
+qqq_history_manager_state：旧版本用来记录“哪个是最后一条”的元数据。
+qqq.transactions.backup：您之前担心的“事务残留”。如果之前的下载或漫游任务崩溃，旧版本会将未完成的事务存入这里。我直接将其抹除，强制让插件从“零状态”干净启动。
+
+
+
+废除 Watchdog 机制：
+移除了 10 秒一次的 Webview 心跳发送。
+移除了 30 秒一次的宿主端健康检查计时器。
+移除了 _lastHeartbeat 成员变量。
+结论对齐：现在，如果脚本报错或 Webview 进程崩溃，界面将保持“白屏”或“报错状态”。这不仅节省了 CPU 和 IPC 资源，更让底层问题（如 CSP 拦截、脚本冲突）能被第一时间捕捉，而不是被定时重载所掩盖。
+
+
+

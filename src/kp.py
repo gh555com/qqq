@@ -759,7 +759,7 @@ def get_file_icon_base64(file_path: str):
 
         # Constants for SHGetFileInfo
         SHGFI_ICON = 0x000000100
-        SHGFI_SMALLICON = 0x000000001
+        SHGFI_LARGEICON = 0x000000000
 
         shfi = SHFILEINFOW()
         res = shell32.SHGetFileInfoW(
@@ -767,7 +767,7 @@ def get_file_icon_base64(file_path: str):
             0,
             ctypes.byref(shfi),
             ctypes.sizeof(shfi),
-            SHGFI_ICON | SHGFI_SMALLICON
+            SHGFI_ICON | SHGFI_LARGEICON
         )
 
         if not res or not shfi.hIcon:
@@ -778,8 +778,8 @@ def get_file_icon_base64(file_path: str):
             hdc_screen = GetDC(0)
             hdc_mem = CreateCompatibleDC(hdc_screen)
 
-            width = 16
-            height = 16
+            width = 32
+            height = 32
 
             bmi = BITMAPINFO()
             bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
