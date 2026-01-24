@@ -758,7 +758,7 @@ class ClipboardHistorySidebarProvider {
 
                         const audioBase64 = this._getKopeAudioBase64(audioIdx);
                         if (audioBase64) {
-                            this._postMessage({ command: 'playAudio', base64: audioBase64 });
+                            this._postMessage({ command: 'playSfx', base64: audioBase64 });
                         }
 
                         // 2. 执行物理复制 + 强制更新历史时间戳
@@ -804,10 +804,10 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'requestSavorAudio': {
-                    const result = this._getSavorAudio();
-                    if (result && result.base64) {
+                    const base64 = this._getSavorAudio();
+                    if (base64) {
                         const count = msg.mode === 'loop' ? -1 : (Math.floor(Math.random() * 5) + 2); // 2-6次
-                        this._postMessage({ command: 'playAudio', base64: result.base64, count, rate: result.rate });
+                        this._postMessage({ command: 'playAudio', base64, count });
                     }
                     break;
                 }
@@ -918,19 +918,15 @@ class ClipboardHistorySidebarProvider {
     _getSavorAudio() {
         const rand = Math.floor(Math.random() * 30);
         let audioPath;
-        let rate = 1.0;
         if (rand === 0) { // 1/30
             audioPath = path.join(this._context.extensionPath, "assets", "q.mp3");
-            rate = 1.0;
         } else { // 29/30
             const subRand = Math.floor(Math.random() * 3); // 0, 1, 2
             audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
-            rate = 0.5 + Math.random() * 0.2; // 0.5 to 0.7
         }
         try {
-            const base64 = fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
-            return { base64, rate };
-        } catch { return { base64: '', rate: 1.0 }; }
+            return fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
+        } catch { return ''; }
     }
 
     _getKopeAudioBase64(idx) {
@@ -1351,15 +1347,27 @@ class ClipboardHistorySidebarProvider {
                     }
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
-                    playAudio(m.base64, m.count, m.rate);
+                    playAudio(m.base64, m.count);
+                } else if (m.command === 'playSfx') {
+                    playSfx(m.base64);
                 }
             });
 
             // 音乐播放
             let currentAudio = null;
+            let currentSfx = null;
             let loopRemaining = 0;
             let playStartTime = 0;
-            let currentRate = 1.0;
+
+            function playSfx(base64) {
+                if (currentSfx) {
+                    currentSfx.pause();
+                    currentSfx = null;
+                }
+                const audio = new Audio('data:audio/mp3;base64,' + base64);
+                currentSfx = audio;
+                audio.play();
+            }
 
             function updateSavorText() {
                 const elLabel = document.getElementById('ms-label');
@@ -1391,12 +1399,10 @@ class ClipboardHistorySidebarProvider {
                 updateSavorText();
                 document.querySelector('.icon-loop')?.classList.remove('spinning');
             }
-            function playAudio(base64, count, rate) {
+            function playAudio(base64, count) {
                 stopAudio();
                 loopRemaining = count || 1; // -1 为永久循环，正数为次数
-                currentRate = rate || 1.0;
                 const audio = new Audio('data:audio/mp3;base64,' + base64);
-                audio.playbackRate = currentRate;
                 currentAudio = audio;
                 playStartTime = Date.now();
 
@@ -1409,12 +1415,10 @@ class ClipboardHistorySidebarProvider {
                 audio.onended = () => {
                     if (loopRemaining === -1) {
                         audio.currentTime = 0;
-                        audio.playbackRate = currentRate;
                         audio.play();
                     } else if (loopRemaining > 1) {
                         loopRemaining--;
                         audio.currentTime = 0;
-                        audio.playbackRate = currentRate;
                         audio.play();
                     } else {
                         stopAudio();
