@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.57.1",
+  "version": "15.57.2",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -292,7 +292,7 @@
       },
       {
         "command": "qqq.savorMoments",
-        "title": "qqq: savor moments for yourself"
+        "title": "qqq: Savor moments for yourself"
       }
     ],
     "keybindings": [

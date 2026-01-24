@@ -31,6 +31,9 @@ const { performance } = require('perf_hooks');
 const CONSTANTS = Object.freeze({
     VERSION: 4,
 
+    // SVG Spacers
+    SPACER_5_BASE64: 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNSIgaGVpZ2h0PSIxIj48L3N2Zz4=',
+
     // 存储
     STORAGE_DIR: 'clipboard-history',
     FILE_BIN_GZ: 'history.bin.gz',
@@ -664,8 +667,32 @@ class ClipboardHistoryManager {
             historyCount: this._size,
             isWatching: this._isWatching,
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
-            perf: { quarantinedFiles: this.perfStats.quarantinedFiles }
+            perf: { quarantinedFiles: this.perfStats.quarantinedFiles },
+            savor: this._getSavorStats()
         };
+    }
+
+    _getSavorStats() {
+        const gs = this.context.globalState;
+        return {
+            count: gs.get('qqq_savor_count', 0),
+            totalMs: gs.get('qqq_savor_total_ms', 0),
+            firstUse: gs.get('qqq_savor_first_use', Date.now())
+        };
+    }
+
+    async recordSavorUsage(durationMs) {
+        const gs = this.context.globalState;
+        const count = gs.get('qqq_savor_count', 0) + 1;
+        const totalMs = gs.get('qqq_savor_total_ms', 0) + durationMs;
+
+        if (!gs.get('qqq_savor_first_use')) {
+            await gs.update('qqq_savor_first_use', Date.now());
+        }
+
+        await gs.update('qqq_savor_count', count);
+        await gs.update('qqq_savor_total_ms', totalMs);
+        this._notifyChange('savor_stats');
     }
 
     async dispose() {
@@ -787,6 +814,9 @@ class ClipboardHistorySidebarProvider {
                 case 'ready':
                     this.updateContent();
                     break;
+                case 'recordSavorUsage':
+                    if (msg.durationMs) await this._historyManager.recordSavorUsage(msg.durationMs);
+                    break;
             }
         });
 
@@ -827,6 +857,9 @@ class ClipboardHistorySidebarProvider {
         }
 
         try {
+            const stats = this._historyManager.getStatsSnapshot();
+            const savorStats = this._formatSavorStats(stats.savor);
+
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
@@ -839,13 +872,14 @@ class ClipboardHistorySidebarProvider {
 
             // ★ 极致纯净：移除 stats，只初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64);
+                this._view.webview.html = this._getHtml(history, audioBase64, savorStats);
             }
 
             this._postMessage({
                 command: 'updateData',
                 history: history,
-                triggerStorm: (reason === 'add' || reason === 'pin')
+                triggerStorm: (reason === 'add' || reason === 'pin'),
+                savorStats: savorStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -853,6 +887,25 @@ class ClipboardHistorySidebarProvider {
         } catch (e) {
             console.error('[Q4-UI] Update failed:', e);
         }
+    }
+
+    _formatSavorStats(s) {
+        if (!s) return '';
+        const formatDuration = (ms) => {
+            const sec = Math.floor(ms / 1000);
+            const min = Math.floor(sec / 60);
+            const hr = Math.floor(min / 60);
+            if (hr > 0) return `${hr}h ${min % 60}m`;
+            if (min > 0) return `${min}m ${sec % 60}s`;
+            return `${sec}s`;
+        };
+
+        const totalStr = formatDuration(s.totalMs);
+        const days = Math.max(1, Math.ceil((Date.now() - s.firstUse) / (24 * 60 * 60 * 1000)));
+        const avgMs = Math.floor(s.totalMs / days);
+        const avgStr = formatDuration(avgMs);
+
+        return `${s.count} times, ${totalStr}; Avg per day: ${avgStr}.`;
     }
 
     _getAudioBase64() {
@@ -894,7 +947,7 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    _getHtml(history, audioBase64) {
+    _getHtml(history, audioBase64, savorStats = '') {
         const nonce = nonceHex();
         const csp = [
             `default-src 'none'`,
@@ -938,10 +991,12 @@ class ClipboardHistorySidebarProvider {
         .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; }
         .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 
-        .icon-loop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDRWMUw4IDVsNCA0VjZjMy4zMSAwIDYgMi42OSA2IDYgMCAxLjAxLS4yNSAxLjk3LS43IDIuOGwxLjQ2IDEuNDZBNy45MyA3LjkzIDAgMCAwIDIwIDEyYzAtNC40Mi0zLjU4LTgtOC04em0wIDE0Yy0zLjMxIDAtNi0yLjY5LTYtNiAwLTEuMDEuMjUtMS45Ny43LTIuOEw1LjI0IDcuNzRBNy45MyA3LjkzIDAgMCAwIDQgMTJjMCA0LjQyIDMuNTggOCA4IDh2M2w0LTQtNC00djN6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; }
+        .icon-loop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDRWMUw4IDVsNCA0VjZjMy4zMSAwIDYgMi42OSA2IDYgMCAxLjAxLS4yNSAxLjk3LS43IDIuOGwxLjQ2IDEuNDZBNy45MyA3LjkzIDAgMCAwIDIwIDEyYzAtNC40Mi0zLjU4LTgtOC04em0wIDE0Yy0zLjMxIDAtNi0yLjY5LTYtNiAwLTEuMDEuMjUtMS45Ny43LTIuOEw1LjI0IDcuNzRBNy45MyA3LjkzIDAgMCAwIDQgMTJjMCA0LjQyIDMuNTggOCA4IDh2M2w0LTQtNC00djN6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-loop.spinning { animation: spin 2s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; }
+        .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+
+        .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -1062,7 +1117,11 @@ class ClipboardHistorySidebarProvider {
                         <button class="action-mini-btn" id="btnSavorLoop" title="Infinite Loop"><span class="icon-loop"></span></button>
                         <button class="action-mini-btn" id="btnSavorStop" title="Stop"><span class="icon-stop"></span></button>
                     </div>
-                    <div class="text-content">🎵 <span id="ms">Ready to Savor</span></div>
+                    <div class="text-content">
+                        <span id="ms-label">Savor moments for yourself</span>
+                        <span class="spacer-5"></span>
+                        <span id="ms-stats">${savorStats}</span>
+                    </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">📋 Paste Everything (F2)</div>
                 <div class="cmd-btn" data-cmd="qqq.q2">🌍 Roam Everywhere (F6)</div>
@@ -1107,6 +1166,7 @@ class ClipboardHistorySidebarProvider {
             let currentHistory = [];
             let currentLimit = 0;
             let batchSize = 20;
+            let currentStats = '${savorStats}';
 
             function post(cmd, data = {}) { vscode.postMessage({ command: cmd, ...data }); }
 
@@ -1281,6 +1341,10 @@ class ClipboardHistorySidebarProvider {
             window.addEventListener('message', e => {
                 const m = e.data;
                 if (m.command === 'updateData') {
+                    if (m.savorStats !== undefined) {
+                        currentStats = m.savorStats;
+                        updateSavorText();
+                    }
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
@@ -1290,13 +1354,36 @@ class ClipboardHistorySidebarProvider {
             // 音乐播放
             let currentAudio = null;
             let loopRemaining = 0;
+            let playStartTime = 0;
+
+            function updateSavorText() {
+                const elLabel = document.getElementById('ms-label');
+                const elStats = document.getElementById('ms-stats');
+                if (!elLabel || !elStats) return;
+
+                elStats.innerText = currentStats;
+
+                if (!currentAudio) {
+                    elLabel.innerText = 'Savor moments for yourself';
+                } else if (loopRemaining === -1) {
+                    elLabel.innerText = 'Looping...';
+                } else {
+                    elLabel.innerText = 'Savoring...';
+                }
+            }
+
             function stopAudio() {
                 if(currentAudio) {
+                    if (playStartTime > 0) {
+                        const dur = Date.now() - playStartTime;
+                        if (dur > 500) post('recordSavorUsage', { durationMs: dur });
+                    }
                     currentAudio.pause();
                     currentAudio.onended = null;
                     currentAudio = null;
+                    playStartTime = 0;
                 }
-                document.getElementById('ms').innerText = 'Stopped';
+                updateSavorText();
                 document.querySelector('.icon-loop')?.classList.remove('spinning');
             }
             function playAudio(base64, count) {
@@ -1304,7 +1391,9 @@ class ClipboardHistorySidebarProvider {
                 loopRemaining = count || 1; // -1 为永久循环，正数为次数
                 const audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
-                document.getElementById('ms').innerText = (loopRemaining === -1 ? 'Looping...' : 'Savoring...');
+                playStartTime = Date.now();
+
+                updateSavorText();
 
                 if (loopRemaining === -1) {
                     document.querySelector('.icon-loop')?.classList.add('spinning');
