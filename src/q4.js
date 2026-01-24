@@ -726,9 +726,9 @@ class ClipboardHistorySidebarProvider {
                         await this._historyManager.copyToClipboard(node.content);
 
                         // 3. 弹出通知 (前47个字符，11秒消失逻辑)
-                        const preview = node.content.length > 47 ? node.content.slice(0, 47) : node.content;
-                        vscode.window.showInformationMessage(`已复制：${preview}`);
-                        vscode.window.setStatusBarMessage(`已复制：${preview}`, 11000);
+                        // const preview = node.content.length > 47 ? node.content.slice(0, 47) : node.content;
+                        // vscode.window.showInformationMessage(`已复制：${preview}`);
+                        // vscode.window.setStatusBarMessage(`已复制：${preview}`, 11000);
                     }
                     break;
                 }
@@ -1443,7 +1443,7 @@ async function copyToHistoryCommand(historyManager) {
 
     await historyManager.copyToClipboard(text);
     await historyManager.addToHistory(text);
-    vscode.window.showInformationMessage('已复制到剪贴板并添加到历史');
+    // vscode.window.showInformationMessage('已复制到剪贴板并添加到历史');
 }
 
 // ============================================================================
