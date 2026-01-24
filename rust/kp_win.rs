@@ -756,6 +756,10 @@ mod win {
     const CF_DIB: u32 = 8;
     const CF_DIBV5: u32 = 17;
 
+    const SHGFI_ICON: u32 = 0x000000100;
+    const SHGFI_LARGEICON: u32 = 0x000000000;
+    const SHGFI_SMALLICON: u32 = 0x000000001;
+
     #[allow(unused_imports)]
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -1133,7 +1137,7 @@ mod win {
 
     pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
         // Python 逻辑：
-        // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_SMALLICON)
+        // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_LARGEICON)
         // - CreateCompatibleDC + CreateDIBSection 32bpp top-down
         // - DrawIconEx
         // - BGRA -> PNG base64
@@ -1146,7 +1150,7 @@ mod win {
                 0,
                 &mut shfi,
                 std::mem::size_of::<SHFILEINFOW>() as u32,
-                SHGFI_ICON | SHGFI_SMALLICON,
+                SHGFI_ICON | SHGFI_LARGEICON,
             );
 
             if res == 0 || shfi.hIcon == std::ptr::null_mut() {
@@ -1172,8 +1176,8 @@ mod win {
                 return None;
             }
 
-            let width: i32 = 16;
-            let height: i32 = 16;
+            let width: i32 = 32;
+            let height: i32 = 32;
 
             let mut bmi = BITMAPINFO32 {
                 bmiHeader: BITMAPINFOHEADER {

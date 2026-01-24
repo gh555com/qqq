@@ -1086,7 +1086,7 @@ mod platform {
         #[cfg(feature = "icons")]
         {
             // file_icon_provider: pixels 已经是 RGBA。Linux caveat：必须在主线程调用（我们在 dispatch_action 里主线程调用）。
-            let icon = get_file_icon(file_path, 16).ok()?;
+            let icon = get_file_icon(file_path, 32).ok()?;
             if icon.width == 0 || icon.height == 0 {
                 return None;
             }
