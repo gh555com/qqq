@@ -1182,16 +1182,6 @@ class ClipboardHistorySidebarProvider {
                 });
             }
 
-            function ensureSelectedVisible() {
-                if (selectedIndex < 0) return;
-                const item = el.historyList.querySelectorAll('.history-item')[selectedIndex];
-                if (!item) return;
-                const top = item.offsetTop, bottom = top + item.offsetHeight;
-                const vTop = el.historyList.scrollTop, vBottom = vTop + el.historyList.clientHeight;
-                if (top < vTop) el.historyList.scrollTop = top;
-                else if (bottom > vBottom) el.historyList.scrollTop = bottom - el.historyList.clientHeight;
-            }
-
             // 事件委托
             el.historyList.addEventListener('click', e => {
                 const btn = e.target.closest('button[data-action]');
@@ -1234,30 +1224,6 @@ class ClipboardHistorySidebarProvider {
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64);
-                }
-            });
-
-            // 键盘导航 (100% 同步 qq 键盘核心)
-            document.addEventListener('keydown', e => {
-                if (currentHistory.length === 0) return;
-                if (e.key === 'ArrowDown') {
-                    selectedIndex = (selectedIndex < 0) ? 0 : Math.min(currentHistory.length - 1, selectedIndex + 1);
-                    setSelectedById(currentHistory[selectedIndex].id);
-                    ensureSelectedVisible();
-                    e.preventDefault();
-                } else if (e.key === 'ArrowUp') {
-                    selectedIndex = (selectedIndex < 0) ? 0 : Math.max(0, selectedIndex - 1);
-                    setSelectedById(currentHistory[selectedIndex].id);
-                    ensureSelectedVisible();
-                    e.preventDefault();
-                } else if (e.key === 'Enter' && selectedIndex >= 0) {
-                    const id = currentHistory[selectedIndex].id;
-                    if (e.ctrlKey) post('pasteToEditor', { itemId: id });
-                    else post('copyToClipboard', { itemId: id });
-                    e.preventDefault();
-                } else if (e.key === 'Delete' && selectedIndex >= 0) {
-                    post('deleteHistoryItem', { itemId: currentHistory[selectedIndex].id });
-                    e.preventDefault();
                 }
             });
 
@@ -1630,47 +1596,7 @@ function activate(context) {
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.showStats', () => showStatsCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager)),
-
-        vscode.commands.registerCommand('qqq.pasteLastItem', async () => {
-            const h = historyManager.getHistory(1);
-            if (h.length > 0) {
-                await historyManager.copyToClipboard(h[0].content);
-                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-            } else {
-                vscode.window.showInformationMessage('剪贴板历史为空');
-            }
-        }),
-
-        vscode.commands.registerCommand('qqq.pasteNthItem', async () => {
-            const input = await vscode.window.showInputBox({
-                placeHolder: '输入序号 (1-10)',
-                prompt: '粘贴第 N 条历史记录',
-                validateInput: (value) => {
-                    const n = parseInt(value, 10);
-                    if (Number.isNaN(n) || n < 1 || n > 10) return '请输入 1-10 之间的数字';
-                    return null;
-                },
-            });
-
-            if (!input) return;
-            const n = parseInt(input, 10);
-
-            const history = historyManager.getHistory(n);
-            if (history.length >= n) {
-                const item = history[n - 1];
-                await historyManager.copyToClipboard(item.content);
-                await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
-            } else {
-                vscode.window.showWarningMessage(`历史记录不足 ${n} 条`);
-            }
-        }),
-
-        vscode.commands.registerCommand('qqq.copyAndAddToHistory', async () => {
-            await vscode.commands.executeCommand('editor.action.clipboardCopyAction');
-            const content = await vscode.env.clipboard.readText();
-            if (content) await historyManager.addToHistory(content);
-        })
+        vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager))
     );
 
     // 清理
