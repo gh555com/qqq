@@ -1215,7 +1215,7 @@ document.addEventListener('keydown', (e) => {
   } else if (key === 'w') {
     e.preventDefault(); e.stopPropagation();
     performOpenAction(selectedItem);
-  } else if (key === 's') {
+  } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
     performDeleteAction(selectedItem);
   } else if (key === 'e') {
@@ -1946,8 +1946,10 @@ function showSaveAsDialog() {
           saveRecentDirectory(currentPath);
           (async () => {
             try {
-              const { default: trash } = await import("trash");
-              await trash([itemToDelete]);
+              // 关键修复：改用 VS Code 原生 FS 接口，彻底解决 trash 库在某些环境下的路径/权限/占用问题
+              const uri = vscode.Uri.file(itemToDelete);
+              await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+
               setTimeout(() => {
                 if (activePanel && activePanelAlive) refreshWebview();
               }, 300);
@@ -1955,7 +1957,7 @@ function showSaveAsDialog() {
             } catch (error) {
               if (panel && activePanelAlive)
                 panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
-              global.showErrorMessage("删除失败：文件正被占用。");
+              global.showErrorMessage(`删除失败: ${error.message}`);
             }
           })();
         } else {
