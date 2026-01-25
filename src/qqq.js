@@ -788,19 +788,45 @@ function makeVsProgressAdapter(progress) {
 
 async function raceClipboard(targetDir, callback) {
 	return pasteQueue.enqueue(async () => {
+		const transId = global.TransactionManager.createTransactionId();
 		try {
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: "qqq: 文件复制...",
 				cancellable: true
 			}, async (progress, token) => {
-				token.onCancellationRequested(() => {
-					global.logMessage("粘贴操作被用户取消", "WARN");
+				token.onCancellationRequested(async () => {
+					global.logMessage(`粘贴操作被用户取消 (${transId})`, "WARN");
+					await global.TransactionManager.rollback(transId);
 				});
+
+				// ★ 注册事务，让 IO 引擎享有完美的事务包裹流程
+				await global.TransactionManager.saveTransaction({
+					id: transId,
+					targetDir: targetDir,
+					tempFiles: [],
+					landedFiles: [],
+					landedFolders: [],
+					startTime: Date.now(),
+					taskType: 'local_file',
+					existingFiles: global.getDirectorySnapshot(targetDir)
+				});
+
 				const progCb = makeVsProgressAdapter(progress);
 
-				// ★ Delegate all detection and handling to h.js
-				return await h.autoDetectAndPaste(targetDir, progCb, token);
+				// ★ Delegate all detection and handling to h.js, passing transId for transactional tracking
+				const result = await h.autoDetectAndPaste(targetDir, progCb, token, transId);
+
+				if (token.isCancellationRequested) {
+					// 已在 onCancellationRequested 处理 rollback
+					return null;
+				}
+
+				// 成功完成，移除事务记录
+				if (result) {
+					await global.TransactionManager.removeTransaction(transId);
+				}
+				return result;
 			});
 
 			// ★ 无论结果如何都调用 callback，确保用户能看到结果
@@ -809,10 +835,11 @@ async function raceClipboard(targetDir, callback) {
 				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
 					global.logMessage(`所有 ${res.skippedCount} 个文件都无法访问，已跳过`, "WARN");
 				}
-				callback(res, 100);
+				if (callback) callback(res, 100);
 			}
 		} catch (e) {
 			global.logMessage(`raceClipboard failed: ${e.message}`, "ERROR");
+			await global.TransactionManager.rollback(transId).catch(() => { });
 		}
 	});
 }

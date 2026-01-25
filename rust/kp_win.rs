@@ -762,6 +762,14 @@ mod win {
     const CF_DIB: u32 = 8;
     const CF_DIBV5: u32 = 17;
 
+    #[repr(C)]
+    struct DROPFILES {
+        pub pFiles: u32,
+        pub pt: windows_sys::Win32::Foundation::POINT,
+        pub fNC: windows_sys::Win32::Foundation::BOOL,
+        pub fWide: windows_sys::Win32::Foundation::BOOL,
+    }
+
     const SHGFI_ICON: u32 = 0x000000100;
     const SHGFI_LARGEICON: u32 = 0x000000000;
     const SHGFI_SMALLICON: u32 = 0x000000001;
@@ -1131,6 +1139,79 @@ mod win {
         }
     }
 
+    pub fn set_clipboard_files(paths: Vec<String>) -> PyV {
+        if paths.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no paths".to_string())),
+            ]);
+        }
+
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("Cannot open clipboard".to_string())),
+                ]);
+            }
+
+            EmptyClipboard();
+
+            // DROPFILES struct + wide chars (null terminated) + final null terminator
+            let offset = std::mem::size_of::<DROPFILES>();
+            let mut content_wide: Vec<u16> = Vec::new();
+            for p in paths {
+                content_wide.extend(p.encode_utf16());
+                content_wide.push(0);
+            }
+            content_wide.push(0); // double null
+
+            let content_bytes_len = content_wide.len() * 2;
+            let total_size = offset + content_bytes_len;
+
+            // GHND = GMEM_MOVEABLE | GMEM_ZEROINIT (0x0042)
+            let h_mem = GlobalAlloc(0x0042, total_size as usize);
+            if h_mem.is_null() {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalAlloc failed".to_string())),
+                ]);
+            }
+
+            let ptr = GlobalLock(h_mem);
+            if ptr.is_null() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalLock failed".to_string())),
+                ]);
+            }
+
+            let df = ptr as *mut DROPFILES;
+            (*df).pFiles = offset as u32;
+            (*df).fWide = 1; // True
+
+            let data_ptr = (ptr as *mut u8).add(offset);
+            std::ptr::copy_nonoverlapping(content_wide.as_ptr() as *const u8, data_ptr, content_bytes_len);
+
+            GlobalUnlock(h_mem);
+
+            if SetClipboardData(CF_HDROP, h_mem as _).is_null() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("SetClipboardData failed".to_string())),
+                ]);
+            }
+
+            CloseClipboard();
+            PyV::Obj(vec![("success".to_string(), PyV::Bool(true))])
+        }
+    }
+
     // =============================================================================
     //  extract_icon —— 对齐 Python get_file_icon_base64
     // =============================================================================
@@ -1357,6 +1438,17 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         "get_clipboard_files" => {
             // Python: out.update(get_clipboard_files_only())
             if let PyV::Obj(extra) = win::get_clipboard_files_only() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "set_clipboard_files" | "setFiles" => {
+            let paths = if let Some(Value::Array(a)) = cmd.get("paths").or(cmd.get("file_paths")) {
+                a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            } else {
+                vec![]
+            };
+            if let PyV::Obj(extra) = win::set_clipboard_files(paths) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)

@@ -605,6 +605,24 @@ function Process-Command {
         $result.files = @()
         if ($files) { foreach ($f in $files) { $result.files += $f } }
       }
+      'setFiles' {
+        try {
+            $res = [ClipboardHelper]::SetFiles($cmd.paths)
+            if ($res -eq "Success") { $result.success = $true }
+            else {
+                # Fallback to pure PS
+                $files = New-Object System.Collections.Specialized.StringCollection
+                foreach ($p in $cmd.paths) { [void]$files.Add($p) }
+                [System.Windows.Forms.Clipboard]::SetFileDropList($files)
+                $result.success = $true
+            }
+        } catch {
+            $files = New-Object System.Collections.Specialized.StringCollection
+            foreach ($p in $cmd.paths) { [void]$files.Add($p) }
+            [System.Windows.Forms.Clipboard]::SetFileDropList($files)
+            $result.success = $true
+        }
+      }
       'saveImage' {
         try {
             $res = [ClipboardHelper]::SaveClipboardImage($cmd.path)

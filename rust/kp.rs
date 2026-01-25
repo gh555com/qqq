@@ -995,6 +995,82 @@ mod platform {
         ])
     }
 
+    pub fn set_clipboard_files(paths: Vec<String>) -> PyV {
+        if paths.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no paths".to_string())),
+            ]);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let mut uris = Vec::new();
+            for p in paths {
+                let abs = PathBuf::from(p);
+                // Simple file:// URI conversion
+                uris.push(format!("file://{}", abs.to_string_lossy()));
+            }
+            let content = uris.join("\n");
+
+            // Wayland
+            if is_wayland_session() && has_wl_paste() {
+                let mut child = process::Command::new("wl-copy")
+                    .arg("--type")
+                    .arg("text/uri-list")
+                    .stdin(process::Stdio::piped())
+                    .spawn();
+                if let Ok(mut c) = child {
+                    if let Some(mut stdin) = c.stdin.take() {
+                        let _ = stdin.write_all(content.as_bytes());
+                    }
+                    let _ = c.wait();
+                    return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                }
+            }
+
+            // X11
+            let mut child = process::Command::new("xclip")
+                .arg("-selection")
+                .arg("clipboard")
+                .arg("-t")
+                .arg("text/uri-list")
+                .stdin(process::Stdio::piped())
+                .spawn();
+            if let Ok(mut c) = child {
+                if let Some(mut stdin) = c.stdin.take() {
+                    let _ = stdin.write_all(content.as_bytes());
+                }
+                let _ = c.wait();
+                return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // AppleScript to set clipboard to file list
+            let mut parts = Vec::new();
+            for p in paths {
+                parts.push(format!("POSIX file \"{}\"", p.replace("\"", "\\\"")));
+            }
+            let script = format!("set the clipboard to {}", parts.join(" & "));
+            let res = process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .status();
+            if let Ok(status) = res {
+                if status.success() {
+                    return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                }
+            }
+        }
+
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("not supported on this platform".to_string())),
+        ])
+    }
+
     pub fn handle_clipboard(output_dir: &Path) -> PyV {
         // 行为对齐（优先级）：files > image > text > unknown
 
@@ -1184,6 +1260,17 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         }
         "get_clipboard_files" => {
             if let PyV::Obj(extra) = platform::get_clipboard_files_only() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "set_clipboard_files" | "setFiles" => {
+            let paths = if let Some(Value::Array(a)) = cmd.get("paths").or(cmd.get("file_paths")) {
+                a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+            } else {
+                vec![]
+            };
+            if let PyV::Obj(extra) = platform::set_clipboard_files(paths) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
