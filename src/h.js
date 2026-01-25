@@ -81,6 +81,17 @@ public class ClipboardHelper {
             CloseClipboard();
         }
     }
+
+    public static string SetFiles(string[] paths) {
+        try {
+            System.Collections.Specialized.StringCollection sc = new System.Collections.Specialized.StringCollection();
+            sc.AddRange(paths);
+            System.Windows.Forms.Clipboard.SetFileDropList(sc);
+            return "Success";
+        } catch (Exception ex) {
+            return "Error: " + ex.Message;
+        }
+    }
 }
 
 public class IconHelper {
@@ -2317,30 +2328,34 @@ async function pickTargetDirectory() {
  */
 async function copyFilesToClipboard(filePaths) {
     if (!filePaths || filePaths.length === 0) return;
-    if (process.platform !== "win32") {
-        // 非 Windows 平台回退到纯文本路径
-        try {
-            await vscode.env.clipboard.writeText(filePaths.join("\n"));
-        } catch { }
-        return;
+
+    const global = getGlobal();
+    const rustBridge = global.rustBridge;
+    const pythonBridge = global.pythonBridge;
+    const shellBridge = global.shellBridge;
+
+    // 尝试顺序：Rust -> Python -> Shell (长驻进程优先)
+    const bridges = [rustBridge, pythonBridge, shellBridge];
+
+    for (const bridge of bridges) {
+        if (bridge && bridge.isAvailable()) {
+            try {
+                const r = await bridge.call("setFiles", { paths: filePaths }, 2000);
+                if (r && r.success) {
+                    log(`[Clipboard] 通过 ${bridge.name} 复制了 ${filePaths.length} 个项目`, "INFO");
+                    return;
+                }
+            } catch (e) {
+                log(`[Clipboard] ${bridge.name} setFiles 失败: ${e.message}`, "WARN");
+            }
+        }
     }
 
+    // 如果所有 Bridge 都不可用，执行最低限度的纯文本回退
     try {
-        // 使用 PowerShell 和 .NET 实现真正的文件复制到剪贴板
-        // 这种方式能让 Windows 资源管理器识别并允许粘贴
-        const pathsJoined = filePaths.map(p => `"${p.replace(/"/g, '`"')}"`).join(",");
-        const psScript = `
-            Add-Type -AssemblyName System.Windows.Forms;
-            $files = New-Object System.Collections.Specialized.StringCollection;
-            $files.AddRange(@(${pathsJoined}));
-            [System.Windows.Forms.Clipboard]::SetFileDropList($files);
-        `.replace(/\n/g, " ");
-
-        await spawnOutput("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
-        log(`[Clipboard] 已将 ${filePaths.length} 个项目复制到剪贴板`, "INFO");
-    } catch (e) {
-        log(`[Clipboard] 复制失败: ${e.message}`, "ERROR");
-    }
+        await vscode.env.clipboard.writeText(filePaths.join("\n"));
+        log(`[Clipboard] 所有引擎不可用，已将路径作为纯文本复制`, "WARN");
+    } catch { }
 }
 
 module.exports = {

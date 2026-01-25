@@ -145,6 +145,29 @@ if _IS_WINDOWS:
     RegisterClipboardFormatW.restype = wintypes.UINT
     CF_HTML = RegisterClipboardFormatW("HTML Format")
 
+    # For Setting Clipboard Files (CF_HDROP)
+    class DROPFILES(ctypes.Structure):
+        _fields_ = [
+            ("pFiles", wintypes.DWORD),
+            ("pt", wintypes.POINT),
+            ("fNC", wintypes.BOOL),
+            ("fWide", wintypes.BOOL),
+        ]
+
+    GlobalAlloc = kernel32.GlobalAlloc
+    GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    GlobalAlloc.restype = wintypes.HGLOBAL
+    GlobalFree = kernel32.GlobalFree
+    GlobalFree.argtypes = [wintypes.HGLOBAL]
+    GlobalFree.restype = wintypes.HGLOBAL
+    EmptyClipboard = user32.EmptyClipboard
+    EmptyClipboard.argtypes = []
+    EmptyClipboard.restype = wintypes.BOOL
+    SetClipboardData = user32.SetClipboardData
+    SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    SetClipboardData.restype = wintypes.HANDLE
+    GHND = 0x0042  # GMEM_MOVEABLE | GMEM_ZEROINIT
+
     # For Icon Extraction
     class SHFILEINFOW(ctypes.Structure):
         _fields_ = [
@@ -700,50 +723,99 @@ def get_clipboard_files_only():
 
 
 def get_clipboard_html():
+    # ... existing code ...
+    return {"type": "unknown"}
+
+
+def set_clipboard_files(paths):
+    if not paths:
+        return {"success": False, "error": "no paths"}
+
     sys_name = platform.system()
     if sys_name == "Windows":
         try:
-            # 优先尝试 ctypes
+            # 优先尝试 ctypes (无依赖)
             if OpenClipboard(None):
                 try:
-                    if CF_HTML and IsClipboardFormatAvailable(CF_HTML):
-                        h_mem = GetClipboardData(CF_HTML)
-                        if h_mem:
-                            data = read_global_data(h_mem)
-                            if data:
-                                # HTML Format 通常是 UTF-8 编码
-                                try:
-                                    html = data.decode("utf-8")
-                                    return {"type": "html", "value": html}
-                                except:
-                                    # 如果解码失败，返回 base64
-                                    return {"type": "html", "value_base64": base64.b64encode(data).decode("ascii")}
+                    EmptyClipboard()
+                    # Calculate size
+                    # DROPFILES struct + wide chars (null terminated) + final null terminator
+                    offset = ctypes.sizeof(DROPFILES)
+                    # Join with null, end with double null
+                    joined = "\0".join(paths) + "\0\0"
+                    content_bytes = joined.encode("utf-16le")
+                    total_size = offset + len(content_bytes)
+
+                    h_mem = GlobalAlloc(GHND, total_size)
+                    if h_mem:
+                        ptr = GlobalLock(h_mem)
+                        if ptr:
+                            try:
+                                df = DROPFILES()
+                                df.pFiles = offset
+                                df.fWide = True
+                                ctypes.memmove(ptr, ctypes.byref(df), offset)
+                                ctypes.memmove(
+                                    ptr + offset, content_bytes, len(content_bytes))
+                            finally:
+                                GlobalUnlock(h_mem)
+                            SetClipboardData(CF_HDROP, h_mem)
+                            return {"success": True}
+                        else:
+                            GlobalFree(h_mem)
                 finally:
                     CloseClipboard()
-        except:
-            pass
-        # 备选 pywin32
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
         try:
+            # 备选 pywin32
             import win32clipboard as wcb
             import win32con as wcon
             wcb.OpenClipboard()
             try:
-                cf_html = wcb.RegisterClipboardFormat("HTML Format")
-                if wcb.IsClipboardFormatAvailable(cf_html):
-                    data = wcb.GetClipboardData(cf_html)
-                    if data:
-                        # pywin32 可能会根据版本返回 bytes 或 str
-                        if isinstance(data, bytes):
-                            try:
-                                return {"type": "html", "value": data.decode("utf-8")}
-                            except:
-                                return {"type": "html", "value_base64": base64.b64encode(data).decode("ascii")}
-                        return {"type": "html", "value": str(data)}
+                wcb.EmptyClipboard()
+                wcb.SetClipboardData(wcon.CF_HDROP, tuple(paths))
+                return {"success": True}
             finally:
                 wcb.CloseClipboard()
         except:
             pass
-    return {"type": "unknown"}
+
+    elif sys_name == "Linux":
+        # Linux text/uri-list
+        uris = [Path(p).absolute().as_uri() for p in paths]
+        content = "\n".join(uris).encode("utf-8")
+        # Try wl-copy or xclip
+        import subprocess
+        try:
+            if os.environ.get("WAYLAND_DISPLAY"):
+                subprocess.run(
+                    ["wl-copy", "--type", "text/uri-list"], input=content, check=True)
+                return {"success": True}
+        except:
+            pass
+        try:
+            subprocess.run(["xclip", "-selection", "clipboard",
+                           "-t", "text/uri-list"], input=content, check=True)
+            return {"success": True}
+        except:
+            pass
+
+    elif sys_name == "Darwin":
+        # macOS pbcopy with file urls
+        import subprocess
+        uris = [Path(p).absolute().as_uri() for p in paths]
+        # Use osascript to set clipboard to file list
+        script = 'set the clipboard to ' + \
+            ' & '.join([f'POSIX file "{p}"' for p in paths])
+        try:
+            subprocess.run(["osascript", "-e", script], check=True)
+            return {"success": True}
+        except:
+            pass
+
+    return {"success": False, "error": f"unsupported on {sys_name}"}
 # =============================================================================
 #  Daemon / CLI
 # =============================================================================
@@ -944,6 +1016,10 @@ def _dispatch_action(cmd):
         return out
     if action == "get_clipboard_files":
         out.update(get_clipboard_files_only())
+        return out
+    if action == "set_clipboard_files" or action == "setFiles":
+        paths = cmd.get("paths") or cmd.get("file_paths") or []
+        out.update(set_clipboard_files(paths))
         return out
     if action == "get_html":
         out.update(get_clipboard_html())
