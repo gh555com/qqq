@@ -164,6 +164,8 @@ function cacheKeyForPath(p) {
   return process.platform === "win32" ? canon.toLowerCase() : canon;
 }
 
+let activeAbortController = new AbortController();
+
 const globalScheduler = new global.TaskScheduler(MAX_CONCURRENT_TASKS);
 
 // ==================== 缓存（folder/file size）====================
@@ -298,15 +300,19 @@ function formatFileSize(bytes, mode, force = false) {
   return { text: chars.join(""), show: true };
 }
 
-function getFileSizeDisplayAsync(itemPath, mode, force = false) {
+function getFileSizeDisplayAsync(itemPath, mode, force = false, signal = null) {
   const canon = canonicalizeExistingPath(itemPath);
   const key = cacheKeyForPath(canon);
 
   return globalScheduler.schedule(`sizeDisplay:${mode}:${key}:${force}`, async () => {
+    if (signal && signal.aborted) return "";
     if (mode === "none" && !force) return "";
 
     try {
+      // 检查 signal
+      if (signal && signal.aborted) return "";
       const stats = await fs.promises.stat(canon);
+      if (signal && signal.aborted) return "";
 
       const handleSize = (sizeInBytes) => {
         const formatted = formatFileSize(sizeInBytes, mode, force);
@@ -1141,21 +1147,24 @@ function refreshSizeDisplay(){
 
 function requestFileSizeUpdates(items){
   if (sizeMode === 'none') return;
-  // 关键：自动请求只针对文件
-  const filesToRequest = items.filter(it => it.type === 'file');
-  const sortedItems = [...filesToRequest].reverse();
 
-  sortedItems.forEach(item => {
+  // 关键优化 1：自动请求只针对文件，且不再逐个发送
+  const filesToRequest = items.filter(it => it.type === 'file' && it.name !== '..');
+  if (filesToRequest.length === 0) return;
+
+  // 批量化请求：一次性发送所有需要更新的文件路径
+  const batch = filesToRequest.map(it => ({ path: it.path, type: 'file' }));
+
+  // UI 表现：先给所有待请求项打上加载圆点
+  batch.forEach(item => {
     const el = findItemElementByPath(item.path, 'file');
     if (el) {
       const sz = el.querySelector('.sz-area');
-      // 只有在 none 模式以外，且该项没有尺寸显示时才自动请求
-      if (sz && sz.textContent === '') {
-        sz.textContent = '    \\u2022    ';
-        vscode.postMessage({ command: 'requestSize', path: item.path, type: 'file', name: item.name });
-      }
+      if (sz && sz.textContent === '') sz.textContent = '    \\u2022    ';
     }
   });
+
+  vscode.postMessage({ command: 'requestSizeBatch', items: batch });
 }
 
 // ====== message ======
@@ -1178,12 +1187,14 @@ window.addEventListener('message', event => {
     if (list) list.innerHTML = message.fileListHtml || '';
     requestFileSizeUpdates(message.items || []);
     setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
-  } else if (message.command === 'updateSize') {
-    const el = findItemElementByPath(message.path, message.type);
-    if (el) {
-      const sz = el.querySelector('.sz-area');
-      if (sz) sz.textContent = message.sizeDisplay || '';
-    }
+  } else if (message.command === 'updateSizeBatch') {
+    (message.results || []).forEach(res => {
+      const el = findItemElementByPath(res.path, res.type);
+      if (el) {
+        const sz = el.querySelector('.sz-area');
+        if (sz) sz.textContent = res.sizeDisplay || '';
+      }
+    });
   } else if (message.command === 'clearFilenameInput') {
     const f = document.getElementById('filenameInput');
     if (f) { f.value = ''; f.focus(); }
@@ -1707,6 +1718,11 @@ function showSaveAsDialog() {
     try {
       if (!panel || !activePanelAlive) return;
 
+      // 切换目录时，取消之前的待处理尺寸请求
+      activeAbortController.abort();
+      activeAbortController = new AbortController();
+      const currentSignal = activeAbortController.signal;
+
       const directoryContents = await getDirectoryContents(currentPath);
       const items = [];
       let fileListHtml = "";
@@ -1857,6 +1873,35 @@ function showSaveAsDialog() {
         refreshWebview();
         break;
 
+      case "requestSizeBatch":
+        if (currentConfig.sizeMode === "none") break;
+        (async () => {
+          const signal = activeAbortController.signal;
+          const items = message.items || [];
+          const CHUNK_SIZE = 50;
+          for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+            if (signal.aborted) break;
+            const chunk = items.slice(i, i + CHUNK_SIZE);
+            const chunkResults = await Promise.all(chunk.map(async (item) => {
+              const display = await getFileSizeDisplayAsync(item.path, currentConfig.sizeMode, false, signal);
+              return {
+                path: canonicalizeExistingPath(item.path),
+                type: item.type,
+                sizeDisplay: display
+              };
+            }));
+
+            if (signal.aborted) break;
+            if (panel && activePanelAlive) {
+              panel.webview.postMessage({
+                command: "updateSizeBatch",
+                results: chunkResults
+              });
+            }
+          }
+        })();
+        break;
+
       case "requestSize":
       case "refreshSize":
         // 注意：这里不再因为 sizeMode === "none" 而直接 break，因为需要支持选中例外显示 (force)
@@ -1864,10 +1909,12 @@ function showSaveAsDialog() {
           const display = await getFileSizeDisplayAsync(message.path, currentConfig.sizeMode, !!message.force);
           if (panel && activePanelAlive) {
             panel.webview.postMessage({
-              command: "updateSize",
-              path: canonicalizeExistingPath(message.path),
-              type: message.type,
-              sizeDisplay: display,
+              command: "updateSizeBatch", // 统一使用批量接口
+              results: [{
+                path: canonicalizeExistingPath(message.path),
+                type: message.type,
+                sizeDisplay: display,
+              }]
             });
           }
         } catch { }

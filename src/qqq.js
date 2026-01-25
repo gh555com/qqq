@@ -877,27 +877,30 @@ async function getFolderInfoJS(folderPath) {
 	let fileCount = 0;
 	const extStats = {};
 
-	async function walk(dir) {
+	// 性能优化：使用迭代而非递归，并利用 Promise.all 控制并发，避免深层目录导致的栈溢出和单线程阻塞
+	const queue = [folderPath];
+	while (queue.length > 0) {
+		const currentDir = queue.shift();
 		try {
-			const files = await fs.promises.readdir(dir, { withFileTypes: true });
-			for (const file of files) {
-				const fullPath = path.join(dir, file.name);
-				if (file.isDirectory()) {
-					await walk(fullPath);
-				} else {
+			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+
+			// 批量获取 stats
+			await Promise.all(entries.map(async (entry) => {
+				const fullPath = path.join(currentDir, entry.name);
+				if (entry.isDirectory()) {
+					queue.push(fullPath);
+				} else if (entry.isFile()) {
 					try {
 						const st = await fs.promises.stat(fullPath);
 						totalSize += st.size;
 						fileCount++;
-						const ext = path.extname(file.name).toLowerCase().replace(".", "") || "no_ext";
+						const ext = path.extname(entry.name).toLowerCase().replace(".", "") || "no_ext";
 						extStats[ext] = (extStats[ext] || 0) + 1;
 					} catch { }
 				}
-			}
+			}));
 		} catch { }
 	}
-
-	await walk(folderPath);
 
 	return {
 		success: true,
