@@ -8,7 +8,6 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
-// const trash = require("trash"); // trash 7.x is ESM only, use dynamic import instead
 
 // ==================== 从 geq().js 导入核心接口 ====================
 // 延迟加载 qqq 以避免循环依赖
