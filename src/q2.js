@@ -1999,18 +1999,14 @@ function showSaveAsDialog() {
           saveRecentDirectory(currentPath);
           (async () => {
             try {
-              // 关键修复：改用 VS Code 原生 FS 接口，彻底解决 trash 库在某些环境下的路径/权限/占用问题
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-
-              setTimeout(() => {
-                if (activePanel && activePanelAlive) refreshWebview();
-              }, 300);
               global.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
             } catch (error) {
-              if (panel && activePanelAlive)
-                panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
               global.showErrorMessage(`删除失败: ${error.message}`);
+            } finally {
+              // 无论成功失败，都刷新列表并恢复状态
+              if (activePanel && activePanelAlive) refreshWebview();
             }
           })();
         } else {
@@ -2024,24 +2020,31 @@ function showSaveAsDialog() {
         if (itemsToDelete.length > 0) {
           saveRecentDirectory(currentPath);
           (async () => {
-            try {
-              let deletedCount = 0;
-              for (const item of itemsToDelete) {
-                const itemPath = canonicalizeExistingPath(item.path);
-                if (fs.existsSync(itemPath)) {
+            let deletedCount = 0;
+            let errorCount = 0;
+
+            for (const item of itemsToDelete) {
+              const itemPath = canonicalizeExistingPath(item.path);
+              if (fs.existsSync(itemPath)) {
+                try {
                   const uri = vscode.Uri.file(itemPath);
                   await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
                   deletedCount++;
+                } catch (error) {
+                  errorCount++;
+                  global.logMessage(`删除项失败: ${itemPath} - ${error.message}`, "WARN");
                 }
               }
-
-              setTimeout(() => {
-                if (activePanel && activePanelAlive) refreshWebview();
-              }, 300);
-              global.setStatusBarMessage(`已将 ${deletedCount} 个项目移至回收站`, 5000);
-            } catch (error) {
-              global.showErrorMessage(`删除失败: ${error.message}`);
             }
+
+            if (deletedCount > 0) {
+              global.setStatusBarMessage(`已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`, 5000);
+            } else if (errorCount > 0) {
+              global.showErrorMessage(`${errorCount} 个项目删除失败。`);
+            }
+
+            // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）
+            if (activePanel && activePanelAlive) refreshWebview();
           })();
         } else {
           refreshWebview();
