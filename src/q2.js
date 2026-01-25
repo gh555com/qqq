@@ -1045,6 +1045,7 @@ function performSizeAction(item){
 }
 function performCopyAction(item){
   if (!item) return;
+  // 准许单选上级目录进行复制操作，这被认为是用户的明确意图
   vscode.postMessage({ command: 'copy', paths: [item.path] });
 }
 function performPasteAction(){
@@ -1191,11 +1192,16 @@ document.addEventListener('keydown', (e) => {
     if (key === 'c') {
       e.preventDefault(); e.stopPropagation();
       if (selectedItems.length > 1) {
-        // 多选复制
-        const paths = selectedItems.map(item => item.path);
-        vscode.postMessage({ command: 'copy', paths: paths });
+        // 多选复制：自动过滤掉上级目录，防止在全选等操作中意外包含父文件夹
+        const paths = selectedItems
+          .filter(item => item.name !== '..')
+          .map(item => item.path);
+
+        if (paths.length > 0) {
+          vscode.postMessage({ command: 'copy', paths: paths });
+        }
       } else if (selectedItem) {
-        // 单选复制
+        // 单选复制：准许包含上级目录（用户手动选中的意图）
         performCopyAction(selectedItem);
       }
       return;
@@ -2083,7 +2089,11 @@ function showSaveAsDialog() {
 
       case "copy":
         if (message.paths && message.paths.length > 0) {
-          await h.copyFilesToClipboard(message.paths);
+          // 插件侧安全过滤：只过滤掉字面意义上的 ".." 相对路径，允许已解析的绝对路径
+          const safePaths = message.paths.filter(p => p !== '..' && !p.endsWith(path.sep + '..'));
+          if (safePaths.length > 0) {
+            await h.copyFilesToClipboard(safePaths);
+          }
         }
         break;
 
