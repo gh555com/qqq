@@ -675,23 +675,25 @@ function getDrives() {
   return drives;
 }
 
-function getDirectoryContents(dirPath) {
+async function getDirectoryContents(dirPath) {
   const contents = { dirs: [], files: [] };
   const canonDir = canonicalizeExistingPath(dirPath);
 
   try {
-    // 性能优化：使用 withFileTypes 拿到 Dirent 对象，极大减少系统调用次数
-    const entries = fs.readdirSync(canonDir, { withFileTypes: true });
-    for (const entry of entries) {
-      const isDir = entry.isDirectory();
-      const isFile = entry.isFile();
+    // 异步性能优化：改用 VS Code 原生异步接口，不阻塞 Extension Host，且完美支持跨平台/远程路径
+    const uri = vscode.Uri.file(canonDir);
+    const entries = await vscode.workspace.fs.readDirectory(uri);
 
-      if (!isDir && !isFile) continue; // 忽略其它特殊类型文件
+    for (const [name, type] of entries) {
+      const isDir = type === vscode.FileType.Directory;
+      const isFile = type === vscode.FileType.File;
 
-      const itemPath = path.join(canonDir, entry.name);
+      if (!isDir && !isFile) continue;
+
+      const itemPath = path.join(canonDir, name);
       const item = {
-        name: entry.name,
-        path: itemPath, // 避免在循环内调用昂贵的 canonicalizeExistingPath
+        name: name,
+        path: itemPath,
         isDir: isDir
       };
 
@@ -1606,11 +1608,11 @@ function showSaveAsDialog() {
     activePanel = null;
   });
 
-  function updateResourceExplorer() {
+  async function updateResourceExplorer() {
     try {
       if (!panel || !activePanelAlive) return;
 
-      const directoryContents = getDirectoryContents(currentPath);
+      const directoryContents = await getDirectoryContents(currentPath);
       const items = [];
       let fileListHtml = "";
 
@@ -1619,7 +1621,8 @@ function showSaveAsDialog() {
       const parent = canonicalizeExistingPath(path.dirname(canonCur));
       const root = (() => {
         try {
-          return path.parse(canonCur).root || "";
+          // 使用 vscode.Uri 辅助解析根路径，增强跨平台兼容性
+          return vscode.Uri.file(canonCur).fsPath === vscode.Uri.file(path.parse(canonCur).root).fsPath ? canonCur : path.parse(canonCur).root;
         } catch {
           return "";
         }
@@ -1664,13 +1667,14 @@ function showSaveAsDialog() {
     }
   }
 
-  function refreshWebview() {
+  async function refreshWebview() {
     if (!panel || !activePanelAlive) return;
     try {
       panel.webview.html = getWebviewContent(currentPath);
-      setTimeout(() => {
+      // 给 Webview 一点加载时间，然后异步更新内容
+      setTimeout(async () => {
         if (!panel || !activePanelAlive) return;
-        updateResourceExplorer();
+        await updateResourceExplorer();
         try {
           panel.webview.postMessage({ command: "focusInput" });
         } catch { }
