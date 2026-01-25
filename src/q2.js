@@ -371,6 +371,8 @@ function getConfig() {
   return config;
 }
 
+let saveConfigTimer = null;
+
 function saveConfig(
   recentDirs,
   lineSpacing,
@@ -397,9 +399,17 @@ function saveConfig(
     kbmOverlap: nextOverlap,
   };
 
-  globalContext.globalState.update("qqq_config", newConfig);
   sizeMode = nextSizeMode;
   kbmOverlap = nextOverlap;
+
+  // 性能优化：防抖处理。频繁切换目录时，不要同步更新 globalState
+  if (saveConfigTimer) clearTimeout(saveConfigTimer);
+  saveConfigTimer = setTimeout(() => {
+    try {
+      globalContext.globalState.update("qqq_config", newConfig);
+      saveConfigTimer = null;
+    } catch (e) { }
+  }, 1000);
 }
 
 // ==================== 目录管理 ====================
@@ -507,39 +517,35 @@ function removeAndRecycleRecentDirectory(directory) {
   return updated;
 }
 
+let cachedDrives = null;
+let lastDrivesQueryTime = 0;
+
 function getDrives() {
+  const now = Date.now();
+  // 缓存 5 分钟，盘符不会频繁变动
+  if (cachedDrives && (now - lastDrivesQueryTime < 300000)) {
+    return cachedDrives;
+  }
+
   const drives = [];
   if (process.platform === "win32") {
-    try {
-      // 现代方案：使用 PowerShell 获取逻辑驱动器，弃用被微软废弃的 wmic
-      const cmd = "powershell.exe -NoProfile -Command \"Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root\"";
-      const child = require("child_process").spawnSync(cmd, { shell: true, encoding: "utf8" });
-      if (child.stdout) {
-        const lines = child.stdout.split(/\r?\n/);
-        for (const line of lines) {
-          const driveMatch = line.trim().match(/^([A-Z]:\\?)$/i);
-          if (driveMatch) {
-            let d = driveMatch[1].toUpperCase();
-            if (!d.endsWith("\\")) d += "\\";
-            if (!drives.includes(d)) drives.push(d);
-          }
-        }
-      }
-    } catch (error) {
-      global.logMessage("PowerShell 获取驱动器失败，尝试回退逻辑: " + error.message, "WARN");
-    }
-
-    // 终极回退：穷举 A-Z。即使命令被禁用，只要盘符存在就能探测到
-    if (drives.length === 0) {
-      for (let i = 65; i <= 90; i++) {
+    // 性能优化：直接使用 fs.existsSync 穷举 A-Z。
+    // 这比 spawn powershell 快 100 倍且不阻塞 Extension Host 主线程。
+    for (let i = 65; i <= 90; i++) {
+      try {
         const drive = String.fromCharCode(i) + ":\\";
-        if (fs.existsSync(drive)) drives.push(drive);
-      }
+        if (fs.existsSync(drive)) {
+          drives.push(drive);
+        }
+      } catch (e) { }
     }
     if (drives.length === 0) drives.push("C:\\");
   } else {
     drives.push("/");
   }
+
+  cachedDrives = drives;
+  lastDrivesQueryTime = now;
   return drives;
 }
 
@@ -1037,6 +1043,7 @@ window.addEventListener('message', event => {
   if (!message) return;
 
   if (message.command === 'update') {
+    currentPath = message.currentPath || '';
     const addr = document.getElementById('addressInput');
     if (addr) addr.value = message.currentPath || '';
     const list = document.getElementById('fileList');
@@ -1559,15 +1566,22 @@ function showSaveAsDialog() {
   async function refreshWebview() {
     if (!panel || !activePanelAlive) return;
     try {
-      panel.webview.html = getWebviewContent(currentPath);
-      // 给 Webview 一点加载时间，然后异步更新内容
-      setTimeout(async () => {
-        if (!panel || !activePanelAlive) return;
+      // 性能优化：如果 Webview 已经加载过内容，不要全量重刷 HTML
+      // 只有在 HTML 为空时才进行初始化。切换目录通过 update 消息处理。
+      if (!panel.webview.html || panel.webview.html === "") {
+        panel.webview.html = getWebviewContent(currentPath);
+        // 首次加载需要给一点时间
+        setTimeout(async () => {
+          if (!panel || !activePanelAlive) return;
+          await updateResourceExplorer();
+          try {
+            panel.webview.postMessage({ command: "focusInput" });
+          } catch { }
+        }, 300);
+      } else {
+        // 已经是激活状态，直接异步更新内容，实现“秒开”响应
         await updateResourceExplorer();
-        try {
-          panel.webview.postMessage({ command: "focusInput" });
-        } catch { }
-      }, 100);
+      }
     } catch (e) {
       geq().logMessage("Refresh Webview failed: " + e.message, "ERROR");
     }

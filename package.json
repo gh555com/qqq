@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.57.31",
+  "version": "15.57.33",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -367,7 +367,6 @@
     "写真",
     "ペースト",
     "画像を貼り付け",
-    "画像貼り付け",
     "사진을 붙이다",
     "사진붙이기",
     "Bild einfügen",
