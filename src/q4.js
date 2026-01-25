@@ -921,7 +921,8 @@ class ClipboardHistorySidebarProvider {
         if (limit) this._currentLimit = limit;
 
         // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新、且不是关键手动操作(pin/remove/clear)，则挂起更新
-        const isImmediate = force || !!keyword || ['pin', 'remove', 'clear'].includes(reason);
+        const isSearchUpdate = !!keyword || (reason === null && !keyword); // 搜索输入或清空搜索
+        const isImmediate = force || isSearchUpdate || ['pin', 'remove', 'clear'].includes(reason);
         if (!isImmediate && this._isFocused) {
             this._needsUpdate = true;
             this._pendingReason = reason;
@@ -1307,8 +1308,8 @@ class ClipboardHistorySidebarProvider {
         .scrollbar-outer-thumb:hover { width: 6px; right: 0; }
 
         .scrollbar-inner { position: absolute; right: 0; top: 0; width: 6px; height: 100%; z-index: 10; pointer-events: none; }
-        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 1; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease; }
-        .scrollbar-inner-thumb:hover { width: 6px; right: 0; }
+        .scrollbar-inner-thumb { position: absolute; right: 1px; width: 4px; background: var(--red) !important; border-radius: 3px; opacity: 0.5; cursor: pointer; pointer-events: auto; forced-color-adjust: none !important; transition: width 0.1s ease, right 0.1s ease, opacity 0.1s ease; }
+        .scrollbar-inner-thumb:hover { width: 6px; right: 0; opacity: 1; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
         .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; }
