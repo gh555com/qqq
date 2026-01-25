@@ -643,18 +643,32 @@ function getDrives() {
   const drives = [];
   if (process.platform === "win32") {
     try {
-      const child = require("child_process").spawnSync("wmic", ["logicaldisk", "get", "caption"], {
-        encoding: "utf8",
-      });
-      const lines = child.stdout.split("\n");
-      for (const line of lines) {
-        const driveMatch = line.match(/([A-Z]:)/);
-        if (driveMatch) drives.push(driveMatch[1]);
+      // 现代方案：使用 PowerShell 获取逻辑驱动器，弃用被微软废弃的 wmic
+      const cmd = "powershell.exe -NoProfile -Command \"Get-PSDrive -PSProvider FileSystem | Select-Object -ExpandProperty Root\"";
+      const child = require("child_process").spawnSync(cmd, { shell: true, encoding: "utf8" });
+      if (child.stdout) {
+        const lines = child.stdout.split(/\r?\n/);
+        for (const line of lines) {
+          const driveMatch = line.trim().match(/^([A-Z]:\\?)$/i);
+          if (driveMatch) {
+            let d = driveMatch[1].toUpperCase();
+            if (!d.endsWith("\\")) d += "\\";
+            if (!drives.includes(d)) drives.push(d);
+          }
+        }
       }
     } catch (error) {
-      geq().logMessage("获取驱动器列表失败: " + error.message, "ERROR");
-      drives.push("C:");
+      geq().logMessage("PowerShell 获取驱动器失败，尝试回退逻辑: " + error.message, "WARN");
     }
+
+    // 终极回退：穷举 A-Z。即使命令被禁用，只要盘符存在就能探测到
+    if (drives.length === 0) {
+      for (let i = 65; i <= 90; i++) {
+        const drive = String.fromCharCode(i) + ":\\";
+        if (fs.existsSync(drive)) drives.push(drive);
+      }
+    }
+    if (drives.length === 0) drives.push("C:\\");
   } else {
     drives.push("/");
   }
@@ -666,22 +680,23 @@ function getDirectoryContents(dirPath) {
   const canonDir = canonicalizeExistingPath(dirPath);
 
   try {
+    // 性能优化：使用 withFileTypes 拿到 Dirent 对象，极大减少系统调用次数
     const entries = fs.readdirSync(canonDir, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path.join(canonDir, entry.name);
-      try {
-        const stat = fs.statSync(entryPath);
-        const item = {
-          name: entry.name,
-          path: canonicalizeExistingPath(entryPath),
-          isDir: entry.isDirectory(),
-          mtime: stat.mtime.toISOString(),
-        };
-        if (item.isDir) contents.dirs.push(item);
-        else contents.files.push(item);
-      } catch {
-        /* ignore */
-      }
+      const isDir = entry.isDirectory();
+      const isFile = entry.isFile();
+
+      if (!isDir && !isFile) continue; // 忽略其它特殊类型文件
+
+      const itemPath = path.join(canonDir, entry.name);
+      const item = {
+        name: entry.name,
+        path: itemPath, // 避免在循环内调用昂贵的 canonicalizeExistingPath
+        isDir: isDir
+      };
+
+      if (isDir) contents.dirs.push(item);
+      else contents.files.push(item);
     }
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
     contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
