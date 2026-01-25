@@ -856,13 +856,11 @@ class ClipboardHistorySidebarProvider {
                 case 'deleteHistoryItem':
                     if (msg.itemId) {
                         await this._historyManager.removeItem(msg.itemId);
-                        this.updateContent();
                     }
                     break;
                 case 'togglePinHistoryItem':
                     if (msg.itemId) {
                         await this._historyManager.togglePin(msg.itemId);
-                        this.updateContent();
                     }
                     break;
                 case 'requestData':
@@ -879,7 +877,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 }
                 case 'ready':
-                    this.updateContent();
+                    this.updateContent(null, null, null, true);
                     break;
                 case 'recordSavorUsage':
                     if (msg.durationMs) await this._historyManager.recordSavorUsage(msg.durationMs);
@@ -892,7 +890,7 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.onDidChangeVisibility(() => {
             if (webviewView.visible) {
-                this.updateContent();
+                this.updateContent(null, null, null, true);
                 this._startPeriodicUpdate();
             } else {
                 this._stopPeriodicUpdate();
@@ -919,8 +917,9 @@ class ClipboardHistorySidebarProvider {
         if (!this._view || !this._view.visible) return;
         if (limit) this._currentLimit = limit;
 
-        // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新，则挂起更新
-        if (!force && this._isFocused && !keyword) {
+        // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新、且不是关键手动操作(pin/remove/clear)，则挂起更新
+        const isImmediate = force || !!keyword || ['pin', 'remove', 'clear'].includes(reason);
+        if (!isImmediate && this._isFocused) {
             this._needsUpdate = true;
             this._pendingReason = reason;
             return;
@@ -1143,6 +1142,7 @@ class ClipboardHistorySidebarProvider {
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
         #videoCard { height: 48px; overflow: visible; }
+        [data-cmd="qqq.weave"] { height: 60px !important; }
         .input-box-wrapper { position: relative; width: 155px; height: 30px; flex-shrink: 0; margin-left: -4px; }
         .inline-input {
             background: var(--base2);
@@ -1372,7 +1372,6 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
             </div>
-            <div class="section-title">Passed by</div>
             <div class="search-container">
                 <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
             </div>
