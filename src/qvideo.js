@@ -1591,6 +1591,8 @@ class Qvideo {
         if (targetUri) {
             // Background insertion using WorkspaceEdit
             try {
+                // ★ 拦截不存在的路径，防止触发编辑器找不到文件的弹窗
+                if (!fs.existsSync(targetUri.fsPath)) return;
                 const doc = await vscode.workspace.openTextDocument(targetUri);
                 const lastLine = doc.lineCount - 1;
                 const range = new vscode.Range(lastLine, doc.lineAt(lastLine).text.length, lastLine, doc.lineAt(lastLine).text.length);

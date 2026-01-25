@@ -1041,6 +1041,15 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		lastAnchorCheckTime = now;
 
 		try {
+			// ★ 防御性校验：确保文件依然存在，避免 VS Code 内部报错打印
+			if (!fs.existsSync(targetUri.fsPath)) {
+				if (!anchorLost) {
+					anchorLost = true;
+					global.logMessage(`[AnchorWatch] 文件不存在，视为锚点丢失: ${targetUri.fsPath}`, 'WARN');
+					anchorLostSource.cancel();
+				}
+				return false;
+			}
 			const doc = await vscode.workspace.openTextDocument(targetUri);
 			const text = doc.getText();
 			const exists = text.includes(anchor);
@@ -1221,6 +1230,8 @@ async function downloadVideosFromUrlCommand(urlArg) {
 // ==================== 锚点替换辅助 ====================
 async function replaceAnchorInDoc(uri, anchor, newText) {
 	try {
+		// ★ 性能无损校验：在打开前检查文件物理存在，消除 net::ERR_FILE_NOT_FOUND 噪音
+		if (!fs.existsSync(uri.fsPath)) return false;
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const text = doc.getText();
 		const idx = text.indexOf(anchor);
