@@ -3024,35 +3024,34 @@ function openFileCommand(filePath) {
 	}
 }
 
-function openFileInRightGroupCommand(filePath) {
+async function openFileInRightGroupCommand(filePath) {
 	if (!fs.existsSync(filePath)) return;
 	try {
 		const uri = vscode.Uri.file(filePath);
-		vscode.workspace.openTextDocument(uri).then(doc => {
-			// 确定右边的视图列
-			let targetColumn = vscode.ViewColumn.Beside;
+		const doc = await vscode.workspace.openTextDocument(uri);
+		// 确定右边的视图列
+		let targetColumn = vscode.ViewColumn.Beside;
 
-			// 检查是否有多个标签组
-			if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
-				const allGroups = vscode.window.tabGroups.all;
-				if (allGroups.length > 1) {
-					// 找到最右边的标签组
-					const sortedGroups = allGroups
-						.filter(g => typeof g.viewColumn === "number")
-						.sort((a, b) => a.viewColumn - b.viewColumn);
-					targetColumn = sortedGroups[sortedGroups.length - 1].viewColumn;
-				}
+		// 检查是否有多个标签组
+		if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
+			const allGroups = vscode.window.tabGroups.all;
+			if (allGroups.length > 1) {
+				// 找到最右边的标签组
+				const sortedGroups = allGroups
+					.filter(g => typeof g.viewColumn === "number")
+					.sort((a, b) => a.viewColumn - b.viewColumn);
+				targetColumn = sortedGroups[sortedGroups.length - 1].viewColumn;
 			}
+		}
 
-			// 在目标列打开文件，确保进入编辑状态（preserveFocus: false）
-			vscode.window.showTextDocument(doc, {
-				viewColumn: targetColumn,
-				preserveFocus: false,
-				preview: false
-			});
+		// 在目标列打开文件，确保进入编辑状态（preserveFocus: false）
+		await vscode.window.showTextDocument(doc, {
+			viewColumn: targetColumn,
+			preserveFocus: false,
+			preview: false
 		});
 	} catch (error) {
-		vscode.window.showErrorMessage("打开文件失败: " + error.message);
+		global.logMessage("打开文件失败: " + error.message, "ERROR");
 	}
 }
 
