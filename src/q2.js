@@ -1010,10 +1010,16 @@ function cancelRename(itemElement, originalContent){
 }
 
 // ===== 操作 =====
-function performEditAction(item){ if (item) startRename(item.path, item.name, item.type); }
+function performEditAction(item){
+  if (item) {
+    if (item.name === '..') return; // 严禁重命名上级目录
+    startRename(item.path, item.name, item.type);
+  }
+}
 function performOpenAction(item){ if (item) vscode.postMessage({ command: 'openWithDefault', path: item.path, type: item.type }); }
 function performDeleteAction(item){
   if (!item) return;
+  if (item.name === '..') return; // 严禁删除上级目录
   const el = findItemElementByPath(item.path);
   if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
   vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: item.path, type: item.type });
@@ -1054,11 +1060,15 @@ function handleContextMenuAction(action){
   if (selectedItems.length > 1) {
     // 多选情况
     if (action === 'delete') {
-      selectedItems.forEach(item => {
+      // 过滤掉上级目录，严禁删除
+      const targets = selectedItems.filter(item => item.name !== '..');
+      if (targets.length === 0) return;
+
+      targets.forEach(item => {
         const el = findItemElementByPath(item.path);
         if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
       });
-      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: selectedItems });
+      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
       selectedItem = null;
       selectedItems = [];
     }
@@ -1066,6 +1076,10 @@ function handleContextMenuAction(action){
     // 单选情况
     const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
     if (!item.path) return;
+    if (item.name === '..') {
+        // 对于上级目录，只允许 q (code) 和 w (open) 操作，屏蔽删除和重命名
+        if (['rename', 'delete'].includes(action)) return;
+    }
 
     switch(action){
       case 'rename': performEditAction(item); break;
@@ -1193,7 +1207,7 @@ document.addEventListener('keydown', (e) => {
     }
     if (key === 'a') {
       e.preventDefault(); e.stopPropagation();
-      // 全选所有文件项
+      // 全选所有文件项（排除 ".." 上级目录项）
       const prevSelectedItems = document.querySelectorAll('.file-item.selected');
       prevSelectedItems.forEach(item => {
         if (item.querySelector('.rename-input')) cancelRename(item);
@@ -1202,17 +1216,21 @@ document.addEventListener('keydown', (e) => {
       selectedItems = [];
 
       const allFileItems = document.querySelectorAll('.file-item');
+      let lastEl = null;
       allFileItems.forEach(item => {
+        if (item.dataset.name === '..') return; // Ctrl+A 时排除上级目录
         item.classList.add('selected');
         const itemType = item.dataset.type;
         const itemPath = item.dataset.path;
         const itemName = item.dataset.name;
-        selectedItems.push({ type: itemType, path: itemPath, name: itemName });
+        const selObj = { type: itemType, path: itemPath, name: itemName };
+        selectedItems.push(selObj);
+        lastEl = item;
       });
 
-      if (allFileItems.length > 0) {
+      if (selectedItems.length > 0) {
         selectedItem = selectedItems[selectedItems.length - 1];
-        lastSelectedItem = allFileItems[allFileItems.length - 1];
+        lastSelectedItem = lastEl;
       }
       currentFocusType = 'fileList';
       return;
@@ -1232,21 +1250,26 @@ document.addEventListener('keydown', (e) => {
   } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
     if (selectedItems.length > 1) {
-      // 多选删除
-      selectedItems.forEach(item => {
-        const el = findItemElementByPath(item.path);
-        if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
-      });
-      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: selectedItems });
-      selectedItem = null;
-      selectedItems = [];
-    } else {
-      // 单选删除
+      // 多选删除：过滤掉上级目录
+      const targets = selectedItems.filter(item => item.name !== '..');
+      if (targets.length > 0) {
+        targets.forEach(item => {
+          const el = findItemElementByPath(item.path);
+          if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+        });
+        vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
+        selectedItem = null;
+        selectedItems = [];
+      }
+    } else if (selectedItem && selectedItem.name !== '..') {
+      // 单选删除：排除上级目录
       performDeleteAction(selectedItem);
     }
   } else if (key === 'e') {
     e.preventDefault(); e.stopPropagation();
-    performEditAction(selectedItem);
+    if (selectedItem && selectedItem.name !== '..') {
+        performEditAction(selectedItem);
+    }
   }
 });
 
@@ -1995,6 +2018,12 @@ function showSaveAsDialog() {
 
       case "quickDeleteToRecycleBin": {
         const itemToDelete = canonicalizeExistingPath(message.path);
+        // 安全保护：绝对禁止删除上级目录
+        if (path.basename(itemToDelete) === '..' || message.name === '..') {
+          global.showErrorMessage("非法操作：禁止删除上级目录。");
+          refreshWebview();
+          break;
+        }
         if (fs.existsSync(itemToDelete)) {
           saveRecentDirectory(currentPath);
           (async () => {
@@ -2016,7 +2045,7 @@ function showSaveAsDialog() {
       }
 
       case "quickDeleteMultipleToRecycleBin": {
-        const itemsToDelete = message.items || [];
+        const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // 插件侧二次过滤，确保安全
         if (itemsToDelete.length > 0) {
           saveRecentDirectory(currentPath);
           (async () => {
