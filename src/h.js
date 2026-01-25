@@ -2311,9 +2311,42 @@ async function pickTargetDirectory() {
     return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
 }
 
+/**
+ * 将文件/文件夹路径列表复制到系统剪贴板 (Windows CF_HDROP 格式)
+ * @param {string[]} filePaths - 绝对路径列表
+ */
+async function copyFilesToClipboard(filePaths) {
+    if (!filePaths || filePaths.length === 0) return;
+    if (process.platform !== "win32") {
+        // 非 Windows 平台回退到纯文本路径
+        try {
+            await vscode.env.clipboard.writeText(filePaths.join("\n"));
+        } catch { }
+        return;
+    }
+
+    try {
+        // 使用 PowerShell 和 .NET 实现真正的文件复制到剪贴板
+        // 这种方式能让 Windows 资源管理器识别并允许粘贴
+        const pathsJoined = filePaths.map(p => `"${p.replace(/"/g, '`"')}"`).join(",");
+        const psScript = `
+            Add-Type -AssemblyName System.Windows.Forms;
+            $files = New-Object System.Collections.Specialized.StringCollection;
+            $files.AddRange(@(${pathsJoined}));
+            [System.Windows.Forms.Clipboard]::SetFileDropList($files);
+        `.replace(/\n/g, " ");
+
+        await spawnOutput("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
+        log(`[Clipboard] 已将 ${filePaths.length} 个项目复制到剪贴板`, "INFO");
+    } catch (e) {
+        log(`[Clipboard] 复制失败: ${e.message}`, "ERROR");
+    }
+}
+
 module.exports = {
     CLIPBOARD_HELPER_CS,
     autoDetectAndPaste,
+    copyFilesToClipboard,
     handleClipboardUnified,
     handleClipboardShell,
     sanitizeHtml,

@@ -8,6 +8,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
+const h = require("./h");
 
 // ==================== 从 geq().js 导入核心接口 ====================
 // 延迟加载 qqq 以避免循环依赖
@@ -977,6 +978,13 @@ function performSizeAction(item){
   }
   vscode.postMessage({ command: 'refreshSize', path: item.path, type: item.type });
 }
+function performCopyAction(item){
+  if (!item) return;
+  vscode.postMessage({ command: 'copy', paths: [item.path] });
+}
+function performPasteAction(){
+  vscode.postMessage({ command: 'paste', destDir: currentPath });
+}
 
 // ===== 右键菜单 =====
 function handleContextMenuAction(action){
@@ -992,6 +1000,7 @@ function handleContextMenuAction(action){
     case 'delete': performDeleteAction(item); break;
     case 'code': performCodeAction(item); break;
     case 'size': performSizeAction(item); break;
+    case 'copy': performCopyAction(item); break;
   }
 }
 
@@ -1086,11 +1095,26 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (isInputFocused() || !selectedItem) return;
+  if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
 
-  // 避免把 ctrl+a/c/x 吞掉（让 vscode/webview 自己处理）
-  if (e.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) return;
+  // Ctrl+C / Ctrl+V 处理
+  if (e.ctrlKey || e.metaKey) {
+    if (key === 'c' && selectedItem) {
+      e.preventDefault(); e.stopPropagation();
+      performCopyAction(selectedItem);
+      return;
+    }
+    if (key === 'v') {
+      e.preventDefault(); e.stopPropagation();
+      performPasteAction();
+      return;
+    }
+    // 允许其他 Ctrl 组合键（如 Ctrl+A）透传
+    return;
+  }
+
+  if (!selectedItem) return;
 
   if (key === 'q') {
     e.preventDefault(); e.stopPropagation();
@@ -1257,6 +1281,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (act === 'createFolder') createFolder();
         else if (act === 'saveFile') saveFile();
         else if (act === 'cancel') cancel();
+        else if (act === 'paste') performPasteAction();
       });
     });
   }
@@ -1850,6 +1875,28 @@ function showSaveAsDialog() {
         }
         break;
       }
+
+      case "copy":
+        if (message.paths && message.paths.length > 0) {
+          await h.copyFilesToClipboard(message.paths);
+        }
+        break;
+
+      case "paste":
+        try {
+          const _qqq = geq();
+          if (_qqq && typeof _qqq.raceClipboard === "function") {
+            await _qqq.raceClipboard(message.destDir, () => {
+              // 粘贴完成后刷新，无论结果如何
+              if (panel && activePanelAlive) refreshWebview();
+            });
+          } else {
+            global.showErrorMessage("粘贴失败：IO 引擎未就绪或不支持粘贴功能。");
+          }
+        } catch (error) {
+          global.showErrorMessage("粘贴执行异常: " + error.message);
+        }
+        break;
     }
   });
 
