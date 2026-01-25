@@ -249,8 +249,8 @@ function getFileSizeSync(filePath) {
 }
 
 // ==================== 尺寸格式化 ====================
-function formatFileSize(bytes, mode) {
-  if (mode === "none") return { text: "", show: false };
+function formatFileSize(bytes, mode, force = false) {
+  if (mode === "none" && !force) return { text: "", show: false };
 
   let unit = "b";
   let value = bytes;
@@ -263,8 +263,10 @@ function formatFileSize(bytes, mode) {
     value = Math.round(bytes / 1024);
   }
 
-  if (mode === "k" && bytes < 1024) return { text: "", show: false };
-  if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
+  if (!force) {
+    if (mode === "k" && bytes < 1024) return { text: "", show: false };
+    if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
+  }
 
   // 三段叠印：xxxxx xxxxx xxxxx（m/k/b 三段）
   const segWidth = 5;
@@ -296,18 +298,18 @@ function formatFileSize(bytes, mode) {
   return { text: chars.join(""), show: true };
 }
 
-function getFileSizeDisplayAsync(itemPath, mode) {
+function getFileSizeDisplayAsync(itemPath, mode, force = false) {
   const canon = canonicalizeExistingPath(itemPath);
   const key = cacheKeyForPath(canon);
 
-  return globalScheduler.schedule(`sizeDisplay:${mode}:${key}`, async () => {
-    if (mode === "none") return "";
+  return globalScheduler.schedule(`sizeDisplay:${mode}:${key}:${force}`, async () => {
+    if (mode === "none" && !force) return "";
 
     try {
       const stats = await fs.promises.stat(canon);
 
       const handleSize = (sizeInBytes) => {
-        const formatted = formatFileSize(sizeInBytes, mode);
+        const formatted = formatFileSize(sizeInBytes, mode, force);
         return formatted.show ? formatted.text : "";
       };
 
@@ -911,10 +913,11 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
 
   currentFocusType = 'fileList';
 
-  if (sizeMode !== 'none' && requestSize) {
+  // 选中文件时，始终例外请求尺寸显示 (force: true)
+  if (type === 'file' && requestSize) {
     const szArea = fileItem.querySelector('.sz-area');
     if (szArea) szArea.textContent = '    \\u2022    ';
-    vscode.postMessage({ command: 'requestSize', path: p, type });
+    vscode.postMessage({ command: 'requestSize', path: p, type, force: true });
   }
 }
 
@@ -1094,29 +1097,39 @@ function handleContextMenuAction(action){
 
 function refreshSizeDisplay(){
   const items = document.querySelectorAll('.file-item');
+  const itemsToRequest = [];
+
   items.forEach(item => {
     const szArea = item.querySelector('.sz-area');
     if (!szArea) return;
-    if (sizeMode !== 'none') {
-      szArea.textContent = '    \\u2022    ';
-      vscode.postMessage({ command: 'requestSize', path: item.dataset.path, type: item.dataset.type });
-    } else {
-      szArea.textContent = '';
+    szArea.textContent = ''; // 先全部清空
+
+    if (item.dataset.type === 'file') {
+      itemsToRequest.push({ path: item.dataset.path, type: 'file', name: item.dataset.name });
     }
   });
+
+  if (sizeMode !== 'none') {
+    requestFileSizeUpdates(itemsToRequest);
+  }
 }
 
 function requestFileSizeUpdates(items){
   if (sizeMode === 'none') return;
-  items.forEach(item => {
-    if (!item || item.name === '..') return;
-    // 文件/文件夹都允许 requestSize（文件会命中 stat；文件夹会走 folderSize）
-    const el = findItemElementByPath(item.path, item.type);
+  // 关键：自动请求只针对文件
+  const filesToRequest = items.filter(it => it.type === 'file');
+  const sortedItems = [...filesToRequest].reverse();
+
+  sortedItems.forEach(item => {
+    const el = findItemElementByPath(item.path, 'file');
     if (el) {
       const sz = el.querySelector('.sz-area');
-      if (sz) sz.textContent = '    \\u2022    ';
+      // 只有在 none 模式以外，且该项没有尺寸显示时才自动请求
+      if (sz && sz.textContent === '') {
+        sz.textContent = '    \\u2022    ';
+        vscode.postMessage({ command: 'requestSize', path: item.path, type: 'file', name: item.name });
+      }
     }
-    vscode.postMessage({ command: 'requestSize', path: item.path, type: item.type, name: item.name });
   });
 }
 
@@ -1126,6 +1139,7 @@ window.addEventListener('message', event => {
   if (!message) return;
 
   if (message.command === 'update') {
+    if (message.sizeMode) sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
     currentPath = message.currentPath || '';
     const addr = document.getElementById('addressInput');
     if (addr) addr.value = message.currentPath || '';
@@ -1352,8 +1366,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const isFolderNameArea = event.target.closest('.folder-name-area');
 
       if (type === 'folder') {
+        if (isSzArea) {
+          // 选中文件夹且点击 sz 区域：手动请求文件夹尺寸
+          const szArea = event.target;
+          szArea.textContent = '    \\u2022    ';
+          vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type: 'folder' });
+          selectFileItem(fileItem, false, event.shiftKey);
+          currentFocusType = 'fileList';
+          return;
+        }
         if (isSelectArea && !isFolderNameArea) {
-          selectFileItem(fileItem, true, event.shiftKey);
+          selectFileItem(fileItem, false, event.shiftKey);
           currentFocusType = 'fileList';
           return;
         }
@@ -1362,17 +1385,12 @@ document.addEventListener('DOMContentLoaded', () => {
           currentFocusType = 'fileList';
           return;
         }
-        selectFileItem(fileItem, true, event.shiftKey);
+        selectFileItem(fileItem, false, event.shiftKey);
         currentFocusType = 'fileList';
         return;
       }
 
       selectFileItem(fileItem, true, event.shiftKey);
-      if (isSzArea) {
-        const szArea = event.target;
-        szArea.textContent = '    \\u2022    ';
-        vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type });
-      }
       currentFocusType = 'fileList';
     });
 
@@ -1704,6 +1722,7 @@ function showSaveAsDialog() {
         currentPath,
         fileListHtml,
         items,
+        sizeMode: getConfig().sizeMode,
       });
     } catch (error) {
       geq().logMessage(`更新资源展示区失败: ${error}`, "ERROR");
@@ -1806,9 +1825,9 @@ function showSaveAsDialog() {
 
       case "requestSize":
       case "refreshSize":
-        if (currentConfig.sizeMode === "none") break;
+        // 注意：这里不再因为 sizeMode === "none" 而直接 break，因为需要支持选中例外显示 (force)
         try {
-          const display = await getFileSizeDisplayAsync(message.path, currentConfig.sizeMode);
+          const display = await getFileSizeDisplayAsync(message.path, currentConfig.sizeMode, !!message.force);
           if (panel && activePanelAlive) {
             panel.webview.postMessage({
               command: "updateSize",
