@@ -747,6 +747,13 @@
 	</div>
 
 	<div id="emptyContextMenu" class="context-menu-empty">
+		<div class="context-menu-empty-item" data-action="paste">
+			<div style="display:flex; justify-content:space-between; width:100%;">
+				<span>paste</span>
+				<span class="context-menu-shortcut" style="margin-left:10px;">Ctrl+V</span>
+			</div>
+		</div>
+		<div class="divider"></div>
 		<div class="context-menu-empty-item {{SIZE_MODE_NONE_CLASS}}" data-mode="none"
 			 onclick="setSizeMode('none');refreshSizeDisplay();">none</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_M_CLASS}}" data-mode="m"
@@ -773,6 +780,11 @@
 		<div class="context-menu-item" data-action="rename" data-shortcut="e">
 			<span>rename</span>
 			<span class="context-menu-shortcut">= "e"</span>
+		</div>
+		<div class="divider"></div>
+		<div class="context-menu-item" data-action="copy">
+			<span>copy</span>
+			<span class="context-menu-shortcut">Ctrl+C</span>
 		</div>
 	</div>
 	<script>
