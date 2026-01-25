@@ -1305,7 +1305,7 @@ class ClipboardHistorySidebarProvider {
         .scrollbar-inner-thumb:hover { width: 6px; right: 0; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
-        .footer-hint { text-align: center; padding: 20px; font-size: 0.7em; opacity: 0.5; }
+        .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; }
     </style>
 </head>
 <body>
@@ -1693,13 +1693,30 @@ class ClipboardHistorySidebarProvider {
                 else elLabel.innerText = 'Savoring...';
             }
 
-            function stopAudio() {
+            function stopAudio(fadeMs) {
                 if(currentAudio) {
+                    var audioToStop = currentAudio;
+                    if (fadeMs > 0) {
+                        var startVol = audioToStop.volume;
+                        var steps = 20;
+                        var stepMs = fadeMs / steps;
+                        var timer = setInterval(function() {
+                            if (audioToStop.volume > 0.05) {
+                                audioToStop.volume -= startVol / steps;
+                            } else {
+                                clearInterval(timer);
+                                audioToStop.pause();
+                                audioToStop.volume = startVol;
+                            }
+                        }, stepMs);
+                    } else {
+                        audioToStop.pause();
+                    }
+
                     if (playStartTime > 0) {
                         var dur = Date.now() - playStartTime;
                         if (dur > 500) post('recordSavorUsage', { durationMs: dur });
                     }
-                    currentAudio.pause();
                     currentAudio.onended = null;
                     currentAudio = null;
                     playStartTime = 0;
@@ -1709,7 +1726,7 @@ class ClipboardHistorySidebarProvider {
                 if (iconLoop) iconLoop.classList.remove('spinning');
             }
             function playAudio(base64, count) {
-                stopAudio();
+                stopAudio(0);
                 loopRemaining = count || 1;
                 var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
@@ -1720,9 +1737,37 @@ class ClipboardHistorySidebarProvider {
                     if (iconLoop) iconLoop.classList.add('spinning');
                 }
                 audio.onended = function() {
-                    if (loopRemaining === -1) { audio.currentTime = 0; audio.play(); }
-                    else if (loopRemaining > 1) { loopRemaining--; audio.currentTime = 0; audio.play(); }
-                    else { stopAudio(); }
+                    if (loopRemaining === -1) {
+                        audio.currentTime = 0;
+                        audio.play();
+                    } else if (loopRemaining > 1) {
+                        loopRemaining--;
+                        audio.currentTime = 0;
+                        audio.play();
+                    } else {
+                        // 最后一次播放结束前淡出
+                        // 如果音频够长，我们在倒数 2 秒时开始淡出
+                        // 但由于 HTML5 Audio 事件限制，最稳妥是在 onended 触发时处理或通过 timeupdate
+                        stopAudio(2000);
+                    }
+                };
+                // 监听时间进度实现精准淡出
+                audio.ontimeupdate = function() {
+                    if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2) {
+                        // 只在最后一次循环且剩余不到2秒时触发一次淡出逻辑
+                        audio.ontimeupdate = null;
+                        var fadeSteps = 20;
+                        var fadeInterval = 2000 / fadeSteps;
+                        var volStep = audio.volume / fadeSteps;
+                        var fTimer = setInterval(function() {
+                            if (audio.volume > volStep) {
+                                audio.volume -= volStep;
+                            } else {
+                                clearInterval(fTimer);
+                                stopAudio(0);
+                            }
+                        }, fadeInterval);
+                    }
                 };
                 audio.play();
             }
