@@ -1194,10 +1194,10 @@ document.addEventListener('keydown', (e) => {
   // 避免把 ctrl+a/c/x 吞掉（让 vscode/webview 自己处理）
   if (e.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) { e.preventDefault(); e.stopPropagation(); return; }
 
-  if (key === 'q') { e.preventDefault(); e.stopPropagation(); performEditAction(selectedItem); }
+  if (key === 'q') { e.preventDefault(); e.stopPropagation(); performCodeAction(selectedItem); }
   else if (key === 'w') { e.preventDefault(); e.stopPropagation(); performOpenAction(selectedItem); }
   else if (key === 's') { e.preventDefault(); e.stopPropagation(); performDeleteAction(selectedItem); }
-  else if (key === 'e') { e.preventDefault(); e.stopPropagation(); performCodeAction(selectedItem); }
+  else if (key === 'e') { e.preventDefault(); e.stopPropagation(); performEditAction(selectedItem); }
 });
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1643,23 +1643,49 @@ function showSaveAsDialog() {
   }
 
   function getShowOptions(openInCurrentGroup) {
-    const baseOptions = { preserveFocus: false };
-    if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
-      return openInCurrentGroup
-        ? baseOptions
-        : Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.Beside });
+    const options = { preserveFocus: false, preview: false };
+    if (!activePanel) {
+      options.viewColumn = vscode.ViewColumn.One;
+      return options;
     }
+
+    const currentCol = activePanel.viewColumn || vscode.ViewColumn.One;
+
+    if (openInCurrentGroup) {
+      // !isPinned case: 实现“一换一”，在 q2 所在的分组打开
+      options.viewColumn = currentCol;
+      return options;
+    }
+
+    // isPinned case: 智能寻找紧邻的分组（左右方向）
+    if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
+      options.viewColumn = vscode.ViewColumn.Beside;
+      return options;
+    }
+
     const allGroups = vscode.window.tabGroups.all || [];
-    if (openInCurrentGroup || !allGroups.length)
-      return Object.assign({}, baseOptions, { viewColumn: vscode.ViewColumn.One });
+    const columns = allGroups
+      .map((g) => g.viewColumn)
+      .filter((c) => typeof c === "number" && c > 0)
+      .sort((a, b) => a - b);
 
-    const sorted = allGroups
-      .filter((g) => typeof g.viewColumn === "number")
-      .sort((a, b) => a.viewColumn - b.viewColumn);
+    const idx = columns.indexOf(currentCol);
+    if (idx !== -1) {
+      if (idx < columns.length - 1) {
+        // 1. 优先使用紧邻右侧的分组
+        options.viewColumn = columns[idx + 1];
+      } else if (idx > 0) {
+        // 2. 如果已是右侧极限，则使用左侧邻居
+        options.viewColumn = columns[idx - 1];
+      } else {
+        // 3. 只有一个分组，则在侧边新建
+        options.viewColumn = vscode.ViewColumn.Beside;
+      }
+    } else {
+      options.viewColumn = vscode.ViewColumn.Beside;
+    }
 
-    return Object.assign({}, baseOptions, {
-      viewColumn: sorted.length > 0 ? sorted[0].viewColumn : vscode.ViewColumn.One,
-    });
+    return options;
   }
 
   panel.webview.onDidReceiveMessage(async (message) => {
