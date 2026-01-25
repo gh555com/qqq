@@ -557,12 +557,16 @@ Add-Type -AssemblyName System.Drawing
 
 # --- Inject C# ClipboardHelper (Optimized for Daemon) ---
 try {
-    $clipboardHelperCode = @'
+    # 检查类型是否已存在，避免重复定义异常
+    if (-not ([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
+        $clipboardHelperCode = @'
 ${clipboardHelperCode}
 '@
-    Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp -ReferencedAssemblies "System.Drawing", "System.Windows.Forms"
+        Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp -ReferencedAssemblies "System.Drawing", "System.Windows.Forms"
+    }
 } catch {
-    # Ignore if type already exists
+    # 注入失败仅记录，不阻塞后续流程
+    Write-Warning "ClipboardHelper injection failed: $($_.Exception.Message)"
 }
 
 function Process-Command {
@@ -573,9 +577,11 @@ function Process-Command {
       'ping' { $result.status = 'alive' }
       'dumpHtmlToFile' {
          try {
-             $res = [ClipboardHelper]::DumpHtmlToFile($cmd.path)
-             if ($res -eq "Success") { $result.success = $true }
-             else { $result.success = $false; $result.error = $res }
+             if (([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
+                $res = [ClipboardHelper]::DumpHtmlToFile($cmd.path)
+                if ($res -eq "Success") { $result.success = $true }
+                else { $result.success = $false; $result.error = $res }
+             } else { throw "Helper not available" }
          } catch {
              $result.success = $false
              $result.error = $_.Exception.Message
@@ -607,39 +613,49 @@ function Process-Command {
       }
       'setFiles' {
         try {
-            $res = [ClipboardHelper]::SetFiles($cmd.paths)
-            if ($res -eq "Success") { $result.success = $true }
-            else {
-                # Fallback to pure PS
-                $files = New-Object System.Collections.Specialized.StringCollection
-                foreach ($p in $cmd.paths) { [void]$files.Add($p) }
-                [System.Windows.Forms.Clipboard]::SetFileDropList($files)
-                $result.success = $true
+            if (([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
+                $res = [ClipboardHelper]::SetFiles($cmd.paths)
+                if ($res -eq "Success") { $result.success = $true; return }
             }
-        } catch {
+            # Fallback to pure PS
             $files = New-Object System.Collections.Specialized.StringCollection
             foreach ($p in $cmd.paths) { [void]$files.Add($p) }
             [System.Windows.Forms.Clipboard]::SetFileDropList($files)
             $result.success = $true
+        } catch {
+            try {
+                $files = New-Object System.Collections.Specialized.StringCollection
+                foreach ($p in $cmd.paths) { [void]$files.Add($p) }
+                [System.Windows.Forms.Clipboard]::SetFileDropList($files)
+                $result.success = $true
+            } catch {
+                $result.success = $false
+                $result.error = $_.Exception.Message
+            }
         }
       }
       'saveImage' {
         try {
-            $res = [ClipboardHelper]::SaveClipboardImage($cmd.path)
-            if ($res -ne $null -and $res.StartsWith("{")) {
-                $p = $res | ConvertFrom-Json
-                if ($p.error) { $result.success = $false; $result.error = $p.error }
-                else { $result.success = $true }
-            } else {
-                # Fallback to pure PS
+            if (([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
+                $res = [ClipboardHelper]::SaveClipboardImage($cmd.path)
+                if ($res -ne $null -and $res.StartsWith("{")) {
+                    $p = $res | ConvertFrom-Json
+                    if (-not $p.error) { $result.success = $true; return }
+                }
+            }
+            # Fallback to pure PS
+            $img = [System.Windows.Forms.Clipboard]::GetImage()
+            if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
+            else { $result.success = $false }
+        } catch {
+             try {
                 $img = [System.Windows.Forms.Clipboard]::GetImage()
                 if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
                 else { $result.success = $false }
-            }
-        } catch {
-             $img = [System.Windows.Forms.Clipboard]::GetImage()
-             if ($img) { $img.Save($cmd.path, [System.Drawing.Imaging.ImageFormat]::Png); $result.success = $true }
-             else { $result.success = $false }
+             } catch {
+                $result.success = $false
+                $result.error = $_.Exception.Message
+             }
         }
       }
       'extract_icon' {
