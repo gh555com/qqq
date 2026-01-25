@@ -692,8 +692,11 @@ class ClipboardHistoryManager {
         const gs = this.context.globalState;
         const key = `qqq_${type}_stats`;
         const stats = gs.get(key, { count: 0, firstUse: Date.now() });
-        stats.count++;
-        await gs.update(key, stats);
+        const newStats = {
+            count: (Number(stats.count) || 0) + 1,
+            firstUse: Number(stats.firstUse) || Date.now()
+        };
+        await gs.update(key, JSON.parse(JSON.stringify(newStats)));
         this._notifyChange(`${type}_stats`);
     }
 
@@ -735,8 +738,8 @@ class ClipboardHistoryManager {
 
     async recordSavorUsage(durationMs) {
         const gs = this.context.globalState;
-        const count = gs.get('qqq_savor_count', 0) + 1;
-        const totalMs = gs.get('qqq_savor_total_ms', 0) + durationMs;
+        const count = (Number(gs.get('qqq_savor_count', 0)) || 0) + 1;
+        const totalMs = (Number(gs.get('qqq_savor_total_ms', 0)) || 0) + durationMs;
 
         if (!gs.get('qqq_savor_first_use')) {
             await gs.update('qqq_savor_first_use', Date.now());
@@ -750,9 +753,12 @@ class ClipboardHistoryManager {
     async recordRoamUsage({ filesCreated = 0 } = {}) {
         const gs = this.context.globalState;
         const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now() });
-        stats.count++;
-        stats.filesCreated += filesCreated;
-        await gs.update('qqq_roam_stats', stats);
+        const newStats = {
+            count: (Number(stats.count) || 0) + 1,
+            filesCreated: (Number(stats.filesCreated) || 0) + filesCreated,
+            firstUse: Number(stats.firstUse) || Date.now()
+        };
+        await gs.update('qqq_roam_stats', JSON.parse(JSON.stringify(newStats)));
         this._notifyChange('roam_stats');
     }
 
