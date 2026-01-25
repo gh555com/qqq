@@ -979,9 +979,7 @@ class ClipboardHistorySidebarProvider {
 
     _formatGenericStats(s) {
         if (!s) return '';
-        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
-        const avgCount = Math.round(s.count / days);
-        return `${s.count} times; Avg per day: ${avgCount} times`;
+        return `${s.count} times`;
     }
 
     _formatSavorStats(s) {
@@ -1142,7 +1140,8 @@ class ClipboardHistorySidebarProvider {
         .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
 
         #videoCard { height: 48px; overflow: visible; }
-        [data-cmd="qqq.weave"] { height: 60px !important; }
+        [data-cmd="qqq.weave"] { height: 49px !important; }
+        [data-cmd="qqq.q2"] { height: 41px !important; }
         .input-box-wrapper { position: relative; width: 155px; height: 30px; flex-shrink: 0; margin-left: -4px; }
         .inline-input {
             background: var(--base2);
@@ -1257,8 +1256,8 @@ class ClipboardHistorySidebarProvider {
             100% { left: 150%; }
         }
 
-        .search-container { margin-bottom: 8px; flex-shrink: 0; }
-        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-container { margin: 3px 0 0 0; flex-shrink: 0; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 9px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
         .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
@@ -1320,13 +1319,13 @@ class ClipboardHistorySidebarProvider {
                     </div>
                     <div class="text-content">
                         <span id="ms-label">Savor moments for yourself</span>
-                        <span class="spacer-5"></span>
+                        <span class="spacer-5"></span> <span class="spacer-5"></span>
                         <span id="ms-stats">${savorStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        &nbsp;Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
+                        &nbsp;Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
@@ -1337,14 +1336,14 @@ class ClipboardHistorySidebarProvider {
                             <div class="error-tip" id="urlErrorTip">无效网址</div>
                         </div>
                     </div>
-                    <span class="spacer-5"></span>
+                    <span class="spacer-5"></span> <span class="spacer-5"></span>
                     <div class="text-content">
                         <span id="video-stats">${videoStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">
                     <div class="text-content">
-                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Tab" or "F6") <span id="roam-stats">${roamStats}</span>
+                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  ("Tab" or "F6") <span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.weave">
@@ -1354,7 +1353,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
                     <div class="text-content">
-                        &nbsp;export Doc <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="exportDoc-stats">${exportDocStats}</span>
+                        &nbsp;export Doc <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="exportDoc-stats">${exportDocStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.pure">
@@ -1364,11 +1363,11 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportZip">
                     <div class="text-content">
-                        &nbsp;export Zip <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="exportZip-stats">${exportZipStats}</span>
+                        &nbsp;export Zip <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="exportZip-stats">${exportZipStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings">
-                    <div class="text-content"> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-all-settings"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-all-settings"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
