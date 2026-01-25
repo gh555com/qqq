@@ -1120,7 +1120,7 @@ class ClipboardHistorySidebarProvider {
         .main-content::-webkit-scrollbar { display: none; }
 
         .section-title { font-size: 1.1em; font-weight: 700; margin: 15px 0 10px 0; border-bottom: 2px solid var(--primary-color); color: var(--primary-color); flex-shrink: 0; }
-        .captain-grid { display: grid; gap: 8px; margin-bottom: 15px; flex-shrink: 0; }
+        .captain-grid { display: grid; gap: 8px; margin-bottom: 0; flex-shrink: 0; }
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 14px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
         #savorCard:hover, #videoCard:hover { transform: none; }
@@ -1257,7 +1257,7 @@ class ClipboardHistorySidebarProvider {
         }
 
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; }
-        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 9px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
         .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
