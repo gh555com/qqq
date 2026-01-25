@@ -353,6 +353,11 @@
 			min-height: 0;
 		}
 
+		::selection {
+			background: rgb(255, 211, 2) !important;
+			color: black !important;
+		}
+
 		.ky-content::-webkit-scrollbar {
 			width: 10px;
 			height: 10px;
@@ -707,8 +712,7 @@
 			</div>
 
 			<div class="address-bar">
-				<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}"
-					   onkeydown="handleAddressInputKeyDown(event)">
+				<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
 			</div>
 
 			<div class="file-list-container" id="fileList" style="margin: 0;">
@@ -722,8 +726,7 @@
 					</div>
 				</div>
 				<div class="filename-input-container">
-					<input type="text" id="filenameInput" class="filename-input"
-						   onkeydown="handleFilenameInputKeyDown(event)">
+					<input type="text" id="filenameInput" class="filename-input">
 				</div>
 				<div style="display: flex; gap: 15px;">
 					<button class="button save-button" onclick="saveFile()" title="新建文件">
