@@ -1000,7 +1000,6 @@ function handleContextMenuAction(action){
     case 'delete': performDeleteAction(item); break;
     case 'code': performCodeAction(item); break;
     case 'size': performSizeAction(item); break;
-    case 'copy': performCopyAction(item); break;
   }
 }
 
@@ -1280,8 +1279,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const act = e.currentTarget.dataset.action;
         if (act === 'createFolder') createFolder();
         else if (act === 'saveFile') saveFile();
-        else if (act === 'cancel') cancel();
-        else if (act === 'paste') performPasteAction();
       });
     });
   }
@@ -1886,10 +1883,14 @@ function showSaveAsDialog() {
         try {
           const _qqq = geq();
           if (_qqq && typeof _qqq.raceClipboard === "function") {
+            const pastePathSnapshot = currentPath;
+            // q2 模式：显式开启 autoRename: true
             await _qqq.raceClipboard(message.destDir, () => {
-              // 粘贴完成后刷新，无论结果如何
-              if (panel && activePanelAlive) refreshWebview();
-            });
+              // 粘贴完成后刷新，确保路径未变且面板存活
+              if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
+                refreshWebview();
+              }
+            }, true);
           } else {
             global.showErrorMessage("粘贴失败：IO 引擎未就绪或不支持粘贴功能。");
           }

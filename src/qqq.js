@@ -786,7 +786,7 @@ function makeVsProgressAdapter(progress) {
 	};
 }
 
-async function raceClipboard(targetDir, callback) {
+async function raceClipboard(targetDir, callback, autoRename = false) {
 	return pasteQueue.enqueue(async () => {
 		const transId = global.TransactionManager.createTransactionId();
 		try {
@@ -814,8 +814,8 @@ async function raceClipboard(targetDir, callback) {
 
 				const progCb = makeVsProgressAdapter(progress);
 
-				// ★ Delegate all detection and handling to h.js, passing transId for transactional tracking
-				const result = await h.autoDetectAndPaste(targetDir, progCb, token, transId);
+				// ★ Delegate all detection and handling to h.js, passing transId and autoRename
+				const result = await h.autoDetectAndPaste(targetDir, progCb, token, transId, null, null, null, autoRename);
 
 				if (token.isCancellationRequested) {
 					// 已在 onCancellationRequested 处理 rollback

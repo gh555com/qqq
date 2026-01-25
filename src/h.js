@@ -282,6 +282,22 @@ function getTimestampFilename(ext) {
 }
 
 /**
+ * 获取一个不冲突的路径 (如 file (1).txt)
+ */
+function getUniquePath(baseDir, originalName) {
+    const ext = path.extname(originalName);
+    const nameWithoutExt = path.basename(originalName, ext);
+    let targetPath = path.join(baseDir, originalName);
+    let counter = 1;
+
+    while (fs.existsSync(targetPath)) {
+        targetPath = path.join(baseDir, `${nameWithoutExt}_${counter}${ext}`);
+        counter++;
+    }
+    return targetPath;
+}
+
+/**
  * ★ 从 URL 提取原始文件名（与 VideoDownloadController._createTask 统一逻辑）
  * @param {string} url - 资源 URL
  * @param {string} kind - 'video' 或 'image'
@@ -1700,7 +1716,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-function copyFilesToTarget(files, targetDir) {
+function copyFilesToTarget(files, targetDir, autoRename = false) {
     ensureDir(targetDir);
     const copied = [];
     const fingerprints = {};
@@ -1723,16 +1739,23 @@ function copyFilesToTarget(files, targetDir) {
             }
             const ext = path.extname(f);
             const isImg = isImageExtForClipboard(ext);
-            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
-            const dest = path.join(targetDir, fname);
+            const originalName = isImg ? getTimestampFilename(ext) : path.basename(f);
+            let dest = path.join(targetDir, originalName);
+
             if (fs.existsSync(dest)) {
                 const dstFingerprint = computeFingerprint(dest);
                 if (dstFingerprint === srcFingerprint) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    // Ensure it's registered globally
                     _tryGlobalDeduplicate(dest);
                     continue;
+                }
+
+                if (autoRename) {
+                    // q2 模式：名字冲突且内容不同 -> 静默重命名
+                    dest = getUniquePath(targetDir, originalName);
+                } else {
+                    // q1 模式：名字冲突且内容不同 -> 保持原逻辑直接覆盖
                 }
             }
             fs.copyFileSync(f, dest);
@@ -1759,7 +1782,7 @@ function copyFilesToTarget(files, targetDir) {
     return { copied, fingerprints };
 }
 
-function processFilesForClipboard(files, targetDir) {
+function processFilesForClipboard(files, targetDir, autoRename = false) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1768,7 +1791,9 @@ function processFilesForClipboard(files, targetDir) {
     const fingerprints = {};
     for (const folder of folders) {
         try {
-            const destFolder = path.join(targetDir, path.basename(folder));
+            const folderName = path.basename(folder);
+            // ★ q2 模式下同名文件夹静默重命名
+            const destFolder = autoRename ? getUniquePath(targetDir, folderName) : path.join(targetDir, folderName);
             // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
@@ -1784,7 +1809,7 @@ function processFilesForClipboard(files, targetDir) {
         }
     }
     if (validFiles.length > 0) {
-        const result = copyFilesToTarget(validFiles, targetDir);
+        const result = copyFilesToTarget(validFiles, targetDir, autoRename);
         copiedFiles.push(...result.copied);
         Object.assign(fingerprints, result.fingerprints);
     }
@@ -1796,7 +1821,7 @@ function processFilesForClipboard(files, targetDir) {
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
-async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null) {
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1868,7 +1893,8 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
                 await yieldToUI();
             }
-            const destFolder = path.join(targetDir, folderName);
+            // ★ q2 模式下同名文件夹静默重命名
+            const destFolder = autoRename ? getUniquePath(targetDir, folderName) : path.join(targetDir, folderName);
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
@@ -1937,8 +1963,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             const ext = path.extname(f);
             const isImg = isImageExtForClipboard(ext);
-            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
-            const dest = path.join(targetDir, fname);
+            const originalName = path.basename(f);
+            // ★ q2 模式下处理重名，q1 模式保持原状（指纹去重逻辑在 copyFilesToTarget 中已处理）
+            let dest = isImg ? path.join(targetDir, getTimestampFilename(ext)) : path.join(targetDir, originalName);
+            if (!isImg && autoRename) {
+                dest = getUniquePath(targetDir, originalName);
+            }
 
             fs.copyFileSync(f, dest);
             try { totalSize += fs.statSync(dest).size; } catch { }
@@ -1971,7 +2001,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     };
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     try {
         if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
         if (process.platform === "win32") {
@@ -2005,7 +2035,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 }
 
                 // ★ 传入 token 和 transId，边复制边记录事务
-                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel);
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel, autoRename);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
@@ -2159,7 +2189,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ★ 接受完整快照（单一真理源），不再重复调用 Shell
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     const global = getGlobal();
 
     // ★ 从快照中提取信息
@@ -2225,8 +2255,8 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
-        // ★ 传递预获取的文件列表，避免重复调用 getFiles
-        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel);
+        // ★ 传递预获取的文件列表，并透传 autoRename
+        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel, autoRename);
     }
 
     // ★★★ Markdown 格式保留检测 ★★★
