@@ -203,13 +203,18 @@ function spawnOutput(cmd, args) {
 // ============================================================================
 // Deduplication Helper (仅同文件夹内去重，不跨文件夹)
 // ============================================================================
-function _tryGlobalDeduplicate(filePath) {
+/**
+ * 尝试在文件所在目录内进行去重（仅限同文件夹）
+ * @param {string} filePath
+ * @returns {string} 最终使用的文件路径
+ */
+function _tryLocalDeduplicate(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return filePath;
     try {
         const currentFp = computeFingerprint(filePath);
         if (!currentFp) return filePath;
 
-        // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
+        // ★ 核心修复：严格限制在同一文件夹内去重，禁止跨文件夹引用
         const dir = path.dirname(filePath);
         const files = fs.readdirSync(dir);
         const isWin = process.platform === "win32";
@@ -221,23 +226,25 @@ function _tryGlobalDeduplicate(filePath) {
 
             if (normalizedFull === normalizedFilePath) continue;
             try {
-                if (!fs.statSync(full).isFile()) continue;
+                const st = fs.statSync(full);
+                if (!st.isFile()) continue;
             } catch { continue; }
+
             if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
             const otherFp = computeFingerprint(full);
             if (otherFp === currentFp) {
                 try {
                     fs.unlinkSync(filePath);
-                    log(`[Dedupe] 同文件夹重复: ${path.basename(filePath)} -> 使用旧文件: ${f}`, "INFO");
+                    log(`[Dedupe] 同文件夹重复，已复用本地文件: ${f}`, "INFO");
                     return full;
                 } catch (e) {
-                    log(`[Dedupe] 删除失败 ${filePath}: ${e.message}`, "WARN");
+                    log(`[Dedupe] 复用本地文件失败 ${filePath}: ${e.message}`, "WARN");
                 }
             }
         }
     } catch (e) {
-        log(`[Dedupe] Exception: ${e.message}`, "ERROR");
+        log(`[Dedupe] Local Exception: ${e.message}`, "ERROR");
     }
     return filePath;
 }
@@ -417,7 +424,6 @@ function copyFileWithProgress(src, dest, onProgress, token) {
 // Fingerprint Logic
 // ============================================================================
 const _fingerprintCache = new Map();
-const _fingerprintDb = new Map();
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
@@ -537,12 +543,7 @@ function prefillFingerprint(filePath, fingerprint) {
         const stat = fs.statSync(filePath);
         const key = cacheKeyForPath(filePath);
         _fingerprintCache.set(key, { mtime: stat.mtimeMs, size: stat.size, fp: fingerprint });
-        _fingerprintDb.set(fingerprint, filePath);
     } catch (e) { }
-}
-
-function findFileByFingerprint(fingerprint) {
-    return _fingerprintDb.get(fingerprint);
 }
 
 function computeFingerprint(filePath) {
@@ -1605,23 +1606,15 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     try {
                         fs.copyFileSync(localPath, destPath);
 
-                        // 先计算指纹，然后检查是否有相同指纹的文件
+                        // 先计算指纹，然后在同目录内去重
                         const fp = computeFingerprint(destPath);
                         let finalPath = destPath;
-                        
+
                         if (!autoRename && fp) {
-                            // 先尝试全局查找相同指纹的文件
-                            let existingPath = findFileByFingerprint(fp);
-                            if (existingPath && fs.existsSync(existingPath)) {
-                                // 如果找到相同指纹的文件，使用它
-                                try { fs.unlinkSync(destPath); } catch (e) { }
-                                finalPath = existingPath;
-                            } else {
-                                // 再尝试同文件夹内去重
-                                finalPath = _tryGlobalDeduplicate(destPath);
-                            }
+                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
+                            finalPath = _tryLocalDeduplicate(destPath);
                         } else {
-                            finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
+                            finalPath = autoRename ? destPath : _tryLocalDeduplicate(destPath);
                         }
 
                         b.filename = path.basename(finalPath);
@@ -1710,27 +1703,18 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             }
                         }
 
-                        // 先计算指纹，然后检查是否有相同指纹的文件
+                        // 先计算指纹，然后在同目录内去重
                         const fp = computeFingerprint(dlPath);
                         let finalPath = dlPath;
                         let isNewFile = true;
-                        
+
                         if (!autoRename && fp) {
-                            // 先尝试全局查找相同指纹的文件
-                            let existingPath = findFileByFingerprint(fp);
-                            if (existingPath && fs.existsSync(existingPath)) {
-                                // 如果找到相同指纹的文件，使用它
-                                try { fs.unlinkSync(dlPath); } catch (e) { }
-                                finalPath = existingPath;
-                                isNewFile = false;
-                            } else {
-                                // 再尝试同文件夹内去重
-                                const tempPath = _tryGlobalDeduplicate(dlPath);
-                                isNewFile = (tempPath === dlPath);
-                                finalPath = tempPath;
-                            }
+                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
+                            const tempPath = _tryLocalDeduplicate(dlPath);
+                            isNewFile = (tempPath === dlPath);
+                            finalPath = tempPath;
                         } else {
-                            finalPath = autoRename ? dlPath : _tryGlobalDeduplicate(dlPath);
+                            finalPath = autoRename ? dlPath : _tryLocalDeduplicate(dlPath);
                             isNewFile = (finalPath === dlPath);
                         }
 
@@ -1797,14 +1781,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
-                // q2 模式跳过全局指纹去重，不复用其他文件夹的旧文件
-                if (!autoRename) {
-                    let existingPath = findFileByFingerprint(srcFingerprint);
-                    if (existingPath && fs.existsSync(existingPath)) {
-                        copied.push(existingPath);
-                        continue;
-                    }
-                }
+                // q2 模式不自动重命名时，允许同目录内去重（但禁止跨目录）
             }
             const ext = path.extname(f);
             const originalName = path.basename(f);
@@ -1821,7 +1798,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
                 if (dstFingerprint === srcFingerprint && !autoRename) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    _tryGlobalDeduplicate(dest);
+                    _tryLocalDeduplicate(dest);
                     continue;
                 }
 
@@ -1834,8 +1811,8 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             }
             fs.copyFileSync(f, dest);
 
-            // Global Deduplication Check
-            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
+            // Local Deduplication Check
+            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
             if (finalPath !== dest) {
                 // If deduplicated to a different path
                 copied.push(finalPath);
@@ -1894,6 +1871,76 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
 }
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
+/**
+ * 异步安全的递归复制文件夹，支持取消检查，并返回累计大小
+ */
+async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCancel = null) {
+    const skipped = [];
+    const errors = [];
+    let totalSize = 0;
+
+    const isCancelled = () => (token && token.isCancellationRequested) || (shouldCancel && shouldCancel());
+
+    async function copyRecursive(srcPath, destPath) {
+        if (isCancelled()) return;
+
+        try {
+            if (!safeAccessCheck(srcPath)) {
+                skipped.push(srcPath);
+                return;
+            }
+
+            const stat = await fs.promises.stat(srcPath).catch(() => null);
+            if (!stat) return;
+
+            if (stat.isDirectory()) {
+                try {
+                    if (!fs.existsSync(destPath)) {
+                        await fs.promises.mkdir(destPath, { recursive: true });
+                    }
+                } catch (e) {
+                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
+                    return;
+                }
+
+                let entries = [];
+                try {
+                    entries = await fs.promises.readdir(srcPath);
+                } catch (e) {
+                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
+                    return;
+                }
+
+                for (const entry of entries) {
+                    if (isCancelled()) break;
+                    await copyRecursive(path.join(srcPath, entry), path.join(destPath, entry));
+                }
+            } else if (stat.isFile()) {
+                try {
+                    await fs.promises.copyFile(srcPath, destPath);
+                    totalSize += stat.size;
+                } catch (e) {
+                    if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
+                        skipped.push(srcPath);
+                        log(`[SafeCopyAsync] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
+                    } else {
+                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
+                    }
+                }
+            }
+        } catch (e) {
+            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
+        }
+    }
+
+    try {
+        await copyRecursive(src, dest);
+        return { success: !isCancelled(), skipped, errors, totalSize };
+    } catch (e) {
+        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`], totalSize: 0 };
+    }
+}
+
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
 async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
@@ -1969,24 +2016,13 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             }
             // ★ q2 模式下同名文件夹静默重命名
             const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
-            const result = safeCopyFolderRecursive(folder, destFolder);
-            if (result.success) {
+
+            // ★ 改为异步复制文件夹，避免大文件夹阻塞主线程
+            const result = await safeCopyFolderRecursiveAsync(folder, destFolder, token, shouldCancel);
+
+            if (result.success || result.errors.length === 0) {
                 copiedFolders.push(destFolder);
-                // 累加文件夹大小
-                try {
-                    const getFolderSize = (dir) => {
-                        let size = 0;
-                        const items = fs.readdirSync(dir);
-                        for (const it of items) {
-                            const p = path.join(dir, it);
-                            const st = fs.statSync(p);
-                            if (st.isDirectory()) size += getFolderSize(p);
-                            else size += st.size;
-                        }
-                        return size;
-                    };
-                    totalSize += getFolderSize(destFolder);
-                } catch { }
+                totalSize += result.totalSize;
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
                     log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
@@ -2018,7 +2054,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
-                if (i % 5 === 0) {
+                // 异步复制时不需要频繁 yieldToUI，因为 fs.promises 已经是不阻塞的了
+                // 但每 10 个文件 yield 一下还是稳妥的，给微任务队列一点空间
+                if (i % 10 === 0) {
                     await yieldToUI();
                 }
             }
@@ -2033,22 +2071,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
-                // q2 模式跳过指纹去重，不复用旧文件
-                if (!autoRename) {
-                    let existingPath = findFileByFingerprint(srcFingerprint);
-                    if (existingPath && fs.existsSync(existingPath)) {
-                        copiedFiles.push(existingPath);
-                        processedItems++;
-                        continue;
-                    }
-                }
             }
 
             const ext = path.extname(f);
             const isImg = isImageExtForClipboard(ext);
             const originalName = path.basename(f);
 
-            // 优先使用原文件名。只有当拿不到有效名称（如内存截图或无名文件）时，才回退到时间戳风格。
             let destName = originalName;
             if (isImg && (!originalName || originalName === ext)) {
                 destName = getTimestampFilename(ext);
@@ -2059,17 +2087,21 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 dest = getUniquePath(targetDir, destName, false);
             }
 
-            fs.copyFileSync(f, dest);
+            // ★ 改为异步复制文件，彻底解决大文件粘贴卡顿
+            await fs.promises.copyFile(f, dest);
 
-            // 全局去重检查
-            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
+            // 本地去重检查
+            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
             if (finalPath !== dest) {
                 copiedFiles.push(finalPath);
             } else {
                 if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
                 copiedFiles.push(dest);
             }
-            try { totalSize += fs.statSync(finalPath).size; } catch { }
+            try {
+                const st = await fs.promises.stat(finalPath);
+                totalSize += st.size;
+            } catch { }
         } catch (e) {
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 skippedCount++;
@@ -2154,8 +2186,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     if (saved?.success && fs.existsSync(dest)) {
                         const st = fs.statSync(dest);
                         if (st.size > 0) {
-                            // ✅ 关键：内存截图也要走全局去重 (q1 模式)
-                            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
+                            // ✅ 关键：内存截图也要走本地去重
+                            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
                             const fp = computeFingerprint(finalPath);
                             const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
 

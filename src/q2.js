@@ -826,6 +826,7 @@ function setSizeMode(mode){
 // ===== 选择/重命名 =====
 let selectedItem = null;
 let selectedItems = []; // 存储多选项目
+let lastSelectedItem = null; // 跟踪上一次选择的项目，用于Shift连续选择
 let currentFocusType = 'filenameInput';
 
 function updateFocusType(element){
@@ -860,13 +861,51 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
     fileItem.classList.add('selected');
     selectedItem = { type, path: p, name };
     selectedItems.push(selectedItem);
+    lastSelectedItem = fileItem; // 更新上一次选择的项目
   } else {
-    // Shift键点击：添加到选择
-    if (!fileItem.classList.contains('selected')) {
+    // Shift键点击：连续选择从lastSelectedItem到当前项
+    if (lastSelectedItem) {
+      // 获取所有文件项
+      const allFileItems = Array.from(document.querySelectorAll('.file-item'));
+
+      // 找到起点和终点的索引
+      const startIndex = allFileItems.indexOf(lastSelectedItem);
+      const endIndex = allFileItems.indexOf(fileItem);
+
+      if (startIndex !== -1 && endIndex !== -1) {
+        // 清除之前的选择
+        const prevSelectedItems = document.querySelectorAll('.file-item.selected');
+        prevSelectedItems.forEach(item => {
+          if (item.querySelector('.rename-input')) cancelRename(item);
+          item.classList.remove('selected');
+        });
+        selectedItems = [];
+
+        // 确定选择范围
+        const start = Math.min(startIndex, endIndex);
+        const end = Math.max(startIndex, endIndex);
+
+        // 选中范围内的所有项目
+        for (let i = start; i <= end; i++) {
+          const item = allFileItems[i];
+          if (item) {
+            item.classList.add('selected');
+            const itemType = item.dataset.type;
+            const itemPath = item.dataset.path;
+            const itemName = item.dataset.name;
+            selectedItems.push({ type: itemType, path: itemPath, name: itemName });
+          }
+        }
+
+        // 更新最后选中的项目
+        selectedItem = { type, path: p, name };
+      }
+    } else {
+      // 如果没有上一次选择的项目，就只选择当前项目
       fileItem.classList.add('selected');
-      const newItem = { type, path: p, name };
-      selectedItems.push(newItem);
-      selectedItem = newItem; // 更新最后选中的项目
+      selectedItem = { type, path: p, name };
+      selectedItems = [selectedItem];
+      lastSelectedItem = fileItem;
     }
   }
 
@@ -1011,7 +1050,7 @@ function handleContextMenuAction(action){
   const menu = document.getElementById('itemContextMenu');
   if (!menu) return;
   hideAllContextMenus();
-  
+
   if (selectedItems.length > 1) {
     // 多选情况
     if (action === 'delete') {
@@ -1027,7 +1066,7 @@ function handleContextMenuAction(action){
     // 单选情况
     const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
     if (!item.path) return;
-    
+
     switch(action){
       case 'rename': performEditAction(item); break;
       case 'open': performOpenAction(item); break;
@@ -1133,7 +1172,7 @@ document.addEventListener('keydown', (e) => {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
 
-  // Ctrl+C / Ctrl+V 处理
+  // Ctrl+C / Ctrl+V / Ctrl+A 处理
   if (e.ctrlKey || e.metaKey) {
     if (key === 'c') {
       e.preventDefault(); e.stopPropagation();
@@ -1152,7 +1191,33 @@ document.addEventListener('keydown', (e) => {
       performPasteAction();
       return;
     }
-    // 允许其他 Ctrl 组合键（如 Ctrl+A）透传
+    if (key === 'a') {
+      e.preventDefault(); e.stopPropagation();
+      // 全选所有文件项
+      const prevSelectedItems = document.querySelectorAll('.file-item.selected');
+      prevSelectedItems.forEach(item => {
+        if (item.querySelector('.rename-input')) cancelRename(item);
+        item.classList.remove('selected');
+      });
+      selectedItems = [];
+
+      const allFileItems = document.querySelectorAll('.file-item');
+      allFileItems.forEach(item => {
+        item.classList.add('selected');
+        const itemType = item.dataset.type;
+        const itemPath = item.dataset.path;
+        const itemName = item.dataset.name;
+        selectedItems.push({ type: itemType, path: itemPath, name: itemName });
+      });
+
+      if (allFileItems.length > 0) {
+        selectedItem = selectedItems[selectedItems.length - 1];
+        lastSelectedItem = allFileItems[allFileItems.length - 1];
+      }
+      currentFocusType = 'fileList';
+      return;
+    }
+    // 允许其他 Ctrl 组合键透传
     return;
   }
 
@@ -1248,6 +1313,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         selectedItem = null;
         selectedItems = [];
+        lastSelectedItem = null; // 清除上一次选择的项目
         return;
       }
 
@@ -1994,20 +2060,18 @@ function showSaveAsDialog() {
           const _qqq = geq();
           if (_qqq && typeof _qqq.raceClipboard === "function") {
             const pastePathSnapshot = currentPath;
-            // 改为非阻塞方式执行粘贴操作，避免大文件粘贴时界面卡住
-            setTimeout(async () => {
-              try {
-                // q2 模式：显式开启 autoRename: true
-                await _qqq.raceClipboard(message.destDir, () => {
-                  // 粘贴完成后刷新，确保路径未变且面板存活
-                  if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
-                    refreshWebview();
-                  }
-                }, true);
-              } catch (error) {
-                global.showErrorMessage("粘贴执行异常: " + error.message);
-              }
-            }, 0);
+            // 恢复为直接调用异步方法，不再使用会导致混淆的 setTimeout(..., 0)
+            try {
+              // q2 模式：显式开启 autoRename: true
+              await _qqq.raceClipboard(message.destDir, (res) => {
+                // 粘贴完成后刷新，确保路径未变且面板存活
+                if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
+                  refreshWebview();
+                }
+              }, true);
+            } catch (error) {
+              global.showErrorMessage("粘贴执行异常: " + error.message);
+            }
           } else {
             global.showErrorMessage("粘贴失败：IO 引擎未就绪或不支持粘贴功能。");
           }
