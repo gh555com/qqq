@@ -284,9 +284,22 @@ function getTimestampFilename(ext) {
 /**
  * 获取一个不冲突的路径 (如 file (1).txt)
  */
-function getUniquePath(baseDir, originalName) {
-    const ext = path.extname(originalName);
-    const nameWithoutExt = path.basename(originalName, ext);
+function getUniquePath(baseDir, originalName, isFolder = false) {
+    let nameWithoutExt, ext;
+    if (isFolder) {
+        // 文件夹不拆分后缀，整体视为名称
+        nameWithoutExt = originalName;
+        ext = "";
+    } else {
+        ext = path.extname(originalName);
+        nameWithoutExt = path.basename(originalName, ext);
+        // 特殊情况：如果是 .gitignore 这种隐藏文件，path.extname 会返回全名，这里修正
+        if (!nameWithoutExt && ext.startsWith('.')) {
+            nameWithoutExt = ext;
+            ext = "";
+        }
+    }
+
     let targetPath = path.join(baseDir, originalName);
     let counter = 1;
 
@@ -1519,7 +1532,7 @@ async function verifyVideoFile(filePath) {
     });
 }
 
-async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId) {
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename = false) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
@@ -1577,12 +1590,17 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (localPath && fs.existsSync(localPath) && !fs.statSync(localPath).isDirectory()) {
                     ensureDir(targetDir);
                     const ext = path.extname(localPath) || ".png";
-                    const filename = getTimestampFilename(ext);
+                    const originalName = path.basename(localPath);
+                    // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
+                    let filename = originalName;
+                    if (!originalName || originalName === ext) {
+                        filename = getTimestampFilename(ext);
+                    }
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
 
-                        const finalPath = _tryGlobalDeduplicate(destPath);
+                        const finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
                         const fp = computeFingerprint(finalPath);
 
                         b.filename = path.basename(finalPath);
@@ -1618,7 +1636,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 try {
                     fs.writeFileSync(destPath, buf);
 
-                    const finalPath = _tryGlobalDeduplicate(destPath);
+                    const finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
                     const fp = computeFingerprint(finalPath); // Re-compute in case it changed
 
                     b.filename = path.basename(finalPath);
@@ -1665,7 +1683,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         }
 
                         // 下载完成后，尝试全局去重
-                        const finalPath = _tryGlobalDeduplicate(dlPath);
+                        const finalPath = autoRename ? dlPath : _tryGlobalDeduplicate(dlPath);
                         const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
 
                         block.status = "ok";
@@ -1731,20 +1749,28 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
-                let existingPath = findFileByFingerprint(srcFingerprint);
-                if (existingPath && fs.existsSync(existingPath)) {
-                    copied.push(existingPath);
-                    continue;
+                // q2 模式跳过全局指纹去重，不复用其他文件夹的旧文件
+                if (!autoRename) {
+                    let existingPath = findFileByFingerprint(srcFingerprint);
+                    if (existingPath && fs.existsSync(existingPath)) {
+                        copied.push(existingPath);
+                        continue;
+                    }
                 }
             }
             const ext = path.extname(f);
+            const originalName = path.basename(f);
             const isImg = isImageExtForClipboard(ext);
-            const originalName = isImg ? getTimestampFilename(ext) : path.basename(f);
-            let dest = path.join(targetDir, originalName);
+            // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
+            let destName = originalName;
+            if (isImg && (!originalName || originalName === ext)) {
+                destName = getTimestampFilename(ext);
+            }
+            let dest = path.join(targetDir, destName);
 
             if (fs.existsSync(dest)) {
                 const dstFingerprint = computeFingerprint(dest);
-                if (dstFingerprint === srcFingerprint) {
+                if (dstFingerprint === srcFingerprint && !autoRename) {
                     copied.push(dest);
                     if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
                     _tryGlobalDeduplicate(dest);
@@ -1753,7 +1779,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
 
                 if (autoRename) {
                     // q2 模式：名字冲突且内容不同 -> 静默重命名
-                    dest = getUniquePath(targetDir, originalName);
+                    dest = getUniquePath(targetDir, destName, false);
                 } else {
                     // q1 模式：名字冲突且内容不同 -> 保持原逻辑直接覆盖
                 }
@@ -1761,7 +1787,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             fs.copyFileSync(f, dest);
 
             // Global Deduplication Check
-            const finalPath = _tryGlobalDeduplicate(dest);
+            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
             if (finalPath !== dest) {
                 // If deduplicated to a different path
                 copied.push(finalPath);
@@ -1793,7 +1819,7 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
         try {
             const folderName = path.basename(folder);
             // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName) : path.join(targetDir, folderName);
+            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
             // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
@@ -1894,7 +1920,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 await yieldToUI();
             }
             // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName) : path.join(targetDir, folderName);
+            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
                 copiedFolders.push(destFolder);
@@ -1959,21 +1985,43 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
+                // q2 模式跳过指纹去重，不复用旧文件
+                if (!autoRename) {
+                    let existingPath = findFileByFingerprint(srcFingerprint);
+                    if (existingPath && fs.existsSync(existingPath)) {
+                        copiedFiles.push(existingPath);
+                        processedItems++;
+                        continue;
+                    }
+                }
             }
 
             const ext = path.extname(f);
             const isImg = isImageExtForClipboard(ext);
             const originalName = path.basename(f);
-            // ★ q2 模式下处理重名，q1 模式保持原状（指纹去重逻辑在 copyFilesToTarget 中已处理）
-            let dest = isImg ? path.join(targetDir, getTimestampFilename(ext)) : path.join(targetDir, originalName);
-            if (!isImg && autoRename) {
-                dest = getUniquePath(targetDir, originalName);
+
+            // 优先使用原文件名。只有当拿不到有效名称（如内存截图或无名文件）时，才回退到时间戳风格。
+            let destName = originalName;
+            if (isImg && (!originalName || originalName === ext)) {
+                destName = getTimestampFilename(ext);
+            }
+            let dest = path.join(targetDir, destName);
+
+            if (autoRename) {
+                dest = getUniquePath(targetDir, destName, false);
             }
 
             fs.copyFileSync(f, dest);
-            try { totalSize += fs.statSync(dest).size; } catch { }
-            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-            copiedFiles.push(dest);
+
+            // 全局去重检查
+            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
+            if (finalPath !== dest) {
+                copiedFiles.push(finalPath);
+            } else {
+                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                copiedFiles.push(dest);
+            }
+            try { totalSize += fs.statSync(finalPath).size; } catch { }
         } catch (e) {
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 skippedCount++;
@@ -2058,8 +2106,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     if (saved?.success && fs.existsSync(dest)) {
                         const st = fs.statSync(dest);
                         if (st.size > 0) {
-                            // ✅ 关键：内存截图也要走全局去重
-                            const finalPath = _tryGlobalDeduplicate(dest);
+                            // ✅ 关键：内存截图也要走全局去重 (q1 模式)
+                            const finalPath = autoRename ? dest : _tryGlobalDeduplicate(dest);
                             const fp = computeFingerprint(finalPath);
                             const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
 
@@ -2086,7 +2134,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         // Fallback to HTML if text looks like HTML
         const text = await vscode.env.clipboard.readText();
         if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img"))) {
-            return await handleClipboardUnified(targetDir, progressCallback, token, transId);
+            return await handleClipboardUnified(targetDir, progressCallback, token, transId, null, autoRename);
         }
     } catch (e) { log(`Shell剪贴板处理失败: ${e.message}`, "ERROR"); }
     return null;
@@ -2095,7 +2143,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // ============================================================================
 // Main Entry
 // ============================================================================
-async function handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel = null) {
+async function handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel = null, autoRename = false) {
     // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
@@ -2179,7 +2227,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
     if (blocks.some(b => b.type === "media")) {
         if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
-        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId);
+        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename);
     }
 
     return { type: "html_blocks", blocks, baseUrl };
@@ -2290,7 +2338,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 
     if (qStatus.hasHtml) {
         log(`[AutoDetect] 进入 HTML 处理流程`, "INFO");
-        return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel);
+        return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel, autoRename);
     }
 
     if (qStatus.hasImage) {

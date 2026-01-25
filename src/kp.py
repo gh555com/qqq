@@ -79,13 +79,23 @@ def safe_filename(name: str) -> str:
     return n
 
 
-def unique_path_in_dir(output_dir: Path, name: str) -> Path:
-    # 简单的重命名策略，防止覆盖（虽然 Node 侧会再次处理，但这里防止同一次操作内的冲突）
+def unique_path_in_dir(output_dir: Path, name: str, is_folder: bool = False) -> Path:
+    # 简单的重命名策略，防止覆盖
     base = output_dir / name
     if not base.exists():
         return base
-    stem = base.stem
-    ext = base.suffix
+
+    if is_folder:
+        stem = name
+        ext = ""
+    else:
+        stem = base.stem
+        ext = base.suffix
+        # 特殊处理：如果没有主文件名（如 .gitignore），整体视为 stem
+        if not stem and ext.startswith('.'):
+            stem = ext
+            ext = ""
+
     for i in range(1, 1000):
         new_name = f"{stem}_{i}{ext}"
         new_path = output_dir / new_name
@@ -341,7 +351,7 @@ def copy_files_parallel(src_files: list, output_dir: Path) -> list:
     def submit_one(src: Path) -> Path:
         try:
             fname = safe_filename(src.name)
-            dst = unique_path_in_dir(output_dir, fname)
+            dst = unique_path_in_dir(output_dir, fname, is_folder=False)
             ensure_parent(dst)
             shutil.copy2(src, dst)
             return dst
@@ -369,7 +379,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
         # 如果目录存在，生成唯一名
         if dst_dir.exists():
             dst_dir = unique_path_in_dir(
-                output_dir, safe_filename(src_dir.name))
+                output_dir, safe_filename(src_dir.name), is_folder=True)
         dst_dir.mkdir(parents=True, exist_ok=True)
         futs = set()
         inflight = max(128, _MAX_WORKERS * 32)
@@ -537,7 +547,8 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                 bmp = dib_to_bmp_bytes(dib)
                 img = Image.open(io.BytesIO(bmp))
                 fname = get_timestamp_filename(".png")
-                out_path = unique_path_in_dir(output_dir, fname)
+                out_path = unique_path_in_dir(
+                    output_dir, fname, is_folder=False)
                 ensure_parent(out_path)
                 save_image_as_png(img, out_path)
                 return {"type": "image", "path": str(out_path)}
@@ -652,7 +663,8 @@ def handle_windows_ctypes(output_dir: Path):
                 bmp = dib_to_bmp_bytes(dib)
                 img = Image.open(io.BytesIO(bmp))
                 fname = get_timestamp_filename(".png")
-                out_path = unique_path_in_dir(output_dir, fname)
+                out_path = unique_path_in_dir(
+                    output_dir, fname, is_folder=False)
                 ensure_parent(out_path)
                 save_image_as_png(img, out_path)
                 return {"type": "image", "path": str(out_path)}
