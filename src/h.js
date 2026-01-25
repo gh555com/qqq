@@ -1543,6 +1543,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
     const httpTasks = [];
     const localTasks = [];
     const taskMap = new Map();
+    const originalFilenames = new Map(); // 保存原始文件名映射
     for (const b of pending) {
         const src = String(b.src || "");
         if (/^data:/i.test(src) || /^file:/i.test(src)) localTasks.push(b);
@@ -1552,10 +1553,14 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const ext = b.kind === "video" ? ".mp4" : ".png";
             // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
             // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
-            const filename = getFilenameFromUrl(src, b.kind) || getTimestampFilename(ext);
+            const originalFileName = getFilenameFromUrl(src, b.kind);
+            const filename = originalFileName || getTimestampFilename(ext);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 200 * 1024 * 1024 });
             taskMap.set(tag, b);
+            if (originalFileName) {
+                originalFilenames.set(tag, originalFileName);
+            }
         }
     }
 
@@ -1600,12 +1605,28 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     try {
                         fs.copyFileSync(localPath, destPath);
 
-                        const finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
-                        const fp = computeFingerprint(finalPath);
+                        // 先计算指纹，然后检查是否有相同指纹的文件
+                        const fp = computeFingerprint(destPath);
+                        let finalPath = destPath;
+                        
+                        if (!autoRename && fp) {
+                            // 先尝试全局查找相同指纹的文件
+                            let existingPath = findFileByFingerprint(fp);
+                            if (existingPath && fs.existsSync(existingPath)) {
+                                // 如果找到相同指纹的文件，使用它
+                                try { fs.unlinkSync(destPath); } catch (e) { }
+                                finalPath = existingPath;
+                            } else {
+                                // 再尝试同文件夹内去重
+                                finalPath = _tryGlobalDeduplicate(destPath);
+                            }
+                        } else {
+                            finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
+                        }
 
                         b.filename = path.basename(finalPath);
                         b.path = finalPath;
-                        b.fingerprint = fp || null;
+                        b.fingerprint = computeFingerprint(finalPath);
                         b.size = fs.statSync(finalPath).size;
                         b.status = "ok";
 
@@ -1619,6 +1640,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                                 await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                             }
                         }
+
+                        // 预填充指纹缓存
+                        if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -1655,6 +1679,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                         }
                     }
+
+                    // 预填充指纹缓存
+                    if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -1672,6 +1699,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     if (!block) continue;
                     if (res.success) {
                         let dlPath = res.path || res.destPath;
+                        const originalFileName = originalFilenames.get(res.tag);
 
                         if (block.kind === "video") {
                             dlPath = await verifyVideoFile(dlPath);
@@ -1682,9 +1710,29 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             }
                         }
 
-                        // 下载完成后，尝试全局去重
-                        const finalPath = autoRename ? dlPath : _tryGlobalDeduplicate(dlPath);
-                        const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
+                        // 先计算指纹，然后检查是否有相同指纹的文件
+                        const fp = computeFingerprint(dlPath);
+                        let finalPath = dlPath;
+                        let isNewFile = true;
+                        
+                        if (!autoRename && fp) {
+                            // 先尝试全局查找相同指纹的文件
+                            let existingPath = findFileByFingerprint(fp);
+                            if (existingPath && fs.existsSync(existingPath)) {
+                                // 如果找到相同指纹的文件，使用它
+                                try { fs.unlinkSync(dlPath); } catch (e) { }
+                                finalPath = existingPath;
+                                isNewFile = false;
+                            } else {
+                                // 再尝试同文件夹内去重
+                                const tempPath = _tryGlobalDeduplicate(dlPath);
+                                isNewFile = (tempPath === dlPath);
+                                finalPath = tempPath;
+                            }
+                        } else {
+                            finalPath = autoRename ? dlPath : _tryGlobalDeduplicate(dlPath);
+                            isNewFile = (finalPath === dlPath);
+                        }
 
                         block.status = "ok";
                         block.path = finalPath;
