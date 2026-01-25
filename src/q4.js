@@ -818,9 +818,11 @@ class ClipboardHistorySidebarProvider {
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
-                        // 1. 随机音效逻辑
+                        // 1.  Math.random + 避重
                         let audioIdx;
-                        do { audioIdx = Math.floor(Math.random() * 7) + 1; } while (audioIdx === this._lastAudioIdx);
+                        do {
+                            audioIdx = Math.floor(Math.random() * 7) + 1;
+                        } while (audioIdx === this._lastAudioIdx);
                         this._lastAudioIdx = audioIdx;
 
                         const audioBase64 = this._getKopeAudioBase64(audioIdx);
@@ -871,7 +873,8 @@ class ClipboardHistorySidebarProvider {
                 case 'requestSavorAudio': {
                     const base64 = this._getSavorAudio();
                     if (base64) {
-                        const count = msg.mode === 'loop' ? -1 : (Math.floor(Math.random() * 5) + 2); // 2-6次
+                        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+                        const count = msg.mode === 'loop' ? -1 : getRand(2, 7); // 2-6次
                         this._postMessage({ command: 'playAudio', base64, count });
                     }
                     break;
@@ -1050,12 +1053,15 @@ class ClipboardHistorySidebarProvider {
     }
 
     _getSavorAudio() {
-        const rand = Math.floor(Math.random() * 30);
+        // 使用 crypto.randomInt 确保“真随机”(CSPRNG)
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+
+        const rand = getRand(0, 30);
         let audioPath;
-        if (rand === 0) { // 1/30
+        if (rand === 0) { // 1/30 几率抽中 q
             audioPath = path.join(this._context.extensionPath, "assets", "q.mp3");
-        } else { // 29/30
-            const subRand = Math.floor(Math.random() * 3); // 0, 1, 2
+        } else { // 29/30 几率进入 1, 2, 3 的选区
+            const subRand = getRand(0, 3); // 1/3 几率
             audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
         }
         try {
