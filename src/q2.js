@@ -1774,6 +1774,10 @@ function showSaveAsDialog() {
               }
             } catch (e) { }
 
+            if (!fs.existsSync(fullFilePath)) {
+              global.logMessage(`[Q2] 创建后打开失败：文件未找到 ${fullFilePath}`, "WARN");
+              return;
+            }
             vscode.workspace.openTextDocument(fullFilePath).then((doc) => {
               global.showTextDocument(doc, getShowOptions(openInCurrentGroup)).then(() => {
                 if (!isPinned) {
@@ -1782,6 +1786,8 @@ function showSaveAsDialog() {
                   if (panel && activePanelAlive) refreshWebview();
                 }
               });
+            }, (err) => {
+              global.logMessage(`[Q2] openTextDocument 失败: ${err.message}`, "ERROR");
             });
           } catch (error) {
             global.showErrorMessage(`创建文件失败: ${error.message}`);
@@ -1832,6 +1838,12 @@ function showSaveAsDialog() {
           break;
         }
 
+        if (!fs.existsSync(p)) {
+          vscode.window.showWarningMessage(`文件已不存在: ${path.basename(p)}`);
+          refreshWebview();
+          break;
+        }
+
         vscode.workspace
           .openTextDocument(p)
           .then((doc) => {
@@ -1839,7 +1851,9 @@ function showSaveAsDialog() {
               if (!message.isPinned && panel && activePanelAlive) panel.dispose();
             });
           })
-          .catch((error) => vscode.window.showErrorMessage("打开文件失败: " + error.message));
+          .catch((error) => {
+            global.logMessage(`[Q2] 打开文件失败: ${error.message}`, "ERROR");
+          });
         break;
       }
 
@@ -1898,13 +1912,20 @@ function showSaveAsDialog() {
           const _qqq = geq();
           if (_qqq && typeof _qqq.raceClipboard === "function") {
             const pastePathSnapshot = currentPath;
-            // q2 模式：显式开启 autoRename: true
-            await _qqq.raceClipboard(message.destDir, () => {
-              // 粘贴完成后刷新，确保路径未变且面板存活
-              if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
-                refreshWebview();
+            // 改为非阻塞方式执行粘贴操作，避免大文件粘贴时界面卡住
+            setTimeout(async () => {
+              try {
+                // q2 模式：显式开启 autoRename: true
+                await _qqq.raceClipboard(message.destDir, () => {
+                  // 粘贴完成后刷新，确保路径未变且面板存活
+                  if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
+                    refreshWebview();
+                  }
+                }, true);
+              } catch (error) {
+                global.showErrorMessage("粘贴执行异常: " + error.message);
               }
-            }, true);
+            }, 0);
           } else {
             global.showErrorMessage("粘贴失败：IO 引擎未就绪或不支持粘贴功能。");
           }
