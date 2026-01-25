@@ -99,16 +99,16 @@ let globalContext = null;
 // ==================== IO / Path：匹配最新引擎逻辑（关键） ====================
 
 function _stripDocJunk(s) {
-  if (s == null) return "";
-  return String(s).trim().replace(/\r/g, "").replace(/\n/g, "");
+  const _qqq = geq();
+  if (_qqq && typeof _qqq._stripDocJunk === "function") return _qqq._stripDocJunk(s);
+  return String(s || "").trim().replace(/\r/g, "").replace(/\n/g, "");
 }
 
 function _getSystemDriveRoot() {
-  // Windows 根路径补全用：优先 SystemDrive，其次 USERPROFILE 盘符，否则 C:
+  const _qqq = geq();
+  if (_qqq && typeof _qqq._getSystemDriveRoot === "function") return _qqq._getSystemDriveRoot();
   const sd = process.env.SystemDrive;
   if (sd && /^[A-Za-z]:$/.test(sd)) return sd.toUpperCase() + "\\";
-  const up = process.env.USERPROFILE;
-  if (up && /^[A-Za-z]:[\\/]/.test(up)) return up.slice(0, 2).toUpperCase() + "\\";
   return "C:\\";
 }
 
@@ -122,181 +122,48 @@ function _getSystemDriveRoot() {
  *   - 其他相对路径：只做 normalize（resolve 由 resolveNavPath 负责）
  */
 function normalizeNavPath(rawPath) {
-  // 如果 qqq.js 新增了同名函数，优先使用（向后兼容你“最新 IO 引擎”）
   const _qqq = geq();
   if (_qqq && typeof _qqq.normalizeNavPath === "function") {
-    try {
-      return _qqq.normalizeNavPath(rawPath);
-    } catch {
-      /* fallthrough */
-    }
+    return _qqq.normalizeNavPath(rawPath);
   }
-
-  let clean = _stripDocJunk(rawPath);
+  // 极简兜底
+  let clean = String(rawPath || "").trim().replace(/\r/g, "").replace(/\n/g, "");
   if (!clean) return "";
-
-  // ~ 展开（mac/linux 常用；windows 也允许）
   if (clean === "~") clean = os.homedir();
-  else if (clean.startsWith("~/") || clean.startsWith("~\\")) {
-    clean = path.join(os.homedir(), clean.slice(2));
-  }
-
-  const isWin = process.platform === "win32";
-  if (!isWin) return path.normalize(clean);
-
-  // Windows：盘符根（"C:" 或 "C:/" 或 "C:\"）
-  if (/^[A-Za-z]:$/.test(clean)) return clean.toUpperCase() + "\\";
-  if (/^[A-Za-z]:[\\/]*$/.test(clean)) return clean[0].toUpperCase() + ":\\";
-
-  // UNC：\\server\share 或 //server/share
-  if (clean.startsWith("\\\\") || clean.startsWith("//")) return path.normalize(clean);
-
-  // 盘符绝对：C:\a\b 或 C:/a/b
-  if (/^[A-Za-z]:[\\/]/.test(clean)) {
-    const normalized = path.normalize(clean);
-    return normalized.replace(/^[a-z]:/, (m) => m.toUpperCase());
-  }
-
-  // 形如 \foo 或 /foo：视为系统盘根路径下的绝对路径（更符合文件管理器直觉）
-  if (clean.startsWith("\\") || clean.startsWith("/")) {
-    const sysRoot = _getSystemDriveRoot();
-    const rest = clean.replace(/^[\\/]+/, "");
-    return path.normalize(path.join(sysRoot, rest));
-  }
-
-  // 其他：相对路径（后续由 resolveNavPath 结合 base 解析）
   return path.normalize(clean);
 }
 
-/**
- * resolveNavPath：把用户键入的 path 解析成最终要访问的绝对目录
- * - 若 normalize 后已是绝对（含 UNC/盘符根），直接返回
- * - 否则按 baseDir 进行 resolve
- */
 function resolveNavPath(rawPath, baseDir) {
-  // 如果 qqq.js 新增了同名函数，优先使用
   const _qqq = geq();
   if (_qqq && typeof _qqq.resolveNavPath === "function") {
-    try {
-      return _qqq.resolveNavPath(rawPath, baseDir);
-    } catch {
-      /* fallthrough */
-    }
+    return _qqq.resolveNavPath(rawPath, baseDir);
   }
-
   const clean = normalizeNavPath(rawPath);
-  if (!clean) return "";
-
-  if (path.isAbsolute(clean)) return clean;
-
-  const base = baseDir && typeof baseDir === "string" ? baseDir : process.cwd();
-  return path.resolve(base, clean);
+  if (!clean || path.isAbsolute(clean)) return clean;
+  return path.resolve(baseDir || process.cwd(), clean);
 }
 
-/**
- * canonicalizeExistingPath：对“存在于磁盘上的路径”做统一键（避免重复/缓存穿透）
- * - realpath（尽量）
- * - normalize
- * - 去尾分隔符（保留 root）
- * - Windows 盘符大写
- */
 function canonicalizeExistingPath(p) {
-  // 如果 qqq.js 新增了同名函数，优先使用（保证 q2/q1/其它模块 canonical 一致）
   const _qqq = geq();
   if (_qqq && typeof _qqq.canonicalizeExistingPath === "function") {
-    try {
-      return _qqq.canonicalizeExistingPath(p);
-    } catch {
-      /* fallthrough */
-    }
+    return _qqq.canonicalizeExistingPath(p);
   }
-
   if (!p) return "";
-  let out = String(p);
-
-  try {
-    if (fs.existsSync(out)) {
-      if (fs.realpathSync && fs.realpathSync.native) out = fs.realpathSync.native(out);
-      else out = fs.realpathSync(out);
-    }
-  } catch {
-    /* ignore */
-  }
-
-  out = path.normalize(out);
-
-  if (process.platform === "win32") {
-    out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
-  }
-
-  try {
-    const root = path.parse(out).root;
-    if (out.length > root.length) out = out.replace(/[\\/]+$/, "");
-  } catch {
-    /* ignore */
-  }
-
+  let out = path.normalize(String(p));
+  if (process.platform === "win32") out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
   return out;
 }
 
 function cacheKeyForPath(p) {
-  // 如果 qqq.js 导出了 cacheKeyForPath，优先用（保持统一 cacheKey 口径）
   const _qqq = geq();
   if (_qqq && typeof _qqq.cacheKeyForPath === "function") {
-    try {
-      return _qqq.cacheKeyForPath(p);
-    } catch {
-      /* fallthrough */
-    }
+    return _qqq.cacheKeyForPath(p);
   }
-
   const canon = canonicalizeExistingPath(p);
   return process.platform === "win32" ? canon.toLowerCase() : canon;
 }
 
-// ==================== 防惊群调度器（去重 + 限并发） ====================
-class TaskScheduler {
-  constructor(maxConcurrency = 6) {
-    this.maxConcurrency = Math.max(1, maxConcurrency | 0);
-    this.runningCount = 0;
-    this.queue = [];
-    this.pendingPromises = new Map();
-  }
-
-  async schedule(taskKey, taskGenerator) {
-    if (this.pendingPromises.has(taskKey)) return this.pendingPromises.get(taskKey);
-
-    const promise = new Promise((resolve, reject) => {
-      const run = async () => {
-        this.runningCount++;
-        try {
-          const result = await taskGenerator();
-          resolve(result);
-        } catch (e) {
-          reject(e);
-        } finally {
-          this.runningCount--;
-          this.pendingPromises.delete(taskKey);
-          this._next();
-        }
-      };
-      this.queue.push(run);
-      this._next();
-    });
-
-    this.pendingPromises.set(taskKey, promise);
-    return promise;
-  }
-
-  _next() {
-    while (this.runningCount < this.maxConcurrency && this.queue.length > 0) {
-      const task = this.queue.shift();
-      task();
-    }
-  }
-}
-
-const globalScheduler = new TaskScheduler(MAX_CONCURRENT_TASKS);
+const globalScheduler = new global.TaskScheduler(MAX_CONCURRENT_TASKS);
 
 // ==================== 缓存（folder/file size）====================
 const folderSizeCache = new Map(); // key(folderPath) -> { size, ts }
@@ -365,7 +232,7 @@ async function getFolderSize(folderPath) {
       if (result && result.error) throw new Error(result.error);
       throw new Error("unknown_error");
     } catch (error) {
-      geq().logMessage(`获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
+      global.logMessage(`获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
       throw error;
     }
   });
@@ -462,7 +329,7 @@ function getFileSizeDisplayAsync(itemPath, mode) {
         return handleSize(folderSz);
       }
     } catch (err) {
-      geq().logMessage(`计算大小失败: ${canon} - ${err.message}`, "ERROR");
+      global.logMessage(`计算大小失败: ${canon} - ${err.message}`, "ERROR");
       return " ...err ";
     }
   });
@@ -658,7 +525,7 @@ function getDrives() {
         }
       }
     } catch (error) {
-      geq().logMessage("PowerShell 获取驱动器失败，尝试回退逻辑: " + error.message, "WARN");
+      global.logMessage("PowerShell 获取驱动器失败，尝试回退逻辑: " + error.message, "WARN");
     }
 
     // 终极回退：穷举 A-Z。即使命令被禁用，只要盘符存在就能探测到
@@ -704,7 +571,7 @@ async function getDirectoryContents(dirPath) {
     contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
     contents.files.sort((a, b) => collator.compare(a.name, b.name));
   } catch (error) {
-    geq().logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
+    global.logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
   }
 
   return contents;
