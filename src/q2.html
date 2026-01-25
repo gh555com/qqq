@@ -325,10 +325,38 @@
 		.address-bar {
 			padding: 0;
 			background-color: var(--bg-color);
-			position: static;
+			position: relative;
 			z-index: 1;
 			flex-shrink: 0;
 			border: none;
+		}
+
+		.address-display {
+			position: absolute;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			padding: 5px 5px 5px 22px;
+			font-size: 14px;
+			background-color: var(--bg-color);
+			color: var(--text-primary);
+			border: 1px solid var(--border-strong);
+			border-radius: 3px;
+			box-sizing: border-box;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			pointer-events: none;
+			display: flex;
+			align-items: center;
+			z-index: 5;
+		}
+
+		.path-sep {
+			font-weight: bold;
+			padding: 0 0.5em;
+			color: var(--orange);
 		}
 
 		.address-input {
@@ -340,6 +368,19 @@
 			background-color: var(--bg-color);
 			color: var(--text-primary);
 			box-sizing: border-box;
+			position: relative;
+			z-index: 10;
+			transition: color 0.1s, background-color 0.1s;
+		}
+
+		.address-input:not(:focus) {
+			color: transparent !important;
+			background-color: transparent !important;
+			border-color: transparent !important;
+		}
+
+		.address-input:focus {
+			background-color: var(--bg-color) !important;
 		}
 
 		.file-list-container {
@@ -712,6 +753,7 @@
 			</div>
 
 			<div class="address-bar">
+				<div id="addressDisplay" class="address-display"></div>
 				<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
 			</div>
 
@@ -748,13 +790,13 @@
 
 	<div id="emptyContextMenu" class="context-menu-empty">
 		<div class="context-menu-empty-item {{SIZE_MODE_NONE_CLASS}}" data-mode="none"
-			 onclick="setSizeMode('none');refreshSizeDisplay();">none</div>
+			 onclick="setSizeMode('none');">none</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_M_CLASS}}" data-mode="m"
-			 onclick="setSizeMode('m');refreshSizeDisplay();">m</div>
+			 onclick="setSizeMode('m');">m</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_K_CLASS}}" data-mode="k"
-			 onclick="setSizeMode('k');refreshSizeDisplay();">k</div>
+			 onclick="setSizeMode('k');">k</div>
 		<div class="context-menu-empty-item {{SIZE_MODE_B_CLASS}}" data-mode="b"
-			 onclick="setSizeMode('b');refreshSizeDisplay();">b</div>
+			 onclick="setSizeMode('b');">b</div>
 	</div>
 
 	<div id="itemContextMenu" class="context-menu">

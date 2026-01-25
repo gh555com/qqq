@@ -774,6 +774,20 @@ function hideAllContextMenus(){
 
 function navigateTo(p){ vscode.postMessage({ command: 'navigate', path: p }); }
 function navigateIntoFolder(p){ vscode.postMessage({ command: 'navigate', path: p }); }
+
+function updateAddressDisplay(p) {
+  const display = document.getElementById('addressDisplay');
+  if (!display) return;
+  if (!p) { display.innerHTML = ''; return; }
+  const parts = p.split(/([\\\\\/])/);
+  display.innerHTML = parts.map(part => {
+    if (part === '\\\\' || part === '/') {
+      return '<span class="path-sep">' + part + '</span>';
+    }
+    return '<span>' + part + '</span>';
+  }).join('');
+}
+
 function removeFromRecent(p){ vscode.postMessage({ command: 'removeFromRecent', path: p }); }
 function cancel(){ vscode.postMessage({ command: 'cancel' }); }
 
@@ -822,7 +836,18 @@ function createFolder(){
 
 function setSizeMode(mode){
   hideAllContextMenus();
+  sizeMode = mode; // 立即本地更新，增强响应感
+  updateSizeMenuUI(mode);
   vscode.postMessage({ command: 'setSizeMode', mode });
+}
+
+function updateSizeMenuUI(mode){
+  const menu = document.getElementById('emptyContextMenu');
+  if (!menu) return;
+  menu.querySelectorAll('[data-mode]').forEach(btn => {
+    if (btn.dataset.mode === mode) btn.classList.add('selected');
+    else btn.classList.remove('selected');
+  });
 }
 
 // ===== 选择/重命名 =====
@@ -1038,7 +1063,7 @@ function performCodeAction(item){
   }
 }
 function performSizeAction(item){
-  if (!item) return;
+  if (!item || item.name === '..') return;
   const el = findItemElementByPath(item.path);
   if (el) {
     const sz = el.querySelector('.sz-area');
@@ -1081,8 +1106,8 @@ function handleContextMenuAction(action){
     const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
     if (!item.path) return;
     if (item.name === '..') {
-        // 对于上级目录，只允许 q (code) 和 w (open) 操作，屏蔽删除和重命名
-        if (['rename', 'delete'].includes(action)) return;
+        // 对于上级目录，只允许 q (code) 和 w (open) 操作，屏蔽删除、重命名和尺寸请求
+        if (['rename', 'delete', 'size'].includes(action)) return;
     }
 
     switch(action){
@@ -1139,10 +1164,16 @@ window.addEventListener('message', event => {
   if (!message) return;
 
   if (message.command === 'update') {
-    if (message.sizeMode) sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
+    if (message.sizeMode) {
+      sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
+      updateSizeMenuUI(sizeMode);
+    }
     currentPath = message.currentPath || '';
     const addr = document.getElementById('addressInput');
-    if (addr) addr.value = message.currentPath || '';
+    if (addr) {
+      addr.value = message.currentPath || '';
+      updateAddressDisplay(addr.value);
+    }
     const list = document.getElementById('fileList');
     if (list) list.innerHTML = message.fileListHtml || '';
     requestFileSizeUpdates(message.items || []);
@@ -1306,6 +1337,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const addressInput = document.getElementById('addressInput');
   if (addressInput) {
+    addressInput.addEventListener('input', (e) => updateAddressDisplay(e.target.value));
     addressInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         const p = (addressInput.value || '').trim();
@@ -1367,6 +1399,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (type === 'folder') {
         if (isSzArea) {
+          if (fileItem.dataset.name === '..') return; // 排除上级目录尺寸请求
           // 选中文件夹且点击 sz 区域：手动请求文件夹尺寸
           const szArea = event.target;
           szArea.textContent = '    \\u2022    ';
@@ -1506,6 +1539,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // 最终：首次渲染后调一轮布局
   adjustSidebarByRatio();
   checkAndApplyResponsive();
+  updateAddressDisplay(currentPath);
 
   // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
 });
