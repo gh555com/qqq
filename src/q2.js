@@ -948,6 +948,12 @@ function updateFocusType(element){
 
 function selectFileItem(fileItem, requestSize){
   if (!fileItem) return;
+
+  // 关键：选择项目时，如果当前焦点在输入框，则强制失去焦点，以便热键生效
+  if (isInputFocused()) {
+    document.activeElement.blur();
+  }
+
   const type = fileItem.dataset.type;
   const p = fileItem.dataset.path;
   const name = fileItem.dataset.name;
@@ -984,7 +990,7 @@ function startRename(itemPath, itemName, itemType){
   itemElement.classList.add('selected');
   selectedItem = { type: itemType, path: itemPath, name: itemName };
 
-  const nameArea = itemElement.querySelector(\`.\\\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
+  const nameArea = itemElement.querySelector(\`.\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
   if (!nameArea || nameArea.querySelector('.rename-input')) return;
 
   const originalContent = nameArea.innerHTML;
@@ -1054,9 +1060,9 @@ function cancelRename(itemElement, originalContent){
   currentFocusType = 'fileList';
 
   const itemType = itemElement.dataset.type;
-  const nameArea = itemElement.querySelector(\`.\\\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
+  const nameArea = itemElement.querySelector(\`.\${itemType === 'file' ? 'file' : 'folder'}-name-area\`);
   if (nameArea) {
-    nameArea.innerHTML = originalContent || \`<span class="file-name">\\\${itemElement.dataset.name}</span>\`;
+    nameArea.innerHTML = originalContent || \`<span class="file-name">\${itemElement.dataset.name}</span>\`;
   }
 }
 
@@ -1180,24 +1186,42 @@ document.addEventListener('click', (e) => {
   }
 });
 
+function isInputFocused() {
+  const active = document.activeElement;
+  if (!active) return false;
+  const tag = active.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || active.isContentEditable || active.classList.contains('rename-input');
+}
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Backspace' && currentFocusType !== 'input') {
+  if (isInputFocused()) return;
+
+  if (e.key === 'Backspace') {
     e.preventDefault();
     vscode.postMessage({ command: 'navigateUp' });
   }
 });
 
 document.addEventListener('keydown', (e) => {
-  if (currentFocusType === 'input' || !selectedItem) return;
+  if (isInputFocused() || !selectedItem) return;
   const key = (e.key || '').toLowerCase();
 
   // 避免把 ctrl+a/c/x 吞掉（让 vscode/webview 自己处理）
-  if (e.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) { e.preventDefault(); e.stopPropagation(); return; }
+  if (e.ctrlKey && (key === 'a' || key === 'c' || key === 'x')) return;
 
-  if (key === 'q') { e.preventDefault(); e.stopPropagation(); performCodeAction(selectedItem); }
-  else if (key === 'w') { e.preventDefault(); e.stopPropagation(); performOpenAction(selectedItem); }
-  else if (key === 's') { e.preventDefault(); e.stopPropagation(); performDeleteAction(selectedItem); }
-  else if (key === 'e') { e.preventDefault(); e.stopPropagation(); performEditAction(selectedItem); }
+  if (key === 'q') {
+    e.preventDefault(); e.stopPropagation();
+    performCodeAction(selectedItem);
+  } else if (key === 'w') {
+    e.preventDefault(); e.stopPropagation();
+    performOpenAction(selectedItem);
+  } else if (key === 's') {
+    e.preventDefault(); e.stopPropagation();
+    performDeleteAction(selectedItem);
+  } else if (key === 'e') {
+    e.preventDefault(); e.stopPropagation();
+    performEditAction(selectedItem);
+  }
 });
 
 document.addEventListener('DOMContentLoaded', () => {
