@@ -1515,7 +1515,13 @@ function withProgress(options, task) {
 }
 
 function showTextDocument(document, column, preserveFocus) {
-	return vscode.window.showTextDocument(document, column, preserveFocus);
+	if (!document) return Promise.resolve(undefined);
+	try {
+		return vscode.window.showTextDocument(document, column, preserveFocus);
+	} catch (e) {
+		logMessage(`showTextDocument 失败: ${e.message}`, "ERROR");
+		return Promise.resolve(undefined);
+	}
 }
 
 function openExternal(uri) {

@@ -825,6 +825,7 @@ function setSizeMode(mode){
 
 // ===== 选择/重命名 =====
 let selectedItem = null;
+let selectedItems = []; // 存储多选项目
 let currentFocusType = 'filenameInput';
 
 function updateFocusType(element){
@@ -836,7 +837,7 @@ function updateFocusType(element){
   else currentFocusType = 'other';
 }
 
-function selectFileItem(fileItem, requestSize){
+function selectFileItem(fileItem, requestSize, shiftPressed = false){
   if (!fileItem) return;
 
   // 关键：选择项目时，如果当前焦点在输入框，则强制失去焦点，以便热键生效
@@ -848,14 +849,27 @@ function selectFileItem(fileItem, requestSize){
   const p = fileItem.dataset.path;
   const name = fileItem.dataset.name;
 
-  const prevSelected = document.querySelector('.file-item.selected');
-  if (prevSelected && prevSelected !== fileItem) {
-    if (prevSelected.querySelector('.rename-input')) cancelRename(prevSelected);
-    prevSelected.classList.remove('selected');
+  if (!shiftPressed) {
+    // 非Shift键点击：清除之前的选择
+    const prevSelectedItems = document.querySelectorAll('.file-item.selected');
+    prevSelectedItems.forEach(item => {
+      if (item.querySelector('.rename-input')) cancelRename(item);
+      item.classList.remove('selected');
+    });
+    selectedItems = [];
+    fileItem.classList.add('selected');
+    selectedItem = { type, path: p, name };
+    selectedItems.push(selectedItem);
+  } else {
+    // Shift键点击：添加到选择
+    if (!fileItem.classList.contains('selected')) {
+      fileItem.classList.add('selected');
+      const newItem = { type, path: p, name };
+      selectedItems.push(newItem);
+      selectedItem = newItem; // 更新最后选中的项目
+    }
   }
 
-  fileItem.classList.add('selected');
-  selectedItem = { type, path: p, name };
   currentFocusType = 'fileList';
 
   if (sizeMode !== 'none' && requestSize) {
@@ -996,16 +1010,31 @@ function performPasteAction(){
 function handleContextMenuAction(action){
   const menu = document.getElementById('itemContextMenu');
   if (!menu) return;
-  const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
   hideAllContextMenus();
-  if (!item.path) return;
-
-  switch(action){
-    case 'rename': performEditAction(item); break;
-    case 'open': performOpenAction(item); break;
-    case 'delete': performDeleteAction(item); break;
-    case 'code': performCodeAction(item); break;
-    case 'size': performSizeAction(item); break;
+  
+  if (selectedItems.length > 1) {
+    // 多选情况
+    if (action === 'delete') {
+      selectedItems.forEach(item => {
+        const el = findItemElementByPath(item.path);
+        if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+      });
+      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: selectedItems });
+      selectedItem = null;
+      selectedItems = [];
+    }
+  } else {
+    // 单选情况
+    const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
+    if (!item.path) return;
+    
+    switch(action){
+      case 'rename': performEditAction(item); break;
+      case 'open': performOpenAction(item); break;
+      case 'delete': performDeleteAction(item); break;
+      case 'code': performCodeAction(item); break;
+      case 'size': performSizeAction(item); break;
+    }
   }
 }
 
@@ -1106,9 +1135,16 @@ document.addEventListener('keydown', (e) => {
 
   // Ctrl+C / Ctrl+V 处理
   if (e.ctrlKey || e.metaKey) {
-    if (key === 'c' && selectedItem) {
+    if (key === 'c') {
       e.preventDefault(); e.stopPropagation();
-      performCopyAction(selectedItem);
+      if (selectedItems.length > 1) {
+        // 多选复制
+        const paths = selectedItems.map(item => item.path);
+        vscode.postMessage({ command: 'copy', paths: paths });
+      } else if (selectedItem) {
+        // 单选复制
+        performCopyAction(selectedItem);
+      }
       return;
     }
     if (key === 'v') {
@@ -1130,7 +1166,19 @@ document.addEventListener('keydown', (e) => {
     performOpenAction(selectedItem);
   } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
-    performDeleteAction(selectedItem);
+    if (selectedItems.length > 1) {
+      // 多选删除
+      selectedItems.forEach(item => {
+        const el = findItemElementByPath(item.path);
+        if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+      });
+      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: selectedItems });
+      selectedItem = null;
+      selectedItems = [];
+    } else {
+      // 单选删除
+      performDeleteAction(selectedItem);
+    }
   } else if (key === 'e') {
     e.preventDefault(); e.stopPropagation();
     performEditAction(selectedItem);
@@ -1192,13 +1240,14 @@ document.addEventListener('DOMContentLoaded', () => {
     fileList.addEventListener('click', (event) => {
       const fileItem = event.target.closest('.file-item');
       if (!fileItem) {
-        const prevSelected = document.querySelector('.file-item.selected');
-        if (prevSelected) {
-          const renameInput = prevSelected.querySelector('.rename-input');
-          if (renameInput) cancelRename(prevSelected);
-          prevSelected.classList.remove('selected');
-        }
+        const prevSelectedItems = document.querySelectorAll('.file-item.selected');
+        prevSelectedItems.forEach(item => {
+          const renameInput = item.querySelector('.rename-input');
+          if (renameInput) cancelRename(item);
+          item.classList.remove('selected');
+        });
         selectedItem = null;
+        selectedItems = [];
         return;
       }
 
@@ -1209,7 +1258,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (type === 'folder') {
         if (isSelectArea && !isFolderNameArea) {
-          selectFileItem(fileItem, true);
+          selectFileItem(fileItem, true, event.shiftKey);
           currentFocusType = 'fileList';
           return;
         }
@@ -1218,12 +1267,12 @@ document.addEventListener('DOMContentLoaded', () => {
           currentFocusType = 'fileList';
           return;
         }
-        selectFileItem(fileItem, true);
+        selectFileItem(fileItem, true, event.shiftKey);
         currentFocusType = 'fileList';
         return;
       }
 
-      selectFileItem(fileItem, true);
+      selectFileItem(fileItem, true, event.shiftKey);
       if (isSzArea) {
         const szArea = event.target;
         szArea.textContent = '    \\u2022    ';
@@ -1242,7 +1291,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const emptyMenu = document.getElementById('emptyContextMenu');
 
       if (itemElement && itemMenu) {
-        selectFileItem(itemElement, false);
+        // 如果已经有选中的项目，并且点击的是其中一个，保持所有选中状态
+        if (selectedItems.length === 0) {
+          selectFileItem(itemElement, false);
+        }
 
         itemMenu.dataset.path = itemElement.dataset.path;
         itemMenu.dataset.name = itemElement.dataset.name;
@@ -1892,6 +1944,36 @@ function showSaveAsDialog() {
             } catch (error) {
               if (panel && activePanelAlive)
                 panel.webview.postMessage({ command: "restoreDeletedItem", path: itemToDelete });
+              global.showErrorMessage(`删除失败: ${error.message}`);
+            }
+          })();
+        } else {
+          refreshWebview();
+        }
+        break;
+      }
+
+      case "quickDeleteMultipleToRecycleBin": {
+        const itemsToDelete = message.items || [];
+        if (itemsToDelete.length > 0) {
+          saveRecentDirectory(currentPath);
+          (async () => {
+            try {
+              let deletedCount = 0;
+              for (const item of itemsToDelete) {
+                const itemPath = canonicalizeExistingPath(item.path);
+                if (fs.existsSync(itemPath)) {
+                  const uri = vscode.Uri.file(itemPath);
+                  await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+                  deletedCount++;
+                }
+              }
+
+              setTimeout(() => {
+                if (activePanel && activePanelAlive) refreshWebview();
+              }, 300);
+              global.setStatusBarMessage(`已将 ${deletedCount} 个项目移至回收站`, 5000);
+            } catch (error) {
               global.showErrorMessage(`删除失败: ${error.message}`);
             }
           })();

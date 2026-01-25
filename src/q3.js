@@ -1521,6 +1521,7 @@ async function pureCommand() {
 
     try {
         fs.writeFileSync(purePath, content, "utf-8");
+        if (!fs.existsSync(purePath)) return;
         const doc = await vscode.workspace.openTextDocument(purePath);
         await global.showTextDocument(doc);
     } catch (e) {
