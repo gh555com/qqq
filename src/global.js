@@ -684,6 +684,38 @@ function Process-Command {
              }
          }
       }
+      'trigger_system_paste' {
+        try {
+          # 路径归一化：Windows COM 喜欢反斜杠且不喜欢结尾斜杠
+          $rawPath = $cmd.path -replace '/', '\'
+          $cleanPath = $rawPath.TrimEnd('\')
+          $shell = New-Object -ComObject Shell.Application
+          $folder = $shell.NameSpace($cleanPath)
+          if ($folder) {
+            # 尝试多种可能的 Verb 形式以增强兼容性
+            $verbFound = $false
+            foreach ($v in @("Paste", "paste", "&Paste")) {
+              $item = $folder.Self.Verbs() | Where-Object { $_.Name -eq $v -or $_.Name.Replace("&","") -eq $v }
+              if ($item) {
+                $item.DoIt()
+                $verbFound = $true
+                break
+              }
+            }
+            if (-not $verbFound) {
+              # 终极保底：直接 Invoke
+              $folder.Self.InvokeVerb("Paste")
+            }
+            $result.success = $true
+          } else {
+            $result.success = $false
+            $result.error = "Folder not found: " + $cleanPath
+          }
+        } catch {
+          $result.success = $false
+          $result.error = "PowerShell Trigger Error: " + $_.Exception.Message
+        }
+      }
       'getHtml' {
         $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
         $b64 = ""
@@ -807,6 +839,24 @@ while ($true) {
         echo '{"_id":'"$id"',"icon":"'"$icon_b64"'","status":"ok"}'
       else
         echo '{"_id":'"$id"',"status":"error"}'
+      fi;;
+    trigger_system_paste)
+      dest=$(json_get "$line" "path")
+      if osascript -e "tell application \"Finder\" to paste to folder (POSIX file \"$dest\")" >/dev/null 2>&1; then
+        echo '{"_id":'"$id"',"success":true}'
+      else
+        echo '{"_id":'"$id"',"success":false,"error":"AppleScript failed"}'
+      fi;;
+    setFiles)
+      paths=$(json_get "$line" "paths")
+      # macOS setFiles implementation via osascript
+      script="set the clipboard to "
+      # simplified single file for now as array handling in bash+osascript is tricky
+      # but it's a fallback anyway
+      if osascript -e "set the clipboard to POSIX file \"$paths\"" >/dev/null 2>&1; then
+        echo '{"_id":'"$id"',"success":true}'
+      else
+        echo '{"_id":'"$id"',"success":false}'
       fi;;
     *) echo '{"_id":'"$id"',"error":"unknown action"}';;
 esac
@@ -2684,10 +2734,41 @@ async function tryOneByOne(callback) {
 			try {
 				const res = await callback(bridge, name);
 				if (res) return res;
-			} catch (e) { }
+			} catch (e) {
+				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
+			}
+		} else if (bridge) {
+			// 如果 bridge 存在但不活跃，记录详细原因以供排查
+			const reason = bridge.lastStartError || bridge.lastCrashReason || "not_started";
+			logMessage(`Engine ${name} is unavailable (${reason}), skipping...`, "DEBUG");
 		}
 	}
 	return null;
+}
+
+/**
+ * 触发系统原生粘贴窗口 (方案 B)
+ * 链路：Rust > Python > Node Daemon > Node Spawn (PowerShell)
+ */
+async function triggerSystemPaste(targetDir) {
+	// 归一化路径：确保 Windows 下使用反斜杠，这对 Shell COM 对象至关重要
+	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
+
+	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
+
+	const res = await tryEngineCall({
+		rust: "trigger_system_paste",
+		python: "trigger_system_paste",
+		shell: "trigger_system_paste"
+	}, { path: normalizedPath });
+
+	if (res && res.success) {
+		logMessage(`[Q2] 系统粘贴指令已成功下发`, "INFO");
+	} else {
+		const errMsg = res?.error || "未知错误";
+		logMessage(`[Q2] 系统粘贴指令下发失败: ${errMsg}`, "WARN");
+	}
+	return res;
 }
 
 async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
@@ -2695,8 +2776,21 @@ async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 		const action = typeof actionOrMap === "object" ? actionOrMap[name] : actionOrMap;
 		if (!action) return null;
 
+		// ★ 关键修复：支持函数式 Action 映射，用于 Node 侧逻辑直接注入
+		if (typeof action === "function") {
+			try {
+				const res = await action(params);
+				if (res && (res.success || !res.error)) return res;
+				return null;
+			} catch (e) {
+				logMessage(`${name} 函数 Action 执行失败: ${e.message}`, "WARN");
+				return null;
+			}
+		}
+
 		const res = await bridge.call(action, params, timeout);
-		if (res && !res.error && res.type !== "unknown") return res;
+		// ★ 容错增强：只要有 success 标志或者没有 error 且不是 unknown，都视为成功
+		if (res && (res.success === true || (res.success !== false && !res.error && res.type !== "unknown"))) return res;
 		return null;
 	});
 }
@@ -2941,6 +3035,7 @@ module.exports = {
 	getEngineTryOrder,
 	tryOneByOne,
 	tryEngineCall,
+	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,
 	ffmpegPath: () => ffmpegPath,
