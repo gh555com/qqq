@@ -97,6 +97,9 @@ let sizeMode = "none";
 let kbmOverlap = 2;
 let globalContext = null;
 
+let cachedInMemoryConfig = null; // 增加内存缓存，防止 globalState 防抖导致的读取延迟/冲突
+let lastResourceExplorerPath = ""; // 记录上一次更新资源展示区时的路径，用于清除尺寸缓存
+
 // ==================== IO / Path：匹配最新引擎逻辑（关键） ====================
 
 function _stripDocJunk(s) {
@@ -359,6 +362,13 @@ function getConfig() {
 
   if (!globalContext) return defaultConfig;
 
+  // 优先使用内存缓存，确保读取到的是最新的（即便还在 1s 的写入防抖期内）
+  if (cachedInMemoryConfig) {
+    sizeMode = cachedInMemoryConfig.sizeMode;
+    kbmOverlap = cachedInMemoryConfig.kbmOverlap;
+    return cachedInMemoryConfig;
+  }
+
   // ★ 终极最优解：容错性配置加载，防止 globalState 返回非预期值
   const storedConfig = globalContext.globalState.get("qqq_config") || {};
   const config = { ...defaultConfig, ...storedConfig };
@@ -369,13 +379,13 @@ function getConfig() {
   if (typeof config.lineSpacing !== "number") config.lineSpacing = -2;
   if (typeof config.sidebarWidth !== "number") config.sidebarWidth = 100;
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
-  if (!config.recycleBin) config.recycleBin = [];
   if (typeof config.isPinned !== "boolean") config.isPinned = false;
   if (!config.sizeMode) config.sizeMode = "none";
   if (typeof config.kbmOverlap !== "number") config.kbmOverlap = 2;
 
   sizeMode = config.sizeMode;
   kbmOverlap = config.kbmOverlap;
+  cachedInMemoryConfig = config;
   return config;
 }
 
@@ -407,8 +417,10 @@ function saveConfig(
     kbmOverlap: nextOverlap,
   };
 
+  // 立即更新内存状态和全局简易变量，确保后续读取（如 refreshWebview）拿到的是正确的
   sizeMode = nextSizeMode;
   kbmOverlap = nextOverlap;
+  cachedInMemoryConfig = newConfig;
 
   // 性能优化：防抖处理。频繁切换目录时，不要同步更新 globalState
   if (saveConfigTimer) clearTimeout(saveConfigTimer);
@@ -604,6 +616,8 @@ const vscode = acquireVsCodeApi();
 let sizeMode = '${escapedSizeMode}';
 let currentPath = '${escapedCurrentPath}';
 let sidebarRatio = ${escapedSidebarRatio};
+
+let sessionSizeCache = new Map(); // path -> sizeDisplay ( sticky session cache )
 
 let resizeObserver = null;
 const MIN_RESPONSIVE_WIDTH = 240;
@@ -844,7 +858,41 @@ function setSizeMode(mode){
   hideAllContextMenus();
   sizeMode = mode; // 立即本地更新，增强响应感
   updateSizeMenuUI(mode);
+  
+  // 切换模式时，利用缓存立即刷新 UI 尺寸显示，避免重新请求
+  refreshSizeDisplayFromCache();
+  
   vscode.postMessage({ command: 'setSizeMode', mode });
+}
+
+function refreshSizeDisplayFromCache() {
+  const items = document.querySelectorAll('.file-item');
+  items.forEach(item => {
+    const p = item.dataset.path;
+    const szArea = item.querySelector('.sz-area');
+    if (!szArea) return;
+
+    if (sessionSizeCache.has(p)) {
+      const cachedValue = sessionSizeCache.get(p);
+      if (shouldShowSizeByMode(cachedValue, sizeMode)) {
+        szArea.textContent = cachedValue;
+      } else {
+        szArea.textContent = '';
+      }
+    } else {
+       // 没有缓存的项，如果当前模式允许，稍后会由 requestFileSizeUpdates 自动触发请求
+       szArea.textContent = ''; 
+    }
+  });
+}
+
+function shouldShowSizeByMode(sizeStr, mode) {
+  if (!sizeStr || mode === 'none') return false;
+  if (mode === 'b') return true;
+  const s = sizeStr.toLowerCase();
+  if (mode === 'k') return s.includes('k') || s.includes('m');
+  if (mode === 'm') return s.includes('m');
+  return true;
 }
 
 function updateSizeMenuUI(mode){
@@ -946,6 +994,11 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
 
   // 选中文件时，始终例外请求尺寸显示 (force: true)
   if (type === 'file' && requestSize) {
+    if (sessionSizeCache.has(p)) {
+      const szArea = fileItem.querySelector('.sz-area');
+      if (szArea) szArea.textContent = sessionSizeCache.get(p);
+      return; 
+    }
     const szArea = fileItem.querySelector('.sz-area');
     if (szArea) szArea.textContent = '    \\u2022    ';
     vscode.postMessage({ command: 'requestSize', path: p, type, force: true });
@@ -1173,6 +1226,11 @@ window.addEventListener('message', event => {
   if (!message) return;
 
   if (message.command === 'update') {
+    const isNewDir = (message.currentPath || '') !== currentPath;
+    if (isNewDir) {
+      sessionSizeCache.clear();
+    }
+    
     if (message.sizeMode) {
       sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
       updateSizeMenuUI(sizeMode);
@@ -1184,15 +1242,46 @@ window.addEventListener('message', event => {
       updateAddressDisplay(addr.value);
     }
     const list = document.getElementById('fileList');
-    if (list) list.innerHTML = message.fileListHtml || '';
-    requestFileSizeUpdates(message.items || []);
+    if (list) {
+      list.innerHTML = message.fileListHtml || '';
+      
+      // 立即恢复缓存中的尺寸
+      const items = list.querySelectorAll('.file-item');
+      items.forEach(item => {
+        const p = item.dataset.path;
+        if (sessionSizeCache.has(p)) {
+          const cachedVal = sessionSizeCache.get(p);
+          const szArea = item.querySelector('.sz-area');
+          if (szArea && shouldShowSizeByMode(cachedVal, sizeMode)) {
+            szArea.textContent = cachedVal;
+          }
+        }
+      });
+    }
+
+    // 仅针对未缓存且符合当前模式的项发起自动请求
+    const uncachedItems = (message.items || []).filter(it => !sessionSizeCache.has(it.path));
+    requestFileSizeUpdates(uncachedItems);
+    
     setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
   } else if (message.command === 'updateSizeBatch') {
     (message.results || []).forEach(res => {
+      // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
+      if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
+        sessionSizeCache.set(res.path, res.sizeDisplay);
+      }
+
       const el = findItemElementByPath(res.path, res.type);
       if (el) {
         const sz = el.querySelector('.sz-area');
-        if (sz) sz.textContent = res.sizeDisplay || '';
+        if (sz) {
+          // 实时更新时仍需遵循模式过滤（除非是 force 请求，但 Batch 通常是自动请求）
+          if (shouldShowSizeByMode(res.sizeDisplay, sizeMode) || (selectedItem && selectedItem.path === res.path)) {
+             sz.textContent = res.sizeDisplay || '';
+          } else {
+             sz.textContent = '';
+          }
+        }
       }
     });
   } else if (message.command === 'clearFilenameInput') {
@@ -1411,10 +1500,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (type === 'folder') {
         if (isSzArea) {
           if (fileItem.dataset.name === '..') return; // 排除上级目录尺寸请求
-          // 选中文件夹且点击 sz 区域：手动请求文件夹尺寸
+          
+          if (sessionSizeCache.has(fileItem.dataset.path)) {
+            const szArea = event.target;
+            szArea.textContent = sessionSizeCache.get(fileItem.dataset.path);
+            return;
+          }
+
+          // 选中文件夹且点击 sz 区域：手动请求文件夹尺寸 (始终 force: true)
           const szArea = event.target;
           szArea.textContent = '    \\u2022    ';
-          vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type: 'folder' });
+          vscode.postMessage({ command: 'requestSize', path: fileItem.dataset.path, type: 'folder', force: true });
           selectFileItem(fileItem, false, event.shiftKey);
           currentFocusType = 'fileList';
           return;
@@ -1461,6 +1557,7 @@ document.addEventListener('DOMContentLoaded', () => {
         itemMenu.style.top = e.clientY + 'px';
         itemMenu.style.display = 'flex';
       } else if (emptyMenu) {
+        updateSizeMenuUI(sizeMode); // 显示前强制刷新一次选中状态，确保万无一失
         emptyMenu.style.left = e.clientX + 'px';
         emptyMenu.style.top = e.clientY + 'px';
         emptyMenu.style.display = 'flex';
@@ -1718,6 +1815,13 @@ function showSaveAsDialog() {
     try {
       if (!panel || !activePanelAlive) return;
 
+      // 做到“永不更新”：仅在切换目录时清除后台尺寸缓存
+      if (currentPath !== lastResourceExplorerPath) {
+        fileSizeCache.clear();
+        folderSizeCache.clear();
+        lastResourceExplorerPath = currentPath;
+      }
+
       // 切换目录时，取消之前的待处理尺寸请求
       activeAbortController.abort();
       activeAbortController = new AbortController();
@@ -1859,22 +1963,25 @@ function showSaveAsDialog() {
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;
 
-      case "setSizeMode":
+      case "setSizeMode": {
+        const config = getConfig();
         saveConfig(
-          currentConfig.recentDirs,
-          currentConfig.lineSpacing,
-          currentConfig.sidebarWidth,
-          currentConfig.sidebarRatio,
-          currentConfig.recycleBin,
-          currentConfig.isPinned,
+          config.recentDirs,
+          config.lineSpacing,
+          config.sidebarWidth,
+          config.sidebarRatio,
+          config.recycleBin,
+          config.isPinned,
           message.mode,
-          currentConfig.kbmOverlap
+          config.kbmOverlap
         );
         refreshWebview();
         break;
+      }
 
-      case "requestSizeBatch":
-        if (currentConfig.sizeMode === "none") break;
+      case "requestSizeBatch": {
+        const config = getConfig();
+        if (config.sizeMode === "none") break;
         (async () => {
           const signal = activeAbortController.signal;
           const items = message.items || [];
@@ -1883,7 +1990,7 @@ function showSaveAsDialog() {
             if (signal.aborted) break;
             const chunk = items.slice(i, i + CHUNK_SIZE);
             const chunkResults = await Promise.all(chunk.map(async (item) => {
-              const display = await getFileSizeDisplayAsync(item.path, currentConfig.sizeMode, false, signal);
+              const display = await getFileSizeDisplayAsync(item.path, config.sizeMode, false, signal);
               return {
                 path: canonicalizeExistingPath(item.path),
                 type: item.type,
@@ -1901,12 +2008,14 @@ function showSaveAsDialog() {
           }
         })();
         break;
+      }
 
       case "requestSize":
-      case "refreshSize":
+      case "refreshSize": {
+        const config = getConfig();
         // 注意：这里不再因为 sizeMode === "none" 而直接 break，因为需要支持选中例外显示 (force)
         try {
-          const display = await getFileSizeDisplayAsync(message.path, currentConfig.sizeMode, !!message.force);
+          const display = await getFileSizeDisplayAsync(message.path, config.sizeMode, !!message.force);
           if (panel && activePanelAlive) {
             panel.webview.postMessage({
               command: "updateSizeBatch", // 统一使用批量接口
@@ -1919,6 +2028,7 @@ function showSaveAsDialog() {
           }
         } catch { }
         break;
+      }
 
       case "renameItem":
         try {
