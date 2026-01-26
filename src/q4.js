@@ -2225,7 +2225,8 @@ function activate(context) {
         clearHistory: () => historyManager.clearHistory(),
         getStats: () => historyManager.getStatsSnapshot(),
         qsc: (a) => qsc(a, historyManager),
-        recordRoamUsage: (args) => historyManager.recordRoamUsage(args)
+        recordRoamUsage: (args) => historyManager.recordRoamUsage(args),
+        sidebarProvider: sidebarProvider // ★ 返回 sidebarProvider 实例
     };
 }
 
