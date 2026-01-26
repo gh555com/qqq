@@ -10,7 +10,6 @@ const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
 const q4 = require("./q4");
-const { ClipboardHistoryManager } = q4;
 
 // 引用 global.js 的核心对象
 const {
@@ -40,14 +39,10 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 // Keep ffmpeg loading in qqq as it was
-let _localFfmpegPath = null;
-let _localFfprobePath = null;
-
 let extensionContext = null;
 let cacheDir = null;
 let cacheMeta = null;
 let _statusBarTimer = null;
-let clipboardHistoryManager = null;
 let activeSidebarProvider = null;
 
 // ============================================================================
@@ -1296,11 +1291,11 @@ async function activate(context) {
 		downloader.ensurePythonReady(context, { background: true }).catch(() => { });
 	} catch (e) { }
 
-	// 初始化剪切板历史管理器
 	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
 	try {
 		const q4Api = q4.activate(context);
 		global.clipboardHistoryManager = q4Api; // 保持全局引用兼容性
+		activeSidebarProvider = q4Api.sidebarProvider; // ★ 正确初始化 activeSidebarProvider
 	} catch (e) {
 		global.logMessage(`q4 (剪切板/侧边栏) 加载失败: ${e.message}`, "ERROR");
 	}
@@ -1449,6 +1444,9 @@ async function deactivate() {
 	if (q2Module?.deactivate) {
 		try { await q2Module.deactivate(); } catch { }
 	}
+
+	// ★ 补充：停用 q4 (剪切板历史管理器)
+	try { await q4.deactivate(); } catch { }
 
 	global.logMessage("qqq 扩展已停用", "INFO");
 }
