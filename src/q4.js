@@ -1405,7 +1405,7 @@ class ClipboardHistorySidebarProvider {
                     <div class="btn-group">
                         <div class="input-box-wrapper">
                             <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
-                            <button id="btnVideoStart" title="Download"><span class="icon-play"></span></button>
+                            <button id="btnVideoStart"><span class="icon-play"></span></button>
                             <div class="error-tip" id="urlErrorTip">无效网址</div>
                         </div>
                     </div>
