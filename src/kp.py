@@ -101,21 +101,26 @@ class NonBlockingAudioEngine:
                 while time.time() < end_t and not self._stop_event.is_set():
                     elapsed = time.time() - start_t
                     if elapsed >= fade_start_t:
-                        # 计算剩余比例进行淡出
-                        rem = max(0.0, (end_t - time.time()) / 2.0)
-                        device.volume = rem
-                    time.sleep(0.05)
+                        # 改进：更顺滑的线性淡出算法
+                        remaining = end_t - time.time()
+                        new_vol = max(0.0, min(1.0, remaining / 2.0))
+                        device.volume = new_vol
+                    time.sleep(0.02)  # 缩短步进，让淡出更平滑
 
                 # 显式停止，准备下一轮或退出
                 try:
                     device.stop()
-                    device.volume = 1.0  # 还原音量
+                    device.volume = 1.0
                 except:
                     pass
 
                 current_loop += 1
                 if not (current_loop < loop_count or loop_count == 0):
                     break
+
+            # ★ 关键：自然播完后，发送事件通知 Node.js 更新 UI
+            if not self._stop_event.is_set():
+                print(json.dumps({"event": "audio_finished"}), flush=True)
 
         except Exception as e:
             sys.stderr.write(f"Audio Engine Error: {e}\n")

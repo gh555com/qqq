@@ -2440,7 +2440,7 @@ class PythonEngineDownloader {
                 spawnSync
             } = require("child_process");
 
-            // 增强检测：版本必须在 [3.7, 3.12] 之间，且返回结果包含 miniaudio 状态
+            // 增强检测：版本必须在 [3.7, 3.12] 之间，且返回结果包含 miniaudio 状态和实际执行路径
             const checkScript = `
 import sys
 v = sys.version_info
@@ -2451,7 +2451,7 @@ try:
     has_m = 1
 except:
     pass
-msg = f'PYTHON_READY|MINIAUDIO:{has_m}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
+msg = f'PYTHON_READY|EXE:{sys.executable}|MINIAUDIO:{has_m}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
 sys.stdout.write(msg)
 sys.exit(0 if ok else 1)
 `.trim();
@@ -2464,7 +2464,10 @@ sys.exit(0 if ok else 1)
             });
 
             if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
-                this._hasMiniaudio = (r.stdout || "").includes("MINIAUDIO:1");
+                const stdout = r.stdout || "";
+                this._hasMiniaudio = stdout.includes("MINIAUDIO:1");
+                const exeMatch = stdout.match(/EXE:([^|]+)/);
+                if (exeMatch) this._resolvedPath = exeMatch[1];
                 return true;
             }
             if (r.error || r.status !== 0) {
@@ -2887,7 +2890,11 @@ class UnifiedMediaDownloader {
 
         // 1. Level 1: 仅检查插件自维护目录 (gh555.qqq/python_engine)，不执行下载
         if (context && await this.python.trySetFromGlobalStorage(context)) {
-            global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${this.python.pythonPath}`, "INFO");
+            const finalPath = this.python._resolvedPath || this.python.pythonPath;
+            if (this._lastLoggedPython !== finalPath) {
+                global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${finalPath}`, "INFO");
+                this._lastLoggedPython = finalPath;
+            }
             await this.python.ensureDependencies(this.python.pythonPath);
             return this.python.pythonPath;
         }
@@ -2898,7 +2905,11 @@ class UnifiedMediaDownloader {
             const settingPath = config.get('defaultInterpreterPath') || config.get('pythonPath');
             if (settingPath && await this.python.isAvailable(settingPath)) {
                 this.python.pythonPath = settingPath;
-                global.logMessage(`[PythonCheck] Level 2 命中: 使用 VS Code 配置路径 ${settingPath}`, "INFO");
+                const finalPath = this.python._resolvedPath || settingPath;
+                if (this._lastLoggedPython !== finalPath) {
+                    global.logMessage(`[PythonCheck] Level 2 命中: 使用 VS Code 配置路径 ${finalPath}`, "INFO");
+                    this._lastLoggedPython = finalPath;
+                }
                 await this.python.ensureDependencies(settingPath);
                 return settingPath;
             }
@@ -2909,7 +2920,11 @@ class UnifiedMediaDownloader {
         for (const bin of envBins) {
             if (await this.python.isAvailable(bin)) {
                 this.python.pythonPath = bin;
-                global.logMessage(`[PythonCheck] Level 3 命中: 使用系统环境变量路径 ${bin}`, "INFO");
+                const finalPath = this.python._resolvedPath || bin;
+                if (this._lastLoggedPython !== finalPath) {
+                    global.logMessage(`[PythonCheck] Level 3 命中: 使用系统环境变量路径 ${finalPath}`, "INFO");
+                    this._lastLoggedPython = finalPath;
+                }
                 await this.python.ensureDependencies(bin);
                 return bin;
             }
@@ -2924,7 +2939,9 @@ class UnifiedMediaDownloader {
                     if (progress) progress.report({ message: "正在自举安装 Python 引擎 (3.8.10)...", increment: 10 });
                     const res = await this.python.autoInstall(context);
                     if (res.success) {
-                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装成功 ${res.path}`, "INFO");
+                        const finalPath = this.python._resolvedPath || res.path;
+                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装成功 ${finalPath}`, "INFO");
+                        this._lastLoggedPython = finalPath;
                         await this.python.ensureDependencies(res.path);
                         return res.path;
                     } else {
