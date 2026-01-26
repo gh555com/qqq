@@ -863,6 +863,13 @@ class ClipboardHistorySidebarProvider {
         // 初始内容
         this.updateContent(null, null, null, true);
 
+        // 监听 Python 引擎的异步通知（如自然播放结束）
+        this._global.pythonBridge.on('event', (data) => {
+            if (data && data.event === 'audio_finished') {
+                this._postMessage({ command: 'stopAudio' });
+            }
+        });
+
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
                 case 'focusState':

@@ -10,8 +10,11 @@ const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 // ============================================================================
 // ★ Daemon Bridge (从 qqq.js 迁移)
 // ============================================================================
-class DaemonBridge {
+const EventEmitter = require('events');
+
+class DaemonBridge extends EventEmitter {
 	constructor(name, startFn) {
+		super();
 		this.name = name;
 		this.startFn = startFn;
 		this.process = null;
@@ -103,6 +106,12 @@ class DaemonBridge {
 				}
 
 				const id = result._id;
+
+				// ★ 增加：处理异步事件（没有 _id 或是明确标记为 event 的消息）
+				if (id === undefined || result.event) {
+					this.emit("event", result);
+					return;
+				}
 
 				if (result.error) logMessage(`${this.name} 错误响应: ${result.error}`, "WARN");
 
