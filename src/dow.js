@@ -2698,21 +2698,33 @@ class UnifiedMediaDownloader {
 
                 this._installPromise = (async () => {
                     try {
-                        return await vscode.window.withProgress({
-                            location: vscode.ProgressLocation.Notification,
-                            title: silent ? "正在后台静默安装视频引擎 (yt-dlp)..." : "正在安装 yt-dlp...",
-                            cancellable: false
-                        }, async (progress) => {
-                            progress.report({ message: "正在下载...", increment: 10 });
+                        const downloadAction = async (progress) => {
+                            if (progress) progress.report({ message: "正在下载...", increment: 10 });
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
                                 if (!silent) vscode.window.showInformationMessage("yt-dlp 安装成功");
                                 return true;
                             } else {
-                                vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                                // 报错或下载失败时，始终记录日志并弹窗
+                                if (vscode) vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                                try {
+                                    const global = require('./global');
+                                    global.logMessage(`yt-dlp 安装失败: ${res.error}`, "ERROR");
+                                } catch { }
                                 return false;
                             }
-                        });
+                        };
+
+                        if (silent) {
+                            // 真正做到静默下载：不做任何弹窗逻辑
+                            return await downloadAction(null);
+                        } else {
+                            return await vscode.window.withProgress({
+                                location: vscode.ProgressLocation.Notification,
+                                title: "正在安装 yt-dlp...",
+                                cancellable: false
+                            }, downloadAction);
+                        }
                     } finally {
                         this._installPromise = null;
                     }
@@ -2720,7 +2732,9 @@ class UnifiedMediaDownloader {
 
                 return this._installPromise;
             } else {
-                vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+                if (!silent) {
+                    vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+                }
                 return false;
             }
         }
