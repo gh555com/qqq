@@ -2313,124 +2313,107 @@ class YtDlpDownloader {
             const platform = os.platform();
             const arch = os.arch();
 
-
-            let downloadUrl;
             let binaryName;
+            let officialUrl;
+            let mirrorUrl;
 
             if (platform === 'win32') {
-
                 binaryName = 'yt-dlp.exe';
-                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
             } else if (platform === 'darwin') {
-
                 binaryName = 'yt-dlp';
-                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
             } else {
-
                 binaryName = 'yt-dlp';
-                downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
             }
-
 
             const installDir = context.globalStorageUri.fsPath;
             const installPath = path.join(installDir, binaryName);
 
-
             if (!fs.existsSync(installDir)) {
                 fs.mkdirSync(installDir, { recursive: true });
             }
-
 
             if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
                 this.ytdlpPath = installPath;
                 return { success: true, path: installPath };
             }
 
-
-            await new Promise((resolve, reject) => {
-                const downloadFile = (url, redirectCount = 0) => {
-                    if (redirectCount > 5) {
-                        reject(new Error('Too many redirects'));
-                        return;
-                    }
-
-                    const urlObj = new URL(url);
-                    const options = {
-                        hostname: urlObj.hostname,
-                        path: urlObj.pathname + urlObj.search,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                            'Accept': '*/*',
-                            'Accept-Encoding': 'identity',
-                            'Connection': 'keep-alive'
-                        },
-                        timeout: 30000
-                    };
-
-                    const req = https.get(options, (res) => {
-                        if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308) {
-                            const location = res.headers.location;
-                            if (location) {
-
-                                const nextUrl = new URL(location, url).href;
-                                downloadFile(nextUrl, redirectCount + 1);
-                            } else {
-                                reject(new Error(`Redirect without location header (status: ${res.statusCode})`));
-                            }
-
-                            res.resume();
+            // 尝试下载逻辑：先官方，失败则尝试镜像
+            const tryDownload = async (url, timeoutMs = 20000) => {
+                return new Promise((resolve, reject) => {
+                    const downloadFile = (targetUrl, redirectCount = 0) => {
+                        if (redirectCount > 5) {
+                            reject(new Error('Too many redirects'));
                             return;
                         }
 
-                        if (res.statusCode === 200) {
-                            const file = fs.createWriteStream(installPath);
-                            res.pipe(file);
+                        const urlObj = new URL(targetUrl);
+                        const options = {
+                            hostname: urlObj.hostname,
+                            path: urlObj.pathname + urlObj.search,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                            },
+                            timeout: timeoutMs
+                        };
 
-                            file.on('finish', () => {
-                                file.close(() => {
+                        const req = https.get(options, (res) => {
+                            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                                const location = res.headers.location;
+                                if (location) {
+                                    downloadFile(new URL(location, targetUrl).href, redirectCount + 1);
+                                } else {
+                                    reject(new Error(`Redirect without location (status: ${res.statusCode})`));
+                                }
+                                res.resume();
+                                return;
+                            }
 
-                                    try {
-                                        const stats = fs.statSync(installPath);
-                                        if (stats.size > 0) {
-                                            resolve();
-                                        } else {
-                                            fs.unlinkSync(installPath);
-                                            reject(new Error('Downloaded file is empty'));
-                                        }
-                                    } catch (e) {
-                                        reject(e);
-                                    }
+                            if (res.statusCode === 200) {
+                                const file = fs.createWriteStream(installPath);
+                                res.pipe(file);
+                                file.on('finish', () => {
+                                    file.close(() => {
+                                        try {
+                                            if (fs.statSync(installPath).size > 0) resolve();
+                                            else { fs.unlinkSync(installPath); reject(new Error('Empty file')); }
+                                        } catch (e) { reject(e); }
+                                    });
                                 });
-                            });
+                                file.on('error', (err) => { fs.unlink(installPath, () => { }); reject(err); });
+                            } else {
+                                res.resume();
+                                reject(new Error(`Status: ${res.statusCode}`));
+                            }
+                        });
 
-                            file.on('error', (err) => {
-                                fs.unlink(installPath, () => { });
-                                reject(err);
-                            });
-                        } else {
-                            res.resume();
-                            reject(new Error(`Download failed with status code: ${res.statusCode}`));
-                        }
-                    });
+                        req.on('error', (err) => reject(err));
+                        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+                    };
+                    downloadFile(url);
+                });
+            };
 
-                    req.on('error', (err) => {
-                        reject(err);
-                    });
-
-                    req.on('timeout', () => {
-                        req.destroy();
-                        reject(new Error('Download timeout'));
-                    });
-                };
-
-                downloadFile(downloadUrl);
-            });
-
+            try {
+                // 第一步：尝试官方下载 (15秒超时)
+                await tryDownload(officialUrl, 15000);
+            } catch (e) {
+                // 第二步：官方失败，尝试镜像下载 (国内加速)
+                try {
+                    await tryDownload(mirrorUrl, 60000);
+                } catch (mirrorErr) {
+                    throw new Error(`Official and Mirror both failed. Mirror Error: ${mirrorErr.message}`);
+                }
+            }
 
             if (platform !== 'win32') {
                 fs.chmodSync(installPath, '755');
             }
-
 
             this.ytdlpPath = installPath;
             return { success: true, path: installPath };
@@ -2701,12 +2684,24 @@ class UnifiedMediaDownloader {
                             if (progress) progress.report({ message: "正在下载视频引擎...", increment: 10 });
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
-                                if (!background) vscode.window.showInformationMessage("qqq: yt-dlp 安装成功");
+                                if (!background) {
+                                    // 使用 withProgress 实现 9 秒自动关闭的成功提示
+                                    vscode.window.withProgress({
+                                        location: vscode.ProgressLocation.Notification,
+                                        title: "qqq: yt-dlp 安装成功",
+                                        cancellable: false
+                                    }, () => new Promise(resolve => setTimeout(resolve, 9000)));
+                                }
                                 return true;
                             } else {
                                 // 仅在非后台模式下弹出错误提示
                                 if (!background && vscode) {
-                                    vscode.window.showErrorMessage(`qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`);
+                                    // 使用 withProgress 实现 9 秒自动关闭的失败提示
+                                    vscode.window.withProgress({
+                                        location: vscode.ProgressLocation.Notification,
+                                        title: `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`,
+                                        cancellable: false
+                                    }, () => new Promise(resolve => setTimeout(resolve, 9000)));
                                 }
                                 try {
                                     const global = require('./global');
