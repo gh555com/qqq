@@ -90,7 +90,8 @@ const UNSUPPORTED_CODE_EXTENSIONS = new Set([
 
 // ==================== 全局变量 ====================
 let activePanel = null;
-let activePanelAlive = false; // 我们自己维护 disposed 状态，别依赖 panel.disposed（VS Code 没这个字段）
+let activePanelAlive = false;
+let currentWatcher = null; // 用于监听当前目录变化
 const usePanelReveal = 1;
 
 let sizeMode = "none";
@@ -1809,6 +1810,10 @@ function showSaveAsDialog() {
   panel.onDidDispose(() => {
     activePanelAlive = false;
     activePanel = null;
+    if (currentWatcher) {
+      currentWatcher.dispose();
+      currentWatcher = null;
+    }
   });
 
   async function updateResourceExplorer() {
@@ -1826,6 +1831,43 @@ function showSaveAsDialog() {
       activeAbortController.abort();
       activeAbortController = new AbortController();
       const currentSignal = activeAbortController.signal;
+
+      // ★ 方案 B：更新目录监视器，确保系统级粘贴后界面自动刷新
+      if (currentWatcher) {
+        currentWatcher.dispose();
+      }
+
+      // 监听当前目录下所有文件的创建、修改和删除
+      // 使用 fs.watch 作为保底，因为它在非工作区目录下表现更稳定
+      try {
+        const debouncedRefresh = () => {
+          setTimeout(() => {
+            if (activePanel && activePanelAlive) refreshWebview();
+          }, 300);
+        };
+
+        // 尝试使用 VS Code 的 Watcher
+        const watchPattern = new vscode.RelativePattern(currentPath, "*");
+        currentWatcher = vscode.workspace.createFileSystemWatcher(watchPattern);
+        currentWatcher.onDidCreate(debouncedRefresh);
+        currentWatcher.onDidChange(debouncedRefresh);
+        currentWatcher.onDidDelete(debouncedRefresh);
+
+        // 如果路径是绝对路径（通常是），额外增加一个原生的 fs.watch 作为双保险
+        if (path.isAbsolute(currentPath) && fs.existsSync(currentPath)) {
+          const nativeWatcher = fs.watch(currentPath, (event, filename) => {
+            if (filename) debouncedRefresh();
+          });
+          // 包装 dispose 逻辑
+          const originalDispose = currentWatcher.dispose.bind(currentWatcher);
+          currentWatcher.dispose = () => {
+            try { nativeWatcher.close(); } catch { }
+            originalDispose();
+          };
+        }
+      } catch (e) {
+        global.logMessage(`[Q2] 启动目录监视失败: ${e.message}`, "WARN");
+      }
 
       const directoryContents = await getDirectoryContents(currentPath);
       const items = [];
@@ -2309,26 +2351,12 @@ function showSaveAsDialog() {
 
       case "paste":
         try {
-          const _qqq = geq();
-          if (_qqq && typeof _qqq.raceClipboard === "function") {
-            const pastePathSnapshot = currentPath;
-            // 恢复为直接调用异步方法，不再使用会导致混淆的 setTimeout(..., 0)
-            try {
-              // q2 模式：显式开启 autoRename: true
-              await _qqq.raceClipboard(message.destDir, (res) => {
-                // 粘贴完成后刷新，确保路径未变且面板存活
-                if (panel && activePanelAlive && currentPath === pastePathSnapshot) {
-                  refreshWebview();
-                }
-              }, true);
-            } catch (error) {
-              global.showErrorMessage("粘贴执行异常: " + error.message);
-            }
-          } else {
-            global.showErrorMessage("粘贴失败：IO 引擎未就绪或不支持粘贴功能。");
-          }
+          // ★ 方案 B：彻底脱钩，直接触发系统原生粘贴
+          // 所有的多任务管理、覆盖提示、进度 UI 全部交给 OS 处理
+          // q2 只负责发出指令，并通过 FileSystemWatcher 自动感知结果
+          await global.triggerSystemPaste(message.destDir);
         } catch (error) {
-          global.showErrorMessage("粘贴执行异常: " + error.message);
+          global.showErrorMessage("系统粘贴触发异常: " + error.message);
         }
         break;
     }

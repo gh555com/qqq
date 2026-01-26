@@ -2488,25 +2488,21 @@ async function copyFilesToClipboard(filePaths) {
     if (!filePaths || filePaths.length === 0) return;
 
     const global = getGlobal();
-    const rustBridge = global.rustBridge;
-    const pythonBridge = global.pythonBridge;
-    const shellBridge = global.shellBridge;
+    try {
+        // ★ 统一使用 global.tryEngineCall，享受 Rust -> Python -> Node 的完美回退
+        const res = await global.tryEngineCall({
+            rust: "setFiles",
+            python: "setFiles",
+            shell: "setFiles" // Node Daemon 兜底
+        }, { paths: filePaths }, 3000);
 
-    // 尝试顺序：Rust -> Python -> Shell (长驻进程优先)
-    const bridges = [rustBridge, pythonBridge, shellBridge];
-
-    for (const bridge of bridges) {
-        if (bridge && bridge.isAvailable()) {
-            try {
-                const r = await bridge.call("setFiles", { paths: filePaths }, 2000);
-                if (r && r.success) {
-                    log(`[Clipboard] 通过 ${bridge.name} 复制了 ${filePaths.length} 个项目`, "INFO");
-                    return;
-                }
-            } catch (e) {
-                log(`[Clipboard] ${bridge.name} setFiles 失败: ${e.message}`, "WARN");
-            }
+        if (res && res.success) {
+            const activeName = global.getActiveEngineName(global.pythonBridge, global.rustBridge, global.shellBridge);
+            log(`[Clipboard] 通过 ${activeName} 复制了 ${filePaths.length} 个项目`, "INFO");
+            return;
         }
+    } catch (e) {
+        log(`[Clipboard] 复制操作异常: ${e.message}`, "WARN");
     }
 
     // 如果所有 Bridge 都不可用，执行最低限度的纯文本回退

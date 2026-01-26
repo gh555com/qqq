@@ -1265,10 +1265,39 @@ class ClipboardHistorySidebarProvider {
         const source = await this._ensureAudioSource();
         if (source === AUDIO_SOURCE.PYTHON) {
             try {
-                await this._global.pythonBridge.call('stop_audio');
+                // 为 Python 引擎添加淡出效果
+                await this._fadeOutAudio();
             } catch (e) { }
+        } else {
+            // Webview 源直接停止
+            this._postMessage({ command: 'stopAudio' });
         }
-        // 同时通知 Webview 停止（不论当前源是什么，确保彻底静默并重置文字）
+    }
+
+    async _fadeOutAudio() {
+        const FADE_DURATION = 2000; // 2秒淡出
+        const STEP_DURATION = 20; // 每20毫秒更新一次
+        const STEPS = FADE_DURATION / STEP_DURATION;
+        const VOLUME_STEP = 1 / STEPS;
+
+        let currentVolume = 1.0;
+        
+        // 渐变音量
+        for (let i = 0; i < STEPS; i++) {
+            currentVolume = Math.max(0, currentVolume - VOLUME_STEP);
+            try {
+                await this._global.pythonBridge.call('set_audio_volume', { volume: currentVolume });
+            } catch (e) { }
+            // 等待指定时间
+            await new Promise(resolve => setTimeout(resolve, STEP_DURATION));
+        }
+
+        // 淡出完成后停止音频
+        try {
+            await this._global.pythonBridge.call('stop_audio');
+        } catch (e) { }
+
+        // 通知 Webview 停止
         this._postMessage({ command: 'stopAudio' });
     }
 
