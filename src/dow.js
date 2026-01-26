@@ -2495,40 +2495,84 @@ sys.exit(0 if ok else 1)
             // 如果是内置引擎且是 Windows embed 版，检查是否需要修复 ._pth 并安装 pip
             if (isInternal && process.platform === 'win32') {
                 const engineDir = path.dirname(pythonBin);
+
+                // 确保 site-packages 目录存在
+                const sitePackagesDir = path.join(engineDir, 'site-packages');
+                if (!fs.existsSync(sitePackagesDir)) {
+                    fs.mkdirSync(sitePackagesDir, { recursive: true });
+                }
+
                 const pthFile = path.join(engineDir, 'python38._pth');
                 if (fs.existsSync(pthFile)) {
-                    let content = fs.readFileSync(pthFile, 'utf8');
-                    if (content.includes('#import site')) {
-                        content = content.replace('#import site', 'import site');
-                        content += '\n./site-packages\n';
-                        fs.writeFileSync(pthFile, content);
-                    }
+                    // ★ 彻底重写 ._pth，确保嵌入版环境的路径搜索逻辑 100% 正确
+                    const pthContent = [
+                        'python38.zip',
+                        '.',
+                        'site-packages',
+                        '',
+                        '# 激活 site 模块以支持 site-packages',
+                        'import site',
+                        ''
+                    ].join('\n');
+                    fs.writeFileSync(pthFile, pthContent);
                 }
 
                 // 检查 pip 是否可用
+                let hasPip = false;
                 try {
                     cp.execSync(`"${pythonBin}" -m pip --version`, { windowsHide: true });
-                } catch (e) {
-                    global.logMessage(`[PythonCheck] 内置引擎缺少 pip，正在引导安装...`, "INFO");
+                    hasPip = true;
+                } catch (e) { }
+
+                if (!hasPip) {
                     const getPipPath = path.join(engineDir, 'get-pip.py');
-                    if (!fs.existsSync(getPipPath)) {
+                    const needsDownload = !fs.existsSync(getPipPath) || fs.statSync(getPipPath).size < 102400;
+
+                    if (needsDownload) {
+                        global.logMessage(`[PythonCheck] 正在下载 pip 引导脚本 (3.8)...`, "INFO");
+                        if (fs.existsSync(getPipPath)) fs.unlinkSync(getPipPath);
+
                         const https = require('https');
                         await new Promise((resolve, reject) => {
                             const file = fs.createWriteStream(getPipPath);
-                            https.get('https://bootstrap.pypa.io/get-pip.py', res => {
+                            // 使用 3.8 专用的引导脚本地址
+                            https.get('https://bootstrap.pypa.io/pip/3.8/get-pip.py', res => {
                                 res.pipe(file);
                                 file.on('finish', () => { file.close(); resolve(); });
-                            }).on('error', reject);
+                            }).on('error', (err) => {
+                                fs.unlink(getPipPath, () => { });
+                                reject(err);
+                            });
                         });
                     }
-                    cp.execSync(`"${pythonBin}" "${getPipPath}" --user --quiet`, { windowsHide: true });
+
+                    global.logMessage(`[PythonCheck] 正在自举安装 pip...`, "INFO");
+                    try {
+                        // ★ 基因级隔离：设置 PYTHONNOUSERSITE 确保 pip 安装到本地而非用户目录
+                        cp.execSync(`"${pythonBin}" "${getPipPath}" --no-setuptools --no-wheel --quiet`, {
+                            windowsHide: true,
+                            cwd: engineDir,
+                            env: { ...process.env, PYTHONNOUSERSITE: '1' },
+                            encoding: 'utf8',
+                            stdio: ['ignore', 'pipe', 'pipe']
+                        });
+                    } catch (installErr) {
+                        const out = installErr.stdout ? installErr.stdout.toString() : "";
+                        const err = installErr.stderr ? installErr.stderr.toString() : "";
+                        throw new Error(`pip bootstrap failed: ${err}\n${out}`);
+                    }
                 }
             }
 
             // 执行安装
             const installArgs = isInternal ? "" : "--user";
-            const cmd = `"${pythonBin}" -m pip install miniaudio --quiet ${installArgs} --index-url https://pypi.tuna.tsinghua.edu.cn/simple`;
-            cp.execSync(cmd, { windowsHide: true, timeout: 90000 });
+            const cmd = `"${pythonBin}" -m pip install miniaudio --quiet ${installArgs} --index-url https://mirrors.aliyun.com/pypi/simple/`;
+            // ★ 基因级隔离：安装 miniaudio 时同样强制隔离
+            cp.execSync(cmd, {
+                windowsHide: true,
+                timeout: 90000,
+                env: { ...process.env, PYTHONNOUSERSITE: '1' }
+            });
 
             this._hasMiniaudio = true;
             global.logMessage(`[PythonCheck] 音频依赖安装成功`, "INFO");
@@ -2575,7 +2619,7 @@ sys.exit(0 if ok else 1)
             let officialUrl, mirrorUrl;
             if (platform === 'win32') {
                 officialUrl = 'https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
-                mirrorUrl = 'https://ghproxy.net/https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
+                mirrorUrl = 'https://mirrors.aliyun.com/python/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
             } else if (platform === 'darwin') {
                 officialUrl = 'https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
                 mirrorUrl = 'https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
@@ -2841,14 +2885,14 @@ class UnifiedMediaDownloader {
         const fs = require('fs');
         const global = require('./global');
 
-        // 1. 极高优先级：检查插件自维护目录 (gh555.qqq/python_engine)
+        // 1. Level 1: 仅检查插件自维护目录 (gh555.qqq/python_engine)，不执行下载
         if (context && await this.python.trySetFromGlobalStorage(context)) {
             global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${this.python.pythonPath}`, "INFO");
             await this.python.ensureDependencies(this.python.pythonPath);
             return this.python.pythonPath;
         }
 
-        // 2. 次高优先级：检查 VS Code 设置中的 Python 路径
+        // 2. Level 2: 检查 VS Code 设置中的 Python 路径
         try {
             const config = vscode.workspace.getConfiguration('python');
             const settingPath = config.get('defaultInterpreterPath') || config.get('pythonPath');
@@ -2860,7 +2904,7 @@ class UnifiedMediaDownloader {
             }
         } catch (e) { }
 
-        // 3. 中优先级：检查系统环境中的解释器是否符合要求 (PATH)
+        // 3. Level 3: 检查系统环境中的解释器 (PATH)
         const envBins = process.platform === "win32" ? ["python"] : ["python3", "python"];
         for (const bin of envBins) {
             if (await this.python.isAvailable(bin)) {
@@ -2871,33 +2915,20 @@ class UnifiedMediaDownloader {
             }
         }
 
-        // 4. 兜底：都不可用，启动闭环下载逻辑
+        // 4. Level 4: 兜底，前三项全灭，启动闭环下载/安装逻辑
         if (this._pyInstallPromise) return this._pyInstallPromise;
 
         this._pyInstallPromise = (async () => {
             try {
                 const downloadAction = async (progress) => {
-                    if (progress) progress.report({ message: "正在下载 Python 引擎 (3.8.10)...", increment: 10 });
+                    if (progress) progress.report({ message: "正在自举安装 Python 引擎 (3.8.10)...", increment: 10 });
                     const res = await this.python.autoInstall(context);
                     if (res.success) {
-                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装 Python 3.8.10 成功 ${res.path}`, "INFO");
-                        if (!background) {
-                            vscode.window.withProgress({
-                                location: vscode.ProgressLocation.Notification,
-                                title: "qqq: Python 引擎安装成功",
-                                cancellable: false
-                            }, () => new Promise(resolve => setTimeout(resolve, 9000)));
-                        }
+                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装成功 ${res.path}`, "INFO");
+                        await this.python.ensureDependencies(res.path);
                         return res.path;
                     } else {
-                        global.logMessage(`[PythonCheck] Level 4 失败: Python 引擎下载/验证失败: ${res.error}`, "ERROR");
-                        if (!background && vscode) {
-                            vscode.window.withProgress({
-                                location: vscode.ProgressLocation.Notification,
-                                title: `qqq: Python 引擎下载失败: ${res.error}`,
-                                cancellable: false
-                            }, () => new Promise(resolve => setTimeout(resolve, 9000)));
-                        }
+                        global.logMessage(`[PythonCheck] Level 4 失败: ${res.error}`, "ERROR");
                         return null;
                     }
                 };
