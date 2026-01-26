@@ -1987,10 +1987,20 @@ class ClipboardHistorySidebarProvider {
                 };
 
                 // ★ 唯一淡出条件：限定次数播放的最后一次，且时长 > 2秒
+                var fadeTimer = null;
                 audio.ontimeupdate = function() {
-                    if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2) {
-                        var rem = (audio.duration - audio.currentTime) / 2;
-                        audio.volume = Math.max(0, rem);
+                    if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2.2) {
+                        audio.ontimeupdate = null; // 触发后立即卸载，由高频 Timer 接管
+                        if (fadeTimer) return;
+
+                        fadeTimer = setInterval(function() {
+                            var rem = audio.duration - audio.currentTime;
+                            if (rem <= 0 || !window.__isPlaying) {
+                                clearInterval(fadeTimer);
+                                return;
+                            }
+                            audio.volume = Math.max(0, Math.min(1, rem / 2.0));
+                        }, 20); // 50Hz 高频淡出
                     }
                 };
 
