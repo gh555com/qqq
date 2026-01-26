@@ -372,10 +372,16 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 						res(false);
 						return;
 					}
+					const isInternal = bin.includes('python_engine');
+					const spawnEnv = isInternal
+						? { ...process.env, ...NO_TRACK_ENV, PYTHONNOUSERSITE: '1', PYTHONPATH: '' }
+						: { ...process.env, ...NO_TRACK_ENV };
+
 					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
 						stdio: ["pipe", "pipe", "pipe"],
 						windowsHide: true,
-						env: NO_TRACK_ENV
+						env: spawnEnv,
+						cwd: isInternal ? path.dirname(bin) : undefined
 					});
 				} catch (e) {
 					const msg = `spawn_fail(${bin}): ${e.message}`;
