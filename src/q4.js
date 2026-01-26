@@ -207,6 +207,8 @@ class ClipboardHistoryManager {
             lastSearchKey: '',
             searchList: null,
             searchBytes: 0,
+            hit: 0,
+            miss: 0,
             maxBytes: 25 * 1024 * 1024,
         };
 
@@ -302,6 +304,7 @@ class ClipboardHistoryManager {
             await this._quarantineCorruptFile(this._fileBinGz);
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
         }
     }
 
@@ -390,7 +393,11 @@ class ClipboardHistoryManager {
 
     getHistory(limit = CONSTANTS.UI_HISTORY_LIMIT) {
         const cacheKey = `${this._version}|${limit}`;
-        if (this._cache.uiList && this._cache.lastUiKey === cacheKey) return this._cache.uiList;
+        if (this._cache.uiList && this._cache.lastUiKey === cacheKey) {
+            this._cache.hit++;
+            return this._cache.uiList;
+        }
+        this._cache.miss++;
 
         const pinned = [];
         const others = [];
@@ -434,7 +441,11 @@ class ClipboardHistoryManager {
         if (!kw) return this.getHistory(limit);
 
         const cacheKey = `${this._version}|${limit}|${kw.toLowerCase()}`;
-        if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) return this._cache.searchList;
+        if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) {
+            this._cache.hit++;
+            return this._cache.searchList;
+        }
+        this._cache.miss++;
 
         const needle = kw.toLowerCase();
         const pinned = [];
@@ -536,29 +547,40 @@ class ClipboardHistoryManager {
             this.requestSave();
         } finally {
             this.perfStats.addTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
         }
     }
 
     async removeItem(id) {
-        const node = this._idMap.get(String(id || ''));
-        if (!node) return false;
-        this._removeNode(node);
-        this._touch();
-        this._notifyChange('remove');
-        this.requestSave();
-        return true;
+        const t0 = performance.now();
+        try {
+            const node = this._idMap.get(String(id || ''));
+            if (!node) return false;
+            this._removeNode(node);
+            this._touch();
+            this._notifyChange('remove');
+            this.requestSave();
+            return true;
+        } finally {
+            this.perfStats.operations++;
+        }
     }
 
     async clearHistory({ deleteFiles = true } = {}) {
-        this._head = null; this._tail = null; this._size = 0;
-        this._idMap.clear(); this._hashMap.clear();
-        this._touch();
-        this._notifyChange('clear');
-        if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
-            try { fs.unlinkSync(this._fileBinGz); } catch { }
+        const t0 = performance.now();
+        try {
+            this._head = null; this._tail = null; this._size = 0;
+            this._idMap.clear(); this._hashMap.clear();
+            this._touch();
+            this._notifyChange('clear');
+            if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
+                try { fs.unlinkSync(this._fileBinGz); } catch { }
+            }
+            this._dirty = true;
+            await this.forceSave();
+        } finally {
+            this.perfStats.operations++;
         }
-        this._dirty = true;
-        await this.forceSave();
     }
 
     requestSave() {
@@ -576,6 +598,7 @@ class ClipboardHistoryManager {
     async _doSaveOnce() {
         if (!this._dirty) return;
         this._dirty = false;
+        const t0 = performance.now();
         try {
             const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
 
@@ -589,6 +612,9 @@ class ClipboardHistoryManager {
         } catch (e) {
             console.error('[Q4] 存储严重故障:', e.message);
             this._dirty = true;
+        } finally {
+            this.perfStats.saveTimeMs += (performance.now() - t0);
+            this.perfStats.operations++;
         }
     }
 
@@ -662,12 +688,23 @@ class ClipboardHistoryManager {
     _notifyChange(reason) { if (this._onChange) this._onChange(reason); }
 
     getStatsSnapshot() {
+        const ops = this.perfStats.operations || 1;
+        const denom = this._cache.hit + this._cache.miss;
+        const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
         const uptimeSec = Math.floor((Date.now() - this.sessionStartedAt) / 1000);
+
         return {
             historyCount: this._size,
             isWatching: this._isWatching,
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
-            perf: { quarantinedFiles: this.perfStats.quarantinedFiles },
+            perf: {
+                quarantinedFiles: this.perfStats.quarantinedFiles,
+                avgSaveMs: this.perfStats.saveTimeMs / ops,
+                avgAddMs: this.perfStats.addTimeMs / ops,
+                avgLoadMs: this.perfStats.loadTimeMs / ops,
+            },
+            cache: { hitRate: cacheHitRate },
+            copyCount: this.context.globalState.get('qqq_copy_total_count', 0),
             savor: this._getSavorStats(),
             paste: this._getPasteStats(),
             video: this._getVideoStats(),
@@ -678,6 +715,13 @@ class ClipboardHistoryManager {
             exportZip: this._getGenericStats('exportZip'),
             allSettings: this._getGenericStats('allSettings')
         };
+    }
+
+    async recordCopyUsage() {
+        const gs = this.context.globalState;
+        const count = (Number(gs.get('qqq_copy_total_count', 0)) || 0) + 1;
+        await gs.update('qqq_copy_total_count', count);
+        this._notifyChange('copy_stats');
     }
 
     _getGenericStats(type) {
@@ -838,6 +882,7 @@ class ClipboardHistorySidebarProvider {
 
                         // 2. 执行物理复制 + 强制更新历史时间戳
                         await this._historyManager.copyToClipboard(node.content);
+                        await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
 
                         // 3. 弹出通知 (已注释)
@@ -947,6 +992,15 @@ class ClipboardHistorySidebarProvider {
             const exportZipStats = this._formatGenericStats(stats.exportZip);
             const allSettingsStats = this._formatGenericStats(stats.allSettings);
 
+            // 构建 placeholder 统计字符串
+            const hitRate = Math.round(stats.cache.hitRate || 0);
+            const avgSave = Math.round(stats.perf.avgSaveMs || 0);
+            const avgAdd = Math.round(stats.perf.avgAddMs || 0);
+            const avgLoadMs = Math.round(stats.perf.avgLoadMs || 0);
+            const copyCount = stats.copyCount || 0;
+            const quarantined = Math.round(stats.perf.quarantinedFiles || 0);
+            const fullStats = `count: ${stats.historyCount}, cacheHit:${hitRate}%, avgSove: ${avgSave}ms, avgAdd: ${avgAdd}ms, avgLaad: ${avgLoadMs}ms quorantined: ${quarantined}ms: ${copyCount} times`;
+
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
                 time: formatTime(item.timestamp),
@@ -977,7 +1031,8 @@ class ClipboardHistorySidebarProvider {
                 exportDocStats: exportDocStats,
                 pureStats: pureStats,
                 exportZipStats: exportZipStats,
-                allSettingsStats: allSettingsStats
+                allSettingsStats: allSettingsStats,
+                fullStats: fullStats
             });
 
             const ver = this._context.extension.packageJSON.version;
@@ -1146,7 +1201,7 @@ class ClipboardHistorySidebarProvider {
         .icon-loop.spinning { animation: spin 2s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .icon-stop { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjE2IiBoZWlnaHQ9IjE2IiByeD0iMiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
-        .icon-play { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+        .icon-play { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzQ0NDQ0NCI+PHBhdGggZD0iTTggNXYxNGwxMS03eiIvPjwvc3ZnPg==') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
@@ -1269,8 +1324,9 @@ class ClipboardHistorySidebarProvider {
             100% { left: 150%; }
         }
 
-        .search-container { margin: 3px 0 0 0; flex-shrink: 0; }
-        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
+        .search-container::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 3px; background: var(--primary-color); z-index: 10; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px 7.5px 12px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
         .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
@@ -1667,6 +1723,9 @@ class ClipboardHistorySidebarProvider {
                 var m = e.data;
                 if (!m) return;
                 if (m.command === 'updateData') {
+                    if (m.fullStats !== undefined && el.searchBox) {
+                        el.searchBox.placeholder = 'clipboard history     ' + m.fullStats;
+                    }
                     if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
                     if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
@@ -1884,6 +1943,7 @@ async function searchHistoryCommand(historyManager) {
                 const node = historyManager.getItemById(selected.id);
                 if (node) {
                     await historyManager.copyToClipboard(node.content);
+                    await historyManager.recordCopyUsage();
                     await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
                 }
             } else if (selected.cmd) {
