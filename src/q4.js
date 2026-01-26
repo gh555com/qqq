@@ -1890,7 +1890,7 @@ class ClipboardHistorySidebarProvider {
                 } else if (m.command === 'playSfx') {
                     playSfx(m.base64);
                 } else if (m.command === 'stopAudio') {
-                    stopAudio(0);
+                    stopAudio();
                 }
             });
 
@@ -1924,33 +1924,16 @@ class ClipboardHistorySidebarProvider {
                 }
             }
 
-            function stopAudio(fadeMs) {
+            function stopAudio() {
                 window.__isPlaying = false;
-
                 if(currentAudio) {
-                    var audioToStop = currentAudio;
-                    if (fadeMs > 0) {
-                        var startVol = audioToStop.volume;
-                        var steps = 20;
-                        var stepMs = fadeMs / steps;
-                        var timer = setInterval(function() {
-                            if (audioToStop.volume > 0.05) {
-                                audioToStop.volume -= startVol / steps;
-                            } else {
-                                clearInterval(timer);
-                                audioToStop.pause();
-                                audioToStop.volume = startVol;
-                            }
-                        }, stepMs);
-                    } else {
-                        audioToStop.pause();
-                    }
-
+                    currentAudio.pause();
                     if (playStartTime > 0) {
                         var dur = Date.now() - playStartTime;
                         if (dur > 500) post('recordSavorUsage', { durationMs: dur });
                     }
                     currentAudio.onended = null;
+                    currentAudio.ontimeupdate = null;
                     currentAudio = null;
                     playStartTime = 0;
                 }
@@ -1960,11 +1943,10 @@ class ClipboardHistorySidebarProvider {
             }
 
             function playAudio(base64, count) {
-                stopAudio(0);
+                stopAudio();
                 window.__isPlaying = true;
                 loopRemaining = count || 1;
 
-                // 如果 base64 为空，说明只是为了更新 UI 文字状态（Python 模式已在外部播放）
                 if (!base64) {
                     updateSavorText();
                     if (loopRemaining === -1 || loopRemaining === 0) {
@@ -1978,10 +1960,12 @@ class ClipboardHistorySidebarProvider {
                 currentAudio = audio;
                 playStartTime = Date.now();
                 updateSavorText();
+
                 if (loopRemaining === -1 || loopRemaining === 0) {
                     var iconLoop = document.querySelector('.icon-loop');
                     if (iconLoop) iconLoop.classList.add('spinning');
                 }
+
                 audio.onended = function() {
                     if (loopRemaining === -1 || loopRemaining === 0) {
                         audio.currentTime = 0;
@@ -1991,9 +1975,18 @@ class ClipboardHistorySidebarProvider {
                         audio.currentTime = 0;
                         audio.play();
                     } else {
-                        stopAudio(2000);
+                        stopAudio(); // 正常结束，不淡出或由 ontimeupdate 预处理
                     }
                 };
+
+                // ★ 唯一淡出条件：限定次数播放的最后一次，且时长 > 2秒
+                audio.ontimeupdate = function() {
+                    if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2) {
+                        var rem = (audio.duration - audio.currentTime) / 2;
+                        audio.volume = Math.max(0, rem);
+                    }
+                };
+
                 audio.play();
             }
 
