@@ -90,13 +90,26 @@ class NonBlockingAudioEngine:
                         break
 
                 # 步骤 4: 可提前停止的小睡等待
-                end_t = time.time() + duration + 0.1
+                # ★ 增加：如果是最后一次循环，且时长超过 2 秒，则在最后 2 秒执行淡出
+                fade_start_t = duration - \
+                    2.0 if (loop_count > 0 and current_loop ==
+                            loop_count - 1 and duration > 2.0) else 999999
+
+                start_t = time.time()
+                end_t = start_t + duration
+
                 while time.time() < end_t and not self._stop_event.is_set():
+                    elapsed = time.time() - start_t
+                    if elapsed >= fade_start_t:
+                        # 计算剩余比例进行淡出
+                        rem = max(0.0, (end_t - time.time()) / 2.0)
+                        device.volume = rem
                     time.sleep(0.05)
 
                 # 显式停止，准备下一轮或退出
                 try:
                     device.stop()
+                    device.volume = 1.0  # 还原音量
                 except:
                     pass
 
@@ -141,16 +154,15 @@ class NonBlockingAudioEngine:
     def stop_all(self):
         self._stop_event.set()
         with self._lock:
-            # 拷贝列表以安全遍历
             devices = list(self.active_devices)
-
-        # ★ 修正：只执行 stop() 停止声音，不要在此处 close()
-        # close() 必须由 worker 线程在 finally 中执行，否则会导致 NoneType 指针错误
         for d in devices:
             try:
                 d.stop()
+                d.volume = 1.0  # 瞬间恢复音量，确保下次播放正常
             except:
                 pass
+
+    # 已删除冗余淡出方法
 
 
 _AUDIO_ENGINE = None
