@@ -321,6 +321,12 @@ class ClipboardHistoryManager {
         this._cache.lastSearchKey = '';
     }
 
+    // 边界保护工具：确保数值在合理范围内，防止异常数据污染统计
+    _clampStat(val, min, max) {
+        if (typeof val !== 'number' || isNaN(val)) return min;
+        return Math.max(min, Math.min(max, val));
+    }
+
     _resetInMemory() {
         this._head = null; this._tail = null; this._size = 0;
         this._idMap.clear(); this._hashMap.clear();
@@ -688,22 +694,23 @@ class ClipboardHistoryManager {
     _notifyChange(reason) { if (this._onChange) this._onChange(reason); }
 
     getStatsSnapshot() {
-        const ops = this.perfStats.operations || 1;
+        const ops = Math.max(1, this.perfStats.operations || 1);
         const denom = this._cache.hit + this._cache.miss;
         const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
         const uptimeSec = Math.floor((Date.now() - this.sessionStartedAt) / 1000);
 
+        // 边界保护：限制平均耗时在 0-5000ms 之间，防止单次极端延迟（如磁盘休眠唤醒）永久拉高均值
         return {
             historyCount: this._size,
             isWatching: this._isWatching,
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
             perf: {
                 quarantinedFiles: this.perfStats.quarantinedFiles,
-                avgSaveMs: this.perfStats.saveTimeMs / ops,
-                avgAddMs: this.perfStats.addTimeMs / ops,
-                avgLoadMs: this.perfStats.loadTimeMs / ops,
+                avgSaveMs: this._clampStat(this.perfStats.saveTimeMs / ops, 0, 1000),
+                avgAddMs: this._clampStat(this.perfStats.addTimeMs / ops, 0, 1000),
+                avgLoadMs: this._clampStat(this.perfStats.loadTimeMs / ops, 0, 5000),
             },
-            cache: { hitRate: cacheHitRate },
+            cache: { hitRate: this._clampStat(cacheHitRate, 0, 100) },
             copyCount: this.context.globalState.get('qqq_copy_total_count', 0),
             savor: this._getSavorStats(),
             paste: this._getPasteStats(),
@@ -999,7 +1006,7 @@ class ClipboardHistorySidebarProvider {
             const avgLoadMs = Math.round(stats.perf.avgLoadMs || 0);
             const copyCount = stats.copyCount || 0;
             const quarantined = Math.round(stats.perf.quarantinedFiles || 0);
-            const fullStats = `count: ${stats.historyCount}, cacheHit:${hitRate}%, avgSove: ${avgSave}ms, avgAdd: ${avgAdd}ms, avgLaad: ${avgLoadMs}ms quorantined: ${quarantined}ms: ${copyCount} times`;
+            const fullStats = `${copyCount} times; count: ${stats.historyCount}, cacheHit:${hitRate}%, avgSove: ${avgSave}ms, avgAdd: ${avgAdd}ms, avgLaad: ${avgLoadMs}ms, quorantined: ${quarantined}`;
 
             const history = this._historyManager.searchHistory(keyword || '', this._currentLimit).map(item => ({
                 id: item.id,
@@ -1325,7 +1332,7 @@ class ClipboardHistorySidebarProvider {
         }
 
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
-        .search-container::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 3px; background: var(--primary-color); z-index: 10; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+        .search-container::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); z-index: 10; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px 7.5px 12px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
@@ -1724,7 +1731,7 @@ class ClipboardHistorySidebarProvider {
                 if (!m) return;
                 if (m.command === 'updateData') {
                     if (m.fullStats !== undefined && el.searchBox) {
-                        el.searchBox.placeholder = 'clipboard history     ' + m.fullStats;
+                        el.searchBox.placeholder = 'clipboard history                                  ' + m.fullStats;
                     }
                     if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
