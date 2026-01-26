@@ -2423,6 +2423,174 @@ class YtDlpDownloader {
     }
 }
 
+class PythonEngineDownloader {
+    constructor(options = {}) {
+        this.pythonPath = options.pythonPath || null;
+    }
+
+    async isAvailable(pythonBin = null) {
+        const bin = pythonBin || this.pythonPath;
+        if (!bin) return false;
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
+
+            const {
+                spawnSync
+            } = require("child_process");
+            // 完美检测脚本：版本>=3.7, f-string支持, reconfigure支持 (用于解决编码问题)
+            const checkScript = `
+import sys
+try:
+    if sys.version_info < (3, 7): sys.exit(1)
+    # test f-string
+    _ = f"{sys.version}"
+    # test stdout reconfigure (3.7+)
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    print("PYTHON_READY")
+    sys.exit(0)
+except:
+    sys.exit(1)
+`.trim();
+            const r = spawnSync(bin, ["-c", checkScript], {
+                encoding: 'utf8',
+                windowsHide: true,
+                timeout: 5000
+            });
+            return r.status === 0 && r.stdout.includes("PYTHON_READY");
+        } catch {
+            return false;
+        }
+    }
+
+    async trySetFromGlobalStorage(context) {
+        const path = require('path');
+        const fs = require('fs');
+        const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
+        const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
+        const ownPath = path.join(installDir, binName);
+        if (fs.existsSync(ownPath)) {
+            if (await this.isAvailable(ownPath)) {
+                this.pythonPath = ownPath;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    async autoInstall(context) {
+        try {
+            const os = require('os');
+            const fs = require('fs');
+            const path = require('path');
+            const https = require('https');
+            const cp = require('child_process');
+
+            const platform = os.platform();
+            const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
+            const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.tmp");
+            const binName = platform === "win32" ? "python.exe" : "bin/python3";
+            const installPath = path.join(installDir, binName);
+
+            if (!fs.existsSync(installDir)) fs.mkdirSync(installDir, {
+                recursive: true
+            });
+
+            let officialUrl, mirrorUrl;
+            if (platform === 'win32') {
+                officialUrl = 'https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
+                mirrorUrl = 'https://ghproxy.net/https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
+            } else if (platform === 'darwin') {
+                officialUrl = 'https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
+                mirrorUrl = 'https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
+            } else {
+                officialUrl = 'https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-unknown-linux-gnu-install_only.tar.gz';
+                mirrorUrl = 'https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-unknown-linux-gnu-install_only.tar.gz';
+            }
+
+            const downloadFile = (url, targetPath, timeoutMs = 30000) => {
+                return new Promise((resolve, reject) => {
+                    const doReq = (targetUrl, redirects = 0) => {
+                        if (redirects > 5) return reject(new Error("Too many redirects"));
+                        const urlObj = new URL(targetUrl);
+                        const req = https.get({
+                            hostname: urlObj.hostname,
+                            path: urlObj.pathname + urlObj.search,
+                            timeout: timeoutMs,
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0'
+                            }
+                        }, (res) => {
+                            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                                res.resume();
+                                return doReq(new URL(res.headers.location, targetUrl).href, redirects + 1);
+                            }
+                            if (res.statusCode !== 200) {
+                                res.resume();
+                                return reject(new Error(`Status: ${res.statusCode}`));
+                            }
+                            const file = fs.createWriteStream(targetPath);
+                            res.pipe(file);
+                            file.on('finish', () => {
+                                file.close();
+                                resolve();
+                            });
+                            file.on('error', (e) => {
+                                fs.unlink(targetPath, () => { });
+                                reject(e);
+                            });
+                        });
+                        req.on('error', reject);
+                        req.on('timeout', () => {
+                            req.destroy();
+                            reject(new Error("Timeout"));
+                        });
+                    };
+                    doReq(url);
+                });
+            };
+
+            // 下载
+            try {
+                await downloadFile(officialUrl, zipPath, 15000);
+            } catch {
+                await downloadFile(mirrorUrl, zipPath, 60000);
+            }
+
+            // 解压
+            if (platform === 'win32') {
+                cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, {
+                    windowsHide: true
+                });
+            } else {
+                cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, {
+                    windowsHide: true
+                });
+            }
+            fs.unlinkSync(zipPath);
+
+            if (await this.isAvailable(installPath)) {
+                this.pythonPath = installPath;
+                return {
+                    success: true,
+                    path: installPath
+                };
+            }
+            return {
+                success: false,
+                error: "Validation failed after install"
+            };
+        } catch (e) {
+            return {
+                success: false,
+                error: e.message
+            };
+        }
+    }
+}
+
 class UnifiedMediaDownloader {
     constructor(options = {}) {
 
@@ -2440,6 +2608,10 @@ class UnifiedMediaDownloader {
             ...(options.ytdlp || {}),
             securityLevel,
             securityOverrides,
+        });
+
+        this.python = new PythonEngineDownloader({
+            pythonPath: options.pythonPath || null
         });
 
         this.options = {
@@ -2572,6 +2744,79 @@ class UnifiedMediaDownloader {
             securityLevel: this.options.securityLevel,
             securityEffective: mergeSecurityOptions(this.options.securityLevel, this.options.securityOverrides),
         };
+    }
+
+    async ensurePythonReady(context, options = {}) {
+        const {
+            background = false,
+            silent = false
+        } = options;
+
+        const path = require('path');
+        const fs = require('fs');
+
+        // 1. 极高优先级：检查插件自维护目录 (yt-dlp.exe 同目录)
+        if (context && await this.python.trySetFromGlobalStorage(context)) {
+            return this.python.pythonPath;
+        }
+
+        // 2. 次高优先级：检查系统环境中的解释器是否符合要求
+        const envBins = process.platform === "win32" ? ["python"] : ["python3", "python"];
+        for (const bin of envBins) {
+            if (await this.python.isAvailable(bin)) {
+                this.python.pythonPath = bin;
+                return bin;
+            }
+        }
+
+        // 3. 兜底：都不可用，启动闭环下载逻辑
+        if (this._pyInstallPromise) return this._pyInstallPromise;
+
+        this._pyInstallPromise = (async () => {
+            try {
+                const downloadAction = async (progress) => {
+                    if (progress) progress.report({ message: "正在下载 Python 引擎 (3.8.10)...", increment: 10 });
+                    const res = await this.python.autoInstall(context);
+                    if (res.success) {
+                        if (!background) {
+                            vscode.window.withProgress({
+                                location: vscode.ProgressLocation.Notification,
+                                title: "qqq: Python 引擎安装成功",
+                                cancellable: false
+                            }, () => new Promise(resolve => setTimeout(resolve, 9000)));
+                        }
+                        return res.path;
+                    } else {
+                        if (!background && vscode) {
+                            vscode.window.withProgress({
+                                location: vscode.ProgressLocation.Notification,
+                                title: `qqq: Python 引擎下载失败: ${res.error}`,
+                                cancellable: false
+                            }, () => new Promise(resolve => setTimeout(resolve, 9000)));
+                        }
+                        try {
+                            const global = require('./global');
+                            global.logMessage(`Python 引擎安装失败: ${res.error}`, "ERROR");
+                        } catch { }
+                        return null;
+                    }
+                };
+
+                if (background) {
+                    return await downloadAction(null);
+                } else {
+                    return await vscode.window.withProgress({
+                        location: vscode.ProgressLocation.Notification,
+                        title: "qqq: ",
+                        cancellable: false
+                    }, downloadAction);
+                }
+            } finally {
+                this._pyInstallPromise = null;
+            }
+        })();
+
+        return this._pyInstallPromise;
     }
 
     destroy() {
