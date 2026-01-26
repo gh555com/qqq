@@ -913,41 +913,17 @@ let downloadContext = null;
 
 async function savorMomentsCommand() {
 	try {
-		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
-		let selectedAudioPath;
-
-		const randomNumber = Math.floor(Math.random() * 30);
-		if (randomNumber === 0) {
-			selectedAudioPath = path.join(assetsPath, 'q.mp3');
+		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+			activeSidebarProvider.triggerSavor('normal');
 		} else {
-			const randomIndex = Math.floor(Math.random() * 3);
-			const audioNum = randomIndex + 1;
-			selectedAudioPath = path.join(assetsPath, `${audioNum}.mp3`);
-		}
-
-		if (fs.existsSync(selectedAudioPath)) {
-			const audioBase64 = fs.readFileSync(selectedAudioPath).toString('base64');
-			if (activeSidebarProvider) {
-				activeSidebarProvider.postMessage({
-					command: 'playAudio',
-					base64: audioBase64,
-					times: 1
-				});
-			} else {
-				// 如果侧边栏未打开，回退到系统播放器（或者静默，根据用户需求）
-				// 用户说不要弹出系统播放器，所以这里我们尝试聚焦侧边栏
-				vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
-					setTimeout(() => {
-						if (activeSidebarProvider) {
-							activeSidebarProvider.postMessage({
-								command: 'playAudio',
-								base64: audioBase64,
-								times: 1
-							});
-						}
-					}, 500);
-				});
-			}
+			// 如果侧边栏未打开或未初始化，聚焦侧边栏并等待加载
+			vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
+				setTimeout(() => {
+					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+						activeSidebarProvider.triggerSavor('normal');
+					}
+				}, 1000); // 稍微加长等待时间确保渲染完成
+			});
 		}
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");

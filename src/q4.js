@@ -929,12 +929,7 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'requestSavorAudio': {
-                    const base64 = this._getSavorAudio();
-                    if (base64) {
-                        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
-                        const count = msg.mode === 'loop' ? -1 : getRand(2, 7); // 2-6次
-                        this._postMessage({ command: 'playAudio', base64, count });
-                    }
+                    this.triggerSavor(msg.mode || 'normal');
                     break;
                 }
                 case 'ready':
@@ -1145,6 +1140,10 @@ class ClipboardHistorySidebarProvider {
         } catch { return ''; }
     }
 
+    get isWebviewReady() {
+        return !!this._view;
+    }
+
     _postMessage(msg) {
         if (!this._view) return;
         try {
@@ -1153,6 +1152,19 @@ class ClipboardHistorySidebarProvider {
             this._view.webview.postMessage(safeMsg).then(undefined, () => { });
         } catch (e) {
             console.warn('[Q4] IPC 消息序列化失败:', e.message);
+        }
+    }
+
+    /**
+     * 外部接口：手动触发“品味瞬间”随机播放
+     * @param {string} mode 'normal' 或 'loop'
+     */
+    triggerSavor(mode = 'normal') {
+        const base64 = this._getSavorAudio();
+        if (base64) {
+            const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+            const count = mode === 'loop' ? -1 : getRand(2, 7); // 2-6次
+            this._postMessage({ command: 'playAudio', base64, count });
         }
     }
 
