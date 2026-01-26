@@ -2440,20 +2440,101 @@ class PythonEngineDownloader {
                 spawnSync
             } = require("child_process");
 
-            // 增强检测：版本必须在 [3.7, 3.12] 之间
-            const checkScript = "import sys; v=sys.version_info; ok=(3,7)<=v<(3,13); sys.stdout.write('PYTHON_READY' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'); sys.exit(0 if ok else 1)";
+            // 增强检测：版本必须在 [3.7, 3.12] 之间，且返回结果包含 miniaudio 状态
+            const checkScript = `
+import sys
+v = sys.version_info
+ok = (3, 7) <= v < (3, 13)
+has_m = 0
+try:
+    import miniaudio
+    has_m = 1
+except:
+    pass
+msg = f'PYTHON_READY|MINIAUDIO:{has_m}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
+sys.stdout.write(msg)
+sys.exit(0 if ok else 1)
+`.trim();
+
             const r = spawnSync(bin, ["-c", checkScript], {
                 encoding: 'utf8',
                 windowsHide: true,
-                timeout: 10000,
+                timeout: 20000,
                 cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
             });
 
             if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
+                this._hasMiniaudio = (r.stdout || "").includes("MINIAUDIO:1");
                 return true;
             }
+            if (r.error || r.status !== 0) {
+                const global = require('./global');
+                global.logMessage(`[PythonCheck] 探测失败 (${bin}): status=${r.status}, error=${r.error}, stderr=${r.stderr}`, "DEBUG");
+            }
             return false;
-        } catch {
+        } catch (e) {
+            const global = require('./global');
+            global.logMessage(`[PythonCheck] 探测异常 (${pythonBin}): ${e.message}`, "DEBUG");
+            return false;
+        }
+    }
+
+    async ensureDependencies(pythonBin) {
+        if (this._hasMiniaudio) return true;
+        const cp = require('child_process');
+        const path = require('path');
+        const fs = require('fs');
+        const global = require('./global');
+
+        try {
+            // 判断是否为内置引擎 (在 globalStorage 内)
+            const isInternal = pythonBin.includes('python_engine');
+
+            global.logMessage(`[PythonCheck] 正在静默准备音频依赖 (miniaudio)...`, "INFO");
+
+            // 如果是内置引擎且是 Windows embed 版，检查是否需要修复 ._pth 并安装 pip
+            if (isInternal && process.platform === 'win32') {
+                const engineDir = path.dirname(pythonBin);
+                const pthFile = path.join(engineDir, 'python38._pth');
+                if (fs.existsSync(pthFile)) {
+                    let content = fs.readFileSync(pthFile, 'utf8');
+                    if (content.includes('#import site')) {
+                        content = content.replace('#import site', 'import site');
+                        content += '\n./site-packages\n';
+                        fs.writeFileSync(pthFile, content);
+                    }
+                }
+
+                // 检查 pip 是否可用
+                try {
+                    cp.execSync(`"${pythonBin}" -m pip --version`, { windowsHide: true });
+                } catch (e) {
+                    global.logMessage(`[PythonCheck] 内置引擎缺少 pip，正在引导安装...`, "INFO");
+                    const getPipPath = path.join(engineDir, 'get-pip.py');
+                    if (!fs.existsSync(getPipPath)) {
+                        const https = require('https');
+                        await new Promise((resolve, reject) => {
+                            const file = fs.createWriteStream(getPipPath);
+                            https.get('https://bootstrap.pypa.io/get-pip.py', res => {
+                                res.pipe(file);
+                                file.on('finish', () => { file.close(); resolve(); });
+                            }).on('error', reject);
+                        });
+                    }
+                    cp.execSync(`"${pythonBin}" "${getPipPath}" --user --quiet`, { windowsHide: true });
+                }
+            }
+
+            // 执行安装
+            const installArgs = isInternal ? "" : "--user";
+            const cmd = `"${pythonBin}" -m pip install miniaudio --quiet ${installArgs} --index-url https://pypi.tuna.tsinghua.edu.cn/simple`;
+            cp.execSync(cmd, { windowsHide: true, timeout: 90000 });
+
+            this._hasMiniaudio = true;
+            global.logMessage(`[PythonCheck] 音频依赖安装成功`, "INFO");
+            return true;
+        } catch (e) {
+            global.logMessage(`[PythonCheck] 音频依赖安装失败: ${e.message}`, "ERROR");
             return false;
         }
     }
@@ -2557,6 +2638,16 @@ class PythonEngineDownloader {
                 cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, {
                     windowsHide: true
                 });
+                // 提前修复 ._pth，确保 isAvailable 能跑通
+                const pthFile = path.join(installDir, 'python38._pth');
+                if (fs.existsSync(pthFile)) {
+                    let content = fs.readFileSync(pthFile, 'utf8');
+                    if (content.includes('#import site')) {
+                        content = content.replace('#import site', 'import site');
+                        content += '\n./site-packages\n';
+                        fs.writeFileSync(pthFile, content);
+                    }
+                }
             } else {
                 cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, {
                     windowsHide: true
@@ -2566,6 +2657,7 @@ class PythonEngineDownloader {
 
             if (await this.isAvailable(installPath)) {
                 this.pythonPath = installPath;
+                await this.ensureDependencies(installPath);
                 return {
                     success: true,
                     path: installPath
@@ -2752,6 +2844,7 @@ class UnifiedMediaDownloader {
         // 1. 极高优先级：检查插件自维护目录 (gh555.qqq/python_engine)
         if (context && await this.python.trySetFromGlobalStorage(context)) {
             global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${this.python.pythonPath}`, "INFO");
+            await this.python.ensureDependencies(this.python.pythonPath);
             return this.python.pythonPath;
         }
 
@@ -2762,6 +2855,7 @@ class UnifiedMediaDownloader {
             if (settingPath && await this.python.isAvailable(settingPath)) {
                 this.python.pythonPath = settingPath;
                 global.logMessage(`[PythonCheck] Level 2 命中: 使用 VS Code 配置路径 ${settingPath}`, "INFO");
+                await this.python.ensureDependencies(settingPath);
                 return settingPath;
             }
         } catch (e) { }
@@ -2772,6 +2866,7 @@ class UnifiedMediaDownloader {
             if (await this.python.isAvailable(bin)) {
                 this.python.pythonPath = bin;
                 global.logMessage(`[PythonCheck] Level 3 命中: 使用系统环境变量路径 ${bin}`, "INFO");
+                await this.python.ensureDependencies(bin);
                 return bin;
             }
         }

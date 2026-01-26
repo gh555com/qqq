@@ -14,6 +14,7 @@ if sys.version_info < (3, 7) or sys.version_info >= (3, 13):
 
 import json
 import time
+import threading
 import platform
 import shutil
 import ctypes
@@ -25,6 +26,143 @@ import concurrent.futures
 from collections import OrderedDict
 import re
 import base64
+
+# =============================================================================
+#  音频引擎整合 (From miniaudio_nonblocking_v15)
+# =============================================================================
+try:
+    import miniaudio
+    HAS_MINIAUDIO = True
+except ImportError:
+    HAS_MINIAUDIO = False
+
+
+class NonBlockingAudioEngine:
+    def __init__(self):
+        self.REQUESTED_FORMAT = getattr(
+            miniaudio, "SampleFormat", None).SIGNED16 if HAS_MINIAUDIO else None
+        self.REQUESTED_CHANNELS = 2
+        self.REQUESTED_RATE = 44100
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=32)
+        self.active_devices = []
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+
+    def _play_worker(self, file_path, loop_count=1):
+        if not HAS_MINIAUDIO or not os.path.exists(file_path):
+            return
+        sound = None
+        device = None
+        try:
+            # 步骤 1: 获取文件信息确定时长
+            info = miniaudio.get_file_info(file_path)
+            duration = max(0.0, float(getattr(info, "duration", 0.0)))
+
+            # 步骤 2: 初始化播放设备
+            device = miniaudio.PlaybackDevice(output_format=self.REQUESTED_FORMAT,
+                                              nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+
+            with self._lock:
+                self.active_devices.append(device)
+
+            # 步骤 3: 循环播放逻辑
+            current_loop = 0
+            while (current_loop < loop_count or loop_count == 0) and not self._stop_event.is_set():
+                # 重新/首次打开流
+                if sound:
+                    try:
+                        sound.close()
+                    except:
+                        pass
+
+                try:
+                    sound = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT,
+                                                  nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                except Exception as stream_err:
+                    sys.stderr.write(f"Stream Error: {stream_err}\n")
+                    break
+
+                if sound and not self._stop_event.is_set():
+                    try:
+                        device.start(sound)
+                    except Exception as start_err:
+                        sys.stderr.write(f"Device Start Error: {start_err}\n")
+                        break
+
+                # 步骤 4: 可提前停止的小睡等待
+                end_t = time.time() + duration + 0.1
+                while time.time() < end_t and not self._stop_event.is_set():
+                    time.sleep(0.05)
+
+                # 显式停止，准备下一轮或退出
+                try:
+                    device.stop()
+                except:
+                    pass
+
+                current_loop += 1
+                if not (current_loop < loop_count or loop_count == 0):
+                    break
+
+        except Exception as e:
+            sys.stderr.write(f"Audio Engine Error: {e}\n")
+            sys.stderr.flush()
+        finally:
+            if device:
+                try:
+                    device.stop()
+                except:
+                    pass
+                try:
+                    device.close()
+                except:
+                    pass
+                with self._lock:
+                    if device in self.active_devices:
+                        try:
+                            self.active_devices.remove(device)
+                        except:
+                            pass
+            if sound:
+                try:
+                    sound.close()
+                except:
+                    pass
+
+    def play(self, file_path, loop_count=1):
+        # ★ 基因加固：强制单实例霸权
+        # 在启动新音频前，立即设置停止信号并清空旧设备句柄
+        self.stop_all()
+        time.sleep(0.05)  # 给旧线程一点点退出的缓冲时间
+
+        self._stop_event.clear()
+        self.executor.submit(self._play_worker, file_path, loop_count)
+
+    def stop_all(self):
+        self._stop_event.set()
+        with self._lock:
+            # 拷贝列表以安全遍历
+            devices = list(self.active_devices)
+
+        # ★ 修正：只执行 stop() 停止声音，不要在此处 close()
+        # close() 必须由 worker 线程在 finally 中执行，否则会导致 NoneType 指针错误
+        for d in devices:
+            try:
+                d.stop()
+            except:
+                pass
+
+
+_AUDIO_ENGINE = None
+
+
+def ensure_audio_engine():
+    global _AUDIO_ENGINE
+    if HAS_MINIAUDIO and _AUDIO_ENGINE is None:
+        _AUDIO_ENGINE = NonBlockingAudioEngine()
+    return _AUDIO_ENGINE
+
+
 # =============================================================================
 #  配置
 # =============================================================================
@@ -1029,6 +1167,46 @@ def _dispatch_action(cmd):
         else:
             out.update(save_clipboard_image_to_path(dest_path))
         return out
+
+    # --- Audio Actions ---
+    if action == "check_audio_engine":
+        out["has_miniaudio"] = HAS_MINIAUDIO
+        if HAS_MINIAUDIO:
+            try:
+                out["miniaudio_version"] = getattr(
+                    miniaudio, "__version__", "unknown")
+                # 修正：实例化 Devices 以获取真实的设备列表
+                devices_obj = miniaudio.Devices()
+                out["devices"] = [str(d.name)
+                                  for d in devices_obj.get_playbacks()]
+            except Exception as e:
+                out["devices_error"] = str(e)
+        out["status"] = "ok"
+        return out
+
+    if action == "play_audio":
+        path = cmd.get("path")
+        loop_count = cmd.get("loop_count", cmd.get("count", 1))
+        engine = ensure_audio_engine()
+        if engine and path:
+            # 无论如何，新播放请求进来，先让旧的停下
+            engine.stop_all()
+            # 稍微给一点点时间让旧设备 stop
+            time.sleep(0.02)
+            engine.play(path, loop_count=loop_count)
+            out["status"] = "playing"
+        else:
+            out["status"] = "error"
+            out["reason"] = "miniaudio_not_installed" if not HAS_MINIAUDIO else "invalid_args"
+        return out
+
+    if action == "stop_audio":
+        engine = ensure_audio_engine()
+        if engine:
+            engine.stop_all()
+            out["status"] = "stopped"
+        return out
+
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
         out["type"] = "peek"

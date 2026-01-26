@@ -28,6 +28,12 @@ const { performance } = require('perf_hooks');
 // ============================================================================
 // 常量
 // ============================================================================
+const AUDIO_SOURCE = {
+    DETECTING: 'DETECTING',
+    PYTHON: 'PYTHON',
+    WEBVIEW: 'WEBVIEW'
+};
+
 const CONSTANTS = Object.freeze({
     VERSION: 4,
 
@@ -842,6 +848,9 @@ class ClipboardHistorySidebarProvider {
         this._isFocused = false;
         this._needsUpdate = false;
         this._pendingReason = null;
+
+        this._audioSource = AUDIO_SOURCE.DETECTING;
+        this._pythonAudioFailed = false;
     }
 
     resolveWebviewView(webviewView) {
@@ -875,31 +884,17 @@ class ClipboardHistorySidebarProvider {
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
-                        // 1.  Math.random + 避重
-                        let audioIdx;
-                        do {
-                            audioIdx = Math.floor(Math.random() * 7) + 1;
-                        } while (audioIdx === this._lastAudioIdx);
-                        this._lastAudioIdx = audioIdx;
-
-                        const audioBase64 = this._getKopeAudioBase64(audioIdx);
-                        if (audioBase64) {
-                            this._postMessage({ command: 'playSfx', base64: audioBase64 });
-                        }
-
-                        // 2. 执行物理复制 + 强制更新历史时间戳
+                        this._handleSfxFeedback();
                         await this._historyManager.copyToClipboard(node.content);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
-
-                        // 3. 弹出通知 (已注释)
-                        // ...
                     }
                     break;
                 }
                 case 'pasteToEditor': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
+                        this._handleSfxFeedback();
                         await this._historyManager.copyToClipboard(node.content);
                         await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
                     }
@@ -929,7 +924,11 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'requestSavorAudio': {
-                    this.triggerSavor(msg.mode || 'normal');
+                    if (msg.mode === 'stop') {
+                        this._stopAudio();
+                    } else {
+                        this.triggerSavor(msg.mode || 'normal');
+                    }
                     break;
                 }
                 case 'ready':
@@ -958,15 +957,21 @@ class ClipboardHistorySidebarProvider {
         });
     }
 
+    _handleSfxFeedback() {
+        let audioIdx;
+        do {
+            audioIdx = Math.floor(Math.random() * 7) + 1;
+        } while (audioIdx === this._lastAudioIdx);
+        this._lastAudioIdx = audioIdx;
+        this._playEffect('kope', audioIdx);
+    }
+
     _startPeriodicUpdate() {
-        // 彻底停用 5 秒定时刷新，剪贴板变化会通过 onChange 自动触发更新
+        // 彻底停用 5 秒定时刷新
     }
 
     _stopPeriodicUpdate() {
-        if (this._updateTimer) {
-            clearInterval(this._updateTimer);
-            this._updateTimer = null;
-        }
+        // 无需清理定时器
     }
 
     updateContent(reason, limit, keyword, force = false) {
@@ -1011,11 +1016,9 @@ class ClipboardHistorySidebarProvider {
                 pinned: !!item.pinned
             }));
 
-            const audioBase64 = this._getAudioBase64();
-
             // ★ 极致纯净：初始化必要的 HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
-                this._view.webview.html = this._getHtml(history, audioBase64, {
+                this._view.webview.html = this._getHtml(history, {
                     savorStats, pasteStats, videoStats, roamStats,
                     weaveStats, exportDocStats, pureStats, exportZipStats, allSettingsStats
                 });
@@ -1109,36 +1112,9 @@ class ClipboardHistorySidebarProvider {
         return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;
     }
 
-    _getAudioBase64() {
-        try {
-            const p = path.join(this._context.extensionPath, "assets", "q.mp3");
-            return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '';
-        } catch { return ''; }
-    }
 
-    _getSavorAudio() {
-        // 使用 crypto.randomInt 确保“真随机”(CSPRNG)
-        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
 
-        const rand = getRand(0, 30);
-        let audioPath;
-        if (rand === 0) { // 1/30 几率抽中 q
-            audioPath = path.join(this._context.extensionPath, "assets", "q.mp3");
-        } else { // 29/30 几率进入 1, 2, 3 的选区
-            const subRand = getRand(0, 3); // 1/3 几率
-            audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
-        }
-        try {
-            return fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
-        } catch { return ''; }
-    }
 
-    _getKopeAudioBase64(idx) {
-        try {
-            const p = path.join(this._context.extensionPath, "assets", "kope", `${idx}.mp3`);
-            return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '';
-        } catch { return ''; }
-    }
 
     get isWebviewReady() {
         return !!this._view;
@@ -1159,16 +1135,172 @@ class ClipboardHistorySidebarProvider {
      * 外部接口：手动触发“品味瞬间”随机播放
      * @param {string} mode 'normal' 或 'loop'
      */
-    triggerSavor(mode = 'normal') {
-        const base64 = this._getSavorAudio();
-        if (base64) {
-            const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
-            const count = mode === 'loop' ? -1 : getRand(2, 7); // 2-6次
-            this._postMessage({ command: 'playAudio', base64, count });
+    async _ensureAudioSource() {
+        if (this._pythonAudioFailed) {
+            this._audioSource = AUDIO_SOURCE.WEBVIEW;
+            return AUDIO_SOURCE.WEBVIEW;
+        }
+        if (this._audioSource !== AUDIO_SOURCE.DETECTING) {
+            return this._audioSource;
+        }
+
+        const bridge = this._global.pythonBridge;
+
+        // 探测 Python 引擎
+        try {
+            // ★ 修复：DaemonBridge 并没有 isAlive 方法，直接检查 available 属性
+            if (bridge && bridge.available === true) {
+                const res = await bridge.call('ping');
+                if (res && res.status === 'alive') {
+                    // 显式检查 miniaudio 状态
+                    const check = await bridge.call('check_audio_engine');
+                    if (check && check.has_miniaudio) {
+                        const version = check.miniaudio_version || "unknown";
+                        const devices = Array.isArray(check.devices) ? `(Devices: ${check.devices.length})` : "";
+                        this._global.logMessage(`[Audio] Python (miniaudio v${version}) 探测成功 ${devices}，切换到高性能模式`, "INFO");
+                        this._audioSource = AUDIO_SOURCE.PYTHON;
+                        return AUDIO_SOURCE.PYTHON;
+                    } else {
+                        this._global.logMessage(`[Audio] Python 引擎已连接但未检测到 miniaudio 依赖`, "WARN");
+                    }
+                }
+            }
+        } catch (e) {
+            this._global.logMessage(`[Audio] Python 探测异常: ${e.message}`, "WARN");
+        }
+
+        this._global.logMessage(`[Audio] Python 引擎探测未通过，使用 Webview 兜底`, "WARN");
+        this._audioSource = AUDIO_SOURCE.WEBVIEW;
+        return AUDIO_SOURCE.WEBVIEW;
+    }
+
+    _getSavorAudioInfo() {
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+        const rand = getRand(0, 30);
+        let filename;
+        if (rand === 0) {
+            filename = "q.mp3";
+        } else {
+            const subRand = getRand(0, 3);
+            filename = `${subRand + 1}.mp3`;
+        }
+        const fullPath = path.join(this._context.extensionPath, "assets", filename);
+        return {
+            path: fullPath,
+            fileName: filename,
+            base64: () => {
+                try {
+                    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath).toString('base64') : '';
+                } catch { return ''; }
+            }
+        };
+    }
+
+    _getKopeAudioInfo(idx) {
+        const filename = `${idx}.mp3`;
+        const fullPath = path.join(this._context.extensionPath, "assets", "kope", filename);
+        return {
+            path: fullPath,
+            fileName: filename,
+            base64: () => {
+                try {
+                    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath).toString('base64') : '';
+                } catch { return ''; }
+            }
+        };
+    }
+
+    async _playEffect(type, idx = null) {
+        // 如果是点击音效 (kope)，强制走 Webview 且不发 playAudio 指令（不干扰 UI 文字）
+        if (type === 'kope') {
+            const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
+            const b64 = info.base64();
+            if (b64) {
+                this._postMessage({ command: 'playSfx', base64: b64 });
+            }
+            return;
+        }
+
+        const source = await this._ensureAudioSource();
+        const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
+        const loopCount = 1;
+
+        this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放: ${info.fileName}, 循环: ${loopCount}`, "INFO");
+
+        // ★ 关键：只有 Savor 音频才更新 UI 文字
+        this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
+        if (source === AUDIO_SOURCE.PYTHON) {
+            try {
+                const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+                if (res && res.status === 'playing') return;
+                throw new Error(res?.reason || 'unknown_python_error');
+            } catch (e) {
+                console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
+                this._pythonAudioFailed = true;
+                this._audioSource = AUDIO_SOURCE.WEBVIEW;
+            }
+        }
+
+        // Webview 兜底播放 Savor 音频
+        const b64 = info.base64();
+        if (b64) {
+            this._postMessage({
+                command: 'playAudio',
+                base64: b64,
+                fileName: info.fileName,
+                count: loopCount
+            });
         }
     }
 
-    _getHtml(history, audioBase64, statsObj = {}) {
+    async _stopAudio() {
+        const source = await this._ensureAudioSource();
+        if (source === AUDIO_SOURCE.PYTHON) {
+            try {
+                await this._global.pythonBridge.call('stop_audio');
+            } catch (e) { }
+        }
+        // 同时通知 Webview 停止（不论当前源是什么，确保彻底静默并重置文字）
+        this._postMessage({ command: 'stopAudio' });
+    }
+
+    async triggerSavor(mode = 'normal') {
+        // ★ 核心改进：播放前先停止，确保单实例叙事
+        await this._stopAudio();
+
+        const source = await this._ensureAudioSource();
+        const info = this._getSavorAudioInfo();
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+
+        const loopCount = mode === 'loop' ? (source === AUDIO_SOURCE.PYTHON ? 0 : -1) : getRand(2, 7);
+        const displayCount = (loopCount === -1 || loopCount === 0) ? '无限' : loopCount;
+
+        this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放品味: ${info.fileName}, 循环: ${displayCount}`, "INFO");
+
+        // ★ 关键：同步 UI 状态
+        this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
+        if (source === AUDIO_SOURCE.PYTHON) {
+            try {
+                const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+                if (res && res.status === 'playing') return;
+                throw new Error(res?.reason || 'unknown_python_error');
+            } catch (e) {
+                console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
+                this._pythonAudioFailed = true;
+                this._audioSource = AUDIO_SOURCE.WEBVIEW;
+            }
+        }
+
+        // Webview 兜底
+        const b64 = info.base64();
+        if (b64) {
+            this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
+        }
+    }
+
+    _getHtml(history, statsObj = {}) {
         const {
             savorStats = '', pasteStats = '', videoStats = '', roamStats = '',
             weaveStats = '', exportDocStats = '', pureStats = '', exportZipStats = '', allSettingsStats = ''
@@ -1693,7 +1825,7 @@ class ClipboardHistorySidebarProvider {
 
             el.savorCard.onclick = function() { post('requestSavorAudio', { mode: 'normal' }); };
             el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
-            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); stopAudio(); };
+            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'stop' }); };
 
             function isValidUrl(s) {
                 if (!s) return false;
@@ -1753,9 +1885,12 @@ class ClipboardHistorySidebarProvider {
                     if (m.allSettingsStats !== undefined && el.allSettingsStats) el.allSettingsStats.textContent = m.allSettingsStats;
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
+                    window.__isPlaying = true;
                     playAudio(m.base64, m.count);
                 } else if (m.command === 'playSfx') {
                     playSfx(m.base64);
+                } else if (m.command === 'stopAudio') {
+                    stopAudio(0);
                 }
             });
 
@@ -1776,12 +1911,22 @@ class ClipboardHistorySidebarProvider {
                 var elStats = document.getElementById('ms-stats');
                 if (!elLabel || !elStats) return;
                 elStats.innerText = currentStats;
-                if (!currentAudio) elLabel.innerText = 'Savor moments for yourself';
-                else if (loopRemaining === -1) elLabel.innerText = 'Looping...';
-                else elLabel.innerText = 'Savoring...';
+
+                // 纯净叙事：不显示文件名
+                if (window.__isPlaying) {
+                    if (loopRemaining === -1 || loopRemaining === 0) {
+                        elLabel.innerText = 'Looping...';
+                    } else {
+                        elLabel.innerText = 'Savoring...';
+                    }
+                } else {
+                    elLabel.innerText = 'Savor moments for yourself';
+                }
             }
 
             function stopAudio(fadeMs) {
+                window.__isPlaying = false;
+
                 if(currentAudio) {
                     var audioToStop = currentAudio;
                     if (fadeMs > 0) {
@@ -1813,19 +1958,32 @@ class ClipboardHistorySidebarProvider {
                 var iconLoop = document.querySelector('.icon-loop');
                 if (iconLoop) iconLoop.classList.remove('spinning');
             }
+
             function playAudio(base64, count) {
                 stopAudio(0);
+                window.__isPlaying = true;
                 loopRemaining = count || 1;
+
+                // 如果 base64 为空，说明只是为了更新 UI 文字状态（Python 模式已在外部播放）
+                if (!base64) {
+                    updateSavorText();
+                    if (loopRemaining === -1 || loopRemaining === 0) {
+                        var iconLoop = document.querySelector('.icon-loop');
+                        if (iconLoop) iconLoop.classList.add('spinning');
+                    }
+                    return;
+                }
+
                 var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
                 playStartTime = Date.now();
                 updateSavorText();
-                if (loopRemaining === -1) {
+                if (loopRemaining === -1 || loopRemaining === 0) {
                     var iconLoop = document.querySelector('.icon-loop');
                     if (iconLoop) iconLoop.classList.add('spinning');
                 }
                 audio.onended = function() {
-                    if (loopRemaining === -1) {
+                    if (loopRemaining === -1 || loopRemaining === 0) {
                         audio.currentTime = 0;
                         audio.play();
                     } else if (loopRemaining > 1) {
@@ -1833,28 +1991,7 @@ class ClipboardHistorySidebarProvider {
                         audio.currentTime = 0;
                         audio.play();
                     } else {
-                        // 最后一次播放结束前淡出
-                        // 如果音频够长，我们在倒数 2 秒时开始淡出
-                        // 但由于 HTML5 Audio 事件限制，最稳妥是在 onended 触发时处理或通过 timeupdate
                         stopAudio(2000);
-                    }
-                };
-                // 监听时间进度实现精准淡出
-                audio.ontimeupdate = function() {
-                    if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2) {
-                        // 只在最后一次循环且剩余不到2秒时触发一次淡出逻辑
-                        audio.ontimeupdate = null;
-                        var fadeSteps = 20;
-                        var fadeInterval = 2000 / fadeSteps;
-                        var volStep = audio.volume / fadeSteps;
-                        var fTimer = setInterval(function() {
-                            if (audio.volume > volStep) {
-                                audio.volume -= volStep;
-                            } else {
-                                clearInterval(fTimer);
-                                stopAudio(0);
-                            }
-                        }, fadeInterval);
                     }
                 };
                 audio.play();
