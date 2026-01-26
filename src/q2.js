@@ -56,8 +56,8 @@ const KBM_OVERLAP_KEY = "kbm_overlap";
 
 // 并发与缓存
 const MAX_CONCURRENT_TASKS = 6;
-const SIZE_CACHE_MAX_AGE_MS = 10 * 1000; // 10s：你可以按需调大/调小
-const SIZE_CACHE_MAX_ENTRIES = 400;
+const SIZE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24小时，实现“永不自动更新”逻辑，仅在切换目录时清除
+const SIZE_CACHE_MAX_ENTRIES = 2000;
 
 const UNSUPPORTED_CODE_EXTENSIONS = new Set([
   ".exe",
@@ -858,10 +858,10 @@ function setSizeMode(mode){
   hideAllContextMenus();
   sizeMode = mode; // 立即本地更新，增强响应感
   updateSizeMenuUI(mode);
-  
+
   // 切换模式时，利用缓存立即刷新 UI 尺寸显示，避免重新请求
   refreshSizeDisplayFromCache();
-  
+
   vscode.postMessage({ command: 'setSizeMode', mode });
 }
 
@@ -881,7 +881,7 @@ function refreshSizeDisplayFromCache() {
       }
     } else {
        // 没有缓存的项，如果当前模式允许，稍后会由 requestFileSizeUpdates 自动触发请求
-       szArea.textContent = ''; 
+       szArea.textContent = '';
     }
   });
 }
@@ -997,7 +997,7 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
     if (sessionSizeCache.has(p)) {
       const szArea = fileItem.querySelector('.sz-area');
       if (szArea) szArea.textContent = sessionSizeCache.get(p);
-      return; 
+      return;
     }
     const szArea = fileItem.querySelector('.sz-area');
     if (szArea) szArea.textContent = '    \\u2022    ';
@@ -1230,7 +1230,7 @@ window.addEventListener('message', event => {
     if (isNewDir) {
       sessionSizeCache.clear();
     }
-    
+
     if (message.sizeMode) {
       sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
       updateSizeMenuUI(sizeMode);
@@ -1244,7 +1244,7 @@ window.addEventListener('message', event => {
     const list = document.getElementById('fileList');
     if (list) {
       list.innerHTML = message.fileListHtml || '';
-      
+
       // 立即恢复缓存中的尺寸
       const items = list.querySelectorAll('.file-item');
       items.forEach(item => {
@@ -1262,7 +1262,7 @@ window.addEventListener('message', event => {
     // 仅针对未缓存且符合当前模式的项发起自动请求
     const uncachedItems = (message.items || []).filter(it => !sessionSizeCache.has(it.path));
     requestFileSizeUpdates(uncachedItems);
-    
+
     setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
   } else if (message.command === 'updateSizeBatch') {
     (message.results || []).forEach(res => {
@@ -1500,7 +1500,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (type === 'folder') {
         if (isSzArea) {
           if (fileItem.dataset.name === '..') return; // 排除上级目录尺寸请求
-          
+
           if (sessionSizeCache.has(fileItem.dataset.path)) {
             const szArea = event.target;
             szArea.textContent = sessionSizeCache.get(fileItem.dataset.path);
