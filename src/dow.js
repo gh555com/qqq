@@ -2439,27 +2439,20 @@ class PythonEngineDownloader {
             const {
                 spawnSync
             } = require("child_process");
-            // 完美检测脚本：版本>=3.7, f-string支持, reconfigure支持 (用于解决编码问题)
-            const checkScript = `
-import sys
-try:
-    if sys.version_info < (3, 7): sys.exit(1)
-    # test f-string
-    _ = f"{sys.version}"
-    # test stdout reconfigure (3.7+)
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
-    print("PYTHON_READY")
-    sys.exit(0)
-except:
-    sys.exit(1)
-`.trim();
+
+            // 增强检测：版本必须在 [3.7, 3.12] 之间
+            const checkScript = "import sys; v=sys.version_info; ok=(3,7)<=v<(3,13); sys.stdout.write('PYTHON_READY' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'); sys.exit(0 if ok else 1)";
             const r = spawnSync(bin, ["-c", checkScript], {
                 encoding: 'utf8',
                 windowsHide: true,
-                timeout: 5000
+                timeout: 10000,
+                cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
             });
-            return r.status === 0 && r.stdout.includes("PYTHON_READY");
+
+            if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
+                return true;
+            }
+            return false;
         } catch {
             return false;
         }
@@ -2754,22 +2747,36 @@ class UnifiedMediaDownloader {
 
         const path = require('path');
         const fs = require('fs');
+        const global = require('./global');
 
-        // 1. 极高优先级：检查插件自维护目录 (yt-dlp.exe 同目录)
+        // 1. 极高优先级：检查插件自维护目录 (gh555.qqq/python_engine)
         if (context && await this.python.trySetFromGlobalStorage(context)) {
+            global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${this.python.pythonPath}`, "INFO");
             return this.python.pythonPath;
         }
 
-        // 2. 次高优先级：检查系统环境中的解释器是否符合要求
+        // 2. 次高优先级：检查 VS Code 设置中的 Python 路径
+        try {
+            const config = vscode.workspace.getConfiguration('python');
+            const settingPath = config.get('defaultInterpreterPath') || config.get('pythonPath');
+            if (settingPath && await this.python.isAvailable(settingPath)) {
+                this.python.pythonPath = settingPath;
+                global.logMessage(`[PythonCheck] Level 2 命中: 使用 VS Code 配置路径 ${settingPath}`, "INFO");
+                return settingPath;
+            }
+        } catch (e) { }
+
+        // 3. 中优先级：检查系统环境中的解释器是否符合要求 (PATH)
         const envBins = process.platform === "win32" ? ["python"] : ["python3", "python"];
         for (const bin of envBins) {
             if (await this.python.isAvailable(bin)) {
                 this.python.pythonPath = bin;
+                global.logMessage(`[PythonCheck] Level 3 命中: 使用系统环境变量路径 ${bin}`, "INFO");
                 return bin;
             }
         }
 
-        // 3. 兜底：都不可用，启动闭环下载逻辑
+        // 4. 兜底：都不可用，启动闭环下载逻辑
         if (this._pyInstallPromise) return this._pyInstallPromise;
 
         this._pyInstallPromise = (async () => {
@@ -2778,6 +2785,7 @@ class UnifiedMediaDownloader {
                     if (progress) progress.report({ message: "正在下载 Python 引擎 (3.8.10)...", increment: 10 });
                     const res = await this.python.autoInstall(context);
                     if (res.success) {
+                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装 Python 3.8.10 成功 ${res.path}`, "INFO");
                         if (!background) {
                             vscode.window.withProgress({
                                 location: vscode.ProgressLocation.Notification,
@@ -2787,6 +2795,7 @@ class UnifiedMediaDownloader {
                         }
                         return res.path;
                     } else {
+                        global.logMessage(`[PythonCheck] Level 4 失败: Python 引擎下载/验证失败: ${res.error}`, "ERROR");
                         if (!background && vscode) {
                             vscode.window.withProgress({
                                 location: vscode.ProgressLocation.Notification,
@@ -2794,10 +2803,6 @@ class UnifiedMediaDownloader {
                                 cancellable: false
                             }, () => new Promise(resolve => setTimeout(resolve, 9000)));
                         }
-                        try {
-                            const global = require('./global');
-                            global.logMessage(`Python 引擎安装失败: ${res.error}`, "ERROR");
-                        } catch { }
                         return null;
                     }
                 };
