@@ -1215,7 +1215,7 @@ class ClipboardHistorySidebarProvider {
         #videoCard { height: 48px; overflow: visible; }
         [data-cmd="qqq.weave"] { height: 49px !important; }
         [data-cmd="qqq.q2"] { height: 41px !important; }
-        .input-box-wrapper { position: relative; width: 155px; height: 30px; flex-shrink: 0; margin-left: -4px; }
+        .input-box-wrapper { position: relative; width: 156px; height: 30px; flex-shrink: 0; margin-left: -7px; }
         .inline-input {
             background: var(--base2);
             color: #000;
@@ -1426,7 +1426,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
                     <div class="text-content">
-                        &nbsp;export Doc <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="exportDoc-stats">${exportDocStats}</span>
+                        &nbsp;export doc <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="exportDoc-stats">${exportDocStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.pure">
