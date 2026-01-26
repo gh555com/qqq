@@ -2668,7 +2668,10 @@ class UnifiedMediaDownloader {
     }
 
     async ensureYtdlpReady(context, options = {}) {
-        const { silent = false } = options;
+        const {
+            silent = false,      // 为 true 时：不弹出“是否安装”的询问框，直接静默开始安装
+            background = false   // 为 true 时：不显示进度条，安装失败也不弹出错误提示（用于启动预热）
+        } = options;
 
         if (context && this.ytdlp.trySetFromGlobalStorage(context)) {
             if (this.ytdlp.isAvailable()) return true;
@@ -2677,8 +2680,7 @@ class UnifiedMediaDownloader {
         if (!this.ytdlp.isAvailable()) {
             if (!vscode) return false;
 
-            // 如果是静默模式，或者用户之前已经同意过（或者我们直接跳过确认），则直接开始安装
-            let shouldInstall = silent;
+            let shouldInstall = silent || background;
 
             if (!shouldInstall) {
                 const installConfirmed = await vscode.window.showInformationMessage(
@@ -2691,23 +2693,20 @@ class UnifiedMediaDownloader {
             }
 
             if (shouldInstall) {
-                // 如果已经在安装中，则等待之前的安装完成
-                if (this._installPromise) {
-                    return this._installPromise;
-                }
+                if (this._installPromise) return this._installPromise;
 
                 this._installPromise = (async () => {
                     try {
                         const downloadAction = async (progress) => {
-                            if (progress) progress.report({ message: "正在下载...", increment: 10 });
+                            if (progress) progress.report({ message: "正在下载视频引擎...", increment: 10 });
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
-                                if (!silent) vscode.window.showInformationMessage("yt-dlp 安装成功");
+                                if (!background) vscode.window.showInformationMessage("qqq: yt-dlp 安装成功");
                                 return true;
                             } else {
-                                // 仅在非静默模式（手动触发）下弹出错误提示
-                                if (!silent && vscode) {
-                                    vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                                // 仅在非后台模式下弹出错误提示
+                                if (!background && vscode) {
+                                    vscode.window.showErrorMessage(`qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`);
                                 }
                                 try {
                                     const global = require('./global');
@@ -2717,13 +2716,14 @@ class UnifiedMediaDownloader {
                             }
                         };
 
-                        if (silent) {
-                            // 真正做到静默下载：不做任何弹窗逻辑
+                        if (background) {
+                            // 后台模式：真正静默，无 UI
                             return await downloadAction(null);
                         } else {
+                            // 非后台模式：显示进度条反馈
                             return await vscode.window.withProgress({
                                 location: vscode.ProgressLocation.Notification,
-                                title: "正在安装 yt-dlp...",
+                                title: "qqq: ",
                                 cancellable: false
                             }, downloadAction);
                         }
@@ -2734,7 +2734,7 @@ class UnifiedMediaDownloader {
 
                 return this._installPromise;
             } else {
-                if (!silent) {
+                if (!background) {
                     vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
                 }
                 return false;
