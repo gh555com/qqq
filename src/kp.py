@@ -90,27 +90,31 @@ class NonBlockingAudioEngine:
                         break
 
                 # 步骤 4: 可提前停止的小睡等待
-                # ★ 增加：如果是最后一次循环，且时长超过 2 秒，则在最后 2 秒执行淡出
-                fade_start_t = duration - \
-                    2.0 if (loop_count > 0 and current_loop ==
-                            loop_count - 1 and duration > 2.0) else 999999
+                # 唯一淡出条件：限定次数播放的最后一次，且时长超过 2 秒
+                is_last_loop = (
+                    loop_count > 0 and current_loop == loop_count - 1)
+                fade_duration = 2.0
 
                 start_t = time.time()
-                end_t = start_t + duration
+                # 增加 0.2s 冗余，确保淡出能播完
+                end_t = start_t + duration + 0.2
 
                 while time.time() < end_t and not self._stop_event.is_set():
-                    elapsed = time.time() - start_t
-                    if elapsed >= fade_start_t:
-                        # 改进：更顺滑的线性淡出算法
-                        remaining = end_t - time.time()
-                        new_vol = max(0.0, min(1.0, remaining / 2.0))
-                        device.volume = new_vol
-                    time.sleep(0.02)  # 缩短步进，让淡出更平滑
+                    now = time.time()
+                    elapsed = now - start_t
+
+                    if is_last_loop and duration > fade_duration and elapsed >= (duration - fade_duration):
+                        # 高精度线性淡出
+                        remaining = max(0.0, end_t - now - 0.2)
+                        device.volume = max(
+                            0.0, min(1.0, remaining / fade_duration))
+
+                    time.sleep(0.02)  # 50Hz 高频扫描
 
                 # 显式停止，准备下一轮或退出
                 try:
                     device.stop()
-                    device.volume = 1.0
+                    device.volume = 1.0  # 物理还原
                 except:
                     pass
 
