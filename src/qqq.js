@@ -1000,7 +1000,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 	// ★ 将 “已经安装 yt-dlp ” 作为一个先决必要条件 (仅针对 downloadVideosFromUrlCommand)
 	const { getSharedDownloader } = require('./dow');
 	const downloader = getSharedDownloader();
-	const isYtdlpReady = await downloader.ensureYtdlpReady(extensionContext);
+	const isYtdlpReady = await downloader.ensureYtdlpReady(extensionContext, { silent: true });
 	if (!isYtdlpReady) {
 		return;
 	}
@@ -1287,6 +1287,12 @@ async function activate(context) {
 	// 已经移至 global.init(context)
 
 	initCache(context);
+
+	// ★ 预热/静默安装视频引擎
+	try {
+		const { getSharedDownloader } = require('./dow');
+		getSharedDownloader().ensureYtdlpReady(context, { silent: true }).catch(() => { });
+	} catch (e) { }
 
 	// 初始化剪切板历史管理器
 	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
