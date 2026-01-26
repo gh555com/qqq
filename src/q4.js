@@ -1199,8 +1199,6 @@ class ClipboardHistorySidebarProvider {
         .cmd-btn { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 0 10px; height: 38px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; overflow: hidden; font-size: 14px; color: var(--text-primary); white-space: nowrap; box-sizing: border-box; }
         .cmd-btn:hover { border-color: var(--primary-color);  transform: translateX(2px); }
         #savorCard:hover, #videoCard:hover { transform: none; }
-        .cmd-btn::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 2px; background: var(--primary-color); }
-
         .cmd-btn .btn-group { display: flex; gap: 4px; flex-shrink: 0; z-index: 10; align-items: center; }
         .cmd-btn .text-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-family: Tahoma, sans-serif; font-size: 14px; }
 
@@ -1332,8 +1330,7 @@ class ClipboardHistorySidebarProvider {
         }
 
         .search-container { margin: 3px 0 0 0; flex-shrink: 0; position: relative; }
-        .search-container::before { content: ''; position: absolute; left: 0; top: 0; height: 100%; width: 4px; background: var(--primary-color); z-index: 10; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
-        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px 7.5px 12px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
+        .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
         .search-input:focus { border-color: var(--primary-color); background: #fff; box-shadow: 0 0 0 1px var(--primary-color); }
