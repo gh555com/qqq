@@ -414,47 +414,29 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 		};
 
 		(async () => {
-			// 1. 尝试使用默认 python
-			const ok1 = await spawnWith("python");
-			if (ok1) {
-				logMessage("Python Bridge 使用 python 启动成功", "INFO");
-				resolve(true);
-				return;
-			}
+			const { getSharedDownloader } = require("./dow");
+			const downloader = getSharedDownloader();
 
-			// 2. 非 Windows 尝试使用 python3
-			if (process.platform !== "win32") {
-				const ok2 = await spawnWith("python3");
-				if (ok2) {
-					logMessage("Python Bridge 使用 python3 启动成功", "INFO");
+			// 闭环检测与下载逻辑：
+			// 1. 优先检查自维护目录 2. 检查系统环境 3. 都没有则后台静默下载 3.8.10
+			const pythonPath = await downloader.ensurePythonReady(extensionContext, {
+				background: true
+			});
+
+			if (pythonPath) {
+				const ok = await spawnWith(pythonPath);
+				if (ok) {
+					logMessage(`Python Bridge 使用 ${pythonPath} 启动成功`, "INFO");
 					resolve(true);
 					return;
 				}
 			}
 
-			// 3. 兜底：尝试从 VS Code 官方 Python 扩展配置中获取路径
-			try {
-				const vscodePythonPath = vscode.workspace.getConfiguration("python").get("defaultInterpreterPath")
-					|| vscode.workspace.getConfiguration("python").get("pythonPath");
-
-				if (vscodePythonPath && vscodePythonPath !== "python" && vscodePythonPath !== "python3") {
-					logMessage(`尝试使用 VS Code 官方配置路径兜底: ${vscodePythonPath}`, "INFO");
-					const ok3 = await spawnWith(vscodePythonPath);
-					if (ok3) {
-						logMessage(`Python Bridge 使用 VS Code 官方配置路径启动成功: ${vscodePythonPath}`, "INFO");
-						resolve(true);
-						return;
-					}
-				}
-			} catch (e) {
-				logMessage(`尝试读取 VS Code 官方 Python 配置失败: ${e.message}`, "DEBUG");
-			}
-
-			// ★ 关键：确保设置兜底错误，防止 lastStartError 为空
+			// ★ 关键：确保设置兜底错误
 			if (!bridge.lastStartError) {
-				bridge._setStartError("all_attempts_failed");
+				bridge._setStartError("python_not_found_or_invalid");
 			}
-			logMessage(`Python Bridge 启动失败，所有尝试均已失败：${bridge.lastStartError}`, "WARN");
+			logMessage(`Python Bridge 启动失败，无法找到可用的解释器：${bridge.lastStartError}`, "WARN");
 			bridge.available = false;
 			resolve(false);
 		})().catch((e) => {

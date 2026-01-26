@@ -1288,10 +1288,12 @@ async function activate(context) {
 
 	initCache(context);
 
-	// ★ 预热/静默安装视频引擎
+	// ★ 预热/静默安装视频引擎和 Python 引擎
 	try {
 		const { getSharedDownloader } = require('./dow');
-		getSharedDownloader().ensureYtdlpReady(context, { background: true }).catch(() => { });
+		const downloader = getSharedDownloader();
+		downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
+		downloader.ensurePythonReady(context, { background: true }).catch(() => { });
 	} catch (e) { }
 
 	// 初始化剪切板历史管理器
@@ -1360,6 +1362,13 @@ async function activate(context) {
 							if (key === "ioEngine") {
 								// ★ 核心设计：三个引擎启动时已全部启动，切换只需更新状态栏
 								global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
+
+								// 如果手动切换到 Python 引擎，触发非后台的就绪检查（可能触发下载进度条）
+								if (val === "python") {
+									const { getSharedDownloader } = require('./dow');
+									getSharedDownloader().ensurePythonReady(context, { silent: true }).catch(() => { });
+								}
+
 								updateStatusBarThrottled();
 							}
 						});
