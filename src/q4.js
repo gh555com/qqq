@@ -17,6 +17,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const global = require('./global');
 
@@ -842,6 +843,7 @@ class ClipboardHistorySidebarProvider {
         this._isFocused = false;
         this._needsUpdate = false;
         this._pendingReason = null;
+        this._currentLayer1Proc = null; // ★ 追踪 Layer 1 播放进程
     }
 
     resolveWebviewView(webviewView) {
@@ -929,12 +931,11 @@ class ClipboardHistorySidebarProvider {
                     }
                     break;
                 case 'requestSavorAudio': {
-                    const base64 = this._getSavorAudio();
-                    if (base64) {
-                        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
-                        const count = msg.mode === 'loop' ? -1 : getRand(2, 7); // 2-6次
-                        this._postMessage({ command: 'playAudio', base64, count });
-                    }
+                    this.triggerSavor(msg.mode || 'normal');
+                    break;
+                }
+                case 'stopSavorAudio': {
+                    this.stopSavor();
                     break;
                 }
                 case 'ready':
@@ -1122,7 +1123,7 @@ class ClipboardHistorySidebarProvider {
     }
 
     _getSavorAudio() {
-        // 使用 crypto.randomInt 确保“真随机”(CSPRNG)
+        // 使用 crypto.randomInt 确保"真随机"(CSPRNG)
         const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
 
         const rand = getRand(0, 30);
@@ -1133,9 +1134,7 @@ class ClipboardHistorySidebarProvider {
             const subRand = getRand(0, 3); // 1/3 几率
             audioPath = path.join(this._context.extensionPath, "assets", `${subRand + 1}.mp3`);
         }
-        try {
-            return fs.existsSync(audioPath) ? fs.readFileSync(audioPath).toString('base64') : '';
-        } catch { return ''; }
+        return audioPath;
     }
 
     _getKopeAudioBase64(idx) {
@@ -1143,6 +1142,10 @@ class ClipboardHistorySidebarProvider {
             const p = path.join(this._context.extensionPath, "assets", "kope", `${idx}.mp3`);
             return fs.existsSync(p) ? fs.readFileSync(p).toString('base64') : '';
         } catch { return ''; }
+    }
+
+    get isWebviewReady() {
+        return !!this._view;
     }
 
     _postMessage(msg) {
@@ -1154,6 +1157,175 @@ class ClipboardHistorySidebarProvider {
         } catch (e) {
             console.warn('[Q4] IPC 消息序列化失败:', e.message);
         }
+    }
+
+    /**
+     * 停止所有层级的播放
+     */
+    async stopSavor() {
+        if (this._currentLayer1Proc) {
+            try {
+                const cp = require('child_process');
+                if (process.platform === 'win32') {
+                    cp.exec(`taskkill /F /T /PID ${this._currentLayer1Proc.pid}`).catch(() => { });
+                } else {
+                    this._currentLayer1Proc.kill();
+                }
+            } catch (e) { }
+            this._currentLayer1Proc = null;
+        }
+
+        if (this._global.rustBridge && this._global.rustBridge.available) {
+            this._global.rustBridge.call("stop_savor").catch(() => { });
+        }
+
+        this._postMessage({ command: 'stopAudio' });
+    }
+
+    /**
+     * 外部接口：手动触发"品味瞬间"随机播放
+     * 四层回退机制：
+     * Layer 0: 当前侧边栏已打开 -> 直接 Webview 播放
+     * Layer 1: 系统原生组件 (Windows WMPlayer / Mac afplay / Linux paplay)
+     * Layer 2: Rust 引擎 (后台线程)
+     * Layer 3: UI 强制闪现 (激活 q4 播放后立即恢复原状)
+     * @param {string} mode 'normal' 或 'loop'
+     */
+    async triggerSavor(mode = 'normal') {
+        const audioPath = this._getSavorAudio();
+        if (!audioPath || !fs.existsSync(audioPath)) return;
+
+        const audioName = path.basename(audioPath);
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+
+        // 抽卡核心逻辑：如果是循环模式则 -1 (无限)，否则 2-6 次随机
+        const count = mode === 'loop' ? -1 : getRand(2, 7);
+        const loopCount = count === -1 ? 999 : count;
+        const countDesc = count === -1 ? "∞" : `${count} 次`;
+
+        global.logMessage(`[Savor] 抽卡结果: [${audioName}] | 播放次数: ${countDesc}`, "INFO");
+        if (!this._view?.visible) {
+            vscode.window.setStatusBarMessage(`$(zap) Savor: ${audioName} (${countDesc})`, 4000);
+        }
+
+        // --- Layer 0: 直接 Webview 播放 ---
+        if (this._view && this._view.visible) {
+            global.logMessage("[Audio] 命中 Layer 0: 当前侧边栏活跃，使用 Webview 播放", "INFO");
+            // 注意：这里只发播放指令，不发 updateData，因此不会产生视觉风暴
+            this._postMessage({ command: 'playAudio', base64: fs.readFileSync(audioPath).toString('base64'), count });
+            return;
+        }
+
+        const cp = require('child_process');
+        const isWin = process.platform === 'win32';
+        const isMac = process.platform === 'darwin';
+
+        // --- Layer 1: 系统原生静默播放 ---
+        try {
+            // 启动前先尝试清理旧进程
+            if (this._currentLayer1Proc) {
+                try {
+                    if (isWin) cp.exec(`taskkill /F /T /PID ${this._currentLayer1Proc.pid}`).catch(() => { });
+                    else this._currentLayer1Proc.kill();
+                } catch (e) { }
+                this._currentLayer1Proc = null;
+            }
+
+            if (isWin) {
+                // Windows: 使用临时 VBS 驱动 WMPlayer.OCX (修复音量与淡出)
+                const vbsPath = path.join(os.tmpdir(), `q_savor_${Date.now()}.vbs`);
+                const safePath = audioPath.replace(/\\/g, "\\\\");
+
+                // 深度优化后的 VBS：支持 100% 音量，支持最后一次循环的 2秒淡出
+                const vbsContent = [
+                    'Set p = CreateObject("WMPlayer.OCX")',
+                    `p.URL = "${safePath}"`,
+                    'p.settings.volume = 100',
+                    `lc = ${loopCount}`,
+                    'p.controls.play',
+                    'Do While lc > 0',
+                    '  Do While p.playState <> 3 : WScript.Sleep 100 : Loop',
+                    '  Do While p.currentMedia.duration = 0 : WScript.Sleep 100 : Loop',
+                    '  dur = p.currentMedia.duration',
+                    '  Do While p.playState = 3',
+                    '    curr = p.controls.currentPosition',
+                    '    If lc = 1 And (dur - curr) <= 2.1 Then',
+                    '      v = Int((dur - curr) * 50)',
+                    '      If v < 0 Then v = 0',
+                    '      If v < p.settings.volume Then p.settings.volume = v',
+                    '    End If',
+                    '    WScript.Sleep 100',
+                    '  Loop',
+                    '  lc = lc - 1',
+                    '  If lc > 0 Then',
+                    '    p.settings.volume = 100',
+                    '    p.controls.play',
+                    '    WScript.Sleep 500',
+                    '  End If',
+                    'Loop',
+                    'Set p = Nothing'
+                ].join("\n");
+
+                fs.writeFileSync(vbsPath, vbsContent, 'utf16le');
+
+                this._currentLayer1Proc = cp.spawn('wscript.exe', ['//B', '//T:150', vbsPath], {
+                    detached: false,
+                    windowsHide: true
+                });
+
+                this._currentLayer1Proc.on('exit', () => {
+                    try { fs.unlinkSync(vbsPath); } catch (e) { }
+                    if (this._currentLayer1Proc?.pid === this._currentLayer1Proc?.pid) this._currentLayer1Proc = null;
+                });
+
+                global.logMessage("[Audio] 命中 Layer 1: 使用 Windows WMPlayer (VBS) 静默播放", "INFO");
+                return;
+            } else if (isMac) {
+                this._currentLayer1Proc = cp.spawn('afplay', [audioPath]);
+                global.logMessage("[Audio] 命中 Layer 1: 使用 macOS afplay 静默播放", "INFO");
+                return;
+            } else {
+                // Linux
+                this._currentLayer1Proc = cp.exec(`paplay "${audioPath}" || play "${audioPath}" || aplay "${audioPath}"`, { stdio: 'ignore' });
+                global.logMessage("[Audio] 命中 Layer 1: 使用 Linux 系统工具播放", "INFO");
+                return;
+            }
+        } catch (e) {
+            global.logMessage(`[Audio] Layer 1 失败: ${e.message}`, "WARN");
+        }
+
+        // --- Layer 2: Rust 引擎播放 ---
+        if (global.rustBridge && global.rustBridge.available) {
+            try {
+                const res = await global.rustBridge.call("play_savor", { path: audioPath, count: loopCount });
+                if (res && res.error) {
+                    throw new Error(`Rust 引擎播放失败: ${res.error}`);
+                }
+                global.logMessage("[Audio] 命中 Layer 2: 使用 Rust 引擎后台播放", "INFO");
+                return;
+            } catch (e) {
+                global.logMessage(`[Audio] Layer 2 失败: ${e.message}`, "WARN");
+            }
+        }
+
+        // --- Layer 3: UI 强制闪现 (兜底模式，无视觉风暴) ---
+        global.logMessage("[Audio] 命中 Layer 3: UI 强制闪现模式", "INFO");
+        await vscode.commands.executeCommand('workbench.view.extension.qqqView');
+
+        let retry = 0;
+        const checkReady = setInterval(async () => {
+            if (this._view || retry > 15) {
+                clearInterval(checkReady);
+                if (this._view) {
+                    this._postMessage({ command: 'playAudio', base64: fs.readFileSync(audioPath).toString('base64'), count });
+                }
+                // 播发指令后，立即切回 Explorer
+                setTimeout(() => {
+                    vscode.commands.executeCommand('workbench.view.explorer').catch(() => { });
+                }, 50);
+            }
+            retry++;
+        }, 100);
     }
 
     _getHtml(history, audioBase64, statsObj = {}) {
@@ -1681,7 +1853,7 @@ class ClipboardHistorySidebarProvider {
 
             el.savorCard.onclick = function() { post('requestSavorAudio', { mode: 'normal' }); };
             el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
-            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); stopAudio(); };
+            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); stopAudio(); post('stopSavorAudio'); };
 
             function isValidUrl(s) {
                 if (!s) return false;
@@ -1744,6 +1916,8 @@ class ClipboardHistorySidebarProvider {
                     playAudio(m.base64, m.count);
                 } else if (m.command === 'playSfx') {
                     playSfx(m.base64);
+                } else if (m.command === 'stopAudio') {
+                    stopAudio(0);
                 }
             });
 

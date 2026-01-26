@@ -16,6 +16,7 @@ icons = ["dep:file_icon_provider"]
 
 [dependencies]
 base64 = "0.22"
+rodio = { version = "0.17", default-features = false, features = ["minimp3"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clipboard-rs = { version = "0.3.1", features = ["image"] }
 file_icon_provider = { version = "1.0.0", optional = true }

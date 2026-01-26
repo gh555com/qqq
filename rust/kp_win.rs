@@ -30,6 +30,8 @@ use std::process;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use rodio::{Decoder, OutputStream, Sink};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
@@ -51,9 +53,6 @@ static IO_POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(*MAX_WORKERS));
 static RE_INVALID_FILENAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[<>:"/\\|?*]+"#).unwrap());
 
 static VALID_CHARS: Lazy<Vec<char>> = Lazy::new(|| {
-    // Python:
-    // excluded_chars = ["l", "i", "s", "a", "m", "c", "b", "f", "t"]
-    // valid_chars = [c for c in "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" if c.lower() not in excluded_chars]
     let excluded = ["l", "i", "s", "a", "m", "c", "b", "f", "t"];
     let base = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     base.chars()
@@ -63,6 +62,46 @@ static VALID_CHARS: Lazy<Vec<char>> = Lazy::new(|| {
         })
         .collect()
 });
+
+// =============================================================================
+//  Audio Support (Rust Native)
+// =============================================================================
+static AUDIO_SINK: Lazy<Arc<Mutex<Option<Sink>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+
+fn play_audio_file(path: String, loop_count: usize) {
+    thread::spawn(move || {
+        // 在 Windows 上，我们需要保持 OutputStream 存活
+        let Ok((_stream, stream_handle)) = OutputStream::try_default() else { return; };
+        let Ok(sink) = Sink::try_new(&stream_handle) else { return; };
+
+        {
+            let mut global_sink = AUDIO_SINK.lock().unwrap();
+            *global_sink = Some(sink);
+        }
+
+        let sink_ref = {
+            let lock = AUDIO_SINK.lock().unwrap();
+            lock.as_ref().map(|s| s.clone())
+        };
+
+        if let Some(sink) = sink_ref {
+            for _ in 0..loop_count {
+                let Ok(file) = fs::File::open(&path) else { break; };
+                let Ok(source) = Decoder::new(io::BufReader::new(file)) else { break; };
+                sink.append(source);
+                sink.sleep_until_end();
+            }
+        }
+    });
+}
+
+fn stop_audio() {
+    if let Ok(mut sink_lock) = AUDIO_SINK.lock() {
+        if let Some(sink) = sink_lock.take() {
+            sink.stop();
+        }
+    }
+}
 
 // =============================================================================
 //  Python 风格 JSON 值：保证对象字段“插入顺序”
@@ -1480,6 +1519,18 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             if let PyV::Obj(extra) = get_folder_info(path) {
                 out_pairs.extend(extra);
             }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "play_savor" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let loop_count = cmd.get("count").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            play_audio_file(path, loop_count);
+            out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "stop_savor" => {
+            stop_audio();
+            out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
             (PyV::Obj(out_pairs), false, false)
         }
         _ => {

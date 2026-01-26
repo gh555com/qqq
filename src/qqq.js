@@ -913,41 +913,8 @@ let downloadContext = null;
 
 async function savorMomentsCommand() {
 	try {
-		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
-		let selectedAudioPath;
-
-		const randomNumber = Math.floor(Math.random() * 30);
-		if (randomNumber === 0) {
-			selectedAudioPath = path.join(assetsPath, 'q.mp3');
-		} else {
-			const randomIndex = Math.floor(Math.random() * 3);
-			const audioNum = randomIndex + 1;
-			selectedAudioPath = path.join(assetsPath, `${audioNum}.mp3`);
-		}
-
-		if (fs.existsSync(selectedAudioPath)) {
-			const audioBase64 = fs.readFileSync(selectedAudioPath).toString('base64');
-			if (activeSidebarProvider) {
-				activeSidebarProvider.postMessage({
-					command: 'playAudio',
-					base64: audioBase64,
-					times: 1
-				});
-			} else {
-				// 如果侧边栏未打开，回退到系统播放器（或者静默，根据用户需求）
-				// 用户说不要弹出系统播放器，所以这里我们尝试聚焦侧边栏
-				vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
-					setTimeout(() => {
-						if (activeSidebarProvider) {
-							activeSidebarProvider.postMessage({
-								command: 'playAudio',
-								base64: audioBase64,
-								times: 1
-							});
-						}
-					}, 500);
-				});
-			}
+		if (activeSidebarProvider) {
+			activeSidebarProvider.triggerSavor('normal');
 		}
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");

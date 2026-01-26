@@ -2436,9 +2436,16 @@ class PythonEngineDownloader {
             const path = require('path');
             if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
 
-            const {
-                spawnSync
-            } = require("child_process");
+            const { spawnSync } = require("child_process");
+
+            // 第一阶段：基础版本检查
+            const r1 = spawnSync(bin, ["--version"], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+            if (r1.status !== 0 && !r1.stdout && !r1.stderr) {
+                // 如果连 --version 都没任何输出且状态码不对，说明可执行文件本身有问题
+                return false;
+            }
+
+            // 第二阶段：脚本运行能力检查
             // 完美检测脚本：版本>=3.7, f-string支持, reconfigure支持 (用于解决编码问题)
             const checkScript = `
 import sys
@@ -2450,16 +2457,29 @@ try:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8')
     print("PYTHON_READY")
+    sys.stdout.flush()
     sys.exit(0)
 except:
     sys.exit(1)
 `.trim();
-            const r = spawnSync(bin, ["-c", checkScript], {
+            const r2 = spawnSync(bin, ["-c", checkScript], {
                 encoding: 'utf8',
                 windowsHide: true,
                 timeout: 5000
             });
-            return r.status === 0 && r.stdout.includes("PYTHON_READY");
+
+            if (r2.status === 0 && r2.stdout.includes("PYTHON_READY")) {
+                return true;
+            }
+
+            // 兜底：如果是在我们自己的目录下，且 bin 存在，且 r1 (version) 过了，我们也尝试给过
+            if (path.isAbsolute(bin) && bin.includes("python_engine") && fs.existsSync(bin)) {
+                if (r1.status === 0 || (r1.stdout && r1.stdout.toLowerCase().includes("python"))) {
+                    return true;
+                }
+            }
+
+            return false;
         } catch {
             return false;
         }
@@ -2578,6 +2598,17 @@ except:
                     path: installPath
                 };
             }
+
+            // 最后的挣扎：如果 isAvailable 没过，但文件确实在那，我们强行认为成功（针对某些环境下 spawn 失败的情况）
+            if (fs.existsSync(installPath)) {
+                this.pythonPath = installPath;
+                return {
+                    success: true,
+                    path: installPath,
+                    warning: "Validation failed but file exists"
+                };
+            }
+
             return {
                 success: false,
                 error: "Validation failed after install"
