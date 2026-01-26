@@ -2705,8 +2705,10 @@ class UnifiedMediaDownloader {
                                 if (!silent) vscode.window.showInformationMessage("yt-dlp 安装成功");
                                 return true;
                             } else {
-                                // 报错或下载失败时，始终记录日志并弹窗
-                                if (vscode) vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                                // 仅在非静默模式（手动触发）下弹出错误提示
+                                if (!silent && vscode) {
+                                    vscode.window.showErrorMessage(`yt-dlp 安装失败: ${res.error}`);
+                                }
                                 try {
                                     const global = require('./global');
                                     global.logMessage(`yt-dlp 安装失败: ${res.error}`, "ERROR");
