@@ -913,16 +913,17 @@ let downloadContext = null;
 
 async function savorMomentsCommand() {
 	try {
-		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+		// 激进策略：无论侧边栏是否 Ready，都先尝试触发播放
+		if (activeSidebarProvider) {
 			activeSidebarProvider.triggerSavor('normal');
 		} else {
-			// 如果侧边栏未打开或未初始化，聚焦侧边栏并等待加载
-			vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
+			// 如果彻底没 Ready，强行聚焦激活视图
+			vscode.commands.executeCommand('qqq.Viewq.focus').then(() => {
 				setTimeout(() => {
-					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+					if (activeSidebarProvider) {
 						activeSidebarProvider.triggerSavor('normal');
 					}
-				}, 1000); // 稍微加长等待时间确保渲染完成
+				}, 1000);
 			});
 		}
 	} catch (e) {

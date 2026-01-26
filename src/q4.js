@@ -932,6 +932,10 @@ class ClipboardHistorySidebarProvider {
                     this.triggerSavor(msg.mode || 'normal');
                     break;
                 }
+                case 'playbackBlocked':
+                    // ★ 核心加固：不仅打开容器，还要强行聚焦到具体的 Webview 视图
+                    vscode.commands.executeCommand('qqq.Viewq.focus');
+                    break;
                 case 'ready':
                     this.updateContent(null, null, null, true);
                     break;
@@ -1782,8 +1786,11 @@ class ClipboardHistorySidebarProvider {
             }
 
             function stopAudio(fadeMs) {
-                if(currentAudio) {
+                if (currentAudio) {
                     var audioToStop = currentAudio;
+                    audioToStop.onended = null;
+                    audioToStop.ontimeupdate = null;
+
                     if (fadeMs > 0) {
                         var startVol = audioToStop.volume;
                         var steps = 20;
@@ -1794,18 +1801,20 @@ class ClipboardHistorySidebarProvider {
                             } else {
                                 clearInterval(timer);
                                 audioToStop.pause();
-                                audioToStop.volume = startVol;
+                                audioToStop.src = "";
+                                audioToStop.load();
                             }
                         }, stepMs);
                     } else {
                         audioToStop.pause();
+                        audioToStop.src = "";
+                        audioToStop.load();
                     }
 
                     if (playStartTime > 0) {
                         var dur = Date.now() - playStartTime;
                         if (dur > 500) post('recordSavorUsage', { durationMs: dur });
                     }
-                    currentAudio.onended = null;
                     currentAudio = null;
                     playStartTime = 0;
                 }
@@ -1813,36 +1822,37 @@ class ClipboardHistorySidebarProvider {
                 var iconLoop = document.querySelector('.icon-loop');
                 if (iconLoop) iconLoop.classList.remove('spinning');
             }
+
             function playAudio(base64, count) {
+                // ★ 极速拦截：确保旧实例死透，实现绝对单例
                 stopAudio(0);
+
                 loopRemaining = count || 1;
                 var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
                 playStartTime = Date.now();
                 updateSavorText();
+
                 if (loopRemaining === -1) {
                     var iconLoop = document.querySelector('.icon-loop');
                     if (iconLoop) iconLoop.classList.add('spinning');
                 }
+
                 audio.onended = function() {
                     if (loopRemaining === -1) {
                         audio.currentTime = 0;
-                        audio.play();
+                        audio.play().catch(function(e) { console.warn("Loop play failed:", e); });
                     } else if (loopRemaining > 1) {
                         loopRemaining--;
                         audio.currentTime = 0;
-                        audio.play();
+                        audio.play().catch(function(e) { console.warn("Next loop failed:", e); });
                     } else {
-                        // 最后一次播放结束前淡出
-                        // 如果音频够长，我们在倒数 2 秒时开始淡出
-                        // 但由于 HTML5 Audio 事件限制，最稳妥是在 onended 触发时处理或通过 timeupdate
                         stopAudio(2000);
                     }
                 };
-                // 监听时间进度实现精准淡出
+
                 audio.ontimeupdate = function() {
                     if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2) {
-                        // 只在最后一次循环且剩余不到2秒时触发一次淡出逻辑
                         audio.ontimeupdate = null;
                         var fadeSteps = 20;
                         var fadeInterval = 2000 / fadeSteps;
@@ -1857,7 +1867,18 @@ class ClipboardHistorySidebarProvider {
                         }, fadeInterval);
                     }
                 };
-                audio.play();
+
+                var playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(function(err) {
+                        // ★ 深度修复：播放失败时，不仅上报，还要重置状态防止逻辑残留
+                        console.error("Playback blocked:", err);
+                        if (err.name === 'NotAllowedError') {
+                            post('playbackBlocked');
+                        }
+                        stopAudio(0);
+                    });
+                }
             }
 
             function setupScrollbar(container, scrollbar, thumb) {
