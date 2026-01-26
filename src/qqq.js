@@ -1291,7 +1291,7 @@ async function activate(context) {
 	// ★ 预热/静默安装视频引擎
 	try {
 		const { getSharedDownloader } = require('./dow');
-		getSharedDownloader().ensureYtdlpReady(context, { silent: true }).catch(() => { });
+		getSharedDownloader().ensureYtdlpReady(context, { background: true }).catch(() => { });
 	} catch (e) { }
 
 	// 初始化剪切板历史管理器
