@@ -5,6 +5,13 @@
 #   - 仅处理：纯文本、文件复制、原生图片保存
 import sys
 import os
+
+# 严格版本检查：[3.7, 3.12]
+if sys.version_info < (3, 7) or sys.version_info >= (3, 13):
+    sys.stderr.write(
+        f"Python version {sys.version} not supported. Requires 3.7 ~ 3.12.\n")
+    sys.exit(1)
+
 import json
 import time
 import platform
