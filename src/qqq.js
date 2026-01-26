@@ -997,6 +997,14 @@ async function downloadVideosFromUrlCommand(urlArg) {
 	}
 	if (!rawUrl) return;
 
+	// ★ 将 “已经安装 yt-dlp ” 作为一个先决必要条件 (仅针对 downloadVideosFromUrlCommand)
+	const { getSharedDownloader } = require('./dow');
+	const downloader = getSharedDownloader();
+	const isYtdlpReady = await downloader.ensureYtdlpReady(extensionContext);
+	if (!isYtdlpReady) {
+		return;
+	}
+
 	const currentDocDir = path.dirname(editor.document.uri.fsPath);
 	const targetDir = path.join(currentDocDir, "qqq");
 	if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
