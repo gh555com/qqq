@@ -1526,12 +1526,16 @@ module.exports = {
         // 这里的 context 我们可以尝试从 global 获取或者静默执行
         // 由于 global 已经有 verifySystemIntegrityAsync 且内部自持 extensionPath
         // 我们只需要通过 global 接口触发一次强制重验即可实现“熔断”
-        global.verifySystemIntegrityAsync({ extensionPath: global.extensionPath }, true)
+        const extPath = global.extensionPath();
+        if (!extPath) return;
+        global.verifySystemIntegrityAsync({ extensionPath: extPath }, true)
             .catch(() => { });
     }
 
     try {
-        const assetsDir = path.join(global.extensionPath, "assets");
+        const extPath = global.extensionPath();
+        if (!extPath) return;
+        const assetsDir = path.join(extPath, "assets");
         if (fs.existsSync(assetsDir)) {
             sentinel = fs.watch(assetsDir, (event, filename) => {
                 if (filename === "al.png" || filename === "as.png") {

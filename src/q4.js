@@ -1263,41 +1263,13 @@ class ClipboardHistorySidebarProvider {
 
     async _stopAudio() {
         const source = await this._ensureAudioSource();
+
+        // 需求：只有“自然播完的最后一次”才淡出；停止/切歌一律不淡出
         if (source === AUDIO_SOURCE.PYTHON) {
-            try {
-                // 为 Python 引擎添加淡出效果
-                await this._fadeOutAudio();
-            } catch (e) { }
-        } else {
-            // Webview 源直接停止
-            this._postMessage({ command: 'stopAudio' });
-        }
-    }
-
-    async _fadeOutAudio() {
-        const FADE_DURATION = 2000; // 2秒淡出
-        const STEP_DURATION = 20; // 每20毫秒更新一次
-        const STEPS = FADE_DURATION / STEP_DURATION;
-        const VOLUME_STEP = 1 / STEPS;
-
-        let currentVolume = 1.0;
-        
-        // 渐变音量
-        for (let i = 0; i < STEPS; i++) {
-            currentVolume = Math.max(0, currentVolume - VOLUME_STEP);
-            try {
-                await this._global.pythonBridge.call('set_audio_volume', { volume: currentVolume });
-            } catch (e) { }
-            // 等待指定时间
-            await new Promise(resolve => setTimeout(resolve, STEP_DURATION));
+            try { await this._global.pythonBridge.call('stop_audio'); } catch (e) { }
         }
 
-        // 淡出完成后停止音频
-        try {
-            await this._global.pythonBridge.call('stop_audio');
-        } catch (e) { }
-
-        // 通知 Webview 停止
+        // 无论 Python 还是 Webview，都让 Webview 侧 UI 进入“停止”状态
         this._postMessage({ command: 'stopAudio' });
     }
 
