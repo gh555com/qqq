@@ -29,7 +29,7 @@ const q3 = require("./q3");
 // 新水印的SHA256哈希值
 const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
-// Deleted:let isCoreIntegrityValid = false;
+let isCoreIntegrityValid = false;
 
 // ==================== 配置常量 ====================
 const SCROLL_DEBOUNCE_MS = 200;
@@ -81,8 +81,41 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
 ]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 
-const IMAGE_EXTS = global.IMAGE_EXTS;
-const VIDEO_EXTS = global.VIDEO_EXTS;
+const IMAGE_EXTS = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".bmp",
+	".webp",
+	".ico",
+	".tiff",
+	".tif",
+	".svg",
+	".ai",
+	".eps",
+	".cdr",
+	".psd",
+]);
+const VIDEO_EXTS = new Set([
+	".mp4",
+	".mkv",
+	".webm",
+	".avi",
+	".mov",
+	".wmv",
+	".flv",
+	".rmvb",
+	".mpeg",
+	".mpg",
+	".3gp",
+	".m4v",
+	".f4v",
+	".ts",
+	".mts",
+	".m2ts",
+	".vob",
+]);
 
 const PIPE_SEEK_ERROR_PATTERNS = [
 	"non seekable",
@@ -168,12 +201,31 @@ async function scheduleGen(key, fn) {
 }
 
 // ==================== 初始化 ====================
+function verifySystemIntegrity() {
+	try {
+		// 验证大相框水印
+		if (!fs.existsSync(LARGE_WATERMARK_PATH)) return false;
+		const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
+		const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
+		if (largeHash !== LARGE_WATERMARK_HASH) return false;
 
-async function loadWatermarkResource() {
+		// 验证小相框水印
+		if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
+		const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
+		const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
+		if (smallHash !== SMALL_WATERMARK_HASH) return false;
+
+		return true;
+	} catch (e) {
+		return false;
+	}
+}
+
+function loadWatermarkResource() {
 	// 加载大相框水印
 	try {
 		if (fs.existsSync(LARGE_WATERMARK_PATH)) {
-			const buf = await fs.promises.readFile(LARGE_WATERMARK_PATH);
+			const buf = fs.readFileSync(LARGE_WATERMARK_PATH);
 			largeWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
 		}
 	} catch (e) {
@@ -183,7 +235,7 @@ async function loadWatermarkResource() {
 	// 加载小相框水印
 	try {
 		if (fs.existsSync(SMALL_WATERMARK_PATH)) {
-			const buf = await fs.promises.readFile(SMALL_WATERMARK_PATH);
+			const buf = fs.readFileSync(SMALL_WATERMARK_PATH);
 			smallWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
 		}
 	} catch (e) {
@@ -409,9 +461,7 @@ function getFrameConfig(info) {
 }
 
 // ==================== FFprobe ====================
-async function getMediaInfo(filePath, mtimeMsRaw) {
-	// 归一化 mtime，与 h.js 保持一致
-	const mtimeMs = Math.floor(mtimeMsRaw);
+async function getMediaInfo(filePath, mtimeMs) {
 	const cached = resolutionCache.get(filePath);
 	if (cached && cached.mtime === mtimeMs) return cached;
 
@@ -420,25 +470,21 @@ async function getMediaInfo(filePath, mtimeMsRaw) {
 }
 
 function _getMediaInfoInternal(filePath, mtimeMs) {
-	if (!filePath) return null;
+	if (!filePath || !fs.existsSync(filePath)) return null;
+	try {
+		const stat = fs.statSync(filePath);
+		if (stat.isDirectory()) return null; // 目录不需要获取媒体信息
+	} catch (e) {
+		return null;
+	}
 
 	const ff = global.ffmpegPath();
 	const ext = path.extname(filePath).toLowerCase();
 
-	// ★ 严格过滤：仅对真正的媒体格式调用 FFprobe
-	if (!global.IMAGE_EXTS.has(ext) && !global.AUDIO_EXTS.has(ext) && !global.VIDEO_EXTS.has(ext)) {
-		return null;
-	}
-
-	// 特殊：Windows 下的图标文件（非媒体）应在 render 层通过图标提取器处理，严禁进入此处
-	if (process.platform === 'win32' && (ext === '.exe' || ext === '.lnk')) {
-		return null;
-	}
-
 	// ... existing code ...
 
 	if (!ff || typeof ff !== 'string' || !fs.existsSync(ff)) {
-
+		geq().logMessage(`ffmpegPath 无效或不存在: ${ff}, 尝试使用系统 ffmpeg`, "WARN");
 		// 如果内置路径无效，尝试直接用 'ffmpeg'
 	}
 
@@ -470,7 +516,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 		child = spawnFfmpeg();
 
 		if (!child) {
-			global.logMessage(`[FFmpeg] spawn failed, resolving with null`, "INFO");
+			geq().logMessage(`spawn FFmpeg 失败: 内置路径和系统路径均不可用`, "ERROR");
 			resolve(null);
 			return;
 		}
@@ -490,7 +536,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 				const shortPath = filePath.length > 60 ? "..." + filePath.slice(-57) : filePath;
 				const cleanStderr = stderr.replace(
 					/\r\n/g, " ").slice(0, 200);
-				global.logMessage(`[FFprobe] no resolution or duration found: ${shortPath}`, "DEBUG");
+				geq().logMessage(`FFprobe info failed for ${shortPath}: ${cleanStderr}`, "WARN");
 			}
 
 			const ext = path.extname(filePath).toLowerCase();
@@ -586,9 +632,6 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 				} else if (IMAGE_EXTS.has(ext)) {
 					info.type = "image";
 					info.isStaticImage = true;
-				} else if (AUDIO_EXTS.has(ext)) {
-					// ★★★ 加入音频类型检查 ★★★
-					info.type = "audio";
 				}
 			}
 
@@ -931,7 +974,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 				}
 			}, 15000);
 
-			child.on('close', async () => {
+			child.on('close', () => {
 				if (!resolved) {
 					resolved = true;
 					clearTimeout(timer);
@@ -946,7 +989,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 					if (!buffer) { resolve(null); return; }
 
 					// 统一缓存命名：.71（cacheKey="71"）
-					await geq().setCacheEntry(contentId, textCacheKey, buffer, {
+					geq().setCacheEntry(contentId, textCacheKey, buffer, {
 						width: targetW,
 						height: targetH,
 						type: 'text_preview',
@@ -984,10 +1027,9 @@ async function tryTextPreview(filePath, contentId, renderW, renderH) {
 
 	const cached = geq().getCachedBuffer(contentId, textCacheKey);
 	if (cached) {
-		// 零错图风险：必须校验 meta.type（兼容旧缓存：无 type 字段也接受）
+		// 零错图风险：必须校验 meta.type
 		const meta = geq().getCacheQualityMeta(contentId, textCacheKey);
-		if (!meta || meta.type === 'text_preview' || !meta.type) {
-			global.logMessage(`[Cache] HIT (text): ${path.basename(filePath)}`, "INFO");
+		if (meta && meta.type === 'text_preview') {
 			return {
 				buffer: cached,
 				webpDuration: 0,
@@ -1345,10 +1387,9 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
-			// 零错图风险：必须校验 meta.type（兼容旧缓存：无 type 字段也接受）
+			// 零错图风险：必须校验 meta.type
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
-			if (!meta || meta.type === "webp_unified" || !meta.type) {
-				global.logMessage(`[Cache] HIT: ${path.basename(filePath)} (${cacheStrategy.cacheKey})`, "INFO");
+			if (meta && meta.type === "webp_unified") {
 				const cachedWidth = meta.width || info?.width || 0;
 				const cachedHeight = meta.height || info?.height || 0;
 				const cachedOriginalDuration =
@@ -1413,8 +1454,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		const existing = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (existing) {
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
-			// 兼容旧缓存：无 type 字段也接受
-			if (!meta || meta.type === "webp_unified" || !meta.type) {
+			if (meta && meta.type === "webp_unified") {
 				if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
 				return { success: true, buffer: existing, fromCache: true, meta };
 			}
@@ -1445,7 +1485,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
-		global.logMessage(`[FFmpeg] Preview generated: ${path.basename(filePath)} (${buffer.length} bytes, ${finalWebPDuration.toFixed(2)}s)`, "INFO");
+		geq().logMessage(`Preview generated: ${path.basename(filePath)}, size=${buffer.length}, dur=${finalWebPDuration}`, "INFO");
 
 		// 快速校验：防止 ffmpeg 产出截断/损坏 WebP 被写入缓存导致长期“坏命中”
 		if (geq().isValidWebPBuffer && !geq().isValidWebPBuffer(buffer)) {
@@ -1455,11 +1495,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 
 
-		global.logMessage(`[FFmpeg] RESULT: success=${result.success}, fromPipe=${result.fromPipe}, fromFile=${result.fromFile}, fromCache=${result.fromCache}`, "DEBUG");
-
 		if (result.fromPipe || result.fromFile) {
-			global.logMessage(`[Cache] WRITE: ${contentId}/${cacheStrategy.cacheKey}`, "INFO");
-			await geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+			geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
 				origWidth: origSize?.width || 0,
@@ -1486,9 +1523,6 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH },
 		};
 	} else {
-		const errorMsg = result.error || "UNKNOWN";
-		const stderr = (result.stderr || "").slice(0, 200);
-		global.logMessage(`[FFmpeg] FAILED: ${path.basename(filePath)} - ${errorMsg}${stderr ? ` stderr=${stderr}` : ""}`, "WARN");
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
 		if (!fallback) {
@@ -1646,7 +1680,6 @@ async function shouldUseFrame(filePath) {
 
 		// 非文本文件，检查是否能生成有效预览
 		const contentId = geq().computeFingerprint(filePath);
-		global.logMessage(`[ContentID] GENERATE: ${path.basename(filePath).slice(-30)} => ${contentId ? contentId.slice(0, 8) + '...' : 'null'}`, "DEBUG");
 		if (!contentId) {
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
@@ -1656,7 +1689,17 @@ async function shouldUseFrame(filePath) {
 			return false;
 		}
 
-		// 获取媒体信息（不需要再检查 fs.existsSync，因为 statSync 已经验证了）
+		// 检查文件是否存在
+		if (!fs.existsSync(filePath)) {
+			// 缓存结果
+			shouldUseFrameCache.set(cacheKey, {
+				result: false,
+				timestamp: Date.now()
+			});
+			return false;
+		}
+
+		// 获取媒体信息
 		const info = await getMediaInfo(filePath, mtimeMs);
 
 		// 没有媒体信息的文件使用图标框
@@ -1855,7 +1898,7 @@ function getEditorId(editor) {
 // ==================== 主渲染逻辑 ====================
 async function renderImages(editor) {
 	if (!editor) return;
-	if (!global.isValid()) {
+	if (!isCoreIntegrityValid) {
 		geq().logMessage(`renderImages: Integrity is invalid, skipping.`, "WARN");
 		clearDecorations();
 		return;
@@ -1909,10 +1952,9 @@ async function renderImages(editor) {
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
 
 			let shouldHide = false;
-			let st = null;
-			if (absPath) {
+			if (absPath && fs.existsSync(absPath)) {
 				try {
-					st = fs.statSync(absPath);
+					const st = fs.statSync(absPath);
 					// 文件夹和支持的媒体文件都需要隐藏原始文本
 					if (!st.isDirectory()) {
 						if (isSupportedMedia(absPath) || process.platform === 'win32') {
@@ -1943,17 +1985,17 @@ async function renderImages(editor) {
 			const contentId = geq().computeFingerprint(absPath);
 			if (!contentId) continue;
 
-			const isDirectory = st.isDirectory();
-			// 严格控制探测范围：
-			// 1. 文件夹不进行媒体探测，直接走图标渲染
-			// 2. 只有真正的媒体格式才进入 FFprobe 逻辑
-			// 3. Windows 下非媒体文件（exe/lnk）直接走图标流程，不准碰 FFprobe
-			if (!isDirectory && !isSupportedMedia(absPath)) {
-				if (process.platform !== 'win32') continue;
-				// Windows 下的非媒体文件，仅允许走图标渲染，严禁 FFprobe
+			let isDirectory = false;
+			try {
+				const stat = fs.statSync(absPath);
+				isDirectory = stat.isDirectory();
+				// 不跳过文件夹，让文件夹也能被渲染
+				if (!isDirectory && !isSupportedMedia(absPath) && process.platform !== 'win32') continue;
+			} catch (e) {
+				continue;
 			}
 
-			// 收集渲染信息（包括文件夹）
+			// 收集渲染信息
 			renderInfos.push({
 				absPath,
 				uniqueKey,
@@ -1962,7 +2004,7 @@ async function renderImages(editor) {
 				isDirectory
 			});
 
-			// 在Windows上，收集需要获取图标的文件路径（包括文件夹）
+			// 在Windows上，收集需要获取图标的文件路径
 			if (process.platform === 'win32') {
 				iconPaths.push(absPath);
 			}
@@ -1998,26 +2040,27 @@ async function renderImages(editor) {
 				let previewResult = null;
 
 				if (isSupported) {
-					// 文件夹始终支持渲染（使用图标），但不需要预览
-					if (!isDirectory) {
-						let info = null;
-						if (!isText) {
-							// 需要探测的媒体文件
-							let mtimeMs = 0;
-							try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-							info = await getMediaInfo(absPath, mtimeMs);
-
-							const fc = getFrameConfig(info);
-							previewWidth = fc.width;
-							previewHeight = fc.height;
-						} else {
-							// 文本文件：直接走配置定义的相框尺寸，禁止探测
-							const fc = getFrameConfig(null);
-							previewWidth = fc.width;
-							previewHeight = fc.height;
+					let info = null;
+					if (!isText) {
+						let mtimeMs = 0;
+						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+						info = await getMediaInfo(absPath, mtimeMs);
+						if (!info) {
+							geq().logMessage(`renderImages: getMediaInfo failed for ${absPath}`, "DEBUG");
 						}
+						const fc = getFrameConfig(info);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					} else {
+						// 文本也支持 small/large（fix 时按配置走：small->small，否则 large）
+						const fc = getFrameConfig(null);
+						previewWidth = fc.width;
+						previewHeight = fc.height;
+					}
 
-						previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
+					if (!previewResult) {
+						geq().logMessage(`renderImages: getPreviewBuffer returned null for ${absPath}`, "DEBUG");
 					}
 				}
 
@@ -2338,7 +2381,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 		startTime: Date.now(),
 		taskType: taskType,
 		intentTotalSize: intentTotalSize,
-		existingFiles: await global.getDirectorySnapshot(targetDir)
+		existingFiles: global.getDirectorySnapshot(targetDir)
 	});
 
 	const taskStartTime = Date.now();
@@ -2548,7 +2591,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 }
 
 async function executeClipboardCommand() {
-	if (!global.isValid()) {
+	if (!isCoreIntegrityValid) {
 		vscode.window.showErrorMessage("Integrity check failed.");
 		return;
 	}
@@ -2661,16 +2704,14 @@ async function provideCleanlinessEditsAsync(document) {
 		let pxHeight = 0;
 
 		if (absPath && fs.existsSync(absPath)) {
-			// ★ 必须调用 shouldUseFrame 来精准判定是否使用相框
-			// 该函数会内部调用 getMediaInfo 来确定文件是否"健康"（有宽高或时长）
+			// 使用新的感知逻辑判断是否使用相框
 			const useFrame = await shouldUseFrame(absPath);
 
 			if (useFrame) {
 				// 确定相框尺寸
 				try {
-					let mtimeMs = 0;
-					try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-					const info = await getMediaInfo(absPath, mtimeMs); // 这个调用会被内存缓存拦截
+					const mtimeMs = fs.statSync(absPath).mtimeMs;
+					const info = await getMediaInfo(absPath, mtimeMs);
 					const { height } = getFrameConfig(info);
 					pxHeight = height;
 				} catch {
@@ -2743,7 +2784,7 @@ class FileCodeLensProvider {
 		}, 300);
 	}
 	async provideCodeLenses(document) {
-		if (!global.isValid() || codelensLevel === "0") return [];
+		if (!isCoreIntegrityValid || codelensLevel === "0") return [];
 		const lenses = [];
 		const regex = geq().createPathRegex();
 		const text = document.getText();
@@ -2757,27 +2798,30 @@ class FileCodeLensProvider {
 			if (!rawPath) continue;
 
 			const absPath = resolvePathToAbsolute(document.uri, rawPath);
-			if (!absPath) continue;
-
-			let st = null;
-			try {
-				st = fs.statSync(absPath);
-			} catch {
-				continue;
-			}
+			if (!absPath || !fs.existsSync(absPath)) continue;
 
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
-			const isDirectory = st.isDirectory();
+			let isDirectory = false;
+			try {
+				const st = fs.statSync(absPath);
+				isDirectory = st.isDirectory();
+			} catch { }
 			const isVidOrImg = isImageOrVideoExt(ext);
 			const isText = !isVidOrImg && !isDirectory && isPlainTextFile(absPath);
 
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
-			let fileSz = formatBytes(st.size);
-			let tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
-			let mtimeMs = st.mtimeMs;
+			let fileSz = "?";
+			let tooltipText = "";
+			let mtimeMs = 0;
+			try {
+				const st = fs.statSync(absPath);
+				fileSz = formatBytes(st.size);
+				tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
+				mtimeMs = st.mtimeMs;
+			} catch { }
 
 			if (codelensLevel === "3") {
 				let folderData = geqFolderSizeSync(folder);
@@ -3128,22 +3172,23 @@ async function activate(context) {
 		if (global.ConfigManager) global.ConfigManager.setContext(context);
 	} catch (e) { }
 
-	// 异步校验完整性，不阻塞启动
-	global.verifySystemIntegrityAsync(context).then(valid => {
-		const _qqq = geq();
-		if (!valid) {
-			if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-			else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-			vscode.window.showWarningMessage("核心文件不完整，部分功能可能受限");
-		} else {
-			if (_qqq) {
-				_qqq.logMessage(`Integrity: PASSED`, "INFO");
-				_qqq.logMessage(`FFmpeg Path: ${_qqq.ffmpegPath}`, "INFO");
-			}
-		}
-	});
+	isCoreIntegrityValid = verifySystemIntegrity();
+	const _qqq = geq();
 
-	await loadWatermarkResource();
+	if (!isCoreIntegrityValid) {
+		if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+		else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+		return;
+	}
+
+	if (_qqq) {
+		_qqq.logMessage(`Integrity: PASSED`, "INFO");
+		_qqq.logMessage(`FFmpeg Path: ${_qqq.ffmpegPath}`, "INFO");
+	} else {
+		global.logMessage(`Integrity: PASSED`, "INFO");
+	}
+
+	loadWatermarkResource();
 	refreshConfig();
 	codeLensProvider = new FileCodeLensProvider();
 
@@ -3171,10 +3216,10 @@ async function activate(context) {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		})),
 		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
-			q3.executeExportDocCommand(global.isValid());
+			q3.executeExportDocCommand(isCoreIntegrityValid);
 		})),
 		vscode.commands.registerCommand("qqq.exportZip", global.withReady(() => {
-			q3.executeExportZipCommand(global.isValid());
+			q3.executeExportZipCommand(isCoreIntegrityValid);
 		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
