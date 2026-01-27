@@ -29,6 +29,9 @@ const q3 = require("./q3");
 // 新水印的SHA256哈希值
 const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
+
+// 默认文件夹图标 (SVG)
+const DEFAULT_FOLDER_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path fill="#FFC107" d="M2 6l2 4h26l2-4H2z"/><path fill="#FFB300" d="M2 8v18h28V10H14l-4-2H2z"/></svg>`;
 // Deleted:let isCoreIntegrityValid = false;
 
 // ==================== 配置常量 ====================
@@ -1989,6 +1992,13 @@ async function renderImages(editor) {
 
 				// 从批量获取的结果中获取图标
 				let iconB64 = iconResults[absPath] || null;
+				let isDefaultIcon = false;
+
+				// ★★★ 修复：如果图标获取失败但它是文件夹，使用默认图标
+				if (isDirectory && !iconB64) {
+					iconB64 = Buffer.from(DEFAULT_FOLDER_ICON_SVG).toString("base64");
+					isDefaultIcon = true;
+				}
 
 				// 文件夹始终支持渲染（使用图标）
 				const isSupported = isDirectory || isVidOrImg || isText;
@@ -2045,7 +2055,8 @@ async function renderImages(editor) {
 
 				// 如果没有预览但有图标，使用图标作为预览
 				if (!contentUrl && iconB64) {
-					contentUrl = `url("data:image/png;base64,${iconB64}")`;
+					const mime = isDefaultIcon ? "image/svg+xml" : "image/png";
+					contentUrl = `url("data:${mime};base64,${iconB64}")`;
 					previewWidth = 32;
 					previewHeight = 32;
 					outputSize = { width: 32, height: 32 };
@@ -2053,7 +2064,8 @@ async function renderImages(editor) {
 
 				// 设置 Gutter 图标
 				if (iconB64) {
-					deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
+					const mime = isDefaultIcon ? "image/svg+xml" : "image/png";
+					deco.renderOptions.gutterIconPath = vscode.Uri.parse(`data:${mime};base64,${iconB64}`);
 					deco.renderOptions.gutterIconSize = "contain";
 				}
 
