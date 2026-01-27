@@ -137,7 +137,7 @@ const editorDebounceTimers = new Map();
 let enlargeSmallImages = true;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
-let cleanFreakMode = false;
+let cleanFreakMode = "never"; // "never" | "add" | "add & remove"
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
 let codelensLevel = "3";
@@ -201,7 +201,10 @@ function refreshConfig() {
 		else performanceMode = config.get("performanceMode", "optmum");
 
 		frameSizeMode = config.get("frameSizeMode", "fix");
-		cleanFreakMode = config.get("cleanFreak", false);
+		cleanFreakMode = config.get("cleanFreak", "never");
+		// 兼容旧的布尔值
+		if (cleanFreakMode === true) cleanFreakMode = "add";
+		else if (cleanFreakMode === false) cleanFreakMode = "never";
 		textSlideColorScheme = config.get("textSlideColorScheme", "light");
 		textSlideFontSize = config.get("textSlideFontSize", 14);
 		codelensLevel = String(config.get("codelensLevel", "3"));
@@ -210,7 +213,7 @@ function refreshConfig() {
 		enlargeSmallImages = true;
 		performanceMode = "optmum";
 		frameSizeMode = "fix";
-		cleanFreakMode = false;
+		cleanFreakMode = "never";
 		textSlideColorScheme = "light";
 		textSlideFontSize = 14;
 		codelensLevel = "3";
@@ -1843,6 +1846,35 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	}
 }
 
+// ★★★ 统一的空行计算函数 ★★★
+// 粘贴和 weave 都使用这个函数，保证结果一致
+async function calculateRequiredBlankLines(filePath, isLastItem = false) {
+	try {
+		// 使用 shouldUseFrame 作为唯一的判断来源
+		const useFrame = await shouldUseFrame(filePath);
+
+		if (!useFrame) {
+			// 图标框：使用 -1 特殊标记
+			return calculateBlankLinesExact(-1, isLastItem);
+		}
+
+		// 相框：获取实际高度
+		let pxHeight = LARGE_PREVIEW_HEIGHT;
+		try {
+			let mtimeMs = 0;
+			try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
+			const info = await getMediaInfo(filePath, mtimeMs || Date.now());
+			const { height } = getFrameConfig(info);
+			pxHeight = height;
+		} catch { }
+
+		return calculateBlankLinesExact(pxHeight, isLastItem);
+	} catch (e) {
+		// 默认图标框
+		return calculateBlankLinesExact(-1, isLastItem);
+	}
+}
+
 function getEditorId(editor) {
 	const docUri = editor.document.uri.toString();
 	const viewColumn = editor.viewColumn ?? 0;
@@ -2138,25 +2170,8 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					const relPath = geq().toSafePath(path.relative(docDir, filePath));
 					const isLastItem = i === blocks.length - 1;
 
-					let pxHeight = 0;
-					const ext = path.extname(filePath).toLowerCase();
-					if (isImageOrVideoExt(ext)) {
-						pxHeight = LARGE_PREVIEW_HEIGHT;
-						try {
-							let mtimeMs = 0;
-							try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
-							const info = await getMediaInfo(filePath, mtimeMs || Date.now());
-							const { height } = getFrameConfig(info);
-							pxHeight = height;
-						} catch { }
-					} else if (isPlainTextFile(filePath)) {
-						pxHeight = getFrameConfig(null).height;
-					} else {
-						// 图标框：使用特殊标记，调用 calculateBlankLinesExact 计算正确的空行数
-						pxHeight = -1;
-					}
-
-					let gapBelow = pxHeight > 0 || pxHeight === -1 ? calculateBlankLinesExact(pxHeight, isLastItem) : 0;
+					// ★ 使用统一的空行计算函数
+					let gapBelow = await calculateRequiredBlankLines(filePath, isLastItem);
 					// 对于非最后一个项目，减1以抵消join添加的额外换行符
 					if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 					finalContent.push(`
@@ -2171,15 +2186,8 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 		const filePath = result.path;
 		if (result.fingerprint) geq().prefillFingerprint(filePath, result.fingerprint);
 		const relPath = geq().toSafePath(path.relative(docDir, filePath));
-		let pxHeight = LARGE_PREVIEW_HEIGHT;
-		try {
-			let mtimeMs = 0;
-			try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { }
-			const info = await getMediaInfo(filePath, mtimeMs || Date.now());
-			const { height } = getFrameConfig(info);
-			pxHeight = height;
-		} catch { }
-		const gapBelow = calculateBlankLinesExact(pxHeight, true);
+		// ★ 使用统一的空行计算函数
+		const gapBelow = await calculateRequiredBlankLines(filePath, true);
 		replacement = `
 /\\${relPath}\\/
 ` + eol.repeat(gapBelow);
@@ -2193,8 +2201,8 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 			const folderPath = folders[i];
 			const relPath = geq().toSafePath(path.relative(docDir, folderPath));
 			const isLastItem = i === folders.length - 1 && files.length === 0;
-			// 文件夹使用图标框的空行数计算
-			let gapBelow = calculateBlankLinesExact(-1, isLastItem);
+			// ★ 使用统一的空行计算函数（文件夹始终是图标框）
+			let gapBelow = await calculateRequiredBlankLines(folderPath, isLastItem);
 
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 			replacement += `
@@ -2207,63 +2215,36 @@ ${eol.repeat(gapBelow)}`;
 			const f = files[i];
 			let fp = fingerprints[f];
 			if (!fp) {
-				const tryKey = process.platform === 'win32' ? f.replace(
-
-
-
-
-
-
-
-
-					/\//g, '\\') : f;
+				const tryKey = process.platform === 'win32' ? f.replace(/\//g, '\\') : f;
 				fp = fingerprints[tryKey];
 			}
 			if (fp) geq().prefillFingerprint(f, fp);
 
 			const relPath = geq().toSafePath(path.relative(docDir, f));
-
-			let pxHeight = 0;
-			const ext = path.extname(f).toLowerCase();
-			if (isImageOrVideoExt(ext)) {
-				pxHeight = LARGE_PREVIEW_HEIGHT;
-				try {
-					let mtimeMs = 0;
-					try { mtimeMs = fs.statSync(f).mtimeMs; } catch { }
-					const info = await getMediaInfo(f, mtimeMs || Date.now());
-					const { height } = getFrameConfig(info);
-					pxHeight = height;
-				} catch { }
-			} else if (isPlainTextFile(f)) {
-				pxHeight = getFrameConfig(null).height;
-			} else {
-
-				pxHeight = -1;
-			}
-
 			const isLastItem = i === files.length - 1 && folders.length === 0;
+
+			// ★ 使用统一的空行计算函数
+			let gapBelow = await calculateRequiredBlankLines(f, isLastItem);
+			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
+
 			if (i > 0 || folders.length > 0) replacement += eol;
 			replacement += `/\\${relPath}\\/
 `;
-			if (pxHeight > 0 || pxHeight === -1) {
-				let gapBelow = calculateBlankLinesExact(pxHeight, isLastItem);
-
-				if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-				replacement += eol.repeat(gapBelow);
-			} else {
-				replacement += eol;
-			}
+			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
 	} else if (result.type === "folder_text") {
-		const folders = result.text.split(
-			/\r?\n/).filter(f => f.trim());
+		const folders = result.text.split(/\r?\n/).filter(f => f.trim());
 		for (let i = 0; i < folders.length; i++) {
 			const folderPath = folders[i];
 			const relPath = path.relative(docDir, folderPath).replace(/\\/g, "/");
+			const isLastItem = i === folders.length - 1;
+			// ★ 使用统一的空行计算函数
+			let gapBelow = await calculateRequiredBlankLines(folderPath, isLastItem);
+			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 			replacement += `
 /\\${relPath}\\/
-${eol}`;
+${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 	} else if (result.type === "text") {
@@ -2634,8 +2615,12 @@ async function executeClipboardCommand() {
 }
 
 // ==================== 整洁模式 ====================
-async function provideCleanlinessEditsAsync(document) {
+async function provideCleanlinessEditsAsync(document, mode = null) {
 	if (!document) return [];
+	// 如果没有指定 mode，使用全局配置
+	const effectiveMode = mode || cleanFreakMode;
+	const allowRemove = effectiveMode === "add & remove";
+
 	const edits = [];
 	const text = document.getText();
 	const regex = geq().createPathRegex();
@@ -2647,6 +2632,7 @@ async function provideCleanlinessEditsAsync(document) {
 		markers.push({ text: match[0], index: match.index, inner: (match[1] || "").trim() });
 	}
 
+	// 从后往前处理，避免索引偏移问题
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const m = markers[i];
 		const startPos = document.positionAt(m.index);
@@ -2655,68 +2641,72 @@ async function provideCleanlinessEditsAsync(document) {
 
 		const rawPath = m.inner;
 		const absPath = resolvePathToAbsolute(document.uri, rawPath);
-		let pxHeight = 0;
 
-		if (absPath && fs.existsSync(absPath)) {
-			// ★ 必须调用 shouldUseFrame 来精准判定是否使用相框
-			// 该函数会内部调用 getMediaInfo 来确定文件是否"健康"（有宽高或时长）
-			const useFrame = await shouldUseFrame(absPath);
-
-			if (useFrame) {
-				// 确定相框尺寸
-				try {
-					let mtimeMs = 0;
-					try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-					const info = await getMediaInfo(absPath, mtimeMs); // 这个调用会被内存缓存拦截
-					const { height } = getFrameConfig(info);
-					pxHeight = height;
-				} catch {
-					// 默认使用大相框高度
-					pxHeight = LARGE_PREVIEW_HEIGHT;
-				}
-			} else {
-				// 图标框：使用较小的高度，对应1-2行
-				pxHeight = -1; // 特殊标记，使用图标框的行数计算
-			}
-		}
-
+		// 检查暗号前后是否有其他内容（需要换行分离）
 		const lineObj = document.lineAt(markerLine);
 		const lineContent = lineObj.text;
-
-		if (startPos.character > 0) edits.push({ range: new vscode.Range(startPos, startPos), newText: eol });
+		if (startPos.character > 0) {
+			edits.push({ range: new vscode.Range(startPos, startPos), newText: eol });
+		}
 		const suffix = lineContent.substring(endPos.character);
-		if (suffix.trim().length > 0) edits.push({ range: new vscode.Range(endPos, endPos), newText: eol });
+		if (suffix.trim().length > 0) {
+			edits.push({ range: new vscode.Range(endPos, endPos), newText: eol });
+		}
 
-		if (pxHeight !== 0) {
-			const isLastMarkerInDoc = i === markers.length - 1;
-			let neededLines = calculateBlankLinesExact(pxHeight, isLastMarkerInDoc);
-			// 对于非最后一个标记，减1以与直接粘贴体验一致
+		// 计算所需空行数
+		const isLastMarkerInDoc = i === markers.length - 1;
+		let neededLines = 0;
+
+		if (absPath && fs.existsSync(absPath)) {
+			// ★ 使用统一的空行计算函数
+			neededLines = await calculateRequiredBlankLines(absPath, isLastMarkerInDoc);
+			// 对于非最后一个标记，减1以与粘贴体验一致
 			if (!isLastMarkerInDoc) neededLines = Math.max(neededLines - 1, 0);
-			let existingBlanks = 0;
-			for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
-				if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
-				else break;
-			}
-			if (existingBlanks < neededLines) {
-				const linesToAdd = neededLines - existingBlanks;
-				const lineEndPos = lineObj.range.end;
-				edits.push({ range: new vscode.Range(lineEndPos, lineEndPos), newText: eol.repeat(linesToAdd) });
-			}
+		}
+
+		// 统计当前已有的空行数
+		let existingBlanks = 0;
+		for (let lineIdx = markerLine + 1; lineIdx < document.lineCount; lineIdx++) {
+			if (document.lineAt(lineIdx).text.trim() === "") existingBlanks++;
+			else break;
+		}
+
+		// 根据模式决定是否需要修改空行
+		if (existingBlanks < neededLines) {
+			// 空行不足，需要添加
+			const linesToAdd = neededLines - existingBlanks;
+			const lineEndPos = lineObj.range.end;
+			edits.push({ range: new vscode.Range(lineEndPos, lineEndPos), newText: eol.repeat(linesToAdd) });
+		} else if (allowRemove && existingBlanks > neededLines) {
+			// 空行过多，需要删除（仅在 add & remove 模式）
+			const linesToRemove = existingBlanks - neededLines;
+			const removeStartLine = markerLine + 1 + neededLines;
+			const removeEndLine = removeStartLine + linesToRemove;
+			const removeStart = new vscode.Position(removeStartLine, 0);
+			const removeEnd = new vscode.Position(removeEndLine, 0);
+			edits.push({ range: new vscode.Range(removeStart, removeEnd), newText: "" });
 		}
 	}
 	return edits;
 }
 
-async function performGlobalClean(editor, force = false) {
+async function performGlobalClean(editor, force = false, mode = null) {
 	if (!editor) return;
-	if (!force && !cleanFreakMode) return;
-	const edits = await provideCleanlinessEditsAsync(editor.document);
-	if (edits.length > 0) {
-		await editor.edit((editBuilder) => {
-			edits.forEach((e) => {
-				editBuilder.replace(e.range, e.newText);
+	if (!force && cleanFreakMode === "never") return;
+	try {
+		// 检查编辑器是否仍然有效
+		if (!vscode.window.visibleTextEditors.includes(editor)) return;
+		// 如果没指定 mode，使用全局配置
+		const edits = await provideCleanlinessEditsAsync(editor.document, mode);
+		if (edits.length > 0) {
+			await editor.edit((editBuilder) => {
+				edits.forEach((e) => {
+					editBuilder.replace(e.range, e.newText);
+				});
 			});
-		});
+		}
+	} catch (e) {
+		global.logMessage(`performGlobalClean failed: ${e.message}`, "WARN");
 	}
 }
 
@@ -3072,10 +3062,17 @@ async function renameFileCommand(rawPath, absPath) {
 			ranges.push(new vscode.Range(doc.positionAt(m.index), doc.positionAt(m.index + m[0].length)));
 		}
 	}
-	if (ranges.length)
-		await editor.edit((b) => ranges.forEach((r) => b.replace(r, `
+	if (ranges.length) {
+		try {
+			// 检查编辑器是否仍然有效
+			if (!vscode.window.visibleTextEditors.includes(editor)) return;
+			await editor.edit((b) => ranges.forEach((r) => b.replace(r, `
 /\\${newRaw}\\/
 `)));
+		} catch (e) {
+			global.logMessage(`renameFile edit failed: ${e.message}`, "WARN");
+		}
+	}
 
 	invalidateFolderSizeCacheForPath(newAbs);
 	renderVisibleEditors();
@@ -3152,11 +3149,11 @@ async function activate(context) {
 				clearDecorations();
 				if (codeLensProvider) codeLensProvider.refresh();
 				renderVisibleEditors(10);
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+				if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
 			}
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
-				if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+				if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
 		vscode.commands.registerCommand("qqq.q1", global.withReady(executeClipboardCommand)),
@@ -3165,7 +3162,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
 		vscode.commands.registerCommand("qqq.renameFile", global.withReady(renameFileCommand)),
 		vscode.commands.registerCommand("qqq.weave", global.withReady(() => {
-			performGlobalClean(vscode.window.activeTextEditor, true);
+			// 手动 weave 始终使用严格模式（add & remove）
+			performGlobalClean(vscode.window.activeTextEditor, true, "add & remove");
 		})),
 		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
 			q3.executeExportDocCommand(global.isValid());
@@ -3175,7 +3173,7 @@ async function activate(context) {
 		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
-			if (cleanFreakMode && e.document) {
+			if (cleanFreakMode !== "never" && e.document) {
 				e.waitUntil(
 					provideCleanlinessEditsAsync(e.document).then((edits) => {
 						return edits.map((edit) => new vscode.TextEdit(edit.range, edit.newText));
@@ -3217,7 +3215,7 @@ async function activate(context) {
 				}
 			}
 			renderVisibleEditors();
-			if (cleanFreakMode) performGlobalClean(vscode.window.activeTextEditor);
+			if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
 		})
 	);
 

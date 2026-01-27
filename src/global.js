@@ -2401,11 +2401,20 @@ const TransactionManager = {
 	},
 
 	async insertAnchor(editor, transId) {
-		const anchor = `/__PENDING_${transId}/`;
-		const success = await editor.edit(editBuilder => {
-			editBuilder.replace(editor.selection, anchor);
-		});
-		return success;
+		try {
+			// 检查编辑器是否仍然有效
+			if (!editor || !vscode.window.visibleTextEditors.includes(editor)) {
+				return false;
+			}
+			const anchor = `/__PENDING_${transId}/`;
+			const success = await editor.edit(editBuilder => {
+				editBuilder.replace(editor.selection, anchor);
+			});
+			return success;
+		} catch (e) {
+			logMessage(`insertAnchor failed: ${e.message}`, "WARN");
+			return false;
+		}
 	}
 };
 
