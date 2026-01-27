@@ -1383,8 +1383,17 @@ class ClipboardHistorySidebarProvider {
         if (source === AUDIO_SOURCE.PYTHON) {
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
-                if (res && res.status === 'playing') return;
-                throw new Error(res?.reason || 'unknown_python_error');
+
+                // [Fix] 兼容 'ok' (新版 kp.py) 和 'playing' (旧版习惯)
+                if (res && (res.status === 'playing' || res.status === 'ok')) {
+                    return;
+                }
+
+                // 优先报告明确的错误信息
+                if (res && res.error) throw new Error(res.error);
+                if (res && res.reason) throw new Error(res.reason);
+
+                throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
             } catch (e) {
                 console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
                 this._pythonAudioFailed = true;
@@ -1436,7 +1445,15 @@ class ClipboardHistorySidebarProvider {
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
                 if (res && res.status === 'playing') return;
-                throw new Error(res?.reason || 'unknown_python_error');
+
+                // [Fix] 增加对 'ok' 状态的兼容
+                if (res && (res.status === 'playing' || res.status === 'ok')) return;
+
+                // 优先报告明确的错误信息
+                if (res && res.error) throw new Error(res.error);
+                if (res && res.reason) throw new Error(res.reason);
+
+                throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
             } catch (e) {
                 console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
                 this._pythonAudioFailed = true;
