@@ -151,33 +151,38 @@ function cacheKeyForPath(p) {
 // ============================================================================
 // Cache Initialization & Management
 // ============================================================================
-function initCache(context) {
+async function initCache(context) {
 	const globalStoragePath = context.globalStorageUri?.fsPath || context.globalStoragePath;
 	if (!globalStoragePath) {
 		global.logMessage("initCache: globalStoragePath is undefined!", "ERROR");
 		return;
 	}
 	cacheDir = path.join(globalStoragePath, CACHE_DIR_NAME);
-	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-	loadCacheMeta();
-	validateCache();
+	if (!fs.existsSync(cacheDir)) {
+		try {
+			await fs.promises.mkdir(cacheDir, { recursive: true });
+		} catch (e) { }
+	}
+	await loadCacheMetaAsync();
+	// validateCache 不在启动阶段执行，由 Q2 视图按需触发或后台延迟空闲执行
 }
 
-function createEmptyMeta() {
-	return {
-		entries: {},
-		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
-		brokenFiles: {},
-		fileIndex: {}, // Persistent Source File Index (Fingerprint -> Path)
-		icons: {}
-	};
+let _cacheValidated = false;
+/**
+ * 确保缓存已验证（按需触发）
+ */
+async function ensureCacheValidated() {
+	if (_cacheValidated) return;
+	_cacheValidated = true;
+	validateCacheAsync().catch(() => { });
 }
 
-function loadCacheMeta() {
+async function loadCacheMetaAsync() {
 	const metaPath = path.join(cacheDir, META_FILE_NAME);
 	try {
 		if (fs.existsSync(metaPath)) {
-			cacheMeta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+			const data = await fs.promises.readFile(metaPath, "utf-8");
+			cacheMeta = JSON.parse(data);
 			if (!cacheMeta.entries) cacheMeta.entries = {};
 			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
 			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
@@ -190,6 +195,104 @@ function loadCacheMeta() {
 		cacheMeta = createEmptyMeta();
 	}
 }
+
+async function validateCacheAsync() {
+	if (!cacheDir || !cacheMeta) return;
+
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+
+	try {
+		const files = await fs.promises.readdir(cacheDir);
+		for (const f of files) {
+			if (f !== META_FILE_NAME) actualFiles.add(f);
+		}
+	} catch (e) { }
+
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry || typeof entry !== "object") {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+			continue;
+		}
+		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
+
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			if (!qInfo) {
+				delete entry.qualities[q];
+				changed = true;
+				continue;
+			}
+
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = await fs.promises.stat(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) {
+					delete entry.qualities[q];
+					changed = true;
+				}
+			}
+		}
+
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+
+	for (const orphan of actualFiles) {
+		// 保护图标文件不被误删，除非它们在 meta 中已不存在
+		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
+			continue;
+		}
+		try {
+			await fs.promises.unlink(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+
+	// Validate Source File Index
+	if (cacheMeta.fileIndex) {
+		const fps = Object.keys(cacheMeta.fileIndex);
+		for (const fp of fps) {
+			const p = cacheMeta.fileIndex[fp];
+			if (!fs.existsSync(p)) {
+				delete cacheMeta.fileIndex[fp];
+				changed = true;
+			}
+		}
+	}
+
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+
+	if (changed) {
+		saveCacheMeta();
+		updateStatusBarThrottled();
+	}
+}
+
+function createEmptyMeta() {
+	return {
+		entries: {},
+		stats: { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 },
+		brokenFiles: {},
+		fileIndex: {}, // Persistent Source File Index (Fingerprint -> Path)
+		icons: {}
+	};
+}
+
 
 function saveCacheMeta() {
 	if (!cacheDir || !cacheMeta) return;
@@ -476,119 +579,6 @@ async function verifyMediaFile(filePath, opts = {}) {
 	});
 }
 
-
-function validateCache() {
-	if (!cacheDir || !cacheMeta) return;
-
-	let changed = false;
-	let realSize = 0;
-	let realCount = 0;
-	const actualFiles = new Set();
-
-	try {
-		const files = fs.readdirSync(cacheDir);
-		for (const f of files) {
-			if (f !== META_FILE_NAME) actualFiles.add(f);
-		}
-	} catch (e) { }
-
-	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
-		if (!entry || typeof entry !== "object") {
-			delete cacheMeta.entries[contentId];
-			changed = true;
-			continue;
-		}
-		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
-
-		for (const [q, qInfo] of Object.entries(entry.qualities)) {
-			if (!qInfo) {
-				delete entry.qualities[q];
-				changed = true;
-				continue;
-			}
-
-			const fileName = `${contentId}.${q}`;
-			const filePath = path.join(cacheDir, fileName);
-
-			if (!actualFiles.has(fileName)) {
-				delete entry.qualities[q];
-				changed = true;
-			} else {
-				actualFiles.delete(fileName);
-				try {
-					const st = fs.statSync(filePath);
-					realSize += st.size;
-					realCount++;
-				} catch (e) {
-					delete entry.qualities[q];
-					changed = true;
-				}
-			}
-		}
-
-		if (Object.keys(entry.qualities).length === 0) {
-			delete cacheMeta.entries[contentId];
-			changed = true;
-		}
-	}
-
-	for (const orphan of actualFiles) {
-		// 保护图标文件不被误删，除非它们在 meta 中已不存在
-		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
-			continue;
-		}
-		try {
-			fs.unlinkSync(path.join(cacheDir, orphan));
-			changed = true;
-		} catch (e) { }
-	}
-
-	// Validate Source File Index
-	if (cacheMeta.fileIndex) {
-		const fps = Object.keys(cacheMeta.fileIndex);
-		for (const fp of fps) {
-			const p = cacheMeta.fileIndex[fp];
-			if (!p || !fs.existsSync(p)) {
-				delete cacheMeta.fileIndex[fp];
-				changed = true;
-			} else {
-				// Sync to memory
-				h.prefillFingerprint(p, fp);
-			}
-		}
-	}
-
-	// Validate Icons
-	if (cacheMeta.icons) {
-		const iconFiles = Object.keys(cacheMeta.icons);
-		for (const p of iconFiles) {
-			const entry = cacheMeta.icons[p];
-			if (!entry || !entry.hash) {
-				delete cacheMeta.icons[p];
-				changed = true;
-				continue;
-			}
-			const iconFileName = `icon_${entry.hash}.png`;
-			if (!actualFiles.has(iconFileName)) {
-				delete cacheMeta.icons[p];
-				changed = true;
-			} else {
-				actualFiles.delete(iconFileName);
-				try {
-					const st = fs.statSync(path.join(cacheDir, iconFileName));
-					realSize += st.size;
-					realCount++;
-				} catch (e) { }
-			}
-		}
-	}
-
-	cacheMeta.stats.totalSize = realSize;
-	cacheMeta.stats.fileCount = realCount;
-
-	if (changed) saveCacheMeta();
-}
-
 function ensureCacheSpace(neededBytes) {
 	if (!cacheDir || !cacheMeta) return;
 	if (cacheMeta.stats.totalSize + neededBytes <= CACHE_MAX_SIZE) return;
@@ -804,7 +794,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 					landedFolders: [],
 					startTime: Date.now(),
 					taskType: 'local_file',
-					existingFiles: global.getDirectorySnapshot(targetDir)
+					existingFiles: await global.getDirectorySnapshot(targetDir)
 				});
 
 				const progCb = makeVsProgressAdapter(progress);
@@ -1001,7 +991,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		landedFiles: [],
 		landedFolders: [],
 		taskType: 'video',  // ★ 视频下载任务
-		existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+		existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
 	});
 
 	// 2. 启动带进度条的弹窗任务
@@ -1257,7 +1247,7 @@ async function activate(context) {
 
 	// 已经移至 global.init(context)
 
-	initCache(context);
+	await initCache(context);
 
 	// ★ 预热/静默安装视频引擎和 Python 引擎
 	try {
@@ -1410,7 +1400,7 @@ async function deactivate() {
 		global.disposeStatusBar();
 	} catch { }
 
-	try { validateCache(); } catch { }
+	try { await validateCacheAsync(); } catch { }
 	saveCacheMeta();
 
 	if (q1Module?.deactivate) {
@@ -1490,7 +1480,8 @@ const exported = {
 	prefillFingerprint: h.prefillFingerprint,
 
 	initCache,
-	validateCache,
+	validateCache: validateCacheAsync,
+	ensureCacheValidated,
 	getIconCache,
 	setIconCache,
 

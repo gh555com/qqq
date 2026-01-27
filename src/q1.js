@@ -81,41 +81,8 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
 ]);
 const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 
-const IMAGE_EXTS = new Set([
-	".png",
-	".jpg",
-	".jpeg",
-	".gif",
-	".bmp",
-	".webp",
-	".ico",
-	".tiff",
-	".tif",
-	".svg",
-	".ai",
-	".eps",
-	".cdr",
-	".psd",
-]);
-const VIDEO_EXTS = new Set([
-	".mp4",
-	".mkv",
-	".webm",
-	".avi",
-	".mov",
-	".wmv",
-	".flv",
-	".rmvb",
-	".mpeg",
-	".mpg",
-	".3gp",
-	".m4v",
-	".f4v",
-	".ts",
-	".mts",
-	".m2ts",
-	".vob",
-]);
+const IMAGE_EXTS = global.IMAGE_EXTS;
+const VIDEO_EXTS = global.VIDEO_EXTS;
 
 const PIPE_SEEK_ERROR_PATTERNS = [
 	"non seekable",
@@ -201,31 +168,12 @@ async function scheduleGen(key, fn) {
 }
 
 // ==================== 初始化 ====================
-function verifySystemIntegrity() {
-	try {
-		// 验证大相框水印
-		if (!fs.existsSync(LARGE_WATERMARK_PATH)) return false;
-		const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
-		const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
-		if (largeHash !== LARGE_WATERMARK_HASH) return false;
 
-		// 验证小相框水印
-		if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
-		const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
-		const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
-		if (smallHash !== SMALL_WATERMARK_HASH) return false;
-
-		return true;
-	} catch (e) {
-		return false;
-	}
-}
-
-function loadWatermarkResource() {
+async function loadWatermarkResource() {
 	// 加载大相框水印
 	try {
 		if (fs.existsSync(LARGE_WATERMARK_PATH)) {
-			const buf = fs.readFileSync(LARGE_WATERMARK_PATH);
+			const buf = await fs.promises.readFile(LARGE_WATERMARK_PATH);
 			largeWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
 		}
 	} catch (e) {
@@ -235,7 +183,7 @@ function loadWatermarkResource() {
 	// 加载小相框水印
 	try {
 		if (fs.existsSync(SMALL_WATERMARK_PATH)) {
-			const buf = fs.readFileSync(SMALL_WATERMARK_PATH);
+			const buf = await fs.promises.readFile(SMALL_WATERMARK_PATH);
 			smallWatermarkBase64 = "data:image/png;base64," + buf.toString("base64");
 		}
 	} catch (e) {
@@ -1898,7 +1846,7 @@ function getEditorId(editor) {
 // ==================== 主渲染逻辑 ====================
 async function renderImages(editor) {
 	if (!editor) return;
-	if (!isCoreIntegrityValid) {
+	if (!global.isValid()) {
 		geq().logMessage(`renderImages: Integrity is invalid, skipping.`, "WARN");
 		clearDecorations();
 		return;
@@ -2381,7 +2329,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 		startTime: Date.now(),
 		taskType: taskType,
 		intentTotalSize: intentTotalSize,
-		existingFiles: global.getDirectorySnapshot(targetDir)
+		existingFiles: await global.getDirectorySnapshot(targetDir)
 	});
 
 	const taskStartTime = Date.now();
@@ -2591,7 +2539,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 }
 
 async function executeClipboardCommand() {
-	if (!isCoreIntegrityValid) {
+	if (!global.isValid()) {
 		vscode.window.showErrorMessage("Integrity check failed.");
 		return;
 	}
@@ -2784,7 +2732,7 @@ class FileCodeLensProvider {
 		}, 300);
 	}
 	async provideCodeLenses(document) {
-		if (!isCoreIntegrityValid || codelensLevel === "0") return [];
+		if (!global.isValid() || codelensLevel === "0") return [];
 		const lenses = [];
 		const regex = geq().createPathRegex();
 		const text = document.getText();
@@ -3172,23 +3120,22 @@ async function activate(context) {
 		if (global.ConfigManager) global.ConfigManager.setContext(context);
 	} catch (e) { }
 
-	isCoreIntegrityValid = verifySystemIntegrity();
-	const _qqq = geq();
+	// 异步校验完整性，不阻塞启动
+	global.verifySystemIntegrityAsync(context).then(valid => {
+		const _qqq = geq();
+		if (!valid) {
+			if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+			else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
+			vscode.window.showWarningMessage("核心文件不完整，部分功能可能受限");
+		} else {
+			if (_qqq) {
+				_qqq.logMessage(`Integrity: PASSED`, "INFO");
+				_qqq.logMessage(`FFmpeg Path: ${_qqq.ffmpegPath}`, "INFO");
+			}
+		}
+	});
 
-	if (!isCoreIntegrityValid) {
-		if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-		else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-		return;
-	}
-
-	if (_qqq) {
-		_qqq.logMessage(`Integrity: PASSED`, "INFO");
-		_qqq.logMessage(`FFmpeg Path: ${_qqq.ffmpegPath}`, "INFO");
-	} else {
-		global.logMessage(`Integrity: PASSED`, "INFO");
-	}
-
-	loadWatermarkResource();
+	await loadWatermarkResource();
 	refreshConfig();
 	codeLensProvider = new FileCodeLensProvider();
 
@@ -3216,10 +3163,10 @@ async function activate(context) {
 			performGlobalClean(vscode.window.activeTextEditor, true);
 		})),
 		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
-			q3.executeExportDocCommand(isCoreIntegrityValid);
+			q3.executeExportDocCommand(global.isValid());
 		})),
 		vscode.commands.registerCommand("qqq.exportZip", global.withReady(() => {
-			q3.executeExportZipCommand(isCoreIntegrityValid);
+			q3.executeExportZipCommand(global.isValid());
 		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {

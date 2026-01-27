@@ -766,7 +766,7 @@ class Qvideo {
                 landedFiles: [],
                 landedFolders: [],
                 taskType: 'video',  // ★ 视频下载任务
-                existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+                existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
             });
         }
 
