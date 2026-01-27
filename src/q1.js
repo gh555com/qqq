@@ -130,8 +130,9 @@ let codeLensProvider = null;
 
 const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
+const RESOLUTION_CACHE_MAX_SIZE = 1000; // ★ 提升至1000条
 const folderSizeCache = new Map();
-const FOLDER_SIZE_CACHE_MAX_ENTRIES = 1000; // ★ 最大缓存条目数
+const FOLDER_SIZE_CACHE_MAX_ENTRIES = 3000; // ★ 提升至3000条
 
 const editorDebounceTimers = new Map();
 
@@ -412,6 +413,26 @@ function getFrameConfig(info) {
 	return { mode, width, height };
 }
 
+// ==================== 缓存工具函数 ====================
+// 通用FIFO缓存清理函数
+function evictOldestEntries(cacheMap, maxSize, evictionRatio = 0.25) {
+	if (cacheMap.size > maxSize) {
+		const keys = Array.from(cacheMap.keys());
+		const deleteCount = Math.floor(keys.length * evictionRatio);
+		for (let i = 0; i < deleteCount; i++) {
+			cacheMap.delete(keys[i]);
+		}
+	}
+}
+
+// 清理所有缓存
+function clearAllCaches() {
+	resolutionCache.clear();
+	folderSizeCache.clear();
+	shouldUseFrameCache.clear();
+	global.logMessage("[Cache] 所有缓存已清空", "INFO");
+}
+
 // ==================== FFprobe ====================
 async function getMediaInfo(filePath, mtimeMsRaw) {
 	// 归一化 mtime，与 h.js 保持一致
@@ -609,7 +630,8 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			}
 
 			resolutionCache.set(filePath, info);
-			if (resolutionCache.size > 200) resolutionCache.delete(resolutionCache.keys().next().value);
+			// ★ FIFO 缓存大小限制
+			evictOldestEntries(resolutionCache, RESOLUTION_CACHE_MAX_SIZE);
 
 			resolve(info.width ? info : null);
 		});
@@ -2921,15 +2943,8 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 						: "空文件夹";
 			const data = { size: result.total_size, summary: summaryStr };
 			folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
-					
-			// ★ FIFO 缓存大小限制：超过则删除最旧的25%
-			if (folderSizeCache.size > FOLDER_SIZE_CACHE_MAX_ENTRIES) {
-				const keys = Array.from(folderSizeCache.keys());
-				const deleteCount = Math.floor(keys.length * 0.25);
-				for (let i = 0; i < deleteCount; i++) {
-					folderSizeCache.delete(keys[i]);
-				}
-			}
+			// ★ FIFO 缓存大小限制
+			evictOldestEntries(folderSizeCache, FOLDER_SIZE_CACHE_MAX_ENTRIES);
 
 			if (refreshCallback) {
 				refreshCallback();
@@ -2965,15 +2980,8 @@ async function geqFolderSize(folderPath) {
 					: "空文件夹";
 		const data = { size: result.total_size, summary: summaryStr };
 		folderSizeCache.set(folderPath, { data, timestamp: now });
-		
-		// ★ FIFO 缓存大小限制：超过则删除最旧的25%
-		if (folderSizeCache.size > FOLDER_SIZE_CACHE_MAX_ENTRIES) {
-			const keys = Array.from(folderSizeCache.keys());
-			const deleteCount = Math.floor(keys.length * 0.25);
-			for (let i = 0; i < deleteCount; i++) {
-				folderSizeCache.delete(keys[i]);
-			}
-		}
+		// ★ FIFO 缓存大小限制
+		evictOldestEntries(folderSizeCache, FOLDER_SIZE_CACHE_MAX_ENTRIES);
 		return data;
 	}
 	return null;
@@ -3280,10 +3288,8 @@ async function deactivate() {
 		clearInterval(shouldUseFrameCleanupInterval);
 	}
 
-	// ★ 清理缓存
-	resolutionCache.clear();
-	folderSizeCache.clear();
-	shouldUseFrameCache.clear();
+	// ★ 清理所有缓存
+	clearAllCaches();
 
 	// 用户时长统计由 geq().js 中控统一管理
 }
