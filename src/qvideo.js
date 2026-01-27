@@ -1610,12 +1610,16 @@ class Qvideo {
         const editor = vscode.window.activeTextEditor;
         if (!editor) return;
 
-        const docDir = path.dirname(editor.document.uri.fsPath);
-        let relPath = path.relative(docDir, fullPath).replace(/\\/g, '/');
+        try {
+            const docDir = path.dirname(editor.document.uri.fsPath);
+            let relPath = path.relative(docDir, fullPath).replace(/\\/g, '/');
 
-        await editor.edit(editBuilder => {
-            editBuilder.insert(editor.selection.active, `/\\${relPath}\\/\n`);
-        });
+            await editor.edit(editBuilder => {
+                editBuilder.insert(editor.selection.active, `/\\${relPath}\\/\n`);
+            });
+        } catch (e) {
+            this.log(`insertPathToEditor failed: ${e.message}`);
+        }
     }
 
     // ==================== 增强流程入口 ====================

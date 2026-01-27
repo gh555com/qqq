@@ -121,9 +121,19 @@
           },
           "qqq.cleanFreak": {
             "order": 20,
-            "type": "boolean",
-            "default": false,
-            "markdownDescription": "👁️ 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+            "type": "string",
+            "default": "never",
+            "enum": [
+              "never",
+              "add",
+              "add & remove"
+            ],
+            "markdownEnumDescriptions": [
+              "不自动整理（可手动 weave）",
+              "只增不减：确保每个暗号下方有足够空行，不删除多余空行",
+              "严格整理：确保每个暗号不多不少拥有应有的空行，多则删、少则补"
+            ],
+            "markdownDescription": "👁️ 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。"
           },
           "qqq.enlargeSmallImages": {
             "order": 30,
