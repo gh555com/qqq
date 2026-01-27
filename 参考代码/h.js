@@ -81,17 +81,6 @@ public class ClipboardHelper {
             CloseClipboard();
         }
     }
-
-    public static string SetFiles(string[] paths) {
-        try {
-            System.Collections.Specialized.StringCollection sc = new System.Collections.Specialized.StringCollection();
-            sc.AddRange(paths);
-            System.Windows.Forms.Clipboard.SetFileDropList(sc);
-            return "Success";
-        } catch (Exception ex) {
-            return "Error: " + ex.Message;
-        }
-    }
 }
 
 public class IconHelper {
@@ -203,46 +192,36 @@ function spawnOutput(cmd, args) {
 // ============================================================================
 // Deduplication Helper (仅同文件夹内去重，不跨文件夹)
 // ============================================================================
-/**
- * 尝试在文件所在目录内进行去重（仅限同文件夹）
- * @param {string} filePath
- * @returns {string} 最终使用的文件路径
- */
-function _tryLocalDeduplicate(filePath) {
+function _tryGlobalDeduplicate(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return filePath;
     try {
         const currentFp = computeFingerprint(filePath);
         if (!currentFp) return filePath;
 
-        // ★ 核心修复：严格限制在同一文件夹内去重，禁止跨文件夹引用
+        // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
         const dir = path.dirname(filePath);
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        const isWin = process.platform === "win32";
-        const normalizedFilePath = isWin ? filePath.toLowerCase() : filePath;
-
-        for (const entry of entries) {
-            if (!entry.isFile()) continue;
-            const f = entry.name;
+        const files = fs.readdirSync(dir);
+        for (const f of files) {
             const full = path.join(dir, f);
-            const normalizedFull = isWin ? full.toLowerCase() : full;
-
-            if (normalizedFull === normalizedFilePath) continue;
-
+            if (full === filePath) continue;
+            try {
+                if (!fs.statSync(full).isFile()) continue;
+            } catch { continue; }
             if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
             const otherFp = computeFingerprint(full);
             if (otherFp === currentFp) {
                 try {
                     fs.unlinkSync(filePath);
-                    log(`[Dedupe] 同文件夹重复，已复用本地文件: ${f}`, "INFO");
+                    log(`[Dedupe] 同文件夹重复: ${path.basename(filePath)} -> 使用旧文件: ${f}`, "INFO");
                     return full;
                 } catch (e) {
-                    log(`[Dedupe] 复用本地文件失败 ${filePath}: ${e.message}`, "WARN");
+                    log(`[Dedupe] 删除失败 ${filePath}: ${e.message}`, "WARN");
                 }
             }
         }
     } catch (e) {
-        log(`[Dedupe] Local Exception: ${e.message}`, "ERROR");
+        log(`[Dedupe] Exception: ${e.message}`, "ERROR");
     }
     return filePath;
 }
@@ -284,35 +263,6 @@ function getTimestampFilename(ext) {
     }
 
     return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
-}
-
-/**
- * 获取一个不冲突的路径 (如 file (1).txt)
- */
-function getUniquePath(baseDir, originalName, isFolder = false) {
-    let nameWithoutExt, ext;
-    if (isFolder) {
-        // 文件夹不拆分后缀，整体视为名称
-        nameWithoutExt = originalName;
-        ext = "";
-    } else {
-        ext = path.extname(originalName);
-        nameWithoutExt = path.basename(originalName, ext);
-        // 特殊情况：如果是 .gitignore 这种隐藏文件，path.extname 会返回全名，这里修正
-        if (!nameWithoutExt && ext.startsWith('.')) {
-            nameWithoutExt = ext;
-            ext = "";
-        }
-    }
-
-    let targetPath = path.join(baseDir, originalName);
-    let counter = 1;
-
-    while (fs.existsSync(targetPath)) {
-        targetPath = path.join(baseDir, `${nameWithoutExt}_${counter}${ext}`);
-        counter++;
-    }
-    return targetPath;
 }
 
 /**
@@ -422,16 +372,20 @@ function copyFileWithProgress(src, dest, onProgress, token) {
 // Fingerprint Logic
 // ============================================================================
 const _fingerprintCache = new Map();
+const _fingerprintDb = new Map();
 const FINGERPRINT_HEAD = 128;
 const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 function canonicalizeExistingPath(p) {
     if (!p) return "";
-    let out = path.normalize(p);
+    let out = String(p);
+    try {
+        if (fs.existsSync(out)) out = fs.realpathSync(out);
+    } catch { }
+    out = path.normalize(out);
     if (process.platform === "win32") {
-        // 统一盘符大写，移除 UNC 路径前缀
-        out = out.replace(/^\\\\\?\\/, "").replace(/^[a-z]:/i, (m) => m.toUpperCase());
+        out = out.replace(/^\\\\\?\\/, "").replace(/^[a-z]:/, (m) => m.toUpperCase());
     }
     return out;
 }
@@ -538,15 +492,19 @@ function prefillFingerprint(filePath, fingerprint) {
         const stat = fs.statSync(filePath);
         const key = cacheKeyForPath(filePath);
         _fingerprintCache.set(key, { mtime: stat.mtimeMs, size: stat.size, fp: fingerprint });
+        _fingerprintDb.set(fingerprint, filePath);
     } catch (e) { }
+}
+
+function findFileByFingerprint(fingerprint) {
+    return _fingerprintDb.get(fingerprint);
 }
 
 function computeFingerprint(filePath) {
     try {
         const stat = fs.statSync(filePath);
         const size = stat.size;
-        // 使用秒级精度或整数毫秒，防止文件系统精度抖动导致的 miss
-        const mtime = Math.floor(stat.mtimeMs);
+        const mtime = stat.mtimeMs;
         const key = cacheKeyForPath(filePath);
 
         const cached = _fingerprintCache.get(key);
@@ -1482,13 +1440,8 @@ async function verifyVideoFile(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return null;
     let ffmpeg = 'ffmpeg';
     try {
-        const globalPath = getGlobal().ffmpegPath();
-        if (globalPath && globalPath !== 'ffmpeg') {
-            ffmpeg = globalPath;
-        } else {
-            const d = getSharedDownloader();
-            if (d && d.ytdlp && d.ytdlp.ffmpegPath) ffmpeg = d.ytdlp.ffmpegPath;
-        }
+        const d = getSharedDownloader();
+        if (d && d.ytdlp && d.ytdlp.ffmpegPath) ffmpeg = d.ytdlp.ffmpegPath;
     } catch (e) { }
 
     return new Promise((resolve) => {
@@ -1534,7 +1487,7 @@ async function verifyVideoFile(filePath) {
     });
 }
 
-async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename = false) {
+async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
     const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
@@ -1545,7 +1498,6 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
     const httpTasks = [];
     const localTasks = [];
     const taskMap = new Map();
-    const originalFilenames = new Map(); // 保存原始文件名映射
     for (const b of pending) {
         const src = String(b.src || "");
         if (/^data:/i.test(src) || /^file:/i.test(src)) localTasks.push(b);
@@ -1555,14 +1507,10 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const ext = b.kind === "video" ? ".mp4" : ".png";
             // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
             // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
-            const originalFileName = getFilenameFromUrl(src, b.kind);
-            const filename = originalFileName || getTimestampFilename(ext);
+            const filename = getFilenameFromUrl(src, b.kind) || getTimestampFilename(ext);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 200 * 1024 * 1024 });
             taskMap.set(tag, b);
-            if (originalFileName) {
-                originalFilenames.set(tag, originalFileName);
-            }
         }
     }
 
@@ -1597,31 +1545,17 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (localPath && fs.existsSync(localPath) && !fs.statSync(localPath).isDirectory()) {
                     ensureDir(targetDir);
                     const ext = path.extname(localPath) || ".png";
-                    const originalName = path.basename(localPath);
-                    // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
-                    let filename = originalName;
-                    if (!originalName || originalName === ext) {
-                        filename = getTimestampFilename(ext);
-                    }
+                    const filename = getTimestampFilename(ext);
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
 
-                        // 先计算指纹，然后在同目录内去重
-                        const fp = computeFingerprint(destPath);
-                        let finalPath = destPath;
-
-                        if (!autoRename && fp) {
-                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
-                            finalPath = _tryLocalDeduplicate(destPath);
-                        } else {
-                            finalPath = autoRename ? destPath : _tryLocalDeduplicate(destPath);
-                        }
+                        const finalPath = _tryGlobalDeduplicate(destPath);
+                        const fp = computeFingerprint(finalPath);
 
                         b.filename = path.basename(finalPath);
                         b.path = finalPath;
-                        b.fingerprint = computeFingerprint(finalPath);
-                        b.size = fs.statSync(finalPath).size;
+                        b.fingerprint = fp || null;
                         b.status = "ok";
 
                         // ★ Register Transaction（使用规范化路径）
@@ -1634,9 +1568,6 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                                 await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                             }
                         }
-
-                        // 预填充指纹缓存
-                        if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                     } catch { b.status = "failed"; }
                     doneCount++;
                     if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
@@ -1654,13 +1585,12 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 try {
                     fs.writeFileSync(destPath, buf);
 
-                    const finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
+                    const finalPath = _tryGlobalDeduplicate(destPath);
                     const fp = computeFingerprint(finalPath); // Re-compute in case it changed
 
                     b.filename = path.basename(finalPath);
                     b.path = finalPath;
                     b.fingerprint = fp || null;
-                    b.size = fs.statSync(finalPath).size;
                     b.status = "ok";
 
                     // ★ Register Transaction（使用规范化路径）
@@ -1673,9 +1603,6 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                         }
                     }
-
-                    // 预填充指纹缓存
-                    if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                 } catch { b.status = "failed"; }
             }
         } catch { b.status = "failed"; }
@@ -1688,77 +1615,55 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 onProgress: (t, e) => { if (e.type === "done" || e.type === "error") { doneCount++; if (progressCallback) progressCallback((doneCount / total) * 100, `下载中 ${doneCount}/${total}`); } }
             });
             for (const res of r.results) {
-                try {
-                    const block = taskMap.get(res.tag);
-                    if (!block) continue;
-                    if (res.success) {
-                        let dlPath = res.path || res.destPath;
-                        const originalFileName = originalFilenames.get(res.tag);
+                const block = taskMap.get(res.tag);
+                if (!block) continue;
+                if (res.success) {
+                    let dlPath = res.path || res.destPath;
 
-                        if (block.kind === "video") {
-                            dlPath = await verifyVideoFile(dlPath);
-                            if (!dlPath) {
-                                block.status = "failed";
-                                block.error = "Video verification failed";
-                                continue;
-                            }
+                    if (block.kind === "video") {
+                        dlPath = await verifyVideoFile(dlPath);
+                        if (!dlPath) {
+                            block.status = "failed";
+                            block.error = "Video verification failed";
+                            continue;
                         }
+                    }
 
-                        // 先计算指纹，然后在同目录内去重
-                        const fp = computeFingerprint(dlPath);
-                        let finalPath = dlPath;
-                        let isNewFile = true;
+                    // 下载完成后，尝试全局去重
+                    const finalPath = _tryGlobalDeduplicate(dlPath);
+                    const isNewFile = (finalPath === dlPath);  // ★ 判断是否是新文件
 
-                        if (!autoRename && fp) {
-                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
-                            const tempPath = _tryLocalDeduplicate(dlPath);
-                            isNewFile = (tempPath === dlPath);
-                            finalPath = tempPath;
-                        } else {
-                            finalPath = autoRename ? dlPath : _tryLocalDeduplicate(dlPath);
-                            isNewFile = (finalPath === dlPath);
+                    block.status = "ok";
+                    block.path = finalPath;
+                    block.filename = path.basename(finalPath);
+                    block.fingerprint = computeFingerprint(block.path);
+                    if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
+
+                    // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
+                    // 复用的旧文件不记入，取消时不删除
+                    if (transId && isNewFile) {
+                        const global = getGlobal();
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                        if (trans) {
+                            const normalizedPath = path.normalize(finalPath);
+                            const newLanded = [...(trans.landedFiles || []), normalizedPath];
+                            // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
+                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
+                            await global.TransactionManager.updateTransaction(transId, {
+                                landedFiles: [...new Set(newLanded)],
+                                tempFiles: newTempFiles
+                            });
                         }
-
-                        block.status = "ok";
-                        block.path = finalPath;
-                        block.filename = path.basename(finalPath);
-                        try {
-                            block.size = fs.statSync(finalPath).size;
-                        } catch (e) {
-                            block.size = 0;
-                            log(`[Dedupe] Warning: Unable to stat finalPath: ${finalPath}`, "WARN");
+                    } else if (transId && !isNewFile) {
+                        // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
+                        const global = getGlobal();
+                        const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                        if (trans) {
+                            const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath);
+                            await global.TransactionManager.updateTransaction(transId, { tempFiles: newTempFiles });
                         }
-                        block.fingerprint = computeFingerprint(block.path);
-                        if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
-
-                        // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
-                        // 复用的旧文件不记入，取消时不删除
-                        if (transId && isNewFile) {
-                            const global = getGlobal();
-                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                            if (trans) {
-                                const normalizedPath = path.normalize(finalPath);
-                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
-                                // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
-                                const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
-                                await global.TransactionManager.updateTransaction(transId, {
-                                    landedFiles: [...new Set(newLanded)],
-                                    tempFiles: newTempFiles
-                                });
-                            }
-                        } else if (transId && !isNewFile) {
-                            // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
-                            const global = getGlobal();
-                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                            if (trans) {
-                                const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath);
-                                await global.TransactionManager.updateTransaction(transId, { tempFiles: newTempFiles });
-                            }
-                        }
-                    } else { block.status = "failed"; block.error = res.error; }
-                } catch (e) {
-                    log(`处理下载结果失败 (${res.tag}): ${e.message}`, "ERROR");
-                }
+                    }
+                } else { block.status = "failed"; block.error = res.error; }
             }
         } catch (e) { log(`dow.js downloadAll failed: ${e.message}`, "ERROR"); }
     }
@@ -1767,7 +1672,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-function copyFilesToTarget(files, targetDir, autoRename = false) {
+function copyFilesToTarget(files, targetDir) {
     ensureDir(targetDir);
     const copied = [];
     const fingerprints = {};
@@ -1782,38 +1687,30 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             const srcFingerprint = computeFingerprint(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
-                // q2 模式不自动重命名时，允许同目录内去重（但禁止跨目录）
-            }
-            const ext = path.extname(f);
-            const originalName = path.basename(f);
-            const isImg = isImageExtForClipboard(ext);
-            // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
-            let destName = originalName;
-            if (isImg && (!originalName || originalName === ext)) {
-                destName = getTimestampFilename(ext);
-            }
-            let dest = path.join(targetDir, destName);
-
-            if (fs.existsSync(dest)) {
-                const dstFingerprint = computeFingerprint(dest);
-                if (dstFingerprint === srcFingerprint && !autoRename) {
-                    copied.push(dest);
-                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    _tryLocalDeduplicate(dest);
+                let existingPath = findFileByFingerprint(srcFingerprint);
+                if (existingPath && fs.existsSync(existingPath)) {
+                    copied.push(existingPath);
                     continue;
                 }
-
-                if (autoRename) {
-                    // q2 模式：名字冲突且内容不同 -> 静默重命名
-                    dest = getUniquePath(targetDir, destName, false);
-                } else {
-                    // q1 模式：名字冲突且内容不同 -> 保持原逻辑直接覆盖
+            }
+            const ext = path.extname(f);
+            const isImg = isImageExtForClipboard(ext);
+            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+            const dest = path.join(targetDir, fname);
+            if (fs.existsSync(dest)) {
+                const dstFingerprint = computeFingerprint(dest);
+                if (dstFingerprint === srcFingerprint) {
+                    copied.push(dest);
+                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                    // Ensure it's registered globally
+                    _tryGlobalDeduplicate(dest);
+                    continue;
                 }
             }
             fs.copyFileSync(f, dest);
 
-            // Local Deduplication Check
-            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
+            // Global Deduplication Check
+            const finalPath = _tryGlobalDeduplicate(dest);
             if (finalPath !== dest) {
                 // If deduplicated to a different path
                 copied.push(finalPath);
@@ -1834,7 +1731,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
     return { copied, fingerprints };
 }
 
-function processFilesForClipboard(files, targetDir, autoRename = false) {
+function processFilesForClipboard(files, targetDir) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1843,9 +1740,7 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
     const fingerprints = {};
     for (const folder of folders) {
         try {
-            const folderName = path.basename(folder);
-            // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
+            const destFolder = path.join(targetDir, path.basename(folder));
             // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
@@ -1861,7 +1756,7 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
         }
     }
     if (validFiles.length > 0) {
-        const result = copyFilesToTarget(validFiles, targetDir, autoRename);
+        const result = copyFilesToTarget(validFiles, targetDir);
         copiedFiles.push(...result.copied);
         Object.assign(fingerprints, result.fingerprints);
     }
@@ -1872,78 +1767,8 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
 }
 
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
-/**
- * 异步安全的递归复制文件夹，支持取消检查，并返回累计大小
- */
-async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCancel = null) {
-    const skipped = [];
-    const errors = [];
-    let totalSize = 0;
-
-    const isCancelled = () => (token && token.isCancellationRequested) || (shouldCancel && shouldCancel());
-
-    async function copyRecursive(srcPath, destPath) {
-        if (isCancelled()) return;
-
-        try {
-            if (!safeAccessCheck(srcPath)) {
-                skipped.push(srcPath);
-                return;
-            }
-
-            const stat = await fs.promises.stat(srcPath).catch(() => null);
-            if (!stat) return;
-
-            if (stat.isDirectory()) {
-                try {
-                    if (!fs.existsSync(destPath)) {
-                        await fs.promises.mkdir(destPath, { recursive: true });
-                    }
-                } catch (e) {
-                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
-                    return;
-                }
-
-                let entries = [];
-                try {
-                    entries = await fs.promises.readdir(srcPath);
-                } catch (e) {
-                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
-                    return;
-                }
-
-                for (const entry of entries) {
-                    if (isCancelled()) break;
-                    await copyRecursive(path.join(srcPath, entry), path.join(destPath, entry));
-                }
-            } else if (stat.isFile()) {
-                try {
-                    await fs.promises.copyFile(srcPath, destPath);
-                    totalSize += stat.size;
-                } catch (e) {
-                    if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
-                        skipped.push(srcPath);
-                        log(`[SafeCopyAsync] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
-                    } else {
-                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
-                    }
-                }
-            }
-        } catch (e) {
-            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
-        }
-    }
-
-    try {
-        await copyRecursive(src, dest);
-        return { success: !isCancelled(), skipped, errors, totalSize };
-    } catch (e) {
-        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`], totalSize: 0 };
-    }
-}
-
 // ★ 修复：添加 token 和 transId 参数，边复制边记录事务
-async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
+async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1954,7 +1779,6 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     const totalItems = folders.length + validFiles.length;
     let processedItems = 0;
     let skippedCount = 0;
-    let totalSize = 0;
 
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
@@ -2015,15 +1839,10 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
                 await yieldToUI();
             }
-            // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
-
-            // ★ 改为异步复制文件夹，避免大文件夹阻塞主线程
-            const result = await safeCopyFolderRecursiveAsync(folder, destFolder, token, shouldCancel);
-
-            if (result.success || result.errors.length === 0) {
+            const destFolder = path.join(targetDir, folderName);
+            const result = safeCopyFolderRecursive(folder, destFolder);
+            if (result.success) {
                 copiedFolders.push(destFolder);
-                totalSize += result.totalSize;
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
                     log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
@@ -2055,9 +1874,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
                 progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
-                // 异步复制时不需要频繁 yieldToUI，因为 fs.promises 已经是不阻塞的了
-                // 但每 10 个文件 yield 一下还是稳妥的，给微任务队列一点空间
-                if (i % 10 === 0) {
+                if (i % 5 === 0) {
                     await yieldToUI();
                 }
             }
@@ -2076,33 +1893,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             const ext = path.extname(f);
             const isImg = isImageExtForClipboard(ext);
-            const originalName = path.basename(f);
+            const fname = isImg ? getTimestampFilename(ext) : path.basename(f);
+            const dest = path.join(targetDir, fname);
 
-            let destName = originalName;
-            if (isImg && (!originalName || originalName === ext)) {
-                destName = getTimestampFilename(ext);
-            }
-            let dest = path.join(targetDir, destName);
-
-            if (autoRename) {
-                dest = getUniquePath(targetDir, destName, false);
-            }
-
-            // ★ 改为异步复制文件，彻底解决大文件粘贴卡顿
-            await fs.promises.copyFile(f, dest);
-
-            // 本地去重检查
-            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
-            if (finalPath !== dest) {
-                copiedFiles.push(finalPath);
-            } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                copiedFiles.push(dest);
-            }
-            try {
-                const st = await fs.promises.stat(finalPath);
-                totalSize += st.size;
-            } catch { }
+            fs.copyFileSync(f, dest);
+            if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+            copiedFiles.push(dest);
         } catch (e) {
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 skippedCount++;
@@ -2125,12 +1921,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         folders: copiedFolders,
         fingerprints: fingerprints,
         skippedCount: skippedCount,
-        totalRequested: totalItems,
-        totalSize: totalSize
+        totalRequested: totalItems
     };
 }
 
-async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
+async function handleClipboardShell(targetDir, token = null, progressCallback = null, preFetchedFiles = null, preCalculatedTotalSize = 0, transId = null, onCancelCallback = null, shouldCancel = null) {
     try {
         if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
         if (process.platform === "win32") {
@@ -2164,7 +1959,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 }
 
                 // ★ 传入 token 和 transId，边复制边记录事务
-                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel, autoRename);
+                const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel);
 
                 // ★ 记录复制结果（包含跳过信息）
                 const successFiles = (result?.files || []).length;
@@ -2184,27 +1979,23 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
-                    if (saved?.success && fs.existsSync(dest)) {
-                        const st = fs.statSync(dest);
-                        if (st.size > 0) {
-                            // ✅ 关键：内存截图也要走本地去重
-                            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
-                            const fp = computeFingerprint(finalPath);
-                            const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
+                    if (saved?.success && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+                        // ✅ 关键：内存截图也要走全局去重
+                        const finalPath = _tryGlobalDeduplicate(dest);
+                        const fp = computeFingerprint(finalPath);
 
-                            // ★ Register Transaction（使用规范化路径）
-                            if (transId) {
-                                const global = getGlobal();
-                                const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
-                                if (trans) {
-                                    const normalizedPath = path.normalize(finalPath);
-                                    const newLanded = [...(trans.landedFiles || []), normalizedPath];
-                                    await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
-                                }
+                        // ★ Register Transaction（使用规范化路径）
+                        if (transId) {
+                            const global = getGlobal();
+                            const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
+                            if (trans) {
+                                const normalizedPath = path.normalize(finalPath);
+                                const newLanded = [...(trans.landedFiles || []), normalizedPath];
+                                await global.TransactionManager.updateTransaction(transId, { landedFiles: [...new Set(newLanded)] });
                             }
-
-                            return { type: "image", path: finalPath, fingerprint: fp, totalSize: finalSize };
                         }
+
+                        return { type: "image", path: finalPath, fingerprint: fp };
                     }
                 }
             } catch (e) { }
@@ -2215,7 +2006,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         // Fallback to HTML if text looks like HTML
         const text = await vscode.env.clipboard.readText();
         if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img"))) {
-            return await handleClipboardUnified(targetDir, progressCallback, token, transId, null, autoRename);
+            return await handleClipboardUnified(targetDir, progressCallback, token, transId);
         }
     } catch (e) { log(`Shell剪贴板处理失败: ${e.message}`, "ERROR"); }
     return null;
@@ -2224,7 +2015,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 // ============================================================================
 // Main Entry
 // ============================================================================
-async function handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel = null, autoRename = false) {
+async function handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel = null) {
     // 1. Get raw data and parsed DOM using Unified "Eyes"
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
@@ -2308,7 +2099,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
     if (blocks.some(b => b.type === "media")) {
         if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
-        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename);
+        await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId);
     }
 
     return { type: "html_blocks", blocks, baseUrl };
@@ -2318,7 +2109,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
 // ★ 接受完整快照（单一真理源），不再重复调用 Shell
 // ============================================================================
-async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
+async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null) {
     const global = getGlobal();
 
     // ★ 从快照中提取信息
@@ -2384,8 +2175,8 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
         log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
-        // ★ 传递预获取的文件列表，并透传 autoRename
-        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel, autoRename);
+        // ★ 传递预获取的文件列表，避免重复调用 getFiles
+        return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel);
     }
 
     // ★★★ Markdown 格式保留检测 ★★★
@@ -2419,7 +2210,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
 
     if (qStatus.hasHtml) {
         log(`[AutoDetect] 进入 HTML 处理流程`, "INFO");
-        return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel, autoRename);
+        return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel);
     }
 
     if (qStatus.hasImage) {
@@ -2481,42 +2272,9 @@ async function pickTargetDirectory() {
     return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
 }
 
-/**
- * 将文件/文件夹路径列表复制到系统剪贴板 (Windows CF_HDROP 格式)
- * @param {string[]} filePaths - 绝对路径列表
- */
-async function copyFilesToClipboard(filePaths) {
-    if (!filePaths || filePaths.length === 0) return;
-
-    const global = getGlobal();
-    try {
-        // ★ 统一使用 global.tryEngineCall，享受 Rust -> Python -> Node 的完美回退
-        const res = await global.tryEngineCall({
-            rust: "setFiles",
-            python: "setFiles",
-            shell: "setFiles" // Node Daemon 兜底
-        }, { paths: filePaths }, 3000);
-
-        if (res && res.success) {
-            const activeName = global.getActiveEngineName(global.pythonBridge, global.rustBridge, global.shellBridge);
-            log(`[Clipboard] 通过 ${activeName} 复制了 ${filePaths.length} 个项目`, "INFO");
-            return;
-        }
-    } catch (e) {
-        log(`[Clipboard] 复制操作异常: ${e.message}`, "WARN");
-    }
-
-    // 如果所有 Bridge 都不可用，执行最低限度的纯文本回退
-    try {
-        await vscode.env.clipboard.writeText(filePaths.join("\n"));
-        log(`[Clipboard] 所有引擎不可用，已将路径作为纯文本复制`, "WARN");
-    } catch { }
-}
-
 module.exports = {
     CLIPBOARD_HELPER_CS,
     autoDetectAndPaste,
-    copyFilesToClipboard,
     handleClipboardUnified,
     handleClipboardShell,
     sanitizeHtml,

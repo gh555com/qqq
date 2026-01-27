@@ -5,16 +5,8 @@
 #   - 仅处理：纯文本、文件复制、原生图片保存
 import sys
 import os
-
-# 严格版本检查：[3.7, 3.12]
-if sys.version_info < (3, 7) or sys.version_info >= (3, 13):
-    sys.stderr.write(
-        f"Python version {sys.version} not supported. Requires 3.7 ~ 3.12.\n")
-    sys.exit(1)
-
 import json
 import time
-import threading
 import platform
 import shutil
 import ctypes
@@ -26,208 +18,6 @@ import concurrent.futures
 from collections import OrderedDict
 import re
 import base64
-
-# =============================================================================
-#  音频引擎整合（Savor：Python 播放引擎）
-#
-#  ✅ 只保留“限定次数播放的最后一次自然播完时淡出 2 秒”这一种淡出场景
-#     - loop_count > 0 且最后一轮（current_loop == loop_count-1）才淡出
-#     - loop_count == 0 代表无限循环：永远不淡出
-#     - stop_audio / 切歌：立即停止，不淡出
-#
-#  ✅ 用“样本级”线性增益衰减实现淡出（不依赖 device.volume，避免平台差异导致无效）
-#  ✅ 用 token 机制避免 stop / play 竞态：旧线程不会因 stop_event 被清除而“复活”
-# =============================================================================
-try:
-    import miniaudio
-    HAS_MINIAUDIO = True
-except ImportError:
-    HAS_MINIAUDIO = False
-
-from array import array
-
-
-class NonBlockingAudioEngine:
-    """
-    单实例、非阻塞音频播放引擎（miniaudio）。
-    重构版：参考 miniaudio_nonblocking_v15.py，使用 stream_file + device.start 模式
-    以解决 Python generator 回调导致的音频混乱/Buffer Underflow 问题。
-    """
-
-    REQUESTED_FORMAT = None  # SIGNED16
-    REQUESTED_CHANNELS = 2
-    REQUESTED_RATE = 44100
-
-    def __init__(self):
-        if HAS_MINIAUDIO:
-            self.REQUESTED_FORMAT = getattr(
-                miniaudio, "SampleFormat", None).SIGNED16
-
-        # 单实例：同一时间只允许一个播放任务
-        # [2026-01-27] 改为 max_workers=4 以防止旧任务清理阻塞新任务（Timeout fix）
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-
-        # token：任何 stop/play 都会推进 token，旧 worker 自动失效
-        self._token = 0
-
-        # 当前播放设备（用于 stop 时强杀）
-        self._device = None
-        self._current_sound = None  # 保存当前的 stream 对象
-
-    # ------------------------- public API -------------------------
-
-    def play(self, file_path, loop_count=1):
-        sys.stderr.write(f"[Audio] Play request: {file_path} (loop={loop_count})\n")
-        # 新播放 = 先停旧的
-        self.stop_all()
-
-        if (not HAS_MINIAUDIO) or (not file_path) or (not os.path.exists(file_path)):
-            sys.stderr.write("[Audio] Ignored: invalid file or no engine\n")
-            return
-
-        loop_count = int(loop_count or 1)
-
-        with self._lock:
-            self._stop_event.clear()
-            self._token += 1
-            token = self._token
-
-        self._executor.submit(self._play_worker, file_path, loop_count, token)
-
-    def stop_all(self):
-        """
-        停止所有播放。
-        注意：只设置信号，不执行物理关闭（由 worker 线程自己清理），
-        避免在主线程执行 device.stop() 导致阻塞或超时。
-        """
-        with self._lock:
-            self._stop_event.set()
-            self._token += 1  # 让所有旧 worker 立刻失效
-            # 清除引用，但资源释放交给 worker 的 finally 块
-            self._device = None
-            self._current_sound = None
-
-    # ------------------------- internal helpers -------------------------
-
-    def _is_alive(self, token):
-        with self._lock:
-            return (not self._stop_event.is_set()) and (token == self._token)
-
-    def _play_worker(self, file_path, loop_count, token):
-        if (not HAS_MINIAUDIO) or (not os.path.exists(file_path)):
-            return
-
-        sys.stderr.write(f"[Audio-Worker-{token}] Starting... loop={loop_count}\n")
-
-        # 0 代表无限循环
-        is_infinite = (loop_count <= 0)
-        # 如果 loop_count 是 0，我们设为一个很大的数来模拟循环，或者在 while 中处理
-        # 这里为了简单，统一用 while 循环处理
-
-        try:
-            # 获取文件时长
-            file_info = miniaudio.get_file_info(file_path)
-            duration = file_info.duration
-            if duration <= 0:
-                return
-        except Exception as e:
-            sys.stderr.write(f"Get File Info Error: {e}\n")
-            return
-
-        current_loop = 0
-
-        while self._is_alive(token):
-            if not is_infinite and current_loop >= loop_count:
-                break
-
-            device = None
-            sound = None
-            try:
-                # 1. 打开音频流
-                sound = miniaudio.stream_file(
-                    file_path,
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE
-                )
-
-                # 2. 初始化设备
-                device = miniaudio.PlaybackDevice(
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE
-                )
-
-                with self._lock:
-                    if not self._is_alive(token):
-                        # 已经被停止
-                        sound.close()
-                        device.close()
-                        return
-                    self._device = device
-                    self._current_sound = sound
-
-                # 3. 开始播放
-                device.start(sound)
-
-                # 4. 等待播放结束
-                # 使用分段 sleep 以便响应 stop 事件
-                # 稍微多等一点点 buffer 时间 (0.1s)
-                wait_remaining = duration + 0.1
-                step = 0.1
-
-                while wait_remaining > 0 and self._is_alive(token):
-                    time.sleep(min(step, wait_remaining))
-                    wait_remaining -= step
-
-            except Exception as e:
-                import traceback
-                error_msg = f"Audio Play Error: {e}\n{traceback.format_exc()}"
-                sys.stderr.write(error_msg)
-                sys.stderr.flush()
-                break
-            finally:
-                sys.stderr.write(f"[Audio-Worker-{token}] Cleaning up...\n")
-                # 清理本轮资源
-                if device:
-                    try:
-                        device.stop()
-                        device.close()
-                    except:
-                        pass
-                if sound:
-                    try:
-                        sound.close()
-                    except:
-                        pass
-
-                with self._lock:
-                    # 只有当 self._device 还是当前这个 device 时才置空
-                    # 防止把新任务的 device 给清了
-                    if self._device == device:
-                        self._device = None
-                    if self._current_sound == sound:
-                        self._current_sound = None
-
-            current_loop += 1
-
-        # 播放结束通知
-        if (not is_infinite) and current_loop >= loop_count and self._is_alive(token):
-             print(json.dumps({"event": "audio_finished"}), flush=True)
-
-
-_AUDIO_ENGINE = None
-
-
-def ensure_audio_engine():
-    global _AUDIO_ENGINE
-    if HAS_MINIAUDIO and _AUDIO_ENGINE is None:
-        _AUDIO_ENGINE = NonBlockingAudioEngine()
-    return _AUDIO_ENGINE
-
-
 # =============================================================================
 #  配置
 # =============================================================================
@@ -289,23 +79,13 @@ def safe_filename(name: str) -> str:
     return n
 
 
-def unique_path_in_dir(output_dir: Path, name: str, is_folder: bool = False) -> Path:
-    # 简单的重命名策略，防止覆盖
+def unique_path_in_dir(output_dir: Path, name: str) -> Path:
+    # 简单的重命名策略，防止覆盖（虽然 Node 侧会再次处理，但这里防止同一次操作内的冲突）
     base = output_dir / name
     if not base.exists():
         return base
-
-    if is_folder:
-        stem = name
-        ext = ""
-    else:
-        stem = base.stem
-        ext = base.suffix
-        # 特殊处理：如果没有主文件名（如 .gitignore），整体视为 stem
-        if not stem and ext.startswith('.'):
-            stem = ext
-            ext = ""
-
+    stem = base.stem
+    ext = base.suffix
     for i in range(1, 1000):
         new_name = f"{stem}_{i}{ext}"
         new_path = output_dir / new_name
@@ -364,29 +144,6 @@ if _IS_WINDOWS:
     RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
     RegisterClipboardFormatW.restype = wintypes.UINT
     CF_HTML = RegisterClipboardFormatW("HTML Format")
-
-    # For Setting Clipboard Files (CF_HDROP)
-    class DROPFILES(ctypes.Structure):
-        _fields_ = [
-            ("pFiles", wintypes.DWORD),
-            ("pt", wintypes.POINT),
-            ("fNC", wintypes.BOOL),
-            ("fWide", wintypes.BOOL),
-        ]
-
-    GlobalAlloc = kernel32.GlobalAlloc
-    GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-    GlobalAlloc.restype = wintypes.HGLOBAL
-    GlobalFree = kernel32.GlobalFree
-    GlobalFree.argtypes = [wintypes.HGLOBAL]
-    GlobalFree.restype = wintypes.HGLOBAL
-    EmptyClipboard = user32.EmptyClipboard
-    EmptyClipboard.argtypes = []
-    EmptyClipboard.restype = wintypes.BOOL
-    SetClipboardData = user32.SetClipboardData
-    SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
-    SetClipboardData.restype = wintypes.HANDLE
-    GHND = 0x0042  # GMEM_MOVEABLE | GMEM_ZEROINIT
 
     # For Icon Extraction
     class SHFILEINFOW(ctypes.Structure):
@@ -561,7 +318,7 @@ def copy_files_parallel(src_files: list, output_dir: Path) -> list:
     def submit_one(src: Path) -> Path:
         try:
             fname = safe_filename(src.name)
-            dst = unique_path_in_dir(output_dir, fname, is_folder=False)
+            dst = unique_path_in_dir(output_dir, fname)
             ensure_parent(dst)
             shutil.copy2(src, dst)
             return dst
@@ -589,7 +346,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
         # 如果目录存在，生成唯一名
         if dst_dir.exists():
             dst_dir = unique_path_in_dir(
-                output_dir, safe_filename(src_dir.name), is_folder=True)
+                output_dir, safe_filename(src_dir.name))
         dst_dir.mkdir(parents=True, exist_ok=True)
         futs = set()
         inflight = max(128, _MAX_WORKERS * 32)
@@ -757,8 +514,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                 bmp = dib_to_bmp_bytes(dib)
                 img = Image.open(io.BytesIO(bmp))
                 fname = get_timestamp_filename(".png")
-                out_path = unique_path_in_dir(
-                    output_dir, fname, is_folder=False)
+                out_path = unique_path_in_dir(output_dir, fname)
                 ensure_parent(out_path)
                 save_image_as_png(img, out_path)
                 return {"type": "image", "path": str(out_path)}
@@ -873,8 +629,7 @@ def handle_windows_ctypes(output_dir: Path):
                 bmp = dib_to_bmp_bytes(dib)
                 img = Image.open(io.BytesIO(bmp))
                 fname = get_timestamp_filename(".png")
-                out_path = unique_path_in_dir(
-                    output_dir, fname, is_folder=False)
+                out_path = unique_path_in_dir(output_dir, fname)
                 ensure_parent(out_path)
                 save_image_as_png(img, out_path)
                 return {"type": "image", "path": str(out_path)}
@@ -945,99 +700,50 @@ def get_clipboard_files_only():
 
 
 def get_clipboard_html():
-    # ... existing code ...
-    return {"type": "unknown"}
-
-
-def set_clipboard_files(paths):
-    if not paths:
-        return {"success": False, "error": "no paths"}
-
     sys_name = platform.system()
     if sys_name == "Windows":
         try:
-            # 优先尝试 ctypes (无依赖)
+            # 优先尝试 ctypes
             if OpenClipboard(None):
                 try:
-                    EmptyClipboard()
-                    # Calculate size
-                    # DROPFILES struct + wide chars (null terminated) + final null terminator
-                    offset = ctypes.sizeof(DROPFILES)
-                    # Join with null, end with double null
-                    joined = "\0".join(paths) + "\0\0"
-                    content_bytes = joined.encode("utf-16le")
-                    total_size = offset + len(content_bytes)
-
-                    h_mem = GlobalAlloc(GHND, total_size)
-                    if h_mem:
-                        ptr = GlobalLock(h_mem)
-                        if ptr:
-                            try:
-                                df = DROPFILES()
-                                df.pFiles = offset
-                                df.fWide = True
-                                ctypes.memmove(ptr, ctypes.byref(df), offset)
-                                ctypes.memmove(
-                                    ptr + offset, content_bytes, len(content_bytes))
-                            finally:
-                                GlobalUnlock(h_mem)
-                            SetClipboardData(CF_HDROP, h_mem)
-                            return {"success": True}
-                        else:
-                            GlobalFree(h_mem)
+                    if CF_HTML and IsClipboardFormatAvailable(CF_HTML):
+                        h_mem = GetClipboardData(CF_HTML)
+                        if h_mem:
+                            data = read_global_data(h_mem)
+                            if data:
+                                # HTML Format 通常是 UTF-8 编码
+                                try:
+                                    html = data.decode("utf-8")
+                                    return {"type": "html", "value": html}
+                                except:
+                                    # 如果解码失败，返回 base64
+                                    return {"type": "html", "value_base64": base64.b64encode(data).decode("ascii")}
                 finally:
                     CloseClipboard()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
+        except:
+            pass
+        # 备选 pywin32
         try:
-            # 备选 pywin32
             import win32clipboard as wcb
             import win32con as wcon
             wcb.OpenClipboard()
             try:
-                wcb.EmptyClipboard()
-                wcb.SetClipboardData(wcon.CF_HDROP, tuple(paths))
-                return {"success": True}
+                cf_html = wcb.RegisterClipboardFormat("HTML Format")
+                if wcb.IsClipboardFormatAvailable(cf_html):
+                    data = wcb.GetClipboardData(cf_html)
+                    if data:
+                        # pywin32 可能会根据版本返回 bytes 或 str
+                        if isinstance(data, bytes):
+                            try:
+                                return {"type": "html", "value": data.decode("utf-8")}
+                            except:
+                                return {"type": "html", "value_base64": base64.b64encode(data).decode("ascii")}
+                        return {"type": "html", "value": str(data)}
             finally:
                 wcb.CloseClipboard()
         except:
             pass
-
-    elif sys_name == "Linux":
-        # Linux text/uri-list
-        uris = [Path(p).absolute().as_uri() for p in paths]
-        content = "\n".join(uris).encode("utf-8")
-        # Try wl-copy or xclip
-        import subprocess
-        try:
-            if os.environ.get("WAYLAND_DISPLAY"):
-                subprocess.run(
-                    ["wl-copy", "--type", "text/uri-list"], input=content, check=True)
-                return {"success": True}
-        except:
-            pass
-        try:
-            subprocess.run(["xclip", "-selection", "clipboard",
-                           "-t", "text/uri-list"], input=content, check=True)
-            return {"success": True}
-        except:
-            pass
-
-    elif sys_name == "Darwin":
-        # macOS pbcopy with file urls
-        import subprocess
-        uris = [Path(p).absolute().as_uri() for p in paths]
-        # Use osascript to set clipboard to file list
-        script = 'set the clipboard to ' + \
-            ' & '.join([f'POSIX file "{p}"' for p in paths])
-        try:
-            subprocess.run(["osascript", "-e", script], check=True)
-            return {"success": True}
-        except:
-            pass
-
-    return {"success": False, "error": f"unsupported on {sys_name}"}
+    return {"type": "unknown"}
 # =============================================================================
 #  Daemon / CLI
 # =============================================================================
@@ -1053,7 +759,7 @@ def get_file_icon_base64(file_path: str):
 
         # Constants for SHGetFileInfo
         SHGFI_ICON = 0x000000100
-        SHGFI_LARGEICON = 0x000000000
+        SHGFI_SMALLICON = 0x000000001
 
         shfi = SHFILEINFOW()
         res = shell32.SHGetFileInfoW(
@@ -1061,7 +767,7 @@ def get_file_icon_base64(file_path: str):
             0,
             ctypes.byref(shfi),
             ctypes.sizeof(shfi),
-            SHGFI_ICON | SHGFI_LARGEICON
+            SHGFI_ICON | SHGFI_SMALLICON
         )
 
         if not res or not shfi.hIcon:
@@ -1072,8 +778,8 @@ def get_file_icon_base64(file_path: str):
             hdc_screen = GetDC(0)
             hdc_mem = CreateCompatibleDC(hdc_screen)
 
-            width = 32
-            height = 32
+            width = 16
+            height = 16
 
             bmi = BITMAPINFO()
             bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
@@ -1119,142 +825,12 @@ def get_file_icon_base64(file_path: str):
         return None
 
 
-def save_clipboard_image_to_path(dest_path: str):
-    if not _IS_WINDOWS:
-        return {"success": False, "error": "not_supported_on_platform"}
-
-    try:
-        # 1. 尝试 pywin32
-        try:
-            import win32clipboard as wcb
-            import win32con as wcon
-            wcb.OpenClipboard()
-            try:
-                dibv5_format = getattr(wcon, "CF_DIBV5", 17)
-                fmt = None
-                if wcb.IsClipboardFormatAvailable(dibv5_format):
-                    fmt = dibv5_format
-                elif wcb.IsClipboardFormatAvailable(wcon.CF_DIB):
-                    fmt = wcon.CF_DIB
-
-                if fmt is not None:
-                    dib_obj = wcb.GetClipboardData(fmt)
-                    dib = bytes_from_pywin32_blob(dib_obj)
-                    if dib:
-                        from PIL import Image
-                        import io
-                        bmp = dib_to_bmp_bytes(dib)
-                        img = Image.open(io.BytesIO(bmp))
-                        out_path = Path(dest_path)
-                        ensure_parent(out_path)
-                        save_image_as_png(img, out_path)
-                        return {"success": True, "path": str(out_path)}
-            finally:
-                wcb.CloseClipboard()
-        except:
-            pass
-
-        # 2. 尝试 ctypes
-        if OpenClipboard(None):
-            try:
-                fmt = None
-                if IsClipboardFormatAvailable(CF_DIBV5):
-                    fmt = CF_DIBV5
-                elif IsClipboardFormatAvailable(CF_DIB):
-                    fmt = CF_DIB
-
-                if fmt is not None:
-                    h_mem = GetClipboardData(fmt)
-                    if h_mem:
-                        dib = read_global_data(h_mem)
-                        if dib:
-                            from PIL import Image
-                            import io
-                            bmp = dib_to_bmp_bytes(dib)
-                            img = Image.open(io.BytesIO(bmp))
-                            out_path = Path(dest_path)
-                            ensure_parent(out_path)
-                            save_image_as_png(img, out_path)
-                            return {"success": True, "path": str(out_path)}
-            finally:
-                CloseClipboard()
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-    return {"success": False, "error": "no_image_in_clipboard"}
-
-
-def trigger_system_paste(target_dir):
-    if not _IS_WINDOWS:
-        # macOS 处理 (通过 osascript)
-        if platform.system() == "Darwin":
-            import subprocess
-            try:
-                # AppleScript 粘贴逻辑
-                script = f'tell application "Finder" to paste to folder (POSIX file "{target_dir}")'
-                subprocess.run(["osascript", "-e", script], check=True)
-                return {"success": True}
-            except:
-                pass
-        return {"success": False, "error": f"Not supported on {platform.system()}"}
-
-    try:
-        # 路径归一化：Windows COM 喜欢反斜杠且不喜欢结尾斜杠
-        clean_path = os.path.abspath(target_dir).rstrip("\\")
-
-        try:
-            import win32com.client
-            import pythoncom
-            pythoncom.CoInitialize()
-            try:
-                shell = win32com.client.Dispatch("Shell.Application")
-                folder = shell.NameSpace(clean_path)
-                if folder:
-                    # 尝试多种可能的 Verb 以增强不同语言系统的兼容性
-                    verb_found = False
-                    for v in ["Paste", "paste", "&Paste"]:
-                        try:
-                            # 遍历 verbs 找到对应的项并调用
-                            for verb in folder.Self.Verbs():
-                                if verb.Name == v or verb.Name.replace("&", "") == v:
-                                    verb.DoIt()
-                                    verb_found = True
-                                    break
-                            if verb_found:
-                                break
-                        except:
-                            continue
-
-                    if not verb_found:
-                        # 终极保底
-                        folder.Self.InvokeVerb("Paste")
-
-                    return {"success": True}
-                else:
-                    return {"success": False, "error": f"Shell NameSpace failed for: {clean_path}"}
-            finally:
-                pythoncom.CoUninitialize()
-        except ImportError:
-            # 回退到 PowerShell 触发
-            import subprocess
-            escaped_dir = clean_path.replace("'", "''")
-            ps_cmd = f"$shell = New-Object -ComObject Shell.Application; $folder = $shell.NameSpace('{escaped_dir}'); if($folder){{ $folder.Self.InvokeVerb('Paste') }}"
-            subprocess.run(["powershell", "-Command", ps_cmd],
-                           check=True, capture_output=True)
-            return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
 def _dispatch_action(cmd):
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
     if action == "ping":
         out["status"] = "alive"
-        return out
-    if action in ("folder_info", "get_folder_info"):
-        out.update(get_folder_info(cmd.get("path", "")))
         return out
     if action == "extract_icon":
         path = cmd.get("path")
@@ -1270,84 +846,12 @@ def _dispatch_action(cmd):
             out["status"] = "error"
             out["message"] = "no path provided"
         return out
-    if action == "hasImage":
-        # Check if clipboard contains image format
-        try:
-            if not OpenClipboard(None):
-                out["value"] = False
-                return out
-            try:
-                # CF_DIB (8), CF_DIBV5 (17) or CF_BITMAP (2)
-                has_dib = IsClipboardFormatAvailable(
-                    8) or IsClipboardFormatAvailable(17) or IsClipboardFormatAvailable(2)
-                out["value"] = bool(has_dib)
-            finally:
-                CloseClipboard()
-        except:
-            out["value"] = False
-        return out
-    if action == "saveImage":
-        dest_path = cmd.get("path")
-        if not dest_path:
-            out["success"] = False
-            out["error"] = "no path provided"
-        else:
-            out.update(save_clipboard_image_to_path(dest_path))
-        return out
-
-    # --- Audio Actions ---
-    if action == "check_audio_engine":
-        out["has_miniaudio"] = HAS_MINIAUDIO
-        if HAS_MINIAUDIO:
-            try:
-                out["miniaudio_version"] = getattr(
-                    miniaudio, "__version__", "unknown")
-                # 修正：实例化 Devices 以获取真实的设备列表
-                devices_obj = miniaudio.Devices()
-                out["devices"] = [str(d.name)
-                                  for d in devices_obj.get_playbacks()]
-            except Exception as e:
-                out["devices_error"] = str(e)
-        out["status"] = "ok"
-        return out
-
-    if action == "play_audio":
-        path = cmd.get("path")
-        loop_count = cmd.get("loop_count", cmd.get("count", 1))
-        engine = ensure_audio_engine()
-
-        if engine and path:
-            if not os.path.exists(path):
-                out["status"] = "error"
-                out["reason"] = f"file_not_found: {path}"
-                return out
-
-            # 单实例：play() 内部会先 stop，再启动新播放（stop 不淡出）
-            engine.play(path, loop_count=loop_count)
-            # [Fix] 增加 "ok" 状态作为 "playing" 的别名，提高前端兼容性
-            out["status"] = "ok"
-        else:
-            out["status"] = "error"
-            out["reason"] = "miniaudio_not_installed" if not HAS_MINIAUDIO else "invalid_args"
-        return out
-
-    if action == "stop_audio":
-        engine = ensure_audio_engine()
-        if engine:
-            engine.stop_all()
-            out["status"] = "stopped"
-        return out
-
     if action in ("clipboard_peek", "peek"):
         # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
         out["type"] = "peek"
         return out
     if action == "get_clipboard_files":
         out.update(get_clipboard_files_only())
-        return out
-    if action == "set_clipboard_files" or action == "setFiles":
-        paths = cmd.get("paths") or cmd.get("file_paths") or []
-        out.update(set_clipboard_files(paths))
         return out
     if action == "get_html":
         out.update(get_clipboard_html())
@@ -1358,13 +862,12 @@ def _dispatch_action(cmd):
         # 先打印响应，再退出
         print(json.dumps(out, ensure_ascii=False), flush=True)
         sys.exit(0)
-    if action == "trigger_system_paste":
-        target_dir = cmd.get("path") or cmd.get("target_dir")
-        out.update(trigger_system_paste(target_dir))
-        return out
     if action in ("clipboard", "paste"):
         target_dir = cmd.get("target_dir", cmd.get("output_dir"))
         out.update(handle_clipboard(target_dir))
+        return out
+    if action in ("folder_info", "get_folder_info"):
+        out.update(get_folder_info(cmd.get("path", "")))
         return out
     out["error"] = f"unknown action: {action}"
     return out

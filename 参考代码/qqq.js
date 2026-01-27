@@ -9,7 +9,7 @@ const q3 = require("./q3");
 const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
-const q4 = require("./q4");
+const ClipboardHistoryManager = require("./clipboard-history");
 
 // 引用 global.js 的核心对象
 const {
@@ -39,11 +39,19 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 // Keep ffmpeg loading in qqq as it was
+let ffmpegPath = null;
+let ffprobePath = null;
+try {
+	const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+	ffmpegPath = ffmpegInstaller.path;
+	ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
+} catch (e) { }
+
 let extensionContext = null;
 let cacheDir = null;
 let cacheMeta = null;
 let _statusBarTimer = null;
-let activeSidebarProvider = null;
+let clipboardHistoryManager = null;
 
 // ============================================================================
 // Cache Meta Logic (Retained in qqq)
@@ -119,16 +127,25 @@ function resolveNavPath(rawPath, baseDir) {
 
 function canonicalizeExistingPath(p) {
 	if (!p) return "";
-	let out = path.normalize(p);
+	let out = String(p);
+
+	try {
+		if (fs.existsSync(out)) {
+			if (fs.realpathSync && fs.realpathSync.native) out = fs.realpathSync.native(out);
+			else out = fs.realpathSync(out);
+		}
+	} catch { }
+
+	out = path.normalize(out);
 
 	if (process.platform === "win32") {
 		out = out.replace(/^\\\\\?\\/, "");
-		out = out.replace(/^[a-z]:/i, (m) => m.toUpperCase());
+		out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
 	}
 
 	try {
 		const root = path.parse(out).root;
-		if (out.length > root.length) out = out.replace(/[\\\/]+$/, "");
+		if (out.length > root.length) out = out.replace(/[\\/]+$/, "");
 	} catch { }
 
 	return out;
@@ -142,129 +159,11 @@ function cacheKeyForPath(p) {
 // ============================================================================
 // Cache Initialization & Management
 // ============================================================================
-async function initCache(context) {
-	const globalStoragePath = context.globalStorageUri?.fsPath || context.globalStoragePath;
-	if (!globalStoragePath) {
-		global.logMessage("initCache: globalStoragePath is undefined!", "ERROR");
-		return;
-	}
-	cacheDir = path.join(globalStoragePath, CACHE_DIR_NAME);
-	if (!fs.existsSync(cacheDir)) {
-		try {
-			await fs.promises.mkdir(cacheDir, { recursive: true });
-		} catch (e) { }
-	}
-	await loadCacheMetaAsync();
-	// validateCache 不在启动阶段执行，避免阻塞，改为延时后台执行
-	setTimeout(() => {
-		validateCacheAsync().catch(() => { });
-	}, 10000);
-}
-
-async function loadCacheMetaAsync() {
-	const metaPath = path.join(cacheDir, META_FILE_NAME);
-	try {
-		if (fs.existsSync(metaPath)) {
-			const data = await fs.promises.readFile(metaPath, "utf-8");
-			cacheMeta = JSON.parse(data);
-			if (!cacheMeta.entries) cacheMeta.entries = {};
-			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
-			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
-			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
-			if (!cacheMeta.icons) cacheMeta.icons = {};
-		} else {
-			cacheMeta = createEmptyMeta();
-		}
-	} catch (e) {
-		cacheMeta = createEmptyMeta();
-	}
-}
-
-async function validateCacheAsync() {
-	if (!cacheDir || !cacheMeta) return;
-
-	let changed = false;
-	let realSize = 0;
-	let realCount = 0;
-	const actualFiles = new Set();
-
-	try {
-		const files = await fs.promises.readdir(cacheDir);
-		for (const f of files) {
-			if (f !== META_FILE_NAME) actualFiles.add(f);
-		}
-	} catch (e) { }
-
-	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
-		if (!entry || typeof entry !== "object") {
-			delete cacheMeta.entries[contentId];
-			changed = true;
-			continue;
-		}
-		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
-
-		for (const [q, qInfo] of Object.entries(entry.qualities)) {
-			if (!qInfo) {
-				delete entry.qualities[q];
-				changed = true;
-				continue;
-			}
-
-			const fileName = `${contentId}.${q}`;
-			const filePath = path.join(cacheDir, fileName);
-
-			if (!actualFiles.has(fileName)) {
-				delete entry.qualities[q];
-				changed = true;
-			} else {
-				actualFiles.delete(fileName);
-				try {
-					const st = await fs.promises.stat(filePath);
-					realSize += st.size;
-					realCount++;
-				} catch (e) {
-					delete entry.qualities[q];
-					changed = true;
-				}
-			}
-		}
-
-		if (Object.keys(entry.qualities).length === 0) {
-			delete cacheMeta.entries[contentId];
-			changed = true;
-		}
-	}
-
-	for (const orphan of actualFiles) {
-		// 保护图标文件不被误删，除非它们在 meta 中已不存在
-		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
-			continue;
-		}
-		try {
-			await fs.promises.unlink(path.join(cacheDir, orphan));
-			changed = true;
-		} catch (e) { }
-	}
-
-	// Validate Source File Index
-	if (cacheMeta.fileIndex) {
-		const fps = Object.keys(cacheMeta.fileIndex);
-		for (const fp of fps) {
-			const p = cacheMeta.fileIndex[fp];
-			if (!fs.existsSync(p)) {
-				delete cacheMeta.fileIndex[fp];
-				changed = true;
-			}
-		}
-	}
-
-	cacheMeta.stats.totalSize = realSize;
-	cacheMeta.stats.fileCount = realCount;
-
-	if (changed) {
-		saveCacheMeta();
-		updateStatusBarThrottled();
-	}
+function initCache(context) {
+	cacheDir = path.join(context.globalStorageUri.fsPath, CACHE_DIR_NAME);
+	if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+	loadCacheMeta();
+	validateCache();
 }
 
 function createEmptyMeta() {
@@ -277,6 +176,23 @@ function createEmptyMeta() {
 	};
 }
 
+function loadCacheMeta() {
+	const metaPath = path.join(cacheDir, META_FILE_NAME);
+	try {
+		if (fs.existsSync(metaPath)) {
+			cacheMeta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+			if (!cacheMeta.entries) cacheMeta.entries = {};
+			if (!cacheMeta.stats) cacheMeta.stats = { totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 };
+			if (!cacheMeta.brokenFiles) cacheMeta.brokenFiles = {};
+			if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
+			if (!cacheMeta.icons) cacheMeta.icons = {};
+		} else {
+			cacheMeta = createEmptyMeta();
+		}
+	} catch (e) {
+		cacheMeta = createEmptyMeta();
+	}
+}
 
 function saveCacheMeta() {
 	if (!cacheDir || !cacheMeta) return;
@@ -317,7 +233,7 @@ function updateStatusBarThrottled() {
 	const now = Date.now();
 	if (now >= _nextStatusBarAt) {
 		_nextStatusBarAt = now + 400;
-		try { updateStatusBarNow(); } catch { }
+		try { updateStatusBarThrottled(); } catch { }
 		return;
 	}
 	if (_statusBarPending) return;
@@ -326,7 +242,7 @@ function updateStatusBarThrottled() {
 	setTimeout(() => {
 		_statusBarPending = false;
 		_nextStatusBarAt = Date.now() + 400;
-		try { updateStatusBarNow(); } catch { }
+		try { updateStatusBarThrottled(); } catch { }
 	}, delay);
 }
 
@@ -504,7 +420,7 @@ function shouldVerifySourceAfterFailure(stderr) {
  * Returns {width,height,duration} or null. Skips remote paths by default.
  */
 async function verifyMediaFile(filePath, opts = {}) {
-	if (!global.ffprobePath()) return null;
+	if (!ffprobePath) return null;
 	if (!filePath || !fs.existsSync(filePath)) return null;
 
 	if (!opts.allowRemote && _isRemoteLikePath(filePath)) return null;
@@ -520,7 +436,7 @@ async function verifyMediaFile(filePath, opts = {}) {
 			filePath
 		];
 
-		const child = cp.spawn(global.ffprobePath(), args, { windowsHide: true });
+		const child = cp.spawn(ffprobePath, args, { windowsHide: true });
 		let stdout = "";
 		let done = false;
 
@@ -561,6 +477,119 @@ async function verifyMediaFile(filePath, opts = {}) {
 			finish(null);
 		}, timeoutMs);
 	});
+}
+
+
+function validateCache() {
+	if (!cacheDir || !cacheMeta) return;
+
+	let changed = false;
+	let realSize = 0;
+	let realCount = 0;
+	const actualFiles = new Set();
+
+	try {
+		const files = fs.readdirSync(cacheDir);
+		for (const f of files) {
+			if (f !== META_FILE_NAME) actualFiles.add(f);
+		}
+	} catch (e) { }
+
+	for (const [contentId, entry] of Object.entries(cacheMeta.entries)) {
+		if (!entry || typeof entry !== "object") {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+			continue;
+		}
+		if (!entry.qualities || typeof entry.qualities !== "object") entry.qualities = {};
+
+		for (const [q, qInfo] of Object.entries(entry.qualities)) {
+			if (!qInfo) {
+				delete entry.qualities[q];
+				changed = true;
+				continue;
+			}
+
+			const fileName = `${contentId}.${q}`;
+			const filePath = path.join(cacheDir, fileName);
+
+			if (!actualFiles.has(fileName)) {
+				delete entry.qualities[q];
+				changed = true;
+			} else {
+				actualFiles.delete(fileName);
+				try {
+					const st = fs.statSync(filePath);
+					realSize += st.size;
+					realCount++;
+				} catch (e) {
+					delete entry.qualities[q];
+					changed = true;
+				}
+			}
+		}
+
+		if (Object.keys(entry.qualities).length === 0) {
+			delete cacheMeta.entries[contentId];
+			changed = true;
+		}
+	}
+
+	for (const orphan of actualFiles) {
+		// 保护图标文件不被误删，除非它们在 meta 中已不存在
+		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
+			continue;
+		}
+		try {
+			fs.unlinkSync(path.join(cacheDir, orphan));
+			changed = true;
+		} catch (e) { }
+	}
+
+	// Validate Source File Index
+	if (cacheMeta.fileIndex) {
+		const fps = Object.keys(cacheMeta.fileIndex);
+		for (const fp of fps) {
+			const p = cacheMeta.fileIndex[fp];
+			if (!p || !fs.existsSync(p)) {
+				delete cacheMeta.fileIndex[fp];
+				changed = true;
+			} else {
+				// Sync to memory
+				h.prefillFingerprint(p, fp);
+			}
+		}
+	}
+
+	// Validate Icons
+	if (cacheMeta.icons) {
+		const iconFiles = Object.keys(cacheMeta.icons);
+		for (const p of iconFiles) {
+			const entry = cacheMeta.icons[p];
+			if (!entry || !entry.hash) {
+				delete cacheMeta.icons[p];
+				changed = true;
+				continue;
+			}
+			const iconFileName = `icon_${entry.hash}.png`;
+			if (!actualFiles.has(iconFileName)) {
+				delete cacheMeta.icons[p];
+				changed = true;
+			} else {
+				actualFiles.delete(iconFileName);
+				try {
+					const st = fs.statSync(path.join(cacheDir, iconFileName));
+					realSize += st.size;
+					realCount++;
+				} catch (e) { }
+			}
+		}
+	}
+
+	cacheMeta.stats.totalSize = realSize;
+	cacheMeta.stats.fileCount = realCount;
+
+	if (changed) saveCacheMeta();
 }
 
 function ensureCacheSpace(neededBytes) {
@@ -755,47 +784,21 @@ function makeVsProgressAdapter(progress) {
 	};
 }
 
-async function raceClipboard(targetDir, callback, autoRename = false) {
+async function raceClipboard(targetDir, callback) {
 	return pasteQueue.enqueue(async () => {
-		const transId = global.TransactionManager.createTransactionId();
 		try {
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
 				title: "qqq: 文件复制...",
 				cancellable: true
 			}, async (progress, token) => {
-				token.onCancellationRequested(async () => {
-					global.logMessage(`粘贴操作被用户取消 (${transId})`, "WARN");
-					await global.TransactionManager.rollback(transId);
+				token.onCancellationRequested(() => {
+					global.logMessage("粘贴操作被用户取消", "WARN");
 				});
-
-				// ★ 注册事务，让 IO 引擎享有完美的事务包裹流程
-				await global.TransactionManager.saveTransaction({
-					id: transId,
-					targetDir: targetDir,
-					tempFiles: [],
-					landedFiles: [],
-					landedFolders: [],
-					startTime: Date.now(),
-					taskType: 'local_file',
-					existingFiles: await global.getDirectorySnapshot(targetDir)
-				});
-
 				const progCb = makeVsProgressAdapter(progress);
 
-				// ★ Delegate all detection and handling to h.js, passing transId and autoRename
-				const result = await h.autoDetectAndPaste(targetDir, progCb, token, transId, null, null, null, autoRename);
-
-				if (token.isCancellationRequested) {
-					// 已在 onCancellationRequested 处理 rollback
-					return null;
-				}
-
-				// 成功完成，移除事务记录
-				if (result) {
-					await global.TransactionManager.removeTransaction(transId);
-				}
-				return result;
+				// ★ Delegate all detection and handling to h.js
+				return await h.autoDetectAndPaste(targetDir, progCb, token);
 			});
 
 			// ★ 无论结果如何都调用 callback，确保用户能看到结果
@@ -804,11 +807,10 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
 					global.logMessage(`所有 ${res.skippedCount} 个文件都无法访问，已跳过`, "WARN");
 				}
-				if (callback) callback(res, 100);
+				callback(res, 100);
 			}
 		} catch (e) {
 			global.logMessage(`raceClipboard failed: ${e.message}`, "ERROR");
-			await global.TransactionManager.rollback(transId).catch(() => { });
 		}
 	});
 }
@@ -846,30 +848,27 @@ async function getFolderInfoJS(folderPath) {
 	let fileCount = 0;
 	const extStats = {};
 
-	// 性能优化：使用迭代而非递归，并利用 Promise.all 控制并发，避免深层目录导致的栈溢出和单线程阻塞
-	const queue = [folderPath];
-	while (queue.length > 0) {
-		const currentDir = queue.shift();
+	async function walk(dir) {
 		try {
-			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
-
-			// 批量获取 stats
-			await Promise.all(entries.map(async (entry) => {
-				const fullPath = path.join(currentDir, entry.name);
-				if (entry.isDirectory()) {
-					queue.push(fullPath);
-				} else if (entry.isFile()) {
+			const files = await fs.promises.readdir(dir, { withFileTypes: true });
+			for (const file of files) {
+				const fullPath = path.join(dir, file.name);
+				if (file.isDirectory()) {
+					await walk(fullPath);
+				} else {
 					try {
 						const st = await fs.promises.stat(fullPath);
 						totalSize += st.size;
 						fileCount++;
-						const ext = path.extname(entry.name).toLowerCase().replace(".", "") || "no_ext";
+						const ext = path.extname(file.name).toLowerCase().replace(".", "") || "no_ext";
 						extStats[ext] = (extStats[ext] || 0) + 1;
 					} catch { }
 				}
-			}));
+			}
 		} catch { }
 	}
+
+	await walk(folderPath);
 
 	return {
 		success: true,
@@ -887,68 +886,90 @@ let downloadContext = null;
 
 async function savorMomentsCommand() {
 	try {
-		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-			activeSidebarProvider.triggerSavor('normal');
+		const assetsPath = path.join(extensionContext.extensionPath, 'assets');
+		let selectedAudio;
+
+
+		const randomNumber = Math.floor(Math.random() * 30);
+		if (randomNumber === 0) {
+
+			selectedAudio = path.join(assetsPath, 'q.mp3');
 		} else {
-			// 如果侧边栏未打开或未初始化，聚焦侧边栏并等待加载
-			vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
-				setTimeout(() => {
-					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-						activeSidebarProvider.triggerSavor('normal');
+
+			const randomIndex = Math.floor(Math.random() * 3);
+			const audioNum = randomIndex + 1;
+			selectedAudio = path.join(assetsPath, `${audioNum}.mp3`);
+		}
+
+
+		if (process.platform === 'win32') {
+			cp.exec(`start /min "" "${selectedAudio}"`);
+		} else if (process.platform === 'darwin') {
+			cp.exec(`open -j "${selectedAudio}"`);
+		} else {
+
+			const players = ['mplayer', 'vlc', 'cvlc', 'mpv'];
+			let command = null;
+			for (const player of players) {
+				try {
+					cp.execSync(`which ${player} `, { stdio: 'ignore' });
+					if (player === 'mpv') {
+						command = `${player} --no - terminal "${selectedAudio}"`;
+					} else if (player === 'cvlc') {
+						command = `${player} "${selectedAudio}"`;
+					} else if (player === 'mplayer') {
+						command = `${player} -really - quiet "${selectedAudio}"`;
+					} else {
+						command = `${player} --play - and - exit "${selectedAudio}"`;
 					}
-				}, 1000); // 稍微加长等待时间确保渲染完成
-			});
+					break;
+				} catch { }
+			}
+			if (command) {
+				cp.exec(command);
+			} else {
+				cp.exec(`xdg - open "${selectedAudio}"`);
+			}
 		}
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
 	}
 }
 
-async function downloadVideosFromUrlCommand(urlArg) {
+async function downloadVideosFromUrlCommand() {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		vscode.window.showErrorMessage("请先打开一个文档");
 		return;
 	}
 
-	let rawUrl = urlArg;
-	if (!rawUrl) {
-		rawUrl = await vscode.window.showInputBox({
-			prompt: " ",
-			ignoreFocusOut: true,
-			placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
-			validateInput: (text) => {
-				const s = (text || "").trim();
-				if (!s) return null;
-				if (/\s/.test(s)) return "无效网址";
+	const rawUrl = await vscode.window.showInputBox({
+		prompt: " ",
+		ignoreFocusOut: true,
+		placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
+		validateInput: (text) => {
+			const s = (text || "").trim();
+			if (!s) return null;
+			if (/\s/.test(s)) return "无效网址";
 
-				// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
-				let toCheck = s;
-				if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
-					toCheck = 'https://' + s;
-				}
-
-				try {
-					const u = new URL(toCheck);
-					// 至少包含一个点或者是 localhost
-					if (u.hostname.includes('.') || u.hostname === 'localhost') {
-						return null;
-					}
-				} catch { }
-
-				return "无效网址";
+			// 尝试解析 (支持不带协议头的短链接，如 youtu.be/xxx)
+			let toCheck = s;
+			if (!/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(s)) {
+				toCheck = 'https://' + s;
 			}
-		});
-	}
-	if (!rawUrl) return;
 
-	// ★ 将 “已经安装 yt-dlp ” 作为一个先决必要条件 (仅针对 downloadVideosFromUrlCommand)
-	const { getSharedDownloader } = require('./dow');
-	const downloader = getSharedDownloader();
-	const isYtdlpReady = await downloader.ensureYtdlpReady(extensionContext, { silent: true });
-	if (!isYtdlpReady) {
-		return;
-	}
+			try {
+				const u = new URL(toCheck);
+				// 至少包含一个点或者是 localhost
+				if (u.hostname.includes('.') || u.hostname === 'localhost') {
+					return null;
+				}
+			} catch { }
+
+			return "无效网址";
+		}
+	});
+	if (!rawUrl) return;
 
 	const currentDocDir = path.dirname(editor.document.uri.fsPath);
 	const targetDir = path.join(currentDocDir, "qqq");
@@ -975,7 +996,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		landedFiles: [],
 		landedFolders: [],
 		taskType: 'video',  // ★ 视频下载任务
-		existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+		existingFiles: global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
 	});
 
 	// 2. 启动带进度条的弹窗任务
@@ -997,15 +1018,6 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		lastAnchorCheckTime = now;
 
 		try {
-			// ★ 防御性校验：确保文件依然存在，避免 VS Code 内部报错打印
-			if (!fs.existsSync(targetUri.fsPath)) {
-				if (!anchorLost) {
-					anchorLost = true;
-					global.logMessage(`[AnchorWatch] 文件不存在，视为锚点丢失: ${targetUri.fsPath}`, 'WARN');
-					anchorLostSource.cancel();
-				}
-				return false;
-			}
 			const doc = await vscode.workspace.openTextDocument(targetUri);
 			const text = doc.getText();
 			const exists = text.includes(anchor);
@@ -1186,8 +1198,6 @@ async function downloadVideosFromUrlCommand(urlArg) {
 // ==================== 锚点替换辅助 ====================
 async function replaceAnchorInDoc(uri, anchor, newText) {
 	try {
-		// ★ 性能无损校验：在打开前检查文件物理存在，消除 net::ERR_FILE_NOT_FOUND 噪音
-		if (!fs.existsSync(uri.fsPath)) return false;
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const text = doc.getText();
 		const idx = text.indexOf(anchor);
@@ -1210,45 +1220,18 @@ let q1Module = null;
 let q2Module = null;
 
 async function activate(context) {
-	// ★ 终极最优解：启动时立即重置状态，且后续注册必须早于任何 await
-	global.setDeactivated(false);
 	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
-
-	if (!context) {
-		global.logMessage("activate: context is undefined!", "ERROR");
-		return;
-	}
 
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
 
-	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-	if (!extensionPath) {
-		global.logMessage("activate: extensionPath is undefined!", "ERROR");
-		return;
-	}
+	initCache(context);
 
-	// 已经移至 global.init(context)
-
-	await initCache(context);
-
-	// ★ 预热/静默安装视频引擎和 Python 引擎
-	try {
-		const { getSharedDownloader } = require('./dow');
-		const downloader = getSharedDownloader();
-		downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
-		downloader.ensurePythonReady(context, { background: true }).catch(() => { });
-	} catch (e) { }
-
-	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
-	try {
-		const q4Api = q4.activate(context);
-		global.clipboardHistoryManager = q4Api; // 保持全局引用兼容性
-		activeSidebarProvider = q4Api.sidebarProvider; // ★ 正确初始化 activeSidebarProvider
-	} catch (e) {
-		global.logMessage(`q4 (剪切板/侧边栏) 加载失败: ${e.message}`, "ERROR");
-	}
+	// 初始化剪切板历史管理器
+	clipboardHistoryManager = new ClipboardHistoryManager(context);
+	global.clipboardHistoryManager = clipboardHistoryManager; // 暴露给全局使用
+	clipboardHistoryManager.startWatching();
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
 	global.setLogPath(path.join(cacheDir, "err.log"));
 	global.initStatusBar();
@@ -1279,21 +1262,29 @@ async function activate(context) {
 		})
 	);
 
-	// 侧边栏 WebView 现在由 q4.activate(context) 内部自动注册
-	// activeSidebarProvider 通过 q4Api 机制获取 (如有需要)
+	// 注册侧边栏 WebView 状态面板
+	const SidebarWebViewProvider = require('./q4');
+	const sidebarProvider = new SidebarWebViewProvider(context, global);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider('qqq.Viewq', sidebarProvider, {
+			webviewOptions: {
+				retainContextWhenHidden: true
+			}
+		})
+	);
 
 	// 保留原来的命令，但现在只是聚焦到侧边栏
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.showStatusPanel", global.withReady(() => {
+		vscode.commands.registerCommand("qqq.showStatusPanel", () => {
 			// 聚焦到侧边栏视图
 			vscode.commands.executeCommand('workbench.view.extension.qqqView');
-		})),
-		vscode.commands.registerCommand("qqq.pure", global.withReady(q3.pureCommand)),
-		vscode.commands.registerCommand("qqq.allSettings", global.withReady(() => {
+		}),
+		vscode.commands.registerCommand("qqq.pure", q3.pureCommand),
+		vscode.commands.registerCommand("qqq.allSettings", () => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
-		})),
-		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
-		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
+		}),
+		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", downloadVideosFromUrlCommand),
+		vscode.commands.registerCommand("qqq.savorMoments", savorMomentsCommand),
 
 
 		vscode.workspace.onDidChangeConfiguration((event) => {
@@ -1307,13 +1298,6 @@ async function activate(context) {
 							if (key === "ioEngine") {
 								// ★ 核心设计：三个引擎启动时已全部启动，切换只需更新状态栏
 								global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
-
-								// 如果手动切换到 Python 引擎，触发非后台的就绪检查（可能触发下载进度条）
-								if (val === "python") {
-									const { getSharedDownloader } = require('./dow');
-									getSharedDownloader().ensurePythonReady(context, { silent: true }).catch(() => { });
-								}
-
 								updateStatusBarThrottled();
 							}
 						});
@@ -1332,18 +1316,12 @@ async function activate(context) {
 		} catch { }
 	}, 5000);
 
-	// ★ 终极最优解：启动时恢复/清理事务 (移至 activate 底部或后台执行)
-	// 不要让它阻塞主注册流程
-	(async () => {
-		try {
-			await global.TransactionManager.recover();
-		} catch (e) {
-			global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
-		} finally {
-			// ★ 无论成功失败，推开信号灯，允许命令执行
-			global.markReady();
-		}
-	})();
+	// ★ 启动时恢复/清理事务 (确保上次崩溃留下的垃圾被清理)
+	try {
+		await global.TransactionManager.recover();
+	} catch (e) {
+		global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
+	}
 
 	global.logMessage("qqq 扩展激活完成", "INFO");
 }
@@ -1365,16 +1343,14 @@ function loadSubModules(context) {
 }
 
 async function deactivate() {
-	// ★ 终极最优解：焦土政策，第一时间设置停用标志位
-	global.setDeactivated(true);
+	pythonBridge.stop();
+	rustBridge.stop();
+	shellBridge.stop();
 
-	// ★ 终极最优解：Await 所有 bridge 停止，且强杀所有追踪中的子进程
-	await Promise.allSettled([
-		pythonBridge.stop(),
-		rustBridge.stop(),
-		shellBridge.stop(),
-		global.killAllProcesses()
-	]);
+	// 停止剪切板监听
+	if (clipboardHistoryManager) {
+		clipboardHistoryManager.dispose();
+	}
 
 	global.finishUserTracking();
 
@@ -1384,19 +1360,12 @@ async function deactivate() {
 		global.disposeStatusBar();
 	} catch { }
 
-	try { await validateCacheAsync(); } catch { }
+	try { validateCache(); } catch { }
 	saveCacheMeta();
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch { }
 	}
-
-	if (q2Module?.deactivate) {
-		try { await q2Module.deactivate(); } catch { }
-	}
-
-	// ★ 补充：停用 q4 (剪切板历史管理器)
-	try { await q4.deactivate(); } catch { }
 
 	global.logMessage("qqq 扩展已停用", "INFO");
 }
@@ -1458,13 +1427,14 @@ const exported = {
 
 	logMessage: global.logMessage,
 	logMessageRateLimited: global.logMessageRateLimited,
+	logQ: global.logQ,
 
 	// Delegate to h.js
 	computeFingerprint: computeFingerprintCached,
 	prefillFingerprint: h.prefillFingerprint,
 
 	initCache,
-	validateCache: validateCacheAsync,
+	validateCache,
 	getIconCache,
 	setIconCache,
 
@@ -1510,32 +1480,29 @@ const exported = {
 Object.assign(module.exports, exported);
 
 Object.defineProperty(module.exports, "LOG_PATH", { enumerable: true, get: () => global.getLogPath() });
-Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => global.ffmpegPath() });
-Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => global.ffprobePath() });
+Object.defineProperty(module.exports, "ffmpegPath", { enumerable: true, get: () => ffmpegPath });
+Object.defineProperty(module.exports, "ffprobePath", { enumerable: true, get: () => ffprobePath });
 
-if (!process.__qqq_error_listeners_attached) {
-	process.__qqq_error_listeners_attached = true;
-	process.on("uncaughtException", (error) => {
-		const stack = error.stack || "";
-		// ★ 对于文件系统相关的错误，只记录日志不崩溃
-		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
-		if (error.code && fsErrorCodes.includes(error.code)) {
-			global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
-		} else {
-			global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
-		}
-	});
+process.on("uncaughtException", (error) => {
+	const stack = error.stack || "";
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
+	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+	if (error.code && fsErrorCodes.includes(error.code)) {
+		global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
+	} else {
+		global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+	}
+});
 
-	process.on("unhandledRejection", (reason) => {
-		const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-		// ★ 对于文件系统相关的错误，只记录日志不崩溃
-		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
-		if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
-			global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
-		} else {
-			global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
-		}
-	});
-}
+process.on("unhandledRejection", (reason) => {
+	const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+	// ★ 对于文件系统相关的错误，只记录日志不崩溃
+	const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
+	if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
+		global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
+	} else {
+		global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+	}
+});
 
 
