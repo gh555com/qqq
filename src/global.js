@@ -665,8 +665,9 @@ function Process-Command {
       'extract_icon' {
          try {
              # 优先尝试 C# 高质量提取
-             # 确保路径使用正确的Unicode编码
-             $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
+             # 确保路径使用正确的Unicode编码，且转换为 Windows 反斜杠格式
+             $normPath = $cmd.path -replace '/', '\'
+             $iconB64 = [IconHelper]::GetIconBase64($normPath)
              if ($iconB64) {
                  $result.icon = $iconB64
                  $result.status = 'ok'
