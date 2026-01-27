@@ -48,9 +48,19 @@ from array import array
 
 
 class NonBlockingAudioEngine:
+    """
+    单实例、非阻塞音频播放引擎（miniaudio）。
+    目标：
+    1) 仅“有限循环的自然播完”在最后 2 秒做淡出
+    2) stop / 切歌 / 无限循环 不做淡出
+    3) Python 引擎循环必须无缝（不允许首尾明显停顿）
+    4) 稳定：修复 callback generator 未启动导致的 TypeError
+    """
+
     REQUESTED_FORMAT = None  # SIGNED16
     REQUESTED_CHANNELS = 2
     REQUESTED_RATE = 44100
+    FADE_SECONDS = 2.0
 
     def __init__(self):
         if HAS_MINIAUDIO:
@@ -74,16 +84,17 @@ class NonBlockingAudioEngine:
         # 新播放 = 先停旧的（不淡出），再开新的
         self.stop_all()
 
-        if not HAS_MINIAUDIO or not file_path or not os.path.exists(file_path):
+        if (not HAS_MINIAUDIO) or (not file_path) or (not os.path.exists(file_path)):
             return
+
+        loop_count = int(loop_count or 1)
 
         with self._lock:
             self._stop_event.clear()
             self._token += 1
             token = self._token
 
-        self._executor.submit(self._play_worker, file_path,
-                              int(loop_count or 1), token)
+        self._executor.submit(self._play_worker, file_path, loop_count, token)
 
     def stop_all(self):
         with self._lock:
@@ -111,62 +122,137 @@ class NonBlockingAudioEngine:
         with self._lock:
             return (not self._stop_event.is_set()) and (token == self._token)
 
-    def _apply_fade(self, chunk_bytes, start_frame, end_frame, total_frames, fade_frames):
-        """对 chunk 做样本级淡出处理（线性衰减）。"""
-        if fade_frames <= 0 or total_frames <= fade_frames:
-            return chunk_bytes
+    @staticmethod
+    def _u32(x):
+        return x & 0xFFFFFFFF
 
-        fade_start = total_frames - fade_frames
-        if end_frame <= fade_start:
-            return chunk_bytes
+    def _build_fade_table(self, fade_frames):
+        # 固定点（Q15）增益：0..32768
+        # gain(frame=0)=32768, gain(frame=fade_frames-1)=0
+        if fade_frames <= 1:
+            return array('H', [0])
+        denom = fade_frames - 1
+        tbl = array('H', [0]) * fade_frames
+        for i in range(fade_frames):
+            g = int(((denom - i) * 32768) / denom)
+            if g < 0:
+                g = 0
+            elif g > 32768:
+                g = 32768
+            tbl[i] = g
+        return tbl
 
-        # SIGNED16: 2 bytes per sample
-        samples = array('h')
-        samples.frombytes(chunk_bytes)
+    def _apply_fade_q15_inplace(self, samples, start_global_frame, fade_start_frame, fade_table):
+        """
+        samples: array('h')，长度 = frames * nchannels
+        start_global_frame: 这个 samples 的第 0 帧对应的全局帧序号
+        fade_start_frame: 全局淡出开始帧（进入最后 2 秒）
+        fade_table: array('H')，Q15 增益表
+        """
+        if fade_start_frame is None:
+            return
 
-        # 对落入淡出区间的帧做增益衰减
-        # 每帧 = nchannels 个 sample
         nch = self.REQUESTED_CHANNELS
-        local_start = max(0, fade_start - start_frame)
-        local_end = end_frame - start_frame
+        fade_frames = len(fade_table)
+        if fade_frames <= 0:
+            return
 
-        for f in range(local_start, local_end):
-            g_frame = start_frame + f
-            # g_frame 从 fade_start -> total_frames-1，gain 从 1 -> 0（最后一帧为 0）
-            denom = float(max(1, fade_frames - 1))
-            gain = (total_frames - 1 - g_frame) / denom
-            if gain < 0.0:
-                gain = 0.0
-            elif gain > 1.0:
-                gain = 1.0
+        # 计算这个 chunk 覆盖的帧区间 [start_global_frame, end_global_frame)
+        frames_in_chunk = len(samples) // nch
+        end_global_frame = start_global_frame + frames_in_chunk
+
+        if end_global_frame <= fade_start_frame:
+            return  # 完全在淡出区前
+
+        # 只处理落入淡出区的那部分
+        local_start = max(0, fade_start_frame - start_global_frame)
+        for f in range(local_start, frames_in_chunk):
+            g_frame = start_global_frame + f
+            idx = g_frame - fade_start_frame
+            if idx < 0:
+                continue
+            if idx >= fade_frames:
+                gain = 0
+            else:
+                gain = fade_table[idx]
 
             base = f * nch
+            # (sample * gain) >> 15
             for c in range(nch):
-                samples[base + c] = int(samples[base + c] * gain)
+                samples[base + c] = int((samples[base + c] * gain) >> 15)
 
-        return samples.tobytes()
+    def _callback_generator(self, pcm_mv, frames_per_loop, loop_count, bytes_per_frame, token,
+                            fade_start_frame, fade_table):
+        """
+        miniaudio callback generator：
+        - 通过 send(framecount) 接收本次需要的帧数
+        - yield 返回 bytes-like（样本必须是 SIGNED16、nchannels、sample_rate 已匹配）
+        """
+        global_frame = 0
+        total_frames_all = (
+            frames_per_loop * loop_count) if loop_count > 0 else None
 
-    def _pcm_generator(self, pcm_bytes, total_frames, bytes_per_frame, token, is_last_loop):
-        """把内存 PCM 切块输出；最后一轮时对最后 2 秒做淡出。"""
-        chunk_frames = 2048
-        fade_frames = int(self.REQUESTED_RATE * 2.0) if is_last_loop else 0
+        framecount = yield b""  # ★ 必须先 yield 一次，外部 next() 预热，避免 “just-started generator” 报错
+        while self._is_alive(token):
+            if not isinstance(framecount, int) or framecount <= 0:
+                framecount = yield b""
+                continue
 
-        frame = 0
-        while frame < total_frames and self._is_alive(token):
-            end = min(total_frames, frame + chunk_frames)
-            a = frame * bytes_per_frame
-            b = end * bytes_per_frame
-            chunk = pcm_bytes[a:b]
+            if total_frames_all is not None and global_frame >= total_frames_all:
+                break  # 自然结束
 
-            if is_last_loop and fade_frames > 0 and total_frames > fade_frames:
-                chunk = self._apply_fade(
-                    chunk, frame, end, total_frames, fade_frames)
+            need_frames = framecount
+            out = bytearray()
 
-            yield chunk
-            frame = end
+            while need_frames > 0 and self._is_alive(token):
+                if total_frames_all is not None and global_frame >= total_frames_all:
+                    break
+
+                # 计算当前在第几轮、当前轮内偏移
+                local_frame = global_frame % frames_per_loop
+                frames_left_in_loop = frames_per_loop - local_frame
+
+                # 本次可取帧数（不跨当前轮尾、不超过请求、不超过总帧）
+                take = min(need_frames, frames_left_in_loop)
+                if total_frames_all is not None:
+                    take = min(take, total_frames_all - global_frame)
+
+                if take <= 0:
+                    break
+
+                a = local_frame * bytes_per_frame
+                b = (local_frame + take) * bytes_per_frame
+                # memoryview 切片为零拷贝视图；追加到 bytearray 仍会拷贝一次（可接受、最稳）
+                out += pcm_mv[a:b]
+
+                global_frame += take
+                need_frames -= take
+
+            if not out:
+                break
+
+            # 如果这个输出 chunk 与淡出区有交集，做样本级淡出
+            if fade_start_frame is not None and (global_frame > fade_start_frame):
+                # out 里对应的起始帧 = global_frame - frames_in_out
+                frames_in_out = len(out) // bytes_per_frame
+                start_frame_of_out = global_frame - frames_in_out
+
+                samples = array('h')
+                samples.frombytes(out)
+                self._apply_fade_q15_inplace(
+                    samples, start_frame_of_out, fade_start_frame, fade_table)
+                out_bytes = samples.tobytes()
+            else:
+                out_bytes = bytes(out)
+
+            framecount = yield out_bytes
+
+        # 结束：返回空 bytes（miniaudio 会将其视为 stream end）
+        while True:
+            yield b""
 
     def _play_worker(self, file_path, loop_count, token):
-        if not HAS_MINIAUDIO or not os.path.exists(file_path):
+        if (not HAS_MINIAUDIO) or (not os.path.exists(file_path)):
             return
 
         device = None
@@ -180,12 +266,23 @@ class NonBlockingAudioEngine:
             )
 
             pcm = decoded.samples
-            total_frames = int(getattr(decoded, "num_frames", 0) or 0)
-            if not pcm or total_frames <= 0:
+            frames_per_loop = int(getattr(decoded, "num_frames", 0) or 0)
+            if (not pcm) or frames_per_loop <= 0:
                 return
 
             bytes_per_frame = self.REQUESTED_CHANNELS * 2
-            duration = total_frames / float(self.REQUESTED_RATE)
+
+            # 仅有限循环（>0）且自然结束时淡出
+            fade_table = None
+            fade_start = None
+            total_frames_all = None
+            if loop_count > 0:
+                total_frames_all = frames_per_loop * loop_count
+                fade_frames = int(self.REQUESTED_RATE *
+                                  float(self.FADE_SECONDS))
+                if total_frames_all > fade_frames > 0:
+                    fade_table = self._build_fade_table(fade_frames)
+                    fade_start = total_frames_all - fade_frames
 
             # 初始化播放设备（一次 worker 一个 device）
             device = miniaudio.PlaybackDevice(
@@ -197,37 +294,49 @@ class NonBlockingAudioEngine:
             with self._lock:
                 self._device = device
 
-            current_loop = 0
-            # loop_count == 0 => 无限循环
-            while (loop_count == 0 or current_loop < loop_count) and self._is_alive(token):
-                is_last_loop = (
-                    loop_count > 0 and current_loop == loop_count - 1)
+            pcm_mv = memoryview(pcm)
 
-                gen = self._pcm_generator(
-                    pcm, total_frames, bytes_per_frame, token, is_last_loop)
+            gen = self._callback_generator(
+                pcm_mv=pcm_mv,
+                frames_per_loop=frames_per_loop,
+                loop_count=loop_count,
+                bytes_per_frame=bytes_per_frame,
+                token=token,
+                fade_start_frame=fade_start,
+                fade_table=fade_table
+            )
+            # ★ 关键：预热 generator，避免 miniaudio 首次 send(framecount) 触发 TypeError
+            try:
+                next(gen)
+            except StopIteration:
+                return
 
-                try:
-                    device.start(gen)
-                except Exception as start_err:
-                    sys.stderr.write(f"Device Start Error: {start_err}\n")
-                    sys.stderr.flush()
-                    break
+            try:
+                device.start(gen)
+            except Exception as start_err:
+                sys.stderr.write(f"Device Start Error: {start_err}\n")
+                sys.stderr.flush()
+                return
 
-                # 等待播放完成（可提前停止）
-                start_t = time.time()
-                end_t = start_t + duration + 0.05  # 轻微冗余，防止尾部被截断
+            # 等待播放结束（可提前 stop）
+            if loop_count > 0:
+                total_duration = total_frames_all / float(self.REQUESTED_RATE)
+                end_t = time.time() + total_duration + 0.10  # 轻微冗余，防止尾部被截断
                 while time.time() < end_t and self._is_alive(token):
-                    time.sleep(0.02)
+                    time.sleep(0.05)
+            else:
+                # 无限循环：直到 stop
+                while self._is_alive(token):
+                    time.sleep(0.20)
 
-                try:
-                    device.stop()
-                except:
-                    pass
-
-                current_loop += 1
+            # 主动 stop（自然结束时也做一次收尾）
+            try:
+                device.stop()
+            except:
+                pass
 
             # 自然播完（非 stop）才通知 Node 更新 UI
-            if self._is_alive(token):
+            if loop_count > 0 and self._is_alive(token):
                 print(json.dumps({"event": "audio_finished"}), flush=True)
 
         except Exception as e:
