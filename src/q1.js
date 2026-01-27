@@ -131,13 +131,14 @@ let codeLensProvider = null;
 const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
 const folderSizeCache = new Map();
+const FOLDER_SIZE_CACHE_MAX_ENTRIES = 1000; // ★ 最大缓存条目数
 
 const editorDebounceTimers = new Map();
 
 let enlargeSmallImages = true;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
-let cleanFreakMode = "never"; // "never" | "add" | "add & remove"
+let cleanFreakMode = "add"; // "never" | "add" | "add & remove"
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
 let codelensLevel = "3";
@@ -201,7 +202,7 @@ function refreshConfig() {
 		else performanceMode = config.get("performanceMode", "optmum");
 
 		frameSizeMode = config.get("frameSizeMode", "fix");
-		cleanFreakMode = config.get("cleanFreak", "never");
+		cleanFreakMode = config.get("cleanFreak", "add");
 		// 兼容旧的布尔值
 		if (cleanFreakMode === true) cleanFreakMode = "add";
 		else if (cleanFreakMode === false) cleanFreakMode = "never";
@@ -213,7 +214,7 @@ function refreshConfig() {
 		enlargeSmallImages = true;
 		performanceMode = "optmum";
 		frameSizeMode = "fix";
-		cleanFreakMode = "never";
+		cleanFreakMode = "add";
 		textSlideColorScheme = "light";
 		textSlideFontSize = 14;
 		codelensLevel = "3";
@@ -584,14 +585,18 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 			}
 
 			if (info.type === "unknown") {
-				if (VIDEO_EXTS.has(ext)) {
-					info.type = "video";
-				} else if (IMAGE_EXTS.has(ext)) {
-					info.type = "image";
-					info.isStaticImage = true;
-				} else if (AUDIO_EXTS.has(ext)) {
-					// ★★★ 加入音频类型检查 ★★★
-					info.type = "audio";
+				// ★ 修复：只有在 FFprobe 真正解析出了宽高或时长时，才根据扩展名推断类型
+				// 否则 exe 改名 mp4 会被误判为视频
+				if (info.width > 0 || info.duration > 0) {
+					if (VIDEO_EXTS.has(ext)) {
+						info.type = "video";
+					} else if (IMAGE_EXTS.has(ext)) {
+						info.type = "image";
+						info.isStaticImage = true;
+					} else if (AUDIO_EXTS.has(ext)) {
+						// ★★★ 加入音频类型检查 ★★★
+						info.type = "audio";
+					}
 				}
 			}
 
@@ -1567,7 +1572,8 @@ function isSupportedMedia(filePath) {
 
 // shouldUseFrame结果的内存缓存
 const shouldUseFrameCache = new Map();
-const CACHE_EXPIRE_TIME = 5 * 60 * 1000; // 5分钟过期
+const CACHE_EXPIRE_TIME = 125 * 60 * 1000;
+const CACHE_MAX_SIZE = 2500; // ★ 最大缓存数量
 
 // 清理过期缓存
 function cleanShouldUseFrameCache() {
@@ -1577,10 +1583,19 @@ function cleanShouldUseFrameCache() {
 			shouldUseFrameCache.delete(key);
 		}
 	}
+	// ★ 如果超过最大数量，删除最旧的50%
+	if (shouldUseFrameCache.size > CACHE_MAX_SIZE) {
+		const entries = Array.from(shouldUseFrameCache.entries())
+			.sort((a, b) => a[1].timestamp - b[1].timestamp);
+		const deleteCount = Math.floor(entries.length / 2);
+		for (let i = 0; i < deleteCount; i++) {
+			shouldUseFrameCache.delete(entries[i][0]);
+		}
+	}
 }
 
 // 定期清理缓存
-setInterval(cleanShouldUseFrameCache, CACHE_EXPIRE_TIME);
+const shouldUseFrameCleanupInterval = setInterval(cleanShouldUseFrameCache, CACHE_EXPIRE_TIME);
 
 // 批量获取图标函数
 async function batchGetIcons(filePaths) {
@@ -2174,9 +2189,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 					let gapBelow = await calculateRequiredBlankLines(filePath, isLastItem);
 					// 对于非最后一个项目，减1以抵消join添加的额外换行符
 					if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-					finalContent.push(`
-/\\${relPath}\\/
-${gapBelow ? eol.repeat(gapBelow) : ""}`);
+					finalContent.push(`/\\${relPath}\\/\n${gapBelow ? eol.repeat(gapBelow) : ""}`);
 					invalidateFolderSizeCacheForPath(filePath);
 				}
 			}
@@ -2188,9 +2201,7 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 		const relPath = geq().toSafePath(path.relative(docDir, filePath));
 		// ★ 使用统一的空行计算函数
 		const gapBelow = await calculateRequiredBlankLines(filePath, true);
-		replacement = `
-/\\${relPath}\\/
-` + eol.repeat(gapBelow);
+		replacement = `/\\${relPath}\\/\n` + eol.repeat(gapBelow);
 		invalidateFolderSizeCacheForPath(filePath);
 	} else if (result.type === "file" || result.type === "file_folder") {
 		const files = result.files || [];
@@ -2205,9 +2216,7 @@ ${gapBelow ? eol.repeat(gapBelow) : ""}`);
 			let gapBelow = await calculateRequiredBlankLines(folderPath, isLastItem);
 
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-			replacement += `
-/\\${relPath}\\/
-${eol.repeat(gapBelow)}`;
+			replacement += `/\\${relPath}\\/\n${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 
@@ -2228,8 +2237,7 @@ ${eol.repeat(gapBelow)}`;
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
 
 			if (i > 0 || folders.length > 0) replacement += eol;
-			replacement += `/\\${relPath}\\/
-`;
+			replacement += `/\\${relPath}\\/\n`;
 			replacement += eol.repeat(gapBelow);
 			invalidateFolderSizeCacheForPath(f);
 		}
@@ -2242,9 +2250,7 @@ ${eol.repeat(gapBelow)}`;
 			// ★ 使用统一的空行计算函数
 			let gapBelow = await calculateRequiredBlankLines(folderPath, isLastItem);
 			if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-			replacement += `
-/\\${relPath}\\/
-${eol.repeat(gapBelow)}`;
+			replacement += `/\\${relPath}\\/\n${eol.repeat(gapBelow)}`;
 			invalidateFolderSizeCacheForPath(folderPath);
 		}
 	} else if (result.type === "text") {
@@ -2915,6 +2921,15 @@ function fetchFolderSizeAsync(folderPath, refreshCallback) {
 						: "空文件夹";
 			const data = { size: result.total_size, summary: summaryStr };
 			folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
+					
+			// ★ FIFO 缓存大小限制：超过则删除最旧的25%
+			if (folderSizeCache.size > FOLDER_SIZE_CACHE_MAX_ENTRIES) {
+				const keys = Array.from(folderSizeCache.keys());
+				const deleteCount = Math.floor(keys.length * 0.25);
+				for (let i = 0; i < deleteCount; i++) {
+					folderSizeCache.delete(keys[i]);
+				}
+			}
 
 			if (refreshCallback) {
 				refreshCallback();
@@ -2950,6 +2965,15 @@ async function geqFolderSize(folderPath) {
 					: "空文件夹";
 		const data = { size: result.total_size, summary: summaryStr };
 		folderSizeCache.set(folderPath, { data, timestamp: now });
+		
+		// ★ FIFO 缓存大小限制：超过则删除最旧的25%
+		if (folderSizeCache.size > FOLDER_SIZE_CACHE_MAX_ENTRIES) {
+			const keys = Array.from(folderSizeCache.keys());
+			const deleteCount = Math.floor(keys.length * 0.25);
+			for (let i = 0; i < deleteCount; i++) {
+				folderSizeCache.delete(keys[i]);
+			}
+		}
 		return data;
 	}
 	return null;
@@ -3162,8 +3186,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
 		vscode.commands.registerCommand("qqq.renameFile", global.withReady(renameFileCommand)),
 		vscode.commands.registerCommand("qqq.weave", global.withReady(() => {
-			// 手动 weave 始终使用严格模式（add & remove）
-			performGlobalClean(vscode.window.activeTextEditor, true, "add & remove");
+			// weave 只增不减
+			performGlobalClean(vscode.window.activeTextEditor, true, "add");
 		})),
 		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
 			q3.executeExportDocCommand(global.isValid());
@@ -3250,6 +3274,17 @@ async function activate(context) {
 async function deactivate() {
 	clearAllEditorDebounceTimers();
 	clearDecorations();
+
+	// ★ 清理定时器
+	if (shouldUseFrameCleanupInterval) {
+		clearInterval(shouldUseFrameCleanupInterval);
+	}
+
+	// ★ 清理缓存
+	resolutionCache.clear();
+	folderSizeCache.clear();
+	shouldUseFrameCache.clear();
+
 	// 用户时长统计由 geq().js 中控统一管理
 }
 
