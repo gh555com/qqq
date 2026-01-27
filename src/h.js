@@ -552,7 +552,13 @@ function computeFingerprint(filePath) {
         const cached = _fingerprintCache.get(key);
         if (cached && cached.mtime === mtime && cached.size === size) return cached.fp;
 
-        if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
+        if (size === 0) {
+            // 空文件：必须使用路径+mtime 来区分，不能所有空文件都返回相同指纹
+            const fp = crypto.createHash("md5").update(`empty:0:${key}:${mtime}`).digest("hex");
+            _fingerprintCache.set(key, { mtime, size, fp });
+            if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
+            return fp;
+        }
 
         const fd = fs.openSync(filePath, "r");
         const chunks = [];

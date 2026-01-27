@@ -278,10 +278,11 @@ function createEmptyMeta() {
 }
 
 
+// 返回一个 Promise，确保调用者可以等待 meta.json 写入完成
 function saveCacheMeta() {
-	if (!cacheDir || !cacheMeta) return;
+	if (!cacheDir || !cacheMeta) return Promise.resolve();
 
-	metaSaveQueue.enqueue(async () => {
+	return metaSaveQueue.enqueue(async () => {
 		try {
 			const data = JSON.stringify(cacheMeta, null, 2);
 			const metaPath = path.join(cacheDir, META_FILE_NAME);
@@ -340,7 +341,8 @@ function computeFingerprintCached(filePath) {
 	let st = null;
 	try { st = fs.statSync(filePath); } catch { /* ignore */ }
 
-	const sig = st ? `${cacheKeyForPath(filePath)}|${st.mtimeMs}|${st.size}` : `${cacheKeyForPath(filePath)}|nostat`;
+	const mtimeMsNorm = st ? Math.floor(st.mtimeMs) : undefined;
+	const sig = st ? `${cacheKeyForPath(filePath)}|${mtimeMsNorm}|${st.size}` : `${cacheKeyForPath(filePath)}|nostat`;
 
 	const cached = _fpCache.get(sig);
 	if (cached) {
@@ -352,6 +354,7 @@ function computeFingerprintCached(filePath) {
 
 	const fp = _computeFingerprintRaw(filePath);
 	if (fp) {
+		global.logMessage(`[Fingerprint] COMPUTE: filePath=${filePath.slice(-40)}, fp=${fp}, cacheKey=${cacheKeyForPath(filePath)}, mtime=${mtimeMsNorm}, size=${st?.size}`, "DEBUG");
 		_fpCache.set(sig, fp);
 		if (_fpCache.size > FP_CACHE_MAX) {
 			const firstKey = _fpCache.keys().next().value;
@@ -613,8 +616,12 @@ function getCacheQualityMeta(contentId, quality) {
 	return qInfo?.meta || null;
 }
 
-function setCacheEntry(contentId, quality, buffer, meta) {
-	if (!cacheDir || !cacheMeta) return null;
+// 返回 Promise，调用者可以 await 确保 meta.json 写入完成
+async function setCacheEntry(contentId, quality, buffer, meta) {
+	if (!cacheDir || !cacheMeta) {
+		global.logMessage(`[Cache] SETUP_FAIL: cacheDir or cacheMeta not ready`, "WARN");
+		return null;
+	}
 
 	if (!cacheMeta.entries[contentId]) {
 		cacheMeta.entries[contentId] = { qualities: {}, atime: Date.now(), meta: {} };
@@ -635,7 +642,9 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 		const tmpPath = filePath + ".tmp";
 		fs.writeFileSync(tmpPath, buffer);
 		fs.renameSync(tmpPath, filePath);
+		global.logMessage(`[Cache] WRITE: ${fileName} (${buffer.length} bytes)`, "INFO");
 	} catch (e) {
+		global.logMessage(`[Cache] WRITE_FAIL: ${fileName}: ${e.message}`, "WARN");
 		try {
 			fs.unlinkSync(filePath + ".tmp");
 		} catch { }
@@ -649,7 +658,13 @@ function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!prev) cacheMeta.stats.fileCount++;
 	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
 
-	saveCacheMeta();
+	global.logMessage(`[Cache] SAVED_META: ${fileName}, total=${cacheMeta.stats.totalSize}, count=${cacheMeta.stats.fileCount}`, "DEBUG");
+	// 异步等待 meta.json 写入完成，确保后续 getCachedBuffer 查询时能看到最新的条目
+	try {
+		await saveCacheMeta();
+	} catch (e) {
+		global.logMessage(`[Cache] ASYNC_SAVE_FAIL: ${e.message}`, "WARN");
+	}
 	updateStatusBarThrottled();
 
 	return filePath;
@@ -663,6 +678,7 @@ function getCachedBuffer(contentId, quality) {
 		cacheMeta.stats.missCount++;
 		global.markCacheMiss();
 		updateStatusBarThrottled();
+		global.logMessage(`[Cache] MISS: contentId=${contentId}, quality=${quality} (entry not in meta)`, "DEBUG");
 		return null;
 	}
 
@@ -672,6 +688,7 @@ function getCachedBuffer(contentId, quality) {
 	try {
 		if (fs.existsSync(filePath)) {
 			const buffer = fs.readFileSync(filePath);
+			global.logMessage(`[Cache] FILE FOUND: ${fileName} (${buffer.length} bytes)`, "DEBUG");
 
 			// Only enforce WebP sanity checks for unified WebP cache (backwards-compatible)
 			const fmt = entry?.qualities?.[quality]?.format;
@@ -684,6 +701,7 @@ function getCachedBuffer(contentId, quality) {
 					entry.atime = Date.now();
 					cacheMeta.stats.hitCount++;
 					global.markCacheHit();
+					global.logMessage(`[Cache] HIT: ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
 					updateStatusBarThrottled();
 					return buffer;
 				}
@@ -692,12 +710,16 @@ function getCachedBuffer(contentId, quality) {
 				entry.atime = Date.now();
 				cacheMeta.stats.hitCount++;
 				global.markCacheHit();
+				global.logMessage(`[Cache] HIT (legacy): ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
 				updateStatusBarThrottled();
 				return buffer;
 			}
 		}
-	} catch (e) { }
+	} catch (e) {
+		global.logMessage(`[Cache] ERROR reading ${fileName}: ${e.message}`, "WARN");
+	}
 
+	global.logMessage(`[Cache] FILE_NOTFOUND or ERROR: ${fileName}`, "DEBUG");
 	cacheMeta.stats.missCount++;
 	global.markCacheMiss();
 
