@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const cp = require("child_process");
 const readline = require("readline");
+const crypto = require("crypto");
 
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
@@ -3143,6 +3144,7 @@ module.exports = {
 	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,
+	extensionPath: () => extensionContext?.extensionPath,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 
@@ -3161,7 +3163,7 @@ module.exports = {
 	// ★ 终极最优解：进程与状态管理接口
 	trackProcess,
 	killAllProcesses,
-	isValid: () => _integrityCache === true,
+	isValid: () => _integrityCache !== false,
 	verifySystemIntegrityAsync,
 	markReady: () => {
 		if (_resolveReady) {

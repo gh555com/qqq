@@ -28,7 +28,15 @@ import re
 import base64
 
 # =============================================================================
-#  音频引擎整合 (From miniaudio_nonblocking_v15)
+#  音频引擎整合（Savor：Python 播放引擎）
+#
+#  ✅ 只保留“限定次数播放的最后一次自然播完时淡出 2 秒”这一种淡出场景
+#     - loop_count > 0 且最后一轮（current_loop == loop_count-1）才淡出
+#     - loop_count == 0 代表无限循环：永远不淡出
+#     - stop_audio / 切歌：立即停止，不淡出
+#
+#  ✅ 用“样本级”线性增益衰减实现淡出（不依赖 device.volume，避免平台差异导致无效）
+#  ✅ 用 token 机制避免 stop / play 竞态：旧线程不会因 stop_event 被清除而“复活”
 # =============================================================================
 try:
     import miniaudio
@@ -36,94 +44,190 @@ try:
 except ImportError:
     HAS_MINIAUDIO = False
 
+from array import array
+
 
 class NonBlockingAudioEngine:
+    REQUESTED_FORMAT = None  # SIGNED16
+    REQUESTED_CHANNELS = 2
+    REQUESTED_RATE = 44100
+
     def __init__(self):
-        self.REQUESTED_FORMAT = getattr(
-            miniaudio, "SampleFormat", None).SIGNED16 if HAS_MINIAUDIO else None
-        self.REQUESTED_CHANNELS = 2
-        self.REQUESTED_RATE = 44100
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=32)
-        self.active_devices = []
+        if HAS_MINIAUDIO:
+            self.REQUESTED_FORMAT = getattr(
+                miniaudio, "SampleFormat", None).SIGNED16
+
+        # 单实例：同一时间只允许一个播放任务
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
 
-    def _play_worker(self, file_path, loop_count=1):
+        # token：任何 stop/play 都会推进 token，旧 worker 自动失效
+        self._token = 0
+
+        # 当前播放设备（用于 stop 时强杀）
+        self._device = None
+
+    # ------------------------- public API -------------------------
+
+    def play(self, file_path, loop_count=1):
+        # 新播放 = 先停旧的（不淡出），再开新的
+        self.stop_all()
+
+        if not HAS_MINIAUDIO or not file_path or not os.path.exists(file_path):
+            return
+
+        with self._lock:
+            self._stop_event.clear()
+            self._token += 1
+            token = self._token
+
+        self._executor.submit(self._play_worker, file_path,
+                              int(loop_count or 1), token)
+
+    def stop_all(self):
+        with self._lock:
+            self._stop_event.set()
+            self._token += 1  # 让所有旧 worker 立刻失效
+            device = self._device
+
+        if device:
+            try:
+                device.stop()
+            except:
+                pass
+            try:
+                device.close()
+            except:
+                pass
+
+        with self._lock:
+            if self._device is device:
+                self._device = None
+
+    # ------------------------- internal helpers -------------------------
+
+    def _is_alive(self, token):
+        with self._lock:
+            return (not self._stop_event.is_set()) and (token == self._token)
+
+    def _apply_fade(self, chunk_bytes, start_frame, end_frame, total_frames, fade_frames):
+        """对 chunk 做样本级淡出处理（线性衰减）。"""
+        if fade_frames <= 0 or total_frames <= fade_frames:
+            return chunk_bytes
+
+        fade_start = total_frames - fade_frames
+        if end_frame <= fade_start:
+            return chunk_bytes
+
+        # SIGNED16: 2 bytes per sample
+        samples = array('h')
+        samples.frombytes(chunk_bytes)
+
+        # 对落入淡出区间的帧做增益衰减
+        # 每帧 = nchannels 个 sample
+        nch = self.REQUESTED_CHANNELS
+        local_start = max(0, fade_start - start_frame)
+        local_end = end_frame - start_frame
+
+        for f in range(local_start, local_end):
+            g_frame = start_frame + f
+            # g_frame 从 fade_start -> total_frames-1，gain 从 1 -> 0（最后一帧为 0）
+            denom = float(max(1, fade_frames - 1))
+            gain = (total_frames - 1 - g_frame) / denom
+            if gain < 0.0:
+                gain = 0.0
+            elif gain > 1.0:
+                gain = 1.0
+
+            base = f * nch
+            for c in range(nch):
+                samples[base + c] = int(samples[base + c] * gain)
+
+        return samples.tobytes()
+
+    def _pcm_generator(self, pcm_bytes, total_frames, bytes_per_frame, token, is_last_loop):
+        """把内存 PCM 切块输出；最后一轮时对最后 2 秒做淡出。"""
+        chunk_frames = 2048
+        fade_frames = int(self.REQUESTED_RATE * 2.0) if is_last_loop else 0
+
+        frame = 0
+        while frame < total_frames and self._is_alive(token):
+            end = min(total_frames, frame + chunk_frames)
+            a = frame * bytes_per_frame
+            b = end * bytes_per_frame
+            chunk = pcm_bytes[a:b]
+
+            if is_last_loop and fade_frames > 0 and total_frames > fade_frames:
+                chunk = self._apply_fade(
+                    chunk, frame, end, total_frames, fade_frames)
+
+            yield chunk
+            frame = end
+
+    def _play_worker(self, file_path, loop_count, token):
         if not HAS_MINIAUDIO or not os.path.exists(file_path):
             return
-        sound = None
+
         device = None
         try:
-            # 步骤 1: 获取文件信息确定时长
-            info = miniaudio.get_file_info(file_path)
-            duration = max(0.0, float(getattr(info, "duration", 0.0)))
+            # 解码到内存：得到准确帧数，用于“最后 2 秒淡出”
+            decoded = miniaudio.decode_file(
+                file_path,
+                output_format=self.REQUESTED_FORMAT,
+                nchannels=self.REQUESTED_CHANNELS,
+                sample_rate=self.REQUESTED_RATE
+            )
 
-            # 步骤 2: 初始化播放设备
-            device = miniaudio.PlaybackDevice(output_format=self.REQUESTED_FORMAT,
-                                              nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+            pcm = decoded.samples
+            total_frames = int(getattr(decoded, "num_frames", 0) or 0)
+            if not pcm or total_frames <= 0:
+                return
+
+            bytes_per_frame = self.REQUESTED_CHANNELS * 2
+            duration = total_frames / float(self.REQUESTED_RATE)
+
+            # 初始化播放设备（一次 worker 一个 device）
+            device = miniaudio.PlaybackDevice(
+                output_format=self.REQUESTED_FORMAT,
+                nchannels=self.REQUESTED_CHANNELS,
+                sample_rate=self.REQUESTED_RATE
+            )
 
             with self._lock:
-                self.active_devices.append(device)
+                self._device = device
 
-            # 步骤 3: 循环播放逻辑
             current_loop = 0
-            while (current_loop < loop_count or loop_count == 0) and not self._stop_event.is_set():
-                # 重新/首次打开流
-                if sound:
-                    try:
-                        sound.close()
-                    except:
-                        pass
-
-                try:
-                    sound = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT,
-                                                  nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
-                except Exception as stream_err:
-                    sys.stderr.write(f"Stream Error: {stream_err}\n")
-                    break
-
-                if sound and not self._stop_event.is_set():
-                    try:
-                        device.start(sound)
-                    except Exception as start_err:
-                        sys.stderr.write(f"Device Start Error: {start_err}\n")
-                        break
-
-                # 步骤 4: 可提前停止的小睡等待
-                # 唯一淡出条件：限定次数播放的最后一次，且时长超过 2 秒
+            # loop_count == 0 => 无限循环
+            while (loop_count == 0 or current_loop < loop_count) and self._is_alive(token):
                 is_last_loop = (
                     loop_count > 0 and current_loop == loop_count - 1)
-                fade_duration = 2.0
 
+                gen = self._pcm_generator(
+                    pcm, total_frames, bytes_per_frame, token, is_last_loop)
+
+                try:
+                    device.start(gen)
+                except Exception as start_err:
+                    sys.stderr.write(f"Device Start Error: {start_err}\n")
+                    sys.stderr.flush()
+                    break
+
+                # 等待播放完成（可提前停止）
                 start_t = time.time()
-                # 增加 0.2s 冗余，确保淡出能播完
-                end_t = start_t + duration + 0.2
+                end_t = start_t + duration + 0.05  # 轻微冗余，防止尾部被截断
+                while time.time() < end_t and self._is_alive(token):
+                    time.sleep(0.02)
 
-                while time.time() < end_t and not self._stop_event.is_set():
-                    now = time.time()
-                    elapsed = now - start_t
-
-                    if is_last_loop and duration > fade_duration and elapsed >= (duration - fade_duration):
-                        # 高精度线性淡出
-                        remaining = max(0.0, end_t - now - 0.2)
-                        device.volume = max(
-                            0.0, min(1.0, remaining / fade_duration))
-
-                    time.sleep(0.02)  # 50Hz 高频扫描
-
-                # 显式停止，准备下一轮或退出
                 try:
                     device.stop()
-                    device.volume = 1.0  # 物理还原
                 except:
                     pass
 
                 current_loop += 1
-                if not (current_loop < loop_count or loop_count == 0):
-                    break
 
-            # ★ 关键：自然播完后，发送事件通知 Node.js 更新 UI
-            if not self._stop_event.is_set():
+            # 自然播完（非 stop）才通知 Node 更新 UI
+            if self._is_alive(token):
                 print(json.dumps({"event": "audio_finished"}), flush=True)
 
         except Exception as e:
@@ -139,39 +243,9 @@ class NonBlockingAudioEngine:
                     device.close()
                 except:
                     pass
-                with self._lock:
-                    if device in self.active_devices:
-                        try:
-                            self.active_devices.remove(device)
-                        except:
-                            pass
-            if sound:
-                try:
-                    sound.close()
-                except:
-                    pass
-
-    def play(self, file_path, loop_count=1):
-        # ★ 基因加固：强制单实例霸权
-        # 在启动新音频前，立即设置停止信号并清空旧设备句柄
-        self.stop_all()
-        time.sleep(0.05)  # 给旧线程一点点退出的缓冲时间
-
-        self._stop_event.clear()
-        self.executor.submit(self._play_worker, file_path, loop_count)
-
-    def stop_all(self):
-        self._stop_event.set()
-        with self._lock:
-            devices = list(self.active_devices)
-        for d in devices:
-            try:
-                d.stop()
-                d.volume = 1.0  # 瞬间恢复音量，确保下次播放正常
-            except:
-                pass
-
-    # 已删除冗余淡出方法
+            with self._lock:
+                if self._device is device:
+                    self._device = None
 
 
 _AUDIO_ENGINE = None
@@ -1272,10 +1346,7 @@ def _dispatch_action(cmd):
         loop_count = cmd.get("loop_count", cmd.get("count", 1))
         engine = ensure_audio_engine()
         if engine and path:
-            # 无论如何，新播放请求进来，先让旧的停下
-            engine.stop_all()
-            # 稍微给一点点时间让旧设备 stop
-            time.sleep(0.02)
+            # 单实例：play() 内部会先 stop，再启动新播放（stop 不淡出）
             engine.play(path, loop_count=loop_count)
             out["status"] = "playing"
         else:

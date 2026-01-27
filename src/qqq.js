@@ -164,17 +164,10 @@ async function initCache(context) {
 		} catch (e) { }
 	}
 	await loadCacheMetaAsync();
-	// validateCache 不在启动阶段执行，由 Q2 视图按需触发或后台延迟空闲执行
-}
-
-let _cacheValidated = false;
-/**
- * 确保缓存已验证（按需触发）
- */
-async function ensureCacheValidated() {
-	if (_cacheValidated) return;
-	_cacheValidated = true;
-	validateCacheAsync().catch(() => { });
+	// validateCache 不在启动阶段执行，避免阻塞，改为延时后台执行
+	setTimeout(() => {
+		validateCacheAsync().catch(() => { });
+	}, 10000);
 }
 
 async function loadCacheMetaAsync() {
@@ -1481,7 +1474,6 @@ const exported = {
 
 	initCache,
 	validateCache: validateCacheAsync,
-	ensureCacheValidated,
 	getIconCache,
 	setIconCache,
 

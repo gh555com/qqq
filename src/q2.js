@@ -1651,14 +1651,11 @@ function getWebviewContent(currentPath) {
 }
 
 // ==================== 主逻辑 ====================
-async function showSaveAsDialog() {
+function showSaveAsDialog() {
   if (!global.isValid()) {
     global.showErrorMessage("Integrity check failed.");
     return;
   }
-
-  // ★ 性能优化：在进入文件管理界面时才按需验证缓存
-  try { geq().ensureCacheValidated(); } catch (e) { }
 
   if (activePanel && activePanelAlive) {
     if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);

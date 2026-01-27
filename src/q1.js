@@ -29,7 +29,7 @@ const q3 = require("./q3");
 // 新水印的SHA256哈希值
 const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
-let isCoreIntegrityValid = false;
+// Deleted:let isCoreIntegrityValid = false;
 
 // ==================== 配置常量 ====================
 const SCROLL_DEBOUNCE_MS = 200;
@@ -1900,9 +1900,10 @@ async function renderImages(editor) {
 			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
 
 			let shouldHide = false;
-			if (absPath && fs.existsSync(absPath)) {
+			let st = null;
+			if (absPath) {
 				try {
-					const st = fs.statSync(absPath);
+					st = fs.statSync(absPath);
 					// 文件夹和支持的媒体文件都需要隐藏原始文本
 					if (!st.isDirectory()) {
 						if (isSupportedMedia(absPath) || process.platform === 'win32') {
@@ -1933,15 +1934,9 @@ async function renderImages(editor) {
 			const contentId = geq().computeFingerprint(absPath);
 			if (!contentId) continue;
 
-			let isDirectory = false;
-			try {
-				const stat = fs.statSync(absPath);
-				isDirectory = stat.isDirectory();
-				// 不跳过文件夹，让文件夹也能被渲染
-				if (!isDirectory && !isSupportedMedia(absPath) && process.platform !== 'win32') continue;
-			} catch (e) {
-				continue;
-			}
+			const isDirectory = st.isDirectory();
+			// 不跳过文件夹，让文件夹也能被渲染
+			if (!isDirectory && !isSupportedMedia(absPath) && process.platform !== 'win32') continue;
 
 			// 收集渲染信息
 			renderInfos.push({
@@ -2746,30 +2741,27 @@ class FileCodeLensProvider {
 			if (!rawPath) continue;
 
 			const absPath = resolvePathToAbsolute(document.uri, rawPath);
-			if (!absPath || !fs.existsSync(absPath)) continue;
+			if (!absPath) continue;
+
+			let st = null;
+			try {
+				st = fs.statSync(absPath);
+			} catch {
+				continue;
+			}
 
 			const folder = path.dirname(absPath);
 			const ext = path.extname(absPath).toLowerCase();
-			let isDirectory = false;
-			try {
-				const st = fs.statSync(absPath);
-				isDirectory = st.isDirectory();
-			} catch { }
+			const isDirectory = st.isDirectory();
 			const isVidOrImg = isImageOrVideoExt(ext);
 			const isText = !isVidOrImg && !isDirectory && isPlainTextFile(absPath);
 
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
-			let fileSz = "?";
-			let tooltipText = "";
-			let mtimeMs = 0;
-			try {
-				const st = fs.statSync(absPath);
-				fileSz = formatBytes(st.size);
-				tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
-				mtimeMs = st.mtimeMs;
-			} catch { }
+			let fileSz = formatBytes(st.size);
+			let tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
+			let mtimeMs = st.mtimeMs;
 
 			if (codelensLevel === "3") {
 				let folderData = geqFolderSizeSync(folder);
