@@ -32,6 +32,84 @@ use std::thread;
 use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+
+// =============================================================================
+//  音频引擎整合 (From miniaudio_nonblocking_v15 equivalent)
+// =============================================================================
+
+struct AudioEngine {
+    _stream: OutputStream,
+    _stream_handle: rodio::OutputStreamHandle,
+    sink: Lazy<Sink>,
+    stop_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AudioEngine {
+    fn new() -> Option<Self> {
+        let (stream, handle) = OutputStream::try_default().ok()?;
+        let sink_handle = handle.clone();
+        Some(Self {
+            _stream: stream,
+            _stream_handle: handle,
+            sink: Lazy::new(move || Sink::try_new(&sink_handle).unwrap()),
+            stop_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        })
+    }
+
+    fn play(&self, file_path: &str, loop_count: usize) {
+        self.stop_all();
+        self.stop_signal.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let path = file_path.to_string();
+        let stop_sig = self.stop_signal.clone();
+        let sink_handle = self._stream_handle.clone();
+
+        thread::spawn(move || {
+            let sink = match Sink::try_new(&sink_handle) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            let mut current_loop = 0;
+            while (loop_count == 0 || current_loop < loop_count) && !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                let file = match fs::File::open(&path) {
+                    Ok(f) => f,
+                    Err(_) => break,
+                };
+                let source = match Decoder::new(io::BufReader::new(file)) {
+                    Ok(d) => d,
+                    Err(_) => break,
+                };
+
+                sink.append(source);
+
+                // Wait for the sound to finish or stop signal
+                while !sink.empty() && !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(50));
+                }
+
+                if stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                    sink.stop();
+                    break;
+                }
+
+                current_loop += 1;
+            }
+
+            if !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                // Natural finish event
+                println!("{}", serde_json::to_string(&serde_json::json!({"event": "audio_finished"})).unwrap());
+            }
+        });
+    }
+
+    fn stop_all(&self) {
+        self.stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+static AUDIO_ENGINE: Lazy<Option<AudioEngine>> = Lazy::new(AudioEngine::new);
 
 // =============================================================================
 //  配置
@@ -75,7 +153,7 @@ enum PyV {
     Num(serde_json::Number),
     Str(String),
     Arr(Vec<PyV>),
-    Obj(Vec<(String, PyV)>),
+    Obj(serde_json::Map<String, Value>),
 }
 
 impl Serialize for PyV {
@@ -85,20 +163,8 @@ impl Serialize for PyV {
             PyV::Bool(b) => serializer.serialize_bool(*b),
             PyV::Num(n) => n.serialize(serializer),
             PyV::Str(s) => serializer.serialize_str(s),
-            PyV::Arr(a) => {
-                let mut seq = serializer.serialize_seq(Some(a.len()))?;
-                for it in a {
-                    seq.serialize_element(it)?;
-                }
-                seq.end()
-            }
-            PyV::Obj(o) => {
-                let mut map = serializer.serialize_map(Some(o.len()))?;
-                for (k, v) in o {
-                    map.serialize_entry(k, v)?;
-                }
-                map.end()
-            }
+            PyV::Arr(a) => a.serialize(serializer),
+            PyV::Obj(o) => o.serialize(serializer),
         }
     }
 }
@@ -752,6 +818,8 @@ mod win {
     use windows_sys::Win32::Graphics::Gdi::*;
     use windows_sys::Win32::System::DataExchange::*;
     use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::System::Com::*;
+    use windows_sys::Win32::System::Ole::*;
     use windows_sys::Win32::UI::Shell::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -761,6 +829,71 @@ mod win {
     const CF_HDROP: u32 = 15;
     const CF_DIB: u32 = 8;
     const CF_DIBV5: u32 = 17;
+
+    // --- COM Interfaces for Shell.Application ---
+    #[repr(C)]
+    pub struct IDispatchVtbl {
+        pub parent: windows_sys::Win32::System::Com::IUnknownVtbl,
+        pub GetTypeInfoCount: unsafe extern "system" fn(this: *mut core::ffi::c_void, pctinfo: *mut u32) -> i32,
+        pub GetTypeInfo: unsafe extern "system" fn(this: *mut core::ffi::c_void, itinfo: u32, lcid: u32, pptinfo: *mut *mut core::ffi::c_void) -> i32,
+        pub GetIDsOfNames: unsafe extern "system" fn(this: *mut core::ffi::c_void, riid: *const windows_sys::core::GUID, rgszNames: *const *const u16, cNames: u32, lcid: u32, rgDispId: *mut i32) -> i32,
+        pub Invoke: unsafe extern "system" fn(this: *mut core::ffi::c_void, dispIdMember: i32, riid: *const windows_sys::core::GUID, lcid: u32, wFlags: u16, pDispParams: *const windows_sys::Win32::System::Com::DISPPARAMS, pVarResult: *mut windows_sys::Win32::System::Com::VARIANT, pExcepInfo: *mut windows_sys::Win32::System::Com::EXCEPINFO, puArgErr: *mut u32) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct IShellDispatchVtbl {
+        pub parent: IDispatchVtbl,
+        pub Application: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub Parent: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub NameSpace: unsafe extern "system" fn(this: *mut IShellDispatch, vDir: windows_sys::Win32::System::Com::VARIANT, ppsid: *mut *mut Folder) -> i32,
+        // ... more methods would go here, but we only need NameSpace for this purpose
+    }
+
+    #[repr(C)]
+    pub struct IShellDispatch {
+        pub lpVtbl: *const IShellDispatchVtbl,
+    }
+
+    #[repr(C)]
+    pub struct FolderVtbl {
+        pub parent: IDispatchVtbl,
+        pub Title: unsafe extern "system" fn(this: *mut core::ffi::c_void, pbs: *mut *mut u16) -> i32,
+        pub Application: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub Parent: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub get_Self: unsafe extern "system" fn(this: *mut Folder, ppfi: *mut *mut FolderItem) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct Folder {
+        pub lpVtbl: *const FolderVtbl,
+    }
+
+    #[repr(C)]
+    pub struct FolderItemVtbl {
+        pub parent: IDispatchVtbl,
+        pub Application: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub Parent: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub Name: unsafe extern "system" fn(this: *mut core::ffi::c_void, pbs: *mut *mut u16) -> i32,
+        pub put_Name: unsafe extern "system" fn(this: *mut core::ffi::c_void, bs: *const u16) -> i32,
+        pub Path: unsafe extern "system" fn(this: *mut core::ffi::c_void, pbs: *mut *mut u16) -> i32,
+        pub GetLink: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub GetFolder: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub IsLink: unsafe extern "system" fn(this: *mut core::ffi::c_void, pb: *mut i16) -> i32,
+        pub IsFolder: unsafe extern "system" fn(this: *mut core::ffi::c_void, pb: *mut i16) -> i32,
+        pub IsFileSystem: unsafe extern "system" fn(this: *mut core::ffi::c_void, pb: *mut i16) -> i32,
+        pub IsBrowsable: unsafe extern "system" fn(this: *mut core::ffi::c_void, pb: *mut i16) -> i32,
+        pub ModifyDate: unsafe extern "system" fn(this: *mut core::ffi::c_void, pdate: *mut f64) -> i32,
+        pub put_ModifyDate: unsafe extern "system" fn(this: *mut core::ffi::c_void, date: f64) -> i32,
+        pub Size: unsafe extern "system" fn(this: *mut core::ffi::c_void, pl: *mut i32) -> i32,
+        pub Type: unsafe extern "system" fn(this: *mut core::ffi::c_void, pbs: *mut *mut u16) -> i32,
+        pub Verbs: unsafe extern "system" fn(this: *mut core::ffi::c_void, pptr: *mut *mut core::ffi::c_void) -> i32,
+        pub InvokeVerb: unsafe extern "system" fn(this: *mut FolderItem, vVerb: windows_sys::Win32::System::Com::VARIANT) -> i32,
+    }
+
+    #[repr(C)]
+    pub struct FolderItem {
+        pub lpVtbl: *const FolderItemVtbl,
+    }
 
     #[repr(C)]
     struct DROPFILES {
@@ -1222,6 +1355,126 @@ mod win {
         bmiColors: [u32; 3],
     }
 
+    pub fn trigger_system_paste(target_dir: &str) -> PyV {
+        let mut clean_path = target_dir.replace('/', "\\");
+        while clean_path.ends_with('\\') && clean_path.len() > 3 {
+            clean_path.pop();
+        }
+
+        unsafe {
+            // 初始化 COM
+            let hr = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            if hr < 0 && hr != -2147024809 { // 0x80070057 is E_INVALIDARG, sometimes returned if already initialized differently
+                // continue anyway if already initialized
+            }
+
+            let mut shell: *mut std::ffi::c_void = std::ptr::null_mut();
+            let clsid_shell = windows_sys::core::GUID {
+                data1: 0x13709620,
+                data2: 0xC279,
+                data3: 0x11CE,
+                data4: [0xA4, 0x9E, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00],
+            };
+            let iid_ishell_dispatch = windows_sys::core::GUID {
+                data1: 0xD8F015C0,
+                data2: 0xC278,
+                data3: 0x11CE,
+                data4: [0xA4, 0x9E, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00],
+            };
+
+            let hr = CoCreateInstance(
+                &clsid_shell,
+                std::ptr::null_mut(),
+                CLSCTX_INPROC_SERVER,
+                &iid_ishell_dispatch,
+                &mut shell,
+            );
+
+            if hr < 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("CoCreateInstance failed: 0x{:X}", hr as u32))),
+                ]);
+            }
+
+            let shell_dispatch = shell as *mut IShellDispatch;
+
+            // shell.NameSpace(path)
+            let mut folder: *mut Folder = std::ptr::null_mut();
+            let bstr_path = SysAllocString(to_wide_null(&clean_path).as_ptr());
+
+            let mut var_path = std::mem::zeroed::<VARIANT>();
+            var_path.vt = 8; // VT_BSTR
+            var_path.Anonymous.Anonymous.Anonymous.bstrVal = bstr_path;
+
+            let hr = ((*(*shell_dispatch).lpVtbl).NameSpace)(shell_dispatch, var_path, &mut folder);
+
+            if hr < 0 || folder.is_null() {
+                SysFreeString(bstr_path);
+                (*(shell_dispatch as *mut IUnknown)).Release();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("NameSpace failed: 0x{:X}", hr as u32))),
+                ]);
+            }
+
+            // folder.Self
+            let mut folder_item: *mut FolderItem = std::ptr::null_mut();
+            let hr = ((*(*folder).lpVtbl).get_Self)(folder, &mut folder_item);
+
+            if hr < 0 || folder_item.is_null() {
+                SysFreeString(bstr_path);
+                (*(folder as *mut IUnknown)).Release();
+                (*(shell_dispatch as *mut IUnknown)).Release();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("get_Self failed: 0x{:X}", hr as u32))),
+                ]);
+            }
+
+            // folder_item.InvokeVerb("Paste")
+            // 尝试多种可能的 Verb 形式以增强兼容性
+            let mut success = false;
+            let verbs = vec!["Paste", "paste", "&Paste"];
+
+            for v in verbs {
+                let bstr_verb = SysAllocString(to_wide_null(v).as_ptr());
+                let var_verb = std::mem::zeroed::<VARIANT>();
+                // InvokeVerb uses BSTR directly in some versions or VARIANT
+                // But IShellDispatch FolderItem has InvokeVerb(vVerb: VARIANT)
+                let mut v_verb = std::mem::zeroed::<VARIANT>();
+                v_verb.vt = 8;
+                v_verb.Anonymous.Anonymous.Anonymous.bstrVal = bstr_verb;
+
+                let hr = ((*(*folder_item).lpVtbl).InvokeVerb)(folder_item, v_verb);
+                SysFreeString(bstr_verb);
+                if hr >= 0 {
+                    success = true;
+                    break;
+                }
+            }
+
+            // cleanup
+            (*(folder_item as *mut IUnknown)).Release();
+            (*(folder as *mut IUnknown)).Release();
+            (*(shell_dispatch as *mut IUnknown)).Release();
+            SysFreeString(bstr_path);
+
+            if success {
+                PyV::Obj(vec![("success".to_string(), PyV::Bool(true))])
+            } else {
+                PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("InvokeVerb(Paste) failed".to_string())),
+                ])
+            }
+        }
+    }
+
+    static ICON_RGBA_BUFFER: Lazy<std::sync::Mutex<Vec<u8>>> = Lazy::new(|| {
+        std::sync::Mutex::new(Vec::with_capacity(32 * 32 * 4))
+    });
+
     pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
         // Python 逻辑：
         // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_LARGEICON)
@@ -1309,21 +1562,19 @@ mod win {
             let src = std::slice::from_raw_parts(bits_ptr as *const u8, size);
 
             // 转 RGBA（PIL frombuffer("RGBA", raw="BGRA") 等效）
-            let mut rgba: Vec<u8> = Vec::with_capacity(size);
+            let mut rgba_lock = ICON_RGBA_BUFFER.lock().unwrap();
+            rgba_lock.clear();
             for px in src.chunks_exact(4) {
-                let b = px[0];
-                let g = px[1];
-                let r = px[2];
-                let a = px[3];
-                rgba.push(r);
-                rgba.push(g);
-                rgba.push(b);
-                rgba.push(a);
+                rgba_lock.push(px[2]); // R
+                rgba_lock.push(px[1]); // G
+                rgba_lock.push(px[0]); // B
+                rgba_lock.push(px[3]); // A
             }
 
-            if let Ok(png) = png_bytes_from_rgba(width as u32, height as u32, &rgba) {
+            if let Ok(png) = png_bytes_from_rgba(width as u32, height as u32, &rgba_lock) {
                 ok = Some(general_purpose::STANDARD.encode(png));
             }
+            drop(rgba_lock);
 
             // cleanup
             let _ = SelectObject(hdc_mem, hold);
@@ -1364,18 +1615,18 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
     let cmd = match cmd_v.as_object() {
         Some(o) => o,
         None => {
-            let out = PyV::Obj(vec![
-                ("_id".to_string(), py_num_u64(0)),
-                ("error".to_string(), PyV::Str("cmd is not an object".to_string())),
-            ]);
-            return (out, false, false);
+            let mut out = serde_json::Map::new();
+            out.insert("_id".to_string(), serde_json::json!(0));
+            out.insert("error".to_string(), serde_json::json!("cmd is not an object"));
+            return (PyV::Obj(out), false, false);
         }
     };
 
     let request_id = pick_request_id(cmd);
 
     // Python: out = {"_id": request_id}
-    let mut out_pairs: Vec<(String, PyV)> = vec![("_id".to_string(), request_id)];
+    let mut out = serde_json::Map::new();
+    out.insert("_id".to_string(), serde_json::json!(request_id));
 
     // Python: action = cmd.get("action") or cmd.get("cmd")  （按 truthiness）
     let a1 = cmd.get("action");
@@ -1398,49 +1649,84 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
 
     match action_s {
         "ping" => {
-            out_pairs.push(("status".to_string(), PyV::Str("alive".to_string())));
-            (PyV::Obj(out_pairs), false, false)
+            out.insert("status".to_string(), serde_json::json!("alive"));
+            (PyV::Obj(out), false, false)
+        }
+        "trigger_system_paste" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = win::trigger_system_paste(path) {
+                out.extend(extra);
+            }
+            (PyV::Obj(out), false, false)
         }
         "extract_icon" => {
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
                 if let Some(icon) = win::get_file_icon_base64(p) {
-                    out_pairs.push(("icon".to_string(), PyV::Str(icon)));
-                    out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
+                    out.insert("icon".to_string(), serde_json::json!(icon));
+                    out.insert("status".to_string(), serde_json::json!("ok"));
                 } else {
-                    out_pairs.push(("status".to_string(), PyV::Str("error".to_string())));
-                    out_pairs.push((
+                    out.insert("status".to_string(), serde_json::json!("error"));
+                    out.insert(
                         "message".to_string(),
-                        PyV::Str("icon extraction failed".to_string()),
-                    ));
+                        serde_json::json!("icon extraction failed"),
+                    );
                 }
             } else {
-                out_pairs.push(("status".to_string(), PyV::Str("error".to_string())));
-                out_pairs.push(("message".to_string(), PyV::Str("no path provided".to_string())));
+                out.insert("status".to_string(), serde_json::json!("error"));
+                out.insert("message".to_string(), serde_json::json!("no path provided"));
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         "hasImage" => {
-            out_pairs.push(("value".to_string(), PyV::Bool(win::has_image())));
-            (PyV::Obj(out_pairs), false, false)
+            out.insert("value".to_string(), serde_json::json!(win::has_image()));
+            (PyV::Obj(out), false, false)
         }
         "saveImage" => {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = win::save_image(path) {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
+        }
+        "check_audio_engine" => {
+            let has_engine = AUDIO_ENGINE.is_some();
+            out.insert("has_miniaudio".to_string(), serde_json::json!(has_engine));
+            if has_engine {
+                out.insert("status".to_string(), serde_json::json!("ok"));
+                out.insert("devices".to_string(), serde_json::json!([])); // Simplification
+            }
+            (PyV::Obj(out), false, false)
+        }
+        "play_audio" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let loop_count = cmd.get("loop_count").or(cmd.get("count")).and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            if let Some(engine) = &*AUDIO_ENGINE {
+                engine.play(path, loop_count);
+                out.insert("status".to_string(), serde_json::json!("playing"));
+            } else {
+                out.insert("status".to_string(), serde_json::json!("error"));
+                out.insert("reason".to_string(), serde_json::json!("audio_engine_init_failed"));
+            }
+            (PyV::Obj(out), false, false)
+        }
+        "stop_audio" => {
+            if let Some(engine) = &*AUDIO_ENGINE {
+                engine.stop_all();
+                out.insert("status".to_string(), serde_json::json!("stopped"));
+            }
+            (PyV::Obj(out), false, false)
         }
         "clipboard_peek" | "peek" => {
-            out_pairs.push(("type".to_string(), PyV::Str("peek".to_string())));
-            (PyV::Obj(out_pairs), false, false)
+            out.insert("type".to_string(), serde_json::json!("peek"));
+            (PyV::Obj(out), false, false)
         }
         "get_clipboard_files" => {
             // Python: out.update(get_clipboard_files_only())
             if let PyV::Obj(extra) = win::get_clipboard_files_only() {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         "set_clipboard_files" | "setFiles" => {
             let paths = if let Some(Value::Array(a)) = cmd.get("paths").or(cmd.get("file_paths")) {
@@ -1449,20 +1735,20 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 vec![]
             };
             if let PyV::Obj(extra) = win::set_clipboard_files(paths) {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         "get_html" => {
             if let PyV::Obj(extra) = win::get_clipboard_html() {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         "exit" => {
-            out_pairs.push(("status".to_string(), PyV::Str("exiting".to_string())));
+            out.insert("status".to_string(), serde_json::json!("exiting"));
             // Python: ensure_ascii=False here
-            (PyV::Obj(out_pairs), true, true)
+            (PyV::Obj(out), true, true)
         }
         "clipboard" | "paste" => {
             let target_dir = cmd
@@ -1471,21 +1757,21 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
                 .or_else(|| cmd.get("output_dir").and_then(|v| v.as_str()));
             let output_dir = resolve_output_dir(target_dir);
             if let PyV::Obj(extra) = win::handle_clipboard(&output_dir) {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         "folder_info" | "get_folder_info" => {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = get_folder_info(path) {
-                out_pairs.extend(extra);
+                out.extend(extra);
             }
-            (PyV::Obj(out_pairs), false, false)
+            (PyV::Obj(out), false, false)
         }
         _ => {
             let msg = format!("unknown action: {}", py_str_like(action_v));
-            out_pairs.push(("error".to_string(), PyV::Str(msg)));
-            (PyV::Obj(out_pairs), false, false)
+            out.insert("error".to_string(), serde_json::json!(msg));
+            (PyV::Obj(out), false, false)
         }
     }
 }

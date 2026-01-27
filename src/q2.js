@@ -25,30 +25,6 @@ function geq() {
 }
 const global = require("./global");
 
-// ==================== 完整性校验（与 q1 对齐，可选） ====================
-const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
-const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
-let LARGE_WATERMARK_PATH = "";
-let SMALL_WATERMARK_PATH = "";
-let isCoreIntegrityValid = false;
-
-function verifySystemIntegrity() {
-  try {
-    // 校验大水印
-    if (!fs.existsSync(LARGE_WATERMARK_PATH)) return false;
-    const largeBuf = fs.readFileSync(LARGE_WATERMARK_PATH);
-    const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
-    if (largeHash !== LARGE_WATERMARK_HASH) return false;
-
-    // 校验小水印
-    if (!fs.existsSync(SMALL_WATERMARK_PATH)) return false;
-    const smallBuf = fs.readFileSync(SMALL_WATERMARK_PATH);
-    const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
-    return smallHash === SMALL_WATERMARK_HASH;
-  } catch {
-    return false;
-  }
-}
 
 // ==================== 配置常量 ====================
 const SIZE_CONFIG_KEY = "size_mode";
@@ -59,34 +35,7 @@ const MAX_CONCURRENT_TASKS = 6;
 const SIZE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24小时，实现“永不自动更新”逻辑，仅在切换目录时清除
 const SIZE_CACHE_MAX_ENTRIES = 2000;
 
-const UNSUPPORTED_CODE_EXTENSIONS = new Set([
-  ".exe",
-  ".dll",
-  ".bin",
-  ".dat",
-  ".iso",
-  ".zip",
-  ".rar",
-  ".7z",
-  ".tar",
-  ".gz",
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".bmp",
-  ".webp",
-  ".ico",
-  ".mp3",
-  ".wav",
-  ".flac",
-  ".mp4",
-  ".avi",
-  ".mkv",
-  ".mov",
-  ".wmv",
-  ".pdf",
-]);
+const UNSUPPORTED_CODE_EXTENSIONS = global.NON_TEXT_EXTS;
 
 // ==================== 全局变量 ====================
 let activePanel = null;
@@ -104,68 +53,27 @@ let lastResourceExplorerPath = ""; // 记录上一次更新资源展示区时的
 // ==================== IO / Path：匹配最新引擎逻辑（关键） ====================
 
 function _stripDocJunk(s) {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq._stripDocJunk === "function") return _qqq._stripDocJunk(s);
-  return String(s || "").trim().replace(/\r/g, "").replace(/\n/g, "");
+  return geq()._stripDocJunk(s);
 }
 
 function _getSystemDriveRoot() {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq._getSystemDriveRoot === "function") return _qqq._getSystemDriveRoot();
-  const sd = process.env.SystemDrive;
-  if (sd && /^[A-Za-z]:$/.test(sd)) return sd.toUpperCase() + "\\";
-  return "C:\\";
+  return geq()._getSystemDriveRoot();
 }
 
-/**
- * normalizeNavPath：用于“导航/打开/展示”的路径清洗
- * - 非 Windows：/ 开头保持绝对路径；~ 支持展开
- * - Windows：
- *   - 盘符/UNC 保持绝对
- *   - "C:" / "C:/" / "C:\" 归一到 "C:\"
- *   - "\foo" 或 "/foo" 视为当前系统盘根路径下的 "\foo"
- *   - 其他相对路径：只做 normalize（resolve 由 resolveNavPath 负责）
- */
 function normalizeNavPath(rawPath) {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq.normalizeNavPath === "function") {
-    return _qqq.normalizeNavPath(rawPath);
-  }
-  // 极简兜底
-  let clean = String(rawPath || "").trim().replace(/\r/g, "").replace(/\n/g, "");
-  if (!clean) return "";
-  if (clean === "~") clean = os.homedir();
-  return path.normalize(clean);
+  return geq().normalizeNavPath(rawPath);
 }
 
 function resolveNavPath(rawPath, baseDir) {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq.resolveNavPath === "function") {
-    return _qqq.resolveNavPath(rawPath, baseDir);
-  }
-  const clean = normalizeNavPath(rawPath);
-  if (!clean || path.isAbsolute(clean)) return clean;
-  return path.resolve(baseDir || process.cwd(), clean);
+  return geq().resolveNavPath(rawPath, baseDir);
 }
 
 function canonicalizeExistingPath(p) {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq.canonicalizeExistingPath === "function") {
-    return _qqq.canonicalizeExistingPath(p);
-  }
-  if (!p) return "";
-  let out = path.normalize(String(p));
-  if (process.platform === "win32") out = out.replace(/^[a-z]:/, (m) => m.toUpperCase());
-  return out;
+  return geq().canonicalizeExistingPath(p);
 }
 
 function cacheKeyForPath(p) {
-  const _qqq = geq();
-  if (_qqq && typeof _qqq.cacheKeyForPath === "function") {
-    return _qqq.cacheKeyForPath(p);
-  }
-  const canon = canonicalizeExistingPath(p);
-  return process.platform === "win32" ? canon.toLowerCase() : canon;
+  return geq().cacheKeyForPath(p);
 }
 
 let activeAbortController = new AbortController();
@@ -1743,11 +1651,14 @@ function getWebviewContent(currentPath) {
 }
 
 // ==================== 主逻辑 ====================
-function showSaveAsDialog() {
-  if (!isCoreIntegrityValid) {
+async function showSaveAsDialog() {
+  if (!global.isValid()) {
     global.showErrorMessage("Integrity check failed.");
     return;
   }
+
+  // ★ 性能优化：在进入文件管理界面时才按需验证缓存
+  try { geq().ensureCacheValidated(); } catch (e) { }
 
   if (activePanel && activePanelAlive) {
     if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
@@ -2381,8 +2292,10 @@ async function activate(context) {
   LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
   SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");
 
-  isCoreIntegrityValid = verifySystemIntegrity();
-  geq().logMessage(`Q2 Integrity: ${isCoreIntegrityValid ? "PASSED" : "FAILED"}`, "INFO");
+  // 异步校验完整性，不阻塞激活
+  global.verifySystemIntegrityAsync(context).then(valid => {
+    geq().logMessage(`Q2 Integrity: ${valid ? "PASSED" : "FAILED"}`, "INFO");
+  });
 
   getConfig();
   geq().logMessage("Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");

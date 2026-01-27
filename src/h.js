@@ -216,19 +216,17 @@ function _tryLocalDeduplicate(filePath) {
 
         // ★ 核心修复：严格限制在同一文件夹内去重，禁止跨文件夹引用
         const dir = path.dirname(filePath);
-        const files = fs.readdirSync(dir);
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
         const isWin = process.platform === "win32";
         const normalizedFilePath = isWin ? filePath.toLowerCase() : filePath;
 
-        for (const f of files) {
+        for (const entry of entries) {
+            if (!entry.isFile()) continue;
+            const f = entry.name;
             const full = path.join(dir, f);
             const normalizedFull = isWin ? full.toLowerCase() : full;
 
             if (normalizedFull === normalizedFilePath) continue;
-            try {
-                const st = fs.statSync(full);
-                if (!st.isFile()) continue;
-            } catch { continue; }
 
             if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
@@ -429,6 +427,11 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 function canonicalizeExistingPath(p) {
+    const _qqq = require("./qqq");
+    if (_qqq && typeof _qqq.canonicalizeExistingPath === "function") {
+        return _qqq.canonicalizeExistingPath(p);
+    }
+    // 极简兜底
     if (!p) return "";
     let out = String(p);
     try {
@@ -1486,8 +1489,13 @@ async function verifyVideoFile(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return null;
     let ffmpeg = 'ffmpeg';
     try {
-        const d = getSharedDownloader();
-        if (d && d.ytdlp && d.ytdlp.ffmpegPath) ffmpeg = d.ytdlp.ffmpegPath;
+        const globalPath = getGlobal().ffmpegPath();
+        if (globalPath && globalPath !== 'ffmpeg') {
+            ffmpeg = globalPath;
+        } else {
+            const d = getSharedDownloader();
+            if (d && d.ytdlp && d.ytdlp.ffmpegPath) ffmpeg = d.ytdlp.ffmpegPath;
+        }
     } catch (e) { }
 
     return new Promise((resolve) => {

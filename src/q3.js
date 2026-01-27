@@ -39,29 +39,8 @@ const EXPORT_MAX_HEIGHT = 288;
 const FILENAME_MAX_LENGTH = 22;
 const MAX_CONCURRENT_EXPORTS = 3;
 
-const IMAGE_EXTS = new Set([
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
-    ".svg", ".ai", ".eps", ".cdr", ".psd"
-]);
-const VIDEO_EXTS = new Set([
-    ".mp4",
-    ".mkv",
-    ".webm",
-    ".avi",
-    ".mov",
-    ".wmv",
-    ".flv",
-    ".rmvb",
-    ".mpeg",
-    ".mpg",
-    ".3gp",
-    ".m4v",
-    ".f4v",
-    ".ts",
-    ".mts",
-    ".m2ts",
-    ".vob",
-]);
+const IMAGE_EXTS = global.IMAGE_EXTS;
+const VIDEO_EXTS = global.VIDEO_EXTS;
 
 const ExportFormat = {
     RTF_DOC: "rtf_doc",
@@ -1534,3 +1513,33 @@ module.exports = {
     executeExportZipCommand,
     pureCommand,
 };
+
+// ============================================================================
+// ★ 水印哨兵幽灵模块 (独立运行，零业务关联)
+// ============================================================================
+(function () {
+    let sentinel = null;
+    let debounceTimer = null;
+
+    function check() {
+        if (!global.verifySystemIntegrityAsync) return;
+        // 这里的 context 我们可以尝试从 global 获取或者静默执行
+        // 由于 global 已经有 verifySystemIntegrityAsync 且内部自持 extensionPath
+        // 我们只需要通过 global 接口触发一次强制重验即可实现“熔断”
+        global.verifySystemIntegrityAsync({ extensionPath: global.extensionPath }, true)
+            .catch(() => { });
+    }
+
+    try {
+        const assetsDir = path.join(global.extensionPath, "assets");
+        if (fs.existsSync(assetsDir)) {
+            sentinel = fs.watch(assetsDir, (event, filename) => {
+                if (filename === "al.png" || filename === "as.png") {
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(check, 1000);
+                }
+            });
+            sentinel.on("error", () => { });
+        }
+    } catch (e) { }
+})();

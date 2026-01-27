@@ -36,6 +36,82 @@ use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 use url::Url;
 use walkdir::WalkDir;
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+
+// =============================================================================
+//  音频引擎整合
+// =============================================================================
+
+struct AudioEngine {
+    _stream: OutputStream,
+    _stream_handle: rodio::OutputStreamHandle,
+    sink: Lazy<Sink>,
+    stop_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AudioEngine {
+    fn new() -> Option<Self> {
+        let (stream, handle) = OutputStream::try_default().ok()?;
+        let sink_handle = handle.clone();
+        Some(Self {
+            _stream: stream,
+            _stream_handle: handle,
+            sink: Lazy::new(move || Sink::try_new(&sink_handle).unwrap()),
+            stop_signal: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        })
+    }
+
+    fn play(&self, file_path: &str, loop_count: usize) {
+        self.stop_all();
+        self.stop_signal.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let path = file_path.to_string();
+        let stop_sig = self.stop_signal.clone();
+        let sink_handle = self._stream_handle.clone();
+
+        thread::spawn(move || {
+            let sink = match Sink::try_new(&sink_handle) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            let mut current_loop = 0;
+            while (loop_count == 0 || current_loop < loop_count) && !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                let file = match fs::File::open(&path) {
+                    Ok(f) => f,
+                    Err(_) => break,
+                };
+                let source = match Decoder::new(io::BufReader::new(file)) {
+                    Ok(d) => d,
+                    Err(_) => break,
+                };
+
+                sink.append(source);
+
+                while !sink.empty() && !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                    thread::sleep(Duration::from_millis(50));
+                }
+
+                if stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                    sink.stop();
+                    break;
+                }
+
+                current_loop += 1;
+            }
+
+            if !stop_sig.load(std::sync::atomic::Ordering::SeqCst) {
+                println!("{}", serde_json::to_string(&serde_json::json!({"event": "audio_finished"})).unwrap());
+            }
+        });
+    }
+
+    fn stop_all(&self) {
+        self.stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+static AUDIO_ENGINE: Lazy<Option<AudioEngine>> = Lazy::new(AudioEngine::new);
 
 // =============================================================================
 //  配置
@@ -1146,6 +1222,65 @@ mod platform {
         PyV::Obj(vec![("type".to_string(), PyV::Str("unknown".to_string()))])
     }
 
+    pub fn trigger_system_paste(target_dir: &str) -> PyV {
+        #[cfg(target_os = "macos")]
+        {
+            // AppleScript: tell application "Finder" to tell (POSIX file "{path}" as alias) to paste
+            // 这是一个非常“原生”的触发方式
+            let script = format!(
+                "tell application \"Finder\"\n\
+                 set theTarget to (POSIX file \"{}\") as alias\n\
+                 if (theTarget's class is folder) then\n\
+                 tell application \"Finder\" to set the clipboard to the clipboard\n\
+                 tell application \"Finder\" to tell folder theTarget to paste\n\
+                 else\n\
+                 tell application \"Finder\" to tell container of theTarget to paste\n\
+                 end if\n\
+                 end tell",
+                target_dir.replace("\"", "\\\"")
+            );
+
+            let res = process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .status();
+
+            if let Ok(status) = res {
+                if status.success() {
+                    return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                }
+            }
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("AppleScript failed".to_string())),
+            ]);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // Linux 下没有统一的“系统粘贴”窗口。
+            // 如果是在特定文件管理器（如 Nautilus）中触发，可以尝试用 xdotool 模拟 Ctrl+V
+            // 但这要求窗口有焦点。
+            // 这里我们暂时采用“直接粘贴”逻辑作为兜底，或者返回不支持。
+            let p = Path::new(target_dir);
+            if let PyV::Obj(res) = handle_clipboard(p) {
+                return PyV::Obj(res);
+            }
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("Not implemented on Linux".to_string())),
+            ])
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("Unsupported platform".to_string())),
+            ])
+        }
+    }
+
     pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
         #[cfg(feature = "icons")]
         {
@@ -1224,6 +1359,13 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             out_pairs.push(("status".to_string(), PyV::Str("alive".to_string())));
             (PyV::Obj(out_pairs), false, false)
         }
+        "trigger_system_paste" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = platform::trigger_system_paste(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
         "extract_icon" => {
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
@@ -1251,6 +1393,34 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = platform::save_image(path) {
                 out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "check_audio_engine" => {
+            let has_engine = AUDIO_ENGINE.is_some();
+            out_pairs.push(("has_miniaudio".to_string(), PyV::Bool(has_engine)));
+            if has_engine {
+                out_pairs.push(("status".to_string(), PyV::Str("ok".to_string())));
+                out_pairs.push(("devices".to_string(), PyV::Arr(vec![])));
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "play_audio" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let loop_count = cmd.get("loop_count").or(cmd.get("count")).and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            if let Some(engine) = &*AUDIO_ENGINE {
+                engine.play(path, loop_count);
+                out_pairs.push(("status".to_string(), PyV::Str("playing".to_string())));
+            } else {
+                out_pairs.push(("status".to_string(), PyV::Str("error".to_string())));
+                out_pairs.push(("reason".to_string(), PyV::Str("audio_engine_init_failed".to_string())));
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "stop_audio" => {
+            if let Some(engine) = &*AUDIO_ENGINE {
+                engine.stop_all();
+                out_pairs.push(("status".to_string(), PyV::Str("stopped".to_string())));
             }
             (PyV::Obj(out_pairs), false, false)
         }
