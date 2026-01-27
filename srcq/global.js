@@ -4,7 +4,6 @@ const fs = require("fs");
 const path = require("path");
 const cp = require("child_process");
 const readline = require("readline");
-const crypto = require("crypto");
 
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
@@ -547,25 +546,24 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 			try { clipboardHelperCode = require("./h").CLIPBOARD_HELPER_CS; } catch (e) { }
 
 			const simplePsScript = `
-# --- Optimized PowerShell Daemon ---
 # 确保所有输出使用UTF-8编码
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
-# 基础组件加载（较快）
-Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-
-function Ensure-ClipboardHelper {
-  if (-not ([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
-    try {
-      $code = @'
+# --- Inject C# ClipboardHelper (Optimized for Daemon) ---
+try {
+    # 检查类型是否已存在，避免重复定义异常
+    if (-not ([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
+        $clipboardHelperCode = @'
 ${clipboardHelperCode}
 '@
-      Add-Type -TypeDefinition $code -Language CSharp -ReferencedAssemblies "System.Drawing", "System.Windows.Forms"
-    } catch {
-      Write-Warning "Helper injection failed: $($_.Exception.Message)"
+        Add-Type -TypeDefinition $clipboardHelperCode -Language CSharp -ReferencedAssemblies "System.Drawing", "System.Windows.Forms"
     }
-  }
+} catch {
+    # 注入失败仅记录，不阻塞后续流程
+    Write-Warning "ClipboardHelper injection failed: $($_.Exception.Message)"
 }
 
 function Process-Command {
@@ -574,13 +572,8 @@ function Process-Command {
   try {
     switch ($cmd.action) {
       'ping' { $result.status = 'alive' }
-      'warmup' {
-         Ensure-ClipboardHelper
-         $result.status = 'warmed'
-      }
       'dumpHtmlToFile' {
          try {
-             Ensure-ClipboardHelper
              if (([System.Management.Automation.PSTypeName]'ClipboardHelper').Type) {
                 $res = [ClipboardHelper]::DumpHtmlToFile($cmd.path)
                 if ($res -eq "Success") { $result.success = $true }
@@ -664,8 +657,6 @@ function Process-Command {
       }
       'extract_icon' {
          try {
-             # 确保 C# Helper 已加载（IconHelper 和 ClipboardHelper 在同一个代码块中）
-             Ensure-ClipboardHelper
              # 优先尝试 C# 高质量提取
              # 确保路径使用正确的Unicode编码
              $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
@@ -692,38 +683,6 @@ function Process-Command {
                  $result.message = $_.Exception.Message
              }
          }
-      }
-      'trigger_system_paste' {
-        try {
-          # 路径归一化：Windows COM 喜欢反斜杠且不喜欢结尾斜杠
-          $rawPath = $cmd.path -replace '/', '\'
-          $cleanPath = $rawPath.TrimEnd('\')
-          $shell = New-Object -ComObject Shell.Application
-          $folder = $shell.NameSpace($cleanPath)
-          if ($folder) {
-            # 尝试多种可能的 Verb 形式以增强兼容性
-            $verbFound = $false
-            foreach ($v in @("Paste", "paste", "&Paste")) {
-              $item = $folder.Self.Verbs() | Where-Object { $_.Name -eq $v -or $_.Name.Replace("&","") -eq $v }
-              if ($item) {
-                $item.DoIt()
-                $verbFound = $true
-                break
-              }
-            }
-            if (-not $verbFound) {
-              # 终极保底：直接 Invoke
-              $folder.Self.InvokeVerb("Paste")
-            }
-            $result.success = $true
-          } else {
-            $result.success = $false
-            $result.error = "Folder not found: " + $cleanPath
-          }
-        } catch {
-          $result.success = $false
-          $result.error = "PowerShell Trigger Error: " + $_.Exception.Message
-        }
       }
       'getHtml' {
         $obj = [System.Windows.Forms.Clipboard]::GetData("HTML Format")
@@ -848,24 +807,6 @@ while ($true) {
         echo '{"_id":'"$id"',"icon":"'"$icon_b64"'","status":"ok"}'
       else
         echo '{"_id":'"$id"',"status":"error"}'
-      fi;;
-    trigger_system_paste)
-      dest=$(json_get "$line" "path")
-      if osascript -e "tell application \"Finder\" to paste to folder (POSIX file \"$dest\")" >/dev/null 2>&1; then
-        echo '{"_id":'"$id"',"success":true}'
-      else
-        echo '{"_id":'"$id"',"success":false,"error":"AppleScript failed"}'
-      fi;;
-    setFiles)
-      paths=$(json_get "$line" "paths")
-      # macOS setFiles implementation via osascript
-      script="set the clipboard to "
-      # simplified single file for now as array handling in bash+osascript is tricky
-      # but it's a fallback anyway
-      if osascript -e "set the clipboard to POSIX file \"$paths\"" >/dev/null 2>&1; then
-        echo '{"_id":'"$id"',"success":true}'
-      else
-        echo '{"_id":'"$id"',"success":false}'
       fi;;
     *) echo '{"_id":'"$id"',"error":"unknown action"}';;
 esac
@@ -1290,7 +1231,6 @@ const _readyPromise = new Promise(resolve => { _resolveReady = resolve; });
 
 /**
  * 高阶函数：包装需要等待就绪的函数
- * 特别确保水印校验通过
  */
 function withReady(fn) {
 	return async (...args) => {
@@ -1309,46 +1249,38 @@ function init(context) {
 	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
 	const ffInAssets = path.join(extensionPath, "assets", ffName);
 
+	let ffValid = false;
 	if (fs.existsSync(ffInAssets)) {
-		ffmpegPath = ffInAssets;
-		ffmpegSource = "ASSETS (Verified)";
-		logMessage(`Global FFmpeg initialized from assets: ${ffInAssets}`, "INFO");
-		// 异步验证，不阻塞启动
-		(async () => {
-			try {
-				const { spawn } = require('child_process');
-				const cp = spawn(ffInAssets, ["-version"], { windowsHide: true });
-				cp.on('error', (e) => {
-					logMessage(`FFmpeg 验证失败 (Spawn Error): ${e.message}`, "WARN");
-				});
-			} catch (e) {
-				logMessage(`FFmpeg 异步验证异常: ${e.message}`, "WARN");
+		try {
+			// 尝试运行以验证是否为有效的可执行文件
+			const result = cp.spawnSync(ffInAssets, ["-version"], {
+				windowsHide: true,
+				timeout: 5000 // 增加超时防止卡死
+			});
+			if (result.status === 0) {
+				ffmpegPath = ffInAssets;
+				ffValid = true;
+				ffmpegSource = "ASSETS (Verified)";
+				logMessage(`[INFO] Global FFmpeg initialized from assets: ${ffmpegPath}`, "INFO");
+			} else {
+				ffmpegSource = "NOT_FOUND";
+				const errDetail = result.error ? result.error.message : `status=${result.status}, signal=${result.signal}`;
+				logMessage(`[ERROR] FFmpeg in assets is invalid (${errDetail})`, "ERROR");
 			}
-		})();
+		} catch (e) {
+			ffmpegSource = "NOT_FOUND";
+			logMessage(`[ERROR] FFmpeg in assets is not executable: ${e.message}`, "ERROR");
+		}
 	} else {
 		ffmpegSource = "NOT_FOUND";
-		ffmpegPath = ffName; // 系统环境变量兜底
+		logMessage(`[ERROR] FFmpeg not found in assets!`, "ERROR");
 	}
 
 	if (ffmpegPath) {
 		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
 	}
 
-	// 启动资产哨兵
-	startAssetsSentinel(context);
-
 	initUserTracking(context);
-
-	// ★ 后台预热 ShellBridge，消除首次粘贴时的 C# 注入延迟
-	setTimeout(() => {
-		if (shellBridge && shellBridge.isAvailable()) {
-			shellBridge.call("warmup", {}, 5000).then(res => {
-				if (res?.status === 'warmed') {
-					logMessage("ShellBridge 后台预热成功，C# 组件已就绪", "INFO");
-				}
-			}).catch(() => { });
-		}
-	}, 3000);
 }
 
 // ============================================================================
@@ -1960,22 +1892,24 @@ function getEnginePreference() {
 const KEY_TRANSACTIONS = "qqq.transactions";
 
 /**
- * 异步获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
+ * ★ 获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
  * @param {string} targetDir - 目标目录
- * @returns {Promise<string[]>} - 文件和文件夹的完整路径数组（已规范化）
+ * @returns {string[]} - 文件和文件夹的完整路径数组（已规范化）
  */
-async function getDirectorySnapshot(targetDir) {
+function getDirectorySnapshot(targetDir) {
 	if (!targetDir || !fs.existsSync(targetDir)) {
 		return [];
 	}
 
 	try {
-		const entries = await fs.promises.readdir(targetDir, { withFileTypes: true });
+		const entries = fs.readdirSync(targetDir, { withFileTypes: true });
 		const snapshot = [];
 
 		for (const entry of entries) {
+			// ★ 使用 path.normalize 统一路径格式
 			const fullPath = path.normalize(path.join(targetDir, entry.name));
 			snapshot.push(fullPath);
+			// ★ 不递归子目录，只记录第一层（性能优化 + landedFiles 通常在第一层）
 		}
 
 		return snapshot;
@@ -2750,155 +2684,19 @@ async function tryOneByOne(callback) {
 			try {
 				const res = await callback(bridge, name);
 				if (res) return res;
-			} catch (e) {
-				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
-			}
-		} else if (bridge) {
-			// 如果 bridge 存在但不活跃，记录详细原因以供排查
-			const reason = bridge.lastStartError || bridge.lastCrashReason || "not_started";
-			logMessage(`Engine ${name} is unavailable (${reason}), skipping...`, "DEBUG");
+			} catch (e) { }
 		}
 	}
 	return null;
 }
-
-/**
- * 触发系统原生粘贴窗口 (方案 B)
- * 链路：Rust > Python > Node Daemon > Node Spawn (PowerShell)
- */
-async function triggerSystemPaste(targetDir) {
-	// 归一化路径：确保 Windows 下使用反斜杠，这对 Shell COM 对象至关重要
-	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
-
-	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
-
-	const res = await tryEngineCall({
-		rust: "trigger_system_paste",
-		python: "trigger_system_paste",
-		shell: "trigger_system_paste"
-	}, { path: normalizedPath });
-
-	if (res && res.success) {
-		logMessage(`[Q2] 系统粘贴指令已成功下发`, "INFO");
-	} else {
-		const errMsg = res?.error || "未知错误";
-		logMessage(`[Q2] 系统粘贴指令下发失败: ${errMsg}`, "WARN");
-	}
-	return res;
-}
-
-let _integrityCache = null;
-const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d64491fa1536cc7";
-const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
-
-/**
- * 异步系统完整性校验（防阻塞启动）
- */
-async function verifySystemIntegrityAsync(context, force = false) {
-	if (!force && _integrityCache !== null) return _integrityCache;
-
-	try {
-		const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-		const assetsDir = path.join(extensionPath, "assets");
-		const largePath = path.join(assetsDir, "al.png");
-		const smallPath = path.join(assetsDir, "as.png");
-
-		const [largeBuf, smallBuf] = await Promise.all([
-			fs.promises.readFile(largePath).catch(() => null),
-			fs.promises.readFile(smallPath).catch(() => null)
-		]);
-
-		if (!largeBuf || !smallBuf) {
-			_integrityCache = false;
-			return false;
-		}
-
-		const largeHash = crypto.createHash("sha256").update(largeBuf).digest("hex");
-		const smallHash = crypto.createHash("sha256").update(smallBuf).digest("hex");
-
-		const isValid = (largeHash === LARGE_WATERMARK_HASH && smallHash === SMALL_WATERMARK_HASH);
-
-		// ★ 熔断机制：如果发现被篡改，主动瘫痪核心引擎
-		if (isValid === false) {
-			logMessage("!!! 熔断保护：核心资产校验失败，引擎已锁定 !!!", "ERROR");
-			killAllProcesses();
-			_integrityCache = false;
-			return false;
-		}
-
-		_integrityCache = true;
-		return true;
-	} catch (e) {
-		logMessage(`Integrity Check Error: ${e.message}`, "ERROR");
-		_integrityCache = false;
-		return false;
-	}
-}
-
-/**
- * 资产哨兵逻辑已移至 q3.js 独立模块实现
- */
-function startAssetsSentinel(context) {
-	// 已迁移
-}
-
-// ==================== 共享常量与扩展名 ====================
-const IMAGE_EXTS = new Set([
-	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
-	".svg", ".ai", ".eps", ".cdr", ".psd"
-]);
-
-const VIDEO_EXTS = new Set([
-	".mp4", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".rmvb",
-	".mpeg", ".mpg", ".3gp", ".m4v", ".f4v", ".ts", ".mts", ".m2ts", ".vob"
-]);
-
-const AUDIO_EXTS = new Set([
-	".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".wma"
-]);
-
-const DOCUMENT_EXTS = new Set([
-	".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".md"
-]);
-
-const ARCHIVE_EXTS = new Set([
-	".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"
-]);
-
-const EXECUTABLE_EXTS = new Set([
-	".exe", ".dll", ".bin", ".dat", ".iso", ".msi", ".bat", ".cmd", ".ps1"
-]);
-
-// 包含所有预览不支持或不应作为文本读取的文件类型（q2 使用）
-const NON_TEXT_EXTS = new Set([
-	...EXECUTABLE_EXTS,
-	...ARCHIVE_EXTS,
-	...IMAGE_EXTS,
-	...VIDEO_EXTS,
-	...AUDIO_EXTS,
-	".pdf"
-]);
 
 async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 	return tryOneByOne(async (bridge, name) => {
 		const action = typeof actionOrMap === "object" ? actionOrMap[name] : actionOrMap;
 		if (!action) return null;
 
-		// ★ 关键修复：支持函数式 Action 映射，用于 Node 侧逻辑直接注入
-		if (typeof action === "function") {
-			try {
-				const res = await action(params);
-				if (res && (res.success || !res.error)) return res;
-				return null;
-			} catch (e) {
-				logMessage(`${name} 函数 Action 执行失败: ${e.message}`, "WARN");
-				return null;
-			}
-		}
-
 		const res = await bridge.call(action, params, timeout);
-		// ★ 容错增强：只要有 success 标志或者没有 error 且不是 unknown，都视为成功
-		if (res && (res.success === true || (res.success !== false && !res.error && res.type !== "unknown"))) return res;
+		if (res && !res.error && res.type !== "unknown") return res;
 		return null;
 	});
 }
@@ -3143,10 +2941,8 @@ module.exports = {
 	getEngineTryOrder,
 	tryOneByOne,
 	tryEngineCall,
-	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,
-	extensionPath: () => extensionContext?.extensionPath,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 
@@ -3165,8 +2961,6 @@ module.exports = {
 	// ★ 终极最优解：进程与状态管理接口
 	trackProcess,
 	killAllProcesses,
-	isValid: () => _integrityCache !== false,
-	verifySystemIntegrityAsync,
 	markReady: () => {
 		if (_resolveReady) {
 			_resolveReady();
@@ -3175,13 +2969,5 @@ module.exports = {
 	},
 	withReady,
 	setDeactivated: (v) => { _isDeactivated = !!v; },
-	isDeactivated: () => _isDeactivated,
-
-	// 常量
-	IMAGE_EXTS,
-	VIDEO_EXTS,
-	AUDIO_EXTS,
-	DOCUMENT_EXTS,
-	ARCHIVE_EXTS,
-	NON_TEXT_EXTS
+	isDeactivated: () => _isDeactivated
 };
