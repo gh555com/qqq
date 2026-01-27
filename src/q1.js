@@ -984,9 +984,8 @@ async function tryTextPreview(filePath, contentId, renderW, renderH) {
 
 	const cached = geq().getCachedBuffer(contentId, textCacheKey);
 	if (cached) {
-		// 零错图风险：必须校验 meta.type（兼容旧缓存：无 type 字段也接受）
 		const meta = geq().getCacheQualityMeta(contentId, textCacheKey);
-		if (!meta || meta.type === 'text_preview' || !meta.type) {
+		if (meta && meta.type === 'text_preview') {
 			global.logMessage(`[Cache] HIT (text): ${path.basename(filePath)}`, "INFO");
 			return {
 				buffer: cached,
@@ -1345,9 +1344,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
-			// 零错图风险：必须校验 meta.type（兼容旧缓存：无 type 字段也接受）
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
-			if (!meta || meta.type === "webp_unified" || !meta.type) {
+			if (meta && meta.type === "webp_unified") {
 				global.logMessage(`[Cache] HIT: ${path.basename(filePath)} (${cacheStrategy.cacheKey})`, "INFO");
 				const cachedWidth = meta.width || info?.width || 0;
 				const cachedHeight = meta.height || info?.height || 0;
@@ -1413,8 +1411,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		const existing = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (existing) {
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
-			// 兼容旧缓存：无 type 字段也接受
-			if (!meta || meta.type === "webp_unified" || !meta.type) {
+			if (meta && meta.type === "webp_unified") {
 				if (geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
 				return { success: true, buffer: existing, fromCache: true, meta };
 			}

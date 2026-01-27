@@ -1407,7 +1407,7 @@ async function deactivate() {
 	} catch { }
 
 	try { await validateCacheAsync(); } catch { }
-	saveCacheMeta();
+	try { await saveCacheMeta(); } catch { }  // ★ 必须 await，否则进程终止时文件会被截断为 0 字节
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch { }
