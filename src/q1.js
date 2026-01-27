@@ -132,7 +132,7 @@ const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
 const RESOLUTION_CACHE_MAX_SIZE = 1000; // ★ 提升至1000条
 const folderSizeCache = new Map();
-const FOLDER_SIZE_CACHE_MAX_ENTRIES = 3000; // ★ 提升至3000条
+const FOLDER_SIZE_CACHE_MAX_ENTRIES = 500; // ★ 调整为500条，匹配实际使用场景
 
 const editorDebounceTimers = new Map();
 
@@ -204,9 +204,6 @@ function refreshConfig() {
 
 		frameSizeMode = config.get("frameSizeMode", "fix");
 		cleanFreakMode = config.get("cleanFreak", "add");
-		// 兼容旧的布尔值
-		if (cleanFreakMode === true) cleanFreakMode = "add";
-		else if (cleanFreakMode === false) cleanFreakMode = "never";
 		textSlideColorScheme = config.get("textSlideColorScheme", "light");
 		textSlideFontSize = config.get("textSlideFontSize", 14);
 		codelensLevel = String(config.get("codelensLevel", "3"));
