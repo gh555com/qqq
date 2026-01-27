@@ -122,7 +122,7 @@
           "qqq.cleanFreak": {
             "order": 20,
             "type": "string",
-            "default": "never",
+            "default": "add",
             "enum": [
               "never",
               "add",
