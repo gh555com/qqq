@@ -120,98 +120,116 @@ class NonBlockingAudioEngine:
             return
 
         sys.stderr.write(f"[Audio-Worker-{token}] Starting... loop={loop_count}\n")
+        sys.stderr.flush()
 
-        # 0 代表无限循环
         is_infinite = (loop_count <= 0)
-        # 如果 loop_count 是 0，我们设为一个很大的数来模拟循环，或者在 while 中处理
-        # 这里为了简单，统一用 while 循环处理
 
         try:
-            # 获取文件时长
+            # 尝试解码到内存 (如果文件不是特别大)
+            # miniaudio.decode_file 返回 DecodedSoundFile (samples, sample_rate, num_channels, format)
             file_info = miniaudio.get_file_info(file_path)
             duration = file_info.duration
             if duration <= 0:
                 return
+
+            # 如果文件小于 20MB，尝试预加载到内存
+            use_memory = False
+            try:
+                if os.path.getsize(file_path) < 20 * 1024 * 1024:
+                    decoded = miniaudio.decode_file(file_path)
+                    use_memory = True
+                    sys.stderr.write(f"[Audio-Worker-{token}] Preloaded to memory.\n")
+            except:
+                pass # Fallback to stream_file
+
         except Exception as e:
             sys.stderr.write(f"Get File Info Error: {e}\n")
             return
 
+        device = None
         current_loop = 0
 
-        while self._is_alive(token):
-            if not is_infinite and current_loop >= loop_count:
-                break
+        try:
+            # 初始化设备 (只一次)
+            # 注意：如果 use_memory=True，decoded.sample_rate 可能与 REQUESTED_RATE 不同，device 会自动重采样
+            # 但我们需要确保 device 的参数与 source 匹配或者我们接受 resampling
+            device = miniaudio.PlaybackDevice(
+                output_format=self.REQUESTED_FORMAT,
+                nchannels=self.REQUESTED_CHANNELS,
+                sample_rate=self.REQUESTED_RATE
+            )
 
-            device = None
-            sound = None
-            try:
-                # 1. 打开音频流
-                sound = miniaudio.stream_file(
-                    file_path,
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE
-                )
+            with self._lock:
+                if not self._is_alive(token):
+                    device.close()
+                    return
+                self._device = device
 
-                # 2. 初始化设备
-                device = miniaudio.PlaybackDevice(
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE
-                )
+            # 开始循环播放
+            while self._is_alive(token):
+                if not is_infinite and current_loop >= loop_count:
+                    break
 
-                with self._lock:
-                    if not self._is_alive(token):
-                        # 已经被停止
-                        sound.close()
-                        device.close()
-                        return
-                    self._device = device
-                    self._current_sound = sound
+                stream = None
+                try:
+                    if use_memory:
+                        # stream_memory 返回 StreamableSource
+                        # FIXED: Use kwargs to avoid argument mismatch (int vs Enum)
+                        stream = miniaudio.stream_memory(
+                            decoded.samples,
+                            output_format=decoded.sample_format,
+                            nchannels=decoded.nchannels,
+                            sample_rate=decoded.sample_rate
+                        )
+                    else:
+                        stream = miniaudio.stream_file(
+                            file_path,
+                            output_format=self.REQUESTED_FORMAT,
+                            nchannels=self.REQUESTED_CHANNELS,
+                            sample_rate=self.REQUESTED_RATE
+                        )
 
-                # 3. 开始播放
-                device.start(sound)
+                    with self._lock:
+                         if not self._is_alive(token):
+                             break
+                         self._current_sound = stream
 
-                # 4. 等待播放结束
-                # 使用分段 sleep 以便响应 stop 事件
-                # 稍微多等一点点 buffer 时间 (0.1s)
-                wait_remaining = duration + 0.1
-                step = 0.1
+                    # 启动播放
+                    device.start(stream)
 
-                while wait_remaining > 0 and self._is_alive(token):
-                    time.sleep(min(step, wait_remaining))
-                    wait_remaining -= step
+                    # 等待
+                    wait_remaining = duration + 0.1
+                    step = 0.1
+                    while wait_remaining > 0 and self._is_alive(token):
+                        time.sleep(min(step, wait_remaining))
+                        wait_remaining -= step
 
-            except Exception as e:
-                import traceback
-                error_msg = f"Audio Play Error: {e}\n{traceback.format_exc()}"
-                sys.stderr.write(error_msg)
-                sys.stderr.flush()
-                break
-            finally:
-                sys.stderr.write(f"[Audio-Worker-{token}] Cleaning up...\n")
-                # 清理本轮资源
-                if device:
-                    try:
-                        device.stop()
-                        device.close()
-                    except:
-                        pass
-                if sound:
-                    try:
-                        sound.close()
-                    except:
-                        pass
+                    # 只有在非最后一次循环才需要显式停止 stream?
+                    # 其实 miniaudio 的 device.start 会替换 stream，所以不需要 stop stream
+                    # 但为了保险，我们可以 close stream
+                    stream.close()
 
-                with self._lock:
-                    # 只有当 self._device 还是当前这个 device 时才置空
-                    # 防止把新任务的 device 给清了
-                    if self._device == device:
-                        self._device = None
-                    if self._current_sound == sound:
-                        self._current_sound = None
+                except Exception as inner_e:
+                    sys.stderr.write(f"[Audio-Worker-{token}] Loop Error: {inner_e}\n")
+                    break
 
-            current_loop += 1
+                current_loop += 1
+
+        except Exception as e:
+            import traceback
+            sys.stderr.write(f"Audio Play Error: {e}\n{traceback.format_exc()}\n")
+        finally:
+            sys.stderr.write(f"[Audio-Worker-{token}] Cleaning up...\n")
+            if device:
+                try:
+                    device.close()
+                except:
+                    pass
+            with self._lock:
+                if self._device == device:
+                    self._device = None
+                if self._current_sound:
+                    self._current_sound = None
 
         # 播放结束通知
         if (not is_infinite) and current_loop >= loop_count and self._is_alive(token):

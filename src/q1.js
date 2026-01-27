@@ -438,7 +438,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 	// ... existing code ...
 
 	if (!ff || typeof ff !== 'string' || !fs.existsSync(ff)) {
-		geq().logMessage(`ffmpegPath 无效或不存在: ${ff}, 尝试使用系统 ffmpeg`, "WARN");
+
 		// 如果内置路径无效，尝试直接用 'ffmpeg'
 	}
 
@@ -470,7 +470,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 		child = spawnFfmpeg();
 
 		if (!child) {
-			geq().logMessage(`spawn FFmpeg 失败: 内置路径和系统路径均不可用`, "ERROR");
+			global.logMessage(`[FFmpeg] spawn failed, resolving with null`, "INFO");
 			resolve(null);
 			return;
 		}
@@ -490,7 +490,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 				const shortPath = filePath.length > 60 ? "..." + filePath.slice(-57) : filePath;
 				const cleanStderr = stderr.replace(
 					/\r\n/g, " ").slice(0, 200);
-				geq().logMessage(`FFprobe info failed for ${shortPath}: ${cleanStderr}`, "WARN");
+				global.logMessage(`[FFprobe] no resolution or duration found: ${shortPath}`, "DEBUG");
 			}
 
 			const ext = path.extname(filePath).toLowerCase();
@@ -586,6 +586,9 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 				} else if (IMAGE_EXTS.has(ext)) {
 					info.type = "image";
 					info.isStaticImage = true;
+				} else if (AUDIO_EXTS.has(ext)) {
+					// ★★★ 加入音频类型检查 ★★★
+					info.type = "audio";
 				}
 			}
 
@@ -928,7 +931,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 				}
 			}, 15000);
 
-			child.on('close', () => {
+			child.on('close', async () => {
 				if (!resolved) {
 					resolved = true;
 					clearTimeout(timer);
@@ -943,7 +946,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 					if (!buffer) { resolve(null); return; }
 
 					// 统一缓存命名：.71（cacheKey="71"）
-					geq().setCacheEntry(contentId, textCacheKey, buffer, {
+					await geq().setCacheEntry(contentId, textCacheKey, buffer, {
 						width: targetW,
 						height: targetH,
 						type: 'text_preview',
@@ -984,6 +987,7 @@ async function tryTextPreview(filePath, contentId, renderW, renderH) {
 		// 零错图风险：必须校验 meta.type
 		const meta = geq().getCacheQualityMeta(contentId, textCacheKey);
 		if (meta && meta.type === 'text_preview') {
+			global.logMessage(`[Cache] HIT (text): ${path.basename(filePath)}`, "INFO");
 			return {
 				buffer: cached,
 				webpDuration: 0,
@@ -1341,6 +1345,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	if (!cacheStrategy.shouldBypassCache) {
 		const cached = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
 		if (cached) {
+			global.logMessage(`[Cache] HIT: ${path.basename(filePath)} (${cacheStrategy.cacheKey})`, "INFO");
 			// 零错图风险：必须校验 meta.type
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
@@ -1439,7 +1444,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 
 		const finalWebPDuration = getWebPDurationFromBuffer(buffer);
 
-		geq().logMessage(`Preview generated: ${path.basename(filePath)}, size=${buffer.length}, dur=${finalWebPDuration}`, "INFO");
+		global.logMessage(`[FFmpeg] Preview generated: ${path.basename(filePath)} (${buffer.length} bytes, ${finalWebPDuration.toFixed(2)}s)`, "INFO");
 
 		// 快速校验：防止 ffmpeg 产出截断/损坏 WebP 被写入缓存导致长期“坏命中”
 		if (geq().isValidWebPBuffer && !geq().isValidWebPBuffer(buffer)) {
@@ -1449,8 +1454,11 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		}
 
 
+		global.logMessage(`[FFmpeg] RESULT: success=${result.success}, fromPipe=${result.fromPipe}, fromFile=${result.fromFile}, fromCache=${result.fromCache}`, "DEBUG");
+
 		if (result.fromPipe || result.fromFile) {
-			geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
+			global.logMessage(`[Cache] WRITE_ATTEMPT: ${contentId}/${cacheStrategy.cacheKey}`, "INFO");
+			await geq().setCacheEntry(contentId, cacheStrategy.cacheKey, buffer, {
 				width: targetW,
 				height: targetH,
 				origWidth: origSize?.width || 0,
@@ -1459,6 +1467,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				webpDur: finalWebPDuration,
 				originalDuration: originalDuration,
 			});
+			global.logMessage(`[Cache] WRITE_SKIPPED: fromPipe=${result.fromPipe}, fromFile=${result.fromFile}`, "WARN");
 		}
 
 		const { width: finalCssW, height: finalCssH } = fitIntoBox(
@@ -1477,6 +1486,9 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 			outputSize: { width: finalCssW, height: finalCssH },
 		};
 	} else {
+		const errorMsg = result.error || "UNKNOWN";
+		const stderr = (result.stderr || "").slice(0, 200);
+		global.logMessage(`[FFmpeg] FAILED: ${path.basename(filePath)} - ${errorMsg}${stderr ? ` stderr=${stderr}` : ""}`, "WARN");
 		const fallback = tryFallbackDirectRead(filePath, renderW, renderH, info);
 
 		if (!fallback) {
@@ -1634,6 +1646,7 @@ async function shouldUseFrame(filePath) {
 
 		// 非文本文件，检查是否能生成有效预览
 		const contentId = geq().computeFingerprint(filePath);
+		global.logMessage(`[ContentID] GENERATE: ${path.basename(filePath).slice(-30)} => ${contentId ? contentId.slice(0, 8) + '...' : 'null'}`, "DEBUG");
 		if (!contentId) {
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
@@ -1932,17 +1945,15 @@ async function renderImages(editor) {
 
 			const isDirectory = st.isDirectory();
 			// 严格控制探测范围：
-			// 1. 文件夹不进行媒体探测
+			// 1. 文件夹不进行媒体探测，直接走图标渲染
 			// 2. 只有真正的媒体格式才进入 FFprobe 逻辑
 			// 3. Windows 下非媒体文件（exe/lnk）直接走图标流程，不准碰 FFprobe
-			if (isDirectory) {
-				// 文件夹渲染逻辑...
-			} else if (!isSupportedMedia(absPath)) {
+			if (!isDirectory && !isSupportedMedia(absPath)) {
 				if (process.platform !== 'win32') continue;
 				// Windows 下的非媒体文件，仅允许走图标渲染，严禁 FFprobe
 			}
 
-			// 收集渲染信息
+			// 收集渲染信息（包括文件夹）
 			renderInfos.push({
 				absPath,
 				uniqueKey,
@@ -1951,7 +1962,7 @@ async function renderImages(editor) {
 				isDirectory
 			});
 
-			// 在Windows上，收集需要获取图标的文件路径
+			// 在Windows上，收集需要获取图标的文件路径（包括文件夹）
 			if (process.platform === 'win32') {
 				iconPaths.push(absPath);
 			}
@@ -1987,24 +1998,27 @@ async function renderImages(editor) {
 				let previewResult = null;
 
 				if (isSupported) {
-					let info = null;
-					if (!isText && !isDirectory) {
-						// 只有真正的媒体文件（且非文件夹）才允许探测
-						let mtimeMs = 0;
-						try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
-						info = await getMediaInfo(absPath, mtimeMs);
+					// 文件夹始终支持渲染（使用图标），但不需要预览
+					if (!isDirectory) {
+						let info = null;
+						if (!isText) {
+							// 需要探测的媒体文件
+							let mtimeMs = 0;
+							try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+							info = await getMediaInfo(absPath, mtimeMs);
 
-						const fc = getFrameConfig(info);
-						previewWidth = fc.width;
-						previewHeight = fc.height;
-					} else {
-						// 文本或文件夹：直接走配置定义的相框尺寸，禁止探测
-						const fc = getFrameConfig(null);
-						previewWidth = fc.width;
-						previewHeight = fc.height;
+							const fc = getFrameConfig(info);
+							previewWidth = fc.width;
+							previewHeight = fc.height;
+						} else {
+							// 文本文件：直接走配置定义的相框尺寸，禁止探测
+							const fc = getFrameConfig(null);
+							previewWidth = fc.width;
+							previewHeight = fc.height;
+						}
+
+						previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
 					}
-
-					previewResult = await getPreviewBuffer(absPath, contentId, previewWidth, previewHeight);
 				}
 
 				if (currentRenderVersion !== myVersion) return null;
@@ -2649,13 +2663,13 @@ async function provideCleanlinessEditsAsync(document) {
 		if (absPath && fs.existsSync(absPath)) {
 			// ★ 必须调用 shouldUseFrame 来精准判定是否使用相框
 			// 该函数会内部调用 getMediaInfo 来确定文件是否"健康"（有宽高或时长）
-			const frameDecision = await shouldUseFrame(absPath);
-			const useFrame = frameDecision.result;
-			const mtimeMs = frameDecision.mtimeMs; // 复用 shouldUseFrame 中已经获取的 mtime
+			const useFrame = await shouldUseFrame(absPath);
 
 			if (useFrame) {
 				// 确定相框尺寸
 				try {
+					let mtimeMs = 0;
+					try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
 					const info = await getMediaInfo(absPath, mtimeMs); // 这个调用会被内存缓存拦截
 					const { height } = getFrameConfig(info);
 					pxHeight = height;
