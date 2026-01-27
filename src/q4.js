@@ -124,15 +124,158 @@ function getMsgpack() {
 // ============================================================================
 // 工具函数
 // ============================================================================
+function _bytesToHex(u8) {
+    let out = '';
+    for (let i = 0; i < u8.length; i++) out += u8[i].toString(16).padStart(2, '0');
+    return out;
+}
+
+function _safeRandomBytes(n) {
+    try {
+        if (crypto && typeof crypto.randomBytes === 'function') {
+            return crypto.randomBytes(n);
+        }
+    } catch { /* ignore */ }
+
+    // WebCrypto / 浏览器环境
+    try {
+        const c = (typeof globalThis !== 'undefined' && globalThis.crypto) ? globalThis.crypto : null;
+        if (c && typeof c.getRandomValues === 'function') {
+            const u8 = new Uint8Array(n);
+            c.getRandomValues(u8);
+            return u8;
+        }
+    } catch { /* ignore */ }
+
+    // 兜底（不加密强度）：仅用于非安全用途
+    const u8 = new Uint8Array(n);
+    for (let i = 0; i < n; i++) u8[i] = Math.floor(Math.random() * 256);
+    return u8;
+}
+
 function randomId() {
-    if (crypto.randomUUID) return crypto.randomUUID();
-    return crypto.randomBytes(16).toString('hex');
+    try {
+        if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch { /* ignore */ }
+    return _bytesToHex(_safeRandomBytes(16));
 }
+
+// 纯 JS 的 MD5（bytes -> hex），用于没有 crypto.createHash 的运行环境
+function _md5BytesToHex(input) {
+    const bytes = (input instanceof Uint8Array) ? input : new Uint8Array(input);
+
+    // 32-bit left rotate
+    const rol = (x, c) => ((x << c) | (x >>> (32 - c))) >>> 0;
+
+    // 常量 K[i] = floor(abs(sin(i+1)) * 2^32)
+    const K = new Uint32Array(64);
+    for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
+
+    // r shift amounts
+    const S = [
+        7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+        5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+    ];
+
+    // padding
+    const origLen = bytes.length;
+    const bitLen = origLen * 8;
+
+    // new length: ((len + 8) padded to 56 mod 64) + 8
+    let newLen = origLen + 1;
+    while ((newLen % 64) !== 56) newLen++;
+    const buf = new Uint8Array(newLen + 8);
+    buf.set(bytes);
+    buf[origLen] = 0x80;
+
+    // append bit length (little-endian 64-bit)
+    for (let i = 0; i < 8; i++) buf[newLen + i] = (bitLen >>> (8 * i)) & 0xFF;
+
+    let a0 = 0x67452301 >>> 0;
+    let b0 = 0xefcdab89 >>> 0;
+    let c0 = 0x98badcfe >>> 0;
+    let d0 = 0x10325476 >>> 0;
+
+    const M = new Uint32Array(16);
+
+    for (let offset = 0; offset < buf.length; offset += 64) {
+        for (let i = 0; i < 16; i++) {
+            const j = offset + i * 4;
+            M[i] = (buf[j] | (buf[j + 1] << 8) | (buf[j + 2] << 16) | (buf[j + 3] << 24)) >>> 0;
+        }
+
+        let A = a0, B = b0, C = c0, D = d0;
+
+        for (let i = 0; i < 64; i++) {
+            let F, g;
+            if (i < 16) {
+                F = (B & C) | (~B & D);
+                g = i;
+            } else if (i < 32) {
+                F = (D & B) | (~D & C);
+                g = (5 * i + 1) % 16;
+            } else if (i < 48) {
+                F = B ^ C ^ D;
+                g = (3 * i + 5) % 16;
+            } else {
+                F = C ^ (B | ~D);
+                g = (7 * i) % 16;
+            }
+            const tmp = D;
+            D = C;
+            C = B;
+            const sum = (A + F + K[i] + M[g]) >>> 0;
+            B = (B + rol(sum, S[i])) >>> 0;
+            A = tmp;
+        }
+
+        a0 = (a0 + A) >>> 0;
+        b0 = (b0 + B) >>> 0;
+        c0 = (c0 + C) >>> 0;
+        d0 = (d0 + D) >>> 0;
+    }
+
+    // output little-endian a0,b0,c0,d0
+    const out = new Uint8Array(16);
+    const words = [a0, b0, c0, d0];
+    for (let i = 0; i < 4; i++) {
+        const w = words[i];
+        out[i * 4 + 0] = w & 0xFF;
+        out[i * 4 + 1] = (w >>> 8) & 0xFF;
+        out[i * 4 + 2] = (w >>> 16) & 0xFF;
+        out[i * 4 + 3] = (w >>> 24) & 0xFF;
+    }
+    return _bytesToHex(out);
+}
+
 function md5Hex(s) {
-    return crypto.createHash('md5').update(Buffer.from(String(s))).digest('hex');
+    const str = String(s);
+
+    // Node 环境：优先用 createHash（最快、兼容 Buffer）
+    try {
+        if (crypto && typeof crypto.createHash === 'function' && typeof Buffer !== 'undefined') {
+            return crypto.createHash('md5').update(Buffer.from(str, 'utf8')).digest('hex');
+        }
+    } catch { /* ignore */ }
+
+    // fallback：纯 JS MD5
+    let bytes;
+    if (typeof TextEncoder !== 'undefined') {
+        bytes = new TextEncoder().encode(str);
+    } else if (typeof Buffer !== 'undefined') {
+        bytes = Buffer.from(str, 'utf8');
+    } else {
+        const arr = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i) & 0xFF;
+        bytes = arr;
+    }
+    return _md5BytesToHex(bytes);
 }
+
 function nonceHex() {
-    return crypto.randomBytes(16).toString('hex');
+    return _bytesToHex(_safeRandomBytes(16));
 }
 function clampInt(n, min, max) {
     const x = Number.isFinite(n) ? Math.trunc(n) : min;
