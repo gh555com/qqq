@@ -83,6 +83,7 @@ const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
 
 const IMAGE_EXTS = global.IMAGE_EXTS;
 const VIDEO_EXTS = global.VIDEO_EXTS;
+const AUDIO_EXTS = global.AUDIO_EXTS;
 
 const PIPE_SEEK_ERROR_PATTERNS = [
 	"non seekable",
@@ -1670,104 +1671,42 @@ async function shouldUseFrame(filePath) {
 
 		// 纯文本文件，使用文本胶片相框
 		if (TEXT_EXTS.has(ext) || isPlainTextFile(filePath)) {
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: true,
-				timestamp: Date.now()
-			});
+			shouldUseFrameCache.set(cacheKey, { result: true, timestamp: Date.now() });
 			return true;
 		}
 
-		// 非文本文件，检查是否能生成有效预览
-		const contentId = geq().computeFingerprint(filePath);
-		global.logMessage(`[ContentID] GENERATE: ${path.basename(filePath).slice(-30)} => ${contentId ? contentId.slice(0, 8) + '...' : 'null'}`, "DEBUG");
-		if (!contentId) {
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: false,
-				timestamp: Date.now()
-			});
-			return false;
-		}
-
-		// 获取媒体信息（不需要再检查 fs.existsSync，因为 statSync 已经验证了）
+		// 获取媒体信息（非媒体文件会返回 null）
 		const info = await getMediaInfo(filePath, mtimeMs);
-
-		// 没有媒体信息的文件使用图标框
 		if (!info) {
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: false,
-				timestamp: Date.now()
-			});
+			shouldUseFrameCache.set(cacheKey, { result: false, timestamp: Date.now() });
 			return false;
 		}
 
-		// 检查缓存是否存在且有效
-		const cacheStrategy = determineCacheStrategy(filePath, info);
-		const cachedBuffer = geq().getCachedBuffer(contentId, cacheStrategy.cacheKey);
-
-		// 如果有缓存，检查缓存是否有效
-		if (cachedBuffer) {
-			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
-			// 确保缓存类型正确
-			if (meta && (meta.type === "webp_unified" || meta.type === "text_preview")) {
-				// 缓存结果
-				shouldUseFrameCache.set(cacheKey, {
-					result: true,
-					timestamp: Date.now()
-				});
-				return true;
-			}
-		}
-
-		// 对于简单格式的静态图片，直接使用
+		// 简单格式的静态图片，直接使用相框
 		const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
 		if (simpleFormats.includes(ext) && info.isStaticImage && !info.needsConversion) {
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: true,
-				timestamp: Date.now()
-			});
+			shouldUseFrameCache.set(cacheKey, { result: true, timestamp: Date.now() });
 			return true;
 		}
 
-		// 其他情况尝试生成预览并检查
-		// 注意：这里不实际生成，只是检查是否能生成
-		// 避免性能问题
-
-		// 如果是视频或动画，检查是否支持
+		// 视频或动画，需要 FFmpeg
 		if (info.type === "video" || info.type === "animated_image") {
-			// 视频和动画需要缓存支持
-			const result = global.ffmpegPath() ? true : false;
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: result,
-				timestamp: Date.now()
-			});
+			const result = !!global.ffmpegPath();
+			shouldUseFrameCache.set(cacheKey, { result, timestamp: Date.now() });
 			return result;
 		}
 
-		// 其他需要转换的格式
+		// 其他需要转换的格式，需要 FFmpeg
 		if (info.needsConversion) {
-			const result = global.ffmpegPath() ? true : false;
-			// 缓存结果
-			shouldUseFrameCache.set(cacheKey, {
-				result: result,
-				timestamp: Date.now()
-			});
+			const result = !!global.ffmpegPath();
+			shouldUseFrameCache.set(cacheKey, { result, timestamp: Date.now() });
 			return result;
 		}
 
 		// 默认使用图标框
-		// 缓存结果
-		shouldUseFrameCache.set(cacheKey, {
-			result: false,
-			timestamp: Date.now()
-		});
+		shouldUseFrameCache.set(cacheKey, { result: false, timestamp: Date.now() });
 		return false;
 	} catch (error) {
-		// 任何错误都使用图标框
 		return false;
 	}
 }
