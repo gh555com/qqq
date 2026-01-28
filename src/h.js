@@ -541,6 +541,17 @@ function prefillFingerprint(filePath, fingerprint) {
     } catch (e) { }
 }
 
+/**
+ * 清除指定文件的指纹缓存
+ * @param {string} filePath - 文件路径
+ */
+function invalidateFingerprintForPath(filePath) {
+    try {
+        const key = cacheKeyForPath(filePath);
+        _fingerprintCache.delete(key);
+    } catch { }
+}
+
 function computeFingerprint(filePath) {
     try {
         const stat = fs.statSync(filePath);
@@ -1809,12 +1820,8 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
                     continue;
                 }
 
-                if (autoRename) {
-                    // q2 模式：名字冲突且内容不同 -> 静默重命名
-                    dest = getUniquePath(targetDir, destName, false);
-                } else {
-                    // q1 模式：名字冲突且内容不同 -> 保持原逻辑直接覆盖
-                }
+                // 名字冲突且内容不同 -> 静默重命名（q1/q2 统一行为，不再覆盖）
+                dest = getUniquePath(targetDir, destName, false);
             }
             fs.copyFileSync(f, dest);
 
@@ -1850,8 +1857,11 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
     for (const folder of folders) {
         try {
             const folderName = path.basename(folder);
-            // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
+            // 同名文件夹静默重命名（q1/q2 统一行为，不再覆盖）
+            let destFolder = path.join(targetDir, folderName);
+            if (fs.existsSync(destFolder)) {
+                destFolder = getUniquePath(targetDir, folderName, true);
+            }
             // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
             const result = safeCopyFolderRecursive(folder, destFolder);
             if (result.success) {
@@ -2021,8 +2031,11 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
                 await yieldToUI();
             }
-            // ★ q2 模式下同名文件夹静默重命名
-            const destFolder = autoRename ? getUniquePath(targetDir, folderName, true) : path.join(targetDir, folderName);
+            // 同名文件夹静默重命名（q1/q2 统一行为，不再覆盖）
+            let destFolder = path.join(targetDir, folderName);
+            if (fs.existsSync(destFolder)) {
+                destFolder = getUniquePath(targetDir, folderName, true);
+            }
 
             // ★ 改为异步复制文件夹，避免大文件夹阻塞主线程
             const result = await safeCopyFolderRecursiveAsync(folder, destFolder, token, shouldCancel);
@@ -2090,7 +2103,18 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             }
             let dest = path.join(targetDir, destName);
 
-            if (autoRename) {
+            // 同名文件静默重命名（q1/q2 统一行为，不再覆盖）
+            if (fs.existsSync(dest)) {
+                const dstFingerprint = computeFingerprint(dest);
+                const srcFingerprint2 = srcFingerprint || computeFingerprint(f);
+                if (dstFingerprint === srcFingerprint2) {
+                    // 内容相同，跳过复制
+                    copiedFiles.push(dest);
+                    if (srcFingerprint2) prefillFingerprint(dest, srcFingerprint2);
+                    processedItems++;
+                    continue;
+                }
+                // 内容不同，重命名
                 dest = getUniquePath(targetDir, destName, false);
             }
 
@@ -2531,6 +2555,7 @@ module.exports = {
     extractVideoUrlsFromHtmlFragment,
     computeFingerprint,
     prefillFingerprint,
+    invalidateFingerprintForPath,
     getTimestampFilename,
     getFilenameFromUrl,
     isImageExtForClipboard,
