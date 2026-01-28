@@ -541,17 +541,6 @@ function prefillFingerprint(filePath, fingerprint) {
     } catch (e) { }
 }
 
-/**
- * 清除指定文件的指纹缓存
- * @param {string} filePath - 文件路径
- */
-function invalidateFingerprintForPath(filePath) {
-    try {
-        const key = cacheKeyForPath(filePath);
-        _fingerprintCache.delete(key);
-    } catch { }
-}
-
 function computeFingerprint(filePath) {
     try {
         const stat = fs.statSync(filePath);
@@ -2555,7 +2544,6 @@ module.exports = {
     extractVideoUrlsFromHtmlFragment,
     computeFingerprint,
     prefillFingerprint,
-    invalidateFingerprintForPath,
     getTimestampFilename,
     getFilenameFromUrl,
     isImageExtForClipboard,
