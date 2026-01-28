@@ -485,6 +485,35 @@ function unmarkFileAsBroken(contentId) {
 	saveCacheMeta();
 }
 
+/**
+ * 根据 contentId 删除预览缓存（包括内存和磁盘文件）
+ * @param {string} contentId - 文件指纹 ID
+ */
+function deleteCacheForContentId(contentId) {
+	if (!cacheDir || !cacheMeta) return;
+	try {
+		const entry = cacheMeta.entries[contentId];
+		if (entry?.qualities) {
+			for (const quality of Object.keys(entry.qualities)) {
+				const fileName = `${contentId}.${quality}`;
+				const filePath = path.join(cacheDir, fileName);
+				try {
+					if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+				} catch { }
+			}
+		}
+		delete cacheMeta.entries[contentId];
+		// 同时清除 broken 记录
+		if (cacheMeta.brokenFiles?.[contentId]) {
+			delete cacheMeta.brokenFiles[contentId];
+		}
+		saveCacheMeta();
+		global.logMessage(`[Cache] INVALIDATED: contentId=${contentId}`, "DEBUG");
+	} catch (e) {
+		global.logMessage(`[Cache] DELETE ERROR: ${e.message}`, "WARN");
+	}
+}
+
 function shouldVerifySourceAfterFailure(stderr) {
 	const s = String(stderr || "").toLowerCase();
 	// Patterns that strongly suggest the SOURCE is corrupted or structurally invalid
@@ -762,6 +791,39 @@ function findSourceFile(fingerprint) {
 	return null;
 }
 
+/**
+ * 通过文件路径失效缓存（指纹 + 预览）
+ * @param {string} filePath - 文件路径
+ */
+function invalidateCacheForPath(filePath) {
+	if (!cacheMeta) return;
+	try {
+		// 先清除指纹缓存
+		h.invalidateFingerprintForPath(filePath);
+
+		// 在 fileIndex 中查找 contentId
+		const normalizedPath = path.normalize(filePath).toLowerCase();
+		let foundContentId = null;
+		if (cacheMeta.fileIndex) {
+			for (const [contentId, indexedPath] of Object.entries(cacheMeta.fileIndex)) {
+				if (path.normalize(indexedPath).toLowerCase() === normalizedPath) {
+					foundContentId = contentId;
+					break;
+				}
+			}
+		}
+
+		if (foundContentId) {
+			// 清除 fileIndex 中的映射
+			delete cacheMeta.fileIndex[foundContentId];
+			// 清除预览缓存
+			deleteCacheForContentId(foundContentId);
+		}
+	} catch (e) {
+		global.logMessage(`[Cache] invalidateCacheForPath error: ${e.message}`, "WARN");
+	}
+}
+
 // ============================================================================
 // Clipboard Logic (Delegated to h.js)
 // ============================================================================
@@ -851,17 +913,24 @@ async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = nu
 
 async function getFolderInfo(folderPath) {
 	folderPath = canonicalizeExistingPath(folderPath) || folderPath;
+	const startTime = Date.now();
 
 	const res = await tryEngineCall({
 		python: "folder_info",
 		rust: "folder_info"
 	}, { path: folderPath }, 15000);
-	if (res) return res;
 
-	return getFolderInfoJS(folderPath);
+	if (res) {
+		const elapsed = Date.now() - startTime;
+		global.logMessage(`[FolderScan] ${folderPath}: ${elapsed}ms, ${res.file_count_root || 0}文件, ${global.formatBytes(res.total_size || 0)}`, "DEBUG");
+		return res;
+	}
+
+	return getFolderInfoJS(folderPath, startTime);
 }
 
-async function getFolderInfoJS(folderPath) {
+async function getFolderInfoJS(folderPath, startTime = null) {
+	if (!startTime) startTime = Date.now();
 	if (!fs.existsSync(folderPath)) return { error: "not_found" };
 
 	let totalSize = 0;
@@ -893,6 +962,9 @@ async function getFolderInfoJS(folderPath) {
 		} catch { }
 	}
 
+	const elapsed = Date.now() - startTime;
+	global.logMessage(`[FolderScan] ${folderPath}: ${elapsed}ms, ${fileCount}文件, ${global.formatBytes(totalSize)} (JS)`, "DEBUG");
+
 	return {
 		success: true,
 		total_size: totalSize,
@@ -900,6 +972,7 @@ async function getFolderInfoJS(folderPath) {
 		ext_stats: extStats,
 	};
 }
+
 
 function shouldShowDuration(info) {
 	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
@@ -1499,6 +1572,7 @@ const exported = {
 	isBrokenFile,
 	markFileAsBroken,
 	unmarkFileAsBroken,
+	deleteCacheForContentId,
 	getBrokenFileRecord,
 	updateStatusBarThrottled,
 	getPersistentCacheStatsSnapshot: global.getPersistentCacheStatsSnapshot,
@@ -1523,6 +1597,7 @@ const exported = {
 
 	registerSourceFile,
 	findSourceFile,
+	invalidateCacheForPath,
 
 	getActiveEngineCode: global.getActiveEngineCode,
 	getActiveEngineName: global.getActiveEngineName,

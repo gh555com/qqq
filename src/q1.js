@@ -239,6 +239,11 @@ function clearDecorations() {
 	documentDecorationsMap.clear();
 }
 
+// ★ 只清除装饰器缓存，不 dispose，用于文件变化后强制重新渲染
+function invalidateDecorationCache() {
+	documentDecorationsMap.clear();
+}
+
 function clearAllEditorDebounceTimers() {
 	for (const timer of editorDebounceTimers.values()) clearTimeout(timer);
 	editorDebounceTimers.clear();
@@ -2663,11 +2668,30 @@ async function performGlobalClean(editor, force = false, mode = null) {
 		// 如果没指定 mode，使用全局配置
 		const edits = await provideCleanlinessEditsAsync(editor.document, mode);
 		if (edits.length > 0) {
-			await editor.edit((editBuilder) => {
-				edits.forEach((e) => {
-					editBuilder.replace(e.range, e.newText);
-				});
+			// ★ 按位置排序并过滤重叠的编辑
+			edits.sort((a, b) => {
+				const cmp = a.range.start.compareTo(b.range.start);
+				if (cmp !== 0) return cmp;
+				return a.range.end.compareTo(b.range.end);
 			});
+			// 过滤重叠的编辑（保留第一个）
+			const filteredEdits = [];
+			let lastEnd = null;
+			for (const e of edits) {
+				if (lastEnd && e.range.start.isBefore(lastEnd)) {
+					// 重叠，跳过
+					continue;
+				}
+				filteredEdits.push(e);
+				lastEnd = e.range.end;
+			}
+			if (filteredEdits.length > 0) {
+				await editor.edit((editBuilder) => {
+					filteredEdits.forEach((e) => {
+						editBuilder.replace(e.range, e.newText);
+					});
+				});
+			}
 		}
 	} catch (e) {
 		global.logMessage(`performGlobalClean failed: ${e.message}`, "WARN");
@@ -2699,7 +2723,6 @@ class FileCodeLensProvider {
 		const regex = geq().createPathRegex();
 		const text = document.getText();
 		let match;
-		const foldersToFetch = new Set();
 
 		while ((match = regex.exec(text))) {
 			const pos = document.positionAt(match.index);
@@ -2741,7 +2764,7 @@ class FileCodeLensProvider {
 				} else {
 					fSizeStr = "●";
 					folderTooltip = "正在计算文件夹大小...";
-					foldersToFetch.add(folder);
+					fetchFolderSizeFirstTime(folder); // 首次加载时扫描一次
 				}
 
 				lenses.push(
@@ -2820,107 +2843,75 @@ class FileCodeLensProvider {
 			}
 		}
 
-		if (foldersToFetch.size > 0) {
-			const refreshCb = () => this.debouncedRefresh();
-			for (const folder of foldersToFetch) {
-				fetchFolderSizeAsync(folder, refreshCb);
-			}
-		}
-
 		return lenses;
 	}
 }
 
-const FOLDER_SIZE_CACHE_MAX_AGE = 235 * 1000;
+// ★ 被动监听模式 + 首次加载扫描一次
+const FOLDER_SIZE_SCAN_COOLDOWN = 15 * 1000; // 15秒扫描冷却时间
 const _pendingFolderSizeRequests = new Map();
+const _lastScanTime = new Map(); // 记录每个文件夹的上次扫描时间
 
+// ★ FileSystemWatcher 触发时调用：清除缓存并触发重新扫描（带冷却时间）
 function invalidateFolderSizeCacheForPath(filePath) {
 	try {
 		const dir = path.dirname(filePath);
+		const hadCache = folderSizeCache.has(dir) || folderSizeCache.has(filePath);
 		if (folderSizeCache.has(dir)) folderSizeCache.delete(dir);
+		if (folderSizeCache.has(filePath)) folderSizeCache.delete(filePath);
+
+		// 触发重新扫描（检查冷却时间）
+		if (hadCache && dir) {
+			const now = Date.now();
+			const lastScan = _lastScanTime.get(dir) || 0;
+			if (now - lastScan >= FOLDER_SIZE_SCAN_COOLDOWN) {
+				fetchFolderSizeInternal(dir, true);
+			}
+		}
 	} catch { }
 }
 
+// ★ 仅返回缓存，不触发扫描
 function geqFolderSizeSync(folderPath) {
-	const now = Date.now();
 	const cached = folderSizeCache.get(folderPath);
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) {
-		return cached.data;
-	}
-	return null;
+	return cached ? cached.data : null;
 }
 
-function fetchFolderSizeAsync(folderPath, refreshCallback) {
-	if (_pendingFolderSizeRequests.has(folderPath)) {
-		return;
-	}
+// ★ 首次加载时触发扫描（唯一的主动扫描）
+function fetchFolderSizeFirstTime(folderPath) {
+	if (folderSizeCache.has(folderPath)) return; // 已有缓存，不扫描
+	fetchFolderSizeInternal(folderPath, false);
+}
 
+// ★ 内部扫描函数（带防重复）
+function fetchFolderSizeInternal(folderPath, fromWatcher) {
+	if (_pendingFolderSizeRequests.has(folderPath)) return;
 	_pendingFolderSizeRequests.set(folderPath, true);
+	_lastScanTime.set(folderPath, Date.now());
 
 	geq().getFolderInfo(folderPath).then(result => {
 		_pendingFolderSizeRequests.delete(folderPath);
-
 		if (result?.success) {
 			const parts = [];
 			let totalFiles = 0;
 			if (result.ext_stats) {
-
 				const sortedExts = Object.entries(result.ext_stats).sort(([, countA], [, countB]) => countB - countA);
 				for (const [ext, count] of sortedExts) {
 					totalFiles += count;
 					parts.push(`${count}★ ${ext || "无后缀"}`);
 				}
 			}
-			const summaryStr =
-				parts.length > 0
-					? `${totalFiles}个文件：${parts.join(";  ")}`
-					: result.file_count_root > 0
-						? `${result.file_count_root}个文件`
-						: "空文件夹";
+			const summaryStr = parts.length > 0
+				? `${totalFiles}个文件：${parts.join(";  ")}`
+				: result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹";
 			const data = { size: result.total_size, summary: summaryStr };
 			folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
-			// ★ FIFO 缓存大小限制
 			evictOldestEntries(folderSizeCache, FOLDER_SIZE_CACHE_MAX_ENTRIES);
-
-			if (refreshCallback) {
-				refreshCallback();
-			}
+			if (codeLensProvider) codeLensProvider.debouncedRefresh();
 		}
 	}).catch(() => {
 		_pendingFolderSizeRequests.delete(folderPath);
 	});
-}
-
-async function geqFolderSize(folderPath) {
-	const now = Date.now();
-	const cached = folderSizeCache.get(folderPath);
-	if (cached && now - cached.timestamp < FOLDER_SIZE_CACHE_MAX_AGE) return cached.data;
-
-	const result = await geq().getFolderInfo(folderPath);
-	if (result?.success) {
-		const parts = [];
-		let totalFiles = 0;
-		if (result.ext_stats) {
-
-			const sortedExts = Object.entries(result.ext_stats).sort(([, countA], [, countB]) => countB - countA);
-			for (const [ext, count] of sortedExts) {
-				totalFiles += count;
-				parts.push(`${count}★ ${ext || "无后缀"}`);
-			}
-		}
-		const summaryStr =
-			parts.length > 0
-				? `${totalFiles}个文件：${parts.join("; ")}`
-				: result.file_count_root > 0
-					? `${result.file_count_root}个文件`
-					: "空文件夹";
-		const data = { size: result.total_size, summary: summaryStr };
-		folderSizeCache.set(folderPath, { data, timestamp: now });
-		// ★ FIFO 缓存大小限制
-		evictOldestEntries(folderSizeCache, FOLDER_SIZE_CACHE_MAX_ENTRIES);
-		return data;
-	}
-	return null;
 }
 
 // ==================== 命令 ====================
@@ -3189,10 +3180,48 @@ async function activate(context) {
 
 	const watcher = vscode.workspace.createFileSystemWatcher("**/*");
 	context.subscriptions.push(watcher);
-	const fsChangeHandler = () => {
-		if (codeLensProvider) codeLensProvider.refresh();
-		renderVisibleEditors(200);
-		clearDecorations();
+
+	// ★ 增强版文件系统监听器，文件变化时清除相关缓存
+	let fsChangeDebounceTimer = null;
+	const pendingChangedPaths = new Set();
+
+	const fsChangeHandler = (uri) => {
+		const filePath = uri?.fsPath;
+		if (filePath) {
+			pendingChangedPaths.add(filePath);
+		}
+
+		// 防抖，避免批量操作时频繁触发
+		if (fsChangeDebounceTimer) {
+			clearTimeout(fsChangeDebounceTimer);
+		}
+		fsChangeDebounceTimer = setTimeout(() => {
+			fsChangeDebounceTimer = null;
+
+			// 批量处理所有变更的文件
+			for (const changedPath of pendingChangedPaths) {
+				// 清除该文件的所有缓存（指纹 + 预览）
+				if (geq().invalidateCacheForPath) {
+					geq().invalidateCacheForPath(changedPath);
+				}
+				// 清除 shouldUseFrame 缓存
+				try {
+					for (const key of shouldUseFrameCache.keys()) {
+						if (key.startsWith(changedPath + ":")) {
+							shouldUseFrameCache.delete(key);
+						}
+					}
+				} catch { }
+				// 清除文件夹大小缓存
+				invalidateFolderSizeCacheForPath(changedPath);
+			}
+			pendingChangedPaths.clear();
+
+			// 触发更新：先清除装饰器缓存，再重新渲染
+			if (codeLensProvider) codeLensProvider.refresh();
+			invalidateDecorationCache(); // 清除缓存，强制重新渲染
+			renderVisibleEditors(50);
+		}, 200); // 200ms 防抖
 	};
 	context.subscriptions.push(
 		watcher.onDidCreate(fsChangeHandler),
