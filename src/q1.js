@@ -1556,17 +1556,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 }
 
 // ==================== 其他工具 ====================
-function formatBytes(size) {
-	if (size == null || isNaN(size)) return "?";
-	const units = ["B", "KB", "MB", "GB"];
-	let idx = 0;
-	let val = size;
-	while (val >= 1024 && idx < units.length - 1) {
-		val /= 1024;
-		idx++;
-	}
-	return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
-}
+// ★ formatBytes 已统一使用 global.formatBytes
 
 function formatDuration(sec) {
 	if (sec == null || isNaN(sec) || sec < 0) return "0s";
@@ -2886,6 +2876,22 @@ function geqFolderSizeSync(folderPath) {
 	return cached ? cached.data : null;
 }
 
+// ★ 轻量检查：只检查文件夹 mtime 是否变化，变化则清除缓存
+function checkFolderMtimeChanged(folderPath) {
+	const cached = folderSizeCache.get(folderPath);
+	if (!cached) return false; // 没有缓存，不需要检查
+
+	try {
+		const currentMtime = fs.statSync(folderPath).mtimeMs;
+		if (cached.mtime !== currentMtime) {
+			// mtime 变了，清除缓存
+			folderSizeCache.delete(folderPath);
+			return true;
+		}
+	} catch { }
+	return false;
+}
+
 // ★ 首次加载时触发扫描（唯一的主动扫描）
 function fetchFolderSizeFirstTime(folderPath) {
 	if (folderSizeCache.has(folderPath)) return; // 已有缓存，不扫描
@@ -2897,6 +2903,10 @@ function fetchFolderSizeInternal(folderPath, fromWatcher) {
 	if (_pendingFolderSizeRequests.has(folderPath)) return;
 	_pendingFolderSizeRequests.set(folderPath, true);
 	_lastScanTime.set(folderPath, Date.now());
+
+	// ★ 获取文件夹 mtime 用于后续轻量检查
+	let folderMtime = 0;
+	try { folderMtime = fs.statSync(folderPath).mtimeMs; } catch { }
 
 	geq().getFolderInfo(folderPath).then(result => {
 		_pendingFolderSizeRequests.delete(folderPath);
@@ -2914,7 +2924,8 @@ function fetchFolderSizeInternal(folderPath, fromWatcher) {
 				? `${totalFiles}个文件：${parts.join(";  ")}`
 				: result.file_count_root > 0 ? `${result.file_count_root}个文件` : "空文件夹";
 			const data = { size: result.total_size, summary: summaryStr };
-			folderSizeCache.set(folderPath, { data, timestamp: Date.now() });
+			// ★ 存储 mtime 用于轻量检查
+			folderSizeCache.set(folderPath, { data, timestamp: Date.now(), mtime: folderMtime });
 			evictOldestEntries(folderSizeCache, FOLDER_SIZE_CACHE_MAX_ENTRIES);
 			if (codeLensProvider) codeLensProvider.debouncedRefresh();
 		}
@@ -3157,10 +3168,17 @@ async function activate(context) {
 		}),
 		vscode.window.onDidChangeWindowState((e) => {
 			if (e.focused) {
-				// ★ 方案 q 核心：获得焦点时清除缓存，强制重新检查
-				folderSizeCache.clear();  // 清除文件夹大小缓存
-				if (codeLensProvider) codeLensProvider.refresh();  // 触发 CodeLens 重新渲染
-				// ★ 直接渲染所有可见编辑器，不用 debounce
+				// ★ 方案 q 轻量版：只检查文件夹 mtime，不主动扫盘
+				let needRefresh = false;
+				for (const [folderPath] of folderSizeCache) {
+					if (checkFolderMtimeChanged(folderPath)) {
+						needRefresh = true;
+					}
+				}
+				if (needRefresh && codeLensProvider) {
+					codeLensProvider.refresh();  // mtime 变了才刷新 CodeLens
+				}
+				// ★ 装饰器更新（通过 mtime 检查，不扫盘）
 				for (const editor of vscode.window.visibleTextEditors) {
 					renderImages(editor);
 				}
