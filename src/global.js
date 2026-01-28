@@ -1915,7 +1915,8 @@ function disposeStatusBar() {
 	}
 }
 
-function formatBytes(size) {
+// ★ 统一的字节格式化函数，decimals 控制小数位数（默认 1 位）
+function formatBytes(size, decimals = 1) {
 	if (size == null || isNaN(size)) return "?";
 	const units = ["B", "KB", "MB", "GB"];
 	let idx = 0;
@@ -1924,7 +1925,7 @@ function formatBytes(size) {
 		val /= 1024;
 		idx++;
 	}
-	return `${val.toFixed(idx > 0 ? 2 : 0)} ${units[idx]}`;
+	return `${val.toFixed(idx > 0 ? decimals : 0)} ${units[idx]}`;
 }
 
 function formatHours(totalSeconds) {
