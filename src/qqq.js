@@ -34,10 +34,6 @@ const CACHE_MAX_SIZE = 40 * 1024 * 1024;
 const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
 const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
 
-const FINGERPRINT_HEAD = 128;
-const FINGERPRINT_MID = 128;
-const FINGERPRINT_TAIL = 128;
-
 // Keep ffmpeg loading in qqq as it was
 let extensionContext = null;
 let cacheDir = null;
@@ -485,35 +481,6 @@ function unmarkFileAsBroken(contentId) {
 	saveCacheMeta();
 }
 
-/**
- * 根据 contentId 删除预览缓存（包括内存和磁盘文件）
- * @param {string} contentId - 文件指纹 ID
- */
-function deleteCacheForContentId(contentId) {
-	if (!cacheDir || !cacheMeta) return;
-	try {
-		const entry = cacheMeta.entries[contentId];
-		if (entry?.qualities) {
-			for (const quality of Object.keys(entry.qualities)) {
-				const fileName = `${contentId}.${quality}`;
-				const filePath = path.join(cacheDir, fileName);
-				try {
-					if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-				} catch { }
-			}
-		}
-		delete cacheMeta.entries[contentId];
-		// 同时清除 broken 记录
-		if (cacheMeta.brokenFiles?.[contentId]) {
-			delete cacheMeta.brokenFiles[contentId];
-		}
-		saveCacheMeta();
-		global.logMessage(`[Cache] INVALIDATED: contentId=${contentId}`, "DEBUG");
-	} catch (e) {
-		global.logMessage(`[Cache] DELETE ERROR: ${e.message}`, "WARN");
-	}
-}
-
 function shouldVerifySourceAfterFailure(stderr) {
 	const s = String(stderr || "").toLowerCase();
 	// Patterns that strongly suggest the SOURCE is corrupted or structurally invalid
@@ -789,39 +756,6 @@ function findSourceFile(fingerprint) {
 		saveCacheMeta();
 	}
 	return null;
-}
-
-/**
- * 通过文件路径失效缓存（指纹 + 预览）
- * @param {string} filePath - 文件路径
- */
-function invalidateCacheForPath(filePath) {
-	if (!cacheMeta) return;
-	try {
-		// 先清除指纹缓存
-		h.invalidateFingerprintForPath(filePath);
-
-		// 在 fileIndex 中查找 contentId
-		const normalizedPath = path.normalize(filePath).toLowerCase();
-		let foundContentId = null;
-		if (cacheMeta.fileIndex) {
-			for (const [contentId, indexedPath] of Object.entries(cacheMeta.fileIndex)) {
-				if (path.normalize(indexedPath).toLowerCase() === normalizedPath) {
-					foundContentId = contentId;
-					break;
-				}
-			}
-		}
-
-		if (foundContentId) {
-			// 清除 fileIndex 中的映射
-			delete cacheMeta.fileIndex[foundContentId];
-			// 清除预览缓存
-			deleteCacheForContentId(foundContentId);
-		}
-	} catch (e) {
-		global.logMessage(`[Cache] invalidateCacheForPath error: ${e.message}`, "WARN");
-	}
 }
 
 // ============================================================================
@@ -1572,7 +1506,6 @@ const exported = {
 	isBrokenFile,
 	markFileAsBroken,
 	unmarkFileAsBroken,
-	deleteCacheForContentId,
 	getBrokenFileRecord,
 	updateStatusBarThrottled,
 	getPersistentCacheStatsSnapshot: global.getPersistentCacheStatsSnapshot,
@@ -1597,7 +1530,6 @@ const exported = {
 
 	registerSourceFile,
 	findSourceFile,
-	invalidateCacheForPath,
 
 	getActiveEngineCode: global.getActiveEngineCode,
 	getActiveEngineName: global.getActiveEngineName,
