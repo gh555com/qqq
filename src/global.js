@@ -1915,6 +1915,33 @@ function disposeStatusBar() {
 	}
 }
 
+// ==================== 路径工具函数 ====================
+
+// ★ 统一的路径规范化函数（盘符大写 + 去尾部斜杠 + 移除 UNC 前缀）
+function canonicalizeExistingPath(p) {
+	if (!p) return "";
+	let out = path.normalize(p);
+
+	if (process.platform === "win32") {
+		out = out.replace(/^\\\\\?\\/, "");
+		out = out.replace(/^[a-z]:/i, (m) => m.toUpperCase());
+	}
+
+	// 去除尾部斜杠（保留根目录如 C:\ 或 /）
+	try {
+		const root = path.parse(out).root;
+		if (out.length > root.length) out = out.replace(/[\\\/]+$/, "");
+	} catch { }
+
+	return out;
+}
+
+// ★ 统一的缓存键生成函数（Windows 下不区分大小写）
+function cacheKeyForPath(p) {
+	const canon = canonicalizeExistingPath(p);
+	return process.platform === "win32" ? canon.toLowerCase() : canon;
+}
+
 // ★ 统一的字节格式化函数，decimals 控制小数位数（默认 1 位）
 function formatBytes(size, decimals = 1) {
 	if (size == null || isNaN(size)) return "?";
@@ -3163,6 +3190,10 @@ module.exports = {
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
 	formatHours,
+
+	// 路径工具函数
+	canonicalizeExistingPath,
+	cacheKeyForPath,
 
 	// ★ 核心逻辑导出
 	savePasteStats,

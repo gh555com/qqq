@@ -427,13 +427,7 @@ const FINGERPRINT_MID = 128;
 const FINGERPRINT_TAIL = 128;
 
 function canonicalizeExistingPath(p) {
-    if (!p) return "";
-    let out = path.normalize(p);
-    if (process.platform === "win32") {
-        // 统一盘符大写，移除 UNC 路径前缀
-        out = out.replace(/^\\\\\?\\/, "").replace(/^[a-z]:/i, (m) => m.toUpperCase());
-    }
-    return out;
+    return global.canonicalizeExistingPath(p);
 }
 
 /**
@@ -529,8 +523,7 @@ function safeCopyFolderRecursive(src, dest) {
 }
 
 function cacheKeyForPath(p) {
-    const canon = canonicalizeExistingPath(p);
-    return process.platform === "win32" ? canon.toLowerCase() : canon;
+    return global.cacheKeyForPath(p);
 }
 
 function prefillFingerprint(filePath, fingerprint) {
