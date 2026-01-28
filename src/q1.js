@@ -239,11 +239,6 @@ function clearDecorations() {
 	documentDecorationsMap.clear();
 }
 
-// ★ 只清除装饰器缓存，不 dispose，用于文件变化后强制重新渲染
-function invalidateDecorationCache() {
-	documentDecorationsMap.clear();
-}
-
 function clearAllEditorDebounceTimers() {
 	for (const timer of editorDebounceTimers.values()) clearTimeout(timer);
 	editorDebounceTimers.clear();
@@ -2866,7 +2861,7 @@ const FOLDER_SIZE_SCAN_COOLDOWN = 15 * 1000; // 15秒扫描冷却时间
 const _pendingFolderSizeRequests = new Map();
 const _lastScanTime = new Map(); // 记录每个文件夹的上次扫描时间
 
-// ★ FileSystemWatcher 触发时调用：清除缓存并触发重新扫描
+// ★ 粘贴操作后调用：清除缓存并触发重新扫描
 function invalidateFolderSizeCacheForPath(filePath) {
 	try {
 		const dir = path.dirname(filePath);
@@ -3198,57 +3193,6 @@ async function activate(context) {
 			renderVisibleEditors();
 			if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
 		})
-	);
-
-	const watcher = vscode.workspace.createFileSystemWatcher("**/*");
-	context.subscriptions.push(watcher);
-
-	// ★ 增强版文件系统监听器，文件变化时清除相关缓存
-	let fsChangeDebounceTimer = null;
-	const pendingChangedPaths = new Set();
-
-	const fsChangeHandler = (uri) => {
-		const filePath = uri?.fsPath;
-		if (filePath) {
-			pendingChangedPaths.add(filePath);
-		}
-
-		// 防抖，避免批量操作时频繁触发
-		if (fsChangeDebounceTimer) {
-			clearTimeout(fsChangeDebounceTimer);
-		}
-		fsChangeDebounceTimer = setTimeout(() => {
-			fsChangeDebounceTimer = null;
-
-			// 批量处理所有变更的文件
-			for (const changedPath of pendingChangedPaths) {
-				// 清除该文件的所有缓存（指纹 + 预览）
-				if (geq().invalidateCacheForPath) {
-					geq().invalidateCacheForPath(changedPath);
-				}
-				// 清除 shouldUseFrame 缓存
-				try {
-					for (const key of shouldUseFrameCache.keys()) {
-						if (key.startsWith(changedPath + ":")) {
-							shouldUseFrameCache.delete(key);
-						}
-					}
-				} catch { }
-				// 清除文件夹大小缓存
-				invalidateFolderSizeCacheForPath(changedPath);
-			}
-			pendingChangedPaths.clear();
-
-			// 触发更新：先清除装饰器缓存，再重新渲染
-			if (codeLensProvider) codeLensProvider.refresh();
-			invalidateDecorationCache(); // 清除缓存，强制重新渲染
-			renderVisibleEditors(50);
-		}, 200); // 200ms 防抖
-	};
-	context.subscriptions.push(
-		watcher.onDidCreate(fsChangeHandler),
-		watcher.onDidDelete(fsChangeHandler),
-		watcher.onDidChange(fsChangeHandler)
 	);
 
 	// ★ 终极最优解：异步恢复移至函数末尾，且使用后台执行模式
