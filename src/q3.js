@@ -889,7 +889,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                             increment: mediaInc,
                         });
 
-                        const fingerprint = qqq.computeFingerprint(elem.path);
+                        const fingerprint = await qqq.computeFingerprintAsync(elem.path);
                         let pngResult;
 
                         if (fingerprint && conversionCache.has(fingerprint)) {

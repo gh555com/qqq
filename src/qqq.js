@@ -334,27 +334,112 @@ function updateStatusBarThrottled() {
 // Fingerprint memoization (dramatically reduces redundant hashing on re-render)
 const _fpCache = new Map(); // key -> fingerprint
 const FP_CACHE_MAX = 2048;
-const _computeFingerprintRaw = h.computeFingerprint;
 
-function computeFingerprintCached(filePath) {
+// Moved from h.js to break circular dependency
+async function computeFileFingerprint(filePath) {
 	if (!filePath) return null;
+	try {
+		const fd = await fs.promises.open(filePath, 'r');
+		try {
+			const st = await fd.stat();
+			const size = st.size;
+			const mtime = Math.floor(st.mtimeMs);
+
+			// Small file optimization
+			if (size < 4096) {
+				const buf = Buffer.alloc(size);
+				await fd.read(buf, 0, size, 0);
+				const hash = crypto.createHash('md5');
+				hash.update(buf);
+				hash.update(`|${size}|${mtime}`);
+				return hash.digest('hex');
+			}
+
+			const buffer = Buffer.alloc(FINGERPRINT_HEAD + FINGERPRINT_MID + FINGERPRINT_TAIL);
+			let bytesRead = 0;
+
+			// Head
+			const headRes = await fd.read(buffer, 0, FINGERPRINT_HEAD, 0);
+			bytesRead += headRes.bytesRead;
+
+			// Mid
+			if (size > FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
+				const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
+				const midRes = await fd.read(buffer, FINGERPRINT_HEAD, FINGERPRINT_MID, midPos);
+				bytesRead += midRes.bytesRead;
+			}
+
+			// Tail
+			if (size > FINGERPRINT_HEAD) {
+				const tailPos = Math.max(FINGERPRINT_HEAD, size - FINGERPRINT_TAIL);
+				const tailRes = await fd.read(buffer, FINGERPRINT_HEAD + FINGERPRINT_MID, FINGERPRINT_TAIL, tailPos);
+				bytesRead += tailRes.bytesRead;
+			}
+
+			const hash = crypto.createHash('md5');
+			hash.update(buffer.slice(0, bytesRead));
+			hash.update(`|${size}|${mtime}`);
+			return hash.digest('hex');
+
+		} finally {
+			await fd.close();
+		}
+	} catch (e) {
+		return null;
+	}
+}
+
+async function prefillFingerprint(filePath, fingerprint) {
+	if (!filePath || !fingerprint) return;
+	try {
+		const st = await fs.promises.stat(filePath);
+		const mtimeMsNorm = Math.floor(st.mtimeMs);
+		const sig = `${cacheKeyForPath(filePath)}|${mtimeMsNorm}|${st.size}`;
+
+		_fpCache.set(sig, fingerprint);
+
+		if (_fpCache.size > FP_CACHE_MAX) {
+			const firstKey = _fpCache.keys().next().value;
+			_fpCache.delete(firstKey);
+		}
+	} catch (e) { }
+}
+
+const _computeFingerprintRaw = computeFileFingerprint;
+
+async function computeFingerprintCachedAsync(filePath) {
+	if (!filePath) return null;
+
 	let st = null;
-	try { st = fs.statSync(filePath); } catch { /* ignore */ }
+	try {
+		st = await fs.promises.stat(filePath);
+	} catch {
+		/* ignore */
+	}
 
 	const mtimeMsNorm = st ? Math.floor(st.mtimeMs) : undefined;
-	const sig = st ? `${cacheKeyForPath(filePath)}|${mtimeMsNorm}|${st.size}` : `${cacheKeyForPath(filePath)}|nostat`;
+	const sig = st
+		? `${cacheKeyForPath(filePath)}|${mtimeMsNorm}|${st.size}`
+		: `${cacheKeyForPath(filePath)}|nostat`;
 
 	const cached = _fpCache.get(sig);
 	if (cached) {
 		// LRU touch
 		_fpCache.delete(sig);
 		_fpCache.set(sig, cached);
-		return cached;
+		return await cached;
 	}
 
-	const fp = _computeFingerprintRaw(filePath);
+	const fp = await _computeFingerprintRaw(filePath);
 	if (fp) {
-		global.logMessage(`[Fingerprint] COMPUTE: filePath=${filePath.slice(-40)}, fp=${fp}, cacheKey=${cacheKeyForPath(filePath)}, mtime=${mtimeMsNorm}, size=${st?.size}`, "DEBUG");
+		global.logMessage(
+			`[Fingerprint] COMPUTE: filePath=${filePath.slice(
+				-40
+			)}, fp=${fp}, cacheKey=${cacheKeyForPath(
+				filePath
+			)}, mtime=${mtimeMsNorm}, size=${st?.size}`,
+			"DEBUG"
+		);
 		_fpCache.set(sig, fp);
 		if (_fpCache.size > FP_CACHE_MAX) {
 			const firstKey = _fpCache.keys().next().value;
@@ -738,26 +823,26 @@ function getCachedBuffer(contentId, quality) {
 // ============================================================================
 // Source File Index (Deduplication)
 // ============================================================================
-function registerSourceFile(filePath) {
+async function registerSourceFile(filePath) {
 	if (!filePath || !fs.existsSync(filePath)) return null;
-	const fp = computeFingerprintCached(filePath);
+	const fp = await computeFingerprintCachedAsync(filePath);
 	if (fp) {
 		if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
 		cacheMeta.fileIndex[fp] = filePath;
-		h.prefillFingerprint(filePath, fp); // Sync to memory
-		saveCacheMeta();
+		await h.prefillFingerprint(filePath, fp); // Sync to memory
+		await saveCacheMeta();
 	}
 	return fp;
 }
 
-function findSourceFile(fingerprint) {
+async function findSourceFile(fingerprint) {
 	if (!cacheMeta?.fileIndex) return null;
 	const p = cacheMeta.fileIndex[fingerprint];
 	if (p && fs.existsSync(p)) return p;
 	if (p) {
 		// Stale entry
 		delete cacheMeta.fileIndex[fingerprint];
-		saveCacheMeta();
+		await saveCacheMeta();
 	}
 	return null;
 }
@@ -1482,8 +1567,8 @@ const exported = {
 	logMessageRateLimited: global.logMessageRateLimited,
 
 	// Delegate to h.js
-	computeFingerprint: computeFingerprintCached,
-	prefillFingerprint: h.prefillFingerprint,
+	computeFingerprintAsync: computeFingerprintCachedAsync,
+	prefillFingerprint: prefillFingerprint,
 
 	initCache,
 	validateCache: validateCacheAsync,

@@ -672,6 +672,77 @@ function getWebPDurationFromBuffer(buffer) {
 
 // ==================== ★ a 的 Plain Text 识别（照抄） ====================
 // Check if a file is likely plain text by reading its header bytes
+async function isPlainTextFileAsync(filePath) {
+	let filehandle;
+	try {
+		const ext = path.extname(filePath).toLowerCase();
+
+		// If it's a known image/video extension, definitely not text
+		if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)) return false;
+
+		// If it's a known text extension, return true
+		if (TEXT_EXTS.has(ext)) return true;
+
+		// For unknown extensions or no extension, analyze content
+		filehandle = await fs.promises.open(filePath, 'r');
+		const headerBuf = Buffer.alloc(8192);
+		const { bytesRead } = await filehandle.read(headerBuf, 0, 8192, 0);
+
+		if (bytesRead === 0) return true; // Empty file is considered text
+
+		// Check for binary content indicators
+		let nullCount = 0;
+		let controlCount = 0;
+
+		for (let i = 0; i < bytesRead; i++) {
+			const b = headerBuf[i];
+			if (b === 0x00) {
+				nullCount++;
+			} else if (b < 0x09 || (b > 0x0D && b < 0x20 && b !== 0x1B)) {
+				// Control chars except tab, newline, carriage return, escape
+				controlCount++;
+			}
+		}
+
+		// Binary detection heuristics:
+		// 1. Any NULL bytes strongly suggest binary
+		if (nullCount > 0) return false;
+
+		// 2. Too many control characters suggest binary
+		if (controlCount > bytesRead * 0.1) return false;
+
+		// 3. Check for common binary file signatures
+		if (bytesRead >= 4) {
+			const sig = headerBuf.slice(0, 4).toString('hex');
+			const binarySigs = [
+				'89504e47', // PNG
+				'ffd8ffe0', 'ffd8ffe1', 'ffd8ffe2', 'ffd8ffdb', 'ffd8ffee', // JPEG
+				'47494638', // GIF
+				'52494646', // RIFF (WebP, AVI, WAV)
+				'504b0304', // ZIP/DOCX/XLSX
+				'25504446', // PDF
+				'7f454c46', // ELF
+				'4d5a9000', '4d5a5000', '4d5a0000', // PE/MZ executables
+				'cafebabe', // Java class
+				'feedface', 'feedfacf', 'cefaedfe', 'cffaedfe', // Mach-O
+			];
+			if (binarySigs.some(s => sig.startsWith(s.slice(0, 8)))) return false;
+		}
+
+		// If we get here, it's likely text
+		return true;
+	} catch (e) {
+		return false;
+	} finally {
+		if (filehandle) {
+			await filehandle.close();
+		}
+	}
+}
+
+/**
+ * @deprecated Use isPlainTextFileAsync instead.
+ */
 function isPlainTextFile(filePath) {
 	try {
 		const ext = path.extname(filePath).toLowerCase();
@@ -949,7 +1020,7 @@ async function generateTextPreview(filePath, contentId, qualityLevel, textCacheK
 				try { if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile); } catch { }
 			};
 
-			const timer = setTimeout(() => {
+			const timer = setTimeout(async () => {
 				if (!resolved) {
 					resolved = true;
 					try { child.kill(); } catch { }
@@ -1199,7 +1270,7 @@ function runFFmpegWithPipeAndFallback(args, cacheFilePath, timeoutMs = 30000, is
 			if (stderr.length < 64000) stderr += d.toString();
 		});
 
-		const timer = setTimeout(() => {
+		const timer = setTimeout(async () => {
 			if (!resolved) {
 				resolved = true;
 				try { child.kill(); } catch (e) { }
@@ -1327,7 +1398,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 	const ext = path.extname(filePath).toLowerCase();
 
 	// ★★★ 文本优先：不是看后缀名，而是看实质（照 a）★★★
-	if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || isPlainTextFile(filePath))) {
+	if (!IMAGE_EXTS.has(ext) && !VIDEO_EXTS.has(ext) && (TEXT_EXTS.has(ext) || await isPlainTextFileAsync(filePath))) {
 		const t = await tryTextPreview(filePath, contentId, renderW, renderH);
 		if (t && geq().unmarkFileAsBroken) geq().unmarkFileAsBroken(contentId);
 		return t;
@@ -1582,6 +1653,16 @@ function isImageOrVideoExt(ext) {
 	return IMAGE_EXTS.has(e) || VIDEO_EXTS.has(e);
 }
 
+async function isSupportedMediaAsync(filePath) {
+	const ext = path.extname(filePath).toLowerCase();
+	if (isImageOrVideoExt(ext)) return true;
+	// ★ 文本按 a 的“实质识别”接管
+	return await isPlainTextFileAsync(filePath);
+}
+
+/**
+ * @deprecated Use isSupportedMediaAsync instead.
+ */
 function isSupportedMedia(filePath) {
 	const ext = path.extname(filePath).toLowerCase();
 	if (isImageOrVideoExt(ext)) return true;
@@ -1669,7 +1750,7 @@ async function shouldUseFrame(filePath) {
 		const ext = path.extname(filePath).toLowerCase();
 
 		// 纯文本文件，使用文本胶片相框
-		if (TEXT_EXTS.has(ext) || isPlainTextFile(filePath)) {
+		if (TEXT_EXTS.has(ext) || await isPlainTextFileAsync(filePath)) {
 			// 缓存结果
 			shouldUseFrameCache.set(cacheKey, {
 				result: true,
@@ -1679,7 +1760,7 @@ async function shouldUseFrame(filePath) {
 		}
 
 		// 非文本文件，检查是否能生成有效预览
-		const contentId = geq().computeFingerprint(filePath);
+		const contentId = await geq().computeFingerprintAsync(filePath);
 		global.logMessage(`[ContentID] GENERATE: ${path.basename(filePath).slice(-30)} => ${contentId ? contentId.slice(0, 8) + '...' : 'null'}`, "DEBUG");
 		if (!contentId) {
 			// 缓存结果
@@ -1952,85 +2033,81 @@ async function renderImages(editor) {
 	const iconPaths = []; // 收集需要获取图标的文件路径
 	const renderInfos = []; // 收集渲染信息，用于后续处理
 
-	// 第一阶段：同步扫描，快速隐藏（仅对支持渲染的路径隐藏，避免“隐藏了但不渲染”的空洞）
+	// 第一阶段：异步扫描，收集所有需要处理的路径信息
+	const pathCandidates = [];
 	for (const range of visibleRanges) {
 		const text = editor.document.getText(range);
 		const rangeOffset = editor.document.offsetAt(range.start);
-
 		pathRegex.lastIndex = 0;
 		let match;
-
 		while ((match = pathRegex.exec(text))) {
+			const rawPath = (match[1] || "").trim();
+			if (!rawPath) continue;
+			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
+			if (!absPath) continue;
+
 			const offset = rangeOffset + match.index;
 			const pos = editor.document.positionAt(offset);
 			const endPos = editor.document.positionAt(offset + match[0].length);
 			const uniqueKey = `${pos.line}_${pos.character}`;
-
-			const rawPath = (match[1] || "").trim();
-			if (!rawPath) continue;
-
-			const absPath = resolvePathToAbsolute(editor.document.uri, rawPath);
-
-			let shouldHide = false;
-			let st = null;
-			if (absPath) {
-				try {
-					st = fs.statSync(absPath);
-					// 文件夹和支持的媒体文件都需要隐藏原始文本
-					if (!st.isDirectory()) {
-						if (isSupportedMedia(absPath) || process.platform === 'win32') {
-							shouldHide = true;
-						}
-					} else {
-						// 文件夹也需要隐藏原始文本
-						shouldHide = true;
-					}
-				} catch { }
-			}
-
-			if (shouldHide) {
-				newHideRanges.push(new vscode.Range(pos, endPos));
-			} else {
-				if (currentDecos.has(uniqueKey)) {
-					currentDecos.delete(uniqueKey);
-				}
-				continue;
-			}
-
-			if (currentDecos.has(uniqueKey)) continue;
-
-			const targetLine = pos.line;
-			if (targetLine >= editor.document.lineCount) continue;
-
-			const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
-			const contentId = geq().computeFingerprint(absPath);
-			if (!contentId) continue;
-
-			const isDirectory = st.isDirectory();
-			// 严格控制探测范围：
-			// 1. 文件夹不进行媒体探测，直接走图标渲染
-			// 2. 只有真正的媒体格式才进入 FFprobe 逻辑
-			// 3. Windows 下非媒体文件（exe/lnk）直接走图标流程，不准碰 FFprobe
-			if (!isDirectory && !isSupportedMedia(absPath)) {
-				if (process.platform !== 'win32') continue;
-				// Windows 下的非媒体文件，仅允许走图标渲染，严禁 FFprobe
-			}
-
-			// 收集渲染信息（包括文件夹）
-			renderInfos.push({
-				absPath,
-				uniqueKey,
-				anchorRange,
-				contentId,
-				isDirectory
-			});
-
-			// 在Windows上，收集需要获取图标的文件路径（包括文件夹）
-			if (process.platform === 'win32') {
-				iconPaths.push(absPath);
-			}
+			pathCandidates.push({ absPath, uniqueKey, range: new vscode.Range(pos, endPos) });
 		}
 	}
+
+	const processingResults = await Promise.all(pathCandidates.map(async (candidate) => {
+		const { absPath, uniqueKey, range } = candidate;
+		let shouldHide = false;
+		let st = null;
+		try {
+			st = await fs.promises.stat(absPath);
+			if (st.isDirectory()) {
+				shouldHide = true;
+			} else if (await isSupportedMediaAsync(absPath) || process.platform === 'win32') {
+				shouldHide = true;
+			}
+		} catch { }
+		return { ...candidate, shouldHide, st };
+	}));
+
+	for (const result of processingResults) {
+		const { absPath, uniqueKey, range, shouldHide, st } = result;
+
+		if (shouldHide) {
+			newHideRanges.push(range);
+		} else {
+			if (currentDecos.has(uniqueKey)) {
+				currentDecos.delete(uniqueKey);
+			}
+			continue;
+		}
+
+		if (currentDecos.has(uniqueKey)) continue;
+
+		const targetLine = range.start.line;
+		if (targetLine >= editor.document.lineCount) continue;
+
+		const anchorRange = new vscode.Range(targetLine, 0, targetLine, 0);
+		const contentId = await geq().computeFingerprintAsync(absPath);
+		if (!contentId) continue;
+
+		const isDirectory = st.isDirectory();
+		if (!isDirectory && !(await isSupportedMediaAsync(absPath))) {
+			if (process.platform !== 'win32') continue;
+		}
+
+		renderInfos.push({
+			absPath,
+			uniqueKey,
+			anchorRange,
+			contentId,
+			isDirectory
+		});
+
+		if (process.platform === 'win32') {
+			iconPaths.push(absPath);
+		}
+	}
+
 
 	// 批量获取图标
 	let iconResults = {};
@@ -2048,7 +2125,7 @@ async function renderImages(editor) {
 			try {
 				const ext = path.extname(absPath).toLowerCase();
 				const isVidOrImg = isImageOrVideoExt(ext);
-				const isText = !isVidOrImg && isPlainTextFile(absPath);
+				const isText = !isVidOrImg && await isPlainTextFileAsync(absPath);
 
 				// 从批量获取的结果中获取图标
 				let iconB64 = iconResults[absPath] || null;
@@ -2067,7 +2144,10 @@ async function renderImages(editor) {
 						if (!isText) {
 							// 需要探测的媒体文件
 							let mtimeMs = 0;
-							try { mtimeMs = fs.statSync(absPath).mtimeMs; } catch { }
+							try {
+								const stat = await fs.promises.stat(absPath);
+								mtimeMs = stat.mtimeMs;
+							} catch { }
 							info = await getMediaInfo(absPath, mtimeMs);
 
 							const fc = getFrameConfig(info);
@@ -2119,6 +2199,8 @@ async function renderImages(editor) {
 					deco.renderOptions.gutterIconPath = vscode.Uri.parse('data:image/png;base64,' + iconB64);
 					deco.renderOptions.gutterIconSize = "contain";
 				}
+
+
 
 				if (!contentUrl) return null;
 
@@ -2200,7 +2282,7 @@ async function formatResultToText(result, editor, taskTitle = '', transId = null
 			} else if (block.type === "media") {
 				if (block.path) {
 					const filePath = block.path;
-					if (block.fingerprint) geq().prefillFingerprint(filePath, block.fingerprint);
+					if (block.fingerprint) await geq().prefillFingerprint(filePath, block.fingerprint);
 					const relPath = geq().toSafePath(path.relative(docDir, filePath));
 					const isLastItem = i === blocks.length - 1;
 
@@ -2782,7 +2864,7 @@ class FileCodeLensProvider {
 			const ext = path.extname(absPath).toLowerCase();
 			const isDirectory = st.isDirectory();
 			const isVidOrImg = isImageOrVideoExt(ext);
-			const isText = !isVidOrImg && !isDirectory && isPlainTextFile(absPath);
+			const isText = !isVidOrImg && !isDirectory && await isPlainTextFileAsync(absPath);
 
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
@@ -3113,11 +3195,11 @@ function debounceRender(editor, delay = SCROLL_DEBOUNCE_MS) {
 	const existingTimer = editorDebounceTimers.get(editorId);
 	if (existingTimer) clearTimeout(existingTimer);
 
-	const timer = setTimeout(() => {
+	const timer = setTimeout(async () => {
 		editorDebounceTimers.delete(editorId);
 		if (editor && !editor.document.isClosed) {
 			const stillVisible = vscode.window.visibleTextEditors.some((e) => getEditorId(e) === editorId);
-			if (stillVisible) renderImages(editor);
+			if (stillVisible) await renderImages(editor);
 		}
 	}, delay);
 
@@ -3273,7 +3355,7 @@ async function activate(context) {
 	})();
 
 	const editor = vscode.window.activeTextEditor;
-	if (editor) renderImages(editor);
+	if (editor) await renderImages(editor);
 }
 
 async function deactivate() {

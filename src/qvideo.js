@@ -1477,7 +1477,7 @@ class Qvideo {
         try {
             if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
 
-            const currentFp = h.computeFingerprint(filePath);
+            const currentFp = await h.computeFingerprintAsync(filePath);
             if (currentFp) {
                 // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
                 const dir = path.dirname(filePath);
@@ -1490,7 +1490,7 @@ class Qvideo {
                     if (!fs.statSync(full).isFile()) continue;
                     if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
-                    const otherFp = h.computeFingerprint(full);
+                    const otherFp = await h.computeFingerprintAsync(full);
                     if (otherFp === currentFp) {
                         this.log(`指纹重复，删除临时文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }

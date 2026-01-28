@@ -7,6 +7,7 @@ const cheerio = require("cheerio");
 const crypto = require("crypto");
 const { TextDecoder } = require("util");
 const { getSharedDownloader, isPlatformOrSegmentVideo } = require("./dow");
+const { computeFingerprintAsync, prefillFingerprint } = require("./qqq");
 const sizeOf = require("image-size");
 const global = require("./global");
 
@@ -208,10 +209,10 @@ function spawnOutput(cmd, args) {
  * @param {string} filePath
  * @returns {string} 最终使用的文件路径
  */
-function _tryLocalDeduplicate(filePath) {
+async function _tryLocalDeduplicate(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return filePath;
     try {
-        const currentFp = computeFingerprint(filePath);
+        const currentFp = await computeFingerprintAsync(filePath);
         if (!currentFp) return filePath;
 
         // ★ 核心修复：严格限制在同一文件夹内去重，禁止跨文件夹引用
@@ -230,7 +231,7 @@ function _tryLocalDeduplicate(filePath) {
 
             if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
-            const otherFp = computeFingerprint(full);
+            const otherFp = await computeFingerprintAsync(full);
             if (otherFp === currentFp) {
                 try {
                     fs.unlinkSync(filePath);
@@ -416,214 +417,6 @@ function copyFileWithProgress(src, dest, onProgress, token) {
             readStream.pipe(writeStream);
         } catch (e) { reject(e); }
     });
-}
-
-// ============================================================================
-// Fingerprint Logic
-// ============================================================================
-const _fingerprintCache = new Map();
-const FINGERPRINT_HEAD = 128;
-const FINGERPRINT_MID = 128;
-const FINGERPRINT_TAIL = 128;
-
-function canonicalizeExistingPath(p) {
-    if (!p) return "";
-    let out = path.normalize(p);
-    if (process.platform === "win32") {
-        // 统一盘符大写，移除 UNC 路径前缀
-        out = out.replace(/^\\\\\?\\/, "").replace(/^[a-z]:/i, (m) => m.toUpperCase());
-    }
-    return out;
-}
-
-/**
- * 安全检查文件/文件夹是否可以被访问和读取
- * @param {string} filePath - 要检查的路径
- * @returns {boolean} - 是否可以安全访问
- */
-function safeAccessCheck(filePath) {
-    try {
-        // 检查是否能访问（读取权限）
-        fs.accessSync(filePath, fs.constants.R_OK);
-        // 检查是否能获取状态信息
-        fs.statSync(filePath);
-        return true;
-    } catch (e) {
-        // 文件被占用、权限不足、路径无效等情况
-        log(`[SafeAccess] 无法访问: ${filePath} - ${e.code || e.message}`, "WARN");
-        return false;
-    }
-}
-
-/**
- * 安全的递归复制文件夹，忽略无法访问的文件
- * @param {string} src - 源文件夹
- * @param {string} dest - 目标文件夹
- * @returns {{success: boolean, skipped: string[], errors: string[]}} - 复制结果
- */
-function safeCopyFolderRecursive(src, dest) {
-    const skipped = [];
-    const errors = [];
-
-    function copyRecursive(srcPath, destPath) {
-        try {
-            if (!safeAccessCheck(srcPath)) {
-                skipped.push(srcPath);
-                return;
-            }
-
-            const stat = fs.statSync(srcPath);
-
-            if (stat.isDirectory()) {
-                // 创建目标目录
-                try {
-                    if (!fs.existsSync(destPath)) {
-                        fs.mkdirSync(destPath, { recursive: true });
-                    }
-                } catch (e) {
-                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
-                    return;
-                }
-
-                // 读取目录内容
-                let entries = [];
-                try {
-                    entries = fs.readdirSync(srcPath);
-                } catch (e) {
-                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
-                    return;
-                }
-
-                // 递归复制每个条目
-                for (const entry of entries) {
-                    const srcEntry = path.join(srcPath, entry);
-                    const destEntry = path.join(destPath, entry);
-                    copyRecursive(srcEntry, destEntry);
-                }
-            } else if (stat.isFile()) {
-                // 复制文件
-                try {
-                    fs.copyFileSync(srcPath, destPath);
-                } catch (e) {
-                    if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
-                        skipped.push(srcPath);
-                        log(`[SafeCopy] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
-                    } else {
-                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
-                    }
-                }
-            }
-            // 忽略符号链接和其他特殊文件类型
-        } catch (e) {
-            // 捕获所有未预期的错误，防止崩溃
-            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
-        }
-    }
-
-    try {
-        copyRecursive(src, dest);
-        return { success: true, skipped, errors };
-    } catch (e) {
-        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`] };
-    }
-}
-
-function cacheKeyForPath(p) {
-    const canon = canonicalizeExistingPath(p);
-    return process.platform === "win32" ? canon.toLowerCase() : canon;
-}
-
-function prefillFingerprint(filePath, fingerprint) {
-    try {
-        const stat = fs.statSync(filePath);
-        const key = cacheKeyForPath(filePath);
-        _fingerprintCache.set(key, { mtime: stat.mtimeMs, size: stat.size, fp: fingerprint });
-    } catch (e) { }
-}
-
-function computeFingerprint(filePath) {
-    try {
-        const stat = fs.statSync(filePath);
-        const size = stat.size;
-        // 使用秒级精度或整数毫秒，防止文件系统精度抖动导致的 miss
-        const mtime = Math.floor(stat.mtimeMs);
-        const key = cacheKeyForPath(filePath);
-
-        const cached = _fingerprintCache.get(key);
-        if (cached && cached.mtime === mtime && cached.size === size) return cached.fp;
-
-        if (size === 0) {
-            // 空文件：必须使用路径+mtime 来区分，不能所有空文件都返回相同指纹
-            const fp = crypto.createHash("md5").update(`empty:0:${key}:${mtime}`).digest("hex");
-            _fingerprintCache.set(key, { mtime, size, fp });
-            if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
-            return fp;
-        }
-
-        const fd = fs.openSync(filePath, "r");
-        const chunks = [];
-        const sizeBuf = Buffer.alloc(8);
-        sizeBuf.writeBigUInt64LE(BigInt(size));
-        chunks.push(sizeBuf);
-
-        try {
-            if (size <= FINGERPRINT_HEAD) {
-                const buf = Buffer.alloc(size);
-                fs.readSync(fd, buf, 0, size, 0);
-                chunks.push(buf);
-            } else if (size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
-                const head = Buffer.alloc(FINGERPRINT_HEAD);
-                fs.readSync(fd, head, 0, FINGERPRINT_HEAD, 0);
-                chunks.push(head);
-                const tailSize = Math.min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD);
-                const tail = Buffer.alloc(tailSize);
-                fs.readSync(fd, tail, 0, tailSize, size - tailSize);
-                chunks.push(tail);
-            } else {
-                const head = Buffer.alloc(FINGERPRINT_HEAD);
-                fs.readSync(fd, head, 0, FINGERPRINT_HEAD, 0);
-                chunks.push(head);
-                const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
-                const mid = Buffer.alloc(FINGERPRINT_MID);
-                fs.readSync(fd, mid, 0, FINGERPRINT_MID, midPos);
-                chunks.push(mid);
-                const tail = Buffer.alloc(FINGERPRINT_TAIL);
-                fs.readSync(fd, tail, 0, FINGERPRINT_TAIL, size - FINGERPRINT_TAIL);
-                chunks.push(tail);
-            }
-        } finally {
-            fs.closeSync(fd);
-        }
-
-        const fp = crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
-        _fingerprintCache.set(key, { mtime, size, fp });
-        if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
-        return fp;
-    } catch (e) { return null; }
-}
-
-function computeBufferFingerprint(buffer) {
-    try {
-        const size = buffer.length;
-        if (size === 0) return crypto.createHash("md5").update("empty:0").digest("hex");
-        const chunks = [];
-        const sizeBuf = Buffer.alloc(8);
-        sizeBuf.writeBigUInt64LE(BigInt(size));
-        chunks.push(sizeBuf);
-
-        if (size <= FINGERPRINT_HEAD) {
-            chunks.push(buffer);
-        } else if (size <= FINGERPRINT_HEAD + FINGERPRINT_TAIL) {
-            chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
-            chunks.push(buffer.subarray(size - Math.min(FINGERPRINT_TAIL, size - FINGERPRINT_HEAD)));
-        } else {
-            chunks.push(buffer.subarray(0, FINGERPRINT_HEAD));
-            const midPos = Math.floor(size / 2) - Math.floor(FINGERPRINT_MID / 2);
-            chunks.push(buffer.subarray(midPos, midPos + FINGERPRINT_MID));
-            chunks.push(buffer.subarray(size - FINGERPRINT_TAIL));
-        }
-        return crypto.createHash("md5").update(Buffer.concat(chunks)).digest("hex");
-    } catch (e) { return null; }
 }
 
 // ============================================================================
@@ -1614,19 +1407,19 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         fs.copyFileSync(localPath, destPath);
 
                         // 先计算指纹，然后在同目录内去重
-                        const fp = computeFingerprint(destPath);
+                        const fp = await computeFingerprintAsync(destPath);
                         let finalPath = destPath;
 
                         if (!autoRename && fp) {
                             // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
-                            finalPath = _tryLocalDeduplicate(destPath);
+                            finalPath = await _tryLocalDeduplicate(destPath);
                         } else {
-                            finalPath = autoRename ? destPath : _tryLocalDeduplicate(destPath);
+                            finalPath = autoRename ? destPath : await _tryLocalDeduplicate(destPath);
                         }
 
                         b.filename = path.basename(finalPath);
                         b.path = finalPath;
-                        b.fingerprint = computeFingerprint(finalPath);
+                        b.fingerprint = await computeFingerprintAsync(finalPath);
                         b.size = fs.statSync(finalPath).size;
                         b.status = "ok";
 
@@ -1660,8 +1453,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 try {
                     fs.writeFileSync(destPath, buf);
 
-                    const finalPath = autoRename ? destPath : _tryGlobalDeduplicate(destPath);
-                    const fp = computeFingerprint(finalPath); // Re-compute in case it changed
+                    const finalPath = autoRename ? dest : await _tryLocalDeduplicate(dest);
+                    const fp = await computeFingerprintAsync(finalPath); // Re-compute in case it changed
 
                     b.filename = path.basename(finalPath);
                     b.path = finalPath;
@@ -1711,17 +1504,17 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         }
 
                         // 先计算指纹，然后在同目录内去重
-                        const fp = computeFingerprint(dlPath);
+                        const fp = await computeFingerprintAsync(dlPath);
                         let finalPath = dlPath;
                         let isNewFile = true;
 
                         if (!autoRename && fp) {
                             // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
-                            const tempPath = _tryLocalDeduplicate(dlPath);
+                            const tempPath = await _tryLocalDeduplicate(dlPath);
                             isNewFile = (tempPath === dlPath);
                             finalPath = tempPath;
                         } else {
-                            finalPath = autoRename ? dlPath : _tryLocalDeduplicate(dlPath);
+                            finalPath = autoRename ? dlPath : await _tryLocalDeduplicate(dlPath);
                             isNewFile = (finalPath === dlPath);
                         }
 
@@ -1734,7 +1527,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             block.size = 0;
                             log(`[Dedupe] Warning: Unable to stat finalPath: ${finalPath}`, "WARN");
                         }
-                        block.fingerprint = computeFingerprint(block.path);
+                        block.fingerprint = await computeFingerprintAsync(block.path);
                         if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
                         // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
@@ -1773,7 +1566,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-function copyFilesToTarget(files, targetDir, autoRename = false) {
+async function copyFilesToTarget(files, targetDir, autoRename = false) {
     ensureDir(targetDir);
     const copied = [];
     const fingerprints = {};
@@ -1785,7 +1578,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
                 continue;
             }
 
-            const srcFingerprint = computeFingerprint(f);
+            const srcFingerprint = await computeFingerprintAsync(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
                 // q2 模式不自动重命名时，允许同目录内去重（但禁止跨目录）
@@ -1801,11 +1594,11 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             let dest = path.join(targetDir, destName);
 
             if (fs.existsSync(dest)) {
-                const dstFingerprint = computeFingerprint(dest);
+                const dstFingerprint = await computeFingerprintAsync(dest);
                 if (dstFingerprint === srcFingerprint && !autoRename) {
                     copied.push(dest);
-                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    _tryLocalDeduplicate(dest);
+                    if (srcFingerprint) await prefillFingerprint(dest, srcFingerprint);
+                    await _tryLocalDeduplicate(dest);
                     continue;
                 }
 
@@ -1819,13 +1612,13 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
             fs.copyFileSync(f, dest);
 
             // Local Deduplication Check
-            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
+            const finalPath = autoRename ? dest : await _tryLocalDeduplicate(dest);
             if (finalPath !== dest) {
                 // If deduplicated to a different path
                 copied.push(finalPath);
                 // No need to prefill fingerprint as registerSourceFile does it
             } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
+                if (srcFingerprint) await prefillFingerprint(dest, srcFingerprint);
                 copied.push(dest);
             }
         } catch (e) {
@@ -1840,7 +1633,7 @@ function copyFilesToTarget(files, targetDir, autoRename = false) {
     return { copied, fingerprints };
 }
 
-function processFilesForClipboard(files, targetDir, autoRename = false) {
+async function processFilesForClipboard(files, targetDir, autoRename = false) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
     ensureDir(targetDir);
@@ -1867,7 +1660,7 @@ function processFilesForClipboard(files, targetDir, autoRename = false) {
         }
     }
     if (validFiles.length > 0) {
-        const result = copyFilesToTarget(validFiles, targetDir, autoRename);
+        const result = await copyFilesToTarget(validFiles, targetDir, autoRename);
         copiedFiles.push(...result.copied);
         Object.assign(fingerprints, result.fingerprints);
     }
@@ -2075,7 +1868,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 continue;
             }
 
-            const srcFingerprint = computeFingerprint(f);
+            const srcFingerprint = await computeFingerprintAsync(f);
             if (srcFingerprint) {
                 fingerprints[f] = srcFingerprint;
             }
@@ -2098,7 +1891,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             await fs.promises.copyFile(f, dest);
 
             // 本地去重检查
-            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
+            const finalPath = autoRename ? dest : await _tryLocalDeduplicate(dest);
             if (finalPath !== dest) {
                 copiedFiles.push(finalPath);
             } else {
@@ -2194,8 +1987,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                         const st = fs.statSync(dest);
                         if (st.size > 0) {
                             // ✅ 关键：内存截图也要走本地去重
-                            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
-                            const fp = computeFingerprint(finalPath);
+                            const finalPath = autoRename ? dest : await _tryLocalDeduplicate(dest);
+                            const fp = await computeFingerprintCachedAsync(finalPath);
                             const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
 
                             // ★ Register Transaction（使用规范化路径）
@@ -2529,8 +2322,6 @@ module.exports = {
     _getSmartHtmlFromClipboard,
     extractVideoUrlsFromWebPage,
     extractVideoUrlsFromHtmlFragment,
-    computeFingerprint,
-    prefillFingerprint,
     getTimestampFilename,
     getFilenameFromUrl,
     isImageExtForClipboard,
