@@ -1908,7 +1908,6 @@ async function renderImages(editor) {
 			const offset = rangeOffset + match.index;
 			const pos = editor.document.positionAt(offset);
 			const endPos = editor.document.positionAt(offset + match[0].length);
-			const uniqueKey = `${pos.line}_${pos.character}`;
 
 			const rawPath = (match[1] || "").trim();
 			if (!rawPath) continue;
@@ -1932,8 +1931,17 @@ async function renderImages(editor) {
 				} catch { }
 			}
 
+			// ★ 缓存键只用位置，但存储 mtime 用于检测变化
+			const uniqueKey = `${pos.line}_${pos.character}`;
+			const currentMtime = st ? Math.floor(st.mtimeMs) : 0;
+
 			if (shouldHide) {
 				newHideRanges.push(new vscode.Range(pos, endPos));
+				// ★ 方案 q 核心：检查 mtime 是否变化，变化则删除旧缓存
+				const cachedDeco = currentDecos.get(uniqueKey);
+				if (cachedDeco && cachedDeco._mtime !== currentMtime) {
+					currentDecos.delete(uniqueKey); // mtime 变了，强制重新渲染
+				}
 			} else {
 				if (currentDecos.has(uniqueKey)) {
 					currentDecos.delete(uniqueKey);
@@ -1966,7 +1974,8 @@ async function renderImages(editor) {
 				uniqueKey,
 				anchorRange,
 				contentId,
-				isDirectory
+				isDirectory,
+				mtime: currentMtime  // ★ 方案 q：存储 mtime
 			});
 
 			// 在Windows上，收集需要获取图标的文件路径（包括文件夹）
@@ -1984,7 +1993,7 @@ async function renderImages(editor) {
 
 	// 第二阶段：创建渲染任务
 	for (const renderInfo of renderInfos) {
-		const { absPath, uniqueKey, anchorRange, contentId, isDirectory } = renderInfo;
+		const { absPath, uniqueKey, anchorRange, contentId, isDirectory, mtime } = renderInfo;
 
 		tasks.push(async () => {
 			if (currentRenderVersion !== myVersion) return null;
@@ -2096,7 +2105,7 @@ async function renderImages(editor) {
 				deco.hoverMessage = new vscode.MarkdownString(`[打开文件](${vscode.Uri.file(absPath).toString()})`);
 				deco.hoverMessage.isTrusted = true;
 
-				return { key: uniqueKey, deco };
+				return { key: uniqueKey, deco, mtime };  // ★ 方案 q：返回 mtime
 			} catch (e) {
 				return null;
 			}
@@ -2116,7 +2125,12 @@ async function renderImages(editor) {
 		if (currentRenderVersion !== myVersion) return;
 		if (!decorationType) return;
 
-		for (const res of chunkResults) if (res) currentDecos.set(res.key, res.deco);
+		for (const res of chunkResults) {
+			if (res) {
+				res.deco._mtime = res.mtime;  // ★ 方案 q：存储 mtime 用于下次检测变化
+				currentDecos.set(res.key, res.deco);
+			}
+		}
 	}
 
 	if (decorationType) {
@@ -2852,16 +2866,16 @@ const FOLDER_SIZE_SCAN_COOLDOWN = 15 * 1000; // 15秒扫描冷却时间
 const _pendingFolderSizeRequests = new Map();
 const _lastScanTime = new Map(); // 记录每个文件夹的上次扫描时间
 
-// ★ FileSystemWatcher 触发时调用：清除缓存并触发重新扫描（带冷却时间）
+// ★ FileSystemWatcher 触发时调用：清除缓存并触发重新扫描
 function invalidateFolderSizeCacheForPath(filePath) {
 	try {
 		const dir = path.dirname(filePath);
-		const hadCache = folderSizeCache.has(dir) || folderSizeCache.has(filePath);
+		// 清除缓存
 		if (folderSizeCache.has(dir)) folderSizeCache.delete(dir);
 		if (folderSizeCache.has(filePath)) folderSizeCache.delete(filePath);
 
-		// 触发重新扫描（检查冷却时间）
-		if (hadCache && dir) {
+		// ★ 简化逻辑：只检查冷却时间，不管之前有没有缓存
+		if (dir) {
 			const now = Date.now();
 			const lastScan = _lastScanTime.get(dir) || 0;
 			if (now - lastScan >= FOLDER_SIZE_SCAN_COOLDOWN) {
@@ -3147,7 +3161,15 @@ async function activate(context) {
 			if (e) debounceRender(e);
 		}),
 		vscode.window.onDidChangeWindowState((e) => {
-			if (e.focused) renderVisibleEditors();
+			if (e.focused) {
+				// ★ 方案 q 核心：获得焦点时清除缓存，强制重新检查
+				folderSizeCache.clear();  // 清除文件夹大小缓存
+				if (codeLensProvider) codeLensProvider.refresh();  // 触发 CodeLens 重新渲染
+				// ★ 直接渲染所有可见编辑器，不用 debounce
+				for (const editor of vscode.window.visibleTextEditors) {
+					renderImages(editor);
+				}
+			}
 		}),
 		vscode.workspace.onDidChangeTextDocument((e) => {
 			const ed = vscode.window.activeTextEditor;
