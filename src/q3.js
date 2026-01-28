@@ -82,19 +82,7 @@ function cleanupExportSession(exportId) {
 }
 
 // ==================== 辅助函数 ====================
-
-function formatBytes(size) {
-    if (size == null || isNaN(size)) return "?";
-    const units = ["B", "KB", "MB", "GB"];
-    let idx = 0;
-    let val = size;
-
-    while (val >= 1024 && idx < units.length - 1) {
-        val /= 1024;
-        idx++;
-    }
-    return `${val.toFixed(idx > 0 ? 1 : 0)} ${units[idx]}`;
-}
+// ★ formatBytes 已统一使用 global.formatBytes
 
 function truncateFilename(filename, maxLength = FILENAME_MAX_LENGTH) {
     if (!filename) return filename;
@@ -178,7 +166,7 @@ function computeFileSHA256(filePath) {
  * ★★★ 生成导出成功消息（统一处理"不包含 qqq 韵味"）★★★
  */
 function buildExportSuccessMessage(fileName, fileSize, hasQqqLinks) {
-    const sizeStr = formatBytes(fileSize);
+    const sizeStr = global.formatBytes(fileSize);
     let msg = `qqq: 文档已导出 (${sizeStr}): ${fileName}`;
     if (!hasQqqLinks) msg += "，但，制品中不包含 qqq 的韵味。";
     return msg;
@@ -450,7 +438,7 @@ function generateRtfDocument(elements, attachments, title) {
             parts.push(
                 `${i + 1}\\tab ${escapeRtf(displayName)}\\tab ${escapeRtf(
                     (att.ext || "").toUpperCase()
-                )}\\tab ${escapeRtf(formatBytes(att.size))}\\tab ${escapeRtf(shortHash)}`
+                )}\\tab ${escapeRtf(global.formatBytes(att.size))}\\tab ${escapeRtf(shortHash)}`
             );
             parts.push("\\par");
         }
@@ -591,7 +579,7 @@ function generateDocxDocument(elements, attachments, title) {
                         new TextRun({ text: "\t", size: 16 }),
                         new TextRun({ text: (att.ext || "").toUpperCase(), size: 16, font: "Arial" }),
                         new TextRun({ text: "\t", size: 16 }),
-                        new TextRun({ text: formatBytes(att.size), size: 16, font: "Arial" }),
+                        new TextRun({ text: global.formatBytes(att.size), size: 16, font: "Arial" }),
                         new TextRun({ text: "\t", size: 16 }),
                         new TextRun({ text: shortHash, size: 16, font: "Arial" }),
                     ],
@@ -1177,7 +1165,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                         const msg =
                             totalBytes > 0
-                                ? `压缩中... ${formatBytes(processedBytes)} / ${formatBytes(totalBytes)}（${percent}%）`
+                                ? `压缩中... ${global.formatBytes(processedBytes)} / ${global.formatBytes(totalBytes)}（${percent}%）`
                                 : `压缩中... 条目 ${processedEntries}/${totalEntries || "?"}（${percent}%）`;
 
                         progress.report({ message: msg, increment: inc });
