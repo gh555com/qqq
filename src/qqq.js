@@ -114,25 +114,11 @@ function resolveNavPath(rawPath, baseDir) {
 }
 
 function canonicalizeExistingPath(p) {
-	if (!p) return "";
-	let out = path.normalize(p);
-
-	if (process.platform === "win32") {
-		out = out.replace(/^\\\\\?\\/, "");
-		out = out.replace(/^[a-z]:/i, (m) => m.toUpperCase());
-	}
-
-	try {
-		const root = path.parse(out).root;
-		if (out.length > root.length) out = out.replace(/[\\\/]+$/, "");
-	} catch { }
-
-	return out;
+	return global.canonicalizeExistingPath(p);
 }
 
 function cacheKeyForPath(p) {
-	const canon = canonicalizeExistingPath(p);
-	return process.platform === "win32" ? canon.toLowerCase() : canon;
+	return global.cacheKeyForPath(p);
 }
 
 // ============================================================================
