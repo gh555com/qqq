@@ -2748,7 +2748,7 @@ class FileCodeLensProvider {
 			const targetLensLine = pos.line;
 			const r = new vscode.Range(targetLensLine, 0, targetLensLine, 0);
 
-			let fileSz = formatBytes(st.size);
+			let fileSz = global.formatBytes(st.size);
 			let tooltipText = `创建: ${new Date(st.birthtime).toLocaleString()}\n修改: ${new Date(st.mtime).toLocaleString()}`;
 			let mtimeMs = st.mtimeMs;
 
@@ -2758,7 +2758,7 @@ class FileCodeLensProvider {
 				let folderTooltip;
 
 				if (folderData) {
-					fSizeStr = formatBytes(folderData.size || 0);
+					fSizeStr = global.formatBytes(folderData.size || 0);
 					folderTooltip = folderData.summary;
 				} else {
 					fSizeStr = "●";
