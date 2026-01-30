@@ -162,6 +162,7 @@ class DaemonBridge extends EventEmitter {
 					this.restartCount = 0;
 					this.available = true;
 					this._setStartError("");
+					invalidateEngineCache(); // ★ 引擎状态变化，清除缓存
 					logMessage(`${this.name} bridge started and handshaked`, "INFO");
 					resolve(true);
 					return true;
@@ -191,6 +192,7 @@ class DaemonBridge extends EventEmitter {
 
 	_handleCrash() {
 		this.process = null;
+		invalidateEngineCache(); // ★ 引擎崩溃，清除缓存
 
 		for (const [id, { resolve, timer }] of this.pending) {
 			clearTimeout(timer);
@@ -2717,6 +2719,42 @@ function getEngineTryOrder(pref) {
 	}
 }
 
+// ★★★ 引擎调度优化：缓存有效引擎顺序 ★★★
+let _cachedEffectiveOrder = null;
+let _cachedPref = null;
+
+function getEffectiveEngineOrder() {
+	const pref = getEnginePreference();
+
+	// 偏好变化时重新计算
+	if (_cachedPref !== pref) {
+		_cachedEffectiveOrder = null;
+		_cachedPref = pref;
+	}
+
+	// 已有缓存且有效
+	if (_cachedEffectiveOrder && _cachedEffectiveOrder.length > 0) {
+		return _cachedEffectiveOrder;
+	}
+
+	// 重新计算：只保留可用引擎
+	const fullOrder = getEngineTryOrder(pref);
+	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
+
+	_cachedEffectiveOrder = fullOrder.filter(name => {
+		if (name === "spawn") return false; // spawn 由调用方单独处理
+		const bridge = bridges[name];
+		return bridge && bridge.isAvailable();
+	});
+
+	return _cachedEffectiveOrder;
+}
+
+// ★ 引擎状态变化时清除缓存
+function invalidateEngineCache() {
+	_cachedEffectiveOrder = null;
+}
+
 function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, shellBridge) {
 	const reasons = [];
 
@@ -2775,15 +2813,37 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 	return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
 }
 
+// ★ 已记录不可用状态的引擎（避免重复打印日志）
+const _loggedUnavailableEngines = new Set();
+
 async function tryOneByOne(callback) {
-	const pref = getEnginePreference();
-	const order = getEngineTryOrder(pref);
+	// ★★★ 优化：使用缓存的有效引擎顺序，避免每次都检查不可用引擎 ★★★
+	const effectiveOrder = getEffectiveEngineOrder();
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
 
-	for (const name of order) {
+	// ★ 快速路径：有缓存的有效引擎，直接遍历
+	if (effectiveOrder.length > 0) {
+		for (const name of effectiveOrder) {
+			const bridge = bridges[name];
+			try {
+				const res = await callback(bridge, name);
+				if (res) return res;
+			} catch (e) {
+				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
+			}
+		}
+		return null;
+	}
+
+	// ★ 慢速路径：没有缓存时，走完整逻辑（并更新缓存）
+	const pref = getEnginePreference();
+	const fullOrder = getEngineTryOrder(pref);
+
+	for (const name of fullOrder) {
 		if (name === "spawn") continue;
 		const bridge = bridges[name];
 		if (bridge && bridge.isAvailable()) {
+			_loggedUnavailableEngines.delete(name);
 			try {
 				const res = await callback(bridge, name);
 				if (res) return res;
@@ -2791,9 +2851,11 @@ async function tryOneByOne(callback) {
 				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
 			}
 		} else if (bridge) {
-			// 如果 bridge 存在但不活跃，记录详细原因以供排查
-			const reason = bridge.lastStartError || bridge.lastCrashReason || "not_started";
-			logMessage(`Engine ${name} is unavailable (${reason}), skipping...`, "DEBUG");
+			if (!_loggedUnavailableEngines.has(name)) {
+				const reason = bridge.lastStartError || bridge.lastCrashReason || "not_started";
+				logMessage(`Engine ${name} is unavailable (${reason}), skipping...`, "DEBUG");
+				_loggedUnavailableEngines.add(name);
+			}
 		}
 	}
 	return null;
