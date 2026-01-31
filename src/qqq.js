@@ -903,14 +903,6 @@ let downloadContext = null;
 // =============================================================================
 // 音频播放状态管理
 // =============================================================================
-const AUDIO_ENGINE = {
-	DETECTING: 'DETECTING',
-	PYTHON: 'PYTHON',
-	WEBVIEW: 'WEBVIEW',
-	NONE: 'NONE'
-};
-
-let _audioEngine = AUDIO_ENGINE.DETECTING;
 let _pythonAudioChecked = false;
 let _pythonAudioAvailable = false;
 let _pythonAudioError = null;
