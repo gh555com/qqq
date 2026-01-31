@@ -1013,6 +1013,9 @@ class ClipboardHistorySidebarProvider {
         // 初始内容
         this.updateContent(null, null, null, true);
 
+        // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
+        this._syncPythonStateOnStartup();
+
         // 监听 Python 引擎的异步通知（如自然播放结束）
         this._global.pythonBridge.on('event', (data) => {
             if (data && data.event === 'audio_finished') {
@@ -1420,6 +1423,35 @@ class ClipboardHistorySidebarProvider {
                 fileName: info.fileName,
                 count: loopCount
             });
+        }
+    }
+
+    // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
+    async _syncPythonStateOnStartup() {
+        try {
+            const res = await this._global.pythonBridge.call('get_audio_state');
+            if (res && res.playing) {
+                // Python 正在播放，同步 UI 状态
+                this._global.logMessage('[Audio] q4 启动时检测到 Python 正在播放，同步 UI', "INFO");
+                // 从 Python 引擎获取当前播放的文件和循环信息
+                // 由于无法直接获取文件名，使用 _pythonPlayState 中保存的信息
+                if (this._pythonPlayState && this._pythonPlayState.fileName) {
+                    this.syncPythonPlayState(
+                        this._pythonPlayState.fileName,
+                        this._pythonPlayState.loopCount,
+                        true
+                    );
+                } else {
+                    // 没有记录则只更新文字状态
+                    this._postMessage({
+                        command: 'playAudio',
+                        fileName: 'Savoring...',
+                        count: -1  // 无限循环标志
+                    });
+                }
+            }
+        } catch (e) {
+            // Python 引擎不可用或调用失败，忽略
         }
     }
 
