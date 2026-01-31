@@ -5,7 +5,6 @@
 //
 // ✅ Solarized Dark + 暗金配色（强制自定义颜色）
 // ✅ forced-color-adjust: none 破 Windows 高对比度主题（保证自定义配色可见）
-// ✅ 已彻底移除一切 VS Code globalState / workspaceState 相关代码与迁移/清理逻辑（向前看，不兼容历史）
 // ✅ CSP 安全：全 nonce，无 unsafe-inline，无内联事件
 // ✅ O(1) 去重/查找：hashMap + idMap + 双向链表（move-to-front）
 // ✅ 文件持久化：globalStorageUri + gzip + (msgpack 可选) + 原子写 + 损坏隔离
