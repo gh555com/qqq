@@ -1468,16 +1468,6 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    /**
-     * ★ 外部接口：检查并解绑 Python 播放器（当 Python 引擎崩坏时调用）
-     */
-    unbindPythonPlayer() {
-        this._pythonAudioFailed = true;
-        this._audioSource = AUDIO_SOURCE.WEBVIEW;
-        this._pythonPlayState.playing = false;
-        this._global.logMessage('[Audio] Python 引擎解绑，切换到 Webview', "WARN");
-    }
-
     async triggerSavor(mode = 'normal') {
         // ★ 核心改进：播放前先停止，确保单实例叙事
         await this._stopAudio();
@@ -2114,7 +2104,6 @@ class ClipboardHistorySidebarProvider {
                     if (m.allSettingsStats !== undefined && el.allSettingsStats) el.allSettingsStats.textContent = m.allSettingsStats;
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
-                    window.__isPlaying = true;
                     playAudio(m.base64, m.count);
                 } else if (m.command === 'playSfx') {
                     playSfx(m.base64);
@@ -2127,6 +2116,7 @@ class ClipboardHistorySidebarProvider {
             var currentSfx = null;
             var loopRemaining = 0;
             var playStartTime = 0;
+            var fadeTimer = null;  // ★ 淡出定时器，移到全局以便 stopAudio 清理
 
             function playSfx(base64) {
                 if (currentSfx) { currentSfx.pause(); currentSfx = null; }
@@ -2155,6 +2145,11 @@ class ClipboardHistorySidebarProvider {
 
             function stopAudio() {
                 window.__isPlaying = false;
+                // ★ 清理淡出定时器
+                if (fadeTimer) {
+                    clearInterval(fadeTimer);
+                    fadeTimer = null;
+                }
                 if(currentAudio) {
                     currentAudio.pause();
                     if (playStartTime > 0) {
@@ -2206,8 +2201,7 @@ class ClipboardHistorySidebarProvider {
                     }
                 };
 
-                // ★ 唯一淡出条件：限定次数播放的最后一次，且时长 > 2秒
-                var fadeTimer = null;
+                // ★ 淡出条件：限定次数播放的最后一次，且时长 > 2秒
                 audio.ontimeupdate = function() {
                     if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2.2) {
                         audio.ontimeupdate = null; // 触发后立即卸载，由高频 Timer 接管
@@ -2217,6 +2211,7 @@ class ClipboardHistorySidebarProvider {
                             var rem = audio.duration - audio.currentTime;
                             if (rem <= 0 || !window.__isPlaying) {
                                 clearInterval(fadeTimer);
+                                fadeTimer = null;
                                 return;
                             }
                             audio.volume = Math.max(0, Math.min(1, rem / 2.0));

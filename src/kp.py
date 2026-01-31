@@ -146,10 +146,21 @@ def _play_audio(file_path, count=1):
         def _monitor_playback():
             global _AUDIO_CURRENT_TOKEN
             token = _AUDIO_CURRENT_TOKEN
+            eng = engine  # 闭包捕获引擎引用
             if token is None:
                 return
-            # 等待播放完成（每 200ms 检查一次）
-            while token and not token.stopped:
+            # 等待播放完成：检查 token 是否被停止，或者被从 _active_tokens 中移除
+            while True:
+                # 检查是否手动停止
+                if token.stopped:
+                    break
+                # 检查 token 是否还在活动列表中（自然播放完成会被移除）
+                try:
+                    with eng._tokens_lock:
+                        if token not in eng._active_tokens:
+                            break
+                except:
+                    break
                 time.sleep(0.2)
             # 播放完成，发送事件（仅非无限循环模式）
             if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
