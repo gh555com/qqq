@@ -130,16 +130,16 @@ def _play_audio(file_path, count=1):
             _AUDIO_CURRENT_TOKEN = engine.play_sound_file(
                 file_path=file_path,
                 loop=True,
-                trim_silence=True
+                trim_silence=False  # 不去除首尾静音
             )
             _AUDIO_IS_LOOPING = True
         elif count == 1:
-            # 单次播放，2秒淡出
-            _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, False )
+            # 单次播放，2秒淡出，不去除首尾静音
+            _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, False)
             _AUDIO_IS_LOOPING = False
         else:
-            # 固定次数循环播放，最后2秒淡出
-            _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, False )
+            # 固定次数循环播放，最后2秒淡出，不去除首尾静音
+            _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, False)
             _AUDIO_IS_LOOPING = False
 
         # ★ 启动后台监控线程，在播放完成后发送事件

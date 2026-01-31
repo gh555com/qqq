@@ -1006,6 +1006,15 @@ async function savorMomentsCommand() {
 			try {
 				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 				if (res && (res.status === 'ok' || res.status === 'playing')) {
+					// ★ 无论 q4 是否打开，都记录 Python 播放状态
+					if (activeSidebarProvider) {
+						activeSidebarProvider._pythonPlayState = {
+							playing: true,
+							fileName: info.fileName,
+							loopCount: loopCount,
+							startTime: Date.now()
+						};
+					}
 					// ★ 如果 q4 webview 已经打开，同步 UI 状态（不主动打开）
 					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 						activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
