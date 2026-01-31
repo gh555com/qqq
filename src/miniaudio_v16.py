@@ -1,11 +1,12 @@
 # 文件名: q1.py
 #
-# v1.6.1
-# - 修复：当 miniaudio API 不符合预期时，不让引擎初始化直接 AttributeError 炸掉
-# - validate_environment(): 不依赖外部文件，返回 "ok" 或 "not ok: ...\n<details...>"
-# - not ok 时包含：miniaudio.__file__/__version__/缺失符号/疑似同名遮蔽提示/traceback 等详细原因
-# - loop 无缝：PCM 预处理一次做短 crossfade（默认12ms），回绕跳过头部 N 帧
-# - 继承 v1.5.2 的全部稳定性策略：send<=16384、空读重试、trim缓存、PCM缓存、token.stop、cleanup 防残留
+# v1.6.2
+# - 新增：az(file_path, loop_times, final_fade_seconds)
+#        去除首尾静音 -> 循环固定次数 -> 最后一次末尾按 final_fade_seconds 余弦淡出
+# - 新增：play_sound_file_loops(...) 作为通用接口（az 是它的简化封装）
+# - 兼容：仍保留原 play_sound_file(... loop=True/False ...) 行为不变
+#
+# ⚠️ 注意：工程目录里不要存在 miniaudio.py / miniaudio/ 目录，否则会遮蔽 pip 的 miniaudio 包
 
 import time
 import os
@@ -34,14 +35,14 @@ SILENCE_DB = -45.0                  # 静音阈值（更“狠”就改 -40.0；
 TRIM_WINDOW_SECONDS = 30.0          # 只精确检测首尾各多少秒用于剪裁（性能折中）
 LOUD_RUN_MS = 8.0                   # 必须连续多少毫秒超阈才算“真正有声”（更干净）
 
-LOOP_PREDECODE_MAX_SECONDS = 300.0  # 循环时：片段<=该秒数才预解码到内存保证“无缝循环”
+LOOP_PREDECODE_MAX_SECONDS = 300.0  # 循环时：片段<=该秒数才预解码到内存保证更稳
 LOOP_CROSSFADE_MS_DEFAULT = 12.0    # 循环“尾->头” crossfade 时长（ms）。设 0 表示关闭
 
 SOURCE_READ_FRAMES_MAX = 16384      # 关键：对 miniaudio.stream_file 的 send(framecount) 不得超过该值
 EMPTY_READ_RETRIES = 6              # 空读重试次数（防止偶发空供被误判 EOF）
 EMPTY_READ_SLEEP = 0.0              # 是否在空读之间 sleep（一般 0 就行）
 
-PCM_CACHE_MAX_ITEMS = 8             # PCM 循环段缓存个数
+PCM_CACHE_MAX_ITEMS = 8             # PCM 缓存个数
 # ==========================================================================
 
 
@@ -55,6 +56,7 @@ SILENCE_THR = _db_to_int16_threshold(SILENCE_DB)
 
 @lru_cache(maxsize=64)
 def _cosine_fade_table(fade_frames: int):
+    # 返回长度 fade_frames+1 的余弦淡出增益表：从 1 -> 0
     if fade_frames <= 0:
         return None
     n = float(fade_frames)
@@ -95,7 +97,6 @@ def _miniaudio_file_hint() -> str:
         return "miniaudio.__file__ 为空（异常情况，可能是被奇怪的模块遮蔽）"
     cwd = os.path.abspath(os.getcwd())
     ap = os.path.abspath(p)
-    # 如果 miniaudio 来自当前工作目录（或其子目录），基本就是被项目文件遮蔽了
     if ap.startswith(cwd + os.sep) or ap == cwd:
         return (
             "⚠️ 疑似同名遮蔽：当前导入的 miniaudio 来自工作目录/项目目录。\n"
@@ -132,12 +133,10 @@ def _miniaudio_diagnostics(verbose_trace=False) -> str:
     if hint:
         lines.append(hint)
 
-    # 关键符号检查
     required = ["PlaybackDevice", "SampleFormat", "stream_file", "get_file_info"]
     missing = [x for x in required if not hasattr(miniaudio, x)]
     lines.append(f"missing symbols: {missing if missing else 'none'}")
 
-    # 如果缺失，顺带把前 40 个属性列出来帮助定位“这到底是什么包”
     if missing:
         attrs = sorted([a for a in dir(miniaudio) if not a.startswith("_")])
         lines.append("exported attributes (partial): " + ", ".join(attrs[:40]) + (" ..." if len(attrs) > 40 else ""))
@@ -161,13 +160,11 @@ class _MiniaudioCompat:
                 self.reason_lines.append(_short_exc(_MINIAUDIO_IMPORT_ERROR))
             return
 
-        # PlaybackDevice
         self.PlaybackDevice = getattr(miniaudio, "PlaybackDevice", None)
         if self.PlaybackDevice is None:
             self.ok = False
             self.reason_lines.append("miniaudio.PlaybackDevice not found")
 
-        # SampleFormat + SIGNED16
         self.SampleFormat = getattr(miniaudio, "SampleFormat", None)
         self.SIGNED16 = None
         if self.SampleFormat is None:
@@ -179,7 +176,6 @@ class _MiniaudioCompat:
                 self.ok = False
                 self.reason_lines.append("miniaudio.SampleFormat.SIGNED16 not found")
 
-        # functions
         self.stream_file = getattr(miniaudio, "stream_file", None)
         if self.stream_file is None:
             self.ok = False
@@ -220,14 +216,12 @@ class NonBlockingAudioEngine:
         self._log("非阻塞音频引擎 (NonBlockingAudioEngine) 正在初始化...")
         self.asset_folder = asset_folder
 
-        # 关键：这里先做 compat 检测，不满足就给出详细原因，避免 AttributeError
         self._compat = _MiniaudioCompat()
         if not self._compat.ok:
             raise RuntimeError(self._compat.reason(with_diag=True))
 
-        # 取出需要的 API
         self.PlaybackDevice = self._compat.PlaybackDevice
-        self.REQUESTED_FORMAT = self._compat.SIGNED16  # SampleFormat.SIGNED16
+        self.REQUESTED_FORMAT = self._compat.SIGNED16
         self.REQUESTED_CHANNELS = 2
         self.REQUESTED_RATE = 44100
         self._frame_bytes = self.REQUESTED_CHANNELS * 2
@@ -245,11 +239,9 @@ class NonBlockingAudioEngine:
         self._active_tokens = set()
         self._tokens_lock = threading.Lock()
 
-        # trim 缓存：key->(mtime_ns,size,new_start,new_end)
         self._trim_cache = {}
         self._trim_cache_lock = threading.Lock()
 
-        # PCM 缓存（LRU）：key->(mtime_ns,size,pcm_bytes,xfade_frames)
         self._pcm_cache = OrderedDict()
         self._pcm_cache_lock = threading.Lock()
 
@@ -315,14 +307,13 @@ class NonBlockingAudioEngine:
         except TypeError as e:
             if "just-started generator" in str(e):
                 try:
-                    gen.send(None)  # prime
+                    gen.send(None)
                 except StopIteration:
                     return b""
                 return gen.send(value)
             raise
 
     def _read_frames_retry(self, gen, frames: int):
-        """向 decoder 请求 frames 帧（frames<=16384），空读会重试几次。"""
         if frames <= 0:
             return b""
         if frames > SOURCE_READ_FRAMES_MAX:
@@ -337,7 +328,6 @@ class NonBlockingAudioEngine:
         return b""
 
     def _skip_frames(self, gen, frames_to_skip: int, token: PlaybackToken) -> bool:
-        """丢弃 frames_to_skip 帧。成功返回 True；遇到 EOF/错误返回 False。"""
         remain = frames_to_skip
         while remain > 0:
             if token.stopped:
@@ -352,7 +342,7 @@ class NonBlockingAudioEngine:
             remain -= got
         return True
 
-    # ---------- 静音剪裁（更狠 + 连续 run） ----------
+    # ---------- 静音剪裁 ----------
     def _block_peak_over_threshold(self, pcm_bytes: bytes, thr: int) -> bool:
         samples = array.array("h")
         samples.frombytes(pcm_bytes)
@@ -534,7 +524,7 @@ class NonBlockingAudioEngine:
             self._trim_cache[key] = (mtime_ns, size, new_start, new_end)
         return new_start, new_end
 
-    # ---------- 余弦淡出（非循环） ----------
+    # ---------- 余弦淡出（对 chunk） ----------
     def _apply_fadeout_to_chunk_s16(self, chunk_bytes: bytes, chunk_frames: int,
                                    frames_played_before_chunk: int,
                                    fade_start_frame: int, fade_frames: int, fade_gains) -> bytes:
@@ -622,14 +612,81 @@ class NonBlockingAudioEngine:
 
             framecount = yield audio
 
-    # ---------- 循环 crossfade：预处理 PCM（一次性） ----------
+    # ---------- PCM 解码并缓存 ----------
+    def _get_pcm_cached_or_decode(self, file_path: str, start_frame: int, end_frame: int,
+                                  token: PlaybackToken, crossfade_ms: float):
+        try:
+            st = os.stat(file_path)
+            mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+            size = st.st_size
+        except Exception:
+            mtime_ns, size = None, None
+
+        try:
+            xms = float(crossfade_ms or 0.0)
+        except Exception:
+            xms = 0.0
+        xms_key = round(xms, 3)
+
+        key = (file_path, start_frame, end_frame, self.REQUESTED_RATE, self.REQUESTED_CHANNELS, xms_key)
+
+        with self._pcm_cache_lock:
+            ent = self._pcm_cache.get(key)
+            if ent and ent[0] == mtime_ns and ent[1] == size:
+                self._pcm_cache.move_to_end(key)
+                return ent[2], ent[3]
+
+        total_frames = end_frame - start_frame
+        if total_frames <= 0:
+            return b"", 0
+
+        src = miniaudio.stream_file(
+            file_path,
+            output_format=self.REQUESTED_FORMAT,
+            nchannels=self.REQUESTED_CHANNELS,
+            sample_rate=self.REQUESTED_RATE
+        )
+        try:
+            if start_frame > 0:
+                if not self._skip_frames(src, start_frame, token):
+                    return b"", 0
+
+            remain = total_frames
+            buf = bytearray()
+            while remain > 0 and (not token.stopped):
+                req = SOURCE_READ_FRAMES_MAX if remain > SOURCE_READ_FRAMES_MAX else remain
+                b = self._read_frames_retry(src, req)
+                if not b:
+                    break
+                got = len(b) // self._frame_bytes
+                if got <= 0:
+                    break
+                buf.extend(b[: got * self._frame_bytes])
+                remain -= got
+
+            pcm = bytes(buf)
+        finally:
+            try:
+                src.close()
+            except Exception:
+                pass
+
+        # 这里 crossfade_ms=0 时不做任何改动（用于 az 的 PCM 基础数据）
+        pcm2 = pcm
+        xfade_frames = 0
+        if xms > 0:
+            pcm2, xfade_frames = self._prepare_pcm_loop_crossfade(pcm, xms)
+
+        with self._pcm_cache_lock:
+            self._pcm_cache[key] = (mtime_ns, size, pcm2, xfade_frames)
+            self._pcm_cache.move_to_end(key)
+            while len(self._pcm_cache) > PCM_CACHE_MAX_ITEMS:
+                self._pcm_cache.popitem(last=False)
+
+        return pcm2, xfade_frames
+
+    # ---------- 循环 crossfade：预处理 PCM（一次性）（保留原功能） ----------
     def _prepare_pcm_loop_crossfade(self, pcm_bytes: bytes, crossfade_ms: float):
-        """
-        返回 (new_pcm_bytes, xfade_frames)
-        策略：
-          - 把“尾部最后 xfade_frames 帧”替换成 tail/head 的加权混合（raised-cosine）
-          - 循环回绕时把 pos 设为 xfade_frames（跳过头部前 xfade_frames 帧，避免重复）
-        """
         try:
             xms = float(crossfade_ms or 0.0)
         except Exception:
@@ -687,7 +744,7 @@ class NonBlockingAudioEngine:
 
         return samples.tobytes(), xfade_frames
 
-    # ---------- PCM 循环（内存） ----------
+    # ---------- PCM 无限循环（原逻辑保留） ----------
     def _pcm_loop_stream(self, pcm_bytes: bytes, token: PlaybackToken, xfade_frames: int = 0):
         total_frames = len(pcm_bytes) // self._frame_bytes
         if total_frames <= 0:
@@ -733,74 +790,178 @@ class NonBlockingAudioEngine:
 
             framecount = yield bytes(out)
 
-    def _get_pcm_cached_or_decode(self, file_path: str, start_frame: int, end_frame: int,
-                                  token: PlaybackToken, crossfade_ms: float):
-        """循环用：取 PCM LRU 缓存；没有则 decode 一次并缓存；并做 loop crossfade 预处理。"""
-        try:
-            st = os.stat(file_path)
-            mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
-            size = st.st_size
-        except Exception:
-            mtime_ns, size = None, None
+    # ---------- PCM 固定循环 N 次 + 最后一次淡出（az 核心） ----------
+    def _pcm_nloop_stream(self, pcm_bytes: bytes, loop_times: int,
+                          token: PlaybackToken,
+                          between_loop_crossfade_ms: float,
+                          final_fade_seconds: float):
+        """
+        - pcm_bytes: 已经是剪裁后的段
+        - loop_times: 固定循环次数（>=1）
+        - between_loop_crossfade_ms: 每次循环衔接的 crossfade（仅用于循环之间，不影响最后收尾）
+        - final_fade_seconds: 仅最后一次末尾淡出
+        """
+        total_frames = len(pcm_bytes) // self._frame_bytes
+        if total_frames <= 0 or loop_times <= 0:
+            framecount = yield b""
+            return
 
+        # 循环之间 crossfade（不会改写 pcm 尾部；最后一次不会衔接，所以不影响最终结尾）
         try:
-            xms = float(crossfade_ms or 0.0)
+            xms = float(between_loop_crossfade_ms or 0.0)
         except Exception:
             xms = 0.0
-        xms_key = round(xms, 3)
 
-        key = (file_path, start_frame, end_frame, self.REQUESTED_RATE, self.REQUESTED_CHANNELS, xms_key)
+        xfade_frames = 0
+        mixed_xfade_bytes = b""
+        if loop_times > 1 and xms > 0.0:
+            xfade_frames = int((xms / 1000.0) * self.REQUESTED_RATE)
+            if xfade_frames > 0 and xfade_frames * 2 < total_frames:
+                out_g, in_g = _raised_cosine_crossfade_gains(xfade_frames)
+                if out_g:
+                    head_b = pcm_bytes[: xfade_frames * self._frame_bytes]
+                    tail_b = pcm_bytes[(total_frames - xfade_frames) * self._frame_bytes: total_frames * self._frame_bytes]
 
-        with self._pcm_cache_lock:
-            ent = self._pcm_cache.get(key)
-            if ent and ent[0] == mtime_ns and ent[1] == size:
-                self._pcm_cache.move_to_end(key)
-                return ent[2], ent[3]
+                    head_s = array.array("h")
+                    tail_s = array.array("h")
+                    head_s.frombytes(head_b)
+                    tail_s.frombytes(tail_b)
+                    if sys.byteorder != "little":
+                        head_s.byteswap()
+                        tail_s.byteswap()
 
-        total_frames = end_frame - start_frame
-        if total_frames <= 0:
-            return b"", 0
+                    ch = self.REQUESTED_CHANNELS
+                    mixed = array.array("h", [0] * (xfade_frames * ch))
+                    for i in range(xfade_frames):
+                        og = out_g[i]
+                        ig = in_g[i]
+                        base = i * ch
+                        for c in range(ch):
+                            v = int(tail_s[base + c] * og + head_s[base + c] * ig)
+                            if v > 32767:
+                                v = 32767
+                            elif v < -32768:
+                                v = -32768
+                            mixed[base + c] = v
 
-        src = miniaudio.stream_file(
-            file_path,
-            output_format=self.REQUESTED_FORMAT,
-            nchannels=self.REQUESTED_CHANNELS,
-            sample_rate=self.REQUESTED_RATE
-        )
+                    if sys.byteorder != "little":
+                        mixed.byteswap()
+                    mixed_xfade_bytes = mixed.tobytes()
+            else:
+                xfade_frames = 0
+
+        # 最后一次淡出参数（作用于“最后一次循环的末尾”）
         try:
-            if start_frame > 0:
-                if not self._skip_frames(src, start_frame, token):
-                    return b"", 0
+            fos = float(final_fade_seconds or 0.0)
+        except Exception:
+            fos = 0.0
+        if fos < 0:
+            fos = 0.0
+        if fos > 0:
+            fade_frames = int(fos * self.REQUESTED_RATE)
+            if fade_frames > total_frames:
+                fade_frames = total_frames
+        else:
+            fade_frames = 0
 
-            remain = total_frames
-            buf = bytearray()
-            while remain > 0 and (not token.stopped):
-                req = SOURCE_READ_FRAMES_MAX if remain > SOURCE_READ_FRAMES_MAX else remain
-                b = self._read_frames_retry(src, req)
-                if not b:
-                    break
-                got = len(b) // self._frame_bytes
-                if got <= 0:
-                    break
-                buf.extend(b[: got * self._frame_bytes])
-                remain -= got
+        fade_start = total_frames - fade_frames
+        fade_gains = _cosine_fade_table(fade_frames) if fade_frames > 0 else None
 
-            pcm = bytes(buf)
-        finally:
-            try:
-                src.close()
-            except Exception:
+        loops_left = int(loop_times)
+        pos = 0          # 当前循环内的位置（帧）
+        mix_pos = -1     # >=0 表示正在输出 mixed_xfade_bytes 的第 mix_pos 帧
+
+        framecount = yield b""
+
+        while True:
+            if token.stopped:
+                return
+
+            want_total = int(framecount) if framecount else 0
+            if want_total <= 0:
+                framecount = yield b""
+                continue
+
+            out = bytearray(want_total * self._frame_bytes)
+            filled = 0
+
+            while filled < want_total and loops_left > 0:
+                if token.stopped:
+                    return
+
+                # 1) 正在输出“循环衔接 crossfade 区”
+                if mix_pos >= 0:
+                    remain_mix = xfade_frames - mix_pos
+                    take = remain_mix if remain_mix < (want_total - filled) else (want_total - filled)
+
+                    sb = mix_pos * self._frame_bytes
+                    eb = sb + take * self._frame_bytes
+                    out[filled * self._frame_bytes: (filled + take) * self._frame_bytes] = mixed_xfade_bytes[sb:eb]
+
+                    mix_pos += take
+                    filled += take
+
+                    if mix_pos >= xfade_frames:
+                        # 一个循环结束 + 已经衔接到下一个循环的头部，因此下一个循环从 xfade_frames 开始
+                        loops_left -= 1
+                        if loops_left <= 0:
+                            break
+                        pos = xfade_frames if xfade_frames > 0 else 0
+                        mix_pos = -1
+                    continue
+
+                # 2) 输出当前循环的普通 PCM 区
+                is_last_loop = (loops_left == 1)
+                if (not is_last_loop) and (xfade_frames > 0):
+                    normal_end = total_frames - xfade_frames  # 留出尾部 xfade_frames 给 mix
+                else:
+                    normal_end = total_frames
+
+                if pos >= normal_end:
+                    # 当前循环普通区已输出完
+                    if (not is_last_loop) and (xfade_frames > 0) and mixed_xfade_bytes:
+                        mix_pos = 0
+                        continue
+                    else:
+                        loops_left -= 1
+                        if loops_left <= 0:
+                            break
+                        pos = 0
+                        continue
+
+                take = (normal_end - pos) if (normal_end - pos) < (want_total - filled) else (want_total - filled)
+                sb = pos * self._frame_bytes
+                eb = sb + take * self._frame_bytes
+                chunk = pcm_bytes[sb:eb]
+
+                # 仅最后一次循环：在末尾 fade_frames 做淡出
+                if is_last_loop and fade_frames > 0 and (pos + take) > fade_start:
+                    chunk = self._apply_fadeout_to_chunk_s16(
+                        chunk_bytes=chunk,
+                        chunk_frames=take,
+                        frames_played_before_chunk=pos,
+                        fade_start_frame=fade_start,
+                        fade_frames=fade_frames,
+                        fade_gains=fade_gains
+                    )
+
+                out[filled * self._frame_bytes: (filled + take) * self._frame_bytes] = chunk
+
+                pos += take
+                filled += take
+
+                # 普通区刚好结束，下一轮 while 会进入 mix 或结束逻辑
+
+            # 不够填就补零
+            if filled < want_total:
+                # out 已经是 bytearray 默认 0，无需额外操作
                 pass
 
-        pcm2, xfade_frames = self._prepare_pcm_loop_crossfade(pcm, xms)
+            # 全部循环完成则自然结束（让 device 结束/静音）
+            if loops_left <= 0 and filled <= 0:
+                return
 
-        with self._pcm_cache_lock:
-            self._pcm_cache[key] = (mtime_ns, size, pcm2, xfade_frames)
-            self._pcm_cache.move_to_end(key)
-            while len(self._pcm_cache) > PCM_CACHE_MAX_ITEMS:
-                self._pcm_cache.popitem(last=False)
-
-        return pcm2, xfade_frames
+            framecount = yield bytes(out)
 
     # ---------- token 管理 ----------
     def _register_token(self, token: PlaybackToken):
@@ -811,7 +972,7 @@ class NonBlockingAudioEngine:
         with self._tokens_lock:
             self._active_tokens.discard(token)
 
-    # ---------- worker ----------
+    # ---------- worker：原 play_sound_file ----------
     def _play_sound_worker(self, file_path, play_range, fade_out_seconds, loop, trim_silence,
                           token: PlaybackToken, loop_crossfade_ms: float):
         device = None
@@ -831,7 +992,6 @@ class NonBlockingAudioEngine:
                 self._log(f"【!!】 获取文件信息失败 {file_path}: {e}")
                 return
 
-            # 解析区间：默认整曲
             if play_range is None:
                 start_s, end_s = 0.0, file_duration
             else:
@@ -865,7 +1025,6 @@ class NonBlockingAudioEngine:
 
             seg_duration = seg_frames / float(rate)
 
-            # loop：无缝 => 预解码 + crossfade 预处理 + 回绕跳过头部 xfade_frames
             if loop:
                 if seg_duration <= LOOP_PREDECODE_MAX_SECONDS:
                     pcm, xfade_frames = self._get_pcm_cached_or_decode(
@@ -876,7 +1035,7 @@ class NonBlockingAudioEngine:
 
                     stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
                     try:
-                        stream.send(None)  # prime
+                        stream.send(None)
                     except StopIteration:
                         return
 
@@ -891,7 +1050,6 @@ class NonBlockingAudioEngine:
                         time.sleep(0.1)
                     return
 
-                # 过长：退化方案（不保证100%无缝），也不做 crossfade
                 self._log(f"提示：片段 {seg_duration:.1f}s 过长，避免预解码循环（可调 LOOP_PREDECODE_MAX_SECONDS）。")
                 while not token.stopped:
                     decoder = miniaudio.stream_file(
@@ -938,7 +1096,6 @@ class NonBlockingAudioEngine:
                     decoder = None
                 return
 
-            # 非循环：可以余弦淡出
             try:
                 fos = float(fade_out_seconds or 0.0)
             except Exception:
@@ -961,7 +1118,7 @@ class NonBlockingAudioEngine:
 
             stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
             try:
-                stream.send(None)  # prime
+                stream.send(None)
             except StopIteration:
                 return
 
@@ -976,7 +1133,7 @@ class NonBlockingAudioEngine:
             while (time.time() < t_end) and (not token.stopped):
                 time.sleep(0.05)
 
-        except Exception as e:
+        except Exception:
             self._log("【!!】 音频播放失败:")
             self._log(traceback.format_exc())
         finally:
@@ -995,17 +1152,201 @@ class NonBlockingAudioEngine:
                 except Exception:
                     pass
 
-    # ---------- 对外接口 ----------
+    # ---------- worker：固定循环次数 + 最后淡出（az 的 worker） ----------
+    def _play_sound_worker_loops(self, file_path, play_range,
+                                loop_times: int, final_fade_seconds: float,
+                                trim_silence: bool,
+                                token: PlaybackToken,
+                                between_loop_crossfade_ms: float):
+        device = None
+        decoder = None
+
+        try:
+            if not os.path.exists(file_path):
+                self._log(f"【!!】 文件不存在: {file_path}")
+                return
+
+            try:
+                info = miniaudio.get_file_info(file_path)
+                file_duration = float(info.duration or 0.0)
+                if file_duration <= 0:
+                    raise ValueError("duration<=0")
+            except Exception as e:
+                self._log(f"【!!】 获取文件信息失败 {file_path}: {e}")
+                return
+
+            if play_range is None:
+                start_s, end_s = 0.0, file_duration
+            else:
+                try:
+                    start_s, end_s = float(play_range[0]), float(play_range[1])
+                except Exception:
+                    self._log(f"【!!】 play_range 无效（应为 (start,end)）: {play_range}")
+                    return
+
+            if start_s < 0:
+                start_s = 0.0
+            if end_s > file_duration:
+                end_s = file_duration
+            if end_s <= start_s:
+                self._log(f"提示：播放区间为空或非法：({start_s}, {end_s})")
+                return
+
+            if loop_times is None:
+                loop_times = 1
+            try:
+                loop_times = int(loop_times)
+            except Exception:
+                loop_times = 1
+            if loop_times <= 0:
+                return
+
+            rate = self.REQUESTED_RATE
+            start_frame = int(start_s * rate)
+            end_frame = int(end_s * rate)
+
+            if trim_silence and not token.stopped:
+                start_frame, end_frame = self._trim_silence_edges(file_path, start_frame, end_frame, token)
+
+            if token.stopped:
+                return
+
+            seg_frames = end_frame - start_frame
+            if seg_frames <= 0:
+                return
+
+            seg_duration = seg_frames / float(rate)
+
+            # 优先：短段 -> PCM 预解码一次 -> 固定循环 + 最后淡出（最连贯）
+            if seg_duration <= LOOP_PREDECODE_MAX_SECONDS:
+                pcm, _ = self._get_pcm_cached_or_decode(file_path, start_frame, end_frame, token, crossfade_ms=0.0)
+                if token.stopped or not pcm:
+                    return
+
+                stream = self._pcm_nloop_stream(
+                    pcm_bytes=pcm,
+                    loop_times=loop_times,
+                    token=token,
+                    between_loop_crossfade_ms=between_loop_crossfade_ms,
+                    final_fade_seconds=final_fade_seconds
+                )
+                try:
+                    stream.send(None)
+                except StopIteration:
+                    return
+
+                device = self.PlaybackDevice(
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE
+                )
+                device.start(stream)
+
+                # 估算总时长（用于 worker 自己收尾）
+                xfade_frames = 0
+                if loop_times > 1:
+                    try:
+                        xms = float(between_loop_crossfade_ms or 0.0)
+                    except Exception:
+                        xms = 0.0
+                    if xms > 0:
+                        xfade_frames = int((xms / 1000.0) * rate)
+                        if xfade_frames * 2 >= seg_frames:
+                            xfade_frames = 0
+
+                if loop_times > 1 and xfade_frames > 0:
+                    total_out_frames = seg_frames + (loop_times - 1) * (seg_frames - xfade_frames)
+                else:
+                    total_out_frames = seg_frames * loop_times
+
+                total_out_sec = total_out_frames / float(rate)
+                t_end = time.time() + total_out_sec + 0.25
+                while (time.time() < t_end) and (not token.stopped):
+                    time.sleep(0.05)
+                return
+
+            # 过长：退化方案（每次循环重开设备/解码器，可能存在极短间隙，但功能满足 az 需求）
+            self._log(f"提示：片段 {seg_duration:.1f}s 过长，az 将使用逐次循环方案（可能有轻微间隙）。")
+            for i in range(loop_times):
+                if token.stopped:
+                    return
+
+                is_last = (i == loop_times - 1)
+                try:
+                    fos = float(final_fade_seconds or 0.0) if is_last else 0.0
+                except Exception:
+                    fos = 0.0
+                if fos < 0:
+                    fos = 0.0
+                if fos > seg_duration:
+                    fos = seg_duration
+                fade_frames = int(fos * rate)
+
+                decoder = miniaudio.stream_file(
+                    file_path,
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE
+                )
+                if start_frame > 0:
+                    if not self._skip_frames(decoder, start_frame, token):
+                        return
+
+                stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
+                try:
+                    stream.send(None)
+                except StopIteration:
+                    return
+
+                device = self.PlaybackDevice(
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE
+                )
+                device.start(stream)
+
+                t_end = time.time() + seg_duration + 0.25
+                while (time.time() < t_end) and (not token.stopped):
+                    time.sleep(0.05)
+
+                try:
+                    device.stop()
+                except Exception:
+                    pass
+                try:
+                    device.close()
+                except Exception:
+                    pass
+                device = None
+
+                try:
+                    decoder.close()
+                except Exception:
+                    pass
+                decoder = None
+
+        except Exception:
+            self._log("【!!】 音频播放失败:")
+            self._log(traceback.format_exc())
+        finally:
+            if device:
+                try:
+                    device.stop()
+                except Exception:
+                    pass
+                try:
+                    device.close()
+                except Exception:
+                    pass
+            if decoder:
+                try:
+                    decoder.close()
+                except Exception:
+                    pass
+
+    # ---------- 对外接口：原 play_sound_file ----------
     def play_sound_file(self, file_path, play_range=None, fade_out_seconds=0.0,
                         loop=False, trim_silence=True, loop_crossfade_ms=None):
-        """
-        - play_range: (start_seconds, end_seconds) 或 None(整曲)
-        - loop: 是否循环（片段 or 整曲）
-        - trim_silence: 默认 True，剪掉首尾 -SILENCE_DB 以下静音
-        - fade_out_seconds: 非循环时可用；循环时忽略（保持连贯）
-        - loop_crossfade_ms: 循环尾->头 crossfade 毫秒数，默认 LOOP_CROSSFADE_MS_DEFAULT；设 0 关闭
-        返回：PlaybackToken，可 token.stop() 停止（尤其 loop=True 时很重要）
-        """
         if loop_crossfade_ms is None:
             loop_crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
 
@@ -1025,6 +1366,58 @@ class NonBlockingAudioEngine:
             )
         finally:
             self._unregister_token(token)
+
+    # ---------- 对外接口：固定循环次数 + 最后淡出 ----------
+    def play_sound_file_loops(self, file_path, loop_times: int, final_fade_seconds: float,
+                              play_range=None, trim_silence=True, between_loop_crossfade_ms=None):
+        """
+        固定循环次数播放：
+          - trim_silence: 先剪裁去除首尾静音
+          - loop_times: 循环次数（>=1）
+          - final_fade_seconds: 仅最后一次末尾淡出（秒）
+          - between_loop_crossfade_ms: 循环之间 crossfade（ms），默认 LOOP_CROSSFADE_MS_DEFAULT；设 0 关闭
+        """
+        if between_loop_crossfade_ms is None:
+            between_loop_crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
+
+        token = PlaybackToken()
+        self._register_token(token)
+        self.executor.submit(
+            self._play_wrapper_loops,
+            file_path, play_range, int(loop_times), float(final_fade_seconds or 0.0),
+            bool(trim_silence), token, float(between_loop_crossfade_ms or 0.0)
+        )
+        return token
+
+    def _play_wrapper_loops(self, file_path, play_range, loop_times, final_fade_seconds,
+                            trim_silence, token: PlaybackToken, between_loop_crossfade_ms: float):
+        try:
+            self._play_sound_worker_loops(
+                file_path=file_path,
+                play_range=play_range,
+                loop_times=loop_times,
+                final_fade_seconds=final_fade_seconds,
+                trim_silence=trim_silence,
+                token=token,
+                between_loop_crossfade_ms=between_loop_crossfade_ms
+            )
+        finally:
+            self._unregister_token(token)
+
+    # ---------- 你要的接口：az(q, 3, 2) ----------
+    def az(self, file_path: str, loop_times: int, final_fade_seconds: float):
+        """
+        az(file_path, loop_times, final_fade_seconds)
+        例：az(q, 3, 2) -> 去静音剪裁后循环 3 次，在最后一次末尾 2 秒淡出
+        """
+        return self.play_sound_file_loops(
+            file_path=file_path,
+            loop_times=loop_times,
+            final_fade_seconds=final_fade_seconds,
+            play_range=None,
+            trim_silence=True,
+            between_loop_crossfade_ms=LOOP_CROSSFADE_MS_DEFAULT
+        )
 
     def stop_all(self):
         with self._tokens_lock:
@@ -1049,26 +1442,16 @@ class NonBlockingAudioEngine:
     # ---------- 验证接口：不依赖任何外部文件 ----------
     @classmethod
     def validate_environment(cls, verbose=False, timeout_sec=0.15):
-        """
-        返回：
-          - "ok"
-          - "not ok: <summary>\\n<details...>"
-        """
-        # 先做 compat 检测
         compat = _MiniaudioCompat()
         if not compat.ok:
             return "not ok: miniaudio API mismatch\n" + compat.reason(with_diag=True)
 
-        # 真机试跑：开一个 PlaybackDevice，用内存 PCM 的 generator 推送（不依赖任何外部文件）
         device = None
         token = None
         try:
-            # 用一个“静默引擎实例”来拿参数（不会加载资源）
             engine = cls(asset_folder=".", max_workers=1, silent=(not verbose))
 
-            # 内存 PCM：极短正弦波（也可以把 amp=0.0 变成静音）
             rate = engine.REQUESTED_RATE
-            ch = engine.REQUESTED_CHANNELS
             dur = 0.12
             frames = max(32, int(dur * rate))
             freq = 440.0
@@ -1084,12 +1467,9 @@ class NonBlockingAudioEngine:
                 samples.byteswap()
             pcm = samples.tobytes()
 
-            # 做一次 crossfade 预处理，验证该分支也可用
-            pcm2, xfade_frames = engine._prepare_pcm_loop_crossfade(pcm, LOOP_CROSSFADE_MS_DEFAULT)
-
             token = PlaybackToken()
-            stream = engine._pcm_loop_stream(pcm2, token, xfade_frames=xfade_frames)
-            stream.send(None)  # prime
+            stream = engine._pcm_loop_stream(pcm, token, xfade_frames=0)
+            stream.send(None)
 
             device = compat.PlaybackDevice(
                 output_format=engine.REQUESTED_FORMAT,
@@ -1138,6 +1518,22 @@ class NonBlockingAudioEngine:
                 pass
 
 
+# --------- 模块级 az：方便你直接 az(q,3,2) ---------
+_DEFAULT_ENGINE = None
+
+
+def az(file_path: str, loop_times: int, final_fade_seconds: float):
+    """
+    模块级 az(file_path, loop_times, final_fade_seconds)
+    内部会懒初始化一个默认引擎（max_workers=8），并自动注册 atexit cleanup
+    """
+    global _DEFAULT_ENGINE
+    if _DEFAULT_ENGINE is None:
+        asset_folder = os.path.dirname(os.path.abspath(file_path)) or "."
+        _DEFAULT_ENGINE = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=8)
+    return _DEFAULT_ENGINE.az(file_path, loop_times, final_fade_seconds)
+
+
 # ---------------- 独立测试（可删） ----------------
 if __name__ == "__main__":
     print("=" * 60)
@@ -1145,7 +1541,6 @@ if __name__ == "__main__":
     print(NonBlockingAudioEngine.validate_environment(verbose=True))
     print("=" * 60)
 
-    # 只有在 ok 的情况下才继续测试播放，避免你现在这种 API mismatch 直接炸栈
     status = NonBlockingAudioEngine.validate_environment(verbose=False)
     if status != "ok":
         print("环境不满足，跳过播放测试。")
@@ -1155,31 +1550,18 @@ if __name__ == "__main__":
     asset_folder = os.path.dirname(TEST_FILE) or "."
 
     print("=" * 60)
-    print("独立播放测试：区间 + 去静音(默认更狠) + 循环 crossfade(默认12ms)")
+    print("az 测试：去静音剪裁 + 循环3次 + 最后2秒淡出")
     print(f"文件: {TEST_FILE}")
-    print(f"静音阈值: {SILENCE_DB} dBFS, 连续有声: {LOUD_RUN_MS} ms, 循环crossfade: {LOOP_CROSSFADE_MS_DEFAULT} ms")
+    print(f"静音阈值: {SILENCE_DB} dBFS, 连续有声: {LOUD_RUN_MS} ms")
     print("=" * 60)
 
     engine = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=8)
 
-    tokenA = engine.play_sound_file(
-        TEST_FILE,
-        play_range=(5.0, 9.0),
-        fade_out_seconds=2.0,
-        loop=False,
-        trim_silence=True
-    )
-    time.sleep(6.0)
-    tokenA.stop()
+    # 你要的：az(q,3,2)
+    token = engine.az(TEST_FILE, 3, 2.0)
 
-    tokenB = engine.play_sound_file(
-        TEST_FILE,
-        play_range=(5.0, 9.0),
-        loop=True,
-        trim_silence=True,
-        loop_crossfade_ms=12.0
-    )
-    time.sleep(10.0)
-    tokenB.stop()
+    # 这里等它播完（也可以手动 token.stop() 提前终止）
+    time.sleep(20.0)
 
+    token.stop()
     engine.cleanup()
