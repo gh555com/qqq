@@ -926,6 +926,11 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		return;
 	}
 
+	if (editor.document.isUntitled) {
+		vscode.window.showInformationMessage("qqq: 只能使用原始粘贴。解决方案：保存文件。");
+		return;
+	}
+
 	let rawUrl = urlArg;
 	if (!rawUrl) {
 		rawUrl = await vscode.window.showInputBox({
