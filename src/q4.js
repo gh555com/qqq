@@ -993,6 +993,14 @@ class ClipboardHistorySidebarProvider {
 
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
+
+        // ★ 新增：跟踪 Python 播放状态，支持绑定/解绑
+        this._pythonPlayState = {
+            playing: false,
+            fileName: null,
+            loopCount: 0,
+            startTime: 0
+        };
     }
 
     resolveWebviewView(webviewView) {
@@ -1008,6 +1016,9 @@ class ClipboardHistorySidebarProvider {
         // 监听 Python 引擎的异步通知（如自然播放结束）
         this._global.pythonBridge.on('event', (data) => {
             if (data && data.event === 'audio_finished') {
+                // ★ 更新 Python 播放状态
+                this._pythonPlayState.playing = false;
+                // 通知 webview 停止播放
                 this._postMessage({ command: 'stopAudio' });
             }
         });
@@ -1420,8 +1431,51 @@ class ClipboardHistorySidebarProvider {
             try { await this._global.pythonBridge.call('stop_audio'); } catch (e) { }
         }
 
+        // ★ 清除 Python 播放状态
+        this._pythonPlayState.playing = false;
+
         // 无论 Python 还是 Webview，都让 Webview 侧 UI 进入“停止”状态
         this._postMessage({ command: 'stopAudio' });
+    }
+
+    /**
+     * ★ 外部接口：同步 Python 播放状态到 Webview UI
+     * 由 qqq.js 中的 savorMomentsCommand 调用，当 Python 引擎直接播放时同步 UI
+     * @param {string} fileName 播放的文件名
+     * @param {number} loopCount 循环次数
+     * @param {boolean} isPlaying 是否正在播放
+     */
+    syncPythonPlayState(fileName, loopCount, isPlaying) {
+        // ★ 绑定到 Python 播放器
+        this._audioSource = AUDIO_SOURCE.PYTHON;
+        this._pythonPlayState = {
+            playing: isPlaying,
+            fileName: fileName,
+            loopCount: loopCount,
+            startTime: isPlaying ? Date.now() : 0
+        };
+
+        // 同步 UI 状态（不发送 base64，让 webview 只更新文字状态）
+        if (isPlaying) {
+            this._postMessage({
+                command: 'playAudio',
+                fileName: fileName,
+                count: loopCount
+                // 不发送 base64，让 webview 知道这是 Python 播放，只更新文字
+            });
+        } else {
+            this._postMessage({ command: 'stopAudio' });
+        }
+    }
+
+    /**
+     * ★ 外部接口：检查并解绑 Python 播放器（当 Python 引擎崩坏时调用）
+     */
+    unbindPythonPlayer() {
+        this._pythonAudioFailed = true;
+        this._audioSource = AUDIO_SOURCE.WEBVIEW;
+        this._pythonPlayState.playing = false;
+        this._global.logMessage('[Audio] Python 引擎解绑，切换到 Webview', "WARN");
     }
 
     async triggerSavor(mode = 'normal') {
@@ -1443,10 +1497,17 @@ class ClipboardHistorySidebarProvider {
         if (source === AUDIO_SOURCE.PYTHON) {
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
-                if (res && res.status === 'playing') return;
 
-                // [Fix] 增加对 'ok' 状态的兼容
-                if (res && (res.status === 'playing' || res.status === 'ok')) return;
+                if (res && (res.status === 'playing' || res.status === 'ok')) {
+                    // ★ 更新 Python 播放状态
+                    this._pythonPlayState = {
+                        playing: true,
+                        fileName: info.fileName,
+                        loopCount: loopCount,
+                        startTime: Date.now()
+                    };
+                    return;
+                }
 
                 // 优先报告明确的错误信息
                 if (res && res.error) throw new Error(res.error);
@@ -1457,10 +1518,11 @@ class ClipboardHistorySidebarProvider {
                 console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
+                this._pythonPlayState.playing = false;
             }
         }
 
-        // Webview 兜底
+        // Webview 兆底
         const b64 = info.base64();
         if (b64) {
             this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
@@ -2112,26 +2174,24 @@ class ClipboardHistorySidebarProvider {
             function playAudio(base64, count) {
                 stopAudio();
                 window.__isPlaying = true;
-                loopRemaining = count || 1;
+                // ★ 修复：count=0 表示无限循环，不能用 || 操作符
+                loopRemaining = (count === undefined || count === null) ? 1 : count;
 
+                // ★ 先更新文字和图标状态
+                updateSavorText();
+                if (loopRemaining === -1 || loopRemaining === 0) {
+                    var iconLoop = document.querySelector('.icon-loop');
+                    if (iconLoop) iconLoop.classList.add('spinning');
+                }
+
+                // ★ 如果没有 base64，说明是 Python 引擎播放，只更新 UI 状态
                 if (!base64) {
-                    updateSavorText();
-                    if (loopRemaining === -1 || loopRemaining === 0) {
-                        var iconLoop = document.querySelector('.icon-loop');
-                        if (iconLoop) iconLoop.classList.add('spinning');
-                    }
                     return;
                 }
 
                 var audio = new Audio('data:audio/mp3;base64,' + base64);
                 currentAudio = audio;
                 playStartTime = Date.now();
-                updateSavorText();
-
-                if (loopRemaining === -1 || loopRemaining === 0) {
-                    var iconLoop = document.querySelector('.icon-loop');
-                    if (iconLoop) iconLoop.classList.add('spinning');
-                }
 
                 audio.onended = function() {
                     if (loopRemaining === -1 || loopRemaining === 0) {
