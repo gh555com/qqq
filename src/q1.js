@@ -2503,7 +2503,12 @@ async function executeClipboardCommand() {
 	if (!editor) return;
 
 	if (editor.document.isUntitled) {
-		vscode.window.showInformationMessage("qqq: 未命名文件不能确定资源落盘路径，固只能使用原始粘贴。解决方案：保存文件。");
+		// 先用 wq() 判断剪贴板内容类型
+		const snapshot = await wq();
+		// 只有当内容不是纯文本时才弹出提示框
+		if (snapshot.type !== 'whitelist') {
+			vscode.window.showInformationMessage("qqq: 只能使用原始粘贴。解决方案：保存文件。");
+		}
 		await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
 		return;
 	}
