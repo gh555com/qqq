@@ -25,6 +25,182 @@ import concurrent.futures
 from collections import OrderedDict
 import re
 import base64
+import importlib.util
+
+# =============================================================================
+#  音频引擎（miniaudio_v16）
+# =============================================================================
+_AUDIO_ENGINE = None
+_AUDIO_ENGINE_ERROR = None
+_AUDIO_CURRENT_TOKEN = None
+_AUDIO_LOCK = None
+_AUDIO_MONITOR_THREAD = None
+_AUDIO_IS_LOOPING = False  # 标记是否为无限循环，无限循环不发送结束事件
+
+def _init_audio_engine():
+    """懒加载音频引擎，返回 (engine, error_msg)"""
+    global _AUDIO_ENGINE, _AUDIO_ENGINE_ERROR, _AUDIO_LOCK
+    import threading
+    if _AUDIO_LOCK is None:
+        _AUDIO_LOCK = threading.Lock()
+
+    with _AUDIO_LOCK:
+        if _AUDIO_ENGINE is not None:
+            return _AUDIO_ENGINE, None
+        if _AUDIO_ENGINE_ERROR is not None:
+            return None, _AUDIO_ENGINE_ERROR
+
+        try:
+            # 查找 miniaudio_v16.py 的路径
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            ma_path = os.path.join(script_dir, "miniaudio_v16.py")
+
+            if not os.path.exists(ma_path):
+                _AUDIO_ENGINE_ERROR = f"miniaudio_v16.py not found: {ma_path}"
+                return None, _AUDIO_ENGINE_ERROR
+
+            # 动态导入模块
+            spec = importlib.util.spec_from_file_location("miniaudio_v16", ma_path)
+            ma_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ma_module)
+
+            # 先验证环境
+            validate_result = ma_module.NonBlockingAudioEngine.validate_environment(verbose=False, timeout_sec=0.15)
+            if validate_result != "ok":
+                _AUDIO_ENGINE_ERROR = validate_result
+                return None, _AUDIO_ENGINE_ERROR
+
+            # 初始化引擎（silent=True 不打印日志）
+            _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(asset_folder=".", max_workers=8, silent=True)
+            return _AUDIO_ENGINE, None
+        except Exception as e:
+            import traceback
+            _AUDIO_ENGINE_ERROR = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+            return None, _AUDIO_ENGINE_ERROR
+
+def _check_audio_engine():
+    """检查音频引擎状态，返回详细信息"""
+    engine, err = _init_audio_engine()
+    if err:
+        return {"has_miniaudio": False, "error": err}
+
+    try:
+        # 尝试获取 miniaudio 版本信息
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        ma_path = os.path.join(script_dir, "miniaudio_v16.py")
+        spec = importlib.util.spec_from_file_location("miniaudio_v16", ma_path)
+        ma_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ma_module)
+
+        miniaudio_pkg = getattr(ma_module, 'miniaudio', None)
+        version = getattr(miniaudio_pkg, '__version__', 'unknown') if miniaudio_pkg else 'unknown'
+
+        return {
+            "has_miniaudio": True,
+            "miniaudio_version": version,
+            "devices": []  # 设备列表可选
+        }
+    except Exception as e:
+        return {"has_miniaudio": True, "miniaudio_version": "unknown", "error": str(e)}
+
+def _play_audio(file_path, count=1):
+    """播放音频，返回状态"""
+    global _AUDIO_CURRENT_TOKEN, _AUDIO_MONITOR_THREAD, _AUDIO_IS_LOOPING
+    import threading
+
+    engine, err = _init_audio_engine()
+    if err:
+        return {"status": "error", "error": err}
+
+    if not os.path.exists(file_path):
+        return {"status": "error", "error": f"file not found: {file_path}"}
+
+    try:
+        # 先停止当前播放
+        if _AUDIO_CURRENT_TOKEN:
+            try:
+                _AUDIO_CURRENT_TOKEN.stop()
+            except:
+                pass
+            _AUDIO_CURRENT_TOKEN = None
+
+        # count=0 或 count=-1 表示无限循环
+        if count == 0 or count == -1:
+            # 无限循环播放
+            _AUDIO_CURRENT_TOKEN = engine.play_sound_file(
+                file_path=file_path,
+                loop=True,
+                trim_silence=True
+            )
+            _AUDIO_IS_LOOPING = True
+        elif count == 1:
+            # 单次播放，2秒淡出
+            _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, False )
+            _AUDIO_IS_LOOPING = False
+        else:
+            # 固定次数循环播放，最后2秒淡出
+            _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, False )
+            _AUDIO_IS_LOOPING = False
+
+        # ★ 启动后台监控线程，在播放完成后发送事件
+        def _monitor_playback():
+            global _AUDIO_CURRENT_TOKEN
+            token = _AUDIO_CURRENT_TOKEN
+            if token is None:
+                return
+            # 等待播放完成（每 200ms 检查一次）
+            while token and not token.stopped:
+                time.sleep(0.2)
+            # 播放完成，发送事件（仅非无限循环模式）
+            if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
+                _AUDIO_CURRENT_TOKEN = None
+                # 发送 JSON 事件到 stdout
+                try:
+                    print(json.dumps({"event": "audio_finished"}), flush=True)
+                except:
+                    pass
+
+        # 启动监控线程（如果不是无限循环）
+        if not _AUDIO_IS_LOOPING:
+            _AUDIO_MONITOR_THREAD = threading.Thread(target=_monitor_playback, daemon=True)
+            _AUDIO_MONITOR_THREAD.start()
+
+        return {"status": "ok"}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
+
+def _stop_audio():
+    """停止音频播放"""
+    global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING
+
+    if _AUDIO_CURRENT_TOKEN:
+        try:
+            _AUDIO_CURRENT_TOKEN.stop()
+        except:
+            pass
+        _AUDIO_CURRENT_TOKEN = None
+
+    _AUDIO_IS_LOOPING = False
+
+    # 也尝试停止引擎的所有播放
+    engine, _ = _init_audio_engine()
+    if engine:
+        try:
+            engine.stop_all()
+        except:
+            pass
+
+    return {"status": "stopped"}
+
+def _get_audio_state():
+    """获取当前播放状态"""
+    global _AUDIO_CURRENT_TOKEN
+
+    if _AUDIO_CURRENT_TOKEN and not _AUDIO_CURRENT_TOKEN.stopped:
+        return {"playing": True}
+    return {"playing": False}
+
 # =============================================================================
 #  配置
 # =============================================================================
@@ -1118,6 +1294,27 @@ def _dispatch_action(cmd):
     if action in ("clipboard", "paste"):
         target_dir = cmd.get("target_dir", cmd.get("output_dir"))
         out.update(handle_clipboard(target_dir))
+        return out
+    # =============================================================================
+    #  音频播放命令
+    # =============================================================================
+    if action == "check_audio_engine":
+        out.update(_check_audio_engine())
+        return out
+    if action == "play_audio":
+        file_path = cmd.get("path", "")
+        count = cmd.get("count", 1)
+        try:
+            count = int(count)
+        except:
+            count = 1
+        out.update(_play_audio(file_path, count))
+        return out
+    if action == "stop_audio":
+        out.update(_stop_audio())
+        return out
+    if action == "get_audio_state":
+        out.update(_get_audio_state())
         return out
     out["error"] = f"unknown action: {action}"
     return out

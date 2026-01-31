@@ -900,20 +900,142 @@ function shouldShowDuration(info) {
 
 let downloadContext = null;
 
+// =============================================================================
+// 音频播放状态管理
+// =============================================================================
+const AUDIO_ENGINE = {
+	DETECTING: 'DETECTING',
+	PYTHON: 'PYTHON',
+	WEBVIEW: 'WEBVIEW',
+	NONE: 'NONE'
+};
+
+let _audioEngine = AUDIO_ENGINE.DETECTING;
+let _pythonAudioChecked = false;
+let _pythonAudioAvailable = false;
+let _pythonAudioError = null;
+
+/**
+ * 检测 Python 音频引擎是否可用
+ */
+async function checkPythonAudioEngine() {
+	if (_pythonAudioChecked) {
+		return _pythonAudioAvailable;
+	}
+
+	try {
+		const bridge = pythonBridge;
+		if (!bridge || bridge.available !== true) {
+			_pythonAudioChecked = true;
+			_pythonAudioAvailable = false;
+			return false;
+		}
+
+		const res = await bridge.call('check_audio_engine');
+		if (res && res.has_miniaudio) {
+			const version = res.miniaudio_version || 'unknown';
+			global.logMessage(`[Audio] Python (miniaudio v${version}) 检测成功`, "INFO");
+			_pythonAudioChecked = true;
+			_pythonAudioAvailable = true;
+			return true;
+		} else {
+			_pythonAudioError = res?.error || 'miniaudio not available';
+			// 在日志面板打印错误原因
+			global.logMessage(`[Audio] Python 引擎不可用: ${_pythonAudioError}`, "WARN");
+		}
+	} catch (e) {
+		_pythonAudioError = e.message;
+		global.logMessage(`[Audio] Python 引擎检测异常: ${e.message}`, "WARN");
+	}
+
+	_pythonAudioChecked = true;
+	_pythonAudioAvailable = false;
+	return false;
+}
+
+/**
+ * 获取 Savor 音频信息（随机选择）
+ */
+function getSavorAudioInfo(context) {
+	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+	const rand = getRand(0, 30);
+	let filename;
+	if (rand === 0) {
+		filename = "q.mp3";
+	} else {
+		const subRand = getRand(0, 3);
+		filename = `${subRand + 1}.mp3`;
+	}
+	const fullPath = path.join(context.extensionPath, "assets", filename);
+	return {
+		path: fullPath,
+		fileName: filename,
+		base64: () => {
+			try {
+				return fs.existsSync(fullPath) ? fs.readFileSync(fullPath).toString('base64') : '';
+			} catch { return ''; }
+		}
+	};
+}
+
+/**
+ * 随机生成循环次数 (2-6)
+ */
+function getRandomLoopCount() {
+	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+	return getRand(2, 7);
+}
+
 async function savorMomentsCommand() {
 	try {
-		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-			activeSidebarProvider.triggerSavor('normal');
-		} else {
-			// 如果侧边栏未打开或未初始化，聚焦侧边栏并等待加载
-			vscode.commands.executeCommand('workbench.view.extension.qqqView').then(() => {
-				setTimeout(() => {
-					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-						activeSidebarProvider.triggerSavor('normal');
-					}
-				}, 1000); // 稍微加长等待时间确保渲染完成
-			});
+		// ★ 保护性检查：确保 extensionContext 已初始化
+		if (!extensionContext || !extensionContext.extensionPath) {
+			global.logMessage('[Audio] extensionContext 未初始化，等待中...', "WARN");
+			// 回退到 webview 播放（不打开侧边栏）
+			if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+				activeSidebarProvider.triggerSavor('normal');
+				return;
+			}
+			// ★ 核心理念：永远不改变用户侧边栏布局，只弹窗提示
+			vscode.window.showInformationMessage('qqq: 请点击侧边按钮开始放松。');
+			return;
 		}
+
+		// 第一步：检测 Python 音频引擎
+		const pythonAvailable = await checkPythonAudioEngine();
+
+		if (pythonAvailable) {
+			// ★ Python 引擎可用，直接播放（不需要 webview，不打开侧边栏）
+			const info = getSavorAudioInfo(extensionContext);
+			const loopCount = getRandomLoopCount();
+
+			global.logMessage(`[Audio] Python 引擎播放: ${info.fileName}, 循环: ${loopCount}`, "INFO");
+
+			try {
+				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+				if (res && (res.status === 'ok' || res.status === 'playing')) {
+					// ★ 如果 q4 webview 已经打开，同步 UI 状态（不主动打开）
+					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+						activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
+					}
+					return;
+				}
+				// Python 播放失败，回退到 webview
+				global.logMessage(`[Audio] Python 播放失败: ${res?.error || 'unknown'}`, "WARN");
+			} catch (e) {
+				global.logMessage(`[Audio] Python 播放异常: ${e.message}`, "WARN");
+			}
+		}
+
+		// 第二步：Python 不可用或失败，检查 webview（不打开侧边栏）
+		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+			// Webview 已准备好，使用 webview 播放
+			activeSidebarProvider.triggerSavor('normal');
+			return;
+		}
+
+		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
+		vscode.window.showInformationMessage('qqq: 请点击侧边按钮开始放松。');
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
 	}

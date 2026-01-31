@@ -1,10 +1,10 @@
 # 文件名: q1.py
 #
-# v1.6.2
-# - 新增：az(file_path, loop_times, final_fade_seconds)
-#        去除首尾静音 -> 循环固定次数 -> 最后一次末尾按 final_fade_seconds 余弦淡出
-# - 新增：play_sound_file_loops(...) 作为通用接口（az 是它的简化封装）
-# - 兼容：仍保留原 play_sound_file(... loop=True/False ...) 行为不变
+# v1.6.3
+# - 修改：az(file_path, loop_times, final_fade_seconds, trim_silence=True)
+#        trim_silence=True  -> 去除首尾静音 -> 循环固定次数 -> 最后一次末尾按 final_fade_seconds 余弦淡出
+#        trim_silence=False -> 不去除首尾静音 -> 循环固定次数 -> 最后一次末尾按 final_fade_seconds 余弦淡出
+# - 其余行为保持不变
 #
 # ⚠️ 注意：工程目录里不要存在 miniaudio.py / miniaudio/ 目录，否则会遮蔽 pip 的 miniaudio 包
 
@@ -1404,18 +1404,21 @@ class NonBlockingAudioEngine:
         finally:
             self._unregister_token(token)
 
-    # ---------- 你要的接口：az(q, 3, 2) ----------
-    def az(self, file_path: str, loop_times: int, final_fade_seconds: float):
+    # ---------- 你要的接口：az(q, 3, 2, True/False) ----------
+    def az(self, file_path: str, loop_times: int, final_fade_seconds: float, trim_silence: bool = True):
         """
-        az(file_path, loop_times, final_fade_seconds)
-        例：az(q, 3, 2) -> 去静音剪裁后循环 3 次，在最后一次末尾 2 秒淡出
+        az(file_path, loop_times, final_fade_seconds, trim_silence=True)
+
+        例：
+          - az(q, 3, 2, True)  -> 去静音剪裁后循环 3 次，在最后一次末尾 2 秒淡出
+          - az(q, 3, 2, False) -> 不去静音剪裁，直接循环 3 次，在最后一次末尾 2 秒淡出
         """
         return self.play_sound_file_loops(
             file_path=file_path,
             loop_times=loop_times,
             final_fade_seconds=final_fade_seconds,
             play_range=None,
-            trim_silence=True,
+            trim_silence=bool(trim_silence),
             between_loop_crossfade_ms=LOOP_CROSSFADE_MS_DEFAULT
         )
 
@@ -1518,20 +1521,24 @@ class NonBlockingAudioEngine:
                 pass
 
 
-# --------- 模块级 az：方便你直接 az(q,3,2) ---------
+# --------- 模块级 az：方便你直接 az(q,3,2,True/False) ---------
 _DEFAULT_ENGINE = None
 
 
-def az(file_path: str, loop_times: int, final_fade_seconds: float):
+def az(file_path: str, loop_times: int, final_fade_seconds: float, trim_silence: bool = True):
     """
-    模块级 az(file_path, loop_times, final_fade_seconds)
+    模块级 az(file_path, loop_times, final_fade_seconds, trim_silence=True)
     内部会懒初始化一个默认引擎（max_workers=8），并自动注册 atexit cleanup
+
+    例：
+      - az(q, 3, 2, True)  -> 去静音剪裁后循环 3 次，在最后一次末尾 2 秒淡出
+      - az(q, 3, 2, False) -> 不去静音剪裁，直接循环 3 次，在最后一次末尾 2 秒淡出
     """
     global _DEFAULT_ENGINE
     if _DEFAULT_ENGINE is None:
         asset_folder = os.path.dirname(os.path.abspath(file_path)) or "."
         _DEFAULT_ENGINE = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=8)
-    return _DEFAULT_ENGINE.az(file_path, loop_times, final_fade_seconds)
+    return _DEFAULT_ENGINE.az(file_path, loop_times, final_fade_seconds, trim_silence)
 
 
 # ---------------- 独立测试（可删） ----------------
@@ -1550,15 +1557,19 @@ if __name__ == "__main__":
     asset_folder = os.path.dirname(TEST_FILE) or "."
 
     print("=" * 60)
-    print("az 测试：去静音剪裁 + 循环3次 + 最后2秒淡出")
+    print("az 测试：可选去静音剪裁 + 循环3次 + 最后2秒淡出")
     print(f"文件: {TEST_FILE}")
     print(f"静音阈值: {SILENCE_DB} dBFS, 连续有声: {LOUD_RUN_MS} ms")
     print("=" * 60)
 
     engine = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=8)
 
-    # 你要的：az(q,3,2)
-    token = engine.az(TEST_FILE, 3, 2.0)
+    # 你要的：az(q,3,2,True/False)
+    # True  -> 去除首尾静音后循环 3 次，第三次末尾 2 秒淡出
+    token = engine.az(TEST_FILE, 3, 2.0, True)
+
+    # False -> 不去除首尾静音，直接循环 3 次，第三次末尾 2 秒淡出
+    # token = engine.az(TEST_FILE, 3, 2.0, False)
 
     # 这里等它播完（也可以手动 token.stop() 提前终止）
     time.sleep(20.0)
