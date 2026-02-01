@@ -2495,12 +2495,12 @@ sys.exit(0 if ok else 1)
 
             global.logMessage(`[PythonCheck] 正在静默准备音频依赖 (miniaudio)...`, "INFO");
 
+            let sitePackagesDir = null;
+
             // 如果是内置引擎且是 Windows embed 版，检查是否需要修复 ._pth 并安装 pip
             if (isInternal && process.platform === 'win32') {
                 const engineDir = path.dirname(pythonBin);
-
-                // 确保 site-packages 目录存在
-                const sitePackagesDir = path.join(engineDir, 'site-packages');
+                sitePackagesDir = path.join(engineDir, 'site-packages');
                 if (!fs.existsSync(sitePackagesDir)) {
                     fs.mkdirSync(sitePackagesDir, { recursive: true });
                 }
@@ -2568,13 +2568,20 @@ sys.exit(0 if ok else 1)
             }
 
             // 执行安装
-            const installArgs = isInternal ? "" : "--user";
-            const cmd = `"${pythonBin}" -m pip install miniaudio --quiet ${installArgs} --index-url https://mirrors.aliyun.com/pypi/simple/`;
-            // ★ 基因级隔离：安装 miniaudio 时同样强制隔离
+            // 外部 Python（VS Code 设置/系统 PATH）安装到用户 site-packages
+            // 内置引擎（python_engine）安装到本地 site-packages 并用 PYTHONNOUSERSITE 隔离
+            const cmd = isInternal
+                ? `"${pythonBin}" -m pip install miniaudio --quiet --target="${sitePackagesDir}"`
+                : `"${pythonBin}" -m pip install miniaudio --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
+
+            const execEnv = isInternal
+                ? { ...process.env, PYTHONNOUSERSITE: '1' }
+                : process.env;
+
             cp.execSync(cmd, {
                 windowsHide: true,
                 timeout: 90000,
-                env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                env: execEnv
             });
 
             this._hasMiniaudio = true;
