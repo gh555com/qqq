@@ -1407,6 +1407,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const isFolderNameArea = event.target.closest('.folder-name-area');
 
       if (type === 'folder') {
+        // 只有点击 sz-area 才选中文件夹，其他任何区域都进入文件夹
         if (isSzArea) {
           if (fileItem.dataset.name === '..') return; // 排除上级目录尺寸请求
 
@@ -1424,17 +1425,8 @@ document.addEventListener('DOMContentLoaded', () => {
           currentFocusType = 'fileList';
           return;
         }
-        if (isSelectArea && !isFolderNameArea) {
-          selectFileItem(fileItem, false, event.shiftKey);
-          currentFocusType = 'fileList';
-          return;
-        }
-        if (isFolderNameArea) {
-          vscode.postMessage({ command: 'navigate', path: fileItem.dataset.path });
-          currentFocusType = 'fileList';
-          return;
-        }
-        selectFileItem(fileItem, false, event.shiftKey);
+        // 非 sz-area 区域：直接进入文件夹
+        vscode.postMessage({ command: 'navigate', path: fileItem.dataset.path });
         currentFocusType = 'fileList';
         return;
       }

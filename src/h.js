@@ -192,10 +192,6 @@ function spawnRun(cmd, args, opts = {}) {
     });
 }
 
-function spawnCheck(cmd, args, expected) {
-    return spawnRun(cmd, args, { checkExpected: expected });
-}
-
 function spawnOutput(cmd, args) {
     return spawnRun(cmd, args, { returnOutput: true });
 }
@@ -446,79 +442,6 @@ function safeAccessCheck(filePath) {
         // 文件被占用、权限不足、路径无效等情况
         log(`[SafeAccess] 无法访问: ${filePath} - ${e.code || e.message}`, "WARN");
         return false;
-    }
-}
-
-/**
- * 安全的递归复制文件夹，忽略无法访问的文件
- * @param {string} src - 源文件夹
- * @param {string} dest - 目标文件夹
- * @returns {{success: boolean, skipped: string[], errors: string[]}} - 复制结果
- */
-function safeCopyFolderRecursive(src, dest) {
-    const skipped = [];
-    const errors = [];
-
-    function copyRecursive(srcPath, destPath) {
-        try {
-            if (!safeAccessCheck(srcPath)) {
-                skipped.push(srcPath);
-                return;
-            }
-
-            const stat = fs.statSync(srcPath);
-
-            if (stat.isDirectory()) {
-                // 创建目标目录
-                try {
-                    if (!fs.existsSync(destPath)) {
-                        fs.mkdirSync(destPath, { recursive: true });
-                    }
-                } catch (e) {
-                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
-                    return;
-                }
-
-                // 读取目录内容
-                let entries = [];
-                try {
-                    entries = fs.readdirSync(srcPath);
-                } catch (e) {
-                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
-                    return;
-                }
-
-                // 递归复制每个条目
-                for (const entry of entries) {
-                    const srcEntry = path.join(srcPath, entry);
-                    const destEntry = path.join(destPath, entry);
-                    copyRecursive(srcEntry, destEntry);
-                }
-            } else if (stat.isFile()) {
-                // 复制文件
-                try {
-                    fs.copyFileSync(srcPath, destPath);
-                } catch (e) {
-                    if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
-                        skipped.push(srcPath);
-                        log(`[SafeCopy] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
-                    } else {
-                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
-                    }
-                }
-            }
-            // 忽略符号链接和其他特殊文件类型
-        } catch (e) {
-            // 捕获所有未预期的错误，防止崩溃
-            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
-        }
-    }
-
-    try {
-        copyRecursive(src, dest);
-        return { success: true, skipped, errors };
-    } catch (e) {
-        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`] };
     }
 }
 
@@ -1766,109 +1689,6 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-function copyFilesToTarget(files, targetDir, autoRename = false) {
-    ensureDir(targetDir);
-    const copied = [];
-    const fingerprints = {};
-    for (const f of files) {
-        try {
-            // ★ 先检查文件是否可访问
-            if (!safeAccessCheck(f)) {
-                log(`[copyFilesToTarget] 跳过无法访问的文件: ${f}`, "WARN");
-                continue;
-            }
-
-            const srcFingerprint = computeFingerprint(f);
-            if (srcFingerprint) {
-                fingerprints[f] = srcFingerprint;
-                // q2 模式不自动重命名时，允许同目录内去重（但禁止跨目录）
-            }
-            const ext = path.extname(f);
-            const originalName = path.basename(f);
-            const isImg = isImageExtForClipboard(ext);
-            // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
-            let destName = originalName;
-            if (isImg && (!originalName || originalName === ext)) {
-                destName = getTimestampFilename(ext);
-            }
-            let dest = path.join(targetDir, destName);
-
-            if (fs.existsSync(dest)) {
-                const dstFingerprint = computeFingerprint(dest);
-                if (dstFingerprint === srcFingerprint && !autoRename) {
-                    copied.push(dest);
-                    if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                    _tryLocalDeduplicate(dest);
-                    continue;
-                }
-
-                // 名字冲突且内容不同 -> 静默重命名（q1/q2 统一行为，不再覆盖）
-                dest = getUniquePath(targetDir, destName, false);
-            }
-            fs.copyFileSync(f, dest);
-
-            // Local Deduplication Check
-            const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
-            if (finalPath !== dest) {
-                // If deduplicated to a different path
-                copied.push(finalPath);
-                // No need to prefill fingerprint as registerSourceFile does it
-            } else {
-                if (srcFingerprint) prefillFingerprint(dest, srcFingerprint);
-                copied.push(dest);
-            }
-        } catch (e) {
-            // ★ 对于被占用/权限不足的文件，记录日志并跳过
-            if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
-                log(`[copyFilesToTarget] 跳过文件 (${e.code}): ${f}`, "WARN");
-            } else {
-                log(`[copyFilesToTarget] 复制文件失败 ${f}: ${e.message}`, "WARN");
-            }
-        }
-    }
-    return { copied, fingerprints };
-}
-
-function processFilesForClipboard(files, targetDir, autoRename = false) {
-    const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
-    const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
-    ensureDir(targetDir);
-    const copiedFiles = [];
-    const copiedFolders = [];
-    const fingerprints = {};
-    for (const folder of folders) {
-        try {
-            const folderName = path.basename(folder);
-            // 同名文件夹静默重命名（q1/q2 统一行为，不再覆盖）
-            let destFolder = path.join(targetDir, folderName);
-            if (fs.existsSync(destFolder)) {
-                destFolder = getUniquePath(targetDir, folderName, true);
-            }
-            // ★ 使用安全的递归复制函数，防止无法访问的文件导致崩溃
-            const result = safeCopyFolderRecursive(folder, destFolder);
-            if (result.success) {
-                copiedFolders.push(destFolder);
-                if (result.skipped.length > 0) {
-                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
-                }
-            } else {
-                log(`[Clipboard] 复制文件夹失败 ${folder}: ${result.errors.join('; ')}`, "WARN");
-            }
-        } catch (e) {
-            log(`[Clipboard] 复制文件夹异常 ${folder}: ${e.message}`, "WARN");
-        }
-    }
-    if (validFiles.length > 0) {
-        const result = copyFilesToTarget(validFiles, targetDir, autoRename);
-        copiedFiles.push(...result.copied);
-        Object.assign(fingerprints, result.fingerprints);
-    }
-    if (copiedFiles.length > 0 || copiedFolders.length > 0) {
-        return { type: "file_folder", files: copiedFiles, folders: copiedFolders, fingerprints: fingerprints };
-    }
-    return null;
-}
-
 // ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
 /**
  * 异步安全的递归复制文件夹，支持取消检查，并返回累计大小
