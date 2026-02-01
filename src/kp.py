@@ -1169,63 +1169,55 @@ def save_clipboard_image_to_path(dest_path: str):
 
 
 def trigger_system_paste(target_dir):
+    """触发系统原生粘贴（仅 win32com，不依赖 PowerShell）"""
     if not _IS_WINDOWS:
         # macOS 处理 (通过 osascript)
         if platform.system() == "Darwin":
             import subprocess
             try:
-                # AppleScript 粘贴逻辑
                 script = f'tell application "Finder" to paste to folder (POSIX file "{target_dir}")'
                 subprocess.run(["osascript", "-e", script], check=True)
                 return {"success": True}
-            except:
-                pass
+            except Exception as e:
+                return {"success": False, "error": f"osascript failed: {e}"}
         return {"success": False, "error": f"Not supported on {platform.system()}"}
 
+    # Windows: 仅使用 win32com.client（企业环境保底，不依赖 PowerShell）
     try:
-        # 路径归一化：Windows COM 喜欢反斜杠且不喜欢结尾斜杠
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        return {"success": False, "error": "win32com not available"}
+
+    try:
         clean_path = os.path.abspath(target_dir).rstrip("\\")
-
+        pythoncom.CoInitialize()
         try:
-            import win32com.client
-            import pythoncom
-            pythoncom.CoInitialize()
-            try:
-                shell = win32com.client.Dispatch("Shell.Application")
-                folder = shell.NameSpace(clean_path)
-                if folder:
-                    # 尝试多种可能的 Verb 以增强不同语言系统的兼容性
-                    verb_found = False
-                    for v in ["Paste", "paste", "&Paste"]:
-                        try:
-                            # 遍历 verbs 找到对应的项并调用
-                            for verb in folder.Self.Verbs():
-                                if verb.Name == v or verb.Name.replace("&", "") == v:
-                                    verb.DoIt()
-                                    verb_found = True
-                                    break
-                            if verb_found:
-                                break
-                        except:
-                            continue
+            shell = win32com.client.Dispatch("Shell.Application")
+            folder = shell.NameSpace(clean_path)
+            if not folder:
+                return {"success": False, "error": f"Shell NameSpace failed for: {clean_path}"}
 
-                    if not verb_found:
-                        # 终极保底
-                        folder.Self.InvokeVerb("Paste")
+            # 尝试多种 Verb 以增强不同语言系统的兼容性
+            verb_found = False
+            for v in ["Paste", "paste", "&Paste"]:
+                try:
+                    for verb in folder.Self.Verbs():
+                        if verb.Name == v or verb.Name.replace("&", "") == v:
+                            verb.DoIt()
+                            verb_found = True
+                            break
+                    if verb_found:
+                        break
+                except:
+                    continue
 
-                    return {"success": True}
-                else:
-                    return {"success": False, "error": f"Shell NameSpace failed for: {clean_path}"}
-            finally:
-                pythoncom.CoUninitialize()
-        except ImportError:
-            # 回退到 PowerShell 触发
-            import subprocess
-            escaped_dir = clean_path.replace("'", "''")
-            ps_cmd = f"$shell = New-Object -ComObject Shell.Application; $folder = $shell.NameSpace('{escaped_dir}'); if($folder){{ $folder.Self.InvokeVerb('Paste') }}"
-            subprocess.run(["powershell", "-Command", ps_cmd],
-                           check=True, capture_output=True)
+            if not verb_found:
+                folder.Self.InvokeVerb("Paste")
+
             return {"success": True}
+        finally:
+            pythoncom.CoUninitialize()
     except Exception as e:
         return {"success": False, "error": str(e)}
 

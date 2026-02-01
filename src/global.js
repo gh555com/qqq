@@ -2862,8 +2862,8 @@ async function tryOneByOne(callback) {
 }
 
 /**
- * 触发系统原生粘贴窗口 (方案 B)
- * 链路：Rust > Python > Node Daemon > Node Spawn (PowerShell)
+ * 触发系统原生粘贴（与用户 IO 引擎偏好无关）
+ * 链路：Node.js Shell (PowerShell) → Python (win32com) 回退
  */
 async function triggerSystemPaste(targetDir) {
 	// 归一化路径：确保 Windows 下使用反斜杠，这对 Shell COM 对象至关重要
@@ -2871,19 +2871,37 @@ async function triggerSystemPaste(targetDir) {
 
 	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
 
-	const res = await tryEngineCall({
-		rust: "trigger_system_paste",
-		python: "trigger_system_paste",
-		shell: "trigger_system_paste"
-	}, { path: normalizedPath });
-
-	if (res && res.success) {
-		logMessage(`[Q2] 系统粘贴指令已成功下发`, "INFO");
-	} else {
-		const errMsg = res?.error || "未知错误";
-		logMessage(`[Q2] 系统粘贴指令下发失败: ${errMsg}`, "WARN");
+	// 1. 首选：Node.js Shell Bridge (PowerShell daemon，延迟最低)
+	if (shellBridge && shellBridge.isAvailable()) {
+		try {
+			const res = await shellBridge.call("trigger_system_paste", { path: normalizedPath }, 8000);
+			if (res && res.success) {
+				logMessage(`[Q2] 系统粘贴成功 (Shell)`, "INFO");
+				return res;
+			}
+			logMessage(`[Q2] Shell 粘贴失败: ${res?.error || 'unknown'}, 尝试 Python 回退`, "WARN");
+		} catch (e) {
+			logMessage(`[Q2] Shell 调用异常: ${e.message}, 尝试 Python 回退`, "WARN");
+		}
 	}
-	return res;
+
+	// 2. 回退：Python win32com (不依赖 PowerShell，企业环境保底)
+	if (pythonBridge && pythonBridge.isAvailable()) {
+		try {
+			const res = await pythonBridge.call("trigger_system_paste", { path: normalizedPath }, 8000);
+			if (res && res.success) {
+				logMessage(`[Q2] 系统粘贴成功 (Python win32com)`, "INFO");
+				return res;
+			}
+			logMessage(`[Q2] Python 粘贴失败: ${res?.error || 'unknown'}`, "WARN");
+			return res;
+		} catch (e) {
+			logMessage(`[Q2] Python 调用异常: ${e.message}`, "WARN");
+		}
+	}
+
+	logMessage(`[Q2] 系统粘贴失败：所有引擎不可用`, "ERROR");
+	return { success: false, error: "所有引擎不可用" };
 }
 
 let _integrityCache = null;
