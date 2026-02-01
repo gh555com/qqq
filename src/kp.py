@@ -82,7 +82,17 @@ def _check_audio_engine():
     """检查音频引擎状态，返回详细信息"""
     engine, err = _init_audio_engine()
     if err:
-        return {"has_miniaudio": False, "error": err}
+        return {"has_miniaudio": False, "has_pillow": False, "error": err}
+
+    # 检查 Pillow 是否可用
+    has_pillow = False
+    pillow_version = "unknown"
+    try:
+        from PIL import Image, ImageOps
+        pillow_version = getattr(Image, '__version__', 'unknown')
+        has_pillow = True
+    except ImportError:
+        pass
 
     try:
         # 尝试获取 miniaudio 版本信息
@@ -98,10 +108,12 @@ def _check_audio_engine():
         return {
             "has_miniaudio": True,
             "miniaudio_version": version,
+            "has_pillow": has_pillow,
+            "pillow_version": pillow_version,
             "devices": []  # 设备列表可选
         }
     except Exception as e:
-        return {"has_miniaudio": True, "miniaudio_version": "unknown", "error": str(e)}
+        return {"has_miniaudio": True, "miniaudio_version": "unknown", "has_pillow": has_pillow, "pillow_version": pillow_version, "error": str(e)}
 
 def _play_audio(file_path, count=1):
     """播放音频，返回状态"""
