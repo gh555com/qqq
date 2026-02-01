@@ -2461,23 +2461,34 @@ class PythonEngineDownloader {
     }
 
     /**
+     * 依赖名到导入名的映射
+     */
+    _getImportName(dep) {
+        const importMap = {
+            'Pillow': 'PIL',
+            'pywin32': 'win32api'  // pywin32 通过 win32api 检测
+        };
+        return importMap[dep] || dep;
+    }
+
+    /**
      * 快速检测：Python 是否已有指定依赖
      * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要检测的依赖列表 ['miniaudio', 'Pillow']
+     * @param {string[]} deps - 要检测的依赖列表
      * @returns {Object} - { hasAll: boolean, missing: string[], detail: { dep: boolean } }
      */
     async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
         const { spawnSync } = require("child_process");
 
-        // 构建检测脚本
+        // 构建检测脚本（修复：使用 print 输出结果）
         const checkScript = deps.map(dep => {
-            const importName = dep === 'Pillow' ? 'PIL' : dep;
+            const importName = this._getImportName(dep);
             return `
 try:
     import ${importName}
-    ${dep}:1
+    print('${dep}:1')
 except:
-    ${dep}:0`;
+    print('${dep}:0')`;
         }).join('\n');
 
         const fullScript = `
@@ -2498,7 +2509,7 @@ sys.exit(0)
             const missing = [];
 
             for (const dep of deps) {
-                const pattern = new RegExp(`${dep}:(\d+)`);
+                const pattern = new RegExp(`${dep}:(\\d+)`);
                 const match = stdout.match(pattern);
                 const hasDep = match && match[1] === '1';
                 detail[dep] = hasDep;
@@ -2655,7 +2666,13 @@ sys.exit(0 if ok else 1)
      * @returns {Object} - { missing: string[], allReady: boolean }
      */
     async quickCheckDeps(pythonBin) {
-        return await this.checkDeps(pythonBin, ['miniaudio', 'Pillow']);
+        // 基础依赖：跨平台
+        const baseDeps = ['miniaudio', 'Pillow'];
+        // Windows 专属依赖：pywin32 (剩下粘贴、剪贴板操作的保底方案)
+        const deps = process.platform === 'win32'
+            ? [...baseDeps, 'pywin32']
+            : baseDeps;
+        return await this.checkDeps(pythonBin, deps);
     }
 
     /**
