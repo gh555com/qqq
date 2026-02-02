@@ -1592,7 +1592,57 @@ function showTextDocument(document, column, preserveFocus) {
 }
 
 function openExternal(uri) {
-	return vscode.env.openExternal(uri);
+	const filePath = uri.fsPath;
+	
+	// 首先尝试使用 Node.js 引擎打开
+	try {
+		if (process.platform === 'win32') {
+			// Windows 平台使用 start 命令
+			require('child_process').execSync(`start "" "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			return Promise.resolve();
+		} else if (process.platform === 'darwin') {
+			// macOS 平台使用 open 命令
+			require('child_process').execSync(`open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			return Promise.resolve();
+		} else {
+			// Linux 平台使用 xdg-open 命令
+			require('child_process').execSync(`xdg-open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
+			return Promise.resolve();
+		}
+	} catch (error) {
+		// 如果 Node.js 引擎打开失败，尝试使用 VS Code 提供的 API
+		try {
+			return vscode.env.openExternal(uri);
+		} catch (vsCodeError) {
+			// 如果 VS Code API 也失败，尝试使用 Python 作为兜底
+			try {
+				const pythonCode = `
+				import os
+				import sys
+				
+				file_path = "${filePath.replace(/"/g, '""')}"
+				
+				if sys.platform == 'win32':
+					try:
+						import win32com.client
+						shell = win32com.client.Dispatch('WScript.Shell')
+						shell.Run(f'"{file_path}"', 1, False)
+						exit(0)
+					except ImportError:
+						pass
+				
+				# 通用方法
+				os.startfile(file_path)
+				`;
+				
+				require('child_process').execSync(`python -c "${pythonCode}"`, { stdio: 'ignore' });
+				return Promise.resolve();
+			} catch (pythonError) {
+				// 所有方法都失败，返回错误
+				return Promise.reject(new Error(`无法打开文件: ${filePath}`));
+			}
+		}
+	}
 }
 
 function setStatusBarMessage(text, hideAfterTimeout) {
