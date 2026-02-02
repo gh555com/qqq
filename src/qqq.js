@@ -1439,8 +1439,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
 			const options = [
-				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: "重置依赖下载的冷却时间，允许立即重新下载", id: "clearCooldown" },
-				{ label: "打开缓存目录", description: `打开缓存目录: ${cacheDir || '未初始化'}`, id: "openCacheDir" }
+				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
+				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
