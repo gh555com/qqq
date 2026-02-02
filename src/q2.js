@@ -1068,6 +1068,12 @@ function handleContextMenuAction(action){
       vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
       selectedItem = null;
       selectedItems = [];
+    } else if (action === 'open') {
+      // 多选情况：只打开第一个选中的项目
+      const firstItem = selectedItems.find(item => item.name !== '..');
+      if (firstItem) {
+        performOpenAction(firstItem);
+      }
     }
   } else {
     // 单选情况
@@ -2169,7 +2175,11 @@ function showSaveAsDialog() {
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
         saveRecentDirectory(message.type === "folder" ? p : path.dirname(p));
-        global.openExternal(vscode.Uri.file(p));
+        try {
+          global.openExternal(vscode.Uri.file(p));
+        } catch (error) {
+          global.showErrorMessage(`打开文件失败: ${error.message}`);
+        }
         refreshWebview();
         break;
       }
