@@ -907,9 +907,6 @@ let _pythonAudioChecked = false;
 let _pythonAudioAvailable = false;
 let _pythonAudioError = null;
 
-/**
- * 检测 Python 音频引擎是否可用
- */
 async function checkPythonAudioEngine() {
 	if (_pythonAudioChecked) {
 		return _pythonAudioAvailable;
@@ -927,6 +924,7 @@ async function checkPythonAudioEngine() {
 		if (res && res.has_miniaudio) {
 			const version = res.miniaudio_version || 'unknown';
 			global.logMessage(`[Audio] Python (miniaudio v${version}) 检测成功`, "INFO");
+			global.pythonAudioDetected = true;
 			_pythonAudioChecked = true;
 			_pythonAudioAvailable = true;
 			return true;
