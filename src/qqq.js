@@ -1453,7 +1453,7 @@ async function activate(context) {
 				try {
 					// 清除 globalState 中的安装时间戳
 					await context.globalState.update('pythonDepsInstallTimestamp', 0);
-					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以立即重新下载依赖");
+					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖");
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 清除冷却时间失败: ${e.message}`);
 				}
