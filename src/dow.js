@@ -1208,7 +1208,12 @@ class SmartHttpDownloader {
                 this.activeReqs.add(req);
                 req.once('close', () => this.activeReqs.delete(req));
             } catch (e) {
-                const r = this._resultFail(task, e.message || "h2_request_failed");
+                let errorMessage = e.message || "h2_request_failed";
+                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
+                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
+                    errorMessage = "ssl_error";
+                }
+                const r = this._resultFail(task, errorMessage);
                 r._networkError = e;
                 r._h2SessionBroken = true;
                 return finish(r);
@@ -1224,7 +1229,12 @@ class SmartHttpDownloader {
             });
 
             req.on("error", (e) => {
-                const r = this._resultFail(task, e.message || "h2_error");
+                let errorMessage = e.message || "h2_error";
+                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
+                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
+                    errorMessage = "ssl_error";
+                }
+                const r = this._resultFail(task, errorMessage);
                 r._networkError = e;
                 if (String(e?.code || "").startsWith("ERR_HTTP2")) r._h2SessionBroken = true;
                 finish(r);
@@ -1673,7 +1683,12 @@ class SmartHttpDownloader {
             });
 
             req.on("error", (e) => {
-                const r = this._resultFail(task, e.message || "h1_error");
+                let errorMessage = e.message || "h1_error";
+                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
+                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
+                    errorMessage = "ssl_error";
+                }
+                const r = this._resultFail(task, errorMessage);
                 r._networkError = e;
                 resolve(r);
             });
