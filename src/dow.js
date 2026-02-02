@@ -2480,15 +2480,15 @@ class PythonEngineDownloader {
     async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
         const { spawnSync } = require("child_process");
 
-        // 构建检测脚本（修复：使用 print 输出结果）
+        // 构建检测脚本（修复：使用 print 输出结果，确保每个依赖都有独立的输出）
         const checkScript = deps.map(dep => {
             const importName = this._getImportName(dep);
             return `
 try:
     import ${importName}
-    print('${dep}:1')
-except:
-    print('${dep}:0')`;
+    print('DEP_CHECK:${dep}:1')
+except Exception as e:
+    print('DEP_CHECK:${dep}:0:${e.message.replace(/\\n/g, ' ')}')`;
         }).join('\n');
 
         const fullScript = `
@@ -2507,22 +2507,43 @@ sys.exit(0)
             const stdout = r.stdout || '';
             const detail = {};
             const missing = [];
+            const errors = {};
 
+            // 解析输出，使用更可靠的匹配方式
+            const lines = stdout.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('DEP_CHECK:')) {
+                    const parts = line.substring(10).split(':');
+                    if (parts.length >= 2) {
+                        const dep = parts[0];
+                        const status = parts[1];
+                        const error = parts.slice(2).join(':') || '';
+                        detail[dep] = status === '1';
+                        if (status !== '1') {
+                            missing.push(dep);
+                            errors[dep] = error;
+                        }
+                    }
+                }
+            }
+
+            // 确保所有依赖都有检测结果
             for (const dep of deps) {
-                const pattern = new RegExp(`${dep}:(\\d+)`);
-                const match = stdout.match(pattern);
-                const hasDep = match && match[1] === '1';
-                detail[dep] = hasDep;
-                if (!hasDep) missing.push(dep);
+                if (!(dep in detail)) {
+                    detail[dep] = false;
+                    missing.push(dep);
+                    errors[dep] = 'No detection result';
+                }
             }
 
             return {
                 hasAll: missing.length === 0,
                 missing,
-                detail
+                detail,
+                errors
             };
         } catch (e) {
-            return { hasAll: false, missing: deps, detail: {} };
+            return { hasAll: false, missing: deps, detail: {}, errors: { all: e.message } };
         }
     }
 
@@ -2676,6 +2697,26 @@ sys.exit(0 if ok else 1)
     }
 
     /**
+     * 检查冷却期剩余时间
+     * @param {Object} context - VS Code 扩展上下文
+     * @returns {Object} - { inCooldown: boolean, remainingHours: number, remainingMinutes: number, remainingMs: number }
+     */
+    _getCooldownStatus(context) {
+        const COOLDOWN_MS = 72 * 60 * 60 * 1000; // 72 小时
+        const state = this._readState(context);
+        const now = Date.now();
+        const elapsed = now - state.installTimestamp;
+        const remainingMs = Math.max(0, COOLDOWN_MS - elapsed);
+
+        return {
+            inCooldown: remainingMs > 0,
+            remainingHours: Math.floor(remainingMs / (60 * 60 * 1000)),
+            remainingMinutes: Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000)),
+            remainingMs
+        };
+    }
+
+    /**
      * 准备依赖（分离启动和安装）
      * 此方法仅快速检测，不阻塞启动
      * @param {string} pythonBin - Python 路径
@@ -2687,21 +2728,31 @@ sys.exit(0 if ok else 1)
 
         if (checkResult.hasAll) {
             // 所有依赖都已存在
-            return { status: 'ready', missing: [] };
+            return { status: 'ready', missing: [], detail: checkResult.detail };
         }
 
         // 有缺失的依赖
         // 检查是否在冷却期内
-        if (this._isInCooldown(context)) {
-            const global = require('./global');
-            global.logMessage(`[PythonCheck] 依赖缺失但在 72 小时冷却期内，跳过安装`, "INFO");
+        const cooldownStatus = this._getCooldownStatus(context);
+        if (cooldownStatus.inCooldown) {
             // ★ 冷却期内直接跳过，什么都不做
-            return { status: 'cooldown', missing: checkResult.missing };
+            return {
+                status: 'cooldown',
+                missing: checkResult.missing,
+                detail: checkResult.detail,
+                errors: checkResult.errors,
+                cooldown: cooldownStatus
+            };
         }
 
         // ★ 冷却期外：安排 20 秒后后台安装一次
         this.scheduleInstall(pythonBin, checkResult.missing, context);
-        return { status: 'scheduled', missing: checkResult.missing };
+        return {
+            status: 'scheduled',
+            missing: checkResult.missing,
+            detail: checkResult.detail,
+            errors: checkResult.errors
+        };
     }
 
     /**
@@ -2730,6 +2781,51 @@ sys.exit(0 if ok else 1)
             }
         }
         return false;
+    }
+
+    /**
+     * 记录依赖检测结果的综合日志
+     * @param {Object} prepResult - 依赖准备结果
+     */
+    _logDependencyResult(prepResult) {
+        const global = require('./global');
+        const detail = prepResult.detail || {};
+        const errors = prepResult.errors || {};
+        const successDeps = Object.entries(detail).filter(([_, has]) => has).map(([dep]) => dep);
+        const failedDeps = Object.entries(detail).filter(([_, has]) => !has).map(([dep]) => dep);
+
+        let logMessage = `[PythonCheck] `;
+
+        // 添加成功的依赖信息
+        if (successDeps.length > 0) {
+            logMessage += `${successDeps.join(', ')} 检测成功`;
+            if (failedDeps.length > 0) {
+                logMessage += `, `;
+            }
+        }
+
+        // 添加失败的依赖信息
+        if (failedDeps.length > 0) {
+            logMessage += `缺失: ${failedDeps.join(', ')}`;
+            // 添加失败原因
+            const errorMessages = failedDeps.map(dep => {
+                const error = errors[dep] || '未知错误';
+                return `${dep}: ${error}`;
+            });
+            if (errorMessages.length > 0) {
+                logMessage += ` (原因: ${errorMessages.join(', ')})`;
+            }
+        }
+
+        // 添加冷却期信息
+        if (prepResult.status === 'cooldown' && prepResult.cooldown) {
+            const { remainingHours, remainingMinutes } = prepResult.cooldown;
+            logMessage += `, 冷却期剩余: ${remainingHours}小时${remainingMinutes}分钟`;
+        } else if (prepResult.status === 'scheduled') {
+            logMessage += `, 不在冷却期，已安排后台安装`;
+        }
+
+        global.logMessage(logMessage, "INFO");
     }
 
     async autoInstall(context) {
@@ -3032,7 +3128,8 @@ class UnifiedMediaDownloader {
             }
             // ★ 分离：快速检测依赖，不阻塞启动
             const prepResult = await this.python.prepareDependencies(this.python.pythonPath, context);
-            global.logMessage(`[PythonCheck] 依赖准备: ${prepResult.status}, 缺失: ${prepResult.missing.join(', ') || '无'}`, "INFO");
+            // 记录综合日志
+            this.python._logDependencyResult(prepResult);
             return this.python.pythonPath;
         }
 
@@ -3049,7 +3146,8 @@ class UnifiedMediaDownloader {
                 }
                 // ★ 分离：快速检测依赖，不阻塞启动
                 const prepResult = await this.python.prepareDependencies(settingPath, context);
-                global.logMessage(`[PythonCheck] 依赖准备: ${prepResult.status}, 缺失: ${prepResult.missing.join(', ') || '无'}`, "INFO");
+                // 记录综合日志
+                this.python._logDependencyResult(prepResult);
                 return settingPath;
             }
         } catch (e) { }
@@ -3066,7 +3164,8 @@ class UnifiedMediaDownloader {
                 }
                 // ★ 分离：快速检测依赖，不阻塞启动
                 const prepResult = await this.python.prepareDependencies(bin, context);
-                global.logMessage(`[PythonCheck] 依赖准备: ${prepResult.status}, 缺失: ${prepResult.missing.join(', ') || '无'}`, "INFO");
+                // 记录综合日志
+                this.python._logDependencyResult(prepResult);
                 return bin;
             }
         }
@@ -3085,7 +3184,8 @@ class UnifiedMediaDownloader {
                         this._lastLoggedPython = finalPath;
                         // ★ 分离：快速检测依赖，不阻塞启动
                         const prepResult = await this.python.prepareDependencies(res.path, context);
-                        global.logMessage(`[PythonCheck] 依赖准备: ${prepResult.status}, 缺失: ${prepResult.missing.join(', ') || '无'}`, "INFO");
+                        // 记录综合日志
+                        this.python._logDependencyResult(prepResult);
                         return res.path;
                     } else {
                         global.logMessage(`[PythonCheck] Level 4 失败: ${res.error}`, "ERROR");
