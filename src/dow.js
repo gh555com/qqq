@@ -2480,7 +2480,7 @@ class PythonEngineDownloader {
     async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
         const { spawnSync } = require("child_process");
 
-        // 构建检测脚本（参考原来的实现，简化输出格式）
+        // 构建检测脚本
         const checkScript = deps.map(dep => {
             const importName = this._getImportName(dep);
             return `
@@ -2566,13 +2566,15 @@ sys.exit(0)
             const pkgs = deps.join(' ');
             let cmd;
             let installEnv;
-            let installDomain = isInternal ? '插件内置环境' : '用户全局环境';
+            let installDomain = isInternal ? '插件内置环境' : '系统Python环境';
 
             if (isInternal && targetPath) {
+                // 插件内置Python，安装到插件目录
                 cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
                 installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
             } else {
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                // 系统Python，尝试直接安装（不使用--user）
+                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --index-url https://mirrors.aliyun.com/pypi/simple/`;
                 installEnv = process.env;
             }
 
