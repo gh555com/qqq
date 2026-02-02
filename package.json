@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.59.10",
+  "version": "15.59.11",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -303,6 +303,10 @@
       {
         "command": "qqq.savorMoments",
         "title": "qqq: Savor moments for yourself"
+      },
+      {
+        "command": "qqq.clearCache",
+        "title": "qqq: 清除缓存"
       }
     ],
     "keybindings": [

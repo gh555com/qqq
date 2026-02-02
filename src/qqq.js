@@ -1381,7 +1381,7 @@ async function activate(context) {
 		const { getSharedDownloader } = require('./dow');
 		const downloader = getSharedDownloader();
 		downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
-		downloader.ensurePythonReady(context, { background: true }).catch(() => { });
+		// 移除重复调用，因为会在startDaemons()中被再次调用
 	} catch (e) { }
 
 	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
@@ -1437,6 +1437,57 @@ async function activate(context) {
 		})),
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
+		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
+			const options = [
+				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: "重置依赖下载的冷却时间，允许立即重新下载", id: "clearCooldown" },
+				{ label: "打开缓存目录", description: `打开缓存目录: ${cacheDir || '未初始化'}`, id: "openCacheDir" }
+			];
+
+			const selected = await vscode.window.showQuickPick(options, {
+				title: "选择缓存操作",
+				placeHolder: "选择要执行的缓存操作"
+			});
+
+			if (!selected) return;
+
+			if (selected.id === "clearCooldown") {
+				// 清除依赖下载冷却时间
+				try {
+					// 清除 globalState 中的安装时间戳
+					await context.globalState.update('pythonDepsInstallTimestamp', 0);
+					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以立即重新下载依赖");
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 清除冷却时间失败: ${e.message}`);
+				}
+			} else if (selected.id === "openCacheDir") {
+				// 打开缓存目录
+				if (!cacheDir) {
+					vscode.window.showErrorMessage("qqq: 缓存目录未初始化");
+					return;
+				}
+
+				try {
+					// 确保缓存目录存在
+					if (!fs.existsSync(cacheDir)) {
+						await fs.promises.mkdir(cacheDir, { recursive: true });
+					}
+					// 打开文件资源管理器
+					if (process.platform === 'win32') {
+						// Windows
+						cp.spawn('explorer.exe', [cacheDir], { detached: true });
+					} else if (process.platform === 'darwin') {
+						// macOS
+						cp.spawn('open', [cacheDir], { detached: true });
+					} else {
+						// Linux
+						cp.spawn('xdg-open', [cacheDir], { detached: true });
+					}
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 打开缓存目录失败: ${e.message}`);
+				}
+			}
+		})),
+
 
 
 		vscode.workspace.onDidChangeConfiguration((event) => {

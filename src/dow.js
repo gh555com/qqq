@@ -2488,7 +2488,7 @@ try:
     import ${importName}
     print('DEP_CHECK:${dep}:1')
 except Exception as e:
-    print('DEP_CHECK:${dep}:0:${e.message.replace(/\\n/g, ' ')}')`;
+    print('DEP_CHECK:${dep}:0:' + str(e).replace('\n', ' '))`;
         }).join('\n');
 
         const fullScript = `
@@ -2505,6 +2505,7 @@ sys.exit(0)
             });
 
             const stdout = r.stdout || '';
+            const stderr = r.stderr || '';
             const detail = {};
             const missing = [];
             const errors = {};
@@ -2532,7 +2533,13 @@ sys.exit(0)
                 if (!(dep in detail)) {
                     detail[dep] = false;
                     missing.push(dep);
-                    errors[dep] = 'No detection result';
+                    if (stderr) {
+                        errors[dep] = `检测失败: ${stderr.substring(0, 100)}`;
+                    } else if (stdout) {
+                        errors[dep] = `输出异常: ${stdout.substring(0, 100)}`;
+                    } else {
+                        errors[dep] = 'No detection result';
+                    }
                 }
             }
 
@@ -2581,6 +2588,7 @@ sys.exit(0)
             const pkgs = deps.join(' ');
             let cmd;
             let installEnv;
+            let installDomain = isInternal ? '插件内置环境' : '用户全局环境';
 
             if (isInternal && targetPath) {
                 cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
@@ -2592,6 +2600,9 @@ sys.exit(0)
 
             global.logMessage(`[PythonCheck] 开始安装依赖: ${deps.join(', ')}`, 'INFO');
 
+            // 记录开始时间
+            const startTime = Date.now();
+
             // 执行安装
             cp.execSync(cmd, {
                 windowsHide: true,
@@ -2599,7 +2610,28 @@ sys.exit(0)
                 env: installEnv
             });
 
+            // 计算安装耗时
+            const endTime = Date.now();
+            const duration = (endTime - startTime) / 1000;
+
+            // 确定最终安装目录
+            let finalInstallDir = targetPath;
+            if (!finalInstallDir) {
+                // 对于用户环境，获取 site-packages 目录
+                try {
+                    const getSitePackagesCmd = `"${pythonBin}" -c "import site; print(site.getusersitepackages())"`;
+                    const sitePackagesOutput = cp.execSync(getSitePackagesCmd, {
+                        encoding: 'utf8',
+                        windowsHide: true
+                    }).trim();
+                    finalInstallDir = sitePackagesOutput;
+                } catch {
+                    finalInstallDir = '用户环境（自动）';
+                }
+            }
+
             global.logMessage(`[PythonCheck] 依赖安装成功: ${deps.join(', ')}`, "INFO");
+            global.logMessage(`[PythonCheck] 安装详情: 目录=${finalInstallDir}, 环境域=${installDomain}, 耗时=${duration.toFixed(2)}秒`, "INFO");
 
             // ★ 无论成功失败，都记录安装时间（用于 72 小时冷却）
             this._saveState(context, { installTimestamp: Date.now() });
@@ -2726,6 +2758,30 @@ sys.exit(0 if ok else 1)
         // 快速检测依赖状态
         const checkResult = await this.quickCheckDeps(pythonBin);
 
+        // 检查Python Bridge是否已经成功启动
+        let bridgeAvailable = false;
+        try {
+            const global = require('./global');
+            bridgeAvailable = global.pythonBridge?.available === true;
+        } catch { }
+
+        // 如果Python Bridge已经可用，说明依赖实际上是存在的
+        if (bridgeAvailable) {
+            // 覆盖检测结果，认为所有依赖都已存在
+            const allDeps = process.platform === 'win32' ? ['miniaudio', 'Pillow', 'pywin32'] : ['miniaudio', 'Pillow'];
+            const overrideDetail = {};
+            allDeps.forEach(dep => {
+                overrideDetail[dep] = true;
+            });
+
+            return {
+                status: 'ready',
+                missing: [],
+                detail: overrideDetail,
+                errors: {}
+            };
+        }
+
         if (checkResult.hasAll) {
             // 所有依赖都已存在
             return { status: 'ready', missing: [], detail: checkResult.detail };
@@ -2786,8 +2842,9 @@ sys.exit(0 if ok else 1)
     /**
      * 记录依赖检测结果的综合日志
      * @param {Object} prepResult - 依赖准备结果
+     * @param {Object} context - VS Code 扩展上下文（用于获取冷却期状态）
      */
-    _logDependencyResult(prepResult) {
+    _logDependencyResult(prepResult, context) {
         const global = require('./global');
         const detail = prepResult.detail || {};
         const errors = prepResult.errors || {};
@@ -2817,12 +2874,20 @@ sys.exit(0 if ok else 1)
             }
         }
 
-        // 添加冷却期信息
-        if (prepResult.status === 'cooldown' && prepResult.cooldown) {
-            const { remainingHours, remainingMinutes } = prepResult.cooldown;
+        // 总是添加冷却期信息
+        let cooldownStatus = null;
+        if (prepResult.cooldown) {
+            cooldownStatus = prepResult.cooldown;
+        } else if (context) {
+            // 如果没有冷却期信息，尝试获取
+            cooldownStatus = this._getCooldownStatus(context);
+        }
+
+        if (cooldownStatus && cooldownStatus.inCooldown) {
+            const { remainingHours, remainingMinutes } = cooldownStatus;
             logMessage += `, 冷却期剩余: ${remainingHours}小时${remainingMinutes}分钟`;
-        } else if (prepResult.status === 'scheduled') {
-            logMessage += `, 不在冷却期，已安排后台安装`;
+        } else {
+            logMessage += `, 不在冷却期`;
         }
 
         global.logMessage(logMessage, "INFO");
@@ -2933,7 +2998,8 @@ sys.exit(0 if ok else 1)
                 this.pythonPath = installPath;
                 // ★ 分离：快速检测依赖，不阻塞启动
                 const prepResult = await this.prepareDependencies(installPath, context);
-                global.logMessage(`[PythonCheck] autoInstall 依赖准备: ${prepResult.status}`, "INFO");
+                // 记录综合日志
+                this._logDependencyResult(prepResult, context);
                 return {
                     success: true,
                     path: installPath
@@ -3129,7 +3195,7 @@ class UnifiedMediaDownloader {
             // ★ 分离：快速检测依赖，不阻塞启动
             const prepResult = await this.python.prepareDependencies(this.python.pythonPath, context);
             // 记录综合日志
-            this.python._logDependencyResult(prepResult);
+            this.python._logDependencyResult(prepResult, context);
             return this.python.pythonPath;
         }
 
@@ -3147,7 +3213,7 @@ class UnifiedMediaDownloader {
                 // ★ 分离：快速检测依赖，不阻塞启动
                 const prepResult = await this.python.prepareDependencies(settingPath, context);
                 // 记录综合日志
-                this.python._logDependencyResult(prepResult);
+                this.python._logDependencyResult(prepResult, context);
                 return settingPath;
             }
         } catch (e) { }
@@ -3165,7 +3231,7 @@ class UnifiedMediaDownloader {
                 // ★ 分离：快速检测依赖，不阻塞启动
                 const prepResult = await this.python.prepareDependencies(bin, context);
                 // 记录综合日志
-                this.python._logDependencyResult(prepResult);
+                this.python._logDependencyResult(prepResult, context);
                 return bin;
             }
         }
@@ -3185,7 +3251,7 @@ class UnifiedMediaDownloader {
                         // ★ 分离：快速检测依赖，不阻塞启动
                         const prepResult = await this.python.prepareDependencies(res.path, context);
                         // 记录综合日志
-                        this.python._logDependencyResult(prepResult);
+                        this.python._logDependencyResult(prepResult, context);
                         return res.path;
                     } else {
                         global.logMessage(`[PythonCheck] Level 4 失败: ${res.error}`, "ERROR");
