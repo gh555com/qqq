@@ -1208,12 +1208,7 @@ class SmartHttpDownloader {
                 this.activeReqs.add(req);
                 req.once('close', () => this.activeReqs.delete(req));
             } catch (e) {
-                let errorMessage = e.message || "h2_request_failed";
-                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
-                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
-                    errorMessage = "ssl_error";
-                }
-                const r = this._resultFail(task, errorMessage);
+                const r = this._resultFail(task, e.message || "h2_request_failed");
                 r._networkError = e;
                 r._h2SessionBroken = true;
                 return finish(r);
@@ -1229,12 +1224,7 @@ class SmartHttpDownloader {
             });
 
             req.on("error", (e) => {
-                let errorMessage = e.message || "h2_error";
-                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
-                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
-                    errorMessage = "ssl_error";
-                }
-                const r = this._resultFail(task, errorMessage);
+                const r = this._resultFail(task, e.message || "h2_error");
                 r._networkError = e;
                 if (String(e?.code || "").startsWith("ERR_HTTP2")) r._h2SessionBroken = true;
                 finish(r);
@@ -1683,12 +1673,7 @@ class SmartHttpDownloader {
             });
 
             req.on("error", (e) => {
-                let errorMessage = e.message || "h1_error";
-                // 过滤掉TLS/SSL相关的错误消息，避免在日志中显示详细的OpenSSL错误
-                if (errorMessage.includes('BAD_DECRYPT') || errorMessage.includes('SSL') || errorMessage.includes('TLS')) {
-                    errorMessage = "ssl_error";
-                }
-                const r = this._resultFail(task, errorMessage);
+                const r = this._resultFail(task, e.message || "h1_error");
                 r._networkError = e;
                 resolve(r);
             });
@@ -2581,15 +2566,13 @@ sys.exit(0)
             const pkgs = deps.join(' ');
             let cmd;
             let installEnv;
-            let installDomain = isInternal ? '插件内置环境' : '系统Python环境';
+            let installDomain = isInternal ? '插件内置环境' : '用户全局环境';
 
             if (isInternal && targetPath) {
-                // 插件内置Python，安装到插件目录
                 cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
                 installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
             } else {
-                // 系统Python，尝试直接安装（不使用--user）
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
                 installEnv = process.env;
             }
 
