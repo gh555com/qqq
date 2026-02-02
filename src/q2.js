@@ -27,8 +27,6 @@ const global = require("./global");
 
 
 // ==================== 配置常量 ====================
-const SIZE_CONFIG_KEY = "size_mode";
-const KBM_OVERLAP_KEY = "kbm_overlap";
 
 // 并发与缓存
 const MAX_CONCURRENT_TASKS = 6;
@@ -43,8 +41,7 @@ let activePanelAlive = false;
 let currentWatcher = null; // 用于监听当前目录变化
 const usePanelReveal = 1;
 
-let sizeMode = "none";
-let kbmOverlap = 2;
+
 let globalContext = null;
 
 let cachedInMemoryConfig = null; // 增加内存缓存，防止 globalState 防抖导致的读取延迟/冲突
@@ -163,62 +160,18 @@ function getFileSizeSync(filePath) {
 }
 
 // ==================== 尺寸格式化 ====================
-function formatFileSize(bytes, mode, force = false) {
-  if (mode === "none" && !force) return { text: "", show: false };
-
-  let unit = "b";
-  let value = bytes;
-
-  if (bytes >= 1024 * 1024) {
-    unit = "m";
-    value = Math.round(bytes / (1024 * 1024));
-  } else if (bytes >= 1024) {
-    unit = "k";
-    value = Math.round(bytes / 1024);
-  }
-
-  if (!force) {
-    if (mode === "k" && bytes < 1024) return { text: "", show: false };
-    if (mode === "m" && bytes < 1024 * 1024) return { text: "", show: false };
-  }
-
-  // 三段叠印：xxxxx xxxxx xxxxx（m/k/b 三段）
-  const segWidth = 5;
-  const ovRaw = parseInt(kbmOverlap, 10);
-  const overlapChars = Math.max(0, Math.min(segWidth - 1, isNaN(ovRaw) ? 0 : ovRaw));
-
-  const totalWidth = segWidth * 3;
-  const chars = new Array(totalWidth).fill(" ");
-  const valueStr = String(value) + unit;
-  const padded = valueStr.padStart(segWidth, " ");
-
-  function place(startIndex) {
-    let start = startIndex;
-    if (start < 0) start = 0;
-    if (start >= totalWidth) return;
-    for (let i = 0; i < segWidth && start + i < totalWidth; i++) {
-      chars[start + i] = padded[i];
-    }
-  }
-
-  const startM = 0;
-  const startK = segWidth - overlapChars;
-  const startB = segWidth * 2 - overlapChars * 2;
-
-  if (unit === "m") place(startM);
-  else if (unit === "k") place(startK);
-  else place(startB);
-
-  return { text: chars.join(""), show: true };
+function formatFileSize(bytes) {
+  // 只显示字节数，添加千位分隔符
+  const formatted = bytes.toLocaleString();
+  return formatted;
 }
 
-function getFileSizeDisplayAsync(itemPath, mode, force = false, signal = null) {
+function getFileSizeDisplayAsync(itemPath, signal = null) {
   const canon = canonicalizeExistingPath(itemPath);
   const key = cacheKeyForPath(canon);
 
-  return globalScheduler.schedule(`sizeDisplay:${mode}:${key}:${force}`, async () => {
+  return globalScheduler.schedule(`sizeDisplay:${key}`, async () => {
     if (signal && signal.aborted) return "";
-    if (mode === "none" && !force) return "";
 
     try {
       // 检查 signal
@@ -227,8 +180,7 @@ function getFileSizeDisplayAsync(itemPath, mode, force = false, signal = null) {
       if (signal && signal.aborted) return "";
 
       const handleSize = (sizeInBytes) => {
-        const formatted = formatFileSize(sizeInBytes, mode, force);
-        return formatted.show ? formatted.text : "";
+        return formatFileSize(sizeInBytes);
       };
 
       if (stats.isFile()) {
@@ -265,16 +217,12 @@ function getConfig() {
     sidebarRatio: 0.2,
     recycleBin: [],
     isPinned: false,
-    sizeMode: "none",
-    kbmOverlap: 2,
   };
 
   if (!globalContext) return defaultConfig;
 
   // 优先使用内存缓存，确保读取到的是最新的（即便还在 1s 的写入防抖期内）
   if (cachedInMemoryConfig) {
-    sizeMode = cachedInMemoryConfig.sizeMode;
-    kbmOverlap = cachedInMemoryConfig.kbmOverlap;
     return cachedInMemoryConfig;
   }
 
@@ -289,11 +237,7 @@ function getConfig() {
   if (typeof config.sidebarWidth !== "number") config.sidebarWidth = 100;
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
   if (typeof config.isPinned !== "boolean") config.isPinned = false;
-  if (!config.sizeMode) config.sizeMode = "none";
-  if (typeof config.kbmOverlap !== "number") config.kbmOverlap = 2;
 
-  sizeMode = config.sizeMode;
-  kbmOverlap = config.kbmOverlap;
   cachedInMemoryConfig = config;
   return config;
 }
@@ -306,14 +250,9 @@ function saveConfig(
   sidebarWidth,
   sidebarRatio,
   recycleBin,
-  isPinned,
-  newSizeMode,
-  newKbmOverlap
+  isPinned
 ) {
   if (!globalContext) return;
-
-  const nextSizeMode = newSizeMode || sizeMode || "none";
-  const nextOverlap = Number.isInteger(newKbmOverlap) ? newKbmOverlap : kbmOverlap;
 
   const newConfig = {
     recentDirs,
@@ -322,13 +261,9 @@ function saveConfig(
     sidebarRatio,
     recycleBin,
     isPinned,
-    sizeMode: nextSizeMode,
-    kbmOverlap: nextOverlap,
   };
 
-  // 立即更新内存状态和全局简易变量，确保后续读取（如 refreshWebview）拿到的是正确的
-  sizeMode = nextSizeMode;
-  kbmOverlap = nextOverlap;
+  // 立即更新内存状态，确保后续读取（如 refreshWebview）拿到的是正确的
   cachedInMemoryConfig = newConfig;
 
   // 性能优化：防抖处理。频繁切换目录时，不要同步更新 globalState
@@ -363,9 +298,7 @@ function removeFromRecycleBin(directory) {
       config.sidebarWidth,
       config.sidebarRatio,
       newRecycleBin,
-      config.isPinned,
-      config.sizeMode,
-      config.kbmOverlap
+      config.isPinned
     );
   }
 }
@@ -385,9 +318,7 @@ function addToRecycleBin(directory) {
     config.sidebarWidth,
     config.sidebarRatio,
     newRecycleBin.slice(0, 60),
-    config.isPinned,
-    config.sizeMode,
-    config.kbmOverlap
+    config.isPinned
   );
 }
 
@@ -410,9 +341,7 @@ function saveRecentDirectory(directory) {
     config.sidebarWidth,
     config.sidebarRatio,
     config.recycleBin,
-    config.isPinned,
-    config.sizeMode,
-    config.kbmOverlap
+    config.isPinned
   );
 }
 
@@ -438,9 +367,7 @@ function removeAndRecycleRecentDirectory(directory) {
       config.sidebarWidth,
       config.sidebarRatio,
       config.recycleBin,
-      config.isPinned,
-      config.sizeMode,
-      config.kbmOverlap
+      config.isPinned
     );
   }
   return updated;
@@ -514,15 +441,13 @@ async function getDirectoryContents(dirPath) {
 }
 
 // ==================== Webview 脚本生成 ====================
-function generateWebviewScript(currentSizeMode, currentPath, sidebarRatio) {
+function generateWebviewScript(currentPath, sidebarRatio) {
   const escapedCurrentPath = escapeJsStringLiteral(currentPath);
-  const escapedSizeMode = escapeJsStringLiteral(currentSizeMode);
   const escapedSidebarRatio = Number(sidebarRatio || 0.2).toFixed(4);
 
   return `
 const vscode = acquireVsCodeApi();
 
-let sizeMode = '${escapedSizeMode}';
 let currentPath = '${escapedCurrentPath}';
 let sidebarRatio = ${escapedSidebarRatio};
 
@@ -763,55 +688,7 @@ function createFolder(){
   vscode.postMessage({ command: 'createFolder', folderName });
 }
 
-function setSizeMode(mode){
-  hideAllContextMenus();
-  sizeMode = mode; // 立即本地更新，增强响应感
-  updateSizeMenuUI(mode);
 
-  // 切换模式时，利用缓存立即刷新 UI 尺寸显示，避免重新请求
-  refreshSizeDisplayFromCache();
-
-  vscode.postMessage({ command: 'setSizeMode', mode });
-}
-
-function refreshSizeDisplayFromCache() {
-  const items = document.querySelectorAll('.file-item');
-  items.forEach(item => {
-    const p = item.dataset.path;
-    const szArea = item.querySelector('.sz-area');
-    if (!szArea) return;
-
-    if (sessionSizeCache.has(p)) {
-      const cachedValue = sessionSizeCache.get(p);
-      if (shouldShowSizeByMode(cachedValue, sizeMode)) {
-        szArea.textContent = cachedValue;
-      } else {
-        szArea.textContent = '';
-      }
-    } else {
-       // 没有缓存的项，如果当前模式允许，稍后会由 requestFileSizeUpdates 自动触发请求
-       szArea.textContent = '';
-    }
-  });
-}
-
-function shouldShowSizeByMode(sizeStr, mode) {
-  if (!sizeStr || mode === 'none') return false;
-  if (mode === 'b') return true;
-  const s = sizeStr.toLowerCase();
-  if (mode === 'k') return s.includes('k') || s.includes('m');
-  if (mode === 'm') return s.includes('m');
-  return true;
-}
-
-function updateSizeMenuUI(mode){
-  const menu = document.getElementById('emptyContextMenu');
-  if (!menu) return;
-  menu.querySelectorAll('[data-mode]').forEach(btn => {
-    if (btn.dataset.mode === mode) btn.classList.add('selected');
-    else btn.classList.remove('selected');
-  });
-}
 
 // ===== 选择/重命名 =====
 let selectedItem = null;
@@ -910,7 +787,7 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
     }
     const szArea = fileItem.querySelector('.sz-area');
     if (szArea) szArea.textContent = '    \\u2022    ';
-    vscode.postMessage({ command: 'requestSize', path: p, type, force: true });
+    vscode.postMessage({ command: 'requestSize', path: p, type });
   }
 }
 
@@ -1108,13 +985,10 @@ function refreshSizeDisplay(){
     }
   });
 
-  if (sizeMode !== 'none') {
-    requestFileSizeUpdates(itemsToRequest);
-  }
+  requestFileSizeUpdates(itemsToRequest);
 }
 
 function requestFileSizeUpdates(items){
-  if (sizeMode === 'none') return;
 
   // 关键优化 1：自动请求只针对文件，且不再逐个发送
   const filesToRequest = items.filter(it => it.type === 'file' && it.name !== '..');
@@ -1141,64 +1015,55 @@ window.addEventListener('message', event => {
   if (!message) return;
 
   if (message.command === 'update') {
-    const isNewDir = (message.currentPath || '') !== currentPath;
-    if (isNewDir) {
-      sessionSizeCache.clear();
-    }
+      const isNewDir = (message.currentPath || '') !== currentPath;
+      if (isNewDir) {
+        sessionSizeCache.clear();
+      }
 
-    if (message.sizeMode) {
-      sizeMode = message.sizeMode; // 同步后端传递的最新 sizeMode
-      updateSizeMenuUI(sizeMode);
-    }
-    currentPath = message.currentPath || '';
-    const addr = document.getElementById('addressInput');
-    if (addr) {
-      addr.value = message.currentPath || '';
-      updateAddressDisplay(addr.value);
-    }
-    const list = document.getElementById('fileList');
-    if (list) {
-      list.innerHTML = message.fileListHtml || '';
+      currentPath = message.currentPath || '';
+      const addr = document.getElementById('addressInput');
+      if (addr) {
+        addr.value = message.currentPath || '';
+        updateAddressDisplay(addr.value);
+      }
+      const list = document.getElementById('fileList');
+      if (list) {
+        list.innerHTML = message.fileListHtml || '';
 
-      // 立即恢复缓存中的尺寸
-      const items = list.querySelectorAll('.file-item');
-      items.forEach(item => {
-        const p = item.dataset.path;
-        if (sessionSizeCache.has(p)) {
-          const cachedVal = sessionSizeCache.get(p);
-          const szArea = item.querySelector('.sz-area');
-          if (szArea && shouldShowSizeByMode(cachedVal, sizeMode)) {
-            szArea.textContent = cachedVal;
+        // 立即恢复缓存中的尺寸
+        const items = list.querySelectorAll('.file-item');
+        items.forEach(item => {
+          const p = item.dataset.path;
+          if (sessionSizeCache.has(p)) {
+            const cachedVal = sessionSizeCache.get(p);
+            const szArea = item.querySelector('.sz-area');
+            if (szArea) {
+              szArea.textContent = cachedVal;
+            }
+          }
+        });
+      }
+
+      // 仅针对未缓存的项发起自动请求
+      const uncachedItems = (message.items || []).filter(it => !sessionSizeCache.has(it.path));
+      requestFileSizeUpdates(uncachedItems);
+
+      setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
+    } else if (message.command === 'updateSizeBatch') {
+      (message.results || []).forEach(res => {
+        // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
+        if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
+          sessionSizeCache.set(res.path, res.sizeDisplay);
+        }
+
+        const el = findItemElementByPath(res.path, res.type);
+        if (el) {
+          const sz = el.querySelector('.sz-area');
+          if (sz) {
+            sz.textContent = res.sizeDisplay || '';
           }
         }
       });
-    }
-
-    // 仅针对未缓存且符合当前模式的项发起自动请求
-    const uncachedItems = (message.items || []).filter(it => !sessionSizeCache.has(it.path));
-    requestFileSizeUpdates(uncachedItems);
-
-    setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
-  } else if (message.command === 'updateSizeBatch') {
-    (message.results || []).forEach(res => {
-      // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
-      if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
-        sessionSizeCache.set(res.path, res.sizeDisplay);
-      }
-
-      const el = findItemElementByPath(res.path, res.type);
-      if (el) {
-        const sz = el.querySelector('.sz-area');
-        if (sz) {
-          // 实时更新时仍需遵循模式过滤（除非是 force 请求，但 Batch 通常是自动请求）
-          if (shouldShowSizeByMode(res.sizeDisplay, sizeMode) || (selectedItem && selectedItem.path === res.path)) {
-             sz.textContent = res.sizeDisplay || '';
-          } else {
-             sz.textContent = '';
-          }
-        }
-      }
-    });
   } else if (message.command === 'clearFilenameInput') {
     const f = document.getElementById('filenameInput');
     if (f) { f.value = ''; f.focus(); }
@@ -1567,7 +1432,6 @@ window.cancel = cancel;
 window.saveFile = saveFile;
 window.createFolder = createFolder;
 window.togglePin = togglePin;
-window.setSizeMode = setSizeMode;
 `;
 }
 
@@ -1628,7 +1492,7 @@ function getWebviewContent(currentPath) {
     )
     .join("");
 
-  const inlineScript = generateWebviewScript(config.sizeMode, currentPath, config.sidebarRatio);
+  const inlineScript = generateWebviewScript(currentPath, config.sidebarRatio);
 
   let finalHtml = htmlTemplate
     .replace("{{SIDEBAR_WIDTH}}", config.sidebarWidth)
@@ -1639,10 +1503,6 @@ function getWebviewContent(currentPath) {
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
     .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
-    .replace("{{SIZE_MODE_NONE_CLASS}}", config.sizeMode === "none" ? "selected" : "")
-    .replace("{{SIZE_MODE_M_CLASS}}", config.sizeMode === "m" ? "selected" : "")
-    .replace("{{SIZE_MODE_K_CLASS}}", config.sizeMode === "k" ? "selected" : "")
-    .replace("{{SIZE_MODE_B_CLASS}}", config.sizeMode === "b" ? "selected" : "")
     .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"));
 
   return finalHtml;
@@ -1911,25 +1771,9 @@ function showSaveAsDialog() {
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;
 
-      case "setSizeMode": {
-        const config = getConfig();
-        saveConfig(
-          config.recentDirs,
-          config.lineSpacing,
-          config.sidebarWidth,
-          config.sidebarRatio,
-          config.recycleBin,
-          config.isPinned,
-          message.mode,
-          config.kbmOverlap
-        );
-        refreshWebview();
-        break;
-      }
+
 
       case "requestSizeBatch": {
-        const config = getConfig();
-        if (config.sizeMode === "none") break;
         (async () => {
           const signal = activeAbortController.signal;
           const items = message.items || [];
@@ -2037,9 +1881,7 @@ function showSaveAsDialog() {
           currentConfig.sidebarWidth,
           message.ratio,
           currentConfig.recycleBin,
-          currentConfig.isPinned,
-          currentConfig.sizeMode,
-          currentConfig.kbmOverlap
+          currentConfig.isPinned
         );
         if (panel && activePanelAlive)
           panel.webview.postMessage({ command: "updateSidebarRatio", ratio: message.ratio });
@@ -2052,9 +1894,7 @@ function showSaveAsDialog() {
           currentConfig.sidebarWidth,
           currentConfig.sidebarRatio,
           currentConfig.recycleBin,
-          message.isPinned,
-          currentConfig.sizeMode,
-          currentConfig.kbmOverlap
+          message.isPinned
         );
         break;
 

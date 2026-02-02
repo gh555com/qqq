@@ -1,199 +1,254 @@
-的梦，我看你现在 **Py 引擎“2 秒淡出”之所以怎么都失败**，根因其实很明确：
+     * 快速检测：Python 是否已有指定依赖
+     * @param {string} pythonBin - Python 路径
+     * @param {string[]} deps - 要检测的依赖列表 ['miniaudio', 'Pillow']
+     * @returns {Object} - { hasAll: boolean, missing: string[], detail: { dep: boolean } }
+     */
+    async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
+        const { spawnSync } = require("child_process");
 
-1. **Node 侧 `_fadeOutAudio()` 在循环调用** `pythonBridge.call('set_audio_volume', {volume})`
-2. 但你这份 **Python daemon 里根本没有实现 `set_audio_volume` / `set_volume` 这个 action**（`_dispatch_action` 里没有分支）
-   → 所以每次淡出都“空调用”，最后直接 `stop_audio` 硬停，听起来当然就是“没有淡出”。
+        // 构建检测脚本
+        const checkScript = deps.map(dep => {
+            const importName = dep === 'Pillow' ? 'PIL' : dep;
+            return `
+try:
+    import ${importName}
+    ${dep}:1
+except:
+    ${dep}:0`;
+        }).join('\n');
 
-下面给你一个“稳的终结版”：**Python 侧实现 set_audio_volume + stop_audio 支持 fade_ms（一次调用就能淡出停止）**，然后 Node 侧改成 **不再狂发 100 次 set_volume**，只发一次 stop_audio(fade_ms=2000)。
+        const fullScript = `
+import sys
+${checkScript}
+sys.exit(0)
+`.trim();
 
----
+        try {
+            const r = spawnSync(pythonBin, ["-c", fullScript], {
+                encoding: 'utf8',
+                windowsHide: true,
+                timeout: 15000
+            });
 
-## ① Python daemon：加上音量控制（关键补丁）
+            const stdout = r.stdout || '';
+            const detail = {};
+            const missing = [];
 
-### A. 在 `NonBlockingAudioEngine.__init__` 里新增两个字段
+            for (const dep of deps) {
+                const pattern = new RegExp(`${dep}:(\d+)`);
+                const match = stdout.match(pattern);
+                const hasDep = match && match[1] === '1';
+                detail[dep] = hasDep;
+                if (!hasDep) missing.push(dep);
+            }
 
-把下面两行加到 `__init__` 末尾合适位置（比如 `_stop_event` 后）：
-
-```python
-        self._volume = 1.0
-        self._volume_lock = threading.Lock()
-```
-
-### B. 在 `NonBlockingAudioEngine` 类里新增 3 个方法
-
-```python
-    def set_volume(self, v: float):
-        try:
-            v = float(v)
-        except Exception:
-            v = 1.0
-        if v < 0.0:
-            v = 0.0
-        if v > 1.0:
-            v = 1.0
-
-        with self._volume_lock:
-            self._volume = v
-
-        # 立即作用到当前所有设备
-        with self._lock:
-            devices = list(self.active_devices)
-        for d in devices:
-            try:
-                d.volume = v
-            except Exception:
-                pass
-        return v
-
-    def get_volume(self) -> float:
-        with self._volume_lock:
-            return float(self._volume)
-
-    def fade_out_and_stop(self, fade_ms: int = 2000, step_ms: int = 20):
-        # 没有设备就直接停
-        with self._lock:
-            devices = list(self.active_devices)
-        if not devices:
-            self.stop_all()
-            return
-
-        fade_ms = int(fade_ms) if fade_ms else 0
-        if fade_ms <= 0:
-            self.stop_all()
-            return
-
-        steps = max(1, int(fade_ms // step_ms))
-        base = self.get_volume()
-
-        for i in range(steps):
-            factor = 1.0 - ((i + 1) / steps)  # 1 -> 0
-            vol = base * factor
-            with self._lock:
-                devices = list(self.active_devices)
-            for d in devices:
-                try:
-                    d.volume = vol
-                except Exception:
-                    pass
-            time.sleep(step_ms / 1000.0)
-
-        self.stop_all()
-        # 为下一次播放还原“逻辑音量”
-        self.set_volume(base)
-```
-
-### C. 在 `_play_worker` 里：设备启动前先应用当前音量（让 set_volume 对新设备也生效）
-
-找到你这里创建 `device = miniaudio.PlaybackDevice(...)` 后、`device.start(sound)` 之前，插入：
-
-```python
-            # 启动前同步当前音量
-            try:
-                device.volume = self.get_volume()
-            except Exception:
-                pass
-```
-
-并且把你最后一圈淡出那段：
-
-```python
-                        device.volume = max(0.0, min(1.0, remaining / fade_duration))
-```
-
-改成 **乘上 base 音量**（否则你外部 set_volume 会被覆盖）：
-
-```python
-                        base = self.get_volume()
-                        device.volume = max(0.0, min(1.0, (remaining / fade_duration) * base))
-```
-
----
-
-## ② Python daemon：实现 `set_audio_volume` + 让 `stop_audio` 支持 fade_ms（一次调用就淡出停止）
-
-在 `_dispatch_action(cmd)` 里加两个分支：
-
-### A. 新增 `set_audio_volume`
-
-放在 `stop_audio` 之前/之后都行：
-
-```python
-    if action in ("set_audio_volume", "set_volume"):
-        engine = ensure_audio_engine()
-        vol = cmd.get("volume", 1.0)
-        if engine:
-            v = engine.set_volume(vol)
-            out["status"] = "ok"
-            out["volume"] = v
-        else:
-            out["status"] = "error"
-            out["reason"] = "engine_not_available"
-        return out
-```
-
-### B. 改造 `stop_audio`：支持 `fade_ms`
-
-把你原来的：
-
-```python
-    if action == "stop_audio":
-        engine = ensure_audio_engine()
-        if engine:
-            engine.stop_all()
-            out["status"] = "stopped"
-        return out
-```
-
-替换成：
-
-```python
-    if action == "stop_audio":
-        engine = ensure_audio_engine()
-        fade_ms = cmd.get("fade_ms", 0)
-        if engine:
-            try:
-                if fade_ms and int(fade_ms) > 0:
-                    engine.fade_out_and_stop(int(fade_ms))
-                else:
-                    engine.stop_all()
-                out["status"] = "stopped"
-            except Exception as e:
-                engine.stop_all()
-                out["status"] = "stopped"
-                out["warn"] = str(e)
-        return out
-```
-
----
-
-## ③ Node 侧（q4.js）：把“狂刷 set_audio_volume”改成“一次 stop_audio(fade_ms=2000)”
-
-你现在 `_fadeOutAudio()` 是循环 set_audio_volume —— 这很容易被 IPC 抖动/阻塞打爆，而且没必要。
-
-把 `_fadeOutAudio()` 简化成这样就够了：
-
-```js
-async _fadeOutAudio() {
-    try {
-        await this._global.pythonBridge.call('stop_audio', { fade_ms: 2000 });
-    } catch (e) {
-        // 兜底：失败就硬停
-        try { await this._global.pythonBridge.call('stop_audio'); } catch {}
+            return {
+                hasAll: missing.length === 0,
+                missing,
+                detail
+            };
+        } catch (e) {
+            return { hasAll: false, missing: deps, detail: {} };
+        }
     }
-    this._postMessage({ command: 'stopAudio' });
-}
-```
 
-> 这样：**淡出逻辑全在 Python 内部完成**，Node 只发一次命令，稳定性会直接拉满。
+    /**
+     * 异步安装依赖（后台执行）
+     * @param {string} pythonBin - Python 路径
+     * @param {string[]} deps - 要安装的依赖列表
+     * @param {Object} context - VS Code 扩展上下文
+     */
+    async _installDepsAsync(pythonBin, deps, context) {
+        if (this._installInProgress) {
+            return { success: false, error: '安装已在进行中' };
+        }
 
----
+        this._installInProgress = true;
+        const global = require('./global');
+        const cp = require('child_process');
+        const path = require('path');
+        const fs = require('fs');
 
-## 如果你打完补丁还是“完全不淡出”
+        try {
+            const isInternal = pythonBin.includes('python_engine');
+            const engineDir = isInternal ? path.dirname(pythonBin) : null;
 
-那几乎可以断定：你当前环境的 `miniaudio.PlaybackDevice.volume` **不生效/版本行为不同**。
-这时终极方案是：**不用 device.volume，改为对 PCM 数据做末尾 2 秒采样衰减（样本级淡出）**，这个一定能淡出。你要我给你“PCM 衰减版播放生成器”的实现，我也可以直接贴你现成可替换的 `_play_worker`（但会比现在长一点）。
+            // 确定目标路径
+            let targetPath = null;
+            if (isInternal && engineDir) {
+                targetPath = path.join(engineDir, 'site-packages');
+                if (!fs.existsSync(targetPath)) {
+                    fs.mkdirSync(targetPath, { recursive: true });
+                }
+            }
 
-你先按我上面这套补丁走一遍：
+            // 构建 pip install 命令
+            const pkgs = deps.join(' ');
+            let cmd;
+            let installEnv;
 
-* 你现在的代码，**99% 就是缺了 `set_audio_volume`** 导致“淡出永远失败”。
-  如果你愿意，把你 pythonBridge 的 `call()` 返回错误日志（比如 unknown action / error 字段）贴一行出来，我还能帮你确认是否就是这一下命中。
+            if (isInternal && targetPath) {
+                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
+                installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
+            } else {
+                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                installEnv = process.env;
+            }
+
+            global.logMessage(`[PythonCheck] 开始安装依赖: ${deps.join(', ')}`, 'INFO');
+
+            // 执行安装
+            cp.execSync(cmd, {
+                windowsHide: true,
+                timeout: 180000, // 3 分钟超时
+                env: installEnv
+            });
+
+            global.logMessage(`[PythonCheck] 依赖安装成功: ${deps.join(', ')}`, "INFO");
+
+            // ★ 无论成功失败，都记录安装时间（用于 72 小时冷却）
+            this._saveState(context, { installTimestamp: Date.now() });
+
+            return { success: true, installed: deps };
+        } catch (e) {
+            global.logMessage(`[PythonCheck] 依赖安装失败: ${e.message}`, 'ERROR');
+            // ★ 失败也要记录时间，防止频繁重试
+            this._saveState(context, { installTimestamp: Date.now() });
+            return { success: false, error: e.message };
+        } finally {
+            this._installInProgress = false;
+        }
+    }
+
+    /**
+     * 安排后台安装（在 20 秒后执行）
+     * @param {string} pythonBin - Python 路径
+     * @param {string[]} deps - 要安装的依赖列表
+     * @param {Object} context - VS Code 扩展上下文
+     */
+    scheduleInstall(pythonBin, deps, context) {
+        // 清除之前的定时器
+        if (this._installTimer) {
+            clearTimeout(this._installTimer);
+        }
+
+        // 20 秒后执行安装
+        this._installTimer = setTimeout(async () => {
+            const global = require('./global');
+            global.logMessage(`[PythonCheck] 触发后台依赖安装检查`, 'INFO');
+
+            // 再次检查是否已在冷却期内
+            if (this._isInCooldown(context)) {
+                global.logMessage(`[PythonCheck] 在 72 小时冷却期内，跳过安装`, 'INFO');
+                return;
+            }
+
+            await this._installDepsAsync(pythonBin, deps, context);
+        }, 20000); // 20 秒延迟
+    }
+
+    async isAvailable(pythonBin = null) {
+        const bin = pythonBin || this.pythonPath;
+        if (!bin) return false;
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
+
+            const { spawnSync } = require("child_process");
+
+            // 快速版本检测
+            const checkScript = `
+import sys
+v = sys.version_info
+ok = (3, 7) <= v < (3, 13)
+msg = f'PYTHON_READY|EXE:{sys.executable}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
+sys.stdout.write(msg)
+sys.exit(0 if ok else 1)
+`.trim();
+
+            const r = spawnSync(bin, ["-c", checkScript], {
+                encoding: 'utf8',
+                windowsHide: true,
+                timeout: 20000,
+                cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
+            });
+
+            if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
+                const stdout = r.stdout || "";
+                const exeMatch = stdout.match(/EXE:([^|]+)/);
+                if (exeMatch) this._resolvedPath = exeMatch[1];
+                return true;
+            }
+            return false;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * 仅快速检测依赖是否存在（不安装）
+     * @param {string} pythonBin - Python 路径
+     * @returns {Object} - { missing: string[], allReady: boolean }
+     */
+    async quickCheckDeps(pythonBin) {
+        return await this.checkDeps(pythonBin, ['miniaudio', 'Pillow']);
+    }
+
+    /**
+     * 准备依赖（分离启动和安装）
+     * 此方法仅快速检测，不阻塞启动
+     * @param {string} pythonBin - Python 路径
+     * @param {Object} context - VS Code 扩展上下文
+     */
+    async prepareDependencies(pythonBin, context) {
+        // 快速检测依赖状态
+        const checkResult = await this.quickCheckDeps(pythonBin);
+
+        if (checkResult.hasAll) {
+            // 所有依赖都已存在
+            return { status: 'ready', missing: [] };
+        }
+
+        // 有缺失的依赖
+        // 检查是否在冷却期内
+        if (this._isInCooldown(context)) {
+            const global = require('./global');
+            global.logMessage(`[PythonCheck] 依赖缺失但在 72 小时冷却期内，跳过安装`, "INFO");
+            // ★ 冷却期内直接跳过，什么都不做
+            return { status: 'cooldown', missing: checkResult.missing };
+        }
+
+        // ★ 冷却期外：安排 20 秒后后台安装一次
+        this.scheduleInstall(pythonBin, checkResult.missing, context);
+        return { status: 'scheduled', missing: checkResult.missing };
+    }
+
+    /**
+     * 强制安装依赖（立即执行，不受冷却期限制）
+     * @param {string} pythonBin - Python 路径
+     * @param {Object} context - VS Code 扩展上下文
+     */
+    async forceInstallDeps(pythonBin, context) {
+        const checkResult = await this.quickCheckDeps(pythonBin);
+        if (checkResult.hasAll) {
+            return { success: true, message: '依赖已存在' };
+        }
+        return await this._installDepsAsync(pythonBin, checkResult.missing, context);
+    }
+
+    async trySetFromGlobalStorage(context) {
+        const path = require('path');
+        const fs = require('fs');
+        const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
+        const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
+        const ownPath = path.join(installDir, binName);
+        if (fs.existsSync(ownPath)) {
+            if (await this.isAvailable(ownPath)) {
+                this.pythonPath = ownPath;
+                return true;
+            }
+        }
+        return false;
+    }
+

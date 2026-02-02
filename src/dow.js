@@ -2480,15 +2480,15 @@ class PythonEngineDownloader {
     async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
         const { spawnSync } = require("child_process");
 
-        // 构建检测脚本（修复：使用 print 输出结果，确保每个依赖都有独立的输出）
+        // 构建检测脚本（参考原来的实现，简化输出格式）
         const checkScript = deps.map(dep => {
             const importName = this._getImportName(dep);
             return `
 try:
     import ${importName}
-    print('DEP_CHECK:${dep}:1')
-except Exception as e:
-    print('DEP_CHECK:${dep}:0:' + str(e).replace('\n', ' '))`;
+    print('${dep}:1')
+except:
+    print('${dep}:0')`;
         }).join('\n');
 
         const fullScript = `
@@ -2505,41 +2505,19 @@ sys.exit(0)
             });
 
             const stdout = r.stdout || '';
-            const stderr = r.stderr || '';
             const detail = {};
             const missing = [];
             const errors = {};
 
-            // 解析输出，使用更可靠的匹配方式
-            const lines = stdout.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('DEP_CHECK:')) {
-                    const parts = line.substring(10).split(':');
-                    if (parts.length >= 2) {
-                        const dep = parts[0];
-                        const status = parts[1];
-                        const error = parts.slice(2).join(':') || '';
-                        detail[dep] = status === '1';
-                        if (status !== '1') {
-                            missing.push(dep);
-                            errors[dep] = error;
-                        }
-                    }
-                }
-            }
-
-            // 确保所有依赖都有检测结果
+            // 解析输出
             for (const dep of deps) {
-                if (!(dep in detail)) {
-                    detail[dep] = false;
+                const pattern = new RegExp(`${dep}:(\\d+)`);
+                const match = stdout.match(pattern);
+                const hasDep = match && match[1] === '1';
+                detail[dep] = hasDep;
+                if (!hasDep) {
                     missing.push(dep);
-                    if (stderr) {
-                        errors[dep] = `检测失败: ${stderr.substring(0, 100)}`;
-                    } else if (stdout) {
-                        errors[dep] = `输出异常: ${stdout.substring(0, 100)}`;
-                    } else {
-                        errors[dep] = 'No detection result';
-                    }
+                    errors[dep] = '检测失败';
                 }
             }
 
@@ -2760,13 +2738,16 @@ sys.exit(0 if ok else 1)
 
         // 检查Python Bridge是否已经成功启动
         let bridgeAvailable = false;
+        let audioDetected = false;
         try {
             const global = require('./global');
             bridgeAvailable = global.pythonBridge?.available === true;
+            // 检查是否有音频检测成功的记录
+            audioDetected = global.pythonAudioDetected === true;
         } catch { }
 
-        // 如果Python Bridge已经可用，说明依赖实际上是存在的
-        if (bridgeAvailable) {
+        // 如果Python Bridge已经可用或音频已检测成功，说明依赖实际上是存在的
+        if (bridgeAvailable || audioDetected) {
             // 覆盖检测结果，认为所有依赖都已存在
             const allDeps = process.platform === 'win32' ? ['miniaudio', 'Pillow', 'pywin32'] : ['miniaudio', 'Pillow'];
             const overrideDetail = {};
