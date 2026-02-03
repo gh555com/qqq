@@ -697,58 +697,20 @@ function Process-Command {
       }
       'trigger_system_paste' {
         try {
-          # 空路径检查
-          if (-not $cmd.path -or $cmd.path -eq '') {
-            $result.success = $false
-            $result.error = "Empty path"
+          $rawPath = $cmd.path -replace '/', '\'
+          $cleanPath = $rawPath.TrimEnd('\')
+          $shell = New-Object -ComObject Shell.Application
+          $folder = $shell.NameSpace($cleanPath)
+          if ($folder) {
+            $folder.Self.InvokeVerb("Paste")
+            $result.success = $true
           } else {
-            # 路径归一化
-            $rawPath = $cmd.path -replace '/', '\'
-            $cleanPath = $rawPath.TrimEnd('\')
-
-            # 检查目标目录是否存在
-            if (-not (Test-Path $cleanPath -PathType Container)) {
-              $result.success = $false
-              $result.error = "Target folder not found: $cleanPath"
-            } else {
-              # 检查剪贴板是否有文件
-              $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
-              if (-not $files -or $files.Count -eq 0) {
-                $result.success = $false
-                $result.error = "No files in clipboard"
-              } else {
-                # ★ 使用 explorer.exe 触发系统粘贴（最可靠）
-                # 这会打开资源管理器并触发粘贴，由系统处理所有对话框
-                $shell = New-Object -ComObject Shell.Application
-
-                # 处理特殊路径：尝试短路径
-                $nsPath = $cleanPath
-                $folder = $shell.NameSpace($nsPath)
-
-                if (-not $folder) {
-                  # 回退：尝试使用短路径
-                  try {
-                    $fso = New-Object -ComObject Scripting.FileSystemObject
-                    $shortPath = $fso.GetFolder($cleanPath).ShortPath
-                    $folder = $shell.NameSpace($shortPath)
-                  } catch {}
-                }
-
-                if ($folder) {
-                  # 触发系统粘贴
-                  $folder.Self.InvokeVerb("Paste")
-                  $result.success = $true
-                  $result.fileCount = $files.Count
-                } else {
-                  $result.success = $false
-                  $result.error = "Cannot access folder via Shell: $cleanPath"
-                }
-              }
-            }
+            $result.success = $false
+            $result.error = "Folder not found: $cleanPath"
           }
         } catch {
           $result.success = $false
-          $result.error = "PowerShell Error: " + $_.Exception.Message
+          $result.error = $_.Exception.Message
         }
       }
       'getHtml' {
@@ -2937,7 +2899,7 @@ async function tryOneByOne(callback) {
 
 /**
  * 触发系统原生粘贴（与用户 IO 引擎偏好无关）
- * 链路：独立 PowerShell 进程 (-STA 模式)
+ * 简单直接：只用 shell daemon
  */
 async function triggerSystemPaste(targetDir) {
 	if (!targetDir) {
@@ -2945,85 +2907,22 @@ async function triggerSystemPaste(targetDir) {
 		return { success: false, error: "目标目录为空" };
 	}
 
-	// 归一化路径
 	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
 	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
 
-	if (process.platform === 'win32') {
-		// Windows: 使用独立的 PowerShell 进程（STA 模式，更可靠）
-		try {
-			const cp = require('child_process');
-			// 转义路径中的单引号
-			const escapedPath = normalizedPath.replace(/'/g, "''");
-			const psScript = `
-Add-Type -AssemblyName System.Windows.Forms
-$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
-if (-not $files -or $files.Count -eq 0) {
-  Write-Output '{"success":false,"error":"No files in clipboard"}'
-  exit
-}
-if (-not (Test-Path '${escapedPath}' -PathType Container)) {
-  Write-Output '{"success":false,"error":"Target folder not found"}'
-  exit
-}
-$shell = New-Object -ComObject Shell.Application
-$folder = $shell.NameSpace('${escapedPath}')
-if (-not $folder) {
-  try {
-    $fso = New-Object -ComObject Scripting.FileSystemObject
-    $shortPath = $fso.GetFolder('${escapedPath}').ShortPath
-    $folder = $shell.NameSpace($shortPath)
-  } catch {}
-}
-if ($folder) {
-  $folder.Self.InvokeVerb('Paste')
-  Write-Output ('{"success":true,"fileCount":' + $files.Count + '}')
-} else {
-  Write-Output '{"success":false,"error":"Cannot access folder via Shell"}'
-}
-`;
-			// 使用 -STA 参数确保 Shell 操作正确执行
-			const result = cp.spawnSync('powershell.exe', [
-				'-STA', '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', psScript
-			], {
-				encoding: 'utf8',
-				windowsHide: true,
-				timeout: 15000
-			});
-
-			const stdout = (result.stdout || '').trim();
-			logMessage(`[Q2] PowerShell 返回: ${stdout}`, "INFO");
-
-			if (stdout) {
-				try {
-					const res = JSON.parse(stdout);
-					if (res.success) {
-						logMessage(`[Q2] 系统粘贴成功`, "INFO");
-					}
-					return res;
-				} catch (e) {
-					return { success: false, error: `Parse error: ${stdout}` };
-				}
-			}
-			return { success: false, error: result.stderr || 'No output' };
-		} catch (e) {
-			logMessage(`[Q2] PowerShell 异常: ${e.message}`, "ERROR");
-			return { success: false, error: e.message };
-		}
-	} else if (process.platform === 'darwin') {
-		// macOS: 使用 osascript
-		try {
-			const cp = require('child_process');
-			const script = `tell application "Finder" to paste to folder (POSIX file "${normalizedPath}")`;
-			cp.execSync(`osascript -e '${script}'`, { timeout: 10000 });
-			logMessage(`[Q2] macOS 粘贴成功`, "INFO");
-			return { success: true };
-		} catch (e) {
-			return { success: false, error: e.message };
-		}
+	if (!shellBridge || !shellBridge.isAvailable()) {
+		logMessage(`[Q2] Shell daemon 不可用`, "ERROR");
+		return { success: false, error: "Shell daemon 不可用" };
 	}
 
-	return { success: false, error: "Platform not supported" };
+	try {
+		const res = await shellBridge.call("trigger_system_paste", { path: normalizedPath }, 10000);
+		logMessage(`[Q2] Shell 返回: ${JSON.stringify(res)}`, "INFO");
+		return res;
+	} catch (e) {
+		logMessage(`[Q2] Shell 异常: ${e.message}`, "ERROR");
+		return { success: false, error: e.message };
+	}
 }
 
 let _integrityCache = null;
