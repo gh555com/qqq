@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.59.19",
+  "version": "15.59.20",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -137,7 +137,7 @@
             "order": 40,
             "type": "boolean",
             "default": false,
-            "markdownDescription": "🛸 自动感知外部变化：开启后，当外部程序修改当前目录中的文件时，自动刷新文件列表（包括排序和 sz 区）。默认关闭以保证稳定性。"
+            "markdownDescription": "🛸 自动感知外部变化。勾选滴好处：当外部程序修改当前目录中滴文件时，自动更新文件列表（包括排序和 sz 区）。不勾选滴好处：0额外性能开销、0视界抖动。默认不勾选。 "
           }
         }
       },
