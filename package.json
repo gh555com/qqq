@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.59.16",
+  "version": "15.59.17",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -96,6 +96,48 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "🛸 是否在文件导航中显示历史回收站。"
+          },
+          "qqq.szDisplayMode": {
+            "order": 20,
+            "type": "string",
+            "default": "nothing",
+            "enum": [
+              "nothing",
+              "size",
+              "ctime",
+              "mtime"
+            ],
+            "markdownEnumDescriptions": [
+              "不显示任何信息",
+              "显示文件大小",
+              "显示创建时间",
+              "显示修改时间"
+            ],
+            "markdownDescription": "🛸 sz 区显示内容：控制文件列表中 sz 区域显示的信息类型。"
+          },
+          "qqq.sortBy": {
+            "order": 30,
+            "type": "string",
+            "default": "name",
+            "enum": [
+              "name",
+              "size",
+              "ctime",
+              "mtime"
+            ],
+            "markdownEnumDescriptions": [
+              "按名称排序（文件夹在上）",
+              "按大小排序（文件夹在上，文件按大小倒序）",
+              "按创建时间排序（文件夹在上按时间倒序，文件在下按时间倒序）",
+              "按修改时间排序（文件夹在上按时间倒序，文件在下按时间倒序）"
+            ],
+            "markdownDescription": "🛸 文件排序依据：控制文件和文件夹的排序方式。"
+          },
+          "qqq.autoWatchChanges": {
+            "order": 40,
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "🛸 自动感知外部变化：开启后，当外部程序修改当前目录中的文件时，自动刷新文件列表（包括排序和 sz 区）。默认关闭以保证稳定性。"
           }
         }
       },

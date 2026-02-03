@@ -2572,7 +2572,8 @@ sys.exit(0)
                 cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
                 installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
             } else {
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                // 系统Python，先尝试直接安装（不使用--user）
+                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --index-url https://mirrors.aliyun.com/pypi/simple/`;
                 installEnv = process.env;
             }
 
@@ -2581,12 +2582,29 @@ sys.exit(0)
             // 记录开始时间
             const startTime = Date.now();
 
-            // 执行安装
-            cp.execSync(cmd, {
-                windowsHide: true,
-                timeout: 180000, // 3 分钟超时
-                env: installEnv
-            });
+            try {
+                // 执行安装
+                cp.execSync(cmd, {
+                    windowsHide: true,
+                    timeout: 180000, // 3 分钟超时
+                    env: installEnv
+                });
+            } catch (e) {
+                // 如果直接安装失败，回退到 --user 安装
+                if (!isInternal) {
+                    global.logMessage(`[PythonCheck] 直接安装失败，回退到 --user 安装: ${e.message}`, 'WARN');
+                    cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                    installEnv = process.env;
+                    installDomain = '用户全局环境（回退）';
+                    cp.execSync(cmd, {
+                        windowsHide: true,
+                        timeout: 180000, // 3 分钟超时
+                        env: installEnv
+                    });
+                } else {
+                    throw e;
+                }
+            }
 
             // 计算安装耗时
             const endTime = Date.now();
