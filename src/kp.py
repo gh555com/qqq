@@ -1170,6 +1170,9 @@ def save_clipboard_image_to_path(dest_path: str):
 
 def trigger_system_paste(target_dir):
     """触发系统原生粘贴（仅 win32com，不依赖 PowerShell）"""
+    if not target_dir:
+        return {"success": False, "error": "目标目录为空"}
+
     if not _IS_WINDOWS:
         # macOS 处理 (通过 osascript)
         if platform.system() == "Darwin":
@@ -1182,7 +1185,7 @@ def trigger_system_paste(target_dir):
                 return {"success": False, "error": f"osascript failed: {e}"}
         return {"success": False, "error": f"Not supported on {platform.system()}"}
 
-    # Windows: 仅使用 win32com.client（企业环境保底，不依赖 PowerShell）
+    # Windows: 使用 win32com 触发系统粘贴
     try:
         import win32com.client
         import pythoncom
@@ -1191,31 +1194,41 @@ def trigger_system_paste(target_dir):
 
     try:
         clean_path = os.path.abspath(target_dir).rstrip("\\")
+
+        # 检查目标目录是否存在
+        if not os.path.isdir(clean_path):
+            return {"success": False, "error": f"Target folder not found: {clean_path}"}
+
+        # 检查剪贴板是否有文件
+        files = get_clipboard_files_only()
+        if not files or not files.get("paths"):
+            return {"success": False, "error": "No files in clipboard"}
+
         pythoncom.CoInitialize()
         try:
             shell = win32com.client.Dispatch("Shell.Application")
+
+            # 处理特殊路径：尝试短路径
             folder = shell.NameSpace(clean_path)
+
             if not folder:
-                return {"success": False, "error": f"Shell NameSpace failed for: {clean_path}"}
-
-            # 尝试多种 Verb 以增强不同语言系统的兼容性
-            verb_found = False
-            for v in ["Paste", "paste", "&Paste"]:
+                # 回退：尝试使用短路径 (8.3)
                 try:
-                    for verb in folder.Self.Verbs():
-                        if verb.Name == v or verb.Name.replace("&", "") == v:
-                            verb.DoIt()
-                            verb_found = True
-                            break
-                    if verb_found:
-                        break
+                    import ctypes
+                    buf = ctypes.create_unicode_buffer(260)
+                    ctypes.windll.kernel32.GetShortPathNameW(clean_path, buf, 260)
+                    short_path = buf.value
+                    if short_path:
+                        folder = shell.NameSpace(short_path)
                 except:
-                    continue
+                    pass
 
-            if not verb_found:
-                folder.Self.InvokeVerb("Paste")
+            if not folder:
+                return {"success": False, "error": f"Cannot access folder via Shell: {clean_path}"}
 
-            return {"success": True}
+            # 触发系统粘贴
+            folder.Self.InvokeVerb("Paste")
+            return {"success": True, "fileCount": len(files["paths"])}
         finally:
             pythoncom.CoUninitialize()
     except Exception as e:

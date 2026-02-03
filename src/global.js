@@ -697,34 +697,58 @@ function Process-Command {
       }
       'trigger_system_paste' {
         try {
-          # 路径归一化：Windows COM 喜欢反斜杠且不喜欢结尾斜杠
-          $rawPath = $cmd.path -replace '/', '\'
-          $cleanPath = $rawPath.TrimEnd('\')
-          $shell = New-Object -ComObject Shell.Application
-          $folder = $shell.NameSpace($cleanPath)
-          if ($folder) {
-            # 尝试多种可能的 Verb 形式以增强兼容性
-            $verbFound = $false
-            foreach ($v in @("Paste", "paste", "&Paste")) {
-              $item = $folder.Self.Verbs() | Where-Object { $_.Name -eq $v -or $_.Name.Replace("&","") -eq $v }
-              if ($item) {
-                $item.DoIt()
-                $verbFound = $true
-                break
+          # 空路径检查
+          if (-not $cmd.path -or $cmd.path -eq '') {
+            $result.success = $false
+            $result.error = "Empty path"
+          } else {
+            # 路径归一化
+            $rawPath = $cmd.path -replace '/', '\'
+            $cleanPath = $rawPath.TrimEnd('\')
+
+            # 检查目标目录是否存在
+            if (-not (Test-Path $cleanPath -PathType Container)) {
+              $result.success = $false
+              $result.error = "Target folder not found: $cleanPath"
+            } else {
+              # 检查剪贴板是否有文件
+              $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+              if (-not $files -or $files.Count -eq 0) {
+                $result.success = $false
+                $result.error = "No files in clipboard"
+              } else {
+                # ★ 使用 explorer.exe 触发系统粘贴（最可靠）
+                # 这会打开资源管理器并触发粘贴，由系统处理所有对话框
+                $shell = New-Object -ComObject Shell.Application
+
+                # 处理特殊路径：尝试短路径
+                $nsPath = $cleanPath
+                $folder = $shell.NameSpace($nsPath)
+
+                if (-not $folder) {
+                  # 回退：尝试使用短路径
+                  try {
+                    $fso = New-Object -ComObject Scripting.FileSystemObject
+                    $shortPath = $fso.GetFolder($cleanPath).ShortPath
+                    $folder = $shell.NameSpace($shortPath)
+                  } catch {}
+                }
+
+                if ($folder) {
+                  # 触发系统粘贴
+                  $folder.Self.InvokeVerb("Paste")
+                  $result.success = $true
+                  $result.fileCount = $files.Count
+                } else {
+                  $result.success = $false
+                  $result.error = "Cannot access folder via Shell: $cleanPath"
+                }
               }
             }
-            if (-not $verbFound) {
-              # 终极保底：直接 Invoke
-              $folder.Self.InvokeVerb("Paste")
-            }
-            $result.success = $true
-          } else {
-            $result.success = $false
-            $result.error = "Folder not found: " + $cleanPath
           }
         } catch {
           $result.success = $false
-          $result.error = "PowerShell Trigger Error: " + $_.Exception.Message
+          $result.error = "PowerShell Error: " + $_.Exception.Message
         }
       }
       'getHtml' {
@@ -1593,7 +1617,7 @@ function showTextDocument(document, column, preserveFocus) {
 
 function openExternal(uri) {
 	const filePath = uri.fsPath;
-	
+
 	// 首先尝试使用 Node.js 引擎打开
 	try {
 		if (process.platform === 'win32') {
@@ -1619,9 +1643,9 @@ function openExternal(uri) {
 				const pythonCode = `
 				import os
 				import sys
-				
+
 				file_path = "${filePath.replace(/"/g, '""')}"
-				
+
 				if sys.platform == 'win32':
 					try:
 						import win32com.client
@@ -1630,11 +1654,11 @@ function openExternal(uri) {
 						exit(0)
 					except ImportError:
 						pass
-				
+
 				# 通用方法
 				os.startfile(file_path)
 				`;
-				
+
 				require('child_process').execSync(`python -c "${pythonCode}"`, { stdio: 'ignore' });
 				return Promise.resolve();
 			} catch (pythonError) {
@@ -2913,45 +2937,93 @@ async function tryOneByOne(callback) {
 
 /**
  * 触发系统原生粘贴（与用户 IO 引擎偏好无关）
- * 链路：Node.js Shell (PowerShell) → Python (win32com) 回退
+ * 链路：独立 PowerShell 进程 (-STA 模式)
  */
 async function triggerSystemPaste(targetDir) {
-	// 归一化路径：确保 Windows 下使用反斜杠，这对 Shell COM 对象至关重要
-	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
+	if (!targetDir) {
+		logMessage(`[Q2] 粘贴失败：目标目录为空`, "ERROR");
+		return { success: false, error: "目标目录为空" };
+	}
 
+	// 归一化路径
+	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
 	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
 
-	// 1. 首选：Node.js Shell Bridge (PowerShell daemon，延迟最低)
-	if (shellBridge && shellBridge.isAvailable()) {
+	if (process.platform === 'win32') {
+		// Windows: 使用独立的 PowerShell 进程（STA 模式，更可靠）
 		try {
-			const res = await shellBridge.call("trigger_system_paste", { path: normalizedPath }, 8000);
-			if (res && res.success) {
-				logMessage(`[Q2] 系统粘贴成功 (Shell)`, "INFO");
-				return res;
+			const cp = require('child_process');
+			// 转义路径中的单引号
+			const escapedPath = normalizedPath.replace(/'/g, "''");
+			const psScript = `
+Add-Type -AssemblyName System.Windows.Forms
+$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+if (-not $files -or $files.Count -eq 0) {
+  Write-Output '{"success":false,"error":"No files in clipboard"}'
+  exit
+}
+if (-not (Test-Path '${escapedPath}' -PathType Container)) {
+  Write-Output '{"success":false,"error":"Target folder not found"}'
+  exit
+}
+$shell = New-Object -ComObject Shell.Application
+$folder = $shell.NameSpace('${escapedPath}')
+if (-not $folder) {
+  try {
+    $fso = New-Object -ComObject Scripting.FileSystemObject
+    $shortPath = $fso.GetFolder('${escapedPath}').ShortPath
+    $folder = $shell.NameSpace($shortPath)
+  } catch {}
+}
+if ($folder) {
+  $folder.Self.InvokeVerb('Paste')
+  Write-Output ('{"success":true,"fileCount":' + $files.Count + '}')
+} else {
+  Write-Output '{"success":false,"error":"Cannot access folder via Shell"}'
+}
+`;
+			// 使用 -STA 参数确保 Shell 操作正确执行
+			const result = cp.spawnSync('powershell.exe', [
+				'-STA', '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', psScript
+			], {
+				encoding: 'utf8',
+				windowsHide: true,
+				timeout: 15000
+			});
+
+			const stdout = (result.stdout || '').trim();
+			logMessage(`[Q2] PowerShell 返回: ${stdout}`, "INFO");
+
+			if (stdout) {
+				try {
+					const res = JSON.parse(stdout);
+					if (res.success) {
+						logMessage(`[Q2] 系统粘贴成功`, "INFO");
+					}
+					return res;
+				} catch (e) {
+					return { success: false, error: `Parse error: ${stdout}` };
+				}
 			}
-			logMessage(`[Q2] Shell 粘贴失败: ${res?.error || 'unknown'}, 尝试 Python 回退`, "WARN");
+			return { success: false, error: result.stderr || 'No output' };
 		} catch (e) {
-			logMessage(`[Q2] Shell 调用异常: ${e.message}, 尝试 Python 回退`, "WARN");
+			logMessage(`[Q2] PowerShell 异常: ${e.message}`, "ERROR");
+			return { success: false, error: e.message };
+		}
+	} else if (process.platform === 'darwin') {
+		// macOS: 使用 osascript
+		try {
+			const cp = require('child_process');
+			const script = `tell application "Finder" to paste to folder (POSIX file "${normalizedPath}")`;
+			cp.execSync(`osascript -e '${script}'`, { timeout: 10000 });
+			logMessage(`[Q2] macOS 粘贴成功`, "INFO");
+			return { success: true };
+		} catch (e) {
+			return { success: false, error: e.message };
 		}
 	}
 
-	// 2. 回退：Python win32com (不依赖 PowerShell，企业环境保底)
-	if (pythonBridge && pythonBridge.isAvailable()) {
-		try {
-			const res = await pythonBridge.call("trigger_system_paste", { path: normalizedPath }, 8000);
-			if (res && res.success) {
-				logMessage(`[Q2] 系统粘贴成功 (Python win32com)`, "INFO");
-				return res;
-			}
-			logMessage(`[Q2] Python 粘贴失败: ${res?.error || 'unknown'}`, "WARN");
-			return res;
-		} catch (e) {
-			logMessage(`[Q2] Python 调用异常: ${e.message}`, "WARN");
-		}
-	}
-
-	logMessage(`[Q2] 系统粘贴失败：所有引擎不可用`, "ERROR");
-	return { success: false, error: "所有引擎不可用" };
+	return { success: false, error: "Platform not supported" };
 }
 
 let _integrityCache = null;
