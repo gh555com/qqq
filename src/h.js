@@ -1480,7 +1480,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const originalFileName = getFilenameFromUrl(src, b.kind);
             const filename = originalFileName || getTimestampFilename(ext);
             const destPath = path.join(targetDir, filename);
-            httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 200 * 1024 * 1024 });
+            httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 20000 * 1048576 });
             taskMap.set(tag, b);
             if (originalFileName) {
                 originalFilenames.set(tag, originalFileName);

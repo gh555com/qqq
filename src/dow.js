@@ -612,7 +612,7 @@ class SmartHttpDownloader {
             maxRedirects: 6,
 
 
-            maxBytesDefault: 200 * 1024 * 1024,
+            maxBytesDefault: 20971520000,
 
 
             maxAttempts: 4,
@@ -1806,8 +1806,8 @@ class YtDlpDownloader {
         this.ffmpegPath = options.ffmpegPath || null;
 
 
-        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 10 * 1024 * 1024));
-        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 1 * 1024 * 1024));
+        this.maxProbeStdoutBytes = Math.max(0, Number(options.maxProbeStdoutBytes ?? 10485760));
+        this.maxProbeStderrBytes = Math.max(0, Number(options.maxProbeStderrBytes ?? 1048576));
 
 
         if (!this.ytdlpPath) this.ytdlpPath = findExecutableInPath("yt-dlp");
@@ -2454,7 +2454,7 @@ class PythonEngineDownloader {
      * 检查是否在 72 小时冷却期内
      */
     _isInCooldown(context) {
-        const COOLDOWN_MS = 72 * 60 * 60 * 1000; // 72 小时
+        const COOLDOWN_MS = 259200000; // 72 小时
         const state = this._readState(context);
         const now = Date.now();
         return (now - state.installTimestamp) < COOLDOWN_MS;
@@ -2730,7 +2730,7 @@ sys.exit(0 if ok else 1)
      * @returns {Object} - { inCooldown: boolean, remainingHours: number, remainingMinutes: number, remainingMs: number }
      */
     _getCooldownStatus(context) {
-        const COOLDOWN_MS = 72 * 60 * 60 * 1000; // 72 小时
+        const COOLDOWN_MS = 259200000; // 72 小时
         const state = this._readState(context);
         const now = Date.now();
         const elapsed = now - state.installTimestamp;
@@ -2738,8 +2738,8 @@ sys.exit(0 if ok else 1)
 
         return {
             inCooldown: remainingMs > 0,
-            remainingHours: Math.floor(remainingMs / (60 * 60 * 1000)),
-            remainingMinutes: Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000)),
+            remainingHours: Math.floor(remainingMs / 3600000),
+            remainingMinutes: Math.floor((remainingMs % 3600000) / 60000),
             remainingMs
         };
     }
@@ -3043,8 +3043,8 @@ class UnifiedMediaDownloader {
         this.options = {
             downloadVideos: options.downloadVideos || "direct-only",
             ytdlpConcurrency: Math.max(1, Number(options.ytdlpConcurrency) || 1),
-            maxBytesImage: options.maxBytesImage ?? 20 * 1024 * 1024,
-            maxBytesDirectVideo: options.maxBytesDirectVideo ?? 200 * 1024 * 1024,
+            maxBytesImage: options.maxBytesImage ?? 200 * 1048576,
+            maxBytesDirectVideo: options.maxBytesDirectVideo ?? 20000 * 1048576,
 
 
             securityLevel,
