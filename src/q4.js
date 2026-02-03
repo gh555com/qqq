@@ -65,18 +65,14 @@ const CONSTANTS = Object.freeze({
     // 损坏隔离
     CORRUPT_SUFFIX_PREFIX: '.corrupt-',
 
-    // 自动清理
-    AUTO_CLEANUP_DAYS: 30,
-    AUTO_CLEANUP_INTERVAL_MS: 24 * 60 * 60 * 1000,
-
     // watchdog
     WATCHDOG_REFRESH_MS: 30000,
     WATCHDOG_STALE_MS: 15000,
 
     // 时间
-    MS_PER_MINUTE: 60 * 1000,
-    MS_PER_HOUR: 60 * 60 * 1000,
-    MS_PER_DAY: 24 * 60 * 60 * 1000,
+    MS_PER_MINUTE: 60000,
+    MS_PER_HOUR: 3600000,
+    MS_PER_DAY: 86400000,
 });
 
 // ============================================================================
@@ -357,7 +353,7 @@ class ClipboardHistoryManager {
             searchBytes: 0,
             hit: 0,
             miss: 0,
-            maxBytes: 25 * 1024 * 1024,
+            maxBytes: 25 * 1048576,
         };
 
         this._storageDir = null;
@@ -1227,7 +1223,7 @@ class ClipboardHistorySidebarProvider {
         };
 
         const totalStr = formatDuration(s.totalMs);
-        const days = Math.max(1, Math.ceil((Date.now() - s.firstUse) / (24 * 60 * 60 * 1000)));
+        const days = Math.max(1, Math.ceil((Date.now() - s.firstUse) / 86400000));
         const avgMs = Math.floor(s.totalMs / days);
         const avgStr = formatDuration(avgMs);
 
@@ -1236,7 +1232,7 @@ class ClipboardHistorySidebarProvider {
 
     _formatRoamStats(s) {
         if (!s) return '';
-        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / 86400000));
         const avgCount = Math.round(s.count / days);
         return `${s.count} times, ${s.filesCreated || 0} files; Avg per day: ${avgCount} times`;
     }
@@ -1252,7 +1248,7 @@ class ClipboardHistorySidebarProvider {
         };
 
         const sizeStr = formatBytes(s.totalSize || 0);
-        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / 86400000));
         const avgCount = Math.round(s.count / days);
 
         return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;
@@ -1269,7 +1265,7 @@ class ClipboardHistorySidebarProvider {
         };
 
         const sizeStr = formatBytes(s.totalSize || 0);
-        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / (24 * 60 * 60 * 1000)));
+        const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / 86400000));
         const avgCount = Math.round(s.count / days);
 
         return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;

@@ -30,9 +30,9 @@ function createPathRegex() {
 
 const CACHE_DIR_NAME = "qqq_cache";
 const META_FILE_NAME = "meta.json";
-const CACHE_MAX_SIZE = 40 * 1024 * 1024;
-const CACHE_TARGET_SIZE = 28 * 1024 * 1024;
-const PASTE_SIZE_THRESHOLD = 80 * 1024 * 1024;
+const CACHE_MAX_SIZE = 40 * 1048576;
+const CACHE_TARGET_SIZE = 28 * 1048576;
+const PASTE_SIZE_THRESHOLD = 80 * 1048576;
 
 // Keep ffmpeg loading in qqq as it was
 let extensionContext = null;
@@ -362,9 +362,9 @@ function _getFileSig(p) {
 }
 
 // Broken-file circuit breaker (prevents repeated expensive ffmpeg retries on known-bad sources)
-const BROKEN_BASE_TTL_MS = 2 * 60 * 1000;        // 2 minutes
-const BROKEN_MAX_TTL_MS = 24 * 60 * 60 * 1000;   // 24 hours
-const BROKEN_GC_INTERVAL_MS = 30 * 60 * 1000;    // 30 minutes
+const BROKEN_BASE_TTL_MS = 120000;        // 2 minutes
+const BROKEN_MAX_TTL_MS = 86400000;   // 24 hours
+const BROKEN_GC_INTERVAL_MS = 1800000;    // 30 minutes
 const BROKEN_MAX_RECORDS = 6000;
 let _lastBrokenGcAt = 0;
 
@@ -517,7 +517,7 @@ async function verifyMediaFile(filePath, opts = {}) {
 
 		child.stdout.on("data", (data) => {
 			// Cap memory; ffprobe JSON is tiny but keep safe
-			if (stdout.length < 256 * 1024) stdout += data;
+			if (stdout.length < 262144) stdout += data;
 		});
 
 		child.on("close", (code) => {

@@ -482,7 +482,7 @@ class Qvideo {
     _formatBytesSimple(bytes) {
         if (!bytes || bytes <= 0) return "0k";
         const k = 1024;
-        const m = 1024 * 1024;
+        const m = 1048576;
         if (bytes >= m) return Math.round(bytes / m) + "m";
         return Math.round(bytes / k) + "k";
     }
@@ -507,8 +507,8 @@ class Qvideo {
         const unit = match[2].toUpperCase();
         let multiplier = 1;
         if (unit.startsWith('K')) multiplier = 1024;
-        else if (unit.startsWith('M')) multiplier = 1024 * 1024;
-        else if (unit.startsWith('G')) multiplier = 1024 * 1024 * 1024;
+        else if (unit.startsWith('M')) multiplier = 1048576;
+        else if (unit.startsWith('G')) multiplier = 1073741824;
         return Math.floor(val * multiplier);
     }
 

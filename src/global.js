@@ -132,7 +132,7 @@ class DaemonBridge extends EventEmitter {
 			const text = d?.toString?.() || "";
 			this._appendStderrSnippet(text);
 			const key = bridgeStderrKey(this.name, text);
-			logMessageRateLimited(key, `${this.name} stderr: ${text}`, "WARN", 5 * 60 * 1000);
+			logMessageRateLimited(key, `${this.name} stderr: ${text}`, "WARN", 300000);
 		});
 
 		proc.on("error", (err) => {
@@ -1448,7 +1448,7 @@ function getLogPath() {
 
 // ★ 日志降噪（rate-limit）基础设施
 const _rateLimitLastTs = new Map();
-function logMessageRateLimited(key, message, level = "WARN", intervalMs = 5 * 60 * 1000) {
+function logMessageRateLimited(key, message, level = "WARN", intervalMs = 300000) {
 	const now = Date.now();
 	const last = _rateLimitLastTs.get(key) || 0;
 	if (now - last < intervalMs) return;
@@ -1465,7 +1465,7 @@ function rotateLogIfNeeded() {
 	if (!LOG_PATH) return;
 
 	try {
-		const maxLogSize = 8 * 1024 * 1024; // 8MB
+		const maxLogSize = 8388608; // 8MB
 		if (fs.existsSync(LOG_PATH)) {
 			const stats = fs.statSync(LOG_PATH);
 			if (stats.size >= maxLogSize) {
@@ -1729,17 +1729,13 @@ function setStatusBarMessage(text, hideAfterTimeout) {
 }
 
 // ============================================================================
-// ★ 统计持久化
+// ★ 使用时长统计（极简：每60秒 +60秒）
 // ============================================================================
-const KEY_TOTAL_DURATION = "qqq_stats_total_seconds";
-const KEY_SESSION_START = "qqq_stats_session_start";
-const KEY_LAST_FLUSH_TIME = "qqq_stats_last_flush"; // ★ 上次持久化时的时间戳
+const KEY_TOTAL_SECONDS = "qqq_stats_total_seconds";
 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
 const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 
-// ★ 定期持久化定时器
-let _durationFlushTimer = null;
-const DURATION_FLUSH_INTERVAL = 60 * 1000; // 每60秒自动持久化一次
+let _durationTimer = null;
 
 // ============================================================================
 // ★ ConfigManager (Custom GlobalState Storage)
@@ -1916,97 +1912,29 @@ function getPersistentCacheStatsSnapshot() {
 }
 
 function initUserTracking(context) {
-	// ★ 恢复上次异常退出未保存的会话时间
-	const lastSessionStart = context.globalState.get(KEY_SESSION_START);
-	const lastFlushTime = context.globalState.get(KEY_LAST_FLUSH_TIME);
-
-	if (lastSessionStart && lastFlushTime && lastFlushTime > lastSessionStart) {
-		// 上次会话异常退出，恢复 lastFlushTime 到 现在 之间没有记录的时间
-		// 但只恢复到 lastFlushTime 为止（那之后的时间无法确定用户是否在使用）
-		const unrecordedSeconds = (lastFlushTime - lastSessionStart) / 1000;
-		const oldTotal = context.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-		// 检查是否已经累加过（避免重复累加）
-		const alreadyAdded = context.globalState.get("qqq_stats_pending_recovered");
-		if (!alreadyAdded && unrecordedSeconds > 0) {
-			context.globalState.update(KEY_TOTAL_DURATION, oldTotal + unrecordedSeconds);
-			logMessage(`[UserTracking] 恢复上次未保存的会话时间: ${unrecordedSeconds.toFixed(0)}秒`, "INFO");
-		}
-	} else if (lastSessionStart && !lastFlushTime) {
-		// 旧版本没有 lastFlushTime，按旧逻辑处理
-		const now = Date.now();
-		// 如果上次会话开始时间在合理范围内（比如48小时内），尝试恢复
-		const diffMs = now - lastSessionStart;
-		if (diffMs > 0 && diffMs < 48 * 60 * 60 * 1000) {
-			// 保守估计：假设用户使用了一半时间
-			// 但为了精确，我们不做任何假设，只记录日志
-			logMessage(`[UserTracking] 检测到上次会话未正常关闭，开始时间: ${new Date(lastSessionStart).toISOString()}`, "WARN");
-		}
-	}
-
-	// ★ 清除恢复标记并设置新的会话开始时间
-	context.globalState.update("qqq_stats_pending_recovered", undefined);
-	context.globalState.update(KEY_SESSION_START, Date.now());
-	context.globalState.update(KEY_LAST_FLUSH_TIME, Date.now());
-
 	_loadPersistentStats(context);
-
-	// ★ 启动定期持久化定时器
-	_startDurationFlushTimer();
+	_startDurationTimer();
 }
 
-// ★ 定期持久化累计时间（防止异常退出丢失数据）
-function _flushDurationToStorage() {
-	if (!extensionContext) return;
+function _startDurationTimer() {
+	if (_durationTimer || !extensionContext) return;
 
-	const start = extensionContext.globalState.get(KEY_SESSION_START);
-	const lastFlush = extensionContext.globalState.get(KEY_LAST_FLUSH_TIME) || start;
-	const now = Date.now();
+	const tick = () => {
+		if (!extensionContext) return;
+		const total = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
+		extensionContext.globalState.update(KEY_TOTAL_SECONDS, total + 60);
+		_durationTimer = setTimeout(tick, 60000); // 执行完再调度下一次
+	};
 
-	if (start && lastFlush) {
-		// 计算自上次 flush 以来的增量时间
-		const incrementSeconds = (now - lastFlush) / 1000;
-		if (incrementSeconds > 0) {
-			const oldTotal = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-			extensionContext.globalState.update(KEY_TOTAL_DURATION, oldTotal + incrementSeconds);
-			extensionContext.globalState.update(KEY_LAST_FLUSH_TIME, now);
-		}
-	}
-}
-
-function _startDurationFlushTimer() {
-	if (_durationFlushTimer) return;
-
-	_durationFlushTimer = setInterval(() => {
-		try {
-			_flushDurationToStorage();
-		} catch (e) {
-			logMessage(`[UserTracking] 定期持久化失败: ${e.message}`, "WARN");
-		}
-	}, DURATION_FLUSH_INTERVAL);
-}
-
-function _stopDurationFlushTimer() {
-	if (_durationFlushTimer) {
-		clearInterval(_durationFlushTimer);
-		_durationFlushTimer = null;
-	}
+	_durationTimer = setTimeout(tick, 60000);
 }
 
 function finishUserTracking() {
-	if (!extensionContext) return;
-
-	// ★ 停止定时器
-	_stopDurationFlushTimer();
-
-	// ★ 最后一次持久化
-	_flushDurationToStorage();
-
-	// ★ 清除会话标记（表示正常退出）
-	extensionContext.globalState.update(KEY_SESSION_START, undefined);
-	extensionContext.globalState.update(KEY_LAST_FLUSH_TIME, undefined);
-
-	// 强制刷新缓存统计
-	if (_statsDirty) {
+	if (_durationTimer) {
+		clearTimeout(_durationTimer);
+		_durationTimer = null;
+	}
+	if (extensionContext && _statsDirty) {
 		try {
 			extensionContext.globalState.update(KEY_CACHE_HIT_TOTAL, _cacheHitTotal);
 			extensionContext.globalState.update(KEY_CACHE_MISS_TOTAL, _cacheMissTotal);
@@ -2016,13 +1944,7 @@ function finishUserTracking() {
 
 function getTotalSecondsIncludingSession() {
 	if (!extensionContext) return 0;
-	const base = extensionContext.globalState.get(KEY_TOTAL_DURATION, 0) || 0;
-	const lastFlush = extensionContext.globalState.get(KEY_LAST_FLUSH_TIME);
-
-	// ★ 计算自上次 flush 以来的未持久化时间
-	if (!lastFlush) return base;
-	const diff = (Date.now() - lastFlush) / 1000;
-	return base + (diff > 0 ? diff : 0);
+	return extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
 }
 
 // ============================================================================
@@ -2173,7 +2095,7 @@ const TransactionManager = {
 
 		// ★ 终极最优解：200/100 优先级截断逻辑
 		if (list.length > 200) {
-			const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+			const SIXTY_DAYS = 5184000000;  // 60天
 			const now = Date.now();
 
 			// 定义清理权重：已结案(success/cancelled) 权重最高，超期(>60天) 权重次之
@@ -2309,7 +2231,7 @@ const TransactionManager = {
 
 		const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
 		const now = Date.now();
-		const FIVE_MINUTES = 5 * 60 * 1000;
+		const FIVE_MINUTES = 300000;
 
 		// 收集需要清理的文件
 		const filesToDelete = new Set();
@@ -2355,7 +2277,7 @@ const TransactionManager = {
 				const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
 				if (!birthtime || isNaN(birthtime)) continue;
 				const age = now - birthtime;
-				if (age > 6 * 60 * 1000) continue; // 允许 age 为负数（系统时钟微差）
+				if (age > 360000) continue; // 6分钟, 允许 age 为负数（系统时钟微差）
 
 				// ★ 带重试逻辑
 				let deleted = false;
@@ -2410,7 +2332,7 @@ const TransactionManager = {
 					if (BINARY_EXTS.has(ext)) continue;
 
 					const stat = fs.statSync(fullPath);
-					if (!stat.isFile() || stat.size > 30 * 1024 * 1024) continue; // 缩小范围提高速度
+					if (!stat.isFile() || stat.size > 60 * 1048576) continue; // 缩小范围提高速度
 
 					const content = fs.readFileSync(fullPath, "utf-8");
 					this._extractReferences(content, referencedItems);
@@ -2471,7 +2393,7 @@ const TransactionManager = {
 
 			// ★ 删除创建时间 < 5分钟的孤儿文件/文件夹
 			const now = Date.now();
-			const FIVE_MINUTES = 5 * 60 * 1000;
+			const FIVE_MINUTES = 300000;
 			let cleanedCount = 0;
 
 			for (const orphan of orphans) {
@@ -2484,7 +2406,7 @@ const TransactionManager = {
 
 					const age = now - birthtime;
 					// ★ 放宽限制：允许 age < 0 (系统时钟微调)，且扩展到 6分钟
-					if (age < 6 * 60 * 1000) {
+					if (age < 360000) {
 						if (orphan.isDir) {
 							// ★ 文件夹：使用 rmSync 递归删除
 							fs.rmSync(fullPath, { recursive: true, force: true });
@@ -3150,7 +3072,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const { h, m } = formatCompactTime(totalSeconds);
 
 	const cacheBytes = cacheStatsSnapshot.totalSize;
-	const cacheMB = cacheBytes / (1024 * 1024);
+	const cacheMB = cacheBytes / 1048576;
 
 	const pstats = getPersistentCacheStatsSnapshot();
 	const denom = pstats.hitTotal + pstats.missTotal;

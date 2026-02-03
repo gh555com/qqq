@@ -9,6 +9,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const h = require("./h");
+const diskusage = require("diskusage");
 
 // ==================== 从 geq().js 导入核心接口 ====================
 // 延迟加载 qqq 以避免循环依赖
@@ -143,7 +144,75 @@ function getFileSizeSync(filePath) {
 function formatFileSize(bytes) {
   // 只显示字节数，添加千位分隔符
   const formatted = bytes.toLocaleString();
+
+  // 检查是否需要显示为橙红色
+  // 当字节数超过 10 亿时（即 1,000,000,000），显示为橙红色
+  if (bytes > 1000000000) {
+    // 分离数字部分和千位分隔符
+    // 例如：14,111,222,999 分离为 "14" 和 ",111,222,999"
+    const parts = formatted.split(',');
+    if (parts.length > 3) {
+      // 只有当数字部分超过 3 个逗号时（即超过 10 亿），才显示橙红色
+      const firstPart = parts[0];
+      const restParts = parts.slice(1).join(',');
+      return `<span style="color: rgb(248, 48, 0);">${firstPart}</span>,${restParts}`;
+    }
+  }
+
   return formatted;
+}
+
+
+// ==================== 获取磁盘剩余空间 ====================
+async function getDiskFreeSpace(drive) {
+  try {
+    if (process.platform === "win32" && !vscode.env.remoteName) {
+      // Windows 本地系统使用 diskusage 库获取磁盘信息
+      // diskusage 内部调用 GetDiskFreeSpaceEx，性能开销很小
+      const info = await diskusage.check(drive.replace(/\\/g, ''));
+      return info.free;
+    } else if (process.platform === "win32" && vscode.env.remoteName) {
+      // Remote/WSL 情况下不要硬查 C:
+      global.logMessage(`远程环境下不获取磁盘空间: ${vscode.env.remoteName}`, "INFO");
+      return 0;
+    } else {
+      // 非 Windows 系统
+      const stats = fs.statfsSync(drive);
+      return stats.bavail * stats.bsize;
+    }
+  } catch (error) {
+    global.logMessage(`获取磁盘空间失败: ${error.message}`, "ERROR");
+    return 0;
+  }
+}
+
+// 同步版本的获取磁盘剩余空间函数
+function getDiskFreeSpaceSync(drive) {
+  try {
+    if (process.platform === "win32" && !vscode.env.remoteName) {
+      // Windows 本地系统使用 diskusage 库获取磁盘信息
+      const info = diskusage.checkSync(drive.replace(/\\/g, ''));
+      return info.free;
+    } else if (process.platform === "win32" && vscode.env.remoteName) {
+      // Remote/WSL 情况下不要硬查 C:
+      global.logMessage(`远程环境下不获取磁盘空间: ${vscode.env.remoteName}`, "INFO");
+      return 0;
+    } else {
+      // 非 Windows 系统
+      const stats = fs.statfsSync(drive);
+      return stats.bavail * stats.bsize;
+    }
+  } catch (error) {
+    global.logMessage(`获取磁盘空间失败: ${error.message}`, "ERROR");
+    return 0;
+  }
+}
+
+// ==================== 格式化磁盘空间 ====================
+function formatDiskSpace(bytes) {
+  // 转换为 GB 并保留两位小数
+  const gb = bytes / 1073741824;
+  return gb.toFixed(2);
 }
 
 function formatDateTime(date) {
@@ -1120,6 +1189,24 @@ window.addEventListener('message', event => {
   } else if (message.command === 'focusInput') {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
+  } else if (message.command === 'updateCDriveSpace') {
+    // 更新 C 盘剩余空间显示
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+      if (item.textContent.trim().startsWith('C:\\')) {
+        // 检查剩余空间是否小于 2GB
+        const spaceValue = parseFloat(message.space);
+        if (spaceValue < 2) {
+          // 小于 2GB，显示为红色
+          const newText = item.textContent.replace(/C:\\s+[\d.]+/, "C:\\  <span style=\"color: rgb(248, 48, 0);\">" + message.space + "</span>");
+          item.innerHTML = newText;
+        } else {
+          // 大于等于 2GB，正常显示
+          const newText = item.textContent.replace(/C:\\s+[\d.]+/, "C:\\  " + message.space);
+          item.textContent = newText;
+        }
+      }
+    });
   }
 });
 
@@ -1527,12 +1614,29 @@ function getWebviewContent(currentPath) {
 
   const drivesHtml = drives
     .map(
-      (drive) =>
-        `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(
+      (drive) => {
+        let driveText = escapeHtmlAttribute(drive);
+        // 为 C 盘添加剩余空间显示
+        if (drive.toUpperCase() === "C:\\") {
+          const freeSpace = getDiskFreeSpaceSync(drive);
+          const formattedSpace = formatDiskSpace(freeSpace);
+          // 检查剩余空间是否小于 2GB
+          const spaceValue = parseFloat(formattedSpace);
+          if (spaceValue < 2) {
+            // 小于 2GB，显示为红色
+            driveText = `${driveText}  <span style="color: rgb(248, 48, 0);">${formattedSpace}</span>`;
+          } else {
+            // 大于等于 2GB，正常显示
+            driveText = `${driveText}  ${formattedSpace}`;
+          }
+        }
+        return `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(
           drive
-        )}')">${escapeHtmlAttribute(drive)}</button>`
+        )}')">${driveText}</button>`;
+      }
     )
     .join("");
+
 
   const recycleBinHtml = showRecycleBin
     ? `
@@ -1643,6 +1747,68 @@ function showSaveAsDialog() {
   const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
+  // 自动更新 C 盘剩余空间的相关变量
+  let cDriveUpdateTimer = null;
+  let lastCDriveFreeSpace = 0;
+  const CDRIVE_UPDATE_INTERVAL = 6000; // 6秒
+  const CDRIVE_UPDATE_THRESHOLD = 10737418.24; // 0.01GB
+
+  // 检查 WebView 是否可见的函数
+  function isWebviewVisible() {
+    if (!activePanelAlive || !panel) return false;
+
+    // 检查 VS Code 窗口是否最小化
+    if (vscode.window.state.focused === false) return false;
+
+    return true;
+  }
+
+  // 自动更新 C 盘剩余空间的函数
+  async function updateCDriveSpace() {
+    if (!activePanelAlive || !panel) return;
+
+    // 检查 WebView 是否可见
+    if (!isWebviewVisible()) {
+      // WebView 不可见，暂停更新
+      if (activePanelAlive) {
+        cDriveUpdateTimer = setTimeout(updateCDriveSpace, CDRIVE_UPDATE_INTERVAL);
+      }
+      return;
+    }
+
+    try {
+      // 检查是否在 Windows 本地环境
+      if (process.platform !== "win32" || vscode.env.remoteName) {
+        return;
+      }
+
+      // 获取当前 C 盘剩余空间
+      const currentFreeSpace = await getDiskFreeSpace("C:\\");
+
+      // 检查空间变化是否达到阈值
+      if (Math.abs(currentFreeSpace - lastCDriveFreeSpace) >= CDRIVE_UPDATE_THRESHOLD || lastCDriveFreeSpace === 0) {
+        // 格式化空间大小
+        const formattedSpace = formatDiskSpace(currentFreeSpace);
+
+        // 发送更新消息到前端
+        panel.webview.postMessage({
+          command: "updateCDriveSpace",
+          space: formattedSpace
+        });
+
+        // 更新上次的空间值
+        lastCDriveFreeSpace = currentFreeSpace;
+      }
+    } catch (error) {
+      global.logMessage(`更新 C 盘空间失败: ${error.message}`, "ERROR");
+    } finally {
+      // 执行完再设置 setTimeout，避免并发叠加和漂移
+      if (activePanelAlive) {
+        cDriveUpdateTimer = setTimeout(updateCDriveSpace, CDRIVE_UPDATE_INTERVAL);
+      }
+    }
+  }
+
   panel.onDidDispose(() => {
     activePanelAlive = false;
     activePanel = null;
@@ -1650,7 +1816,15 @@ function showSaveAsDialog() {
       currentWatcher.dispose();
       currentWatcher = null;
     }
+    // 清除自动更新定时器
+    if (cDriveUpdateTimer) {
+      clearTimeout(cDriveUpdateTimer);
+      cDriveUpdateTimer = null;
+    }
   });
+
+  // 启动自动更新
+  updateCDriveSpace();
 
   async function updateResourceExplorer() {
     try {
@@ -1693,6 +1867,7 @@ function showSaveAsDialog() {
         return "";
       }
 
+
       // 允许返回上级：root 不显示 ..
       const canonCur = canonicalizeExistingPath(currentPath);
       const parent = canonicalizeExistingPath(path.dirname(canonCur));
@@ -1720,7 +1895,7 @@ function showSaveAsDialog() {
         items.push({ path: dir.path, name: dir.name, type: "folder" });
         fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
           dir.path
-        )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${escapeHtmlAttribute(szContent)}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
+        )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
           dir.name
         )}</span></div></div>`;
       });
@@ -1730,10 +1905,11 @@ function showSaveAsDialog() {
         items.push({ path: file.path, name: file.name, type: "file" });
         fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
           file.path
-        )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${escapeHtmlAttribute(szContent)}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
+        )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
           file.name
         )}</span></div></div>`;
       });
+
 
       panel.webview.postMessage({
         command: "update",
@@ -1912,6 +2088,7 @@ function showSaveAsDialog() {
         })();
         break;
       }
+
 
       case "renameItem":
         try {

@@ -567,9 +567,9 @@ class ClipboardMonitor(Qaqqlication):
             return "未知大小"
         if size_bytes < 1024:
             return f"{size_bytes}b"
-        if size_bytes < 1024 * 1024:
+        if size_bytes < 1048576:
             return f"{size_bytes:,}b"
-        mb = size_bytes / (1024 * 1024)
+        mb = size_bytes / 1048576
         return f"{mb:,.0f}M"
 
     def set_cooldown(self):

@@ -79,7 +79,7 @@ const FALLBACK_DIRECT_READ_EXTS = new Set([
 	".bmp",
 	".ico",
 ]);
-const FALLBACK_MAX_SIZE = 4 * 1024 * 1024;
+const FALLBACK_MAX_SIZE = 4 * 1048576;   // 渲染 ico 图片滴尺寸界限
 
 const IMAGE_EXTS = global.IMAGE_EXTS;
 const VIDEO_EXTS = global.VIDEO_EXTS;
@@ -267,8 +267,8 @@ function logFallbackUsedRateLimited(filePath, ext, errCode, stderr) {
 			key,
 			`FFMPEG_FAIL -> fallbackDirectRead: ${shortPath}  ext=${e}  err=${err}${shortStderr ? `  stderr=${shortStderr}` : ""}`,
 			"WARN",
-			2 * 60 * 1000
-		);
+			130 * 1000
+		);  // 相同日志去重时间
 	} catch { }
 }
 
@@ -1046,7 +1046,7 @@ function determineCacheStrategy(filePath, info) {
 	const isMjpegStatic = info?.isMjpegStatic === true;
 	const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
 	const canDirectRead = simpleFormats.includes(ext) || (ext === ".webp" && isStaticSource);
-
+	// 满足以下任一条件就跳过缓存（直接读原图）：✅ 条件1： 是 .ico 文件 且 小于 4MB ✅ 条件2： 文件小于 300KB 且 宽度≤512px 且 高度≤512px
 	let shouldBypassCache = false;
 	if (isMjpegStatic) {
 		shouldBypassCache = true;
@@ -1056,7 +1056,7 @@ function determineCacheStrategy(filePath, info) {
 		!info?.needsConversion &&
 		(
 			(ext === ".ico" && fileSize < FALLBACK_MAX_SIZE) ||
-			(fileSize < 300 * 1024 && info?.width && info?.height && info.width <= 512 && info.height <= 512)
+			(fileSize < 307200 && info?.width && info?.height && info.width <= 512 && info.height <= 512)
 		)
 	) {
 		shouldBypassCache = true;
@@ -1533,8 +1533,8 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 				try {
 					const v = await geq().verifyMediaFile(filePath, { timeoutMs: 2000, allowRemote: false });
 					if (!v) {
-						// 确认严重损坏：延长冷却到上限（避免无意义重试）
-						geq().markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 24 * 60 * 60 * 1000 });
+						// 确认严重损坏：延长冷却到上限 24小时 （避免无意义重试）
+						geq().markFileAsBroken(contentId, filePath, "verified_corrupt", { increment: false, forceTtlMs: 86400000 });
 					}
 				} catch { }
 			}
@@ -2419,10 +2419,10 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 								if (totalSize > 0) {
 									if (totalSize < 1024) {
 										sizeStr = `${totalSize}b`;
-									} else if (totalSize < 1024 * 1024) {
+									} else if (totalSize < 1048576) {
 										sizeStr = `${(totalSize / 1024).toFixed(1)}k`;
 									} else {
-										sizeStr = `${(totalSize / (1024 * 1024)).toFixed(1)}m`;
+										sizeStr = `${(totalSize / 1048576).toFixed(1)}m`;
 									}
 								}
 								detail = `共落盘${mediaCount}个文件${sizeStr ? ` ${sizeStr}` : ''}`;
@@ -2537,7 +2537,7 @@ async function executeClipboardCommand() {
 				mode = 'q';
 			} else if (snapshot.subType === 'file') {
 				const fileCount = snapshot.files?.length || 0;
-				if (snapshot.totalSize < 80 * 1024 * 1024 && fileCount < FILE_COUNT_THRESHOLD) {
+				if (snapshot.totalSize < 80 * 1048576 && fileCount < FILE_COUNT_THRESHOLD) {
 					mode = 'q';
 				}
 			}
@@ -2852,7 +2852,7 @@ class FileCodeLensProvider {
 }
 
 // ★ 被动监听模式 + 首次加载扫描一次
-const FOLDER_SIZE_SCAN_COOLDOWN = 15 * 1000; // 15秒扫描冷却时间
+const FOLDER_SIZE_SCAN_COOLDOWN = 15000; // 15秒扫描冷却时间
 const _pendingFolderSizeRequests = new Map();
 const _lastScanTime = new Map(); // 记录每个文件夹的上次扫描时间
 

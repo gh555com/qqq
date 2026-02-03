@@ -1,254 +1,36 @@
-     * 快速检测：Python 是否已有指定依赖
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要检测的依赖列表 ['miniaudio', 'Pillow']
-     * @returns {Object} - { hasAll: boolean, missing: string[], detail: { dep: boolean } }
-     */
-    async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
-        const { spawnSync } = require("child_process");
+1 用 diskusage：内部调用 GetDiskFreeSpaceEx（这类调用基本就是一次系统调用，开销非常小）
 
-        // 构建检测脚本
-        const checkScript = deps.map(dep => {
-            const importName = dep === 'Pillow' ? 'PIL' : dep;
-            return `
-try:
-    import ${importName}
-    ${dep}:1
-except:
-    ${dep}:0`;
-        }).join('\n');
+npm i diskusage
 
-        const fullScript = `
-import sys
-${checkScript}
-sys.exit(0)
-`.trim();
 
-        try {
-            const r = spawnSync(pythonBin, ["-c", fullScript], {
-                encoding: 'utf8',
-                windowsHide: true,
-                timeout: 15000
-            });
+TypeScript 示例（核心查询）：
 
-            const stdout = r.stdout || '';
-            const detail = {};
-            const missing = [];
+import * as os from "os";
+import * as vscode from "vscode";
+import * as diskusage from "diskusage";
 
-            for (const dep of deps) {
-                const pattern = new RegExp(`${dep}:(\d+)`);
-                const match = stdout.match(pattern);
-                const hasDep = match && match[1] === '1';
-                detail[dep] = hasDep;
-                if (!hasDep) missing.push(dep);
-            }
+function isLocalWindows() {
+  // Remote/WSL 情况下不要硬查 C:
+  return process.platform === "win32" && !vscode.env.remoteName;
+}
 
-            return {
-                hasAll: missing.length === 0,
-                missing,
-                detail
-            };
-        } catch (e) {
-            return { hasAll: false, missing: deps, detail: {} };
-        }
-    }
+async function getCDriveFreeBytes(): Promise<{ free: number;  }> {
+  // diskusage 需要根路径或盘符
+  const info = await diskusage.check("c:");
+  return { free: info.free };
+}
 
-    /**
-     * 异步安装依赖（后台执行）
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要安装的依赖列表
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    async _installDepsAsync(pythonBin, deps, context) {
-        if (this._installInProgress) {
-            return { success: false, error: '安装已在进行中' };
-        }
+ 上代码要翻译成 js 语言, 只查 c 盘剩余空间 将性能开销降到最小
 
-        this._installInProgress = true;
-        const global = require('./global');
-        const cp = require('child_process');
-        const path = require('path');
-        const fs = require('fs');
+ 2 只在 漫游器 也就是 q2 w eb v iew 打开 且没有被隐藏 滴情况下做自动更新,
 
-        try {
-            const isInternal = pythonBin.includes('python_engine');
-            const engineDir = isInternal ? path.dirname(pythonBin) : null;
+  只要没有被隐藏就用唯一滴一种逻辑去做自动更新： 每6秒去请求一次 c 盘剩余空间, 但只是请求 并不做 UI 更新, 要两次请求之间滴 剩余空间差别达到了 0.01GB  也就是大于 11MB 才会做一次更新 界面。
 
-            // 确定目标路径
-            let targetPath = null;
-            if (isInternal && engineDir) {
-                targetPath = path.join(engineDir, 'site-packages');
-                if (!fs.existsSync(targetPath)) {
-                    fs.mkdirSync(targetPath, { recursive: true });
-                }
-            }
+  所谓隐藏是指：  vs 窗口最小化； q2没有被打开；  q2 已经被打开但被其他标签遮盖 处于不能见状态； 其他导致 q2 处于不能见滴情形。
 
-            // 构建 pip install 命令
-            const pkgs = deps.join(' ');
-            let cmd;
-            let installEnv;
+   只要 q2被隐藏, 就不做任何请求和更新。
 
-            if (isInternal && targetPath) {
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
-                installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
-            } else {
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
-                installEnv = process.env;
-            }
 
-            global.logMessage(`[PythonCheck] 开始安装依赖: ${deps.join(', ')}`, 'INFO');
+  3 不要 setInterval：用“执行完再 setTimeout”能避免并发叠加和漂移
 
-            // 执行安装
-            cp.execSync(cmd, {
-                windowsHide: true,
-                timeout: 180000, // 3 分钟超时
-                env: installEnv
-            });
-
-            global.logMessage(`[PythonCheck] 依赖安装成功: ${deps.join(', ')}`, "INFO");
-
-            // ★ 无论成功失败，都记录安装时间（用于 72 小时冷却）
-            this._saveState(context, { installTimestamp: Date.now() });
-
-            return { success: true, installed: deps };
-        } catch (e) {
-            global.logMessage(`[PythonCheck] 依赖安装失败: ${e.message}`, 'ERROR');
-            // ★ 失败也要记录时间，防止频繁重试
-            this._saveState(context, { installTimestamp: Date.now() });
-            return { success: false, error: e.message };
-        } finally {
-            this._installInProgress = false;
-        }
-    }
-
-    /**
-     * 安排后台安装（在 20 秒后执行）
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要安装的依赖列表
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    scheduleInstall(pythonBin, deps, context) {
-        // 清除之前的定时器
-        if (this._installTimer) {
-            clearTimeout(this._installTimer);
-        }
-
-        // 20 秒后执行安装
-        this._installTimer = setTimeout(async () => {
-            const global = require('./global');
-            global.logMessage(`[PythonCheck] 触发后台依赖安装检查`, 'INFO');
-
-            // 再次检查是否已在冷却期内
-            if (this._isInCooldown(context)) {
-                global.logMessage(`[PythonCheck] 在 72 小时冷却期内，跳过安装`, 'INFO');
-                return;
-            }
-
-            await this._installDepsAsync(pythonBin, deps, context);
-        }, 20000); // 20 秒延迟
-    }
-
-    async isAvailable(pythonBin = null) {
-        const bin = pythonBin || this.pythonPath;
-        if (!bin) return false;
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
-
-            const { spawnSync } = require("child_process");
-
-            // 快速版本检测
-            const checkScript = `
-import sys
-v = sys.version_info
-ok = (3, 7) <= v < (3, 13)
-msg = f'PYTHON_READY|EXE:{sys.executable}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
-sys.stdout.write(msg)
-sys.exit(0 if ok else 1)
-`.trim();
-
-            const r = spawnSync(bin, ["-c", checkScript], {
-                encoding: 'utf8',
-                windowsHide: true,
-                timeout: 20000,
-                cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
-            });
-
-            if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
-                const stdout = r.stdout || "";
-                const exeMatch = stdout.match(/EXE:([^|]+)/);
-                if (exeMatch) this._resolvedPath = exeMatch[1];
-                return true;
-            }
-            return false;
-        } catch (e) {
-            return false;
-        }
-    }
-
-    /**
-     * 仅快速检测依赖是否存在（不安装）
-     * @param {string} pythonBin - Python 路径
-     * @returns {Object} - { missing: string[], allReady: boolean }
-     */
-    async quickCheckDeps(pythonBin) {
-        return await this.checkDeps(pythonBin, ['miniaudio', 'Pillow']);
-    }
-
-    /**
-     * 准备依赖（分离启动和安装）
-     * 此方法仅快速检测，不阻塞启动
-     * @param {string} pythonBin - Python 路径
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    async prepareDependencies(pythonBin, context) {
-        // 快速检测依赖状态
-        const checkResult = await this.quickCheckDeps(pythonBin);
-
-        if (checkResult.hasAll) {
-            // 所有依赖都已存在
-            return { status: 'ready', missing: [] };
-        }
-
-        // 有缺失的依赖
-        // 检查是否在冷却期内
-        if (this._isInCooldown(context)) {
-            const global = require('./global');
-            global.logMessage(`[PythonCheck] 依赖缺失但在 72 小时冷却期内，跳过安装`, "INFO");
-            // ★ 冷却期内直接跳过，什么都不做
-            return { status: 'cooldown', missing: checkResult.missing };
-        }
-
-        // ★ 冷却期外：安排 20 秒后后台安装一次
-        this.scheduleInstall(pythonBin, checkResult.missing, context);
-        return { status: 'scheduled', missing: checkResult.missing };
-    }
-
-    /**
-     * 强制安装依赖（立即执行，不受冷却期限制）
-     * @param {string} pythonBin - Python 路径
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    async forceInstallDeps(pythonBin, context) {
-        const checkResult = await this.quickCheckDeps(pythonBin);
-        if (checkResult.hasAll) {
-            return { success: true, message: '依赖已存在' };
-        }
-        return await this._installDepsAsync(pythonBin, checkResult.missing, context);
-    }
-
-    async trySetFromGlobalStorage(context) {
-        const path = require('path');
-        const fs = require('fs');
-        const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-        const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
-        const ownPath = path.join(installDir, binName);
-        if (fs.existsSync(ownPath)) {
-            if (await this.isAvailable(ownPath)) {
-                this.pythonPath = ownPath;
-                return true;
-            }
-        }
-        return false;
-    }
-
+只在 Windows 本地跑：vscode.env.remoteName 不为空时就不要硬查 C:（Remote/WSL 容易误伤性能或直接错误）。
