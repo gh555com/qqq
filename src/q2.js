@@ -2191,10 +2191,10 @@ function showSaveAsDialog() {
 
       case "paste":
         try {
-          // ★ 方案 B：彻底脱钩，直接触发系统原生粘贴
-          // 所有的多任务管理、覆盖提示、进度 UI 全部交给 OS 处理
-          // q2 只负责发出指令，并通过 FileSystemWatcher 自动感知结果
+          // 粘贴操作：触发系统原生粘贴
           await global.triggerSystemPaste(message.destDir);
+          // ★ 粘贴是用户主动操作，完成后主动刷新（不依赖文件监视器）
+          setTimeout(() => refreshWebview(), 500); // 给系统粘贴一点时间完成
         } catch (error) {
           global.showErrorMessage("系统粘贴触发异常: " + error.message);
         }
