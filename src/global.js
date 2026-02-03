@@ -699,14 +699,107 @@ function Process-Command {
         try {
           $rawPath = $cmd.path -replace '/', '\'
           $cleanPath = $rawPath.TrimEnd('\')
-          $shell = New-Object -ComObject Shell.Application
-          $folder = $shell.NameSpace($cleanPath)
-          if ($folder) {
-            $folder.Self.InvokeVerb("Paste")
-            $result.success = $true
-          } else {
+
+          # 检查是否是点结尾路径
+          $hasDotPath = $cleanPath.EndsWith('.') -or $cleanPath.Contains('.\\')
+
+          # 检查目标目录
+          $checkPath = if ($hasDotPath) { '\\\\?\\' + $cleanPath } else { $cleanPath }
+          $dirExists = [System.IO.Directory]::Exists($checkPath)
+          if (-not $dirExists) {
             $result.success = $false
-            $result.error = "Folder not found: $cleanPath"
+            $result.error = "Target folder not found: $cleanPath"
+          } else {
+            # 获取剪贴板文件
+            $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+            if (-not $files -or $files.Count -eq 0) {
+              $result.success = $false
+              $result.error = "No files in clipboard"
+            } else {
+              # 计算总大小
+              $totalSize = 0
+              foreach ($src in $files) {
+                if ([System.IO.File]::Exists($src)) {
+                  $totalSize += (Get-Item $src).Length
+                } elseif ([System.IO.Directory]::Exists($src)) {
+                  $totalSize += 100MB
+                }
+              }
+
+              # 大文件阈值：100MB
+              $useBgCopy = $totalSize -gt 100MB
+
+              # ★ 点结尾路径必须用 .NET 方法，普通路径用 robocopy/cmd
+              $copiedCount = 0
+              $errors = @()
+
+              foreach ($src in $files) {
+                try {
+                  $srcName = [System.IO.Path]::GetFileName($src)
+
+                  if ($hasDotPath) {
+                    # ★ 点结尾路径：使用 .NET 方法 + \\?\ 前缀
+                    $destPath = '\\\\?\\' + $cleanPath + '\\' + $srcName
+
+                    if ([System.IO.Directory]::Exists($src)) {
+                      # 递归复制文件夹
+                      $srcPrefix = '\\\\?\\' + $src
+                      [System.IO.Directory]::CreateDirectory($destPath) | Out-Null
+                      $allFiles = [System.IO.Directory]::GetFiles($srcPrefix, '*', 'AllDirectories')
+                      foreach ($f in $allFiles) {
+                        $rel = $f.Substring($srcPrefix.Length + 1)
+                        $dstFile = $destPath + '\\' + $rel
+                        $dstDir = [System.IO.Path]::GetDirectoryName($dstFile)
+                        if (-not [System.IO.Directory]::Exists($dstDir)) {
+                          [System.IO.Directory]::CreateDirectory($dstDir) | Out-Null
+                        }
+                        [System.IO.File]::Copy($f, $dstFile, $true)
+                      }
+                      $copiedCount++
+                    } elseif ([System.IO.File]::Exists($src)) {
+                      # 复制文件
+                      $srcPath = '\\\\?\\' + $src
+                      [System.IO.File]::Copy($srcPath, $destPath, $true)
+                      $copiedCount++
+                    }
+                  } else {
+                    # ★ 普通路径：使用 robocopy/cmd
+                    if ([System.IO.Directory]::Exists($src)) {
+                      $destDir = $cleanPath + '\\' + $srcName
+                      if ($useBgCopy) {
+                        $robocopyArgs = '"' + $src + '" "' + $destDir + '" /E /R:1 /W:1'
+                        Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs -WindowStyle Hidden
+                        $copiedCount++
+                      } else {
+                        $robocopyArgs = '"' + $src + '" "' + $destDir + '" /E /R:1 /W:1'
+                        $p = Start-Process -FilePath 'robocopy' -ArgumentList $robocopyArgs -WindowStyle Hidden -Wait -PassThru
+                        if ($p.ExitCode -lt 8) { $copiedCount++ }
+                      }
+                    } elseif ([System.IO.File]::Exists($src)) {
+                      if ($useBgCopy) {
+                        $copyArgs = '/c copy /Y "' + $src + '" "' + $cleanPath + '\\"'
+                        Start-Process -FilePath 'cmd' -ArgumentList $copyArgs -WindowStyle Hidden
+                        $copiedCount++
+                      } else {
+                        $copyArgs = '/c copy /Y "' + $src + '" "' + $cleanPath + '\\"'
+                        $p = Start-Process -FilePath 'cmd' -ArgumentList $copyArgs -WindowStyle Hidden -Wait -PassThru
+                        if ($p.ExitCode -eq 0) { $copiedCount++ }
+                      }
+                    }
+                  }
+                } catch {
+                  $errors += $_.Exception.Message
+                }
+              }
+
+              $result.success = ($copiedCount -gt 0)
+              $result.mode = if ($useBgCopy -and -not $hasDotPath) { "background" } else { "sync" }
+              $result.copiedCount = $copiedCount
+              $result.totalCount = $files.Count
+              if ($errors.Count -gt 0) {
+                $result.partialErrors = ($errors | Select-Object -First 3) -join "; "
+              }
+            }
           }
         } catch {
           $result.success = $false
