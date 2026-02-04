@@ -1572,7 +1572,8 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
 			const options = [
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
-				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" }
+				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
+				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
@@ -1616,6 +1617,24 @@ async function activate(context) {
 					}
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 打开缓存目录失败: ${e.message}`);
+				}
+			} else if (selected.id === "deleteYtDlp") {
+				// 删除视频下载组件 yt-dlp.exe
+				try {
+					const globalStoragePath = context?.globalStorageUri?.fsPath;
+					if (!globalStoragePath) {
+						vscode.window.showErrorMessage("qqq: 无法获取存储路径");
+						return;
+					}
+					const ytDlpPath = path.join(globalStoragePath, 'yt-dlp.exe');
+					if (fs.existsSync(ytDlpPath)) {
+						fs.unlinkSync(ytDlpPath);
+						vscode.window.showInformationMessage(`qqq: 已删除${ytDlpPath}`);
+					} else {
+						vscode.window.showInformationMessage("qqq: yt-dlp.exe 不存在");
+					}
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
 				}
 			}
 		})),
