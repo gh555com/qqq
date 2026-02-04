@@ -48,6 +48,25 @@ fn compute_max_workers() -> usize {
 static MAX_WORKERS: Lazy<usize> = Lazy::new(compute_max_workers);
 static IO_POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(*MAX_WORKERS));
 
+// =============================================================================
+//  扫描取消机制（用于取消 path_size/folder_info 等耗时操作）
+// =============================================================================
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static SCAN_CANCEL_VERSION: AtomicU64 = AtomicU64::new(0);
+
+fn bump_scan_cancel_version() -> u64 {
+    SCAN_CANCEL_VERSION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn get_scan_cancel_version() -> u64 {
+    SCAN_CANCEL_VERSION.load(Ordering::SeqCst)
+}
+
+fn is_scan_cancelled(my_version: u64) -> bool {
+    get_scan_cancel_version() != my_version
+}
+
 static RE_INVALID_FILENAME: Lazy<Regex> = Lazy::new(|| Regex::new(r#"[<>:"/\\|?*]+"#).unwrap());
 
 static VALID_CHARS: Lazy<Vec<char>> = Lazy::new(|| {
@@ -576,8 +595,8 @@ fn python_like_ext_lower(path: &Path) -> String {
     ext
 }
 
-/// 只获取单文件或目录递归总大小（极限优化，不统计后缀名）
-fn get_path_size(path: &str) -> PyV {
+/// 只获取单文件或目录递归总大小（极限优化 + 可取消，不统计后缀名）
+fn get_path_size(path: &str, cancel_version: Option<u64>) -> PyV {
     if path.is_empty() {
         return PyV::Obj(vec![
             ("success".to_string(), PyV::Bool(false)),
@@ -614,8 +633,22 @@ fn get_path_size(path: &str) -> PyV {
     }
 
     let mut total_size: u64 = 0;
+    let mut check_count: u64 = 0;
 
     for entry in WalkDir::new(&p).follow_links(false) {
+        // 每 5000 个文件检查一次取消
+        if let Some(ver) = cancel_version {
+            if check_count >= 5000 {
+                check_count = 0;
+                if is_scan_cancelled(ver) {
+                    return PyV::Obj(vec![
+                        ("success".to_string(), PyV::Bool(false)),
+                        ("cancelled".to_string(), PyV::Bool(true)),
+                    ]);
+                }
+            }
+        }
+
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -629,6 +662,7 @@ fn get_path_size(path: &str) -> PyV {
             Err(_) => continue,
         };
         total_size = total_size.saturating_add(meta.len());
+        check_count += 1;
     }
 
     PyV::Obj(vec![
@@ -637,15 +671,8 @@ fn get_path_size(path: &str) -> PyV {
     ])
 }
 
-fn get_folder_info(folder_path: &str) -> PyV {
-    // Python:
-    // if not folder_path or not isinstance(folder_path, str):
-    //   return {"success": False, "error": "empty path"}
-    // if not exists or not isdir:
-    //   return {"success": False, "error": "path not a directory"}
-    // total_size=0; file_count=0; ext_counts={}
-    // walk and sum
-    // return {"success": True, "total_size":..., "file_count_root":..., "ext_stats": ext_counts}
+fn get_folder_info(folder_path: &str, cancel_version: Option<u64>) -> PyV {
+    // 完整信息版：total_size + file_count_root + ext_stats（极限优化 + 可取消）
 
     if folder_path.is_empty() {
         return PyV::Obj(vec![
@@ -664,12 +691,26 @@ fn get_folder_info(folder_path: &str) -> PyV {
 
     let mut total_size: u64 = 0;
     let mut file_count: u64 = 0;
+    let mut check_count: u64 = 0;
 
-    // Python dict 是“首次出现的扩展名”决定插入顺序
+    // Python dict 是"首次出现的扩展名"决定插入顺序
     let mut ext_keys: Vec<String> = Vec::new();
     let mut ext_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
     for entry in WalkDir::new(&p).follow_links(false) {
+        // 每 5000 个文件检查一次取消
+        if let Some(ver) = cancel_version {
+            if check_count >= 5000 {
+                check_count = 0;
+                if is_scan_cancelled(ver) {
+                    return PyV::Obj(vec![
+                        ("success".to_string(), PyV::Bool(false)),
+                        ("cancelled".to_string(), PyV::Bool(true)),
+                    ]);
+                }
+            }
+        }
+
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue,
@@ -684,6 +725,7 @@ fn get_folder_info(folder_path: &str) -> PyV {
         };
         total_size = total_size.saturating_add(meta.len());
         file_count = file_count.saturating_add(1);
+        check_count += 1;
 
         let ext = python_like_ext_lower(sp);
         if !ext_counts.contains_key(&ext) {
@@ -1434,6 +1476,13 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             out_pairs.push(("status".to_string(), PyV::Str("alive".to_string())));
             (PyV::Obj(out_pairs), false, false)
         }
+        "cancel_scans" => {
+            // 取消所有正在进行的扫描操作
+            let new_ver = bump_scan_cancel_version();
+            out_pairs.push(("status".to_string(), PyV::Str("cancelled".to_string())));
+            out_pairs.push(("new_version".to_string(), py_num_u64(new_ver)));
+            (PyV::Obj(out_pairs), false, false)
+        }
         "extract_icon" => {
             let path = cmd.get("path").and_then(|v| v.as_str());
             if let Some(p) = path {
@@ -1499,7 +1548,8 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         }
         "folder_info" | "get_folder_info" => {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            if let PyV::Obj(extra) = get_folder_info(path) {
+            // TODO: 当改成多线程 daemon 时，传入实际的 cancel_version
+            if let PyV::Obj(extra) = get_folder_info(path, None) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
@@ -1507,7 +1557,8 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         "path_size" => {
             // 极限优化版：只获取文件/目录大小，不统计后缀名
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            if let PyV::Obj(extra) = get_path_size(path) {
+            // TODO: 当改成多线程 daemon 时，传入实际的 cancel_version
+            if let PyV::Obj(extra) = get_path_size(path, None) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)

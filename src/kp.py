@@ -211,6 +211,29 @@ def _get_audio_state():
 # 线程池（全局复用）
 _MAX_WORKERS = min(32, max(4, (os.cpu_count() or 4) * 2))
 _IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+
+# =============================================================================
+#  扫描取消机制（用于取消 path_size/folder_info 等耗时操作）
+# =============================================================================
+import threading
+_SCAN_CANCEL_VERSION = 0  # 全局取消版本号
+_SCAN_CANCEL_LOCK = threading.Lock()
+
+def _bump_scan_cancel_version():
+    """递增取消版本号，使所有正在进行的扫描失效"""
+    global _SCAN_CANCEL_VERSION
+    with _SCAN_CANCEL_LOCK:
+        _SCAN_CANCEL_VERSION += 1
+        return _SCAN_CANCEL_VERSION
+
+def _get_scan_cancel_version():
+    """获取当前取消版本号"""
+    with _SCAN_CANCEL_LOCK:
+        return _SCAN_CANCEL_VERSION
+
+def _is_scan_cancelled(my_version):
+    """检查扫描是否已被取消"""
+    return _get_scan_cancel_version() != my_version
 # =============================================================================
 #  工具：路径/文件名
 # =============================================================================
@@ -606,8 +629,8 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
 #  - 行为对齐原实现：不进入符号链接目录；符号链接文件按目标大小计（Path.stat 默认跟随）
 # =============================================================================
 
-def get_folder_info(folder_path: str):
-    """完整信息版：total_size + file_count_root + ext_stats（极限优化）"""
+def get_folder_info(folder_path: str, cancel_version: int = None):
+    """完整信息版：total_size + file_count_root + ext_stats（极限优化 + 可取消）"""
     if not folder_path or not isinstance(folder_path, str):
         return {"success": False, "error": "empty path"}
     if not os.path.isdir(folder_path):
@@ -616,6 +639,7 @@ def get_folder_info(folder_path: str):
     total_size = 0
     file_count = 0
     ext_counts = {}
+    check_count = 0  # 用于取消检查点计数
 
     try:
         stack = [folder_path]
@@ -623,6 +647,12 @@ def get_folder_info(folder_path: str):
         ext_get = ext_counts.get
 
         while stack:
+            # 每 5000 个文件检查一次取消
+            if cancel_version is not None and check_count >= 5000:
+                check_count = 0
+                if _is_scan_cancelled(cancel_version):
+                    return {"success": False, "cancelled": True}
+
             d = stack.pop()
             try:
                 with scandir(d) as it:
@@ -649,6 +679,7 @@ def get_folder_info(folder_path: str):
 
                             total_size += st.st_size
                             file_count += 1
+                            check_count += 1
 
                             # 扣后缀名：与 Path.suffix 的关键边界对齐（.gitignore -> no_ext）
                             n = e.name
@@ -706,8 +737,8 @@ def get_disk_free(drive: str = None):
         return {"success": False, "error": str(e)}
 
 
-def get_path_size(path: str):
-    """只获取单文件或目录递归总大小（极限优化，不统计后缀名）"""
+def get_path_size(path: str, cancel_version: int = None):
+    """只获取单文件或目录递归总大小（极限优化 + 可取消，不统计后缀名）"""
     if not path or not isinstance(path, str):
         return {"success": False, "error": "empty path"}
 
@@ -724,10 +755,17 @@ def get_path_size(path: str):
             return {"success": False, "error": "path not a file or directory"}
 
         total_size = 0
+        check_count = 0  # 用于取消检查点计数
         stack = [path]
         scandir = os.scandir
 
         while stack:
+            # 每 5000 个文件检查一次取消
+            if cancel_version is not None and check_count >= 5000:
+                check_count = 0
+                if _is_scan_cancelled(cancel_version):
+                    return {"success": False, "cancelled": True}
+
             d = stack.pop()
             try:
                 with scandir(d) as it:
@@ -749,6 +787,7 @@ def get_path_size(path: str):
                             except OSError:
                                 continue
                             total_size += st.st_size
+                            check_count += 1
 
                         except OSError:
                             continue
@@ -1358,19 +1397,26 @@ def trigger_system_paste(target_dir):
         return {"success": False, "error": str(e)}
 
 
-def _dispatch_action(cmd):
+def _dispatch_action(cmd, cancel_version: int = None):
+    """分发命令处理，cancel_version 用于可取消的耗时操作"""
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
     if action == "ping":
         out["status"] = "alive"
         return out
+    if action == "cancel_scans":
+        # 取消所有正在进行的扫描操作
+        new_ver = _bump_scan_cancel_version()
+        out["status"] = "cancelled"
+        out["new_version"] = new_ver
+        return out
     if action in ("folder_info", "get_folder_info"):
-        out.update(get_folder_info(cmd.get("path", "")))
+        out.update(get_folder_info(cmd.get("path", ""), cancel_version))
         return out
     if action == "path_size":
         # 极限优化版：只获取文件/目录大小，不统计后缀名
-        out.update(get_path_size(cmd.get("path", "")))
+        out.update(get_path_size(cmd.get("path", ""), cancel_version))
         return out
     if action == "disk_free":
         # 获取磁盘剩余空间
@@ -1468,6 +1514,9 @@ def _dispatch_action(cmd):
 
 
 def daemon_mode():
+    """多线程 daemon 模式：支持取消耗时操作"""
+    import queue
+
     try:
         if hasattr(sys.stdin, 'reconfigure'):
             sys.stdin.reconfigure(encoding='utf-8')
@@ -1476,16 +1525,45 @@ def daemon_mode():
     except:
         pass
 
-    # Debug: log startup
-    sys.stderr.write(f"Daemon started. PID={os.getpid()}\n")
+    sys.stderr.write(f"Daemon started (multithreaded). PID={os.getpid()}\n")
     sys.stderr.flush()
 
+    # 结果队列：线程安全
+    result_queue = queue.Queue()
+
+    # stdout 写入线程：从 result_queue 取结果写入 stdout
+    def stdout_writer():
+        while True:
+            try:
+                result = result_queue.get()
+                if result is None:  # 终止信号
+                    break
+                try:
+                    print(json.dumps(result, ensure_ascii=True), flush=True)
+                except:
+                    pass
+            except:
+                pass
+
+    writer_thread = threading.Thread(target=stdout_writer, daemon=True)
+    writer_thread.start()
+
+    # 耗时操作列表（需要提交到线程池执行）
+    SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
+
+    # 工作函数：在线程池中执行耗时操作
+    def execute_slow_action(cmd, cancel_ver):
+        try:
+            res = _dispatch_action(cmd, cancel_ver)
+        except Exception as e:
+            res = {"_id": cmd.get("_id", 0), "error": str(e)}
+        result_queue.put(res)
+
+    # 主循环：读 stdin，分发命令
     while True:
         try:
-            # Use binary reading to avoid encoding issues on Windows
             line_bytes = sys.stdin.buffer.readline()
             if not line_bytes:
-                # EOF reached
                 sys.stderr.write("Daemon stdin EOF.\n")
                 time.sleep(1)
                 continue
@@ -1496,20 +1574,33 @@ def daemon_mode():
 
             try:
                 cmd = json.loads(line)
-                res = _dispatch_action(cmd)
             except Exception as e:
-                res = {"_id": 0, "error": str(e)}
+                result_queue.put({"_id": 0, "error": str(e)})
+                continue
 
-            try:
-                print(json.dumps(res, ensure_ascii=True), flush=True)
-            except:
-                pass
+            action = cmd.get("action") or cmd.get("cmd") or ""
+
+            if action in SLOW_ACTIONS:
+                # 耗时操作：提交到线程池，附带当前取消版本号
+                cancel_ver = _get_scan_cancel_version()
+                _IO_EXECUTOR.submit(execute_slow_action, cmd, cancel_ver)
+            else:
+                # 快速操作：直接执行（包括 cancel_scans）
+                try:
+                    res = _dispatch_action(cmd)
+                except Exception as e:
+                    res = {"_id": cmd.get("_id", 0), "error": str(e)}
+                result_queue.put(res)
+
         except KeyboardInterrupt:
             break
         except Exception as e:
             sys.stderr.write(f"Daemon loop error: {e}\n")
             sys.stderr.flush()
             time.sleep(0.05)
+
+    # 清理
+    result_queue.put(None)  # 终止 stdout_writer 线程
 
 
 def main():

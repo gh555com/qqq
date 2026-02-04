@@ -3113,6 +3113,22 @@ async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 	});
 }
 
+/**
+ * 向所有活跃的 daemon 发送 cancel_scans 命令
+ * 用于取消正在进行的耗时扫描操作（path_size, folder_info）
+ */
+async function cancelScans() {
+	const bridges = [pythonBridge, rustBridge];
+	const promises = bridges.map(async (bridge) => {
+		if (!bridge || !bridge.isAlive()) return null;
+		try {
+			// 快速调用，不等待响应（fire and forget）
+			bridge.call("cancel_scans", {}, 500).catch(() => { });
+		} catch { }
+	});
+	await Promise.allSettled(promises);
+}
+
 function getActiveEngineCode(pythonBridge, rustBridge, shellBridge) {
 	return getActiveEngineState(pythonBridge, rustBridge, shellBridge).code;
 }
@@ -3353,6 +3369,7 @@ module.exports = {
 	getEngineTryOrder,
 	tryOneByOne,
 	tryEngineCall,
+	cancelScans,
 	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,

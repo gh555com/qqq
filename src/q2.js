@@ -11,7 +11,7 @@ const os = require("os");
 const h = require("./h");
 
 // ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪贴板快照等 ★★★
-const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats } = require("./global");
+const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
 
 // ==================== 从 geq().js 导入核心接口 ====================
 // 延迟加载 qqq 以避免循环依赖
@@ -2277,6 +2277,7 @@ function showSaveAsDialog() {
     activePanelAlive = false;
     activePanel = null;
     sRequestVersion++; // 使所有正在进行的 sRequest 失效
+    cancelScans(); // 取消正在进行的耗时扫描
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
@@ -2612,6 +2613,7 @@ function showSaveAsDialog() {
       case "navigate":
         try {
           sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
+          cancelScans(); // 取消正在进行的耗时扫描
           const resolved = resolveNavPath(message.path, currentPath);
 
           // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
@@ -2633,6 +2635,7 @@ function showSaveAsDialog() {
 
       case "navigateUp": {
         sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
+        cancelScans(); // 取消正在进行的耗时扫描
         const parentDir = canonicalizeExistingPath(path.dirname(currentPath));
         if (parentDir && parentDir !== currentPath) {
           currentPath = parentDir;
