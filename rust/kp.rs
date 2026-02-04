@@ -528,6 +528,67 @@ fn get_path_size(path: &str) -> PyV {
     ])
 }
 
+// =============================================================================
+//  disk_free —— 获取磁盘剩余空间 (Unix: statvfs)
+// =============================================================================
+
+fn get_disk_free(path: &str) -> PyV {
+    // 处理路径格式：空则默认根目录
+    let target_path = if path.is_empty() {
+        "/".to_string()
+    } else {
+        path.to_string()
+    };
+
+    // 使用 libc::statvfs
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+        use std::mem::MaybeUninit;
+
+        let c_path = match CString::new(target_path.as_str()) {
+            Ok(p) => p,
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("invalid path: {}", e))),
+                ]);
+            }
+        };
+
+        let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::uninit();
+        let result = unsafe { libc::statvfs(c_path.as_ptr(), stat.as_mut_ptr()) };
+
+        if result == 0 {
+            let stat = unsafe { stat.assume_init() };
+            let block_size = stat.f_frsize as u64;
+            let total = stat.f_blocks as u64 * block_size;
+            let free = stat.f_bavail as u64 * block_size;  // 普通用户可用空间
+            let used = total.saturating_sub(stat.f_bfree as u64 * block_size);
+
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(true)),
+                ("free".to_string(), py_num_u64(free)),
+                ("total".to_string(), py_num_u64(total)),
+                ("used".to_string(), py_num_u64(used)),
+            ])
+        } else {
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str(format!("statvfs failed for: {}", target_path))),
+            ])
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("not supported on this platform".to_string())),
+        ])
+    }
+}
+
 fn get_folder_info(folder_path: &str) -> PyV {
     if folder_path.is_empty() {
         return PyV::Obj(vec![
@@ -1281,6 +1342,16 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             // 极限优化版：只获取文件/目录大小，不统计后缀名
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = get_path_size(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "disk_free" => {
+            // 获取磁盘剩余空间
+            let path = cmd.get("drive").and_then(|v| v.as_str())
+                .or_else(|| cmd.get("path").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if let PyV::Obj(extra) = get_disk_free(path) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)

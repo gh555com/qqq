@@ -1,217 +1,466 @@
-的梦，按你这版“极限 scandir+显式栈”的实现来说：
 
-## 1) 扣后缀名（扩展名）精度/能力会下降吗？
+ 2 只在 漫游器 也就是 q2 w eb v iew 打开 且没有被隐藏 滴情况下做自动更新,
 
-**不会下降**，在你原逻辑里你是：
+  只要没有被隐藏就用唯一滴一种逻辑去做自动更新： 每6秒去请求一次 c 盘剩余空间, 但只是请求 并不做 UI 更新, 要两次请求之间滴 剩余空间差别达到了 0.01GB  也就是大于 11MB 才会做一次更新 界面。
 
-```py
-ext = p.suffix.lower().replace(".", "") or "no_ext"
-```
+  所谓隐藏是指：  vs 窗口最小化； q2没有被打开；  q2 已经被打开但被其他标签遮盖 处于不能见状态； 其他导致 q2 处于不能见滴情形。
 
-而我给的极限版是用 `name.rfind('.')` 做等价判断，并且刻意保证与 `Path.suffix` 的关键行为一致：
+   只要 q2被隐藏, 就不做任何请求和更新。
 
-* `foo.tar.gz` → `gz`（只取最后一段）✅一致
-* `.gitignore`（点开头的隐藏文件）→ `no_ext` ✅一致（`Path('.gitignore').suffix == ''`）
-* `a.`（尾部点）→ `no_ext` ✅一致
-* `a..b` → `b` ✅一致
-* 大小写：你原来 `.lower()`，我也 `.lower()` ✅一致
 
-**唯一“差异风险点”**是极端奇葩文件名（比如包含不可见字符、或某些平台返回的名字不是 `str`），但在你这个 Windows/常规文件系统路径里，几乎可视为 0。
+  3 不要 setInterval：用“执行完再 setTimeout”能避免并发叠加和漂移
 
----
+只在 Windows 本地跑：vscode.env.remoteName 不为空时就不要硬查 C:（Remote/WSL 容易误伤性能或直接错误）。
 
-## 2) 拆分成两个极限函数：q（完整信息） vs a（只求尺寸）
+最终版（基本没优化空间）：现代 WebviewPanel + legacy(≤1.22) previewHtml + daemon优先 + exec兜底 + “精确隐藏”判定
 
-你的想法对：把“只求 size”从“求 size + count + ext_stats”里拆出来，能避免很多无谓工作（字符串处理、dict 更新），在**海量小文件**场景会非常明显。
+你要的点它都含了：
 
-### 性能多维打分（可量化维度）
+只在 q2 可见时：才“请求 +（delta≥11MB 才 UI 更新）”
 
-我用 4 个维度打分（0~10，越大越好），再做加权总分（总分 0~100）：
+隐藏=立刻停：定时器停、in-flight 尽力 kill
 
-* **吞吐（Throughput）**：单位时间处理文件数（主要受 Python 循环体工作量影响）
-* **延迟（Latency）**：拿到结果的速度（同吞吐但更偏向“快出结果”）
-* **CPU 开销**：每个文件额外做了多少 Python 操作（字符串/字典/分支）
-* **内存开销**：额外数据结构（ext_counts 字典）+ 栈深
+窗口失焦但 q2 在另一分组仍可见：✅ 不算隐藏（靠 panel.visible + document.visibilityState；legacy 靠 visibleTextEditors）
 
-权重：吞吐 50%，延迟 20%，CPU 20%，内存 10%（你这个场景通常吞吐最关键）
+不 setInterval：✅ 每次完成后 setTimeout
 
-给分（理论相对值，实际跟磁盘/网络盘差异会有波动）：
+Remote/WSL：✅ vscode.env.remoteName 非空就不硬查
 
-* **a（只求尺寸）**：吞吐 10 / 延迟 9.5 / CPU 9.8 / 内存 9.7
-  总分 = (10×0.5 + 9.5×0.2 + 9.8×0.2 + 9.7×0.1) × 10
-  = (5 + 1.9 + 1.96 + 0.97) × 10 = **98.3**
-* **q（完整信息）**：吞吐 8.7 / 延迟 8.8 / CPU 8.3 / 内存 8.9
-  总分 = (8.7×0.5 + 8.8×0.2 + 8.3×0.2 + 8.9×0.1) × 10
-  = (4.35 + 1.76 + 1.66 + 0.89) × 10 = **86.6**
+22s/6s：✅ >8GB=22s，否则 6s
 
-结论：**纯 size 场景 a 明显更强**；需要 ext_stats/file_count 的场景只能用 q（或者你再做一次遍历，那反而更慢）。
+1.17 之前兼容：✅ 无 createWebviewPanel 时走 previewHtml 分支（功能会少：没有 webview 消息，但可见性用 visibleTextEditors 做到你要的“分组可见也算可见”）
 
----
+注意：previewHtml 分支本身属于老路子，后来被弃用
+GitHub
+，但你要兼容老版本就只能这样。
 
-## 拆分带来的额外风险/代价（你问“会不会多风险/代价”）
+最终版：src/extension.ts（完整）
+import * as vscode from 'vscode';
+import * as os from 'os';
+import * as net from 'net';
+import { execFile, ChildProcess } from 'child_process';
 
-**基本没有业务风险**，但有 3 个工程代价要明确：
+// ====== 规则参数 ======
+const THRESHOLD_BYTES = 11 * 1024 * 1024; // >11MB 才更新 UI
+const INTERVAL_LOW_MS = 6000;
+const INTERVAL_HIGH_MS = 22000;
+const HIGH_GB = 8;
 
-1. **维护面变大**：两套遍历逻辑，未来修 bug / 适配平台时要同步改（这是主要代价）。
-2. **接口使用风险**：调用方可能误用（需要 ext_stats 却调用 a）。解决：只把 `get_folder_info` 继续绑定到 q，外部默认不变。
-3. **一致性边界**：你现在对“符号链接目录”的处理是 `os.walk(followlinks=False)` 风格；拆分后必须保证 a/q 都一致（下面代码已统一：**不进入链接目录；链接文件按目标大小计**，与 `Path.stat()` 默认行为对齐）。
+// daemon（可改成你们现有的）
+const PIPE_NAME = '\\\\.\\pipe\\q2-diskfree';
 
----
+// legacy previewHtml 的 URI
+const LEGACY_SCHEME = 'q2';
+const LEGACY_PATH = 'panel.html';
 
-# 一次给你两份“极限代码”（可直接粘进文件，100%可替换）
+// ====== 工具函数 ======
+function bytesToGB(b: number) { return b / (1024 * 1024 * 1024); }
+function fmtGB(bytes: number) { const gb = bytesToGB(bytes); return gb >= 10 ? gb.toFixed(2) : gb.toFixed(3); }
+function pickIntervalMs(free: number) { return bytesToGB(free) > HIGH_GB ? INTERVAL_HIGH_MS : INTERVAL_LOW_MS; }
 
-### 设计：
+function getSystemDriveLetter(): string {
+  const sd = process.env.SystemDrive;
+  if (sd && sd.length > 0) return sd[0].toUpperCase();
+  return 'C';
+}
 
-* `q(folder_path)`：等同你现在 `get_folder_info` 的“特定信息获取”（size + count + ext_stats），极限优化
-* `a(path)`：只取单文件/目录递归总大小（只 size），极限优化
-* `get_folder_info`：保持你对外接口**一模一样**，直接 `return q(folder_path)`（外部零改动）
+// ====== Webview HTML（现代） ======
+function getModernWebviewHtml(): string {
+  return `<!doctype html><html><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>body{font-family:sans-serif;padding:12px}.v{font-size:20px}.s{opacity:.7;margin-top:8px}</style>
+</head><body>
+<div class="v" id="val">C: --</div><div class="s" id="st">...</div>
+<script>
+  const vscode = acquireVsCodeApi();
+  function reportVis(){ vscode.postMessage({type:'q2Vis', visible: document.visibilityState==='visible'}); }
+  document.addEventListener('visibilitychange', reportVis);
+  window.addEventListener('focus', reportVis);
+  window.addEventListener('blur', reportVis);
+  reportVis();
 
-```python
-# =============================================================================
-#  文件夹统计（拆分：q = 完整信息；a = 只求尺寸）
-#  - 保持 get_folder_info 对外接口完全一致（字段/语义不变）
-#  - 极限 IO：os.scandir + DirEntry 缓存 + 显式栈（无递归深度风险）
-#  - 行为对齐你原实现：不进入符号链接目录；符号链接文件按目标大小计（Path.stat 默认跟随）
-# =============================================================================
-
-def q(folder_path: str):
-    """等同现有 get_folder_info 的能力：total_size + file_count_root + ext_stats（极限版）"""
-    if not folder_path or not isinstance(folder_path, str):
-        return {"success": False, "error": "empty path"}
-    if not os.path.isdir(folder_path):
-        return {"success": False, "error": "path not a directory"}
-
-    total_size = 0
-    file_count = 0
-    ext_counts = {}
-
-    try:
-        stack = [folder_path]
-        scandir = os.scandir
-        ext_get = ext_counts.get
-
-        while stack:
-            d = stack.pop()
-            try:
-                with scandir(d) as it:
-                    for e in it:
-                        try:
-                            # 不跟随链接目录（对齐 os.walk(followlinks=False)）
-                            if e.is_dir(follow_symlinks=False):
-                                stack.append(e.path)
-                                continue
-
-                            # 若是链接且指向目录：不进入也不统计（对齐 os.walk 行为）
-                            if e.is_symlink():
-                                try:
-                                    if e.is_dir(follow_symlinks=True):
-                                        continue
-                                except OSError:
-                                    continue
-
-                            # 文件（或链接文件）：按目标大小计（对齐 Path.stat 默认行为）
-                            try:
-                                st = e.stat(follow_symlinks=True)
-                            except OSError:
-                                continue
-
-                            total_size += st.st_size
-                            file_count += 1
-
-                            # 扣后缀名：与 Path.suffix 的关键边界对齐（.gitignore -> no_ext）
-                            n = e.name
-                            i = n.rfind(".")
-                            if 0 < i < (len(n) - 1):
-                                ext = n[i + 1 :].lower()
-                            else:
-                                ext = "no_ext"
-
-                            ext_counts[ext] = ext_get(ext, 0) + 1
-
-                        except OSError:
-                            continue
-                        except Exception:
-                            continue
-            except OSError:
-                continue
-            except Exception:
-                continue
-
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-    return {
-        "success": True,
-        "total_size": total_size,
-        "file_count_root": file_count,
-        "ext_stats": ext_counts
+  window.addEventListener('message', (ev)=>{
+    const m = ev.data || {};
+    if (m.type === 'disk') {
+      document.getElementById('val').textContent = m.text;
+      document.getElementById('st').textContent = m.sub || '';
     }
+  });
+</script>
+</body></html>`;
+}
 
+// ====== Legacy HTML（previewHtml） ======
+function getLegacyHtml(text: string, sub: string): string {
+  // previewHtml 下没法 acquireVsCodeApi() 做消息，所以我们只能“重渲染整个 HTML”
+  return `<!doctype html><html><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>q2</title>
+<style>body{font-family:sans-serif;padding:12px}.v{font-size:20px}.s{opacity:.7;margin-top:8px}</style>
+</head><body>
+<div class="v">${escapeHtml(text)}</div>
+<div class="s">${escapeHtml(sub || '')}</div>
+</body></html>`;
+}
+function escapeHtml(s: string): string {
+  return (s || '').replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case '&': return '&amp;';
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '"': return '&quot;';
+      case "'": return '&#39;';
+      default: return c;
+    }
+  });
+}
 
-def a(path: str):
-    """只获取单文件或目录递归总大小（极限版）"""
-    if not path or not isinstance(path, str):
-        return {"success": False, "error": "empty path"}
+// ====== 读盘：daemon -> powershell -> wmic -> fsutil ======
+function queryFromDaemonPipe(driveLetter: string, timeoutMs: number, killToken: { sock?: net.Socket | null }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const dl = (driveLetter || 'C').toUpperCase().replace(/[^A-Z]/g, '') || 'C';
+    const sock = net.createConnection(PIPE_NAME);
+    killToken.sock = sock;
 
-    try:
-        # 文件：直接 stat（跟随链接，与你原 Path.stat 默认一致）
-        if os.path.isfile(path):
-            try:
-                return {"success": True, "total_size": os.stat(path, follow_symlinks=True).st_size}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+    let done = false;
+    let buf = '';
 
-        # 目录：递归累加
-        if not os.path.isdir(path):
-            return {"success": False, "error": "path not a file or directory"}
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { sock.destroy(); } catch {}
+      reject(new Error('daemon timeout'));
+    }, timeoutMs);
 
-        total_size = 0
-        stack = [path]
-        scandir = os.scandir
+    sock.on('error', (e) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      reject(e);
+    });
 
-        while stack:
-            d = stack.pop()
-            try:
-                with scandir(d) as it:
-                    for e in it:
-                        try:
-                            if e.is_dir(follow_symlinks=False):
-                                stack.append(e.path)
-                                continue
+    sock.on('data', (d) => { buf += String(d); });
 
-                            if e.is_symlink():
-                                try:
-                                    if e.is_dir(follow_symlinks=True):
-                                        continue
-                                except OSError:
-                                    continue
+    sock.on('connect', () => {
+      sock.write(dl + '\n');
+    });
 
-                            try:
-                                st = e.stat(follow_symlinks=True)
-                            except OSError:
-                                continue
-                            total_size += st.st_size
+    sock.on('close', () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      const s = buf.trim();
+      const n = Number(s);
+      if (!Number.isFinite(n) || n < 0) return reject(new Error('bad daemon response: ' + s));
+      resolve(n);
+    });
+  });
+}
 
-                        except OSError:
-                            continue
-                        except Exception:
-                            continue
-            except OSError:
-                continue
-            except Exception:
-                continue
+function queryByExecWindows(driveLetter: string, killToken: { child?: ChildProcess | null }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const dl = (driveLetter || 'C').toUpperCase().replace(/[^A-Z]/g, '') || 'C';
 
-        return {"success": True, "total_size": total_size}
+    // 先 PowerShell
+    const ps = `[Console]::Write([System.IO.DriveInfo]::new('${dl}').AvailableFreeSpace)`;
+    const child = execFile('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { windowsHide: true, timeout: 1500 },
+      () => {}
+    );
+    killToken.child = child;
 
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    let buf = '';
+    child.stdout && child.stdout.on('data', (d) => buf += String(d));
+    child.stderr && child.stderr.on('data', (d) => buf += String(d));
 
+    child.on('error', () => {
+      // powershell 不行就 wmic
+      fallbackWMIC(dl, killToken).then(resolve, reject);
+    });
 
-def get_folder_info(folder_path: str):
-    """对外接口保持一模一样：字段不变、能力不减"""
-    return q(folder_path)
-```
+    child.on('close', () => {
+      const out = String(buf).trim();
+      const n = Number(out);
+      if (Number.isFinite(n) && n >= 0) return resolve(n);
+      fallbackWMIC(dl, killToken).then(resolve, reject);
+    });
+  });
+}
 
----
+function fallbackWMIC(dl: string, killToken: { child?: ChildProcess | null }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = execFile('wmic',
+      ['logicaldisk', 'where', `DeviceID='${dl}:'`, 'get', 'FreeSpace', '/value'],
+      { windowsHide: true, timeout: 2000 },
+      () => {}
+    );
+    killToken.child = child;
 
-如果你下一步想把它接进 `_dispatch_action` 做性能对照，我建议你新增一个 action（比如 `"path_size"`）专门走 `a()`，这样你在前端可以很直观地 A/B 测：同一路径分别调用 `q` 和 `a`，就能看到在“只要 size”时 a 的优势有多大。
+    let buf = '';
+    child.stdout && child.stdout.on('data', (d) => buf += String(d));
+    child.stderr && child.stderr.on('data', (d) => buf += String(d));
+
+    child.on('error', () => fallbackFsutil(dl, killToken).then(resolve, reject));
+    child.on('close', () => {
+      const out = String(buf).trim();
+      const m = out.match(/FreeSpace\s*=\s*(\d+)/i);
+      if (m) return resolve(Number(m[1]));
+      fallbackFsutil(dl, killToken).then(resolve, reject);
+    });
+  });
+}
+
+function fallbackFsutil(dl: string, killToken: { child?: ChildProcess | null }): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = execFile('fsutil',
+      ['volume', 'diskfree', `${dl}:`],
+      { windowsHide: true, timeout: 2000 },
+      () => {}
+    );
+    killToken.child = child;
+
+    let buf = '';
+    child.stdout && child.stdout.on('data', (d) => buf += String(d));
+    child.stderr && child.stderr.on('data', (d) => buf += String(d));
+
+    child.on('error', reject);
+    child.on('close', () => {
+      const out = String(buf).trim();
+      const m = out.match(/free bytes\s*:\s*(\d+)/i);
+      if (m) return resolve(Number(m[1]));
+      reject(new Error('all methods failed'));
+    });
+  });
+}
+
+// ====== 主逻辑：现代/legacy 两条分支共用一套“轮询状态机” ======
+export function activate(context: vscode.ExtensionContext) {
+  let timer: NodeJS.Timeout | null = null;
+  let inFlight = false;
+  let lastSample: number | null = null;
+
+  const killToken: { child?: ChildProcess | null; sock?: net.Socket | null } = { child: null, sock: null };
+
+  function clearTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+  function hardStopInFlight() {
+    try { if (killToken.child && !killToken.child.killed) killToken.child.kill(); } catch {}
+    try { if (killToken.sock) killToken.sock.destroy(); } catch {}
+    killToken.child = null;
+    killToken.sock = null;
+  }
+
+  // ---- 现代 webviewPanel 分支 ----
+  let panel: vscode.WebviewPanel | null = null;
+  let panelVisible = false;
+  let webviewVisible = false;
+
+  // ---- legacy previewHtml 分支 ----
+  let legacyProvider: vscode.TextDocumentContentProvider | null = null;
+  let legacyEmitter: vscode.EventEmitter<vscode.Uri> | null = null;
+  let legacyUri: vscode.Uri | null = null;
+  let legacyHtmlText = getLegacyHtml('C: --', '...');
+
+  function isRemoteOrNotWindows(): string | null {
+    if (vscode.env.remoteName) return 'Remote 环境，已停止轮询';
+    if (os.platform() !== 'win32') return '非 Windows，已停止轮询';
+    return null;
+  }
+
+  function schedule(ms: number, runner: () => void) {
+    clearTimer();
+    timer = setTimeout(runner, ms);
+  }
+
+  function needUiUpdate(nextFree: number): boolean {
+    if (lastSample === null) return true;
+    return Math.abs(nextFree - lastSample) >= THRESHOLD_BYTES;
+  }
+
+  async function queryFreeBytes(): Promise<number> {
+    const drive = getSystemDriveLetter();
+
+    // daemon 优先
+    try {
+      return await queryFromDaemonPipe(drive, 500, killToken);
+    } catch {
+      // fallback exec
+      return await queryByExecWindows(drive, killToken);
+    }
+  }
+
+  function modernIsActuallyVisible(): boolean {
+    return !!panel && panelVisible && webviewVisible;
+  }
+
+  function legacyIsActuallyVisible(): boolean {
+    if (!legacyUri) return false;
+
+    // 关键：visibleTextEditors 能满足“q2 在另一分组可见但不聚焦也算可见”
+    const editors = vscode.window.visibleTextEditors || [];
+    for (let i = 0; i < editors.length; i++) {
+      const u = editors[i].document && editors[i].document.uri;
+      if (u && u.toString() === legacyUri.toString()) return true;
+    }
+    return false;
+  }
+
+  // ====== 现代轮询循环（执行完再 setTimeout） ======
+  async function modernLoopOnce() {
+    if (!panel) return;
+    if (!modernIsActuallyVisible()) { clearTimer(); hardStopInFlight(); return; }
+    if (inFlight) return;
+    inFlight = true;
+
+    try {
+      const stopReason = isRemoteOrNotWindows();
+      if (stopReason) {
+        clearTimer(); hardStopInFlight();
+        panel.webview.postMessage({ type: 'disk', text: 'C: N/A', sub: stopReason });
+        return;
+      }
+
+      const free = await queryFreeBytes();
+
+      const upd = needUiUpdate(free);
+      lastSample = free;
+
+      if (upd && panel) {
+        const drive = getSystemDriveLetter();
+        panel.webview.postMessage({
+          type: 'disk',
+          text: `${drive}: ${fmtGB(free)} GB`,
+          sub: `delta>=11MB 才更新；下次请求：${pickIntervalMs(free)}ms`
+        });
+      }
+
+      schedule(pickIntervalMs(free), modernLoopOnce);
+    } catch (e: any) {
+      if (panel) panel.webview.postMessage({ type: 'disk', text: 'C: --', sub: '读取失败：' + (e && e.message ? e.message : String(e)) });
+      schedule(INTERVAL_HIGH_MS, modernLoopOnce);
+    } finally {
+      inFlight = false;
+      killToken.child = null;
+      killToken.sock = null;
+    }
+  }
+
+  function modernRefreshRunState() {
+    if (modernIsActuallyVisible()) schedule(0, modernLoopOnce);
+    else { clearTimer(); hardStopInFlight(); }
+  }
+
+  // ====== legacy 轮询循环 ======
+  async function legacyLoopOnce() {
+    if (!legacyUri || !legacyEmitter) return;
+    if (!legacyIsActuallyVisible()) { clearTimer(); hardStopInFlight(); return; }
+    if (inFlight) return;
+    inFlight = true;
+
+    try {
+      const stopReason = isRemoteOrNotWindows();
+      if (stopReason) {
+        clearTimer(); hardStopInFlight();
+        legacyHtmlText = getLegacyHtml('C: N/A', stopReason);
+        legacyEmitter.fire(legacyUri);
+        return;
+      }
+
+      const free = await queryFreeBytes();
+      const upd = needUiUpdate(free);
+      lastSample = free;
+
+      if (upd) {
+        const drive = getSystemDriveLetter();
+        legacyHtmlText = getLegacyHtml(`${drive}: ${fmtGB(free)} GB`, `delta>=11MB 才更新；下次请求：${pickIntervalMs(free)}ms`);
+        legacyEmitter.fire(legacyUri); // 触发 previewHtml 刷新
+      }
+
+      schedule(pickIntervalMs(free), legacyLoopOnce);
+    } catch (e: any) {
+      legacyHtmlText = getLegacyHtml('C: --', '读取失败：' + (e && e.message ? e.message : String(e)));
+      legacyEmitter.fire(legacyUri);
+      schedule(INTERVAL_HIGH_MS, legacyLoopOnce);
+    } finally {
+      inFlight = false;
+      killToken.child = null;
+      killToken.sock = null;
+    }
+  }
+
+  function legacyRefreshRunState() {
+    if (legacyIsActuallyVisible()) schedule(0, legacyLoopOnce);
+    else { clearTimer(); hardStopInFlight(); }
+  }
+
+  // 监听“可见编辑器变化”，用于 legacy 精确判断隐藏/显示
+  context.subscriptions.push(vscode.window.onDidChangeVisibleTextEditors(() => {
+    if (legacyUri) legacyRefreshRunState();
+  }));
+
+  // ====== 打开 q2 ======
+  context.subscriptions.push(
+    vscode.commands.registerCommand('q2.open', async () => {
+      // 优先现代 createWebviewPanel（>=1.23 stable）:contentReference[oaicite:2]{index=2}
+      const canModern = !!(vscode.window as any).createWebviewPanel;
+
+      if (canModern) {
+        if (panel) {
+          panel.reveal(panel.viewColumn || vscode.ViewColumn.One, true);
+          modernRefreshRunState();
+          return;
+        }
+
+        panel = (vscode.window as any).createWebviewPanel(
+          'q2',
+          'q2',
+          { viewColumn: vscode.ViewColumn.One, preserveFocus: true },
+          { enableScripts: true, retainContextWhenHidden: true }
+        ) as vscode.WebviewPanel;
+
+        panel.webview.html = getModernWebviewHtml();
+
+        panelVisible = panel.visible;
+        webviewVisible = true;
+
+        panel.onDidDispose(() => {
+          clearTimer(); hardStopInFlight();
+          panel = null;
+        });
+
+        panel.onDidChangeViewState((e) => {
+          panelVisible = e.webviewPanel.visible;
+          modernRefreshRunState();
+        });
+
+        panel.webview.onDidReceiveMessage((msg: any) => {
+          if (msg && msg.type === 'q2Vis') {
+            webviewVisible = !!msg.visible;
+            modernRefreshRunState();
+          }
+        });
+
+        modernRefreshRunState();
+        return;
+      }
+
+      // ===== legacy：previewHtml（<=1.22/更早） =====
+      // 注意：previewHtml 后来被弃用:contentReference[oaicite:3]{index=3}，但你要兼容老版本只能这么干
+      if (!legacyEmitter) legacyEmitter = new vscode.EventEmitter<vscode.Uri>();
+      if (!legacyProvider) {
+        legacyProvider = {
+          onDidChange: legacyEmitter.event,
+          provideTextDocumentContent: () => legacyHtmlText
+        };
+        context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(LEGACY_SCHEME, legacyProvider));
+      }
+      legacyUri = vscode.Uri.parse(`${LEGACY_SCHEME}:/${LEGACY_PATH}`);
+
+      await vscode.commands.executeCommand('vscode.previewHtml', legacyUri, vscode.ViewColumn.One, 'q2');
+
+      legacyRefreshRunState();
+    })
+  );
+}
+
+export function deactivate() {}

@@ -687,6 +687,32 @@ def get_folder_info(folder_path: str):
     }
 
 
+def get_disk_free(drive: str = None):
+    """获取磁盘剩余空间（单位：字节）"""
+    if not drive:
+        # 默认使用系统盘
+        drive = os.environ.get('SystemDrive', 'C:')
+    # 确保格式正确：C: -> C:\
+    drive = drive.strip()
+    if len(drive) == 1 and drive.isalpha():
+        drive = drive.upper() + ":\\"
+    elif len(drive) == 2 and drive[1] == ':':
+        drive = drive.upper() + "\\"
+    elif not drive.endswith("\\") and not drive.endswith("/"):
+        drive = drive + "\\"
+
+    try:
+        usage = shutil.disk_usage(drive)
+        return {
+            "success": True,
+            "free": usage.free,
+            "total": usage.total,
+            "used": usage.used
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def get_path_size(path: str):
     """只获取单文件或目录递归总大小（极限优化，不统计后缀名）"""
     if not path or not isinstance(path, str):
@@ -1352,6 +1378,10 @@ def _dispatch_action(cmd):
     if action == "path_size":
         # 极限优化版：只获取文件/目录大小，不统计后缀名
         out.update(get_path_size(cmd.get("path", "")))
+        return out
+    if action == "disk_free":
+        # 获取磁盘剩余空间
+        out.update(get_disk_free(cmd.get("drive", cmd.get("path", ""))))
         return out
     if action == "extract_icon":
         path = cmd.get("path")
