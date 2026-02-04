@@ -182,6 +182,27 @@ function formatDateTime(date) {
   return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
+// ==================== 9秒自动关闭弹窗 ====================
+/**
+ * 显示一个自动关闭的通知消息
+ * @param {'info'|'warning'|'error'} type - 消息类型
+ * @param {string} message - 消息内容
+ * @param {number} timeout - 自动关闭时间（毫秒），默认 9000ms
+ */
+function showAutoCloseNotification(type, message, timeout = 9000) {
+  vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: message,
+      cancellable: false
+    },
+    async (progress) => {
+      // 等待指定时间后自动关闭
+      await new Promise(resolve => setTimeout(resolve, timeout));
+    }
+  );
+}
+
 // ==================== 配置读写 ====================
 function getConfig() {
   const defaultConfig = {
@@ -856,6 +877,10 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
 }
 
 let renameBlurHandler = null;
+let renameMouseHandler = null;
+let renameContextMenuHandler = null;
+let renameWheelHandler = null;
+let renameMiddleClickHandler = null;
 
 function startRename(itemPath, itemName, itemType){
   const itemElement = findItemElementByPath(itemPath);
@@ -900,7 +925,6 @@ function startRename(itemPath, itemName, itemType){
   else input.select();
 
   currentFocusType = 'input';
-  renameBlurHandler = () => cancelRename(itemElement, originalContent);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -912,16 +936,53 @@ function startRename(itemPath, itemName, itemType){
     }
   };
 
+  // ★ 点击处理：编辑框内点击移动光标，编辑框外点击等于保存
+  renameMouseHandler = (e) => {
+    if (e.button !== 0) return; // 只处理左键
+    if (input.contains(e.target) || e.target === input) {
+      // 点击编辑框内：不做任何处理，让光标自然移动
+      return;
+    }
+    // 点击编辑框外：等于按回车保存
+    e.preventDefault();
+    e.stopPropagation();
+    commitRename(itemElement, itemPath, itemType, input.value.trim());
+  };
+
+  // ★ 屏蔽编辑过程中的右键菜单
+  renameContextMenuHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // ★ 屏蔽编辑过程中的滚轮事件
+  renameWheelHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // ★ 屏蔽编辑过程中的中键点击
+  renameMiddleClickHandler = (e) => {
+    if (e.button === 1) { // 中键
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  // 注册事件监听（使用 capture 确保优先拦截）
+  document.addEventListener('mousedown', renameMouseHandler, true);
+  document.addEventListener('contextmenu', renameContextMenuHandler, true);
+  document.addEventListener('wheel', renameWheelHandler, { capture: true, passive: false });
+  document.addEventListener('auxclick', renameMiddleClickHandler, true);
+
   input.addEventListener('keydown', handleKeyDown);
-  input.addEventListener('blur', renameBlurHandler);
   itemElement.dataset.originalContent = originalContent;
 }
 
 function commitRename(itemElement, oldPath, itemType, newName){
   const input = itemElement.querySelector('.rename-input');
   if (!input) return;
-  input.removeEventListener('blur', renameBlurHandler);
-  renameBlurHandler = null;
+  cleanupRenameHandlers();
   currentFocusType = 'fileList';
   const oldName = itemElement.dataset.name;
 
@@ -932,11 +993,30 @@ function commitRename(itemElement, oldPath, itemType, newName){
   }
 }
 
+function cleanupRenameHandlers() {
+  if (renameMouseHandler) {
+    document.removeEventListener('mousedown', renameMouseHandler, true);
+    renameMouseHandler = null;
+  }
+  if (renameContextMenuHandler) {
+    document.removeEventListener('contextmenu', renameContextMenuHandler, true);
+    renameContextMenuHandler = null;
+  }
+  if (renameWheelHandler) {
+    document.removeEventListener('wheel', renameWheelHandler, { capture: true, passive: false });
+    renameWheelHandler = null;
+  }
+  if (renameMiddleClickHandler) {
+    document.removeEventListener('auxclick', renameMiddleClickHandler, true);
+    renameMiddleClickHandler = null;
+  }
+  renameBlurHandler = null;
+}
+
 function cancelRename(itemElement, originalContent){
   const input = itemElement.querySelector('.rename-input');
   if (!input) return;
-  input.removeEventListener('blur', renameBlurHandler);
-  renameBlurHandler = null;
+  cleanupRenameHandlers();
   currentFocusType = 'fileList';
 
   const itemType = itemElement.dataset.type;
@@ -1000,6 +1080,9 @@ function handleContextMenuAction(action){
       vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
       selectedItem = null;
       selectedItems = [];
+    } else if (action === 'rename') {
+      // 多选时禁止重命名
+      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: 'qqq: 请单选再做重命名' });
     } else if (action === 'open') {
       // 多选情况：只打开第一个选中的项目
       const firstItem = selectedItems.find(item => item.name !== '..');
@@ -1282,8 +1365,35 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (key === 'e') {
     e.preventDefault(); e.stopPropagation();
+    if (selectedItems.length > 1) {
+      // 多选时禁止重命名
+      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: 'qqq: 请单选再做重命名' });
+      return;
+    }
     if (selectedItem && selectedItem.name !== '..') {
         performEditAction(selectedItem);
+    }
+  } else if (e.key === 'Delete' && e.shiftKey) {
+    // Shift+Delete: 永久删除，无确认提示
+    e.preventDefault(); e.stopPropagation();
+    if (selectedItems.length > 1) {
+      // 多选永久删除
+      const targets = selectedItems.filter(item => item.name !== '..');
+      if (targets.length > 0) {
+        targets.forEach(item => {
+          const el = findItemElementByPath(item.path);
+          if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+        });
+        vscode.postMessage({ command: 'quickPermanentDeleteMultiple', items: targets });
+        selectedItem = null;
+        selectedItems = [];
+      }
+    } else if (selectedItem && selectedItem.name !== '..') {
+      // 单选永久删除
+      const el = findItemElementByPath(selectedItem.path);
+      if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
+      vscode.postMessage({ command: 'quickPermanentDelete', path: selectedItem.path, type: selectedItem.type });
+      selectedItem = null;
     }
   }
 });
@@ -2217,7 +2327,7 @@ function showSaveAsDialog() {
           const newPath = canonicalizeExistingPath(path.join(path.dirname(oldCanon), newName));
 
           if (fs.existsSync(newPath)) {
-            global.showErrorMessage(`重命名失败：目标位置已存在同名项。`);
+            showAutoCloseNotification('error', `重命名失败：目标位置已存在同名项。`, 9000);
             refreshWebview();
           } else {
             fs.renameSync(oldCanon, newPath);
@@ -2227,7 +2337,7 @@ function showSaveAsDialog() {
             }, 100);
           }
         } catch (error) {
-          global.showErrorMessage("重命名失败: " + error.message);
+          showAutoCloseNotification('error', "重命名失败: " + error.message, 9000);
           refreshWebview();
         }
         break;
@@ -2476,6 +2586,72 @@ function showSaveAsDialog() {
         break;
       }
 
+      case "quickPermanentDelete": {
+        // Shift+Delete 永久删除单个项目
+        const itemToDelete = canonicalizeExistingPath(message.path);
+        if (path.basename(itemToDelete) === '..' || message.name === '..') {
+          showAutoCloseNotification('error', "非法操作：禁止删除上级目录。", 9000);
+          refreshWebview();
+          break;
+        }
+        if (fs.existsSync(itemToDelete)) {
+          saveRecentDirectory(currentPath);
+          (async () => {
+            try {
+              const uri = vscode.Uri.file(itemToDelete);
+              await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
+              showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已永久删除`, 9000);
+            } catch (error) {
+              showAutoCloseNotification('error', `永久删除失败: ${error.message}`, 9000);
+            } finally {
+              if (activePanel && activePanelAlive) refreshWebview();
+            }
+          })();
+        } else {
+          refreshWebview();
+        }
+        break;
+      }
+
+      case "quickPermanentDeleteMultiple": {
+        // Shift+Delete 永久删除多个项目
+        const itemsToDelete = (message.items || []).filter(item => item.name !== '..');
+        if (itemsToDelete.length > 0) {
+          saveRecentDirectory(currentPath);
+          (async () => {
+            let deletedCount = 0;
+            let errorCount = 0;
+
+            for (const item of itemsToDelete) {
+              const itemPath = canonicalizeExistingPath(item.path);
+              if (fs.existsSync(itemPath)) {
+                try {
+                  const uri = vscode.Uri.file(itemPath);
+                  await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
+                  deletedCount++;
+                } catch (error) {
+                  errorCount++;
+                  global.logMessage(`永久删除项失败: ${itemPath} - ${error.message}`, "WARN");
+                }
+              }
+            }
+
+            if (deletedCount > 0 && errorCount === 0) {
+              showAutoCloseNotification('info', `已永久删除 ${deletedCount} 个项目`, 9000);
+            } else if (deletedCount > 0 && errorCount > 0) {
+              showAutoCloseNotification('warning', `已永久删除 ${deletedCount} 个项目，${errorCount} 个处理失败`, 9000);
+            } else if (errorCount > 0) {
+              showAutoCloseNotification('error', `${errorCount} 个项目永久删除失败。`, 9000);
+            }
+
+            if (activePanel && activePanelAlive) refreshWebview();
+          })();
+        } else {
+          refreshWebview();
+        }
+        break;
+      }
+
       case "copy":
         if (message.paths && message.paths.length > 0) {
           // 插件侧安全过滤：只过滤掉字面意义上的 ".." 相对路径，允许已解析的绝对路径
@@ -2490,6 +2666,14 @@ function showSaveAsDialog() {
         // ★★★ Q2 粘贴功能：完全移植自 Q1，基于事务、带进度条、可取消 ★★★
         await performQ2Paste(message.destDir, refreshWebview);
         break;
+
+      case "showAutoCloseMessage": {
+        // ★ 9秒自动关闭的弹窗
+        const msgType = message.type || 'info';
+        const msgText = message.message || '';
+        showAutoCloseNotification(msgType, msgText, 9000);
+        break;
+      }
     }
   });
 
