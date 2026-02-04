@@ -515,16 +515,15 @@ let pathTooltipVisible = false;
 // ====== 盘符剩余空间更新机制 ======
 // 规则：
 // - 只在 webview 可见时轮询（6秒间隔）
-// - 只有两次请求差异 >= 11MB 才更新 UI
-// - 不用 setInterval，用"执行完再 setTimeout"
-// - 空间 < 1% 或 < 2GB 时显示红色警告
+// - 合批请求：一次请求返回所有盘符的完整答卷
+// - 最终答卷比较：只有不同于上次答卷时才更新 UI
+// - 空间 < 1% 或 < 2GB 时显示红色警告（并显示小数位）
 const DISK_FREE_INTERVAL_MS = 6000;
-const DISK_FREE_THRESHOLD_BYTES = 11 * 1024 * 1024; // 11MB
 const DISK_FREE_WARNING_PERCENT = 0.01; // 1%
 const DISK_FREE_WARNING_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const DISK_FREE_WARNING_COLOR = 'rgb(248, 48, 0)';
 let diskFreeTimer = null;
-let lastDiskFreeSamples = {}; // { 'C': {free, total}, 'D': {free, total}, ... }
+let lastDiskFreeSnapshot = ''; // 上次答卷的 JSON 序列化，用于比较
 let diskFreeInFlight = false;
 
 function ensurePathTooltip(){
@@ -1114,18 +1113,19 @@ window.addEventListener('message', event => {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
   } else if (message.command === 'diskFreeResult') {
-    // 盘符剩余空间更新响应
+    // 合批答卷返回：{ data: { 'C': {free, total}, 'D': {free, total}, ... } }
     diskFreeInFlight = false;
-    const drive = message.drive; // 盘符字母，如 'C', 'D'
-    const free = message.free;
-    const total = message.total;
-    if (typeof free === 'number' && drive) {
-      const last = lastDiskFreeSamples[drive];
-      const needUiUpdate = !last ||
-        (Math.abs(free - last.free) >= DISK_FREE_THRESHOLD_BYTES);
-      lastDiskFreeSamples[drive] = { free, total };
-      if (needUiUpdate) {
-        updateDriveDisplay(drive, free, total);
+    const data = message.data;
+    if (data && typeof data === 'object') {
+      // 答卷比较：JSON 序列化后比较
+      const snapshot = JSON.stringify(data);
+      if (snapshot !== lastDiskFreeSnapshot) {
+        lastDiskFreeSnapshot = snapshot;
+        // 批量更新所有盘符显示
+        for (const drive in data) {
+          const info = data[drive];
+          updateDriveDisplay(drive, info.free, info.total);
+        }
       }
     }
     // 完成后安排下一轮
@@ -1515,13 +1515,15 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateDriveDisplay(drive, freeBytes, totalBytes) {
   const el = document.getElementById('drive-' + drive.toLowerCase() + '-text');
   if (!el) return;
-  // 格式："C:\\  1.75"（保留两位小数，不打印单位）
   const freeGB = freeBytes / (1024 * 1024 * 1024);
-  el.textContent = drive.toUpperCase() + ':\\  ' + freeGB.toFixed(2);
 
   // 检查是否需要红色警告: 空间 < 1% 或 < 2GB
   const isLow = (totalBytes > 0 && freeBytes / totalBytes < DISK_FREE_WARNING_PERCENT) ||
                 (freeBytes < DISK_FREE_WARNING_BYTES);
+
+  // 正常显示整数，红色时才显示小数位
+  const gbText = isLow ? freeGB.toFixed(2) : Math.floor(freeGB).toString();
+  el.textContent = drive.toUpperCase() + ':\\  ' + gbText;
   el.style.color = isLow ? DISK_FREE_WARNING_COLOR : '';
 }
 
@@ -1534,12 +1536,12 @@ function isDiskFreePollingAllowed() {
 }
 
 /**
- * 请求所有盘符剩余空间
+ * 请求所有盘符剩余空间（合批）
  */
 function requestDiskFree() {
   if (diskFreeInFlight) return;
   diskFreeInFlight = true;
-  vscode.postMessage({ command: 'getDiskFree', drive: 'all' });
+  vscode.postMessage({ command: 'getDiskFree' });
 }
 
 /**
@@ -2156,40 +2158,27 @@ function showSaveAsDialog() {
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;
 
-      // 盘符剩余空间请求
+      // 盘符剩余空间请求（合批）
       case "getDiskFree": {
         (async () => {
           try {
-            if (message.drive === 'all') {
-              // 查询所有盘符
-              const drives = getDrives();
-              for (const drive of drives) {
-                const driveLetter = drive.toUpperCase().replace(/[^A-Z]/g, '') || 'X';
-                const res = await geq().getDiskFree(driveLetter + ':');
-                if (panel && activePanelAlive && res && res.success) {
-                  panel.webview.postMessage({
-                    command: "diskFreeResult",
-                    drive: driveLetter,
-                    free: res.free,
-                    total: res.total
-                  });
-                }
-              }
-            } else {
-              // 查询单个盘符
-              const driveLetter = (message.drive || 'C').toUpperCase().replace(/[^A-Z]/g, '') || 'C';
+            const result = {}; // { 'C': {free, total}, 'D': {free, total}, ... }
+            const drives = getDrives();
+            for (const drive of drives) {
+              const driveLetter = drive.toUpperCase().replace(/[^A-Z]/g, '') || 'X';
               const res = await geq().getDiskFree(driveLetter + ':');
-              if (panel && activePanelAlive && res && res.success) {
-                panel.webview.postMessage({
-                  command: "diskFreeResult",
-                  drive: driveLetter,
-                  free: res.free,
-                  total: res.total
-                });
+              if (res && res.success) {
+                result[driveLetter] = { free: res.free, total: res.total };
               }
             }
+            if (panel && activePanelAlive) {
+              panel.webview.postMessage({
+                command: "diskFreeResult",
+                data: result // 一次性返回所有盘符的完整答卷
+              });
+            }
           } catch (e) {
-            geq().logMessage('getDiskFree \u5931\u8d25: ' + e.message, "WARN");
+            geq().logMessage('getDiskFree 失败: ' + e.message, "WARN");
           }
         })();
         break;
