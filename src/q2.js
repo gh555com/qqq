@@ -96,9 +96,9 @@ async function getSizeForSRequest(itemPath, isFolder) {
     }
   }
 
-  // 文件夹：通过 qqq 底座高效获取递归总大小
+  // 文件夹：使用极限优化版 getPathSize（只获取大小，不统计后缀名）
   try {
-    const result = await geq().getFolderInfo(canon);
+    const result = await geq().getPathSize(canon);
     if (result && result.success) {
       return Number(result.total_size) || 0;
     }
@@ -160,51 +160,6 @@ function formatDateTime(date) {
   const hour = String(d.getHours()).padStart(2, '0');
   const minute = String(d.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day} ${hour}:${minute}`;
-}
-
-function getFileDisplayAsync(itemPath, displayMode, signal = null) {
-  const canon = canonicalizeExistingPath(itemPath);
-  const key = cacheKeyForPath(canon);
-
-  return globalScheduler.schedule(`sizeDisplay:${key}`, async () => {
-    if (signal && signal.aborted) return "";
-
-    try {
-      // 检查 signal
-      if (signal && signal.aborted) return "";
-      const stats = await fs.promises.stat(canon);
-      if (signal && signal.aborted) return "";
-
-      // 根据显示模式返回不同的内容，末尾加一个空格作为简易留白
-      if (displayMode === "nothing") {
-        return "";
-      } else if (displayMode === "size") {
-        // size 模式：只显示文件大小，文件夹不参与
-        if (stats.isFile()) {
-          const sz = Number(stats.size) || 0;
-          return formatFileSize(sz) + " ";
-        } else {
-          // 文件夹不显示尺寸
-          return "";
-        }
-      } else if (displayMode === "ctime") {
-        return formatDateTime(stats.birthtime) + " ";
-      } else if (displayMode === "mtime") {
-        return formatDateTime(stats.mtime) + " ";
-      }
-
-      return "";
-    } catch (err) {
-      global.logMessage(`获取文件信息失败: ${canon} - ${err.message}`, "ERROR");
-      return " ...err ";
-    }
-  });
-}
-
-// 保持向后兼容的别名
-function getFileSizeDisplayAsync(itemPath, signal = null) {
-  const config = getConfig();
-  return getFileDisplayAsync(itemPath, config.szDisplayMode, signal);
 }
 
 // ==================== 配置读写 ====================
@@ -2310,7 +2265,7 @@ function showSaveAsDialog() {
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
               global.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
             } catch (error) {
-              global.showErrorMessage(`删除失败: ${error.message}`);
+              global.showErrorMessage(`qqq: 删除失败: ${error.message}`);
             } finally {
               // 无论成功失败，都刷新列表并恢复状态
               if (activePanel && activePanelAlive) refreshWebview();

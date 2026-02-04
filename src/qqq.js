@@ -893,6 +893,73 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 	};
 }
 
+/**
+ * 极限优化版：只获取文件/目录大小，不统计后缀名、文件数
+ * 适用场景：szDisplayMode="size" 时只需要知道大小
+ * @param {string} targetPath 文件或目录路径
+ * @returns {Promise<{success: boolean, total_size?: number, error?: string}>}
+ */
+async function getPathSize(targetPath) {
+	targetPath = canonicalizeExistingPath(targetPath) || targetPath;
+	const startTime = Date.now();
+
+	const res = await tryEngineCall({
+		python: "path_size",
+		rust: "path_size"
+	}, { path: targetPath }, 15000);
+
+	if (res) {
+		const elapsed = Date.now() - startTime;
+		global.logMessage(`[PathSize] ${targetPath}: ${elapsed}ms, ${global.formatBytes(res.total_size || 0)}`, "DEBUG");
+		return res;
+	}
+
+	return getPathSizeJS(targetPath, startTime);
+}
+
+/**
+ * JS 回退实现：只获取大小（简化版本，不统计后缀名）
+ */
+async function getPathSizeJS(targetPath, startTime = null) {
+	if (!startTime) startTime = Date.now();
+	if (!fs.existsSync(targetPath)) return { success: false, error: "not_found" };
+
+	try {
+		const st = await fs.promises.stat(targetPath);
+		if (st.isFile()) {
+			return { success: true, total_size: st.size };
+		}
+	} catch {
+		return { success: false, error: "stat_failed" };
+	}
+
+	let totalSize = 0;
+	const queue = [targetPath];
+
+	while (queue.length > 0) {
+		const currentDir = queue.shift();
+		try {
+			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+			await Promise.all(entries.map(async (entry) => {
+				const fullPath = path.join(currentDir, entry.name);
+				if (entry.isDirectory()) {
+					queue.push(fullPath);
+				} else if (entry.isFile()) {
+					try {
+						const st = await fs.promises.stat(fullPath);
+						totalSize += st.size;
+					} catch { }
+				}
+			}));
+		} catch { }
+	}
+
+	const elapsed = Date.now() - startTime;
+	global.logMessage(`[PathSize] ${targetPath}: ${elapsed}ms, ${global.formatBytes(totalSize)} (JS)`, "DEBUG");
+
+	return { success: true, total_size: totalSize };
+}
+
 
 function shouldShowDuration(info) {
 	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
@@ -1679,6 +1746,7 @@ const exported = {
 	handleClipboardSlow,
 
 	getFolderInfo,
+	getPathSize,  // 极限优化版：只获取大小，不统计后缀名
 
 	// Delegate to h.js
 	getTimestampFilename: h.getTimestampFilename,
