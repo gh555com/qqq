@@ -2701,6 +2701,9 @@ sys.exit(0)
     }
 
     async autoInstall(context) {
+        // ★ 关键：引入 global 模块
+        const global = require('./global');
+
         try {
             const os = require('os');
             const fs = require('fs');
@@ -2816,16 +2819,22 @@ sys.exit(0)
             };
 
             // 下载：级联下载策略（一个接一个尝试，直到成功）
-            // 第1层：官方源（GitHub/python.org）- 15秒超时
-            // 第2层：ghproxy.net 镜像 - 60秒超时
-            // 第3层：mirror.ghproxy.com 镜像 - 60秒超时
-            const downloadUrls = [
-                { url: officialUrl, timeout: 15000, name: '官方源' },
-                { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' },
-            ];
+            // Windows: 阿里云镜像优先（国内快），再试官方源
+            // macOS/Linux: 官方源 → ghproxy → mirror.ghproxy
+            const downloadUrls = [];
 
-            // 为 macOS/Linux 添加第三层镜像兜底
-            if (platform !== 'win32') {
+            if (platform === 'win32') {
+                // Windows: 先阿里镜像，再官方源
+                downloadUrls.push(
+                    { url: mirrorUrl, timeout: 30000, name: '阿里云镜像' },
+                    { url: officialUrl, timeout: 30000, name: '官方源' }
+                );
+            } else {
+                // macOS/Linux: 先官方源，再 ghproxy，再 mirror.ghproxy
+                downloadUrls.push(
+                    { url: officialUrl, timeout: 15000, name: '官方源' },
+                    { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' }
+                );
                 const thirdMirrorUrl = officialUrl.replace('https://github.com/', 'https://mirror.ghproxy.com/https://github.com/');
                 downloadUrls.push({ url: thirdMirrorUrl, timeout: 60000, name: 'mirror.ghproxy镜像' });
             }
@@ -2921,6 +2930,9 @@ sys.exit(0)
                 error: "Validation failed after install"
             };
         } catch (e) {
+            // ★ 关键：下载失败也要记录时间戳，触发 72 小时冷却期
+            this._saveState(context, { installTimestamp: Date.now() });
+            global.logMessage(`[PythonCheck] 下载失败，进入 72 小时冷却期: ${e.message}`, 'ERROR');
             return {
                 success: false,
                 error: e.message

@@ -40,6 +40,7 @@ const UNSUPPORTED_CODE_EXTENSIONS = global.NON_TEXT_EXTS;
 let activePanel = null;
 let activePanelAlive = false;
 let currentWatcher = null; // 用于监听当前目录变化
+let sRequestVersion = 0; // sRequest 版本号，用于取消过期请求
 const usePanelReveal = 1;
 
 
@@ -2275,6 +2276,7 @@ function showSaveAsDialog() {
   panel.onDidDispose(() => {
     activePanelAlive = false;
     activePanel = null;
+    sRequestVersion++; // 使所有正在进行的 sRequest 失效
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
@@ -2549,27 +2551,38 @@ function showSaveAsDialog() {
       }
 
       // s 请求：点击 sz 区强制获取 size（包括文件夹递归大小）
+      // 优化：边算边渲染 + 版本号取消机制
       case "sRequest": {
+        const thisVersion = ++sRequestVersion; // 递增版本号，使之前的请求失效
         (async () => {
           const items = message.items || [];
           if (items.length === 0) return;
 
-          const results = await Promise.all(items.map(async (item) => {
+          // 边算边渲染：每个完成后立即发送，不阻塞其他项
+          const promises = items.map(async (item) => {
+            // 版本号检查：如果已过期，直接跳过
+            if (sRequestVersion !== thisVersion) return;
+
             const isFolder = item.type === 'folder';
             const size = await getSizeForSRequest(item.path, isFolder);
-            return {
-              path: canonicalizeExistingPath(item.path),
-              type: item.type,
-              sizeDisplay: formatFileSize(size) + " "
-            };
-          }));
 
-          if (panel && activePanelAlive) {
+            // 再次检查版本号：计算完成后可能已经切换目录了
+            if (sRequestVersion !== thisVersion) return;
+            if (!panel || !activePanelAlive) return;
+
+            // 单个结果立即发送渲染
             panel.webview.postMessage({
               command: "updateSizeBatch",
-              results: results
+              results: [{
+                path: canonicalizeExistingPath(item.path),
+                type: item.type,
+                sizeDisplay: formatFileSize(size) + " "
+              }]
             });
-          }
+          });
+
+          // 并发执行，但不等待全部完成
+          await Promise.allSettled(promises);
         })();
         break;
       }
@@ -2598,6 +2611,7 @@ function showSaveAsDialog() {
 
       case "navigate":
         try {
+          sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
           const resolved = resolveNavPath(message.path, currentPath);
 
           // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
@@ -2618,6 +2632,7 @@ function showSaveAsDialog() {
         break;
 
       case "navigateUp": {
+        sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
         const parentDir = canonicalizeExistingPath(path.dirname(currentPath));
         if (parentDir && parentDir !== currentPath) {
           currentPath = parentDir;
