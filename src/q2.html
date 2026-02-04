@@ -714,6 +714,94 @@
 			box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 			pointer-events: none;
 		}
+
+		/* ====== 精细 SCM 按钮样式 ====== */
+		.address-bar-wrapper {
+			display: flex;
+			align-items: stretch;
+			gap: 0;
+			padding: 0;
+			background-color: var(--bg-color);
+		}
+
+		.scm-btn-group {
+			display: flex;
+			align-items: stretch;
+			gap: 0;
+			flex-shrink: 0;
+		}
+
+		.scm-btn {
+			width: 33px;
+			height: 100%;
+			min-height: 26px;
+			border: 1px solid var(--border-strong);
+			background-color: var(--bg-highlight);
+			color: var(--text-primary);
+			font-size: 14px;
+			font-weight: bold;
+			cursor: pointer;
+			position: relative;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			margin: 0;
+			padding: 0;
+			transition: background-color 0.15s;
+		}
+
+		.scm-btn:hover {
+			background-color: #d3d1c4;
+		}
+
+		.scm-btn.active {
+			background-color: var(--yellow);
+			color: var(--base3);
+		}
+
+		.scm-btn .scm-check {
+			position: absolute;
+			right: 2px;
+			bottom: 0px;
+			width: 8px;
+			height: 8px;
+			display: none;
+		}
+
+		.scm-btn.active .scm-check {
+			display: block;
+		}
+
+		.open-btn {
+			padding: 0 6px;
+			height: 100%;
+			min-height: 26px;
+			border: 1px solid var(--border-strong);
+			background-color: var(--bg-highlight);
+			color: var(--text-primary);
+			font-size: 12px;
+			cursor: pointer;
+			transition: background-color 0.15s;
+		}
+
+		.open-btn:hover {
+			background-color: #d3d1c4;
+		}
+
+		.address-bar-inner {
+			flex: 1;
+			position: relative;
+			min-width: 0;
+			height: 26px;
+		}
+
+		.address-bar-inner .address-display {
+			padding: 5px 5px 5px 8px;
+		}
+
+		.address-bar-inner .address-input {
+			padding: 5px 5px 5px 8px;
+		}
 	</style>
 </head>
 
@@ -738,8 +826,58 @@
 			</div>
 
 			<div class="address-bar">
-				<div id="addressDisplay" class="address-display"></div>
-				<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
+				<div class="address-bar-wrapper">
+					<!-- 左侧 SCM: sz 区显示模式 -->
+					<div class="scm-btn-group" id="szModeGroup">
+						<button class="scm-btn" data-mode="size" title="sz区显示: 文件大小">
+							S
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						<button class="scm-btn" data-mode="ctime" title="sz区显示: 创建时间">
+							C
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						<button class="scm-btn" data-mode="mtime" title="sz区显示: 修改时间">
+							M
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+					</div>
+
+					<!-- 地址栏 -->
+					<div class="address-bar-inner">
+						<div id="addressDisplay" class="address-display"></div>
+						<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
+					</div>
+
+					<!-- 右侧: open 按钮 + SCM 排序模式 -->
+					<button class="open-btn" id="openFolderBtn" title="在资源管理器中打开当前文件夹">open</button>
+					<div class="scm-btn-group" id="sortByGroup">
+						<button class="scm-btn" data-sort="size" title="排序: 按文件大小">
+							S
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						<button class="scm-btn" data-sort="ctime" title="排序: 按创建时间">
+							C
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+						<button class="scm-btn" data-sort="mtime" title="排序: 按修改时间">
+							M
+							<svg class="scm-check" viewBox="0 0 10 10">
+								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+							</svg>
+						</button>
+					</div>
+				</div>
 			</div>
 
 			<div class="file-list-container" id="fileList" style="margin: 0;">

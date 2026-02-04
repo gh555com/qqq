@@ -311,6 +311,47 @@ function saveConfig(
   }, 1000);
 }
 
+// ==================== 精细 SCM 存储 ====================
+// 独立存储，与配置分离，避免影响其他配置项
+const FINE_SCM_KEY = "qqq_fine_scm";
+
+function getFineSCM(folderPath) {
+  if (!globalContext || !folderPath) return { szMode: null, sortBy: null };
+  try {
+    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    const key = cacheKeyForPath(folderPath);
+    const scm = allFineSCM[key];
+    if (scm) {
+      return {
+        szMode: scm.szMode || null,
+        sortBy: scm.sortBy || null
+      };
+    }
+  } catch (e) {
+    geq().logMessage(`读取精细 SCM 失败: ${e.message}`, "WARN");
+  }
+  return { szMode: null, sortBy: null };
+}
+
+function setFineSCMValue(folderPath, szMode, sortBy) {
+  if (!globalContext || !folderPath) return;
+  try {
+    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    const key = cacheKeyForPath(folderPath);
+
+    // 如果两个都是 null，删除该条目
+    if (szMode === null && sortBy === null) {
+      delete allFineSCM[key];
+    } else {
+      allFineSCM[key] = { szMode, sortBy };
+    }
+
+    globalContext.globalState.update(FINE_SCM_KEY, allFineSCM);
+  } catch (e) {
+    geq().logMessage(`保存精细 SCM 失败: ${e.message}`, "WARN");
+  }
+}
+
 // ==================== 目录管理 ====================
 function removeFromRecycleBin(directory) {
   const config = getConfig();
@@ -533,6 +574,97 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
+// ====== 逐字撤销/重做系统 ======
+// 为所有编辑框提供逐字级别的 Ctrl+Z / Ctrl+Y 功能
+const inputUndoStacks = new WeakMap(); // input -> { history: [], index: -1, lastValue: '', isProgrammatic: false }
+
+function getInputUndoState(input) {
+  if (!inputUndoStacks.has(input)) {
+    inputUndoStacks.set(input, {
+      history: [input.value || ''],
+      index: 0,
+      lastValue: input.value || '',
+      isProgrammatic: false
+    });
+  }
+  return inputUndoStacks.get(input);
+}
+
+function initInputUndoRedo(input) {
+  if (!input || input._undoRedoInitialized) return;
+  input._undoRedoInitialized = true;
+
+  const state = getInputUndoState(input);
+
+  // 监听输入变化，记录每次改变
+  input.addEventListener('input', () => {
+    const st = getInputUndoState(input);
+
+    // 如果是程序触发的撤销/重做，不记录历史
+    if (st.isProgrammatic) {
+      st.isProgrammatic = false;
+      return;
+    }
+
+    const currentValue = input.value;
+
+    // 如果当前不在历史末尾，截断后面的历史
+    if (st.index < st.history.length - 1) {
+      st.history = st.history.slice(0, st.index + 1);
+    }
+
+    // 只有当值真正变化时才记录
+    if (currentValue !== st.lastValue) {
+      st.history.push(currentValue);
+      st.index = st.history.length - 1;
+      st.lastValue = currentValue;
+    }
+  });
+
+  // 拦截 Ctrl+Z 和 Ctrl+Y
+  input.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const st = getInputUndoState(input);
+      if (st.index > 0) {
+        st.index--;
+        st.isProgrammatic = true;
+        input.value = st.history[st.index];
+        st.lastValue = input.value;
+        // 触发 input 事件以便其他监听器能响应
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const st = getInputUndoState(input);
+      if (st.index < st.history.length - 1) {
+        st.index++;
+        st.isProgrammatic = true;
+        input.value = st.history[st.index];
+        st.lastValue = input.value;
+        // 触发 input 事件
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return;
+    }
+  });
+}
+
+function resetInputUndoState(input, initialValue) {
+  if (!input) return;
+  const val = initialValue !== undefined ? initialValue : (input.value || '');
+  inputUndoStacks.set(input, {
+    history: [val],
+    index: 0,
+    lastValue: val,
+    isProgrammatic: false
+  });
+}
+
 // ====== 盘符剩余空间更新机制 ======
 // 规则：
 // - 只在 webview 可见时轮询（6秒间隔）
@@ -546,6 +678,75 @@ const DISK_FREE_WARNING_COLOR = 'rgb(248, 48, 0)';
 let diskFreeTimer = null;
 let lastDiskFreeSnapshot = ''; // 上次答卷的 JSON 序列化，用于比较
 let diskFreeInFlight = false;
+
+// ====== 精细 SCM 系统 ======
+// 当前文件夹的精细 SCM 设置（从后端传来）
+let currentFineSCM = { szMode: null, sortBy: null };
+
+function updateFineSCMButtons() {
+  // 更新左侧 szMode 按钮
+  const szModeGroup = document.getElementById('szModeGroup');
+  if (szModeGroup) {
+    szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
+      const mode = btn.dataset.mode;
+      if (currentFineSCM.szMode === mode) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  // 更新右侧 sortBy 按钮
+  const sortByGroup = document.getElementById('sortByGroup');
+  if (sortByGroup) {
+    sortByGroup.querySelectorAll('.scm-btn').forEach(btn => {
+      const sort = btn.dataset.sort;
+      if (currentFineSCM.sortBy === sort) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+}
+
+function handleSzModeClick(mode) {
+  // 如果已经选中，再次点击 = 取消
+  const newMode = (currentFineSCM.szMode === mode) ? null : mode;
+  currentFineSCM.szMode = newMode;
+  updateFineSCMButtons();
+  // 发送给后端保存并刷新
+  vscode.postMessage({
+    command: 'setFineSCM',
+    path: currentPath,
+    szMode: newMode,
+    sortBy: currentFineSCM.sortBy
+  });
+}
+
+function handleSortByClick(sort) {
+  // 如果已经选中，再次点击 = 取消
+  const newSort = (currentFineSCM.sortBy === sort) ? null : sort;
+  currentFineSCM.sortBy = newSort;
+  updateFineSCMButtons();
+  // 发送给后端保存并刷新
+  vscode.postMessage({
+    command: 'setFineSCM',
+    path: currentPath,
+    szMode: currentFineSCM.szMode,
+    sortBy: newSort
+  });
+}
+
+function handleOpenFolderClick() {
+  // 在默认资源管理器中打开当前文件夹
+  vscode.postMessage({
+    command: 'openWithDefault',
+    path: currentPath,
+    type: 'folder'
+  });
+}
 
 function ensurePathTooltip(){
   if (pathTooltipEl) return;
@@ -920,6 +1121,10 @@ function startRename(itemPath, itemName, itemType){
   nameArea.appendChild(input);
   input.focus();
 
+  // ★ 初始化逐字撤销/重做功能
+  initInputUndoRedo(input);
+  resetInputUndoState(input, itemName);
+
   const dotIndex = itemName.lastIndexOf('.');
   if (dotIndex > 0) input.setSelectionRange(0, dotIndex);
   else input.select();
@@ -1134,6 +1339,13 @@ window.addEventListener('message', event => {
       // 更新当前模式
       currentSizeMode = newSizeMode;
       currentPath = message.currentPath || '';
+
+      // ★ 更新精细 SCM 状态
+      currentFineSCM = {
+        szMode: message.fineSCM?.szMode || null,
+        sortBy: message.fineSCM?.sortBy || null
+      };
+      updateFineSCMButtons();
 
       const addr = document.getElementById('addressInput');
       if (addr) {
@@ -1404,6 +1616,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const filenameInput = document.getElementById('filenameInput');
   if (filenameInput) {
     filenameInput.focus();
+    // ★ 初始化逐字撤销/重做功能
+    initInputUndoRedo(filenameInput);
     filenameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') saveFile();
     });
@@ -1411,12 +1625,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const addressInput = document.getElementById('addressInput');
   if (addressInput) {
+    // ★ 初始化逐字撤销/重做功能
+    initInputUndoRedo(addressInput);
     addressInput.addEventListener('input', (e) => updateAddressDisplay(e.target.value));
     addressInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         const p = (addressInput.value || '').trim();
         if (p) vscode.postMessage({ command: 'navigate', path: p });
       }
+    });
+  }
+
+  // ★ 精细 SCM 按钮事件监听
+  const szModeGroup = document.getElementById('szModeGroup');
+  if (szModeGroup) {
+    szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSzModeClick(btn.dataset.mode);
+      });
+    });
+  }
+
+  const sortByGroup = document.getElementById('sortByGroup');
+  if (sortByGroup) {
+    sortByGroup.querySelectorAll('.scm-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSortByClick(btn.dataset.sort);
+      });
+    });
+  }
+
+  const openFolderBtn = document.getElementById('openFolderBtn');
+  if (openFolderBtn) {
+    openFolderBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenFolderClick();
     });
   }
 
@@ -2054,8 +2302,13 @@ function showSaveAsDialog() {
       }
 
       const config = getConfig();
-      const szDisplayMode = config.szDisplayMode;
-      const directoryContents = await getDirectoryContents(currentPath, config.sortBy, szDisplayMode);
+
+      // ★ 精细 SCM 优先级高于全局设置
+      const fineSCM = getFineSCM(currentPath);
+      const szDisplayMode = fineSCM.szMode || config.szDisplayMode;
+      const sortBy = fineSCM.sortBy || config.sortBy;
+
+      const directoryContents = await getDirectoryContents(currentPath, sortBy, szDisplayMode);
       const items = [];
       let fileListHtml = "";
 
@@ -2121,7 +2374,8 @@ function showSaveAsDialog() {
         currentPath,
         fileListHtml,
         items,
-        sizeMode: config.szDisplayMode,
+        sizeMode: szDisplayMode,
+        fineSCM: fineSCM,
       });
 
       // ★ 智能文件监视器：只在用户开启 autoWatchChanges 时启用
@@ -2666,6 +2920,17 @@ function showSaveAsDialog() {
         // ★★★ Q2 粘贴功能：完全移植自 Q1，基于事务、带进度条、可取消 ★★★
         await performQ2Paste(message.destDir, refreshWebview);
         break;
+
+      case "setFineSCM": {
+        // ★ 保存精细 SCM 并立即刷新
+        const folderPath = message.path;
+        const szMode = message.szMode;
+        const sortByValue = message.sortBy;
+        setFineSCMValue(folderPath, szMode, sortByValue);
+        // 立即刷新界面
+        if (activePanel && activePanelAlive) refreshWebview();
+        break;
+      }
 
       case "showAutoCloseMessage": {
         // ★ 9秒自动关闭的弹窗
