@@ -608,38 +608,142 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
     except Exception:
         return None
 # =============================================================================
-#  文件夹统计
+#  文件夹统计（拆分：get_folder_info = 完整信息；get_path_size = 只求尺寸）
+#  - 极限 IO：os.scandir + DirEntry 缓存 + 显式栈（无递归深度风险）
+#  - 行为对齐原实现：不进入符号链接目录；符号链接文件按目标大小计（Path.stat 默认跟随）
 # =============================================================================
 
-
 def get_folder_info(folder_path: str):
+    """完整信息版：total_size + file_count_root + ext_stats（极限优化）"""
     if not folder_path or not isinstance(folder_path, str):
         return {"success": False, "error": "empty path"}
-    if not os.path.exists(folder_path) or not os.path.isdir(folder_path):
+    if not os.path.isdir(folder_path):
         return {"success": False, "error": "path not a directory"}
+
     total_size = 0
     file_count = 0
     ext_counts = {}
+
     try:
-        for root, _, files in os.walk(folder_path):
-            for f in files:
-                try:
-                    p = Path(root) / f
-                    s = p.stat().st_size
-                    total_size += s
-                    file_count += 1
-                    ext = p.suffix.lower().replace(".", "") or "no_ext"
-                    ext_counts[ext] = ext_counts.get(ext, 0) + 1
-                except:
-                    pass
+        stack = [folder_path]
+        scandir = os.scandir
+        ext_get = ext_counts.get
+
+        while stack:
+            d = stack.pop()
+            try:
+                with scandir(d) as it:
+                    for e in it:
+                        try:
+                            # 不跟随链接目录（对齐 os.walk(followlinks=False)）
+                            if e.is_dir(follow_symlinks=False):
+                                stack.append(e.path)
+                                continue
+
+                            # 若是链接且指向目录：不进入也不统计（对齐 os.walk 行为）
+                            if e.is_symlink():
+                                try:
+                                    if e.is_dir(follow_symlinks=True):
+                                        continue
+                                except OSError:
+                                    continue
+
+                            # 文件（或链接文件）：按目标大小计（对齐 Path.stat 默认行为）
+                            try:
+                                st = e.stat(follow_symlinks=True)
+                            except OSError:
+                                continue
+
+                            total_size += st.st_size
+                            file_count += 1
+
+                            # 扣后缀名：与 Path.suffix 的关键边界对齐（.gitignore -> no_ext）
+                            n = e.name
+                            i = n.rfind(".")
+                            if 0 < i < (len(n) - 1):
+                                ext = n[i + 1 :].lower()
+                            else:
+                                ext = "no_ext"
+
+                            ext_counts[ext] = ext_get(ext, 0) + 1
+
+                        except OSError:
+                            continue
+                        except Exception:
+                            continue
+            except OSError:
+                continue
+            except Exception:
+                continue
+
     except Exception as e:
         return {"success": False, "error": str(e)}
+
     return {
         "success": True,
         "total_size": total_size,
         "file_count_root": file_count,
         "ext_stats": ext_counts
     }
+
+
+def get_path_size(path: str):
+    """只获取单文件或目录递归总大小（极限优化，不统计后缀名）"""
+    if not path or not isinstance(path, str):
+        return {"success": False, "error": "empty path"}
+
+    try:
+        # 文件：直接 stat（跟随链接，与原 Path.stat 默认一致）
+        if os.path.isfile(path):
+            try:
+                return {"success": True, "total_size": os.stat(path, follow_symlinks=True).st_size}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        # 目录：递归累加
+        if not os.path.isdir(path):
+            return {"success": False, "error": "path not a file or directory"}
+
+        total_size = 0
+        stack = [path]
+        scandir = os.scandir
+
+        while stack:
+            d = stack.pop()
+            try:
+                with scandir(d) as it:
+                    for e in it:
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                stack.append(e.path)
+                                continue
+
+                            if e.is_symlink():
+                                try:
+                                    if e.is_dir(follow_symlinks=True):
+                                        continue
+                                except OSError:
+                                    continue
+
+                            try:
+                                st = e.stat(follow_symlinks=True)
+                            except OSError:
+                                continue
+                            total_size += st.st_size
+
+                        except OSError:
+                            continue
+                        except Exception:
+                            continue
+            except OSError:
+                continue
+            except Exception:
+                continue
+
+        return {"success": True, "total_size": total_size}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 # =============================================================================
 #  Windows clipboard handlers
 # =============================================================================
@@ -1244,6 +1348,10 @@ def _dispatch_action(cmd):
         return out
     if action in ("folder_info", "get_folder_info"):
         out.update(get_folder_info(cmd.get("path", "")))
+        return out
+    if action == "path_size":
+        # 极限优化版：只获取文件/目录大小，不统计后缀名
+        out.update(get_path_size(cmd.get("path", "")))
         return out
     if action == "extract_icon":
         path = cmd.get("path")

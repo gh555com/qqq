@@ -467,6 +467,67 @@ fn python_like_ext_lower(path: &Path) -> String {
     ext
 }
 
+/// 只获取单文件或目录递归总大小（极限优化，不统计后缀名）
+fn get_path_size(path: &str) -> PyV {
+    if path.is_empty() {
+        return PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("empty path".to_string())),
+        ]);
+    }
+
+    let p = PathBuf::from(path);
+
+    // 文件：直接 stat
+    if p.is_file() {
+        match fs::metadata(&p) {
+            Ok(meta) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(true)),
+                    ("total_size".to_string(), py_num_u64(meta.len())),
+                ]);
+            }
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(e.to_string())),
+                ]);
+            }
+        }
+    }
+
+    // 目录：递归累加（不统计 ext_stats）
+    if !p.exists() || !p.is_dir() {
+        return PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("path not a file or directory".to_string())),
+        ]);
+    }
+
+    let mut total_size: u64 = 0;
+
+    for entry in WalkDir::new(&p).follow_links(false) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let sp = entry.path();
+        let meta = match fs::metadata(sp) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        total_size = total_size.saturating_add(meta.len());
+    }
+
+    PyV::Obj(vec![
+        ("success".to_string(), PyV::Bool(true)),
+        ("total_size".to_string(), py_num_u64(total_size)),
+    ])
+}
+
 fn get_folder_info(folder_path: &str) -> PyV {
     if folder_path.is_empty() {
         return PyV::Obj(vec![
@@ -1212,6 +1273,14 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         "folder_info" | "get_folder_info" => {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = get_folder_info(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "path_size" => {
+            // 极限优化版：只获取文件/目录大小，不统计后缀名
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = get_path_size(path) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
