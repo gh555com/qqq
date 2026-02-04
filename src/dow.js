@@ -2901,6 +2901,7 @@ sys.exit(0 if ok else 1)
             const cp = require('child_process');
 
             const platform = os.platform();
+            const arch = os.arch();
             const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
             const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.tmp");
             const binName = platform === "win32" ? "python.exe" : "bin/python3";
@@ -2910,17 +2911,59 @@ sys.exit(0 if ok else 1)
                 recursive: true
             });
 
+            // 平台和架构检测，生成对应的下载 URL
             let officialUrl, mirrorUrl;
+            const releaseDate = '20230507';
+            const pyVersion = '3.8.10';
+
             if (platform === 'win32') {
-                officialUrl = 'https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
-                mirrorUrl = 'https://mirrors.aliyun.com/python/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip';
+                // Windows: 支持 x64, x86 (ia32), arm64
+                if (arch === 'x64') {
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                } else if (arch === 'ia32') {
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
+                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
+                } else if (arch === 'arm64') {
+                    // 注：Python 3.8.10 官方没有 Windows ARM64 原生构建，使用 x86_64 版本通过模拟运行
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                } else {
+                    // 未知架构，默认使用 x64
+                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                }
             } else if (platform === 'darwin') {
-                officialUrl = 'https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
-                mirrorUrl = 'https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-apple-darwin-install_only.tar.gz';
+                // macOS: 支持 x64 (x86_64) 和 arm64 (Apple Silicon)
+                if (arch === 'arm64') {
+                    // Apple Silicon (M1/M2/M3)
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-apple-darwin-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-apple-darwin-install_only.tar.gz`;
+                } else {
+                    // Intel x86_64 或未知架构
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-apple-darwin-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-apple-darwin-install_only.tar.gz`;
+                }
             } else {
-                officialUrl = 'https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-unknown-linux-gnu-install_only.tar.gz';
-                mirrorUrl = 'https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/20230507/cpython-3.8.10+20230507-x86_64-unknown-linux-gnu-install_only.tar.gz';
+                // Linux: 支持 x64 (x86_64), arm64 (aarch64), armv7l
+                if (arch === 'x64') {
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
+                } else if (arch === 'arm64') {
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-unknown-linux-gnu-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-unknown-linux-gnu-install_only.tar.gz`;
+                } else if (arch === 'arm') {
+                    // ARMv7 32位（如树莓派）
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-armv7-unknown-linux-gnueabihf-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-armv7-unknown-linux-gnueabihf-install_only.tar.gz`;
+                } else {
+                    // 未知架构，默认使用 x86_64
+                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
+                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
+                }
             }
+
+            global.logMessage(`Python 自动安装: 检测到平台 ${platform}, 架构 ${arch}, 下载 URL: ${officialUrl}`, "INFO");
 
             const downloadFile = (url, targetPath, timeoutMs = 30000) => {
                 return new Promise((resolve, reject) => {
