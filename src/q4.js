@@ -21,6 +21,7 @@ const global = require('./global');
 
 // ★ 终极最优解：全局实例追踪，用于生命周期强杀
 let _currentHistoryManager = null;
+let _currentSidebarProvider = null;  // ★ 新增：跟踪当前侧边栏实例
 const zlib = require('zlib');
 const { performance } = require('perf_hooks');
 
@@ -997,6 +998,16 @@ class ClipboardHistorySidebarProvider {
             loopCount: 0,
             startTime: 0
         };
+    }
+
+    /**
+     * ★ 重置音频源状态（当 Python 环境"从无到有"时调用）
+     * 下次播放时会重新探测 Python 引擎
+     */
+    resetAudioSource() {
+        this._audioSource = AUDIO_SOURCE.DETECTING;
+        this._pythonAudioFailed = false;
+        this._global.logMessage(`[Q4] 音频源状态已重置`, "INFO");
     }
 
     resolveWebviewView(webviewView) {
@@ -2582,6 +2593,7 @@ function activate(context) {
 
     // 修复实例化：传入 context, historyManager 和 global 模块
     sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager, global);
+    _currentSidebarProvider = sidebarProvider;  // ★ 记录当前实例
 
     const sidebarDisposable = vscode.window.registerWebviewViewProvider(
         'qqq.Viewq',
@@ -2650,9 +2662,20 @@ async function deactivate() {
 // ============================================================================
 // 导出
 // ============================================================================
+
+/**
+ * ★ 重置 Q4 的音频源状态（当 Python 环境"从无到有"时调用）
+ */
+function resetQ4AudioSource() {
+    if (_currentSidebarProvider && typeof _currentSidebarProvider.resetAudioSource === 'function') {
+        _currentSidebarProvider.resetAudioSource();
+    }
+}
+
 module.exports = {
     activate,
     deactivate,
     ClipboardHistoryManager,
     ClipboardHistorySidebarProvider,
+    resetQ4AudioSource,  // ★ 导出重置函数
 };

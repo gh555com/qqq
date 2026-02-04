@@ -1041,6 +1041,15 @@ let _pythonAudioChecked = false;
 let _pythonAudioAvailable = false;
 let _pythonAudioError = null;
 
+/**
+ * ★ 重置 Python 音频引擎缓存（当 Python 环境"从无到有"时调用）
+ */
+function resetPythonAudioCache() {
+	_pythonAudioChecked = false;
+	_pythonAudioAvailable = false;
+	_pythonAudioError = null;
+}
+
 async function checkPythonAudioEngine() {
 	if (_pythonAudioChecked) {
 		return _pythonAudioAvailable;
@@ -1653,10 +1662,26 @@ async function activate(context) {
 								// ★ 核心设计：三个引擎启动时已全部启动，切换只需更新状态栏
 								global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
 
-								// 如果手动切换到 Python 引擎，触发非后台的就绪检查（可能触发下载进度条）
+								// ★ 如果手动切换到 Python 引擎，检查 L1 不完美缓存
 								if (val === "python") {
 									const { getSharedDownloader } = require('./dow');
-									getSharedDownloader().ensurePythonReady(context, { silent: true }).catch(() => { });
+									const downloader = getSharedDownloader();
+									const status = downloader.python.getL1ImperfectStatus();
+
+									if (status.imperfect) {
+										// ★ 已知不完美，提示用户并触发后台尝试
+										const reasonMsg = {
+											'no_interpreter': 'Python 解释器未安装',
+											'interpreter_invalid': 'Python 解释器不可用',
+											'deps_missing': `缺少依赖: ${status.missing.join(', ')}`,
+											'no_context': '环境未就绪'
+										}[status.reason] || status.reason;
+
+										global.logMessage(`[IO引擎] Python 环境不完美: ${reasonMsg}，将回退到其他引擎`, "WARN");
+									}
+
+									// 触发后台就绪检查（可能触发下载）
+									downloader.ensurePythonReady(context, { silent: true }).catch(() => { });
 								}
 
 								updateStatusBarThrottled();
@@ -1852,6 +1877,9 @@ const exported = {
 	getActiveEngineCode: global.getActiveEngineCode,
 	getActiveEngineName: global.getActiveEngineName,
 	updateStatusBarNow,
+
+	// ★ Python 环境变化时调用
+	resetPythonAudioCache,
 };
 
 Object.assign(module.exports, exported);

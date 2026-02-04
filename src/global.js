@@ -435,11 +435,72 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			const { getSharedDownloader } = require("./dow");
 			const downloader = getSharedDownloader();
 
-			// 闭环检测与下载逻辑：
-			// 1. 优先检查自维护目录 2. 检查系统环境 3. 都没有则后台静默下载 3.8.10
-			const pythonPath = await downloader.ensurePythonReady(extensionContext, {
-				background: true
+			// ★ 注册 "从无到有" 回调：下载完成后热启动 daemon
+			downloader.python.onPythonReady(async (pythonPath, context) => {
+				logMessage(`[Python] "从无到有" 回调触发，尝试热启动 daemon: ${pythonPath}`, "INFO");
+
+				// ★ 环境已完美，刷新引擎缓存
+				invalidateEngineCache();
+
+				// ★ 重置 Python 音频引擎缓存（很重要！）
+				try {
+					const qqq = require('./qqq');
+					if (qqq.resetPythonAudioCache) {
+						qqq.resetPythonAudioCache();
+						logMessage(`[Python] 已重置 qqq 音频引擎缓存`, "INFO");
+					}
+				} catch (e) {
+					logMessage(`[Python] 重置 qqq 音频引擎缓存失败: ${e.message}`, "WARN");
+				}
+
+				// ★ 重置 Q4 音频源状态
+				try {
+					const q4 = require('./q4');
+					if (q4.resetQ4AudioSource) {
+						q4.resetQ4AudioSource();
+						logMessage(`[Python] 已重置 Q4 音频源状态`, "INFO");
+					}
+				} catch (e) {
+					logMessage(`[Python] 重置 Q4 音频源状态失败: ${e.message}`, "WARN");
+				}
+
+				// 检查是否已经有可用的 daemon
+				if (bridge.available) {
+					logMessage(`[Python] daemon 已可用，跳过热启动`, "INFO");
+					return;
+				}
+
+				// 热启动 daemon
+				const ok = await spawnWith(pythonPath);
+				if (ok) {
+					logMessage(`[Python] 热启动成功: ${pythonPath}`, "INFO");
+
+					// ★ 热启动成功后再次刷新引擎缓存
+					invalidateEngineCache();
+
+					// ★ 根据 IO 引擎偏好决定是待命还是主力
+					try {
+						const vscode = require('vscode');
+						const config = vscode.workspace.getConfiguration('qqq');
+						const ioEngine = config.get('ioEngine', 'auto');
+
+						if (ioEngine === 'auto' || ioEngine === 'python') {
+							logMessage(`[Python] IO 引擎偏好为 ${ioEngine}，daemon 作为主力`, "INFO");
+						} else {
+							logMessage(`[Python] IO 引擎偏好为 ${ioEngine}，daemon 待命`, "INFO");
+						}
+					} catch (e) {
+						logMessage(`[Python] 读取 IO 引擎偏好失败: ${e.message}`, "WARN");
+					}
+				} else {
+					logMessage(`[Python] 热启动失败`, "WARN");
+				}
 			});
+
+			// ★ 新架构：只检查 L1 完美性
+			// 如果 L1 完美，直接启动 daemon
+			// 如果 L1 不完美，返回 null，等待 20 秒后下载完成后通过回调热启动
+			const pythonPath = await downloader.ensurePythonReady(extensionContext);
 
 			if (pythonPath) {
 				const ok = await spawnWith(pythonPath);
@@ -450,11 +511,20 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				}
 			}
 
-			// ★ 关键：确保设置兜底错误
-			if (!bridge.lastStartError) {
-				bridge._setStartError("python_not_found_or_invalid");
+			// L1 不完美或启动失败，等待后台下载完成后热启动
+			if (!pythonPath) {
+				logMessage(`[Python] L1 不完美，等待后台下载完成后热启动`, "INFO");
+				// 不设置错误，因为可能会通过回调热启动
+				bridge.available = false;
+				resolve(false);
+				return;
 			}
-			logMessage(`Python Bridge 启动失败，无法找到可用的解释器：${bridge.lastStartError}`, "WARN");
+
+			// 启动失败
+			if (!bridge.lastStartError) {
+				bridge._setStartError("python_spawn_failed");
+			}
+			logMessage(`Python Bridge 启动失败：${bridge.lastStartError}`, "WARN");
 			bridge.available = false;
 			resolve(false);
 		})().catch((e) => {
@@ -2783,8 +2853,8 @@ function getEffectiveEngineOrder() {
 		_cachedPref = pref;
 	}
 
-	// 已有缓存且有效
-	if (_cachedEffectiveOrder && _cachedEffectiveOrder.length > 0) {
+	// ★ 已有缓存（包括空数组），直接返回
+	if (_cachedEffectiveOrder !== null) {
 		return _cachedEffectiveOrder;
 	}
 
@@ -2792,8 +2862,25 @@ function getEffectiveEngineOrder() {
 	const fullOrder = getEngineTryOrder(pref);
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
 
+	// ★ 获取 Python L1 不完美状态
+	let pythonL1Imperfect = false;
+	try {
+		const { getSharedDownloader } = require("./dow");
+		const downloader = getSharedDownloader();
+		if (downloader && downloader.python) {
+			const status = downloader.python.getL1ImperfectStatus();
+			pythonL1Imperfect = status.imperfect;
+		}
+	} catch { }
+
 	_cachedEffectiveOrder = fullOrder.filter(name => {
 		if (name === "spawn") return false; // spawn 由调用方单独处理
+
+		// ★ 如果 Python L1 已知不完美，跳过 Python
+		if (name === "python" && pythonL1Imperfect) {
+			return false;
+		}
+
 		const bridge = bridges[name];
 		return bridge && bridge.isAvailable();
 	});
@@ -2864,51 +2951,21 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 	return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
 }
 
-// ★ 已记录不可用状态的引擎（避免重复打印日志）
-const _loggedUnavailableEngines = new Set();
-
 async function tryOneByOne(callback) {
-	// ★★★ 优化：使用缓存的有效引擎顺序，避免每次都检查不可用引擎 ★★★
+	// ★ 简化版：直接使用缓存的有效引擎顺序
 	const effectiveOrder = getEffectiveEngineOrder();
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
 
-	// ★ 快速路径：有缓存的有效引擎，直接遍历
-	if (effectiveOrder.length > 0) {
-		for (const name of effectiveOrder) {
-			const bridge = bridges[name];
-			try {
-				const res = await callback(bridge, name);
-				if (res) return res;
-			} catch (e) {
-				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
-			}
-		}
-		return null;
-	}
-
-	// ★ 慢速路径：没有缓存时，走完整逻辑（并更新缓存）
-	const pref = getEnginePreference();
-	const fullOrder = getEngineTryOrder(pref);
-
-	for (const name of fullOrder) {
-		if (name === "spawn") continue;
+	for (const name of effectiveOrder) {
 		const bridge = bridges[name];
-		if (bridge && bridge.isAvailable()) {
-			_loggedUnavailableEngines.delete(name);
-			try {
-				const res = await callback(bridge, name);
-				if (res) return res;
-			} catch (e) {
-				logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
-			}
-		} else if (bridge) {
-			if (!_loggedUnavailableEngines.has(name)) {
-				const reason = bridge.lastStartError || bridge.lastCrashReason || "not_started";
-				logMessage(`Engine ${name} is unavailable (${reason}), skipping...`, "DEBUG");
-				_loggedUnavailableEngines.add(name);
-			}
+		try {
+			const res = await callback(bridge, name);
+			if (res) return res;
+		} catch (e) {
+			logMessage(`Engine ${name} execution error: ${e.message}`, "WARN");
 		}
 	}
+
 	return null;
 }
 
@@ -3299,6 +3356,7 @@ module.exports = {
 	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,
+	invalidateEngineCache,  // ★ 刷新引擎缓存
 	extensionPath: () => extensionContext?.extensionPath,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,

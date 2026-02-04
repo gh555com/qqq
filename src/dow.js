@@ -2428,6 +2428,41 @@ class PythonEngineDownloader {
         this.pythonPath = options.pythonPath || null;
         this._installInProgress = false;
         this._installTimer = null;
+        // ★ "从无到有" 回调：当 Python 环境从无到有时触发
+        this._onPythonReady = null;
+        // ★ L1 "已知不完美" 状态缓存
+        this._l1KnownImperfect = false;
+        this._l1ImperfectReason = null;
+        this._l1ImperfectMissing = [];
+    }
+
+    /**
+     * 注册 "从无到有" 回调
+     * @param {Function} callback - 当 Python 环境从无到有时调用
+     */
+    onPythonReady(callback) {
+        this._onPythonReady = callback;
+    }
+
+    /**
+     * ★ 查询 L1 是否已知不完美
+     * @returns {Object} - { imperfect: boolean, reason: string|null, missing: string[] }
+     */
+    getL1ImperfectStatus() {
+        return {
+            imperfect: this._l1KnownImperfect,
+            reason: this._l1ImperfectReason,
+            missing: this._l1ImperfectMissing
+        };
+    }
+
+    /**
+     * ★ 清除 L1 不完美缓存（当环境变化时调用）
+     */
+    clearL1ImperfectCache() {
+        this._l1KnownImperfect = false;
+        this._l1ImperfectReason = null;
+        this._l1ImperfectMissing = [];
     }
 
     /**
@@ -2435,7 +2470,7 @@ class PythonEngineDownloader {
      */
     _readState(context) {
         try {
-            const ts = context.globalState.get('pythonDepsInstallTimestamp', 0);
+            const ts = context.globalState.get('pythonInstallTimestamp', 0);
             return { installTimestamp: ts };
         } catch (e) { }
         return { installTimestamp: 0 };
@@ -2446,7 +2481,7 @@ class PythonEngineDownloader {
      */
     _saveState(context, state) {
         try {
-            context.globalState.update('pythonDepsInstallTimestamp', state.installTimestamp);
+            context.globalState.update('pythonInstallTimestamp', state.installTimestamp);
         } catch (e) { }
     }
 
@@ -2461,26 +2496,68 @@ class PythonEngineDownloader {
     }
 
     /**
+     * 检查冷却期剩余时间
+     */
+    _getCooldownStatus(context) {
+        const COOLDOWN_MS = 259200000; // 72 小时
+        const state = this._readState(context);
+        const now = Date.now();
+        const elapsed = now - state.installTimestamp;
+        const remainingMs = Math.max(0, COOLDOWN_MS - elapsed);
+
+        return {
+            inCooldown: remainingMs > 0,
+            remainingHours: Math.floor(remainingMs / 3600000),
+            remainingMinutes: Math.floor((remainingMs % 3600000) / 60000),
+            remainingMs
+        };
+    }
+
+    /**
      * 依赖名到导入名的映射
      */
     _getImportName(dep) {
         const importMap = {
             'Pillow': 'PIL',
-            'pywin32': 'win32api'  // pywin32 通过 win32api 检测
+            'pywin32': 'win32api'
         };
         return importMap[dep] || dep;
     }
 
     /**
-     * 快速检测：Python 是否已有指定依赖
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要检测的依赖列表
-     * @returns {Object} - { hasAll: boolean, missing: string[], detail: { dep: boolean } }
+     * 获取锁定版本的依赖列表
+     * ★ 版本锁定：pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22
      */
-    async checkDeps(pythonBin, deps = ['miniaudio', 'Pillow']) {
-        const { spawnSync } = require("child_process");
+    _getLockedDeps() {
+        const baseDeps = [
+            'miniaudio==1.61',
+            'Pillow==10.4.0',
+            'cffi==1.16.0',
+            'pycparser==2.22'
+        ];
+        // Windows 专属依赖：pywin32==311（不跑 postinstall）
+        return process.platform === 'win32'
+            ? [...baseDeps, 'pywin32==311']
+            : baseDeps;
+    }
 
-        // 构建检测脚本
+    /**
+     * 获取依赖检测列表（不带版本号）
+     */
+    _getDepsForCheck() {
+        const baseDeps = ['miniaudio', 'Pillow'];
+        return process.platform === 'win32'
+            ? [...baseDeps, 'pywin32']
+            : baseDeps;
+    }
+
+    /**
+     * 快速检测依赖是否存在
+     */
+    async checkDeps(pythonBin) {
+        const { spawnSync } = require("child_process");
+        const deps = this._getDepsForCheck();
+
         const checkScript = deps.map(dep => {
             const importName = this._getImportName(dep);
             return `
@@ -2507,169 +2584,24 @@ sys.exit(0)
             const stdout = r.stdout || '';
             const detail = {};
             const missing = [];
-            const errors = {};
 
-            // 解析输出
             for (const dep of deps) {
                 const pattern = new RegExp(`${dep}:(\\d+)`);
                 const match = stdout.match(pattern);
                 const hasDep = match && match[1] === '1';
                 detail[dep] = hasDep;
-                if (!hasDep) {
-                    missing.push(dep);
-                    errors[dep] = '检测失败';
-                }
+                if (!hasDep) missing.push(dep);
             }
 
-            return {
-                hasAll: missing.length === 0,
-                missing,
-                detail,
-                errors
-            };
+            return { hasAll: missing.length === 0, missing, detail };
         } catch (e) {
-            return { hasAll: false, missing: deps, detail: {}, errors: { all: e.message } };
+            return { hasAll: false, missing: deps, detail: {}, error: e.message };
         }
     }
 
     /**
-     * 异步安装依赖（后台执行）
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要安装的依赖列表
-     * @param {Object} context - VS Code 扩展上下文
+     * 检查 Python 解释器是否可用（简化版，不检查版本范围）
      */
-    async _installDepsAsync(pythonBin, deps, context) {
-        if (this._installInProgress) {
-            return { success: false, error: '安装已在进行中' };
-        }
-
-        this._installInProgress = true;
-        const global = require('./global');
-        const cp = require('child_process');
-        const path = require('path');
-        const fs = require('fs');
-
-        try {
-            const isInternal = pythonBin.includes('python_engine');
-            const engineDir = isInternal ? path.dirname(pythonBin) : null;
-
-            // 确定目标路径
-            let targetPath = null;
-            if (isInternal && engineDir) {
-                targetPath = path.join(engineDir, 'site-packages');
-                if (!fs.existsSync(targetPath)) {
-                    fs.mkdirSync(targetPath, { recursive: true });
-                }
-            }
-
-            // 构建 pip install 命令
-            const pkgs = deps.join(' ');
-            let cmd;
-            let installEnv;
-            let installDomain = isInternal ? '插件内置环境' : '用户全局环境';
-
-            if (isInternal && targetPath) {
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --target="${targetPath}"`;
-                installEnv = { ...process.env, PYTHONNOUSERSITE: '1' };
-            } else {
-                // 系统Python，先尝试直接安装（不使用--user）
-                cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --index-url https://mirrors.aliyun.com/pypi/simple/`;
-                installEnv = process.env;
-            }
-
-            global.logMessage(`[PythonCheck] 开始安装依赖: ${deps.join(', ')}`, 'INFO');
-
-            // 记录开始时间
-            const startTime = Date.now();
-
-            try {
-                // 执行安装
-                cp.execSync(cmd, {
-                    windowsHide: true,
-                    timeout: 180000, // 3 分钟超时
-                    env: installEnv
-                });
-            } catch (e) {
-                // 如果直接安装失败，回退到 --user 安装
-                if (!isInternal) {
-                    global.logMessage(`[PythonCheck] 直接安装失败，回退到 --user 安装: ${e.message}`, 'WARN');
-                    cmd = `"${pythonBin}" -m pip install ${pkgs} --quiet --user --index-url https://mirrors.aliyun.com/pypi/simple/`;
-                    installEnv = process.env;
-                    installDomain = '用户全局环境（回退）';
-                    cp.execSync(cmd, {
-                        windowsHide: true,
-                        timeout: 180000, // 3 分钟超时
-                        env: installEnv
-                    });
-                } else {
-                    throw e;
-                }
-            }
-
-            // 计算安装耗时
-            const endTime = Date.now();
-            const duration = (endTime - startTime) / 1000;
-
-            // 确定最终安装目录
-            let finalInstallDir = targetPath;
-            if (!finalInstallDir) {
-                // 对于用户环境，获取 site-packages 目录
-                try {
-                    const getSitePackagesCmd = `"${pythonBin}" -c "import site; print(site.getusersitepackages())"`;
-                    const sitePackagesOutput = cp.execSync(getSitePackagesCmd, {
-                        encoding: 'utf8',
-                        windowsHide: true
-                    }).trim();
-                    finalInstallDir = sitePackagesOutput;
-                } catch {
-                    finalInstallDir = '用户环境（自动）';
-                }
-            }
-
-            global.logMessage(`[PythonCheck] 依赖安装成功: ${deps.join(', ')}`, "INFO");
-            global.logMessage(`[PythonCheck] 安装详情: 目录=${finalInstallDir}, 环境域=${installDomain}, 耗时=${duration.toFixed(2)}秒`, "INFO");
-
-            // ★ 无论成功失败，都记录安装时间（用于 72 小时冷却）
-            this._saveState(context, { installTimestamp: Date.now() });
-
-            return { success: true, installed: deps };
-        } catch (e) {
-            global.logMessage(`[PythonCheck] 依赖安装失败: ${e.message}`, 'ERROR');
-            // ★ 失败也要记录时间，防止频繁重试
-            this._saveState(context, { installTimestamp: Date.now() });
-            return { success: false, error: e.message };
-        } finally {
-            this._installInProgress = false;
-        }
-    }
-
-    /**
-     * 安排后台安装（在 20 秒后执行）
-     * @param {string} pythonBin - Python 路径
-     * @param {string[]} deps - 要安装的依赖列表
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    scheduleInstall(pythonBin, deps, context) {
-        // 清除之前的定时器
-        if (this._installTimer) {
-            clearTimeout(this._installTimer);
-        }
-
-        // 20 秒后执行安装
-        this._installTimer = setTimeout(async () => {
-            const global = require('./global');
-            global.logMessage(`[PythonCheck] 触发后台依赖安装检查`, 'INFO');
-
-            // 再次检查是否已在冷却期内
-            if (this._isInCooldown(context)) {
-                global.logMessage(`[PythonCheck] 在 72 小时冷却期内，跳过安装`, 'INFO');
-                return;
-            }
-
-            await this._installDepsAsync(pythonBin, deps, context);
-        }, 20000); // 20 秒延迟
-    }
-
     async isAvailable(pythonBin = null) {
         const bin = pythonBin || this.pythonPath;
         if (!bin) return false;
@@ -2679,27 +2611,17 @@ sys.exit(0)
             if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
 
             const { spawnSync } = require("child_process");
-
-            // 快速版本检测
-            const checkScript = `
-import sys
-v = sys.version_info
-ok = (3, 7) <= v < (3, 13)
-msg = f'PYTHON_READY|EXE:{sys.executable}' if ok else f'VERSION_OUT_OF_RANGE:{v.major}.{v.minor}'
-sys.stdout.write(msg)
-sys.exit(0 if ok else 1)
-`.trim();
+            const checkScript = `import sys; sys.stdout.write(f'PYTHON_READY|EXE:{sys.executable}')`;
 
             const r = spawnSync(bin, ["-c", checkScript], {
                 encoding: 'utf8',
                 windowsHide: true,
-                timeout: 20000,
+                timeout: 10000,
                 cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
             });
 
             if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
-                const stdout = r.stdout || "";
-                const exeMatch = stdout.match(/EXE:([^|]+)/);
+                const exeMatch = (r.stdout || "").match(/EXE:([^|]+)/);
                 if (exeMatch) this._resolvedPath = exeMatch[1];
                 return true;
             }
@@ -2710,186 +2632,52 @@ sys.exit(0 if ok else 1)
     }
 
     /**
-     * 仅快速检测依赖是否存在（不安装）
-     * @param {string} pythonBin - Python 路径
-     * @returns {Object} - { missing: string[], allReady: boolean }
+     * ★ L1 完美性检查：解释器存在 + 依赖完整才算完美
+     * @returns {Object} - { perfect: boolean, pythonPath: string|null, missing: string[] }
      */
-    async quickCheckDeps(pythonBin) {
-        // 基础依赖：跨平台
-        const baseDeps = ['miniaudio', 'Pillow'];
-        // Windows 专属依赖：pywin32 (剩下粘贴、剪贴板操作的保底方案)
-        const deps = process.platform === 'win32'
-            ? [...baseDeps, 'pywin32']
-            : baseDeps;
-        return await this.checkDeps(pythonBin, deps);
-    }
-
-    /**
-     * 检查冷却期剩余时间
-     * @param {Object} context - VS Code 扩展上下文
-     * @returns {Object} - { inCooldown: boolean, remainingHours: number, remainingMinutes: number, remainingMs: number }
-     */
-    _getCooldownStatus(context) {
-        const COOLDOWN_MS = 259200000; // 72 小时
-        const state = this._readState(context);
-        const now = Date.now();
-        const elapsed = now - state.installTimestamp;
-        const remainingMs = Math.max(0, COOLDOWN_MS - elapsed);
-
-        return {
-            inCooldown: remainingMs > 0,
-            remainingHours: Math.floor(remainingMs / 3600000),
-            remainingMinutes: Math.floor((remainingMs % 3600000) / 60000),
-            remainingMs
-        };
-    }
-
-    /**
-     * 准备依赖（分离启动和安装）
-     * 此方法仅快速检测，不阻塞启动
-     * @param {string} pythonBin - Python 路径
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    async prepareDependencies(pythonBin, context) {
-        // 快速检测依赖状态
-        const checkResult = await this.quickCheckDeps(pythonBin);
-
-        // 检查Python Bridge是否已经成功启动
-        let bridgeAvailable = false;
-        let audioDetected = false;
-        try {
-            const global = require('./global');
-            bridgeAvailable = global.pythonBridge?.available === true;
-            // 检查是否有音频检测成功的记录
-            audioDetected = global.pythonAudioDetected === true;
-        } catch { }
-
-        // 如果Python Bridge已经可用或音频已检测成功，说明依赖实际上是存在的
-        if (bridgeAvailable || audioDetected) {
-            // 覆盖检测结果，认为所有依赖都已存在
-            const allDeps = process.platform === 'win32' ? ['miniaudio', 'Pillow', 'pywin32'] : ['miniaudio', 'Pillow'];
-            const overrideDetail = {};
-            allDeps.forEach(dep => {
-                overrideDetail[dep] = true;
-            });
-
-            return {
-                status: 'ready',
-                missing: [],
-                detail: overrideDetail,
-                errors: {}
-            };
-        }
-
-        if (checkResult.hasAll) {
-            // 所有依赖都已存在
-            return { status: 'ready', missing: [], detail: checkResult.detail };
-        }
-
-        // 有缺失的依赖
-        // 检查是否在冷却期内
-        const cooldownStatus = this._getCooldownStatus(context);
-        if (cooldownStatus.inCooldown) {
-            // ★ 冷却期内直接跳过，什么都不做
-            return {
-                status: 'cooldown',
-                missing: checkResult.missing,
-                detail: checkResult.detail,
-                errors: checkResult.errors,
-                cooldown: cooldownStatus
-            };
-        }
-
-        // ★ 冷却期外：安排 20 秒后后台安装一次
-        this.scheduleInstall(pythonBin, checkResult.missing, context);
-        return {
-            status: 'scheduled',
-            missing: checkResult.missing,
-            detail: checkResult.detail,
-            errors: checkResult.errors
-        };
-    }
-
-    /**
-     * 强制安装依赖（立即执行，不受冷却期限制）
-     * @param {string} pythonBin - Python 路径
-     * @param {Object} context - VS Code 扩展上下文
-     */
-    async forceInstallDeps(pythonBin, context) {
-        const checkResult = await this.quickCheckDeps(pythonBin);
-        if (checkResult.hasAll) {
-            return { success: true, message: '依赖已存在' };
-        }
-        return await this._installDepsAsync(pythonBin, checkResult.missing, context);
-    }
-
-    async trySetFromGlobalStorage(context) {
+    async checkL1Perfect(context) {
         const path = require('path');
         const fs = require('fs');
+
+        // ★ 辅助函数：记录不完美状态
+        const markImperfect = (reason, missing = []) => {
+            this._l1KnownImperfect = true;
+            this._l1ImperfectReason = reason;
+            this._l1ImperfectMissing = missing;
+        };
+
+        if (!context || !context.globalStorageUri) {
+            markImperfect('no_context');
+            return { perfect: false, pythonPath: null, missing: [], reason: 'no_context' };
+        }
+
         const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
         const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
-        const ownPath = path.join(installDir, binName);
-        if (fs.existsSync(ownPath)) {
-            if (await this.isAvailable(ownPath)) {
-                this.pythonPath = ownPath;
-                return true;
-            }
-        }
-        return false;
-    }
+        const pythonPath = path.join(installDir, binName);
 
-    /**
-     * 记录依赖检测结果的综合日志
-     * @param {Object} prepResult - 依赖准备结果
-     * @param {Object} context - VS Code 扩展上下文（用于获取冷却期状态）
-     */
-    _logDependencyResult(prepResult, context) {
-        const global = require('./global');
-        const detail = prepResult.detail || {};
-        const errors = prepResult.errors || {};
-        const successDeps = Object.entries(detail).filter(([_, has]) => has).map(([dep]) => dep);
-        const failedDeps = Object.entries(detail).filter(([_, has]) => !has).map(([dep]) => dep);
-
-        let logMessage = `[PythonCheck] `;
-
-        // 添加成功的依赖信息
-        if (successDeps.length > 0) {
-            logMessage += `${successDeps.join(', ')} 检测成功`;
-            if (failedDeps.length > 0) {
-                logMessage += `, `;
-            }
+        // 1. 检查解释器是否存在
+        if (!fs.existsSync(pythonPath)) {
+            markImperfect('no_interpreter');
+            return { perfect: false, pythonPath: null, missing: [], reason: 'no_interpreter' };
         }
 
-        // 添加失败的依赖信息
-        if (failedDeps.length > 0) {
-            logMessage += `缺失: ${failedDeps.join(', ')}`;
-            // 添加失败原因
-            const errorMessages = failedDeps.map(dep => {
-                const error = errors[dep] || '未知错误';
-                return `${dep}: ${error}`;
-            });
-            if (errorMessages.length > 0) {
-                logMessage += ` (原因: ${errorMessages.join(', ')})`;
-            }
+        // 2. 检查解释器是否可用
+        if (!await this.isAvailable(pythonPath)) {
+            markImperfect('interpreter_invalid');
+            return { perfect: false, pythonPath, missing: [], reason: 'interpreter_invalid' };
         }
 
-        // 总是添加冷却期信息
-        let cooldownStatus = null;
-        if (prepResult.cooldown) {
-            cooldownStatus = prepResult.cooldown;
-        } else if (context) {
-            // 如果没有冷却期信息，尝试获取
-            cooldownStatus = this._getCooldownStatus(context);
+        // 3. 检查依赖是否完整
+        const depsResult = await this.checkDeps(pythonPath);
+        if (!depsResult.hasAll) {
+            markImperfect('deps_missing', depsResult.missing);
+            return { perfect: false, pythonPath, missing: depsResult.missing, reason: 'deps_missing' };
         }
 
-        if (cooldownStatus && cooldownStatus.inCooldown) {
-            const { remainingHours, remainingMinutes } = cooldownStatus;
-            logMessage += `, 冷却期剩余: ${remainingHours}小时${remainingMinutes}分钟`;
-        } else {
-            logMessage += `, 不在冷却期`;
-        }
-
-        global.logMessage(logMessage, "INFO");
+        // 完美！清除不完美缓存
+        this.clearL1ImperfectCache();
+        this.pythonPath = pythonPath;
+        return { perfect: true, pythonPath, missing: [], reason: 'ok' };
     }
 
     async autoInstall(context) {
@@ -3063,14 +2851,50 @@ sys.exit(0 if ok else 1)
 
             if (await this.isAvailable(installPath)) {
                 this.pythonPath = installPath;
-                // ★ 分离：快速检测依赖，不阻塞启动
-                const prepResult = await this.prepareDependencies(installPath, context);
-                // 记录综合日志
-                this._logDependencyResult(prepResult, context);
-                return {
-                    success: true,
-                    path: installPath
-                };
+
+                // ★ 合并逻辑：下载完成后立即安装依赖（版本锁定）
+                const sitePackagesDir = path.join(installDir, 'site-packages');
+                if (!fs.existsSync(sitePackagesDir)) {
+                    fs.mkdirSync(sitePackagesDir, { recursive: true });
+                }
+
+                const lockedDeps = this._getLockedDeps();
+                global.logMessage(`[PythonCheck] 开始安装锁定版本依赖: ${lockedDeps.join(', ')}`, 'INFO');
+
+                try {
+                    const startTime = Date.now();
+                    // ★ 版本锁定安装，不跑 pywin32_postinstall
+                    const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
+                    cp.execSync(pipCmd, {
+                        windowsHide: true,
+                        timeout: 300000, // 5 分钟超时
+                        env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                    });
+
+                    const duration = (Date.now() - startTime) / 1000;
+                    global.logMessage(`[PythonCheck] 依赖安装成功, 耗时=${duration.toFixed(2)}秒`, 'INFO');
+
+                    // 记录安装时间（用于 72 小时冷却）
+                    this._saveState(context, { installTimestamp: Date.now() });
+
+                    // ★ 清除不完美缓存，环境已完美
+                    this.clearL1ImperfectCache();
+
+                    return {
+                        success: true,
+                        path: installPath,
+                        fromScratch: true  // ★ 标记"从无到有"
+                    };
+                } catch (depErr) {
+                    global.logMessage(`[PythonCheck] 依赖安装失败: ${depErr.message}`, 'ERROR');
+                    // 即使依赖安装失败，Python 本身已安装成功，记录时间防止频繁重试
+                    this._saveState(context, { installTimestamp: Date.now() });
+                    return {
+                        success: false,
+                        path: installPath,
+                        error: `Python 已安装但依赖安装失败: ${depErr.message}`
+                    };
+                }
             }
             return {
                 success: false,
@@ -3241,106 +3065,88 @@ class UnifiedMediaDownloader {
     }
 
     async ensurePythonReady(context, options = {}) {
-        const {
-            background = false,
-            silent = false
-        } = options;
-
-        const path = require('path');
-        const fs = require('fs');
         const global = require('./global');
 
-        // ★ 新架构：快速检测 → 立即启动 → 后台异步安装（20秒后）
+        // ★ 新架构：只信任 L1 (插件自维护目录) 和 L4 (下载安装)
+        // ★ 彻底去除 L2 (VS Code 配置) 和 L3 (系统 PATH)
 
-        // 1. Level 1: 仅检查插件自维护目录 (gh555.qqq/python_engine)，不执行下载
-        if (context && await this.python.trySetFromGlobalStorage(context)) {
-            const finalPath = this.python._resolvedPath || this.python.pythonPath;
+        // 1. L1 完美性检查：解释器存在 + 依赖完整才算完美
+        const l1Result = await this.python.checkL1Perfect(context);
+
+        if (l1Result.perfect) {
+            // L1 完美！直接返回，可以启动 daemon
+            const finalPath = this.python._resolvedPath || l1Result.pythonPath;
             if (this._lastLoggedPython !== finalPath) {
-                global.logMessage(`[PythonCheck] Level 1 命中: 使用插件内置引擎 ${finalPath}`, "INFO");
+                global.logMessage(`[PythonCheck] L1 完美命中: ${finalPath}`, "INFO");
                 this._lastLoggedPython = finalPath;
             }
-            // ★ 分离：快速检测依赖，不阻塞启动
-            const prepResult = await this.python.prepareDependencies(this.python.pythonPath, context);
-            // 记录综合日志
-            this.python._logDependencyResult(prepResult, context);
-            return this.python.pythonPath;
+            return l1Result.pythonPath;
         }
 
-        // 2. Level 2: 检查 VS Code 设置中的 Python 路径
-        try {
-            const config = vscode.workspace.getConfiguration('python');
-            const settingPath = config.get('defaultInterpreterPath') || config.get('pythonPath');
-            if (settingPath && await this.python.isAvailable(settingPath)) {
-                this.python.pythonPath = settingPath;
-                const finalPath = this.python._resolvedPath || settingPath;
-                if (this._lastLoggedPython !== finalPath) {
-                    global.logMessage(`[PythonCheck] Level 2 命中: 使用 VS Code 配置路径 ${finalPath}`, "INFO");
-                    this._lastLoggedPython = finalPath;
-                }
-                // ★ 分离：快速检测依赖，不阻塞启动
-                const prepResult = await this.python.prepareDependencies(settingPath, context);
-                // 记录综合日志
-                this.python._logDependencyResult(prepResult, context);
-                return settingPath;
-            }
-        } catch (e) { }
+        // L1 不完美，记录原因
+        global.logMessage(`[PythonCheck] L1 不完美: ${l1Result.reason}${l1Result.missing.length > 0 ? `, 缺失: ${l1Result.missing.join(', ')}` : ''}`, "INFO");
 
-        // 3. Level 3: 检查系统环境中的解释器 (PATH)
-        const envBins = process.platform === "win32" ? ["python"] : ["python3", "python"];
-        for (const bin of envBins) {
-            if (await this.python.isAvailable(bin)) {
-                this.python.pythonPath = bin;
-                const finalPath = this.python._resolvedPath || bin;
-                if (this._lastLoggedPython !== finalPath) {
-                    global.logMessage(`[PythonCheck] Level 3 命中: 使用系统环境变量路径 ${finalPath}`, "INFO");
-                    this._lastLoggedPython = finalPath;
-                }
-                // ★ 分离：快速检测依赖，不阻塞启动
-                const prepResult = await this.python.prepareDependencies(bin, context);
-                // 记录综合日志
-                this.python._logDependencyResult(prepResult, context);
-                return bin;
-            }
+        // 2. 检查 72 小时冷却期
+        const cooldownStatus = this.python._getCooldownStatus(context);
+        if (cooldownStatus.inCooldown) {
+            global.logMessage(`[PythonCheck] 在 72 小时冷却期内 (剩余 ${cooldownStatus.remainingHours}h${cooldownStatus.remainingMinutes}m)，跳过下载`, "INFO");
+            // 冷却期内不启动 daemon，返回 null
+            return null;
         }
 
-        // 4. Level 4: 兜底，前三项全灭，启动闭环下载/安装逻辑
+        // 3. L4 触发：等待 20 秒后后台静默下载
         if (this._pyInstallPromise) return this._pyInstallPromise;
 
-        this._pyInstallPromise = (async () => {
-            try {
-                const downloadAction = async (progress) => {
-                    if (progress) progress.report({ message: "正在自举安装 Python 引擎 (3.8.10)...", increment: 10 });
+        global.logMessage(`[PythonCheck] L1 不完美且不在冷却期，20 秒后触发 L4 下载流程`, "INFO");
+
+        this._pyInstallPromise = new Promise((resolve) => {
+            // ★ 20 秒延迟，错开启动高峰
+            setTimeout(async () => {
+                try {
+                    global.logMessage(`[PythonCheck] 开始 L4 下载安装流程...`, "INFO");
+
+                    // 再次检查冷却期（防止 20 秒内多次触发）
+                    if (this.python._isInCooldown(context)) {
+                        global.logMessage(`[PythonCheck] 已进入冷却期，跳过下载`, "INFO");
+                        resolve(null);
+                        return;
+                    }
+
+                    // 执行下载安装（百分百静默，无 UI）
                     const res = await this.python.autoInstall(context);
+
                     if (res.success) {
                         const finalPath = this.python._resolvedPath || res.path;
-                        global.logMessage(`[PythonCheck] Level 4 命中: 下载安装成功 ${finalPath}`, "INFO");
+                        global.logMessage(`[PythonCheck] L4 下载安装成功: ${finalPath}`, "INFO");
                         this._lastLoggedPython = finalPath;
-                        // ★ 分离：快速检测依赖，不阻塞启动
-                        const prepResult = await this.python.prepareDependencies(res.path, context);
-                        // 记录综合日志
-                        this.python._logDependencyResult(prepResult, context);
-                        return res.path;
+
+                        // ★ "从无到有" 回调：热启动 daemon
+                        if (res.fromScratch && this.python._onPythonReady) {
+                            global.logMessage(`[PythonCheck] 触发 "从无到有" 回调，热启动 daemon...`, "INFO");
+                            try {
+                                await this.python._onPythonReady(res.path, context);
+                            } catch (cbErr) {
+                                global.logMessage(`[PythonCheck] "从无到有" 回调失败: ${cbErr.message}`, "WARN");
+                            }
+                        }
+
+                        resolve(res.path);
                     } else {
-                        global.logMessage(`[PythonCheck] Level 4 失败: ${res.error}`, "ERROR");
-                        return null;
+                        global.logMessage(`[PythonCheck] L4 失败: ${res.error}`, "ERROR");
+                        resolve(null);
                     }
-                };
-
-                if (background) {
-                    return await downloadAction(null);
-                } else {
-                    return await vscode.window.withProgress({
-                        location: vscode.ProgressLocation.Notification,
-                        title: "qqq: ",
-                        cancellable: false
-                    }, downloadAction);
+                } catch (e) {
+                    global.logMessage(`[PythonCheck] L4 异常: ${e.message}`, "ERROR");
+                    resolve(null);
+                } finally {
+                    this._pyInstallPromise = null;
                 }
-            } finally {
-                this._pyInstallPromise = null;
-            }
-        })();
+            }, 20000); // ★ 20 秒延迟
+        });
 
-        return this._pyInstallPromise;
+        // 立即返回 null，不阻塞启动
+        // 下载完成后会通过回调热启动 daemon
+        return null;
     }
 
     destroy() {
