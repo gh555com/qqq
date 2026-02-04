@@ -1583,7 +1583,9 @@ async function activate(context) {
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
 				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
 				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" },
-				{ label: "删除 Python 环境", description: "用于修复 Python IO 引擎 ", id: "deletePythonEngine" }
+				{ label: "删除 Python 环境", description: "用于修复 Python IO 引擎 ", id: "deletePythonEngine" },
+				{ label: "清理 globalStates 数据库", description: "清空并丢失：1、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆；2、已缓存滴用于 “事物回滚和文件去重” 滴关键信息。", id: "clearGlobalStates" },
+				{ label: "清空剪切板历史记录", description: "永久清除所有剪切板历史", id: "clearClipboardHistory" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
@@ -1665,6 +1667,44 @@ async function activate(context) {
 					}
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 删除 Python 环境失败: ${e.message}`);
+				}
+			} else if (selected.id === "clearGlobalStates") {
+				// 清理 globalStates 数据库（保留状态区信息）
+				try {
+					// 状态区 keys（不清除）：用户使用时长、缓存命中、前摇
+					const preserveKeys = new Set([
+						'qqq_stats_total_seconds',    // 用户使用时长
+						'qqq_stats_cache_hit_total',  // 缓存命中
+						'qqq_stats_cache_miss_total', // 缓存未命中
+						'qqq_wq_stats'                // 前摇时间统计
+					]);
+
+					const allKeys = context.globalState.keys();
+					let clearedCount = 0;
+
+					for (const key of allKeys) {
+						if (!preserveKeys.has(key)) {
+							await context.globalState.update(key, undefined);
+							clearedCount++;
+						}
+					}
+
+					vscode.window.showInformationMessage(`qqq: 已清理 ${clearedCount} 条数据，状态区信息已保留`);
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 清理 globalStates 失败: ${e.message}`);
+				}
+			} else if (selected.id === "clearClipboardHistory") {
+				// 清空剪切板历史记录
+				try {
+					const historyManager = global.clipboardHistoryManager;
+					if (historyManager && typeof historyManager.clearHistory === 'function') {
+						await historyManager.clearHistory({ deleteFiles: true });
+						vscode.window.showInformationMessage("qqq: 剪切板历史记录已清空");
+					} else {
+						vscode.window.showErrorMessage("qqq: 剪切板历史管理器未初始化");
+					}
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 清空剪切板历史失败: ${e.message}`);
 				}
 			}
 		})),
