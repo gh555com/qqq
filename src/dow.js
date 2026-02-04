@@ -2490,9 +2490,15 @@ class PythonEngineDownloader {
      */
     _readState(context) {
         try {
-            const ts = context.globalState.get('pythonInstallTimestamp', 0);
-            return { installTimestamp: ts };
-        } catch (e) { }
+            // ★ 先读主 key，如果为 0 则读备份 key
+            let ts = context.globalState.get('pythonInstallTimestamp', 0);
+            if (!ts) {
+                ts = context.globalState.get('python_cooldown_ts', 0);
+            }
+            return { installTimestamp: ts || 0 };
+        } catch (e) {
+            console.error('[PythonCheck] _readState error:', e.message);
+        }
         return { installTimestamp: 0 };
     }
 
@@ -2501,8 +2507,14 @@ class PythonEngineDownloader {
      */
     _saveState(context, state) {
         try {
+            // ★ 关键：globalState.update 是异步的，但这里不需要等待
+            // 因为 VS Code 会在内部队列处理，只要调用就会生效
             context.globalState.update('pythonInstallTimestamp', state.installTimestamp);
-        } catch (e) { }
+            // ★ 同时写入一个备份 key，确保写入成功
+            context.globalState.update('python_cooldown_ts', state.installTimestamp);
+        } catch (e) {
+            console.error('[PythonCheck] _saveState error:', e.message);
+        }
     }
 
     /**
@@ -2729,20 +2741,21 @@ sys.exit(0)
 
             if (platform === 'win32') {
                 // Windows: 支持 x64, x86 (ia32), arm64
+                // ★ 使用淘宝 NPM 镜像（国内快）作为主要源
                 if (arch === 'x64') {
                     officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
                 } else if (arch === 'ia32') {
                     officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
-                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
                 } else if (arch === 'arm64') {
                     // 注：Python 3.8.10 官方没有 Windows ARM64 原生构建，使用 x86_64 版本通过模拟运行
                     officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
                 } else {
                     // 未知架构，默认使用 x64
                     officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://mirrors.aliyun.com/python/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
+                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
                 }
             } else if (platform === 'darwin') {
                 // macOS: 支持 x64 (x86_64) 和 arm64 (Apple Silicon)
@@ -2819,14 +2832,14 @@ sys.exit(0)
             };
 
             // 下载：级联下载策略（一个接一个尝试，直到成功）
-            // Windows: 阿里云镜像优先（国内快），再试官方源
+            // Windows: 淘宝NPM镜像优先（国内快），再试官方源
             // macOS/Linux: 官方源 → ghproxy → mirror.ghproxy
             const downloadUrls = [];
 
             if (platform === 'win32') {
-                // Windows: 先阿里镜像，再官方源
+                // Windows: 先淘宝NPM镜像，再官方源
                 downloadUrls.push(
-                    { url: mirrorUrl, timeout: 30000, name: '阿里云镜像' },
+                    { url: mirrorUrl, timeout: 30000, name: '淘宝NPM镜像' },
                     { url: officialUrl, timeout: 30000, name: '官方源' }
                 );
             } else {

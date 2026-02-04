@@ -1548,7 +1548,6 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         }
         "folder_info" | "get_folder_info" => {
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            // TODO: 当改成多线程 daemon 时，传入实际的 cancel_version
             if let PyV::Obj(extra) = get_folder_info(path, None) {
                 out_pairs.extend(extra);
             }
@@ -1557,7 +1556,6 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         "path_size" => {
             // 极限优化版：只获取文件/目录大小，不统计后缀名
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            // TODO: 当改成多线程 daemon 时，传入实际的 cancel_version
             if let PyV::Obj(extra) = get_path_size(path, None) {
                 out_pairs.extend(extra);
             }
@@ -1582,18 +1580,34 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
 }
 
 fn daemon_mode() {
-    // Python debug: log startup
-    eprintln!("Daemon started. PID={}", process::id());
+    eprintln!("Daemon started (multi-threaded). PID={}", process::id());
+
+    // 结果输出通道
+    let (result_tx, result_rx) = mpsc::channel::<(String, bool)>();
+
+    // stdout 写入线程
+    let writer_handle = thread::spawn(move || {
+        let mut stdout = BufWriter::new(io::stdout());
+        for (line, should_exit) in result_rx {
+            let _ = stdout.write_all(line.as_bytes());
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
+            if should_exit {
+                process::exit(0);
+            }
+        }
+    });
+
+    // 慢操作列表
+    let slow_actions = ["path_size", "folder_info", "get_folder_info"];
 
     let stdin = io::stdin();
     let mut reader = stdin.lock();
-    let mut stdout = io::stdout();
 
     loop {
         let mut line_bytes: Vec<u8> = Vec::new();
         match reader.read_until(b'\n', &mut line_bytes) {
             Ok(0) => {
-                // EOF
                 eprintln!("Daemon stdin EOF. Exiting.");
                 process::exit(0);
             }
@@ -1606,40 +1620,105 @@ fn daemon_mode() {
         }
 
         let line = decode_utf8_ignore(&line_bytes);
-        let line = line.trim();
+        let line = line.trim().to_string();
         if line.is_empty() {
             continue;
         }
 
-        // Trace received command (optional, can be noisy)
-        // eprintln!("Received: {}", line);
-
-        let parsed: Result<Value, _> = serde_json::from_str(line);
-
-        let (res, exit_now, exit_ascii_false) = match parsed {
-            Ok(cmd) => dispatch_action(&cmd),
+        let parsed: Result<Value, _> = serde_json::from_str(&line);
+        let cmd_v = match parsed {
+            Ok(v) => v,
             Err(e) => {
                 eprintln!("JSON parse error: {} | line: {}", e, line);
                 let out = PyV::Obj(vec![
                     ("_id".to_string(), py_num_u64(0)),
                     ("error".to_string(), PyV::Str(e.to_string())),
                 ]);
-                (out, false, false)
+                let s = dumps_py(&out, true);
+                let _ = result_tx.send((s, false));
+                continue;
             }
         };
 
-        // Python: normal ensure_ascii=True; exit ensure_ascii=False
-        let ensure_ascii = !exit_ascii_false;
-        let s = dumps_py(&res, ensure_ascii);
+        // 获取 action
+        let action_s = cmd_v.as_object()
+            .and_then(|o| o.get("action").or_else(|| o.get("cmd")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-        let _ = stdout.write_all(s.as_bytes());
-        let _ = stdout.write_all(b"\n");
-        let _ = stdout.flush();
-
-        if exit_now {
-            eprintln!("Daemon exit requested.");
-            process::exit(0);
+        if slow_actions.contains(&action_s) {
+            // 慢操作：提交到线程池
+            let cancel_ver = get_scan_cancel_version();
+            let tx = result_tx.clone();
+            IO_POOL.execute(move || {
+                let (res, _, exit_ascii_false) = dispatch_action_with_cancel(&cmd_v, Some(cancel_ver));
+                let ensure_ascii = !exit_ascii_false;
+                let s = dumps_py(&res, ensure_ascii);
+                let _ = tx.send((s, false));
+            });
+        } else {
+            // 快速操作（包括 cancel_scans）：直接在主线程执行
+            let (res, exit_now, exit_ascii_false) = dispatch_action(&cmd_v);
+            let ensure_ascii = !exit_ascii_false;
+            let s = dumps_py(&res, ensure_ascii);
+            let _ = result_tx.send((s, exit_now));
         }
+    }
+
+    #[allow(unreachable_code)]
+    drop(writer_handle);
+}
+
+/// 用于多线程 daemon：带取消版本的 dispatch
+fn dispatch_action_with_cancel(cmd_v: &Value, cancel_version: Option<u64>) -> (PyV, bool, bool) {
+    let cmd = match cmd_v.as_object() {
+        Some(o) => o,
+        None => {
+            let out = PyV::Obj(vec![
+                ("_id".to_string(), py_num_u64(0)),
+                ("error".to_string(), PyV::Str("cmd is not an object".to_string())),
+            ]);
+            return (out, false, false);
+        }
+    };
+
+    let request_id = pick_request_id(cmd);
+    let mut out_pairs: Vec<(String, PyV)> = vec![("_id".to_string(), request_id)];
+
+    let a1 = cmd.get("action");
+    let a2 = cmd.get("cmd");
+
+    let action_v: Option<&Value> = if let Some(v) = a1 {
+        if is_truthy(v) { Some(v) } else { None }
+    } else {
+        None
+    }
+    .or_else(|| {
+        if let Some(v) = a2 {
+            if is_truthy(v) { Some(v) } else { None }
+        } else {
+            None
+        }
+    });
+
+    let action_s = action_v.and_then(|v| v.as_str()).unwrap_or("");
+
+    match action_s {
+        "folder_info" | "get_folder_info" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = get_folder_info(path, cancel_version) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "path_size" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = get_path_size(path, cancel_version) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        _ => dispatch_action(cmd_v)
     }
 }
 

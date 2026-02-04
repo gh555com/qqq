@@ -34,6 +34,34 @@ const CACHE_MAX_SIZE = 40 * 1048576;
 const CACHE_TARGET_SIZE = 28 * 1048576;
 const PASTE_SIZE_THRESHOLD = 80 * 1048576;
 
+// =============================================================================
+//  扫描取消机制（Node 引擎）
+// =============================================================================
+let _scanCancelVersion = 0;
+
+/**
+ * 递增取消版本号，使所有正在进行的扫描失效
+ */
+function cancelScansJS() {
+	_scanCancelVersion++;
+	global.logMessage(`[CancelScans] JS version bumped to ${_scanCancelVersion}`, "DEBUG");
+	return _scanCancelVersion;
+}
+
+/**
+ * 获取当前取消版本号
+ */
+function getScanCancelVersion() {
+	return _scanCancelVersion;
+}
+
+/**
+ * 检查扫描是否已被取消
+ */
+function isScanCancelled(myVersion) {
+	return _scanCancelVersion !== myVersion;
+}
+
 // Keep ffmpeg loading in qqq as it was
 let extensionContext = null;
 let cacheDir = null;
@@ -918,10 +946,12 @@ async function getPathSize(targetPath) {
 }
 
 /**
- * JS 回退实现：只获取大小（简化版本，不统计后缀名）
+ * JS 回退实现：只获取大小（简化版本，支持取消）
  */
-async function getPathSizeJS(targetPath, startTime = null) {
+async function getPathSizeJS(targetPath, startTime = null, cancelVersion = null) {
 	if (!startTime) startTime = Date.now();
+	if (cancelVersion === null) cancelVersion = getScanCancelVersion();
+
 	if (!fs.existsSync(targetPath)) return { success: false, error: "not_found" };
 
 	try {
@@ -934,13 +964,22 @@ async function getPathSizeJS(targetPath, startTime = null) {
 	}
 
 	let totalSize = 0;
+	let checkCount = 0;
 	const queue = [targetPath];
 
 	while (queue.length > 0) {
+		// 每 100 个目录检查一次取消（Node 比 Rust/Python 慢，所以用更小的间隔）
+		if (++checkCount % 100 === 0) {
+			if (isScanCancelled(cancelVersion)) {
+				global.logMessage(`[PathSize] ${targetPath}: cancelled after ${checkCount} dirs`, "DEBUG");
+				return { success: false, cancelled: true };
+			}
+		}
+
 		const currentDir = queue.shift();
 		try {
 			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
-			await Promise.all(entries.map(async (entry) => {
+			for (const entry of entries) {
 				const fullPath = path.join(currentDir, entry.name);
 				if (entry.isDirectory()) {
 					queue.push(fullPath);
@@ -950,7 +989,7 @@ async function getPathSizeJS(targetPath, startTime = null) {
 						totalSize += st.size;
 					} catch { }
 				}
-			}));
+			}
 		} catch { }
 	}
 
@@ -1920,6 +1959,7 @@ const exported = {
 	getFolderInfo,
 	getPathSize,  // 极限优化版：只获取大小，不统计后缀名
 	getDiskFree,  // 获取磁盘剩余空间
+	cancelScansJS,  // 取消正在进行的 JS 扫描
 
 	// Delegate to h.js
 	getTimestampFilename: h.getTimestampFilename,

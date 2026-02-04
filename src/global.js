@@ -299,6 +299,13 @@ class DaemonBridge extends EventEmitter {
 		});
 	}
 
+	/**
+	 * 检查 daemon 进程是否存活
+	 */
+	isAlive() {
+		return !!(this.process && !this.process.killed && this.available === true);
+	}
+
 	isAvailable() {
 		return this.available === true;
 	}
