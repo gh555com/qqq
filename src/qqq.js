@@ -960,6 +960,73 @@ async function getPathSizeJS(targetPath, startTime = null) {
 	return { success: true, total_size: totalSize };
 }
 
+/**
+ * 获取磁盘剩余空间
+ * @param {string} drive - 盘符，如 "C:" 或 "C:\\"
+ * @returns {Promise<{success: boolean, free?: number, total?: number, error?: string}>}
+ */
+async function getDiskFree(drive = "C:") {
+	const res = await tryEngineCall({
+		python: "disk_free",
+		rust: "disk_free"
+	}, { drive: drive }, 2000);
+
+	if (res && res.success) {
+		return res;
+	}
+
+	// JS 回退：使用 Node.js 的 fs.statfs（Node 18.15+）或 child_process
+	return getDiskFreeJS(drive);
+}
+
+/**
+ * JS 回退：获取磁盘剩余空间
+ */
+async function getDiskFreeJS(drive = "C:") {
+	try {
+		// 确保盘符格式正确
+		let d = drive.toUpperCase().replace(/[^A-Z]/g, "") || "C";
+		const drivePath = d + ":\\";
+
+		// Node 18.15+ 有 fs.statfs
+		if (fs.statfs) {
+			return new Promise((resolve) => {
+				fs.statfs(drivePath, (err, stats) => {
+					if (err) {
+						resolve({ success: false, error: err.message });
+					} else {
+						const free = stats.bavail * stats.bsize;
+						const total = stats.blocks * stats.bsize;
+						resolve({ success: true, free, total, used: total - free });
+					}
+				});
+			});
+		}
+
+		// 回退：wmic 命令
+		const cp = require("child_process");
+		return new Promise((resolve) => {
+			cp.execFile("wmic", ["logicaldisk", "where", `DeviceID='${d}:'`, "get", "FreeSpace", "/value"],
+				{ windowsHide: true, timeout: 2000 },
+				(err, stdout) => {
+					if (err) {
+						resolve({ success: false, error: err.message });
+						return;
+					}
+					const match = stdout.match(/FreeSpace\s*=\s*(\d+)/i);
+					if (match) {
+						resolve({ success: true, free: parseInt(match[1], 10) });
+					} else {
+						resolve({ success: false, error: "parse_failed" });
+					}
+				}
+			);
+		});
+	} catch (e) {
+		return { success: false, error: e.message };
+	}
+}
+
 
 function shouldShowDuration(info) {
 	return info && (info.type === "video" || info.type === "animated_image") && info.duration > 0.1;
@@ -1747,6 +1814,7 @@ const exported = {
 
 	getFolderInfo,
 	getPathSize,  // 极限优化版：只获取大小，不统计后缀名
+	getDiskFree,  // 获取磁盘剩余空间
 
 	// Delegate to h.js
 	getTimestampFilename: h.getTimestampFilename,

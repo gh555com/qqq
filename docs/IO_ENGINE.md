@@ -13,7 +13,7 @@
 
 Conclusion: Rust > Python > N(D): Node Daemon (1st-level Fallback) > N(S): Node Spawn (2nd-level Fallback)
 
-This document evaluates and scores each engine across **13 dimensions** on a scale of 1-10 (10 being the best), providing insights into their respective use cases.
+This document evaluates and scores each engine across **14 dimensions** on a scale of 1-10 (10 being the best), providing insights into their respective use cases.
 
 Especially for the **Rust engine**: the **official gh555.com release** must be **version 16.0.0 or later** to support the Rust engine.
 
@@ -43,14 +43,15 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | 11. Dev & Maintenance Cost        | **10** |    5   |      7     |   ★☆☆  | Readability, iteration speed        |
 | 12. Cross-Platform Capability     |    7   |    8   |    **8**   |   ★☆☆  | Win/macOS/Linux coverage            |
 | 13. File Icon Extraction          |    9   |    9   |    **9**   |   ★★☆  | Multi-platform native APIs          |
+| 14. Disk Free Space Query         | **10** |    9   |      7     |   ★★☆  | Cross-platform disk usage retrieval |
 
 ### Total Scores
 
 | Engine         | Raw Total | Weighted Total | Recommended Scenarios                                     |
 | :------------- | :-------: | :------------: | :-------------------------------------------------------- |
-| **Python**     |    104    |    **98.2**    | Transparent-image clipboard, everyday advanced operations |
-| **Rust**       |    114    |   **104.8**    | Extreme performance, huge-scale bulk file operations      |
-| **Node Shell** |     87    |    **89.8**    | Zero-dependency fallback, simple text/files               |
+| **Python**     |    114    |   **108.2**    | Transparent-image clipboard, disk queries, everyday ops   |
+| **Rust**       |    123    |   **113.8**    | Extreme performance, huge-scale bulk file operations      |
+| **Node Shell** |     94    |    **96.8**    | Zero-dependency fallback, simple text/files               |
 
 > Weighting formula: ★★★ = 1.2x, ★★☆ = 1.0x, ★☆☆ = 0.8x
 
@@ -225,6 +226,23 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | Rust       |   9   | Direct Win32 API | High |
 | Node Shell |   9   | Multi-platform Native | Very High |
 
+---
+
+### 14. Disk Free Space Query
+
+| Engine     | Score | Implementation | Cross-Platform |
+| :--------- | :---: | :------------- | :------------- |
+| Python     | **10** | `shutil.disk_usage()` (stdlib) | Win/Mac/Linux, x86/x64/ARM |
+| Rust       |   9   | `statvfs` / Win32 API | Full support |
+| Node Shell |   7   | `wmic` / `df` commands | Windows best, others limited |
+
+**Technical Details:**
+- **Python**: `shutil.disk_usage()` is part of the **standard library (3.3+)**, requiring **zero extra dependencies**. Works identically across all platforms and architectures.
+- **Rust**: Uses platform-specific system calls (`GetDiskFreeSpaceExW` on Windows, `statvfs` on Unix).
+- **Node Fallback**: When Python/Rust unavailable, falls back to `fs.statfs` (Node 18.15+) or spawns `wmic`/`df` commands.
+
+**Conclusion:** Python offers the best balance of simplicity and cross-platform compatibility for disk queries.
+
 **Technical Details:**
 - **Python/Rust**: Use `SHGetFileInfo` (Windows) to retrieve exact system icons.
 - **Node Shell**: Implements a **multi-tier cross-platform strategy**:
@@ -291,7 +309,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 结论：Rust  >  Python  >  N(D)：Node Daemon（一级兜底） >  N(S)：Node Spawn（二级兜底）
 
-本文档从 **13 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
+本文档从 **14 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
 
 特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
 
@@ -321,14 +339,15 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | 11. 开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
 | 12. 跨平台能力 | 7 | 8 | **8** | ★☆☆ | Win/Mac/Linux 支持程度 |
 | 13. 文件原始图标提取 | 9 | 9 | **9** | ★★☆ | 多平台原生 API 支持 |
+| 14. 磁盘剩余空间查询 | **10** | 9 | 7 | ★★☆ | 跨平台磁盘用量获取 |
 
 ### 总分
 
 | 引擎 | 原始总分 | 加权总分 | 推荐场景 |
 |:-----|:--------:|:--------:|:---------|
-| **Python** | 104 | **98.2** | 透明图剪贴板、日常高级操作 |
-| **Rust** | 114 | **104.8** | 极致性能、超大文件批量操作 |
-| **Node Shell** | 87 | **89.8** | 零依赖兜底、简单文本/文件 |
+| **Python** | 114 | **108.2** | 透明图剪贴板、磁盘查询、日常高级操作 |
+| **Rust** | 123 | **113.8** | 极致性能、超大文件批量操作 |
+| **Node Shell** | 94 | **96.8** | 零依赖兜底、简单文本/文件 |
 
 > 加权公式：★★★=1.2x, ★★☆=1.0x, ★☆☆=0.8x
 
@@ -501,6 +520,23 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | Python | 9 | ctypes 调用 Win32 API | 高 |
 | Rust | 9 | 直接调用 Win32 API | 高 |
 | Node Shell | 9 | 多平台原生支持 | 极高 |
+
+---
+
+### 14. 磁盘剩余空间查询
+
+| 引擎 | 得分 | 实现方式 | 跨平台支持 |
+|:-----|:----:|:---------|:-----------|
+| Python | **10** | `shutil.disk_usage()` (标准库) | Win/Mac/Linux, x86/x64/ARM |
+| Rust | 9 | `statvfs` / Win32 API | 完整支持 |
+| Node Shell | 7 | `wmic` / `df` 命令 | Windows 最佳，其他受限 |
+
+**技术细节：**
+- **Python**: `shutil.disk_usage()` 是 **标准库 (3.3+)**，**零额外依赖**。在所有平台和架构上行为一致。
+- **Rust**: 使用平台特定系统调用（Windows 上 `GetDiskFreeSpaceExW`，Unix 上 `statvfs`）。
+- **Node 兜底**: 当 Python/Rust 不可用时，回退到 `fs.statfs` (Node 18.15+) 或 spawn `wmic`/`df` 命令。
+
+**结论：** Python 在磁盘查询方面提供了最佳的简洁性与跨平台兼容性平衡。
 
 **技术细节：**
 - **Python/Rust**: 使用 `SHGetFileInfo` (Windows) 获取系统注册的精确图标。

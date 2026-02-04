@@ -492,6 +492,17 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
+// ====== C 盘剩余空间更新机制 ======
+// 规则：
+// - 只在 webview 可见时轮询（6秒间隔）
+// - 只有两次请求差异 >= 11MB 才更新 UI
+// - 不用 setInterval，用“执行完再 setTimeout”
+const DISK_FREE_INTERVAL_MS = 6000;
+const DISK_FREE_THRESHOLD_BYTES = 11 * 1024 * 1024; // 11MB
+let diskFreeTimer = null;
+let lastDiskFreeSample = null;
+let diskFreeInFlight = false;
+
 function ensurePathTooltip(){
   if (pathTooltipEl) return;
   pathTooltipEl = document.createElement('div');
@@ -1078,6 +1089,20 @@ window.addEventListener('message', event => {
   } else if (message.command === 'focusInput') {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
+  } else if (message.command === 'diskFreeResult') {
+    // C 盘剩余空间更新响应
+    diskFreeInFlight = false;
+    const free = message.free;
+    if (typeof free === 'number') {
+      const needUiUpdate = (lastDiskFreeSample === null) ||
+        (Math.abs(free - lastDiskFreeSample) >= DISK_FREE_THRESHOLD_BYTES);
+      lastDiskFreeSample = free;
+      if (needUiUpdate) {
+        updateDriveCDisplay(free);
+      }
+    }
+    // 完成后安排下一轮
+    scheduleDiskFreeUpdate();
   }
 });
 
@@ -1452,6 +1477,81 @@ document.addEventListener('DOMContentLoaded', () => {
   // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
 });
 
+// ====== C 盘剩余空间更新机制函数 ======
+
+/**
+ * 更新 C 盘显示文本
+ * @param {number} freeBytes - 剩余字节数
+ */
+function updateDriveCDisplay(freeBytes) {
+  const el = document.getElementById('drive-c-text');
+  if (!el) return;
+  // 格式："C:\\  1.75"（保留两位小数，不打印单位）
+  const freeGB = freeBytes / (1024 * 1024 * 1024);
+  el.textContent = 'C:\\  ' + freeGB.toFixed(2);
+}
+
+/**
+ * 检测 webview 是否可见
+ */
+function isDiskFreePollingAllowed() {
+  // 只在页面可见时轮询
+  return document.visibilityState === 'visible';
+}
+
+/**
+ * 请求 C 盘剩余空间
+ */
+function requestDiskFree() {
+  if (diskFreeInFlight) return;
+  diskFreeInFlight = true;
+  vscode.postMessage({ command: 'getDiskFree', drive: 'C:' });
+}
+
+/**
+ * 安排下一轮 C 盘剩余空间更新
+ */
+function scheduleDiskFreeUpdate() {
+  if (diskFreeTimer) {
+    clearTimeout(diskFreeTimer);
+    diskFreeTimer = null;
+  }
+  if (!isDiskFreePollingAllowed()) return;
+  diskFreeTimer = setTimeout(() => {
+    if (isDiskFreePollingAllowed()) {
+      requestDiskFree();
+    } else {
+      scheduleDiskFreeUpdate(); // 稍后重试
+    }
+  }, DISK_FREE_INTERVAL_MS);
+}
+
+/**
+ * 停止 C 盘剩余空间轮询
+ */
+function stopDiskFreePolling() {
+  if (diskFreeTimer) {
+    clearTimeout(diskFreeTimer);
+    diskFreeTimer = null;
+  }
+}
+
+// 监听可见性变化
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    // 变为可见，立即请求一次并启动轮询
+    requestDiskFree();
+  } else {
+    // 隐藏时停止轮询
+    stopDiskFreePolling();
+  }
+});
+
+// 初始化：立即请求一次
+if (isDiskFreePollingAllowed()) {
+  requestDiskFree();
+}
+
 // ====== 导出给模板内联 onclick ======
 window.navigateTo = navigateTo;
 window.navigateIntoFolder = navigateIntoFolder;
@@ -1484,12 +1584,14 @@ function getWebviewContent(currentPath) {
   }
 
   const drivesHtml = drives
-    .map(
-      (drive) =>
-        `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(
-          drive
-        )}')">${escapeHtmlAttribute(drive)}</button>`
-    )
+    .map((drive) => {
+      // C 盘特殊处理：添加剩余空间显示区
+      const driveUpper = drive.toUpperCase();
+      if (driveUpper.startsWith("C:")) {
+        return `<button class="nav-item" id="drive-c-btn" onclick="navigateTo('${escapeJsStringLiteral(drive)}')"><span id="drive-c-text">${escapeHtmlAttribute(drive)}</span></button>`;
+      }
+      return `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(drive)}')"　>${escapeHtmlAttribute(drive)}</button>`;
+    })
     .join("");
 
   const recycleBinHtml = showRecycleBin
@@ -2021,6 +2123,25 @@ function showSaveAsDialog() {
       case "removeFromRecent":
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;
+
+      // C 盘剩余空间请求
+      case "getDiskFree": {
+        (async () => {
+          try {
+            const res = await geq().getDiskFree(message.drive || "C:");
+            if (panel && activePanelAlive && res && res.success) {
+              panel.webview.postMessage({
+                command: "diskFreeResult",
+                drive: message.drive || "C:",
+                free: res.free
+              });
+            }
+          } catch (e) {
+            geq().logMessage(`getDiskFree 失败: ${e.message}`, "WARN");
+          }
+        })();
+        break;
+      }
 
       // s 请求：点击 sz 区强制获取 size（包括文件夹递归大小）
       case "sRequest": {
