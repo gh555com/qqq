@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.59.28",
+  "version": "15.60.0",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -113,7 +113,7 @@
               "显示创建时间",
               "显示修改时间"
             ],
-            "markdownDescription": "🛸 sz 区显示内容：控制文件列表中 sz 区域显示的信息类型。"
+            "markdownDescription": "🛸 sz 区显示："
           },
           "qqq.sortBy": {
             "order": 30,
@@ -131,13 +131,13 @@
               "按创建时间排序（文件夹在上按时间倒序，文件在下按时间倒序）",
               "按修改时间排序（文件夹在上按时间倒序，文件在下按时间倒序）"
             ],
-            "markdownDescription": "🛸 文件排序依据：控制文件和文件夹的排序方式。"
+            "markdownDescription": "🛸 排序依据："
           },
           "qqq.autoWatchChanges": {
-            "order": 40,
+            "order": 25,
             "type": "boolean",
             "default": false,
-            "markdownDescription": "🛸 自动感知外部变化。勾选滴好处：当外部程序修改当前目录中滴文件时，自动更新文件列表（包括排序和 sz 区）。不勾选滴好处：0额外性能开销、0视界抖动。默认不勾选。 "
+            "description": "🛸 自动感知外部变化。\n  勾选：当外部程序修改当前目录中滴文件时，自动更新文件列表（包括 sz 区和排序）。\n 不勾选：0性能开销、0视界抖动。默认不勾选。 "
           }
         }
       },
