@@ -3007,11 +3007,36 @@ sys.exit(0 if ok else 1)
                 });
             };
 
-            // 下载
-            try {
-                await downloadFile(officialUrl, zipPath, 15000);
-            } catch {
-                await downloadFile(mirrorUrl, zipPath, 60000);
+            // 下载：级联下载策略（一个接一个尝试，直到成功）
+            // 第1层：官方源（GitHub/python.org）- 15秒超时
+            // 第2层：ghproxy.net 镜像 - 60秒超时
+            // 第3层：mirror.ghproxy.com 镜像 - 60秒超时
+            const downloadUrls = [
+                { url: officialUrl, timeout: 15000, name: '官方源' },
+                { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' },
+            ];
+
+            // 为 macOS/Linux 添加第三层镜像兜底
+            if (platform !== 'win32') {
+                const thirdMirrorUrl = officialUrl.replace('https://github.com/', 'https://mirror.ghproxy.com/https://github.com/');
+                downloadUrls.push({ url: thirdMirrorUrl, timeout: 60000, name: 'mirror.ghproxy镜像' });
+            }
+
+            let lastError = null;
+            for (const { url, timeout, name } of downloadUrls) {
+                try {
+                    global.logMessage(`尝试从 ${name} 下载...`, "INFO");
+                    await downloadFile(url, zipPath, timeout);
+                    global.logMessage(`${name} 下载成功`, "INFO");
+                    break; // 成功则跳出循环
+                } catch (e) {
+                    lastError = e;
+                    global.logMessage(`${name} 下载失败: ${e.message}`, "WARN");
+                    // 如果是最后一个 URL，则抛出错误
+                    if (url === downloadUrls[downloadUrls.length - 1].url) {
+                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
+                    }
+                }
             }
 
             // 解压
