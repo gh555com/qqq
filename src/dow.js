@@ -2900,6 +2900,58 @@ sys.exit(0)
                     fs.mkdirSync(sitePackagesDir, { recursive: true });
                 }
 
+                // ★ 关键：Python embed 版本没有 pip，需要先安装 pip
+                if (platform === 'win32') {
+                    global.logMessage(`[PythonCheck] Python embed 版本，正在安装 pip...`, 'INFO');
+                    const getPipPath = path.join(installDir, 'get-pip.py');
+
+                    // 下载 get-pip.py（支持重定向）
+                    await new Promise((resolve, reject) => {
+                        const downloadGetPip = (url, redirectCount = 0) => {
+                            if (redirectCount > 5) {
+                                reject(new Error('get-pip.py 重定向次数过多'));
+                                return;
+                            }
+                            const urlObj = new URL(url);
+                            https.get({
+                                hostname: urlObj.hostname,
+                                path: urlObj.pathname,
+                                headers: { 'User-Agent': 'Mozilla/5.0' }
+                            }, (res) => {
+                                if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+                                    res.resume();
+                                    const location = res.headers.location;
+                                    downloadGetPip(new URL(location, url).href, redirectCount + 1);
+                                    return;
+                                }
+                                if (res.statusCode !== 200) {
+                                    reject(new Error(`get-pip.py 下载失败: ${res.statusCode}`));
+                                    return;
+                                }
+                                const file = fs.createWriteStream(getPipPath);
+                                res.pipe(file);
+                                file.on('finish', () => {
+                                    file.close();
+                                    resolve();
+                                });
+                                file.on('error', reject);
+                            }).on('error', reject);
+                        };
+                        downloadGetPip('https://bootstrap.pypa.io/get-pip.py');
+                    });
+
+                    // 运行 get-pip.py 安装 pip
+                    cp.execSync(`"${installPath}" "${getPipPath}" --quiet`, {
+                        windowsHide: true,
+                        timeout: 120000,
+                        env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                    });
+
+                    // 删除 get-pip.py
+                    try { fs.unlinkSync(getPipPath); } catch { }
+                    global.logMessage(`[PythonCheck] pip 安装成功`, 'INFO');
+                }
+
                 const lockedDeps = this._getLockedDeps();
                 global.logMessage(`[PythonCheck] 开始安装锁定版本依赖: ${lockedDeps.join(', ')}`, 'INFO');
 

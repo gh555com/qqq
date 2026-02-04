@@ -1637,8 +1637,10 @@ async function activate(context) {
 			if (selected.id === "clearCooldown") {
 				// 清除依赖下载冷却时间
 				try {
-					// 清除 globalState 中的安装时间戳
-					await context.globalState.update('pythonDepsInstallTimestamp', 0);
+					// ★ 清除所有相关的 globalState key
+					await context.globalState.update('pythonInstallTimestamp', 0);
+					await context.globalState.update('python_cooldown_ts', 0);
+					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
 					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖");
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 清除冷却时间失败: ${e.message}`);
