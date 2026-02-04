@@ -143,9 +143,29 @@ function getFileSizeSync(filePath) {
 }
 
 // ==================== 尺寸格式化 ====================
+const SZ_GB_WARNING_COLOR = 'rgb(248, 48, 0)';
+
 function formatFileSize(bytes) {
   // 只显示字节数，添加千位分隔符
+  // 当超过 GB（10位数字，即 >= 1,000,000,000）时，GB 部分用橙红色
   const formatted = bytes.toLocaleString();
+
+  // 检查是否超过 GB（数字部分超过 9 位，即带分隔符后超过 11 位：x,xxx,xxx,xxx）
+  // 1GB = 1,073,741,824，但用户要求是按显示位数判断：10位数字以上
+  if (bytes >= 1000000000) {
+    // 找到 GB 部分（前面的数字，到第三个逗号之前）
+    // 例如: "14,111,222,999" -> GB部分是 "14"
+    // 例如: "7,111,222,999" -> GB部分是 "7"
+    const parts = formatted.split(',');
+    if (parts.length >= 4) {
+      // GB 部分是前 (parts.length - 3) 个部分
+      const gbParts = parts.slice(0, parts.length - 3);
+      const restParts = parts.slice(parts.length - 3);
+      const gbStr = gbParts.join(',');
+      const restStr = restParts.join(',');
+      return '<span style="color:' + SZ_GB_WARNING_COLOR + '">' + gbStr + '</span>,' + restStr;
+    }
+  }
   return formatted;
 }
 
@@ -492,15 +512,19 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
-// ====== C 盘剩余空间更新机制 ======
+// ====== 盘符剩余空间更新机制 ======
 // 规则：
 // - 只在 webview 可见时轮询（6秒间隔）
 // - 只有两次请求差异 >= 11MB 才更新 UI
-// - 不用 setInterval，用“执行完再 setTimeout”
+// - 不用 setInterval，用"执行完再 setTimeout"
+// - 空间 < 1% 或 < 2GB 时显示红色警告
 const DISK_FREE_INTERVAL_MS = 6000;
 const DISK_FREE_THRESHOLD_BYTES = 11 * 1024 * 1024; // 11MB
+const DISK_FREE_WARNING_PERCENT = 0.01; // 1%
+const DISK_FREE_WARNING_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const DISK_FREE_WARNING_COLOR = 'rgb(248, 48, 0)';
 let diskFreeTimer = null;
-let lastDiskFreeSample = null;
+let lastDiskFreeSamples = {}; // { 'C': {free, total}, 'D': {free, total}, ... }
 let diskFreeInFlight = false;
 
 function ensurePathTooltip(){
@@ -1090,15 +1114,18 @@ window.addEventListener('message', event => {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
   } else if (message.command === 'diskFreeResult') {
-    // C 盘剩余空间更新响应
+    // 盘符剩余空间更新响应
     diskFreeInFlight = false;
+    const drive = message.drive; // 盘符字母，如 'C', 'D'
     const free = message.free;
-    if (typeof free === 'number') {
-      const needUiUpdate = (lastDiskFreeSample === null) ||
-        (Math.abs(free - lastDiskFreeSample) >= DISK_FREE_THRESHOLD_BYTES);
-      lastDiskFreeSample = free;
+    const total = message.total;
+    if (typeof free === 'number' && drive) {
+      const last = lastDiskFreeSamples[drive];
+      const needUiUpdate = !last ||
+        (Math.abs(free - last.free) >= DISK_FREE_THRESHOLD_BYTES);
+      lastDiskFreeSamples[drive] = { free, total };
       if (needUiUpdate) {
-        updateDriveCDisplay(free);
+        updateDriveDisplay(drive, free, total);
       }
     }
     // 完成后安排下一轮
@@ -1477,18 +1504,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
 });
 
-// ====== C 盘剩余空间更新机制函数 ======
+// ====== 盘符剩余空间更新机制函数 ======
 
 /**
- * 更新 C 盘显示文本
+ * 更新盘符显示文本
+ * @param {string} drive - 盘符字母，如 'C', 'D'
  * @param {number} freeBytes - 剩余字节数
+ * @param {number} totalBytes - 总字节数
  */
-function updateDriveCDisplay(freeBytes) {
-  const el = document.getElementById('drive-c-text');
+function updateDriveDisplay(drive, freeBytes, totalBytes) {
+  const el = document.getElementById('drive-' + drive.toLowerCase() + '-text');
   if (!el) return;
   // 格式："C:\\  1.75"（保留两位小数，不打印单位）
   const freeGB = freeBytes / (1024 * 1024 * 1024);
-  el.textContent = 'C:\\  ' + freeGB.toFixed(2);
+  el.textContent = drive.toUpperCase() + ':\\  ' + freeGB.toFixed(2);
+
+  // 检查是否需要红色警告: 空间 < 1% 或 < 2GB
+  const isLow = (totalBytes > 0 && freeBytes / totalBytes < DISK_FREE_WARNING_PERCENT) ||
+                (freeBytes < DISK_FREE_WARNING_BYTES);
+  el.style.color = isLow ? DISK_FREE_WARNING_COLOR : '';
 }
 
 /**
@@ -1500,12 +1534,12 @@ function isDiskFreePollingAllowed() {
 }
 
 /**
- * 请求 C 盘剩余空间
+ * 请求所有盘符剩余空间
  */
 function requestDiskFree() {
   if (diskFreeInFlight) return;
   diskFreeInFlight = true;
-  vscode.postMessage({ command: 'getDiskFree', drive: 'C:' });
+  vscode.postMessage({ command: 'getDiskFree', drive: 'all' });
 }
 
 /**
@@ -1585,12 +1619,10 @@ function getWebviewContent(currentPath) {
 
   const drivesHtml = drives
     .map((drive) => {
-      // C 盘特殊处理：添加剩余空间显示区
+      // 为每个盘符添加唯一 ID 和空间显示区域
       const driveUpper = drive.toUpperCase();
-      if (driveUpper.startsWith("C:")) {
-        return `<button class="nav-item" id="drive-c-btn" onclick="navigateTo('${escapeJsStringLiteral(drive)}')"><span id="drive-c-text">${escapeHtmlAttribute(drive)}</span></button>`;
-      }
-      return `<button class="nav-item" onclick="navigateTo('${escapeJsStringLiteral(drive)}')"　>${escapeHtmlAttribute(drive)}</button>`;
+      const driveLetter = driveUpper.replace(/[^A-Z]/g, '') || 'X';
+      return '<button class="nav-item" id="drive-' + driveLetter.toLowerCase() + '-btn" onclick="navigateTo(\'' + escapeJsStringLiteral(drive) + '\')"><span id="drive-' + driveLetter.toLowerCase() + '-text">' + escapeHtmlAttribute(drive) + '</span></button>';
     })
     .join("");
 
@@ -1957,7 +1989,7 @@ function showSaveAsDialog() {
         items.push({ path: dir.path, name: dir.name, type: "folder" });
         fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
           dir.path
-        )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${escapeHtmlAttribute(szContent)}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
+        )}" data-name="${escapeHtmlAttribute(dir.name)}" data-type="folder"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">${escapeHtmlAttribute(
           dir.name
         )}</span></div></div>`;
       });
@@ -1967,7 +1999,7 @@ function showSaveAsDialog() {
         items.push({ path: file.path, name: file.name, type: "file" });
         fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
           file.path
-        )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${escapeHtmlAttribute(szContent)}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
+        )}" data-name="${escapeHtmlAttribute(file.name)}" data-type="file"><div class="file-select-area"><div class="sz-area">${szContent}</div><span class="file-icon">🗈</span></div><div class="file-name-area"><span class="file-name">${escapeHtmlAttribute(
           file.name
         )}</span></div></div>`;
       });
@@ -2124,20 +2156,40 @@ function showSaveAsDialog() {
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;
 
-      // C 盘剩余空间请求
+      // 盘符剩余空间请求
       case "getDiskFree": {
         (async () => {
           try {
-            const res = await geq().getDiskFree(message.drive || "C:");
-            if (panel && activePanelAlive && res && res.success) {
-              panel.webview.postMessage({
-                command: "diskFreeResult",
-                drive: message.drive || "C:",
-                free: res.free
-              });
+            if (message.drive === 'all') {
+              // 查询所有盘符
+              const drives = getDrives();
+              for (const drive of drives) {
+                const driveLetter = drive.toUpperCase().replace(/[^A-Z]/g, '') || 'X';
+                const res = await geq().getDiskFree(driveLetter + ':');
+                if (panel && activePanelAlive && res && res.success) {
+                  panel.webview.postMessage({
+                    command: "diskFreeResult",
+                    drive: driveLetter,
+                    free: res.free,
+                    total: res.total
+                  });
+                }
+              }
+            } else {
+              // 查询单个盘符
+              const driveLetter = (message.drive || 'C').toUpperCase().replace(/[^A-Z]/g, '') || 'C';
+              const res = await geq().getDiskFree(driveLetter + ':');
+              if (panel && activePanelAlive && res && res.success) {
+                panel.webview.postMessage({
+                  command: "diskFreeResult",
+                  drive: driveLetter,
+                  free: res.free,
+                  total: res.total
+                });
+              }
             }
           } catch (e) {
-            geq().logMessage(`getDiskFree 失败: ${e.message}`, "WARN");
+            geq().logMessage('getDiskFree \u5931\u8d25: ' + e.message, "WARN");
           }
         })();
         break;
