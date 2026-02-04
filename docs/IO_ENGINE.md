@@ -32,26 +32,26 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | :-------------------------------- | :----: | :----: | :--------: | :----: | :---------------------------------- |
 | 1. Cold Start Speed               |    6   |    9   |      5     |   ★★☆  | First-launch overhead               |
 | 2. Hot Response Latency           |    8   |   10   |      7     |   ★★★  | Single-call cost in daemon mode     |
-| 3. Memory Footprint               |    5   |   10   |      4     |   ★★☆  | Resident memory usage               |
-| 4. CPU Efficiency                 |    7   |   10   |      5     |   ★★☆  | CPU usage under intensive workloads |
+| 3. Comprehensive Memory Footprint               |    5   |   10   |      4     |   ★★☆  | Resident memory usage               |
+| 4. Comprehensive CPU Efficiency                 |    7   |   10   |      5     |   ★★☆  | CPU usage under intensive workloads |
 | 5. Clipboard – Transparent Images | **10** | **10** |      3     |   ★★★  | DIBv5 / alpha channel handling      |
 | 6. Clipboard – File Drop          |    9   |    9   |      8     |   ★★☆  | Reading CF_HDROP file lists         |
 | 7. Clipboard – HTML               |    9   |    8   |      7     |   ★★☆  | HTML Format parsing                 |
 | 8. Bulk File Copy                 |    8   | **10** |      5     |   ★★☆  | Recursive copy of many small files  |
 | 9. System Compatibility           |    8   |    7   |   **10**   |   ★★★  | Runs without extra dependencies     |
 | 10. Stability                     |    8   |    9   |      9     |   ★★★  | Crash rate over long runtimes       |
-| 11. Dev & Maintenance Cost        | **10** |    5   |      7     |   ★☆☆  | Readability, iteration speed        |
+| 11. Secondary Dev & Maintenance Cost        | **10** |    5   |      7     |   ★☆☆  | Readability, iteration speed        |
 | 12. Cross-Platform Capability     |    7   |    8   |    **8**   |   ★☆☆  | Win/macOS/Linux coverage            |
 | 13. File Icon Extraction          |    9   |    9   |    **9**   |   ★★☆  | Multi-platform native APIs          |
 | 14. Disk Free Space Query         | **10** | **10** |      7     |   ★★☆  | Cross-platform disk usage retrieval |
 
 ### Total Scores
 
-| Engine         | Raw Total | Weighted Total | Recommended Scenarios                                     |
-| :------------- | :-------: | :------------: | :-------------------------------------------------------- |
-| **Python**     |    114    |   **108.2**    | Transparent-image clipboard, disk queries, everyday ops   |
-| **Rust**       |    124    |   **114.8**    | Extreme performance, huge-scale bulk file operations      |
-| **Node Shell** |     94    |    **96.8**    | Zero-dependency fallback, simple text/files               |
+| Engine         | Raw Total | Weighted Total | Weighted Percentage | Recommended Scenarios                                     |
+| :------------- | :-------: | :------------: | :-----------------: | :-------------------------------------------------------- |
+| **Python**     |    114    |   **108.2**    |        94.2%        | Transparent-image clipboard, disk queries, everyday ops   |
+| **Rust**       |    124    |   **114.8**    |        100%         | Extreme performance, huge-scale bulk file operations      |
+| **Node Shell** |     94    |    **96.8**    |        84.3%        | Zero-dependency fallback, simple text/files               |
 
 > Weighting formula: ★★★ = 1.2x, ★★☆ = 1.0x, ★☆☆ = 0.8x
 
@@ -85,7 +85,7 @@ In daemon mode, the process stays resident; a single RPC call typically costs:
 
 ---
 
-### 3. Memory Footprint
+### 3. Comprehensive Memory Footprint
 
 | Engine     | Score | Resident Memory | Notes                            |
 | :--------- | :---: | :-------------: | :------------------------------- |
@@ -97,7 +97,7 @@ In daemon mode, the process stays resident; a single RPC call typically costs:
 
 ---
 
-### 4. CPU Efficiency
+### 4. Comprehensive CPU Efficiency
 
 CPU usage during bulk file operations:
 
@@ -194,7 +194,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-### 11. Development & Maintenance Cost
+### 11. Secondary Development & Maintenance Cost
 
 | Engine     |  Score |  Code Size  | Iteration Speed                   |
 | :--------- | :----: | :---------: | :-------------------------------- |
@@ -311,7 +311,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 结论：Rust  >  Python  >  N(D)：Node Daemon（一级兜底） >  N(S)：Node Spawn（二级兜底）
 
-本文档从 **14 个维度** 进行量化打分（1-10 分，10 分最优），帮助理解各引擎的适用场景。
+本文档从 **14 个维度** 进行量化打分（1-10 分，10 分最优），助于理解各引擎滴适用场景。
 
 特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
 
@@ -330,26 +330,26 @@ Copying 10,000+ small files (e.g., `node_modules`):
 |:-----|:------:|:----:|:----------:|:----:|:-----|
 | 1. 冷启动速度 | 6 | 9 | 5 | ★★☆ | 首次启动耗时 |
 | 2. 热响应延迟 | 8 | 10 | 7 | ★★★ | Daemon 模式下单次调用耗时 |
-| 3. 内存占用 | 5 | 10 | 4 | ★★☆ | 常驻内存消耗 |
-| 4. CPU 效率 | 7 | 10 | 5 | ★★☆ | 密集操作时 CPU 占用 |
+| 3. 综合内存占用 | 5 | 10 | 4 | ★★☆ | 常驻内存消耗 |
+| 4. 综合 CPU 效率 | 7 | 10 | 5 | ★★☆ | 密集操作时 CPU 占用 |
 | 5. 剪贴板-透明图 | **10** | **10** | 3 | ★★★ | DIBv5/Alpha 通道处理 |
 | 6. 剪贴板-文件 | 9 | 9 | 8 | ★★☆ | CF_HDROP 文件列表读取 |
 | 7. 剪贴板-HTML | 9 | 8 | 7 | ★★☆ | HTML Format 解析 |
 | 8. 文件批量复制 | 8 | **10** | 5 | ★★☆ | 大量小文件递归复制 |
 | 9. 系统兼容性 | 8 | 7 | **10** | ★★★ | 无需额外依赖即可运行 |
 | 10. 稳定性 | 8 | 9 | 9 | ★★★ | 长期运行崩溃率 |
-| 11. 开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
+| 11. 二次开发维护成本 | **10** | 5 | 7 | ★☆☆ | 代码可读性、迭代效率 |
 | 12. 跨平台能力 | 7 | 8 | **8** | ★☆☆ | Win/Mac/Linux 支持程度 |
 | 13. 文件原始图标提取 | 9 | 9 | **9** | ★★☆ | 多平台原生 API 支持 |
 | 14. 磁盘剩余空间查询 | **10** | **10** | 7 | ★★☆ | 跨平台磁盘用量获取 |
 
 ### 总分
 
-| 引擎 | 原始总分 | 加权总分 | 推荐场景 |
-|:-----|:--------:|:--------:|:---------|
-| **Python** | 114 | **108.2** | 透明图剪贴板、磁盘查询、日常高级操作 |
-| **Rust** | 124 | **114.8** | 极致性能、超大文件批量操作 |
-| **Node Shell** | 94 | **96.8** | 零依赖兜底、简单文本/文件 |
+| 引擎 | 原始总分 | 加权总分 | 加权百分比 | 推荐场景 |
+|:-----|:--------:|:--------:|:--------:|:---------|
+| **Python** | 114 | **108.2** | 94.2% | 透明图剪贴板、磁盘查询、日常高级操作 |
+| **Rust** | 124 | **114.8** | 100% | 极致性能、超大文件批量操作 |
+| **Node Shell** | 94 | **96.8** | 84.3% | 零依赖兜底、简单文本/文件 |
 
 > 加权公式：★★★=1.2x, ★★☆=1.0x, ★☆☆=0.8x
 
@@ -383,7 +383,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-### 3. 内存占用
+### 3. 综合内存占用
 
 | 引擎 | 得分 | 常驻内存 | 说明 |
 |:-----|:----:|:--------:|:-----|
@@ -395,7 +395,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-### 4. CPU 效率
+### 4. 综合 CPU 效率
 
 批量文件操作时 CPU 占用率：
 
@@ -491,7 +491,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-### 11. 开发与维护成本
+### 11. 二次开发维护成本
 
 | 引擎 | 得分 | 代码量 | 迭代效率 |
 |:-----|:----:|:------:|:---------|
