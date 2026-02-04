@@ -2399,15 +2399,35 @@ class YtDlpDownloader {
                 });
             };
 
-            try {
-                // 第一步：尝试官方下载 (15秒超时)
-                await tryDownload(officialUrl, 15000);
-            } catch (e) {
-                // 第二步：官方失败，尝试镜像下载 (国内加速)
+            // 级联下载策略：官方 → ghproxy → kkgithub → mirror.ghproxy
+            const downloadUrls = [
+                { url: officialUrl, timeout: 15000, name: '官方源' },
+                { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' },
+            ];
+
+            // 生成第三层和第四层镜像 URL
+            const kkgithubUrl = officialUrl.replace('https://github.com/', 'https://kkgithub.com/');
+            const mirrorGhproxyUrl = officialUrl.replace('https://github.com/', 'https://mirror.ghproxy.com/https://github.com/');
+
+            downloadUrls.push(
+                { url: kkgithubUrl, timeout: 60000, name: 'kkgithub镜像' },
+                { url: mirrorGhproxyUrl, timeout: 60000, name: 'mirror.ghproxy镜像' }
+            );
+
+            let lastError = null;
+            for (const { url, timeout, name } of downloadUrls) {
                 try {
-                    await tryDownload(mirrorUrl, 60000);
-                } catch (mirrorErr) {
-                    throw new Error(`Official and Mirror both failed. Mirror Error: ${mirrorErr.message}`);
+                    global.logMessage(`yt-dlp 尝试从 ${name} 下载...`, "INFO");
+                    await tryDownload(url, timeout);
+                    global.logMessage(`yt-dlp ${name} 下载成功`, "INFO");
+                    break; // 成功则跳出循环
+                } catch (e) {
+                    lastError = e;
+                    global.logMessage(`yt-dlp ${name} 下载失败: ${e.message}`, "WARN");
+                    // 如果是最后一个 URL，则抛出错误
+                    if (url === downloadUrls[downloadUrls.length - 1].url) {
+                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
+                    }
                 }
             }
 

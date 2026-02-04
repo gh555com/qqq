@@ -1582,7 +1582,8 @@ async function activate(context) {
 			const options = [
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
 				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
-				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" }
+				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" },
+				{ label: "删除 Python 环境", description: "用于修复 Python IO 引擎 ", id: "deletePythonEngine" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
@@ -1644,6 +1645,26 @@ async function activate(context) {
 					}
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
+				}
+			} else if (selected.id === "deletePythonEngine") {
+				// 删除 Python 环境目录
+				try {
+					const globalStoragePath = context?.globalStorageUri?.fsPath;
+					if (!globalStoragePath) {
+						vscode.window.showErrorMessage("qqq: 无法获取存储路径");
+						return;
+					}
+					const pythonEnginePath = path.join(globalStoragePath, 'python_engine');
+					if (fs.existsSync(pythonEnginePath)) {
+						// 递归删除目录
+						const rmSync = fs.rmSync || fs.rmdirSync;
+						rmSync(pythonEnginePath, { recursive: true, force: true });
+						vscode.window.showInformationMessage(`qqq: 已删除${pythonEnginePath}`);
+					} else {
+						vscode.window.showInformationMessage(`qqq: 不存在${pythonEnginePath}`);
+					}
+				} catch (e) {
+					vscode.window.showErrorMessage(`qqq: 删除 Python 环境失败: ${e.message}`);
 				}
 			}
 		})),
