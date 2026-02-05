@@ -2309,6 +2309,7 @@ class YtDlpDownloader {
             const fs = require('fs');
             const path = require('path');
             const https = require('https');
+            const global = require('./global'); // ★ 引入 global 模块
 
             const platform = os.platform();
             const arch = os.arch();
@@ -2874,15 +2875,28 @@ sys.exit(0)
                 cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, {
                     windowsHide: true
                 });
-                // 提前修复 ._pth，确保 isAvailable 能跑通
+                // 提前修复 ._pth，确保 pip 能跑通
                 const pthFile = path.join(installDir, 'python38._pth');
                 if (fs.existsSync(pthFile)) {
                     let content = fs.readFileSync(pthFile, 'utf8');
+                    global.logMessage(`[PythonCheck] 原始 python38._pth: ${content.replace(/\n/g, ' | ')}`, 'DEBUG');
+
+                    // ★ 关键：启用 import site 并添加 site-packages 路径
                     if (content.includes('#import site')) {
                         content = content.replace('#import site', 'import site');
-                        content += '\n./site-packages\n';
-                        fs.writeFileSync(pthFile, content);
                     }
+                    // 确保 site-packages 路径存在
+                    if (!content.includes('site-packages')) {
+                        content += '\n./site-packages\n';
+                    }
+                    // ★ 关键：添加 Lib 路径（get-pip.py 需要）
+                    if (!content.includes('./Lib')) {
+                        content = './Lib\n' + content;
+                    }
+                    fs.writeFileSync(pthFile, content);
+                    global.logMessage(`[PythonCheck] 修改后 python38._pth: ${content.replace(/\n/g, ' | ')}`, 'DEBUG');
+                } else {
+                    global.logMessage(`[PythonCheck] python38._pth 不存在`, 'WARN');
                 }
             } else {
                 cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, {
@@ -2937,15 +2951,26 @@ sys.exit(0)
                                 file.on('error', reject);
                             }).on('error', reject);
                         };
-                        downloadGetPip('https://bootstrap.pypa.io/get-pip.py');
+                        downloadGetPip('https://bootstrap.pypa.io/pip/3.8/get-pip.py');
                     });
 
                     // 运行 get-pip.py 安装 pip
-                    cp.execSync(`"${installPath}" "${getPipPath}" --quiet`, {
-                        windowsHide: true,
-                        timeout: 120000,
-                        env: { ...process.env, PYTHONNOUSERSITE: '1' }
-                    });
+                    try {
+                        cp.execSync(`"${installPath}" "${getPipPath}"`, {
+                            windowsHide: true,
+                            timeout: 120000,
+                            stdio: ['pipe', 'pipe', 'pipe'],
+                            env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                        });
+                    } catch (pipErr) {
+                        // 获取详细错误信息
+                        const stderr = pipErr.stderr ? pipErr.stderr.toString() : '';
+                        const stdout = pipErr.stdout ? pipErr.stdout.toString() : '';
+                        global.logMessage(`[PythonCheck] pip 安装失败: ${pipErr.message}`, 'ERROR');
+                        if (stderr) global.logMessage(`[PythonCheck] pip stderr: ${stderr.slice(0, 500)}`, 'ERROR');
+                        if (stdout) global.logMessage(`[PythonCheck] pip stdout: ${stdout.slice(0, 500)}`, 'DEBUG');
+                        throw pipErr;
+                    }
 
                     // 删除 get-pip.py
                     try { fs.unlinkSync(getPipPath); } catch { }

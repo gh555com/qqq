@@ -509,6 +509,13 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			// 如果 L1 不完美，返回 null，等待 20 秒后下载完成后通过回调热启动
 			const pythonPath = await downloader.ensurePythonReady(extensionContext);
 
+			// ★ 检查 daemon 是否已经被热启动回调启动了
+			if (pythonBridge.available) {
+				logMessage(`[Python] daemon 已被热启动回调启动，跳过全局启动`, "INFO");
+				resolve(true);
+				return;
+			}
+
 			if (pythonPath) {
 				const ok = await spawnWith(pythonPath);
 				if (ok) {

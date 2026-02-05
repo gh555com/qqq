@@ -1641,7 +1641,7 @@ async function activate(context) {
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
-					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖");
+					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 清除冷却时间失败: ${e.message}`);
 				}
@@ -1783,7 +1783,8 @@ async function activate(context) {
 									}
 
 									// 触发后台就绪检查（可能触发下载）
-									downloader.ensurePythonReady(context, { silent: true }).catch(() => { });
+									// ★ 已在 global.js 中统一处理，避免重复调用 ensurePythonReady
+									// downloader.ensurePythonReady(context, { silent: true }).catch(() => { });
 								}
 
 								updateStatusBarThrottled();
