@@ -1633,12 +1633,6 @@ async function activate(context) {
 
 			if (!selected) return;
 
-			// 辅助函数：显示带超时的消息
-			const showMessageWithTimeout = (message, type = 'info') => {
-				const msgFunc = type === 'info' ? vscode.window.showInformationMessage : vscode.window.showErrorMessage;
-				msgFunc(message);
-			};
-
 			if (selected.id === "clearCooldown") {
 				// 清除依赖下载冷却时间
 				try {

@@ -2846,7 +2846,20 @@ class UnifiedMediaDownloader {
             }
 
             if (shouldInstall) {
-                if (this._installPromise) return this._installPromise;
+                // ★ 如果已经有正在进行的安装，复用它
+                if (this._installPromise) {
+                    // ★ 关键修复：如果当前调用不是后台模式，显示等待提示
+                    if (!background && vscode) {
+                        vscode.window.withProgress({
+                            location: vscode.ProgressLocation.Notification,
+                            title: "qqq: 正在下载视频引擎...",
+                            cancellable: false
+                        }, async () => {
+                            await this._installPromise;
+                        });
+                    }
+                    return this._installPromise;
+                }
 
                 this._installPromise = (async () => {
                     try {
