@@ -1618,6 +1618,15 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
+			// ★ 自动消失的通知（9秒后安静消失，无进度条滚动）
+			const showAutoHideMessage = (message, type = 'info') => {
+				vscode.window.withProgress({
+					location: vscode.ProgressLocation.Notification,
+					title: message,
+					cancellable: false
+				}, () => new Promise(resolve => setTimeout(resolve, 9000)));
+			};
+
 			const options = [
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
 				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
@@ -1640,14 +1649,14 @@ async function activate(context) {
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
-					vscode.window.showInformationMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
+					showAutoHideMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
 				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 清除冷却时间失败: ${e.message}`);
+					showAutoHideMessage(`qqq: 清除冷却时间失败: ${e.message}`, 'error');
 				}
 			} else if (selected.id === "openCacheDir") {
 				// 打开缓存目录
 				if (!cacheDir) {
-					vscode.window.showErrorMessage("qqq: 缓存目录未初始化");
+					showAutoHideMessage("qqq: 缓存目录未初始化", 'error');
 					return;
 				}
 
@@ -1668,25 +1677,25 @@ async function activate(context) {
 						cp.spawn('xdg-open', [cacheDir], { detached: true });
 					}
 				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 打开缓存目录失败: ${e.message}`);
+					showAutoHideMessage(`qqq: 打开缓存目录失败: ${e.message}`, 'error');
 				}
 			} else if (selected.id === "deleteYtDlp") {
 				// 删除视频下载组件 yt-dlp.exe
 				try {
 					const globalStoragePath = context?.globalStorageUri?.fsPath;
 					if (!globalStoragePath) {
-						vscode.window.showErrorMessage("qqq: 无法获取存储路径");
+						showAutoHideMessage("qqq: 无法获取存储路径", 'error');
 						return;
 					}
 					const ytDlpPath = path.join(globalStoragePath, 'yt-dlp.exe');
 					if (fs.existsSync(ytDlpPath)) {
 						fs.unlinkSync(ytDlpPath);
-						vscode.window.showInformationMessage(`qqq: 已删除${ytDlpPath}`);
+						showAutoHideMessage(`qqq: 已删除${ytDlpPath}`);
 					} else {
-						vscode.window.showInformationMessage("qqq: yt-dlp.exe 不存在");
+						showAutoHideMessage("qqq: yt-dlp.exe 不存在");
 					}
 				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
+					showAutoHideMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`, 'error');
 				}
 			} else if (selected.id === "clearGlobalStates") {
 				// 清理 globalStates 数据库（保留状态区信息）
@@ -1725,9 +1734,9 @@ async function activate(context) {
 						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
 					};
 
-					vscode.window.showInformationMessage(`qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
+					showAutoHideMessage(`qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
 				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 清理 globalStates 失败: ${e.message}`);
+					showAutoHideMessage(`qqq: 清理 globalStates 失败: ${e.message}`, 'error');
 				}
 			} else if (selected.id === "clearClipboardHistory") {
 				// 清空剪切板历史记录
@@ -1735,12 +1744,12 @@ async function activate(context) {
 					const historyManager = global.clipboardHistoryManager;
 					if (historyManager && typeof historyManager.clearHistory === 'function') {
 						await historyManager.clearHistory({ deleteFiles: true });
-						vscode.window.showInformationMessage("qqq: 剪切板历史记录已清空");
+						showAutoHideMessage("qqq: 剪切板历史记录已清空");
 					} else {
-						vscode.window.showErrorMessage("qqq: 剪切板历史管理器未初始化");
+						showAutoHideMessage("qqq: 剪切板历史管理器未初始化", 'error');
 					}
 				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 清空剪切板历史失败: ${e.message}`);
+					showAutoHideMessage(`qqq: 清空剪切板历史失败: ${e.message}`, 'error');
 				}
 			}
 		})),
