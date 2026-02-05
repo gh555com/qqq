@@ -1632,7 +1632,7 @@ class ClipboardHistorySidebarProvider {
             font-family: Tahoma, sans-serif;
         }
         .inline-input::selection { background: #FFD302; color: #000; }
-        .inline-input:focus { border-color: var(--primary-color); background: #FFFDD0; box-shadow: 0 0 0 1px var(--primary-color); }
+        .inline-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
         .inline-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); font-size: 14px; }
 
         #btnVideoStart {
@@ -1735,7 +1735,7 @@ class ClipboardHistorySidebarProvider {
         .search-input { width: 100%; background: var(--base2); border: 1px solid var(--border-color); border-radius: 4px; padding: 7.5px 10px; font-family: Tahoma, sans-serif; font-size: 13px; color: #000; outline: none; transition: 0.2s; box-sizing: border-box; }
         .search-input::selection { background: #FFD302; color: #000; }
         .search-input::placeholder { color: var(--vscode-input-placeholderForeground, rgba(0,0,0,0.5)); }
-        .search-input:focus { border-color: var(--primary-color); background: #FFFDD0; box-shadow: 0 0 0 1px var(--primary-color); }
+        .search-input:focus { border-color: var(--primary-color); box-shadow: 0 0 0 1px var(--primary-color); }
 
         .item-info { display: none; }
         .item-time { font-size: 13px; color: var(--base2); }

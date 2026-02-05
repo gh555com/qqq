@@ -1622,7 +1622,6 @@ async function activate(context) {
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
 				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
 				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" },
-				{ label: "删除 Python 环境", description: "用于修复 Python IO 引擎 ", id: "deletePythonEngine" },
 				{ label: "清理 globalStates 数据库", description: "清空并丢失：1、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆；2、已缓存滴用于 “事物回滚和文件去重” 滴关键信息。", id: "clearGlobalStates" },
 				{ label: "清空剪切板历史记录", description: "永久清除所有剪切板历史", id: "clearClipboardHistory" }
 			];
@@ -1633,6 +1632,12 @@ async function activate(context) {
 			});
 
 			if (!selected) return;
+
+			// 辅助函数：显示带超时的消息
+			const showMessageWithTimeout = (message, type = 'info') => {
+				const msgFunc = type === 'info' ? vscode.window.showInformationMessage : vscode.window.showErrorMessage;
+				msgFunc(message);
+			};
 
 			if (selected.id === "clearCooldown") {
 				// 清除依赖下载冷却时间
@@ -1689,26 +1694,6 @@ async function activate(context) {
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
 				}
-			} else if (selected.id === "deletePythonEngine") {
-				// 删除 Python 环境目录
-				try {
-					const globalStoragePath = context?.globalStorageUri?.fsPath;
-					if (!globalStoragePath) {
-						vscode.window.showErrorMessage("qqq: 无法获取存储路径");
-						return;
-					}
-					const pythonEnginePath = path.join(globalStoragePath, 'python_engine');
-					if (fs.existsSync(pythonEnginePath)) {
-						// 递归删除目录
-						const rmSync = fs.rmSync || fs.rmdirSync;
-						rmSync(pythonEnginePath, { recursive: true, force: true });
-						vscode.window.showInformationMessage(`qqq: 已删除${pythonEnginePath}`);
-					} else {
-						vscode.window.showInformationMessage(`qqq: 不存在${pythonEnginePath}`);
-					}
-				} catch (e) {
-					vscode.window.showErrorMessage(`qqq: 删除 Python 环境失败: ${e.message}`);
-				}
 			} else if (selected.id === "clearGlobalStates") {
 				// 清理 globalStates 数据库（保留状态区信息）
 				try {
@@ -1722,15 +1707,31 @@ async function activate(context) {
 
 					const allKeys = context.globalState.keys();
 					let clearedCount = 0;
+					let totalSize = 0;
 
 					for (const key of allKeys) {
 						if (!preserveKeys.has(key)) {
+							const value = context.globalState.get(key);
+							try {
+								const jsonString = JSON.stringify(value);
+								totalSize += Buffer.byteLength(jsonString, 'utf8');
+							} catch {
+								// 忽略无法序列化的值
+							}
 							await context.globalState.update(key, undefined);
 							clearedCount++;
 						}
 					}
 
-					vscode.window.showInformationMessage(`qqq: 已清理 ${clearedCount} 条数据，状态区信息已保留`);
+					const formatBytes = (bytes) => {
+						if (bytes === 0) return '0B';
+						const k = 1024;
+						const sizes = ['B', 'KB', 'MB'];
+						const i = Math.floor(Math.log(bytes) / Math.log(k));
+						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+					};
+
+					vscode.window.showInformationMessage(`qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
 				} catch (e) {
 					vscode.window.showErrorMessage(`qqq: 清理 globalStates 失败: ${e.message}`);
 				}

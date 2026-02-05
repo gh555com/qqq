@@ -12,18 +12,64 @@ const { TaskCounter, TaskMessage } = require('./global');
 // ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
 const QvideoMsg = {
     /**
-     * 生成进度消息
+     * ★ 解析阶段消息（不显示已交换）
+     */
+    parsing(task, url) {
+        const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
+        const domain = this._extractDomain(url);
+        return `${prefix}正在解析 ${domain}...`;
+    },
+
+    /**
+     * ★ 生成进度消息
      * @param {Object} task - 任务对象（含 taskTitle, videoTitle）
      * @param {string} sizeStr - 已交换的大小字符串，如 "7m"
-     * @param {string} urlSnippet - URL 缩略
-     * @param {string} [suffix] - 可选后缀，如 "(1:22)", "(正在解析...)"
+     * @param {string} url - 原始 URL
+     * @param {number} [elapsedMs] - 已耗时毫秒（>20分钟才显示）
+     * @param {string} [statusSuffix] - 状态后缀，如 "增强下载中"
      */
-    progress(task, sizeStr, urlSnippet, suffix = '') {
-        const suffixPart = suffix ? ` ${suffix}` : '';
+    progress(task, sizeStr, url, elapsedMs = 0, statusSuffix = '') {
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
-        // ★ 新格式：已交换 Xm (mm:ss) 于 '标题...' URL...
-        const titlePart = task?.videoTitle ? `'${task.videoTitle}' ` : '';
-        return `${prefix}已交换 ${sizeStr}${suffixPart} 于 ${titlePart}${urlSnippet}`;
+
+        // ★ 耗时：只有 >20分钟才显示
+        const TWENTY_MIN = 20 * 60 * 1000;
+        const timePart = elapsedMs >= TWENTY_MIN ? ` (${this._formatTime(elapsedMs)})` : '';
+
+        // ★ 状态后缀
+        const statusPart = statusSuffix ? ` (${statusSuffix})` : '';
+
+        // ★ 新格式：于 domain_标题...
+        const domain = this._extractDomain(url);
+        const titlePart = task?.videoTitle ? `_${task.videoTitle}` : '';
+
+        return `${prefix}已交换 ${sizeStr}${timePart}${statusPart} 于 ${domain}${titlePart}`;
+    },
+
+    /**
+     * ★ 提取主域名（如 youtube.com）
+     */
+    _extractDomain(url) {
+        try {
+            const u = new URL(String(url));
+            // 去掉 www. 前缀
+            return u.hostname.replace(/^www\./, '');
+        } catch {
+            return String(url).slice(0, 20);
+        }
+    },
+
+    /**
+     * ★ 格式化时间 mm:ss 或 h:mm:ss
+     */
+    _formatTime(ms) {
+        const total = Math.floor(ms / 1000);
+        const s = total % 60;
+        const m = Math.floor(total / 60) % 60;
+        const h = Math.floor(total / 3600);
+        const ss = String(s).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        if (h > 0) return `${h}:${mm}:${ss}`;
+        return `${m}:${ss}`;
     },
 
     /**
@@ -499,18 +545,6 @@ class Qvideo {
         return `${s}s`;
     }
 
-    // ★ 格式化耗时：mm:ss 或 hh:mm:ss
-    _formatElapsedTime(ms) {
-        const total = Math.max(0, Math.floor(ms / 1000));
-        const s = total % 60;
-        const m = Math.floor(total / 60) % 60;
-        const h = Math.floor(total / 3600);
-        const ss = String(s).padStart(2, '0');
-        const mm = String(m).padStart(2, '0');
-        if (h > 0) return `${h}:${mm}:${ss}`;
-        return `${m}:${ss}`;
-    }
-
     _parseSizeToBytes(sizeStr) {
         if (!sizeStr) return 0;
         const match = sizeStr.match(/([\d\.]+)([KMGTiB]+)/i);
@@ -525,7 +559,7 @@ class Qvideo {
     }
 
     _makeUrlSnippet(url) {
-        return this._truncateByWidth(String(url || ''), 44);
+        return this._truncateByWidth(String(url || ''), 28);
     }
 
     // ★ 按显示宽度截断（公认最佳实践）
@@ -1053,8 +1087,8 @@ class Qvideo {
             const isYouTube = this._isYouTubeUrl(url);
 
             const runLogic = async (progress, token) => {
-                // ★ 使用统一格式化器 (progress 方法已去除了重复前缀，现在只需传递纯内容)
-                progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet, '(正在解析...)') });
+                // ★ 解析阶段：使用新的 parsing 方法
+                progress.report({ message: QvideoMsg.parsing(task, url) });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -1082,12 +1116,12 @@ class Qvideo {
                             this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
                             tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
                             // ★ 播放列表：用第一个视频的标题
-                            task.videoTitle = this._truncateByWidth(res.entries[0]?.title || '', 44);
+                            task.videoTitle = this._truncateByWidth(res.entries[0]?.title || '', 28);
                         } else {
                             this.log(`识别为单个视频: ${res.title}`);
                             tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
                             // ★ 单个视频：保存截断后的标题
-                            task.videoTitle = this._truncateByWidth(res.title || '', 44);
+                            task.videoTitle = this._truncateByWidth(res.title || '', 28);
                         }
                     } else {
                         if (this._isForbidden(403, res?.error)) {
@@ -1156,7 +1190,7 @@ class Qvideo {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet) });
+                progress.report({ message: QvideoMsg.progress(task, '0k', url, 0, '') });
 
                 // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
                 // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
@@ -1199,11 +1233,13 @@ class Qvideo {
                 });
 
                 let logTotalBytes = 0;
-                const logProgressMap = new Map();  // ★ url -> { base: 0, peak: 0 } 累计器模式
-                let useLogOnly = false;       // ★ 一旦 yt-dlp 有进度，就锁定只用它
-                let noProgressTicks = 0;      // ★ 无进度的计时（每 tick 500ms）
-                const FALLBACK_TICKS = 4;     // ★ 2秒后才启用磁盘扫描兆底
-                const downloadStartMs = Date.now(); // ★ 下载开始时间（用于耗时显示）
+                // ★ 精确进度追踪：每个 URL + 每个阶段独立计数
+                // key = url + stageIdx，避免多阶段覆盖
+                const logProgressMap = new Map();  // url -> { completed: 0, current: 0, lastPeak: 0 }
+                let useLogOnly = false;
+                let noProgressTicks = 0;
+                const FALLBACK_TICKS = 4;
+                const downloadStartMs = Date.now();
 
                 let fileSizeTimer = null;
 
@@ -1270,8 +1306,7 @@ class Qvideo {
                         const totalStr = this._formatBytesSimple(finalBytes);
                         // ★ 计算已耗时（格式 mm:ss 或 hh:mm:ss）
                         const elapsedMs = Date.now() - downloadStartMs;
-                        const elapsedStr = this._formatElapsedTime(elapsedMs);
-                        progress.report({ message: QvideoMsg.progress(task, totalStr, urlSnippet, `(${elapsedStr})`) });
+                        progress.report({ message: QvideoMsg.progress(task, totalStr, url, elapsedMs, '') });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1299,19 +1334,28 @@ class Qvideo {
                                             currentBytes = this._parseSizeToBytes(p.currentSize);
                                         }
                                         if (currentBytes > 0) {
-                                            // ★ 累计器模式：检测进度回退时累加之前的峰值
-                                            const entry = logProgressMap.get(t.url) || { base: 0, peak: 0 };
-                                            if (currentBytes < entry.peak * 0.5 && entry.peak > 1024 * 1024) {
-                                                // ★ 进度明显下降（<50%）且之前峰值>1MB，说明新阶段开始
-                                                entry.base += entry.peak;
-                                                entry.peak = currentBytes;
+                                            // ★ 简化累计器：检测进度回退就累加
+                                            const entry = logProgressMap.get(t.url) || { completed: 0, current: 0, lastPeak: 0 };
+
+                                            // ★ 关键：如果 currentBytes 明显小于 lastPeak，说明新阶段开始
+                                            if (currentBytes < entry.lastPeak * 0.8 && entry.lastPeak > 512 * 1024) {
+                                                // 新阶段：把之前的峰值加到 completed
+                                                entry.completed += entry.lastPeak;
+                                                entry.current = currentBytes;
+                                                entry.lastPeak = currentBytes;
                                             } else {
-                                                entry.peak = Math.max(entry.peak, currentBytes);
+                                                // 同阶段：更新 current 和 lastPeak
+                                                entry.current = currentBytes;
+                                                entry.lastPeak = Math.max(entry.lastPeak, currentBytes);
                                             }
+
                                             logProgressMap.set(t.url, entry);
-                                            // ★ 求和：base + peak
+
+                                            // ★ 求和：completed + current
                                             let sum = 0;
-                                            for (const e of logProgressMap.values()) sum += e.base + e.peak;
+                                            for (const e of logProgressMap.values()) {
+                                                sum += e.completed + e.current;
+                                            }
                                             logTotalBytes = sum;
                                         }
                                     } else if (event.type === 'done') {
@@ -2327,8 +2371,8 @@ $of = $vi.OriginalFilename;
             title: "",
             cancellable: true
         }, async (progress, token) => {
-            // ★ 使用统一格式化器
-            progress.report({ message: QvideoMsg.progress(task, '0k', urlSnippet, '(增强下载中...)') });
+            // ★ 增强下载解析阶段
+            progress.report({ message: QvideoMsg.parsing(task, url) });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -2355,7 +2399,8 @@ $of = $vi.OriginalFilename;
 
                     // ★ 使用新增文件扫描，避免多任务互相干扰
                     const bytes = this._scanNewBytes(targetDir, existingFiles);
-                    progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), urlSnippet, '(增强下载中...)') });
+                    const elapsedMs = Date.now() - startMs;
+                    progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), url, elapsedMs, '增强下载中') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
