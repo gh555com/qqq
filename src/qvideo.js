@@ -13,17 +13,17 @@ const { TaskCounter, TaskMessage } = require('./global');
 const QvideoMsg = {
     /**
      * 生成进度消息
-     * @param {Object} task - 任务对象（含 taskTitle）
+     * @param {Object} task - 任务对象（含 taskTitle, videoTitle）
      * @param {string} sizeStr - 已交换的大小字符串，如 "7m"
      * @param {string} urlSnippet - URL 缩略
-     * @param {string} [suffix] - 可选后缀，如 "(正在解析...)", "(增强下载中...)"
+     * @param {string} [suffix] - 可选后缀，如 "(1:22)", "(正在解析...)"
      */
     progress(task, sizeStr, urlSnippet, suffix = '') {
         const suffixPart = suffix ? ` ${suffix}` : '';
-        // ★ 修复：只保留统一真理源的前缀，移除 Qvideo 中重复添加的前缀
-        // 但如果前缀缺失，需要补上
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
-        return `${prefix}已交换 ${sizeStr} 于 ${urlSnippet}${suffixPart}`;
+        // ★ 新格式：已交换 Xm (mm:ss) 于 '标题...' URL...
+        const titlePart = task?.videoTitle ? `'${task.videoTitle}' ` : '';
+        return `${prefix}已交换 ${sizeStr}${suffixPart} 于 ${titlePart}${urlSnippet}`;
     },
 
     /**
@@ -499,6 +499,18 @@ class Qvideo {
         return `${s}s`;
     }
 
+    // ★ 格式化耗时：mm:ss 或 hh:mm:ss
+    _formatElapsedTime(ms) {
+        const total = Math.max(0, Math.floor(ms / 1000));
+        const s = total % 60;
+        const m = Math.floor(total / 60) % 60;
+        const h = Math.floor(total / 3600);
+        const ss = String(s).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        if (h > 0) return `${h}:${mm}:${ss}`;
+        return `${m}:${ss}`;
+    }
+
     _parseSizeToBytes(sizeStr) {
         if (!sizeStr) return 0;
         const match = sizeStr.match(/([\d\.]+)([KMGTiB]+)/i);
@@ -513,8 +525,33 @@ class Qvideo {
     }
 
     _makeUrlSnippet(url) {
-        const s = String(url || '');
-        return s.length > 44 ? s.slice(0, 44) + "..." : s;
+        return this._truncateByWidth(String(url || ''), 44);
+    }
+
+    // ★ 按显示宽度截断（公认最佳实践）
+    // 全角字符（中日韩等）= 2宽度，半角字符 = 1宽度
+    _truncateByWidth(str, maxWidth) {
+        if (!str) return '';
+        let width = 0;
+        let i = 0;
+        for (; i < str.length; i++) {
+            const code = str.charCodeAt(i);
+            // 全角字符范围：CJK + 日文假名 + 全角标点 + Emoji
+            const isWide = (
+                (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK 基本区
+                (code >= 0x3000 && code <= 0x303F) ||   // CJK 标点
+                (code >= 0x3040 && code <= 0x30FF) ||   // 日文假名
+                (code >= 0xFF00 && code <= 0xFFEF) ||   // 全角字符
+                (code >= 0xAC00 && code <= 0xD7AF) ||   // 韩文
+                (code >= 0x1F300 && code <= 0x1F9FF) || // Emoji
+                (code >= 0x2600 && code <= 0x26FF)     // 杂项符号
+            );
+            const charWidth = isWide ? 2 : 1;
+            if (width + charWidth > maxWidth) break;
+            width += charWidth;
+        }
+        if (i < str.length) return str.slice(0, i) + '...';
+        return str;
     }
 
     _sanitizeFilename(title) {
@@ -1044,9 +1081,13 @@ class Qvideo {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
                             this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
                             tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                            // ★ 播放列表：用第一个视频的标题
+                            task.videoTitle = this._truncateByWidth(res.entries[0]?.title || '', 44);
                         } else {
                             this.log(`识别为单个视频: ${res.title}`);
                             tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
+                            // ★ 单个视频：保存截断后的标题
+                            task.videoTitle = this._truncateByWidth(res.title || '', 44);
                         }
                     } else {
                         if (this._isForbidden(403, res?.error)) {
@@ -1158,10 +1199,11 @@ class Qvideo {
                 });
 
                 let logTotalBytes = 0;
-                const logProgressMap = new Map();
+                const logProgressMap = new Map();  // ★ url -> { base: 0, peak: 0 } 累计器模式
                 let useLogOnly = false;       // ★ 一旦 yt-dlp 有进度，就锁定只用它
                 let noProgressTicks = 0;      // ★ 无进度的计时（每 tick 500ms）
-                const FALLBACK_TICKS = 4;     // ★ 2秒后才启用磁盘扫描兜底
+                const FALLBACK_TICKS = 4;     // ★ 2秒后才启用磁盘扫描兆底
+                const downloadStartMs = Date.now(); // ★ 下载开始时间（用于耗时显示）
 
                 let fileSizeTimer = null;
 
@@ -1226,7 +1268,10 @@ class Qvideo {
                         }
 
                         const totalStr = this._formatBytesSimple(finalBytes);
-                        progress.report({ message: QvideoMsg.progress(task, totalStr, urlSnippet) });
+                        // ★ 计算已耗时（格式 mm:ss 或 hh:mm:ss）
+                        const elapsedMs = Date.now() - downloadStartMs;
+                        const elapsedStr = this._formatElapsedTime(elapsedMs);
+                        progress.report({ message: QvideoMsg.progress(task, totalStr, urlSnippet, `(${elapsedStr})`) });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1254,9 +1299,19 @@ class Qvideo {
                                             currentBytes = this._parseSizeToBytes(p.currentSize);
                                         }
                                         if (currentBytes > 0) {
-                                            logProgressMap.set(t.url, currentBytes);
+                                            // ★ 累计器模式：检测进度回退时累加之前的峰值
+                                            const entry = logProgressMap.get(t.url) || { base: 0, peak: 0 };
+                                            if (currentBytes < entry.peak * 0.5 && entry.peak > 1024 * 1024) {
+                                                // ★ 进度明显下降（<50%）且之前峰值>1MB，说明新阶段开始
+                                                entry.base += entry.peak;
+                                                entry.peak = currentBytes;
+                                            } else {
+                                                entry.peak = Math.max(entry.peak, currentBytes);
+                                            }
+                                            logProgressMap.set(t.url, entry);
+                                            // ★ 求和：base + peak
                                             let sum = 0;
-                                            for (const b of logProgressMap.values()) sum += b;
+                                            for (const e of logProgressMap.values()) sum += e.base + e.peak;
                                             logTotalBytes = sum;
                                         }
                                     } else if (event.type === 'done') {
