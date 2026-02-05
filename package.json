@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.62.1",
+  "version": "15.62.2",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -131,7 +131,7 @@
               "按创建时间排序（文件夹在上按时间倒序，文件在下按时间倒序）",
               "按修改时间排序（文件夹在上按时间倒序，文件在下按时间倒序）"
             ],
-            "markdownDescription": "🛸 排序依据："
+            "markdownDescription": "🛸 ↑↓"
           },
           "qqq.autoWatchChanges": {
             "order": 25,

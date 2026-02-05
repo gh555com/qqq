@@ -14,6 +14,9 @@ const { spawnSync } = require("child_process");
 let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
+// ★ 从 qvenv.js 导入 Python 环境管理类（YtDlpDownloader 保留在 dow.js）
+const { PythonEngineDownloader } = require('./qvenv');
+
 async function runPool(items, concurrency, worker) {
     if (!items || items.length === 0) return;
     concurrency = Math.max(1, Number(concurrency) || 1);
@@ -2339,10 +2342,31 @@ class YtDlpDownloader {
                 fs.mkdirSync(installDir, { recursive: true });
             }
 
-            if (fs.existsSync(installPath) && fs.statSync(installPath).size > 0) {
-                this.ytdlpPath = installPath;
-                return { success: true, path: installPath };
+            // ★ 关键修复1：检查文件是否正常（>10MB）
+            const MIN_SIZE = 10 * 1024 * 1024; // 10MB
+            if (fs.existsSync(installPath)) {
+                const stat = fs.statSync(installPath);
+                if (stat.size > MIN_SIZE) {
+                    // ★ 验证可用性
+                    const { spawnSync } = require('child_process');
+                    const r = spawnSync(installPath, ['--version'], {
+                        encoding: 'utf8',
+                        windowsHide: true,
+                        timeout: 5000
+                    });
+                    if (r.status === 0 && (r.stdout || '').match(/^\d+/)) {
+                        this.ytdlpPath = installPath;
+                        return { success: true, path: installPath };
+                    }
+                }
+                // 文件损坏，删除
+                global.logMessage(`[yt-dlp] 检测到损坏文件 (${stat.size} bytes)，重新下载`, 'WARN');
+                fs.unlinkSync(installPath);
             }
+
+            // ★ 关键修复2：使用临时文件，防止并发覆盖
+            const tmpPath = installPath + '.tmp';
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
 
             // 尝试下载逻辑：先官方，失败则尝试镜像
             const tryDownload = async (url, timeoutMs = 20000) => {
@@ -2376,17 +2400,19 @@ class YtDlpDownloader {
                             }
 
                             if (res.statusCode === 200) {
-                                const file = fs.createWriteStream(installPath);
+                                // ★ 下载到临时文件
+                                const file = fs.createWriteStream(tmpPath);
                                 res.pipe(file);
                                 file.on('finish', () => {
                                     file.close(() => {
                                         try {
-                                            if (fs.statSync(installPath).size > 0) resolve();
-                                            else { fs.unlinkSync(installPath); reject(new Error('Empty file')); }
+                                            const size = fs.statSync(tmpPath).size;
+                                            if (size > MIN_SIZE) resolve();
+                                            else { fs.unlinkSync(tmpPath); reject(new Error(`File too small: ${size} bytes`)); }
                                         } catch (e) { reject(e); }
                                     });
                                 });
-                                file.on('error', (err) => { fs.unlink(installPath, () => { }); reject(err); });
+                                file.on('error', (err) => { fs.unlink(tmpPath, () => { }); reject(err); });
                             } else {
                                 res.resume();
                                 reject(new Error(`Status: ${res.statusCode}`));
@@ -2400,31 +2426,26 @@ class YtDlpDownloader {
                 });
             };
 
-            // 级联下载策略：官方 → ghproxy → kkgithub → mirror.ghproxy
+            // ★ 级联下载策略：gh-proxy.com (国内最快) → 官方 → ghproxy.net
             const downloadUrls = [
-                { url: officialUrl, timeout: 15000, name: '官方源' },
-                { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' },
+                // ★ gh-proxy.com（国内最快，稳定）
+                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy镜像' },
+                // ★ 官方源（最新版，超时加60秒）
+                { url: officialUrl, timeout: 60000, name: '官方源' },
+                // ★ ghproxy.net（备用）
+                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net镜像' },
             ];
-
-            // 生成第三层和第四层镜像 URL
-            const kkgithubUrl = officialUrl.replace('https://github.com/', 'https://kkgithub.com/');
-            const mirrorGhproxyUrl = officialUrl.replace('https://github.com/', 'https://mirror.ghproxy.com/https://github.com/');
-
-            downloadUrls.push(
-                { url: kkgithubUrl, timeout: 60000, name: 'kkgithub镜像' },
-                { url: mirrorGhproxyUrl, timeout: 60000, name: 'mirror.ghproxy镜像' }
-            );
 
             let lastError = null;
             for (const { url, timeout, name } of downloadUrls) {
                 try {
-                    global.logMessage(`yt-dlp 尝试从 ${name} 下载...`, "INFO");
+                    global.logMessage(`[yt-dlp] 尝试从 ${name} 下载...`, "INFO");
                     await tryDownload(url, timeout);
-                    global.logMessage(`yt-dlp ${name} 下载成功`, "INFO");
+                    global.logMessage(`[yt-dlp] ${name} 下载成功`, "INFO");
                     break; // 成功则跳出循环
                 } catch (e) {
                     lastError = e;
-                    global.logMessage(`yt-dlp ${name} 下载失败: ${e.message}`, "WARN");
+                    global.logMessage(`[yt-dlp] ${name} 下载失败: ${e.message}`, "WARN");
                     // 如果是最后一个 URL，则抛出错误
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
                         throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
@@ -2432,8 +2453,22 @@ class YtDlpDownloader {
                 }
             }
 
+            // ★ 原子移动：下载完成后再 rename
+            fs.renameSync(tmpPath, installPath);
+
             if (platform !== 'win32') {
                 fs.chmodSync(installPath, '755');
+            }
+
+            // ★ 最终验证
+            const { spawnSync } = require('child_process');
+            const r = spawnSync(installPath, ['--version'], {
+                encoding: 'utf8',
+                windowsHide: true,
+                timeout: 5000
+            });
+            if (r.status !== 0 || !(r.stdout || '').match(/^\d+/)) {
+                throw new Error('下载完成但验证失败');
             }
 
             this.ytdlpPath = installPath;
@@ -2444,592 +2479,7 @@ class YtDlpDownloader {
     }
 }
 
-class PythonEngineDownloader {
-    constructor(options = {}) {
-        this.pythonPath = options.pythonPath || null;
-        this._installInProgress = false;
-        this._installTimer = null;
-        // ★ "从无到有" 回调：当 Python 环境从无到有时触发
-        this._onPythonReady = null;
-        // ★ L1 "已知不完美" 状态缓存
-        this._l1KnownImperfect = false;
-        this._l1ImperfectReason = null;
-        this._l1ImperfectMissing = [];
-    }
-
-    /**
-     * 注册 "从无到有" 回调
-     * @param {Function} callback - 当 Python 环境从无到有时调用
-     */
-    onPythonReady(callback) {
-        this._onPythonReady = callback;
-    }
-
-    /**
-     * ★ 查询 L1 是否已知不完美
-     * @returns {Object} - { imperfect: boolean, reason: string|null, missing: string[] }
-     */
-    getL1ImperfectStatus() {
-        return {
-            imperfect: this._l1KnownImperfect,
-            reason: this._l1ImperfectReason,
-            missing: this._l1ImperfectMissing
-        };
-    }
-
-    /**
-     * ★ 清除 L1 不完美缓存（当环境变化时调用）
-     */
-    clearL1ImperfectCache() {
-        this._l1KnownImperfect = false;
-        this._l1ImperfectReason = null;
-        this._l1ImperfectMissing = [];
-    }
-
-    /**
-     * 读取上次安装时间戳（globalState）
-     */
-    _readState(context) {
-        try {
-            // ★ 先读主 key，如果为 0 则读备份 key
-            let ts = context.globalState.get('pythonInstallTimestamp', 0);
-            if (!ts) {
-                ts = context.globalState.get('python_cooldown_ts', 0);
-            }
-            return { installTimestamp: ts || 0 };
-        } catch (e) {
-            console.error('[PythonCheck] _readState error:', e.message);
-        }
-        return { installTimestamp: 0 };
-    }
-
-    /**
-     * 保存安装时间戳（globalState）
-     */
-    _saveState(context, state) {
-        try {
-            // ★ 关键：globalState.update 是异步的，但这里不需要等待
-            // 因为 VS Code 会在内部队列处理，只要调用就会生效
-            context.globalState.update('pythonInstallTimestamp', state.installTimestamp);
-            // ★ 同时写入一个备份 key，确保写入成功
-            context.globalState.update('python_cooldown_ts', state.installTimestamp);
-        } catch (e) {
-            console.error('[PythonCheck] _saveState error:', e.message);
-        }
-    }
-
-    /**
-     * 检查是否在 72 小时冷却期内
-     */
-    _isInCooldown(context) {
-        const COOLDOWN_MS = 259200000; // 72 小时
-        const state = this._readState(context);
-        const now = Date.now();
-        return (now - state.installTimestamp) < COOLDOWN_MS;
-    }
-
-    /**
-     * 检查冷却期剩余时间
-     */
-    _getCooldownStatus(context) {
-        const COOLDOWN_MS = 259200000; // 72 小时
-        const state = this._readState(context);
-        const now = Date.now();
-        const elapsed = now - state.installTimestamp;
-        const remainingMs = Math.max(0, COOLDOWN_MS - elapsed);
-
-        return {
-            inCooldown: remainingMs > 0,
-            remainingHours: Math.floor(remainingMs / 3600000),
-            remainingMinutes: Math.floor((remainingMs % 3600000) / 60000),
-            remainingMs
-        };
-    }
-
-    /**
-     * 依赖名到导入名的映射
-     */
-    _getImportName(dep) {
-        const importMap = {
-            'Pillow': 'PIL',
-            'pywin32': 'win32api'
-        };
-        return importMap[dep] || dep;
-    }
-
-    /**
-     * 获取锁定版本的依赖列表
-     * ★ 版本锁定：pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22
-     */
-    _getLockedDeps() {
-        const baseDeps = [
-            'miniaudio==1.61',
-            'Pillow==10.4.0',
-            'cffi==1.16.0',
-            'pycparser==2.22'
-        ];
-        // Windows 专属依赖：pywin32==311（不跑 postinstall）
-        return process.platform === 'win32'
-            ? [...baseDeps, 'pywin32==311']
-            : baseDeps;
-    }
-
-    /**
-     * 获取依赖检测列表（不带版本号）
-     */
-    _getDepsForCheck() {
-        const baseDeps = ['miniaudio', 'Pillow'];
-        return process.platform === 'win32'
-            ? [...baseDeps, 'pywin32']
-            : baseDeps;
-    }
-
-    /**
-     * 快速检测依赖是否存在
-     */
-    async checkDeps(pythonBin) {
-        const { spawnSync } = require("child_process");
-        const deps = this._getDepsForCheck();
-
-        const checkScript = deps.map(dep => {
-            const importName = this._getImportName(dep);
-            return `
-try:
-    import ${importName}
-    print('${dep}:1')
-except:
-    print('${dep}:0')`;
-        }).join('\n');
-
-        const fullScript = `
-import sys
-${checkScript}
-sys.exit(0)
-`.trim();
-
-        try {
-            const r = spawnSync(pythonBin, ["-c", fullScript], {
-                encoding: 'utf8',
-                windowsHide: true,
-                timeout: 15000
-            });
-
-            const stdout = r.stdout || '';
-            const detail = {};
-            const missing = [];
-
-            for (const dep of deps) {
-                const pattern = new RegExp(`${dep}:(\\d+)`);
-                const match = stdout.match(pattern);
-                const hasDep = match && match[1] === '1';
-                detail[dep] = hasDep;
-                if (!hasDep) missing.push(dep);
-            }
-
-            return { hasAll: missing.length === 0, missing, detail };
-        } catch (e) {
-            return { hasAll: false, missing: deps, detail: {}, error: e.message };
-        }
-    }
-
-    /**
-     * 检查 Python 解释器是否可用（简化版，不检查版本范围）
-     */
-    async isAvailable(pythonBin = null) {
-        const bin = pythonBin || this.pythonPath;
-        if (!bin) return false;
-        try {
-            const fs = require('fs');
-            const path = require('path');
-            if (path.isAbsolute(bin) && !fs.existsSync(bin)) return false;
-
-            const { spawnSync } = require("child_process");
-            const checkScript = `import sys; sys.stdout.write(f'PYTHON_READY|EXE:{sys.executable}')`;
-
-            const r = spawnSync(bin, ["-c", checkScript], {
-                encoding: 'utf8',
-                windowsHide: true,
-                timeout: 10000,
-                cwd: path.isAbsolute(bin) ? path.dirname(bin) : undefined
-            });
-
-            if (r.status === 0 && (r.stdout || "").includes("PYTHON_READY")) {
-                const exeMatch = (r.stdout || "").match(/EXE:([^|]+)/);
-                if (exeMatch) this._resolvedPath = exeMatch[1];
-                return true;
-            }
-            return false;
-        } catch (e) {
-            return false;
-        }
-    }
-
-    /**
-     * ★ L1 完美性检查：解释器存在 + 依赖完整才算完美
-     * @returns {Object} - { perfect: boolean, pythonPath: string|null, missing: string[] }
-     */
-    async checkL1Perfect(context) {
-        const path = require('path');
-        const fs = require('fs');
-
-        // ★ 辅助函数：记录不完美状态
-        const markImperfect = (reason, missing = []) => {
-            this._l1KnownImperfect = true;
-            this._l1ImperfectReason = reason;
-            this._l1ImperfectMissing = missing;
-        };
-
-        if (!context || !context.globalStorageUri) {
-            markImperfect('no_context');
-            return { perfect: false, pythonPath: null, missing: [], reason: 'no_context' };
-        }
-
-        const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-        const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
-        const pythonPath = path.join(installDir, binName);
-
-        // 1. 检查解释器是否存在
-        if (!fs.existsSync(pythonPath)) {
-            markImperfect('no_interpreter');
-            return { perfect: false, pythonPath: null, missing: [], reason: 'no_interpreter' };
-        }
-
-        // 2. 检查解释器是否可用
-        if (!await this.isAvailable(pythonPath)) {
-            markImperfect('interpreter_invalid');
-            return { perfect: false, pythonPath, missing: [], reason: 'interpreter_invalid' };
-        }
-
-        // 3. 检查依赖是否完整
-        const depsResult = await this.checkDeps(pythonPath);
-        if (!depsResult.hasAll) {
-            markImperfect('deps_missing', depsResult.missing);
-            return { perfect: false, pythonPath, missing: depsResult.missing, reason: 'deps_missing' };
-        }
-
-        // 完美！清除不完美缓存
-        this.clearL1ImperfectCache();
-        this.pythonPath = pythonPath;
-        return { perfect: true, pythonPath, missing: [], reason: 'ok' };
-    }
-
-    async autoInstall(context) {
-        // ★ 关键：引入 global 模块
-        const global = require('./global');
-
-        try {
-            const os = require('os');
-            const fs = require('fs');
-            const path = require('path');
-            const https = require('https');
-            const cp = require('child_process');
-
-            const platform = os.platform();
-            const arch = os.arch();
-            const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-            const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.tmp");
-            const binName = platform === "win32" ? "python.exe" : "bin/python3";
-            const installPath = path.join(installDir, binName);
-
-            if (!fs.existsSync(installDir)) fs.mkdirSync(installDir, {
-                recursive: true
-            });
-
-            // 平台和架构检测，生成对应的下载 URL
-            let officialUrl, mirrorUrl;
-            const releaseDate = '20230507';
-            const pyVersion = '3.8.10';
-
-            if (platform === 'win32') {
-                // Windows: 支持 x64, x86 (ia32), arm64
-                // ★ 使用淘宝 NPM 镜像（国内快）作为主要源
-                if (arch === 'x64') {
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                } else if (arch === 'ia32') {
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-win32.zip`;
-                } else if (arch === 'arm64') {
-                    // 注：Python 3.8.10 官方没有 Windows ARM64 原生构建，使用 x86_64 版本通过模拟运行
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                } else {
-                    // 未知架构，默认使用 x64
-                    officialUrl = `https://www.python.org/ftp/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                    mirrorUrl = `https://registry.npmmirror.com/-/binary/python/${pyVersion}/python-${pyVersion}-embed-amd64.zip`;
-                }
-            } else if (platform === 'darwin') {
-                // macOS: 支持 x64 (x86_64) 和 arm64 (Apple Silicon)
-                if (arch === 'arm64') {
-                    // Apple Silicon (M1/M2/M3)
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-apple-darwin-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-apple-darwin-install_only.tar.gz`;
-                } else {
-                    // Intel x86_64 或未知架构
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-apple-darwin-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-apple-darwin-install_only.tar.gz`;
-                }
-            } else {
-                // Linux: 支持 x64 (x86_64), arm64 (aarch64), armv7l
-                if (arch === 'x64') {
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
-                } else if (arch === 'arm64') {
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-unknown-linux-gnu-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-aarch64-unknown-linux-gnu-install_only.tar.gz`;
-                } else if (arch === 'arm') {
-                    // ARMv7 32位（如树莓派）
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-armv7-unknown-linux-gnueabihf-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-armv7-unknown-linux-gnueabihf-install_only.tar.gz`;
-                } else {
-                    // 未知架构，默认使用 x86_64
-                    officialUrl = `https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
-                    mirrorUrl = `https://ghproxy.net/https://github.com/indygreg/python-build-standalone/releases/download/${releaseDate}/cpython-${pyVersion}+${releaseDate}-x86_64-unknown-linux-gnu-install_only.tar.gz`;
-                }
-            }
-
-            global.logMessage(`Python 自动安装: 检测到平台 ${platform}, 架构 ${arch}, 下载 URL: ${officialUrl}`, "INFO");
-
-            const downloadFile = (url, targetPath, timeoutMs = 30000) => {
-                return new Promise((resolve, reject) => {
-                    const doReq = (targetUrl, redirects = 0) => {
-                        if (redirects > 5) return reject(new Error("Too many redirects"));
-                        const urlObj = new URL(targetUrl);
-                        const req = https.get({
-                            hostname: urlObj.hostname,
-                            path: urlObj.pathname + urlObj.search,
-                            timeout: timeoutMs,
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0'
-                            }
-                        }, (res) => {
-                            if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-                                res.resume();
-                                return doReq(new URL(res.headers.location, targetUrl).href, redirects + 1);
-                            }
-                            if (res.statusCode !== 200) {
-                                res.resume();
-                                return reject(new Error(`Status: ${res.statusCode}`));
-                            }
-                            const file = fs.createWriteStream(targetPath);
-                            res.pipe(file);
-                            file.on('finish', () => {
-                                file.close();
-                                resolve();
-                            });
-                            file.on('error', (e) => {
-                                fs.unlink(targetPath, () => { });
-                                reject(e);
-                            });
-                        });
-                        req.on('error', reject);
-                        req.on('timeout', () => {
-                            req.destroy();
-                            reject(new Error("Timeout"));
-                        });
-                    };
-                    doReq(url);
-                });
-            };
-
-            // 下载：级联下载策略（一个接一个尝试，直到成功）
-            // Windows: 淘宝NPM镜像优先（国内快），再试官方源
-            // macOS/Linux: 官方源 → ghproxy → mirror.ghproxy
-            const downloadUrls = [];
-
-            if (platform === 'win32') {
-                // Windows: 先淘宝NPM镜像，再官方源
-                downloadUrls.push(
-                    { url: mirrorUrl, timeout: 30000, name: '淘宝NPM镜像' },
-                    { url: officialUrl, timeout: 30000, name: '官方源' }
-                );
-            } else {
-                // macOS/Linux: 先官方源，再 ghproxy，再 mirror.ghproxy
-                downloadUrls.push(
-                    { url: officialUrl, timeout: 15000, name: '官方源' },
-                    { url: mirrorUrl, timeout: 60000, name: 'ghproxy镜像' }
-                );
-                const thirdMirrorUrl = officialUrl.replace('https://github.com/', 'https://mirror.ghproxy.com/https://github.com/');
-                downloadUrls.push({ url: thirdMirrorUrl, timeout: 60000, name: 'mirror.ghproxy镜像' });
-            }
-
-            let lastError = null;
-            for (const { url, timeout, name } of downloadUrls) {
-                try {
-                    global.logMessage(`尝试从 ${name} 下载...`, "INFO");
-                    await downloadFile(url, zipPath, timeout);
-                    global.logMessage(`${name} 下载成功`, "INFO");
-                    break; // 成功则跳出循环
-                } catch (e) {
-                    lastError = e;
-                    global.logMessage(`${name} 下载失败: ${e.message}`, "WARN");
-                    // 如果是最后一个 URL，则抛出错误
-                    if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
-                    }
-                }
-            }
-
-            // 解压
-            if (platform === 'win32') {
-                cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, {
-                    windowsHide: true
-                });
-                // 提前修复 ._pth，确保 pip 能跑通
-                const pthFile = path.join(installDir, 'python38._pth');
-                if (fs.existsSync(pthFile)) {
-                    let content = fs.readFileSync(pthFile, 'utf8');
-                    global.logMessage(`[PythonCheck] 原始 python38._pth: ${content.replace(/\n/g, ' | ')}`, 'DEBUG');
-
-                    // ★ 关键：启用 import site 并添加 site-packages 路径
-                    if (content.includes('#import site')) {
-                        content = content.replace('#import site', 'import site');
-                    }
-                    // 确保 site-packages 路径存在
-                    if (!content.includes('site-packages')) {
-                        content += '\n./site-packages\n';
-                    }
-                    // ★ 关键：添加 Lib 路径（get-pip.py 需要）
-                    if (!content.includes('./Lib')) {
-                        content = './Lib\n' + content;
-                    }
-                    fs.writeFileSync(pthFile, content);
-                    global.logMessage(`[PythonCheck] 修改后 python38._pth: ${content.replace(/\n/g, ' | ')}`, 'DEBUG');
-                } else {
-                    global.logMessage(`[PythonCheck] python38._pth 不存在`, 'WARN');
-                }
-            } else {
-                cp.execSync(`tar -xzf "${zipPath}" -C "${installDir}" --strip-components=1`, {
-                    windowsHide: true
-                });
-            }
-            fs.unlinkSync(zipPath);
-
-            if (await this.isAvailable(installPath)) {
-                this.pythonPath = installPath;
-
-                // ★ 合并逻辑：下载完成后立即安装依赖（版本锁定）
-                const sitePackagesDir = path.join(installDir, 'site-packages');
-                if (!fs.existsSync(sitePackagesDir)) {
-                    fs.mkdirSync(sitePackagesDir, { recursive: true });
-                }
-
-                // ★ 关键：Python embed 版本没有 pip，需要先安装 pip
-                if (platform === 'win32') {
-                    global.logMessage(`[PythonCheck] Python embed 版本，正在安装 pip...`, 'INFO');
-                    const getPipPath = path.join(installDir, 'get-pip.py');
-
-                    // 下载 get-pip.py（支持重定向）
-                    await new Promise((resolve, reject) => {
-                        const downloadGetPip = (url, redirectCount = 0) => {
-                            if (redirectCount > 5) {
-                                reject(new Error('get-pip.py 重定向次数过多'));
-                                return;
-                            }
-                            const urlObj = new URL(url);
-                            https.get({
-                                hostname: urlObj.hostname,
-                                path: urlObj.pathname,
-                                headers: { 'User-Agent': 'Mozilla/5.0' }
-                            }, (res) => {
-                                if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
-                                    res.resume();
-                                    const location = res.headers.location;
-                                    downloadGetPip(new URL(location, url).href, redirectCount + 1);
-                                    return;
-                                }
-                                if (res.statusCode !== 200) {
-                                    reject(new Error(`get-pip.py 下载失败: ${res.statusCode}`));
-                                    return;
-                                }
-                                const file = fs.createWriteStream(getPipPath);
-                                res.pipe(file);
-                                file.on('finish', () => {
-                                    file.close();
-                                    resolve();
-                                });
-                                file.on('error', reject);
-                            }).on('error', reject);
-                        };
-                        downloadGetPip('https://bootstrap.pypa.io/pip/3.8/get-pip.py');
-                    });
-
-                    // 运行 get-pip.py 安装 pip
-                    try {
-                        cp.execSync(`"${installPath}" "${getPipPath}"`, {
-                            windowsHide: true,
-                            timeout: 120000,
-                            stdio: ['pipe', 'pipe', 'pipe'],
-                            env: { ...process.env, PYTHONNOUSERSITE: '1' }
-                        });
-                    } catch (pipErr) {
-                        // 获取详细错误信息
-                        const stderr = pipErr.stderr ? pipErr.stderr.toString() : '';
-                        const stdout = pipErr.stdout ? pipErr.stdout.toString() : '';
-                        global.logMessage(`[PythonCheck] pip 安装失败: ${pipErr.message}`, 'ERROR');
-                        if (stderr) global.logMessage(`[PythonCheck] pip stderr: ${stderr.slice(0, 500)}`, 'ERROR');
-                        if (stdout) global.logMessage(`[PythonCheck] pip stdout: ${stdout.slice(0, 500)}`, 'DEBUG');
-                        throw pipErr;
-                    }
-
-                    // 删除 get-pip.py
-                    try { fs.unlinkSync(getPipPath); } catch { }
-                    global.logMessage(`[PythonCheck] pip 安装成功`, 'INFO');
-                }
-
-                const lockedDeps = this._getLockedDeps();
-                global.logMessage(`[PythonCheck] 开始安装锁定版本依赖: ${lockedDeps.join(', ')}`, 'INFO');
-
-                try {
-                    const startTime = Date.now();
-                    // ★ 版本锁定安装，不跑 pywin32_postinstall
-                    const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
-                    cp.execSync(pipCmd, {
-                        windowsHide: true,
-                        timeout: 300000, // 5 分钟超时
-                        env: { ...process.env, PYTHONNOUSERSITE: '1' }
-                    });
-
-                    const duration = (Date.now() - startTime) / 1000;
-                    global.logMessage(`[PythonCheck] 依赖安装成功, 耗时=${duration.toFixed(2)}秒`, 'INFO');
-
-                    // 记录安装时间（用于 72 小时冷却）
-                    this._saveState(context, { installTimestamp: Date.now() });
-
-                    // ★ 清除不完美缓存，环境已完美
-                    this.clearL1ImperfectCache();
-
-                    return {
-                        success: true,
-                        path: installPath,
-                        fromScratch: true  // ★ 标记"从无到有"
-                    };
-                } catch (depErr) {
-                    global.logMessage(`[PythonCheck] 依赖安装失败: ${depErr.message}`, 'ERROR');
-                    // 即使依赖安装失败，Python 本身已安装成功，记录时间防止频繁重试
-                    this._saveState(context, { installTimestamp: Date.now() });
-                    return {
-                        success: false,
-                        path: installPath,
-                        error: `Python 已安装但依赖安装失败: ${depErr.message}`
-                    };
-                }
-            }
-            return {
-                success: false,
-                error: "Validation failed after install"
-            };
-        } catch (e) {
-            // ★ 关键：下载失败也要记录时间戳，触发 72 小时冷却期
-            this._saveState(context, { installTimestamp: Date.now() });
-            global.logMessage(`[PythonCheck] 下载失败，进入 72 小时冷却期: ${e.message}`, 'ERROR');
-            return {
-                success: false,
-                error: e.message
-            };
-        }
-    }
-}
+// ★ PythonEngineDownloader 已删除，使用 qvenv.js 中的版本
 
 class UnifiedMediaDownloader {
     constructor(options = {}) {
@@ -3192,83 +2642,106 @@ class UnifiedMediaDownloader {
         // ★ 新架构：只信任 L1 (插件自维护目录) 和 L4 (下载安装)
         // ★ 彻底去除 L2 (VS Code 配置) 和 L3 (系统 PATH)
 
-        // 1. L1 完美性检查：解释器存在 + 依赖完整才算完美
-        const l1Result = await this.python.checkL1Perfect(context);
-
-        if (l1Result.perfect) {
-            // L1 完美！直接返回，可以启动 daemon
-            const finalPath = this.python._resolvedPath || l1Result.pythonPath;
-            if (this._lastLoggedPython !== finalPath) {
-                global.logMessage(`[PythonCheck] L1 完美命中: ${finalPath}`, "INFO");
-                this._lastLoggedPython = finalPath;
-            }
-            return l1Result.pythonPath;
+        // ★ 关键：防止整个 ensurePythonReady 被并发调用，确保单例
+        if (this._ensurePythonReadyPromise) {
+            return this._ensurePythonReadyPromise;
         }
 
-        // L1 不完美，记录原因
-        global.logMessage(`[PythonCheck] L1 不完美: ${l1Result.reason}${l1Result.missing.length > 0 ? `, 缺失: ${l1Result.missing.join(', ')}` : ''}`, "INFO");
-
-        // 2. 检查 72 小时冷却期
-        const cooldownStatus = this.python._getCooldownStatus(context);
-        if (cooldownStatus.inCooldown) {
-            global.logMessage(`[PythonCheck] 在 72 小时冷却期内 (剩余 ${cooldownStatus.remainingHours}h${cooldownStatus.remainingMinutes}m)，跳过下载`, "INFO");
-            // 冷却期内不启动 daemon，返回 null
-            return null;
-        }
-
-        // 3. L4 触发：等待 20 秒后后台静默下载
-        if (this._pyInstallPromise) return this._pyInstallPromise;
-
-        global.logMessage(`[PythonCheck] L1 不完美且不在冷却期，20 秒后触发 L4 下载流程`, "INFO");
-
-        this._pyInstallPromise = new Promise((resolve) => {
-            // ★ 20 秒延迟，错开启动高峰
-            setTimeout(async () => {
-                try {
-                    global.logMessage(`[PythonCheck] 开始 L4 下载安装流程...`, "INFO");
-
-                    // 再次检查冷却期（防止 20 秒内多次触发）
-                    if (this.python._isInCooldown(context)) {
-                        global.logMessage(`[PythonCheck] 已进入冷却期，跳过下载`, "INFO");
-                        resolve(null);
-                        return;
-                    }
-
-                    // 执行下载安装（百分百静默，无 UI）
-                    const res = await this.python.autoInstall(context);
-
-                    if (res.success) {
-                        const finalPath = this.python._resolvedPath || res.path;
-                        global.logMessage(`[PythonCheck] L4 下载安装成功: ${finalPath}`, "INFO");
-                        this._lastLoggedPython = finalPath;
-
-                        // ★ "从无到有" 回调：热启动 daemon
-                        if (res.fromScratch && this.python._onPythonReady) {
-                            global.logMessage(`[PythonCheck] 触发 "从无到有" 回调，热启动 daemon...`, "INFO");
-                            try {
-                                await this.python._onPythonReady(res.path, context);
-                            } catch (cbErr) {
-                                global.logMessage(`[PythonCheck] "从无到有" 回调失败: ${cbErr.message}`, "WARN");
-                            }
-                        }
-
-                        resolve(res.path);
-                    } else {
-                        global.logMessage(`[PythonCheck] L4 失败: ${res.error}`, "ERROR");
-                        resolve(null);
-                    }
-                } catch (e) {
-                    global.logMessage(`[PythonCheck] L4 异常: ${e.message}`, "ERROR");
-                    resolve(null);
-                } finally {
-                    this._pyInstallPromise = null;
+        // ★ 创建单例 Promise
+        this._ensurePythonReadyPromise = (async () => {
+            try {
+                // ★ 内层检查：如果已有正在进行的下载流程，直接返回
+                if (this._pyInstallPromise) {
+                    return this._pyInstallPromise;
                 }
-            }, 20000); // ★ 20 秒延迟
-        });
 
-        // 立即返回 null，不阻塞启动
-        // 下载完成后会通过回调热启动 daemon
-        return null;
+                // 1. L1 完美性检查：解释器存在 + 依赖完整才算完美
+                const l1Result = await this.python.checkL1Perfect(context);
+
+                if (l1Result.perfect) {
+                    // L1 完美！直接返回，可以启动 daemon
+                    const finalPath = this.python._resolvedPath || l1Result.pythonPath;
+                    if (this._lastLoggedPython !== finalPath) {
+                        global.logMessage(`[PythonCheck] L1 完美命中: ${finalPath}`, "INFO");
+                        this._lastLoggedPython = finalPath;
+                    }
+                    return l1Result.pythonPath;
+                }
+
+                // L1 不完美，记录原因
+                global.logMessage(`[PythonCheck] L1 不完美: ${l1Result.reason}${l1Result.missing.length > 0 ? `, 缺失: ${l1Result.missing.join(', ')}` : ''}`, "INFO");
+
+                // 2. 检查 72 小时冷却期
+                const cooldownStatus = this.python._getCooldownStatus(context);
+                if (cooldownStatus.inCooldown) {
+                    global.logMessage(`[PythonCheck] 在 72 小时冷却期内 (剩余 ${cooldownStatus.remainingHours}h${cooldownStatus.remainingMinutes}m)，跳过下载`, "INFO");
+                    // 冷却期内不启动 daemon，返回 null
+                    return null;
+                }
+
+                // 3. L4 触发：等待 20 秒后后台静默下载
+                // ★ 注意：_pyInstallPromise 检查已移到函数开头，确保单例
+
+                global.logMessage(`[PythonCheck] L1 不完美且不在冷却期，20 秒后触发 L4 下载流程`, "INFO");
+
+                this._pyInstallPromise = new Promise((resolve) => {
+                    // ★ 20 秒延迟，错开启动高峰
+                    setTimeout(async () => {
+                        try {
+                            global.logMessage(`[PythonCheck] 开始 L4 下载安装流程...`, "INFO");
+
+                            // 再次检查冷却期（防止 20 秒内多次触发）
+                            if (this.python._isInCooldown(context)) {
+                                global.logMessage(`[PythonCheck] 已进入冷却期，跳过下载`, "INFO");
+                                resolve(null);
+                                return;
+                            }
+
+                            // 执行下载安装（百分百静默，无 UI）
+                            const res = await this.python.autoInstall(context);
+
+                            if (res.success) {
+                                const finalPath = this.python._resolvedPath || res.path;
+                                global.logMessage(`[PythonCheck] L4 下载安装成功: ${finalPath}`, "INFO");
+                                this._lastLoggedPython = finalPath;
+
+                                // ★ "从无到有" 回调：热启动 daemon
+                                if (res.fromScratch && this.python._onPythonReady) {
+                                    global.logMessage(`[PythonCheck] 触发 "从无到有" 回调，热启动 daemon...`, "INFO");
+                                    try {
+                                        await this.python._onPythonReady(res.path, context);
+                                    } catch (cbErr) {
+                                        global.logMessage(`[PythonCheck] "从无到有" 回调失败: ${cbErr.message}`, "WARN");
+                                    }
+                                }
+
+                                resolve(res.path);
+                            } else {
+                                global.logMessage(`[PythonCheck] L4 失败: ${res.error}`, "ERROR");
+                                resolve(null);
+                            }
+                        } catch (e) {
+                            global.logMessage(`[PythonCheck] L4 异常: ${e.message}`, "ERROR");
+                            resolve(null);
+                        } finally {
+                            this._pyInstallPromise = null;
+                        }
+                    }, 20000); // ★ 20 秒延迟
+                });
+
+                // 立即返回 null，不阻塞启动
+                // 下载完成后会通过回调热启动 daemon
+                return null;
+            } finally {
+                // ★ 不要立即清理锁！延迟清理，防止并发调用
+                // ★ 等待 1 秒后清理，确保所有并发调用都能命中同一个 Promise
+                setTimeout(() => {
+                    this._ensurePythonReadyPromise = null;
+                }, 1000);
+            }
+        })();
+
+        return this._ensurePythonReadyPromise;
     }
 
     destroy() {

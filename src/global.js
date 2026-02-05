@@ -380,7 +380,15 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 		}
 
 		const spawnWith = (bin) => {
-			return new Promise((res) => {
+			return new Promise(async (res) => {
+				// ★ 关键：单例检查，防止重复启动
+				const isRunning = await checkDaemonRunning('python.exe', 'kp.py --daemon');
+				if (isRunning) {
+					logMessage(`[Python] 检测到 kp.py daemon 已在运行，跳过启动`, "WARN");
+					res(false);
+					return;
+				}
+
 				let proc;
 				try {
 					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
@@ -584,43 +592,53 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			return;
 		}
 
-		try {
-			logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
-			if (!fs.existsSync(exePath)) {
-				logMessage(`[Rust] 路径不存在: ${exePath}`, "WARN");
-				bridge._setStartError(`exe_not_found_real: ${exePath}`);
+		// ★ 关键：单例检查，防止重复启动
+		(async () => {
+			const isRunning = await checkDaemonRunning(filename, '--daemon');
+			if (isRunning) {
+				logMessage(`[Rust] 检测到 ${filename} daemon 已在运行，跳过启动`, "WARN");
 				resolve(false);
 				return;
 			}
-			const proc = cp.spawn(exePath, ["--daemon"], {
-				stdio: ["pipe", "pipe", "pipe"],
-				windowsHide: true,
-			});
 
-			proc.once("error", (err) => {
-				bridge._setStartError(`process_error: ${err.message}`);
-				logMessage(`Rust Bridge 进程错误: ${err.message}`, "WARN");
+			try {
+				logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
+				if (!fs.existsSync(exePath)) {
+					logMessage(`[Rust] 路径不存在: ${exePath}`, "WARN");
+					bridge._setStartError(`exe_not_found_real: ${exePath}`);
+					resolve(false);
+					return;
+				}
+				const proc = cp.spawn(exePath, ["--daemon"], {
+					stdio: ["pipe", "pipe", "pipe"],
+					windowsHide: true,
+				});
+
+				proc.once("error", (err) => {
+					bridge._setStartError(`process_error: ${err.message}`);
+					logMessage(`Rust Bridge 进程错误: ${err.message}`, "WARN");
+					bridge.available = false;
+					resolve(false);
+				});
+
+				bridge.setupProcess(proc, (ok) => {
+					if (ok) {
+						logMessage("Rust Bridge 启动成功", "INFO");
+						resolve(true);
+					} else {
+						logMessage(`Rust Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+						resolve(false);
+					}
+				});
+			} catch (e) {
+				bridge._setStartError(`start_exception: ${e.message}`);
+				logMessage(`Rust Bridge 启动异常: ${e.message}`, "ERROR");
 				bridge.available = false;
 				resolve(false);
-			});
-
-			bridge.setupProcess(proc, (ok) => {
-				if (ok) {
-					logMessage("Rust Bridge 启动成功", "INFO");
-					resolve(true);
-				} else {
-					logMessage(`Rust Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
-					resolve(false);
-				}
-			});
-		} catch (e) {
-			bridge._setStartError(`start_exception: ${e.message}`);
-			logMessage(`Rust Bridge 启动异常: ${e.message}`, "ERROR");
-			bridge.available = false;
-			resolve(false);
-		}
-	});
-});
+			}
+		})();  // ★ 结束 async IIFE
+	});  // ★ 结束 Promise
+});  // ★ 结束 DaemonBridge
 
 // Shell bridge
 const shellBridge = new DaemonBridge("Shell", (bridge) => {
@@ -944,48 +962,61 @@ while ($true) {
 `.trim();
 
 			logMessage("尝试启动 PowerShell 进程", "DEBUG");
-			try {
-				const psOptions = [
-					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
-					["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
-					["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
-					["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
-				];
 
-				let lastError = null;
-				for (const [index, options] of psOptions.entries()) {
-					try {
-						logMessage(`尝试使用选项 ${index + 1} 启动 PowerShell: ${options[0]}`, "DEBUG");
-						proc = cp.spawn(options[0], options.slice(1), {
-							stdio: ["pipe", "pipe", "pipe"],
-							windowsHide: true,
-						});
-						logMessage(`PowerShell 进程已创建: ${options[0]}`, "DEBUG");
-						break;
-					} catch (e) {
-						lastError = e;
-						logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
+			// ★ 关键修复：将整个启动逻辑放在 async IIFE 内部，并在内部 resolve
+			(async () => {
+				// ★ 移除单例检查，依赖 cleanupGhostDaemons 清理残留进程
+				// 单例检查会导致误判（残留进程未完全退出时）
+
+				try {
+					const psOptions = [
+						["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
+						["powershell.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
+						["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", simplePsScript],
+						["pwsh.exe", "-STA", "-NoProfile", "-NoLogo", "-NonInteractive", "-Command", simplePsScript],
+					];
+
+					let lastError = null;
+					for (const [index, options] of psOptions.entries()) {
+						try {
+							logMessage(`尝试使用选项 ${index + 1} 启动 PowerShell: ${options[0]}`, "DEBUG");
+							proc = cp.spawn(options[0], options.slice(1), {
+								stdio: ["pipe", "pipe", "pipe"],
+								windowsHide: true,
+							});
+							logMessage(`PowerShell 进程已创建: ${options[0]}`, "DEBUG");
+							break;
+						} catch (e) {
+							lastError = e;
+							logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
+						}
 					}
-				}
 
-				if (!proc) {
-					throw lastError || new Error("无法启动任何PowerShell进程");
-				}
+					if (!proc) {
+						throw lastError || new Error("无法启动任何PowerShell进程");
+					}
 
-				proc.on("error", (err) => {
-					bridge._setStartError(`process_error: ${err.message}`);
-					logMessage(`PowerShell 进程错误: ${err.message} `, "ERROR");
-				});
-				proc.on("exit", (code, signal) => {
-					logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal} `, "INFO");
-				});
-			} catch (e) {
-				bridge._setStartError(`create_fail: ${e.message} `);
-				logMessage(`PowerShell 进程创建失败: ${e.message} `, "ERROR");
-				bridge.available = false;
-				resolve(false);
-				return;
-			}
+					proc.on("error", (err) => {
+						bridge._setStartError(`process_error: ${err.message}`);
+						logMessage(`PowerShell 进程错误: ${err.message} `, "ERROR");
+					});
+					proc.on("exit", (code, signal) => {
+						logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal} `, "INFO");
+					});
+
+					// ★ 关键：在 async IIFE 内部调用 setupProcess
+					bridge.setupProcess(proc, (ok) => {
+						if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"} `, "WARN");
+						resolve(ok);
+					});
+				} catch (e) {
+					bridge._setStartError(`create_fail: ${e.message} `);
+					logMessage(`PowerShell 进程创建失败: ${e.message} `, "ERROR");
+					bridge.available = false;
+					resolve(false);
+				}
+			})();
+			return;  // ★ 关键：Windows 分支提前返回，不执行下面的通用代码
 		} else {
 			const nodeBin = process.execPath.replace(/"/g, '\\"');
 			const bashScript = platform === "darwin"
@@ -1303,27 +1334,90 @@ async function cleanupGhostDaemons() {
 	const rustBins = [
 		"q_engine_win_x64.exe", "q_engine_win_arm64.exe",
 		"q_engine_linux_x64", "q_engine_linux_arm64",
-		"q_engine_mac_x64", "q_engine_mac_arm64"
+		"q_engine_mac_x64", "q_engine_mac_arm64",
+		"q_win_x64.exe", "q_win_arm64.exe", "q_win_x86.exe",  // ★ 新加
+		"q_mac_arm64", "q_mac_x64",
+		"q_linux_arm64", "q_linux_x64"
 	];
 
 	try {
 		if (isWin) {
 			// Windows: 使用 PowerShell 精准匹配命令行中的 kp.py，避免误杀用户其他 Python 任务
+			// ★ 关键修复：使用 spawnSync 直接传参，绕过 cmd.exe 转义
 			const pyKill = `Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe'" | Where-Object { $_.CommandLine -like '*kp.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-			try { cp.execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${pyKill}"`, { stdio: 'ignore' }); } catch (e) { }
+			try {
+				cp.spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', pyKill], {
+					timeout: 5000, windowsHide: true
+				});
+			} catch (e) { }
 
 			// 清理 Rust 引擎残留
 			for (const bin of rustBins) {
 				if (bin.endsWith(".exe")) {
-					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore' }); } catch (e) { }
+					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 				}
 			}
+
+			// ★ 清理 PowerShell daemon 残留
+			const psKill = `Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like '*--daemon*' -and $_.CommandLine -like '*UTF8*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
+			try {
+				cp.spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psKill], {
+					timeout: 5000, windowsHide: true
+				});
+			} catch (e) { }
 		} else {
 			// Linux/macOS: 使用 pkill -f 匹配全路径/全命令行
-			try { cp.execSync(`pkill -9 -f "kp.py"`, { stdio: 'ignore' }); } catch (e) { }
-			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore' }); } catch (e) { }
+			try { cp.execSync(`pkill -9 -f "kp.py"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
+			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
+			try { cp.execSync(`pkill -9 -f "q_mac_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
+			try { cp.execSync(`pkill -9 -f "q_linux_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 		}
 	} catch (e) { }
+}
+
+/**
+ * ★ 检查单个 daemon 是否已在运行（单例检查）
+ * @param {string} processName - 进程名或关键字
+ * @param {string} [commandLinePattern] - 命令行匹配模式
+ * @returns {Promise<boolean>} - 如果已在运行返回 true
+ */
+async function checkDaemonRunning(processName, commandLinePattern = null) {
+	const isWin = process.platform === "win32";
+
+	try {
+		if (isWin) {
+			let psScript;
+			if (commandLinePattern) {
+				// ★ 使用单引号包裹 Filter 参数，避免 cmd.exe 转义问题
+				psScript = `Get-CimInstance Win32_Process -Filter "Name = '${processName}'" | Where-Object { $_.CommandLine -like '*${commandLinePattern}*' } | Measure-Object | Select-Object -ExpandProperty Count`;
+			} else {
+				psScript = `Get-CimInstance Win32_Process -Filter "Name = '${processName}'" | Measure-Object | Select-Object -ExpandProperty Count`;
+			}
+
+			// ★ 关键修复：使用 spawnSync 直接传参，绕过 cmd.exe 转义
+			const result = cp.spawnSync('powershell', [
+				'-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript
+			], {
+				encoding: 'utf8',
+				timeout: 3000,
+				windowsHide: true
+			});
+
+			const count = parseInt(result.stdout?.trim()) || 0;
+			return count > 0;
+		} else {
+			const pattern = commandLinePattern || processName;
+			const result = cp.execSync(`pgrep -f "${pattern}" | wc -l`, {
+				encoding: 'utf8',
+				timeout: 3000
+			}).trim();
+
+			const count = parseInt(result) || 0;
+			return count > 0;
+		}
+	} catch (e) {
+		return false;
+	}
 }
 
 async function startDaemons() {
