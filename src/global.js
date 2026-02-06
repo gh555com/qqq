@@ -2255,6 +2255,7 @@ const TransactionManager = {
 		let list = this.getTransactions();
 
 		// ★ 终极最优解：完美白名单字段清洗 (防止 1.8MB 爆炸)
+		const now = Date.now();
 		const cleanTrans = {
 			id: trans.id,
 			targetDir: trans.targetDir,
@@ -2263,7 +2264,10 @@ const TransactionManager = {
 			docUri: typeof trans.docUri === 'string' ? trans.docUri : trans.docUri?.toString(),
 			tempFiles: Array.isArray(trans.tempFiles) ? trans.tempFiles : [],
 			status: 'pending',
-			createdAt: trans.createdAt || Date.now(),
+			createdAt: trans.createdAt || now,
+			// ★ lastActiveAt: 事务最后活跃时间，用于 recover 场景的时间基准判断
+			// 每次 cancel check 时更新，回滚时用此时间而非文件 birthtime
+			lastActiveAt: trans.lastActiveAt || now,
 			taskType: trans.taskType || 'unknown',
 			// 预留元数据空间 (仅限简单类型)
 			extra: trans.extra || {}
@@ -2304,6 +2308,37 @@ const TransactionManager = {
 		let list = this.getTransactions();
 		list = list.map(t => t.id === id ? { ...t, ...updates } : t);
 		await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
+	},
+
+	/**
+	 * ★ 轻量级更新 lastActiveAt（用于 cancel check 时频繁调用）
+	 * 使用节流逻辑，最多每 5 秒更新一次，避免过于频繁的 I/O
+	 */
+	_lastActiveThrottle: {},
+	async touchLastActive(transId) {
+		if (!extensionContext || !transId) return;
+		const now = Date.now();
+		// 节流：每 5 秒最多更新一次
+		const lastTouch = this._lastActiveThrottle[transId] || 0;
+		if (now - lastTouch < 5000) return;
+		this._lastActiveThrottle[transId] = now;
+
+		try {
+			let list = this.getTransactions();
+			let found = false;
+			list = list.map(t => {
+				if (t.id === transId) {
+					found = true;
+					return { ...t, lastActiveAt: now };
+				}
+				return t;
+			});
+			if (found) {
+				await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
+			}
+		} catch (e) {
+			// 静默失败，不影响主流程
+		}
 	},
 
 	async removeTransaction(id) {
@@ -2363,10 +2398,12 @@ const TransactionManager = {
 		await this.removeTransaction(trans.id);
 
 		// ★ 后台清理（不阻塞弹窗和用户交互）
+		const isRecover = options.isRecover === true;
 		if (trans.targetDir) {
 			setTimeout(() => {
 				// 1. 清理 .part/.ytdl 临时文件 (传入 trans 以便清理预注册的 tempFiles)
-				this._cleanupTempFiles(trans.targetDir, trans).catch(e => {
+				// ★ 传递 isRecover 选项，让清理逻辑使用事务时间基准
+				this._cleanupTempFiles(trans.targetDir, trans, { isRecover }).catch(e => {
 					logMessage(`[临时文件清理] 失败: ${e.message}`, "WARN");
 				});
 			}, 100);
@@ -2403,43 +2440,54 @@ const TransactionManager = {
 	 * ★ 后台清理临时文件（.part/.ytdl 等，以及事务预注册的 tempFiles）
 	 * @param {string} targetDir
 	 * @param {object} trans - 可选的事务对象，包含显式的 tempFiles 列表
+	 * @param {object} options - 可选参数 { isRecover: boolean }
 	 */
-	async _cleanupTempFiles(targetDir, trans = null) {
+	async _cleanupTempFiles(targetDir, trans = null, options = {}) {
 		if (!targetDir || !fs.existsSync(targetDir)) return;
 
 		const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
 		const now = Date.now();
-		const FIVE_MINUTES = 300000;
+		const SIX_MINUTES = 360000;
 
-		// 收集需要清理的文件
-		const filesToDelete = new Set();
+		// ★ 混合策略基准时间：
+		// - 对于事务记录的精确 tempFiles：使用 lastActiveAt 作为基准（文件创建时间 < lastActiveAt + 缓冲时间 就删除）
+		// - 对于模糊匹配的临时文件：保留 6 分钟限制
+		const isRecover = options.isRecover === true;
+		const transBaseTime = trans?.lastActiveAt || trans?.createdAt || 0;
+		// ★ recover 场景的缓冲时间：60分钟（容纳网络下载延迟、系统时钟误差等）
+		const RECOVER_BUFFER = 3600000; // 60分钟
 
-		// 1. 扫描目录下的临时后缀文件
+		// 收集需要清理的文件（区分精确记录 vs 模糊匹配）
+		const exactTempFiles = new Set(); // 事务显式记录的文件
+		const fuzzyTempFiles = new Set(); // 模糊匹配的临时文件
+
+		// 1. 扫描目录下的临时后缀文件（模糊匹配）
 		try {
 			const files = fs.readdirSync(targetDir);
 			for (const f of files) {
 				const ext = path.extname(f).toLowerCase();
 				if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
-					filesToDelete.add(path.normalize(path.join(targetDir, f)));
+					fuzzyTempFiles.add(path.normalize(path.join(targetDir, f)));
 				}
 			}
 		} catch { }
 
-		// 2. 加上事务显式记录的 tempFiles
+		// 2. 加上事务显式记录的 tempFiles（精确记录）
 		if (trans && Array.isArray(trans.tempFiles)) {
 			trans.tempFiles.forEach(f => {
-				if (f && typeof f === 'string') filesToDelete.add(path.normalize(f));
+				if (f && typeof f === 'string') exactTempFiles.add(path.normalize(f));
 			});
 		}
 
-		if (filesToDelete.size === 0) return;
+		const allFiles = new Set([...exactTempFiles, ...fuzzyTempFiles]);
+		if (allFiles.size === 0) return;
 
 		// ★ 关键修复：在删除任何文件之前，先获取全量引用“白名单”
 		// 这样即便文件在 tempFiles 中，只要有文档正在引用它，就绝不删除
 		const referencedItems = this._getReferencedItemsSync(targetDir);
 
 		// 3. 执行删除
-		for (const fullPath of filesToDelete) {
+		for (const fullPath of allFiles) {
 			try {
 				const fileName = path.basename(fullPath).toLowerCase();
 				// ★ 引用保护：如果在白名单中，跳过
@@ -2451,18 +2499,37 @@ const TransactionManager = {
 				const stat = fs.statSync(fullPath);
 				if (!stat.isFile()) continue;
 
-				// ★ 只删除创建时间 < 5分钟的 (放松到 6分钟，容忍误差)
+				// ★ 获取文件创建时间（优先 birthtime，fallback 到 mtime）
+				// 注意：Windows 的 birthtimeMs 是真正的创建时间，Linux 可能不可用
 				const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
 				if (!birthtime || isNaN(birthtime)) continue;
-				const age = now - birthtime;
-				if (age > 360000) continue; // 6分钟, 允许 age 为负数（系统时钟微差）
+
+				// ★ 混合策略时间判断
+				const isExactFile = exactTempFiles.has(fullPath);
+				let shouldDelete = false;
+
+				if (isExactFile && isRecover && transBaseTime > 0) {
+					// ★ recover 场景 + 精确记录的文件：
+					// 文件创建时间 < lastActiveAt + 缓冲时间 就删除
+					// 这样即使 VS Code 崩溃后过了很久才重启，也能正确清理
+					shouldDelete = birthtime < transBaseTime + RECOVER_BUFFER;
+					if (shouldDelete) {
+						logMessage(`[临时文件清理] recover模式：${path.basename(fullPath)} (birthtime=${new Date(birthtime).toISOString()}, baseTime=${new Date(transBaseTime).toISOString()})`, "DEBUG");
+					}
+				} else {
+					// ★ 普通场景 / 模糊匹配文件：保留 6 分钟限制
+					const age = now - birthtime;
+					shouldDelete = age >= 0 && age < SIX_MINUTES;
+				}
+
+				if (!shouldDelete) continue;
 
 				// ★ 带重试逻辑
 				let deleted = false;
 				for (let retry = 0; retry < 5 && !deleted; retry++) {
 					try {
 						fs.unlinkSync(fullPath);
-						logMessage(`[临时文件清理] 删除: ${path.basename(fullPath)}`, "INFO");
+						logMessage(`[临时文件清理] 删除: ${path.basename(fullPath)}${isRecover && isExactFile ? ' (recover模式)' : ''}`, "INFO");
 						deleted = true;
 					} catch (e) {
 						if ((e.code === 'EBUSY' || e.code === 'EPERM') && retry < 4) {
@@ -2625,8 +2692,9 @@ const TransactionManager = {
 		logMessage(`[Recovery] 发现 ${list.length} 个未完成事务，开始清理...`, "WARN");
 		for (const trans of list) {
 			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
-			// 或者可以判断 createdAt 是否超时 (例如 10分钟)
-			await this.rollback(trans);
+			// ★ 传入 isRecover: true，让清理逻辑使用 lastActiveAt 作为时间基准
+			// 而非文件 birthtime，这样即使 VS Code 崩溃后过了很久才重启也能正确回滚
+			await this.rollback(trans, { isRecover: true });
 		}
 	},
 

@@ -921,6 +921,12 @@ class Qvideo {
             return true;
         }
 
+        // ★ 任务还在运行，更新事务的 lastActiveAt（用于 recover 场景的时间基准）
+        // 内部有节流逻辑，每 5 秒最多更新一次，不阻塞主流程
+        if (task.transId) {
+            global.TransactionManager.touchLastActive(task.transId).catch(() => { });
+        }
+
         return false;
     }
 
@@ -2180,7 +2186,7 @@ $of = $vi.OriginalFilename;
 
         exePath = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "正在下载 Chrome for Testing...",
+            title: "qqq: 正在下载 Chrome for Testing...",
             cancellable: true
         }, async (progress, token) => {
             let cancelled = false;

@@ -382,6 +382,34 @@ class ClipboardHistoryManager {
         this._loadHistory().catch(() => { });
     }
 
+    // ★ 新增：管理命令历史
+    async addCommandToHistory(key, value) {
+        if (!key || !value || !this.context.globalState) return;
+        const fullKey = `q4_${key}_history`;
+        let history = this.context.globalState.get(fullKey, []);
+
+        // 去重并移动到最前
+        const existingIndex = history.indexOf(value);
+        if (existingIndex > -1) {
+            history.splice(existingIndex, 1);
+        }
+
+        // 添加到开头
+        history.unshift(value);
+
+        // 限制最近 5 条
+        const trimmedHistory = history.slice(0, 5);
+
+        await this.context.globalState.update(fullKey, trimmedHistory);
+    }
+
+    // ★ 新增：获取命令历史
+    async getCommandHistory(key) {
+        if (!key || !this.context.globalState) return [];
+        const fullKey = `q4_${key}_history`;
+        return this.context.globalState.get(fullKey, []);
+    }
+
     _initStorage() {
         try {
             const root = this.context.globalStorageUri?.fsPath;
@@ -1035,6 +1063,18 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
+                // ★ 新增：处理命令历史记录的获取和保存
+                case 'getHistory':
+                    if (msg.key) {
+                        const history = await this._historyManager.getCommandHistory(msg.key);
+                        this._postMessage({ command: 'historyData', key: msg.key, history: history });
+                    }
+                    break;
+                case 'saveHistory':
+                    if (msg.key && msg.value) {
+                        await this._historyManager.addCommandToHistory(msg.key, msg.value);
+                    }
+                    break;
                 case 'focusState':
                     this._isFocused = !!msg.focused;
                     if (!this._isFocused && this._needsUpdate) {
@@ -1781,6 +1821,38 @@ class ClipboardHistorySidebarProvider {
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
         .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; }
+
+        /* ★ 新增：命令历史下拉框样式 */
+        .history-dropdown {
+            display: none;
+            position: absolute;
+            border: 1px solid var(--primary-color);
+            background-color: var(--base2);
+            z-index: 1000;
+            width: 100%;
+            box-sizing: border-box;
+            max-height: 150px;
+            overflow-y: auto;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            top: 100%; /* Position below the input */
+            left: 0;
+        }
+        .history-dropdown-item {
+            padding: 6px 10px;
+            cursor: pointer;
+            color: #000;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 13px;
+            font-family: Tahoma, sans-serif;
+        }
+        .history-dropdown-item:hover {
+            background-color: var(--primary-color);
+            color: var(--base2);
+        }
+
     </style>
 </head>
 <body>
@@ -1809,6 +1881,8 @@ class ClipboardHistorySidebarProvider {
                             <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
                             <button id="btnVideoStart"><span class="icon-play"></span></button>
                             <div class="error-tip" id="urlErrorTip">无效网址</div>
+                             <!-- ★ 新增：video url 历史下拉框 -->
+                            <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
                     </div>
                     <span class="spacer-5"></span> <span class="spacer-5"></span>
@@ -1848,6 +1922,8 @@ class ClipboardHistorySidebarProvider {
             </div>
             <div class="search-container">
                 <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
+                 <!-- ★ 新增：剪贴板 history 历史下拉框 -->
+                <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
@@ -1903,7 +1979,10 @@ class ClipboardHistorySidebarProvider {
                 innerThumb: document.getElementById('innerThumb'),
                 outerThumb: document.getElementById('outerThumb'),
                 innerScrollbar: document.getElementById('innerScrollbar'),
-                outerScrollbar: document.getElementById('outerScrollbar')
+                outerScrollbar: document.getElementById('outerScrollbar'),
+                // ★ 新增：历史下拉框元素
+                videoHistoryDropdown: document.getElementById('videoHistoryDropdown'),
+                searchHistoryDropdown: document.getElementById('searchHistoryDropdown'),
             };
 
             var selectedId = '';
@@ -1932,11 +2011,59 @@ class ClipboardHistorySidebarProvider {
                 }
             }
 
+            // ★ 新增：历史下拉框功能
+            function hideAllDropdowns() {
+                if (el.videoHistoryDropdown) el.videoHistoryDropdown.style.display = 'none';
+                if (el.searchHistoryDropdown) el.searchHistoryDropdown.style.display = 'none';
+            }
+
+            function showHistoryDropdown(inputEl, dropdownEl, history) {
+                hideAllDropdowns();
+                if (!history || history.length === 0) {
+                    return;
+                }
+                dropdownEl.innerHTML = '';
+                history.forEach(function(itemText) {
+                    var itemDiv = document.createElement('div');
+                    itemDiv.className = 'history-dropdown-item';
+                    itemDiv.textContent = itemText;
+                    itemDiv.title = itemText;
+                    itemDiv.onclick = function() {
+                        inputEl.value = itemText;
+                        hideAllDropdowns();
+                        inputEl.focus();
+                    };
+                    dropdownEl.appendChild(itemDiv);
+                });
+                dropdownEl.style.display = 'block';
+            }
+
+            // --- 修改/新增事件监听 ---
+
             el.searchBox.oninput = function() {
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
+                hideAllDropdowns();
             };
+
+            el.searchBox.addEventListener('focus', function() {
+                if (el.searchBox.value === '') {
+                    post('getHistory', { key: 'search' });
+                }
+            });
+            el.searchBox.addEventListener('blur', function() {
+                setTimeout(hideAllDropdowns, 150); // 延迟以允许点击
+            });
+            el.searchBox.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    var val = el.searchBox.value;
+                    if (val.trim() !== '') {
+                        post('saveHistory', { key: 'search', value: val });
+                    }
+                }
+            });
+
 
             el.historyList.onscroll = function() {
                 var list = el.historyList;
@@ -2104,12 +2231,25 @@ class ClipboardHistorySidebarProvider {
                 el.videoInput.className = 'inline-input invalid';
             }
 
-            el.videoInput.oninput = function() { el.videoInput.className = 'inline-input'; };
+            el.videoInput.oninput = function() {
+                el.videoInput.className = 'inline-input';
+                hideAllDropdowns();
+            };
+            el.videoInput.addEventListener('focus', function() {
+                if (el.videoInput.value === '') {
+                    post('getHistory', { key: 'video' });
+                }
+            });
+            el.videoInput.addEventListener('blur', function() {
+                setTimeout(hideAllDropdowns, 150); // 延迟以允许点击
+            });
+
             el.videoInput.onkeydown = function(e) {
                 if (e.key === 'Enter') {
                     var val = el.videoInput.value.trim();
                     if (isValidUrl(val)) {
                         post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                        post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
                 }
@@ -2120,6 +2260,7 @@ class ClipboardHistorySidebarProvider {
                 var val = el.videoInput.value.trim();
                 if (isValidUrl(val)) {
                     post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                    post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
                     el.videoInput.value = '';
                 } else if (val) { showErrorTip(); }
             };
@@ -2128,6 +2269,17 @@ class ClipboardHistorySidebarProvider {
             window.addEventListener('message', function(e) {
                 var m = e.data;
                 if (!m) return;
+
+                // ★ 新增：处理接收到的历史数据
+                if (m.command === 'historyData') {
+                    if (m.key === 'video') {
+                        showHistoryDropdown(el.videoInput, el.videoHistoryDropdown, m.history);
+                    } else if (m.key === 'search') {
+                        showHistoryDropdown(el.searchBox, el.searchHistoryDropdown, m.history);
+                    }
+                    return; // 尽早返回
+                }
+
                 if (m.command === 'updateData') {
                     if (m.fullStats !== undefined && el.searchBox) {
                         el.searchBox.placeholder = 'clipboard history                                  ' + m.fullStats;
