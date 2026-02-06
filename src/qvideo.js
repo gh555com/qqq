@@ -9,6 +9,9 @@ const https = require('https');
 const global = require('./global');
 const { TaskCounter, TaskMessage } = require('./global');
 
+// ★ 模块级工具函数
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
 // ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
 const QvideoMsg = {
     /**
@@ -41,8 +44,8 @@ const QvideoMsg = {
         // ★ 有标题：域名(28)▶标题(44)；无标题：完整URL前44字符
         let locationPart;
         if (task?.videoTitle) {
-            const domain = this._truncateStr(this._extractDomain(url), 28);
-            const title = this._truncateStr(task.videoTitle, 44);
+            const domain = this._truncateByWidth(this._extractDomain(url), 28);
+            const title = this._truncateByWidth(task.videoTitle, 44);
             locationPart = `${domain}▶${title}`;
         } else {
             locationPart = this._truncateUrl(url, 44);
@@ -61,12 +64,35 @@ const QvideoMsg = {
     },
 
     /**
-     * ★ 截断字符串（通用）
+     * ★ 按显示宽度截断（公认最佳实践）
+     * 全角字符（中日韩等）= 2宽度，半角字符 = 1宽度
      */
-    _truncateStr(str, maxLen) {
-        const s = String(str || '');
-        if (s.length <= maxLen) return s;
-        return s.slice(0, maxLen) + '...';
+    _truncateByWidth(str, maxWidth) {
+        if (!str) return '';
+        const s = String(str);
+        let width = 0;
+        let i = 0;
+        for (; i < s.length; i++) {
+            const code = s.charCodeAt(i);
+            // 全角字符范围：CJK + 日文假名 + 全角标点 + Emoji + 阿拉伯文/希伯来文等
+            const isWide = (
+                (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK 基本区
+                (code >= 0x3000 && code <= 0x303F) ||   // CJK 标点
+                (code >= 0x3040 && code <= 0x30FF) ||   // 日文假名
+                (code >= 0xFF00 && code <= 0xFFEF) ||   // 全角字符
+                (code >= 0xAC00 && code <= 0xD7AF) ||   // 韩文
+                (code >= 0x0600 && code <= 0x06FF) ||   // 阿拉伯文
+                (code >= 0x0590 && code <= 0x05FF) ||   // 希伯来文
+                (code >= 0x0E00 && code <= 0x0E7F) ||   // 泰文
+                (code >= 0x1F300 && code <= 0x1F9FF) || // Emoji
+                (code >= 0x2600 && code <= 0x26FF)     // 杂项符号
+            );
+            const charWidth = isWide ? 2 : 1;
+            if (width + charWidth > maxWidth) break;
+            width += charWidth;
+        }
+        if (i < s.length) return s.slice(0, i) + '...';
+        return s;
     },
 
     /**
@@ -153,7 +179,7 @@ class ChildProcessTracker {
 
         // 先温柔一点，再强杀
         for (const pid of pids) await this._killPidTree(pid, false);
-        await this._sleep(400);
+        await _sleep(400);
         for (const pid of pids) await this._killPidTree(pid, true);
 
         // ★ 已移除 _killYtdlpProcesses()：
@@ -162,8 +188,6 @@ class ChildProcessTracker {
 
         this._procs.clear();
     }
-
-    _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     async _killPidTree(pid, force) {
         if (!pid || typeof pid !== 'number') return;
@@ -547,26 +571,12 @@ class Qvideo {
         this.outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
     }
 
-    _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
     _formatBytesSimple(bytes) {
         if (!bytes || bytes <= 0) return "0k";
         const k = 1024;
         const m = 1048576;
         if (bytes >= m) return Math.round(bytes / m) + "m";
         return Math.round(bytes / k) + "k";
-    }
-
-    _formatDuration(ms) {
-        const total = Math.max(0, Math.floor(ms / 1000));
-        let s = total % 60;
-        let m = Math.floor(total / 60);
-        let h = Math.floor(m / 60);
-        m = m % 60;
-
-        if (h > 0) return `${h}h+${m}m+${s}s`;
-        if (m > 0) return `${m}m+${s}s`;
-        return `${s}s`;
     }
 
     _parseSizeToBytes(sizeStr) {
@@ -583,33 +593,7 @@ class Qvideo {
     }
 
     _makeUrlSnippet(url) {
-        return this._truncateByWidth(String(url || ''), 28);
-    }
-
-    // ★ 按显示宽度截断（公认最佳实践）
-    // 全角字符（中日韩等）= 2宽度，半角字符 = 1宽度
-    _truncateByWidth(str, maxWidth) {
-        if (!str) return '';
-        let width = 0;
-        let i = 0;
-        for (; i < str.length; i++) {
-            const code = str.charCodeAt(i);
-            // 全角字符范围：CJK + 日文假名 + 全角标点 + Emoji
-            const isWide = (
-                (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK 基本区
-                (code >= 0x3000 && code <= 0x303F) ||   // CJK 标点
-                (code >= 0x3040 && code <= 0x30FF) ||   // 日文假名
-                (code >= 0xFF00 && code <= 0xFFEF) ||   // 全角字符
-                (code >= 0xAC00 && code <= 0xD7AF) ||   // 韩文
-                (code >= 0x1F300 && code <= 0x1F9FF) || // Emoji
-                (code >= 0x2600 && code <= 0x26FF)     // 杂项符号
-            );
-            const charWidth = isWide ? 2 : 1;
-            if (width + charWidth > maxWidth) break;
-            width += charWidth;
-        }
-        if (i < str.length) return str.slice(0, i) + '...';
-        return str;
+        return QvideoMsg._truncateByWidth(String(url || ''), 28);
     }
 
     _sanitizeFilename(title) {
@@ -1099,7 +1083,7 @@ class Qvideo {
             } catch (e) { }
 
             // ★ 修复：使用 prompt 添加统一前缀
-            const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开的文档)。 另一方面，稍做等待也是一种解决方案。');
+            const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。');
             vscode.window.showWarningMessage(promptMsg);
         }
     }
@@ -1752,7 +1736,7 @@ class Qvideo {
             if (this._isTaskCancelled(task)) return null;
 
             // ★ 此处无需长时间等待，因为外部已结束 withProgress
-            await this._sleep(100);
+            await _sleep(100);
 
             // ★ 如果当前没有其他活跃下载任务，重置“弹窗被吃掉”的状态，以保证优先尝试 Q 弹窗
             if (_activeTasks.size <= 1) {
@@ -1994,19 +1978,45 @@ class Qvideo {
 
     /**
      * ★ 二次确认：下载chrome 或 终止一切
-     * 保持原有逻辑不变
+     * 带 QuickPick 兜底，防止多任务场景弹窗被吃掉
      */
     async _showSecondaryConfirmation(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return null;
 
         this.log(`[二次确认] 弹出选择: 下载chrome / 终止一切`);
 
-        const sel = await vscode.window.showErrorMessage(
+        let sel = undefined;
+        const startTime = Date.now();
+
+        sel = await vscode.window.showErrorMessage(
             "qqq: 未选择有效浏览器。可选下载chrome（约150m）或终止一切。",
             "下载 chrome", "终止一切"
         );
 
+        const elapsed = Date.now() - startTime;
+
         if (this._isTaskCancelled(task)) return null;
+
+        // ★ 弹窗被吃掉时用 QuickPick 兜底
+        if (sel === undefined && elapsed < 500) {
+            this.log(`[二次确认] 弹窗被吃掉 (${elapsed}ms)，使用 QuickPick 兜底...`);
+
+            const items = [
+                { label: '📥 下载 chrome（约150m）', value: 'download' },
+                { label: '❌ 终止一切', value: 'cancel' }
+            ];
+
+            const picked = await vscode.window.showQuickPick(items, {
+                placeHolder: 'qqq: 未选择有效浏览器，请选择操作',
+                ignoreFocusOut: true
+            });
+
+            if (this._isTaskCancelled(task)) return null;
+
+            if (picked?.value === 'download') {
+                sel = "下载 chrome";
+            }
+        }
 
         if (sel === "下载 chrome") {
             this.log(`[二次确认] 用户选择下载chrome`);
@@ -2141,8 +2151,12 @@ $of = $vi.OriginalFilename;
             zipName = 'chrome-linux64.zip';
         }
 
+        // ★ 多源兜底：npmmirror(国内) → Google官方(海外)
         return {
-            url: `https://cdn.npmmirror.com/binaries/chrome-for-testing/${version}/${platformKey}/${zipName}`,
+            sources: [
+                { name: 'npmmirror (国内)', url: `https://cdn.npmmirror.com/binaries/chrome-for-testing/${version}/${platformKey}/${zipName}` },
+                { name: 'Google (官方)', url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platformKey}/${zipName}` }
+            ],
             version,
             platform: platformKey,
             zipName
@@ -2157,11 +2171,10 @@ $of = $vi.OriginalFilename;
         const zipPath = path.join(this.chromeHome, 'chrome.zip');
         const chromeInfo = this._getChromeDownloadInfo();
 
-        this.log(`[Chrome] 下载源: npmmirror (国内)`);
         this.log(`[Chrome] 版本: ${chromeInfo.version}`);
         this.log(`[Chrome] 平台: ${chromeInfo.platform}`);
-        this.log(`[Chrome] URL: ${chromeInfo.url}`);
         this.log(`[Chrome] 目标目录: ${this.chromeHome}`);
+        this.log(`[Chrome] 可用源: ${chromeInfo.sources.map(s => s.name).join(', ')}`);
 
         let exePath = null;
 
@@ -2178,46 +2191,68 @@ $of = $vi.OriginalFilename;
                 })
             );
 
-            try {
-                progress.report({ message: `0% (版本 ${chromeInfo.version})` });
+            // ★ 多源兜底下载
+            let lastError = null;
+            for (let i = 0; i < chromeInfo.sources.length; i++) {
+                const source = chromeInfo.sources[i];
+                if (cancelled || this._isTaskCancelled(task)) return null;
 
-                await this._downloadFile(chromeInfo.url, zipPath, progress, () => cancelled || this._isTaskCancelled(task));
+                this.log(`[Chrome] 尝试源 ${i + 1}/${chromeInfo.sources.length}: ${source.name}`);
+                this.log(`[Chrome] URL: ${source.url}`);
+                progress.report({ message: `0% - ${source.name} (版本 ${chromeInfo.version})` });
 
-                if (cancelled || this._isTaskCancelled(task)) {
+                try {
+                    await this._downloadFile(source.url, zipPath, progress, () => cancelled || this._isTaskCancelled(task));
+
+                    if (cancelled || this._isTaskCancelled(task)) {
+                        try { fs.unlinkSync(zipPath); } catch (e) { }
+                        return null;
+                    }
+
+                    // ★ 下载成功，继续解压
+                    this.log(`[Chrome] 下载成功，来源: ${source.name}`);
+                    progress.report({ message: "解压中..." });
+
+                    await this._extractZip(zipPath, this.chromeHome);
+
                     try { fs.unlinkSync(zipPath); } catch (e) { }
-                    return null;
+
+                    const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
+                    const foundExe = this._findFileRecursive(this.chromeHome, exeName, 6);
+
+                    if (!foundExe) throw new Error("解压完成但找不到 chrome 可执行文件");
+
+                    this.log(`[Chrome] 找到: ${foundExe}`);
+
+                    if (process.platform === 'darwin' || process.platform === 'linux') {
+                        try { cp.execSync(`chmod +x "${foundExe}"`); } catch (e) { }
+                    }
+
+                    const validation = await this._validateChromiumSilently(foundExe);
+                    if (!validation.valid) throw new Error(`下载的 Chrome 验证失败: ${validation.error}`);
+
+                    this.log(`[Chrome] 验证通过: ${validation.version}`);
+
+                    return foundExe;
+
+                } catch (e) {
+                    lastError = e;
+                    this.log(`[Chrome] 源 ${source.name} 失败: ${e.message}`);
+                    try { fs.unlinkSync(zipPath); } catch (e) { }
+
+                    // ★ 还有下一个源，继续尝试
+                    if (i < chromeInfo.sources.length - 1) {
+                        this.log(`[Chrome] 尝试下一个源...`);
+                        continue;
+                    }
                 }
-
-                progress.report({ message: "解压中..." });
-
-                await this._extractZip(zipPath, this.chromeHome);
-
-                try { fs.unlinkSync(zipPath); } catch (e) { }
-
-                const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
-                const foundExe = this._findFileRecursive(this.chromeHome, exeName, 6);
-
-                if (!foundExe) throw new Error("解压完成但找不到 chrome 可执行文件");
-
-                this.log(`[Chrome] 找到: ${foundExe}`);
-
-                if (process.platform === 'darwin' || process.platform === 'linux') {
-                    try { cp.execSync(`chmod +x "${foundExe}"`); } catch (e) { }
-                }
-
-                const validation = await this._validateChromiumSilently(foundExe);
-                if (!validation.valid) throw new Error(`下载的 Chrome 验证失败: ${validation.error}`);
-
-                this.log(`[Chrome] 验证通过: ${validation.version}`);
-
-                return foundExe;
-
-            } catch (e) {
-                if (this._isTaskCancelled(task)) return null;
-                this.log(`[Chrome] 失败: ${e.message}`);
-                vscode.window.showErrorMessage(`下载 Chrome 失败: ${e.message}`);
-                return null;
             }
+
+            // ★ 所有源都失败
+            if (this._isTaskCancelled(task)) return null;
+            this.log(`[Chrome] 所有源都失败`);
+            vscode.window.showErrorMessage(`下载 Chrome 失败: ${lastError?.message || '未知错误'}`);
+            return null;
         });
 
         if (!exePath) return;
@@ -2533,7 +2568,7 @@ $of = $vi.OriginalFilename;
 
             if (this._isTaskCancelled(task)) return null;
 
-            await this._sleep(300);
+            await _sleep(300);
 
             const rawFiles = this._findLandedVideoFilesSince(targetDir, startMs);
             const landedFiles = [];
@@ -2729,7 +2764,7 @@ $of = $vi.OriginalFilename;
             }
 
             // ★ 等待前一个弹窗关闭（VS Code UI 有延迟，需要较长时间）
-            await this._sleep(300);
+            await _sleep(300);
 
             const out = await this._downloadEnhancedOne(task, url, targetDir, best);
             if (!out) return null;
