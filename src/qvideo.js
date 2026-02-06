@@ -1221,30 +1221,9 @@ class Qvideo {
                     }
                 }
 
-                // ★ 精确匹配当前任务的文件（而非前缀匹配，避免多任务互相干扰）
-                const activeFileNames = new Set();
-                tasks.forEach(t => {
-                    if (t.destPath) {
-                        const fullName = path.basename(t.destPath);  // 包含扩展名
-                        const nameNoExt = path.basename(t.destPath, path.extname(t.destPath));
-                        if (fullName) activeFileNames.add(fullName.toLowerCase());
-                        // ★ 也添加 yt-dlp 可能创建的临时文件名模式
-                        if (nameNoExt) {
-                            activeFileNames.add((nameNoExt + '.mp4.part').toLowerCase());
-                            activeFileNames.add((nameNoExt + '.webm.part').toLowerCase());
-                            // yt-dlp 段格式: xxx.f123.mp4
-                            // 由于无法预知段 ID，使用前缀匹配但记录前缀
-                        }
-                    }
-                });
-                // ★ 保留前缀集合用于匹配 yt-dlp 段文件
-                const activePrefixes = new Set();
-                tasks.forEach(t => {
-                    if (t.destPath) {
-                        const nameNoExt = path.basename(t.destPath, path.extname(t.destPath));
-                        if (nameNoExt) activePrefixes.add(nameNoExt.toLowerCase());
-                    }
-                });
+                // ★ 基于 transId 前缀精确匹配，100% 不会多任务互相污染
+                // 文件名格式：{transId}_{date}__{day}__{time}{ext}
+                const transIdPrefix = task.transId ? (task.transId + '_') : null;
 
                 let logTotalBytes = 0;
                 // ★ 精确进度追踪：每个 URL + 每个阶段独立计数
@@ -1287,28 +1266,18 @@ class Qvideo {
                             // ★ yt-dlp 尚未报告进度，计时
                             noProgressTicks++;
                             if (noProgressTicks >= FALLBACK_TICKS) {
-                                // ★ 兜底：扫描磁盘（不准确但至少有显示）
+                                // ★ 兆底：基于 transId 前缀扫描磁盘（100% 精确）
                                 let diskBytes = 0;
                                 try {
-                                    if (fs.existsSync(targetDir)) {
+                                    if (transIdPrefix && fs.existsSync(targetDir)) {
                                         const files = fs.readdirSync(targetDir);
                                         for (const f of files) {
-                                            const fLower = f.toLowerCase();
-                                            if (activeFileNames.has(fLower)) {
+                                            // ★ 只统计以 {transId}_ 开头的文件
+                                            if (f.startsWith(transIdPrefix)) {
                                                 try {
                                                     const s = fs.statSync(path.join(targetDir, f));
                                                     if (s.isFile()) diskBytes += s.size;
                                                 } catch (e) { }
-                                                continue;
-                                            }
-                                            for (const prefix of activePrefixes) {
-                                                if (fLower.startsWith(prefix + '.f') && /\.f\d+\.(mp4|webm|m4a|mkv|part)$/i.test(f)) {
-                                                    try {
-                                                        const s = fs.statSync(path.join(targetDir, f));
-                                                        if (s.isFile()) diskBytes += s.size;
-                                                    } catch (e) { }
-                                                    break;
-                                                }
                                             }
                                         }
                                     }
@@ -2483,30 +2452,23 @@ $of = $vi.OriginalFilename;
     }
 
     /**
-     * ★ 获取目录中当前文件列表（用于排除已有文件）
+     * ★ 扫描当前任务的文件大小（基于 transId 前缀精确匹配，100% 不会多任务互相污染）
+     * @param {string} targetDir - 目标目录
+     * @param {string} transId - 任务的事务ID，文件名格式为 {transId}_{date}__{day}__{time}{ext}
+     * @returns {number} 当前任务已下载的字节数
      */
-    _getExistingFileSet(targetDir) {
-        const set = new Set();
-        try {
-            if (fs.existsSync(targetDir)) {
-                const files = fs.readdirSync(targetDir);
-                for (const f of files) set.add(f.toLowerCase());
-            }
-        } catch (e) { }
-        return set;
-    }
-
-    /**
-     * ★ 扫描新增文件大小（排除任务开始前已存在的文件，避免多任务互相干扰）
-     */
-    _scanNewBytes(targetDir, existingFiles) {
+    _scanTaskBytes(targetDir, transId) {
         let total = 0;
+        if (!transId) return 0;
+
         try {
             if (!fs.existsSync(targetDir)) return 0;
             const files = fs.readdirSync(targetDir);
+            const prefix = transId + '_';  // ★ 精确匹配前缀
+
             for (const f of files) {
-                // ★ 只计算任务开始后新增的文件
-                if (existingFiles.has(f.toLowerCase())) continue;
+                // ★ 只统计以 {transId}_ 开头的文件（包括 .part 等临时文件）
+                if (!f.startsWith(prefix)) continue;
                 const full = path.join(targetDir, f);
                 try {
                     const s = fs.statSync(full);
@@ -2520,8 +2482,7 @@ $of = $vi.OriginalFilename;
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
-        // ★ 记录任务开始前已存在的文件，避免多任务互相干扰
-        const existingFiles = this._getExistingFileSet(targetDir);
+        // ★ 不再需要 existingFiles，现在基于 transId 前缀精确匹配
 
         const out = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -2554,8 +2515,8 @@ $of = $vi.OriginalFilename;
                         } catch (e) { }
                     }
 
-                    // ★ 使用新增文件扫描，避免多任务互相干扰
-                    const bytes = this._scanNewBytes(targetDir, existingFiles);
+                    // ★ 基于 transId 前缀精确匹配，100% 不会多任务互相污染
+                    const bytes = this._scanTaskBytes(targetDir, task.transId);
                     const elapsedMs = Date.now() - startMs;
                     progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), url, elapsedMs, '增强下载中') });
                 }, 500);
