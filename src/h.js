@@ -260,13 +260,30 @@ function isImageExtForClipboard(ext) {
     return IMAGE_EXTS_FOR_CLIPBOARD.has(ext.toLowerCase());
 }
 
-function getTimestampFilename(ext) {
+/**
+ * 生成带时间戳的文件名
+ * @param {string} ext - 文件扩展名（如 '.mp4'）
+ * @param {string} [transId] - 可选的事务ID，作为文件名前缀（用于回滚时精确匹配）
+ * @returns {string} 文件名，格式为：{transId}_{date}__{day}__{time}{ext}
+ *
+ * 示例：
+ * - 有 transId: jhrYLq_2026.02.06__5__12.20.30.mp4
+ * - 无 transId: 587kD_2026.02.06__5__12.20.30.mp4（随机前缀）
+ */
+function getTimestampFilename(ext, transId = null) {
     const now = new Date();
     const date = now.toISOString().slice(0, 10).replace(/-/g, ".");
     const time = now.toTimeString().slice(0, 8).replace(/:/g, ".");
     const day = now.getDay() || 7;
     const ms = String(now.getMilliseconds()).padStart(3, "0");
 
+    // ★ 如果提供了 transId，直接使用它作为前缀
+    // 这样回滚时可以通过 transId 前缀精确匹配删除
+    if (transId && typeof transId === 'string' && transId.length > 0) {
+        return `${transId}_${date}__${day}__${time}${ext}`;
+    }
+
+    // ★ 无 transId 时使用随机前缀（向后兼容）
     const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
     const valid = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         .split("")
@@ -1478,7 +1495,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
             // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
             const originalFileName = getFilenameFromUrl(src, b.kind);
-            const filename = originalFileName || getTimestampFilename(ext);
+            // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+            const filename = originalFileName || getTimestampFilename(ext, transId);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 20000 * 1048576 });
             taskMap.set(tag, b);
@@ -1523,7 +1541,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
                     let filename = originalName;
                     if (!originalName || originalName === ext) {
-                        filename = getTimestampFilename(ext);
+                        // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                        filename = getTimestampFilename(ext, transId);
                     }
                     const destPath = path.join(targetDir, filename);
                     try {
@@ -1571,7 +1590,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (!isImageExtForClipboard(ext)) {
                     try { const dim = sizeOf(buf); if (dim && dim.type) ext = "." + dim.type; } catch { ext = ".webp"; }
                 }
-                const filename = getTimestampFilename(ext);
+                // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                const filename = getTimestampFilename(ext, transId);
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
@@ -1901,7 +1921,8 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             let destName = originalName;
             if (isImg && (!originalName || originalName === ext)) {
-                destName = getTimestampFilename(ext);
+                // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                destName = getTimestampFilename(ext, transId);
             }
             let dest = path.join(targetDir, destName);
 
@@ -2012,7 +2033,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             try {
                 const hasImg = await bridge.call("hasImage", {}, 1500);
                 if (hasImg?.value) {
-                    const fname = getTimestampFilename(".png");
+                    // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                    const fname = getTimestampFilename(".png", transId);
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);

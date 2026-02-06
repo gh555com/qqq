@@ -2437,9 +2437,9 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 后台清理临时文件（.part/.ytdl 等，以及事务预注册的 tempFiles）
+	 * ★ 后台清理临时文件（基于 transId 前缀精确匹配 + 模糊匹配 .part/.ytdl 等）
 	 * @param {string} targetDir
-	 * @param {object} trans - 可选的事务对象，包含显式的 tempFiles 列表
+	 * @param {object} trans - 可选的事务对象，包含 id 和 tempFiles
 	 * @param {object} options - 可选参数 { isRecover: boolean }
 	 */
 	async _cleanupTempFiles(targetDir, trans = null, options = {}) {
@@ -2448,50 +2448,56 @@ const TransactionManager = {
 		const tempExts = ['.part', '.ytdl', '.tmp', '.download'];
 		const now = Date.now();
 		const SIX_MINUTES = 360000;
+		const transId = trans?.id || null;
 
-		// ★ 混合策略基准时间：
-		// - 对于事务记录的精确 tempFiles：使用 lastActiveAt 作为基准（文件创建时间 < lastActiveAt + 缓冲时间 就删除）
-		// - 对于模糊匹配的临时文件：保留 6 分钟限制
-		const isRecover = options.isRecover === true;
-		const transBaseTime = trans?.lastActiveAt || trans?.createdAt || 0;
-		// ★ recover 场景的缓冲时间：60分钟（容纳网络下载延迟、系统时钟误差等）
-		const RECOVER_BUFFER = 3600000; // 60分钟
+		// 收集需要清理的文件（区分精确匹配 vs 模糊匹配）
+		const transIdMatchFiles = new Set(); // ★ 基于 transId 前缀精确匹配的文件（无时间限制）
+		const fuzzyTempFiles = new Set();    // 模糊匹配的临时文件（有 6 分钟限制）
 
-		// 收集需要清理的文件（区分精确记录 vs 模糊匹配）
-		const exactTempFiles = new Set(); // 事务显式记录的文件
-		const fuzzyTempFiles = new Set(); // 模糊匹配的临时文件
-
-		// 1. 扫描目录下的临时后缀文件（模糊匹配）
+		// 1. 扫描目录下的文件
 		try {
 			const files = fs.readdirSync(targetDir);
 			for (const f of files) {
+				const fullPath = path.normalize(path.join(targetDir, f));
 				const ext = path.extname(f).toLowerCase();
+
+				// ★ 策略 A：基于 transId 前缀精确匹配（无时间限制，100% 精确）
+				// 文件名格式：{transId}_{date}__{day}__{time}{ext}
+				// 例如：jhrYLq_2026.02.06__5__12.20.30.mp4
+				if (transId && f.startsWith(transId + '_')) {
+					transIdMatchFiles.add(fullPath);
+					continue; // 已精确匹配，不需要模糊匹配
+				}
+
+				// ★ 策略 B：模糊匹配临时后缀文件（有 6 分钟限制）
 				if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
-					fuzzyTempFiles.add(path.normalize(path.join(targetDir, f)));
+					fuzzyTempFiles.add(fullPath);
 				}
 			}
 		} catch { }
 
-		// 2. 加上事务显式记录的 tempFiles（精确记录）
+		// 2. 加上事务显式记录的 tempFiles（也用精确匹配，无时间限制）
 		if (trans && Array.isArray(trans.tempFiles)) {
 			trans.tempFiles.forEach(f => {
-				if (f && typeof f === 'string') exactTempFiles.add(path.normalize(f));
+				if (f && typeof f === 'string') transIdMatchFiles.add(path.normalize(f));
 			});
 		}
 
-		const allFiles = new Set([...exactTempFiles, ...fuzzyTempFiles]);
+		const allFiles = new Set([...transIdMatchFiles, ...fuzzyTempFiles]);
 		if (allFiles.size === 0) return;
 
 		// ★ 关键修复：在删除任何文件之前，先获取全量引用“白名单”
 		// 这样即便文件在 tempFiles 中，只要有文档正在引用它，就绝不删除
 		const referencedItems = this._getReferencedItemsSync(targetDir);
 
+		let deletedCount = 0;
+
 		// 3. 执行删除
 		for (const fullPath of allFiles) {
 			try {
-				const fileName = path.basename(fullPath).toLowerCase();
+				const fileName = path.basename(fullPath);
 				// ★ 引用保护：如果在白名单中，跳过
-				if (referencedItems.has(fileName)) {
+				if (referencedItems.has(fileName.toLowerCase())) {
 					continue;
 				}
 
@@ -2499,27 +2505,21 @@ const TransactionManager = {
 				const stat = fs.statSync(fullPath);
 				if (!stat.isFile()) continue;
 
-				// ★ 获取文件创建时间（优先 birthtime，fallback 到 mtime）
-				// 注意：Windows 的 birthtimeMs 是真正的创建时间，Linux 可能不可用
-				const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
-				if (!birthtime || isNaN(birthtime)) continue;
-
-				// ★ 混合策略时间判断
-				const isExactFile = exactTempFiles.has(fullPath);
+				// ★ 精确匹配的文件：无时间限制，直接删除
+				// ★ 模糊匹配的文件：保留 6 分钟限制
+				const isExactMatch = transIdMatchFiles.has(fullPath);
 				let shouldDelete = false;
 
-				if (isExactFile && isRecover && transBaseTime > 0) {
-					// ★ recover 场景 + 精确记录的文件：
-					// 文件创建时间 < lastActiveAt + 缓冲时间 就删除
-					// 这样即使 VS Code 崩溃后过了很久才重启，也能正确清理
-					shouldDelete = birthtime < transBaseTime + RECOVER_BUFFER;
-					if (shouldDelete) {
-						logMessage(`[临时文件清理] recover模式：${path.basename(fullPath)} (birthtime=${new Date(birthtime).toISOString()}, baseTime=${new Date(transBaseTime).toISOString()})`, "DEBUG");
-					}
+				if (isExactMatch) {
+					// ★ transId 前缀匹配 / tempFiles 记录：无时间限制，100% 精确删除
+					shouldDelete = true;
 				} else {
-					// ★ 普通场景 / 模糊匹配文件：保留 6 分钟限制
-					const age = now - birthtime;
-					shouldDelete = age >= 0 && age < SIX_MINUTES;
+					// ★ 模糊匹配文件：保留 6 分钟限制
+					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
+					if (birthtime && !isNaN(birthtime)) {
+						const age = now - birthtime;
+						shouldDelete = age >= 0 && age < SIX_MINUTES;
+					}
 				}
 
 				if (!shouldDelete) continue;
@@ -2529,8 +2529,9 @@ const TransactionManager = {
 				for (let retry = 0; retry < 5 && !deleted; retry++) {
 					try {
 						fs.unlinkSync(fullPath);
-						logMessage(`[临时文件清理] 删除: ${path.basename(fullPath)}${isRecover && isExactFile ? ' (recover模式)' : ''}`, "INFO");
+						logMessage(`[临时文件清理] 删除: ${fileName}${isExactMatch ? ' (transId精确匹配)' : ''}`, "INFO");
 						deleted = true;
+						deletedCount++;
 					} catch (e) {
 						if ((e.code === 'EBUSY' || e.code === 'EPERM') && retry < 4) {
 							await new Promise(r => setTimeout(r, 500 * (retry + 1)));
@@ -2538,6 +2539,10 @@ const TransactionManager = {
 					}
 				}
 			} catch { }
+		}
+
+		if (deletedCount > 0) {
+			logMessage(`[临时文件清理] 完成，共删除 ${deletedCount} 个文件`, "INFO");
 		}
 	},
 

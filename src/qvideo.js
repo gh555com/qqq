@@ -618,7 +618,7 @@ class Qvideo {
         });
     }
 
-    _createTask(videoUrl, title, targetDir, referer) {
+    _createTask(videoUrl, title, targetDir, referer, transId = null) {
         let destPath = null;
         let originalFileName = null;  // ★ 保存原始文件名
         let tempFileName = null;      // ★ 临时文件名（带时间戳）
@@ -644,8 +644,8 @@ class Qvideo {
             } catch (e) { }
         }
 
-        // ★ 总是使用唯一的时间戳文件名作为临时文件，避免覆盖旧文件
-        tempFileName = h.getTimestampFilename('.mp4');
+        // ★ 使用 transId 作为文件名前缀，回滚时可通过 transId 精确匹配删除
+        tempFileName = h.getTimestampFilename('.mp4', transId);
         destPath = path.join(targetDir, tempFileName);
 
         const headers = {};
@@ -1128,12 +1128,12 @@ class Qvideo {
                     if (res && res.success) {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
                             this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
-                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
+                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url, task.transId));
                             // ★ 播放列表：保存完整标题（截断由 QvideoMsg 统一处理）
                             task.videoTitle = res.entries[0]?.title || '';
                         } else {
                             this.log(`识别为单个视频: ${res.title}`);
-                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
+                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url, task.transId));
                             // ★ 单个视频：保存完整标题（截断由 QvideoMsg 统一处理）
                             task.videoTitle = res.title || '';
                         }
@@ -1142,11 +1142,11 @@ class Qvideo {
                             if (!isYouTube) {
                                 probeForbidden = true;
                                 this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
-                                tasks.push(this._createTask(url, null, targetDir, url));
+                                tasks.push(this._createTask(url, null, targetDir, url, task.transId));
                             } else {
                                 // ✅ 前置排除：YouTube 的 403 不作为增强信号
                                 this.log("YouTube 探测 403：忽略增强触发（仍尝试交给 yt-dlp 直接下载）。");
-                                tasks.push(this._createTask(url, null, targetDir, url));
+                                tasks.push(this._createTask(url, null, targetDir, url, task.transId));
                             }
                         } else {
                             this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
@@ -1188,7 +1188,7 @@ class Qvideo {
                             }
                         }
 
-                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url)));
+                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url, task.transId)));
                     }
                 } catch (e) {
                     this.log(`静态分析失败: ${e.message}`);
@@ -1200,7 +1200,7 @@ class Qvideo {
 
                 if (tasks.length === 0) {
                     this.log("未探测到明确资源，尝试直接下载原链接...");
-                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url));
+                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url, task.transId));
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
@@ -2563,7 +2563,8 @@ $of = $vi.OriginalFilename;
                 if (this._isTaskCancelled(task)) return null;
 
                 await this._runWithSuppressedPopups(async () => {
-                    await this.downloader.downloadVideos([bestVideo], targetDir);
+                    // ★ 传入 transId，使下载的文件名带有 transId 前缀，回滚时可精确匹配删除
+                    await this.downloader.downloadVideos([bestVideo], targetDir, null, task.transId);
                 });
 
             } finally {

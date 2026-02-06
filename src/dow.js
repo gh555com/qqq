@@ -2999,14 +2999,15 @@ class UnifiedMediaDownloader {
         return videosToDownload;
     }
 
-    async downloadVideos(videos, targetDir, progress) {
+    async downloadVideos(videos, targetDir, progress, transId = null) {
         if (!videos || videos.length === 0) return;
         if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 });
 
         const h = require('./h');
 
         const downloadTasks = videos.map(video => {
-            const filename = h.getTimestampFilename('.mp4');
+            // ★ 使用 transId 作为文件名前缀，回滚时可精确匹配删除
+            const filename = h.getTimestampFilename('.mp4', transId);
             const destPath = require('path').join(targetDir, filename);
             return {
                 url: video.url,
