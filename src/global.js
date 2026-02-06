@@ -3485,6 +3485,138 @@ async function getIcon(filePath) {
 	return null;
 }
 
+// ============================================================================
+// ★ URL 验证 (统一真理源，供 Node.js 和 Webview 两端共用)
+// ============================================================================
+function isValidUrl(input) {
+	if (input === null || input === undefined) return false;
+
+	// ES3/ES5 都能跑的 trim
+	var s = ('' + input).replace(/^\s+|\s+$/g, '');
+	if (!s) return false;
+
+	// 任意空白直接判无效（防止 "http://a b.com"）
+	if (/\s/.test(s)) return false;
+
+	// 拒绝反斜杠，避免把 Windows 路径误判成 URL
+	if (/\\/.test(s)) return false;
+
+	// 拒绝 scheme-relative: //example.com
+	if (s.indexOf('//') === 0) return false;
+
+	// 解析 scheme（若写了必须是 http/https）
+	var rest = s;
+	var m = rest.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
+	if (m) {
+		var scheme = m[1].toLowerCase();
+		if (scheme !== 'http' && scheme !== 'https') return false;
+		rest = rest.slice(m[0].length);
+	}
+
+	// authority 到第一个 / ? # 为止
+	var cut = rest.search(/[\/?#]/);
+	var authority = (cut === -1) ? rest : rest.slice(0, cut);
+	if (!authority) return false;
+
+	// 不支持 userinfo（更安全）：user:pass@host
+	if (authority.indexOf('@') !== -1) return false;
+
+	// 拆 host / port
+	var host = '';
+	var portStr = '';
+
+	if (authority.charAt(0) === '[') {
+		// [IPv6]:port
+		var end = authority.indexOf(']');
+		if (end === -1) return false;
+		host = authority.slice(0, end + 1);
+		var after = authority.slice(end + 1);
+		if (after) {
+			if (after.charAt(0) !== ':') return false;
+			portStr = after.slice(1);
+			if (!portStr) return false;
+		}
+	} else {
+		// host:port（用最后一个冒号切）
+		var lastColon = authority.lastIndexOf(':');
+		if (lastColon !== -1 && authority.indexOf(':') === lastColon) {
+			var possiblePort = authority.slice(lastColon + 1);
+			if (/^\d+$/.test(possiblePort)) {
+				host = authority.slice(0, lastColon);
+				portStr = possiblePort;
+			} else {
+				host = authority;
+			}
+		} else {
+			host = authority;
+		}
+	}
+
+	if (!host) return false;
+
+	// 端口 1..65535
+	if (portStr) {
+		if (!/^\d{1,5}$/.test(portStr)) return false;
+		var port = parseInt(portStr, 10);
+		if (!(port >= 1 && port <= 65535)) return false;
+	}
+
+	// host 校验：localhost / IPv4 / [IPv6] / 域名（含 punycode）
+	if (isLocal(host) || isIPv4(host) || isBracketIPv6(host) || isDomain(host)) return true;
+	return false;
+
+	function isLocal(h) {
+		if (/^(localhost|127\.0\.0\.1)$/i.test(h)) return true;
+		return h.toLowerCase() === '[::1]';
+	}
+
+	function isBracketIPv6(h) {
+		// 实用型 IPv6 校验（不做完整 RFC，但足够稳）
+		if (h.length < 4) return false;
+		if (h.charAt(0) !== '[' || h.charAt(h.length - 1) !== ']') return false;
+		var inner = h.slice(1, -1);
+		if (inner.indexOf(':') === -1) return false;
+		if (!/^[0-9a-fA-F:.]+$/.test(inner)) return false;
+		return true;
+	}
+
+	function isIPv4(h) {
+		var mm = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+		if (!mm) return false;
+		for (var i = 1; i <= 4; i++) {
+			var n = parseInt(mm[i], 10);
+			if (!(n >= 0 && n <= 255)) return false;
+		}
+		return true;
+	}
+
+	function isDomain(h) {
+		// 允许末尾点：example.com.
+		if (h.charAt(h.length - 1) === '.') h = h.slice(0, -1);
+		if (!h) return false;
+		if (h.length > 253) return false;
+
+		// 必须至少一个点（避免把 "abc" 当域名；localhost 走 isLocal）
+		if (h.indexOf('.') === -1) return false;
+
+		var labels = h.split('.');
+		if (labels.length < 2) return false;
+
+		for (var i = 0; i < labels.length; i++) {
+			var lab = labels[i];
+			if (!lab || lab.length > 63) return false;
+			// 每段：字母数字开头结尾，中间允许 -
+			if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(lab)) return false;
+		}
+
+		// TLD：纯字母 2-63 或 punycode xn--
+		var tld = labels[labels.length - 1];
+		if (!/^(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i.test(tld)) return false;
+
+		return true;
+	}
+}
+
 module.exports = {
 	init,
 	getIcon,
@@ -3596,5 +3728,8 @@ module.exports = {
 	AUDIO_EXTS,
 	DOCUMENT_EXTS,
 	ARCHIVE_EXTS,
-	NON_TEXT_EXTS
+	NON_TEXT_EXTS,
+
+	// URL 验证 (统一真理源)
+	isValidUrl
 };

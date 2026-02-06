@@ -217,26 +217,6 @@ function showAutoCloseNotification(type, message, timeout = 9) {
   );
 }
 
-// ==================== 命令历史管理 ====================
-async function addCommandToHistory(key, value) {
-  if (!key || !value || !globalContext || !globalContext.globalState) return;
-  const fullKey = `q2_${key}_history`;
-  let history = globalContext.globalState.get(fullKey, []);
-  const existingIndex = history.indexOf(value);
-  if (existingIndex > -1) {
-    history.splice(existingIndex, 1);
-  }
-  history.unshift(value);
-  const trimmedHistory = history.slice(0, 5);
-  await globalContext.globalState.update(fullKey, trimmedHistory);
-}
-
-async function getCommandHistory(key) {
-  if (!key || !globalContext || !globalContext.globalState) return [];
-  const fullKey = `q2_${key}_history`;
-  return globalContext.globalState.get(fullKey, []);
-}
-
 // ==================== 配置读写 ====================
 function getConfig() {
   const defaultConfig = {
@@ -717,36 +697,6 @@ let diskFreeInFlight = false;
 // 当前文件夹的精细 SCM 设置（从后端传来）
 let currentFineSCM = { szMode: null, sortBy: null };
 
-// ====== 命令历史下拉框 ======
-function hideAllDropdowns() {
-    const dropdowns = document.querySelectorAll('.history-dropdown');
-    dropdowns.forEach(d => d.style.display = 'none');
-}
-
-function showHistoryDropdown(inputEl, dropdownEl, history) {
-    hideAllDropdowns();
-    if (!history || history.length === 0) return;
-    dropdownEl.innerHTML = '';
-    history.forEach(itemText => {
-        const itemDiv = document.createElement('div');
-        itemDiv.className = 'history-dropdown-item';
-        itemDiv.textContent = itemText;
-        itemDiv.title = itemText;
-        itemDiv.onclick = () => {
-            inputEl.value = itemText;
-            hideAllDropdowns();
-            inputEl.focus();
-            // ★ For file filter, trigger input event to apply filter
-            if (inputEl.id === 'fileFilterInput') {
-                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        };
-        dropdownEl.appendChild(itemDiv);
-    });
-    dropdownEl.style.display = 'block';
-}
-
-
 function updateFineSCMButtons() {
   // 更新左侧 szMode 按钮
   const szModeGroup = document.getElementById('szModeGroup');
@@ -1048,7 +998,7 @@ let currentFocusType = 'filenameInput';
 
 function updateFocusType(element){
   if (!element) { currentFocusType = 'other'; return; }
-  if (['filenameInput', 'addressInput', 'fileFilterInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
+  if (['filenameInput', 'addressInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
   else if (element.classList.contains('file-list-container') || element.closest('.file-list-container')) currentFocusType = 'fileList';
   else if (element.classList.contains('sidebar') || element.closest('.sidebar')) currentFocusType = 'sidebar';
   else if (element.classList.contains('recent-section') || element.closest('.recent-section')) currentFocusType = 'recentSection';
@@ -1390,17 +1340,6 @@ window.addEventListener('message', event => {
   const message = event.data;
   if (!message) return;
 
-    if (message.command === 'historyData') {
-        if (message.key === 'fileFilter') {
-            const input = document.getElementById('fileFilterInput');
-            const dropdown = document.getElementById('fileFilterHistoryDropdown');
-            if (input && dropdown) {
-                showHistoryDropdown(input, dropdown, message.history);
-            }
-        }
-        return;
-    }
-
   if (message.command === 'update') {
       const newSizeMode = message.sizeMode || 'nothing';
       const isModeChanged = newSizeMode !== currentSizeMode;
@@ -1507,7 +1446,7 @@ window.addEventListener('message', event => {
 document.addEventListener('focusin', (e) => updateFocusType(e.target));
 document.addEventListener('click', (e) => {
   hideAllContextMenus();
-  if (!['filenameInput', 'addressInput', 'fileFilterInput'].includes((e.target && e.target.id) || '') && !(e.target && e.target.classList && e.target.classList.contains('rename-input'))) {
+  if (!['filenameInput', 'addressInput'].includes((e.target && e.target.id) || '') && !(e.target && e.target.classList && e.target.classList.contains('rename-input'))) {
     updateFocusType(e.target);
   }
 });
@@ -1710,44 +1649,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-    // ★ 新增：文件筛选输入框逻辑
-    const fileFilterInput = document.getElementById('fileFilterInput');
-    if (fileFilterInput) {
-        initInputUndoRedo(fileFilterInput);
-
-        fileFilterInput.addEventListener('input', () => {
-            hideAllDropdowns();
-            const filterText = fileFilterInput.value.toLowerCase();
-            const keywords = filterText.split(/\\s+/).filter(Boolean);
-            const fileItems = document.querySelectorAll('.file-item');
-
-            fileItems.forEach(item => {
-                const itemName = (item.dataset.name || '').toLowerCase();
-                const isMatch = keywords.every(kw => itemName.includes(kw));
-                item.style.display = isMatch ? '' : 'none';
-            });
-        });
-
-        fileFilterInput.addEventListener('focus', () => {
-            if (fileFilterInput.value === '') {
-                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
-            }
-        });
-
-        fileFilterInput.addEventListener('blur', () => {
-            setTimeout(hideAllDropdowns, 150);
-        });
-
-        fileFilterInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const value = fileFilterInput.value.trim();
-                if (value) {
-                    vscode.postMessage({ command: 'saveHistory', key: 'fileFilter', value: value });
-                }
-            }
-        });
-    }
 
   // ★ 精细 SCM 按钮事件监听
   const szModeGroup = document.getElementById('szModeGroup');
@@ -2084,8 +1985,7 @@ function getWebviewContent(currentPath) {
 
   let htmlTemplate = "";
   try {
-    // ★ 修改：从 h.js 引入 HTML 模板
-    htmlTemplate = h.getQ2Template();
+    htmlTemplate = require("./q2.html");
   } catch (error) {
     geq().logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
     return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
@@ -2143,7 +2043,6 @@ function getWebviewContent(currentPath) {
 
   return finalHtml;
 }
-
 
 // ==================== Q2 粘贴功能（完全移植自 Q1） ====================
 // ★★★ 基于事务、多任务、指纹去重、同名自动重命名、完美取消回滚、完备UI ★★★
@@ -2635,17 +2534,6 @@ function showSaveAsDialog() {
     const currentConfig = getConfig();
 
     switch (message.command) {
-      case "getHistory":
-        if (message.key) {
-          const history = await getCommandHistory(message.key);
-          panel.webview.postMessage({ command: 'historyData', key: message.key, history: history });
-        }
-        break;
-      case "saveHistory":
-        if (message.key && message.value) {
-          await addCommandToHistory(message.key, message.value);
-        }
-        break;
       case "removeFromRecent":
         if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
         break;

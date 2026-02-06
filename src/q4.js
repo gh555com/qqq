@@ -1445,10 +1445,10 @@ class ClipboardHistorySidebarProvider {
 
         this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放: ${info.fileName}, 循环: ${loopCount}`, "INFO");
 
-        // ★ 关键：只有 Savor 音频才更新 UI 文字
-        this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
-
         if (source === AUDIO_SOURCE.PYTHON) {
+            // Python 模式：先发 UI-only（无 base64）
+            this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 
@@ -1466,10 +1466,11 @@ class ClipboardHistorySidebarProvider {
                 console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
+                // 继续落到 Webview 兜底
             }
         }
 
-        // Webview 兜底播放 Savor 音频
+        // Webview 模式：只发一次（带 base64）
         const b64 = info.base64();
         if (b64) {
             this._postMessage({
@@ -1568,10 +1569,10 @@ class ClipboardHistorySidebarProvider {
 
         this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放品味: ${info.fileName}, 循环: ${displayCount}`, "INFO");
 
-        // ★ 关键：同步 UI 状态
-        this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
-
         if (source === AUDIO_SOURCE.PYTHON) {
+            // Python 模式：先发 UI-only（无 base64）
+            this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 
@@ -1596,10 +1597,11 @@ class ClipboardHistorySidebarProvider {
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
                 this._pythonPlayState.playing = false;
+                // 继续落到 Webview 兜底
             }
         }
 
-        // Webview 兆底
+        // Webview 模式：只发一次（带 base64）
         const b64 = info.base64();
         if (b64) {
             this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
@@ -2220,15 +2222,8 @@ class ClipboardHistorySidebarProvider {
             el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
             el.btnSavorStop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'stop' }); };
 
-            function isValidUrl(s) {
-                if (!s) return false;
-                var val = ('' + s).replace(/^\s+|\s+$/g, '');
-                if (!val) return false;
-                if (/\s/.test(val)) return false;
-                if (/^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/i.test(val)) return true;
-                var pattern = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(\/[^\s]*)?$/i;
-                return pattern.test(val);
-            }
+            // ★ 统一真理源：从 global.js 嵌入
+            var isValidUrl = ${this._global.isValidUrl.toString()};
 
             function showErrorTip() {
                 var tip = document.getElementById('urlErrorTip');
