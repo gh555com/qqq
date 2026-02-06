@@ -1,15 +1,3 @@
-// ============================================================================
-// Q4.js - QQQ Clipboard History Ultimate Fusion (A+Q Final Value Edition)
-// 作者: 的梦 (q)
-// 版本: 4.0.0-fusion-final
-//
-// ✅ Solarized Dark + 暗金配色（强制自定义颜色）
-// ✅ forced-color-adjust: none 破 Windows 高对比度主题（保证自定义配色可见）
-// ✅ CSP 安全：全 nonce，无 unsafe-inline，无内联事件
-// ✅ O(1) 去重/查找：hashMap + idMap + 双向链表（move-to-front）
-// ✅ 文件持久化：globalStorageUri + gzip + (msgpack 可选) + 原子写 + 损坏隔离
-// ✅ 功能：搜索、导入/导出、复制、粘贴、插入编辑器、QuickPick、统计、状态栏
-// ============================================================================
 
 'use strict';
 
@@ -619,19 +607,28 @@ class ClipboardHistoryManager {
         const kw = String(keyword || '').trim();
         if (!kw) return this.getHistory(limit);
 
-        const cacheKey = `${this._version}|${limit}|${kw.toLowerCase()}`;
+        // ★ 新功能：空格代表 AND 组合搜索（q a => 同时包含 q 和 a）
+        const normalized = kw.toLowerCase().replace(REGEX.WHITESPACE_COLLAPSE, ' ').trim();
+        const terms = normalized.split(' ').filter(Boolean);
+
+        const cacheKey = `${this._version}|${limit}|${normalized}`;
         if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) {
             this._cache.hit++;
             return this._cache.searchList;
         }
         this._cache.miss++;
 
-        const needle = kw.toLowerCase();
         const pinned = [];
         const others = [];
         let cur = this._head;
         while (cur) {
-            if (cur.content.toLowerCase().includes(needle)) {
+            const hay = cur.content.toLowerCase();
+            let ok = true;
+            for (let i = 0; i < terms.length; i++) {
+                if (!hay.includes(terms[i])) { ok = false; break; }
+            }
+
+            if (ok) {
                 const item = {
                     id: cur.id,
                     content: cur.content,
@@ -1026,6 +1023,9 @@ class ClipboardHistorySidebarProvider {
             loopCount: 0,
             startTime: 0
         };
+
+        // ★ 新增：记录 PythonBridge 事件 handler 引用，便于 dispose 解绑，避免热重载堆监听
+        this._onPythonEvent = null;
     }
 
     /**
@@ -1052,14 +1052,26 @@ class ClipboardHistorySidebarProvider {
         this._syncPythonStateOnStartup();
 
         // 监听 Python 引擎的异步通知（如自然播放结束）
-        this._global.pythonBridge.on('event', (data) => {
+        try {
+            // 防止重复绑定（热重载/视图重建）
+            if (this._onPythonEvent && this._global?.pythonBridge) {
+                if (typeof this._global.pythonBridge.off === 'function') {
+                    this._global.pythonBridge.off('event', this._onPythonEvent);
+                } else if (typeof this._global.pythonBridge.removeListener === 'function') {
+                    this._global.pythonBridge.removeListener('event', this._onPythonEvent);
+                }
+            }
+        } catch { /* ignore */ }
+
+        this._onPythonEvent = (data) => {
             if (data && data.event === 'audio_finished') {
                 // ★ 更新 Python 播放状态
                 this._pythonPlayState.playing = false;
                 // 通知 webview 停止播放
                 this._postMessage({ command: 'stopAudio' });
             }
-        });
+        };
+        this._global.pythonBridge.on('event', this._onPythonEvent);
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
@@ -1135,9 +1147,9 @@ class ClipboardHistorySidebarProvider {
                     break;
                 case 'requestSavorAudio': {
                     if (msg.mode === 'stop') {
-                        this._stopAudio();
+                        await this._stopAudio();
                     } else {
-                        this.triggerSavor(msg.mode || 'normal');
+                        await this.triggerSavor(msg.mode || 'normal');
                     }
                     break;
                 }
@@ -1321,10 +1333,6 @@ class ClipboardHistorySidebarProvider {
 
         return `${s.count} times, ${sizeStr}; Avg per day: ${avgCount} times`;
     }
-
-
-
-
 
     get isWebviewReady() {
         return !!this._view;
@@ -2214,11 +2222,11 @@ class ClipboardHistorySidebarProvider {
 
             function isValidUrl(s) {
                 if (!s) return false;
-                var val = ('' + s).replace(/^\\s+|\\s+$/g, '');
+                var val = ('' + s).replace(/^\s+|\s+$/g, '');
                 if (!val) return false;
-                if (/\\s/.test(val)) return false;
-                if (/^(https?:\\/\\/)?(localhost|127\\.0\\.0\\.1|\\[::1\\])(:\\d+)?(\\/.*)?$/i.test(val)) return true;
-                var pattern = /^(https?:\\/\\/)?([a-z0-9-]+\\.)+[a-z]{2,}(?::\\d+)?(\\/[^\\s]*)?$/i;
+                if (/\s/.test(val)) return false;
+                if (/^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/.*)?$/i.test(val)) return true;
+                var pattern = /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(?::\d+)?(\/[^\s]*)?$/i;
                 return pattern.test(val);
             }
 
@@ -2450,6 +2458,22 @@ class ClipboardHistorySidebarProvider {
     </script>
 </body>
 </html>`;
+    }
+
+    // ★ 新增：供 activate() 的 subscriptions 安全调用，且解绑 pythonBridge 监听避免热重载堆监听
+    dispose() {
+        try { this._stopPeriodicUpdate(); } catch { }
+        try {
+            if (this._onPythonEvent && this._global?.pythonBridge) {
+                if (typeof this._global.pythonBridge.off === 'function') {
+                    this._global.pythonBridge.off('event', this._onPythonEvent);
+                } else if (typeof this._global.pythonBridge.removeListener === 'function') {
+                    this._global.pythonBridge.removeListener('event', this._onPythonEvent);
+                }
+            }
+        } catch { }
+        this._onPythonEvent = null;
+        this._view = null;
     }
 }
 
@@ -2831,3 +2855,5 @@ module.exports = {
     ClipboardHistorySidebarProvider,
     resetQ4AudioSource,  // ★ 导出重置函数
 };
+
+
