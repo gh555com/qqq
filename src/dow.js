@@ -2479,8 +2479,6 @@ class YtDlpDownloader {
     }
 }
 
-// ★ PythonEngineDownloader 已删除，使用 qvenv.js 中的版本
-
 class UnifiedMediaDownloader {
     constructor(options = {}) {
 
