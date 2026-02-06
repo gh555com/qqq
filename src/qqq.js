@@ -364,7 +364,7 @@ function computeFingerprintCached(filePath) {
 
 	const fp = _computeFingerprintRaw(filePath);
 	if (fp) {
-		global.logMessage(`[Fingerprint] COMPUTE: filePath=${filePath.slice(-40)}, fp=${fp}, cacheKey=${cacheKeyForPath(filePath)}, mtime=${mtimeMsNorm}, size=${st?.size}`, "DEBUG");
+		// global.logMessage(`[Fingerprint] COMPUTE: filePath=${filePath.slice(-40)}, fp=${fp}, cacheKey=${cacheKeyForPath(filePath)}, mtime=${mtimeMsNorm}, size=${st?.size}`, "DEBUG");
 		_fpCache.set(sig, fp);
 		if (_fpCache.size > FP_CACHE_MAX) {
 			const firstKey = _fpCache.keys().next().value;
@@ -698,7 +698,7 @@ function getCachedBuffer(contentId, quality) {
 	try {
 		if (fs.existsSync(filePath)) {
 			const buffer = fs.readFileSync(filePath);
-			global.logMessage(`[Cache] FILE FOUND: ${fileName} (${buffer.length} bytes)`, "DEBUG");
+			// global.logMessage(`[Cache] FILE FOUND: ${fileName} (${buffer.length} bytes)`, "DEBUG");
 
 			// Only enforce WebP sanity checks for unified WebP cache (backwards-compatible)
 			const fmt = entry?.qualities?.[quality]?.format;
@@ -711,7 +711,7 @@ function getCachedBuffer(contentId, quality) {
 					entry.atime = Date.now();
 					cacheMeta.stats.hitCount++;
 					global.markCacheHit();
-					global.logMessage(`[Cache] HIT: ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
+					// global.logMessage(`[Cache] HIT: ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
 					updateStatusBarThrottled();
 					return buffer;
 				}

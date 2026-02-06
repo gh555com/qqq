@@ -1374,7 +1374,7 @@ async function getPreviewBuffer(filePath, contentId, renderW, renderH) {
 		if (cached) {
 			const meta = geq().getCacheQualityMeta(contentId, cacheStrategy.cacheKey);
 			if (meta && meta.type === "webp_unified") {
-				global.logMessage(`[Cache] HIT: ${path.basename(filePath)} (${cacheStrategy.cacheKey})`, "INFO");
+				// global.logMessage(`[Cache] HIT: ${path.basename(filePath)} (${cacheStrategy.cacheKey})`, "INFO");
 				const cachedWidth = meta.width || info?.width || 0;
 				const cachedHeight = meta.height || info?.height || 0;
 				const cachedOriginalDuration =
