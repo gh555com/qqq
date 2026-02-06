@@ -200,16 +200,19 @@ function formatDateTime(date) {
  * @param {string} message - 消息内容
  * @param {number} timeout - 自动关闭时间（毫秒），默认 9000ms
  */
-function showAutoCloseNotification(type, message, timeout = 9000) {
+function showAutoCloseNotification(type, message, timeout = 9) {
   vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: message,
+      title: '',
       cancellable: false
     },
     async (progress) => {
-      // 等待指定时间后自动关闭
-      await new Promise(resolve => setTimeout(resolve, timeout));
+      // ★ 9秒精确进度条，带倒计时显示
+      for (let sec = timeout; sec >= 1; sec--) {
+        progress.report({ increment: 86 / timeout, message: `${message}    ${sec} s` });
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
   );
 }
@@ -2818,9 +2821,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-              global.setStatusBarMessage(`${path.basename(itemToDelete)} 已移至回收站`, 5000);
+              showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已移至回收站`);
             } catch (error) {
-              global.showErrorMessage(`qqq: 删除失败: ${error.message}`);
+              showAutoCloseNotification('error', `qqq: 删除失败: ${error.message}`);
             } finally {
               // 无论成功失败，都刷新列表并恢复状态
               if (activePanel && activePanelAlive) refreshWebview();
@@ -2855,9 +2858,9 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
-              global.setStatusBarMessage(`已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`, 5000);
+              showAutoCloseNotification('info', `已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`);
             } else if (errorCount > 0) {
-              global.showErrorMessage(`${errorCount} 个项目删除失败。`);
+              showAutoCloseNotification('error', `${errorCount} 个项目删除失败。`);
             }
 
             // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）

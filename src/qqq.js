@@ -1618,21 +1618,27 @@ async function activate(context) {
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
-			// ★ 自动消失的通知（9秒后安静消失，无进度条滚动）
-			const showAutoHideMessage = (message, type = 'info') => {
+			// ★ 9秒精确进度条通知（进度条从左滚到右正好9秒后消失，带倒计时）
+			const showAutoHideMessage = (message) => {
 				vscode.window.withProgress({
 					location: vscode.ProgressLocation.Notification,
-					title: message,
+					title: '',
 					cancellable: false
-				}, () => new Promise(resolve => setTimeout(resolve, 9000)));
+				}, async (progress) => {
+					const totalSeconds = 9;
+					for (let sec = totalSeconds; sec >= 1; sec--) {
+						progress.report({ increment: 86 / totalSeconds, message: `${message}    ${sec} s` });
+						await new Promise(r => setTimeout(r, 1000));
+					}
+				});
 			};
 
 			const options = [
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
 				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
 				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" },
-				{ label: "清理 globalStates 数据库", description: "清空并丢失：1、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆；2、已缓存滴用于 “事物回滚和文件去重” 滴关键信息。", id: "clearGlobalStates" },
-				{ label: "清空剪切板历史记录", description: "永久清除所有剪切板历史", id: "clearClipboardHistory" }
+				{ label: "清理 globalStates 数据库", description: "清空并丢失 ：1、漫游器快速跳转阵列；2、视频增强下载流程已指定滴浏览器入口；3、已缓存滴用于 “事物回滚和文件去重” 滴关键信息；4、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆。", id: "clearGlobalStates" },
+				{ label: "清空剪切板历史记录", description: " ", id: "clearClipboardHistory" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
@@ -1651,12 +1657,12 @@ async function activate(context) {
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
 					showAutoHideMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清除冷却时间失败: ${e.message}`, 'error');
+					showAutoHideMessage(`qqq: 清除冷却时间失败: ${e.message}`);
 				}
 			} else if (selected.id === "openCacheDir") {
 				// 打开缓存目录
 				if (!cacheDir) {
-					showAutoHideMessage("qqq: 缓存目录未初始化", 'error');
+					showAutoHideMessage("qqq: 缓存目录未初始化");
 					return;
 				}
 
@@ -1677,14 +1683,14 @@ async function activate(context) {
 						cp.spawn('xdg-open', [cacheDir], { detached: true });
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 打开缓存目录失败: ${e.message}`, 'error');
+					showAutoHideMessage(`qqq: 打开缓存目录失败: ${e.message}`);
 				}
 			} else if (selected.id === "deleteYtDlp") {
 				// 删除视频下载组件 yt-dlp.exe
 				try {
 					const globalStoragePath = context?.globalStorageUri?.fsPath;
 					if (!globalStoragePath) {
-						showAutoHideMessage("qqq: 无法获取存储路径", 'error');
+						showAutoHideMessage("qqq: 无法获取存储路径");
 						return;
 					}
 					const ytDlpPath = path.join(globalStoragePath, 'yt-dlp.exe');
@@ -1695,7 +1701,7 @@ async function activate(context) {
 						showAutoHideMessage("qqq: yt-dlp.exe 不存在");
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`, 'error');
+					showAutoHideMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
 				}
 			} else if (selected.id === "clearGlobalStates") {
 				// 清理 globalStates 数据库（保留状态区信息）
@@ -1729,14 +1735,14 @@ async function activate(context) {
 					const formatBytes = (bytes) => {
 						if (bytes === 0) return '0B';
 						const k = 1024;
-						const sizes = ['B', 'KB', 'MB'];
+						const sizes = [' b', ' kb', ' Mb'];
 						const i = Math.floor(Math.log(bytes) / Math.log(k));
 						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
 					};
 
 					showAutoHideMessage(`qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清理 globalStates 失败: ${e.message}`, 'error');
+					showAutoHideMessage(`qqq: 清理 globalStates 失败: ${e.message}`);
 				}
 			} else if (selected.id === "clearClipboardHistory") {
 				// 清空剪切板历史记录
@@ -1746,10 +1752,10 @@ async function activate(context) {
 						await historyManager.clearHistory({ deleteFiles: true });
 						showAutoHideMessage("qqq: 剪切板历史记录已清空");
 					} else {
-						showAutoHideMessage("qqq: 剪切板历史管理器未初始化", 'error');
+						showAutoHideMessage("qqq: 剪切板历史管理器未初始化");
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清空剪切板历史失败: ${e.message}`, 'error');
+					showAutoHideMessage(`qqq: 清空剪切板历史失败: ${e.message}`);
 				}
 			}
 		})),

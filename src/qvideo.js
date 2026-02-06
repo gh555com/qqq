@@ -12,12 +12,12 @@ const { TaskCounter, TaskMessage } = require('./global');
 // ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
 const QvideoMsg = {
     /**
-     * ★ 解析阶段消息（不显示已交换）
+     * ★ 解析阶段消息（显示完整网址前44字符）
      */
     parsing(task, url) {
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
-        const domain = this._extractDomain(url);
-        return `${prefix}正在解析 ${domain}...`;
+        const urlSnippet = this._truncateUrl(url, 44);
+        return `${prefix}正在解析 ${urlSnippet}`;
     },
 
     /**
@@ -38,11 +38,35 @@ const QvideoMsg = {
         // ★ 状态后缀
         const statusPart = statusSuffix ? ` (${statusSuffix})` : '';
 
-        // ★ 新格式：于 domain_标题...
-        const domain = this._extractDomain(url);
-        const titlePart = task?.videoTitle ? `_${task.videoTitle}` : '';
+        // ★ 有标题：域名(28)▶标题(44)；无标题：完整URL前44字符
+        let locationPart;
+        if (task?.videoTitle) {
+            const domain = this._truncateStr(this._extractDomain(url), 28);
+            const title = this._truncateStr(task.videoTitle, 44);
+            locationPart = `${domain}▶${title}`;
+        } else {
+            locationPart = this._truncateUrl(url, 44);
+        }
 
-        return `${prefix}已交换 ${sizeStr}${timePart}${statusPart} 于 ${domain}${titlePart}`;
+        return `${prefix}已交换 ${sizeStr}${timePart}${statusPart} 于 ${locationPart}`;
+    },
+
+    /**
+     * ★ 截断 URL（保留 https://www. 等前缀）
+     */
+    _truncateUrl(url, maxLen) {
+        const s = String(url || '');
+        if (s.length <= maxLen) return s;
+        return s.slice(0, maxLen) + '...';
+    },
+
+    /**
+     * ★ 截断字符串（通用）
+     */
+    _truncateStr(str, maxLen) {
+        const s = String(str || '');
+        if (s.length <= maxLen) return s;
+        return s.slice(0, maxLen) + '...';
     },
 
     /**
@@ -1115,13 +1139,13 @@ class Qvideo {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
                             this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
                             tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url));
-                            // ★ 播放列表：用第一个视频的标题
-                            task.videoTitle = this._truncateByWidth(res.entries[0]?.title || '', 28);
+                            // ★ 播放列表：保存完整标题（截断由 QvideoMsg 统一处理）
+                            task.videoTitle = res.entries[0]?.title || '';
                         } else {
                             this.log(`识别为单个视频: ${res.title}`);
                             tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url));
-                            // ★ 单个视频：保存截断后的标题
-                            task.videoTitle = this._truncateByWidth(res.title || '', 28);
+                            // ★ 单个视频：保存完整标题（截断由 QvideoMsg 统一处理）
+                            task.videoTitle = res.title || '';
                         }
                     } else {
                         if (this._isForbidden(403, res?.error)) {
@@ -1754,7 +1778,8 @@ class Qvideo {
                 );
                 elapsed = Date.now() - startTime;
             } else {
-                this.log(`[增强] 处于弹窗被吃掉模式，跳过 InformationMessage 直接尝试兜底逻辑...`);
+                this.log(`[增强] 处于弹窗被吃掉模式，跳过 InformationMessage 直接进入 QuickPick 兜底...`);
+                elapsed = 0;  // ★ 关键修复：强制设为 0 以触发 QuickPick 兜底
             }
 
             // ★ 如果被立即关闭（< 500ms 且 undefined），用 QuickPick 兆底
@@ -1814,41 +1839,109 @@ class Qvideo {
         });
     }
 
-    async _runEnhancedPreferSaved(task, url, targetDir) {
-        await this._cleanupSavedBrowserPaths();
+    // ==================== 内嵌环境相关 ====================
 
-        const dedicated = this.context.globalState.get(this.KEY_DEDICATED_BROWSER);
-        if (dedicated && fs.existsSync(dedicated)) {
-            const v = await this._validateChromiumSilently(dedicated);
-            if (v.valid) {
-                this.log(`[增强] 使用已保存专用浏览器: ${dedicated} (${v.version})`);
-                return await this._startSniffer(task, dedicated, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
-            } else {
-                await this.context.globalState.update(this.KEY_DEDICATED_BROWSER, undefined);
-            }
+    /**
+     * ★ 获取内嵌 Chrome 的路径（不检查是否存在）
+     */
+    _getEmbeddedChromePath() {
+        const platform = process.platform;
+        const arch = process.arch;
+        let folderName;
+        if (platform === 'win32') {
+            folderName = (arch === 'x64' || arch === 'arm64') ? 'chrome-win64' : 'chrome-win32';
+        } else if (platform === 'darwin') {
+            folderName = arch === 'arm64' ? 'chrome-mac-arm64' : 'chrome-mac-x64';
+        } else {
+            folderName = 'chrome-linux64';
+        }
+        const exeName = platform === 'win32' ? 'chrome.exe' : 'chrome';
+        return path.join(this.chromeHome, folderName, exeName);
+    }
+
+    /**
+     * ★ z判断：检查内嵌环境是否可用
+     * @returns {{ available: boolean, path: string, version?: string }}
+     */
+    async _checkEmbeddedChrome() {
+        const embeddedPath = this._getEmbeddedChromePath();
+        this.log(`[z判断] 检查内嵌环境: ${embeddedPath}`);
+
+        if (!fs.existsSync(embeddedPath)) {
+            this.log(`[z判断] 内嵌环境不存在`);
+            return { available: false, path: embeddedPath };
         }
 
+        const v = await this._validateChromiumSilently(embeddedPath);
+        if (v.valid) {
+            this.log(`[z判断] 内嵌环境可用: ${v.version}`);
+            return { available: true, path: embeddedPath, version: v.version };
+        } else {
+            this.log(`[z判断] 内嵌环境验证失败: ${v.error}`);
+            return { available: false, path: embeddedPath };
+        }
+    }
+
+    // ==================== 新增强流程（按钮一）====================
+
+    /**
+     * ★ 按钮一：启动增强流程
+     * 优先级：记忆 → 内嵌 → 选择exe → 二次确认
+     */
+    async _runEnhancedPreferSaved(task, url, targetDir) {
+        await this._cleanupSavedBrowserPaths();
+        if (this._isTaskCancelled(task)) return null;
+
+        // ★ 1. 检查记忆（用户之前选择的浏览器）
         const custom = this.context.globalState.get(this.KEY_CUSTOM_BROWSER);
         if (custom && fs.existsSync(custom)) {
             const v = await this._validateChromiumSilently(custom);
             if (v.valid) {
-                this.log(`[增强] 使用已保存用户浏览器: ${custom} (${v.version})`);
+                this.log(`[按钮一] 使用记忆的用户浏览器: ${custom} (${v.version})`);
                 return await this._startSniffer(task, custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             } else {
+                this.log(`[按钮一] 记忆的浏览器已失效，清除记忆`);
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
         }
 
-        return await this._promptPickThenMaybeDownload(task, url, targetDir);
-    }
-
-    async _runEnhancedForcePick(task, url, targetDir) {
-        return await this._promptPickThenMaybeDownload(task, url, targetDir);
-    }
-
-    async _promptPickThenMaybeDownload(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return null;
 
+        // ★ 2. z判断：检查内嵌环境
+        const embedded = await this._checkEmbeddedChrome();
+        if (embedded.available) {
+            this.log(`[按钮一] 使用内嵌环境: ${embedded.path}`);
+            return await this._startSniffer(task, embedded.path, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
+        }
+
+        if (this._isTaskCancelled(task)) return null;
+
+        // ★ 3. 内嵌不可用 → 弹选择exe窗口
+        return await this._pickExeThenFallback(task, url, targetDir, true);
+    }
+
+    // ==================== 新增强流程（按钮二）====================
+
+    /**
+     * ★ 按钮二：选择exe
+     * 让用户更新偏好，优先级：选择exe → 内嵌 → 二次确认
+     */
+    async _runEnhancedForcePick(task, url, targetDir) {
+        if (this._isTaskCancelled(task)) return null;
+        return await this._pickExeThenFallback(task, url, targetDir, false);
+    }
+
+    // ==================== 选择exe后的兜底逻辑 ====================
+
+    /**
+     * ★ 弹选择exe窗口，失败后根据参数决定兜底逻辑
+     * @param {boolean} skipEmbeddedFallback - 如果为 true，失败后直接进入二次确认（按钮一场景，因为已经检查过内嵌）
+     *                                        如果为 false，失败后先检查内嵌（按钮二场景）
+     */
+    async _pickExeThenFallback(task, url, targetDir, skipEmbeddedFallback) {
+        if (this._isTaskCancelled(task)) return null;
+
+        // ★ 弹出选择exe窗口
         const uris = await vscode.window.showOpenDialog({
             canSelectFiles: true,
             filters: process.platform === 'win32'
@@ -1859,44 +1952,67 @@ class Qvideo {
 
         if (this._isTaskCancelled(task)) return null;
 
-        if (!uris || uris.length === 0) {
-            const sel = await vscode.window.showErrorMessage(
-                "qqq: 未选择浏览器入口文件。可选下载chrome（约150m）或终止一切。",
-                "下载 chrome", "终止一切"
-            );
-            if (sel === "下载 chrome") {
-                return await this._downloadChrome(task, url, targetDir);
-            } else {
-                this.log("用户终止增强流程");
+        // ★ 用户选了文件
+        if (uris && uris.length > 0) {
+            const exePath = uris[0].fsPath;
+            this.log(`[选择exe] 用户选择: ${exePath}`);
+
+            const validation = await this._validateChromiumSilently(exePath);
+            if (this._isTaskCancelled(task)) return null;
+
+            if (validation.valid) {
+                this.log(`[选择exe] 验证通过: ${validation.version}，记忆并启动`);
+                return await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             }
-            return null;
+
+            // ★ 选了不能用的exe
+            this.log(`[选择exe] 验证失败: ${validation.error}`);
+        } else {
+            // ★ 用户关闭了选择窗口
+            this.log(`[选择exe] 用户关闭了选择窗口`);
         }
-
-        const exePath = uris[0].fsPath;
-        this.log(`[增强] 用户选择: ${exePath}`);
-
-        const validation = await this._validateChromiumSilently(exePath);
 
         if (this._isTaskCancelled(task)) return null;
 
-        if (validation.valid) {
-            this.log(`[增强] 用户浏览器验证通过: ${validation.version}`);
-            return await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
+        // ★ 选择失败后的兜底逻辑
+        if (!skipEmbeddedFallback) {
+            // 按钮二场景：先检查内嵌环境
+            const embedded = await this._checkEmbeddedChrome();
+            if (embedded.available) {
+                this.log(`[选择exe兜底] 内嵌环境可用，直接使用`);
+                return await this._startSniffer(task, embedded.path, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
+            }
         }
 
-        await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
+        if (this._isTaskCancelled(task)) return null;
 
-        this.log(`[增强] 用户浏览器验证失败: ${validation.error}`);
+        // ★ 所有兜底都失败 → 二次确认
+        return await this._showSecondaryConfirmation(task, url, targetDir);
+    }
+
+    // ==================== 二次确认弹窗 ====================
+
+    /**
+     * ★ 二次确认：下载chrome 或 终止一切
+     * 保持原有逻辑不变
+     */
+    async _showSecondaryConfirmation(task, url, targetDir) {
+        if (this._isTaskCancelled(task)) return null;
+
+        this.log(`[二次确认] 弹出选择: 下载chrome / 终止一切`);
 
         const sel = await vscode.window.showErrorMessage(
-            `qqq: 该入口文件无效，可选下载chrome（约150m）或终止一切。\n原因: ${validation.error}`,
+            "qqq: 未选择有效浏览器。可选下载chrome（约150m）或终止一切。",
             "下载 chrome", "终止一切"
         );
 
+        if (this._isTaskCancelled(task)) return null;
+
         if (sel === "下载 chrome") {
+            this.log(`[二次确认] 用户选择下载chrome`);
             return await this._downloadChrome(task, url, targetDir);
         } else {
-            this.log("用户终止增强流程");
+            this.log(`[二次确认] 用户终止增强流程`);
         }
         return null;
     }

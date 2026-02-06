@@ -1728,7 +1728,7 @@ const TaskMessage = {
 	 * @returns {string}
 	 */
 	prompt(taskTitle, message) {
-		const prefix = taskTitle || 'qqq';
+		const prefix = taskTitle || 'qqq:';
 		return `${prefix} ${message}`;
 	},
 
