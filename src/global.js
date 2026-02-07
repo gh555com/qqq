@@ -1660,8 +1660,21 @@ function rotateLogIfNeeded() {
 }
 
 function logMessage(message, level = "INFO") {
-	const ts = new Date().toISOString();
-	const line = `[${ts}][${level}] ${message} `;
+	const now = new Date();
+	// ★ 使用客户电脑本地时间 + 时区偏移
+	const tzOffset = -now.getTimezoneOffset();
+	const tzSign = tzOffset >= 0 ? '+' : '-';
+	const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
+	const tzMins = String(Math.abs(tzOffset) % 60).padStart(2, '0');
+	const localISO = now.getFullYear() + '-' +
+		String(now.getMonth() + 1).padStart(2, '0') + '-' +
+		String(now.getDate()).padStart(2, '0') + 'T' +
+		String(now.getHours()).padStart(2, '0') + ':' +
+		String(now.getMinutes()).padStart(2, '0') + ':' +
+		String(now.getSeconds()).padStart(2, '0') + '.' +
+		String(now.getMilliseconds()).padStart(3, '0') +
+		tzSign + tzHours + ':' + tzMins;
+	const line = `[${localISO}][${level}] ${message} `;
 	outputChannel.appendLine(line);
 
 	if ((level === "ERROR" || level === "WARN") && LOG_PATH) {

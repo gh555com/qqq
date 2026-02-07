@@ -2900,6 +2900,10 @@ function checkFolderMtimeChanged(folderPath) {
 // ★ 首次加载时触发扫描（唯一的主动扫描）
 function fetchFolderSizeFirstTime(folderPath) {
 	if (folderSizeCache.has(folderPath)) return; // 已有缓存，不扫描
+	// ★ 也要检查冷却时间，防止缓存被删后在冷却期内重复扫描
+	const now = Date.now();
+	const lastScan = _lastScanTime.get(folderPath) || 0;
+	if (now - lastScan < FOLDER_SIZE_SCAN_COOLDOWN) return;
 	fetchFolderSizeInternal(folderPath, false);
 }
 
