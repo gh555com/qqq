@@ -2357,6 +2357,7 @@ function canonicalizeExistingPath(p) {
 	return out;
 }
 
+
 // ★ 统一的缓存键生成函数（Windows 下不区分大小写）
 function cacheKeyForPath(p) {
 	const canon = canonicalizeExistingPath(p);
@@ -2367,7 +2368,8 @@ function cacheKeyForPath(p) {
 // ★ 统一的字节格式化函数，decimals 控制小数位数（默认 1 位）
 function formatBytes(size, decimals = 1) {
 	if (size == null || isNaN(size)) return "?";
-	const units = ["b", "kb", "mb", "gb"];
+	// const units = ["b", "kb", "mb", "gb"];
+	const units = ["B", "KB", "MB", "GB"];
 	let idx = 0;
 	let val = size;
 	while (val >= 1024 && idx < units.length - 1) {

@@ -190,7 +190,7 @@ function formatDateTime(date) {
   const day = String(d.getDate()).padStart(2, '0');
   const hour = String(d.getHours()).padStart(2, '0');
   const minute = String(d.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hour}:${minute}`;
+  return `${year}.${month}.${day} ${hour}:${minute}`;
 }
 
 // ==================== 9秒自动关闭弹窗 ====================
