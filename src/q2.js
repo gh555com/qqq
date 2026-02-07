@@ -269,12 +269,11 @@ function getConfig() {
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
   if (typeof config.isPinned !== "boolean") config.isPinned = false;
 
-  // 读取全局设置（从 VS Code 配置中读取）
+  // 读取全局设置（通过 ConfigGate 读取）
   try {
-    const globalConfig = vscode.workspace.getConfiguration("qqq");
-    const szDisplayMode = globalConfig.get("szDisplayMode", "nothing");
-    const sortBy = globalConfig.get("sortBy", "name");
-    const autoWatchChanges = globalConfig.get("autoWatchChanges", false);
+    const szDisplayMode = global.getConfig("szDisplayMode") || "nothing";
+    const sortBy = global.getConfig("sortBy") || "name";
+    const autoWatchChanges = global.getConfig("autoWatchChanges") || false;
 
     // 验证并设置有效值
     const validDisplayModes = ["nothing", "size", "ctime", "mtime"];
@@ -2079,7 +2078,7 @@ function getWebviewContent(currentPath) {
     (dir) => dir && typeof dir === "string" && fs.existsSync(dir)
   );
   const showRecycleBin =
-    vscode.workspace.getConfiguration("qqq").get("showHistoryRecycleBin", true) &&
+    (global.getConfig("showHistoryRecycleBin") !== false) &&
     safeRecycleBin.length > 0;
 
   let htmlTemplate = "";

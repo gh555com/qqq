@@ -739,8 +739,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const text = document.getText();
     const regex = qqq.createPathRegex();
 
-    // 获取图片分辨率配置
-    const resolutionConfig = vscode.workspace.getConfiguration("qqq").get("docExportImageResolution");
+    // 获取图片分辨率配置（通过 ConfigGate 读取）
+    const resolutionConfig = global.getConfig("docExportImageResolution") || "原始分辨率";
     const useFrameResolution = resolutionConfig === "相框分辨率";
     if (useFrameResolution) {
         global.logMessage("导出策略：使用相框分辨率 (小尺寸)", "INFO");
@@ -748,8 +748,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
         global.logMessage("导出策略：使用原始分辨率 (适应页面宽度)", "INFO");
     }
 
-    // 获取暗号保留配置
-    const includeCipher = vscode.workspace.getConfiguration("qqq").get("docExportIncludeCipher", true);
+    // 获取暗号保留配置（通过 ConfigGate 读取）
+    const includeCipher = global.getConfig("docExportIncludeCipher") !== false;
     global.logMessage(`导出策略：${includeCipher ? "保留" : "移除"}暗号字符串`, "INFO");
 
     // 解析阶段：先构建 rawElements；附件先只收集候选项（SHA256 后算，纳入进度条）

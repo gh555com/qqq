@@ -196,18 +196,19 @@ async function loadWatermarkResource() {
 
 function refreshConfig() {
 	try {
-		const config = vscode.workspace.getConfiguration("qqq");
-		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
+		// ★ 通过 ConfigGate 读取配置（不直接读 settings.json）
+		enlargeSmallImages = getConfig("enlargeSmallImages");
+		if (enlargeSmallImages === undefined) enlargeSmallImages = true;
 
-		const extremePerformance = config.get("extremePerformance", false);
+		const extremePerformance = getConfig("extremePerformance");
 		if (extremePerformance) performanceMode = "extreme";
-		else performanceMode = config.get("performanceMode", "optmum");
+		else performanceMode = getConfig("performanceMode") || "optmum";
 
-		frameSizeMode = config.get("frameSizeMode", "fix");
-		cleanFreakMode = config.get("cleanFreak", "add");
-		textSlideColorScheme = config.get("textSlideColorScheme", "light");
-		textSlideFontSize = config.get("textSlideFontSize", 14);
-		codelensLevel = String(config.get("codelensLevel", "3"));
+		frameSizeMode = getConfig("frameSizeMode") || "fix";
+		cleanFreakMode = getConfig("cleanFreak") || "add";
+		textSlideColorScheme = getConfig("textSlideColorScheme") || "light";
+		textSlideFontSize = getConfig("textSlideFontSize") || 14;
+		codelensLevel = String(getConfig("codelensLevel") || "3");
 		PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
 	} catch (e) {
 		enlargeSmallImages = true;

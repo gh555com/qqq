@@ -1,128 +1,429 @@
-function isValidUrl(input) {
-  if (input === null || input === undefined) return false;
+的梦，既然 **VIP / 非 VIP 已经在 activate 早期就拿到了一个布尔值**（`isVip`），那“终极版（没优化空间）”我给你一套**强约束 + 强一致性**的架构：
 
-  // ES3/ES5 都能跑的 trim
-  var s = ('' + input).replace(/^\s+|\s+$/g, '');
-  if (!s) return false;
+> **唯一真理源 = 你的 ConfigGate（effective config）**
+> VS Code 的 settings.json 只当“输入设备”，**永远不当存储**（尤其非 VIP）。
+> 非 VIP 的任何改动：**立刻生效，但绝不落盘**，甚至可以做到“用户 settings.json 改了也没用”。
 
-  // 任意空白直接判无效（防止 "http://a b.com"）
-  if (/\s/.test(s)) return false;
+下面是完整方案（直接按你现有代码改，且每一步都把绕过路径堵死）。
 
-  // 可选：拒绝反斜杠，避免把 Windows 路径误判成 URL
-  if (/\\/.test(s)) return false;
+---
 
-  // 拒绝 scheme-relative: //example.com
-  if (s.indexOf('//') === 0) return false;
+## 0) 你当前代码里，为什么“非 VIP 不可保存”很难成立
 
-  // 解析 scheme（若写了必须是 http/https）
-  var rest = s;
-  var m = rest.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
-  if (m) {
-    var scheme = m[1].toLowerCase();
-    if (scheme !== 'http' && scheme !== 'https') return false;
-    rest = rest.slice(m[0].length);
+* 你现在 `ConfigManager.get()` 会先读 globalState（DB），没有再读 workspace setting，然后才 default。
+* 你现在 `ConfigManager.set()` 会把值写进 globalState（持久化）。
+* 你现在监听设置变化后，会把用户改的值直接 `global.setConfig(key,val)` 持久化到 DB。
+* 而且你很多业务代码还会直接读 VS Code settings（绕过 ConfigManager），比如 `takeOverCodelensStyle`：、以及 global.js 里读 `ioEngine`：
+  => 所以只要用户能改 settings.json，就会“被你读到 / 被你写入 DB”。
+
+**终极版的核心**就是：
+
+1. **所有业务只读 ConfigGate**；
+2. **非 VIP 时永远不读任何落盘配置**（globalState / settings.json 都不算数）；
+3. 非 VIP 改配置只进内存（session），并且可选：把 settings.json 的改动“回弹”掉，保证重启后 UI 也回默认。
+
+---
+
+## 1) 终极版的 3 层配置模型（强不可绕过）
+
+### 三层数据结构
+
+1. **DEFAULT_CONFIG**：你已经有（global.js 里）
+2. **SESSION_OVERRIDES（仅内存）**：非 VIP 的“临时体验”
+3. **PERSISTENT_DB（globalState）**：只给 VIP 用（你的 `cfg_*` DB）
+
+### 唯一真理源规则（必须死守）
+
+* **任何功能开关/行为判断只能调用 `ConfigManager.get(key)`**
+* 项目里除了 ConfigGate 这一处，**禁止**再出现 `vscode.workspace.getConfiguration('qqq').get(...)`
+  否则用户改 settings.json 会绕过你的 VIP 控制。
+
+---
+
+## 2) 终极版：ConfigGate（可直接替换你 global.js 里 ConfigManager 那段）
+
+你现在的 ConfigManager 在 global.js 这段（读 DB → 读 workspace → default），我建议整体替换为下面这一套（“终极版”）：
+
+> 目标：
+>
+> * VIP：读/写 DB（globalState），必要时可迁移 settings 的值；
+> * 非 VIP：**只读 DEFAULT + session overrides**；
+> * 非 VIP 改 settings：立刻生效（进 session），但自动清掉 settings.json 里对应项（可选强回弹，最稳）。
+
+```js
+// ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
+let _isVip = false;
+let _sessionOverrides = Object.create(null);
+let _suppressConfigEcho = 0; // 防止“我们自己回弹 settings”触发死循环
+let _trialHintShown = false;
+
+function setVipMode(v) {
+  _isVip = !!v;
+  _sessionOverrides = Object.create(null); // 模式切换时清会话覆写，防串味
+}
+function isVip() { return _isVip; }
+
+// 你现在 DB key 是 `cfg_${key} `（尾部有空格）:contentReference[oaicite:7]{index=7}
+// 终极版：同时兼容旧key+新key，写入时统一写“无尾空格”，并删除旧key（一次性净化）
+function _dbKeys(key) {
+  const a = `cfg_${key}`;     // 新
+  const b = `cfg_${key} `;    // 旧（你现在用的）
+  return [a, b];
+}
+
+async function _dbGet(key) {
+  if (!extensionContext) return undefined;
+  const [kNew, kOld] = _dbKeys(key);
+  let v = extensionContext.globalState.get(kNew);
+  if (v !== undefined) return v;
+  v = extensionContext.globalState.get(kOld);
+  if (v !== undefined) {
+    // 迁移：读到旧key就搬到新key并清旧key（不影响体验）
+    try {
+      await extensionContext.globalState.update(kNew, v);
+      await extensionContext.globalState.update(kOld, undefined);
+    } catch {}
+    return v;
   }
+  return undefined;
+}
 
-  // authority 到第一个 / ? # 为止
-  var cut = rest.search(/[\/?#]/);
-  var authority = (cut === -1) ? rest : rest.slice(0, cut);
-  if (!authority) return false;
+async function _dbSet(key, value) {
+  if (!extensionContext) return;
+  const [kNew, kOld] = _dbKeys(key);
+  await extensionContext.globalState.update(kNew, value);
+  await extensionContext.globalState.update(kOld, undefined); // 清旧
+}
 
-  // 不支持 userinfo（更安全）：user:pass@host
-  if (authority.indexOf('@') !== -1) return false;
-
-  // 拆 host / port
-  var host = '';
-  var portStr = '';
-
-  if (authority.charAt(0) === '[') {
-    // [IPv6]:port
-    var end = authority.indexOf(']');
-    if (end === -1) return false;
-    host = authority.slice(0, end + 1);
-    var after = authority.slice(end + 1);
-    if (after) {
-      if (after.charAt(0) !== ':') return false;
-      portStr = after.slice(1);
-      if (!portStr) return false;
+// 强回弹：把 settings.json 里的 qqq.xxx 删除（Global/Workspace/WorkspaceFolder 都清）
+async function _clearVscodeSettingEverywhere(key) {
+  _suppressConfigEcho++;
+  try {
+    // Global + Workspace
+    const cfg = vscode.workspace.getConfiguration("qqq");
+    const ins = cfg.inspect(key);
+    if (ins?.globalValue !== undefined) {
+      await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
     }
-  } else {
-    // host:port（用最后一个冒号切）
-    var lastColon = authority.lastIndexOf(':');
-    if (lastColon !== -1 && authority.indexOf(':') === lastColon) {
-      var possiblePort = authority.slice(lastColon + 1);
-      if (/^\d+$/.test(possiblePort)) {
-        host = authority.slice(0, lastColon);
-        portStr = possiblePort;
-      } else {
-        host = authority;
+    if (ins?.workspaceValue !== undefined) {
+      await cfg.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+    }
+
+    // WorkspaceFolder（每个 folder 单独清）
+    const folders = vscode.workspace.workspaceFolders || [];
+    for (const wf of folders) {
+      const folderCfg = vscode.workspace.getConfiguration("qqq", wf.uri);
+      const fin = folderCfg.inspect(key);
+      if (fin?.workspaceFolderValue !== undefined) {
+        await folderCfg.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
       }
-    } else {
-      host = authority;
     }
-  }
-
-  if (!host) return false;
-
-  // 端口 1..65535
-  if (portStr) {
-    if (!/^\d{1,5}$/.test(portStr)) return false;
-    var port = parseInt(portStr, 10);
-    if (!(port >= 1 && port <= 65535)) return false;
-  }
-
-  // host 校验：localhost / IPv4 / [IPv6] / 域名（含 punycode）
-  if (isLocal(host) || isIPv4(host) || isBracketIPv6(host) || isDomain(host)) return true;
-  return false;
-
-  function isLocal(h) {
-    if (/^(localhost|127\.0\.0\.1)$/i.test(h)) return true;
-    return h.toLowerCase() === '[::1]';
-  }
-
-  function isBracketIPv6(h) {
-    // 实用型 IPv6 校验（不做完整 RFC，但足够稳）
-    if (h.length < 4) return false;
-    if (h.charAt(0) !== '[' || h.charAt(h.length - 1) !== ']') return false;
-    var inner = h.slice(1, -1);
-    if (inner.indexOf(':') === -1) return false;
-    if (!/^[0-9a-fA-F:.]+$/.test(inner)) return false;
-    return true;
-  }
-
-  function isIPv4(h) {
-    var mm = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (!mm) return false;
-    for (var i = 1; i <= 4; i++) {
-      var n = parseInt(mm[i], 10);
-      if (!(n >= 0 && n <= 255)) return false;
-    }
-    return true;
-  }
-
-  function isDomain(h) {
-    // 允许末尾点：example.com.
-    if (h.charAt(h.length - 1) === '.') h = h.slice(0, -1);
-    if (!h) return false;
-    if (h.length > 253) return false;
-
-    // 必须至少一个点（避免把 "abc" 当域名；localhost 走 isLocal）
-    if (h.indexOf('.') === -1) return false;
-
-    var labels = h.split('.');
-    if (labels.length < 2) return false;
-
-    for (var i = 0; i < labels.length; i++) {
-      var lab = labels[i];
-      if (!lab || lab.length > 63) return false;
-      // 每段：字母数字开头结尾，中间允许 -
-      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(lab)) return false;
-    }
-
-    // TLD：纯字母 2-63 或 punycode xn--
-    var tld = labels[labels.length - 1];
-    if (!/^(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i.test(tld)) return false;
-
-    return true;
+  } finally {
+    _suppressConfigEcho--;
   }
 }
+
+// 终极真理源：get
+const ConfigManager = {
+  get(key) {
+    // 1) session overrides 永远优先（VIP/非VIP都可以用作“即时覆盖”）
+    if (Object.prototype.hasOwnProperty.call(_sessionOverrides, key)) {
+      return _sessionOverrides[key];
+    }
+
+    // 2) 非 VIP：彻底不读任何落盘（DB / settings.json 一律当不存在）
+    if (!_isVip) return DEFAULT_CONFIG[key];
+
+    // 3) VIP：读 DB；没有再“迁移式”读取 settings UI（可保留你现有逻辑）
+    // 注意：这里是 sync get，所以用缓存/同步读；dbGet 是 async，最简单是保持你原先同步 globalState.get
+    // 如果你想严格：把 dbGet 的 async 迁移去 init 阶段做一次“预加载到内存”。
+    if (extensionContext) {
+      // 兼容旧尾空格 key 的同步读（迁移放到 init 做）
+      const v1 = extensionContext.globalState.get(`cfg_${key}`);
+      if (v1 !== undefined) return v1;
+      const v2 = extensionContext.globalState.get(`cfg_${key} `);
+      if (v2 !== undefined) return v2;
+    }
+
+    try {
+      const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
+      if (wsVal !== undefined) return wsVal;
+    } catch {}
+
+    return DEFAULT_CONFIG[key];
+  },
+
+  // 终极 set：VIP 可持久；非 VIP 只能 session
+  async set(key, value, { persist = true } = {}) {
+    _sessionOverrides[key] = value;
+
+    if (_configChangeCallback) _configChangeCallback(key, value);
+
+    if (!_isVip || !persist) {
+      // 非VIP：绝不写DB；并且可选“强回弹”清掉 settings.json 的痕迹（最稳）
+      if (!_trialHintShown) {
+        _trialHintShown = true;
+        try { vscode.window.showInformationMessage("试用模式：设置仅本次有效，重启后恢复默认。"); } catch {}
+      }
+      await _clearVscodeSettingEverywhere(key); // 这句就是“最稳固/最防篡改”的关键
+      return;
+    }
+
+    // VIP：写 DB（globalState）
+    await _dbSet(key, value);
+  },
+
+  getAll() {
+    const res = {};
+    for (const k of Object.keys(DEFAULT_CONFIG)) res[k] = this.get(k);
+    return res;
+  },
+
+  onChange(cb) { _configChangeCallback = cb; },
+
+  // 非VIP启动时：清一次所有 qqq.* setting，确保“重启一切还原”
+  async nonVipBootstrapResetAll() {
+    if (_isVip) return;
+    for (const k of Object.keys(DEFAULT_CONFIG)) {
+      await _clearVscodeSettingEverywhere(k);
+    }
+    // 注意：sessionOverrides 不清，允许你“启动后立刻通过命令设置一遍”也可
+  },
+
+  // VS Code 设置变更入口（唯一入口）
+  async handleVscodeConfigChanged(event) {
+    if (_suppressConfigEcho) return;
+
+    // 只处理 qqq.* 这 19 个 key（你现在就是从 DEFAULT_CONFIG key 集合遍历）:contentReference[oaicite:8]{index=8}
+    for (const key of Object.keys(DEFAULT_CONFIG)) {
+      const fullKey = `qqq.${key}`;
+      if (!event.affectsConfiguration(fullKey)) continue;
+
+      const val = vscode.workspace.getConfiguration("qqq").get(key);
+      const cur = this.get(key);
+      if (val === cur) continue;
+
+      // VIP：persist；非VIP：session + 回弹清除
+      await this.set(key, val, { persist: _isVip });
+    }
+  }
+};
+
+// ============================================================================
+// 你原来就导出了 setConfig/getConfig :contentReference[oaicite:9]{index=9}
+// 保留：但内部走“终极 set”
+function getConfig(key) { return ConfigManager.get(key); }
+async function setConfig(key, value) { await ConfigManager.set(key, value, { persist: _isVip }); }
+```
+
+> 这一套已经把“绕过保存”的路堵死：
+>
+> * 非 VIP 时：globalState 不写；settings.json 的改动会被回弹删掉；
+> * 重启后：没有任何落盘值可读，天然回 DEFAULT；
+> * 用户就算手改 settings.json：也只会触发一次事件，被你吞掉 + 回弹。
+
+---
+
+## 3) qqq.js 的终极接入方式（只改 2 处，且是“必须改”）
+
+### A) activate 最早期：注入 isVip，然后非 VIP 启动清空设置
+
+你现在 activate 里很早就 `global.init(context)` 并开始注册监听
+终极版要求：在任何监听/业务启动前，先：
+
+```js
+global.setVipMode(isVip);              // 你已算好的布尔值
+await global.ConfigManager.nonVipBootstrapResetAll(); // 非VIP启动就清一遍，保证“重启还原”
+```
+
+### B) 把你现在这段“把设置写进 DB”的监听替换掉
+
+你现在：设置变化 => `global.setConfig(key,val)`（会持久化）
+终极版：设置变化 => 统一入口 `ConfigManager.handleVscodeConfigChanged(event)`：
+
+```js
+vscode.workspace.onDidChangeConfiguration((event) => {
+  global.ConfigManager.handleVscodeConfigChanged(event).catch(()=>{});
+});
+```
+
+---
+
+## 4) **最关键的一刀**：业务代码别再直接读 VS Code settings
+
+否则会绕过 ConfigGate。
+
+你现在至少有两处典型绕过：
+
+* `updateCodeLensStyle()` 直接读 `vscode.workspace.getConfiguration("qqq")`
+  终极版应改为：`const takeOver = global.ConfigManager.get("takeOverCodelensStyle")`
+* global.js 里读 `ioEngine`：
+  终极版应改为：`const ioEngine = ConfigManager.get("ioEngine")`
+
+> 你要把规则定死：
+> **工程里出现 `getConfiguration("qqq").get` 的地方，一律改成 `ConfigManager.get`**
+> 这样用户就无法通过 settings.json 来“持久化绕过”。
+
+---
+
+## 5) 这套为什么叫“终极版”
+
+它同时满足你所有硬条件：
+
+1. **非 VIP：允许改，且立即生效**（sessionOverrides + onChange 回调立即触发）
+2. **非 VIP：重启必回默认**（sessionOverrides 天然丢失 + 不读落盘）
+3. **非 VIP：不允许保存**
+
+   * 不写 globalState（你的 DB）
+   * 甚至把 settings.json 的改动也清掉（强回弹，最稳固）
+4. **防篡改（在“已完成 VIP 判定”的前提下）**
+
+   * 改 settings.json 没用：会被回弹
+   * 改 globalState 没用：非 VIP 根本不读
+   * 唯一能影响行为的是“本会话内存覆写”，重启即死
+
+---
+
+如果你愿意，我下一条直接按你现有文件结构给你“精确到行级”的改法：
+
+* `global.js`：替换 ConfigManager 块 + 增加 setVipMode/isVip 导出
+* `qqq.js`：activate 里插入 2 行 + 替换监听回调
+  并顺手把你项目里所有 `getConfiguration('qqq').get` 的绕过点都指出来（至少你现在已经出现了 `takeOverCodelensStyle` 和 `ioEngine` 这两处）。
+的梦，你贴的“上方方案”和我之前说的 **C 方案**——**本质是一类**：都是“**允许改→立即生效（内存层）+ 立刻清掉落盘（回弹）+ 重启必恢复默认**”。
+
+但你这份“上方方案”比我之前的 C **更接近你项目的真实坑位**，并且**更终极**，差异点主要在这 3 个“加强项”：
+
+1. **唯一真理源强约束**
+
+* 我 C 方案强调 runtimeOverrides + 清理持久化；
+* 你上方方案进一步要求：工程里禁止再出现 `vscode.workspace.getConfiguration("qqq").get(...)`，全部走 ConfigGate，否则绕过 VIP 控制。你项目里现在确实存在绕过：
+
+  * `qqq.js` 里 `updateCodeLensStyle()` 直接读 settings：
+  * `global.js` 里 Python 热启动也直接读 `qqq.ioEngine`：
+    这两处如果不“砍掉直读”，你再怎么回弹都可能出现行为不一致。
+
+2. **非 VIP “彻底不读任何落盘”**
+   你当前 ConfigManager 是“DB → settings → default”，并且 DB key 还是 `cfg_${key} `（尾部有空格）。
+   上方方案把非 VIP 的读路径直接砍成：**只读 DEFAULT + sessionOverrides**，这比我原 C 方案更硬（也更符合你“重启=默认”的精神）。
+
+3. **全域回弹（Global/Workspace/Folder 全清）**
+   我原 C 方案只讲“update undefined 清掉持久化”，但你上方方案明确要清三层，且对每个 workspace folder 也清，这就把“写在 .vscode/settings.json 里绕过”的路也堵得更牢。
+
+所以结论：**是同类，但你上方那份 = C 的“项目落地加强版 + 统一真理源版”。**
+下面我给你再整合一份“纠极版（我+你合体后，工程上再无优化空间）”。
+
+---
+
+# 纠极版（最终版）：VIP/试用 配置系统（强一致 + 强回弹 + 强收敛）
+
+## 目标（完全覆盖你想要的效果）
+
+* 用户只用 VS Code 默认 Settings UI（你 `package.json` 已经贡献了 `qqq.*` 配置项，天然支持）
+* 非 VIP：**改了立刻生效**，但 **不能保存**，并且 **重启=默认**
+* VIP：按你现在逻辑持久化（globalState DB），也可选择兼容 settings 的迁移
+* 项目级保证：任何功能都不会绕过 VIP Gate
+
+---
+
+## 一、唯一真理源：ConfigGate（必须做到“全工程唯一读取入口”）
+
+### 1) 三层：DEFAULT / SESSION / DB（VIP-only）
+
+* `DEFAULT_CONFIG`：你 global.js 已有
+* `SESSION_OVERRIDES`：只在内存，非 VIP 的“临时体验”全靠它
+* `DB (globalState)`：只给 VIP 用（你现在就是 `cfg_${key} `）
+
+### 2) 绝对规则（写进团队/自我规范）
+
+* **禁止**再出现 `getConfiguration("qqq").get(...)` 作为业务判断
+  你现在至少两处明确绕过（CodeLens、Python ioEngine）
+* **所有业务只调用：** `global.getConfig(key)`（即 ConfigGate.get）
+
+> 这是你整套方案“防绕过”的根基；否则用户改 settings.json 会从别的口子影响行为。
+
+---
+
+## 二、非 VIP 的“强回弹”策略（你最想要的“写了也像没写”）
+
+### 行为定义（非 VIP）
+
+* 用户在 Settings UI 改 `qqq.xxx`：
+
+  1. 你监听到变更 → 读到新值 → 写入 `SESSION_OVERRIDES` → **立即 apply（刷新 UI/daemon）**
+  2. 然后立刻把 settings.json 里的 `qqq.xxx` **删掉**（Global/Workspace/Folder 都删）
+* 所以用户体验是：**我改了，马上生效**；但磁盘上最终**没有配置痕迹**，重启自然回默认。
+
+> 你现在 qqq.js 里有一个监听会把 settings 的值写到 DB：`global.setConfig(key, val)`
+> 纠极版要把它彻底替换成“进 session + 回弹”，并且非 VIP 时绝不写 DB。
+
+---
+
+## 三、纠极版代码结构（最少改动、最大收益）
+
+### A) global.js：替换/包裹现有 ConfigManager（你现在的 ConfigManager 读写逻辑在这里）
+
+核心要点：
+
+* 增加 `setVipMode(isVip)`，activate 最早调用
+* `get(key)`：
+
+  * 先 session overrides
+  * 非 VIP：直接 DEFAULT（不读 DB，不读 settings）
+  * VIP：读 DB（兼容你旧 key 尾空格），可选读 settings 做迁移
+* `set(key,val)`：
+
+  * 永远写 session（保证“立即生效”统一入口）
+  * VIP 才写 DB
+  * 非 VIP：清掉 settings（强回弹）
+* `handleVscodeConfigChanged(event)`：唯一监听入口，统一把 settings 变更导入 session，再决定是否持久化/回弹。
+
+> 你上方贴的 ConfigGate 代码思路我认可：**迁移旧 DB key + 强回弹三层 + suppress 防递归**，这就是纠极版应该保留的东西。
+
+### B) qqq.js：只动 2 类地方
+
+#### 1) activate 最早期注入 isVip，并做“非 VIP 启动清扫”
+
+* 你现在 activate 里会 initCache、startDaemons 等一堆流程
+* 纠极版要求：在任何业务启动/监听注册前先 setVip，再（非 VIP）清一遍 settings，确保“重启=默认”。
+
+#### 2) 替换所有 settings 监听为 ConfigGate 的 handler
+
+你现在有监听写 DB 的逻辑：
+纠极版要替换为：
+
+```js
+vscode.workspace.onDidChangeConfiguration((event) => {
+  global.ConfigManager.handleVscodeConfigChanged(event).catch(()=>{});
+});
+```
+
+#### 3) 把绕过点砍掉（必须）
+
+* CodeLens 那段现在直接读 settings：
+  改成：
+
+```js
+const takeOver = global.getConfig("takeOverCodelensStyle"); // 不再直接读 settings
+```
+
+* global.js 的 Python 热启动里也直接读 settings：
+  改成：
+
+```js
+const ioEngine = getConfig("ioEngine") || "auto";
+```
+
+---
+
+## 四、纠极版“工程级封死绕过”的加固（可选但我建议你做）
+
+这一步是“终极版”最狠的一刀：**让你以后再也不会不小心写出绕过点。**
+
+1. **代码扫描（构建时失败）**
+   在 build/CI 里 grep：`getConfiguration("qqq")` / `getConfiguration('qqq')`，出现就 fail。
+   （你项目现在确实出现了，至少在 qqq.js / global.js 里就有）
+
+2. **只导出 getConfig/setConfig**
+   让业务模块根本拿不到 ConfigManager 内部对象（或只拿到只读接口），减少误用。
+
+---

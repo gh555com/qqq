@@ -1530,6 +1530,15 @@ async function activate(context) {
 	downloadContext = context;
 	global.init(context);
 
+	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 true 换成实际的 isVip 变量）
+	const isVip = true; // TODO: 替换为你的 VIP 校验结果
+	global.setVipMode(isVip);
+
+	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保"重启还原"
+	if (!isVip) {
+		global.ConfigManager.nonVipBootstrapResetAll().catch(() => { });
+	}
+
 	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
 	if (!extensionPath) {
 		global.logMessage("activate: extensionPath is undefined!", "ERROR");
@@ -1563,11 +1572,10 @@ async function activate(context) {
 
 	startDaemons();
 
-	// 设置 CodeLens 样式
+	// 设置 CodeLens 样式（通过 ConfigGate 读取）
 	function updateCodeLensStyle() {
-		const config = vscode.workspace.getConfiguration("qqq");
-		const takeOver = config.get("takeOverCodelensStyle", true);
-		if (takeOver) {
+		const takeOver = global.getConfig("takeOverCodelensStyle");
+		if (takeOver === undefined ? true : takeOver) {
 			// 设置 CodeLens 字体和字号
 			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
 			vscode.workspace.getConfiguration("editor").update("codeLensFontSize", 13, vscode.ConfigurationTarget.Global);
@@ -1746,47 +1754,33 @@ async function activate(context) {
 
 
 
+		// ★ 终极版：统一的设置变更入口（通过 ConfigGate）
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			for (const key of Object.keys(global.ConfigManager.getAll())) {
-				const fullKey = `qqq.${key}`;
-				if (event.affectsConfiguration(fullKey)) {
-					const val = vscode.workspace.getConfiguration("qqq").get(key);
-					const currentStored = global.ConfigManager.get(key);
-					if (val !== currentStored) {
-						global.setConfig(key, val).then(() => {
-							if (key === "ioEngine") {
-								// ★ 核心设计：三个引擎启动时已全部启动，切换只需更新状态栏
-								global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
+			global.ConfigManager.handleVscodeConfigChanged(event).then(() => {
+				// ioEngine 切换后别处理
+				if (event.affectsConfiguration("qqq.ioEngine")) {
+					const val = global.getConfig("ioEngine");
+					global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
 
-								// ★ 如果手动切换到 Python 引擎，检查 L1 不完美缓存
-								if (val === "python") {
-									const { getSharedDownloader } = require('./dow');
-									const downloader = getSharedDownloader();
-									const status = downloader.python.getL1ImperfectStatus();
+					if (val === "python") {
+						const { getSharedDownloader } = require('./dow');
+						const downloader = getSharedDownloader();
+						const status = downloader.python.getL1ImperfectStatus();
 
-									if (status.imperfect) {
-										// ★ 已知不完美，提示用户并触发后台尝试
-										const reasonMsg = {
-											'no_interpreter': 'Python 解释器未安装',
-											'interpreter_invalid': 'Python 解释器不可用',
-											'deps_missing': `缺少依赖: ${status.missing.join(', ')}`,
-											'no_context': '环境未就绪'
-										}[status.reason] || status.reason;
-
-										global.logMessage(`[IO引擎] Python 环境不完美: ${reasonMsg}，将回退到其他引擎`, "WARN");
-									}
-
-									// 触发后台就绪检查（可能触发下载）
-									// ★ 已在 global.js 中统一处理，避免重复调用 ensurePythonReady
-									// downloader.ensurePythonReady(context, { silent: true }).catch(() => { });
-								}
-
-								updateStatusBarThrottled();
-							}
-						});
+						if (status.imperfect) {
+							const reasonMsg = {
+								'no_interpreter': 'Python 解释器未安装',
+								'interpreter_invalid': 'Python 解释器不可用',
+								'deps_missing': `缺少依赖: ${status.missing.join(', ')}`,
+								'no_context': '环境未就绪'
+							}[status.reason] || status.reason;
+							global.logMessage(`[IO引擎] Python 环境不完美: ${reasonMsg}，将回退到其他引擎`, "WARN");
+						}
 					}
+
+					updateStatusBarThrottled();
 				}
-			}
+			}).catch(() => { });
 		})
 	);
 

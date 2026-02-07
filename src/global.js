@@ -493,11 +493,9 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					// ★ 热启动成功后再次刷新引擎缓存
 					invalidateEngineCache();
 
-					// ★ 根据 IO 引擎偏好决定是待命还是主力
+					// ★ 根据 IO 引擎偏好决定是待命还是主力（通过 ConfigGate 读取）
 					try {
-						const vscode = require('vscode');
-						const config = vscode.workspace.getConfiguration('qqq');
-						const ioEngine = config.get('ioEngine', 'auto');
+						const ioEngine = getConfig('ioEngine') || 'auto';
 
 						if (ioEngine === 'auto' || ioEngine === 'python') {
 							logMessage(`[Python] IO 引擎偏好为 ${ioEngine}，daemon 作为主力`, "INFO");
@@ -1929,7 +1927,7 @@ const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 let _durationTimer = null;
 
 // ============================================================================
-// ★ ConfigManager (Custom GlobalState Storage)
+// ★ ConfigGate (ULTIMATE VIP/Trial Config System)
 // ============================================================================
 const DEFAULT_CONFIG = {
 	"showHistoryRecycleBin": true,
@@ -1993,34 +1991,99 @@ const CONFIG_METADATA = {
 	}
 };
 
+// ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
+let _isVip = true; // ★ 默认 true = VIP 行为（向后兼容，直到 setVipMode 被调用）
+let _sessionOverrides = Object.create(null);
+let _suppressConfigEcho = 0; // 防止"我们自己回弹 settings"触发死循环
+let _trialHintShown = false;
 let _configChangeCallback = null;
+
+function setVipMode(v) {
+	_isVip = !!v;
+	_sessionOverrides = Object.create(null); // 模式切换时清会话覆写，防串味
+	logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO");
+}
+function isVip() { return _isVip; }
+
+// 强回弹：把 settings.json 里的 qqq.xxx 删除（Global/Workspace/WorkspaceFolder 都清）
+async function _clearVscodeSettingEverywhere(key) {
+	_suppressConfigEcho++;
+	try {
+		const cfg = vscode.workspace.getConfiguration("qqq");
+		const ins = cfg.inspect(key);
+		if (ins?.globalValue !== undefined) {
+			await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
+		}
+		if (ins?.workspaceValue !== undefined) {
+			await cfg.update(key, undefined, vscode.ConfigurationTarget.Workspace);
+		}
+		// WorkspaceFolder（每个 folder 单独清）
+		const folders = vscode.workspace.workspaceFolders || [];
+		for (const wf of folders) {
+			const folderCfg = vscode.workspace.getConfiguration("qqq", wf.uri);
+			const fin = folderCfg.inspect(key);
+			if (fin?.workspaceFolderValue !== undefined) {
+				await folderCfg.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
+			}
+		}
+	} catch (e) {
+		logMessage(`[ConfigGate] 清除设置失败 ${key}: ${e.message}`, "WARN");
+	} finally {
+		_suppressConfigEcho--;
+	}
+}
 
 const ConfigManager = {
 	get(key) {
-		// ★ Dual-Layer Strategy:
-		// 1. Try to get from globalState (DB)
-		if (extensionContext) {
-			const val = extensionContext.globalState.get(`cfg_${key} `);
-			if (val !== undefined) return val;
+		// 1) session overrides 永远优先（VIP/非VIP都可以用作"即时覆盖"）
+		if (Object.prototype.hasOwnProperty.call(_sessionOverrides, key)) {
+			return _sessionOverrides[key];
 		}
 
-		// 2. If missing in DB (first run or reset), try to get from Workspace Config (UI)
-		// This acts as a "migration" from old settings.json or default UI values.
+		// 2) 非 VIP：彻底不读任何落盘（DB / settings.json 一律当不存在）
+		if (!_isVip) return DEFAULT_CONFIG[key];
+
+		// 3) VIP：读 DB（globalState）
+		if (extensionContext) {
+			// 兼容旧尾空格 key
+			const v1 = extensionContext.globalState.get(`cfg_${key}`);
+			if (v1 !== undefined) return v1;
+			const v2 = extensionContext.globalState.get(`cfg_${key} `);
+			if (v2 !== undefined) return v2;
+		}
+
+		// 4) VIP：可选读 settings 做迁移
 		try {
 			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
-			// Check if wsVal is strictly undefined? get() usually returns default if not found.
-			// But if it returns the default value, that's fine too.
 			if (wsVal !== undefined) return wsVal;
 		} catch { }
 
-		// 3. Fallback to hardcoded default
+		// 5) Fallback to hardcoded default
 		return DEFAULT_CONFIG[key];
 	},
 
-	async set(key, value) {
-		if (!extensionContext) return;
-		await extensionContext.globalState.update(`cfg_${key} `, value);
+	// 终极 set：VIP 可持久；非 VIP 只能 session
+	async set(key, value, opts = {}) {
+		const persist = opts.persist !== false; // 默认 true
+		_sessionOverrides[key] = value;
+
 		if (_configChangeCallback) _configChangeCallback(key, value);
+
+		if (!_isVip || !persist) {
+			// 非VIP：绝不写DB；并且"强回弹"清掉 settings.json 的痕迹
+			if (!_isVip && !_trialHintShown) {
+				_trialHintShown = true;
+				try { vscode.window.showInformationMessage("试用模式：设置仅本次有效，重启后恢复默认。"); } catch { }
+			}
+			await _clearVscodeSettingEverywhere(key);
+			return;
+		}
+
+		// VIP：写 DB（globalState），用新 key（无尾空格），同时清旧 key
+		if (extensionContext) {
+			await extensionContext.globalState.update(`cfg_${key}`, value);
+			await extensionContext.globalState.update(`cfg_${key} `, undefined); // 清旧
+		}
 	},
 
 	getAll() {
@@ -2037,6 +2100,32 @@ const ConfigManager = {
 
 	onChange(cb) {
 		_configChangeCallback = cb;
+	},
+
+	// 非VIP启动时：清一次所有 qqq.* setting，确保"重启还原"
+	async nonVipBootstrapResetAll() {
+		if (_isVip) return;
+		logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO");
+		for (const k of Object.keys(DEFAULT_CONFIG)) {
+			await _clearVscodeSettingEverywhere(k);
+		}
+	},
+
+	// VS Code 设置变更入口（唯一入口）
+	async handleVscodeConfigChanged(event) {
+		if (_suppressConfigEcho) return;
+
+		for (const key of Object.keys(DEFAULT_CONFIG)) {
+			const fullKey = `qqq.${key}`;
+			if (!event.affectsConfiguration(fullKey)) continue;
+
+			const val = vscode.workspace.getConfiguration("qqq").get(key);
+			const cur = this.get(key);
+			if (val === cur) continue;
+
+			// VIP：persist；非VIP：session + 回弹清除
+			await this.set(key, val, { persist: _isVip });
+		}
 	}
 };
 
@@ -2045,7 +2134,7 @@ function getConfig(key) {
 }
 
 async function setConfig(key, value) {
-	await ConfigManager.set(key, value);
+	await ConfigManager.set(key, value, { persist: _isVip });
 }
 
 let _cacheHitTotal = 0;
@@ -3685,6 +3774,8 @@ module.exports = {
 	ConfigManager,
 	getConfig,
 	setConfig,
+	setVipMode,
+	isVip,
 
 	pythonBridge,
 	rustBridge,
