@@ -1530,8 +1530,8 @@ async function activate(context) {
 	downloadContext = context;
 	global.init(context);
 
-	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 true 换成实际的 isVip 变量）
-	const isVip = true; // TODO: 替换为你的 VIP 校验结果
+	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 false 换成实际的 isVip 变量）
+	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存
 	global.setVipMode(isVip);
 
 	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保"重启还原"

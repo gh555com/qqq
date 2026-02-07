@@ -1942,7 +1942,15 @@ const DEFAULT_CONFIG = {
 	"docExportIncludeCipher": true,
 	"transactionLevel": "full",
 	"textSlideColorScheme": "light",
-	"textSlideFontSize": 14
+	"textSlideFontSize": 14,
+	// ★ 补充缺失的配置项（确保 VIP Gate 完整覆盖）
+	"szDisplayMode": "nothing",
+	"sortBy": "name",
+	"autoWatchChanges": false,
+	"codelensLevel": "3",
+	"takeOverCodelensStyle": true,
+	"forceTextFlowScheme": false,
+	"autoDownload": true
 };
 
 const CONFIG_METADATA = {
@@ -1988,7 +1996,27 @@ const CONFIG_METADATA = {
 	},
 	"textSlideFontSize": {
 		name: "文本胶片字体大小", type: "number"
-	}
+	},
+	// ★ 补充缺失的元数据
+	"szDisplayMode": {
+		name: "sz区显示模式", type: "enum",
+		options: ["nothing", "size", "ctime", "mtime"],
+		descriptions: []
+	},
+	"sortBy": {
+		name: "排序方式", type: "enum",
+		options: ["name", "size", "ctime", "mtime"],
+		descriptions: []
+	},
+	"autoWatchChanges": { name: "自动监听变更", type: "boolean" },
+	"codelensLevel": {
+		name: "CodeLens 级别", type: "enum",
+		options: ["0", "1", "2", "3"],
+		descriptions: []
+	},
+	"takeOverCodelensStyle": { name: "接管 CodeLens 样式", type: "boolean" },
+	"forceTextFlowScheme": { name: "强制文本流方案", type: "boolean" },
+	"autoDownload": { name: "自动下载视频", type: "boolean" }
 };
 
 // ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
