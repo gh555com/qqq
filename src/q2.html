@@ -803,28 +803,23 @@
 			padding: 5px 5px 5px 8px;
 		}
 
-		/* ====== 文件筛选栏样式 ====== */
-		.filter-bar {
-			padding: 4px 0;
-			background-color: var(--bg-color);
-			position: relative;
-			flex-shrink: 0;
-		}
-
+		/* ====== 筛选框样式（内嵌地址栏） ====== */
 		.filter-input-wrapper {
 			position: relative;
-			display: flex;
-			align-items: center;
+			width: 71px;
+			flex-shrink: 0;
 		}
 
 		.filter-input {
 			width: 100%;
-			padding: 4px 8px;
+			height: 100%;
+			min-height: 26px;
+			padding: 4px 6px;
 			border: 1px solid var(--border-strong);
-			border-radius: 3px;
 			background-color: var(--bg-color);
 			color: var(--text-primary);
 			font-size: 12px;
+			box-sizing: border-box;
 		}
 
 		.filter-input::placeholder {
@@ -837,7 +832,7 @@
 			position: absolute;
 			top: 100%;
 			left: 0;
-			right: 0;
+			width: 150px;
 			background-color: var(--bg-color);
 			border: 1px solid var(--border-strong);
 			border-top: none;
@@ -912,6 +907,12 @@
 						<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
 					</div>
 
+					<!-- 筛选框 -->
+					<div class="filter-input-wrapper">
+						<input type="text" id="fileFilterInput" class="filter-input" placeholder="筛选">
+						<div id="fileFilterHistoryDropdown" class="history-dropdown"></div>
+					</div>
+
 					<!-- 右侧: open 按钮 + SCM 排序模式 -->
 					<button class="open-btn" id="openFolderBtn" title="在资源管理器中打开当前文件夹">open</button>
 					<div class="scm-btn-group" id="sortByGroup">
@@ -934,14 +935,6 @@
 							</svg>
 						</button>
 					</div>
-				</div>
-			</div>
-
-			<!-- 文件筛选栏 -->
-			<div class="filter-bar">
-				<div class="filter-input-wrapper">
-					<input type="text" id="fileFilterInput" class="filter-input" placeholder="筛选文件/文件夹...多关键词空格分隔">
-					<div id="fileFilterHistoryDropdown" class="history-dropdown"></div>
 				</div>
 			</div>
 

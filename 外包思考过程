@@ -522,3 +522,177 @@ function wireVipConfigWatcher(context) {
 ---
 
 如果你愿意，我可以按你现在的 `global.js` 真实结构（你这文件很大，而且 ConfigManager 已经在用）给你一个“最小 diff 风格”的改法：只改 `ConfigManager.get/set` + 加 watcher + 加 `_sessionOverrides`，保证不影响你现有的引擎/事务逻辑。
+的梦，我先把“终极版”说清楚：**你理想的 UX（用户在 Settings UI 改、立刻生效、界面也显示已改、但实际上完全没写入 settings.json）**——在 VS Code 的默认 Settings UI 体系里**做不到 100%**。原因很简单：Settings UI 本质就是在写配置（settings.json/工作区配置），你无法“拦截写入但又让 UI 继续以为写入成功”而不自己做一套 UI。
+
+但你要的“几乎等效理想”可以做到两种：
+
+* **方案 A（最推荐，最像你理想）：允许写入 → 立即生效 → 但下次启动自动擦除 → 重启恢复默认**
+  用户这次会话里看到 UI 值保持、功能按新值运行；重启后自动回默认。
+  ⚠️缺点：这次会话期间**确实写进了 settings.json**（只是会被你下次启动清掉）。如果用户开了 Settings Sync，有概率在你清掉前同步出去。
+
+* **方案 B（最硬核，“真的没写入”）：允许用户在 UI 改 → 你立刻读到并生效 → 然后马上把 setting 回滚删掉**
+  优点：**文件最终不落盘**、也不怕 Sync。
+  ⚠️缺点：Settings UI 会“回弹”到默认值（用户会看到它没保存），这和你理想冲突。
+
+下面我把**所有可选方案**列全，并给一个“量化终极打分”，最后给你**终极实现（方案 A + 可切换到方案 B）**，并结合你现有代码结构（你现在 `ConfigManager.set()` 会写 globalState 持久化 ，而且你监听设置变更会直接持久化 ）。
+
+---
+
+## 1) 全部可选方案清单
+
+我按“是否允许用 Settings UI 直接改”来分组：
+
+### ① 仍然用 Settings UI（你想要的方向）
+
+**A. 写入但下次启动擦除（推荐，最像你理想）**
+
+* 非 VIP：Settings UI 改 → 你监听到 → 立刻应用（只写内存 sessionOverrides）
+* 但不让它“永久有效”：在**下次启动**检测到非 VIP 时，把所有 `qqq.*` 配置从 Global/Workspace/WorkspaceFolder 里清掉，确保重启回默认。
+* VIP：正常持久化（你的 globalState DB 或者允许 settings.json 持久）
+
+**B. 立刻回滚（最防篡改、最不落盘）**
+
+* 非 VIP：Settings UI 改 → 你立刻应用（sessionOverrides）→ **马上 `update(key, undefined)` 清掉设置**
+* 文件最终不变，Sync 风险最低
+* 但 UI 会回弹默认（用户会明显发现“没保存”）
+
+**C. 不擦除 settings.json，但你的业务完全忽略它（不推荐）**
+
+* 非 VIP：Settings UI 改了也写进文件，但你代码一律不读它，只读默认+sessionOverrides
+* 缺点：用户重启后 UI 仍显示“改过”，但你的功能却回默认，体验会非常迷惑
+
+### ② 不用 Settings UI（你不太想要）
+
+**D. 自己做设置界面（webview/命令/QuickPick）**
+
+* 非 VIP：只存在内存；VIP：写入你的 DB
+* 真的可控、也可做到“看似设置但不落盘”
+* 但你不想做 UI，这条先放着
+
+---
+
+## 2) 终极量化打分对比（10 分制）
+
+评分维度（越高越好）：
+
+* **UX 符合理想**：UI 里改、立刻生效、UI 也看起来改了
+* **真不落盘**：最终 settings.json 真的不留下痕迹
+* **重启还原可靠**：100% 回默认
+* **抗绕过**：用户手改 settings.json / globalState 也很难让它“持久化生效”
+* **实现复杂度（高分=更简单）**
+* **副作用小**：不污染用户配置、不影响 Sync/其它扩展
+
+| 方案              | UX 符合理想 |   真不落盘 |   重启还原 |   抗绕过 | 实现简单 |  副作用小 |          总分 |
+| --------------- | ------: | -----: | -----: | ----: | ---: | ----: | ----------: |
+| **A 写入→下次启动擦除** |   **9** |      6 | **10** |     8 |    7 |     6 |      **46** |
+| **B 立刻回滚删掉**    |       5 | **10** | **10** | **9** |    6 | **9** | **49（更硬核）** |
+| C 忽略不擦除（不推荐）    |       3 |      3 |      7 |     6 |    8 |     3 |          30 |
+| D 自建设置 UI       |       2 | **10** | **10** |     9 |    3 |     8 |          42 |
+
+**结论：**
+
+* 你“最像理想”的选 **A**（但 Sync 有风险、且“这次会话确实写过”）。
+* 你“最防篡改 / 真不落盘”的选 **B**（但 UI 会回弹，不符合你理想）。
+* 真正“UI 也不回弹、文件也不写”的只有 **D（自建 UI）**，但你不想做。
+
+所以“终极版”应该是：
+✅ **默认走 A**（体验最好）
+✅ **可开关切到 B**（当用户开了 Settings Sync 或者你想更硬核时）
+
+---
+
+## 3) 终极版架构（不管选 A 还是 B，都必须做到的铁律）
+
+### 铁律 1：你的扩展里**只能**通过“有效配置层”读取配置
+
+你现在有绕过点：比如 `takeOverCodelensStyle` 直接读 VS Code 配置 ，`ioEngine` 也直接读过 。
+**这些都必须改成只读 `ConfigManager.get()`**，否则非 VIP 手改 settings.json 就能“影响行为”。
+
+### 铁律 2：非 VIP 的配置变更只进内存（sessionOverrides）
+
+* 立即生效靠它
+* 重启天然丢失，保证还原
+
+### 铁律 3：非 VIP 永远不写你的持久层（globalState cfg_*）
+
+你现在 `ConfigManager.set()` 会写 globalState ，必须改成：非 VIP 禁止写。
+
+---
+
+## 4) 终极实现（方案 A + 可切换 B），按你的现有代码最小改法
+
+### Step 1：在 `global.js` 的 ConfigManager 里加 sessionOverrides + isVip 分流
+
+你现在 `get()` 是 “globalState → workspace config → default” ，`set()` 永远写 globalState 。
+终极版要变成：
+
+* **get(key)**：`sessionOverrides` 优先；非 VIP 直接 default；VIP 才读 DB/VSCode config
+* **set(key,val)**：非 VIP 只写 sessionOverrides（并根据策略 A/B 决定是否回滚 VSCode setting）；VIP 才写 DB
+
+核心伪代码（够你直接落地）：
+
+```js
+let _isVip = false;
+const _session = Object.create(null);
+let _suppress = 0;
+
+function setVipMode(v){ _isVip = !!v; }
+
+function getEffective(key){
+  if (key in _session) return _session[key];
+  if (!_isVip) return DEFAULT_CONFIG[key];
+  // VIP：你原逻辑（globalState / vscode config / default）
+}
+
+async function setEffective(key, val){
+  _session[key] = val;
+  _configChangeCallback?.(key, val);
+
+  if (_isVip) {
+    // VIP：写你的 DB(globalState)
+    await extensionContext.globalState.update(`cfg_${key}`, val);
+    return;
+  }
+
+  // 非VIP：策略 A or B
+  if (TRIAL_STRATEGY === "rollback_now") {
+    // B：立刻回滚（真不落盘）
+    await rollbackVscodeSetting(key);
+  } else {
+    // A：不立刻回滚（体验最佳），留到下次启动统一清理
+  }
+}
+```
+
+### Step 2：把你 `qqq.js` 里监听设置变更那段换成“只进 effective config”
+
+你现在是：监听到变化就 `global.setConfig(key,val)`，这会被你 set() 持久化
+终极版：监听变化后，非 VIP 只写 sessionOverrides，并触发更新。
+
+### Step 3：非 VIP 启动时统一清理（实现方案 A 的关键）
+
+在 `activate()` 拿到 isVip 后，马上做：
+
+* `setVipMode(false)`
+* **清理所有 `qqq.*` 的 VS Code setting（Global/Workspace/WorkspaceFolder）**
+* （可选）清理你自己的 cfg_* DB（防止旧数据污染）
+
+你代码里已经有一段“清 globalState 但保留统计”的工具函数 ，很好用：你只需要再加一个“只清 cfg_ 前缀”的版本。
+
+---
+
+## 5) 你理想的那句话，终极解释
+
+> “用户在 Settings UI 改，立刻生效，界面也更新，但实际上没写不能持久化，除非 VIP”
+
+* **“界面也保持显示已改”** → 只能选 **方案 A**（因为 UI 的显示取决于 settings.json 的真实值）
+* **“实际上没写”** → 只能选 **方案 B**（但 UI 会回弹默认）
+
+所以我的终极建议是：
+
+* 默认 **A（体验王者）**
+* 提供一个内部开关（不是给用户设置项）在检测到 Settings Sync 开启/或你想更硬核时切到 **B（不落盘王者）**
+
+---
+
+如果你愿意，我可以直接按你当前两个文件把“终极版 A+B 可切换”写成**可复制粘贴的完整代码块**（global.js 里完整替换 ConfigManager + qqq.js 里替换监听 + 把你现有两个绕过点全部改掉）。你只要告诉我：你更偏向 **A** 还是 **B** 做默认（不问你也行，我可以默认 A）。
