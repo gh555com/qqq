@@ -1545,6 +1545,11 @@ async function activate(context) {
 		return;
 	}
 
+	// ★ 缓存必须立即初始化（不延迟），否则用户操作会触发 SETUP_FAIL
+	initCache(context).catch(e => {
+		global.logMessage(`缓存初始化失败: ${e?.message || e}`, "ERROR");
+	});
+
 	// ★ 延迟启动策略：onStartupFinished 后再等 3 秒才执行重载初始化
 	setTimeout(() => {
 		_delayedActivate(context).catch(e => {
@@ -1560,9 +1565,7 @@ async function activate(context) {
 async function _delayedActivate(context) {
 	global.logMessage("qqq 延迟初始化开始...", "INFO");
 
-	// 已经移至 global.init(context)
-
-	await initCache(context);
+	// initCache 已移至 activate() 立即执行，此处无需重复
 
 	// ★ 预热/静默安装视频引擎和 Python 引擎（延迟 10 秒）
 	setTimeout(() => {

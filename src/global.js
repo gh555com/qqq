@@ -517,7 +517,8 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 			// ★ 检查 daemon 是否已经被热启动回调启动了
 			if (pythonBridge.available) {
-				logMessage(`[Python] daemon 已被热启动回调启动，跳过全局启动`, "INFO");
+				// ★ 使用频率限制，避免日志刷屏
+				logMessageRateLimited("py_skip_global", `[Python] daemon 已可用，跳过全局启动`, "DEBUG", 60000);
 				resolve(true);
 				return;
 			}
@@ -1419,8 +1420,17 @@ async function checkDaemonRunning(processName, commandLinePattern = null) {
 }
 
 async function startDaemons() {
-	// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
-	try { await cleanupGhostDaemons(); } catch (e) { }
+	// ★ 终极修复：如果所有 bridge 都已可用，跳过整个启动流程
+	const pythonOk = pythonBridge.available === true;
+	const rustOk = rustBridge.available === true;
+	const shellOk = shellBridge.available === true;
+	
+	if (pythonOk || rustOk || shellOk) {
+		logMessage(`[startDaemons] 已有 bridge 可用 (py=${pythonOk}, rust=${rustOk}, shell=${shellOk})，跳过幽灵进程清理`, "INFO");
+	} else {
+		// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
+		try { await cleanupGhostDaemons(); } catch (e) { }
+	}
 
 	const bootSeq = ++_daemonBootSeq;
 

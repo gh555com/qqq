@@ -161,13 +161,22 @@ async function scheduleProbe(key, fn) {
 	return fn();
 }
 
+// ★ 本地防重 Map，用于 genScheduler 不可用时的回退防重
+const _localGenPending = new Map();
+
 async function scheduleGen(key, fn) {
 	const _qqq = geq();
 	const s = _qqq?.genScheduler;
 	if (s && typeof s.schedule === "function") {
 		return s.schedule(key, fn);
 	}
-	return fn();
+	// ★ 回退防重：即使 genScheduler 不可用，也要防止重复调用
+	if (_localGenPending.has(key)) {
+		return _localGenPending.get(key);
+	}
+	const p = fn().finally(() => _localGenPending.delete(key));
+	_localGenPending.set(key, p);
+	return p;
 }
 
 // ==================== 初始化 ====================
