@@ -1534,7 +1534,7 @@ async function activate(context) {
 	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存
 	global.setVipMode(isVip);
 
-	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保"重启还原"
+	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保“重启还原”
 	if (!isVip) {
 		global.ConfigManager.nonVipBootstrapResetAll().catch(() => { });
 	}
@@ -1545,17 +1545,34 @@ async function activate(context) {
 		return;
 	}
 
+	// ★ 延迟启动策略：onStartupFinished 后再等 3 秒才执行重载初始化
+	setTimeout(() => {
+		_delayedActivate(context).catch(e => {
+			global.logMessage(`延迟初始化失败: ${e?.message || e}`, "ERROR");
+		});
+	}, 3000);
+
+	// ★ 立即注册命令（不延迟，确保用户可以立即使用）
+	_registerCommands(context);
+}
+
+// ★ 延迟初始化逻辑（onStartupFinished + 3秒后执行）
+async function _delayedActivate(context) {
+	global.logMessage("qqq 延迟初始化开始...", "INFO");
+
 	// 已经移至 global.init(context)
 
 	await initCache(context);
 
-	// ★ 预热/静默安装视频引擎和 Python 引擎
-	try {
-		const { getSharedDownloader } = require('./dow');
-		const downloader = getSharedDownloader();
-		downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
-		// 移除重复调用，因为会在startDaemons()中被再次调用
-	} catch (e) { }
+	// ★ 预热/静默安装视频引擎和 Python 引擎（延迟 10 秒）
+	setTimeout(() => {
+		try {
+			const { getSharedDownloader } = require('./dow');
+			const downloader = getSharedDownloader();
+			downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
+			global.logMessage("qqq dow.js 预热开始 (10秒延迟)", "INFO");
+		} catch (e) { }
+	}, 7000); // 相对于 _delayedActivate 开始，再延迟 7 秒 = 总共 3+7=10 秒
 
 	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
 	try {
@@ -1570,7 +1587,11 @@ async function activate(context) {
 	global.initStatusBar();
 	updateStatusBarThrottled();
 
-	startDaemons();
+	// ★ startDaemons 延迟 6 秒（相对于 _delayedActivate 开始，再延迟 3 秒 = 总共 3+3=6 秒）
+	setTimeout(() => {
+		global.logMessage("qqq startDaemons 开始 (6秒延迟)", "INFO");
+		startDaemons();
+	}, 3000);
 
 	// 设置 CodeLens 样式（通过 ConfigGate 读取）
 	function updateCodeLensStyle() {
@@ -1593,11 +1614,10 @@ async function activate(context) {
 			}
 		})
 	);
+}
 
-	// 侧边栏 WebView 现在由 q4.activate(context) 内部自动注册
-	// activeSidebarProvider 通过 q4Api 机制获取 (如有需要)
-
-	// 保留原来的命令，但现在只是聚焦到侧边栏
+// ★ 抽取命令注册到单独函数（立即注册，不延迟）
+function _registerCommands(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.showStatusPanel", global.withReady(() => {
 			// 聚焦到侧边栏视图

@@ -2,22 +2,14 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.62.17",
+  "version": "15.62.18",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
     "vscode": "^1.73.0"
   },
   "activationEvents": [
-    "*",
-    "onCommand:qqq.q1",
-    "onCommand:qqq.q2",
-    "onCommand:qqq.pure",
-    "onCommand:qqq.allSettings",
-    "onCommand:qqq.weave",
-    "onCommand:qqq.clipboardHistory",
-    "onCommand:qqq.exportDoc",
-    "onCommand:qqq.exportZip"
+    "onStartupFinished"
   ],
   "main": "./dist/qqq.js",
   "contributes": {
