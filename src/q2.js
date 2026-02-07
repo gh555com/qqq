@@ -3111,25 +3111,25 @@ async function activate(context) {
   getConfig();
   geq().logMessage("Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
 
-  // ★ 关键：监听配置变化，当用户在设置中修改时立即刷新
-  const configChangeDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
-    if (event.affectsConfiguration("qqq.szDisplayMode") ||
-      event.affectsConfiguration("qqq.sortBy") ||
-      event.affectsConfiguration("qqq.autoWatchChanges")) {
-      // 清除配置缓存，强制重新读取
-      cachedInMemoryConfig = null;
-      geq().logMessage("Q2: 配置已更改，正在刷新...", "INFO");
-      // 如果面板正在显示，刷新它
-      if (activePanel && activePanelAlive && globalRefreshWebview) {
-        globalRefreshWebview();
-      }
+  // ★ 终极修复：通过 ConfigGate 回调机制获取配置更新通知（解决竞态问题）
+  // 之前直接监听 onDidChangeConfiguration 会导致在 sessionOverrides 更新前就读取配置
+  global.ConfigManager.onConfigUpdated((changedKeys, event) => {
+    // 只关心 q2 相关的配置
+    const q2Keys = ["szDisplayMode", "sortBy", "autoWatchChanges"];
+    if (!changedKeys.some(k => q2Keys.includes(k))) return;
+
+    // 清除配置缓存，强制重新读取
+    cachedInMemoryConfig = null;
+    geq().logMessage("Q2: 配置已更改（通过 ConfigGate 回调），正在刷新...", "INFO");
+    // 如果面板正在显示，刷新它
+    if (activePanel && activePanelAlive && globalRefreshWebview) {
+      globalRefreshWebview();
     }
   });
 
   context.subscriptions.push(
     vscode.commands.registerCommand("qqq.q2", global.withReady(showSaveAsDialog)),
-    vscode.commands.registerCommand("qqq.saveAsDialog", global.withReady(showSaveAsDialog)),
-    configChangeDisposable
+    vscode.commands.registerCommand("qqq.saveAsDialog", global.withReady(showSaveAsDialog))
   );
 }
 

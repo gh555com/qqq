@@ -2059,6 +2059,7 @@ let _sessionOverrides = Object.create(null);
 let _suppressConfigEcho = 0; // 防止"我们自己回弹 settings"触发死循环
 let _trialHintShown = false;
 let _configChangeCallback = null;
+let _configUpdateCallbacks = []; // ★ 配置更新完成后的回调列表（解决竞态问题）
 
 function setVipMode(v) {
 	_isVip = !!v;
@@ -2177,6 +2178,7 @@ const ConfigManager = {
 	async handleVscodeConfigChanged(event) {
 		if (_suppressConfigEcho) return;
 
+		const changedKeys = [];
 		for (const key of Object.keys(DEFAULT_CONFIG)) {
 			const fullKey = `qqq.${key}`;
 			if (!event.affectsConfiguration(fullKey)) continue;
@@ -2187,7 +2189,28 @@ const ConfigManager = {
 
 			// VIP：persist；非VIP：session + 回弹清除
 			await this.set(key, val, { persist: _isVip });
+			changedKeys.push(key);
 		}
+
+		// ★ 配置更新完成后，通知所有订阅者（解决竞态问题）
+		if (changedKeys.length > 0) {
+			for (const cb of _configUpdateCallbacks) {
+				try { cb(changedKeys, event); } catch (e) { }
+			}
+		}
+	},
+
+	// ★ 注册配置更新完成后的回调（解决 q1.js/q2.js 的竞态问题）
+	onConfigUpdated(callback) {
+		if (typeof callback === 'function' && !_configUpdateCallbacks.includes(callback)) {
+			_configUpdateCallbacks.push(callback);
+		}
+	},
+
+	// ★ 移除回调
+	offConfigUpdated(callback) {
+		const idx = _configUpdateCallbacks.indexOf(callback);
+		if (idx !== -1) _configUpdateCallbacks.splice(idx, 1);
 	}
 };
 

@@ -3139,16 +3139,21 @@ async function activate(context) {
 	refreshConfig();
 	codeLensProvider = new FileCodeLensProvider();
 
+	// ★ 终极修复：通过 ConfigGate 回调机制获取配置更新通知（解决竞态问题）
+	// 之前直接监听 onDidChangeConfiguration 会导致 refreshConfig() 在 sessionOverrides 更新前执行
+	global.ConfigManager.onConfigUpdated((changedKeys, event) => {
+		global.logMessage(`[q1] 配置更新回调: ${changedKeys.join(', ')}`, "DEBUG");
+		refreshConfig();
+		clearDecorations();
+		if (codeLensProvider) codeLensProvider.refresh();
+		renderVisibleEditors(10);
+		if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
+	});
+
 	// ★ 终极最优解：注册权提升，严禁在注册前使用 await
 	context.subscriptions.push(
+		// ★ 只保留 editor 配置的监听（这些不涉及 ConfigGate）
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration("qqq")) {
-				refreshConfig();
-				clearDecorations();
-				if (codeLensProvider) codeLensProvider.refresh();
-				renderVisibleEditors(10);
-				if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
-			}
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
 				if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
