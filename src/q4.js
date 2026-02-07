@@ -1069,6 +1069,11 @@ class ClipboardHistorySidebarProvider {
                 this._pythonPlayState.playing = false;
                 // 通知 webview 停止播放
                 this._postMessage({ command: 'stopAudio' });
+            } else if (data && data.event === 'process_crashed' && data.bridge === 'Python') {
+                // ★ Python 进程崩溃，立即停止 UI 播放状态
+                this._pythonPlayState.playing = false;
+                this._postMessage({ command: 'stopAudio' });
+                this._global.logMessage(`[Q4] Python 进程崩溃，已停止播放 UI`, "WARN");
             }
         };
         this._global.pythonBridge.on('event', this._onPythonEvent);

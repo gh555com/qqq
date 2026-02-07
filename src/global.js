@@ -194,6 +194,9 @@ class DaemonBridge extends EventEmitter {
 		this.process = null;
 		invalidateEngineCache(); // ★ 引擎崩溃，清除缓存
 
+		// ★ 发出崩溃事件，让 UI 层感知
+		this.emit("event", { event: "process_crashed", bridge: this.name });
+
 		for (const [id, { resolve, timer }] of this.pending) {
 			clearTimeout(timer);
 			resolve({ error: "process_crashed" });
