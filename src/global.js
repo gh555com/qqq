@@ -2133,12 +2133,15 @@ const ConfigManager = {
 		if (_configChangeCallback) _configChangeCallback(key, value);
 
 		if (!_isVip || !persist) {
-			// 非VIP：绝不写DB；并且"强回弹"清掉 settings.json 的痕迹
+			// 非VIP：绝不写DB
+			// ★ 终极修复：不再实时回弹清除 settings.json
+			// 因为 VS Code 不会为"选择默认值"触发事件（如果 settings.json 中没有该值）
+			// 保留 settings.json 中的值，让 VS Code 能正常检测到变化
+			// 重启还原通过 nonVipBootstrapResetAll() 在启动时实现
 			if (!_isVip && !_trialHintShown) {
 				_trialHintShown = true;
 				try { vscode.window.showInformationMessage("试用模式：设置仅本次有效，重启后恢复默认。"); } catch { }
 			}
-			await _clearVscodeSettingEverywhere(key);
 			return;
 		}
 

@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.62.24",
+  "version": "15.62.25",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -273,7 +273,7 @@
             "order": 20,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "📦 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
+            "markdownDescription": "📦 导出图片暗号字符串（如：/\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ ）"
           }
         }
       }
