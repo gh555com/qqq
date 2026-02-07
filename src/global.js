@@ -246,7 +246,22 @@ class DaemonBridge extends EventEmitter {
 			// 指数退避策略：从 50ms 开始，快速重试
 			const backoff = 50 * Math.pow(2, this.restartCount - 1);
 			logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})，延迟 ${backoff}ms`, "WARN");
-			setTimeout(() => this.start(), backoff);
+
+			// ★ 工业级修复：重启前确保 available 不是 false，否则 start() 中的检查会阻止重启
+			this.available = null;
+
+			setTimeout(() => {
+				logMessage(`${this.name} 正在执行重启...`, "INFO");
+				this.start().then(ok => {
+					if (ok) {
+						logMessage(`${this.name} 重启成功`, "INFO");
+					} else {
+						logMessage(`${this.name} 重启失败`, "WARN");
+					}
+				}).catch(e => {
+					logMessage(`${this.name} 重启异常: ${e?.message || e}`, "ERROR");
+				});
+			}, backoff);
 		} else {
 			logMessage(`${this.name} 进程崩溃，达到最大重启次数，标记为不可用`, "ERROR");
 			this.available = false;
@@ -268,8 +283,12 @@ class DaemonBridge extends EventEmitter {
 			return { error: `${this.name}_disabled_too_many_crashes` };
 		}
 
-		// 允许再尝试启动
-		if (this.available === false) this.available = null;
+		// ★ 工业级修复：如果引擎已知不可用，不要反复尝试启动
+		// available === false 表示已确认失败/崩溃，不应该在每次 call 时重试
+		// 只有通过 startDaemons 或明确的重启操作才应该重试
+		if (this.available === false) {
+			return { error: `${this.name}_not_available` };
+		}
 
 		if (!this.process || this.process.killed) {
 			const started = await this.start();
@@ -515,10 +534,9 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			// 如果 L1 不完美，返回 null，等待 20 秒后下载完成后通过回调热启动
 			const pythonPath = await downloader.ensurePythonReady(extensionContext);
 
-			// ★ 检查 daemon 是否已经被热启动回调启动了
-			if (pythonBridge.available) {
-				// ★ 使用频率限制，避免日志刷屏
-				logMessageRateLimited("py_skip_global", `[Python] daemon 已可用，跳过全局启动`, "DEBUG", 60000);
+			// ★ 检查 daemon 是否已经可用
+			if (pythonBridge.available === true) {
+				logMessage(`[Python] daemon 已可用，跳过全局启动`, "DEBUG");
 				resolve(true);
 				return;
 			}
@@ -1420,13 +1438,16 @@ async function checkDaemonRunning(processName, commandLinePattern = null) {
 }
 
 async function startDaemons() {
-	// ★ 终极修复：如果所有 bridge 都已可用，跳过整个启动流程
-	const pythonOk = pythonBridge.available === true;
-	const rustOk = rustBridge.available === true;
-	const shellOk = shellBridge.available === true;
-	
-	if (pythonOk || rustOk || shellOk) {
-		logMessage(`[startDaemons] 已有 bridge 可用 (py=${pythonOk}, rust=${rustOk}, shell=${shellOk})，跳过幽灵进程清理`, "INFO");
+	// ★ 终极修复：检查是否已有 bridge 可用或正在启动
+	// available === true 表示已可用
+	// isStarting === true 表示正在启动中（spawn 到 handshake 之间）
+	// process 存在表示进程已启动
+	const pythonBusy = pythonBridge.available === true || pythonBridge.isStarting || pythonBridge.process;
+	const rustBusy = rustBridge.available === true || rustBridge.isStarting || rustBridge.process;
+	const shellBusy = shellBridge.available === true || shellBridge.isStarting || shellBridge.process;
+
+	if (pythonBusy || rustBusy || shellBusy) {
+		logMessage(`[startDaemons] 已有 bridge 活动中 (py=${pythonBusy}, rust=${rustBusy}, shell=${shellBusy})，跳过幽灵进程清理`, "INFO");
 	} else {
 		// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
 		try { await cleanupGhostDaemons(); } catch (e) { }
