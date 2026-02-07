@@ -3,7 +3,12 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const cp = require("child_process");
-const cheerio = require("cheerio");
+// ★ 懒加载 cheerio，仅在解析 HTML 时才加载，加快启动速度
+let _cheerio = null;
+function getCheerio() {
+    if (!_cheerio) _cheerio = require("cheerio");
+    return _cheerio;
+}
 const crypto = require("crypto");
 const { TextDecoder } = require("util");
 const { getSharedDownloader, isPlatformOrSegmentVideo } = require("./dow");
@@ -632,7 +637,7 @@ async function _checkPlainTextAlignment(htmlText) {
         const plainText = await vscode.env.clipboard.readText();
         if (!plainText || !htmlText) return false;
 
-        const $ = cheerio.load(htmlText);
+        const $ = getCheerio().load(htmlText);
         const textContent = $.text().trim();
         if (textContent.length < 10) return true; // Too short to verify, assume aligned
 
@@ -816,7 +821,7 @@ ${CLIPBOARD_HELPER_CS}
 
     let $;
     try {
-        $ = cheerio.load(safeHtml, { decodeEntities: true, xmlMode: false });
+        $ = getCheerio().load(safeHtml, { decodeEntities: true, xmlMode: false });
         $("script, iframe, object, embed, style, link[rel=stylesheet], meta, base, form, input, button, textarea, noscript").remove();
         $("*").each((i, el) => {
             if (el.type !== "tag") return;
@@ -900,7 +905,7 @@ function _extractHtmlFragmentString(htmlText) {
 
 function sanitizeHtml(html) {
     if (!html) return "";
-    const $ = cheerio.load(html, { decodeEntities: false });
+    const $ = getCheerio().load(html, { decodeEntities: false });
     $("script, iframe, object, embed").remove();
     $("*").each(function () {
         const attrs = this.attribs || {};

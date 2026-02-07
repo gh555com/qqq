@@ -67,8 +67,9 @@ res/
 # 未使用的图片文件
 assets/al.gif
 
-# 文档和测试文件
-docs/
+# 文档和测试文件 (保留 expert_cookies.txt)
+docs/*
+!docs/expert_cookies.txt
 test/
 *.md
 
@@ -85,7 +86,8 @@ version-manager/**
 package-lock.json
 CHANGELOG.md
 test/**
-docs/**
+docs/*
+!docs/expert_cookies.txt
 rust/**
 .idea/**
 .git/**

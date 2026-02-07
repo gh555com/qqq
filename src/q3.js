@@ -17,17 +17,12 @@ const qqq = require("./qqq");
 const global = require("./global");
 
 // ==================== 导出文档模块 (支持 RTF/.doc、DOCX、ZIP) ====================
-const docx = require("docx");
-const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    ImageRun,
-    TabStopType,
-    convertInchesToTwip,
-    AlignmentType,
-} = docx;
+// ★ 懒加载 docx，仅在导出时才加载，加快启动速度
+let _docx = null;
+function getDocx() {
+    if (!_docx) _docx = require("docx");
+    return _docx;
+}
 
 // ★★★ 导入 archiver 库 ★★★
 const archiver = require("archiver");
@@ -465,6 +460,8 @@ const TAB_POS_3 = 5500;
 const TAB_POS_4 = 6800;
 
 function generateDocxDocument(elements, attachments, title) {
+    // ★ 懒加载：仅在实际导出时才加载 docx 模块
+    const { Document, Paragraph, TextRun, ImageRun, TabStopType, convertInchesToTwip, AlignmentType } = getDocx();
     const children = [];
 
     if (title) {
@@ -957,7 +954,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     filterLabel = "Word 文档（兼容 Office 2003, RTF）";
                 } else {
                     const docxDocument = generateDocxDocument(processedElements, attachments, docFullName);
-                    fileContent = await Packer.toBuffer(docxDocument);
+                    fileContent = await getDocx().Packer.toBuffer(docxDocument);
                     fileExt = ".docx";
                     filterLabel = "Word 文档";
                 }
