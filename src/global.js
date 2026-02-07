@@ -2377,8 +2377,9 @@ function formatBytes(size, decimals = 1) {
 }
 
 function formatHours(totalSeconds) {
-	const h = totalSeconds / 3600;
-	return `${h.toFixed(2)} h`;
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	return `${h}h : ${m.toString().padStart(2, '0')}m`;
 }
 
 function formatCompactTime(totalSeconds) {
