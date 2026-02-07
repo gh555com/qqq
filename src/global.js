@@ -2363,10 +2363,11 @@ function cacheKeyForPath(p) {
 	return process.platform === "win32" ? canon.toLowerCase() : canon;
 }
 
+
 // ★ 统一的字节格式化函数，decimals 控制小数位数（默认 1 位）
 function formatBytes(size, decimals = 1) {
 	if (size == null || isNaN(size)) return "?";
-	const units = ["B", "KB", "MB", "GB"];
+	const units = ["b", "kb", "mb", "gb"];
 	let idx = 0;
 	let val = size;
 	while (val >= 1024 && idx < units.length - 1) {
