@@ -940,7 +940,7 @@ function Process-Command {
   [Console]::Out.WriteLine($b64)
 }
 
-# 使用UTF-8编码读取输入
+# 使用UTF-8编码读取键入
 $encoding = [System.Text.Encoding]::UTF8
 $reader = New-Object System.IO.StreamReader([System.Console]::OpenStandardInput(), $encoding)
 

@@ -130,7 +130,7 @@ fn pyv_from_json(v: &Value) -> PyV {
         Value::String(s) => PyV::Str(s.clone()),
         Value::Array(a) => PyV::Arr(a.iter().map(pyv_from_json).collect()),
         Value::Object(o) => {
-            // 输入对象字段顺序不重要；这里只做“尽量保留”，但不会用于“严格顺序对齐”的输出对象
+            // 键入对象字段顺序不重要；这里只做“尽量保留”，但不会用于“严格顺序对齐”的输出对象
             let mut out = Vec::with_capacity(o.len());
             for (k, v) in o {
                 out.push((k.clone(), pyv_from_json(v)));

@@ -629,7 +629,7 @@ function initInputUndoRedo(input) {
 
   const state = getInputUndoState(input);
 
-  // 监听输入变化，记录每次改变
+  // 监听键入变化，记录每次改变
   input.addEventListener('input', () => {
     const st = getInputUndoState(input);
 
@@ -1057,7 +1057,7 @@ function updateFocusType(element){
 function selectFileItem(fileItem, requestSize, shiftPressed = false){
   if (!fileItem) return;
 
-  // 关键：选择项目时，如果当前焦点在输入框，则强制失去焦点，以便热键生效
+  // 关键：选择项目时，如果当前焦点在键入框，则强制失去焦点，以便热键生效
   if (isInputFocused()) {
     document.activeElement.blur();
   }
@@ -1710,7 +1710,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-    // ★ 新增：文件筛选输入框逻辑
+    // ★ 新增：文件筛选键入框逻辑
     const fileFilterInput = document.getElementById('fileFilterInput');
     if (fileFilterInput) {
         initInputUndoRedo(fileFilterInput);

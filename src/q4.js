@@ -1201,7 +1201,7 @@ class ClipboardHistorySidebarProvider {
         if (limit) this._currentLimit = limit;
 
         // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新、且不是关键手动操作(pin/remove/clear)，则挂起更新
-        const isSearchUpdate = !!keyword || (reason === null && !keyword); // 搜索输入或清空搜索
+        const isSearchUpdate = !!keyword || (reason === null && !keyword); // 搜索键入或清空搜索
         const isImmediate = force || isSearchUpdate || ['pin', 'remove', 'clear'].includes(reason);
         if (!isImmediate && this._isFocused) {
             this._needsUpdate = true;
