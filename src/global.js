@@ -2064,7 +2064,7 @@ let _configUpdateCallbacks = []; // ★ 配置更新完成后的回调列表（�
 function setVipMode(v) {
 	_isVip = !!v;
 	_sessionOverrides = Object.create(null); // 模式切换时清会话覆写，防串味
-	logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO");
+	// logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO");
 }
 function isVip() { return _isVip; }
 
@@ -2171,7 +2171,7 @@ const ConfigManager = {
 	// 非VIP启动时：清一次所有 qqq.* setting，确保"重启还原"
 	async nonVipBootstrapResetAll() {
 		if (_isVip) return;
-		logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO");
+		// logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO");
 		for (const k of Object.keys(DEFAULT_CONFIG)) {
 			await _clearVscodeSettingEverywhere(k);
 		}
