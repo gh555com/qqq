@@ -1045,11 +1045,15 @@ class ClipboardHistorySidebarProvider {
             localResourceRoots: [this._context.extensionUri],
         };
 
-        // 初始内容
-        this.updateContent(null, null, null, true);
+        // ★ 闪电加载：立即渲染空骨架 HTML，1秒后再加载历史数据
+        this._view.webview.html = this._getHtml([], {});
 
-        // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
-        this._syncPythonStateOnStartup();
+        // 1秒后加载完整数据（包括剩贴板历史 + Python 状态同步）
+        setTimeout(() => {
+            this.updateContent(null, null, null, true);
+            // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
+            this._syncPythonStateOnStartup();
+        }, 1000);
 
         // 监听 Python 引擎的异步通知（如自然播放结束）
         try {
