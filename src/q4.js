@@ -1844,7 +1844,7 @@ class ClipboardHistorySidebarProvider {
             border: 1px solid var(--primary-color);
             background-color: var(--base2);
             z-index: 1000;
-            width: 100%;
+            width: 777px;
             box-sizing: border-box;
             max-height: 150px;
             overflow-y: auto;
@@ -1862,10 +1862,28 @@ class ClipboardHistorySidebarProvider {
             text-overflow: ellipsis;
             font-size: 13px;
             font-family: Tahoma, sans-serif;
+            position: relative;
         }
         .history-dropdown-item:hover {
             background-color: var(--primary-color);
             color: var(--base2);
+        }
+
+        /* 下拉框 item tooltip */
+        .dropdown-item-tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: rgb(35, 30, 0);
+            color: var(--base2);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: Tahoma, sans-serif;
+            font-size: 13px;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+            white-space: nowrap;
+            border: 1px solid var(--primary-color);
         }
 
     </style>
@@ -1950,6 +1968,7 @@ class ClipboardHistorySidebarProvider {
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
         <div id="tooltip"></div>
+        <div id="dropdownItemTooltip" class="dropdown-item-tooltip"></div>
     </div>
     <script nonce="${nonce}">
         (function() {
@@ -1998,6 +2017,7 @@ class ClipboardHistorySidebarProvider {
                 // ★ 新增：历史下拉框元素
                 videoHistoryDropdown: document.getElementById('videoHistoryDropdown'),
                 searchHistoryDropdown: document.getElementById('searchHistoryDropdown'),
+                dropdownTooltip: document.getElementById('dropdownItemTooltip'),
             };
 
             var selectedId = '';
@@ -2032,6 +2052,11 @@ class ClipboardHistorySidebarProvider {
                 if (el.searchHistoryDropdown) el.searchHistoryDropdown.style.display = 'none';
             }
 
+            // 判断文本是否被截断
+            function isTextTruncated(element) {
+                return element.scrollWidth > element.clientWidth;
+            }
+
             function showHistoryDropdown(inputEl, dropdownEl, history) {
                 hideAllDropdowns();
                 if (!history || history.length === 0) {
@@ -2042,40 +2067,105 @@ class ClipboardHistorySidebarProvider {
                     var itemDiv = document.createElement('div');
                     itemDiv.className = 'history-dropdown-item';
                     itemDiv.textContent = itemText;
-                    itemDiv.title = itemText;
+                    // 移除默认 title，使用自定义 tooltip
                     itemDiv.onclick = function() {
                         inputEl.value = itemText;
                         hideAllDropdowns();
                         inputEl.focus();
+                        // 触发 input 事件
+                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                     };
                     dropdownEl.appendChild(itemDiv);
                 });
                 dropdownEl.style.display = 'block';
             }
 
+            // 为下拉框添加 tooltip 事件（事件委托）
+            function attachDropdownTooltip(dropdownEl) {
+                dropdownEl.addEventListener('mouseenter', function(e) {
+                    var item = e.target.closest('.history-dropdown-item');
+                    if (item && isTextTruncated(item)) {
+                        el.dropdownTooltip.textContent = item.textContent;
+                        el.dropdownTooltip.style.display = 'block';
+                    }
+                }, true);
+
+                dropdownEl.addEventListener('mousemove', function(e) {
+                    if (el.dropdownTooltip.style.display === 'block') {
+                        el.dropdownTooltip.style.left = (e.clientX) + 'px';
+                        el.dropdownTooltip.style.top = (e.clientY + 22) + 'px';
+                    }
+                }, true);
+
+                dropdownEl.addEventListener('mouseleave', function(e) {
+                    var item = e.target.closest('.history-dropdown-item');
+                    if (item) {
+                        el.dropdownTooltip.style.display = 'none';
+                    }
+                }, true);
+            }
+
+            // 为两个下拉框附加 tooltip 事件
+            if (el.videoHistoryDropdown) attachDropdownTooltip(el.videoHistoryDropdown);
+            if (el.searchHistoryDropdown) attachDropdownTooltip(el.searchHistoryDropdown);
+
             // --- 修改/新增事件监听 ---
+
+            // 显示/隐藏下拉框函数
+            function toggleSearchDropdown(show) {
+                if (show && el.searchBox.value.trim() === '') {
+                    post('getHistory', { key: 'search' });
+                } else if (!show) {
+                    hideAllDropdowns();
+                }
+            }
+
+            function toggleVideoDropdown(show) {
+                if (show && el.videoInput.value.trim() === '') {
+                    post('getHistory', { key: 'video' });
+                } else if (!show) {
+                    hideAllDropdowns();
+                }
+            }
 
             el.searchBox.oninput = function() {
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
-                hideAllDropdowns();
+                // 空文本时显示下拉框，否则隐藏
+                toggleSearchDropdown(el.searchBox.value.trim() === '');
             };
 
             el.searchBox.addEventListener('focus', function() {
-                if (el.searchBox.value === '') {
-                    post('getHistory', { key: 'search' });
+                toggleSearchDropdown(true);
+            });
+
+            // blur 时立即隐藏下拉框
+            el.searchBox.addEventListener('blur', function(e) {
+                var relatedTarget = e.relatedTarget;
+                var isDropdownElement = relatedTarget && el.searchHistoryDropdown.contains(relatedTarget);
+                if (!isDropdownElement) {
+                    hideAllDropdowns();
+                    el.dropdownTooltip.style.display = 'none';
                 }
             });
-            el.searchBox.addEventListener('blur', function() {
-                setTimeout(hideAllDropdowns, 150); // 延迟以允许点击
-            });
+
+            // 点击下拉框时阻止冒泡，防止触发 blur
+            if (el.searchHistoryDropdown) {
+                el.searchHistoryDropdown.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                });
+            }
+
             el.searchBox.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter') {
                     var val = el.searchBox.value;
                     if (val.trim() !== '') {
                         post('saveHistory', { key: 'search', value: val });
                     }
+                    hideAllDropdowns();
+                } else if (e.key === 'Escape') {
+                    hideAllDropdowns();
                 }
             });
 
@@ -2241,16 +2331,30 @@ class ClipboardHistorySidebarProvider {
 
             el.videoInput.oninput = function() {
                 el.videoInput.className = 'inline-input';
-                hideAllDropdowns();
+                // 空文本时显示下拉框，否则隐藏
+                toggleVideoDropdown(el.videoInput.value.trim() === '');
             };
+
             el.videoInput.addEventListener('focus', function() {
-                if (el.videoInput.value === '') {
-                    post('getHistory', { key: 'video' });
+                toggleVideoDropdown(true);
+            });
+
+            // blur 时立即隐藏下拉框
+            el.videoInput.addEventListener('blur', function(e) {
+                var relatedTarget = e.relatedTarget;
+                var isDropdownElement = relatedTarget && el.videoHistoryDropdown.contains(relatedTarget);
+                if (!isDropdownElement) {
+                    hideAllDropdowns();
+                    el.dropdownTooltip.style.display = 'none';
                 }
             });
-            el.videoInput.addEventListener('blur', function() {
-                setTimeout(hideAllDropdowns, 150); // 延迟以允许点击
-            });
+
+            // 点击下拉框时阻止冒泡，防止触发 blur
+            if (el.videoHistoryDropdown) {
+                el.videoHistoryDropdown.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                });
+            }
 
             el.videoInput.onkeydown = function(e) {
                 if (e.key === 'Enter') {

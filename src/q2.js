@@ -1410,6 +1410,17 @@ window.addEventListener('message', event => {
         sessionSizeCache.clear();
       }
 
+      // ★ 切换目录时清空筛选框
+      if (isNewDir) {
+        const fileFilterInput = document.getElementById('fileFilterInput');
+        if (fileFilterInput) {
+          fileFilterInput.value = '';
+          // 触发 input 事件重置文件列表显示
+          fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        hideAllDropdowns();
+      }
+
       // 更新当前模式
       currentSizeMode = newSizeMode;
       currentPath = message.currentPath || '';
@@ -1710,14 +1721,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-    // ★ 新增：文件筛选键入框逻辑
+    // ★ 新增：文件筛选键入框逻辑（改进版）
     const fileFilterInput = document.getElementById('fileFilterInput');
-    if (fileFilterInput) {
+    const fileFilterDropdown = document.getElementById('fileFilterHistoryDropdown');
+    if (fileFilterInput && fileFilterDropdown) {
         initInputUndoRedo(fileFilterInput);
 
+        // 创建 tooltip 元素
+        let dropdownTooltip = document.getElementById('dropdownItemTooltip');
+        if (!dropdownTooltip) {
+            dropdownTooltip = document.createElement('div');
+            dropdownTooltip.id = 'dropdownItemTooltip';
+            dropdownTooltip.className = 'dropdown-item-tooltip';
+            document.body.appendChild(dropdownTooltip);
+        }
+
+        // 判断文本是否被截断
+        function isTextTruncated(element) {
+            return element.scrollWidth > element.clientWidth;
+        }
+
+        // 显示/隐藏下拉框
+        function toggleDropdown(show) {
+            if (show) {
+                const currentValue = fileFilterInput.value.trim();
+                // 空文本时才显示下拉框
+                if (currentValue === '') {
+                    vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+                } else {
+                    hideAllDropdowns();
+                }
+            } else {
+                hideAllDropdowns();
+            }
+        }
+
         fileFilterInput.addEventListener('input', () => {
-            hideAllDropdowns();
-            const filterText = fileFilterInput.value.toLowerCase();
+            const currentValue = fileFilterInput.value.trim();
+            // 空文本时显示下拉框，否则隐藏
+            toggleDropdown(currentValue === '');
+
+            // 执行筛选
+            const filterText = currentValue.toLowerCase();
             const keywords = filterText.split(/\\s+/).filter(Boolean);
             const fileItems = document.querySelectorAll('.file-item');
 
@@ -1729,13 +1774,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         fileFilterInput.addEventListener('focus', () => {
-            if (fileFilterInput.value === '') {
-                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+            toggleDropdown(true);
+        });
+
+        // blur 时立即隐藏下拉框
+        fileFilterInput.addEventListener('blur', (e) => {
+            // 检查 relatedTarget 是否是下拉框内的元素
+            const relatedTarget = e.relatedTarget;
+            const isDropdownElement = relatedTarget && fileFilterDropdown.contains(relatedTarget);
+            if (!isDropdownElement) {
+                hideAllDropdowns();
+                dropdownTooltip.style.display = 'none';
             }
         });
 
-        fileFilterInput.addEventListener('blur', () => {
-            setTimeout(hideAllDropdowns, 150);
+        // 点击下拉框时阻止冒泡，防止触发 blur
+        fileFilterDropdown.addEventListener('mousedown', (e) => {
+            e.preventDefault();
         });
 
         fileFilterInput.addEventListener('keydown', (e) => {
@@ -1744,6 +1799,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (value) {
                     vscode.postMessage({ command: 'saveHistory', key: 'fileFilter', value: value });
                 }
+                hideAllDropdowns();
+            } else if (e.key === 'Escape') {
+                hideAllDropdowns();
+            }
+        });
+
+        // 为下拉框添加 tooltip 事件（事件委托）
+        fileFilterDropdown.addEventListener('mouseenter', (e) => {
+            const item = e.target.closest('.history-dropdown-item');
+            if (item && isTextTruncated(item)) {
+                dropdownTooltip.textContent = item.textContent;
+                dropdownTooltip.style.display = 'block';
+            }
+        }, true);
+
+        fileFilterDropdown.addEventListener('mousemove', (e) => {
+            if (dropdownTooltip.style.display === 'block') {
+                dropdownTooltip.style.left = (e.clientX) + 'px';
+                dropdownTooltip.style.top = (e.clientY + 22) + 'px';
+            }
+        }, true);
+
+        fileFilterDropdown.addEventListener('mouseleave', (e) => {
+            const item = e.target.closest('.history-dropdown-item');
+            if (item) {
+                dropdownTooltip.style.display = 'none';
+            }
+        }, true);
+
+        // 点击下拉框 item
+        fileFilterDropdown.addEventListener('click', (e) => {
+            const item = e.target.closest('.history-dropdown-item');
+            if (item) {
+                fileFilterInput.value = item.textContent;
+                hideAllDropdowns();
+                fileFilterInput.focus();
+                // 触发 input 事件执行筛选
+                fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
             }
         });
     }
@@ -2370,7 +2463,7 @@ function showSaveAsDialog() {
 
   const panel = vscode.window.createWebviewPanel(
     "q2",
-    "qqq new 新建",
+    "qq 的梦gaea",
     vscode.ViewColumn.Active,
     {
       enableScripts: true,
