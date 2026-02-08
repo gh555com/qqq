@@ -2463,7 +2463,7 @@ function showSaveAsDialog() {
 
   const panel = vscode.window.createWebviewPanel(
     "q2",
-    "qq 的梦gaea",
+    "的梦gaea",
     vscode.ViewColumn.Active,
     {
       enableScripts: true,

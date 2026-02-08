@@ -1869,23 +1869,6 @@ class ClipboardHistorySidebarProvider {
             color: var(--base2);
         }
 
-        /* 下拉框 item tooltip */
-        .dropdown-item-tooltip {
-            position: fixed;
-            pointer-events: none;
-            background: rgb(35, 30, 0);
-            color: var(--base2);
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-family: Tahoma, sans-serif;
-            font-size: 13px;
-            z-index: 9999;
-            display: none;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
-            white-space: nowrap;
-            border: 1px solid var(--primary-color);
-        }
-
     </style>
 </head>
 <body>
@@ -1968,7 +1951,6 @@ class ClipboardHistorySidebarProvider {
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
         <div id="tooltip"></div>
-        <div id="dropdownItemTooltip" class="dropdown-item-tooltip"></div>
     </div>
     <script nonce="${nonce}">
         (function() {
@@ -2017,7 +1999,6 @@ class ClipboardHistorySidebarProvider {
                 // ★ 新增：历史下拉框元素
                 videoHistoryDropdown: document.getElementById('videoHistoryDropdown'),
                 searchHistoryDropdown: document.getElementById('searchHistoryDropdown'),
-                dropdownTooltip: document.getElementById('dropdownItemTooltip'),
             };
 
             var selectedId = '';
@@ -2052,11 +2033,6 @@ class ClipboardHistorySidebarProvider {
                 if (el.searchHistoryDropdown) el.searchHistoryDropdown.style.display = 'none';
             }
 
-            // 判断文本是否被截断
-            function isTextTruncated(element) {
-                return element.scrollWidth > element.clientWidth;
-            }
-
             function showHistoryDropdown(inputEl, dropdownEl, history) {
                 hideAllDropdowns();
                 if (!history || history.length === 0) {
@@ -2067,47 +2043,17 @@ class ClipboardHistorySidebarProvider {
                     var itemDiv = document.createElement('div');
                     itemDiv.className = 'history-dropdown-item';
                     itemDiv.textContent = itemText;
-                    // 移除默认 title，使用自定义 tooltip
+                    itemDiv.title = itemText;
                     itemDiv.onclick = function() {
                         inputEl.value = itemText;
                         hideAllDropdowns();
                         inputEl.focus();
-                        // 触发 input 事件
                         inputEl.dispatchEvent(new Event('input', { bubbles: true }));
                     };
                     dropdownEl.appendChild(itemDiv);
                 });
                 dropdownEl.style.display = 'block';
             }
-
-            // 为下拉框添加 tooltip 事件（事件委托）
-            function attachDropdownTooltip(dropdownEl) {
-                dropdownEl.addEventListener('mouseenter', function(e) {
-                    var item = e.target.closest('.history-dropdown-item');
-                    if (item && isTextTruncated(item)) {
-                        el.dropdownTooltip.textContent = item.textContent;
-                        el.dropdownTooltip.style.display = 'block';
-                    }
-                }, true);
-
-                dropdownEl.addEventListener('mousemove', function(e) {
-                    if (el.dropdownTooltip.style.display === 'block') {
-                        el.dropdownTooltip.style.left = (e.clientX) + 'px';
-                        el.dropdownTooltip.style.top = (e.clientY + 22) + 'px';
-                    }
-                }, true);
-
-                dropdownEl.addEventListener('mouseleave', function(e) {
-                    var item = e.target.closest('.history-dropdown-item');
-                    if (item) {
-                        el.dropdownTooltip.style.display = 'none';
-                    }
-                }, true);
-            }
-
-            // 为两个下拉框附加 tooltip 事件
-            if (el.videoHistoryDropdown) attachDropdownTooltip(el.videoHistoryDropdown);
-            if (el.searchHistoryDropdown) attachDropdownTooltip(el.searchHistoryDropdown);
 
             // --- 修改/新增事件监听 ---
 
@@ -2146,7 +2092,6 @@ class ClipboardHistorySidebarProvider {
                 var isDropdownElement = relatedTarget && el.searchHistoryDropdown.contains(relatedTarget);
                 if (!isDropdownElement) {
                     hideAllDropdowns();
-                    el.dropdownTooltip.style.display = 'none';
                 }
             });
 
@@ -2345,7 +2290,6 @@ class ClipboardHistorySidebarProvider {
                 var isDropdownElement = relatedTarget && el.videoHistoryDropdown.contains(relatedTarget);
                 if (!isDropdownElement) {
                     hideAllDropdowns();
-                    el.dropdownTooltip.style.display = 'none';
                 }
             });
 
