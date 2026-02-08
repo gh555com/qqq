@@ -730,7 +730,7 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
         const itemDiv = document.createElement('div');
         itemDiv.className = 'history-dropdown-item';
         itemDiv.textContent = itemText;
-        itemDiv.title = itemText;
+        itemDiv.setAttribute('data-tooltip', itemText);
         itemDiv.onclick = () => {
             inputEl.value = itemText;
             hideAllDropdowns();
@@ -1757,9 +1757,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileFilterInput && fileFilterDropdown) {
         initInputUndoRedo(fileFilterInput);
 
-        // 使用全局 tooltip
-        const dropdownTooltip = document.getElementById('globalTooltip');
-
         // 显示/隐藏下拉框
         function toggleDropdown(show) {
             if (show) {
@@ -1803,7 +1800,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const isDropdownElement = relatedTarget && fileFilterDropdown.contains(relatedTarget);
             if (!isDropdownElement) {
                 hideAllDropdowns();
-                if (dropdownTooltip) dropdownTooltip.style.display = 'none';
             }
         });
 
@@ -1823,29 +1819,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 hideAllDropdowns();
             }
         });
-
-        // 为下拉框添加 tooltip 事件（事件委托）- 使用全局 tooltip，不判断截断
-        fileFilterDropdown.addEventListener('mouseenter', (e) => {
-            const item = e.target.closest('.history-dropdown-item');
-            if (item && dropdownTooltip) {
-                dropdownTooltip.textContent = item.textContent;
-                dropdownTooltip.style.display = 'block';
-            }
-        }, true);
-
-        fileFilterDropdown.addEventListener('mousemove', (e) => {
-            if (dropdownTooltip && dropdownTooltip.style.display === 'block') {
-                dropdownTooltip.style.left = (e.clientX) + 'px';
-                dropdownTooltip.style.top = (e.clientY + 22) + 'px';
-            }
-        }, true);
-
-        fileFilterDropdown.addEventListener('mouseleave', (e) => {
-            const item = e.target.closest('.history-dropdown-item');
-            if (item && dropdownTooltip) {
-                dropdownTooltip.style.display = 'none';
-            }
-        }, true);
 
         // 点击下拉框 item
         fileFilterDropdown.addEventListener('click', (e) => {
