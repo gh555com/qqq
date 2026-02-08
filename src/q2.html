@@ -50,6 +50,7 @@
 			box-sizing: border-box;
 			forced-color-adjust: none;
 			-ms-high-contrast-adjust: none;
+			scrollbar-width: none;
 		}
 
 		body,
@@ -110,7 +111,14 @@
 			display: flex;
 			flex-direction: column;
 			border: none;
-			overflow-x: hidden;
+			overflow: hidden;
+		}
+
+		/* 彻底杀除所有原生滚动条 */
+		*::-webkit-scrollbar {
+			display: none !important;
+			width: 0 !important;
+			height: 0 !important;
 		}
 
 		.container {
