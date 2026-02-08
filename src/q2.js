@@ -154,30 +154,16 @@ function getFileSizeSync(filePath) {
 }
 
 // ==================== 尺寸格式化 ====================
-const SZ_GB_WARNING_COLOR = 'rgb(248, 48, 0)';
+const SZ_GB_THRESHOLD = 1000000000; // 1GB
 
 function formatFileSize(bytes) {
-  // 只显示字节数，添加千位分隔符
-  // 当超过 GB（10位数字，即 >= 1,000,000,000）时，GB 部分用橙红色
-  const formatted = bytes.toLocaleString();
+  // 只显示字节数，添加千位分隔符，纯文本，不包含 HTML
+  return bytes.toLocaleString();
+}
 
-  // 检查是否超过 GB（数字部分超过 9 位，即带分隔符后超过 11 位：x,xxx,xxx,xxx）
-  // 1GB = 1,073,741,824，但用户要求是按显示位数判断：10位数字以上
-  if (bytes >= 1000000000) {
-    // 找到 GB 部分（前面的数字，到第三个逗号之前）
-    // 例如: "14,111,222,999" -> GB部分是 "14"
-    // 例如: "7,111,222,999" -> GB部分是 "7"
-    const parts = formatted.split(',');
-    if (parts.length >= 4) {
-      // GB 部分是前 (parts.length - 3) 个部分
-      const gbParts = parts.slice(0, parts.length - 3);
-      const restParts = parts.slice(parts.length - 3);
-      const gbStr = gbParts.join(',');
-      const restStr = restParts.join(',');
-      return '<span style="color:' + SZ_GB_WARNING_COLOR + '">' + gbStr + '</span>,' + restStr;
-    }
-  }
-  return formatted;
+// 返回是否超过 1GB
+function isLargeSize(bytes) {
+  return bytes >= SZ_GB_THRESHOLD;
 }
 
 function formatDateTime(date) {
@@ -869,6 +855,7 @@ function findItemElementByPath(p, type){
 }
 
 function handleSidebarTooltipHover(e){
+  if (!e.target || typeof e.target.closest !== 'function') return;
   const target = e.target.closest('.nav-item, .recycle-item');
   if (!target || !isEllipsisActive(target)) {
     if (pathTooltipVisible) hidePathTooltip();
@@ -879,6 +866,7 @@ function handleSidebarTooltipHover(e){
 }
 
 function handleKyTooltipHover(e){
+  if (!e.target || typeof e.target.closest !== 'function') return;
   const ky = document.getElementById('kyContent');
   if (!ky || ky.clientWidth >= 200) {
     if (pathTooltipVisible) hidePathTooltip();
@@ -1484,6 +1472,12 @@ window.addEventListener('message', event => {
           const sz = el.querySelector('.sz-area');
           if (sz) {
             sz.textContent = res.sizeDisplay || '';
+            // 超过 1GB 时添加红色 class
+            if (res.bytes >= 1000000000) {
+              sz.classList.add('sz-large');
+            } else {
+              sz.classList.remove('sz-large');
+            }
           }
         }
       });
@@ -1721,11 +1715,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 为所有带有 data-tooltip 的元素添加 tooltip 事件
     document.addEventListener('mouseenter', (e) => {
+      if (!e.target || typeof e.target.closest !== 'function') return;
       const target = e.target.closest('[data-tooltip]');
       if (target) {
         currentTooltipTarget = target;
         const text = target.getAttribute('data-tooltip');
         if (text) {
+          // 先重置样式，让 tooltip 自然展开
+          globalTooltip.style.maxWidth = '';
           globalTooltip.textContent = text;
           globalTooltip.style.display = 'block';
         }
@@ -1734,8 +1731,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('mousemove', (e) => {
       if (globalTooltip.style.display === 'block' && currentTooltipTarget) {
-        const tooltipWidth = globalTooltip.offsetWidth;
         const pageWidth = window.innerWidth;
+        const padding = 10; // 边界留白
+
+        // 先重置 max-width 让 tooltip 自然展开，获取实际宽度
+        globalTooltip.style.maxWidth = '';
+        const naturalWidth = globalTooltip.offsetWidth;
 
         // 判断元素位置类别，决定 tooltip 对齐方式
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
@@ -1755,25 +1756,50 @@ document.addEventListener('DOMContentLoaded', () => {
           globalTooltip.style.top = (e.clientY + 22) + 'px';
         }
 
-        // 水平位置对齐
+        // 计算可用空间
         let leftPos;
+        let availableWidth;
+
         if (isLeftScmButton || isAddressInput) {
           // 左边界对齐：光标位置 -11px
           leftPos = e.clientX - 11;
+          availableWidth = pageWidth - leftPos - padding;
         } else if (isRightSideButton) {
           // 右边界对齐：光标位置 - tooltip宽度 + 11px
-          leftPos = e.clientX - tooltipWidth + 11;
+          leftPos = e.clientX - naturalWidth + 11;
+          availableWidth = e.clientX + 11 - padding;
         } else {
           // 默认居中
+          leftPos = e.clientX - naturalWidth / 2;
+          // 居中时，可用空间是左右两侧较小的那个的两倍
+          const spaceLeft = e.clientX - padding;
+          const spaceRight = pageWidth - e.clientX - padding;
+          availableWidth = Math.min(spaceLeft, spaceRight) * 2;
+        }
+
+        // 如果自然宽度超过可用空间，设置 max-width 并让文字换行
+        if (naturalWidth > availableWidth && availableWidth > 50) {
+          globalTooltip.style.maxWidth = availableWidth + 'px';
+        }
+
+        // 重新获取宽度（可能已经换行）
+        const tooltipWidth = globalTooltip.offsetWidth;
+
+        // 重新计算 leftPos
+        if (isLeftScmButton || isAddressInput) {
+          leftPos = e.clientX - 11;
+        } else if (isRightSideButton) {
+          leftPos = e.clientX - tooltipWidth + 11;
+        } else {
           leftPos = e.clientX - tooltipWidth / 2;
         }
 
         // 边界保护
-        if (leftPos + tooltipWidth > pageWidth - 10) {
-          leftPos = pageWidth - tooltipWidth - 10;
+        if (leftPos + tooltipWidth > pageWidth - padding) {
+          leftPos = pageWidth - tooltipWidth - padding;
         }
-        if (leftPos < 10) {
-          leftPos = 10;
+        if (leftPos < padding) {
+          leftPos = padding;
         }
 
         globalTooltip.style.left = leftPos + 'px';
@@ -1781,6 +1807,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }, true);
 
     document.addEventListener('mouseleave', (e) => {
+      if (!e.target || typeof e.target.closest !== 'function') return;
       const target = e.target.closest('[data-tooltip]');
       if (target) {
         currentTooltipTarget = null;
@@ -1808,21 +1835,19 @@ document.addEventListener('DOMContentLoaded', () => {
       updateAddressDisplay(e.target.value);
       // 动态更新 tooltip 为当前地址
       addressInput.setAttribute('data-tooltip', e.target.value || '');
+      // 有键入先隐藏下拉框，然后判断是否为空
+      hideAllDropdowns();
+      if (addressInput.value === '') {
+        vscode.postMessage({ command: 'getHistory', key: 'address' });
+      }
     });
     // 初始设置 tooltip
     addressInput.setAttribute('data-tooltip', addressInput.value || '');
 
-    // 显示/隐藏下拉框
-    function toggleAddressDropdown(show) {
-      if (show && addressInput.value.trim() === '') {
-        vscode.postMessage({ command: 'getHistory', key: 'address' });
-      } else {
-        hideAllDropdowns();
-      }
-    }
-
     addressInput.addEventListener('focus', () => {
-      toggleAddressDropdown(true);
+      if (addressInput.value === '') {
+        vscode.postMessage({ command: 'getHistory', key: 'address' });
+      }
     });
 
     addressInput.addEventListener('blur', (e) => {
@@ -1872,28 +1897,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileFilterInput && fileFilterDropdown) {
         initInputUndoRedo(fileFilterInput);
 
-        // 显示/隐藏下拉框
-        function toggleDropdown(show) {
-            if (show) {
-                const currentValue = fileFilterInput.value.trim();
-                // 空文本时才显示下拉框
-                if (currentValue === '') {
-                    vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
-                } else {
-                    hideAllDropdowns();
-                }
-            } else {
-                hideAllDropdowns();
-            }
-        }
-
         fileFilterInput.addEventListener('input', () => {
-            const currentValue = fileFilterInput.value.trim();
-            // 空文本时显示下拉框，否则隐藏
-            toggleDropdown(currentValue === '');
+            // 有键入先隐藏下拉框
+            hideAllDropdowns();
+
+            // 如果为空，请求历史
+            if (fileFilterInput.value === '') {
+                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+            }
 
             // 执行筛选
-            const filterText = currentValue.toLowerCase();
+            const filterText = fileFilterInput.value.trim().toLowerCase();
             const keywords = filterText.split(/\\s+/).filter(Boolean);
             const fileItems = document.querySelectorAll('.file-item');
 
@@ -1905,7 +1919,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         fileFilterInput.addEventListener('focus', () => {
-            toggleDropdown(true);
+            if (fileFilterInput.value === '') {
+                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+            }
+        });
+
+        // 确保点击时获得焦点（用 mousedown 更早触发）
+        fileFilterInput.addEventListener('mousedown', (e) => {
+            // 延迟一下确保焦点转移
+            setTimeout(() => fileFilterInput.focus(), 0);
         });
 
         // blur 时立即隐藏下拉框
@@ -1931,9 +1953,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 hideAllDropdowns();
             } else if (e.key === 'Escape') {
-                hideAllDropdowns();
-            } else if (e.key === ' ') {
-                // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
                 hideAllDropdowns();
             }
         });
@@ -2904,7 +2923,8 @@ function showSaveAsDialog() {
               results: [{
                 path: canonicalizeExistingPath(item.path),
                 type: item.type,
-                sizeDisplay: formatFileSize(size) + " "
+                sizeDisplay: formatFileSize(size) + " ",
+                bytes: size  // 用于前端判断是否超过 1GB
               }]
             });
           });

@@ -2061,33 +2061,22 @@ class ClipboardHistorySidebarProvider {
 
             // --- 修改/新增事件监听 ---
 
-            // 显示/隐藏下拉框函数
-            function toggleSearchDropdown(show) {
-                if (show && el.searchBox.value.trim() === '') {
-                    post('getHistory', { key: 'search' });
-                } else if (!show) {
-                    hideAllDropdowns();
-                }
-            }
-
-            function toggleVideoDropdown(show) {
-                if (show && el.videoInput.value.trim() === '') {
-                    post('getHistory', { key: 'video' });
-                } else if (!show) {
-                    hideAllDropdowns();
-                }
-            }
-
-            el.searchBox.oninput = function() {
+            el.searchBox.addEventListener('input', function() {
+                // 有键入先隐藏下拉框
+                hideAllDropdowns();
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
-                // 空文本时显示下拉框，否则隐藏
-                toggleSearchDropdown(el.searchBox.value.trim() === '');
-            };
+                // 如果为空，请求历史
+                if (el.searchBox.value === '') {
+                    post('getHistory', { key: 'search' });
+                }
+            });
 
             el.searchBox.addEventListener('focus', function() {
-                toggleSearchDropdown(true);
+                if (el.searchBox.value === '') {
+                    post('getHistory', { key: 'search' });
+                }
             });
 
             // blur 时立即隐藏下拉框
@@ -2114,9 +2103,6 @@ class ClipboardHistorySidebarProvider {
                     }
                     hideAllDropdowns();
                 } else if (e.key === 'Escape') {
-                    hideAllDropdowns();
-                } else if (e.key === ' ') {
-                    // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
                     hideAllDropdowns();
                 }
             });
@@ -2281,14 +2267,20 @@ class ClipboardHistorySidebarProvider {
                 el.videoInput.className = 'inline-input invalid';
             }
 
-            el.videoInput.oninput = function() {
+            el.videoInput.addEventListener('input', function() {
+                // 有键入先隐藏下拉框
+                hideAllDropdowns();
                 el.videoInput.className = 'inline-input';
-                // 空文本时显示下拉框，否则隐藏
-                toggleVideoDropdown(el.videoInput.value.trim() === '');
-            };
+                // 如果为空，请求历史
+                if (el.videoInput.value === '') {
+                    post('getHistory', { key: 'video' });
+                }
+            });
 
             el.videoInput.addEventListener('focus', function() {
-                toggleVideoDropdown(true);
+                if (el.videoInput.value === '') {
+                    post('getHistory', { key: 'video' });
+                }
             });
 
             // blur 时立即隐藏下拉框
@@ -2318,9 +2310,6 @@ class ClipboardHistorySidebarProvider {
                     hideAllDropdowns();
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
-                } else if (e.key === ' ') {
-                    // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
-                    hideAllDropdowns();
                 }
                 e.stopPropagation();
             };
@@ -2333,6 +2322,9 @@ class ClipboardHistorySidebarProvider {
                     el.videoInput.value = '';
                 } else if (val) { showErrorTip(); }
             };
+
+            // 阻止点击事件冒泡到 videoCard
+            el.videoInput.onclick = function(e) { e.stopPropagation(); };
             el.videoCard.onclick = function() { el.videoInput.focus(); };
 
             window.addEventListener('message', function(e) {
