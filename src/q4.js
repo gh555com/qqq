@@ -2115,6 +2115,9 @@ class ClipboardHistorySidebarProvider {
                     hideAllDropdowns();
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
+                } else if (e.key === ' ') {
+                    // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
+                    hideAllDropdowns();
                 }
             });
 
@@ -2312,6 +2315,12 @@ class ClipboardHistorySidebarProvider {
                         post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
+                    hideAllDropdowns();
+                } else if (e.key === 'Escape') {
+                    hideAllDropdowns();
+                } else if (e.key === ' ') {
+                    // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
+                    hideAllDropdowns();
                 }
                 e.stopPropagation();
             };

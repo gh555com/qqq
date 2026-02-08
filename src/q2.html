@@ -569,8 +569,8 @@
 		}
 
 		.pin-box.pinned {
-			background-color: var(--yellow);
-			color: var(--base3);
+			background-color: rgb(223, 202, 136);
+			color: var(--text-primary);
 		}
 
 		.pin-text {
@@ -612,8 +612,8 @@
 		}
 
 		.save-button {
-			background-color: var(--button-primary);
-			color: var(--button-text);
+			background-color: rgb(223, 202, 136);
+			color: var(--text-primary);
 		}
 
 		.cancel-button {
@@ -748,8 +748,8 @@
 		}
 
 		.scm-btn.active {
-			background-color: #e8a030;
-			color: var(--base3);
+			background-color: rgb(223, 202, 136);
+			color: var(--text-primary);
 		}
 
 		.scm-btn .scm-check {
@@ -913,9 +913,10 @@
 					</div>
 
 					<!-- 地址栏 -->
-					<div class="address-bar-inner">
+					<div class="address-bar-inner" style="position: relative;">
 						<div id="addressDisplay" class="address-display"></div>
 						<input type="text" id="addressInput" class="address-input" value="{{CURRENT_PATH}}">
+						<div id="addressHistoryDropdown" class="history-dropdown"></div>
 					</div>
 
 					<!-- 筛选框 -->
@@ -964,7 +965,7 @@
 				</div>
 				<div style="display: flex; gap: 15px;">
 					<button class="button save-button" onclick="saveFile()" data-tooltip="新建文件">
-						<svg width="20" height="20" viewBox="0 0 24 24" fill="#eee8d5">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="#7a7874">
 							<path
 								d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
 						</svg>

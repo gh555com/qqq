@@ -1396,6 +1396,12 @@ window.addEventListener('message', event => {
             if (input && dropdown) {
                 showHistoryDropdown(input, dropdown, message.history);
             }
+        } else if (message.key === 'address') {
+            const input = document.getElementById('addressInput');
+            const dropdown = document.getElementById('addressHistoryDropdown');
+            if (input && dropdown) {
+                showHistoryDropdown(input, dropdown, message.history);
+            }
         }
         return;
     }
@@ -1415,8 +1421,11 @@ window.addEventListener('message', event => {
         const fileFilterInput = document.getElementById('fileFilterInput');
         if (fileFilterInput) {
           fileFilterInput.value = '';
-          // 触发 input 事件重置文件列表显示
-          fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
+          // 重置文件列表显示（不触发 input 事件，避免弹出下拉列表）
+          const fileItems = document.querySelectorAll('.file-item');
+          fileItems.forEach(item => {
+            item.style.display = '';
+          });
         }
         hideAllDropdowns();
       }
@@ -1436,6 +1445,8 @@ window.addEventListener('message', event => {
       if (addr) {
         addr.value = message.currentPath || '';
         updateAddressDisplay(addr.value);
+        // 更新 tooltip 为当前地址
+        addr.setAttribute('data-tooltip', addr.value || '');
       }
 
       const list = document.getElementById('fileList');
@@ -1698,13 +1709,21 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
 
+  // ★ 禁用系统默认右键菜单
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  }, false);
+
   // ★ 全局自定义 tooltip 系统
   const globalTooltip = document.getElementById('globalTooltip');
   if (globalTooltip) {
+    let currentTooltipTarget = null;
+
     // 为所有带有 data-tooltip 的元素添加 tooltip 事件
     document.addEventListener('mouseenter', (e) => {
       const target = e.target.closest('[data-tooltip]');
       if (target) {
+        currentTooltipTarget = target;
         const text = target.getAttribute('data-tooltip');
         if (text) {
           globalTooltip.textContent = text;
@@ -1714,15 +1733,57 @@ document.addEventListener('DOMContentLoaded', () => {
     }, true);
 
     document.addEventListener('mousemove', (e) => {
-      if (globalTooltip.style.display === 'block') {
-        globalTooltip.style.left = (e.clientX) + 'px';
-        globalTooltip.style.top = (e.clientY + 22) + 'px';
+      if (globalTooltip.style.display === 'block' && currentTooltipTarget) {
+        const tooltipWidth = globalTooltip.offsetWidth;
+        const pageWidth = window.innerWidth;
+
+        // 判断元素位置类别，决定 tooltip 对齐方式
+        const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
+                                currentTooltipTarget.closest('#szModeGroup');
+        const isAddressInput = currentTooltipTarget.id === 'addressInput';
+        const isRightSideButton = currentTooltipTarget.classList.contains('open-btn') ||
+                                  currentTooltipTarget.classList.contains('save-button') ||
+                                  currentTooltipTarget.classList.contains('cancel-button') ||
+                                  (currentTooltipTarget.classList.contains('scm-btn') &&
+                                   currentTooltipTarget.closest('#sortByGroup'));
+
+        // 垂直位置：下方或上方
+        if (currentTooltipTarget.classList.contains('save-button') ||
+            currentTooltipTarget.classList.contains('cancel-button')) {
+          globalTooltip.style.top = (e.clientY - 44) + 'px';
+        } else {
+          globalTooltip.style.top = (e.clientY + 22) + 'px';
+        }
+
+        // 水平位置对齐
+        let leftPos;
+        if (isLeftScmButton || isAddressInput) {
+          // 左边界对齐：光标位置 -11px
+          leftPos = e.clientX - 11;
+        } else if (isRightSideButton) {
+          // 右边界对齐：光标位置 - tooltip宽度 + 11px
+          leftPos = e.clientX - tooltipWidth + 11;
+        } else {
+          // 默认居中
+          leftPos = e.clientX - tooltipWidth / 2;
+        }
+
+        // 边界保护
+        if (leftPos + tooltipWidth > pageWidth - 10) {
+          leftPos = pageWidth - tooltipWidth - 10;
+        }
+        if (leftPos < 10) {
+          leftPos = 10;
+        }
+
+        globalTooltip.style.left = leftPos + 'px';
       }
     }, true);
 
     document.addEventListener('mouseleave', (e) => {
       const target = e.target.closest('[data-tooltip]');
       if (target) {
+        currentTooltipTarget = null;
         globalTooltip.style.display = 'none';
       }
     }, true);
@@ -1738,14 +1799,68 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ★ 地址栏逻辑（带历史下拉框）
   const addressInput = document.getElementById('addressInput');
-  if (addressInput) {
-    // ★ 初始化逐字撤销/重做功能
+  const addressHistoryDropdown = document.getElementById('addressHistoryDropdown');
+  if (addressInput && addressHistoryDropdown) {
     initInputUndoRedo(addressInput);
-    addressInput.addEventListener('input', (e) => updateAddressDisplay(e.target.value));
+    addressInput.addEventListener('input', (e) => {
+      updateAddressDisplay(e.target.value);
+      // 动态更新 tooltip 为当前地址
+      addressInput.setAttribute('data-tooltip', e.target.value || '');
+    });
+    // 初始设置 tooltip
+    addressInput.setAttribute('data-tooltip', addressInput.value || '');
+
+    // 显示/隐藏下拉框
+    function toggleAddressDropdown(show) {
+      if (show && addressInput.value.trim() === '') {
+        vscode.postMessage({ command: 'getHistory', key: 'address' });
+      } else {
+        hideAllDropdowns();
+      }
+    }
+
+    addressInput.addEventListener('focus', () => {
+      toggleAddressDropdown(true);
+    });
+
+    addressInput.addEventListener('blur', (e) => {
+      const relatedTarget = e.relatedTarget;
+      const isDropdownElement = relatedTarget && addressHistoryDropdown.contains(relatedTarget);
+      if (!isDropdownElement) {
+        hideAllDropdowns();
+      }
+    });
+
+    addressHistoryDropdown.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
+
     addressInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
-        const p = (addressInput.value || '').trim();
+        const p = addressInput.value.trim();
+        if (p) {
+          vscode.postMessage({ command: 'navigate', path: p });
+          vscode.postMessage({ command: 'saveHistory', key: 'address', value: p });
+        }
+        hideAllDropdowns();
+      } else if (e.key === 'Escape') {
+        hideAllDropdowns();
+      } else if (e.key === ' ') {
+        // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
+        hideAllDropdowns();
+      }
+    });
+
+    // 点击下拉框 item
+    addressHistoryDropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('.history-dropdown-item');
+      if (item) {
+        addressInput.value = item.textContent;
+        hideAllDropdowns();
+        addressInput.focus();
+        const p = addressInput.value.trim();
         if (p) vscode.postMessage({ command: 'navigate', path: p });
       }
     });
@@ -1816,6 +1931,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 hideAllDropdowns();
             } else if (e.key === 'Escape') {
+                hideAllDropdowns();
+            } else if (e.key === ' ') {
+                // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
                 hideAllDropdowns();
             }
         });
