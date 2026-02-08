@@ -728,6 +728,8 @@ function hideAllDropdowns() {
 
 function showHistoryDropdown(inputEl, dropdownEl, history) {
     hideAllDropdowns();
+    // ★ 加固：只有当输入框持有焦点时才弹出下拉框
+    if (document.activeElement !== inputEl) return;
     if (!history || history.length === 0) return;
     dropdownEl.innerHTML = '';
     history.forEach(itemText => {
@@ -1419,6 +1421,19 @@ window.addEventListener('message', event => {
         return;
     }
 
+    // ★ 地址栏导航成功后：保存历史并失去焦点
+    if (message.command === 'navigateSuccess') {
+        const addr = document.getElementById('addressInput');
+        if (message.path) {
+            vscode.postMessage({ command: 'saveHistory', key: 'address', value: message.path });
+        }
+        if (addr) {
+            addr.blur();
+        }
+        hideAllDropdowns();
+        return;
+    }
+
   if (message.command === 'update') {
       const newSizeMode = message.sizeMode || 'nothing';
       const isModeChanged = newSizeMode !== currentSizeMode;
@@ -1896,7 +1911,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = addressInput.value.trim();
         if (p) {
           vscode.postMessage({ command: 'navigate', path: p });
-          vscode.postMessage({ command: 'saveHistory', key: 'address', value: p });
+          // ★ 不在这里保存历史，等待后端 navigateSuccess 消息
         }
         hideAllDropdowns();
       } else if (e.key === 'Escape') {
@@ -1981,6 +1996,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     vscode.postMessage({ command: 'saveHistory', key: 'fileFilter', value: value });
                 }
                 hideAllDropdowns();
+                fileFilterInput.blur(); // ★ 回车保存后失去焦点
             } else if (e.key === 'Escape') {
                 hideAllDropdowns();
             }
@@ -3060,6 +3076,10 @@ function showSaveAsDialog() {
           if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
             currentPath = newPath;
             refreshWebview();
+            // ★ 导航成功后发送成功消息，前端可以据此保存历史并 blur
+            if (panel && activePanelAlive) {
+              panel.webview.postMessage({ command: 'navigateSuccess', path: message.path });
+            }
           } else {
             global.showErrorMessage("无效的目录路径: " + newPath);
           }

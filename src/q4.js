@@ -2039,6 +2039,10 @@ class ClipboardHistorySidebarProvider {
 
             function showHistoryDropdown(inputEl, dropdownEl, history) {
                 hideAllDropdowns();
+                // ★ 加固：只有当输入框持有焦点时才弹出下拉框
+                if (document.activeElement !== inputEl) {
+                    return;
+                }
                 if (!history || history.length === 0) {
                     return;
                 }
@@ -2102,6 +2106,7 @@ class ClipboardHistorySidebarProvider {
                         post('saveHistory', { key: 'search', value: val });
                     }
                     hideAllDropdowns();
+                    el.searchBox.blur(); // ★ 回车后失去焦点
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
                 }
@@ -2305,6 +2310,7 @@ class ClipboardHistorySidebarProvider {
                     if (isValidUrl(val)) {
                         post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
                         post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
+                        el.videoInput.blur(); // ★ 成功提交后先失去焦点
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
                     hideAllDropdowns();
@@ -2319,6 +2325,7 @@ class ClipboardHistorySidebarProvider {
                 if (isValidUrl(val)) {
                     post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
                     post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
+                    el.videoInput.blur(); // ★ 成功提交后先失去焦点
                     el.videoInput.value = '';
                 } else if (val) { showErrorTip(); }
             };
