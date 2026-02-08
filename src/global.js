@@ -1343,8 +1343,8 @@ async function checkAndInstallLinuxDeps() {
  * 多个 IDE 实例各自独立运行自己的 daemon，清理会误杀别人的进程
  *
  * 僵尸进程由各自 daemon 的 watchdog 机制处理：
- * - Python: 父进程死亡检测 + stdin EOF 退出
- * - Rust: stdin EOF 退出（待部署时加 watchdog）
+ * - Python: watchdog (6s) + stdin EOF 退出
+ * - Rust: watchdog (6s) + stdin EOF 退出
  * - Shell: stdin 关闭时自动退出
  */
 async function cleanupGhostDaemons() {
