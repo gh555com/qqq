@@ -1582,6 +1582,30 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
 fn daemon_mode() {
     eprintln!("Daemon started (multi-threaded). PID={}", process::id());
 
+    // ★ 工业级修复：父进程监控 watchdog
+    // 当父进程（VS Code）崩溃时，自动退出避免成为僵尸进程
+    if let Ok(ppid_str) = std::env::var("Q_PARENT_PID") {
+        if let Ok(ppid) = ppid_str.parse::<u32>() {
+            thread::spawn(move || {
+                use windows_sys::Win32::Foundation::CloseHandle;
+                use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+                loop {
+                    thread::sleep(Duration::from_secs(6));
+                    unsafe {
+                        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, ppid);
+                        if handle == 0 {
+                            eprintln!("Parent process {} died, exiting...", ppid);
+                            process::exit(0);
+                        }
+                        CloseHandle(handle);
+                    }
+                }
+            });
+            eprintln!("Watchdog started, monitoring parent PID={}", ppid);
+        }
+    }
+
     // 结果输出通道
     let (result_tx, result_rx) = mpsc::channel::<(String, bool)>();
 

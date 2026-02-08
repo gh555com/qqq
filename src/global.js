@@ -622,6 +622,8 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 				const proc = cp.spawn(exePath, ["--daemon"], {
 					stdio: ["pipe", "pipe", "pipe"],
 					windowsHide: true,
+					// ★ 工业级修复：传入父进程 PID，供 daemon watchdog 检测父进程死亡
+					env: { ...process.env, Q_PARENT_PID: String(process.pid) }
 				});
 
 				proc.once("error", (err) => {
@@ -1334,41 +1336,19 @@ async function checkAndInstallLinuxDeps() {
 }
 
 /**
- * ★ 幽灵进程肃清协议 (Ghost Process Purgatory)
- * 在插件启动初始化时执行，确保环境中没有旧版本的守护进程残留。
+ * ★ 幽灵进程肃清协议 - 已禁用
+ *
+ * 多实例修复：不再清理任何 daemon 进程
+ * 因为所有 daemon（Python/Rust/Shell）都使用 stdin/stdout 通信
+ * 多个 IDE 实例各自独立运行自己的 daemon，清理会误杀别人的进程
+ *
+ * 僵尸进程由各自 daemon 的 watchdog 机制处理：
+ * - Python: 父进程死亡检测 + stdin EOF 退出
+ * - Rust: stdin EOF 退出（待部署时加 watchdog）
+ * - Shell: stdin 关闭时自动退出
  */
 async function cleanupGhostDaemons() {
-	const isWin = process.platform === "win32";
-
-	// ★ 多实例修复：不再清理 Python/Shell daemon
-	// 因为多个 IDE 实例各自独立运行自己的 daemon，清理会误杀别人的进程
-	// 只保留 Rust daemon 清理，因为 Rust 使用独占端口，同一机器只能有一个
-
-	// 定义清理目标 (Rust 引擎所有可能的平台二进制名)
-	const rustBins = [
-		"q_engine_win_x64.exe", "q_engine_win_arm64.exe",
-		"q_engine_linux_x64", "q_engine_linux_arm64",
-		"q_engine_mac_x64", "q_engine_mac_arm64",
-		"q_win_x64.exe", "q_win_arm64.exe", "q_win_x86.exe",
-		"q_mac_arm64", "q_mac_x64",
-		"q_linux_arm64", "q_linux_x64"
-	];
-
-	try {
-		if (isWin) {
-			// 只清理 Rust 引擎残留
-			for (const bin of rustBins) {
-				if (bin.endsWith(".exe")) {
-					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
-				}
-			}
-		} else {
-			// Linux/macOS: 只清理 Rust 引擎
-			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
-			try { cp.execSync(`pkill -9 -f "q_mac_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
-			try { cp.execSync(`pkill -9 -f "q_linux_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
-		}
-	} catch (e) { }
+	// 空操作：不再清理任何进程
 }
 
 async function startDaemons() {

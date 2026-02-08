@@ -1528,6 +1528,35 @@ def daemon_mode():
     sys.stderr.write(f"Daemon started (multithreaded). PID={os.getpid()}\n")
     sys.stderr.flush()
 
+    # ★ 工业级修复：父进程监控 watchdog
+    # 当父进程（VS Code）崩溃时，自动退出避免成为僵尸进程
+    parent_pid = os.getppid()
+    def parent_watchdog():
+        while True:
+            time.sleep(6)
+            try:
+                # 检查父进程是否存在（信号0只检查，不杀死）
+                if platform.system() == "Windows":
+                    import ctypes
+                    kernel32 = ctypes.windll.kernel32
+                    handle = kernel32.OpenProcess(0x1000, False, parent_pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+                    if handle == 0:
+                        sys.stderr.write(f"Parent process {parent_pid} died, exiting...\n")
+                        sys.stderr.flush()
+                        os._exit(0)
+                    kernel32.CloseHandle(handle)
+                else:
+                    os.kill(parent_pid, 0)
+            except OSError:
+                sys.stderr.write(f"Parent process {parent_pid} died, exiting...\n")
+                sys.stderr.flush()
+                os._exit(0)
+            except:
+                pass
+
+    watchdog_thread = threading.Thread(target=parent_watchdog, daemon=True)
+    watchdog_thread.start()
+
     # 结果队列：线程安全
     result_queue = queue.Queue()
 
@@ -1564,9 +1593,10 @@ def daemon_mode():
         try:
             line_bytes = sys.stdin.buffer.readline()
             if not line_bytes:
-                sys.stderr.write("Daemon stdin EOF.\n")
-                time.sleep(1)
-                continue
+                # ★ 工业级修复：stdin EOF 表示父进程关闭，立即退出
+                sys.stderr.write("Daemon stdin EOF, exiting...\n")
+                sys.stderr.flush()
+                break
 
             line = line_bytes.decode('utf-8', errors='ignore').strip()
             if not line:

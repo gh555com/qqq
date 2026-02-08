@@ -1475,6 +1475,26 @@ fn dispatch_action_with_cancel(cmd_v: &Value, cancel_version: Option<u64>) -> (P
 fn daemon_mode() {
     eprintln!("Daemon started (multi-threaded). PID={}", process::id());
 
+    // ★ 工业级修复：父进程监控 watchdog
+    // 当父进程（VS Code）崩溃时，自动退出避免成为僵尸进程
+    if let Ok(ppid_str) = std::env::var("Q_PARENT_PID") {
+        if let Ok(ppid) = ppid_str.parse::<i32>() {
+            thread::spawn(move || {
+                loop {
+                    thread::sleep(Duration::from_secs(6));
+                    // 使用 kill(pid, 0) 检查进程是否存在
+                    unsafe {
+                        if libc::kill(ppid, 0) != 0 {
+                            eprintln!("Parent process {} died, exiting...", ppid);
+                            process::exit(0);
+                        }
+                    }
+                }
+            });
+            eprintln!("Watchdog started, monitoring parent PID={}", ppid);
+        }
+    }
+
     // 结果输出通道
     let (result_tx, result_rx) = mpsc::channel::<(String, bool)>();
 
