@@ -871,7 +871,7 @@
 <body>
 	<div class="container">
 		<div class="sidebar">
-			<div class="sidebar-header" onclick="cancel()" title="关闭当前面板">
+			<div class="sidebar-header" onclick="cancel()" data-tooltip="关闭当前面板">
 				<span class="close-icon">✕</span>
 			</div>
 			{{DRIVES_HTML}}
@@ -892,19 +892,19 @@
 				<div class="address-bar-wrapper">
 					<!-- 左侧 SCM: sz 区显示模式 -->
 					<div class="scm-btn-group" id="szModeGroup">
-						<button class="scm-btn" data-mode="size" title="sz区显示: 文件大小">
+						<button class="scm-btn" data-mode="size" data-tooltip="sz区显示: 文件大小">
 							S
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-mode="ctime" title="sz区显示: 创建时间">
+						<button class="scm-btn" data-mode="ctime" data-tooltip="sz区显示: 创建时间">
 							C
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-mode="mtime" title="sz区显示: 修改时间">
+						<button class="scm-btn" data-mode="mtime" data-tooltip="sz区显示: 修改时间">
 							M
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -925,21 +925,21 @@
 					</div>
 
 					<!-- 右侧: open 按钮 + SCM 排序模式 -->
-					<button class="open-btn" id="openFolderBtn" title="在资源管理器中打开当前文件夹">open</button>
+					<button class="open-btn" id="openFolderBtn" data-tooltip="在资源管理器中打开当前文件夹">open</button>
 					<div class="scm-btn-group" id="sortByGroup">
-						<button class="scm-btn" data-sort="size" title="排序: 按文件大小">
+						<button class="scm-btn" data-sort="size" data-tooltip="排序: 按文件大小">
 							S
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-sort="ctime" title="排序: 按创建时间">
+						<button class="scm-btn" data-sort="ctime" data-tooltip="排序: 按创建时间">
 							C
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-sort="mtime" title="排序: 按修改时间">
+						<button class="scm-btn" data-sort="mtime" data-tooltip="排序: 按修改时间">
 							M
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -963,13 +963,13 @@
 					<input type="text" id="filenameInput" class="filename-input">
 				</div>
 				<div style="display: flex; gap: 15px;">
-					<button class="button save-button" onclick="saveFile()" title="新建文件">
+					<button class="button save-button" onclick="saveFile()" data-tooltip="新建文件">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="#eee8d5">
 							<path
 								d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
 						</svg>
 					</button>
-					<button class="button cancel-button" onclick="createFolder()" title="新建文件夹">
+					<button class="button cancel-button" onclick="createFolder()" data-tooltip="新建文件夹">
 						<svg width="20" height="20" viewBox="0 24 24" fill="#7a7874">
 							<path
 								d="M10,4H4C2.89,4 2,4.89 2,6V20A2,2 0 0,0 4,22H20A2,2 0 0,0 22,20V8L16,2H10M13,9V3.5L18.5,9H13Z" />
@@ -1000,6 +1000,10 @@
 			<span class="context-menu-shortcut">= "e"</span>
 		</div>
 	</div>
+
+	<!-- 全局自定义 tooltip -->
+	<div id="globalTooltip" class="dropdown-item-tooltip"></div>
+
 	<script>
 		{{INLINE_SCRIPT}}
 	</script>

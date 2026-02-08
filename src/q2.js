@@ -1698,6 +1698,36 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
 
+  // ★ 全局自定义 tooltip 系统
+  const globalTooltip = document.getElementById('globalTooltip');
+  if (globalTooltip) {
+    // 为所有带有 data-tooltip 的元素添加 tooltip 事件
+    document.addEventListener('mouseenter', (e) => {
+      const target = e.target.closest('[data-tooltip]');
+      if (target) {
+        const text = target.getAttribute('data-tooltip');
+        if (text) {
+          globalTooltip.textContent = text;
+          globalTooltip.style.display = 'block';
+        }
+      }
+    }, true);
+
+    document.addEventListener('mousemove', (e) => {
+      if (globalTooltip.style.display === 'block') {
+        globalTooltip.style.left = (e.clientX) + 'px';
+        globalTooltip.style.top = (e.clientY + 22) + 'px';
+      }
+    }, true);
+
+    document.addEventListener('mouseleave', (e) => {
+      const target = e.target.closest('[data-tooltip]');
+      if (target) {
+        globalTooltip.style.display = 'none';
+      }
+    }, true);
+  }
+
   const filenameInput = document.getElementById('filenameInput');
   if (filenameInput) {
     filenameInput.focus();
@@ -1727,19 +1757,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fileFilterInput && fileFilterDropdown) {
         initInputUndoRedo(fileFilterInput);
 
-        // 创建 tooltip 元素
-        let dropdownTooltip = document.getElementById('dropdownItemTooltip');
-        if (!dropdownTooltip) {
-            dropdownTooltip = document.createElement('div');
-            dropdownTooltip.id = 'dropdownItemTooltip';
-            dropdownTooltip.className = 'dropdown-item-tooltip';
-            document.body.appendChild(dropdownTooltip);
-        }
-
-        // 判断文本是否被截断
-        function isTextTruncated(element) {
-            return element.scrollWidth > element.clientWidth;
-        }
+        // 使用全局 tooltip
+        const dropdownTooltip = document.getElementById('globalTooltip');
 
         // 显示/隐藏下拉框
         function toggleDropdown(show) {
@@ -1784,7 +1803,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isDropdownElement = relatedTarget && fileFilterDropdown.contains(relatedTarget);
             if (!isDropdownElement) {
                 hideAllDropdowns();
-                dropdownTooltip.style.display = 'none';
+                if (dropdownTooltip) dropdownTooltip.style.display = 'none';
             }
         });
 
@@ -1805,17 +1824,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // 为下拉框添加 tooltip 事件（事件委托）
+        // 为下拉框添加 tooltip 事件（事件委托）- 使用全局 tooltip，不判断截断
         fileFilterDropdown.addEventListener('mouseenter', (e) => {
             const item = e.target.closest('.history-dropdown-item');
-            if (item && isTextTruncated(item)) {
+            if (item && dropdownTooltip) {
                 dropdownTooltip.textContent = item.textContent;
                 dropdownTooltip.style.display = 'block';
             }
         }, true);
 
         fileFilterDropdown.addEventListener('mousemove', (e) => {
-            if (dropdownTooltip.style.display === 'block') {
+            if (dropdownTooltip && dropdownTooltip.style.display === 'block') {
                 dropdownTooltip.style.left = (e.clientX) + 'px';
                 dropdownTooltip.style.top = (e.clientY + 22) + 'px';
             }
@@ -1823,7 +1842,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fileFilterDropdown.addEventListener('mouseleave', (e) => {
             const item = e.target.closest('.history-dropdown-item');
-            if (item) {
+            if (item && dropdownTooltip) {
                 dropdownTooltip.style.display = 'none';
             }
         }, true);
