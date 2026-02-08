@@ -155,15 +155,33 @@ function getFileSizeSync(filePath) {
 
 // ==================== 尺寸格式化 ====================
 const SZ_GB_THRESHOLD = 1000000000; // 1GB
+const SZ_GB_COLOR = 'rgb(248, 48, 0)';
 
-function formatFileSize(bytes) {
-  // 只显示字节数，添加千位分隔符，纯文本，不包含 HTML
-  return bytes.toLocaleString();
+// 返回格式化结果：{ text, gbPart, restPart }
+function formatFileSizeEx(bytes) {
+  const formatted = bytes.toLocaleString();
+
+  // 检查是否超过 1GB
+  if (bytes >= SZ_GB_THRESHOLD) {
+    const parts = formatted.split(',');
+    if (parts.length >= 4) {
+      // GB 部分是前 (parts.length - 3) 个部分
+      // 例如: "14,111,222,999" -> GB部分是 "14"
+      const gbParts = parts.slice(0, parts.length - 3);
+      const restParts = parts.slice(parts.length - 3);
+      return {
+        text: formatted,
+        gbPart: gbParts.join(','),
+        restPart: ',' + restParts.join(',')
+      };
+    }
+  }
+  return { text: formatted, gbPart: '', restPart: '' };
 }
 
-// 返回是否超过 1GB
-function isLargeSize(bytes) {
-  return bytes >= SZ_GB_THRESHOLD;
+function formatFileSize(bytes) {
+  // 简单版本，只返回文本
+  return bytes.toLocaleString();
 }
 
 function formatDateTime(date) {
@@ -581,7 +599,7 @@ const vscode = acquireVsCodeApi();
 let currentPath = '${escapedCurrentPath}';
 let sidebarRatio = ${escapedSidebarRatio};
 
-let sessionSizeCache = new Map(); // path -> sizeDisplay ( sticky session cache )
+let sessionSizeCache = new Map(); // path -> { text, gbPart, restPart }
 let currentSizeMode = 'nothing'; // 当前 sz 区显示模式
 
 let resizeObserver = null;
@@ -1119,7 +1137,14 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
   if (type === 'file' && requestSize) {
     if (sessionSizeCache.has(p)) {
       const szArea = fileItem.querySelector('.sz-area');
-      if (szArea) szArea.textContent = sessionSizeCache.get(p);
+      if (szArea) {
+        const cached = sessionSizeCache.get(p);
+        if (cached.gbPart) {
+          szArea.innerHTML = '<span style="color:rgb(248,48,0)">' + cached.gbPart + '</span>' + cached.restPart + ' ';
+        } else {
+          szArea.textContent = cached.text;
+        }
+      }
       return;
     }
     const szArea = fileItem.querySelector('.sz-area');
@@ -1447,10 +1472,14 @@ window.addEventListener('message', event => {
         items.forEach(item => {
           const p = item.dataset.path;
           if (sessionSizeCache.has(p)) {
-            const cachedVal = sessionSizeCache.get(p);
+            const cached = sessionSizeCache.get(p);
             const szArea = item.querySelector('.sz-area');
             if (szArea) {
-              szArea.textContent = cachedVal;
+              if (cached.gbPart) {
+                szArea.innerHTML = '<span style="color:rgb(248,48,0)">' + cached.gbPart + '</span>' + cached.restPart + ' ';
+              } else {
+                szArea.textContent = cached.text;
+              }
             }
           }
         });
@@ -1464,19 +1493,22 @@ window.addEventListener('message', event => {
       (message.results || []).forEach(res => {
         // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
         if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
-          sessionSizeCache.set(res.path, res.sizeDisplay);
+          sessionSizeCache.set(res.path, {
+            text: res.sizeDisplay,
+            gbPart: res.gbPart || '',
+            restPart: res.restPart || ''
+          });
         }
 
         const el = findItemElementByPath(res.path, res.type);
         if (el) {
           const sz = el.querySelector('.sz-area');
           if (sz) {
-            sz.textContent = res.sizeDisplay || '';
-            // 超过 1GB 时添加红色 class
-            if (res.bytes >= 1000000000) {
-              sz.classList.add('sz-large');
+            // 如果有 GB 部分，用 innerHTML 显示红色
+            if (res.gbPart) {
+              sz.innerHTML = '<span style="color:rgb(248,48,0)">' + res.gbPart + '</span>' + res.restPart + ' ';
             } else {
-              sz.classList.remove('sz-large');
+              sz.textContent = res.sizeDisplay || '';
             }
           }
         }
@@ -1732,7 +1764,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('mousemove', (e) => {
       if (globalTooltip.style.display === 'block' && currentTooltipTarget) {
         const pageWidth = window.innerWidth;
-        const padding = 10; // 边界留白
+        const leftPadding = 10; // 左边界留白
+        const rightPadding = 0; // 右边界不留白，可以延伸到滚动条区域
 
         // 先重置 max-width 让 tooltip 自然展开，获取实际宽度
         globalTooltip.style.maxWidth = '';
@@ -1742,13 +1775,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
                                 currentTooltipTarget.closest('#szModeGroup');
         const isAddressInput = currentTooltipTarget.id === 'addressInput';
-        const isRightSideButton = currentTooltipTarget.classList.contains('open-btn') ||
-                                  currentTooltipTarget.classList.contains('save-button') ||
+        const isOpenButton = currentTooltipTarget.classList.contains('open-btn');
+        const isRightSideButton = currentTooltipTarget.classList.contains('save-button') ||
                                   currentTooltipTarget.classList.contains('cancel-button') ||
                                   (currentTooltipTarget.classList.contains('scm-btn') &&
                                    currentTooltipTarget.closest('#sortByGroup'));
 
-        // 垂直位置：下方或上方
+        // 垂直位置
         if (currentTooltipTarget.classList.contains('save-button') ||
             currentTooltipTarget.classList.contains('cancel-button')) {
           globalTooltip.style.top = (e.clientY - 44) + 'px';
@@ -1756,50 +1789,46 @@ document.addEventListener('DOMContentLoaded', () => {
           globalTooltip.style.top = (e.clientY + 22) + 'px';
         }
 
-        // 计算可用空间
+        // 计算初始位置
         let leftPos;
-        let availableWidth;
-
-        if (isLeftScmButton || isAddressInput) {
-          // 左边界对齐：光标位置 -11px
+        if (isLeftScmButton || isOpenButton) {
           leftPos = e.clientX - 11;
-          availableWidth = pageWidth - leftPos - padding;
         } else if (isRightSideButton) {
-          // 右边界对齐：光标位置 - tooltip宽度 + 11px
           leftPos = e.clientX - naturalWidth + 11;
-          availableWidth = e.clientX + 11 - padding;
         } else {
-          // 默认居中
+          // 默认/地址框：居中
           leftPos = e.clientX - naturalWidth / 2;
-          // 居中时，可用空间是左右两侧较小的那个的两倍
-          const spaceLeft = e.clientX - padding;
-          const spaceRight = pageWidth - e.clientX - padding;
-          availableWidth = Math.min(spaceLeft, spaceRight) * 2;
         }
 
-        // 如果自然宽度超过可用空间，设置 max-width 并让文字换行
-        if (naturalWidth > availableWidth && availableWidth > 50) {
-          globalTooltip.style.maxWidth = availableWidth + 'px';
+        // 检查边界
+        const overflowLeft = leftPos < leftPadding;
+        const overflowRight = leftPos + naturalWidth > pageWidth - rightPadding;
+
+        // 只有左右两边都被截断时才自动换行
+        if (overflowLeft && overflowRight) {
+          // 两边都超出，设置 max-width 并换行
+          const availableWidth = pageWidth - leftPadding - rightPadding;
+          if (availableWidth > 50) {
+            globalTooltip.style.maxWidth = availableWidth + 'px';
+            leftPos = leftPadding;
+          }
+        } else if (overflowLeft) {
+          // 只有左边超出，向右延长
+          leftPos = leftPadding;
+        } else if (overflowRight) {
+          // 只有右边超出，向左延长
+          leftPos = pageWidth - naturalWidth - rightPadding;
         }
 
         // 重新获取宽度（可能已经换行）
         const tooltipWidth = globalTooltip.offsetWidth;
 
-        // 重新计算 leftPos
-        if (isLeftScmButton || isAddressInput) {
-          leftPos = e.clientX - 11;
-        } else if (isRightSideButton) {
-          leftPos = e.clientX - tooltipWidth + 11;
-        } else {
-          leftPos = e.clientX - tooltipWidth / 2;
+        // 最终边界保护
+        if (leftPos + tooltipWidth > pageWidth - rightPadding) {
+          leftPos = pageWidth - tooltipWidth - rightPadding;
         }
-
-        // 边界保护
-        if (leftPos + tooltipWidth > pageWidth - padding) {
-          leftPos = pageWidth - tooltipWidth - padding;
-        }
-        if (leftPos < padding) {
-          leftPos = padding;
+        if (leftPos < leftPadding) {
+          leftPos = leftPadding;
         }
 
         globalTooltip.style.left = leftPos + 'px';
@@ -2655,7 +2684,13 @@ function showSaveAsDialog() {
         if (szDisplayMode === "size") {
           // size 模式：只显示文件大小，文件夹不参与
           if (isFolder) return "";
-          return formatFileSize(item.size || 0) + " ";
+          const bytes = item.size || 0;
+          const sizeInfo = formatFileSizeEx(bytes);
+          // 如果有 GB 部分，返回带红色的 HTML
+          if (sizeInfo.gbPart) {
+            return '<span style="color:' + SZ_GB_COLOR + '">' + sizeInfo.gbPart + '</span>' + sizeInfo.restPart + ' ';
+          }
+          return sizeInfo.text + " ";
         } else if (szDisplayMode === "ctime") {
           return formatDateTime(item.ctime) + " ";
         } else if (szDisplayMode === "mtime") {
@@ -2918,13 +2953,15 @@ function showSaveAsDialog() {
             if (!panel || !activePanelAlive) return;
 
             // 单个结果立即发送渲染
+            const sizeInfo = formatFileSizeEx(size);
             panel.webview.postMessage({
               command: "updateSizeBatch",
               results: [{
                 path: canonicalizeExistingPath(item.path),
                 type: item.type,
-                sizeDisplay: formatFileSize(size) + " ",
-                bytes: size  // 用于前端判断是否超过 1GB
+                sizeDisplay: sizeInfo.text + " ",
+                gbPart: sizeInfo.gbPart,
+                restPart: sizeInfo.restPart
               }]
             });
           });

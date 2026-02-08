@@ -466,11 +466,6 @@
 			-ms-user-select: none;
 		}
 
-		/* 超过 1GB 时显示红色 */
-		.sz-area.sz-large {
-			color: rgb(248, 48, 0);
-		}
-
 		.file-select-area {
 			display: flex;
 			align-items: center;
@@ -877,7 +872,7 @@
 <body>
 	<div class="container">
 		<div class="sidebar">
-			<div class="sidebar-header" onclick="cancel()" data-tooltip="关闭当前面板">
+			<div class="sidebar-header" onclick="cancel()">
 				<span class="close-icon">✕</span>
 			</div>
 			{{DRIVES_HTML}}
