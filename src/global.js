@@ -403,13 +403,9 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 		const spawnWith = (bin) => {
 			return new Promise(async (res) => {
-				// ★ 关键：单例检查，防止重复启动
-				const isRunning = await checkDaemonRunning('python.exe', 'kp.py --daemon');
-				if (isRunning) {
-					logMessage(`[Python] 检测到 kp.py daemon 已在运行，跳过启动`, "WARN");
-					res(false);
-					return;
-				}
+				// ★ 多实例修复：移除系统级单例检查
+				// 每个 IDE 实例独立运行自己的 daemon，不会被别的 IDE 干扰
+				// 实例级检查（this.process/isStarting）已足够防止同一 IDE 重复启动
 
 				let proc;
 				try {
@@ -612,15 +608,9 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			return;
 		}
 
-		// ★ 关键：单例检查，防止重复启动
+		// ★ 多实例修复：移除系统级单例检查
+		// 每个 IDE 实例独立运行自己的 daemon，不会被别的 IDE 干扰
 		(async () => {
-			const isRunning = await checkDaemonRunning(filename, '--daemon');
-			if (isRunning) {
-				logMessage(`[Rust] 检测到 ${filename} daemon 已在运行，跳过启动`, "WARN");
-				resolve(false);
-				return;
-			}
-
 			try {
 				logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
 				if (!fs.existsSync(exePath)) {
@@ -1350,94 +1340,35 @@ async function checkAndInstallLinuxDeps() {
 async function cleanupGhostDaemons() {
 	const isWin = process.platform === "win32";
 
-	// 1. 定义清理目标 (Rust 引擎所有可能的平台二进制名)
+	// ★ 多实例修复：不再清理 Python/Shell daemon
+	// 因为多个 IDE 实例各自独立运行自己的 daemon，清理会误杀别人的进程
+	// 只保留 Rust daemon 清理，因为 Rust 使用独占端口，同一机器只能有一个
+
+	// 定义清理目标 (Rust 引擎所有可能的平台二进制名)
 	const rustBins = [
 		"q_engine_win_x64.exe", "q_engine_win_arm64.exe",
 		"q_engine_linux_x64", "q_engine_linux_arm64",
 		"q_engine_mac_x64", "q_engine_mac_arm64",
-		"q_win_x64.exe", "q_win_arm64.exe", "q_win_x86.exe",  // ★ 新加
+		"q_win_x64.exe", "q_win_arm64.exe", "q_win_x86.exe",
 		"q_mac_arm64", "q_mac_x64",
 		"q_linux_arm64", "q_linux_x64"
 	];
 
 	try {
 		if (isWin) {
-			// Windows: 使用 PowerShell 精准匹配命令行中的 kp.py，避免误杀用户其他 Python 任务
-			// ★ 关键修复：使用 spawnSync 直接传参，绕过 cmd.exe 转义
-			const pyKill = `Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'python3.exe'" | Where-Object { $_.CommandLine -like '*kp.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-			try {
-				cp.spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', pyKill], {
-					timeout: 5000, windowsHide: true
-				});
-			} catch (e) { }
-
-			// 清理 Rust 引擎残留
+			// 只清理 Rust 引擎残留
 			for (const bin of rustBins) {
 				if (bin.endsWith(".exe")) {
 					try { cp.execSync(`taskkill /F /IM "${bin}" /T`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 				}
 			}
-
-			// ★ 清理 PowerShell daemon 残留
-			const psKill = `Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object { $_.CommandLine -like '*--daemon*' -and $_.CommandLine -like '*UTF8*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-			try {
-				cp.spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psKill], {
-					timeout: 5000, windowsHide: true
-				});
-			} catch (e) { }
 		} else {
-			// Linux/macOS: 使用 pkill -f 匹配全路径/全命令行
-			try { cp.execSync(`pkill -9 -f "kp.py"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
+			// Linux/macOS: 只清理 Rust 引擎
 			try { cp.execSync(`pkill -9 -f "q_engine_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 			try { cp.execSync(`pkill -9 -f "q_mac_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 			try { cp.execSync(`pkill -9 -f "q_linux_"`, { stdio: 'ignore', timeout: 3000 }); } catch (e) { }
 		}
 	} catch (e) { }
-}
-
-/**
- * ★ 检查单个 daemon 是否已在运行（单例检查）
- * @param {string} processName - 进程名或关键字
- * @param {string} [commandLinePattern] - 命令行匹配模式
- * @returns {Promise<boolean>} - 如果已在运行返回 true
- */
-async function checkDaemonRunning(processName, commandLinePattern = null) {
-	const isWin = process.platform === "win32";
-
-	try {
-		if (isWin) {
-			let psScript;
-			if (commandLinePattern) {
-				// ★ 使用单引号包裹 Filter 参数，避免 cmd.exe 转义问题
-				psScript = `Get-CimInstance Win32_Process -Filter "Name = '${processName}'" | Where-Object { $_.CommandLine -like '*${commandLinePattern}*' } | Measure-Object | Select-Object -ExpandProperty Count`;
-			} else {
-				psScript = `Get-CimInstance Win32_Process -Filter "Name = '${processName}'" | Measure-Object | Select-Object -ExpandProperty Count`;
-			}
-
-			// ★ 关键修复：使用 spawnSync 直接传参，绕过 cmd.exe 转义
-			const result = cp.spawnSync('powershell', [
-				'-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript
-			], {
-				encoding: 'utf8',
-				timeout: 3000,
-				windowsHide: true
-			});
-
-			const count = parseInt(result.stdout?.trim()) || 0;
-			return count > 0;
-		} else {
-			const pattern = commandLinePattern || processName;
-			const result = cp.execSync(`pgrep -f "${pattern}" | wc -l`, {
-				encoding: 'utf8',
-				timeout: 3000
-			}).trim();
-
-			const count = parseInt(result) || 0;
-			return count > 0;
-		}
-	} catch (e) {
-		return false;
-	}
 }
 
 async function startDaemons() {
