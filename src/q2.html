@@ -388,17 +388,13 @@
 			position: relative;
 		}
 
-		.file-list-container::-webkit-scrollbar {
-			display: none;
-		}
-
 		/* 自定义滚动条 - 与 q4 外层滚动条样式完全一致 */
 		.custom-scrollbar-outer {
 			position: absolute;
 			right: 0;
-			top: 0;
+			top: 51px;
 			width: 6px;
-			height: 100%;
+			bottom: 0;
 			z-index: 1000;
 			pointer-events: none;
 		}
@@ -424,24 +420,6 @@
 		::selection {
 			background: rgb(255, 211, 2) !important;
 			color: black !important;
-		}
-
-		.ky-content::-webkit-scrollbar {
-			width: 10px;
-			height: 10px;
-		}
-
-		.ky-content::-webkit-scrollbar-track {
-			background: var(--bg-highlight);
-		}
-
-		.ky-content::-webkit-scrollbar-thumb {
-			background: var(--red);
-			border-radius: 5px;
-		}
-
-		.ky-content::-webkit-scrollbar-thumb:hover {
-			background: #ff4444;
 		}
 
 		.file-item {
