@@ -379,13 +379,46 @@
 
 		.file-list-container {
 			flex: 1;
-			overflow: visible;
+			overflow: auto;
 			overflow-x: hidden;
 			padding: 0 0 24px 0;
-			scrollbar-width: thin;
-			scrollbar-color: var(--base1) var(--base2);
+			scrollbar-width: none;
 			margin: 0;
 			min-height: 0;
+			position: relative;
+		}
+
+		.file-list-container::-webkit-scrollbar {
+			display: none;
+		}
+
+		/* 自定义滚动条 - 与 q4 外层滚动条样式完全一致 */
+		.custom-scrollbar-outer {
+			position: absolute;
+			right: 0;
+			top: 0;
+			width: 6px;
+			height: 100%;
+			z-index: 1000;
+			pointer-events: none;
+		}
+
+		.custom-scrollbar-thumb {
+			position: absolute;
+			right: 1px;
+			width: 4px;
+			background: #000 !important;
+			border-radius: 3px;
+			opacity: 1;
+			cursor: pointer;
+			pointer-events: auto;
+			forced-color-adjust: none !important;
+			transition: width 0.1s ease, right 0.1s ease;
+		}
+
+		.custom-scrollbar-thumb:hover {
+			width: 6px;
+			right: 0;
 		}
 
 		::selection {
@@ -403,12 +436,12 @@
 		}
 
 		.ky-content::-webkit-scrollbar-thumb {
-			background: var(--base1);
+			background: var(--red);
 			border-radius: 5px;
 		}
 
 		.ky-content::-webkit-scrollbar-thumb:hover {
-			background: var(--base00);
+			background: #ff4444;
 		}
 
 		.file-item {
@@ -954,6 +987,7 @@
 
 			<div class="file-list-container" id="fileList" style="margin: 0;">
 			</div>
+			<div class="custom-scrollbar-outer" id="customScrollbar"><div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div></div>
 
 			<div class="footer">
 				<div id="pinButton" class="pin-container" onclick="togglePin()">

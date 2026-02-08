@@ -2317,6 +2317,57 @@ window.cancel = cancel;
 window.saveFile = saveFile;
 window.createFolder = createFolder;
 window.togglePin = togglePin;
+
+// ====== 自定义滚动条（与 q4 外层滚动条完全一致）======
+function setupCustomScrollbar() {
+  const container = document.getElementById('fileList');
+  const scrollbar = document.getElementById('customScrollbar');
+  const thumb = document.getElementById('customScrollbarThumb');
+  if (!container || !scrollbar || !thumb) return;
+
+  function update() {
+    const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+    if (sh > ch) {
+      scrollbar.style.display = 'block';
+      const th = Math.max(20, (ch / sh) * ch);
+      thumb.style.height = th + 'px';
+      thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
+    } else {
+      scrollbar.style.display = 'none';
+    }
+  }
+
+  container.addEventListener('scroll', update);
+
+  let isDragging = false, startY, startST;
+  thumb.onmousedown = function(e) {
+    isDragging = true;
+    startY = e.clientY;
+    startST = container.scrollTop;
+    document.onmousemove = function(e) {
+      if (!isDragging) return;
+      const dy = e.clientY - startY;
+      const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
+      container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
+    };
+    document.onmouseup = function() {
+      isDragging = false;
+      document.onmousemove = null;
+    };
+    e.preventDefault();
+  };
+
+  // 初始更新
+  update();
+  // 窗口大小改变时更新
+  window.addEventListener('resize', update);
+  // 内容变化时更新（使用 MutationObserver）
+  const observer = new MutationObserver(update);
+  observer.observe(container, { childList: true, subtree: true });
+}
+
+// 初始化滚动条
+setTimeout(setupCustomScrollbar, 100);
 `;
 }
 
