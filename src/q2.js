@@ -1815,7 +1815,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // 判断元素位置类别，决定 tooltip 对齐方式
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
                                 currentTooltipTarget.closest('#szModeGroup');
-        const isAddressInput = currentTooltipTarget.id === 'addressInput';
         const isOpenButton = currentTooltipTarget.classList.contains('open-btn');
         const isRightSideButton = currentTooltipTarget.classList.contains('save-button') ||
                                   currentTooltipTarget.classList.contains('cancel-button') ||
