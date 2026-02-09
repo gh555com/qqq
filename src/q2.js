@@ -2458,6 +2458,20 @@ function setupCustomScrollbar() {
   const observer = new MutationObserver(update);
   observer.observe(container, { childList: true, subtree: true });
 
+  // 滚动防抖：快速滚动时禁用 hover 效果，消除残影
+  let scrollTimer = null;
+  container.addEventListener('scroll', function() {
+    if (!container.classList.contains('scrolling')) {
+      container.style.pointerEvents = 'none';
+      container.classList.add('scrolling');
+    }
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(function() {
+      container.style.pointerEvents = '';
+      container.classList.remove('scrolling');
+    }, 80);
+  });
+
   // 按 1 滚到顶部，按 2 滚到底部（编辑状态下不监听）
   document.addEventListener('keydown', function(e) {
     if (isInputFocused()) return;
