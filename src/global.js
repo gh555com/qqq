@@ -1737,13 +1737,17 @@ function showAutoCloseNotification(type, message, seconds) {
 	const sec = (typeof seconds === 'number' && seconds > 0) ? seconds : AUTO_CLOSE_SECONDS;
 	const prefixMap = { 'success': '✅ ', 'cancel': '❌ ', 'error': '⚠️ ', 'warning': '⚠️ ', 'info': '' };
 	const prefix = prefixMap[type] || '';
+	// ★ 唯一真理源：自动补 "qqq: " 前缀，已有则跳过
+	const qPrefix = /^qqq[:\uff1a]/i.test(message) ? '' : 'qqq: ';
+	const text = `${prefix}${qPrefix}${message}`;
 	vscode.window.withProgress({
 		location: vscode.ProgressLocation.Notification,
 		title: '',
 		cancellable: false
 	}, async (progress) => {
 		for (let s = sec; s >= 1; s--) {
-			progress.report({ increment: 86 / sec, message: `${prefix}${message}    ${s} s` });
+			// progress.report({ increment: 86 / sec, message: `${text}\u3000\u3000\u3000${s} s` });
+			progress.report({ increment: 86 / sec, message: `${text}` });
 			await new Promise(r => setTimeout(r, 1000));
 		}
 	});
