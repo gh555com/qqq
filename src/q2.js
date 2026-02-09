@@ -2432,6 +2432,18 @@ function setupCustomScrollbar() {
   window.addEventListener('resize', update);
   const observer = new MutationObserver(update);
   observer.observe(container, { childList: true, subtree: true });
+
+  // 按 1 滚到顶部，按 2 滚到底部（编辑状态下不监听）
+  document.addEventListener('keydown', function(e) {
+    if (isInputFocused()) return;
+    if (e.key === '1') {
+      e.preventDefault();
+      container.scrollTop = 0;
+    } else if (e.key === '2') {
+      e.preventDefault();
+      container.scrollTop = container.scrollHeight;
+    }
+  }, true);
 }
 
 setTimeout(setupCustomScrollbar, 100);
