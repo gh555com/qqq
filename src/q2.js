@@ -2472,6 +2472,19 @@ function setupCustomScrollbar() {
     hoveredItem = null;
   });
 
+  // 兑底：交互停止后，浏览器空闲时刷新一次，清除一切残影
+  let idleHandle = null;
+  function scheduleIdleRepaint() {
+    if (idleHandle) return;
+    idleHandle = requestIdleCallback(function() {
+      idleHandle = null;
+      container.style.willChange = 'transform';
+      requestAnimationFrame(function() { container.style.willChange = ''; });
+    });
+  }
+  container.addEventListener('scroll', scheduleIdleRepaint);
+  container.addEventListener('mousemove', scheduleIdleRepaint);
+
   // 按 1 滚到顶部，按 2 滚到底部（编辑状态下不监听）
   document.addEventListener('keydown', function(e) {
     if (isInputFocused()) return;
