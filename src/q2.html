@@ -404,13 +404,13 @@
 			flex-direction: column;
 		}
 
-		/* 自定义滚动条 - 与 q4 外层滚动条样式完全一致 */
+		/* 自定义滚动条 */
 		.custom-scrollbar-outer {
 			position: absolute;
 			right: 0;
 			top: 0;
 			bottom: 0;
-			width: 6px;
+			width: 12px;
 			z-index: 1000;
 			pointer-events: none;
 			background: var(--base2);
@@ -418,19 +418,19 @@
 
 		.custom-scrollbar-thumb {
 			position: absolute;
-			right: 1px;
-			width: 4px;
+			right: 0;
+			width: 3px;
 			background: #000 !important;
-			border-radius: 3px;
-			opacity: 1;
+			border-radius: 0;
+			opacity: 0.8;
 			cursor: pointer;
 			pointer-events: auto;
 			forced-color-adjust: none !important;
-			transition: width 0.1s ease, right 0.1s ease;
+			transition: width 0.1s ease, right 0.1s ease, opacity 0.1s ease;
 		}
 
-		.custom-scrollbar-thumb:hover {
-			width: 6px;
+		.custom-scrollbar-outer:hover .custom-scrollbar-thumb {
+			width: 12px;
 			right: 0;
 		}
 
