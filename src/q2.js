@@ -2385,30 +2385,46 @@ function setupCustomScrollbar() {
     e.stopPropagation();
   };
 
-  // 点击轨道背景：翻页 / Shift+点击闪现
+  // 点击轨道背景：左键翻页 / Shift+左键或右键闪现
   scrollbar.style.pointerEvents = 'auto';
-  scrollbar.addEventListener('mousedown', function(e) {
-    if (e.target === thumb) return; // 点击在滚动块上，不处理
+
+  function jumpToClick(e) {
     e.preventDefault();
     const rect = scrollbar.getBoundingClientRect();
     const clickY = e.clientY - rect.top;
-    const thumbTop = parseFloat(thumb.style.top) || 0;
     const th = thumb.offsetHeight;
     const sh = container.scrollHeight, ch = container.clientHeight;
+    const barH = scrollbar.clientHeight;
+    const ratio = (clickY - th / 2) / (barH - th);
+    container.scrollTop = Math.max(0, Math.min(1, ratio)) * (sh - ch);
+  }
 
-    if (e.shiftKey) {
-      // Shift+点击：滚动块闪现到点击位置
-      const barH = scrollbar.clientHeight;
-      const ratio = (clickY - th / 2) / (barH - th);
-      container.scrollTop = Math.max(0, Math.min(1, ratio)) * (sh - ch);
-    } else {
-      // 普通点击：翻页
+  scrollbar.addEventListener('mousedown', function(e) {
+    if (e.target === thumb) return;
+    e.preventDefault();
+
+    if (e.shiftKey || e.button === 2) {
+      // Shift+左键 或 右键：闪现到点击位置
+      jumpToClick(e);
+    } else if (e.button === 0) {
+      // 普通左键：翻页
+      const rect = scrollbar.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const thumbTop = parseFloat(thumb.style.top) || 0;
+      const th = thumb.offsetHeight;
+      const sh = container.scrollHeight, ch = container.clientHeight;
       if (clickY < thumbTop) {
         container.scrollTop = Math.max(0, container.scrollTop - ch);
       } else if (clickY > thumbTop + th) {
         container.scrollTop = Math.min(sh - ch, container.scrollTop + ch);
       }
     }
+  });
+
+  // 屏蔽滚动条区域的右键菜单
+  scrollbar.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
   });
 
   // 初始更新
