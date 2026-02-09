@@ -2079,6 +2079,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileList = document.getElementById('fileList');
   if (fileList) {
     fileList.addEventListener('click', (event) => {
+      // ★ 正在重命名时，点击 rename-input 内部不做任何处理，让光标自然移动
+      if (event.target.classList && event.target.classList.contains('rename-input')) return;
       const fileItem = event.target.closest('.file-item');
       if (!fileItem) {
         const prevSelectedItems = document.querySelectorAll('.file-item.selected');
