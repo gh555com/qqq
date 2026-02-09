@@ -197,29 +197,7 @@ function formatDateTime(date) {
   return `${year}.${month}.${day} ${hour}:${minute}`;
 }
 
-// ==================== 9秒自动关闭弹窗 ====================
-/**
- * 显示一个自动关闭的通知消息
- * @param {'info'|'warning'|'error'} type - 消息类型
- * @param {string} message - 消息内容
- * @param {number} timeout - 自动关闭时间（毫秒），默认 9000ms
- */
-function showAutoCloseNotification(type, message, timeout = 9) {
-  vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: '',
-      cancellable: false
-    },
-    async (progress) => {
-      // ★ 9秒精确进度条，带倒计时显示
-      for (let sec = timeout; sec >= 1; sec--) {
-        progress.report({ increment: 86 / timeout, message: `${message}    ${sec} s` });
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-  );
-}
+// ★ 9秒自动关闭弹窗 → 已提取到 global.showAutoCloseNotification（唯一真理源）
 
 // ==================== 命令历史管理 ====================
 async function addCommandToHistory(key, value) {
@@ -2596,7 +2574,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
   // ★ 如果剪贴板是白名单类型（纯文本），不处理
   if (snapshot.type === 'whitelist') {
-    global.showInformationMessage('qqq: 剪贴板中是纯文本，无法粘贴到文件管理器');
+    global.showAutoCloseNotification('info', 'qqq: 剪贴板中是纯文本，无法粘贴到文件管理器')
     return;
   }
 
@@ -2756,7 +2734,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 // ==================== 主逻辑 ====================
 function showSaveAsDialog() {
   if (!global.isValid()) {
-    global.showErrorMessage("Integrity check failed.");
+    global.showAutoCloseNotification('error', "Integrity check failed.");
     return;
   }
 
@@ -3161,7 +3139,7 @@ function showSaveAsDialog() {
           const newPath = canonicalizeExistingPath(path.join(path.dirname(oldCanon), newName));
 
           if (fs.existsSync(newPath)) {
-            showAutoCloseNotification('error', `重命名失败：目标位置已存在同名项。`, 9000);
+            global.showAutoCloseNotification('error', `重命名失败：目标位置已存在同名项。`);
             refreshWebview();
           } else {
             fs.renameSync(oldCanon, newPath);
@@ -3171,7 +3149,7 @@ function showSaveAsDialog() {
             }, 100);
           }
         } catch (error) {
-          showAutoCloseNotification('error', "重命名失败: " + error.message, 9000);
+          global.showAutoCloseNotification('error', "重命名失败: " + error.message);
           refreshWebview();
         }
         break;
@@ -3196,10 +3174,10 @@ function showSaveAsDialog() {
               panel.webview.postMessage({ command: 'navigateSuccess', path: message.path });
             }
           } else {
-            global.showErrorMessage("无效的目录路径: " + newPath);
+            global.showAutoCloseNotification('error', "无效的目录路径: " + newPath);
           }
         } catch (error) {
-          global.showErrorMessage("导航失败: " + error.message);
+          global.showAutoCloseNotification('error', "导航失败: " + error.message);
         }
         break;
 
@@ -3245,7 +3223,7 @@ function showSaveAsDialog() {
         const createFileAction = () => {
           try {
             if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
-              global.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+              global.showAutoCloseNotification('error', `无法创建文件，因为已存在同名文件夹: "${filename}"`);
               return;
             }
             fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
@@ -3275,14 +3253,14 @@ function showSaveAsDialog() {
               global.logMessage(`[Q2] openTextDocument 失败: ${err.message}`, "ERROR");
             });
           } catch (error) {
-            global.showErrorMessage(`创建文件失败: ${error.message}`);
+            global.showAutoCloseNotification('error', `创建文件失败: ${error.message}`);
           }
         };
 
         if (fs.existsSync(fullFilePath)) {
           const stats = fs.statSync(fullFilePath);
           if (stats.isDirectory()) {
-            global.showErrorMessage(`无法创建文件，因为已存在同名文件夹: "${filename}"`);
+            global.showAutoCloseNotification('error', `无法创建文件，因为已存在同名文件夹: "${filename}"`);
           } else {
             global
               .showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
@@ -3299,7 +3277,7 @@ function showSaveAsDialog() {
       case "createFolder": {
         const newFolderPath = canonicalizeExistingPath(path.join(currentPath, message.folderName));
         if (fs.existsSync(newFolderPath)) {
-          global.showErrorMessage(`无法创建，"${message.folderName}" 已存在。`);
+          global.showAutoCloseNotification('error', `无法创建，"${message.folderName}" 已存在。`);
         } else {
           fs.mkdirSync(newFolderPath);
           saveRecentDirectory(currentPath);
@@ -3319,12 +3297,12 @@ function showSaveAsDialog() {
         const ext = path.extname(p).toLowerCase();
 
         if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
-          vscode.window.showWarningMessage(`该文件不支持在 VS Code 里打开: "${path.basename(p)}"`);
+          global.showAutoCloseNotification('warning', `该文件不支持在 VS Code 里打开: "${path.basename(p)}"`);
           break;
         }
 
         if (!fs.existsSync(p)) {
-          vscode.window.showWarningMessage(`文件已不存在: ${path.basename(p)}`);
+          global.showAutoCloseNotification('warning', `文件已不存在: ${path.basename(p)}`);
           refreshWebview();
           break;
         }
@@ -3358,7 +3336,7 @@ function showSaveAsDialog() {
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
-          global.showErrorMessage(`打开文件失败: ${error.message}`);
+          global.showAutoCloseNotification('error', `打开文件失败: ${error.message}`);
         }
         break;
       }
@@ -3367,7 +3345,7 @@ function showSaveAsDialog() {
         const itemToDelete = canonicalizeExistingPath(message.path);
         // 安全保护：绝对禁止删除上级目录
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          global.showErrorMessage("非法操作：禁止删除上级目录。");
+          global.showAutoCloseNotification('error', "非法操作：禁止删除上级目录。");
           refreshWebview();
           break;
         }
@@ -3377,9 +3355,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-              showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已移至回收站`);
+              global.showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已移至回收站`);
             } catch (error) {
-              showAutoCloseNotification('error', `qqq: 删除失败: ${error.message}`);
+              global.showAutoCloseNotification('error', `qqq: 删除失败: ${error.message}`);
             } finally {
               // 无论成功失败，都刷新列表并恢复状态
               if (activePanel && activePanelAlive) refreshWebview();
@@ -3414,9 +3392,9 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
-              showAutoCloseNotification('info', `已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`);
+              global.showAutoCloseNotification('info', `已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`);
             } else if (errorCount > 0) {
-              showAutoCloseNotification('error', `${errorCount} 个项目删除失败。`);
+              global.showAutoCloseNotification('error', `${errorCount} 个项目删除失败。`);
             }
 
             // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）
@@ -3432,7 +3410,7 @@ function showSaveAsDialog() {
         // Shift+Delete 永久删除单个项目
         const itemToDelete = canonicalizeExistingPath(message.path);
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          showAutoCloseNotification('error', "非法操作：禁止删除上级目录。", 9000);
+          global.showAutoCloseNotification('error', "非法操作：禁止删除上级目录。");
           refreshWebview();
           break;
         }
@@ -3442,9 +3420,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-              showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已永久删除`, 9000);
+              global.showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已永久删除`);
             } catch (error) {
-              showAutoCloseNotification('error', `永久删除失败: ${error.message}`, 9000);
+              global.showAutoCloseNotification('error', `永久删除失败: ${error.message}`);
             } finally {
               if (activePanel && activePanelAlive) refreshWebview();
             }
@@ -3479,11 +3457,11 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0 && errorCount === 0) {
-              showAutoCloseNotification('info', `已永久删除 ${deletedCount} 个项目`, 9000);
+              global.showAutoCloseNotification('info', `已永久删除 ${deletedCount} 个项目`);
             } else if (deletedCount > 0 && errorCount > 0) {
-              showAutoCloseNotification('warning', `已永久删除 ${deletedCount} 个项目，${errorCount} 个处理失败`, 9000);
+              global.showAutoCloseNotification('warning', `已永久删除 ${deletedCount} 个项目，${errorCount} 个处理失败`);
             } else if (errorCount > 0) {
-              showAutoCloseNotification('error', `${errorCount} 个项目永久删除失败。`, 9000);
+              global.showAutoCloseNotification('error', `${errorCount} 个项目永久删除失败。`);
             }
 
             if (activePanel && activePanelAlive) refreshWebview();
@@ -3524,7 +3502,7 @@ function showSaveAsDialog() {
         // ★ 9秒自动关闭的弹窗
         const msgType = message.type || 'info';
         const msgText = message.message || '';
-        showAutoCloseNotification(msgType, msgText, 9000);
+        global.showAutoCloseNotification(msgType, msgText);
         break;
       }
     }

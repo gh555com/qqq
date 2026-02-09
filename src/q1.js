@@ -2505,7 +2505,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 
 async function executeClipboardCommand() {
 	if (!global.isValid()) {
-		vscode.window.showErrorMessage("Integrity check failed.");
+		global.showAutoCloseNotification('error', "Integrity check failed.");
 		return;
 	}
 
@@ -2517,7 +2517,7 @@ async function executeClipboardCommand() {
 		const snapshot = await wq();
 		// 只有当内容不是纯文本时才弹出提示框
 		if (snapshot.type !== 'whitelist') {
-			vscode.window.showInformationMessage("qqq: 只能使用原始粘贴。解决方案：保存文件。");
+			global.showAutoCloseNotification('info', "qqq: 只能使用原始粘贴。解决方案：保存文件。");
 		}
 		await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
 		return;
@@ -3042,7 +3042,7 @@ async function renameFileCommand(rawPath, absPath) {
 	try {
 		await fs.promises.rename(absPath, newAbs);
 	} catch (e) {
-		global.showErrorMessage(e.message);
+		global.showAutoCloseNotification('error', e.message);
 		return;
 	}
 
@@ -3126,7 +3126,7 @@ async function activate(context) {
 		if (!valid) {
 			if (_qqq) _qqq.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
 			else global.logMessage(`Integrity: FAILED (LARGE_PATH=${LARGE_WATERMARK_PATH})`, "WARN");
-			vscode.window.showWarningMessage("核心文件不完整，部分功能可能受限");
+			global.showAutoCloseNotification('warning', "核心文件不完整，部分功能可能受限");
 		} else {
 			if (_qqq) {
 				_qqq.logMessage(`Integrity: PASSED`, "INFO");

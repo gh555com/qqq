@@ -1299,10 +1299,10 @@ async function checkAndInstallLinuxDeps() {
 				// 重新检测
 				const nowHasXclip = await checkXclipInstalled();
 				if (nowHasXclip) {
-					vscode.window.showInformationMessage('qqq: xclip 安装成功！剪贴板功能现已可用。');
+					showAutoCloseNotification('success', 'qqq: xclip 安装成功！剪贴板功能现已可用。');
 					logMessage('xclip 安装成功', 'INFO');
 				} else {
-					vscode.window.showWarningMessage('qqq: xclip 安装可能未成功，请检查终端输出或手动安装。');
+					showAutoCloseNotification('warning', 'qqq: xclip 安装可能未成功，请检查终端输出或手动安装。');
 					logMessage('xclip 安装可能失败', 'WARN');
 				}
 			}
@@ -1310,7 +1310,7 @@ async function checkAndInstallLinuxDeps() {
 
 	} else if (choice === '复制命令') {
 		await vscode.env.clipboard.writeText(installCmd);
-		vscode.window.showInformationMessage(`qqq: 安装命令已复制到剪贴板: ${installCmd}`);
+		showAutoCloseNotification('info', `qqq: 安装命令已复制到剪贴板: ${installCmd}`);
 		logMessage(`用户选择复制安装命令: ${installCmd}`, 'INFO');
 
 	} else if (choice === '不再提示') {
@@ -1704,30 +1704,13 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示简单的自动关闭消息（无按钮）
+	 * 显示简单的自动关闭消息（无按钮），统一委托 showAutoCloseNotification
 	 * @param {string} message - 消息内容
-	 * @param {number} timeout - 自动关闭时间（毫秒），默认 15000
-	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型，用于显示不同的 emoji 图标
+	 * @param {number} [_timeout] - 已弃用，保留参数兼容旧调用签名
+	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型
 	 */
-	async showSimpleToast(message, timeout = 15000, type = 'info') {
-		// ★ 根据类型添加 emoji 前缀
-		const prefixMap = {
-			'success': '✅ ',
-			'cancel': '❌ ',
-			'error': '❌ ',
-			'info': ''
-		};
-		const prefix = prefixMap[type] || '';
-		const fullMessage = prefix + message;
-
-		return vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: fullMessage,
-			cancellable: false
-		}, async (progress) => {
-			progress.report({ increment: 100 });
-			await new Promise(resolve => setTimeout(resolve, timeout));
-		});
+	showSimpleToast(message, _timeout, type = 'info') {
+		showAutoCloseNotification(type, message);
 	}
 };
 
@@ -1738,21 +1721,31 @@ function showInformationMessage(message, ...items) {
 	return vscode.window.showInformationMessage(message, ...items);
 }
 
+// ============================================================================
+// ★ 唯一真理源：9 秒精确倒计时自动关闭弹窗
+// 所有「纯通知弹窗」统一调用此函数，修改秒数只需改这里的默认值
+// ============================================================================
+const AUTO_CLOSE_SECONDS = 9; // ★ 全局默认秒数，改这一个数字即可
+
 /**
- * ★ 显示一个会自动关闭的通知消息
+ * 显示一个带倒计时进度条的自动关闭通知（唯一真理源）
+ * @param {'info'|'warning'|'error'|'success'|'cancel'} type - 消息类型
  * @param {string} message - 消息内容
- * @param {number} timeout - 自动关闭时间（毫秒），默认 15000ms
+ * @param {number} [seconds] - 自动关闭秒数，默认 AUTO_CLOSE_SECONDS
  */
-function showAutoCloseMessage(message, timeout = 15000) {
-	return vscode.window.withProgress({
+function showAutoCloseNotification(type, message, seconds) {
+	const sec = (typeof seconds === 'number' && seconds > 0) ? seconds : AUTO_CLOSE_SECONDS;
+	const prefixMap = { 'success': '✅ ', 'cancel': '❌ ', 'error': '⚠️ ', 'warning': '⚠️ ', 'info': '' };
+	const prefix = prefixMap[type] || '';
+	vscode.window.withProgress({
 		location: vscode.ProgressLocation.Notification,
-		title: message,
+		title: '',
 		cancellable: false
 	}, async (progress) => {
-		// 立即设置进度到 100%，这样不显示进度条动画
-		progress.report({ increment: 100 });
-		// 等待指定时间后自动关闭
-		await new Promise(resolve => setTimeout(resolve, timeout));
+		for (let s = sec; s >= 1; s--) {
+			progress.report({ increment: 86 / sec, message: `${prefix}${message}    ${s} s` });
+			await new Promise(r => setTimeout(r, 1000));
+		}
 	});
 }
 
@@ -2037,7 +2030,7 @@ const ConfigManager = {
 			// 重启还原通过 nonVipBootstrapResetAll() 在启动时实现
 			if (!_isVip && !_trialHintShown) {
 				_trialHintShown = true;
-				try { vscode.window.showInformationMessage("试用模式：设置仅本次有效，重启后恢复默认。"); } catch { }
+				try { showAutoCloseNotification('info', "试用模式：设置仅本次有效，重启后恢复默认。"); } catch { }
 			}
 			return;
 		}
@@ -3730,7 +3723,7 @@ module.exports = {
 
 	// 对话框
 	showInformationMessage,
-	showAutoCloseMessage,
+	showAutoCloseNotification,
 	showErrorMessage,
 	showWarningMessage,
 	showInputBox,

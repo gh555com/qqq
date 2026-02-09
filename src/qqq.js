@@ -1169,7 +1169,7 @@ async function savorMomentsCommand() {
 				return;
 			}
 			// ★ 核心理念：永远不改变用户侧边栏布局，只弹窗提示
-			vscode.window.showInformationMessage('qqq: 请点击侧边按钮开始放松。');
+			global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
 			return;
 		}
 
@@ -1216,7 +1216,7 @@ async function savorMomentsCommand() {
 		}
 
 		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
-		vscode.window.showInformationMessage('qqq: 请点击侧边按钮开始放松。');
+		global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
 	} catch (e) {
 		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
 	}
@@ -1225,7 +1225,7 @@ async function savorMomentsCommand() {
 async function downloadVideosFromUrlCommand(urlArg) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
-		vscode.window.showErrorMessage("请先打开一个文档");
+		global.showAutoCloseNotification('error', "请先打开一个文档");
 		return;
 	}
 
@@ -1633,20 +1633,7 @@ function _registerCommands(context) {
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
-			// ★ 9秒精确进度条通知（进度条从左滚到右正好9秒后消失，带倒计时）
-			const showAutoHideMessage = (message) => {
-				vscode.window.withProgress({
-					location: vscode.ProgressLocation.Notification,
-					title: '',
-					cancellable: false
-				}, async (progress) => {
-					const totalSeconds = 9;
-					for (let sec = totalSeconds; sec >= 1; sec--) {
-						progress.report({ increment: 86 / totalSeconds, message: `${message}    ${sec} s` });
-						await new Promise(r => setTimeout(r, 1000));
-					}
-				});
-			};
+			// ★ 9秒自动关闭弹窗 → 统一使用 global.showAutoCloseNotification（唯一真理源）
 
 			const options = [
 				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
@@ -1670,14 +1657,14 @@ function _registerCommands(context) {
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
-					showAutoHideMessage("qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
+					global.showAutoCloseNotification('info', "qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清除冷却时间失败: ${e.message}`);
+					global.showAutoCloseNotification('error', `qqq: 清除冷却时间失败: ${e.message}`);
 				}
 			} else if (selected.id === "openCacheDir") {
 				// 打开缓存目录
 				if (!cacheDir) {
-					showAutoHideMessage("qqq: 缓存目录未初始化");
+					global.showAutoCloseNotification('warning', "qqq: 缓存目录未初始化");
 					return;
 				}
 
@@ -1698,25 +1685,25 @@ function _registerCommands(context) {
 						cp.spawn('xdg-open', [cacheDir], { detached: true });
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 打开缓存目录失败: ${e.message}`);
+					global.showAutoCloseNotification('error', `qqq: 打开缓存目录失败: ${e.message}`);
 				}
 			} else if (selected.id === "deleteYtDlp") {
 				// 删除视频下载组件 yt-dlp.exe
 				try {
 					const globalStoragePath = context?.globalStorageUri?.fsPath;
 					if (!globalStoragePath) {
-						showAutoHideMessage("qqq: 无法获取存储路径");
+						global.showAutoCloseNotification('warning', "qqq: 无法获取存储路径");
 						return;
 					}
 					const ytDlpPath = path.join(globalStoragePath, 'yt-dlp.exe');
 					if (fs.existsSync(ytDlpPath)) {
 						fs.unlinkSync(ytDlpPath);
-						showAutoHideMessage(`qqq: 已删除${ytDlpPath}`);
+						global.showAutoCloseNotification('info', `qqq: 已删除${ytDlpPath}`);
 					} else {
-						showAutoHideMessage("qqq: yt-dlp.exe 不存在");
+						global.showAutoCloseNotification('info', "qqq: yt-dlp.exe 不存在");
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
+					global.showAutoCloseNotification('error', `qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
 				}
 			} else if (selected.id === "clearGlobalStates") {
 				// 清理 globalStates 数据库（保留状态区信息）
@@ -1755,9 +1742,9 @@ function _registerCommands(context) {
 						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
 					};
 
-					showAutoHideMessage(`qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
+					global.showAutoCloseNotification('info', `qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清理 globalStates 失败: ${e.message}`);
+					global.showAutoCloseNotification('error', `qqq: 清理 globalStates 失败: ${e.message}`);
 				}
 			} else if (selected.id === "clearClipboardHistory") {
 				// 清空剪切板历史记录
@@ -1765,12 +1752,12 @@ function _registerCommands(context) {
 					const historyManager = global.clipboardHistoryManager;
 					if (historyManager && typeof historyManager.clearHistory === 'function') {
 						await historyManager.clearHistory({ deleteFiles: true });
-						showAutoHideMessage("qqq: 剪切板历史记录已清空");
+						global.showAutoCloseNotification('info', "qqq: 剪切板历史记录已清空");
 					} else {
-						showAutoHideMessage("qqq: 剪切板历史管理器未初始化");
+						global.showAutoCloseNotification('warning', "qqq: 剪切板历史管理器未初始化");
 					}
 				} catch (e) {
-					showAutoHideMessage(`qqq: 清空剪切板历史失败: ${e.message}`);
+					global.showAutoCloseNotification('error', `qqq: 清空剪切板历史失败: ${e.message}`);
 				}
 			}
 		})),

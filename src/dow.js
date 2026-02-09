@@ -2866,23 +2866,15 @@ class UnifiedMediaDownloader {
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
                                 if (!background) {
-                                    // 使用 withProgress 实现 9 秒自动关闭的成功提示
-                                    vscode.window.withProgress({
-                                        location: vscode.ProgressLocation.Notification,
-                                        title: "qqq: yt-dlp 安装成功",
-                                        cancellable: false
-                                    }, () => new Promise(resolve => setTimeout(resolve, 9000)));
+                                    // ★ 统一使用 global.showAutoCloseNotification（唯一真理源）
+                                    try { require('./global').showAutoCloseNotification('success', "qqq: yt-dlp 安装成功"); } catch { }
                                 }
                                 return true;
                             } else {
                                 // 仅在非后台模式下弹出错误提示
                                 if (!background && vscode) {
-                                    // 使用 withProgress 实现 9 秒自动关闭的失败提示
-                                    vscode.window.withProgress({
-                                        location: vscode.ProgressLocation.Notification,
-                                        title: `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`,
-                                        cancellable: false
-                                    }, () => new Promise(resolve => setTimeout(resolve, 9000)));
+                                    // ★ 统一使用 global.showAutoCloseNotification（唯一真理源）
+                                    try { require('./global').showAutoCloseNotification('error', `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`); } catch { }
                                 }
                                 try {
                                     const global = require('./global');
@@ -2911,7 +2903,7 @@ class UnifiedMediaDownloader {
                 return this._installPromise;
             } else {
                 if (!background) {
-                    vscode.window.showWarningMessage("yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。");
+                    try { require('./global').showAutoCloseNotification('warning', "yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。"); } catch { }
                 }
                 return false;
             }
@@ -2956,12 +2948,12 @@ class UnifiedMediaDownloader {
                     if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
                     probeResult = await this.ytdlp.probe(url);
                     if (!probeResult || !probeResult.success) {
-                        if (vscode) vscode.window.showErrorMessage(`视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`);
+                        if (vscode) { try { require('./global').showAutoCloseNotification('error', `视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`); } catch { } }
                         return null;
                     }
                 }
             } catch (webError) {
-                if (vscode) vscode.window.showErrorMessage(`网页解析失败: ${webError.message}`);
+                if (vscode) { try { require('./global').showAutoCloseNotification('error', `网页解析失败: ${webError.message}`); } catch { } }
                 return null;
             }
         }

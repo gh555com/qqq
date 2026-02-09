@@ -946,7 +946,7 @@ class Qvideo {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            vscode.window.showErrorMessage("请先打开一个文档以便插入视频。");
+            global.showAutoCloseNotification('error', "请先打开一个文档以便插入视频。");
             return;
         }
 
@@ -1090,7 +1090,7 @@ class Qvideo {
 
             // ★ 修复：使用 prompt 添加统一前缀
             const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。');
-            vscode.window.showWarningMessage(promptMsg);
+            global.showAutoCloseNotification('warning', promptMsg);
         }
     }
 
@@ -2226,7 +2226,7 @@ $of = $vi.OriginalFilename;
             // ★ 所有源都失败
             if (this._isTaskCancelled(task)) return null;
             this.log(`[Chrome] 所有源都失败`);
-            vscode.window.showErrorMessage(`下载 Chrome 失败: ${lastError?.message || '未知错误'}`);
+            global.showAutoCloseNotification('error', `下载 Chrome 失败: ${lastError?.message || '未知错误'}`);
             return null;
         });
 

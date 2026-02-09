@@ -2631,9 +2631,9 @@ async function exportHistoryCommand(historyManager) {
             history: historyManager._toArrayAll()
         };
         await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(data, null, 2), 'utf8'));
-        vscode.window.showInformationMessage('📦 历史记录已全量导出');
+        global.showAutoCloseNotification('info', '📦 历史记录已全量导出');
     } catch (e) {
-        vscode.window.showErrorMessage('导出失败: ' + e.message);
+        global.showAutoCloseNotification('error', '导出失败: ' + e.message);
     }
 }
 
@@ -2658,9 +2658,9 @@ async function importHistoryCommand(historyManager) {
                 count++;
             }
         }
-        vscode.window.showInformationMessage(`📥 成功增量导入 ${count} 条记录`);
+        global.showAutoCloseNotification('info', `📥 成功增量导入 ${count} 条记录`);
     } catch (e) {
-        vscode.window.showErrorMessage('导入失败: ' + e.message);
+        global.showAutoCloseNotification('error', '导入失败: ' + e.message);
     }
 }
 
@@ -2685,7 +2685,7 @@ function showStatsCommand(historyManager) {
 async function copyToHistoryCommand(historyManager) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage('没有活动的编辑器');
+        global.showAutoCloseNotification('warning', '没有活动的编辑器');
         return;
     }
 
@@ -2693,7 +2693,7 @@ async function copyToHistoryCommand(historyManager) {
     const text = editor.document.getText(selection);
 
     if (!text || text.trim() === '') {
-        vscode.window.showWarningMessage('没有选中任何文本');
+        global.showAutoCloseNotification('warning', '没有选中任何文本');
         return;
     }
 

@@ -677,18 +677,18 @@ function scanQqqLinks(documentUri, text) {
 
 async function executeExportDocCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
-        global.showErrorMessage("qqq: Integrity check failed.");
+        global.showAutoCloseNotification('error', "qqq: Integrity check failed.");
         return;
     }
 
     if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
-        global.showWarningMessage(`qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
+        global.showAutoCloseNotification('warning', `qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
         return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 请选择打开滴文档");
+        global.showAutoCloseNotification('warning', "qqq: 请选择打开滴文档");
         return;
     }
 
@@ -834,7 +834,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const mediaCount = rawElements.filter((e) => e.type === "media").length;
     if (rawElements.length === 0) {
-        global.showWarningMessage("qqq: 文档为空，无法导出");
+        global.showAutoCloseNotification('warning', "qqq: 文档为空，无法导出");
         return;
     }
 
@@ -861,7 +861,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
                 for (const elem of rawElements) {
                     if (token.isCancellationRequested) {
-                        global.showWarningMessage("qqq: 导出已取消");
+                        global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                         return;
                     }
 
@@ -913,7 +913,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showWarningMessage("qqq: 导出已取消");
+                    global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                     return;
                 }
 
@@ -925,7 +925,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     let idx = 0;
                     for (const att of attachments) {
                         if (token.isCancellationRequested) {
-                            global.showWarningMessage("qqq: 导出已取消");
+                            global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                             return;
                         }
                         idx++;
@@ -938,7 +938,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showWarningMessage("qqq: 导出已取消");
+                    global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                     return;
                 }
 
@@ -973,7 +973,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                         filters,
                     });
                     if (!saveUri) {
-                        global.showWarningMessage("qqq: 导出已取消");
+                        global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                         return;
                     }
                     finalSavePath = saveUri.fsPath;
@@ -999,28 +999,21 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 // 解决方案：使用 setTimeout 将 Message 放到下一个 tick，让 Progress 先结束
 
                 setTimeout(async () => {
-                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    // ★★★ 成功提示框：自动关闭 + 打开并选中，统一使用 TaskMessage.showDoneToast ★★★
                     const OPEN_LABEL = "打开文件夹";
-                    const p = vscode.window.showInformationMessage(successMsg, OPEN_LABEL);
-
-                    let timer = null;
-                    const timeout = new Promise(resolve => {
-                        timer = setTimeout(() => resolve(undefined), 9000);
+                    await global.TaskMessage.showDoneToast(successMsg, {
+                        buttons: [OPEN_LABEL],
+                        timeout: 9000,
+                        onButton: async (btn) => {
+                            if (btn === OPEN_LABEL) await revealFileOrFolder(finalSavePath);
+                        }
                     });
-
-                    const choice = await Promise.race([p, timeout]);
-                    try { if (timer) clearTimeout(timer); } catch (e) { }
-
-                    if (choice === OPEN_LABEL) {
-                        await revealFileOrFolder(finalSavePath);
-                    }
-
                     await hideToastsBestEffort();
                 }, 100);
 
             } catch (e) {
                 global.logMessage(`导出失败: ${e.message}\n${e.stack}`, "ERROR");
-                global.showErrorMessage(`qqq: 导出失败: ${e.message}`);
+                global.showAutoCloseNotification('error', `qqq: 导出失败: ${e.message}`);
             } finally {
                 cleanupExportSession(exportId);
                 activeExportCount--;
@@ -1039,24 +1032,24 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
  */
 async function executeExportZipCommand(isCoreIntegrityValid) {
     if (!isCoreIntegrityValid) {
-        global.showErrorMessage("qqq: Integrity check failed.");
+        global.showAutoCloseNotification('error', "qqq: Integrity check failed.");
         return;
     }
 
     if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
-        global.showWarningMessage(`qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
+        global.showAutoCloseNotification('warning', `qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`);
         return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showWarningMessage("qqq: 请选择打开滴文档");
+        global.showAutoCloseNotification('warning', "qqq: 请选择打开滴文档");
         return;
     }
 
     const document = editor.document;
     if (document.isUntitled) {
-        global.showWarningMessage("qqq: 请先保存文档后再导出 ZIP");
+        global.showAutoCloseNotification('warning', "qqq: 请先保存文档后再导出 ZIP");
         return;
     }
 
@@ -1092,14 +1085,14 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                         filters: { "ZIP 压缩包": ["zip"] },
                     });
                     if (!saveUri) {
-                        global.showWarningMessage("qqq: 导出已取消");
+                        global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                         return;
                     }
                     finalZipPath = saveUri.fsPath;
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showWarningMessage("qqq: 导出已取消");
+                    global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                     return;
                 }
 
@@ -1202,7 +1195,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     try {
                         if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath);
                     } catch { }
-                    global.showWarningMessage("qqq: 导出已取消");
+                    global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                     return;
                 }
 
@@ -1222,22 +1215,15 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                 // ★★★ 确保一号弹窗（Progress）先关闭，再显示三号弹窗（Message） ★★★
                 setTimeout(async () => {
-                    // ★★★ 成功提示框：模仿下载器的逻辑（自动关闭 + 打开并选中） ★★★
+                    // ★★★ 成功提示框：自动关闭 + 打开并选中，统一使用 TaskMessage.showDoneToast ★★★
                     const OPEN_LABEL = "打开文件夹";
-                    const p = vscode.window.showInformationMessage(detailMsg, OPEN_LABEL);
-
-                    let timer = null;
-                    const timeout = new Promise(resolve => {
-                        timer = setTimeout(() => resolve(undefined), 9000);
+                    await global.TaskMessage.showDoneToast(detailMsg, {
+                        buttons: [OPEN_LABEL],
+                        timeout: 9000,
+                        onButton: async (btn) => {
+                            if (btn === OPEN_LABEL) await revealFileOrFolder(finalZipPath);
+                        }
                     });
-
-                    const choice = await Promise.race([p, timeout]);
-                    try { if (timer) clearTimeout(timer); } catch (e) { }
-
-                    if (choice === OPEN_LABEL) {
-                        await revealFileOrFolder(finalZipPath);
-                    }
-
                     await hideToastsBestEffort();
                 }, 100);
 
@@ -1247,10 +1233,10 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     try {
                         if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath);
                     } catch { }
-                    global.showWarningMessage("qqq: 导出已取消");
+                    global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                 } else {
                     global.logMessage(`ZIP 导出失败: ${e.message}\n${e.stack}`, "ERROR");
-                    global.showErrorMessage(`qqq: ZIP 导出失败: ${e.message}`);
+                    global.showAutoCloseNotification('error', `qqq: ZIP 导出失败: ${e.message}`);
                 }
             } finally {
                 try { if (archive) archive.abort(); } catch { }
@@ -1359,7 +1345,7 @@ function isLikelyBinary(filePath) {
 async function pureCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showInformationMessage("请先打开一个文件");
+        global.showAutoCloseNotification('info', "请先打开一个文件");
         return;
     }
 
@@ -1368,7 +1354,7 @@ async function pureCommand() {
     const qqqDir = path.join(parentDir, "qqq");
 
     if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) {
-        vscode.window.showInformationMessage("当前目录下没有 qqq 文件夹");
+        global.showAutoCloseNotification('info', "当前目录下没有 qqq 文件夹");
         return;
     }
 
@@ -1384,12 +1370,12 @@ async function pureCommand() {
             } catch { }
         }
     } catch (e) {
-        vscode.window.showErrorMessage("读取 qqq 目录失败");
+        global.showAutoCloseNotification('error', "读取 qqq 目录失败");
         return;
     }
 
     if (!qqqItems.length) {
-        vscode.window.showInformationMessage("qqq 文件夹是空的");
+        global.showAutoCloseNotification('info', "qqq 文件夹是空的");
         return;
     }
 
@@ -1443,7 +1429,7 @@ async function pureCommand() {
     const orphanItems = qqqItems.filter((item) => !referencedItems.has(item.name.toLowerCase()));
 
     if (!orphanItems.length) {
-        global.showInformationMessage("未发现孤儿文件或文件夹");
+        global.showAutoCloseNotification('info', "未发现孤儿文件或文件夹");
         return;
     }
 
@@ -1489,7 +1475,7 @@ async function pureCommand() {
         const doc = await vscode.workspace.openTextDocument(purePath);
         await global.showTextDocument(doc);
     } catch (e) {
-        global.showErrorMessage("无法生成 qqq.pure 文件");
+        global.showAutoCloseNotification('error', "无法生成 qqq.pure 文件");
     }
 }
 
