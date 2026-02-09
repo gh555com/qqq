@@ -2341,13 +2341,19 @@ function setupCustomScrollbar() {
   const thumb = document.getElementById('customScrollbarThumb');
   if (!container || !scrollbar || !thumb) return;
 
+  function getThumbHeight() {
+    const ch = container.clientHeight, sh = container.scrollHeight;
+    return Math.max(20, (ch / sh) * scrollbar.clientHeight);
+  }
+
   function update() {
     const ch = container.clientHeight, sh = container.scrollHeight, st = container.scrollTop;
+    const barH = scrollbar.clientHeight;
     if (sh > ch) {
       scrollbar.style.display = 'block';
-      const th = Math.max(20, (ch / sh) * ch);
+      const th = getThumbHeight();
       thumb.style.height = th + 'px';
-      thumb.style.top = (st / (sh - ch)) * (ch - th) + 'px';
+      thumb.style.top = (st / (sh - ch)) * (barH - th) + 'px';
     } else {
       scrollbar.style.display = 'none';
     }
@@ -2355,6 +2361,7 @@ function setupCustomScrollbar() {
 
   container.addEventListener('scroll', update);
 
+  // 拖动滚动块
   let isDragging = false, startY, startST;
   thumb.onmousedown = function(e) {
     isDragging = true;
@@ -2363,26 +2370,52 @@ function setupCustomScrollbar() {
     document.onmousemove = function(e) {
       if (!isDragging) return;
       const dy = e.clientY - startY;
-      const ch = container.clientHeight, sh = container.scrollHeight, th = thumb.offsetHeight;
-      container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
+      const barH = scrollbar.clientHeight;
+      const th = thumb.offsetHeight;
+      const sh = container.scrollHeight, ch = container.clientHeight;
+      container.scrollTop = startST + (dy / (barH - th)) * (sh - ch);
     };
     document.onmouseup = function() {
       isDragging = false;
       document.onmousemove = null;
     };
     e.preventDefault();
+    e.stopPropagation();
   };
+
+  // 点击轨道背景：翻页 / Shift+点击闪现
+  scrollbar.style.pointerEvents = 'auto';
+  scrollbar.addEventListener('mousedown', function(e) {
+    if (e.target === thumb) return; // 点击在滚动块上，不处理
+    e.preventDefault();
+    const rect = scrollbar.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const thumbTop = parseFloat(thumb.style.top) || 0;
+    const th = thumb.offsetHeight;
+    const sh = container.scrollHeight, ch = container.clientHeight;
+
+    if (e.shiftKey) {
+      // Shift+点击：滚动块闪现到点击位置
+      const barH = scrollbar.clientHeight;
+      const ratio = (clickY - th / 2) / (barH - th);
+      container.scrollTop = Math.max(0, Math.min(1, ratio)) * (sh - ch);
+    } else {
+      // 普通点击：翻页
+      if (clickY < thumbTop) {
+        container.scrollTop = Math.max(0, container.scrollTop - ch);
+      } else if (clickY > thumbTop + th) {
+        container.scrollTop = Math.min(sh - ch, container.scrollTop + ch);
+      }
+    }
+  });
 
   // 初始更新
   update();
-  // 窗口大小改变时更新
   window.addEventListener('resize', update);
-  // 内容变化时更新（使用 MutationObserver）
   const observer = new MutationObserver(update);
   observer.observe(container, { childList: true, subtree: true });
 }
 
-// 初始化滚动条
 setTimeout(setupCustomScrollbar, 100);
 `;
 }

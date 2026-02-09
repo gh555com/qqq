@@ -390,21 +390,30 @@
 			overflow: auto;
 			overflow-x: hidden;
 			padding: 0 0 24px 0;
-			scrollbar-width: none;
 			margin: 0;
 			min-height: 0;
+		}
+
+		/* wrapper: 包裹文件列表和滚动条，擑满地址栏下方到 footer 上方 */
+		.file-list-wrapper {
+			flex: 1;
 			position: relative;
+			overflow: hidden;
+			min-height: 0;
+			display: flex;
+			flex-direction: column;
 		}
 
 		/* 自定义滚动条 - 与 q4 外层滚动条样式完全一致 */
 		.custom-scrollbar-outer {
 			position: absolute;
 			right: 0;
-			top: 51px;
-			width: 6px;
+			top: 0;
 			bottom: 0;
+			width: 6px;
 			z-index: 1000;
 			pointer-events: none;
+			background: var(--base2);
 		}
 
 		.custom-scrollbar-thumb {
@@ -710,10 +719,6 @@
 			flex-shrink: 0;
 		}
 
-		.file-list-container {
-			flex: 1 1 auto;
-		}
-
 		.path-tooltip {
 			position: fixed;
 			z-index: 99999;
@@ -975,9 +980,11 @@
 				</div>
 			</div>
 
+		<div class="file-list-wrapper" id="fileListWrapper">
 			<div class="file-list-container" id="fileList" style="margin: 0;">
 			</div>
 			<div class="custom-scrollbar-outer" id="customScrollbar"><div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div></div>
+		</div>
 
 			<div class="footer">
 				<div id="pinButton" class="pin-container" onclick="togglePin()">
