@@ -590,17 +590,9 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			filename = arch === "arm64" ? "q_linux_arm64" : "q_linux_x64";
 		}
 
-		const candidates = [
-			path.join(extensionContext.extensionPath, "assets", "q_engine" + (platform === "win32" ? ".exe" : "")),
-			path.join(extensionContext.extensionPath, "assets", filename),
-		];
+		const exePath = path.join(extensionContext.extensionPath, "assets", filename);
 
-		let exePath = null;
-		for (const c of candidates) {
-			if (fs.existsSync(c)) { exePath = c; break; }
-		}
-
-		if (!exePath) {
+		if (!fs.existsSync(exePath)) {
 			bridge._setStartError(`exe_not_found: ${filename}`);
 			logMessage("Rust Bridge 可执行文件未找到", "WARN");
 			bridge.available = false;
@@ -613,12 +605,6 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		(async () => {
 			try {
 				logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
-				if (!fs.existsSync(exePath)) {
-					logMessage(`[Rust] 路径不存在: ${exePath}`, "WARN");
-					bridge._setStartError(`exe_not_found_real: ${exePath}`);
-					resolve(false);
-					return;
-				}
 				const proc = cp.spawn(exePath, ["--daemon"], {
 					stdio: ["pipe", "pipe", "pipe"],
 					windowsHide: true,
