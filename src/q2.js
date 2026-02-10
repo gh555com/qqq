@@ -1565,6 +1565,31 @@ window.addEventListener('message', event => {
   } else if (message.command === 'restoreDeletedItem') {
     const el = findItemElementByPath(message.path);
     if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
+  } else if (message.command === 'updateSidebar') {
+      // 动态更新 sidebar 区域
+      const recycleSec = document.querySelector('.sidebar .recycle-bin-section');
+      const divider = document.querySelector('.sidebar .divider');
+      if (message.recycleBinHtml) {
+        // 有内容：替换或插入
+        const temp = document.createElement('div');
+        temp.innerHTML = message.recycleBinHtml;
+        const newDivider = temp.querySelector('.divider');
+        const newSection = temp.querySelector('.recycle-bin-section');
+        if (recycleSec && divider) {
+          divider.replaceWith(newDivider || document.createElement('div'));
+          recycleSec.replaceWith(newSection || document.createElement('div'));
+        } else if (newDivider && newSection) {
+          const sidebar = document.querySelector('.sidebar');
+          if (sidebar) { sidebar.appendChild(newDivider); sidebar.appendChild(newSection); }
+        }
+      } else {
+        // 没内容：移除
+        if (recycleSec) recycleSec.remove();
+        if (divider) divider.remove();
+      }
+      // 更新图钉历史区
+      const recentList = document.querySelector('.recent-list');
+      if (recentList) recentList.innerHTML = message.pinnedDirsHtml || '';
   } else if (message.command === 'updateSidebarRatio') {
     sidebarRatio = message.ratio;
     adjustSidebarByRatio();
@@ -2508,35 +2533,15 @@ setTimeout(setupCustomScrollbar, 100);
 `;
 }
 
-function getWebviewContent(currentPath) {
-  const config = getConfig();
-  const drives = getDrives();
-
+// ==================== sidebar HTML 生成（共用） ====================
+function generateSidebarHtml(config) {
   const safeRecycleBin = (config.recycleBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
   );
-
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const showRecycleBin =
     (global.getConfig("showHistoryRecycleBin") !== false) &&
     safeRecycleBin.length > 0;
-
-  let htmlTemplate = "";
-  try {
-    htmlTemplate = require("./q2.html");
-  } catch (error) {
-    geq().logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
-    return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
-  }
-
-  const drivesHtml = drives
-    .map((drive) => {
-      // 为每个盘符添加唯一 ID 和空间显示区域
-      const driveUpper = drive.toUpperCase();
-      const driveLetter = driveUpper.replace(/[^A-Z]/g, '') || 'X';
-      return '<button class="nav-item" id="drive-' + driveLetter.toLowerCase() + '-btn" onclick="navigateTo(\'' + escapeJsStringLiteral(drive) + '\')"><span id="drive-' + driveLetter.toLowerCase() + '-text">' + escapeHtmlAttribute(drive) + '</span></button>';
-    })
-    .join("");
 
   const recycleBinHtml = showRecycleBin
     ? `
@@ -2545,11 +2550,12 @@ function getWebviewContent(currentPath) {
   ${safeRecycleBin
       .map((item) => {
         const escaped = escapeJsStringLiteral(item.path);
-        const display = escapeHtmlAttribute(item.path);
+        const fullDisplay = escapeHtmlAttribute(item.path);
         if (item.type === 'file') {
-          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" title="${display}"><span class="recycle-text">${display}</span></div>`;
+          const fileName = escapeHtmlAttribute(path.basename(item.path));
+          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" title="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
         } else {
-          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" title="${display}"><span class="recycle-text">${display}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')" title="图钉到历史区">\ud83d\udccc</span></div>`;
+          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" title="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')" title="\u56fe\u9489\u5230\u5386\u53f2\u533a">\ud83d\udccc</span></div>`;
         }
       })
       .join("")}
@@ -2566,6 +2572,31 @@ function getWebviewContent(currentPath) {
   <span>${escapeHtmlAttribute(dir)}</span>
 </div>`
     )
+    .join("");
+
+  return { recycleBinHtml, pinnedDirsHtml };
+}
+
+function getWebviewContent(currentPath) {
+  const config = getConfig();
+  const drives = getDrives();
+
+  const { recycleBinHtml, pinnedDirsHtml } = generateSidebarHtml(config);
+
+  let htmlTemplate = "";
+  try {
+    htmlTemplate = require("./q2.html");
+  } catch (error) {
+    geq().logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+    return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
+  }
+
+  const drivesHtml = drives
+    .map((drive) => {
+      const driveUpper = drive.toUpperCase();
+      const driveLetter = driveUpper.replace(/[^A-Z]/g, '') || 'X';
+      return '<button class="nav-item" id="drive-' + driveLetter.toLowerCase() + '-btn" onclick="navigateTo(\'' + escapeJsStringLiteral(drive) + '\')"><span id="drive-' + driveLetter.toLowerCase() + '-text">' + escapeHtmlAttribute(drive) + '</span></button>';
+    })
     .join("");
 
   const inlineScript = generateWebviewScript(currentPath, config.sidebarRatio);
@@ -2946,6 +2977,14 @@ function showSaveAsDialog() {
         items,
         sizeMode: szDisplayMode,
         fineSCM: fineSCM,
+      });
+
+      // ★ 同步更新 sidebar（历史回收站 + 图钉历史区）
+      const sidebarData = generateSidebarHtml(config);
+      panel.webview.postMessage({
+        command: "updateSidebar",
+        recycleBinHtml: sidebarData.recycleBinHtml,
+        pinnedDirsHtml: sidebarData.pinnedDirsHtml,
       });
 
       // ★ 智能文件监视器：只在用户开启 autoWatchChanges 时启用
@@ -3358,6 +3397,11 @@ function showSaveAsDialog() {
 
       case "editFile": {
         recordFileHistory(message.path);
+        // ★ 立即更新 sidebar（可能不会走 refreshWebview）
+        if (panel && activePanelAlive) {
+          const sbData = generateSidebarHtml(getConfig());
+          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+        }
         const p = canonicalizeExistingPath(message.path);
         const ext = path.extname(p).toLowerCase();
 
@@ -3398,6 +3442,11 @@ function showSaveAsDialog() {
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
         recordDirHistory(message.type === "folder" ? p : path.dirname(p));
+        // ★ 立即更新 sidebar
+        if (panel && activePanelAlive) {
+          const sbData = generateSidebarHtml(getConfig());
+          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+        }
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {

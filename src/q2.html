@@ -309,7 +309,7 @@
 
 		.recycle-item {
 			padding: 3px 10px;
-			color: var(--text-dim);
+			color: var(--text-primary);
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
@@ -329,24 +329,33 @@
 
 		.recycle-item .pin-icon {
 			flex-shrink: 0;
-			margin-left: 4px;
-			font-size: 12px;
+			padding: 3px 8px;
+			margin: -3px -10px -3px 0;
+			font-size: 13px;
 			opacity: 0.3;
 			cursor: pointer;
-			transition: opacity 0.15s;
+			transition: opacity 0.15s, background-color 0.15s;
 		}
 
-		.recycle-item:hover .pin-icon {
+		.recycle-dir:hover .pin-icon {
 			opacity: 0.9;
 		}
 
-		.recycle-file {
-			padding-left: 20px;
-			font-size: 12px;
+		.recycle-dir:hover .pin-icon:hover {
+			background-color: rgb(223, 202, 136);
+			opacity: 1;
+		}
+
+		/* 目录行 hover 时，只有 recycle-text 部分变色 */
+		.recycle-dir:hover .recycle-text {
+			background-color: var(--bg-highlight);
+		}
+
+		.recycle-file:hover {
+			background-color: var(--bg-highlight);
 		}
 
 		.recycle-item:hover {
-			background-color: var(--bg-highlight);
 			color: var(--text-primary);
 		}
 
