@@ -291,6 +291,15 @@
 			color: var(--red);
 		}
 
+		/* 历史区路径 span：flex 子元素截断 + 省略号 */
+		.recent-item > span:not(.delete-button) {
+			flex: 1;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
 		.divider {
 			height: 1px;
 			background-color: var(--border-strong);
@@ -327,10 +336,28 @@
 			white-space: nowrap;
 		}
 
-		.recycle-item .pin-icon {
+		/* 文件行：整行 hover */
+		.recycle-file:hover {
+			background-color: var(--bg-highlight);
+		}
+
+		/* 目录行：取消行级 padding，下沉到子元素，实现两区独立 hover */
+		.recycle-dir {
+			padding: 0;
+		}
+
+		.recycle-dir .recycle-text {
+			padding: 3px 10px;
+			transition: background-color 0.1s;
+		}
+
+		.recycle-dir .recycle-text:hover {
+			background-color: var(--bg-highlight);
+		}
+
+		.recycle-dir .pin-icon {
 			flex-shrink: 0;
-			padding: 3px 8px;
-			margin: -3px -10px -3px 0;
+			padding: 3px 10px;
 			font-size: 13px;
 			opacity: 0.3;
 			cursor: pointer;
@@ -341,22 +368,9 @@
 			opacity: 0.9;
 		}
 
-		.recycle-dir:hover .pin-icon:hover {
+		.recycle-dir .pin-icon:hover {
 			background-color: rgb(223, 202, 136);
 			opacity: 1;
-		}
-
-		/* 目录行 hover 时，只有 recycle-text 部分变色 */
-		.recycle-dir:hover .recycle-text {
-			background-color: var(--bg-highlight);
-		}
-
-		.recycle-file:hover {
-			background-color: var(--bg-highlight);
-		}
-
-		.recycle-item:hover {
-			color: var(--text-primary);
 		}
 
 		.address-bar {

@@ -397,22 +397,30 @@ function removeFromRecycleBin(targetPath) {
   }
 }
 
-/** 向 recycleBin 顶部插入一条记录（去重） */
-function _insertToRecycleBinTop(bin, itemPath, itemType) {
+/** 向 recycleBin 顶部插入一条记录（去重，且跳过已 pin 的目录） */
+function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
   const canon = canonicalizeExistingPath(itemPath);
   if (!canon) return bin;
+  // 如果是目录且已在 pinnedDirs 中，不插入
+  if (itemType === 'dir' && Array.isArray(pinnedDirs)) {
+    const key = cacheKeyForPath(canon);
+    if (pinnedDirs.some(d => cacheKeyForPath(d) === key)) return bin;
+  }
   const key = cacheKeyForPath(canon);
   const filtered = bin.filter(item => _recycleBinKey(item.path) !== key);
   filtered.unshift({ path: canon, type: itemType });
   return filtered.slice(0, 60);
 }
 
-/** 记录目录历史（仅向 recycleBin 添加目录） */
+/** 记录目录历史（仅向 recycleBin 添加目录，已 pin 的跳过） */
 function recordDirHistory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon || !fs.existsSync(canon)) return;
-  const newBin = _insertToRecycleBinTop(config.recycleBin || [], canon, 'dir');
+  // 已在 pinnedDirs 中，不重复进入回收站
+  const key = cacheKeyForPath(canon);
+  if ((config.pinnedDirs || []).some(d => cacheKeyForPath(d) === key)) return;
+  const newBin = _insertToRecycleBinTop(config.recycleBin || [], canon, 'dir', config.pinnedDirs);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
 }
 
@@ -430,8 +438,14 @@ function recordFileHistory(filePath) {
     const k = _recycleBinKey(item.path);
     return k !== dirKey && k !== fileKey;
   });
-  // 插入顺序：目录在上（index 0），文件在下（index 1）
-  bin.unshift({ path: dirCanon, type: 'dir' }, { path: canon, type: 'file' });
+  // 插入顺序：目录在上，文件在下——但已 pin 的目录不插入
+  const pinnedKeys = new Set((config.pinnedDirs || []).map(d => cacheKeyForPath(d)));
+  const toInsert = [];
+  if (!pinnedKeys.has(dirKey)) {
+    toInsert.push({ path: dirCanon, type: 'dir' });
+  }
+  toInsert.push({ path: canon, type: 'file' });
+  bin.unshift(...toInsert);
   bin = bin.slice(0, 60);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
@@ -885,39 +899,57 @@ function findItemElementByPath(p, type){
   return null;
 }
 
-function handleSidebarTooltipHover(e){
-  if (!e.target || typeof e.target.closest !== 'function') return;
-  const target = e.target.closest('.nav-item, .recycle-item');
-  if (!target || !isEllipsisActive(target)) {
-    if (pathTooltipVisible) hidePathTooltip();
-    return;
-  }
-  const text = (target.getAttribute('title') || target.textContent || '').trim();
-  if (text) showPathTooltip(text, e.clientX, e.clientY);
-}
+// ====== 统一 pathTooltip hover 处理（覆盖全部4个区域） ======
+// 区域1: 盘符区 .nav-item  区域2: 回收站区 .recycle-item
+// 区域3: 历史区 .recent-item  区域4: 资源列表区 .file-item
+function handlePathTooltipHover(e){
+  const t = e.target;
+  if (!t || typeof t.closest !== 'function') return;
 
-function handleKyTooltipHover(e){
-  if (!e.target || typeof e.target.closest !== 'function') return;
-  const ky = document.getElementById('kyContent');
-  if (!ky || ky.clientWidth >= 200) {
-    if (pathTooltipVisible) hidePathTooltip();
+  // ---- 区域1: 盘符区 (.nav-item button) ----
+  const navItem = t.closest('.nav-item');
+  if (navItem) {
+    if (isEllipsisActive(navItem)) {
+      showPathTooltip(navItem.textContent.trim(), e.clientX, e.clientY);
+    } else if (pathTooltipVisible) { hidePathTooltip(); }
     return;
   }
-  let text = '';
-  const recentItem = e.target.closest('.recent-item');
+
+  // ---- 区域2: 回收站区 (.recycle-item) ----
+  const recycleItem = t.closest('.recycle-item');
+  if (recycleItem) {
+    const textEl = recycleItem.querySelector('.recycle-text');
+    const checkEl = textEl || recycleItem;
+    if (isEllipsisActive(checkEl)) {
+      const tip = recycleItem.getAttribute('title') || (textEl ? textEl.textContent : recycleItem.textContent || '').trim();
+      showPathTooltip(tip, e.clientX, e.clientY);
+    } else if (pathTooltipVisible) { hidePathTooltip(); }
+    return;
+  }
+
+  // ---- 区域3: 历史区 (.recent-item) ----
+  const recentItem = t.closest('.recent-item');
   if (recentItem) {
     const span = recentItem.querySelector('span:not(.delete-button)');
-    text = (span && span.textContent) ? span.textContent : (recentItem.textContent || '');
-  } else {
-    const fileItem = e.target.closest('.file-item');
-    if (fileItem) text = fileItem.getAttribute('data-path') || '';
-    else {
-      if (pathTooltipVisible) hidePathTooltip();
-      return;
-    }
+    const checkEl = span || recentItem;
+    if (isEllipsisActive(checkEl)) {
+      showPathTooltip(span ? span.textContent.trim() : recentItem.textContent.trim(), e.clientX, e.clientY);
+    } else if (pathTooltipVisible) { hidePathTooltip(); }
+    return;
   }
-  text = (text || '').trim();
-  if (text) showPathTooltip(text, e.clientX, e.clientY);
+
+  // ---- 区域4: 资源列表区 (.file-item) ----
+  const fileItem = t.closest('.file-item');
+  if (fileItem) {
+    const nameArea = fileItem.querySelector('.folder-name-area, .file-name-area');
+    if (nameArea && isEllipsisActive(nameArea)) {
+      showPathTooltip(fileItem.getAttribute('data-path') || fileItem.getAttribute('data-name') || '', e.clientX, e.clientY);
+    } else if (pathTooltipVisible) { hidePathTooltip(); }
+    return;
+  }
+
+  // 不在任何目标元素上
+  if (pathTooltipVisible) hidePathTooltip();
 }
 
 function calculateAndAdjustScroll(){
@@ -2102,13 +2134,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const sidebarEl = document.querySelector('.sidebar');
   if (sidebarEl) {
-    sidebarEl.addEventListener('mousemove', handleSidebarTooltipHover);
+    sidebarEl.addEventListener('mousemove', handlePathTooltipHover);
     sidebarEl.addEventListener('mouseleave', hidePathTooltip);
   }
 
   const kyEl = document.getElementById('kyContent');
   if (kyEl) {
-    kyEl.addEventListener('mousemove', handleKyTooltipHover);
+    kyEl.addEventListener('mousemove', handlePathTooltipHover);
     kyEl.addEventListener('mouseleave', hidePathTooltip);
   }
 
@@ -2535,10 +2567,12 @@ setTimeout(setupCustomScrollbar, 100);
 
 // ==================== sidebar HTML 生成（共用） ====================
 function generateSidebarHtml(config) {
+  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
+  const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
   const safeRecycleBin = (config.recycleBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
+      && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const showRecycleBin =
     (global.getConfig("showHistoryRecycleBin") !== false) &&
     safeRecycleBin.length > 0;
