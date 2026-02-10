@@ -251,9 +251,77 @@ function _tryLocalDeduplicate(filePath) {
 // ============================================================================
 // File / Path Helpers
 // ============================================================================
+const QQQ_ADS_SALT = "gh555";
+const QQQ_FOLDER_NAME = "qqq";
+
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) {
-        try { fs.mkdirSync(dirPath, { recursive: true }); } catch (e) { }
+        try {
+            fs.mkdirSync(dirPath, { recursive: true });
+            // ★ 加盐：如果创建的是 qqq 文件夹，写入 ADS 标记（Windows NTFS）
+            _saltQqqFolder(dirPath);
+        } catch (e) { }
+    }
+}
+
+/**
+ * 给 qqq 文件夹加盐（Windows ADS），标记为我们创建的
+ */
+function _saltQqqFolder(dirPath) {
+    if (process.platform !== "win32") return;
+    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
+    try {
+        fs.writeFileSync(dirPath + ":qqq", QQQ_ADS_SALT, "utf8");
+    } catch { }
+}
+
+/**
+ * 检查一个 qqq 文件夹是否是我们创建的（验盐）
+ */
+function isOurQqqFolder(dirPath) {
+    if (process.platform !== "win32") return false;
+    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return false;
+    try {
+        const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
+        return salt === QQQ_ADS_SALT;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * 检查目录是否为空（不含任何文件或子目录）
+ */
+function isDirEmpty(dirPath) {
+    try {
+        const entries = fs.readdirSync(dirPath);
+        return entries.length === 0;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * ★ 兜底清理：如果 qqq 文件夹为空且是我们创建的，永久删除
+ * 供 onDidSaveTextDocument 调用
+ * @returns {boolean} 是否执行了删除
+ */
+function cleanupEmptyQqqFolder(docDir) {
+    if (!docDir) return false;
+    const qqqPath = path.join(docDir, QQQ_FOLDER_NAME);
+    try {
+        if (!fs.existsSync(qqqPath)) return false;
+        if (!fs.statSync(qqqPath).isDirectory()) return false;
+        if (!isDirEmpty(qqqPath)) return false;
+        if (!isOurQqqFolder(qqqPath)) return false;
+        // 先删 ADS 流，再删空目录
+        try { fs.unlinkSync(qqqPath + ":qqq"); } catch { }
+        fs.rmdirSync(qqqPath);
+        log(`[Cleanup] 已删除空 qqq 文件夹: ${qqqPath}`, "INFO");
+        return true;
+    } catch (e) {
+        log(`[Cleanup] 清理空 qqq 文件夹失败: ${e.message}`, "WARN");
+        return false;
     }
 }
 
@@ -2389,6 +2457,7 @@ module.exports = {
     isImageExtForClipboard,
     spawnOutput,
     ensureDir,
+    cleanupEmptyQqqFolder,
     promptForUrl,
     pickTargetDirectory,
     log,

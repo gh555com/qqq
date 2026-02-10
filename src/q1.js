@@ -3188,6 +3188,14 @@ async function activate(context) {
 		vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
 			debounceRender(e.textEditor);
 		}),
+		// ★ 兜底机制：文档保存后检查同级目录的空 qqq 文件夹，确认是我们创建的则永久删除
+		vscode.workspace.onDidSaveTextDocument((doc) => {
+			if (!doc || doc.isUntitled || doc.uri.scheme !== 'file') return;
+			try {
+				const docDir = path.dirname(doc.uri.fsPath);
+				h.cleanupEmptyQqqFolder(docDir);
+			} catch { }
+		}),
 		vscode.window.onDidChangeActiveTextEditor((e) => {
 			if (e) debounceRender(e);
 		}),
