@@ -882,9 +882,20 @@ function showPathTooltip(text, clientX, clientY){
   }
 }
 
-function isEllipsisActive(element){
-  if (!element) return false;
-  return element.scrollWidth > element.clientWidth + 1;
+function isEllipsisActive(el){
+  if (!el) return false;
+  // 方法1: 标准 scrollWidth 检查（对大多数 block/flex-child 有效）
+  if (el.scrollWidth > el.clientWidth + 1) return true;
+  // 方法2: Range 测量兜底（对 button 等 scrollWidth 不可靠的元素有效）
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const contentW = range.getBoundingClientRect().width;
+    const cs = getComputedStyle(el);
+    const availW = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    if (contentW > availW + 1) return true;
+  } catch(_) {}
+  return false;
 }
 
 // 关键修复：不要用 querySelector attribute 拼接路径（特殊字符会炸）
@@ -921,7 +932,7 @@ function handlePathTooltipHover(e){
     const textEl = recycleItem.querySelector('.recycle-text');
     const checkEl = textEl || recycleItem;
     if (isEllipsisActive(checkEl)) {
-      const tip = recycleItem.getAttribute('title') || (textEl ? textEl.textContent : recycleItem.textContent || '').trim();
+      const tip = recycleItem.getAttribute('data-fullpath') || (textEl ? textEl.textContent : recycleItem.textContent || '').trim();
       showPathTooltip(tip, e.clientX, e.clientY);
     } else if (pathTooltipVisible) { hidePathTooltip(); }
     return;
@@ -2587,9 +2598,9 @@ function generateSidebarHtml(config) {
         const fullDisplay = escapeHtmlAttribute(item.path);
         if (item.type === 'file') {
           const fileName = escapeHtmlAttribute(path.basename(item.path));
-          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" title="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
+          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
         } else {
-          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" title="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')" title="\u56fe\u9489\u5230\u5386\u53f2\u533a">\ud83d\udccc</span></div>`;
+          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')">\ud83d\udccc</span></div>`;
         }
       })
       .join("")}
