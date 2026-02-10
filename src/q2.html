@@ -344,6 +344,7 @@
 		/* 目录行：取消行级 padding，下沉到子元素，实现两区独立 hover */
 		.recycle-dir {
 			padding: 0;
+			position: relative;
 		}
 
 		.recycle-dir .recycle-text {
@@ -371,6 +372,18 @@
 		.recycle-dir .pin-icon:hover {
 			background-color: rgb(223, 202, 136);
 			opacity: 1;
+		}
+
+		/* 图钉 hover 时：暖金色下划线延伸到左边界，标识要 pin 的文件夹 */
+		.recycle-dir .pin-icon:hover::after {
+			content: '';
+			position: absolute;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			height: 2px;
+			background-color: rgb(223, 202, 136);
+			pointer-events: none;
 		}
 
 		.address-bar {

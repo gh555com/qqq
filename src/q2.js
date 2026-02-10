@@ -929,6 +929,14 @@ function handlePathTooltipHover(e){
   // ---- 区域2: 回收站区 (.recycle-item) ----
   const recycleItem = t.closest('.recycle-item');
   if (recycleItem) {
+    // 文件行：无条件弹出完整路径（显示的只是文件名，完整路径始终有意义）
+    if (recycleItem.classList.contains('recycle-file')) {
+      const tip = recycleItem.getAttribute('data-fullpath') || '';
+      if (tip) { showPathTooltip(tip, e.clientX, e.clientY); }
+      else if (pathTooltipVisible) { hidePathTooltip(); }
+      return;
+    }
+    // 目录行：仅截断时弹出
     const textEl = recycleItem.querySelector('.recycle-text');
     const checkEl = textEl || recycleItem;
     if (isEllipsisActive(checkEl)) {
