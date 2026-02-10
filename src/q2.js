@@ -222,7 +222,7 @@ async function getCommandHistory(key) {
 // ==================== 配置读写 ====================
 function getConfig() {
   const defaultConfig = {
-    recentDirs: [],
+    pinnedDirs: [],
     lineSpacing: -2,
     sidebarWidth: 100,
     sidebarRatio: 0.2,
@@ -243,9 +243,21 @@ function getConfig() {
   const storedConfig = globalContext.globalState.get("qqq_config") || {};
   const config = { ...defaultConfig, ...storedConfig };
 
+  // 迁移旧数据：recentDirs → pinnedDirs
+  if (Array.isArray(storedConfig.recentDirs) && !Array.isArray(storedConfig.pinnedDirs)) {
+    config.pinnedDirs = storedConfig.recentDirs.slice(0, 6);
+  }
+  delete config.recentDirs;
+
   // 确保数组字段存在
-  if (!Array.isArray(config.recentDirs)) config.recentDirs = [];
+  if (!Array.isArray(config.pinnedDirs)) config.pinnedDirs = [];
   if (!Array.isArray(config.recycleBin)) config.recycleBin = [];
+  // 迁移旧 recycleBin 格式（字符串 → 对象）
+  config.recycleBin = config.recycleBin.map(item => {
+    if (typeof item === 'string') return { path: item, type: 'dir' };
+    if (item && typeof item.path === 'string') return item;
+    return null;
+  }).filter(Boolean);
   if (typeof config.lineSpacing !== "number") config.lineSpacing = -2;
   if (typeof config.sidebarWidth !== "number") config.sidebarWidth = 100;
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
@@ -278,7 +290,7 @@ function getConfig() {
 let saveConfigTimer = null;
 
 function saveConfig(
-  recentDirs,
+  pinnedDirs,
   lineSpacing,
   sidebarWidth,
   sidebarRatio,
@@ -288,7 +300,7 @@ function saveConfig(
   if (!globalContext) return;
 
   const newConfig = {
-    recentDirs,
+    pinnedDirs,
     lineSpacing,
     sidebarWidth,
     sidebarRatio,
@@ -313,7 +325,7 @@ function saveConfig(
     try {
       // 保存时排除全局设置字段（它们由 VS Code 配置管理）
       const configToSave = {
-        recentDirs: newConfig.recentDirs,
+        pinnedDirs: newConfig.pinnedDirs,
         lineSpacing: newConfig.lineSpacing,
         sidebarWidth: newConfig.sidebarWidth,
         sidebarRatio: newConfig.sidebarRatio,
@@ -367,101 +379,98 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
   }
 }
 
-// ==================== 目录管理 ====================
-function removeFromRecycleBin(directory) {
+// ==================== 历史记录管理（新版） ====================
+// recycleBin: [{path, type:'dir'|'file'}] 最多60条，新条目在上方
+// pinnedDirs: [string] 最多6条，新条目在下方（仅目录）
+
+function _recycleBinKey(p) {
+  return cacheKeyForPath(canonicalizeExistingPath(p) || p);
+}
+
+/** 从 recycleBin 中移除指定路径 */
+function removeFromRecycleBin(targetPath) {
   const config = getConfig();
-  const canon = canonicalizeExistingPath(directory);
-  let updated = false;
-
-  const newRecycleBin = (config.recycleBin || []).filter((dir) => {
-    const c = canonicalizeExistingPath(dir);
-    if (c && canon && cacheKeyForPath(c) === cacheKeyForPath(canon)) {
-      updated = true;
-      return false;
-    }
-    return true;
-  });
-
-  if (updated) {
-    saveConfig(
-      config.recentDirs,
-      config.lineSpacing,
-      config.sidebarWidth,
-      config.sidebarRatio,
-      newRecycleBin,
-      config.isPinned
-    );
+  const key = _recycleBinKey(targetPath);
+  const newBin = (config.recycleBin || []).filter(item => _recycleBinKey(item.path) !== key);
+  if (newBin.length !== (config.recycleBin || []).length) {
+    saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
   }
 }
 
-function addToRecycleBin(directory) {
-  const config = getConfig();
-  const canon = canonicalizeExistingPath(directory);
-  if (!canon || !fs.existsSync(canon) || typeof canon !== "string") return;
-
+/** 向 recycleBin 顶部插入一条记录（去重） */
+function _insertToRecycleBinTop(bin, itemPath, itemType) {
+  const canon = canonicalizeExistingPath(itemPath);
+  if (!canon) return bin;
   const key = cacheKeyForPath(canon);
-  const newRecycleBin = (config.recycleBin || []).filter((dir) => cacheKeyForPath(dir) !== key);
-  newRecycleBin.unshift(canon);
-
-  saveConfig(
-    config.recentDirs,
-    config.lineSpacing,
-    config.sidebarWidth,
-    config.sidebarRatio,
-    newRecycleBin.slice(0, 60),
-    config.isPinned
-  );
+  const filtered = bin.filter(item => _recycleBinKey(item.path) !== key);
+  filtered.unshift({ path: canon, type: itemType });
+  return filtered.slice(0, 60);
 }
 
-function saveRecentDirectory(directory) {
+/** 记录目录历史（仅向 recycleBin 添加目录） */
+function recordDirHistory(dirPath) {
   const config = getConfig();
-  const canon = canonicalizeExistingPath(directory);
+  const canon = canonicalizeExistingPath(dirPath);
   if (!canon || !fs.existsSync(canon)) return;
-
-  removeFromRecycleBin(canon);
-
-  const key = cacheKeyForPath(canon);
-  let recentDirs = (config.recentDirs || []).filter((dir) => dir && cacheKeyForPath(dir) !== key);
-
-  if (recentDirs.length >= 10) addToRecycleBin(recentDirs.pop());
-  recentDirs.unshift(canon);
-
-  saveConfig(
-    recentDirs.slice(0, 10),
-    config.lineSpacing,
-    config.sidebarWidth,
-    config.sidebarRatio,
-    config.recycleBin,
-    config.isPinned
-  );
+  const newBin = _insertToRecycleBinTop(config.recycleBin || [], canon, 'dir');
+  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
 }
 
-function removeAndRecycleRecentDirectory(directory) {
+/** 记录文件历史（向 recycleBin 添加目录+文件对，目录在上文件在下） */
+function recordFileHistory(filePath) {
   const config = getConfig();
-  const canon = canonicalizeExistingPath(directory);
-  const key = cacheKeyForPath(canon);
-
-  let updated = false;
-  const newRecentDirs = (config.recentDirs || []).filter((dir) => {
-    if (cacheKeyForPath(dir) === key) {
-      updated = true;
-      return false;
-    }
-    return true;
+  const canon = canonicalizeExistingPath(filePath);
+  if (!canon) return;
+  const dirCanon = canonicalizeExistingPath(path.dirname(canon));
+  if (!dirCanon) return;
+  // 先移除两者的旧记录
+  const dirKey = cacheKeyForPath(dirCanon);
+  const fileKey = cacheKeyForPath(canon);
+  let bin = (config.recycleBin || []).filter(item => {
+    const k = _recycleBinKey(item.path);
+    return k !== dirKey && k !== fileKey;
   });
+  // 插入顺序：目录在上（index 0），文件在下（index 1）
+  bin.unshift({ path: dirCanon, type: 'dir' }, { path: canon, type: 'file' });
+  bin = bin.slice(0, 60);
+  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
+}
 
-  if (updated) {
-    addToRecycleBin(canon);
-    saveConfig(
-      newRecentDirs,
-      config.lineSpacing,
-      config.sidebarWidth,
-      config.sidebarRatio,
-      config.recycleBin,
-      config.isPinned
-    );
+/** 图钉目录：从 recycleBin 移至 pinnedDirs 底部（最多6条，溢出时自动解除最老的） */
+function pinDirectory(dirPath) {
+  const config = getConfig();
+  const canon = canonicalizeExistingPath(dirPath);
+  if (!canon || !fs.existsSync(canon)) return;
+  const key = cacheKeyForPath(canon);
+  // 从 pinnedDirs 去重
+  let pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
+  // 从 recycleBin 移除该目录
+  let bin = (config.recycleBin || []).filter(item => _recycleBinKey(item.path) !== key);
+  // 加到 pinnedDirs 底部
+  pinned.push(canon);
+  // 如果超出6条，把最老的（第一条）放回 recycleBin 顶部
+  while (pinned.length > 6) {
+    const removed = pinned.shift();
+    const removedCanon = canonicalizeExistingPath(removed);
+    if (removedCanon && fs.existsSync(removedCanon)) {
+      bin = _insertToRecycleBinTop(bin, removedCanon, 'dir');
+    }
   }
-  return updated;
+  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
+}
+
+/** 解除图钉：从 pinnedDirs 移至 recycleBin 顶部 */
+function unpinDirectory(dirPath) {
+  const config = getConfig();
+  const canon = canonicalizeExistingPath(dirPath);
+  if (!canon) return;
+  const key = cacheKeyForPath(canon);
+  const pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
+  let bin = config.recycleBin || [];
+  if (fs.existsSync(canon)) {
+    bin = _insertToRecycleBinTop(bin, canon, 'dir');
+  }
+  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
 
 let cachedDrives = null;
@@ -883,7 +892,7 @@ function handleSidebarTooltipHover(e){
     if (pathTooltipVisible) hidePathTooltip();
     return;
   }
-  const text = (target.textContent || '').trim();
+  const text = (target.getAttribute('title') || target.textContent || '').trim();
   if (text) showPathTooltip(text, e.clientX, e.clientY);
 }
 
@@ -1015,7 +1024,9 @@ function updateAddressDisplay(p) {
   }).join('');
 }
 
-function removeFromRecent(p){ vscode.postMessage({ command: 'removeFromRecent', path: p }); }
+function unpinDir(p){ vscode.postMessage({ command: 'unpinDirectory', path: p }); }
+function pinDir(p){ vscode.postMessage({ command: 'pinDirectory', path: p }); }
+function onRecycleFileClick(p){ vscode.postMessage({ command: 'recycleFileClick', path: p }); }
 function cancel(){ vscode.postMessage({ command: 'cancel' }); }
 
 function togglePin(){
@@ -2348,7 +2359,9 @@ if (isDiskFreePollingAllowed()) {
 // ====== 导出给模板内联 onclick ======
 window.navigateTo = navigateTo;
 window.navigateIntoFolder = navigateIntoFolder;
-window.removeFromRecent = removeFromRecent;
+window.unpinDir = unpinDir;
+window.pinDir = pinDir;
+window.onRecycleFileClick = onRecycleFileClick;
 window.cancel = cancel;
 window.saveFile = saveFile;
 window.createFolder = createFolder;
@@ -2499,10 +2512,11 @@ function getWebviewContent(currentPath) {
   const config = getConfig();
   const drives = getDrives();
 
-  const safeRecentDirs = (config.recentDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const safeRecycleBin = (config.recycleBin || []).filter(
-    (dir) => dir && typeof dir === "string" && fs.existsSync(dir)
+    (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
   );
+
+  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const showRecycleBin =
     (global.getConfig("showHistoryRecycleBin") !== false) &&
     safeRecycleBin.length > 0;
@@ -2529,24 +2543,26 @@ function getWebviewContent(currentPath) {
 <div class="divider"></div>
 <div class="recycle-bin-section">
   ${safeRecycleBin
-      .map(
-        (dir) =>
-          `<div class="recycle-item" onclick="navigateTo('${escapeJsStringLiteral(
-            dir
-          )}')">${escapeHtmlAttribute(dir)}</div>`
-      )
+      .map((item) => {
+        const escaped = escapeJsStringLiteral(item.path);
+        const display = escapeHtmlAttribute(item.path);
+        if (item.type === 'file') {
+          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" title="${display}"><span class="recycle-text">${display}</span></div>`;
+        } else {
+          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" title="${display}"><span class="recycle-text">${display}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')" title="图钉到历史区">\ud83d\udccc</span></div>`;
+        }
+      })
       .join("")}
 </div>`
     : "";
 
-  const recentDirsHtml = safeRecentDirs
-    .reverse()
+  const pinnedDirsHtml = safePinnedDirs
     .map(
       (dir) => `
 <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
-  <span class="delete-button" onclick="event.stopPropagation(); removeFromRecent('${escapeJsStringLiteral(
+  <span class="delete-button" onclick="event.stopPropagation(); unpinDir('${escapeJsStringLiteral(
         dir
-      )}')">×</span>
+      )}')">\u00d7</span>
   <span>${escapeHtmlAttribute(dir)}</span>
 </div>`
     )
@@ -2559,7 +2575,7 @@ function getWebviewContent(currentPath) {
     .replace("{{LINE_SPACING}}", config.lineSpacing)
     .replace("{{DRIVES_HTML}}", drivesHtml)
     .replace("{{RECYCLE_BIN_HTML}}", recycleBinHtml)
-    .replace("{{RECENT_DIRS_HTML}}", recentDirsHtml)
+    .replace("{{RECENT_DIRS_HTML}}", pinnedDirsHtml)
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
     .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
@@ -2723,6 +2739,9 @@ async function performQ2Paste(targetDir, refreshCallback) {
           savePasteStats(totalSizeForStats);
         }
 
+        // ★ 粘贴成功，记录目标目录到历史
+        recordDirHistory(targetDir);
+
         // 刷新 Webview
         if (refreshCallback) setTimeout(refreshCallback, 300);
       } else {
@@ -2766,11 +2785,15 @@ function showSaveAsDialog() {
 
   const config = getConfig();
 
-  // 起始目录：优先 recentDirs[0]，否则按平台默认
+  // 起始目录：优先 pinnedDirs，其次 recycleBin 中的目录，否则按平台默认
   let currentPath = "";
-  if (config.recentDirs && config.recentDirs.length > 0) {
-    currentPath = canonicalizeExistingPath(config.recentDirs[0]);
+  if (config.pinnedDirs && config.pinnedDirs.length > 0) {
+    currentPath = canonicalizeExistingPath(config.pinnedDirs[0]);
   } else {
+    const firstDir = (config.recycleBin || []).find(item => item.type === 'dir');
+    if (firstDir) currentPath = canonicalizeExistingPath(firstDir.path);
+  }
+  if (!currentPath) {
     if (process.platform === "win32")
       currentPath = canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot());
     else currentPath = canonicalizeExistingPath(os.homedir() || "/");
@@ -3076,9 +3099,36 @@ function showSaveAsDialog() {
           await addCommandToHistory(message.key, message.value);
         }
         break;
-      case "removeFromRecent":
-        if (removeAndRecycleRecentDirectory(message.path)) refreshWebview();
+      case "unpinDirectory":
+        if (message.path) {
+          unpinDirectory(message.path);
+          refreshWebview();
+        }
         break;
+      case "pinDirectory":
+        if (message.path) {
+          pinDirectory(message.path);
+          refreshWebview();
+        }
+        break;
+      case "recycleFileClick": {
+        // 点击回收站文件：重新置顶 dir+file，然后编辑该文件
+        const clickedFile = canonicalizeExistingPath(message.path);
+        if (clickedFile && fs.existsSync(clickedFile)) {
+          recordFileHistory(clickedFile);
+          // 打开编辑
+          const ext = path.extname(clickedFile).toLowerCase();
+          if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
+            try { global.openExternal(vscode.Uri.file(clickedFile)); } catch { }
+          } else {
+            vscode.workspace.openTextDocument(clickedFile).then((doc) => {
+              global.showTextDocument(doc, getShowOptions(false));
+            });
+          }
+        }
+        refreshWebview();
+        break;
+      }
 
       // 盘符剩余空间请求（合批）
       case "getDiskFree": {
@@ -3158,7 +3208,7 @@ function showSaveAsDialog() {
             refreshWebview();
           } else {
             fs.renameSync(oldCanon, newPath);
-            saveRecentDirectory(path.dirname(oldCanon));
+            recordDirHistory(path.dirname(oldCanon));
             setTimeout(() => {
               if (panel && activePanelAlive) refreshWebview();
             }, 100);
@@ -3209,7 +3259,7 @@ function showSaveAsDialog() {
 
       case "saveSidebarRatio":
         saveConfig(
-          currentConfig.recentDirs,
+          currentConfig.pinnedDirs,
           currentConfig.lineSpacing,
           currentConfig.sidebarWidth,
           message.ratio,
@@ -3222,7 +3272,7 @@ function showSaveAsDialog() {
 
       case "togglePin":
         saveConfig(
-          currentConfig.recentDirs,
+          currentConfig.pinnedDirs,
           currentConfig.lineSpacing,
           currentConfig.sidebarWidth,
           currentConfig.sidebarRatio,
@@ -3242,7 +3292,7 @@ function showSaveAsDialog() {
               return;
             }
             fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
-            saveRecentDirectory(currentPath);
+            recordDirHistory(currentPath);
 
             // 联动 Q4 统计：累加新建文件数
             try {
@@ -3295,7 +3345,7 @@ function showSaveAsDialog() {
           global.showAutoCloseNotification('error', `无法创建，"${message.folderName}" 已存在。`);
         } else {
           fs.mkdirSync(newFolderPath);
-          saveRecentDirectory(currentPath);
+          recordDirHistory(currentPath);
           refreshWebview();
           if (panel && activePanelAlive) panel.webview.postMessage({ command: "clearFilenameInput" });
         }
@@ -3307,7 +3357,7 @@ function showSaveAsDialog() {
         break;
 
       case "editFile": {
-        saveRecentDirectory(path.dirname(message.path));
+        recordFileHistory(message.path);
         const p = canonicalizeExistingPath(message.path);
         const ext = path.extname(p).toLowerCase();
 
@@ -3337,7 +3387,7 @@ function showSaveAsDialog() {
 
       case "openFolderInNewWindow": {
         const p = canonicalizeExistingPath(message.path);
-        saveRecentDirectory(p);
+        recordDirHistory(p);
         vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(p), {
           forceNewWindow: true,
         });
@@ -3347,7 +3397,7 @@ function showSaveAsDialog() {
 
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
-        saveRecentDirectory(message.type === "folder" ? p : path.dirname(p));
+        recordDirHistory(message.type === "folder" ? p : path.dirname(p));
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
@@ -3365,7 +3415,7 @@ function showSaveAsDialog() {
           break;
         }
         if (fs.existsSync(itemToDelete)) {
-          saveRecentDirectory(currentPath);
+          recordDirHistory(currentPath);
           (async () => {
             try {
               const uri = vscode.Uri.file(itemToDelete);
@@ -3387,7 +3437,7 @@ function showSaveAsDialog() {
       case "quickDeleteMultipleToRecycleBin": {
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // 插件侧二次过滤，确保安全
         if (itemsToDelete.length > 0) {
-          saveRecentDirectory(currentPath);
+          recordDirHistory(currentPath);
           (async () => {
             let deletedCount = 0;
             let errorCount = 0;
@@ -3430,7 +3480,7 @@ function showSaveAsDialog() {
           break;
         }
         if (fs.existsSync(itemToDelete)) {
-          saveRecentDirectory(currentPath);
+          recordDirHistory(currentPath);
           (async () => {
             try {
               const uri = vscode.Uri.file(itemToDelete);
@@ -3452,7 +3502,7 @@ function showSaveAsDialog() {
         // Shift+Delete 永久删除多个项目
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..');
         if (itemsToDelete.length > 0) {
-          saveRecentDirectory(currentPath);
+          recordDirHistory(currentPath);
           (async () => {
             let deletedCount = 0;
             let errorCount = 0;

@@ -316,6 +316,33 @@
 			cursor: pointer;
 			width: 100%;
 			box-sizing: border-box;
+			display: flex;
+			align-items: center;
+		}
+
+		.recycle-item .recycle-text {
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.recycle-item .pin-icon {
+			flex-shrink: 0;
+			margin-left: 4px;
+			font-size: 12px;
+			opacity: 0.3;
+			cursor: pointer;
+			transition: opacity 0.15s;
+		}
+
+		.recycle-item:hover .pin-icon {
+			opacity: 0.9;
+		}
+
+		.recycle-file {
+			padding-left: 20px;
+			font-size: 12px;
 		}
 
 		.recycle-item:hover {
