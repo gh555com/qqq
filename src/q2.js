@@ -932,18 +932,19 @@ function calculateAndAdjustScroll(){
 }
 
 function checkAndApplyResponsive(){
-  const container = document.querySelector('.container');
-  if (!container) return;
+  const kyContent = document.querySelector('.ky-content');
+  if (!kyContent) return;
 
-  const currentWidth = container.clientWidth;
+  const w = kyContent.clientWidth;
   const footer = document.querySelector('.footer');
   const pinContainer = document.getElementById('pinButton');
   const saveButton = footer ? footer.querySelector('.save-button') : null;
   const createFolderBtn = footer ? footer.querySelector('.cancel-button') : null;
 
-  if (pinContainer) pinContainer.style.display = (currentWidth < PIN_HIDE_WIDTH) ? 'none' : 'block';
+  // footer: 常驻按钮 → 新建文件按钮，始终保留编辑框+新建文件夹按钮
+  if (pinContainer) pinContainer.style.display = (w < PIN_HIDE_WIDTH) ? 'none' : 'block';
 
-  if (currentWidth < MIN_RESPONSIVE_WIDTH) {
+  if (w < MIN_RESPONSIVE_WIDTH) {
     if (saveButton) saveButton.style.display = 'none';
     if (createFolderBtn) createFolderBtn.style.display = 'block';
     if (footer) footer.classList.add('responsive-narrow');
@@ -953,12 +954,21 @@ function checkAndApplyResponsive(){
     if (footer) footer.classList.remove('responsive-narrow');
   }
 
-  if (currentWidth < MIN_TAG_WIDTH) {
+  if (w < MIN_TAG_WIDTH) {
     if (createFolderBtn) createFolderBtn.style.display = 'none';
     if (footer) footer.classList.add('responsive-extreme');
   } else {
     if (footer) footer.classList.remove('responsive-extreme');
   }
+
+  // 地址栏一排：右SCM → 左SCM → 筛选框，始终保留地址框+open按钮
+  const sortByGroup = document.getElementById('sortByGroup');
+  const szModeGroup = document.getElementById('szModeGroup');
+  const filterWrapper = document.querySelector('.filter-input-wrapper');
+
+  if (sortByGroup) sortByGroup.style.display = (w < 340) ? 'none' : '';
+  if (filterWrapper) filterWrapper.style.display = (w < 340) ? 'none' : '';
+  if (szModeGroup) szModeGroup.style.display = (w < 200) ? 'none' : '';
 
   setTimeout(calculateAndAdjustScroll, 50);
 }
@@ -2216,6 +2226,7 @@ document.addEventListener('DOMContentLoaded', () => {
       sidebar.style.width = newWidth + 'px';
       sidebarResizer.style.left = newWidth + 'px';
       kyContent.style.left = newWidth + 'px';
+      checkAndApplyResponsive();
     });
 
     document.addEventListener('mouseup', () => {

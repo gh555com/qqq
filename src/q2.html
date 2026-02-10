@@ -552,37 +552,7 @@
 			gap: 10px;
 		}
 
-		/* 窗口变窄时逐步隐藏：常驻按钮 → 新建文件按钮，始终保留编辑框+新建文件夹按钮 */
-		@media (max-width: 240px) {
-			.pin-container {
-				display: none;
-			}
-		}
-
-		@media (max-width: 170px) {
-			.footer>div:last-child button:first-child {
-				display: none;
-			}
-		}
-
-		/* 地址栏一排窗口变窄时逐步隐藏：右SCM → 左SCM → 筛选框，始终保留地址框+open按钮 */
-		@media (max-width: 340px) {
-			#sortByGroup {
-				display: none;
-			}
-		}
-
-		@media (max-width: 260px) {
-			#szModeGroup {
-				display: none;
-			}
-		}
-
-		@media (max-width: 180px) {
-			.filter-input-wrapper {
-				display: none;
-			}
-		}
+		/* 响应式隐藏由 JS 控制，基于右侧面板实际宽度 */
 
 		.filename-input-container {
 			flex: 1;
