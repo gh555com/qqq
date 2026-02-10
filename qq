@@ -1,0 +1,80 @@
+1) Windows ADS：PowerShell 写/读/删
+写（目录或文件都行，只要在 NTFS 上）
+Set-Content -Path "C:\data\abc:dgs" -Value "gh555.com"
+
+读
+Get-Content -Path "C:\data\abc:dgs"
+
+删（删除这个数据流）
+Remove-Item -Path "C:\data\abc:dgs"
+
+
+备注：C:\data\abc:dgs.meta 里的 dgs.meta 只是流名叫 “dgs.meta”，并不是文件扩展名。
+
+2) Windows ADS：Node.js（JS）怎么写
+
+Node 里 ADS 本质就是“一个带冒号的路径”，直接用 fs 写就行。
+
+// windows-ads.js
+const fs = require("fs");
+
+const dir = "C:\\data\\abc";         // 目标目录
+const stream = "dgs";                // 你的 stream name（随便取，只要合法）
+const adsPath = `${dir}:${stream}`;  // 例如 C:\data\abc:dgs
+
+// 写
+fs.writeFileSync(adsPath, "gh555.com", "utf8");
+
+// 读
+const v = fs.readFileSync(adsPath, "utf8");
+console.log("ADS =", v);
+
+// 删（可选）
+fs.unlinkSync(adsPath);
+
+更稳一点（长路径/特殊情况）
+
+有时你可以用 \\?\ 前缀避免 Win32 路径限制：
+
+const adsPath = `\\\\?\\C:\\data\\abc:dgs`;
+
+3) macOS / Linux xattr：Node.js（JS）怎么写
+选项 A：用 npm 包（推荐）
+
+常用的是 fs-xattr（跨 mac/linux；Windows 通常不走 xattr）。
+
+// xattr-demo.js
+const xattr = require("fs-xattr");
+
+(async () => {
+  const folder = "/path/to/folder";
+
+  // macOS 通常用反向域名命名；Linux 常用 user.*（更规范）
+  const key = process.platform === "darwin"
+    ? "com.dgs.owner"
+    : "user.dgs.owner";
+
+  // 写
+  await xattr.set(folder, key, Buffer.from("DreamGoods", "utf8"));
+
+  // 读
+  const buf = await xattr.get(folder, key);
+  console.log("xattr =", buf.toString("utf8"));
+
+  // 删（可选）
+  // await xattr.remove(folder, key);
+})();
+
+
+安装：npm i fs-xattr
+
+选项 B：不用包，直接调用系统命令（mac/linux 都行）
+const { execFileSync } = require("child_process");
+
+const folder = "/path/to/folder";
+execFileSync("xattr", ["-w", "com.dgs.owner", "DreamGoods", folder]);     // 写
+const out = execFileSync("xattr", ["-p", "com.dgs.owner", folder]);       // 读
+console.log(out.toString());
+
+
+Linux 如果用 setfattr/getfattr 也一样能用 execFileSync 调。

@@ -2530,7 +2530,8 @@ async function executeClipboardCommand() {
 
 	const currentDocDir = path.dirname(editor.document.uri.fsPath);
 	const targetDir = path.join(currentDocDir, "qqq");
-	if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+	// ★ 不在此处创建 qqq 文件夹！由 h.js ensureDir 在实际写文件时按需创建
+	// 避免纯文本粘贴产生空 qqq 文件夹
 
 	const snapshot = await wq();
 	const config = getConfig('transactionLevel') || 'full';
