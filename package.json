@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.63.55",
+  "version": "15.63.56",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -320,39 +320,39 @@
     "commands": [
       {
         "command": "qqq.q1",
-        "title": "qqq: Paste everything ( Ctrl+V or F2 )"
+        "title": "qqq: Paste ( Ctrl+V or F2 )"
       },
       {
         "command": "qqq.q2",
-        "title": "qqq: Roam everywhere ( Tab or F6 )"
+        "title": "qqq: Roam ( Tab or F6 )"
       },
       {
         "command": "qqq.pure",
-        "title": "qqq: pure"
+        "title": "qqq: Pure"
       },
       {
         "command": "qqq.allSettings",
-        "title": "qqq: all settings"
+        "title": "qqq:     ⚙️"
       },
       {
         "command": "qqq.weave",
-        "title": "qqq: weave"
+        "title": "qqq: Weave"
       },
       {
         "command": "qqq.clipboardHistory",
-        "title": "qqq: 🔍 搜索并粘贴剪贴板历史"
+        "title": "qqq: clipboard history"
       },
       {
         "command": "qqq.exportDoc",
-        "title": "qqq: 导出文档 (Doc/Docx)"
+        "title": "qqq: export doc"
       },
       {
         "command": "qqq.exportZip",
-        "title": "qqq: 导出 ZIP"
+        "title": "qqq: export Zip"
       },
       {
         "command": "qqq.downloadVideosFromUrl",
-        "title": "qqq: insert Videos From Url"
+        "title": "qqq: Video Url"
       },
       {
         "command": "qqq.savorMoments",
