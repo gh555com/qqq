@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.63.54",
+  "version": "15.63.55",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -29,6 +29,26 @@
         "title": "☀️ 核心",
         "order": 10,
         "properties": {
+          "qqq.language": {
+            "order": 5,
+            "type": "string",
+            "default": "中文",
+            "enum": [
+              "中文",
+              "English",
+              "日本語",
+              "Deutsch",
+              "Русский"
+            ],
+            "markdownEnumDescriptions": [
+              "中文",
+              "English",
+              "日本語 (Japanese)",
+              "Deutsch (German)",
+              "Русский (Russian)"
+            ],
+            "markdownDescription": "☀️ 语言 / Language："
+          },
           "qqq.performanceMode": {
             "order": 10,
             "type": "string",
