@@ -1557,12 +1557,15 @@ window.addEventListener('message', event => {
 
       const list = document.getElementById('fileList');
       if (list) {
+        // ★ 同目录刷新（SCM 切换等）：保存当前选中状态
+        const lastSelPath = lastSelectedItem ? lastSelectedItem.dataset?.path : null;
+
         // 重新渲染列表（后端已预填充 sz-area 内容）
         list.innerHTML = message.fileListHtml || '';
 
         // 从缓存恢复 sz-area 显示（优先使用缓存值，可能是 s 请求结果）
-        const items = list.querySelectorAll('.file-item');
-        items.forEach(item => {
+        const allItems = list.querySelectorAll('.file-item');
+        allItems.forEach(item => {
           const p = item.dataset.path;
           if (sessionSizeCache.has(p)) {
             const cached = sessionSizeCache.get(p);
@@ -1576,6 +1579,34 @@ window.addEventListener('message', event => {
             }
           }
         });
+
+        // ★ 恢复选中状态：同目录刷新时保持单选/多选红色高亮
+        if (!isNewDir && selectedItems.length > 0) {
+          const selectedPaths = new Set(selectedItems.map(s => s.path));
+          let newLastSelected = null;
+          let restoredCount = 0;
+          allItems.forEach(item => {
+            if (selectedPaths.has(item.dataset.path)) {
+              item.classList.add('selected');
+              restoredCount++;
+              if (item.dataset.path === lastSelPath) newLastSelected = item;
+            }
+          });
+          if (restoredCount > 0) {
+            lastSelectedItem = newLastSelected || lastSelectedItem;
+          } else {
+            selectedItems = [];
+            selectedItem = null;
+            lastSelectedItem = null;
+          }
+        }
+
+        // ★ 切换目录时清空选中状态
+        if (isNewDir) {
+          selectedItems = [];
+          selectedItem = null;
+          lastSelectedItem = null;
+        }
       }
 
       // 注：后端已预填充 sz-area，不需要再主动请求
