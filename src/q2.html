@@ -997,13 +997,13 @@
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-mode="ctime" data-tooltip="sz区显示: 创建时间">
+						<button class="scm-btn" data-mode="ctime" data-tooltip="{{I18N_SZ_CTIME}}">
 							C
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-mode="mtime" data-tooltip="sz区显示: 修改时间">
+						<button class="scm-btn" data-mode="mtime" data-tooltip="{{I18N_SZ_MTIME}}">
 							M
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1025,21 +1025,21 @@
 					</div>
 
 					<!-- 右侧: open 按钮 + SCM 排序模式 -->
-					<button class="open-btn" id="openFolderBtn" data-tooltip="在资源管理器中打开当前文件夹">open</button>
+					<button class="open-btn" id="openFolderBtn" data-tooltip="{{I18N_OPEN_FOLDER}}">open</button>
 					<div class="scm-btn-group" id="sortByGroup">
-						<button class="scm-btn" data-sort="size" data-tooltip="排序: 按文件大小">
+						<button class="scm-btn" data-sort="size" data-tooltip="{{I18N_SORT_SIZE}}">
 							S
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-sort="ctime" data-tooltip="排序: 按创建时间">
+						<button class="scm-btn" data-sort="ctime" data-tooltip="{{I18N_SORT_CTIME}}">
 							C
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 							</svg>
 						</button>
-						<button class="scm-btn" data-sort="mtime" data-tooltip="排序: 按修改时间">
+						<button class="scm-btn" data-sort="mtime" data-tooltip="{{I18N_SORT_MTIME}}">
 							M
 							<svg class="scm-check" viewBox="0 0 10 10">
 								<polyline points="1,5 4,8 9,2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1058,7 +1058,7 @@
 			<div class="footer">
 				<div id="pinButton" class="pin-container" onclick="togglePin()">
 					<div class="pin-box {{PIN_CLASS}}">
-						<span class="pin-text">长驻</span>
+						<span class="pin-text">{{I18N_PIN}}</span>
 						<span class="pin-checkbox">{{PIN_CHECKBOX}}</span>
 					</div>
 				</div>
@@ -1066,13 +1066,13 @@
 					<input type="text" id="filenameInput" class="filename-input">
 				</div>
 				<div style="display: flex; gap: 15px;">
-					<button class="button save-button" onclick="saveFile()" data-tooltip="新建文件">
+					<button class="button save-button" onclick="saveFile()" data-tooltip="{{I18N_NEW_FILE}}">
 						<svg width="20" height="20" viewBox="0 0 24 24" fill="#7a7874">
 							<path
 								d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
 						</svg>
 					</button>
-					<button class="button cancel-button" onclick="createFolder()" data-tooltip="新建文件夹">
+					<button class="button cancel-button" onclick="createFolder()" data-tooltip="{{I18N_NEW_FOLDER}}">
 						<svg width="20" height="20" viewBox="0 24 24" fill="#7a7874">
 							<path
 								d="M10,4H4C2.89,4 2,4.89 2,6V20A2,2 0 0,0 4,22H20A2,2 0 0,0 22,20V8L16,2H10M13,9V3.5L18.5,9H13Z" />

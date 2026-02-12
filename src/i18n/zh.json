@@ -1,5 +1,16 @@
 {
     "q2": {
+        "ui": {
+            "pin": "长驻",
+            "newFile": "新建文件",
+            "newFolder": "新建文件夹",
+            "openFolder": "在资源管理器中打开当前文件夹",
+            "szCtime": "sz区显示: 创建时间",
+            "szMtime": "sz区显示: 修改时间",
+            "sortSize": "排序: 按文件大小",
+            "sortCtime": "排序: 按创建时间",
+            "sortMtime": "排序: 按修改时间"
+        },
         "paste": {
             "plainTextOnly": "qqq: 剪贴板中是纯文本，无法粘贴到文件管理器"
         },

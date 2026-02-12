@@ -1,5 +1,16 @@
 {
     "q2": {
+        "ui": {
+            "pin": "Pin",
+            "newFile": "New file",
+            "newFolder": "New folder",
+            "openFolder": "Open current folder in Explorer",
+            "szCtime": "sz column: Creation time",
+            "szMtime": "sz column: Modification time",
+            "sortSize": "Sort: By file size",
+            "sortCtime": "Sort: By creation time",
+            "sortMtime": "Sort: By modification time"
+        },
         "paste": {
             "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"
         },

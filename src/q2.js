@@ -9,7 +9,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const h = require("./h");
-const { t } = require("./i18n");
+const { t, onLanguageChange } = require("./i18n");
 
 // ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪贴板快照等 ★★★
 const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
@@ -2767,7 +2767,17 @@ function getWebviewContent(currentPath) {
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
     .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
-    .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"));
+    .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"))
+    // ★ i18n 占位符替换
+    .replace("{{I18N_PIN}}", t('q2.ui.pin'))
+    .replace("{{I18N_NEW_FILE}}", t('q2.ui.newFile'))
+    .replace("{{I18N_NEW_FOLDER}}", t('q2.ui.newFolder'))
+    .replace("{{I18N_OPEN_FOLDER}}", t('q2.ui.openFolder'))
+    .replace("{{I18N_SZ_CTIME}}", t('q2.ui.szCtime'))
+    .replace("{{I18N_SZ_MTIME}}", t('q2.ui.szMtime'))
+    .replace("{{I18N_SORT_SIZE}}", t('q2.ui.sortSize'))
+    .replace("{{I18N_SORT_CTIME}}", t('q2.ui.sortCtime'))
+    .replace("{{I18N_SORT_MTIME}}", t('q2.ui.sortMtime'));
 
   return finalHtml;
 }
@@ -3032,6 +3042,21 @@ function showSaveAsDialog() {
       currentWatcher = null;
     }
   });
+
+  // ★ 监听语言切换，实时刷新 Webview
+  const langChangeDisposable = onLanguageChange(() => {
+    if (panel && activePanelAlive) {
+      console.log('[Q2] Language changed, refreshing webview...');
+      panel.webview.html = getWebviewContent(currentPath);
+      setTimeout(() => {
+        if (panel && activePanelAlive) {
+          updateResourceExplorer();
+        }
+      }, 100);
+    }
+  });
+  // 面板关闭时取消订阅
+  panel.onDidDispose(() => langChangeDisposable.dispose());
 
   async function updateResourceExplorer() {
     try {

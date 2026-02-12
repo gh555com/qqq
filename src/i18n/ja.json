@@ -1,5 +1,16 @@
 {
     "q2": {
+        "ui": {
+            "pin": "ピン留め",
+            "newFile": "新規ファイル",
+            "newFolder": "新規フォルダ",
+            "openFolder": "エクスプローラーで現在のフォルダを開く",
+            "szCtime": "sz列: 作成時刻",
+            "szMtime": "sz列: 更新時刻",
+            "sortSize": "並び替え: ファイルサイズ順",
+            "sortCtime": "並び替え: 作成時刻順",
+            "sortMtime": "並び替え: 更新時刻順"
+        },
         "paste": {
             "plainTextOnly": "qqq: クリップボードにはプレーンテキストのみです。ファイルマネージャーに貼り付けできません"
         },
