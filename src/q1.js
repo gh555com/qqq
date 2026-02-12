@@ -10,6 +10,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const { TextDecoder } = require("util");
+const { q } = require('./i18n');
 
 // 延迟加载 qqq 以避免循环依赖
 let qqq = null;
@@ -438,7 +439,7 @@ function clearAllCaches() {
 	resolutionCache.clear();
 	folderSizeCache.clear();
 	shouldUseFrameCache.clear();
-	global.logMessage("[Cache] 所有缓存已清空", "INFO");
+	global.logMessage(q('q1.log.cacheCleared'), "INFO");
 }
 
 // ==================== FFprobe ====================
@@ -645,7 +646,7 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 		});
 
 		child.on("error", (err) => {
-			geq().logMessage(`FFmpeg 进程错误: ${err.message}`, "WARN");
+			geq().logMessage(q('q1.log.ffmpegError', err.message), "WARN");
 			resolve(null);
 		});
 
@@ -2320,7 +2321,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 
 			if (!exists && !anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
+				global.logMessage(q('q1.log.anchorLost', anchor), 'WARN');
 				anchorLostSource.cancel();
 				return false;
 			}
@@ -2328,7 +2329,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 		} catch (e) {
 			if (!anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
+				global.logMessage(q('q1.log.anchorReadError', e.message), 'WARN');
 				anchorLostSource.cancel();
 			}
 			return false;
@@ -2993,7 +2994,7 @@ async function openFileInRightGroupCommand(filePath) {
 			preview: false
 		});
 	} catch (error) {
-		global.logMessage("打开文件失败: " + error.message, "ERROR");
+		global.logMessage(q('q1.log.openFileFailed', error.message), "ERROR");
 	}
 }
 
@@ -3143,7 +3144,7 @@ async function activate(context) {
 	// ★ 终极修复：通过 ConfigGate 回调机制获取配置更新通知（解决竞态问题）
 	// 之前直接监听 onDidChangeConfiguration 会导致 refreshConfig() 在 sessionOverrides 更新前执行
 	global.ConfigManager.onConfigUpdated((changedKeys, event) => {
-		global.logMessage(`[q1] 配置更新回调: ${changedKeys.join(', ')}`, "DEBUG");
+		global.logMessage(q('q1.log.configUpdateCallback', changedKeys.join(', ')), "DEBUG");
 		refreshConfig();
 		clearDecorations();
 		if (codeLensProvider) codeLensProvider.refresh();
@@ -3252,7 +3253,7 @@ async function activate(context) {
 			await TransactionManager.recover();
 			global.hasRecovered = true;
 		} catch (e) {
-			global.logMessage(`q1 事务恢复失败: ${e.message}`, "ERROR");
+			global.logMessage(q('q1.log.transactionRecoverError', e.message), "ERROR");
 			global.hasRecovered = true;
 		}
 	})();

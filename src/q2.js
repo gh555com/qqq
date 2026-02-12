@@ -376,7 +376,7 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
 
     globalContext.globalState.update(FINE_SCM_KEY, allFineSCM);
   } catch (e) {
-    geq().logMessage(`保存精细 SCM 失败: ${e.message}`, "WARN");
+    geq().logMessage(q('q2.log.saveScmError', e.message), "WARN");
   }
 }
 
@@ -584,7 +584,7 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
       contents.files.sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
     }
   } catch (error) {
-    global.logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
+    global.logMessage(q('q2.log.readDirError', canonDir, error.message), "ERROR");
   }
 
   return contents;
@@ -2744,7 +2744,7 @@ function getWebviewContent(currentPath) {
   try {
     htmlTemplate = require("./q2.html");
   } catch (error) {
-    geq().logMessage(`无法读取 q2.html 模板文件: ${error.message}`, "ERROR");
+    geq().logMessage(q('q2.log.templateReadError', error.message), "ERROR");
     return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
   }
 
@@ -3175,7 +3175,7 @@ function showSaveAsDialog() {
         setupFileWatcher(currentPath);
       }
     } catch (error) {
-      geq().logMessage(`更新资源展示区失败: ${error}`, "ERROR");
+      geq().logMessage(q('q2.log.updatePreviewError', error), "ERROR");
     }
   }
 
@@ -3227,7 +3227,7 @@ function showSaveAsDialog() {
       currentWatcher.onDidDelete(smartRefresh);
 
     } catch (e) {
-      global.logMessage(`[Q2] 启动文件监视失败: ${e.message}`, "WARN");
+      global.logMessage(q('q2.log.watchStartError', e.message), "WARN");
     }
   }
 
@@ -3388,7 +3388,7 @@ function showSaveAsDialog() {
               });
             }
           } catch (e) {
-            geq().logMessage('getDiskFree 失败: ' + e.message, "WARN");
+            geq().logMessage(q('q2.log.diskFreeError', e.message), "WARN");
           }
         })();
         break;
@@ -3541,7 +3541,7 @@ function showSaveAsDialog() {
             } catch (e) { }
 
             if (!fs.existsSync(fullFilePath)) {
-              global.logMessage(`[Q2] 创建后打开失败：文件未找到 ${fullFilePath}`, "WARN");
+              global.logMessage(q('q2.log.createOpenError', fullFilePath), "WARN");
               return;
             }
             vscode.workspace.openTextDocument(fullFilePath).then((doc) => {
@@ -3553,7 +3553,7 @@ function showSaveAsDialog() {
                 }
               });
             }, (err) => {
-              global.logMessage(`[Q2] openTextDocument 失败: ${err.message}`, "ERROR");
+              global.logMessage(q('q2.log.openDocError', err.message), "ERROR");
             });
           } catch (error) {
             global.showAutoCloseNotification('error', q('q2.error.createFileError', error.message));
@@ -3623,7 +3623,7 @@ function showSaveAsDialog() {
             });
           })
           .catch((error) => {
-            global.logMessage(`[Q2] 打开文件失败: ${error.message}`, "ERROR");
+            global.logMessage(q('q2.log.openFileError', error.message), "ERROR");
           });
         break;
       }
@@ -3853,7 +3853,7 @@ async function activate(context) {
   });
 
   getConfig();
-  geq().logMessage("Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）", "INFO");
+  geq().logMessage(q('q2.log.activated'), "INFO");
 
   // ★ 终极修复：通过 ConfigGate 回调机制获取配置更新通知（解决竞态问题）
   // 之前直接监听 onDidChangeConfiguration 会导致在 sessionOverrides 更新前就读取配置
@@ -3864,7 +3864,7 @@ async function activate(context) {
 
     // 清除配置缓存，强制重新读取
     cachedInMemoryConfig = null;
-    geq().logMessage("Q2: 配置已更改（通过 ConfigGate 回调），正在刷新...", "INFO");
+    geq().logMessage(q('q2.log.configRefresh'), "INFO");
     // 如果面板正在显示，刷新它
     if (activePanel && activePanelAlive && globalRefreshWebview) {
       globalRefreshWebview();

@@ -11,6 +11,7 @@ const net = require("net");
 const { pipeline, Transform } = require("stream");
 // ★ 不在顶部缓存 spawn，改为每次使用时动态获取，以便 ChildProcessTracker 能正确追踪
 const { spawnSync } = require("child_process");
+const { q } = require('./i18n');
 let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
@@ -2360,7 +2361,7 @@ class YtDlpDownloader {
                     }
                 }
                 // 文件损坏，删除
-                global.logMessage(`[yt-dlp] 检测到损坏文件 (${stat.size} bytes)，重新下载`, 'WARN');
+                global.logMessage(q('dow.corruptedFile', stat.size), 'WARN');
                 fs.unlinkSync(installPath);
             }
 
@@ -2439,13 +2440,13 @@ class YtDlpDownloader {
             let lastError = null;
             for (const { url, timeout, name } of downloadUrls) {
                 try {
-                    global.logMessage(`[yt-dlp] 尝试从 ${name} 下载...`, "INFO");
+                    global.logMessage(q('dow.tryDownload', name), "INFO");
                     await tryDownload(url, timeout);
-                    global.logMessage(`[yt-dlp] ${name} 下载成功`, "INFO");
+                    global.logMessage(q('dow.downloadSuccess', name), "INFO");
                     break; // 成功则跳出循环
                 } catch (e) {
                     lastError = e;
-                    global.logMessage(`[yt-dlp] ${name} 下载失败: ${e.message}`, "WARN");
+                    global.logMessage(q('dow.downloadFailed', name, e.message), "WARN");
                     // 如果是最后一个 URL，则抛出错误
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
                         throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
@@ -2660,19 +2661,19 @@ class UnifiedMediaDownloader {
                     // L1 完美！直接返回，可以启动 daemon
                     const finalPath = this.python._resolvedPath || l1Result.pythonPath;
                     if (this._lastLoggedPython !== finalPath) {
-                        global.logMessage(`[PythonCheck] L1 完美命中: ${finalPath}`, "INFO");
+                        global.logMessage(q('dow.l1PerfectHit', finalPath), "INFO");
                         this._lastLoggedPython = finalPath;
                     }
                     return l1Result.pythonPath;
                 }
 
                 // L1 不完美，记录原因
-                global.logMessage(`[PythonCheck] L1 不完美: ${l1Result.reason}${l1Result.missing.length > 0 ? `, 缺失: ${l1Result.missing.join(', ')}` : ''}`, "INFO");
+                global.logMessage(q('dow.l1Imperfect', l1Result.reason) + (l1Result.missing.length > 0 ? q('dow.l1ImperfectMissing', l1Result.missing.join(', ')) : ''), "INFO");
 
                 // 2. 检查 72 小时冷却期
                 const cooldownStatus = this.python._getCooldownStatus(context);
                 if (cooldownStatus.inCooldown) {
-                    global.logMessage(`[PythonCheck] 在 72 小时冷却期内 (剩余 ${cooldownStatus.remainingHours}h${cooldownStatus.remainingMinutes}m)，跳过下载`, "INFO");
+                    global.logMessage(q('dow.inCooldown', cooldownStatus.remainingHours, cooldownStatus.remainingMinutes), "INFO");
                     // 冷却期内不启动 daemon，返回 null
                     return null;
                 }
@@ -2680,17 +2681,17 @@ class UnifiedMediaDownloader {
                 // 3. L4 触发：等待 20 秒后后台静默下载
                 // ★ 注意：_pyInstallPromise 检查已移到函数开头，确保单例
 
-                global.logMessage(`[PythonCheck] L1 不完美且不在冷却期，20 秒后触发 L4 下载流程`, "INFO");
+                global.logMessage(q('dow.triggerL4'), "INFO");
 
                 this._pyInstallPromise = new Promise((resolve) => {
                     // ★ 20 秒延迟，错开启动高峰
                     setTimeout(async () => {
                         try {
-                            global.logMessage(`[PythonCheck] 开始 L4 下载安装流程...`, "INFO");
+                            global.logMessage(q('dow.startL4'), "INFO");
 
                             // 再次检查冷却期（防止 20 秒内多次触发）
                             if (this.python._isInCooldown(context)) {
-                                global.logMessage(`[PythonCheck] 已进入冷却期，跳过下载`, "INFO");
+                                global.logMessage(q('dow.enteredCooldown'), "INFO");
                                 resolve(null);
                                 return;
                             }
@@ -2700,26 +2701,26 @@ class UnifiedMediaDownloader {
 
                             if (res.success) {
                                 const finalPath = this.python._resolvedPath || res.path;
-                                global.logMessage(`[PythonCheck] L4 下载安装成功: ${finalPath}`, "INFO");
+                                global.logMessage(q('dow.l4Success', finalPath), "INFO");
                                 this._lastLoggedPython = finalPath;
 
                                 // ★ "从无到有" 回调：热启动 daemon
                                 if (res.fromScratch && this.python._onPythonReady) {
-                                    global.logMessage(`[PythonCheck] 触发 "从无到有" 回调，热启动 daemon...`, "INFO");
+                                    global.logMessage(q('dow.l4Callback'), "INFO");
                                     try {
                                         await this.python._onPythonReady(res.path, context);
                                     } catch (cbErr) {
-                                        global.logMessage(`[PythonCheck] "从无到有" 回调失败: ${cbErr.message}`, "WARN");
+                                        global.logMessage(q('dow.l4CallbackFailed', cbErr.message), "WARN");
                                     }
                                 }
 
                                 resolve(res.path);
                             } else {
-                                global.logMessage(`[PythonCheck] L4 失败: ${res.error}`, "ERROR");
+                                global.logMessage(q('dow.l4Failed', res.error), "ERROR");
                                 resolve(null);
                             }
                         } catch (e) {
-                            global.logMessage(`[PythonCheck] L4 异常: ${e.message}`, "ERROR");
+                            global.logMessage(q('dow.l4Exception', e.message), "ERROR");
                             resolve(null);
                         } finally {
                             this._pyInstallPromise = null;
@@ -2878,7 +2879,7 @@ class UnifiedMediaDownloader {
                                 }
                                 try {
                                     const global = require('./global');
-                                    global.logMessage(`yt-dlp 安装失败: ${res.error}`, "ERROR");
+                                    global.logMessage(q('dow.ytdlpInstallFailed', res.error), "ERROR");
                                 } catch { }
                                 return false;
                             }

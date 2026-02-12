@@ -10,6 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const { spawnSync } = require("child_process");
+const { q } = require("./i18n");
 
 let vscode = null;
 try { vscode = require("vscode"); } catch { }
@@ -433,14 +434,14 @@ sys.exit(0)
                 const copyResult = this._copyVCRuntimeDlls(context, installDir);
                 if (copyResult.copied.length > 0) {
                     const global = require('./global');
-                    global.logMessage(`[PythonCheck] 自动复制 VC++ DLL: ${copyResult.copied.join(', ')}`, 'INFO');
+                    global.logMessage(q('qvenv.vcppDllCopy', copyResult.copied.join(', ')), 'INFO');
                 }
                 // 再次检查，但不阻塞
                 const recheckDll = this._checkVCRuntimeDlls(installDir);
                 if (!recheckDll.ok) {
                     missingDlls = recheckDll.missing;
                     const global = require('./global');
-                    global.logMessage(`[PythonCheck] VC++ DLL 缺失 (不阻塞): ${missingDlls.join(', ')}`, 'WARN');
+                    global.logMessage(q('qvenv.vcppDllMissing', missingDlls.join(', ')), 'WARN');
                     // ★ 不返回，继续检查依赖
                 }
             }
@@ -464,7 +465,7 @@ sys.exit(0)
         const missingOptional = depsResult.missingOptional || [];
         if (missingOptional.length > 0) {
             const global = require('./global');
-            global.logMessage(`[PythonCheck] 可选依赖缺失 (允许): ${missingOptional.join(', ')}`, 'INFO');
+            global.logMessage(q('qvenv.optionalDepsMissing', missingOptional.join(', ')), 'INFO');
         }
 
         // 完美！清除不完美缓存
@@ -566,7 +567,7 @@ sys.exit(0)
 
         const savedMB = totalSaved / 1024 / 1024;
         if (savedMB > 0.1) {
-            global.logMessage(`[Slim] 完成: 释放 ${savedMB.toFixed(1)}MB`, 'INFO');
+            global.logMessage(q('qvenv.slimComplete', savedMB.toFixed(1)), 'INFO');
         }
     }
 
@@ -779,7 +780,7 @@ sys.exit(0)
                 mirrorUrl = officialUrl.replace('https://github.com/', 'https://ghproxy.net/https://github.com/');
             }
 
-            global.logMessage(`[Python] 平台=${platform}, 架构=${arch}, URL=${officialUrl}`, "INFO");
+            global.logMessage(q('qvenv.platformArch', platform, arch, officialUrl), "INFO");
 
             // 下载函数
             const downloadFile = (url, targetPath, timeoutMs = 30000) => {
@@ -820,12 +821,12 @@ sys.exit(0)
 
             for (const { url, timeout, name } of downloadUrls) {
                 try {
-                    global.logMessage(`[Python] 尝试 ${name}...`, "INFO");
+                    global.logMessage(q('qvenv.trySource', name), "INFO");
                     await downloadFile(url, zipPath, timeout);
-                    global.logMessage(`[Python] ${name} 下载成功`, "INFO");
+                    global.logMessage(q('qvenv.sourceSuccess', name), "INFO");
                     break;
                 } catch (e) {
-                    global.logMessage(`[Python] ${name} 失败: ${e.message}`, "WARN");
+                    global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
                         throw new Error(`所有源均失败: ${e.message}`);
                     }
@@ -859,7 +860,7 @@ sys.exit(0)
 
             // 安装 pip (Windows embed)
             if (platform === 'win32') {
-                global.logMessage('[Python] 安装 pip...', 'INFO');
+                global.logMessage(q('qvenv.installPip'), 'INFO');
                 const getPipPath = path.join(installDir, 'get-pip.py');
                 await new Promise((resolve, reject) => {
                     const downloadGetPip = (url, redirectCount = 0) => {
@@ -896,7 +897,7 @@ sys.exit(0)
 
             // 安装依赖
             const lockedDeps = this._getLockedDeps();
-            global.logMessage(`[Python] 安装依赖: ${lockedDeps.join(', ')}`, 'INFO');
+            global.logMessage(q('qvenv.installDeps', lockedDeps.join(', ')), 'INFO');
             const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
             cp.execSync(pipCmd, {
                 windowsHide: true,
@@ -906,7 +907,7 @@ sys.exit(0)
 
             // ★ 最聪明的调用时机：依赖安装完成后，pywin32配置之前
             // 原因：此时包已完整，但还未被使用，删除最安全
-            global.logMessage('[Python] 开始精简...', 'INFO');
+            global.logMessage(q('qvenv.startSlim'), 'INFO');
             await this._slimPython(installDir, installPath);
 
             // pywin32 配置
@@ -924,14 +925,14 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
     if os.path.isdir(p) and p not in sys.path: sys.path.insert(0, p)
 `;
                     fs.writeFileSync(path.join(sitePackagesDir, 'sitecustomize.py'), sitecustomizeCode, 'utf8');
-                    global.logMessage(`[Python] pywin32 配置完成`, 'INFO');
+                    global.logMessage(q('qvenv.pywin32Done'), 'INFO');
                 }
 
                 // ★ 复制 VC++ 运行时 DLL（Pillow 依赖）
                 if (context.extensionPath) {
                     const copyResult = this._copyVCRuntimeDlls(context, installDir);
                     if (copyResult.copied.length > 0) {
-                        global.logMessage(`[Python] 复制 VC++ DLL: ${copyResult.copied.join(', ')}`, 'INFO');
+                        global.logMessage(q('qvenv.copyVcDll', copyResult.copied.join(', ')), 'INFO');
                     }
                 }
             }
@@ -943,7 +944,7 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
             return { success: true, path: installPath, fromScratch: true };
         } catch (e) {
             this._saveState(context, { installTimestamp: Date.now() });
-            global.logMessage(`[Python] 安装失败: ${e.message}`, 'ERROR');
+            global.logMessage(q('qvenv.installFailed', e.message), 'ERROR');
             return { success: false, error: e.message };
         }
     }

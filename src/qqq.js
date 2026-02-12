@@ -1106,7 +1106,7 @@ async function checkPythonAudioEngine() {
 		const res = await bridge.call('check_audio_engine');
 		if (res && res.has_miniaudio) {
 			const version = res.miniaudio_version || 'unknown';
-			global.logMessage(`[Audio] Python (miniaudio v${version}) 检测成功`, "INFO");
+			global.logMessage(q('qqq.log.pythonAudioDetected', version), "INFO");
 			global.pythonAudioDetected = true;
 			_pythonAudioChecked = true;
 			_pythonAudioAvailable = true;
@@ -1231,7 +1231,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 	}
 
 	if (editor.document.isUntitled) {
-		vscode.window.showInformationMessage("qqq: 只能使用原始粘贴。解决方案：保存文件。");
+		vscode.window.showInformationMessage(q('qqq.ui.plainPasteOnly'));
 		return;
 	}
 
@@ -1411,12 +1411,12 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		cancellable: true
 	}, async (progress, token) => {
 		token.onCancellationRequested(() => {
-			global.logMessage(`任务 ${transId} 被用户取消`, "WARN");
+			global.logMessage(q('qqq.log.taskCancelled', transId), "WARN");
 		});
 
 		// ★ 锚点丢失也触发回滚提示
 		anchorLostSource.token.onCancellationRequested(() => {
-			global.logMessage('[AnchorLost] 锚点丢失触发取消', 'WARN');
+			global.logMessage(q('qqq.log.anchorLostCancel'), 'WARN');
 		});
 
 		const Qvideo = require('./qvideo');
@@ -1446,8 +1446,8 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			return await processResult(res);
 
 		} catch (e) {
-			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
-			vscode.window.showErrorMessage(`视频下载失败: ${e.message}`);
+			global.logMessage(q('qqq.log.videoDownloadFailed', e.message), "ERROR");
+			vscode.window.showErrorMessage(q('qqq.ui.videoDownloadFailed', e.message));
 			await global.TransactionManager.rollback(transId);
 			await replaceAnchorInDoc(targetUri, anchor, "");
 			return null;
@@ -1520,7 +1520,7 @@ let q2Module = null;
 async function activate(context) {
 	// ★ 终极最优解：启动时立即重置状态，且后续注册必须早于任何 await
 	global.setDeactivated(false);
-	global.logMessage("qqq 扩展激活（中控模式）...", "INFO");
+	global.logMessage(q('qqq.log.activating'), "INFO");
 
 	if (!context) {
 		global.logMessage("activate: context is undefined!", "ERROR");
@@ -1551,13 +1551,13 @@ async function activate(context) {
 
 	// ★ 缓存必须立即初始化（不延迟），否则用户操作会触发 SETUP_FAIL
 	initCache(context).catch(e => {
-		global.logMessage(`缓存初始化失败: ${e?.message || e}`, "ERROR");
+		global.logMessage(q('qqq.log.cacheInitError', e?.message || e), "ERROR");
 	});
 
 	// ★ 延迟启动策略：onStartupFinished 后再等 3 秒才执行重载初始化
 	setTimeout(() => {
 		_delayedActivate(context).catch(e => {
-			global.logMessage(`延迟初始化失败: ${e?.message || e}`, "ERROR");
+			global.logMessage(q('qqq.log.delayedInitError', e?.message || e), "ERROR");
 		});
 	}, 3000);
 
@@ -1567,7 +1567,7 @@ async function activate(context) {
 
 // ★ 延迟初始化逻辑（onStartupFinished + 3秒后执行）
 async function _delayedActivate(context) {
-	global.logMessage("qqq 延迟初始化开始...", "INFO");
+	global.logMessage(q('qqq.log.delayedInitStart'), "INFO");
 
 	// initCache 已移至 activate() 立即执行，此处无需重复
 
@@ -1577,7 +1577,7 @@ async function _delayedActivate(context) {
 			const { getSharedDownloader } = require('./dow');
 			const downloader = getSharedDownloader();
 			downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
-			global.logMessage("qqq dow.js 预热开始 (10秒延迟)", "INFO");
+			global.logMessage(q('qqq.log.dowWarmup'), "INFO");
 		} catch (e) { }
 	}, 7000); // 相对于 _delayedActivate 开始，再延迟 7 秒 = 总共 3+7=10 秒
 
@@ -1587,7 +1587,7 @@ async function _delayedActivate(context) {
 		global.clipboardHistoryManager = q4Api; // 保持全局引用兼容性
 		activeSidebarProvider = q4Api.sidebarProvider; // ★ 正确初始化 activeSidebarProvider
 	} catch (e) {
-		global.logMessage(`q4 (剪切板/侧边栏) 加载失败: ${e.message}`, "ERROR");
+		global.logMessage(q('qqq.log.q4LoadError', e.message), "ERROR");
 	}
 	global.setCacheStatsGetter(() => getCacheStatsSnapshot());
 	global.setLogPath(path.join(cacheDir, "err.log"));
@@ -1596,7 +1596,7 @@ async function _delayedActivate(context) {
 
 	// ★ startDaemons 延迟 6 秒（相对于 _delayedActivate 开始，再延迟 3 秒 = 总共 3+3=6 秒）
 	setTimeout(() => {
-		global.logMessage("qqq startDaemons 开始 (6秒延迟)", "INFO");
+		global.logMessage(q('qqq.log.daemonsStart'), "INFO");
 		startDaemons();
 	}, 3000);
 
@@ -1774,7 +1774,7 @@ function _registerCommands(context) {
 				// ioEngine 切换后别处理
 				if (event.affectsConfiguration("qqq.ioEngine")) {
 					const val = global.getConfig("ioEngine");
-					global.logMessage(`引擎切换为: ${val}，更新状态栏`, "INFO");
+					global.logMessage(q('qqq.log.engineSwitch', val), "INFO");
 
 					if (val === "python") {
 						const { getSharedDownloader } = require('./dow');
@@ -1788,7 +1788,7 @@ function _registerCommands(context) {
 								'deps_missing': `缺少依赖: ${status.missing.join(', ')}`,
 								'no_context': '环境未就绪'
 							}[status.reason] || status.reason;
-							global.logMessage(`[IO引擎] Python 环境不完美: ${reasonMsg}，将回退到其他引擎`, "WARN");
+							global.logMessage(q('qqq.log.pythonEnvImperfect', reasonMsg), "WARN");
 						}
 					}
 
@@ -1813,14 +1813,14 @@ function _registerCommands(context) {
 		try {
 			await global.TransactionManager.recover();
 		} catch (e) {
-			global.logMessage(`事务恢复失败: ${e.message}`, "ERROR");
+			global.logMessage(q('qqq.log.transactionRecoverError', e.message), "ERROR");
 		} finally {
 			// ★ 无论成功失败，推开信号灯，允许命令执行
 			global.markReady();
 		}
 	})();
 
-	global.logMessage("qqq 扩展激活完成", "INFO");
+	global.logMessage(q('qqq.log.activateComplete'), "INFO");
 }
 
 function loadSubModules(context) {
@@ -1828,14 +1828,14 @@ function loadSubModules(context) {
 		q1Module = require("./q1");
 		if (q1Module?.activate) q1Module.activate(context);
 	} catch (e) {
-		global.logMessage(`q1 加载失败: ${e.message}`, "ERROR");
+		global.logMessage(q('qqq.log.q1LoadError', e.message), "ERROR");
 	}
 
 	try {
 		q2Module = require("./q2");
 		if (q2Module?.activate) q2Module.activate(context);
 	} catch (e) {
-		global.logMessage(`q2 加载失败: ${e.message}`, "ERROR");
+		global.logMessage(q('qqq.log.q2LoadError', e.message), "ERROR");
 	}
 }
 
@@ -1873,7 +1873,7 @@ async function deactivate() {
 	// ★ 补充：停用 q4 (剪切板历史管理器)
 	try { await q4.deactivate(); } catch { }
 
-	global.logMessage("qqq 扩展已停用", "INFO");
+	global.logMessage(q('qqq.log.deactivated'), "INFO");
 }
 
 function getIconCache(filePath) {
@@ -2001,9 +2001,9 @@ if (!process.__qqq_error_listeners_attached) {
 		// ★ 对于文件系统相关的错误，只记录日志不崩溃
 		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 		if (error.code && fsErrorCodes.includes(error.code)) {
-			global.logMessage(`[文件系统错误] ${error.code}: ${error.message}`, "WARN");
+			global.logMessage(q('qqq.log.fsError', error.code, error.message), "WARN");
 		} else {
-			global.logMessage(`未捕获的异常: ${error.message}\n${error.stack}`, "ERROR");
+			global.logMessage(q('qqq.log.uncaughtException', `${error.message}\n${error.stack}`), "ERROR");
 		}
 	});
 
@@ -2012,9 +2012,9 @@ if (!process.__qqq_error_listeners_attached) {
 		// ★ 对于文件系统相关的错误，只记录日志不崩溃
 		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 		if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
-			global.logMessage(`[文件系统错误] ${reason.code}: ${reason.message}`, "WARN");
+			global.logMessage(q('qqq.log.fsError', reason.code, reason.message), "WARN");
 		} else {
-			global.logMessage(`未处理的Promise拒绝: ${msg}`, "ERROR");
+			global.logMessage(q('qqq.log.unhandledRejection', msg), "ERROR");
 		}
 	});
 }

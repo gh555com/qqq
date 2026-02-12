@@ -15,6 +15,7 @@ const os = require("os");
 
 const qqq = require("./qqq");
 const global = require("./global");
+const { q } = require("./i18n");
 
 // ==================== 导出文档模块 (支持 RTF/.doc、DOCX、ZIP) ====================
 // ★ 懒加载 docx，仅在导出时才加载，加快启动速度
@@ -740,14 +741,14 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const resolutionConfig = global.getConfig("docExportImageResolution") || "原始分辨率";
     const useFrameResolution = resolutionConfig === "相框分辨率";
     if (useFrameResolution) {
-        global.logMessage("导出策略：使用相框分辨率 (小尺寸)", "INFO");
+        global.logMessage(q('q3.log.exportFrameRes'), "INFO");
     } else {
-        global.logMessage("导出策略：使用原始分辨率 (适应页面宽度)", "INFO");
+        global.logMessage(q('q3.log.exportOriginalRes'), "INFO");
     }
 
     // 获取暗号保留配置（通过 ConfigGate 读取）
     const includeCipher = global.getConfig("docExportIncludeCipher") !== false;
-    global.logMessage(`导出策略：${includeCipher ? "保留" : "移除"}暗号字符串`, "INFO");
+    global.logMessage(q(includeCipher ? 'q3.log.exportCipherKeep' : 'q3.log.exportCipherRemove'), "INFO");
 
     // 解析阶段：先构建 rawElements；附件先只收集候选项（SHA256 后算，纳入进度条）
     const rawElements = [];
@@ -1012,7 +1013,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }, 100);
 
             } catch (e) {
-                global.logMessage(`导出失败: ${e.message}\n${e.stack}`, "ERROR");
+                global.logMessage(q('q3.log.exportFailed', `${e.message}\n${e.stack}`), "ERROR");
                 global.showAutoCloseNotification('error', `qqq: 导出失败: ${e.message}`);
             } finally {
                 cleanupExportSession(exportId);
@@ -1114,7 +1115,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     archive.on("error", (err) => finish(err));
 
                     archive.on("warning", (err) => {
-                        if (err.code !== "ENOENT") global.logMessage(`ZIP 警告: ${err.message}`, "WARN");
+                        if (err.code !== "ENOENT") global.logMessage(q('q3.log.zipWarning', err.message), "WARN");
                     });
 
                     // ✅ 进度条：archiver progress 事件（更靠谱）
@@ -1179,7 +1180,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                                 archive.file(file.absPath, { name: file.relativePath });
                             }
                         } catch (e) {
-                            qqq.logMessage(`添加文件失败: ${file.absPath} - ${e.message}`, "WARN");
+                            qqq.logMessage(q('q3.log.addFileFailed', file.absPath, e.message), "WARN");
                         }
                     }
 
@@ -1227,7 +1228,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     await hideToastsBestEffort();
                 }, 100);
 
-                global.logMessage(`ZIP 导出完成: ${finalZipPath}, 包含 ${fileCount + 1} 个条目`, "INFO");
+                global.logMessage(q('q3.log.zipComplete', finalZipPath, fileCount + 1), "INFO");
             } catch (e) {
                 if (e && e.message === "用户取消") {
                     try {
@@ -1235,7 +1236,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     } catch { }
                     global.showAutoCloseNotification('warning', "qqq: 导出已取消");
                 } else {
-                    global.logMessage(`ZIP 导出失败: ${e.message}\n${e.stack}`, "ERROR");
+                    global.logMessage(q('q3.log.zipFailed', `${e.message}\n${e.stack}`), "ERROR");
                     global.showAutoCloseNotification('error', `qqq: ZIP 导出失败: ${e.message}`);
                 }
             } finally {

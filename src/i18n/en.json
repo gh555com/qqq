@@ -1,4 +1,69 @@
 {
+    "bridge": {
+        "errorResponse": "{0} error response: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} process error: {1}",
+        "processClose": "{0} process closed, exit code: {1}",
+        "pingFailed": "{0} ping failed, tried {1} times",
+        "circuitBreaker": "{0} crashed more than 5 times in 1 minute, circuit breaker triggered, permanently disabled.",
+        "shellDaemonCrash": "node shell daemon crashed, qqq will stop working. Solution: Restart.",
+        "shellDaemonDetail": "Detected frequent daemon crashes, possibly blocked by antivirus or environment issue. Core functionality paused for system stability.",
+        "restartWindow": "Restart Window Now",
+        "crashRestart": "{0} process crashed, attempting restart ({1}/{2}), delay {3}ms",
+        "restarting": "{0} restarting...",
+        "restartSuccess": "{0} restart successful",
+        "restartFailed": "{0} restart failed",
+        "restartException": "{0} restart exception: {1}",
+        "maxRestartsReached": "{0} process crashed, max restarts reached, marked as unavailable",
+        "forceRevive": "{0} reached max restarts, but as resident service will force revive in 3 seconds",
+        "actionFailed": "{0} function Action execution failed: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "Linux dependency check: xclip not installed, prompting user",
+        "xclipPrompt": "qqq: Clipboard functionality requires xclip, install now?",
+        "installNow": "Install Now",
+        "copyCommand": "Copy Command",
+        "dontAskAgain": "Don't Ask Again",
+        "installingXclip": "Installing xclip with command: {0}",
+        "terminalTitle": "qqq: Install xclip",
+        "xclipInstalled": "Linux dependency check: xclip installed",
+        "xclipInstallSuccess": "xclip installation successful",
+        "xclipInstallMaybeFailed": "xclip installation may have failed",
+        "userCopyCmd": "User chose to copy install command: {0}",
+        "userDismiss": "User chose not to be prompted about xclip installation",
+        "checkException": "Linux dependency check exception: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] Detected corrupted file ({0} bytes), re-downloading",
+        "tryDownload": "[yt-dlp] Trying to download from {0}...",
+        "downloadSuccess": "[yt-dlp] {0} download successful",
+        "downloadFailed": "[yt-dlp] {0} download failed: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 perfect hit: {0}",
+        "l1Imperfect": "[PythonCheck] L1 imperfect: {0}",
+        "l1ImperfectMissing": ", missing: {0}",
+        "inCooldown": "[PythonCheck] In 72-hour cooldown (remaining {0}h{1}m), skipping download",
+        "triggerL4": "[PythonCheck] L1 imperfect and not in cooldown, triggering L4 download in 20 seconds",
+        "startL4": "[PythonCheck] Starting L4 download and install flow...",
+        "enteredCooldown": "[PythonCheck] Entered cooldown period, skipping download",
+        "l4Success": "[PythonCheck] L4 download and install successful: {0}",
+        "l4Callback": "[PythonCheck] Triggering \"from scratch\" callback, hot-starting daemon...",
+        "l4CallbackFailed": "[PythonCheck] \"From scratch\" callback failed: {0}",
+        "l4Failed": "[PythonCheck] L4 failed: {0}",
+        "l4Exception": "[PythonCheck] L4 exception: {0}",
+        "ytdlpInstallFailed": "yt-dlp installation failed: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] All cache cleared",
+            "ffmpegError": "FFmpeg process error: {0}",
+            "anchorLost": "[AnchorWatch] Anchor lost, triggering rollback immediately: {0}",
+            "anchorReadError": "[AnchorWatch] Cannot read document, anchor considered lost: {0}",
+            "openFileFailed": "Open file failed: {0}",
+            "configUpdateCallback": "[q1] Config update callback: {0}",
+            "transactionRecoverError": "q1 transaction recovery failed: {0}"
+        }
+    },
     "q2": {
         "ui": {
             "pin": "Pin ",
@@ -47,8 +112,19 @@
             "no": "No"
         },
         "log": {
-            "getFolderSizeError": "sRequest get folder size failed: {0} - {1}",
-            "readScmError": "Read fine-grained SCM failed: {0}"
+            "getFolderSizeError": "Request get folder size failed: {0} - {1}",
+            "readScmError": "Read fine-grained SCM failed: {0}",
+            "saveScmError": "Save fine-grained SCM failed: {0}",
+            "readDirError": "Read directory contents failed: {0} - {1}",
+            "templateReadError": "Cannot read q2.html template file: {0}",
+            "updatePreviewError": "Update preview area failed: {0}",
+            "watchStartError": "[Q2] Start file watch failed: {0}",
+            "diskFreeError": "getDiskFree failed: {0}",
+            "createOpenError": "[Q2] Open after create failed: file not found {0}",
+            "openDocError": "[Q2] openTextDocument failed: {0}",
+            "openFileError": "[Q2] Open file failed: {0}",
+            "activated": "Q2: File manager activated (using geq().js 4-level fallback + size scheduling/cache + latest IO path logic)",
+            "configRefresh": "Q2: Config changed (via ConfigGate callback), refreshing..."
         }
     },
     "q4": {
@@ -99,7 +175,65 @@
             "anchorFileNotExist": "File does not exist, anchor considered lost: {0}",
             "anchorLost": "Anchor lost, triggering rollback immediately: {0}",
             "anchorReadError": "Cannot read document, anchor considered lost: {0}",
-            "anchorReplaceFail": "Anchor replacement failed, rolling back transaction"
+            "anchorReplaceFail": "Anchor replacement failed, rolling back transaction",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) detected successfully",
+            "taskCancelled": "Task {0} cancelled by user",
+            "anchorLostCancel": "[AnchorLost] Anchor lost triggered cancel",
+            "videoDownloadFailed": "Video download task failed: {0}",
+            "activating": "qqq extension activating (central control mode)...",
+            "cacheInitError": "Cache initialization failed: {0}",
+            "delayedInitError": "Delayed initialization failed: {0}",
+            "delayedInitStart": "qqq delayed initialization starting...",
+            "dowWarmup": "qqq dow.js warmup starting (10s delay)",
+            "q4LoadError": "q4 (clipboard/sidebar) load failed: {0}",
+            "daemonsStart": "qqq startDaemons starting (6s delay)",
+            "engineSwitch": "Engine switched to: {0}, updating status bar",
+            "pythonEnvImperfect": "[IO Engine] Python environment imperfect: {0}, falling back to other engines",
+            "transactionRecoverError": "Transaction recovery failed: {0}",
+            "activateComplete": "qqq extension activation complete",
+            "q1LoadError": "q1 load failed: {0}",
+            "q2LoadError": "q2 load failed: {0}",
+            "deactivated": "qqq extension deactivated",
+            "fsError": "[File system error] {0}: {1}",
+            "uncaughtException": "Uncaught exception: {0}",
+            "unhandledRejection": "Unhandled Promise rejection: {0}",
+            "pythonNoInterpreter": "Python interpreter not installed",
+            "pythonInvalid": "Python interpreter not available",
+            "pythonDepsMissing": "Missing dependencies: {0}",
+            "pythonNoContext": "Environment not ready"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} cancelled and rolled back",
+            "anchorLostRollback": "{0} anchor lost, rolled back",
+            "downloadFailedRollback": "{0} download failed, rolled back",
+            "videoDownloadFailed": "Video download failed: {0}",
+            "plainPasteOnly": "qqq: Can only use plain paste. Solution: Save the file.",
+            "clickSidebarToRelax": "qqq: Please click sidebar button to start relaxing.",
+            "cooldownCleared": "qqq: Dependency download cooldown cleared, can re-download dependencies.",
+            "cooldownClearError": "qqq: Clear cooldown failed: {0}",
+            "cacheNotInit": "qqq: Cache directory not initialized",
+            "openCacheDirError": "qqq: Open cache directory failed: {0}",
+            "noStoragePath": "qqq: Cannot get storage path",
+            "ytdlpDeleted": "qqq: Deleted {0}",
+            "ytdlpNotExist": "qqq: yt-dlp.exe does not exist",
+            "ytdlpDeleteError": "qqq: Delete yt-dlp.exe failed: {0}",
+            "globalStateCleared": "qqq: globalStates cleared {0} entries, total {1}.",
+            "globalStateClearError": "qqq: Clear globalStates failed: {0}",
+            "clipboardHistoryCleared": "qqq: Clipboard history cleared",
+            "clipboardManagerNotInit": "qqq: Clipboard history manager not initialized",
+            "clipboardClearError": "qqq: Clear clipboard history failed: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "Clear dependency download cooldown (default 72 hours)",
+            "clearCooldownDesc": "Allows immediate re-download",
+            "openCacheDir": "Open cache directory",
+            "deleteYtDlp": "Delete video download component yt-dlp",
+            "deleteYtDlpDesc": "Can trigger yt-dlp update",
+            "clearGlobalStates": "Clear globalStates database",
+            "clearGlobalStatesDesc": "Clear and lose: 1. Rover quick jump array; 2. Video enhanced download browser entry; 3. Cached transaction rollback and dedup info; 4. Rover folder sz/sort preferences.",
+            "clearClipboardHistory": "Clear clipboard history",
+            "selectTitle": "Select cache operation",
+            "selectPlaceholder": "Select cache operation to execute"
         }
     },
     "video": {
@@ -126,6 +260,143 @@
         "storageError": "Critical storage error:",
         "ipcSerializeError": "IPC message serialization failed:",
         "pythonPlaybackError": "Python playback failed, permanently switching to Webview:",
-        "disposeError": "Dispose kill failed:"
+        "disposeError": "Dispose kill failed:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) probe successful {1}, switching to high-performance mode"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "Export strategy: Using frame resolution (small size)",
+            "exportOriginalRes": "Export strategy: Using original resolution (fit page width)",
+            "exportCipherKeep": "Export strategy: Keep cipher string",
+            "exportCipherRemove": "Export strategy: Remove cipher string",
+            "exportFailed": "Export failed: {0}",
+            "zipWarning": "ZIP warning: {0}",
+            "addFileFailed": "Add file failed: {0} - {1}",
+            "zipComplete": "ZIP export complete: {0}, contains {1} entries",
+            "zipFailed": "ZIP export failed: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "Extract video URL from HTML fragment failed:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] Trying spawn: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] Path does not exist: {0}",
+        "bridgeStartFailed": "Python bridge start failed ({0}): {1}",
+        "bridgeProcessError": "Python bridge process error ({0}): {1}",
+        "bridgeStartAllFailed": "Python Bridge start failed: {0}",
+        "fromScratchCallback": "[Python] \"From scratch\" callback triggered, trying hot-start daemon: {0}",
+        "audioResetQqq": "[Python] qqq audio engine cache reset",
+        "audioResetQqqError": "[Python] Reset qqq audio engine cache failed: {0}",
+        "audioResetQ4": "[Python] Q4 audio source state reset",
+        "audioResetQ4Error": "[Python] Reset Q4 audio source state failed: {0}",
+        "daemonAvailable": "[Python] daemon already available, skipping hot-start",
+        "hotStartSuccess": "[Python] Hot-start successful: {0}",
+        "ioEngineMain": "[Python] IO engine preference is {0}, daemon as main",
+        "ioEngineStandby": "[Python] IO engine preference is {0}, daemon on standby",
+        "ioEngineReadError": "[Python] Read IO engine preference failed: {0}",
+        "hotStartFailed": "[Python] Hot-start failed",
+        "daemonSkipStart": "[Python] daemon already available, skipping global start",
+        "bridgeUseSuccess": "Python Bridge started successfully using {0}",
+        "l1ImperfectWait": "[Python] L1 imperfect, waiting for background download to complete before hot-start",
+        "bridgeStartException": "Python Bridge start exception: {0}"
+    },
+    "rust": {
+        "exeNotFound": "Rust Bridge executable not found",
+        "tryStart": "Rust Bridge trying to start: \"{0}\" --daemon",
+        "processError": "Rust Bridge process error: {0}",
+        "startSuccess": "Rust Bridge started successfully",
+        "startFailed": "Rust Bridge start failed: {0}",
+        "startException": "Rust Bridge start exception: {0}"
+    },
+    "shell": {
+        "tryStart": "Trying to start PowerShell process",
+        "tryOption": "Trying option {0} to start PowerShell: {1}",
+        "processCreated": "PowerShell process created: {0}",
+        "optionFailed": "Option {0} failed to start PowerShell: {1}",
+        "processError": "PowerShell process error: {0}",
+        "processExit": "PowerShell process exited, code: {0}, signal: {1}",
+        "bridgeStartFailed": "Shell Bridge start failed: {0}",
+        "processCreateFailed": "PowerShell process creation failed: {0}",
+        "tryBash": "Trying to start Bash process",
+        "bashCreated": "Bash process created",
+        "bashCreateFailed": "Bash process creation failed: {0}",
+        "warmupSuccess": "ShellBridge background warmup successful, C# component ready"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] Bridge already active (py={0}, rust={1}, shell={2}), skipping ghost process cleanup",
+        "startWithEngine": "Starting daemons, user selected engine: {0}",
+        "startBridge": "Starting {0} bridge...",
+        "bridgeStartFailedNamed": "{0} Bridge start failed: {1}",
+        "bridgeStartException": "{0} Bridge start exception: {1}",
+        "flowException": "startDaemons flow exception: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "FFmpeg validation failed (Spawn Error): {0}",
+        "validateException": "FFmpeg async validation exception: {0}"
+    },
+    "editor": {
+        "showDocFailed": "showTextDocument failed: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] Clear setting failed {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] Get directory snapshot failed: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] Invalid transaction ID",
+        "notFound": "[Rollback] Transaction not found: {0}",
+        "rollingBack": "[Rollback] Rolling back task: {0}",
+        "anchorDeleted": "[Rollback] Deleted residual anchor: {0}",
+        "anchorDeleteFailed": "[Rollback] Delete anchor failed: {0}",
+        "anchorError": "[Rollback] Error processing anchor: {0}",
+        "completed": "[Rollback] Rollback completed"
+    },
+    "cleanup": {
+        "tempFileFailed": "[Temp file cleanup] Failed: {0}",
+        "videoWaitKillAll": "[Fallback cleanup] video type task, waiting for killAll",
+        "fallbackFailed": "[Fallback cleanup] Failed: {0}",
+        "tempFileDeleted": "[Temp file cleanup] Deleted: {0}{1}",
+        "exactMatch": " (transId exact match)",
+        "tempFileCompleted": "[Temp file cleanup] Completed, deleted {0} files",
+        "refScanFailed": "[Reference scan] Failed: {0}",
+        "orphanFolderDeleted": "[Fallback cleanup] Deleted orphan folder: {0} (created {1}s ago)",
+        "orphanFileDeleted": "[Fallback cleanup] Deleted orphan file: {0} (created {1}s ago)",
+        "orphanCompleted": "[Fallback cleanup] Completed, deleted {0} orphan items",
+        "orphanException": "[Fallback cleanup] Exception: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] Found {0} incomplete transactions, starting cleanup..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] Paste failed: target directory is empty",
+        "targetEmptyError": "Target directory is empty",
+        "triggering": "[Q2] Triggering system paste to: {0}",
+        "shellUnavailable": "[Q2] Shell daemon unavailable",
+        "shellUnavailableError": "Shell daemon unavailable",
+        "shellResponse": "[Q2] Shell response: {0}",
+        "shellError": "[Q2] Shell exception: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! Fuse protection: core asset verification failed, engine locked !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] Auto-copy VC++ DLL: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL missing (non-blocking): {0}",
+        "optionalDepsMissing": "[PythonCheck] Optional dependencies missing (allowed): {0}",
+        "slimComplete": "[Slim] Complete: freed {0}MB",
+        "platformArch": "[Python] platform={0}, arch={1}, URL={2}",
+        "trySource": "[Python] Trying {0}...",
+        "sourceSuccess": "[Python] {0} download successful",
+        "sourceFailed": "[Python] {0} failed: {1}",
+        "installPip": "[Python] Installing pip...",
+        "installDeps": "[Python] Installing dependencies: {0}",
+        "startSlim": "[Python] Starting slim...",
+        "pywin32Done": "[Python] pywin32 configuration complete",
+        "copyVcDll": "[Python] Copy VC++ DLL: {0}",
+        "installFailed": "[Python] Installation failed: {0}"
     }
 }

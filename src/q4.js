@@ -100,7 +100,7 @@ function getMsgpack() {
     try {
         _msgpack = require('msgpack-lite');
     } catch (e) {
-        console.error('[Q4] 严重错误：无法加载 msgpack-lite 依赖', e.message);
+        console.error('[Q4]', q('log.msgpackError'), e.message);
         _msgpack = null;
     }
     return _msgpack;
@@ -462,7 +462,7 @@ class ClipboardHistoryManager {
             this._touch();
             this._notifyChange();
         } catch (e) {
-            console.error('[Q4] 二进制加载失败，执行隔离:', e.message);
+            console.error('[Q4]', q('log.binaryLoadError'), e.message);
             await this._quarantineCorruptFile(this._fileBinGz);
         } finally {
             this.perfStats.loadTimeMs += (performance.now() - t0);
@@ -712,7 +712,7 @@ class ClipboardHistoryManager {
 
                 // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
                 if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
-                    console.log('[Q4] 触发容量熔断，执行批量清理...');
+                    console.log('[Q4]', q('log.capacityFuse'));
                     for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
                         if (this._tail) this._popTail();
                     }
@@ -787,7 +787,7 @@ class ClipboardHistoryManager {
 
             await this._writeFileAtomic(this._fileBinGz, outBuf);
         } catch (e) {
-            console.error('[Q4] 存储严重故障:', e.message);
+            console.error('[Q4]', q('log.storageError'), e.message);
             this._dirty = true;
         } finally {
             this.perfStats.saveTimeMs += (performance.now() - t0);
@@ -1355,7 +1355,7 @@ class ClipboardHistorySidebarProvider {
             const safeMsg = JSON.parse(JSON.stringify(msg));
             this._view.webview.postMessage(safeMsg).then(undefined, () => { });
         } catch (e) {
-            console.warn('[Q4] IPC 消息序列化失败:', e.message);
+            console.warn('[Q4]', q('log.ipcSerializeError'), e.message);
         }
     }
 
@@ -1385,7 +1385,7 @@ class ClipboardHistorySidebarProvider {
                     if (check && check.has_miniaudio) {
                         const version = check.miniaudio_version || "unknown";
                         const devices = Array.isArray(check.devices) ? `(Devices: ${check.devices.length})` : "";
-                        this._global.logMessage(`[Audio] Python (miniaudio v${version}) 探测成功 ${devices}，切换到高性能模式`, "INFO");
+                        this._global.logMessage(q('log.pythonProbeSuccess', version, devices), "INFO");
                         this._audioSource = AUDIO_SOURCE.PYTHON;
                         return AUDIO_SOURCE.PYTHON;
                     } else {
@@ -1473,7 +1473,7 @@ class ClipboardHistorySidebarProvider {
 
                 throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
             } catch (e) {
-                console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
+                console.error('[Q4]', q('log.pythonPlaybackError'), e.message);
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
                 // 继续落到 Webview 兜底
@@ -1603,7 +1603,7 @@ class ClipboardHistorySidebarProvider {
 
                 throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
             } catch (e) {
-                console.error('[Q4] Python 播放失败，永久切换到 Webview:', e.message);
+                console.error('[Q4]', q('log.pythonPlaybackError'), e.message);
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
                 this._pythonPlayState.playing = false;
@@ -2756,7 +2756,7 @@ class StatusBarManager {
  */
 async function qsc(a, historyManager) {
     const context = historyManager?.context;
-    console.log(`[QSC] 执行清理任务，级别: ${a}`);
+    console.log('[QSC]', q('q4.cache.clearing', a));
 
     // 1. 清理 qqq_cache 文件夹
     const clearCache = async () => {
@@ -2772,16 +2772,16 @@ async function qsc(a, historyManager) {
                         if (fs.statSync(filePath).isFile()) fs.unlinkSync(filePath);
                     } catch { }
                 }
-                console.log('[QSC] qqq_cache 已清空');
+                console.log('[QSC]', q('q4.cache.cacheCleared'));
             }
-        } catch (e) { console.error('[QSC] 清理 cache 失败:', e.message); }
+        } catch (e) { console.error('[QSC]', q('q4.cache.cacheClearError', e.message)); }
     };
 
     // 2. 清空剪切板历史
     const clearHistory = async () => {
         if (historyManager) {
             await historyManager.clearHistory({ deleteFiles: true });
-            console.log('[QSC] 剪切板历史已清空');
+            console.log('[QSC]', q('q4.cache.historyCleared'));
         }
     };
 
@@ -2793,8 +2793,8 @@ async function qsc(a, historyManager) {
             for (const key of keys) {
                 await context.globalState.update(key, undefined);
             }
-            console.log('[QSC] globalState 已清空');
-        } catch (e) { console.error('[QSC] 清理 globalState 失败:', e.message); }
+            console.log('[QSC]', q('q4.cache.stateCleared'));
+        } catch (e) { console.error('[QSC]', q('q4.cache.stateClearError', e.message)); }
     };
 
     if (a === 1) await clearCache();
@@ -2890,7 +2890,7 @@ async function deactivate() {
         try {
             await _currentHistoryManager.dispose();
         } catch (e) {
-            console.error('[Q4] Dispose 强杀失败:', e.message);
+            console.error('[Q4]', q('log.disposeError'), e.message);
         }
         _currentHistoryManager = null;
     }

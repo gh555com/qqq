@@ -14,6 +14,7 @@ const { TextDecoder } = require("util");
 const { getSharedDownloader, isPlatformOrSegmentVideo } = require("./dow");
 const sizeOf = require("image-size");
 const global = require("./global");
+const { q } = require("./i18n");
 
 let _global = null;
 function getGlobal() {
@@ -1112,7 +1113,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
 
         return Array.from(videoUrls);
     } catch (error) {
-        console.error('从HTML片段提取视频URL失败:', error);
+        console.error(q('h.log.extractVideoUrlFailed'), error);
         return [];
     }
 }

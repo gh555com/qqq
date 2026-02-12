@@ -5,6 +5,7 @@ const path = require("path");
 const cp = require("child_process");
 const readline = require("readline");
 const crypto = require("crypto");
+const { q } = require('./i18n');
 
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
@@ -114,7 +115,7 @@ class DaemonBridge extends EventEmitter {
 					return;
 				}
 
-				if (result.error) logMessage(`${this.name} 错误响应: ${result.error}`, "WARN");
+				if (result.error) logMessage(q('bridge.errorResponse', this.name, result.error), "WARN");
 
 				if (this.pending.has(id)) {
 					const { resolve: res, timer } = this.pending.get(id);
@@ -137,13 +138,13 @@ class DaemonBridge extends EventEmitter {
 
 		proc.on("error", (err) => {
 			if (this.process !== proc) return;
-			logMessage(`${this.name} 进程错误: ${err.message}`, "ERROR");
+			logMessage(q('bridge.processError', this.name, err.message), "ERROR");
 			this.lastCrashReason = cleanReason(err.message);
 			this._handleCrash();
 		});
 		proc.on("close", (code) => {
 			if (this.process !== proc) return;
-			logMessage(`${this.name} 进程关闭，退出码: ${code}`, "INFO");
+			logMessage(q('bridge.processClose', this.name, code), "INFO");
 			this.lastCrashReason = cleanReason(`exit_code=${code}`);
 			this._handleCrash();
 		});
@@ -179,7 +180,7 @@ class DaemonBridge extends EventEmitter {
 			// 所有 ping 尝试都失败
 			const reason = `ping_failed_after_${maxPingAttempts}_attempts${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
 			this._setStartError(reason);
-			logMessage(`${this.name} ping 失败，已尝试 ${maxPingAttempts} 次`, "WARN");
+			logMessage(q('bridge.pingFailed', this.name, maxPingAttempts), "WARN");
 			this.available = false;
 			try { proc.kill(); } catch { }
 			this.process = null;
@@ -221,21 +222,21 @@ class DaemonBridge extends EventEmitter {
 		if (this.recentCrashes.length > 5) {
 			this.isPermDisabled = true;
 			this.available = false;
-			const msg = `${this.name} 1分钟内崩溃超过5次，已触发熔断保护，永久禁用该 Bridge。`;
+			const msg = q('bridge.circuitBreaker', this.name);
 			this._setStartError(msg);
 			logMessage(msg, "ERROR");
 
 			// ★ Shell Daemon 致命错误弹窗
 			if (this.name === "Shell") {
 				showErrorMessage(
-					"node shell deamo 陷入异常，qqq 将停止工作。 解决方案：重启。",
+					q('bridge.shellDaemonCrash'),
 					{
 						modal: true,
-						detail: "检测到后台守护进程频繁崩溃，可能是被杀毒软件拦截或环境异常。为保护系统稳定性，核心功能已暂停。"
+						detail: q('bridge.shellDaemonDetail')
 					},
-					"立即重启窗口"
+					q('bridge.restartWindow')
 				).then(selection => {
-					if (selection === "立即重启窗口") {
+					if (selection === q('bridge.restartWindow')) {
 						vscode.commands.executeCommand("workbench.action.reloadWindow");
 					}
 				});
@@ -248,30 +249,30 @@ class DaemonBridge extends EventEmitter {
 			this.restartCount++;
 			// 指数退避策略：从 50ms 开始，快速重试
 			const backoff = 50 * Math.pow(2, this.restartCount - 1);
-			logMessage(`${this.name} 进程崩溃，尝试重启 (${this.restartCount}/${this.maxRestarts})，延迟 ${backoff}ms`, "WARN");
+			logMessage(q('bridge.crashRestart', this.name, this.restartCount, this.maxRestarts, backoff), "WARN");
 
 			// ★ 工业级修复：重启前确保 available 不是 false，否则 start() 中的检查会阻止重启
 			this.available = null;
 
 			setTimeout(() => {
-				logMessage(`${this.name} 正在执行重启...`, "INFO");
+				logMessage(q('bridge.restarting', this.name), "INFO");
 				this.start().then(ok => {
 					if (ok) {
-						logMessage(`${this.name} 重启成功`, "INFO");
+						logMessage(q('bridge.restartSuccess', this.name), "INFO");
 					} else {
-						logMessage(`${this.name} 重启失败`, "WARN");
+						logMessage(q('bridge.restartFailed', this.name), "WARN");
 					}
 				}).catch(e => {
-					logMessage(`${this.name} 重启异常: ${e?.message || e}`, "ERROR");
+					logMessage(q('bridge.restartException', this.name, e?.message || e), "ERROR");
 				});
 			}, backoff);
 		} else {
-			logMessage(`${this.name} 进程崩溃，达到最大重启次数，标记为不可用`, "ERROR");
+			logMessage(q('bridge.maxRestartsReached', this.name), "ERROR");
 			this.available = false;
 
 			// ★ Shell Daemon 特权：无限复活
 			if (this.name === "Shell") {
-				logMessage(`${this.name} 达到最大重启次数，但作为常驻服务将在 3秒 后强制复活`, "WARN");
+				logMessage(q('bridge.forceRevive', this.name), "WARN");
 				this.restartCount = 0; // 重置计数以允许再次进入重启循环
 				setTimeout(() => this.start(), 3000);
 			}
@@ -409,11 +410,11 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 				let proc;
 				try {
-					logMessage(`[Python] 尝试 spawn: ${bin} "${scriptPath}" --daemon`, "INFO");
+					logMessage(q('python.trySpawn', bin, scriptPath), "INFO");
 
 					// 检查 bin 是否为绝对路径且存在
 					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
-						logMessage(`[Python] 路径不存在: ${bin}`, "WARN");
+						logMessage(q('python.pathNotExist', bin), "WARN");
 						res(false);
 						return;
 					}
@@ -431,7 +432,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				} catch (e) {
 					const msg = `spawn_fail(${bin}): ${e.message}`;
 					bridge._setStartError(msg);
-					logMessage(`Python bridge 启动失败 (${bin}): ${e.message}`, "WARN");
+					logMessage(q('python.bridgeStartFailed', bin, e.message), "WARN");
 					res(false);
 					return;
 				}
@@ -449,7 +450,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				proc.once("error", (err) => {
 					const msg = `process_error(${bin}): ${err.message}`;
 					bridge._setStartError(msg);
-					logMessage(`Python bridge 进程错误 (${bin}): ${err.message}`, "WARN");
+					logMessage(q('python.bridgeProcessError', bin, err.message), "WARN");
 					failFast();
 				});
 
@@ -457,7 +458,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					if (settled) return;
 					settled = true;
 					if (!ok && bridge.lastStartError) {
-						logMessage(`Python Bridge 启动失败：${bridge.lastStartError}`, "WARN");
+						logMessage(q('python.bridgeStartAllFailed', bridge.lastStartError), "WARN");
 					}
 					res(!!ok);
 				});
@@ -470,7 +471,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 			// ★ 注册 "从无到有" 回调：下载完成后热启动 daemon
 			downloader.python.onPythonReady(async (pythonPath, context) => {
-				logMessage(`[Python] "从无到有" 回调触发，尝试热启动 daemon: ${pythonPath}`, "INFO");
+				logMessage(q('python.fromScratchCallback', pythonPath), "INFO");
 
 				// ★ 环境已完美，刷新引擎缓存
 				invalidateEngineCache();
@@ -480,10 +481,10 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					const qqq = require('./qqq');
 					if (qqq.resetPythonAudioCache) {
 						qqq.resetPythonAudioCache();
-						logMessage(`[Python] 已重置 qqq 音频引擎缓存`, "INFO");
+						logMessage(q('python.audioResetQqq'), "INFO");
 					}
 				} catch (e) {
-					logMessage(`[Python] 重置 qqq 音频引擎缓存失败: ${e.message}`, "WARN");
+					logMessage(q('python.audioResetQqqError', e.message), "WARN");
 				}
 
 				// ★ 重置 Q4 音频源状态
@@ -491,22 +492,22 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					const q4 = require('./q4');
 					if (q4.resetQ4AudioSource) {
 						q4.resetQ4AudioSource();
-						logMessage(`[Python] 已重置 Q4 音频源状态`, "INFO");
+						logMessage(q('python.audioResetQ4'), "INFO");
 					}
 				} catch (e) {
-					logMessage(`[Python] 重置 Q4 音频源状态失败: ${e.message}`, "WARN");
+					logMessage(q('python.audioResetQ4Error', e.message), "WARN");
 				}
 
 				// 检查是否已经有可用的 daemon
 				if (bridge.available) {
-					logMessage(`[Python] daemon 已可用，跳过热启动`, "INFO");
+					logMessage(q('python.daemonAvailable'), "INFO");
 					return;
 				}
 
 				// 热启动 daemon
 				const ok = await spawnWith(pythonPath);
 				if (ok) {
-					logMessage(`[Python] 热启动成功: ${pythonPath}`, "INFO");
+					logMessage(q('python.hotStartSuccess', pythonPath), "INFO");
 
 					// ★ 热启动成功后再次刷新引擎缓存
 					invalidateEngineCache();
@@ -516,15 +517,15 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 						const ioEngine = getConfig('ioEngine') || 'auto';
 
 						if (ioEngine === 'auto' || ioEngine === 'python') {
-							logMessage(`[Python] IO 引擎偏好为 ${ioEngine}，daemon 作为主力`, "INFO");
+							logMessage(q('python.ioEngineMain', ioEngine), "INFO");
 						} else {
-							logMessage(`[Python] IO 引擎偏好为 ${ioEngine}，daemon 待命`, "INFO");
+							logMessage(q('python.ioEngineStandby', ioEngine), "INFO");
 						}
 					} catch (e) {
-						logMessage(`[Python] 读取 IO 引擎偏好失败: ${e.message}`, "WARN");
+						logMessage(q('python.ioEngineReadError', e.message), "WARN");
 					}
 				} else {
-					logMessage(`[Python] 热启动失败`, "WARN");
+					logMessage(q('python.hotStartFailed'), "WARN");
 				}
 			});
 
@@ -535,7 +536,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 			// ★ 检查 daemon 是否已经可用
 			if (pythonBridge.available === true) {
-				logMessage(`[Python] daemon 已可用，跳过全局启动`, "DEBUG");
+				logMessage(q('python.daemonSkipStart'), "DEBUG");
 				resolve(true);
 				return;
 			}
@@ -543,7 +544,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			if (pythonPath) {
 				const ok = await spawnWith(pythonPath);
 				if (ok) {
-					logMessage(`Python Bridge 使用 ${pythonPath} 启动成功`, "INFO");
+					logMessage(q('python.bridgeUseSuccess', pythonPath), "INFO");
 					resolve(true);
 					return;
 				}
@@ -551,7 +552,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 			// L1 不完美或启动失败，等待后台下载完成后热启动
 			if (!pythonPath) {
-				logMessage(`[Python] L1 不完美，等待后台下载完成后热启动`, "INFO");
+				logMessage(q('python.l1ImperfectWait'), "INFO");
 				// 不设置错误，因为可能会通过回调热启动
 				bridge.available = false;
 				resolve(false);
@@ -562,12 +563,12 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			if (!bridge.lastStartError) {
 				bridge._setStartError("python_spawn_failed");
 			}
-			logMessage(`Python Bridge 启动失败：${bridge.lastStartError}`, "WARN");
+			logMessage(q('python.bridgeStartAllFailed', bridge.lastStartError), "WARN");
 			bridge.available = false;
 			resolve(false);
 		})().catch((e) => {
 			bridge._setStartError(`start_exception: ${e.message}`);
-			logMessage(`Python Bridge 启动异常: ${e.message}`, "ERROR");
+			logMessage(q('python.bridgeStartException', e.message), "ERROR");
 			resolve(false);
 		});
 	});
@@ -594,7 +595,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 
 		if (!fs.existsSync(exePath)) {
 			bridge._setStartError(`exe_not_found: ${filename}`);
-			logMessage("Rust Bridge 可执行文件未找到", "WARN");
+			logMessage(q('rust.exeNotFound'), "WARN");
 			bridge.available = false;
 			resolve(false);
 			return;
@@ -604,7 +605,7 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		// 每个 IDE 实例独立运行自己的 daemon，不会被别的 IDE 干扰
 		(async () => {
 			try {
-				logMessage(`Rust Bridge 尝试启动: "${exePath}" --daemon`, "INFO");
+				logMessage(q('rust.tryStart', exePath), "INFO");
 				const proc = cp.spawn(exePath, ["--daemon"], {
 					stdio: ["pipe", "pipe", "pipe"],
 					windowsHide: true,
@@ -614,23 +615,23 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 
 				proc.once("error", (err) => {
 					bridge._setStartError(`process_error: ${err.message}`);
-					logMessage(`Rust Bridge 进程错误: ${err.message}`, "WARN");
+					logMessage(q('rust.processError', err.message), "WARN");
 					bridge.available = false;
 					resolve(false);
 				});
 
 				bridge.setupProcess(proc, (ok) => {
 					if (ok) {
-						logMessage("Rust Bridge 启动成功", "INFO");
+						logMessage(q('rust.startSuccess'), "INFO");
 						resolve(true);
 					} else {
-						logMessage(`Rust Bridge 启动失败原因：${bridge.lastStartError || "unknown"}`, "WARN");
+						logMessage(q('rust.startFailed', bridge.lastStartError || "unknown"), "WARN");
 						resolve(false);
 					}
 				});
 			} catch (e) {
 				bridge._setStartError(`start_exception: ${e.message}`);
-				logMessage(`Rust Bridge 启动异常: ${e.message}`, "ERROR");
+				logMessage(q('rust.startException', e.message), "ERROR");
 				bridge.available = false;
 				resolve(false);
 			}
@@ -959,7 +960,7 @@ while ($true) {
 }
 `.trim();
 
-			logMessage("尝试启动 PowerShell 进程", "DEBUG");
+			logMessage(q('shell.tryStart'), "DEBUG");
 
 			// ★ 关键修复：将整个启动逻辑放在 async IIFE 内部，并在内部 resolve
 			(async () => {
@@ -977,16 +978,16 @@ while ($true) {
 					let lastError = null;
 					for (const [index, options] of psOptions.entries()) {
 						try {
-							logMessage(`尝试使用选项 ${index + 1} 启动 PowerShell: ${options[0]}`, "DEBUG");
+							logMessage(q('shell.tryOption', index + 1, options[0]), "DEBUG");
 							proc = cp.spawn(options[0], options.slice(1), {
 								stdio: ["pipe", "pipe", "pipe"],
 								windowsHide: true,
 							});
-							logMessage(`PowerShell 进程已创建: ${options[0]}`, "DEBUG");
+							logMessage(q('shell.processCreated', options[0]), "DEBUG");
 							break;
 						} catch (e) {
 							lastError = e;
-							logMessage(`使用选项 ${index + 1} 启动 PowerShell 失败: ${e.message}`, "DEBUG");
+							logMessage(q('shell.optionFailed', index + 1, e.message), "DEBUG");
 						}
 					}
 
@@ -996,20 +997,20 @@ while ($true) {
 
 					proc.on("error", (err) => {
 						bridge._setStartError(`process_error: ${err.message}`);
-						logMessage(`PowerShell 进程错误: ${err.message} `, "ERROR");
+						logMessage(q('shell.processError', err.message), "ERROR");
 					});
 					proc.on("exit", (code, signal) => {
-						logMessage(`PowerShell 进程退出，代码: ${code}, 信号: ${signal} `, "INFO");
+						logMessage(q('shell.processExit', code, signal), "INFO");
 					});
 
 					// ★ 关键：在 async IIFE 内部调用 setupProcess
 					bridge.setupProcess(proc, (ok) => {
-						if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"} `, "WARN");
+						if (!ok) logMessage(q('shell.bridgeStartFailed', bridge.lastStartError || "unknown"), "WARN");
 						resolve(ok);
 					});
 				} catch (e) {
 					bridge._setStartError(`create_fail: ${e.message} `);
-					logMessage(`PowerShell 进程创建失败: ${e.message} `, "ERROR");
+					logMessage(q('shell.processCreateFailed', e.message), "ERROR");
 					bridge.available = false;
 					resolve(false);
 				}
@@ -1119,16 +1120,16 @@ esac
 done
 `.trim();
 
-			logMessage("尝试启动 Bash 进程", "DEBUG");
+			logMessage(q('shell.tryBash'), "DEBUG");
 			try {
 				proc = cp.spawn("bash", ["-c", bashScript], {
 					stdio: ["pipe", "pipe", "pipe"],
 					env: NO_TRACK_ENV
 				});
-				logMessage("Bash 进程已创建", "DEBUG");
+				logMessage(q('shell.bashCreated'), "DEBUG");
 			} catch (e) {
 				bridge._setStartError(`spawn_fail(bash): ${e.message} `);
-				logMessage(`Bash 进程创建失败: ${e.message} `, "ERROR");
+				logMessage(q('shell.bashCreateFailed', e.message), "ERROR");
 				bridge.available = false;
 				resolve(false);
 				return;
@@ -1142,7 +1143,7 @@ done
 		}
 
 		bridge.setupProcess(proc, (ok) => {
-			if (!ok) logMessage(`Shell Bridge 启动失败原因：${bridge.lastStartError || "unknown"} `, "WARN");
+			if (!ok) logMessage(q('shell.bridgeStartFailed', bridge.lastStartError || "unknown"), "WARN");
 			resolve(ok);
 		});
 	});
@@ -1263,11 +1264,11 @@ async function checkAndInstallLinuxDeps() {
 	// 检测 xclip 是否已安装
 	const hasXclip = await checkXclipInstalled();
 	if (hasXclip) {
-		logMessage('Linux 依赖检测: xclip 已安装', 'INFO');
+		logMessage(q('linux.xclipInstalled'), 'INFO');
 		return;
 	}
 
-	logMessage('Linux 依赖检测: xclip 未安装，准备提示用户', 'INFO');
+	logMessage(q('linux.xclipNotInstalled'), 'INFO');
 
 	// 检测包管理器
 	const pkgMgr = await detectLinuxPackageManager();
@@ -1275,18 +1276,18 @@ async function checkAndInstallLinuxDeps() {
 
 	// 弹窗询问用户
 	const choice = await vscode.window.showWarningMessage(
-		'qqq: 剪贴板功能需要 xclip，是否立即安装？',
+		q('linux.xclipPrompt'),
 		{ modal: false },
-		'立即安装',
-		'复制命令',
-		'不再提示'
+		q('linux.installNow'),
+		q('linux.copyCommand'),
+		q('linux.dontAskAgain')
 	);
 
-	if (choice === '立即安装') {
-		logMessage(`正在安装 xclip，使用命令: ${installCmd}`, 'INFO');
+	if (choice === q('linux.installNow')) {
+		logMessage(q('linux.installingXclip', installCmd), 'INFO');
 
 		// 在终端中执行安装命令
-		const terminal = await runInTerminal(installCmd, 'qqq: 安装 xclip');
+		const terminal = await runInTerminal(installCmd, q('linux.terminalTitle'));
 
 		// 监听终端关闭，检测是否安装成功
 		const disposable = vscode.window.onDidCloseTerminal(async (closedTerminal) => {
@@ -1300,24 +1301,24 @@ async function checkAndInstallLinuxDeps() {
 				const nowHasXclip = await checkXclipInstalled();
 				if (nowHasXclip) {
 					showAutoCloseNotification('success', 'qqq: xclip 安装成功！剪贴板功能现已可用。');
-					logMessage('xclip 安装成功', 'INFO');
+					logMessage(q('linux.xclipInstallSuccess'), 'INFO');
 				} else {
 					showAutoCloseNotification('warning', 'qqq: xclip 安装可能未成功，请检查终端输出或手动安装。');
-					logMessage('xclip 安装可能失败', 'WARN');
+					logMessage(q('linux.xclipInstallMaybeFailed'), 'WARN');
 				}
 			}
 		});
 
-	} else if (choice === '复制命令') {
+	} else if (choice === q('linux.copyCommand')) {
 		await vscode.env.clipboard.writeText(installCmd);
 		showAutoCloseNotification('info', `qqq: 安装命令已复制到剪贴板: ${installCmd}`);
-		logMessage(`用户选择复制安装命令: ${installCmd}`, 'INFO');
+		logMessage(q('linux.userCopyCmd', installCmd), 'INFO');
 
-	} else if (choice === '不再提示') {
+	} else if (choice === q('linux.dontAskAgain')) {
 		if (extensionContext) {
 			await extensionContext.globalState.update(suppressKey, true);
 		}
-		logMessage('用户选择不再提示 xclip 安装', 'INFO');
+		logMessage(q('linux.userDismiss'), 'INFO');
 	}
 }
 
@@ -1347,7 +1348,7 @@ async function startDaemons() {
 	const shellBusy = shellBridge.available === true || shellBridge.isStarting || shellBridge.process;
 
 	if (pythonBusy || rustBusy || shellBusy) {
-		logMessage(`[startDaemons] 已有 bridge 活动中 (py=${pythonBusy}, rust=${rustBusy}, shell=${shellBusy})，跳过幽灵进程清理`, "INFO");
+		logMessage(q('daemons.bridgeBusy', pythonBusy, rustBusy, shellBusy), "INFO");
 	} else {
 		// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
 		try { await cleanupGhostDaemons(); } catch (e) { }
@@ -1368,14 +1369,14 @@ async function startDaemons() {
 	}
 
 	const pref = getEnginePreference();
-	logMessage(`开始启动守护进程，用户选择的引擎: ${pref} `, "INFO");
+	logMessage(q('daemons.startWithEngine', pref), "INFO");
 
 	const ensureStarted = async (bridge) => {
 		if (bootSeq !== _daemonBootSeq) return false;
 		try {
 			if (bridge.isAvailable()) return true;
 
-			logMessage(`启动 ${bridge.name} bridge...`, "INFO");
+			logMessage(q('daemons.startBridge', bridge.name), "INFO");
 			const ok = await bridge.start();
 
 			if (bootSeq !== _daemonBootSeq) return false;
@@ -1383,11 +1384,11 @@ async function startDaemons() {
 			if (ok) {
 				logMessage(`${bridge.name} Bridge OK`, "INFO");
 			} else {
-				logMessage(`${bridge.name} Bridge 启动失败：${bridge.lastStartError || "unknown"}`, "WARN");
+				logMessage(q('daemons.bridgeStartFailedNamed', bridge.name, bridge.lastStartError || "unknown"), "WARN");
 			}
 			return !!ok;
 		} catch (e) {
-			logMessage(`${bridge.name} Bridge 启动异常：${e?.message || e}`, "WARN");
+			logMessage(q('daemons.bridgeStartException', bridge.name, e?.message || e), "WARN");
 			return false;
 		} finally {
 			updateStatusBarNow();
@@ -1418,12 +1419,12 @@ async function startDaemons() {
 			// ★ 检测 Linux 依赖（延迟执行，避免阻塞启动流程）
 			setTimeout(() => {
 				checkAndInstallLinuxDeps().catch(e => {
-					logMessage(`Linux 依赖检测异常: ${e?.message || e}`, 'WARN');
+					logMessage(q('linux.checkException', e?.message || e), 'WARN');
 				});
 			}, 2000);
 		}
 	})().catch((e) => {
-		logMessage(`startDaemons 流程异常: ${e?.message || e} `, "WARN");
+		logMessage(q('daemons.flowException', e?.message || e), "WARN");
 		updateStatusBarNow();
 	});
 }
@@ -1507,10 +1508,10 @@ function init(context) {
 				const { spawn } = require('child_process');
 				const cp = spawn(ffInAssets, ["-version"], { windowsHide: true });
 				cp.on('error', (e) => {
-					logMessage(`FFmpeg 验证失败 (Spawn Error): ${e.message}`, "WARN");
+					logMessage(q('ffmpeg.validateFailed', e.message), "WARN");
 				});
 			} catch (e) {
-				logMessage(`FFmpeg 异步验证异常: ${e.message}`, "WARN");
+				logMessage(q('ffmpeg.validateException', e.message), "WARN");
 			}
 		})();
 	} else {
@@ -1532,7 +1533,7 @@ function init(context) {
 		if (shellBridge && shellBridge.isAvailable()) {
 			shellBridge.call("warmup", {}, 5000).then(res => {
 				if (res?.status === 'warmed') {
-					logMessage("ShellBridge 后台预热成功，C# 组件已就绪", "INFO");
+					logMessage(q('shell.warmupSuccess'), "INFO");
 				}
 			}).catch(() => { });
 		}
@@ -1782,7 +1783,7 @@ function showTextDocument(document, column, preserveFocus) {
 	try {
 		return vscode.window.showTextDocument(document, column, preserveFocus);
 	} catch (e) {
-		logMessage(`showTextDocument 失败: ${e.message}`, "ERROR");
+		logMessage(q('editor.showDocFailed', e.message), "ERROR");
 		return Promise.resolve(undefined);
 	}
 }
@@ -1982,7 +1983,7 @@ async function _clearVscodeSettingEverywhere(key) {
 			}
 		}
 	} catch (e) {
-		logMessage(`[ConfigGate] 清除设置失败 ${key}: ${e.message}`, "WARN");
+		logMessage(q('config.clearFailed', key, e.message), "WARN");
 	} finally {
 		_suppressConfigEcho--;
 	}
@@ -2325,7 +2326,7 @@ async function getDirectorySnapshot(targetDir) {
 
 		return snapshot;
 	} catch (e) {
-		logMessage(`[Snapshot] 获取目录快照失败: ${e.message}`, "WARN");
+		logMessage(q('snapshot.getFailed', e.message), "WARN");
 		return [];
 	}
 }
@@ -2438,18 +2439,18 @@ const TransactionManager = {
 		// ★ 始终从 globalState 获取最新的事务数据（避免使用过时的快照）
 		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
 		if (!transId) {
-			logMessage(`[Rollback] 无效的事务ID`, "WARN");
+			logMessage(q('rollback.invalidId'), "WARN");
 			return;
 		}
 
 		// 从 globalState 重新获取最新数据
 		const trans = this.getTransactions().find(t => t.id === transId);
 		if (!trans) {
-			logMessage(`[Rollback] 未找到事务: ${transId}`, "WARN");
+			logMessage(q('rollback.notFound', transId), "WARN");
 			return;
 		}
 
-		logMessage(`[Rollback] 正在回滚任务: ${trans.id}`, "WARN");
+		logMessage(q('rollback.rollingBack', trans.id), "WARN");
 
 		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
 		try {
@@ -2470,17 +2471,17 @@ const TransactionManager = {
 						const edit = new vscode.WorkspaceEdit();
 						edit.replace(uri, range, '');
 						await vscode.workspace.applyEdit(edit);
-						logMessage(`[Rollback] 已删除残留锚点: ${anchor}`, "INFO");
+						logMessage(q('rollback.anchorDeleted', anchor), "INFO");
 					}
 				} catch (e) {
-					logMessage(`[Rollback] 删除锚点失败: ${e.message}`, "WARN");
+					logMessage(q('rollback.anchorDeleteFailed', e.message), "WARN");
 				}
 			}
 		} catch (e) {
-			logMessage(`[Rollback] 处理锚点时出错: ${e.message}`, "WARN");
+			logMessage(q('rollback.anchorError', e.message), "WARN");
 		}
 
-		logMessage(`[Rollback] 回滚完成`, "INFO");
+		logMessage(q('rollback.completed'), "INFO");
 		await this.removeTransaction(trans.id);
 
 		// ★ 后台清理（不阻塞弹窗和用户交互）
@@ -2490,7 +2491,7 @@ const TransactionManager = {
 				// 1. 清理 .part/.ytdl 临时文件 (传入 trans 以便清理预注册的 tempFiles)
 				// ★ 传递 isRecover 选项，让清理逻辑使用事务时间基准
 				this._cleanupTempFiles(trans.targetDir, trans, { isRecover }).catch(e => {
-					logMessage(`[临时文件清理] 失败: ${e.message}`, "WARN");
+					logMessage(q('cleanup.tempFileFailed', e.message), "WARN");
 				});
 			}, 100);
 
@@ -2500,19 +2501,19 @@ const TransactionManager = {
 			if (taskType === 'video') {
 				// ★ video 类型：跳过此处清理，由 VideoDownloadController 在 killAll 后立即执行
 				// （因为需要先杀死 yt-dlp 进程才能删除文件）
-				logMessage(`[兜底清理] video 类型任务，等待 killAll 后执行`, "INFO");
+				logMessage(q('cleanup.videoWaitKillAll'), "INFO");
 			} else if (taskType === 'html') {
 				// ★ html 类型：无长进程，1秒后立即执行清理
 				setTimeout(() => {
 					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
-						logMessage(`[兜底清理] 失败: ${e.message}`, "WARN");
+						logMessage(q('cleanup.fallbackFailed', e.message), "WARN");
 					});
 				}, 1000);
 			} else {
 				// ★ 其他类型（local_file 等）：11秒后执行 pure 兜底
 				setTimeout(() => {
 					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
-						logMessage(`[兜底清理] 失败: ${e.message}`, "WARN");
+						logMessage(q('cleanup.fallbackFailed', e.message), "WARN");
 					});
 				}, 11000);
 			}
@@ -2615,7 +2616,7 @@ const TransactionManager = {
 				for (let retry = 0; retry < 5 && !deleted; retry++) {
 					try {
 						fs.unlinkSync(fullPath);
-						logMessage(`[临时文件清理] 删除: ${fileName}${isExactMatch ? ' (transId精确匹配)' : ''}`, "INFO");
+						logMessage(q('cleanup.tempFileDeleted', fileName, isExactMatch ? q('cleanup.exactMatch') : ''), "INFO");
 						deleted = true;
 						deletedCount++;
 					} catch (e) {
@@ -2628,7 +2629,7 @@ const TransactionManager = {
 		}
 
 		if (deletedCount > 0) {
-			logMessage(`[临时文件清理] 完成，共删除 ${deletedCount} 个文件`, "INFO");
+			logMessage(q('cleanup.tempFileCompleted', deletedCount), "INFO");
 		}
 	},
 
@@ -2690,7 +2691,7 @@ const TransactionManager = {
 				}
 			}
 		} catch (e) {
-			logMessage(`[引用扫描] 失败: ${e.message}`, "WARN");
+			logMessage(q('cleanup.refScanFailed', e.message), "WARN");
 		}
 		return referencedItems;
 	},
@@ -2746,14 +2747,14 @@ const TransactionManager = {
 						if (orphan.isDir) {
 							// ★ 文件夹：使用 rmSync 递归删除
 							fs.rmSync(fullPath, { recursive: true, force: true });
-							logMessage(`[兖底清理] 删除孤儿文件夹: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+							logMessage(q('cleanup.orphanFolderDeleted', orphan.name, Math.round(age / 1000)), "INFO");
 						} else {
 							// ★ 文件：带重试逻辑的 unlink
 							let deleted = false;
 							for (let retry = 0; retry < 3 && !deleted; retry++) {
 								try {
 									fs.unlinkSync(fullPath);
-									logMessage(`[兖底清理] 删除孤儿文件: ${orphan.name} (创建 ${Math.round(age / 1000)}秒前)`, "INFO");
+									logMessage(q('cleanup.orphanFileDeleted', orphan.name, Math.round(age / 1000)), "INFO");
 									deleted = true;
 								} catch (e) {
 									if ((e.code === 'EBUSY' || e.code === 'EPERM') && retry < 2) {
@@ -2768,11 +2769,11 @@ const TransactionManager = {
 			}
 
 			if (cleanedCount > 0) {
-				logMessage(`[兖底清理] 完成，共删除 ${cleanedCount} 个孤儿项目`, "INFO");
+				logMessage(q('cleanup.orphanCompleted', cleanedCount), "INFO");
 			}
 		} catch (e) {
 			// ★ 捕获所有异常，防止扩展崩溃
-			logMessage(`[兖底清理] 异常: ${e.message}`, "WARN");
+			logMessage(q('cleanup.orphanException', e.message), "WARN");
 		}
 	},
 
@@ -2780,7 +2781,7 @@ const TransactionManager = {
 		const list = this.getTransactions();
 		if (list.length === 0) return;
 
-		logMessage(`[Recovery] 发现 ${list.length} 个未完成事务，开始清理...`, "WARN");
+		logMessage(q('recovery.found', list.length), "WARN");
 		for (const trans of list) {
 			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
 			// ★ 传入 isRecover: true，让清理逻辑使用 lastActiveAt 作为时间基准
@@ -3242,24 +3243,24 @@ async function tryOneByOne(callback) {
  */
 async function triggerSystemPaste(targetDir) {
 	if (!targetDir) {
-		logMessage(`[Q2] 粘贴失败：目标目录为空`, "ERROR");
-		return { success: false, error: "目标目录为空" };
+		logMessage(q('q2paste.targetEmpty'), "ERROR");
+		return { success: false, error: q('q2paste.targetEmptyError') };
 	}
 
 	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
-	logMessage(`[Q2] 正在触发系统粘贴至: ${normalizedPath}`, "INFO");
+	logMessage(q('q2paste.triggering', normalizedPath), "INFO");
 
 	if (!shellBridge || !shellBridge.isAvailable()) {
-		logMessage(`[Q2] Shell daemon 不可用`, "ERROR");
-		return { success: false, error: "Shell daemon 不可用" };
+		logMessage(q('q2paste.shellUnavailable'), "ERROR");
+		return { success: false, error: q('q2paste.shellUnavailableError') };
 	}
 
 	try {
 		const res = await shellBridge.call("trigger_system_paste", { path: normalizedPath }, 10000);
-		logMessage(`[Q2] Shell 返回: ${JSON.stringify(res)}`, "INFO");
+		logMessage(q('q2paste.shellResponse', JSON.stringify(res)), "INFO");
 		return res;
 	} catch (e) {
-		logMessage(`[Q2] Shell 异常: ${e.message}`, "ERROR");
+		logMessage(q('q2paste.shellError', e.message), "ERROR");
 		return { success: false, error: e.message };
 	}
 }
@@ -3297,7 +3298,7 @@ async function verifySystemIntegrityAsync(context, force = false) {
 
 		// ★ 熔断机制：如果发现被篡改，主动瘫痪核心引擎
 		if (isValid === false) {
-			logMessage("!!! 熔断保护：核心资产校验失败，引擎已锁定 !!!", "ERROR");
+			logMessage(q('integrity.fuseLocked'), "ERROR");
 			killAllProcesses();
 			_integrityCache = false;
 			return false;
@@ -3368,7 +3369,7 @@ async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 				if (res && (res.success || !res.error)) return res;
 				return null;
 			} catch (e) {
-				logMessage(`${name} 函数 Action 执行失败: ${e.message}`, "WARN");
+				logMessage(q('bridge.actionFailed', name, e.message), "WARN");
 				return null;
 			}
 		}

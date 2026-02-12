@@ -22,7 +22,11 @@ const LANG_MAP = {
     '日本語': 'ja',
     'Deutsch': 'de',
     'Русский': 'ru',
-    'العربية': 'ar'
+    'العربية': 'ar',
+    '한국어': 'ko',
+    'Español': 'es',
+    'Français': 'fr',
+    'Português BR': 'pt-br'
 };
 
 // VS Code 语言 → 我们的语言代码
@@ -36,7 +40,12 @@ const VSCODE_LANG_MAP = {
     'ja': 'ja',
     'de': 'de',
     'ru': 'ru',
-    'ar': 'ar'
+    'ar': 'ar',
+    'ko': 'ko',
+    'es': 'es',
+    'fr': 'fr',
+    'pt-br': 'pt-br',
+    'pt': 'pt-br'
 };
 
 /**
@@ -55,7 +64,7 @@ function loadAllLocales() {
         path.dirname(__filename || ''),
     ].filter(Boolean);
 
-    const langFiles = ['zh', 'en', 'ja', 'ar', 'de', 'ru'];
+    const langFiles = ['zh', 'en', 'ja', 'ar', 'de', 'ru', 'ko', 'es', 'fr', 'pt-br'];
     let foundDir = null;
 
     for (const dir of possibleDirs) {
