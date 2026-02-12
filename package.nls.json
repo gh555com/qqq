@@ -33,7 +33,7 @@
     "config.sortBy.enum.size": "Sort by size (folders on top, files descending by size)",
     "config.sortBy.enum.ctime": "Sort by creation time (folders on top descending, files below descending)",
     "config.sortBy.enum.mtime": "Sort by modification time (folders on top descending, files below descending)",
-    "config.autoWatchChanges.desc": "🛸 Auto-detect external changes.\n  Checked: Automatically refresh the file list (including sz column and sort order) when external programs modify files in the current directory.\n Unchecked: Zero performance overhead, zero visual jitter. Unchecked by default. ",
+    "config.autoWatchChanges.desc": "🛸 Checked: Automatically refresh the file list (including sz column and sort order) when external programs modify files in the current directory.\n Unchecked: Zero performance overhead, zero visual jitter. Unchecked by default. ",
     "config.frameSizeMode.desc": "👁️ Frame Size Mode: controls the display size of preview images.",
     "config.frameSizeMode.enum.large": "Large frame: 512×288",
     "config.frameSizeMode.enum.small": "Small frame: 256×144",
@@ -72,5 +72,4 @@
     "cmd.downloadVideosFromUrl": "qqq: Video Url",
     "cmd.savorMoments": "qqq: Savor moments for yourself",
     "cmd.clearCache": "qqq: Clear Cache"
-}
 }
