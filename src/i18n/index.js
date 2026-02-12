@@ -113,6 +113,7 @@ function setLanguage(lang) {
     const code = LANG_MAP[lang] || lang;
 
     if (code !== currentLang) {
+        console.log(`[i18n] Language changed: ${currentLang} -> ${code}`);
         currentLang = code;
         // 预加载语言包
         loadLocale(code);
@@ -137,6 +138,8 @@ function init() {
     const config = vscode.workspace.getConfiguration('qqq');
     const userLang = config.get('language');
 
+    console.log(`[i18n] init() - userLang setting: "${userLang}", mapped: ${LANG_MAP[userLang] || 'undefined'}`);
+
     if (userLang && LANG_MAP[userLang]) {
         // 用户明确设置了语言
         setLanguage(userLang);
@@ -144,6 +147,7 @@ function init() {
         // 跟随 VS Code 显示语言
         const vscodeLang = vscode.env.language.toLowerCase();
         const mappedLang = VSCODE_LANG_MAP[vscodeLang] || 'en';
+        console.log(`[i18n] Using VS Code language: ${vscodeLang} -> ${mappedLang}`);
         setLanguage(mappedLang);
     }
 
@@ -151,6 +155,7 @@ function init() {
     vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('qqq.language')) {
             const newLang = vscode.workspace.getConfiguration('qqq').get('language');
+            console.log(`[i18n] Config changed - new language: "${newLang}"`);
             if (newLang && LANG_MAP[newLang]) {
                 setLanguage(newLang);
                 // 触发语言变更事件，让各模块可以响应
@@ -158,6 +163,8 @@ function init() {
             }
         }
     });
+
+    console.log(`[i18n] Initialized with language: ${currentLang}`);
 }
 
 // 语言变更事件发射器

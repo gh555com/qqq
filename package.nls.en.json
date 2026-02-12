@@ -1,7 +1,7 @@
 {
-    "config.title.core": "☀️ Core",
-    "config.title.rover": "🛸 Rover",
-    "config.title.observe": "👁️ Observe",
+    "config.title.core": "☀️ Kernel",
+    "config.title.rover": "🛸 Roam",
+    "config.title.observe": "👁️ observer",
     "config.title.html": "🍌 HTML & Rich Text",
     "config.title.docExport": "📦 Doc Export Settings",
     "config.language.desc": "☀️ Language:",

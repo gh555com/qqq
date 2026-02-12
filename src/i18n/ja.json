@@ -1,0 +1,107 @@
+{
+    "q2": {
+        "paste": {
+            "plainTextOnly": "qqq: クリップボードにはプレーンテキストのみです。ファイルマネージャーに貼り付けできません"
+        },
+        "error": {
+            "integrityFailed": "整合性チェックに失敗しました。",
+            "renameFailed": "名前の変更に失敗：同じ名前のファイルまたはフォルダが既に存在します。",
+            "renameError": "名前の変更に失敗: {0}",
+            "invalidPath": "無効なディレクトリパス: {0}",
+            "navError": "ナビゲーションに失敗: {0}",
+            "createFileFolderExists": "同じ名前のフォルダが既に存在するため、ファイルを作成できません: \"{0}\"",
+            "createFileError": "ファイルの作成に失敗: {0}",
+            "folderExists": "作成できません。\"{0}\" は既に存在します。",
+            "unsupportedFile": "このファイル形式は VS Code でサポートされていません: \"{0}\"",
+            "fileNotExists": "ファイルが存在しません: {0}",
+            "openFileError": "ファイルを開けませんでした: {0}",
+            "deleteParentForbidden": "不正な操作：親ディレクトリの削除は禁止されています。"
+        },
+        "confirm": {
+            "overwriteFile": "ファイル \"{0}\" は既に存在します。上書きしますか？",
+            "yes": "はい",
+            "no": "いいえ"
+        },
+        "log": {
+            "getFolderSizeError": "フォルダサイズの取得に失敗: {0} - {1}",
+            "readScmError": "詳細SCMの読み取りに失敗: {0}"
+        }
+    },
+    "q4": {
+        "export": {
+            "success": "📦 履歴のエクスポートが完了しました",
+            "error": "エクスポートに失敗: {0}"
+        },
+        "import": {
+            "success": "📥 {0} 件のレコードをインポートしました",
+            "error": "インポートに失敗: {0}"
+        },
+        "editor": {
+            "noActive": "アクティブなエディタがありません",
+            "noSelection": "テキストが選択されていません"
+        },
+        "cache": {
+            "clearing": "クリーンアップタスク実行中、レベル: {0}",
+            "cacheCleared": "qqq_cache をクリアしました",
+            "cacheClearError": "キャッシュのクリアに失敗: {0}",
+            "historyCleared": "クリップボード履歴をクリアしました",
+            "stateCleared": "globalState をクリアしました",
+            "stateClearError": "globalState のクリアに失敗: {0}"
+        },
+        "log": {
+            "audioReset": "オーディオソースの状態がリセットされました",
+            "pythonCrash": "Python プロセスがクラッシュし、再生UIを停止しました",
+            "pythonNoMiniaudio": "Python エンジンは接続されていますが、miniaudio 依存が検出されません",
+            "pythonProbeError": "Python 探査例外: {0}",
+            "pythonProbeFail": "Python エンジンの探査に失敗、Webview にフォールバック",
+            "audioPlay": "{0} エンジン再生中: {1}、ループ: {2}",
+            "pythonPlaying": "q4 起動時に Python が再生中を検出、UI を同期",
+            "audioSavor": "{0} エンジンでセイバー再生中: {1}、ループ: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "貼り付け操作がユーザーによりキャンセルされました ({0})",
+            "allFilesSkipped": "すべての {0} ファイルにアクセスできず、スキップしました",
+            "folderScan": "{0}: {1}ms、{2} ファイル、{3}",
+            "folderScanJs": "{0}: {1}ms、{2} ファイル、{3} (JS)",
+            "pythonUnavailable": "Python エンジンが利用できません: {0}",
+            "pythonCheckError": "Python エンジンチェック例外: {0}",
+            "contextWaiting": "extensionContext が初期化されていません、待機中...",
+            "pythonPlay": "Python エンジン再生中: {0}、ループ: {1}",
+            "pythonPlayFail": "Python 再生に失敗: {0}",
+            "pythonPlayError": "Python 再生例外: {0}",
+            "audioPlayError": "オーディオ再生に失敗: {0}",
+            "anchorFileNotExist": "ファイルが存在せず、アンカーが失われたと見なされます: {0}",
+            "anchorLost": "アンカーが失われました、即座にロールバックをトリガー: {0}",
+            "anchorReadError": "ドキュメントを読み取れません、アンカーが失われたと見なされます: {0}",
+            "anchorReplaceFail": "アンカーの置換に失敗、トランザクションをロールバック"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "無効なURLです。",
+            "cancelled": "キャンセルとしてマーク ({0})、クリーンアップ中...",
+            "fallbackCleanup": "killAll 後に即座に実行されました",
+            "fallbackCleanupError": "失敗: {0}",
+            "anchorLost": "アンカーの喪失を検出、キャンセルとしてマークしプロセスを即座に終了",
+            "startProcess": "処理を開始: {0}",
+            "usingCookies": "グローバル Cookie ファイルを使用: {0}",
+            "cookieSearchError": "検索エラー: {0}",
+            "cookieInvalid": "Cookie の無効/欠落の可能性を検出 ({0})、設定ディレクトリを自動的に開いています...",
+            "sniffing": "スマートリソーススニッフィング中...",
+            "playlistDetected": "プレイリストとして検出、合計 {0} 本の動画。",
+            "singleVideo": "単一の動画として検出: {0}",
+            "probe403": "探査で 403 が返されました、拡張フローをトリガーするためにダウンロードキューに直接追加を試みます。"
+        }
+    },
+    "log": {
+        "msgpackError": "致命的エラー: msgpack-lite 依存の読み込みに失敗",
+        "binaryLoadError": "バイナリの読み込みに失敗、隔離中:",
+        "capacityFuse": "容量ヒューズがトリガーされました、バッチクリーンアップを実行中...",
+        "storageError": "致命的なストレージエラー:",
+        "ipcSerializeError": "IPC メッセージのシリアル化に失敗:",
+        "pythonPlaybackError": "Python 再生に失敗、Webview に永久的に切り替え:",
+        "disposeError": "Dispose kill に失敗:"
+    }
+}
