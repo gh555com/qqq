@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const global = require('./global');
+const { t } = require('./i18n');
 
 // ★ 终极最优解：全局实例追踪，用于生命周期强杀
 let _currentHistoryManager = null;
@@ -2631,9 +2632,9 @@ async function exportHistoryCommand(historyManager) {
             history: historyManager._toArrayAll()
         };
         await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(data, null, 2), 'utf8'));
-        global.showAutoCloseNotification('info', '📦 历史记录已全量导出');
+        global.showAutoCloseNotification('info', t('q4.export.success'));
     } catch (e) {
-        global.showAutoCloseNotification('error', '导出失败: ' + e.message);
+        global.showAutoCloseNotification('error', t('q4.export.error', e.message));
     }
 }
 
@@ -2658,9 +2659,9 @@ async function importHistoryCommand(historyManager) {
                 count++;
             }
         }
-        global.showAutoCloseNotification('info', `📥 成功增量导入 ${count} 条记录`);
+        global.showAutoCloseNotification('info', t('q4.import.success', count));
     } catch (e) {
-        global.showAutoCloseNotification('error', '导入失败: ' + e.message);
+        global.showAutoCloseNotification('error', t('q4.import.error', e.message));
     }
 }
 
@@ -2685,7 +2686,7 @@ function showStatsCommand(historyManager) {
 async function copyToHistoryCommand(historyManager) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showAutoCloseNotification('warning', '没有活动的编辑器');
+        global.showAutoCloseNotification('warning', t('q4.editor.noActive'));
         return;
     }
 
@@ -2693,7 +2694,7 @@ async function copyToHistoryCommand(historyManager) {
     const text = editor.document.getText(selection);
 
     if (!text || text.trim() === '') {
-        global.showAutoCloseNotification('warning', '没有选中任何文本');
+        global.showAutoCloseNotification('warning', t('q4.editor.noSelection'));
         return;
     }
 

@@ -10,6 +10,7 @@ const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
 const q4 = require("./q4");
+const i18n = require("./i18n");
 
 // 引用 global.js 的核心对象
 const {
@@ -1529,6 +1530,9 @@ async function activate(context) {
 	extensionContext = context;
 	downloadContext = context;
 	global.init(context);
+
+	// ★ 初始化国际化模块：读取语言设置，监听配置变更
+	i18n.init();
 
 	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 false 换成实际的 isVip 变量）
 	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存

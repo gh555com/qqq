@@ -9,6 +9,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const h = require("./h");
+const { t } = require("./i18n");
 
 // ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪贴板快照等 ★★★
 const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
@@ -2614,7 +2615,7 @@ function setupCustomScrollbar() {
   const observer = new MutationObserver(update);
   observer.observe(container, { childList: true, subtree: true });
 
-  // JS hover：仅鼠标真正移动时才切换 hover，滚动时鼠标不动则零触发，消除残影
+  // JS hover：仅光标真正移动时才切换 hover，滚动时光标不动则零触发，消除残影
   let hoveredItem = null;
   container.addEventListener('mousemove', function(e) {
     const item = e.target.closest('.file-item');
@@ -2792,7 +2793,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
   // ★ 如果剪贴板是白名单类型（纯文本），不处理
   if (snapshot.type === 'whitelist') {
-    global.showAutoCloseNotification('info', 'qqq: 剪贴板中是纯文本，无法粘贴到文件管理器')
+    global.showAutoCloseNotification('info', t('q2.paste.plainTextOnly'))
     return;
   }
 
@@ -2955,7 +2956,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 // ==================== 主逻辑 ====================
 function showSaveAsDialog() {
   if (!global.isValid()) {
-    global.showAutoCloseNotification('error', "Integrity check failed.");
+    global.showAutoCloseNotification('error', t('q2.error.integrityFailed'));
     return;
   }
 
@@ -3415,7 +3416,7 @@ function showSaveAsDialog() {
           const newPath = canonicalizeExistingPath(path.join(path.dirname(oldCanon), newName));
 
           if (fs.existsSync(newPath)) {
-            global.showAutoCloseNotification('error', `重命名失败：目标位置已存在同名项。`);
+            global.showAutoCloseNotification('error', t('q2.error.renameFailed'));
             refreshWebview();
           } else {
             fs.renameSync(oldCanon, newPath);
@@ -3425,7 +3426,7 @@ function showSaveAsDialog() {
             }, 100);
           }
         } catch (error) {
-          global.showAutoCloseNotification('error', "重命名失败: " + error.message);
+          global.showAutoCloseNotification('error', t('q2.error.renameError', error.message));
           refreshWebview();
         }
         break;
@@ -3450,10 +3451,10 @@ function showSaveAsDialog() {
               panel.webview.postMessage({ command: 'navigateSuccess', path: message.path });
             }
           } else {
-            global.showAutoCloseNotification('error', "无效的目录路径: " + newPath);
+            global.showAutoCloseNotification('error', t('q2.error.invalidPath', newPath));
           }
         } catch (error) {
-          global.showAutoCloseNotification('error', "导航失败: " + error.message);
+          global.showAutoCloseNotification('error', t('q2.error.navError', error.message));
         }
         break;
 
@@ -3499,7 +3500,7 @@ function showSaveAsDialog() {
         const createFileAction = () => {
           try {
             if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
-              global.showAutoCloseNotification('error', `无法创建文件，因为已存在同名文件夹: "${filename}"`);
+              global.showAutoCloseNotification('error', t('q2.error.createFileFolderExists', filename));
               return;
             }
             fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
@@ -3529,19 +3530,19 @@ function showSaveAsDialog() {
               global.logMessage(`[Q2] openTextDocument 失败: ${err.message}`, "ERROR");
             });
           } catch (error) {
-            global.showAutoCloseNotification('error', `创建文件失败: ${error.message}`);
+            global.showAutoCloseNotification('error', t('q2.error.createFileError', error.message));
           }
         };
 
         if (fs.existsSync(fullFilePath)) {
           const stats = fs.statSync(fullFilePath);
           if (stats.isDirectory()) {
-            global.showAutoCloseNotification('error', `无法创建文件，因为已存在同名文件夹: "${filename}"`);
+            global.showAutoCloseNotification('error', t('q2.error.createFileFolderExists', filename));
           } else {
             global
-              .showWarningMessage(`文件 "${filename}" 已存在，是否覆盖？`, { modal: true }, "是", "否")
+              .showWarningMessage(t('q2.confirm.overwriteFile', filename), { modal: true }, t('q2.confirm.yes'), t('q2.confirm.no'))
               .then((answer) => {
-                if (answer === "是") createFileAction();
+                if (answer === t('q2.confirm.yes')) createFileAction();
               });
           }
         } else {
@@ -3553,7 +3554,7 @@ function showSaveAsDialog() {
       case "createFolder": {
         const newFolderPath = canonicalizeExistingPath(path.join(currentPath, message.folderName));
         if (fs.existsSync(newFolderPath)) {
-          global.showAutoCloseNotification('error', `无法创建，"${message.folderName}" 已存在。`);
+          global.showAutoCloseNotification('error', t('q2.error.folderExists', message.folderName));
         } else {
           fs.mkdirSync(newFolderPath);
           recordDirHistory(currentPath);
@@ -3578,12 +3579,12 @@ function showSaveAsDialog() {
         const ext = path.extname(p).toLowerCase();
 
         if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
-          global.showAutoCloseNotification('warning', `该文件不支持在 VS Code 里打开: "${path.basename(p)}"`);
+          global.showAutoCloseNotification('warning', t('q2.error.unsupportedFile', path.basename(p)));
           break;
         }
 
         if (!fs.existsSync(p)) {
-          global.showAutoCloseNotification('warning', `文件已不存在: ${path.basename(p)}`);
+          global.showAutoCloseNotification('warning', t('q2.error.fileNotExists', path.basename(p)));
           refreshWebview();
           break;
         }
@@ -3622,7 +3623,7 @@ function showSaveAsDialog() {
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
-          global.showAutoCloseNotification('error', `打开文件失败: ${error.message}`);
+          global.showAutoCloseNotification('error', t('q2.error.openFileError', error.message));
         }
         break;
       }
@@ -3631,7 +3632,7 @@ function showSaveAsDialog() {
         const itemToDelete = canonicalizeExistingPath(message.path);
         // 安全保护：绝对禁止删除上级目录
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          global.showAutoCloseNotification('error', "非法操作：禁止删除上级目录。");
+          global.showAutoCloseNotification('error', t('q2.error.deleteParentForbidden'));
           refreshWebview();
           break;
         }
@@ -3696,7 +3697,7 @@ function showSaveAsDialog() {
         // Shift+Delete 永久删除单个项目
         const itemToDelete = canonicalizeExistingPath(message.path);
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          global.showAutoCloseNotification('error', "非法操作：禁止删除上级目录。");
+          global.showAutoCloseNotification('error', t('q2.error.deleteParentForbidden'));
           refreshWebview();
           break;
         }
