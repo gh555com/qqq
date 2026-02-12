@@ -612,6 +612,10 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
+// ====== 回收站懒加载 ======
+let recycleBinLoading = false;
+const RECYCLE_BATCH_SIZE = 20;
+
 // ====== 逐字撤销/重做系统 ======
 // 为所有编辑框提供逐字级别的 Ctrl+Z / Ctrl+Y 功能
 const inputUndoStacks = new WeakMap(); // input -> { history: [], index: -1, lastValue: '', isProgrammatic: false }
@@ -1696,8 +1700,46 @@ window.addEventListener('message', event => {
     }
     // 完成后安排下一轮
     scheduleDiskFreeUpdate();
+  } else if (message.command === 'appendRecycleBin') {
+    // 回收站懒加载：追加新条目
+    const section = document.querySelector('.recycle-bin-section');
+    if (section && message.itemsHtml) {
+      section.insertAdjacentHTML('beforeend', message.itemsHtml);
+      section.dataset.loaded = message.loaded;
+      section.dataset.total = message.total;
+      recycleBinLoading = false;
+    }
   }
 });
+
+// ====== 回收站滚动懒加载 ======
+function initRecycleBinLazyLoad() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+
+  sidebar.addEventListener('scroll', () => {
+    if (recycleBinLoading) return;
+
+    const section = document.querySelector('.recycle-bin-section');
+    if (!section) return;
+
+    const total = parseInt(section.dataset.total || '0', 10);
+    const loaded = parseInt(section.dataset.loaded || '0', 10);
+
+    // 已加载完毕
+    if (loaded >= total) return;
+
+    // 检查是否滚动到底部附近（距离底部 100px 内）
+    if (sidebar.scrollTop + sidebar.clientHeight > sidebar.scrollHeight - 100) {
+      recycleBinLoading = true;
+      vscode.postMessage({
+        command: 'requestRecycleBin',
+        offset: loaded,
+        limit: RECYCLE_BATCH_SIZE
+      });
+    }
+  });
+}
 
 // ====== DOM ======
 document.addEventListener('focusin', (e) => updateFocusType(e.target));
@@ -1883,6 +1925,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
+  initRecycleBinLazyLoad(); // 初始化回收站懒加载
 
   // ★ 禁用系统默认右键菜单
   document.addEventListener('contextmenu', (e) => {
@@ -2616,20 +2659,24 @@ setTimeout(setupCustomScrollbar, 100);
 }
 
 // ==================== sidebar HTML 生成（共用） ====================
-function generateSidebarHtml(config) {
+const RECYCLE_BIN_BATCH_SIZE = 20; // 每批加载条数
+
+function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
   const safeRecycleBin = (config.recycleBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const showRecycleBin = safeRecycleBin.length > 0;
+  const totalRecycleBin = safeRecycleBin.length;
+  const displayedRecycleBin = safeRecycleBin.slice(0, recycleBinLimit);
+  const showRecycleBin = displayedRecycleBin.length > 0;
 
   const recycleBinHtml = showRecycleBin
     ? `
 <div class="divider"></div>
-<div class="recycle-bin-section">
-  ${safeRecycleBin
+<div class="recycle-bin-section" data-total="${totalRecycleBin}" data-loaded="${displayedRecycleBin.length}">
+  ${displayedRecycleBin
       .map((item) => {
         const escaped = escapeJsStringLiteral(item.path);
         const fullDisplay = escapeHtmlAttribute(item.path);
@@ -2657,6 +2704,33 @@ function generateSidebarHtml(config) {
     .join("");
 
   return { recycleBinHtml, pinnedDirsHtml };
+}
+
+// 生成回收站单条项目 HTML
+function generateRecycleBinItemHtml(item) {
+  const escaped = escapeJsStringLiteral(item.path);
+  const fullDisplay = escapeHtmlAttribute(item.path);
+  if (item.type === 'file') {
+    const fileName = escapeHtmlAttribute(path.basename(item.path));
+    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
+  } else {
+    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')">\ud83d\udccc</span></div>`;
+  }
+}
+
+// 获取指定范围的回收站项目
+function getRecycleBinItems(offset, limit) {
+  const config = getConfig();
+  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
+  const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
+  const safeRecycleBin = (config.recycleBin || []).filter(
+    (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
+      && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
+  );
+  const total = safeRecycleBin.length;
+  const items = safeRecycleBin.slice(offset, offset + limit);
+  const itemsHtml = items.map(generateRecycleBinItemHtml).join('');
+  return { itemsHtml, total, loaded: offset + items.length };
 }
 
 function getWebviewContent(currentPath) {
@@ -3248,6 +3322,22 @@ function showSaveAsDialog() {
           }
         }
         refreshWebview();
+        break;
+      }
+
+      // 回收站懒加载：请求更多条目
+      case "requestRecycleBin": {
+        const offset = message.offset || 0;
+        const limit = message.limit || RECYCLE_BIN_BATCH_SIZE;
+        const result = getRecycleBinItems(offset, limit);
+        if (panel && activePanelAlive) {
+          panel.webview.postMessage({
+            command: 'appendRecycleBin',
+            itemsHtml: result.itemsHtml,
+            total: result.total,
+            loaded: result.loaded
+          });
+        }
         break;
       }
 
