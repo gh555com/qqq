@@ -339,6 +339,24 @@ function saveConfig(
   }, 1000);
 }
 
+// ==================== 上次访问目录存储 ====================
+// 立即保存，确保即使崩溃也能恢复到最后访问的目录
+const LAST_VISITED_DIR_KEY = "qqq_last_visited_dir";
+
+function getLastVisitedDir() {
+  if (!globalContext) return null;
+  try {
+    return globalContext.globalState.get(LAST_VISITED_DIR_KEY) || null;
+  } catch { return null; }
+}
+
+function saveLastVisitedDir(dirPath) {
+  if (!globalContext || !dirPath) return;
+  try {
+    globalContext.globalState.update(LAST_VISITED_DIR_KEY, dirPath);
+  } catch { }
+}
+
 // ==================== 精细 SCM 存储 ====================
 // 独立存储，与配置分离，避免影响其他配置项
 const FINE_SCM_KEY = "qqq_fine_scm";
@@ -2984,11 +3002,21 @@ function showSaveAsDialog() {
 
   const config = getConfig();
 
-  // 起始目录：优先 pinnedDirs，其次 recycleBin 中的目录，否则按平台默认
+  // 起始目录优先级：
+  // 1. 上次访问的目录（恢复会话）
+  // 2. pinnedDirs 第一项
+  // 3. recycleBin 中的第一个目录
+  // 4. 平台默认目录
   let currentPath = "";
-  if (config.pinnedDirs && config.pinnedDirs.length > 0) {
+  const lastVisited = getLastVisitedDir();
+  if (lastVisited) {
+    const canon = canonicalizeExistingPath(lastVisited);
+    if (canon && fs.existsSync(canon)) currentPath = canon;
+  }
+  if (!currentPath && config.pinnedDirs && config.pinnedDirs.length > 0) {
     currentPath = canonicalizeExistingPath(config.pinnedDirs[0]);
-  } else {
+  }
+  if (!currentPath) {
     const firstDir = (config.recycleBin || []).find(item => item.type === 'dir');
     if (firstDir) currentPath = canonicalizeExistingPath(firstDir.path);
   }
@@ -3066,6 +3094,8 @@ function showSaveAsDialog() {
       // 记录当前目录，用于检测目录切换
       if (currentPath !== lastResourceExplorerPath) {
         lastResourceExplorerPath = currentPath;
+        // ★ 立即保存最后访问的目录（即使崩溃也能恢复）
+        saveLastVisitedDir(currentPath);
       }
 
       // 切换目录时，取消之前的待处理尺寸请求
