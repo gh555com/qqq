@@ -2773,6 +2773,7 @@ function getWebviewContent(currentPath) {
     .replace("{{I18N_NEW_FILE}}", t('q2.ui.newFile'))
     .replace("{{I18N_NEW_FOLDER}}", t('q2.ui.newFolder'))
     .replace("{{I18N_OPEN_FOLDER}}", t('q2.ui.openFolder'))
+    .replace("{{I18N_SZ_SIZE}}", t('q2.ui.szSize'))
     .replace("{{I18N_SZ_CTIME}}", t('q2.ui.szCtime'))
     .replace("{{I18N_SZ_MTIME}}", t('q2.ui.szMtime'))
     .replace("{{I18N_SORT_SIZE}}", t('q2.ui.sortSize'))
@@ -3667,9 +3668,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-              global.showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已移至回收站`);
+              global.showAutoCloseNotification('info', t('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
             } catch (error) {
-              global.showAutoCloseNotification('error', `qqq: 删除失败: ${error.message}`);
+              global.showAutoCloseNotification('error', t('q2.ui.deleteFailed', error.message));
             } finally {
               // 无论成功失败，都刷新列表并恢复状态
               if (activePanel && activePanelAlive) refreshWebview();
@@ -3698,15 +3699,19 @@ function showSaveAsDialog() {
                   deletedCount++;
                 } catch (error) {
                   errorCount++;
-                  global.logMessage(`删除项失败: ${itemPath} - ${error.message}`, "WARN");
+                  global.logMessage(t('q2.ui.deleteItemFailed', itemPath, error.message), "WARN");
                 }
               }
             }
 
             if (deletedCount > 0) {
-              global.showAutoCloseNotification('info', `已将 ${deletedCount} 个项目移至回收站${errorCount > 0 ? `，${errorCount} 个处理失败` : ""}`);
+              if (errorCount > 0) {
+                global.showAutoCloseNotification('info', t('q2.ui.multiDeletePartial', deletedCount, errorCount));
+              } else {
+                global.showAutoCloseNotification('info', t('q2.ui.multiDeleteSuccess', deletedCount));
+              }
             } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', `${errorCount} 个项目删除失败。`);
+              global.showAutoCloseNotification('error', t('q2.ui.multiDeleteFailed', errorCount));
             }
 
             // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）
@@ -3732,9 +3737,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-              global.showAutoCloseNotification('info', `${path.basename(itemToDelete)} 已永久删除`);
+              global.showAutoCloseNotification('info', t('q2.ui.permanentDeleted', path.basename(itemToDelete)));
             } catch (error) {
-              global.showAutoCloseNotification('error', `永久删除失败: ${error.message}`);
+              global.showAutoCloseNotification('error', t('q2.ui.permanentDeleteFailed', error.message));
             } finally {
               if (activePanel && activePanelAlive) refreshWebview();
             }
@@ -3763,17 +3768,17 @@ function showSaveAsDialog() {
                   deletedCount++;
                 } catch (error) {
                   errorCount++;
-                  global.logMessage(`永久删除项失败: ${itemPath} - ${error.message}`, "WARN");
+                  global.logMessage(t('q2.ui.permanentDeleteItemFailed', itemPath, error.message), "WARN");
                 }
               }
             }
 
             if (deletedCount > 0 && errorCount === 0) {
-              global.showAutoCloseNotification('info', `已永久删除 ${deletedCount} 个项目`);
+              global.showAutoCloseNotification('info', t('q2.ui.multiPermanentDeleteSuccess', deletedCount));
             } else if (deletedCount > 0 && errorCount > 0) {
-              global.showAutoCloseNotification('warning', `已永久删除 ${deletedCount} 个项目，${errorCount} 个处理失败`);
+              global.showAutoCloseNotification('warning', t('q2.ui.multiPermanentDeletePartial', deletedCount, errorCount));
             } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', `${errorCount} 个项目永久删除失败。`);
+              global.showAutoCloseNotification('error', t('q2.ui.multiPermanentDeleteFailed', errorCount));
             }
 
             if (activePanel && activePanelAlive) refreshWebview();

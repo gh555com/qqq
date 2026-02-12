@@ -5,11 +5,24 @@
             "newFile": "新建文件",
             "newFolder": "新建文件夹",
             "openFolder": "在资源管理器中打开当前文件夹",
+            "szSize": "sz区显示: 文件大小",
             "szCtime": "sz区显示: 创建时间",
             "szMtime": "sz区显示: 修改时间",
             "sortSize": "排序: 按文件大小",
             "sortCtime": "排序: 按创建时间",
-            "sortMtime": "排序: 按修改时间"
+            "sortMtime": "排序: 按修改时间",
+            "movedToRecycleBin": "{0} 已移至回收站",
+            "deleteFailed": "qqq: 删除失败: {0}",
+            "deleteItemFailed": "删除项失败: {0} - {1}",
+            "multiDeleteSuccess": "已将 {0} 个项目移至回收站",
+            "multiDeletePartial": "已将 {0} 个项目移至回收站，{1} 个处理失败",
+            "multiDeleteFailed": "{0} 个项目删除失败。",
+            "permanentDeleted": "{0} 已永久删除",
+            "permanentDeleteFailed": "永久删除失败: {0}",
+            "permanentDeleteItemFailed": "永久删除项失败: {0} - {1}",
+            "multiPermanentDeleteSuccess": "已永久删除 {0} 个项目",
+            "multiPermanentDeletePartial": "已永久删除 {0} 个项目，{1} 个处理失败",
+            "multiPermanentDeleteFailed": "{0} 个项目永久删除失败。"
         },
         "paste": {
             "plainTextOnly": "qqq: 剪贴板中是纯文本，无法粘贴到文件管理器"

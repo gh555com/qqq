@@ -5,11 +5,24 @@
             "newFile": "ملف جديد",
             "newFolder": "مجلد جديد",
             "openFolder": "فتح المجلد الحالي في مستكشف الملفات",
+            "szSize": "عمود sz: حجم الملف",
             "szCtime": "عمود sz: وقت الإنشاء",
             "szMtime": "عمود sz: وقت التعديل",
             "sortSize": "ترتيب: حسب حجم الملف",
             "sortCtime": "ترتيب: حسب وقت الإنشاء",
-            "sortMtime": "ترتيب: حسب وقت التعديل"
+            "sortMtime": "ترتيب: حسب وقت التعديل",
+            "movedToRecycleBin": "تم نقل {0} إلى سلة المهملات",
+            "deleteFailed": "qqq: فشل الحذف: {0}",
+            "deleteItemFailed": "فشل حذف العنصر: {0} - {1}",
+            "multiDeleteSuccess": "تم نقل {0} عنصر إلى سلة المهملات",
+            "multiDeletePartial": "تم نقل {0} عنصر إلى سلة المهملات، فشل {1}",
+            "multiDeleteFailed": "فشل حذف {0} عنصر.",
+            "permanentDeleted": "تم حذف {0} نهائياً",
+            "permanentDeleteFailed": "فشل الحذف النهائي: {0}",
+            "permanentDeleteItemFailed": "فشل حذف العنصر نهائياً: {0} - {1}",
+            "multiPermanentDeleteSuccess": "تم حذف {0} عنصر نهائياً",
+            "multiPermanentDeletePartial": "تم حذف {0} عنصر نهائياً، فشل {1}",
+            "multiPermanentDeleteFailed": "فشل حذف {0} عنصر نهائياً."
         },
         "paste": {
             "plainTextOnly": "qqq: الحافظة تحتوي على نص عادي فقط، لا يمكن اللصق في مدير الملفات"

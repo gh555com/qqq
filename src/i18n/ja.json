@@ -5,11 +5,24 @@
             "newFile": "新規ファイル",
             "newFolder": "新規フォルダ",
             "openFolder": "エクスプローラーで現在のフォルダを開く",
+            "szSize": "sz列: ファイルサイズ",
             "szCtime": "sz列: 作成時刻",
             "szMtime": "sz列: 更新時刻",
             "sortSize": "並び替え: ファイルサイズ順",
             "sortCtime": "並び替え: 作成時刻順",
-            "sortMtime": "並び替え: 更新時刻順"
+            "sortMtime": "並び替え: 更新時刻順",
+            "movedToRecycleBin": "{0} をごみ箱に移動しました",
+            "deleteFailed": "qqq: 削除に失敗: {0}",
+            "deleteItemFailed": "アイテムの削除に失敗: {0} - {1}",
+            "multiDeleteSuccess": "{0} 個のアイテムをごみ箱に移動しました",
+            "multiDeletePartial": "{0} 個のアイテムをごみ箱に移動、{1} 個失敗",
+            "multiDeleteFailed": "{0} 個のアイテムの削除に失敗しました。",
+            "permanentDeleted": "{0} を完全に削除しました",
+            "permanentDeleteFailed": "完全削除に失敗: {0}",
+            "permanentDeleteItemFailed": "アイテムの完全削除に失敗: {0} - {1}",
+            "multiPermanentDeleteSuccess": "{0} 個のアイテムを完全に削除しました",
+            "multiPermanentDeletePartial": "{0} 個のアイテムを完全に削除、{1} 個失敗",
+            "multiPermanentDeleteFailed": "{0} 個のアイテムの完全削除に失敗しました。"
         },
         "paste": {
             "plainTextOnly": "qqq: クリップボードにはプレーンテキストのみです。ファイルマネージャーに貼り付けできません"

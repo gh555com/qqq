@@ -5,11 +5,24 @@
             "newFile": "New file",
             "newFolder": "New folder",
             "openFolder": "Open current folder in Explorer",
+            "szSize": "sz column: File size",
             "szCtime": "sz column: Creation time",
             "szMtime": "sz column: Modification time",
             "sortSize": "Sort: By file size",
             "sortCtime": "Sort: By creation time",
-            "sortMtime": "Sort: By modification time"
+            "sortMtime": "Sort: By modification time",
+            "movedToRecycleBin": "{0} moved to Recycle Bin",
+            "deleteFailed": "qqq: Delete failed: {0}",
+            "deleteItemFailed": "Delete item failed: {0} - {1}",
+            "multiDeleteSuccess": "Moved {0} items to Recycle Bin",
+            "multiDeletePartial": "Moved {0} items to Recycle Bin, {1} failed",
+            "multiDeleteFailed": "{0} items failed to delete.",
+            "permanentDeleted": "{0} permanently deleted",
+            "permanentDeleteFailed": "Permanent delete failed: {0}",
+            "permanentDeleteItemFailed": "Permanent delete item failed: {0} - {1}",
+            "multiPermanentDeleteSuccess": "Permanently deleted {0} items",
+            "multiPermanentDeletePartial": "Permanently deleted {0} items, {1} failed",
+            "multiPermanentDeleteFailed": "{0} items failed to permanently delete."
         },
         "paste": {
             "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"
