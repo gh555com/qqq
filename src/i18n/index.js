@@ -53,7 +53,10 @@ const VSCODE_LANG_MAP = {
  * 加载所有语言包
  */
 function loadAllLocales() {
-    if (locales) return;
+    // 如果已经成功加载了语言包，直接返回
+    if (locales && Object.keys(locales).length > 0 && locales['zh']) {
+        return;
+    }
 
     locales = {};
 

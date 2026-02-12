@@ -1520,7 +1520,6 @@ let q2Module = null;
 async function activate(context) {
 	// ★ 终极最优解：启动时立即重置状态，且后续注册必须早于任何 await
 	global.setDeactivated(false);
-	global.logMessage(q('qqq.log.activating'), "INFO");
 
 	if (!context) {
 		global.logMessage("activate: context is undefined!", "ERROR");
@@ -1537,8 +1536,10 @@ async function activate(context) {
 		return;
 	}
 
-	// ★ 初始化国际化模块：读取语言设置，监听配置变更
+	// ★ 初始化国际化模块：必须在任何 q() 调用之前
 	initI18n(extensionPath);
+
+	global.logMessage(q('qqq.log.activating'), "INFO");
 
 	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 false 换成实际的 isVip 变量）
 	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存
