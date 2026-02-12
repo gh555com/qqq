@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const global = require('./global');
-const { t } = require('./i18n');
+const { q } = require('./i18n');
 
 // ★ 终极最优解：全局实例追踪，用于生命周期强杀
 let _currentHistoryManager = null;
@@ -484,7 +484,7 @@ class ClipboardHistoryManager {
     }
 
     // 边界保护工具：确保数值在合理范围内，防止异常数据污染统计
-    _clampStat(val, min, max) {
+    _clampStaq(val, min, max) {
         if (typeof val !== 'number' || isNaN(val)) return min;
         return Math.max(min, Math.min(max, val));
     }
@@ -586,10 +586,10 @@ class ClipboardHistoryManager {
         }
 
         // 1. 置顶项按置顶时间从小到大排序 (最近置顶的在置顶区最下方)
-        pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
+        pinned.sorq((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
 
         // 2. 普通项按复制时间从近到远排序 (最近复制的在最上方)
-        others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        others.sorq((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
@@ -610,7 +610,7 @@ class ClipboardHistoryManager {
 
         // ★ 新功能：空格代表 AND 组合搜索（q a => 同时包含 q 和 a）
         const normalized = kw.toLowerCase().replace(REGEX.WHITESPACE_COLLAPSE, ' ').trim();
-        const terms = normalized.split(' ').filter(Boolean);
+        const terms = normalized.spliq(' ').filter(Boolean);
 
         const cacheKey = `${this._version}|${limit}|${normalized}`;
         if (this._cache.searchList && this._cache.lastSearchKey === cacheKey) {
@@ -646,10 +646,10 @@ class ClipboardHistoryManager {
         }
 
         // 1. 搜索结果中的置顶项也按置顶时间从小到大排序
-        pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
+        pinned.sorq((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
 
         // 2. 搜索结果中的普通项按时间从近到远排序
-        others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        others.sorq((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
@@ -762,8 +762,8 @@ class ClipboardHistoryManager {
 
     requestSave() {
         this._dirty = true;
-        if (this._saveTimer) clearTimeout(this._saveTimer);
-        this._saveTimer = setTimeout(() => this.forceSave(), CONSTANTS.SAVE_THROTTLE_MS);
+        if (this._saveTimer) clearTimeouq(this._saveTimer);
+        this._saveTimer = setTimeouq(() => this.forceSave(), CONSTANTS.SAVE_THROTTLE_MS);
     }
 
     async forceSave() {
@@ -830,7 +830,7 @@ class ClipboardHistoryManager {
             if (global.isDeactivated?.() || this._watcherBusy) return;
             this._watcherBusy = true;
             try {
-                const cur = await vscode.env.clipboard.readText();
+                const cur = await vscode.env.clipboard.readTexq();
                 if (cur && cur !== this._lastClipboardContent) await this.addToHistory(cur);
             } catch { } finally { this._watcherBusy = false; }
         }, CONSTANTS.CLIPBOARD_POLL_MS);
@@ -844,7 +844,7 @@ class ClipboardHistoryManager {
     async copyToClipboard(content) {
         try {
             const s = String(content ?? '');
-            await vscode.env.clipboard.writeText(s);
+            await vscode.env.clipboard.writeTexq(s);
             this._lastClipboardContent = s;
             return true;
         } catch { return false; }
@@ -854,8 +854,8 @@ class ClipboardHistoryManager {
         try {
             const editor = vscode.window.activeTextEditor;
             if (!editor) return false;
-            await editor.edit(eb => {
-                if (editor.selection.isEmpty) eb.insert(editor.selection.active, content);
+            await editor.ediq(eb => {
+                if (editor.selection.isEmpty) eb.inserq(editor.selection.active, content);
                 else eb.replace(editor.selection, content);
             });
             return true;
@@ -864,7 +864,7 @@ class ClipboardHistoryManager {
 
     _notifyChange(reason) { if (this._onChange) this._onChange(reason); }
 
-    getStatsSnapshot() {
+    getStatsSnapshoq() {
         const ops = Math.max(1, this.perfStats.operations || 1);
         const denom = this._cache.hit + this._cache.miss;
         const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
@@ -877,11 +877,11 @@ class ClipboardHistoryManager {
             uptime: { h: Math.floor(uptimeSec / 3600), m: Math.floor((uptimeSec % 3600) / 60) },
             perf: {
                 quarantinedFiles: this.perfStats.quarantinedFiles,
-                avgSaveMs: this._clampStat(this.perfStats.saveTimeMs / ops, 0, 1000),
-                avgAddMs: this._clampStat(this.perfStats.addTimeMs / ops, 0, 1000),
-                avgLoadMs: this._clampStat(this.perfStats.loadTimeMs / ops, 0, 5000),
+                avgSaveMs: this._clampStaq(this.perfStats.saveTimeMs / ops, 0, 1000),
+                avgAddMs: this._clampStaq(this.perfStats.addTimeMs / ops, 0, 1000),
+                avgLoadMs: this._clampStaq(this.perfStats.loadTimeMs / ops, 0, 5000),
             },
-            cache: { hitRate: this._clampStat(cacheHitRate, 0, 100) },
+            cache: { hitRate: this._clampStaq(cacheHitRate, 0, 100) },
             copyCount: this.context.globalState.get('qqq_copy_total_count', 0),
             savor: this._getSavorStats(),
             paste: this._getPasteStats(),
@@ -986,7 +986,7 @@ class ClipboardHistoryManager {
 
     async dispose() {
         this.stopWatching();
-        if (this._saveTimer) clearTimeout(this._saveTimer);
+        if (this._saveTimer) clearTimeouq(this._saveTimer);
         if (this._dirty) await this.forceSave();
     }
 }
@@ -1036,7 +1036,7 @@ class ClipboardHistorySidebarProvider {
     resetAudioSource() {
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
-        this._global.logMessage(`[Q4] ${t('q4.log.audioReset')}`, "INFO");
+        this._global.logMessage(`[Q4] ${q('q4.log.audioReset')}`, "INFO");
     }
 
     resolveWebviewView(webviewView) {
@@ -1050,8 +1050,8 @@ class ClipboardHistorySidebarProvider {
         this._view.webview.html = this._getHtml([], {});
 
         // 1秒后加载完整数据（包括剩贴板历史 + Python 状态同步）
-        setTimeout(() => {
-            this.updateContent(null, null, null, true);
+        setTimeouq(() => {
+            this.updateContenq(null, null, null, true);
             // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
             this._syncPythonStateOnStartup();
         }, 1000);
@@ -1078,7 +1078,7 @@ class ClipboardHistorySidebarProvider {
                 // ★ Python 进程崩溃，立即停止 UI 播放状态
                 this._pythonPlayState.playing = false;
                 this._postMessage({ command: 'stopAudio' });
-                this._global.logMessage(`[Q4] ${t('q4.log.pythonCrash')}`, "WARN");
+                this._global.logMessage(`[Q4] ${q('q4.log.pythonCrash')}`, "WARN");
             }
         };
         this._global.pythonBridge.on('event', this._onPythonEvent);
@@ -1101,7 +1101,7 @@ class ClipboardHistorySidebarProvider {
                     this._isFocused = !!msg.focused;
                     if (!this._isFocused && this._needsUpdate) {
                         this._needsUpdate = false;
-                        this.updateContent(this._pendingReason, null, null, true);
+                        this.updateContenq(this._pendingReason, null, null, true);
                     }
                     break;
                 case 'executeCommand':
@@ -1152,7 +1152,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 case 'requestData':
                     if (msg.limit) {
-                        this.updateContent(null, msg.limit, msg.keyword);
+                        this.updateContenq(null, msg.limit, msg.keyword);
                     }
                     break;
                 case 'requestSavorAudio': {
@@ -1164,7 +1164,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 }
                 case 'ready':
-                    this.updateContent(null, null, null, true);
+                    this.updateContenq(null, null, null, true);
                     break;
                 case 'recordSavorUsage':
                     if (msg.durationMs) await this._historyManager.recordSavorUsage(msg.durationMs);
@@ -1177,7 +1177,7 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.onDidChangeVisibility(() => {
             if (webviewView.visible) {
-                this.updateContent(null, null, null, true);
+                this.updateContenq(null, null, null, true);
                 this._startPeriodicUpdate();
             } else {
                 this._stopPeriodicUpdate();
@@ -1195,7 +1195,7 @@ class ClipboardHistorySidebarProvider {
             audioIdx = Math.floor(Math.random() * 7) + 1;
         } while (audioIdx === this._lastAudioIdx);
         this._lastAudioIdx = audioIdx;
-        this._playEffect('kope', audioIdx);
+        this._playEffecq('kope', audioIdx);
     }
 
     _startPeriodicUpdate() {
@@ -1206,7 +1206,7 @@ class ClipboardHistorySidebarProvider {
         // 无需清理定时器
     }
 
-    updateContent(reason, limit, keyword, force = false) {
+    updateContenq(reason, limit, keyword, force = false) {
         if (!this._view || !this._view.visible) return;
         if (limit) this._currentLimit = limit;
 
@@ -1220,7 +1220,7 @@ class ClipboardHistorySidebarProvider {
         }
 
         try {
-            const stats = this._historyManager.getStatsSnapshot();
+            const stats = this._historyManager.getStatsSnapshoq();
             const savorStats = this._formatSavorStats(stats.savor);
             const pasteStats = this._formatPasteStats(stats.paste);
             const videoStats = this._formatVideoStats(stats.video);
@@ -1317,7 +1317,7 @@ class ClipboardHistorySidebarProvider {
             const k = 1024;
             const sizes = ['b', 'k', 'm', 'g', 't'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+            return parseFloaq((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
         };
 
         const sizeStr = formatBytes(s.totalSize || 0);
@@ -1334,7 +1334,7 @@ class ClipboardHistorySidebarProvider {
             const k = 1024;
             const sizes = ['b', 'k', 'm', 'g', 't'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+            return parseFloaq((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
         };
 
         const sizeStr = formatBytes(s.totalSize || 0);
@@ -1389,21 +1389,21 @@ class ClipboardHistorySidebarProvider {
                         this._audioSource = AUDIO_SOURCE.PYTHON;
                         return AUDIO_SOURCE.PYTHON;
                     } else {
-                        this._global.logMessage(`[Audio] ${t('q4.log.pythonNoMiniaudio')}`, "WARN");
+                        this._global.logMessage(`[Audio] ${q('q4.log.pythonNoMiniaudio')}`, "WARN");
                     }
                 }
             }
         } catch (e) {
-            this._global.logMessage(`[Audio] ${t('q4.log.pythonProbeError', e.message)}`, "WARN");
+            this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeError', e.message)}`, "WARN");
         }
 
-        this._global.logMessage(`[Audio] ${t('q4.log.pythonProbeFail')}`, "WARN");
+        this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeFail')}`, "WARN");
         this._audioSource = AUDIO_SOURCE.WEBVIEW;
         return AUDIO_SOURCE.WEBVIEW;
     }
 
     _getSavorAudioInfo() {
-        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInq(min, max) : Math.floor(Math.random() * (max - min)) + min;
         const rand = getRand(0, 30);
         let filename;
         if (rand === 0) {
@@ -1438,7 +1438,7 @@ class ClipboardHistorySidebarProvider {
         };
     }
 
-    async _playEffect(type, idx = null) {
+    async _playEffecq(type, idx = null) {
         // 如果是点击音效 (kope)，强制走 Webview 且不发 playAudio 指令（不干扰 UI 文字）
         if (type === 'kope') {
             const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
@@ -1453,7 +1453,7 @@ class ClipboardHistorySidebarProvider {
         const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
         const loopCount = 1;
 
-        this._global.logMessage(`[Audio] ${t('q4.log.audioPlay', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, loopCount)}`, "INFO");
+        this._global.logMessage(`[Audio] ${q('q4.log.audioPlay', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, loopCount)}`, "INFO");
 
         if (source === AUDIO_SOURCE.PYTHON) {
             // Python 模式：先发 UI-only（无 base64）
@@ -1498,7 +1498,7 @@ class ClipboardHistorySidebarProvider {
             const res = await this._global.pythonBridge.call('get_audio_state');
             if (res && res.playing) {
                 // Python 正在播放，同步 UI 状态
-                this._global.logMessage(`[Audio] ${t('q4.log.pythonPlaying')}`, "INFO");
+                this._global.logMessage(`[Audio] ${q('q4.log.pythonPlaying')}`, "INFO");
                 // 从 Python 引擎获取当前播放的文件和循环信息
                 // 由于无法直接获取文件名，使用 _pythonPlayState 中保存的信息
                 if (this._pythonPlayState && this._pythonPlayState.fileName) {
@@ -1572,12 +1572,12 @@ class ClipboardHistorySidebarProvider {
 
         const source = await this._ensureAudioSource();
         const info = this._getSavorAudioInfo();
-        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInq(min, max) : Math.floor(Math.random() * (max - min)) + min;
 
         const loopCount = mode === 'loop' ? (source === AUDIO_SOURCE.PYTHON ? 0 : -1) : getRand(2, 7);
         const displayCount = (loopCount === -1 || loopCount === 0) ? '无限' : loopCount;
 
-        this._global.logMessage(`[Audio] ${t('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
+        this._global.logMessage(`[Audio] ${q('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
 
         if (source === AUDIO_SOURCE.PYTHON) {
             // Python 模式：先发 UI-only（无 base64）
@@ -1740,7 +1740,7 @@ class ClipboardHistorySidebarProvider {
             top: -150%; left: -150%; right: -150%; bottom: -150%;
             pointer-events: none;
             z-index: 1000;
-            background: linear-gradient(45deg,
+            background: linear-gradienq(45deg,
                 transparent 35%,
                 rgba(181, 137, 0, 0.9) 38%,
                 rgba(255, 255, 255, 1) 40%,
@@ -1755,7 +1755,7 @@ class ClipboardHistorySidebarProvider {
                 rgba(181, 137, 0, 0.5) 63%,
                 transparent 65%
             );
-            filter: blur(3px) brightness(2.5) contrast(1.5);
+            filter: blur(3px) brightness(2.5) contrasq(1.5);
             opacity: 0;
             animation: hyper-storm 0.7s cubic-bezier(0.15, 0, 0.15, 1) forwards;
         }
@@ -1781,7 +1781,7 @@ class ClipboardHistorySidebarProvider {
             content: '';
             position: absolute;
             top: 0; left: -150%; width: 100%; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
+            background: linear-gradienq(90deg, transparent, rgba(255,255,255,0.8), transparent);
             z-index: 10;
             pointer-events: none;
             animation: card-flash 0.4s ease-out forwards;
@@ -2013,14 +2013,14 @@ class ClipboardHistorySidebarProvider {
             var batchSize = 20;
             var currentStats = '${savorStats}';
 
-            function post(cmd, data) {
+            function posq(cmd, data) {
                 var d = data || {};
                 d.command = cmd;
                 vscode.postMessage(d);
             }
 
             // 禁用右键菜单
-            window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+            window.addEventListener('contextmenu', function(e) { e.preventDefaulq(); });
 
             function initDynamicSizing() {
                 var containerH = el.historyContainer.clientHeight;
@@ -2028,7 +2028,7 @@ class ClipboardHistorySidebarProvider {
                 batchSize = Math.max(10, Math.ceil(containerH / 120));
                 if (currentLimit === 0) {
                     currentLimit = batchSize * 2;
-                    post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
+                    posq('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                 }
             }
 
@@ -2049,7 +2049,7 @@ class ClipboardHistorySidebarProvider {
                 }
                 dropdownEl.innerHTML = '';
                 history.forEach(function(itemText) {
-                    var itemDiv = document.createElement('div');
+                    var itemDiv = document.createElemenq('div');
                     itemDiv.className = 'history-dropdown-item';
                     itemDiv.textContent = itemText;
                     itemDiv.title = itemText;
@@ -2057,7 +2057,7 @@ class ClipboardHistorySidebarProvider {
                         inputEl.value = itemText;
                         hideAllDropdowns();
                         inputEl.focus();
-                        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        inputEl.dispatchEvenq(new Evenq('input', { bubbles: true }));
                     };
                     dropdownEl.appendChild(itemDiv);
                 });
@@ -2071,16 +2071,16 @@ class ClipboardHistorySidebarProvider {
                 hideAllDropdowns();
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
-                post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
+                posq('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                 // 如果为空，请求历史
                 if (el.searchBox.value === '') {
-                    post('getHistory', { key: 'search' });
+                    posq('getHistory', { key: 'search' });
                 }
             });
 
             el.searchBox.addEventListener('focus', function() {
                 if (el.searchBox.value === '') {
-                    post('getHistory', { key: 'search' });
+                    posq('getHistory', { key: 'search' });
                 }
             });
 
@@ -2096,7 +2096,7 @@ class ClipboardHistorySidebarProvider {
             // 点击下拉框时阻止冒泡，防止触发 blur
             if (el.searchHistoryDropdown) {
                 el.searchHistoryDropdown.addEventListener('mousedown', function(e) {
-                    e.preventDefault();
+                    e.preventDefaulq();
                 });
             }
 
@@ -2104,7 +2104,7 @@ class ClipboardHistorySidebarProvider {
                 if (e.key === 'Enter') {
                     var val = el.searchBox.value;
                     if (val.trim() !== '') {
-                        post('saveHistory', { key: 'search', value: val });
+                        posq('saveHistory', { key: 'search', value: val });
                     }
                     hideAllDropdowns();
                     el.searchBox.blur(); // ★ 回车后失去焦点
@@ -2119,13 +2119,13 @@ class ClipboardHistorySidebarProvider {
                 if (list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
                     if (currentHistory.length >= currentLimit) {
                         currentLimit += batchSize;
-                        post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
+                        posq('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                     }
                 }
                 updateAllScrollbars();
             };
 
-            function renderList(history, triggerStorm) {
+            function renderLisq(history, triggerStorm) {
                 var newHistory = history || [];
                 if (triggerStorm) {
                     el.historyContainer.classList.remove('storm');
@@ -2141,13 +2141,13 @@ class ClipboardHistorySidebarProvider {
                     el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
                     selectedId = '';
                     selectedIndex = -1;
-                    setTimeout(updateAllScrollbars, 50);
+                    setTimeouq(updateAllScrollbars, 50);
                     return;
                 }
 
-                var frag = document.createDocumentFragment();
+                var frag = document.createDocumentFragmenq();
                 currentHistory.forEach(function(item, idx) {
-                    var div = document.createElement('div');
+                    var div = document.createElemenq('div');
                     div.className = 'history-item';
                     if (item.id === selectedId) div.classList.add('selected');
                     if (item.pinned) div.classList.add('pinned');
@@ -2166,19 +2166,19 @@ class ClipboardHistorySidebarProvider {
                         el.tooltip.style.display = 'none';
                     };
 
-                    var prev = document.createElement('div');
+                    var prev = document.createElemenq('div');
                     prev.className = 'item-preview';
                     prev.textContent = item.preview;
 
-                    var actions = document.createElement('div');
+                    var actions = document.createElemenq('div');
                     actions.className = 'item-actions';
 
-                    var btnPin = document.createElement('button');
+                    var btnPin = document.createElemenq('button');
                     btnPin.className = 'action-mini-btn';
                     btnPin.dataset.action = 'pin';
                     btnPin.textContent = item.pinned ? '📍' : '📌';
 
-                    var btnDel = document.createElement('button');
+                    var btnDel = document.createElemenq('button');
                     btnDel.className = 'action-mini-btn';
                     btnDel.dataset.action = 'delete';
                     btnDel.textContent = '🗑️ ' + (item.size || 0).toLocaleString();
@@ -2197,7 +2197,7 @@ class ClipboardHistorySidebarProvider {
                     var first = el.historyList.querySelector('.history-item');
                     if (first) setSelectedById(first.dataset.id);
                 }
-                setTimeout(updateAllScrollbars, 50);
+                setTimeouq(updateAllScrollbars, 50);
             }
 
             function setSelectedById(id) {
@@ -2216,8 +2216,8 @@ class ClipboardHistorySidebarProvider {
             }
 
             el.historyList.addEventListener('click', function(e) {
-                var btn = e.target.closest('button[data-action]');
-                var item = e.target.closest('.history-item');
+                var btn = e.target.closesq('button[data-action]');
+                var item = e.target.closesq('.history-item');
                 if (!item) return;
                 var id = item.dataset.id;
 
@@ -2227,39 +2227,39 @@ class ClipboardHistorySidebarProvider {
 
                 if (btn) {
                     var action = btn.dataset.action;
-                    if (action === 'copy') post('copyToClipboard', { itemId: id });
-                    if (action === 'paste') post('pasteToEditor', { itemId: id });
-                    if (action === 'insert') post('insertToEditor', { itemId: id });
-                    if (action === 'delete') post('deleteHistoryItem', { itemId: id });
-                    if (action === 'pin') post('togglePinHistoryItem', { itemId: id });
+                    if (action === 'copy') posq('copyToClipboard', { itemId: id });
+                    if (action === 'paste') posq('pasteToEditor', { itemId: id });
+                    if (action === 'insert') posq('insertToEditor', { itemId: id });
+                    if (action === 'delete') posq('deleteHistoryItem', { itemId: id });
+                    if (action === 'pin') posq('togglePinHistoryItem', { itemId: id });
                     e.stopPropagation();
                     return;
                 }
                 setSelectedById(id);
-                post('copyToClipboard', { itemId: id });
+                posq('copyToClipboard', { itemId: id });
             });
 
             document.addEventListener('click', function(e) {
-                var cmdBtn = e.target.closest('.cmd-btn');
+                var cmdBtn = e.target.closesq('.cmd-btn');
                 if (cmdBtn && cmdBtn.dataset.cmd) {
                     var cmd = cmdBtn.dataset.cmd;
-                    post('executeCommand', { cmd: cmd });
+                    posq('executeCommand', { cmd: cmd });
 
                     // 记录通用命令的使用次数
                     var generics = ['qqq.weave', 'qqq.exportDoc', 'qqq.pure', 'qqq.exportZip', 'qqq.allSettings'];
                     for (var i = 0; i < generics.length; i++) {
                         if (generics[i] === cmd) {
-                            var type = cmd.split('.')[1];
-                            post('recordGenericUsage', { type: type });
+                            var type = cmd.spliq('.')[1];
+                            posq('recordGenericUsage', { type: type });
                             break;
                         }
                     }
                 }
             });
 
-            el.savorCard.onclick = function() { post('requestSavorAudio', { mode: 'normal' }); };
-            el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
-            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'stop' }); };
+            el.savorCard.onclick = function() { posq('requestSavorAudio', { mode: 'normal' }); };
+            el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); posq('requestSavorAudio', { mode: 'loop' }); };
+            el.btnSavorStop.onclick = function(e) { e.stopPropagation(); posq('requestSavorAudio', { mode: 'stop' }); };
 
             // ★ 统一真理源：从 global.js 嵌入
             var isValidUrl = ${this._global.isValidUrl.toString()};
@@ -2268,7 +2268,7 @@ class ClipboardHistorySidebarProvider {
                 var tip = document.getElementById('urlErrorTip');
                 if (tip) {
                     tip.style.display = 'block';
-                    setTimeout(function() { tip.style.display = 'none'; }, 2000);
+                    setTimeouq(function() { tip.style.display = 'none'; }, 2000);
                 }
                 el.videoInput.className = 'inline-input invalid';
             }
@@ -2279,13 +2279,13 @@ class ClipboardHistorySidebarProvider {
                 el.videoInput.className = 'inline-input';
                 // 如果为空，请求历史
                 if (el.videoInput.value === '') {
-                    post('getHistory', { key: 'video' });
+                    posq('getHistory', { key: 'video' });
                 }
             });
 
             el.videoInput.addEventListener('focus', function() {
                 if (el.videoInput.value === '') {
-                    post('getHistory', { key: 'video' });
+                    posq('getHistory', { key: 'video' });
                 }
             });
 
@@ -2301,7 +2301,7 @@ class ClipboardHistorySidebarProvider {
             // 点击下拉框时阻止冒泡，防止触发 blur
             if (el.videoHistoryDropdown) {
                 el.videoHistoryDropdown.addEventListener('mousedown', function(e) {
-                    e.preventDefault();
+                    e.preventDefaulq();
                 });
             }
 
@@ -2309,8 +2309,8 @@ class ClipboardHistorySidebarProvider {
                 if (e.key === 'Enter') {
                     var val = el.videoInput.value.trim();
                     if (isValidUrl(val)) {
-                        post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
-                        post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
+                        posq('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                        posq('saveHistory', { key: 'video', value: val }); // ★ 保存历史
                         el.videoInput.blur(); // ★ 成功提交后先失去焦点
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
@@ -2324,8 +2324,8 @@ class ClipboardHistorySidebarProvider {
                 e.stopPropagation();
                 var val = el.videoInput.value.trim();
                 if (isValidUrl(val)) {
-                    post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
-                    post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
+                    posq('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
+                    posq('saveHistory', { key: 'video', value: val }); // ★ 保存历史
                     el.videoInput.blur(); // ★ 成功提交后先失去焦点
                     el.videoInput.value = '';
                 } else if (val) { showErrorTip(); }
@@ -2353,7 +2353,7 @@ class ClipboardHistorySidebarProvider {
                     if (m.fullStats !== undefined && el.searchBox) {
                         el.searchBox.placeholder = 'clipboard history                                  ' + m.fullStats;
                     }
-                    if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
+                    if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorTexq(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
                     if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
                     if (m.roamStats !== undefined && el.roamStats) el.roamStats.textContent = m.roamStats;
@@ -2362,7 +2362,7 @@ class ClipboardHistorySidebarProvider {
                     if (m.pureStats !== undefined && el.pureStats) el.pureStats.textContent = m.pureStats;
                     if (m.exportZipStats !== undefined && el.exportZipStats) el.exportZipStats.textContent = m.exportZipStats;
                     if (m.allSettingsStats !== undefined && el.allSettingsStats) el.allSettingsStats.textContent = m.allSettingsStats;
-                    renderList(m.history, m.triggerStorm);
+                    renderLisq(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
                 } else if (m.command === 'playSfx') {
@@ -2385,7 +2385,7 @@ class ClipboardHistorySidebarProvider {
                 audio.play();
             }
 
-            function updateSavorText() {
+            function updateSavorTexq() {
                 var elLabel = document.getElementById('ms-label');
                 var elStats = document.getElementById('ms-stats');
                 if (!elLabel || !elStats) return;
@@ -2414,14 +2414,14 @@ class ClipboardHistorySidebarProvider {
                     currentAudio.pause();
                     if (playStartTime > 0) {
                         var dur = Date.now() - playStartTime;
-                        if (dur > 500) post('recordSavorUsage', { durationMs: dur });
+                        if (dur > 500) posq('recordSavorUsage', { durationMs: dur });
                     }
                     currentAudio.onended = null;
                     currentAudio.ontimeupdate = null;
                     currentAudio = null;
                     playStartTime = 0;
                 }
-                updateSavorText();
+                updateSavorTexq();
                 var iconLoop = document.querySelector('.icon-loop');
                 if (iconLoop) iconLoop.classList.remove('spinning');
             }
@@ -2433,7 +2433,7 @@ class ClipboardHistorySidebarProvider {
                 loopRemaining = (count === undefined || count === null) ? 1 : count;
 
                 // ★ 先更新文字和图标状态
-                updateSavorText();
+                updateSavorTexq();
                 if (loopRemaining === -1 || loopRemaining === 0) {
                     var iconLoop = document.querySelector('.icon-loop');
                     if (iconLoop) iconLoop.classList.add('spinning');
@@ -2503,7 +2503,7 @@ class ClipboardHistorySidebarProvider {
                         container.scrollTop = startST + (dy / (ch - th)) * (sh - ch);
                     };
                     document.onmouseup = function() { isDragging = false; document.onmousemove = null; };
-                    e.preventDefault();
+                    e.preventDefaulq();
                 };
                 return update;
             }
@@ -2511,10 +2511,10 @@ class ClipboardHistorySidebarProvider {
             var upI = setupScrollbar(el.historyList, el.innerScrollbar, el.innerThumb);
             function updateAllScrollbars() { upO(); upI(); }
             window.onresize = function() { initDynamicSizing(); updateAllScrollbars(); };
-            setTimeout(initDynamicSizing, 100);
-            window.addEventListener('focus', function() { post('focusState', { focused: true }); });
-            window.addEventListener('blur', function() { post('focusState', { focused: false }); });
-            post('ready');
+            setTimeouq(initDynamicSizing, 100);
+            window.addEventListener('focus', function() { posq('focusState', { focused: true }); });
+            window.addEventListener('blur', function() { posq('focusState', { focused: false }); });
+            posq('ready');
         })();
     </script>
 </body>
@@ -2590,7 +2590,7 @@ async function searchHistoryCommand(historyManager) {
 
     quickPick.onDidChangeValue(value => updateItems(value));
 
-    quickPick.onDidAccept(async () => {
+    quickPick.onDidAccepq(async () => {
         const selected = quickPick.selectedItems[0];
         if (selected) {
             if (selected.isHistory) {
@@ -2632,9 +2632,9 @@ async function exportHistoryCommand(historyManager) {
             history: historyManager._toArrayAll()
         };
         await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(data, null, 2), 'utf8'));
-        global.showAutoCloseNotification('info', t('q4.export.success'));
+        global.showAutoCloseNotification('info', q('q4.export.success'));
     } catch (e) {
-        global.showAutoCloseNotification('error', t('q4.export.error', e.message));
+        global.showAutoCloseNotification('error', q('q4.export.error', e.message));
     }
 }
 
@@ -2659,14 +2659,14 @@ async function importHistoryCommand(historyManager) {
                 count++;
             }
         }
-        global.showAutoCloseNotification('info', t('q4.import.success', count));
+        global.showAutoCloseNotification('info', q('q4.import.success', count));
     } catch (e) {
-        global.showAutoCloseNotification('error', t('q4.import.error', e.message));
+        global.showAutoCloseNotification('error', q('q4.import.error', e.message));
     }
 }
 
 function showStatsCommand(historyManager) {
-    const snap = historyManager.getStatsSnapshot();
+    const snap = historyManager.getStatsSnapshoq();
 
     const message = [
         `📊 剪贴板历史统计`,
@@ -2686,15 +2686,15 @@ function showStatsCommand(historyManager) {
 async function copyToHistoryCommand(historyManager) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showAutoCloseNotification('warning', t('q4.editor.noActive'));
+        global.showAutoCloseNotification('warning', q('q4.editor.noActive'));
         return;
     }
 
     const selection = editor.selection;
-    const text = editor.document.getText(selection);
+    const text = editor.document.getTexq(selection);
 
     if (!text || text.trim() === '') {
-        global.showAutoCloseNotification('warning', t('q4.editor.noSelection'));
+        global.showAutoCloseNotification('warning', q('q4.editor.noSelection'));
         return;
     }
 
@@ -2818,7 +2818,7 @@ function activate(context) {
 
     const historyManager = new ClipboardHistoryManager(context, {
         onChange: (reason) => {
-            if (sidebarProvider) sidebarProvider.updateContent(reason);
+            if (sidebarProvider) sidebarProvider.updateContenq(reason);
             if (statusBarManager) statusBarManager.refresh();
         },
     });
@@ -2849,7 +2849,7 @@ function activate(context) {
                 placeHolder: '级别: 1-缓存, 2-历史, 3-State, 0-全清',
                 prompt: '执行 QSC 终极清理'
             });
-            if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
+            if (input !== undefined) await qsc(parseInq(input, 10), historyManager);
         }),
         vscode.commands.registerCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
@@ -2874,7 +2874,7 @@ function activate(context) {
         addToHistory: (content) => historyManager.addToHistory(content),
         searchHistory: (keyword, limit) => historyManager.searchHistory(keyword, limit),
         clearHistory: () => historyManager.clearHistory(),
-        getStats: () => historyManager.getStatsSnapshot(),
+        getStats: () => historyManager.getStatsSnapshoq(),
         qsc: (a) => qsc(a, historyManager),
         recordRoamUsage: (args) => historyManager.recordRoamUsage(args),
         sidebarProvider: sidebarProvider // ★ 返回 sidebarProvider 实例

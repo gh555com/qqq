@@ -41,14 +41,25 @@ const VSCODE_LANG_MAP = {
 function loadLocale(lang) {
     if (locales[lang]) return locales[lang];
 
+    const filePath = path.join(__dirname, `${lang}.json`);
     try {
-        const filePath = path.join(__dirname, `${lang}.json`);
-        // 使用 require 加载 JSON，Node 会自动解析
-        delete require.cache[require.resolve(filePath)]; // 清除缓存以支持热重载
+        console.log(`[i18n] Loading locale file: ${filePath}`);
+        // 清除缓存以支持热重载
+        try { delete require.cache[require.resolve(filePath)]; } catch (_) { }
         locales[lang] = require(filePath);
+        console.log(`[i18n] Loaded locale "${lang}", keys:`, Object.keys(locales[lang]));
     } catch (e) {
-        console.warn(`[i18n] Failed to load locale "${lang}":`, e.message);
-        locales[lang] = {};
+        console.error(`[i18n] Failed to load locale "${lang}" from ${filePath}:`, e.message);
+        // 尝试用 fs 读取
+        try {
+            const fs = require('fs');
+            const content = fs.readFileSync(filePath, 'utf8');
+            locales[lang] = JSON.parse(content);
+            console.log(`[i18n] Loaded locale "${lang}" via fs, keys:`, Object.keys(locales[lang]));
+        } catch (fsErr) {
+            console.error(`[i18n] fs fallback also failed:`, fsErr.message);
+            locales[lang] = {};
+        }
     }
 
     return locales[lang];
@@ -60,18 +71,23 @@ function loadLocale(lang) {
  * @param {...any} args - 占位符参数，支持 {0}, {1} 等格式
  * @returns {string} 翻译后的文本
  */
-function t(key, ...args) {
+function q(key, ...args) {
     const locale = loadLocale(currentLang);
     const fallback = loadLocale('zh'); // 中文作为回退
 
+    // 调试：输出详细信息
+    console.log(`[i18n] t("${key}") called, currentLang=${currentLang}, locale keys=${Object.keys(locale).join(',')}, fallback keys=${Object.keys(fallback).join(',')}`);
+
     // 支持嵌套键，如 'q2.error.fileExists'
     let value = getNestedValue(locale, key);
+    console.log(`[i18n] getNestedValue(locale, "${key}") = ${JSON.stringify(value)}`);
     if (value === undefined) {
         value = getNestedValue(fallback, key);
+        console.log(`[i18n] getNestedValue(fallback, "${key}") = ${JSON.stringify(value)}`);
     }
     if (value === undefined) {
-        console.warn(`[i18n] Missing translation for key: "${key}"`);
-        return key; // 返回 key 本身作为最后回退
+        console.warn(`[i18n] Missing translation for key: "${key}" in lang: ${currentLang}`);
+        return key;
     }
 
     // 替换占位符 {0}, {1}, {2}, ...
@@ -89,7 +105,10 @@ function t(key, ...args) {
  * 获取嵌套对象的值
  */
 function getNestedValue(obj, keyPath) {
-    if (!obj) return undefined;
+    if (!obj) {
+        console.log(`[i18n] getNestedValue: obj is null/undefined`);
+        return undefined;
+    }
 
     // 先尝试直接匹配（支持扁平键）
     if (obj[keyPath] !== undefined) return obj[keyPath];
@@ -98,7 +117,10 @@ function getNestedValue(obj, keyPath) {
     const keys = keyPath.split('.');
     let value = obj;
     for (const k of keys) {
-        if (value === null || value === undefined) return undefined;
+        if (value === null || value === undefined) {
+            console.log(`[i18n] getNestedValue: traversal failed at key "${k}", current value: ${JSON.stringify(value)}`);
+            return undefined;
+        }
         value = value[k];
     }
     return value;
@@ -179,7 +201,7 @@ function clearCache() {
 
 // 导出
 module.exports = {
-    t,
+    q,
     setLanguage,
     getLanguage,
     init,

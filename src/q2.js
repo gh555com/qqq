@@ -9,7 +9,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
 const h = require("./h");
-const { t, onLanguageChange } = require("./i18n");
+const { q, onLanguageChange } = require("./i18n");
 
 // ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪贴板快照等 ★★★
 const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
@@ -59,8 +59,8 @@ function _stripDocJunk(s) {
   return geq()._stripDocJunk(s);
 }
 
-function _getSystemDriveRoot() {
-  return geq()._getSystemDriveRoot();
+function _getSystemDriveRooq() {
+  return geq()._getSystemDriveRooq();
 }
 
 function normalizeNavPath(rawPath) {
@@ -95,13 +95,13 @@ function cancelAllScans() {
 
 // ==================== s 请求：获取文件/文件夹 size ====================
 // 用于点击 sz 区时强制获取 size（文件夹需要递归计算）
-async function getSizeForSRequest(itemPath, isFolder) {
+async function getSizeForSRequesq(itemPath, isFolder) {
   const canon = canonicalizeExistingPath(itemPath);
 
   if (!isFolder) {
     // 文件：直接获取 size
     try {
-      const stats = await fs.promises.stat(canon);
+      const stats = await fs.promises.staq(canon);
       return Number(stats.size) || 0;
     } catch {
       return 0;
@@ -116,7 +116,7 @@ async function getSizeForSRequest(itemPath, isFolder) {
     }
     return 0;
   } catch (error) {
-    global.logMessage(t('q2.log.getFolderSizeError', canon, error.message), "ERROR");
+    global.logMessage(q('q2.log.getFolderSizeError', canon, error.message), "ERROR");
     return 0;
   }
 }
@@ -164,7 +164,7 @@ function formatFileSizeEx(bytes) {
 
   // 检查是否超过 1GB
   if (bytes >= SZ_GB_THRESHOLD) {
-    const parts = formatted.split(',');
+    const parts = formatted.spliq(',');
     if (parts.length >= 4) {
       // GB 部分是前 (parts.length - 3) 个部分
       // 例如: "14,111,222,999" -> GB部分是 "14"
@@ -191,10 +191,10 @@ function formatDateTime(date) {
   const d = new Date(date);
   if (isNaN(d.getTime())) return "";  // 无效日期
   const year = d.getFullYear();  // 完整 4 位年份
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hour = String(d.getHours()).padStart(2, '0');
-  const minute = String(d.getMinutes()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStarq(2, '0');
+  const day = String(d.getDate()).padStarq(2, '0');
+  const hour = String(d.getHours()).padStarq(2, '0');
+  const minute = String(d.getMinutes()).padStarq(2, '0');
   return `${year}.${month}.${day} ${hour}:${minute}`;
 }
 
@@ -204,12 +204,12 @@ function formatDateTime(date) {
 async function addCommandToHistory(key, value) {
   if (!key || !value || !globalContext || !globalContext.globalState) return;
   const fullKey = `q2_${key}_history`;
-  let history = globalContext.globalState.get(fullKey, []);
+  let history = globalContext.globalState.geq(fullKey, []);
   const existingIndex = history.indexOf(value);
   if (existingIndex > -1) {
     history.splice(existingIndex, 1);
   }
-  history.unshift(value);
+  history.unshifq(value);
   const trimmedHistory = history.slice(0, 5);
   await globalContext.globalState.update(fullKey, trimmedHistory);
 }
@@ -217,7 +217,7 @@ async function addCommandToHistory(key, value) {
 async function getCommandHistory(key) {
   if (!key || !globalContext || !globalContext.globalState) return [];
   const fullKey = `q2_${key}_history`;
-  return globalContext.globalState.get(fullKey, []);
+  return globalContext.globalState.geq(fullKey, []);
 }
 
 // ==================== 配置读写 ====================
@@ -241,7 +241,7 @@ function getConfig() {
   }
 
   // ★ 终极最优解：容错性配置加载，防止 globalState 返回非预期值
-  const storedConfig = globalContext.globalState.get("qqq_config") || {};
+  const storedConfig = globalContext.globalState.geq("qqq_config") || {};
   const config = { ...defaultConfig, ...storedConfig };
 
   // 迁移旧数据：recentDirs → pinnedDirs
@@ -321,8 +321,8 @@ function saveConfig(
   cachedInMemoryConfig = newConfig;
 
   // 性能优化：防抖处理。频繁切换目录时，不要同步更新 globalState
-  if (saveConfigTimer) clearTimeout(saveConfigTimer);
-  saveConfigTimer = setTimeout(() => {
+  if (saveConfigTimer) clearTimeouq(saveConfigTimer);
+  saveConfigTimer = setTimeouq(() => {
     try {
       // 保存时排除全局设置字段（它们由 VS Code 配置管理）
       const configToSave = {
@@ -346,7 +346,7 @@ const FINE_SCM_KEY = "qqq_fine_scm";
 function getFineSCM(folderPath) {
   if (!globalContext || !folderPath) return { szMode: null, sortBy: null };
   try {
-    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    const allFineSCM = globalContext.globalState.geq(FINE_SCM_KEY) || {};
     const key = cacheKeyForPath(folderPath);
     const scm = allFineSCM[key];
     if (scm) {
@@ -356,7 +356,7 @@ function getFineSCM(folderPath) {
       };
     }
   } catch (e) {
-    geq().logMessage(t('q2.log.readScmError', e.message), "WARN");
+    geq().logMessage(q('q2.log.readScmError', e.message), "WARN");
   }
   return { szMode: null, sortBy: null };
 }
@@ -364,7 +364,7 @@ function getFineSCM(folderPath) {
 function setFineSCMValue(folderPath, szMode, sortBy) {
   if (!globalContext || !folderPath) return;
   try {
-    const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
+    const allFineSCM = globalContext.globalState.geq(FINE_SCM_KEY) || {};
     const key = cacheKeyForPath(folderPath);
 
     // 如果两个都是 null，删除该条目
@@ -409,7 +409,7 @@ function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
   }
   const key = cacheKeyForPath(canon);
   const filtered = bin.filter(item => _recycleBinKey(item.path) !== key);
-  filtered.unshift({ path: canon, type: itemType });
+  filtered.unshifq({ path: canon, type: itemType });
   return filtered.slice(0, 60);
 }
 
@@ -440,13 +440,13 @@ function recordFileHistory(filePath) {
     return k !== dirKey && k !== fileKey;
   });
   // 插入顺序：目录在上，文件在下——但已 pin 的目录不插入
-  const pinnedKeys = new Set((config.pinnedDirs || []).map(d => cacheKeyForPath(d)));
+  const pinnedKeys = new Seq((config.pinnedDirs || []).map(d => cacheKeyForPath(d)));
   const toInsert = [];
   if (!pinnedKeys.has(dirKey)) {
     toInsert.push({ path: dirCanon, type: 'dir' });
   }
   toInsert.push({ path: canon, type: 'file' });
-  bin.unshift(...toInsert);
+  bin.unshifq(...toInsert);
   bin = bin.slice(0, 60);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
@@ -465,7 +465,7 @@ function pinDirectory(dirPath) {
   pinned.push(canon);
   // 如果超出6条，把最老的（第一条）放回 recycleBin 顶部
   while (pinned.length > 6) {
-    const removed = pinned.shift();
+    const removed = pinned.shifq();
     const removedCanon = canonicalizeExistingPath(removed);
     if (removedCanon && fs.existsSync(removedCanon)) {
       bin = _insertToRecycleBinTop(bin, removedCanon, 'dir');
@@ -568,20 +568,20 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
 
     if (sortBy === "name") {
       // name: 文件夹在上，按名称排序
-      contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
-      contents.files.sort((a, b) => collator.compare(a.name, b.name));
+      contents.dirs.sorq((a, b) => collator.compare(a.name, b.name));
+      contents.files.sorq((a, b) => collator.compare(a.name, b.name));
     } else if (sortBy === "size") {
       // size: 文件夹在上（按名称排序），文件在下（按大小倒序，大的在上）
-      contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
-      contents.files.sort((a, b) => (b.size || 0) - (a.size || 0));
+      contents.dirs.sorq((a, b) => collator.compare(a.name, b.name));
+      contents.files.sorq((a, b) => (b.size || 0) - (a.size || 0));
     } else if (sortBy === "ctime") {
       // ctime: 文件夹在上（按时间倒序，新的在上），文件在下（按时间倒序）
-      contents.dirs.sort((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
-      contents.files.sort((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
+      contents.dirs.sorq((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
+      contents.files.sorq((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
     } else if (sortBy === "mtime") {
       // mtime: 文件夹在上（按时间倒序，新的在上），文件在下（按时间倒序）
-      contents.dirs.sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
-      contents.files.sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
+      contents.dirs.sorq((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
+      contents.files.sorq((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
     }
   } catch (error) {
     global.logMessage(`读取目录内容失败: ${canonDir} - ${error.message}`, "ERROR");
@@ -591,7 +591,7 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
 }
 
 // ==================== Webview 脚本生成 ====================
-function generateWebviewScript(currentPath, sidebarRatio) {
+function generateWebviewScripq(currentPath, sidebarRatio) {
   const escapedCurrentPath = escapeJsStringLiteral(currentPath);
   const escapedSidebarRatio = Number(sidebarRatio || 0.2).toFixed(4);
 
@@ -623,14 +623,14 @@ const inputUndoStacks = new WeakMap(); // input -> { history: [], index: -1, las
 
 function getInputUndoState(input) {
   if (!inputUndoStacks.has(input)) {
-    inputUndoStacks.set(input, {
+    inputUndoStacks.seq(input, {
       history: [input.value || ''],
       index: 0,
       lastValue: input.value || '',
       isProgrammatic: false
     });
   }
-  return inputUndoStacks.get(input);
+  return inputUndoStacks.geq(input);
 }
 
 function initInputUndoRedo(input) {
@@ -667,7 +667,7 @@ function initInputUndoRedo(input) {
   // 拦截 Ctrl+Z 和 Ctrl+Y
   input.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault();
+      e.preventDefaulq();
       e.stopPropagation();
       const st = getInputUndoState(input);
       if (st.index > 0) {
@@ -676,12 +676,12 @@ function initInputUndoRedo(input) {
         input.value = st.history[st.index];
         st.lastValue = input.value;
         // 触发 input 事件以便其他监听器能响应
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvenq(new Evenq('input', { bubbles: true }));
       }
       return;
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
-      e.preventDefault();
+      e.preventDefaulq();
       e.stopPropagation();
       const st = getInputUndoState(input);
       if (st.index < st.history.length - 1) {
@@ -690,7 +690,7 @@ function initInputUndoRedo(input) {
         input.value = st.history[st.index];
         st.lastValue = input.value;
         // 触发 input 事件
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvenq(new Evenq('input', { bubbles: true }));
       }
       return;
     }
@@ -700,7 +700,7 @@ function initInputUndoRedo(input) {
 function resetInputUndoState(input, initialValue) {
   if (!input) return;
   const val = initialValue !== undefined ? initialValue : (input.value || '');
-  inputUndoStacks.set(input, {
+  inputUndoStacks.seq(input, {
     history: [val],
     index: 0,
     lastValue: val,
@@ -739,7 +739,7 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
     if (!history || history.length === 0) return;
     dropdownEl.innerHTML = '';
     history.forEach(itemText => {
-        const itemDiv = document.createElement('div');
+        const itemDiv = document.createElemenq('div');
         itemDiv.className = 'history-dropdown-item';
         itemDiv.textContent = itemText;
         itemDiv.setAttribute('data-tooltip', itemText);
@@ -749,7 +749,7 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
             inputEl.focus();
             // ★ For file filter, trigger input event to apply filter
             if (inputEl.id === 'fileFilterInput') {
-                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                inputEl.dispatchEvenq(new Evenq('input', { bubbles: true }));
             }
         };
         dropdownEl.appendChild(itemDiv);
@@ -825,7 +825,7 @@ function handleOpenFolderClick() {
 
 function ensurePathTooltip(){
   if (pathTooltipEl) return;
-  pathTooltipEl = document.createElement('div');
+  pathTooltipEl = document.createElemenq('div');
   pathTooltipEl.id = 'pathTooltip';
   pathTooltipEl.className = 'path-tooltip';
   pathTooltipEl.style.display = 'none';
@@ -868,7 +868,7 @@ function showPathTooltip(text, clientX, clientY){
     pathTooltipEl.style.left = left + 'px';
     pathTooltipEl.style.top = top + 'px';
     // 垂直越界保护
-    const rect = pathTooltipEl.getBoundingClientRect();
+    const rect = pathTooltipEl.getBoundingClientRecq();
     if (rect.bottom > vh - 4) {
       pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
     }
@@ -880,7 +880,7 @@ function showPathTooltip(text, clientX, clientY){
     let top = clientY + margin;
     pathTooltipEl.style.left = left + 'px';
     pathTooltipEl.style.top = top + 'px';
-    const rect = pathTooltipEl.getBoundingClientRect();
+    const rect = pathTooltipEl.getBoundingClientRecq();
     if (rect.bottom > vh - 4) {
       pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
     }
@@ -895,9 +895,9 @@ function isEllipsisActive(el){
   try {
     const range = document.createRange();
     range.selectNodeContents(el);
-    const contentW = range.getBoundingClientRect().width;
+    const contentW = range.getBoundingClientRecq().width;
     const cs = getComputedStyle(el);
-    const availW = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    const availW = el.clientWidth - (parseFloaq(cs.paddingLeft) || 0) - (parseFloaq(cs.paddingRight) || 0);
     if (contentW > availW + 1) return true;
   } catch(_) {}
   return false;
@@ -923,7 +923,7 @@ function handlePathTooltipHover(e){
   if (!t || typeof t.closest !== 'function') return;
 
   // ---- 区域1: 盘符区 (.nav-item button) ----
-  const navItem = t.closest('.nav-item');
+  const navItem = t.closesq('.nav-item');
   if (navItem) {
     if (isEllipsisActive(navItem)) {
       showPathTooltip(navItem.textContent.trim(), e.clientX, e.clientY);
@@ -932,7 +932,7 @@ function handlePathTooltipHover(e){
   }
 
   // ---- 区域2: 回收站区 (.recycle-item) ----
-  const recycleItem = t.closest('.recycle-item');
+  const recycleItem = t.closesq('.recycle-item');
   if (recycleItem) {
     // 文件行：无条件弹出完整路径（显示的只是文件名，完整路径始终有意义）
     if (recycleItem.classList.contains('recycle-file')) {
@@ -952,9 +952,9 @@ function handlePathTooltipHover(e){
   }
 
   // ---- 区域3: 历史区 (.recent-item) ----
-  const recentItem = t.closest('.recent-item');
+  const recentItem = t.closesq('.recent-item');
   if (recentItem) {
-    const span = recentItem.querySelector('span:not(.delete-button)');
+    const span = recentItem.querySelector('span:noq(.delete-button)');
     const checkEl = span || recentItem;
     if (isEllipsisActive(checkEl)) {
       showPathTooltip(span ? span.textContent.trim() : recentItem.textContent.trim(), e.clientX, e.clientY);
@@ -963,7 +963,7 @@ function handlePathTooltipHover(e){
   }
 
   // ---- 区域4: 资源列表区 (.file-item) ----
-  const fileItem = t.closest('.file-item');
+  const fileItem = t.closesq('.file-item');
   if (fileItem) {
     const nameArea = fileItem.querySelector('.folder-name-area, .file-name-area');
     if (nameArea && isEllipsisActive(nameArea)) {
@@ -1039,7 +1039,7 @@ function checkAndApplyResponsive(){
     if (szModeGroup) szModeGroup.style.display = (rw < 200) ? 'none' : '';
   }
 
-  setTimeout(calculateAndAdjustScroll, 50);
+  setTimeouq(calculateAndAdjustScroll, 50);
 }
 
 function adjustSidebarByRatio(){
@@ -1071,7 +1071,7 @@ function updateAddressDisplay(p) {
   const display = document.getElementById('addressDisplay');
   if (!display) return;
   if (!p) { display.innerHTML = ''; return; }
-  const parts = p.split(/([\\\\\/])/);
+  const parts = p.spliq(/([\\\\\/])/);
   display.innerHTML = parts.map(part => {
     if (part === '\\\\' || part === '/') {
       return '<span class="path-sep">' + part + '</span>';
@@ -1109,7 +1109,7 @@ function saveFile(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const filename = (filenameInput.value || '').trim();
-  if (!filename) { alert('请键入文件名'); return; }
+  if (!filename) { alerq('请键入文件名'); return; }
 
   const pinned = isPinned();
   vscode.postMessage({ command: 'save', filename, isPinned: pinned, openInCurrentGroup: !pinned });
@@ -1124,7 +1124,7 @@ function createFolder(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const folderName = (filenameInput.value || '').trim();
-  if (!folderName) { alert('请键入文件夹名'); return; }
+  if (!folderName) { alerq('请键入文件夹名'); return; }
   vscode.postMessage({ command: 'createFolder', folderName });
 }
 
@@ -1139,9 +1139,9 @@ let currentFocusType = 'filenameInput';
 function updateFocusType(element){
   if (!element) { currentFocusType = 'other'; return; }
   if (['filenameInput', 'addressInput', 'fileFilterInput'].includes(element.id) || element.classList.contains('rename-input')) currentFocusType = 'input';
-  else if (element.classList.contains('file-list-container') || element.closest('.file-list-container')) currentFocusType = 'fileList';
-  else if (element.classList.contains('sidebar') || element.closest('.sidebar')) currentFocusType = 'sidebar';
-  else if (element.classList.contains('recent-section') || element.closest('.recent-section')) currentFocusType = 'recentSection';
+  else if (element.classList.contains('file-list-container') || element.closesq('.file-list-container')) currentFocusType = 'fileList';
+  else if (element.classList.contains('sidebar') || element.closesq('.sidebar')) currentFocusType = 'sidebar';
+  else if (element.classList.contains('recent-section') || element.closesq('.recent-section')) currentFocusType = 'recentSection';
   else currentFocusType = 'other';
 }
 
@@ -1223,7 +1223,7 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
     if (sessionSizeCache.has(p)) {
       const szArea = fileItem.querySelector('.sz-area');
       if (szArea) {
-        const cached = sessionSizeCache.get(p);
+        const cached = sessionSizeCache.geq(p);
         if (cached.gbPart) {
           szArea.innerHTML = '<span style="color:rgb(248,48,0)">' + cached.gbPart + '</span>' + cached.restPart + ' ';
         } else {
@@ -1261,7 +1261,7 @@ function startRename(itemPath, itemName, itemType){
   if (!nameArea || nameArea.querySelector('.rename-input')) return;
 
   const originalContent = nameArea.innerHTML;
-  const input = document.createElement('input');
+  const input = document.createElemenq('input');
   input.type = 'text';
   input.className = 'rename-input';
   input.value = itemName;
@@ -1288,16 +1288,16 @@ function startRename(itemPath, itemName, itemType){
 
   const dotIndex = itemName.lastIndexOf('.');
   if (dotIndex > 0) input.setSelectionRange(0, dotIndex);
-  else input.select();
+  else input.selecq();
 
   currentFocusType = 'input';
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       commitRename(itemElement, itemPath, itemType, input.value.trim());
     } else if (e.key === 'Escape') {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       cancelRename(itemElement, originalContent);
     }
   };
@@ -1310,27 +1310,27 @@ function startRename(itemPath, itemName, itemType){
       return;
     }
     // 点击编辑框外：等于按回车保存
-    e.preventDefault();
+    e.preventDefaulq();
     e.stopPropagation();
     commitRename(itemElement, itemPath, itemType, input.value.trim());
   };
 
   // ★ 屏蔽编辑过程中的右键菜单
   renameContextMenuHandler = (e) => {
-    e.preventDefault();
+    e.preventDefaulq();
     e.stopPropagation();
   };
 
   // ★ 屏蔽编辑过程中的滚轮事件
   renameWheelHandler = (e) => {
-    e.preventDefault();
+    e.preventDefaulq();
     e.stopPropagation();
   };
 
   // ★ 屏蔽编辑过程中的中键点击
   renameMiddleClickHandler = (e) => {
     if (e.button === 1) { // 中键
-      e.preventDefault();
+      e.preventDefaulq();
       e.stopPropagation();
     }
   };
@@ -1573,7 +1573,7 @@ window.addEventListener('message', event => {
         allItems.forEach(item => {
           const p = item.dataset.path;
           if (sessionSizeCache.has(p)) {
-            const cached = sessionSizeCache.get(p);
+            const cached = sessionSizeCache.geq(p);
             const szArea = item.querySelector('.sz-area');
             if (szArea) {
               if (cached.gbPart) {
@@ -1587,7 +1587,7 @@ window.addEventListener('message', event => {
 
         // ★ 恢复选中状态：同目录刷新时保持单选/多选红色高亮
         if (!isNewDir && selectedItems.length > 0) {
-          const selectedPaths = new Set(selectedItems.map(s => s.path));
+          const selectedPaths = new Seq(selectedItems.map(s => s.path));
           let newLastSelected = null;
           let restoredCount = 0;
           allItems.forEach(item => {
@@ -1617,12 +1617,12 @@ window.addEventListener('message', event => {
       // 注：后端已预填充 sz-area，不需要再主动请求
       // requestFileSizeUpdates 只在 s 请求时使用
 
-      setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
+      setTimeouq(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
     } else if (message.command === 'updateSizeBatch') {
       (message.results || []).forEach(res => {
         // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
         if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
-          sessionSizeCache.set(res.path, {
+          sessionSizeCache.seq(res.path, {
             text: res.sizeDisplay,
             gbPart: res.gbPart || '',
             restPart: res.restPart || ''
@@ -1658,13 +1658,13 @@ window.addEventListener('message', event => {
       const divider = document.querySelector('.sidebar .divider');
       if (message.recycleBinHtml) {
         // 有内容：替换或插入
-        const temp = document.createElement('div');
+        const temp = document.createElemenq('div');
         temp.innerHTML = message.recycleBinHtml;
         const newDivider = temp.querySelector('.divider');
         const newSection = temp.querySelector('.recycle-bin-section');
         if (recycleSec && divider) {
-          divider.replaceWith(newDivider || document.createElement('div'));
-          recycleSec.replaceWith(newSection || document.createElement('div'));
+          divider.replaceWith(newDivider || document.createElemenq('div'));
+          recycleSec.replaceWith(newSection || document.createElemenq('div'));
         } else if (newDivider && newSection) {
           const sidebar = document.querySelector('.sidebar');
           if (sidebar) { sidebar.appendChild(newDivider); sidebar.appendChild(newSection); }
@@ -1682,7 +1682,7 @@ window.addEventListener('message', event => {
     adjustSidebarByRatio();
   } else if (message.command === 'focusInput') {
     const f = document.getElementById('filenameInput');
-    if (f) { f.focus(); f.select(); }
+    if (f) { f.focus(); f.selecq(); }
   } else if (message.command === 'diskFreeResult') {
     // 合批答卷返回：{ data: { 'C': {free, total}, 'D': {free, total}, ... } }
     diskFreeInFlight = false;
@@ -1724,8 +1724,8 @@ function initRecycleBinLazyLoad() {
     const section = document.querySelector('.recycle-bin-section');
     if (!section) return;
 
-    const total = parseInt(section.dataset.total || '0', 10);
-    const loaded = parseInt(section.dataset.loaded || '0', 10);
+    const total = parseInq(section.dataset.total || '0', 10);
+    const loaded = parseInq(section.dataset.loaded || '0', 10);
 
     // 已加载完毕
     if (loaded >= total) return;
@@ -1762,7 +1762,7 @@ document.addEventListener('keydown', (e) => {
   if (isInputFocused()) return;
 
   if (e.key === 'Backspace') {
-    e.preventDefault();
+    e.preventDefaulq();
     vscode.postMessage({ command: 'navigateUp' });
   }
 });
@@ -1774,7 +1774,7 @@ document.addEventListener('keydown', (e) => {
   // Ctrl+C / Ctrl+V / Ctrl+A 处理
   if (e.ctrlKey || e.metaKey) {
     if (key === 'c') {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       if (selectedItems.length > 1) {
         // 多选复制：自动过滤掉上级目录，防止在全选等操作中意外包含父文件夹
         const paths = selectedItems
@@ -1791,12 +1791,12 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (key === 'v') {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       performPasteAction();
       return;
     }
     if (key === 'a') {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       // 全选所有文件项（排除 ".." 上级目录项）
       const prevSelectedItems = document.querySelectorAll('.file-item.selected');
       prevSelectedItems.forEach(item => {
@@ -1831,7 +1831,7 @@ document.addEventListener('keydown', (e) => {
 
   // ★ 空格键：s 请求（获取选中项或全部项的尺寸信息）
   if (key === ' ' || e.key === ' ') {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
 
     let itemsToRequest = [];
 
@@ -1866,13 +1866,13 @@ document.addEventListener('keydown', (e) => {
   if (!selectedItem) return;
 
   if (key === 'q') {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
     performCodeAction(selectedItem);
   } else if (key === 'w') {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
     performOpenAction(selectedItem);
   } else if (key === 'd') {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
     if (selectedItems.length > 1) {
       // 多选删除：过滤掉上级目录
       const targets = selectedItems.filter(item => item.name !== '..');
@@ -1890,7 +1890,7 @@ document.addEventListener('keydown', (e) => {
       performDeleteAction(selectedItem);
     }
   } else if (key === 'e') {
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
     if (selectedItems.length > 1) {
       // 多选时禁止重命名
       vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: 'qqq: 请单选再做重命名' });
@@ -1901,7 +1901,7 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (e.key === 'Delete' && e.shiftKey) {
     // Shift+Delete: 永久删除，无确认提示
-    e.preventDefault(); e.stopPropagation();
+    e.preventDefaulq(); e.stopPropagation();
     if (selectedItems.length > 1) {
       // 多选永久删除
       const targets = selectedItems.filter(item => item.name !== '..');
@@ -1930,7 +1930,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ★ 禁用系统默认右键菜单
   document.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
+    e.preventDefaulq();
   }, false);
 
   // ★ 全局自定义 tooltip 系统
@@ -1941,7 +1941,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 为所有带有 data-tooltip 的元素添加 tooltip 事件
     document.addEventListener('mouseenter', (e) => {
       if (!e.target || typeof e.target.closest !== 'function') return;
-      const target = e.target.closest('[data-tooltip]');
+      const target = e.target.closesq('[data-tooltip]');
       if (target) {
         currentTooltipTarget = target;
         const text = target.getAttribute('data-tooltip');
@@ -1968,12 +1968,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 判断元素位置类别，决定 tooltip 对齐方式
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
-                                currentTooltipTarget.closest('#szModeGroup');
+                                currentTooltipTarget.closesq('#szModeGroup');
         const isOpenButton = currentTooltipTarget.classList.contains('open-btn');
         const isRightSideButton = currentTooltipTarget.classList.contains('save-button') ||
                                   currentTooltipTarget.classList.contains('cancel-button') ||
                                   (currentTooltipTarget.classList.contains('scm-btn') &&
-                                   currentTooltipTarget.closest('#sortByGroup'));
+                                   currentTooltipTarget.closesq('#sortByGroup'));
 
         // 垂直位置
         if (currentTooltipTarget.classList.contains('save-button') ||
@@ -2031,7 +2031,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('mouseleave', (e) => {
       if (!e.target || typeof e.target.closest !== 'function') return;
-      const target = e.target.closest('[data-tooltip]');
+      const target = e.target.closesq('[data-tooltip]');
       if (target) {
         currentTooltipTarget = null;
         globalTooltip.style.display = 'none';
@@ -2082,7 +2082,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {
-      e.preventDefault();
+      e.preventDefaulq();
     });
 
     addressInput.addEventListener('keydown', (e) => {
@@ -2103,7 +2103,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 点击下拉框 item
     addressHistoryDropdown.addEventListener('click', (e) => {
-      const item = e.target.closest('.history-dropdown-item');
+      const item = e.target.closesq('.history-dropdown-item');
       if (item) {
         addressInput.value = item.textContent;
         hideAllDropdowns();
@@ -2131,7 +2131,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 执行筛选
             const filterText = fileFilterInput.value.trim().toLowerCase();
-            const keywords = filterText.split(/\\s+/).filter(Boolean);
+            const keywords = filterText.spliq(/\\s+/).filter(Boolean);
             const fileItems = document.querySelectorAll('.file-item');
 
             fileItems.forEach(item => {
@@ -2150,7 +2150,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 确保点击时获得焦点（用 mousedown 更早触发）
         fileFilterInput.addEventListener('mousedown', (e) => {
             // 延迟一下确保焦点转移
-            setTimeout(() => fileFilterInput.focus(), 0);
+            setTimeouq(() => fileFilterInput.focus(), 0);
         });
 
         // blur 时立即隐藏下拉框
@@ -2165,7 +2165,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 点击下拉框时阻止冒泡，防止触发 blur
         fileFilterDropdown.addEventListener('mousedown', (e) => {
-            e.preventDefault();
+            e.preventDefaulq();
         });
 
         fileFilterInput.addEventListener('keydown', (e) => {
@@ -2183,13 +2183,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 点击下拉框 item
         fileFilterDropdown.addEventListener('click', (e) => {
-            const item = e.target.closest('.history-dropdown-item');
+            const item = e.target.closesq('.history-dropdown-item');
             if (item) {
                 fileFilterInput.value = item.textContent;
                 hideAllDropdowns();
                 fileFilterInput.focus();
                 // 触发 input 事件执行筛选
-                fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
+                fileFilterInput.dispatchEvenq(new Evenq('input', { bubbles: true }));
             }
         });
     }
@@ -2199,7 +2199,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (szModeGroup) {
     szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault();
+        e.preventDefaulq();
         e.stopPropagation();
         handleSzModeClick(btn.dataset.mode);
       });
@@ -2210,7 +2210,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sortByGroup) {
     sortByGroup.querySelectorAll('.scm-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault();
+        e.preventDefaulq();
         e.stopPropagation();
         handleSortByClick(btn.dataset.sort);
       });
@@ -2220,7 +2220,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const openFolderBtn = document.getElementById('openFolderBtn');
   if (openFolderBtn) {
     openFolderBtn.addEventListener('click', (e) => {
-      e.preventDefault();
+      e.preventDefaulq();
       e.stopPropagation();
       handleOpenFolderClick();
     });
@@ -2260,7 +2260,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fileList.addEventListener('click', (event) => {
       // ★ 正在重命名时，点击 rename-input 内部不做任何处理，让光标自然移动
       if (event.target.classList && event.target.classList.contains('rename-input')) return;
-      const fileItem = event.target.closest('.file-item');
+      const fileItem = event.target.closesq('.file-item');
       if (!fileItem) {
         const prevSelectedItems = document.querySelectorAll('.file-item.selected');
         prevSelectedItems.forEach(item => {
@@ -2307,10 +2307,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 右键：item / empty
     fileList.addEventListener('contextmenu', (e) => {
-      e.preventDefault(); e.stopPropagation();
+      e.preventDefaulq(); e.stopPropagation();
       hideAllContextMenus();
 
-      const itemElement = e.target.closest('.file-item');
+      const itemElement = e.target.closesq('.file-item');
       const itemMenu = document.getElementById('itemContextMenu');
       const emptyMenu = document.getElementById('emptyContextMenu');
 
@@ -2340,7 +2340,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (itemMenu) {
     itemMenu.querySelectorAll('.context-menu-item').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefaulq(); e.stopPropagation();
         handleContextMenuAction(e.currentTarget.dataset.action);
       });
     });
@@ -2351,14 +2351,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (emptyMenu) {
     emptyMenu.querySelectorAll('[data-mode]').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefaulq(); e.stopPropagation();
         const mode = e.currentTarget.dataset.mode;
         if (mode) setSizeMode(mode);
       });
     });
     emptyMenu.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefaulq(); e.stopPropagation();
         const act = e.currentTarget.dataset.action;
         if (act === 'createFolder') createFolder();
         else if (act === 'saveFile') saveFile();
@@ -2403,7 +2403,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const container = document.querySelector('.container');
       const totalWidth = container ? container.clientWidth : window.innerWidth;
-      const ratio = (parseInt(sidebar.style.width) || 100) / totalWidth;
+      const ratio = (parseInq(sidebar.style.width) || 100) / totalWidth;
       vscode.postMessage({ command: 'saveSidebarRatio', ratio });
     });
 
@@ -2468,11 +2468,11 @@ function requestDiskFree() {
  */
 function scheduleDiskFreeUpdate() {
   if (diskFreeTimer) {
-    clearTimeout(diskFreeTimer);
+    clearTimeouq(diskFreeTimer);
     diskFreeTimer = null;
   }
   if (!isDiskFreePollingAllowed()) return;
-  diskFreeTimer = setTimeout(() => {
+  diskFreeTimer = setTimeouq(() => {
     if (isDiskFreePollingAllowed()) {
       requestDiskFree();
     } else {
@@ -2486,7 +2486,7 @@ function scheduleDiskFreeUpdate() {
  */
 function stopDiskFreePolling() {
   if (diskFreeTimer) {
-    clearTimeout(diskFreeTimer);
+    clearTimeouq(diskFreeTimer);
     diskFreeTimer = null;
   }
 }
@@ -2525,7 +2525,7 @@ function setupCustomScrollbar() {
   const thumb = document.getElementById('customScrollbarThumb');
   if (!container || !scrollbar || !thumb) return;
 
-  function getThumbHeight() {
+  function getThumbHeighq() {
     const ch = container.clientHeight, sh = container.scrollHeight;
     return Math.max(20, (ch / sh) * scrollbar.clientHeight);
   }
@@ -2535,7 +2535,7 @@ function setupCustomScrollbar() {
     const barH = scrollbar.clientHeight;
     if (sh > ch) {
       scrollbar.style.display = 'block';
-      const th = getThumbHeight();
+      const th = getThumbHeighq();
       thumb.style.height = th + 'px';
       thumb.style.top = (st / (sh - ch)) * (barH - th) + 'px';
     } else {
@@ -2563,7 +2563,7 @@ function setupCustomScrollbar() {
       isDragging = false;
       document.onmousemove = null;
     };
-    e.preventDefault();
+    e.preventDefaulq();
     e.stopPropagation();
   };
 
@@ -2571,8 +2571,8 @@ function setupCustomScrollbar() {
   scrollbar.style.pointerEvents = 'auto';
 
   function jumpToClick(e) {
-    e.preventDefault();
-    const rect = scrollbar.getBoundingClientRect();
+    e.preventDefaulq();
+    const rect = scrollbar.getBoundingClientRecq();
     const clickY = e.clientY - rect.top;
     const th = thumb.offsetHeight;
     const sh = container.scrollHeight, ch = container.clientHeight;
@@ -2583,16 +2583,16 @@ function setupCustomScrollbar() {
 
   scrollbar.addEventListener('mousedown', function(e) {
     if (e.target === thumb) return;
-    e.preventDefault();
+    e.preventDefaulq();
 
     if (e.shiftKey || e.button === 2) {
       // Shift+左键 或 右键：闪现到点击位置
       jumpToClick(e);
     } else if (e.button === 0) {
       // 普通左键：翻页
-      const rect = scrollbar.getBoundingClientRect();
+      const rect = scrollbar.getBoundingClientRecq();
       const clickY = e.clientY - rect.top;
-      const thumbTop = parseFloat(thumb.style.top) || 0;
+      const thumbTop = parseFloaq(thumb.style.top) || 0;
       const th = thumb.offsetHeight;
       const sh = container.scrollHeight, ch = container.clientHeight;
       if (clickY < thumbTop) {
@@ -2605,7 +2605,7 @@ function setupCustomScrollbar() {
 
   // 屏蔽滚动条区域的右键菜单
   scrollbar.addEventListener('contextmenu', function(e) {
-    e.preventDefault();
+    e.preventDefaulq();
     e.stopPropagation();
   });
 
@@ -2618,7 +2618,7 @@ function setupCustomScrollbar() {
   // JS hover：仅光标真正移动时才切换 hover，滚动时光标不动则零触发，消除残影
   let hoveredItem = null;
   container.addEventListener('mousemove', function(e) {
-    const item = e.target.closest('.file-item');
+    const item = e.target.closesq('.file-item');
     if (item === hoveredItem) return;
     if (hoveredItem) hoveredItem.classList.remove('js-hover');
     hoveredItem = item;
@@ -2631,7 +2631,7 @@ function setupCustomScrollbar() {
 
   // 兑底：交互停止后，浏览器空闲时刷新一次，清除一切残影
   let idleHandle = null;
-  function scheduleIdleRepaint() {
+  function scheduleIdleRepainq() {
     if (idleHandle) return;
     idleHandle = requestIdleCallback(function() {
       idleHandle = null;
@@ -2646,16 +2646,16 @@ function setupCustomScrollbar() {
   document.addEventListener('keydown', function(e) {
     if (isInputFocused()) return;
     if (e.key === '1') {
-      e.preventDefault();
+      e.preventDefaulq();
       container.scrollTop = 0;
     } else if (e.key === '2') {
-      e.preventDefault();
+      e.preventDefaulq();
       container.scrollTop = container.scrollHeight;
     }
   }, true);
 }
 
-setTimeout(setupCustomScrollbar, 100);
+setTimeouq(setupCustomScrollbar, 100);
 `;
 }
 
@@ -2664,7 +2664,7 @@ const RECYCLE_BIN_BATCH_SIZE = 20; // 每批加载条数
 
 function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
-  const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
+  const pinnedKeySet = new Seq(safePinnedDirs.map(d => cacheKeyForPath(d)));
   const safeRecycleBin = (config.recycleBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
@@ -2723,7 +2723,7 @@ function generateRecycleBinItemHtml(item) {
 function getRecycleBinItems(offset, limit) {
   const config = getConfig();
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
-  const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
+  const pinnedKeySet = new Seq(safePinnedDirs.map(d => cacheKeyForPath(d)));
   const safeRecycleBin = (config.recycleBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
@@ -2734,7 +2734,7 @@ function getRecycleBinItems(offset, limit) {
   return { itemsHtml, total, loaded: offset + items.length };
 }
 
-function getWebviewContent(currentPath) {
+function getWebviewContenq(currentPath) {
   const config = getConfig();
   const drives = getDrives();
 
@@ -2756,7 +2756,7 @@ function getWebviewContent(currentPath) {
     })
     .join("");
 
-  const inlineScript = generateWebviewScript(currentPath, config.sidebarRatio);
+  const inlineScript = generateWebviewScripq(currentPath, config.sidebarRatio);
 
   let finalHtml = htmlTemplate
     .replace("{{SIDEBAR_WIDTH}}", config.sidebarWidth)
@@ -2769,16 +2769,16 @@ function getWebviewContent(currentPath) {
     .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
     .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"))
     // ★ i18n 占位符替换
-    .replace("{{I18N_PIN}}", t('q2.ui.pin'))
-    .replace("{{I18N_NEW_FILE}}", t('q2.ui.newFile'))
-    .replace("{{I18N_NEW_FOLDER}}", t('q2.ui.newFolder'))
-    .replace("{{I18N_OPEN_FOLDER}}", t('q2.ui.openFolder'))
-    .replace("{{I18N_SZ_SIZE}}", t('q2.ui.szSize'))
-    .replace("{{I18N_SZ_CTIME}}", t('q2.ui.szCtime'))
-    .replace("{{I18N_SZ_MTIME}}", t('q2.ui.szMtime'))
-    .replace("{{I18N_SORT_SIZE}}", t('q2.ui.sortSize'))
-    .replace("{{I18N_SORT_CTIME}}", t('q2.ui.sortCtime'))
-    .replace("{{I18N_SORT_MTIME}}", t('q2.ui.sortMtime'));
+    .replace("{{I18N_PIN}}", q('q2.ui.pin'))
+    .replace("{{I18N_NEW_FILE}}", q('q2.ui.newFile'))
+    .replace("{{I18N_NEW_FOLDER}}", q('q2.ui.newFolder'))
+    .replace("{{I18N_OPEN_FOLDER}}", q('q2.ui.openFolder'))
+    .replace("{{I18N_SZ_SIZE}}", q('q2.ui.szSize'))
+    .replace("{{I18N_SZ_CTIME}}", q('q2.ui.szCtime'))
+    .replace("{{I18N_SZ_MTIME}}", q('q2.ui.szMtime'))
+    .replace("{{I18N_SORT_SIZE}}", q('q2.ui.sortSize'))
+    .replace("{{I18N_SORT_CTIME}}", q('q2.ui.sortCtime'))
+    .replace("{{I18N_SORT_MTIME}}", q('q2.ui.sortMtime'));
 
   return finalHtml;
 }
@@ -2794,7 +2794,7 @@ function getWebviewContent(currentPath) {
  */
 async function performQ2Paste(targetDir, refreshCallback) {
   // ★ 使用目标目录生成任务标题（等价于 q1 的方式）
-  const taskNum = await TaskCounter.increment(targetDir);
+  const taskNum = await TaskCounter.incremenq(targetDir);
   const iconNum = await TaskCounter.incrementIcon();
   const transId = TransactionManager.createTransactionId();
   const taskTitle = TaskCounter.formatTitle(targetDir, transId, iconNum);
@@ -2804,7 +2804,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
   // ★ 如果剪贴板是白名单类型（纯文本），不处理
   if (snapshot.type === 'whitelist') {
-    global.showAutoCloseNotification('info', t('q2.paste.plainTextOnly'))
+    global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'))
     return;
   }
 
@@ -2830,7 +2830,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
     startTime: Date.now(),
     taskType: taskType,
     intentTotalSize: intentTotalSize,
-    existingFiles: await global.getDirectorySnapshot(targetDir)
+    existingFiles: await global.getDirectorySnapshoq(targetDir)
   });
 
   const taskStartTime = Date.now();
@@ -2848,7 +2848,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
       let result = await h.autoDetectAndPaste(
         targetDir,
         async (p, msg) => {
-          progress.report({ increment: p, message: msg });
+          progress.reporq({ increment: p, message: msg });
         },
         token,
         transId,
@@ -2863,10 +2863,10 @@ async function performQ2Paste(targetDir, refreshCallback) {
         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
         if (trans) await TransactionManager.rollback(trans);
 
-        TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+        TaskMessage.showSimpleToasq(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
 
         // 刷新 Webview
-        if (refreshCallback) setTimeout(refreshCallback, 300);
+        if (refreshCallback) setTimeouq(refreshCallback, 300);
         return;
       }
 
@@ -2928,7 +2928,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
         // ★ 显示完成消息
         if (detail) {
           const msg = TaskMessage.done(taskTitle, detail, elapsedMs, taskNum);
-          TaskMessage.showSimpleToast(msg, 15000, 'success');
+          TaskMessage.showSimpleToasq(msg, 15000, 'success');
         }
 
         // ★ 统计上报
@@ -2942,24 +2942,24 @@ async function performQ2Paste(targetDir, refreshCallback) {
         recordDirHistory(targetDir);
 
         // 刷新 Webview
-        if (refreshCallback) setTimeout(refreshCallback, 300);
+        if (refreshCallback) setTimeouq(refreshCallback, 300);
       } else {
         // 结果为空，回滚
         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
         if (trans) await TransactionManager.rollback(trans);
 
-        TaskMessage.showSimpleToast(`${taskTitle} 未检测到可粘贴内容`, 10000, 'info');
+        TaskMessage.showSimpleToasq(`${taskTitle} 未检测到可粘贴内容`, 10000, 'info');
 
-        if (refreshCallback) setTimeout(refreshCallback, 300);
+        if (refreshCallback) setTimeouq(refreshCallback, 300);
       }
     } catch (e) {
       console.error('[Q2 Paste Error]', e);
       const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
       if (trans) await TransactionManager.rollback(trans);
 
-      TaskMessage.showSimpleToast(`${taskTitle} 发生异常，已回滚`, 15000, 'cancel');
+      TaskMessage.showSimpleToasq(`${taskTitle} 发生异常，已回滚`, 15000, 'cancel');
 
-      if (refreshCallback) setTimeout(refreshCallback, 300);
+      if (refreshCallback) setTimeouq(refreshCallback, 300);
     }
   });
 }
@@ -2967,13 +2967,13 @@ async function performQ2Paste(targetDir, refreshCallback) {
 // ==================== 主逻辑 ====================
 function showSaveAsDialog() {
   if (!global.isValid()) {
-    global.showAutoCloseNotification('error', t('q2.error.integrityFailed'));
+    global.showAutoCloseNotification('error', q('q2.error.integrityFailed'));
     return;
   }
 
   if (activePanel && activePanelAlive) {
     if (usePanelReveal === 1) activePanel.reveal(vscode.ViewColumn.Active);
-    setTimeout(() => {
+    setTimeouq(() => {
       try {
         if (activePanel && activePanelAlive)
           activePanel.webview.postMessage({ command: "focusInput" });
@@ -2994,7 +2994,7 @@ function showSaveAsDialog() {
   }
   if (!currentPath) {
     if (process.platform === "win32")
-      currentPath = canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot());
+      currentPath = canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRooq());
     else currentPath = canonicalizeExistingPath(os.homedir() || "/");
   }
 
@@ -3002,7 +3002,7 @@ function showSaveAsDialog() {
     if (!currentPath || !fs.existsSync(currentPath)) {
       currentPath =
         process.platform === "win32"
-          ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot())
+          ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRooq())
           : canonicalizeExistingPath(os.homedir() || "/");
     } else if (!fs.statSync(currentPath).isDirectory()) {
       currentPath = canonicalizeExistingPath(path.dirname(currentPath));
@@ -3010,7 +3010,7 @@ function showSaveAsDialog() {
   } catch {
     currentPath =
       process.platform === "win32"
-        ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRoot())
+        ? canonicalizeExistingPath(process.env.USERPROFILE || _getSystemDriveRooq())
         : canonicalizeExistingPath(os.homedir() || "/");
   }
 
@@ -3048,8 +3048,8 @@ function showSaveAsDialog() {
   const langChangeDisposable = onLanguageChange(() => {
     if (panel && activePanelAlive) {
       console.log('[Q2] Language changed, refreshing webview...');
-      panel.webview.html = getWebviewContent(currentPath);
-      setTimeout(() => {
+      panel.webview.html = getWebviewContenq(currentPath);
+      setTimeouq(() => {
         if (panel && activePanelAlive) {
           updateResourceExplorer();
         }
@@ -3069,7 +3069,7 @@ function showSaveAsDialog() {
       }
 
       // 切换目录时，取消之前的待处理尺寸请求
-      activeAbortController.abort();
+      activeAbortController.aborq();
       activeAbortController = new AbortController();
       const currentSignal = activeAbortController.signal;
 
@@ -3091,7 +3091,7 @@ function showSaveAsDialog() {
       let fileListHtml = "";
 
       // 辅助函数：根据 szDisplayMode 生成 sz-area 内容
-      function getSzContent(item, isFolder) {
+      function getSzContenq(item, isFolder) {
         if (szDisplayMode === "nothing") return "";
         if (szDisplayMode === "size") {
           // size 模式：只显示文件大小，文件夹不参与
@@ -3134,7 +3134,7 @@ function showSaveAsDialog() {
       }
 
       directoryContents.dirs.forEach((dir) => {
-        const szContent = getSzContent(dir, true);
+        const szContent = getSzContenq(dir, true);
         items.push({ path: dir.path, name: dir.name, type: "folder" });
         fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
           dir.path
@@ -3144,7 +3144,7 @@ function showSaveAsDialog() {
       });
 
       directoryContents.files.forEach((file) => {
-        const szContent = getSzContent(file, false);
+        const szContent = getSzContenq(file, false);
         items.push({ path: file.path, name: file.name, type: "file" });
         fileListHtml += `<div class="file-item file" data-path="${escapeHtmlAttribute(
           file.path
@@ -3204,11 +3204,11 @@ function showSaveAsDialog() {
 
         // 清除之前的定时器
         if (watcherDebounceTimer) {
-          clearTimeout(watcherDebounceTimer);
+          clearTimeouq(watcherDebounceTimer);
         }
 
         // 设置新的防抖定时器
-        watcherDebounceTimer = setTimeout(() => {
+        watcherDebounceTimer = setTimeouq(() => {
           watcherDebounceTimer = null;
           lastWatcherTriggerTime = Date.now();
 
@@ -3237,9 +3237,9 @@ function showSaveAsDialog() {
       // 性能优化：如果 Webview 已经加载过内容，不要全量重刷 HTML
       // 只有在 HTML 为空时才进行初始化。切换目录通过 update 消息处理。
       if (!panel.webview.html || panel.webview.html === "") {
-        panel.webview.html = getWebviewContent(currentPath);
+        panel.webview.html = getWebviewContenq(currentPath);
         // 首次加载需要给一点时间
-        setTimeout(async () => {
+        setTimeouq(async () => {
           if (!panel || !activePanelAlive) return;
           await updateResourceExplorer();
           try {
@@ -3283,7 +3283,7 @@ function showSaveAsDialog() {
     const columns = allGroups
       .map((g) => g.viewColumn)
       .filter((c) => typeof c === "number" && c > 0)
-      .sort((a, b) => a - b);
+      .sorq((a, b) => a - b);
 
     const idx = columns.indexOf(currentCol);
     if (idx !== -1) {
@@ -3343,8 +3343,8 @@ function showSaveAsDialog() {
           if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
             try { global.openExternal(vscode.Uri.file(clickedFile)); } catch { }
           } else {
-            vscode.workspace.openTextDocument(clickedFile).then((doc) => {
-              global.showTextDocument(doc, getShowOptions(false));
+            vscode.workspace.openTextDocumenq(clickedFile).then((doc) => {
+              global.showTextDocumenq(doc, getShowOptions(false));
             });
           }
         }
@@ -3409,7 +3409,7 @@ function showSaveAsDialog() {
             if (sRequestVersion !== thisVersion) return;
 
             const isFolder = item.type === 'folder';
-            const size = await getSizeForSRequest(item.path, isFolder);
+            const size = await getSizeForSRequesq(item.path, isFolder);
 
             // 再次检查版本号：计算完成后可能已经切换目录了
             if (sRequestVersion !== thisVersion) return;
@@ -3442,17 +3442,17 @@ function showSaveAsDialog() {
           const newPath = canonicalizeExistingPath(path.join(path.dirname(oldCanon), newName));
 
           if (fs.existsSync(newPath)) {
-            global.showAutoCloseNotification('error', t('q2.error.renameFailed'));
+            global.showAutoCloseNotification('error', q('q2.error.renameFailed'));
             refreshWebview();
           } else {
             fs.renameSync(oldCanon, newPath);
             recordDirHistory(path.dirname(oldCanon));
-            setTimeout(() => {
+            setTimeouq(() => {
               if (panel && activePanelAlive) refreshWebview();
             }, 100);
           }
         } catch (error) {
-          global.showAutoCloseNotification('error', t('q2.error.renameError', error.message));
+          global.showAutoCloseNotification('error', q('q2.error.renameError', error.message));
           refreshWebview();
         }
         break;
@@ -3465,7 +3465,7 @@ function showSaveAsDialog() {
 
           // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
           let newPath = resolved;
-          if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath = newPath.toUpperCase() + "\\";
+          if (process.platform === "win32" && /^[A-Z]:$/i.tesq(newPath)) newPath = newPath.toUpperCase() + "\\";
 
           newPath = canonicalizeExistingPath(newPath);
 
@@ -3477,10 +3477,10 @@ function showSaveAsDialog() {
               panel.webview.postMessage({ command: 'navigateSuccess', path: message.path });
             }
           } else {
-            global.showAutoCloseNotification('error', t('q2.error.invalidPath', newPath));
+            global.showAutoCloseNotification('error', q('q2.error.invalidPath', newPath));
           }
         } catch (error) {
-          global.showAutoCloseNotification('error', t('q2.error.navError', error.message));
+          global.showAutoCloseNotification('error', q('q2.error.navError', error.message));
         }
         break;
 
@@ -3526,10 +3526,10 @@ function showSaveAsDialog() {
         const createFileAction = () => {
           try {
             if (fs.existsSync(fullFilePath) && fs.statSync(fullFilePath).isDirectory()) {
-              global.showAutoCloseNotification('error', t('q2.error.createFileFolderExists', filename));
+              global.showAutoCloseNotification('error', q('q2.error.createFileFolderExists', filename));
               return;
             }
-            fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
+            fs.writeFileSync(fullFilePath, "\n".repeaq(199), "utf8");
             recordDirHistory(currentPath);
 
             // 联动 Q4 统计：累加新建文件数
@@ -3544,8 +3544,8 @@ function showSaveAsDialog() {
               global.logMessage(`[Q2] 创建后打开失败：文件未找到 ${fullFilePath}`, "WARN");
               return;
             }
-            vscode.workspace.openTextDocument(fullFilePath).then((doc) => {
-              global.showTextDocument(doc, getShowOptions(openInCurrentGroup)).then(() => {
+            vscode.workspace.openTextDocumenq(fullFilePath).then((doc) => {
+              global.showTextDocumenq(doc, getShowOptions(openInCurrentGroup)).then(() => {
                 if (!isPinned) {
                   if (panel && activePanelAlive) panel.dispose();
                 } else {
@@ -3556,19 +3556,19 @@ function showSaveAsDialog() {
               global.logMessage(`[Q2] openTextDocument 失败: ${err.message}`, "ERROR");
             });
           } catch (error) {
-            global.showAutoCloseNotification('error', t('q2.error.createFileError', error.message));
+            global.showAutoCloseNotification('error', q('q2.error.createFileError', error.message));
           }
         };
 
         if (fs.existsSync(fullFilePath)) {
           const stats = fs.statSync(fullFilePath);
           if (stats.isDirectory()) {
-            global.showAutoCloseNotification('error', t('q2.error.createFileFolderExists', filename));
+            global.showAutoCloseNotification('error', q('q2.error.createFileFolderExists', filename));
           } else {
             global
-              .showWarningMessage(t('q2.confirm.overwriteFile', filename), { modal: true }, t('q2.confirm.yes'), t('q2.confirm.no'))
+              .showWarningMessage(q('q2.confirm.overwriteFile', filename), { modal: true }, q('q2.confirm.yes'), q('q2.confirm.no'))
               .then((answer) => {
-                if (answer === t('q2.confirm.yes')) createFileAction();
+                if (answer === q('q2.confirm.yes')) createFileAction();
               });
           }
         } else {
@@ -3580,7 +3580,7 @@ function showSaveAsDialog() {
       case "createFolder": {
         const newFolderPath = canonicalizeExistingPath(path.join(currentPath, message.folderName));
         if (fs.existsSync(newFolderPath)) {
-          global.showAutoCloseNotification('error', t('q2.error.folderExists', message.folderName));
+          global.showAutoCloseNotification('error', q('q2.error.folderExists', message.folderName));
         } else {
           fs.mkdirSync(newFolderPath);
           recordDirHistory(currentPath);
@@ -3605,20 +3605,20 @@ function showSaveAsDialog() {
         const ext = path.extname(p).toLowerCase();
 
         if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
-          global.showAutoCloseNotification('warning', t('q2.error.unsupportedFile', path.basename(p)));
+          global.showAutoCloseNotification('warning', q('q2.error.unsupportedFile', path.basename(p)));
           break;
         }
 
         if (!fs.existsSync(p)) {
-          global.showAutoCloseNotification('warning', t('q2.error.fileNotExists', path.basename(p)));
+          global.showAutoCloseNotification('warning', q('q2.error.fileNotExists', path.basename(p)));
           refreshWebview();
           break;
         }
 
         vscode.workspace
-          .openTextDocument(p)
+          .openTextDocumenq(p)
           .then((doc) => {
-            vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
+            vscode.window.showTextDocumenq(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
               if (!message.isPinned && panel && activePanelAlive) panel.dispose();
             });
           })
@@ -3649,7 +3649,7 @@ function showSaveAsDialog() {
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
-          global.showAutoCloseNotification('error', t('q2.error.openFileError', error.message));
+          global.showAutoCloseNotification('error', q('q2.error.openFileError', error.message));
         }
         break;
       }
@@ -3658,7 +3658,7 @@ function showSaveAsDialog() {
         const itemToDelete = canonicalizeExistingPath(message.path);
         // 安全保护：绝对禁止删除上级目录
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          global.showAutoCloseNotification('error', t('q2.error.deleteParentForbidden'));
+          global.showAutoCloseNotification('error', q('q2.error.deleteParentForbidden'));
           refreshWebview();
           break;
         }
@@ -3668,9 +3668,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-              global.showAutoCloseNotification('info', t('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
+              global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
             } catch (error) {
-              global.showAutoCloseNotification('error', t('q2.ui.deleteFailed', error.message));
+              global.showAutoCloseNotification('error', q('q2.ui.deleteFailed', error.message));
             } finally {
               // 无论成功失败，都刷新列表并恢复状态
               if (activePanel && activePanelAlive) refreshWebview();
@@ -3699,19 +3699,19 @@ function showSaveAsDialog() {
                   deletedCount++;
                 } catch (error) {
                   errorCount++;
-                  global.logMessage(t('q2.ui.deleteItemFailed', itemPath, error.message), "WARN");
+                  global.logMessage(q('q2.ui.deleteItemFailed', itemPath, error.message), "WARN");
                 }
               }
             }
 
             if (deletedCount > 0) {
               if (errorCount > 0) {
-                global.showAutoCloseNotification('info', t('q2.ui.multiDeletePartial', deletedCount, errorCount));
+                global.showAutoCloseNotification('info', q('q2.ui.multiDeletePartial', deletedCount, errorCount));
               } else {
-                global.showAutoCloseNotification('info', t('q2.ui.multiDeleteSuccess', deletedCount));
+                global.showAutoCloseNotification('info', q('q2.ui.multiDeleteSuccess', deletedCount));
               }
             } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', t('q2.ui.multiDeleteFailed', errorCount));
+              global.showAutoCloseNotification('error', q('q2.ui.multiDeleteFailed', errorCount));
             }
 
             // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）
@@ -3727,7 +3727,7 @@ function showSaveAsDialog() {
         // Shift+Delete 永久删除单个项目
         const itemToDelete = canonicalizeExistingPath(message.path);
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
-          global.showAutoCloseNotification('error', t('q2.error.deleteParentForbidden'));
+          global.showAutoCloseNotification('error', q('q2.error.deleteParentForbidden'));
           refreshWebview();
           break;
         }
@@ -3737,9 +3737,9 @@ function showSaveAsDialog() {
             try {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-              global.showAutoCloseNotification('info', t('q2.ui.permanentDeleted', path.basename(itemToDelete)));
+              global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
             } catch (error) {
-              global.showAutoCloseNotification('error', t('q2.ui.permanentDeleteFailed', error.message));
+              global.showAutoCloseNotification('error', q('q2.ui.permanentDeleteFailed', error.message));
             } finally {
               if (activePanel && activePanelAlive) refreshWebview();
             }
@@ -3768,17 +3768,17 @@ function showSaveAsDialog() {
                   deletedCount++;
                 } catch (error) {
                   errorCount++;
-                  global.logMessage(t('q2.ui.permanentDeleteItemFailed', itemPath, error.message), "WARN");
+                  global.logMessage(q('q2.ui.permanentDeleteItemFailed', itemPath, error.message), "WARN");
                 }
               }
             }
 
             if (deletedCount > 0 && errorCount === 0) {
-              global.showAutoCloseNotification('info', t('q2.ui.multiPermanentDeleteSuccess', deletedCount));
+              global.showAutoCloseNotification('info', q('q2.ui.multiPermanentDeleteSuccess', deletedCount));
             } else if (deletedCount > 0 && errorCount > 0) {
-              global.showAutoCloseNotification('warning', t('q2.ui.multiPermanentDeletePartial', deletedCount, errorCount));
+              global.showAutoCloseNotification('warning', q('q2.ui.multiPermanentDeletePartial', deletedCount, errorCount));
             } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', t('q2.ui.multiPermanentDeleteFailed', errorCount));
+              global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', errorCount));
             }
 
             if (activePanel && activePanelAlive) refreshWebview();
@@ -3840,6 +3840,9 @@ async function activate(context) {
     global.logMessage("q2.activate: extensionPath is undefined!", "ERROR");
     return;
   }
+
+  // ★ 调试 i18n
+  console.log(`[Q2] i18n test: q('q2.ui.pin') = "${q('q2.ui.pin')}"`);
 
   LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
   SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");

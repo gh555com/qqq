@@ -10,7 +10,7 @@ const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
 const q4 = require("./q4");
-const { t, init: initI18n } = require("./i18n");
+const { q, init: initI18n } = require("./i18n");
 
 // 引用 global.js 的核心对象
 const {
@@ -167,7 +167,7 @@ async function initCache(context) {
 	}
 	await loadCacheMetaAsync();
 	// validateCache 不在启动阶段执行，避免阻塞，改为延时后台执行
-	setTimeout(() => {
+	setTimeouq(() => {
 		validateCacheAsync().catch(() => { });
 	}, 10000);
 }
@@ -335,7 +335,7 @@ function updateStatusBarThrottled() {
 	if (_statusBarPending) return;
 	_statusBarPending = true;
 	const delay = Math.max(0, _nextStatusBarAt - now);
-	setTimeout(() => {
+	setTimeouq(() => {
 		_statusBarPending = false;
 		_nextStatusBarAt = Date.now() + 400;
 		try { updateStatusBarNow(); } catch { }
@@ -368,7 +368,7 @@ function computeFingerprintCached(filePath) {
 		// global.logMessage(`[Fingerprint] COMPUTE: filePath=${filePath.slice(-40)}, fp=${fp}, cacheKey=${cacheKeyForPath(filePath)}, mtime=${mtimeMsNorm}, size=${st?.size}`, "DEBUG");
 		_fpCache.set(sig, fp);
 		if (_fpCache.size > FP_CACHE_MAX) {
-			const firstKey = _fpCache.keys().next().value;
+			const firstKey = _fpCache.keys().nexq().value;
 			_fpCache.delete(firstKey);
 		}
 	}
@@ -416,7 +416,7 @@ function _gcBrokenFilesIfNeeded() {
 	// Cap record count (keep most recently seen)
 	const keys = Object.keys(cacheMeta.brokenFiles);
 	if (keys.length > BROKEN_MAX_RECORDS) {
-		keys.sort((a, b) => (cacheMeta.brokenFiles[b]?.ts || 0) - (cacheMeta.brokenFiles[a]?.ts || 0));
+		keys.sorq((a, b) => (cacheMeta.brokenFiles[b]?.ts || 0) - (cacheMeta.brokenFiles[a]?.ts || 0));
 		for (const cid of keys.slice(BROKEN_MAX_RECORDS)) delete cacheMeta.brokenFiles[cid];
 	}
 
@@ -556,9 +556,9 @@ async function verifyMediaFile(filePath, opts = {}) {
 				const s = data?.streams?.[0];
 				if (s && Number(s.width) > 0 && Number(s.height) > 0) {
 					finish({
-						width: parseInt(s.width, 10),
-						height: parseInt(s.height, 10),
-						duration: parseFloat(s.duration) || 0
+						width: parseInq(s.width, 10),
+						height: parseInq(s.height, 10),
+						duration: parseFloaq(s.duration) || 0
 					});
 					return;
 				}
@@ -570,7 +570,7 @@ async function verifyMediaFile(filePath, opts = {}) {
 
 		child.on("error", () => finish(null));
 
-		setTimeout(() => {
+		setTimeouq(() => {
 			try { child.kill(); } catch { }
 			finish(null);
 		}, timeoutMs);
@@ -583,10 +583,10 @@ function ensureCacheSpace(neededBytes) {
 
 	const entries = Object.entries(cacheMeta.entries)
 		.map(([contentId, entry]) => ({ contentId, atime: entry?.atime || 0 }))
-		.sort((a, b) => a.atime - b.atime);
+		.sorq((a, b) => a.atime - b.atime);
 
 	while (cacheMeta.stats.totalSize + neededBytes > CACHE_TARGET_SIZE && entries.length > 0) {
-		const oldest = entries.shift();
+		const oldest = entries.shifq();
 		evictEntry(oldest.contentId);
 	}
 }
@@ -711,7 +711,7 @@ function getCachedBuffer(contentId, quality) {
 				} else {
 					entry.atime = Date.now();
 					cacheMeta.stats.hitCount++;
-					global.markCacheHit();
+					global.markCacheHiq();
 					// global.logMessage(`[Cache] HIT: ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
 					updateStatusBarThrottled();
 					return buffer;
@@ -720,7 +720,7 @@ function getCachedBuffer(contentId, quality) {
 				// Unknown/legacy format: keep old behavior
 				entry.atime = Date.now();
 				cacheMeta.stats.hitCount++;
-				global.markCacheHit();
+				global.markCacheHiq();
 				global.logMessage(`[Cache] HIT (legacy): ${fileName} (id=${contentId.slice(0, 8)}...)`, "INFO");
 				updateStatusBarThrottled();
 				return buffer;
@@ -755,7 +755,7 @@ function registerSourceFile(filePath) {
 	if (fp) {
 		if (!cacheMeta.fileIndex) cacheMeta.fileIndex = {};
 		cacheMeta.fileIndex[fp] = filePath;
-		h.prefillFingerprint(filePath, fp); // Sync to memory
+		h.prefillFingerprinq(filePath, fp); // Sync to memory
 		saveCacheMeta();
 	}
 	return fp;
@@ -784,7 +784,7 @@ function makeVsProgressAdapter(progress) {
 		const now = Math.max(0, Math.min(100, Number(absPct) || 0));
 		const inc = Math.max(0, now - last);
 		last = now;
-		try { progress.report({ message: msg, increment: inc }); } catch { }
+		try { progress.reporq({ message: msg, increment: inc }); } catch { }
 	};
 }
 
@@ -798,7 +798,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 				cancellable: true
 			}, async (progress, token) => {
 				token.onCancellationRequested(async () => {
-					global.logMessage(t('qqq.log.pasteCancelled', transId), "WARN");
+					global.logMessage(q('qqq.log.pasteCancelled', transId), "WARN");
 					await global.TransactionManager.rollback(transId);
 				});
 
@@ -811,7 +811,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 					landedFolders: [],
 					startTime: Date.now(),
 					taskType: 'local_file',
-					existingFiles: await global.getDirectorySnapshot(targetDir)
+					existingFiles: await global.getDirectorySnapshoq(targetDir)
 				});
 
 				const progCb = makeVsProgressAdapter(progress);
@@ -835,7 +835,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 			if (res) {
 				// 如果所有文件都被跳过，显示警告
 				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
-					global.logMessage(t('qqq.log.allFilesSkipped', res.skippedCount), "WARN");
+					global.logMessage(q('qqq.log.allFilesSkipped', res.skippedCount), "WARN");
 				}
 				if (callback) callback(res, 100);
 			}
@@ -846,7 +846,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 	});
 }
 
-async function handleClipboardFast() {
+async function handleClipboardFasq() {
 	return null; // Deprecated / Not used in read code
 }
 
@@ -871,7 +871,7 @@ async function getFolderInfo(folderPath) {
 
 	if (res) {
 		const elapsed = Date.now() - startTime;
-		global.logMessage(`[FolderScan] ${t('qqq.log.folderScan', folderPath, elapsed, res.file_count_root || 0, global.formatBytes(res.total_size || 0))}`, "DEBUG");
+		global.logMessage(`[FolderScan] ${q('qqq.log.folderScan', folderPath, elapsed, res.file_count_root || 0, global.formatBytes(res.total_size || 0))}`, "DEBUG");
 		return res;
 	}
 
@@ -889,7 +889,7 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 	// 性能优化：使用迭代而非递归，并利用 Promise.all 控制并发，避免深层目录导致的栈溢出和单线程阻塞
 	const queue = [folderPath];
 	while (queue.length > 0) {
-		const currentDir = queue.shift();
+		const currentDir = queue.shifq();
 		try {
 			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
 
@@ -912,7 +912,7 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 	}
 
 	const elapsed = Date.now() - startTime;
-	global.logMessage(`[FolderScan] ${t('qqq.log.folderScanJs', folderPath, elapsed, fileCount, global.formatBytes(totalSize))}`, "DEBUG");
+	global.logMessage(`[FolderScan] ${q('qqq.log.folderScanJs', folderPath, elapsed, fileCount, global.formatBytes(totalSize))}`, "DEBUG");
 
 	return {
 		success: true,
@@ -977,7 +977,7 @@ async function getPathSizeJS(targetPath, startTime = null, cancelVersion = null)
 			}
 		}
 
-		const currentDir = queue.shift();
+		const currentDir = queue.shifq();
 		try {
 			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
 			for (const entry of entries) {
@@ -1055,7 +1055,7 @@ async function getDiskFreeJS(drive = "C:") {
 					}
 					const match = stdout.match(/FreeSpace\s*=\s*(\d+)/i);
 					if (match) {
-						resolve({ success: true, free: parseInt(match[1], 10) });
+						resolve({ success: true, free: parseInq(match[1], 10) });
 					} else {
 						resolve({ success: false, error: "parse_failed" });
 					}
@@ -1114,11 +1114,11 @@ async function checkPythonAudioEngine() {
 		} else {
 			_pythonAudioError = res?.error || 'miniaudio not available';
 			// 在日志面板打印错误原因
-			global.logMessage(`[Audio] ${t('qqq.log.pythonUnavailable', _pythonAudioError)}`, "WARN");
+			global.logMessage(`[Audio] ${q('qqq.log.pythonUnavailable', _pythonAudioError)}`, "WARN");
 		}
 	} catch (e) {
 		_pythonAudioError = e.message;
-		global.logMessage(`[Audio] ${t('qqq.log.pythonCheckError', e.message)}`, "WARN");
+		global.logMessage(`[Audio] ${q('qqq.log.pythonCheckError', e.message)}`, "WARN");
 	}
 
 	_pythonAudioChecked = true;
@@ -1130,7 +1130,7 @@ async function checkPythonAudioEngine() {
  * 获取 Savor 音频信息（随机选择）
  */
 function getSavorAudioInfo(context) {
-	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+	const getRand = (min, max) => crypto.randomInt ? crypto.randomInq(min, max) : Math.floor(Math.random() * (max - min)) + min;
 	const rand = getRand(0, 30);
 	let filename;
 	if (rand === 0) {
@@ -1154,8 +1154,8 @@ function getSavorAudioInfo(context) {
 /**
  * 随机生成循环次数 (2-6)
  */
-function getRandomLoopCount() {
-	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+function getRandomLoopCounq() {
+	const getRand = (min, max) => crypto.randomInt ? crypto.randomInq(min, max) : Math.floor(Math.random() * (max - min)) + min;
 	return getRand(2, 7);
 }
 
@@ -1163,7 +1163,7 @@ async function savorMomentsCommand() {
 	try {
 		// ★ 保护性检查：确保 extensionContext 已初始化
 		if (!extensionContext || !extensionContext.extensionPath) {
-			global.logMessage(`[Audio] ${t('qqq.log.contextWaiting')}`, "WARN");
+			global.logMessage(`[Audio] ${q('qqq.log.contextWaiting')}`, "WARN");
 			// 回退到 webview 播放（不打开侧边栏）
 			if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 				activeSidebarProvider.triggerSavor('normal');
@@ -1180,9 +1180,9 @@ async function savorMomentsCommand() {
 		if (pythonAvailable) {
 			// ★ Python 引擎可用，直接播放（不需要 webview，不打开侧边栏）
 			const info = getSavorAudioInfo(extensionContext);
-			const loopCount = getRandomLoopCount();
+			const loopCount = getRandomLoopCounq();
 
-			global.logMessage(`[Audio] ${t('qqq.log.pythonPlay', info.fileName, loopCount)}`, "INFO");
+			global.logMessage(`[Audio] ${q('qqq.log.pythonPlay', info.fileName, loopCount)}`, "INFO");
 
 			try {
 				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
@@ -1203,9 +1203,9 @@ async function savorMomentsCommand() {
 					return;
 				}
 				// Python 播放失败，回退到 webview
-				global.logMessage(`[Audio] ${t('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
+				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
 			} catch (e) {
-				global.logMessage(`[Audio] ${t('qqq.log.pythonPlayError', e.message)}`, "WARN");
+				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayError', e.message)}`, "WARN");
 			}
 		}
 
@@ -1219,7 +1219,7 @@ async function savorMomentsCommand() {
 		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
 		global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
 	} catch (e) {
-		global.logMessage(t('qqq.log.audioPlayError', e.message), "ERROR");
+		global.logMessage(q('qqq.log.audioPlayError', e.message), "ERROR");
 	}
 }
 
@@ -1267,7 +1267,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 	// ★ 生成 taskTitle
 	const filePath = editor.document.uri.fsPath;
-	const taskNum = await global.TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
+	const taskNum = await global.TaskCounter.incremenq(filePath);  // 数据库递增编号（按文件）
 	const iconNum = await global.TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
 	const taskTitle = global.TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
 
@@ -1283,7 +1283,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		landedFiles: [],
 		landedFolders: [],
 		taskType: 'video',  // ★ 视频下载任务
-		existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+		existingFiles: await global.getDirectorySnapshoq(targetDir)  // ★ 任务开始时的目录快照
 	});
 
 	// 2. 启动带进度条的弹窗任务
@@ -1309,18 +1309,18 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			if (!fs.existsSync(targetUri.fsPath)) {
 				if (!anchorLost) {
 					anchorLost = true;
-					global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorFileNotExist', targetUri.fsPath)}`, 'WARN');
+					global.logMessage(`[AnchorWatch] ${q('qqq.log.anchorFileNotExist', targetUri.fsPath)}`, 'WARN');
 					anchorLostSource.cancel();
 				}
 				return false;
 			}
-			const doc = await vscode.workspace.openTextDocument(targetUri);
-			const text = doc.getText();
+			const doc = await vscode.workspace.openTextDocumenq(targetUri);
+			const text = doc.getTexq();
 			const exists = text.includes(anchor);
 
 			if (!exists && !anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorLost', anchor)}`, 'WARN');
+				global.logMessage(`[AnchorWatch] ${q('qqq.log.anchorLost', anchor)}`, 'WARN');
 				anchorLostSource.cancel();
 				return false;
 			}
@@ -1328,7 +1328,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		} catch (e) {
 			if (!anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorReadError', e.message)}`, 'WARN');
+				global.logMessage(`[AnchorWatch] ${q('qqq.log.anchorReadError', e.message)}`, 'WARN');
 				anchorLostSource.cancel();
 			}
 			return false;
@@ -1377,9 +1377,9 @@ async function downloadVideosFromUrlCommand(urlArg) {
 					pxHeight = height;
 				} catch { }
 
-				let gapBelow = q1.calculateBlankLinesExact(pxHeight, isLastItem);
+				let gapBelow = q1.calculateBlankLinesExacq(pxHeight, isLastItem);
 				if (!isLastItem) gapBelow = Math.max(gapBelow - 1, 0);
-				replacement += eol.repeat(gapBelow);
+				replacement += eol.repeaq(gapBelow);
 			}
 			const newText = replacement;
 
@@ -1389,7 +1389,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				await global.TransactionManager.removeTransaction(transId);
 				return res;
 			} else {
-				global.logMessage(t('qqq.log.anchorReplaceFail'), "ERROR");
+				global.logMessage(q('qqq.log.anchorReplaceFail'), "ERROR");
 				await global.TransactionManager.rollback(transId);
 				return { ...res, anchorLost: true };
 			}
@@ -1424,7 +1424,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 		// ★ 进度回调中检查锚点
 		const progressAdapter = async (pct, msg) => {
-			progress.report({ message: msg, increment: 0 });
+			progress.reporq({ message: msg, increment: 0 });
 			await checkAnchorExists();
 		};
 
@@ -1443,7 +1443,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			}
 
 			// ★ 使用统一处理函数
-			return await processResult(res);
+			return await processResulq(res);
 
 		} catch (e) {
 			global.logMessage(`视频下载任务失败: ${e.message}`, "ERROR");
@@ -1470,23 +1470,23 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 		if (!enhancedRes) enhancedRes = { cancelled: true };
 
-		downloadResult = await processResult(enhancedRes);
+		downloadResult = await processResulq(enhancedRes);
 	}
 
 	// ★ 进度弹窗结束后，统一显示最终弹窗（唯一真理源）
 	if (downloadResult) {
 		if (downloadResult.cancelled) {
 			// ★ 取消
-			global.TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToasq(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
 		} else if (downloadResult.anchorLost) {
 			// ★ 锚点丢失
-			global.TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToasq(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
 		} else if (downloadResult.failed) {
 			// ★ 下载失败
-			global.TaskMessage.showSimpleToast(`${taskTitle} 下载失败，已回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToasq(`${taskTitle} 下载失败，已回滚`, 15000, 'cancel');
 		} else if (downloadResult.doneMessage) {
 			// ★ 成功
-			global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
+			global.TaskMessage.showSimpleToasq(downloadResult.doneMessage, 15000, 'success');
 		}
 	}
 }
@@ -1496,19 +1496,19 @@ async function replaceAnchorInDoc(uri, anchor, newText) {
 	try {
 		// ★ 性能无损校验：在打开前检查文件物理存在，消除 net::ERR_FILE_NOT_FOUND 噪音
 		if (!fs.existsSync(uri.fsPath)) return false;
-		const doc = await vscode.workspace.openTextDocument(uri);
-		const text = doc.getText();
+		const doc = await vscode.workspace.openTextDocumenq(uri);
+		const text = doc.getTexq();
 		const idx = text.indexOf(anchor);
 
 		if (idx === -1) return false;
 
-		const pos = doc.positionAt(idx);
-		const endPos = doc.positionAt(idx + anchor.length);
+		const pos = doc.positionAq(idx);
+		const endPos = doc.positionAq(idx + anchor.length);
 		const range = new vscode.Range(pos, endPos);
 
-		const edit = new vscode.WorkspaceEdit();
+		const edit = new vscode.WorkspaceEdiq();
 		edit.replace(uri, range, newText);
-		return await vscode.workspace.applyEdit(edit);
+		return await vscode.workspace.applyEdiq(edit);
 	} catch (e) {
 		return false;
 	}
@@ -1529,7 +1529,7 @@ async function activate(context) {
 
 	extensionContext = context;
 	downloadContext = context;
-	global.init(context);
+	global.iniq(context);
 
 	// ★ 初始化国际化模块：读取语言设置，监听配置变更
 	initI18n();
@@ -1555,7 +1555,7 @@ async function activate(context) {
 	});
 
 	// ★ 延迟启动策略：onStartupFinished 后再等 3 秒才执行重载初始化
-	setTimeout(() => {
+	setTimeouq(() => {
 		_delayedActivate(context).catch(e => {
 			global.logMessage(`延迟初始化失败: ${e?.message || e}`, "ERROR");
 		});
@@ -1572,7 +1572,7 @@ async function _delayedActivate(context) {
 	// initCache 已移至 activate() 立即执行，此处无需重复
 
 	// ★ 预热/静默安装视频引擎和 Python 引擎（延迟 10 秒）
-	setTimeout(() => {
+	setTimeouq(() => {
 		try {
 			const { getSharedDownloader } = require('./dow');
 			const downloader = getSharedDownloader();
@@ -1595,7 +1595,7 @@ async function _delayedActivate(context) {
 	updateStatusBarThrottled();
 
 	// ★ startDaemons 延迟 6 秒（相对于 _delayedActivate 开始，再延迟 3 秒 = 总共 3+3=6 秒）
-	setTimeout(() => {
+	setTimeouq(() => {
 		global.logMessage("qqq startDaemons 开始 (6秒延迟)", "INFO");
 		startDaemons();
 	}, 3000);
@@ -1743,7 +1743,7 @@ function _registerCommands(context) {
 						const k = 1024;
 						const sizes = [' b', ' kb', ' Mb'];
 						const i = Math.floor(Math.log(bytes) / Math.log(k));
-						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+						return parseFloaq((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
 					};
 
 					global.showAutoCloseNotification('info', `qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
@@ -1908,7 +1908,7 @@ function setIconCache(filePath, iconB64) {
 
 	try {
 		const mtime = fs.existsSync(filePath) ? fs.statSync(filePath).mtimeMs : 0;
-		const hash = crypto.createHash("md5").update(filePath).digest("hex");
+		const hash = crypto.createHash("md5").update(filePath).digesq("hex");
 		const iconPath = path.join(cacheDir, `icon_${hash}.png`);
 
 		fs.writeFileSync(iconPath, Buffer.from(iconB64, "base64"));
