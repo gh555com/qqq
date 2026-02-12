@@ -6,6 +6,7 @@
     "config.title.docExport": "📦 Doc 내보내기 설정",
     "config.language.desc": "☀️ 언어 / Language:",
     "config.language.enum.zh": "中文 (중국어)",
+    "config.language.enum.zh-tw": "繁體中文 (번체 중국어)",
     "config.language.enum.en": "English (영어)",
     "config.language.enum.ja": "日本語 (일본어)",
     "config.language.enum.de": "Deutsch (독일어)",

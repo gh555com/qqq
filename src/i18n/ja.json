@@ -1,4 +1,69 @@
 {
+    "bridge": {
+        "errorResponse": "{0} エラー応答: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} プロセスエラー: {1}",
+        "processClose": "{0} プロセス終了、終了コード: {1}",
+        "pingFailed": "{0} ping 失敗、{1} 回試行済み",
+        "circuitBreaker": "{0} 1分間に5回以上クラッシュしました。サーキットブレーカーが作動し、永久に無効化されました。",
+        "shellDaemonCrash": "node shell daemon が異常状態に陥りました。qqq は動作を停止します。解決策：再起動。",
+        "shellDaemonDetail": "バックグラウンドデーモンの頻繁なクラッシュを検出しました。ウイルス対策ソフトによるブロックまたは環境の異常が原因の可能性があります。システムの安定性を保護するため、コア機能が一時停止されました。",
+        "restartWindow": "今すぐウィンドウを再起動",
+        "crashRestart": "{0} プロセスがクラッシュ、再起動を試行中 ({1}/{2})、遅延 {3}ms",
+        "restarting": "{0} 再起動中...",
+        "restartSuccess": "{0} 再起動成功",
+        "restartFailed": "{0} 再起動失敗",
+        "restartException": "{0} 再起動例外: {1}",
+        "maxRestartsReached": "{0} プロセスがクラッシュ、最大再起動回数に達し、利用不可としてマーク",
+        "forceRevive": "{0} 最大再起動回数に達しましたが、常駐サービスとして3秒後に強制復活します",
+        "actionFailed": "{0} 関数 Action 実行失敗: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "Linux 依存関係チェック: xclip 未インストール、ユーザーに通知準備中",
+        "xclipPrompt": "qqq: クリップボード機能には xclip が必要です。今すぐインストールしますか？",
+        "installNow": "今すぐインストール",
+        "copyCommand": "コマンドをコピー",
+        "dontAskAgain": "今後表示しない",
+        "installingXclip": "xclip をインストール中、コマンド: {0}",
+        "terminalTitle": "qqq: xclip インストール",
+        "xclipInstalled": "Linux 依存関係チェック: xclip インストール済み",
+        "xclipInstallSuccess": "xclip インストール成功",
+        "xclipInstallMaybeFailed": "xclip インストールが失敗した可能性があります",
+        "userCopyCmd": "ユーザーがインストールコマンドをコピーしました: {0}",
+        "userDismiss": "ユーザーが xclip インストール通知を非表示にしました",
+        "checkException": "Linux 依存関係チェック例外: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] 破損ファイルを検出 ({0} bytes)、再ダウンロード中",
+        "tryDownload": "[yt-dlp] {0} からダウンロードを試行中...",
+        "downloadSuccess": "[yt-dlp] {0} ダウンロード成功",
+        "downloadFailed": "[yt-dlp] {0} ダウンロード失敗: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 完全ヒット: {0}",
+        "l1Imperfect": "[PythonCheck] L1 不完全: {0}",
+        "l1ImperfectMissing": ", 不足: {0}",
+        "inCooldown": "[PythonCheck] 72時間のクールダウン中 (残り {0}h{1}m)、ダウンロードをスキップ",
+        "triggerL4": "[PythonCheck] L1 不完全かつクールダウン外、20秒後に L4 ダウンロードフローをトリガー",
+        "startL4": "[PythonCheck] L4 ダウンロードとインストールフローを開始...",
+        "enteredCooldown": "[PythonCheck] クールダウン期間に入りました、ダウンロードをスキップ",
+        "l4Success": "[PythonCheck] L4 ダウンロードとインストール成功: {0}",
+        "l4Callback": "[PythonCheck] \"ゼロから\" コールバックをトリガー、デーモンをホットスタート中...",
+        "l4CallbackFailed": "[PythonCheck] \"ゼロから\" コールバック失敗: {0}",
+        "l4Failed": "[PythonCheck] L4 失敗: {0}",
+        "l4Exception": "[PythonCheck] L4 例外: {0}",
+        "ytdlpInstallFailed": "yt-dlp インストール失敗: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] すべてのキャッシュがクリアされました",
+            "ffmpegError": "FFmpeg プロセスエラー: {0}",
+            "anchorLost": "[AnchorWatch] アンカーが失われました、即座にロールバックをトリガー: {0}",
+            "anchorReadError": "[AnchorWatch] ドキュメントを読み取れません、アンカーが失われたと見なされます: {0}",
+            "openFileFailed": "ファイルを開けませんでした: {0}",
+            "configUpdateCallback": "[q1] 設定更新コールバック: {0}",
+            "transactionRecoverError": "q1 トランザクション回復失敗: {0}"
+        }
+    },
     "q2": {
         "ui": {
             "pin": "ピン",
@@ -48,7 +113,18 @@
         },
         "log": {
             "getFolderSizeError": "フォルダサイズの取得に失敗: {0} - {1}",
-            "readScmError": "詳細SCMの読み取りに失敗: {0}"
+            "readScmError": "詳細SCMの読み取りに失敗: {0}",
+            "saveScmError": "詳細SCMの保存に失敗: {0}",
+            "readDirError": "ディレクトリ内容の読み取りに失敗: {0} - {1}",
+            "templateReadError": "q2.html テンプレートファイルを読み取れません: {0}",
+            "updatePreviewError": "プレビューエリアの更新に失敗: {0}",
+            "watchStartError": "[Q2] ファイル監視の開始に失敗: {0}",
+            "diskFreeError": "getDiskFree 失敗: {0}",
+            "createOpenError": "[Q2] 作成後のオープンに失敗: ファイルが見つかりません {0}",
+            "openDocError": "[Q2] openTextDocument 失敗: {0}",
+            "openFileError": "[Q2] ファイルを開けませんでした: {0}",
+            "activated": "Q2: ファイルマネージャーがアクティブ化されました (geq().js 4段階フォールバック + サイズスケジューリング/キャッシュ + 最新IOパスロジックを使用)",
+            "configRefresh": "Q2: 設定が変更されました (ConfigGate コールバック経由)、更新中..."
         }
     },
     "q4": {
@@ -99,7 +175,65 @@
             "anchorFileNotExist": "ファイルが存在せず、アンカーが失われたと見なされます: {0}",
             "anchorLost": "アンカーが失われました、即座にロールバックをトリガー: {0}",
             "anchorReadError": "ドキュメントを読み取れません、アンカーが失われたと見なされます: {0}",
-            "anchorReplaceFail": "アンカーの置換に失敗、トランザクションをロールバック"
+            "anchorReplaceFail": "アンカーの置換に失敗、トランザクションをロールバック",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) 検出成功",
+            "taskCancelled": "タスク {0} がユーザーによりキャンセルされました",
+            "anchorLostCancel": "[AnchorLost] アンカーの喪失によりキャンセルがトリガーされました",
+            "videoDownloadFailed": "動画ダウンロードタスク失敗: {0}",
+            "activating": "qqq 拡張機能がアクティブ化中 (中央制御モード)...",
+            "cacheInitError": "キャッシュの初期化に失敗: {0}",
+            "delayedInitError": "遅延初期化に失敗: {0}",
+            "delayedInitStart": "qqq 遅延初期化を開始...",
+            "dowWarmup": "qqq dow.js ウォームアップ開始 (10秒遅延)",
+            "q4LoadError": "q4 (クリップボード/サイドバー) のロードに失敗: {0}",
+            "daemonsStart": "qqq startDaemons 開始 (6秒遅延)",
+            "engineSwitch": "エンジンを {0} に切り替え、ステータスバーを更新",
+            "pythonEnvImperfect": "[IOエンジン] Python 環境が不完全: {0}、他のエンジンにフォールバック",
+            "transactionRecoverError": "トランザクション回復失敗: {0}",
+            "activateComplete": "qqq 拡張機能のアクティブ化完了",
+            "q1LoadError": "q1 のロードに失敗: {0}",
+            "q2LoadError": "q2 のロードに失敗: {0}",
+            "deactivated": "qqq 拡張機能が非アクティブ化されました",
+            "fsError": "[ファイルシステムエラー] {0}: {1}",
+            "uncaughtException": "キャッチされない例外: {0}",
+            "unhandledRejection": "未処理の Promise 拒否: {0}",
+            "pythonNoInterpreter": "Python インタープリターがインストールされていません",
+            "pythonInvalid": "Python インタープリターが利用できません",
+            "pythonDepsMissing": "依存関係が不足: {0}",
+            "pythonNoContext": "環境が準備できていません"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} がキャンセルされロールバックされました",
+            "anchorLostRollback": "{0} アンカーが失われ、ロールバックされました",
+            "downloadFailedRollback": "{0} ダウンロードに失敗、ロールバックされました",
+            "videoDownloadFailed": "動画ダウンロード失敗: {0}",
+            "plainPasteOnly": "qqq: 元の貼り付けのみ使用できます。解決策: ファイルを保存してください。",
+            "clickSidebarToRelax": "qqq: リラックスするにはサイドバーボタンをクリックしてください。",
+            "cooldownCleared": "qqq: 依存関係ダウンロードのクールダウンがクリアされました。再ダウンロードできます。",
+            "cooldownClearError": "qqq: クールダウンのクリアに失敗: {0}",
+            "cacheNotInit": "qqq: キャッシュディレクトリが初期化されていません",
+            "openCacheDirError": "qqq: キャッシュディレクトリを開けませんでした: {0}",
+            "noStoragePath": "qqq: ストレージパスを取得できません",
+            "ytdlpDeleted": "qqq: {0} を削除しました",
+            "ytdlpNotExist": "qqq: yt-dlp.exe が存在しません",
+            "ytdlpDeleteError": "qqq: yt-dlp.exe の削除に失敗: {0}",
+            "globalStateCleared": "qqq: globalStates から {0} 件のデータをクリア、合計 {1}。",
+            "globalStateClearError": "qqq: globalStates のクリアに失敗: {0}",
+            "clipboardHistoryCleared": "qqq: クリップボード履歴がクリアされました",
+            "clipboardManagerNotInit": "qqq: クリップボード履歴マネージャーが初期化されていません",
+            "clipboardClearError": "qqq: クリップボード履歴のクリアに失敗: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "依存関係ダウンロードのクールダウンをクリア (デフォルト72時間)",
+            "clearCooldownDesc": "即座に再ダウンロードが可能になります",
+            "openCacheDir": "キャッシュディレクトリを開く",
+            "deleteYtDlp": "動画ダウンロードコンポーネント yt-dlp を削除",
+            "deleteYtDlpDesc": "yt-dlp の更新をトリガーできます",
+            "clearGlobalStates": "globalStates データベースをクリア",
+            "clearGlobalStatesDesc": "クリアして失われるもの: 1. ローバークイックジャンプ配列; 2. 動画拡張ダウンロードブラウザエントリー; 3. トランザクションロールバックと重複排除のキャッシュ情報; 4. ローバーフォルダ sz/ソート設定。",
+            "clearClipboardHistory": "クリップボード履歴をクリア",
+            "selectTitle": "キャッシュ操作を選択",
+            "selectPlaceholder": "実行するキャッシュ操作を選択"
         }
     },
     "video": {
@@ -126,6 +260,143 @@
         "storageError": "致命的なストレージエラー:",
         "ipcSerializeError": "IPC メッセージのシリアル化に失敗:",
         "pythonPlaybackError": "Python 再生に失敗、Webview に永久的に切り替え:",
-        "disposeError": "Dispose kill に失敗:"
+        "disposeError": "Dispose kill に失敗:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) 探査成功 {1}、高性能モードに切り替え"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "エクスポート戦略: フレーム解像度を使用 (小サイズ)",
+            "exportOriginalRes": "エクスポート戦略: 元の解像度を使用 (ページ幅に合わせる)",
+            "exportCipherKeep": "エクスポート戦略: 暗号文字列を保持",
+            "exportCipherRemove": "エクスポート戦略: 暗号文字列を削除",
+            "exportFailed": "エクスポート失敗: {0}",
+            "zipWarning": "ZIP 警告: {0}",
+            "addFileFailed": "ファイルの追加に失敗: {0} - {1}",
+            "zipComplete": "ZIP エクスポート完了: {0}、{1} エントリーを含む",
+            "zipFailed": "ZIP エクスポート失敗: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "HTML フラグメントから動画URLの抽出に失敗:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] spawn を試行: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] パスが存在しません: {0}",
+        "bridgeStartFailed": "Python bridge 起動失敗 ({0}): {1}",
+        "bridgeProcessError": "Python bridge プロセスエラー ({0}): {1}",
+        "bridgeStartAllFailed": "Python Bridge 起動失敗: {0}",
+        "fromScratchCallback": "[Python] \"ゼロから\" コールバックがトリガーされました、デーモンをホットスタート試行: {0}",
+        "audioResetQqq": "[Python] qqq オーディオエンジンキャッシュをリセットしました",
+        "audioResetQqqError": "[Python] qqq オーディオエンジンキャッシュのリセットに失敗: {0}",
+        "audioResetQ4": "[Python] Q4 オーディオソース状態をリセットしました",
+        "audioResetQ4Error": "[Python] Q4 オーディオソース状態のリセットに失敗: {0}",
+        "daemonAvailable": "[Python] daemon は既に利用可能、ホットスタートをスキップ",
+        "hotStartSuccess": "[Python] ホットスタート成功: {0}",
+        "ioEngineMain": "[Python] IO エンジン設定は {0}、daemon がメイン",
+        "ioEngineStandby": "[Python] IO エンジン設定は {0}、daemon はスタンバイ",
+        "ioEngineReadError": "[Python] IO エンジン設定の読み取りに失敗: {0}",
+        "hotStartFailed": "[Python] ホットスタート失敗",
+        "daemonSkipStart": "[Python] daemon は既に利用可能、グローバル起動をスキップ",
+        "bridgeUseSuccess": "Python Bridge が {0} で正常に起動しました",
+        "l1ImperfectWait": "[Python] L1 が不完全、バックグラウンドダウンロード完了後にホットスタート",
+        "bridgeStartException": "Python Bridge 起動例外: {0}"
+    },
+    "rust": {
+        "exeNotFound": "Rust Bridge 実行ファイルが見つかりません",
+        "tryStart": "Rust Bridge 起動を試行: \"{0}\" --daemon",
+        "processError": "Rust Bridge プロセスエラー: {0}",
+        "startSuccess": "Rust Bridge 起動成功",
+        "startFailed": "Rust Bridge 起動失敗: {0}",
+        "startException": "Rust Bridge 起動例外: {0}"
+    },
+    "shell": {
+        "tryStart": "PowerShell プロセスの起動を試行",
+        "tryOption": "オプション {0} で PowerShell の起動を試行: {1}",
+        "processCreated": "PowerShell プロセスが作成されました: {0}",
+        "optionFailed": "オプション {0} での PowerShell 起動に失敗: {1}",
+        "processError": "PowerShell プロセスエラー: {0}",
+        "processExit": "PowerShell プロセスが終了、コード: {0}、シグナル: {1}",
+        "bridgeStartFailed": "Shell Bridge 起動失敗: {0}",
+        "processCreateFailed": "PowerShell プロセスの作成に失敗: {0}",
+        "tryBash": "Bash プロセスの起動を試行",
+        "bashCreated": "Bash プロセスが作成されました",
+        "bashCreateFailed": "Bash プロセスの作成に失敗: {0}",
+        "warmupSuccess": "ShellBridge バックグラウンドウォームアップ成功、C# コンポーネント準備完了"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] Bridge がアクティブ中 (py={0}, rust={1}, shell={2})、ゴーストプロセスクリーンアップをスキップ",
+        "startWithEngine": "デーモンを起動中、ユーザー選択のエンジン: {0}",
+        "startBridge": "{0} bridge を起動中...",
+        "bridgeStartFailedNamed": "{0} Bridge 起動失敗: {1}",
+        "bridgeStartException": "{0} Bridge 起動例外: {1}",
+        "flowException": "startDaemons フロー例外: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "FFmpeg 検証失敗 (Spawn Error): {0}",
+        "validateException": "FFmpeg 非同期検証例外: {0}"
+    },
+    "editor": {
+        "showDocFailed": "showTextDocument 失敗: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] 設定のクリアに失敗 {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] ディレクトリスナップショットの取得に失敗: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] 無効なトランザクションID",
+        "notFound": "[Rollback] トランザクションが見つかりません: {0}",
+        "rollingBack": "[Rollback] タスクをロールバック中: {0}",
+        "anchorDeleted": "[Rollback] 残留アンカーを削除しました: {0}",
+        "anchorDeleteFailed": "[Rollback] アンカーの削除に失敗: {0}",
+        "anchorError": "[Rollback] アンカー処理中にエラー: {0}",
+        "completed": "[Rollback] ロールバック完了"
+    },
+    "cleanup": {
+        "tempFileFailed": "[一時ファイルクリーンアップ] 失敗: {0}",
+        "videoWaitKillAll": "[フォールバッククリーンアップ] video タイプのタスク、killAll を待機",
+        "fallbackFailed": "[フォールバッククリーンアップ] 失敗: {0}",
+        "tempFileDeleted": "[一時ファイルクリーンアップ] 削除: {0}{1}",
+        "exactMatch": " (transId 完全一致)",
+        "tempFileCompleted": "[一時ファイルクリーンアップ] 完了、{0} ファイルを削除",
+        "refScanFailed": "[参照スキャン] 失敗: {0}",
+        "orphanFolderDeleted": "[フォールバッククリーンアップ] 孤児フォルダを削除: {0} ({1}秒前に作成)",
+        "orphanFileDeleted": "[フォールバッククリーンアップ] 孤児ファイルを削除: {0} ({1}秒前に作成)",
+        "orphanCompleted": "[フォールバッククリーンアップ] 完了、{0} 個の孤児アイテムを削除",
+        "orphanException": "[フォールバッククリーンアップ] 例外: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] {0} 件の未完了トランザクションを発見、クリーンアップを開始..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] 貼り付け失敗: ターゲットディレクトリが空です",
+        "targetEmptyError": "ターゲットディレクトリが空です",
+        "triggering": "[Q2] システム貼り付けをトリガー: {0}",
+        "shellUnavailable": "[Q2] Shell daemon が利用できません",
+        "shellUnavailableError": "Shell daemon が利用できません",
+        "shellResponse": "[Q2] Shell レスポンス: {0}",
+        "shellError": "[Q2] Shell 例外: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! ヒューズ保護: コア資産の検証に失敗、エンジンがロックされました !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] VC++ DLL を自動コピー: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL が不足 (非ブロッキング): {0}",
+        "optionalDepsMissing": "[PythonCheck] オプション依存が不足 (許可): {0}",
+        "slimComplete": "[Slim] 完了: {0}MB を解放",
+        "platformArch": "[Python] platform={0}, arch={1}, URL={2}",
+        "trySource": "[Python] {0} を試行中...",
+        "sourceSuccess": "[Python] {0} ダウンロード成功",
+        "sourceFailed": "[Python] {0} 失敗: {1}",
+        "installPip": "[Python] pip をインストール中...",
+        "installDeps": "[Python] 依存関係をインストール中: {0}",
+        "startSlim": "[Python] スリム化を開始...",
+        "pywin32Done": "[Python] pywin32 設定完了",
+        "copyVcDll": "[Python] VC++ DLL をコピー: {0}",
+        "installFailed": "[Python] インストール失敗: {0}"
     }
 }

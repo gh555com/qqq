@@ -1,0 +1,402 @@
+{
+    "bridge": {
+        "errorResponse": "{0} ответ с ошибкой: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} ошибка процесса: {1}",
+        "processClose": "{0} процесс закрыт, код выхода: {1}",
+        "pingFailed": "{0} ping не удался, попыток: {1}",
+        "circuitBreaker": "{0} аварийно завершился более 5 раз за минуту, сработала защита, Bridge навсегда отключён.",
+        "shellDaemonCrash": "node shell daemon в аварийном состоянии, qqq прекращает работу. Решение: перезапуск.",
+        "shellDaemonDetail": "Обнаружены частые сбои фонового демона, возможно блокировка антивирусом или проблемы среды. Для стабильности системы основные функции приостановлены.",
+        "restartWindow": "Перезапустить окно сейчас",
+        "crashRestart": "{0} процесс аварийно завершился, попытка перезапуска ({1}/{2}), задержка {3}мс",
+        "restarting": "{0} выполняется перезапуск...",
+        "restartSuccess": "{0} перезапуск успешен",
+        "restartFailed": "{0} перезапуск не удался",
+        "restartException": "{0} исключение при перезапуске: {1}",
+        "maxRestartsReached": "{0} процесс аварийно завершился, достигнут лимит перезапусков, помечен как недоступный",
+        "forceRevive": "{0} достигнут лимит перезапусков, но как резидентный сервис будет принудительно восстановлен через 3 сек",
+        "actionFailed": "{0} выполнение Action не удалось: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "Проверка зависимостей Linux: xclip не установлен, подготовка уведомления",
+        "xclipPrompt": "qqq: для работы буфера обмена требуется xclip, установить сейчас?",
+        "installNow": "Установить сейчас",
+        "copyCommand": "Копировать команду",
+        "dontAskAgain": "Больше не спрашивать",
+        "installingXclip": "Установка xclip, команда: {0}",
+        "terminalTitle": "qqq: установка xclip",
+        "xclipInstalled": "Проверка зависимостей Linux: xclip установлен",
+        "xclipInstallSuccess": "xclip успешно установлен",
+        "xclipInstallMaybeFailed": "Установка xclip возможно не удалась",
+        "userCopyCmd": "Пользователь скопировал команду установки: {0}",
+        "userDismiss": "Пользователь отключил уведомление об установке xclip",
+        "checkException": "Исключение при проверке зависимостей Linux: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] Обнаружен повреждённый файл ({0} байт), повторная загрузка",
+        "tryDownload": "[yt-dlp] Попытка загрузки с {0}...",
+        "downloadSuccess": "[yt-dlp] {0} загрузка успешна",
+        "downloadFailed": "[yt-dlp] {0} загрузка не удалась: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 полное совпадение: {0}",
+        "l1Imperfect": "[PythonCheck] L1 неполный: {0}",
+        "l1ImperfectMissing": ", отсутствует: {0}",
+        "inCooldown": "[PythonCheck] В периоде ожидания 72ч (осталось {0}ч{1}м), загрузка пропущена",
+        "triggerL4": "[PythonCheck] L1 неполный и не в периоде ожидания, запуск L4 через 20 сек",
+        "startL4": "[PythonCheck] Начало процесса загрузки и установки L4...",
+        "enteredCooldown": "[PythonCheck] Вошёл в период ожидания, загрузка пропущена",
+        "l4Success": "[PythonCheck] L4 загрузка и установка успешна: {0}",
+        "l4Callback": "[PythonCheck] Запуск callback \"с нуля\", горячий старт daemon...",
+        "l4CallbackFailed": "[PythonCheck] Callback \"с нуля\" не удался: {0}",
+        "l4Failed": "[PythonCheck] L4 не удался: {0}",
+        "l4Exception": "[PythonCheck] L4 исключение: {0}",
+        "ytdlpInstallFailed": "Установка yt-dlp не удалась: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] Весь кэш очищен",
+            "ffmpegError": "Ошибка процесса FFmpeg: {0}",
+            "anchorLost": "[AnchorWatch] Якорь потерян, немедленный откат: {0}",
+            "anchorReadError": "[AnchorWatch] Не удалось прочитать документ, считается потерей якоря: {0}",
+            "openFileFailed": "Не удалось открыть файл: {0}",
+            "configUpdateCallback": "[q1] Callback обновления конфигурации: {0}",
+            "transactionRecoverError": "Восстановление транзакции q1 не удалось: {0}"
+        }
+    },
+    "q2": {
+        "ui": {
+            "pin": "Закрепить",
+            "newFile": "Новый файл",
+            "newFolder": "Новая папка",
+            "openFolder": "Открыть текущую папку в проводнике",
+            "szSize": "Колонка sz: размер файла",
+            "szCtime": "Колонка sz: время создания",
+            "szMtime": "Колонка sz: время изменения",
+            "sortSize": "Сортировка: по размеру",
+            "sortCtime": "Сортировка: по времени создания",
+            "sortMtime": "Сортировка: по времени изменения",
+            "movedToRecycleBin": "{0} перемещён в корзину",
+            "deleteFailed": "qqq: удаление не удалось: {0}",
+            "deleteItemFailed": "Удаление элемента не удалось: {0} - {1}",
+            "multiDeleteSuccess": "{0} элементов перемещено в корзину",
+            "multiDeletePartial": "{0} элементов перемещено в корзину, {1} не удалось",
+            "multiDeleteFailed": "Удаление {0} элементов не удалось.",
+            "permanentDeleted": "{0} безвозвратно удалён",
+            "permanentDeleteFailed": "Безвозвратное удаление не удалось: {0}",
+            "permanentDeleteItemFailed": "Безвозвратное удаление элемента не удалось: {0} - {1}",
+            "multiPermanentDeleteSuccess": "{0} элементов безвозвратно удалено",
+            "multiPermanentDeletePartial": "{0} элементов безвозвратно удалено, {1} не удалось",
+            "multiPermanentDeleteFailed": "Безвозвратное удаление {0} элементов не удалось."
+        },
+        "paste": {
+            "plainTextOnly": "qqq: в буфере только текст, невозможно вставить в файловый менеджер"
+        },
+        "error": {
+            "integrityFailed": "Проверка целостности не пройдена.",
+            "renameFailed": "Переименование не удалось: элемент с таким именем уже существует.",
+            "renameError": "Переименование не удалось: {0}",
+            "invalidPath": "Недопустимый путь к каталогу: {0}",
+            "navError": "Навигация не удалась: {0}",
+            "createFileFolderExists": "Невозможно создать файл, папка с таким именем уже существует: \"{0}\"",
+            "createFileError": "Создание файла не удалось: {0}",
+            "folderExists": "Невозможно создать, \"{0}\" уже существует.",
+            "unsupportedFile": "Этот тип файла не поддерживается в VS Code: \"{0}\"",
+            "fileNotExists": "Файл больше не существует: {0}",
+            "openFileError": "Не удалось открыть файл: {0}",
+            "deleteParentForbidden": "Недопустимая операция: удаление родительского каталога запрещено."
+        },
+        "confirm": {
+            "overwriteFile": "Файл \"{0}\" уже существует. Перезаписать?",
+            "yes": "Да",
+            "no": "Нет"
+        },
+        "log": {
+            "getFolderSizeError": "Не удалось получить размер папки: {0} - {1}",
+            "readScmError": "Не удалось прочитать SCM: {0}",
+            "saveScmError": "Не удалось сохранить SCM: {0}",
+            "readDirError": "Не удалось прочитать содержимое каталога: {0} - {1}",
+            "templateReadError": "Не удалось прочитать шаблон q2.html: {0}",
+            "updatePreviewError": "Не удалось обновить область предпросмотра: {0}",
+            "watchStartError": "[Q2] Не удалось запустить наблюдение за файлами: {0}",
+            "diskFreeError": "getDiskFree не удался: {0}",
+            "createOpenError": "[Q2] Не удалось открыть после создания: файл не найден {0}",
+            "openDocError": "[Q2] openTextDocument не удался: {0}",
+            "openFileError": "[Q2] Не удалось открыть файл: {0}",
+            "activated": "Q2: Файловый менеджер активирован",
+            "configRefresh": "Q2: Конфигурация изменена, обновление..."
+        }
+    },
+    "q4": {
+        "export": {
+            "success": "📦 История полностью экспортирована",
+            "error": "Экспорт не удался: {0}"
+        },
+        "import": {
+            "success": "📥 Успешно импортировано {0} записей",
+            "error": "Импорт не удался: {0}"
+        },
+        "editor": {
+            "noActive": "Нет активного редактора",
+            "noSelection": "Текст не выделен"
+        },
+        "cache": {
+            "clearing": "Выполнение очистки, уровень: {0}",
+            "cacheCleared": "qqq_cache очищен",
+            "cacheClearError": "Очистка кэша не удалась: {0}",
+            "historyCleared": "История буфера обмена очищена",
+            "stateCleared": "globalState очищен",
+            "stateClearError": "Очистка globalState не удалась: {0}"
+        },
+        "log": {
+            "audioReset": "Состояние аудиоисточника сброшено",
+            "pythonCrash": "Процесс Python аварийно завершился, UI воспроизведения остановлен",
+            "pythonNoMiniaudio": "Python-движок подключён, но зависимость miniaudio не обнаружена",
+            "pythonProbeError": "Исключение при проверке Python: {0}",
+            "pythonProbeFail": "Проверка Python-движка не пройдена, резерв на Webview",
+            "audioPlay": "Движок {0} воспроизводит: {1}, цикл: {2}",
+            "pythonPlaying": "q4 обнаружил воспроизведение Python при запуске, синхронизация UI",
+            "audioSavor": "Движок {0} воспроизводит избранное: {1}, цикл: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "Операция вставки отменена пользователем ({0})",
+            "allFilesSkipped": "Все {0} файлов недоступны, пропущены",
+            "folderScan": "{0}: {1}мс, {2} файлов, {3}",
+            "folderScanJs": "{0}: {1}мс, {2} файлов, {3} (JS)",
+            "pythonUnavailable": "Python-движок недоступен: {0}",
+            "pythonCheckError": "Исключение при проверке Python-движка: {0}",
+            "contextWaiting": "extensionContext не инициализирован, ожидание...",
+            "pythonPlay": "Python-движок воспроизводит: {0}, цикл: {1}",
+            "pythonPlayFail": "Воспроизведение Python не удалось: {0}",
+            "pythonPlayError": "Исключение воспроизведения Python: {0}",
+            "audioPlayError": "Воспроизведение аудио не удалось: {0}",
+            "anchorFileNotExist": "Файл не существует, считается потерей якоря: {0}",
+            "anchorLost": "Якорь потерян, немедленный откат: {0}",
+            "anchorReadError": "Не удалось прочитать документ, считается потерей якоря: {0}",
+            "anchorReplaceFail": "Замена якоря не удалась, откат транзакции",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) обнаружен успешно",
+            "taskCancelled": "Задача {0} отменена пользователем",
+            "anchorLostCancel": "[AnchorLost] Потеря якоря вызвала отмену",
+            "videoDownloadFailed": "Загрузка видео не удалась: {0}",
+            "activating": "Активация расширения qqq...",
+            "cacheInitError": "Инициализация кэша не удалась: {0}",
+            "delayedInitError": "Отложенная инициализация не удалась: {0}",
+            "delayedInitStart": "Отложенная инициализация qqq начата...",
+            "dowWarmup": "Прогрев qqq dow.js начат",
+            "q4LoadError": "Загрузка q4 не удалась: {0}",
+            "daemonsStart": "Запуск qqq startDaemons",
+            "engineSwitch": "Движок переключён на: {0}",
+            "pythonEnvImperfect": "[IO-движок] Среда Python неполная: {0}",
+            "transactionRecoverError": "Восстановление транзакции не удалось: {0}",
+            "activateComplete": "Активация расширения qqq завершена",
+            "q1LoadError": "Загрузка q1 не удалась: {0}",
+            "q2LoadError": "Загрузка q2 не удалась: {0}",
+            "deactivated": "Расширение qqq деактивировано",
+            "fsError": "[Ошибка файловой системы] {0}: {1}",
+            "uncaughtException": "Необработанное исключение: {0}",
+            "unhandledRejection": "Необработанный Promise rejection: {0}",
+            "pythonNoInterpreter": "Интерпретатор Python не установлен",
+            "pythonInvalid": "Интерпретатор Python недоступен",
+            "pythonDepsMissing": "Отсутствуют зависимости: {0}",
+            "pythonNoContext": "Среда не готова"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} отменено и откачено",
+            "anchorLostRollback": "{0} якорь потерян, откачено",
+            "downloadFailedRollback": "{0} загрузка не удалась, откачено",
+            "videoDownloadFailed": "Загрузка видео не удалась: {0}",
+            "plainPasteOnly": "qqq: доступна только обычная вставка.",
+            "clickSidebarToRelax": "qqq: нажмите кнопку на боковой панели для отдыха.",
+            "cooldownCleared": "qqq: период ожидания загрузки зависимостей сброшен.",
+            "cooldownClearError": "qqq: сброс периода ожидания не удался: {0}",
+            "cacheNotInit": "qqq: каталог кэша не инициализирован",
+            "openCacheDirError": "qqq: не удалось открыть каталог кэша: {0}",
+            "noStoragePath": "qqq: не удалось получить путь хранения",
+            "ytdlpDeleted": "qqq: удалено {0}",
+            "ytdlpNotExist": "qqq: yt-dlp.exe не существует",
+            "ytdlpDeleteError": "qqq: удаление yt-dlp.exe не удалось: {0}",
+            "globalStateCleared": "qqq: очищено {0} записей globalStates из {1}.",
+            "globalStateClearError": "qqq: очистка globalStates не удалась: {0}",
+            "clipboardHistoryCleared": "qqq: история буфера обмена очищена",
+            "clipboardManagerNotInit": "qqq: менеджер истории буфера не инициализирован",
+            "clipboardClearError": "qqq: очистка истории буфера не удалась: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "Сбросить период ожидания загрузки",
+            "clearCooldownDesc": "Позволяет немедленно загрузить снова",
+            "openCacheDir": "Открыть каталог кэша",
+            "deleteYtDlp": "Удалить yt-dlp",
+            "deleteYtDlpDesc": "Может вызвать обновление yt-dlp",
+            "clearGlobalStates": "Очистить базу globalStates",
+            "clearGlobalStatesDesc": "Очистить данные",
+            "clearClipboardHistory": "Очистить историю буфера обмена",
+            "selectTitle": "Выберите операцию с кэшем",
+            "selectPlaceholder": "Выберите операцию с кэшем для выполнения"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "Недопустимый URL.",
+            "cancelled": "Помечено как отменённое ({0}), очистка...",
+            "fallbackCleanup": "Выполнено сразу после killAll",
+            "fallbackCleanupError": "Не удалось: {0}",
+            "anchorLost": "Обнаружена потеря якоря",
+            "startProcess": "Начало обработки: {0}",
+            "usingCookies": "Использование глобального файла Cookie: {0}",
+            "cookieSearchError": "Ошибка поиска: {0}",
+            "cookieInvalid": "Обнаружен возможно недействительный Cookie ({0})",
+            "sniffing": "Умное обнаружение ресурсов...",
+            "playlistDetected": "Определён как плейлист, всего {0} видео.",
+            "singleVideo": "Определено как одиночное видео: {0}",
+            "probe403": "Проверка вернула 403"
+        }
+    },
+    "log": {
+        "msgpackError": "Критическая ошибка: не удалось загрузить зависимость msgpack-lite",
+        "binaryLoadError": "Загрузка бинарного файла не удалась, изоляция:",
+        "capacityFuse": "Сработал предохранитель ёмкости, пакетная очистка...",
+        "storageError": "Критическая ошибка хранилища:",
+        "ipcSerializeError": "Сериализация IPC-сообщения не удалась:",
+        "pythonPlaybackError": "Воспроизведение Python не удалось, переключение на Webview:",
+        "disposeError": "Принудительное завершение Dispose не удалось:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) проверка успешна {1}, переключение на высокопроизводительный режим"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "Стратегия экспорта: разрешение рамки",
+            "exportOriginalRes": "Стратегия экспорта: исходное разрешение",
+            "exportCipherKeep": "Стратегия экспорта: сохранить шифр",
+            "exportCipherRemove": "Стратегия экспорта: удалить шифр",
+            "exportFailed": "Экспорт не удался: {0}",
+            "zipWarning": "Предупреждение ZIP: {0}",
+            "addFileFailed": "Добавление файла не удалось: {0} - {1}",
+            "zipComplete": "Экспорт ZIP завершён: {0}, {1} элементов",
+            "zipFailed": "Экспорт ZIP не удался: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "Не удалось извлечь URL видео из HTML-фрагмента:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] Попытка spawn: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] Путь не существует: {0}",
+        "bridgeStartFailed": "Запуск Python bridge не удался ({0}): {1}",
+        "bridgeProcessError": "Ошибка процесса Python bridge ({0}): {1}",
+        "bridgeStartAllFailed": "Запуск Python Bridge не удался: {0}",
+        "fromScratchCallback": "[Python] Callback \"с нуля\" вызван, попытка горячего старта daemon: {0}",
+        "audioResetQqq": "[Python] Кэш аудиодвижка qqq сброшен",
+        "audioResetQqqError": "[Python] Сброс кэша аудиодвижка qqq не удался: {0}",
+        "audioResetQ4": "[Python] Состояние аудиоисточника Q4 сброшено",
+        "audioResetQ4Error": "[Python] Сброс состояния аудиоисточника Q4 не удался: {0}",
+        "daemonAvailable": "[Python] daemon уже доступен, горячий старт пропущен",
+        "hotStartSuccess": "[Python] Горячий старт успешен: {0}",
+        "ioEngineMain": "[Python] Предпочтение IO-движка {0}, daemon как основной",
+        "ioEngineStandby": "[Python] Предпочтение IO-движка {0}, daemon в режиме ожидания",
+        "ioEngineReadError": "[Python] Не удалось прочитать предпочтение IO-движка: {0}",
+        "hotStartFailed": "[Python] Горячий старт не удался",
+        "daemonSkipStart": "[Python] daemon уже доступен, глобальный запуск пропущен",
+        "bridgeUseSuccess": "Python Bridge успешно запущен с {0}",
+        "l1ImperfectWait": "[Python] L1 неполный, горячий старт после фоновой загрузки",
+        "bridgeStartException": "Исключение запуска Python Bridge: {0}"
+    },
+    "rust": {
+        "exeNotFound": "Исполняемый файл Rust Bridge не найден",
+        "tryStart": "Попытка запуска Rust Bridge: \"{0}\" --daemon",
+        "processError": "Ошибка процесса Rust Bridge: {0}",
+        "startSuccess": "Rust Bridge успешно запущен",
+        "startFailed": "Запуск Rust Bridge не удался: {0}",
+        "startException": "Исключение запуска Rust Bridge: {0}"
+    },
+    "shell": {
+        "tryStart": "Попытка запуска процесса PowerShell",
+        "tryOption": "Попытка запуска PowerShell с опцией {0}: {1}",
+        "processCreated": "Процесс PowerShell создан: {0}",
+        "optionFailed": "Запуск PowerShell с опцией {0} не удался: {1}",
+        "processError": "Ошибка процесса PowerShell: {0}",
+        "processExit": "Процесс PowerShell завершился, код: {0}, сигнал: {1}",
+        "bridgeStartFailed": "Запуск Shell Bridge не удался: {0}",
+        "processCreateFailed": "Создание процесса PowerShell не удалось: {0}",
+        "tryBash": "Попытка запуска процесса Bash",
+        "bashCreated": "Процесс Bash создан",
+        "bashCreateFailed": "Создание процесса Bash не удалось: {0}",
+        "warmupSuccess": "Фоновый прогрев ShellBridge успешен, компонент C# готов"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] Bridge уже активен (py={0}, rust={1}, shell={2}), очистка призрачных процессов пропущена",
+        "startWithEngine": "Запуск демонов, выбранный пользователем движок: {0}",
+        "startBridge": "Запуск {0} bridge...",
+        "bridgeStartFailedNamed": "{0} Bridge запуск не удался: {1}",
+        "bridgeStartException": "{0} Bridge исключение запуска: {1}",
+        "flowException": "Исключение процесса startDaemons: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "Проверка FFmpeg не удалась (Spawn Error): {0}",
+        "validateException": "Исключение асинхронной проверки FFmpeg: {0}"
+    },
+    "editor": {
+        "showDocFailed": "showTextDocument не удался: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] Очистка настройки не удалась {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] Получение снимка каталога не удалось: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] Недопустимый ID транзакции",
+        "notFound": "[Rollback] Транзакция не найдена: {0}",
+        "rollingBack": "[Rollback] Откат задачи: {0}",
+        "anchorDeleted": "[Rollback] Удалён остаточный якорь: {0}",
+        "anchorDeleteFailed": "[Rollback] Удаление якоря не удалось: {0}",
+        "anchorError": "[Rollback] Ошибка при обработке якоря: {0}",
+        "completed": "[Rollback] Откат завершён"
+    },
+    "cleanup": {
+        "tempFileFailed": "[Очистка временных файлов] Не удалось: {0}",
+        "videoWaitKillAll": "[Резервная очистка] Задача типа video, ожидание killAll",
+        "fallbackFailed": "[Резервная очистка] Не удалось: {0}",
+        "tempFileDeleted": "[Очистка временных файлов] Удалено: {0}{1}",
+        "exactMatch": " (точное совпадение transId)",
+        "tempFileCompleted": "[Очистка временных файлов] Завершено, удалено {0} файлов",
+        "refScanFailed": "[Сканирование ссылок] Не удалось: {0}",
+        "orphanFolderDeleted": "[Резервная очистка] Удалена осиротевшая папка: {0} (создана {1} сек назад)",
+        "orphanFileDeleted": "[Резервная очистка] Удалён осиротевший файл: {0} (создан {1} сек назад)",
+        "orphanCompleted": "[Резервная очистка] Завершено, удалено {0} осиротевших элементов",
+        "orphanException": "[Резервная очистка] Исключение: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] Найдено {0} незавершённых транзакций, начало очистки..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] Вставка не удалась: целевой каталог пуст",
+        "targetEmptyError": "Целевой каталог пуст",
+        "triggering": "[Q2] Запуск системной вставки в: {0}",
+        "shellUnavailable": "[Q2] Shell daemon недоступен",
+        "shellUnavailableError": "Shell daemon недоступен",
+        "shellResponse": "[Q2] Ответ Shell: {0}",
+        "shellError": "[Q2] Исключение Shell: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! Защита предохранителем: проверка ключевых активов не пройдена, движок заблокирован !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] Автокопирование VC++ DLL: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL отсутствует (не блокирует): {0}",
+        "optionalDepsMissing": "[PythonCheck] Опциональные зависимости отсутствуют (допустимо): {0}",
+        "slimComplete": "[Slim] Завершено: освобождено {0}МБ",
+        "platformArch": "[Python] платформа={0}, архитектура={1}, URL={2}",
+        "trySource": "[Python] Попытка {0}...",
+        "sourceSuccess": "[Python] {0} загрузка успешна",
+        "sourceFailed": "[Python] {0} не удалось: {1}",
+        "installPip": "[Python] Установка pip...",
+        "installDeps": "[Python] Установка зависимостей: {0}",
+        "startSlim": "[Python] Начало оптимизации...",
+        "pywin32Done": "[Python] Настройка pywin32 завершена",
+        "copyVcDll": "[Python] Копирование VC++ DLL: {0}",
+        "installFailed": "[Python] Установка не удалась: {0}"
+    }
+}

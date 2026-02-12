@@ -1,42 +1,107 @@
 {
+    "bridge": {
+        "errorResponse": "{0} استجابة خطأ: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} خطأ في العملية: {1}",
+        "processClose": "{0} تم إغلاق العملية، رمز الخروج: {1}",
+        "pingFailed": "{0} فشل ping، تم إجراء {1} محاولات",
+        "circuitBreaker": "{0} تعطل أكثر من 5 مرات في دقيقة واحدة، تم تفعيل الحماية، Bridge معطل نهائياً.",
+        "shellDaemonCrash": "node shell daemon في حالة غير طبيعية، qqq سيتوقف عن العمل. الحل: إعادة التشغيل.",
+        "shellDaemonDetail": "تم اكتشاف أعطال متكررة في الـ daemon الخلفي، ربما محظور بواسطة مضاد الفيروسات أو خلل في البيئة. تم إيقاف الوظائف الأساسية لحماية الاستقرار.",
+        "restartWindow": "إعادة تشغيل النافذة الآن",
+        "crashRestart": "{0} تعطلت العملية، محاولة إعادة التشغيل ({1}/{2})، تأخير {3}ms",
+        "restarting": "{0} جاري تنفيذ إعادة التشغيل...",
+        "restartSuccess": "{0} إعادة التشغيل ناجحة",
+        "restartFailed": "{0} فشلت إعادة التشغيل",
+        "restartException": "{0} استثناء إعادة التشغيل: {1}",
+        "maxRestartsReached": "{0} تعطلت العملية، تم الوصول لحد إعادة التشغيل، تم وضع علامة غير متاح",
+        "forceRevive": "{0} تم الوصول لحد إعادة التشغيل، لكن كخدمة مقيمة سيتم استعادتها خلال 3 ثوانٍ",
+        "actionFailed": "{0} فشل تنفيذ Action: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "فحص تبعيات Linux: xclip غير مثبت، جاري تحضير الإشعار",
+        "xclipPrompt": "qqq: الحافظة تتطلب xclip، هل تريد التثبيت الآن؟",
+        "installNow": "تثبيت الآن",
+        "copyCommand": "نسخ الأمر",
+        "dontAskAgain": "لا تسأل مرة أخرى",
+        "installingXclip": "جاري تثبيت xclip، الأمر: {0}",
+        "terminalTitle": "qqq: تثبيت xclip",
+        "xclipInstalled": "فحص تبعيات Linux: xclip مثبت",
+        "xclipInstallSuccess": "تم تثبيت xclip بنجاح",
+        "xclipInstallMaybeFailed": "قد يكون تثبيت xclip فشل",
+        "userCopyCmd": "المستخدم نسخ أمر التثبيت: {0}",
+        "userDismiss": "المستخدم أوقف إشعار تثبيت xclip",
+        "checkException": "استثناء فحص تبعيات Linux: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] تم اكتشاف ملف تالف ({0} بايت)، جاري إعادة التحميل",
+        "tryDownload": "[yt-dlp] محاولة التحميل من {0}...",
+        "downloadSuccess": "[yt-dlp] {0} تم التحميل بنجاح",
+        "downloadFailed": "[yt-dlp] {0} فشل التحميل: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 تطابق مثالي: {0}",
+        "l1Imperfect": "[PythonCheck] L1 غير مكتمل: {0}",
+        "l1ImperfectMissing": "، مفقود: {0}",
+        "inCooldown": "[PythonCheck] في فترة انتظار 72 ساعة (متبقي {0}س{1}د)، تم تخطي التحميل",
+        "triggerL4": "[PythonCheck] L1 غير مكتمل وليس في فترة انتظار، بدء تدفق L4 خلال 20 ثانية",
+        "startL4": "[PythonCheck] بدء عملية تحميل وتثبيت L4...",
+        "enteredCooldown": "[PythonCheck] دخل فترة الانتظار، تم تخطي التحميل",
+        "l4Success": "[PythonCheck] L4 تحميل وتثبيت ناجح: {0}",
+        "l4Callback": "[PythonCheck] تفعيل callback \"من الصفر\"، بدء daemon ساخن...",
+        "l4CallbackFailed": "[PythonCheck] callback \"من الصفر\" فشل: {0}",
+        "l4Failed": "[PythonCheck] L4 فشل: {0}",
+        "l4Exception": "[PythonCheck] L4 استثناء: {0}",
+        "ytdlpInstallFailed": "فشل تثبيت yt-dlp: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] تم مسح كل ذاكرة التخزين المؤقت",
+            "ffmpegError": "خطأ في عملية FFmpeg: {0}",
+            "anchorLost": "[AnchorWatch] فُقد المرساة، تراجع فوري: {0}",
+            "anchorReadError": "[AnchorWatch] تعذر قراءة المستند، يعتبر مرساة مفقودة: {0}",
+            "openFileFailed": "فشل فتح الملف: {0}",
+            "configUpdateCallback": "[q1] callback تحديث الإعدادات: {0}",
+            "transactionRecoverError": "فشل استعادة معاملة q1: {0}"
+        }
+    },
     "q2": {
         "ui": {
-            "pin": "ثبت",
+            "pin": "تثبيت",
             "newFile": "ملف جديد",
             "newFolder": "مجلد جديد",
             "openFolder": "فتح المجلد الحالي في مستكشف الملفات",
             "szSize": "عمود sz: حجم الملف",
-            "szCtime": "عمود sz: وقت الإنشاء",
-            "szMtime": "عمود sz: وقت التعديل",
-            "sortSize": "ترتيب: حسب حجم الملف",
-            "sortCtime": "ترتيب: حسب وقت الإنشاء",
-            "sortMtime": "ترتيب: حسب وقت التعديل",
-            "movedToRecycleBin": "تم نقل {0} إلى سلة المهملات",
+            "szCtime": "عمود sz: تاريخ الإنشاء",
+            "szMtime": "عمود sz: تاريخ التعديل",
+            "sortSize": "ترتيب: حسب الحجم",
+            "sortCtime": "ترتيب: حسب تاريخ الإنشاء",
+            "sortMtime": "ترتيب: حسب تاريخ التعديل",
+            "movedToRecycleBin": "{0} تم نقله إلى سلة المهملات",
             "deleteFailed": "qqq: فشل الحذف: {0}",
             "deleteItemFailed": "فشل حذف العنصر: {0} - {1}",
             "multiDeleteSuccess": "تم نقل {0} عنصر إلى سلة المهملات",
             "multiDeletePartial": "تم نقل {0} عنصر إلى سلة المهملات، فشل {1}",
             "multiDeleteFailed": "فشل حذف {0} عنصر.",
-            "permanentDeleted": "تم حذف {0} نهائياً",
+            "permanentDeleted": "{0} تم حذفه نهائياً",
             "permanentDeleteFailed": "فشل الحذف النهائي: {0}",
-            "permanentDeleteItemFailed": "فشل حذف العنصر نهائياً: {0} - {1}",
+            "permanentDeleteItemFailed": "فشل الحذف النهائي للعنصر: {0} - {1}",
             "multiPermanentDeleteSuccess": "تم حذف {0} عنصر نهائياً",
             "multiPermanentDeletePartial": "تم حذف {0} عنصر نهائياً، فشل {1}",
-            "multiPermanentDeleteFailed": "فشل حذف {0} عنصر نهائياً."
+            "multiPermanentDeleteFailed": "فشل الحذف النهائي لـ {0} عنصر."
         },
         "paste": {
-            "plainTextOnly": "qqq: الحافظة تحتوي على نص عادي فقط، لا يمكن اللصق في مدير الملفات"
+            "plainTextOnly": "qqq: الحافظة تحتوي على نص فقط، لا يمكن اللصق في مدير الملفات"
         },
         "error": {
             "integrityFailed": "فشل فحص السلامة.",
-            "renameFailed": "فشلت إعادة التسمية: يوجد ملف أو مجلد بنفس الاسم في الموقع المستهدف.",
+            "renameFailed": "فشلت إعادة التسمية: يوجد عنصر بنفس الاسم في الوجهة.",
             "renameError": "فشلت إعادة التسمية: {0}",
             "invalidPath": "مسار دليل غير صالح: {0}",
             "navError": "فشل التنقل: {0}",
-            "createFileFolderExists": "لا يمكن إنشاء الملف لأن مجلداً بنفس الاسم موجود بالفعل: \"{0}\"",
+            "createFileFolderExists": "لا يمكن إنشاء الملف، يوجد مجلد بنفس الاسم: \"{0}\"",
             "createFileError": "فشل إنشاء الملف: {0}",
             "folderExists": "لا يمكن الإنشاء، \"{0}\" موجود بالفعل.",
-            "unsupportedFile": "نوع الملف هذا غير مدعوم في VS Code: \"{0}\"",
+            "unsupportedFile": "هذا النوع من الملفات غير مدعوم في VS Code: \"{0}\"",
             "fileNotExists": "الملف لم يعد موجوداً: {0}",
             "openFileError": "فشل فتح الملف: {0}",
             "deleteParentForbidden": "عملية غير قانونية: حذف الدليل الأب ممنوع."
@@ -47,13 +112,24 @@
             "no": "لا"
         },
         "log": {
-            "getFolderSizeError": "فشل طلب حجم المجلد: {0} - {1}",
-            "readScmError": "فشل قراءة SCM الدقيق: {0}"
+            "getFolderSizeError": "فشل الحصول على حجم المجلد: {0} - {1}",
+            "readScmError": "فشل قراءة SCM: {0}",
+            "saveScmError": "فشل حفظ SCM: {0}",
+            "readDirError": "فشل قراءة محتويات الدليل: {0} - {1}",
+            "templateReadError": "تعذر قراءة قالب q2.html: {0}",
+            "updatePreviewError": "فشل تحديث منطقة المعاينة: {0}",
+            "watchStartError": "[Q2] فشل بدء مراقبة الملفات: {0}",
+            "diskFreeError": "فشل getDiskFree: {0}",
+            "createOpenError": "[Q2] فشل الفتح بعد الإنشاء: الملف غير موجود {0}",
+            "openDocError": "[Q2] فشل openTextDocument: {0}",
+            "openFileError": "[Q2] فشل فتح الملف: {0}",
+            "activated": "Q2: تم تفعيل مدير الملفات",
+            "configRefresh": "Q2: تم تغيير الإعدادات، جاري التحديث..."
         }
     },
     "q4": {
         "export": {
-            "success": "📦 تم تصدير السجل بنجاح",
+            "success": "📦 تم تصدير السجل بالكامل",
             "error": "فشل التصدير: {0}"
         },
         "import": {
@@ -74,18 +150,18 @@
         },
         "log": {
             "audioReset": "تم إعادة تعيين حالة مصدر الصوت",
-            "pythonCrash": "تعطل عملية Python، تم إيقاف واجهة التشغيل",
+            "pythonCrash": "تعطلت عملية Python، تم إيقاف واجهة التشغيل",
             "pythonNoMiniaudio": "محرك Python متصل لكن لم يتم اكتشاف تبعية miniaudio",
             "pythonProbeError": "استثناء فحص Python: {0}",
-            "pythonProbeFail": "فشل فحص محرك Python، استخدام Webview كبديل",
+            "pythonProbeFail": "فشل فحص محرك Python، استخدام Webview كاحتياطي",
             "audioPlay": "محرك {0} يشغل: {1}، تكرار: {2}",
-            "pythonPlaying": "اكتشف q4 أن Python يشغل عند بدء التشغيل، مزامنة الواجهة",
-            "audioSavor": "محرك {0} يشغل للاستمتاع: {1}، تكرار: {2}"
+            "pythonPlaying": "q4 اكتشف Python يشغل عند البدء، مزامنة الواجهة",
+            "audioSavor": "محرك {0} يشغل المفضل: {1}، تكرار: {2}"
         }
     },
     "qqq": {
         "log": {
-            "pasteCancelled": "تم إلغاء عملية اللصق من قبل المستخدم ({0})",
+            "pasteCancelled": "تم إلغاء عملية اللصق بواسطة المستخدم ({0})",
             "allFilesSkipped": "جميع الملفات {0} غير قابلة للوصول، تم تخطيها",
             "folderScan": "{0}: {1}ms، {2} ملف، {3}",
             "folderScanJs": "{0}: {1}ms، {2} ملف، {3} (JS)",
@@ -96,10 +172,68 @@
             "pythonPlayFail": "فشل تشغيل Python: {0}",
             "pythonPlayError": "استثناء تشغيل Python: {0}",
             "audioPlayError": "فشل تشغيل الصوت: {0}",
-            "anchorFileNotExist": "الملف غير موجود، يعتبر المرساة مفقودة: {0}",
-            "anchorLost": "المرساة مفقودة، تفعيل التراجع فوراً: {0}",
-            "anchorReadError": "لا يمكن قراءة المستند، يعتبر المرساة مفقودة: {0}",
-            "anchorReplaceFail": "فشل استبدال المرساة، التراجع عن المعاملة"
+            "anchorFileNotExist": "الملف غير موجود، يعتبر مرساة مفقودة: {0}",
+            "anchorLost": "فُقد المرساة، تراجع فوري: {0}",
+            "anchorReadError": "تعذر قراءة المستند، يعتبر مرساة مفقودة: {0}",
+            "anchorReplaceFail": "فشل استبدال المرساة، التراجع عن المعاملة",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) تم اكتشافه بنجاح",
+            "taskCancelled": "تم إلغاء المهمة {0} بواسطة المستخدم",
+            "anchorLostCancel": "[AnchorLost] فقدان المرساة أدى إلى الإلغاء",
+            "videoDownloadFailed": "فشل تحميل الفيديو: {0}",
+            "activating": "جاري تفعيل إضافة qqq...",
+            "cacheInitError": "فشل تهيئة ذاكرة التخزين المؤقت: {0}",
+            "delayedInitError": "فشل التهيئة المؤجلة: {0}",
+            "delayedInitStart": "بدأت التهيئة المؤجلة لـ qqq...",
+            "dowWarmup": "بدأ تسخين qqq dow.js",
+            "q4LoadError": "فشل تحميل q4: {0}",
+            "daemonsStart": "بدأ qqq startDaemons",
+            "engineSwitch": "تم تغيير المحرك إلى: {0}",
+            "pythonEnvImperfect": "[محرك IO] بيئة Python غير مكتملة: {0}",
+            "transactionRecoverError": "فشل استعادة المعاملة: {0}",
+            "activateComplete": "اكتمل تفعيل إضافة qqq",
+            "q1LoadError": "فشل تحميل q1: {0}",
+            "q2LoadError": "فشل تحميل q2: {0}",
+            "deactivated": "تم إلغاء تفعيل إضافة qqq",
+            "fsError": "[خطأ نظام الملفات] {0}: {1}",
+            "uncaughtException": "استثناء غير ملتقط: {0}",
+            "unhandledRejection": "رفض Promise غير معالج: {0}",
+            "pythonNoInterpreter": "مفسر Python غير مثبت",
+            "pythonInvalid": "مفسر Python غير متاح",
+            "pythonDepsMissing": "تبعيات مفقودة: {0}",
+            "pythonNoContext": "البيئة غير جاهزة"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} تم إلغاؤه والتراجع عنه",
+            "anchorLostRollback": "{0} فُقد المرساة، تم التراجع",
+            "downloadFailedRollback": "{0} فشل التحميل، تم التراجع",
+            "videoDownloadFailed": "فشل تحميل الفيديو: {0}",
+            "plainPasteOnly": "qqq: اللصق البسيط فقط متاح.",
+            "clickSidebarToRelax": "qqq: انقر على زر الشريط الجانبي للاسترخاء.",
+            "cooldownCleared": "qqq: تم مسح فترة انتظار تحميل التبعيات.",
+            "cooldownClearError": "qqq: فشل مسح فترة الانتظار: {0}",
+            "cacheNotInit": "qqq: دليل ذاكرة التخزين المؤقت غير مهيأ",
+            "openCacheDirError": "qqq: فشل فتح دليل ذاكرة التخزين المؤقت: {0}",
+            "noStoragePath": "qqq: تعذر الحصول على مسار التخزين",
+            "ytdlpDeleted": "qqq: تم حذف {0}",
+            "ytdlpNotExist": "qqq: yt-dlp.exe غير موجود",
+            "ytdlpDeleteError": "qqq: فشل حذف yt-dlp.exe: {0}",
+            "globalStateCleared": "qqq: تم مسح {0} بيانات من globalStates، الإجمالي {1}.",
+            "globalStateClearError": "qqq: فشل مسح globalStates: {0}",
+            "clipboardHistoryCleared": "qqq: تم مسح سجل الحافظة",
+            "clipboardManagerNotInit": "qqq: مدير سجل الحافظة غير مهيأ",
+            "clipboardClearError": "qqq: فشل مسح سجل الحافظة: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "مسح فترة انتظار التحميل",
+            "clearCooldownDesc": "يسمح بالتحميل مرة أخرى فوراً",
+            "openCacheDir": "فتح دليل ذاكرة التخزين المؤقت",
+            "deleteYtDlp": "حذف yt-dlp",
+            "deleteYtDlpDesc": "قد يؤدي إلى تحديث yt-dlp",
+            "clearGlobalStates": "مسح قاعدة بيانات globalStates",
+            "clearGlobalStatesDesc": "مسح البيانات",
+            "clearClipboardHistory": "مسح سجل الحافظة",
+            "selectTitle": "اختر عملية ذاكرة التخزين المؤقت",
+            "selectPlaceholder": "اختر عملية ذاكرة التخزين المؤقت للتنفيذ"
         }
     },
     "video": {
@@ -108,15 +242,15 @@
             "cancelled": "تم وضع علامة إلغاء ({0})، جاري التنظيف...",
             "fallbackCleanup": "تم التنفيذ فوراً بعد killAll",
             "fallbackCleanupError": "فشل: {0}",
-            "anchorLost": "اكتشاف فقدان المرساة، وضع علامة إلغاء وقتل العملية فوراً",
+            "anchorLost": "تم اكتشاف فقدان المرساة",
             "startProcess": "بدء المعالجة: {0}",
             "usingCookies": "استخدام ملف Cookie العام: {0}",
             "cookieSearchError": "خطأ في البحث: {0}",
-            "cookieInvalid": "اكتشاف Cookie غير صالح/مفقود محتمل ({0})، فتح دليل التكوين تلقائياً...",
-            "sniffing": "جاري الاستشعار الذكي للموارد...",
+            "cookieInvalid": "تم اكتشاف Cookie قد يكون غير صالح ({0})",
+            "sniffing": "جاري الاكتشاف الذكي للموارد...",
             "playlistDetected": "تم التعرف عليها كقائمة تشغيل، إجمالي {0} فيديو.",
             "singleVideo": "تم التعرف عليه كفيديو واحد: {0}",
-            "probe403": "الفحص أعاد 403، محاولة الإضافة إلى قائمة التنزيل لتفعيل التدفق المحسن."
+            "probe403": "أعاد الفحص 403"
         }
     },
     "log": {
@@ -126,6 +260,143 @@
         "storageError": "خطأ تخزين حرج:",
         "ipcSerializeError": "فشل تسلسل رسالة IPC:",
         "pythonPlaybackError": "فشل تشغيل Python، التبديل الدائم إلى Webview:",
-        "disposeError": "فشل إنهاء العملية:"
+        "disposeError": "فشل الإنهاء القسري لـ Dispose:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) فحص ناجح {1}، التبديل إلى وضع الأداء العالي"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "استراتيجية التصدير: دقة الإطار",
+            "exportOriginalRes": "استراتيجية التصدير: الدقة الأصلية",
+            "exportCipherKeep": "استراتيجية التصدير: الاحتفاظ بالتشفير",
+            "exportCipherRemove": "استراتيجية التصدير: إزالة التشفير",
+            "exportFailed": "فشل التصدير: {0}",
+            "zipWarning": "تحذير ZIP: {0}",
+            "addFileFailed": "فشل إضافة الملف: {0} - {1}",
+            "zipComplete": "اكتمل تصدير ZIP: {0}، {1} عنصر",
+            "zipFailed": "فشل تصدير ZIP: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "فشل استخراج رابط الفيديو من مقطع HTML:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] محاولة spawn: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] المسار غير موجود: {0}",
+        "bridgeStartFailed": "فشل بدء Python bridge ({0}): {1}",
+        "bridgeProcessError": "خطأ في عملية Python bridge ({0}): {1}",
+        "bridgeStartAllFailed": "فشل بدء Python Bridge: {0}",
+        "fromScratchCallback": "[Python] تم تفعيل callback \"من الصفر\"، محاولة بدء daemon ساخن: {0}",
+        "audioResetQqq": "[Python] تم إعادة تعيين ذاكرة محرك صوت qqq",
+        "audioResetQqqError": "[Python] فشل إعادة تعيين ذاكرة محرك صوت qqq: {0}",
+        "audioResetQ4": "[Python] تم إعادة تعيين حالة مصدر صوت Q4",
+        "audioResetQ4Error": "[Python] فشل إعادة تعيين حالة مصدر صوت Q4: {0}",
+        "daemonAvailable": "[Python] daemon متاح بالفعل، تم تخطي البدء الساخن",
+        "hotStartSuccess": "[Python] البدء الساخن ناجح: {0}",
+        "ioEngineMain": "[Python] تفضيل محرك IO {0}، daemon كرئيسي",
+        "ioEngineStandby": "[Python] تفضيل محرك IO {0}، daemon في وضع الانتظار",
+        "ioEngineReadError": "[Python] فشل قراءة تفضيل محرك IO: {0}",
+        "hotStartFailed": "[Python] فشل البدء الساخن",
+        "daemonSkipStart": "[Python] daemon متاح بالفعل، تم تخطي البدء العام",
+        "bridgeUseSuccess": "Python Bridge بدأ بنجاح مع {0}",
+        "l1ImperfectWait": "[Python] L1 غير مكتمل، بدء ساخن بعد التحميل في الخلفية",
+        "bridgeStartException": "استثناء بدء Python Bridge: {0}"
+    },
+    "rust": {
+        "exeNotFound": "ملف Rust Bridge التنفيذي غير موجود",
+        "tryStart": "محاولة بدء Rust Bridge: \"{0}\" --daemon",
+        "processError": "خطأ في عملية Rust Bridge: {0}",
+        "startSuccess": "Rust Bridge بدأ بنجاح",
+        "startFailed": "فشل بدء Rust Bridge: {0}",
+        "startException": "استثناء بدء Rust Bridge: {0}"
+    },
+    "shell": {
+        "tryStart": "محاولة بدء عملية PowerShell",
+        "tryOption": "محاولة بدء PowerShell مع الخيار {0}: {1}",
+        "processCreated": "تم إنشاء عملية PowerShell: {0}",
+        "optionFailed": "فشل بدء PowerShell مع الخيار {0}: {1}",
+        "processError": "خطأ في عملية PowerShell: {0}",
+        "processExit": "انتهت عملية PowerShell، الرمز: {0}، الإشارة: {1}",
+        "bridgeStartFailed": "فشل بدء Shell Bridge: {0}",
+        "processCreateFailed": "فشل إنشاء عملية PowerShell: {0}",
+        "tryBash": "محاولة بدء عملية Bash",
+        "bashCreated": "تم إنشاء عملية Bash",
+        "bashCreateFailed": "فشل إنشاء عملية Bash: {0}",
+        "warmupSuccess": "نجح تسخين ShellBridge في الخلفية، مكون C# جاهز"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] Bridge نشط بالفعل (py={0}, rust={1}, shell={2})، تم تخطي تنظيف العمليات الشبحية",
+        "startWithEngine": "بدء الـ daemons، المحرك المختار من المستخدم: {0}",
+        "startBridge": "بدء {0} bridge...",
+        "bridgeStartFailedNamed": "{0} Bridge فشل البدء: {1}",
+        "bridgeStartException": "{0} Bridge استثناء البدء: {1}",
+        "flowException": "استثناء تدفق startDaemons: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "فشل التحقق من FFmpeg (Spawn Error): {0}",
+        "validateException": "استثناء التحقق غير المتزامن من FFmpeg: {0}"
+    },
+    "editor": {
+        "showDocFailed": "فشل showTextDocument: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] فشل مسح الإعداد {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] فشل الحصول على لقطة الدليل: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] معرف معاملة غير صالح",
+        "notFound": "[Rollback] المعاملة غير موجودة: {0}",
+        "rollingBack": "[Rollback] جاري التراجع عن المهمة: {0}",
+        "anchorDeleted": "[Rollback] تم حذف المرساة المتبقية: {0}",
+        "anchorDeleteFailed": "[Rollback] فشل حذف المرساة: {0}",
+        "anchorError": "[Rollback] خطأ في معالجة المرساة: {0}",
+        "completed": "[Rollback] اكتمل التراجع"
+    },
+    "cleanup": {
+        "tempFileFailed": "[تنظيف الملفات المؤقتة] فشل: {0}",
+        "videoWaitKillAll": "[التنظيف الاحتياطي] مهمة نوع فيديو، انتظار killAll",
+        "fallbackFailed": "[التنظيف الاحتياطي] فشل: {0}",
+        "tempFileDeleted": "[تنظيف الملفات المؤقتة] تم الحذف: {0}{1}",
+        "exactMatch": " (تطابق دقيق لـ transId)",
+        "tempFileCompleted": "[تنظيف الملفات المؤقتة] اكتمل، تم حذف {0} ملف",
+        "refScanFailed": "[فحص المراجع] فشل: {0}",
+        "orphanFolderDeleted": "[التنظيف الاحتياطي] تم حذف المجلد اليتيم: {0} (أُنشئ منذ {1} ثانية)",
+        "orphanFileDeleted": "[التنظيف الاحتياطي] تم حذف الملف اليتيم: {0} (أُنشئ منذ {1} ثانية)",
+        "orphanCompleted": "[التنظيف الاحتياطي] اكتمل، تم حذف {0} عنصر يتيم",
+        "orphanException": "[التنظيف الاحتياطي] استثناء: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] تم العثور على {0} معاملة غير مكتملة، بدء التنظيف..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] فشل اللصق: دليل الوجهة فارغ",
+        "targetEmptyError": "دليل الوجهة فارغ",
+        "triggering": "[Q2] تفعيل لصق النظام إلى: {0}",
+        "shellUnavailable": "[Q2] Shell daemon غير متاح",
+        "shellUnavailableError": "Shell daemon غير متاح",
+        "shellResponse": "[Q2] استجابة Shell: {0}",
+        "shellError": "[Q2] استثناء Shell: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! حماية الفيوز: فشل التحقق من الأصول الحرجة، المحرك مقفل !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] نسخ تلقائي لـ VC++ DLL: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL مفقود (غير مانع): {0}",
+        "optionalDepsMissing": "[PythonCheck] تبعيات اختيارية مفقودة (مسموح): {0}",
+        "slimComplete": "[Slim] اكتمل: تم تحرير {0}MB",
+        "platformArch": "[Python] المنصة={0}، البنية={1}، URL={2}",
+        "trySource": "[Python] محاولة {0}...",
+        "sourceSuccess": "[Python] {0} تحميل ناجح",
+        "sourceFailed": "[Python] {0} فشل: {1}",
+        "installPip": "[Python] جاري تثبيت pip...",
+        "installDeps": "[Python] جاري تثبيت التبعيات: {0}",
+        "startSlim": "[Python] بدء التحسين...",
+        "pywin32Done": "[Python] اكتمل تكوين pywin32",
+        "copyVcDll": "[Python] نسخ VC++ DLL: {0}",
+        "installFailed": "[Python] فشل التثبيت: {0}"
     }
 }

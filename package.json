@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.63.72",
+  "version": "15.63.73",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -35,19 +35,29 @@
             "default": "中文",
             "enum": [
               "中文",
+              "繁體中文",
               "English",
               "日本語",
               "Deutsch",
               "Русский",
-              "العربية"
+              "العربية",
+              "한국어",
+              "Español",
+              "Français",
+              "Português BR"
             ],
             "markdownEnumDescriptions": [
               "%config.language.enum.zh%",
+              "%config.language.enum.zh-tw%",
               "%config.language.enum.en%",
               "%config.language.enum.ja%",
               "%config.language.enum.de%",
               "%config.language.enum.ru%",
-              "%config.language.enum.ar%"
+              "%config.language.enum.ar%",
+              "%config.language.enum.ko%",
+              "%config.language.enum.es%",
+              "%config.language.enum.fr%",
+              "%config.language.enum.pt-br%"
             ],
             "markdownDescription": "%config.language.desc%"
           },

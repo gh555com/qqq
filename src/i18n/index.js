@@ -18,6 +18,7 @@ let extensionPath = null;
 // 语言代码映射 (qqq.language 设置值 → 语言文件名)
 const LANG_MAP = {
     '中文': 'zh',
+    '繁體中文': 'zh-tw',
     'English': 'en',
     '日本語': 'ja',
     'Deutsch': 'de',
@@ -32,7 +33,7 @@ const LANG_MAP = {
 // VS Code 语言 → 我们的语言代码
 const VSCODE_LANG_MAP = {
     'zh-cn': 'zh',
-    'zh-tw': 'zh',
+    'zh-tw': 'zh-tw',
     'zh': 'zh',
     'en': 'en',
     'en-us': 'en',
@@ -64,7 +65,7 @@ function loadAllLocales() {
         path.dirname(__filename || ''),
     ].filter(Boolean);
 
-    const langFiles = ['zh', 'en', 'ja', 'ar', 'de', 'ru', 'ko', 'es', 'fr', 'pt-br'];
+    const langFiles = ['zh', 'en', 'ja', 'ar', 'de', 'ru', 'ko', 'es', 'fr', 'pt-br', 'zh-tw'];
     let foundDir = null;
 
     for (const dir of possibleDirs) {

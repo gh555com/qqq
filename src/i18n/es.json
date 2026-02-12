@@ -1,0 +1,402 @@
+{
+    "bridge": {
+        "errorResponse": "{0} respuesta de error: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} error de proceso: {1}",
+        "processClose": "{0} proceso cerrado, código de salida: {1}",
+        "pingFailed": "{0} ping falló, {1} intentos realizados",
+        "circuitBreaker": "{0} se bloqueó más de 5 veces en 1 minuto, protección activada, Bridge deshabilitado permanentemente.",
+        "shellDaemonCrash": "node shell daemon en estado anormal, qqq dejará de funcionar. Solución: reiniciar.",
+        "shellDaemonDetail": "Se detectaron fallos frecuentes del daemon en segundo plano, posiblemente bloqueado por antivirus o anomalía del entorno. Las funciones principales se han pausado para proteger la estabilidad.",
+        "restartWindow": "Reiniciar ventana ahora",
+        "crashRestart": "{0} proceso bloqueado, intentando reiniciar ({1}/{2}), retraso {3}ms",
+        "restarting": "{0} ejecutando reinicio...",
+        "restartSuccess": "{0} reinicio exitoso",
+        "restartFailed": "{0} reinicio falló",
+        "restartException": "{0} excepción de reinicio: {1}",
+        "maxRestartsReached": "{0} proceso bloqueado, límite de reinicios alcanzado, marcado como no disponible",
+        "forceRevive": "{0} límite de reinicios alcanzado, pero como servicio residente se recuperará en 3 segundos",
+        "actionFailed": "{0} ejecución de Action falló: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "Verificación de dependencias Linux: xclip no instalado, preparando notificación",
+        "xclipPrompt": "qqq: el portapapeles requiere xclip, ¿instalar ahora?",
+        "installNow": "Instalar ahora",
+        "copyCommand": "Copiar comando",
+        "dontAskAgain": "No volver a preguntar",
+        "installingXclip": "Instalando xclip, comando: {0}",
+        "terminalTitle": "qqq: instalar xclip",
+        "xclipInstalled": "Verificación de dependencias Linux: xclip instalado",
+        "xclipInstallSuccess": "xclip instalado correctamente",
+        "xclipInstallMaybeFailed": "La instalación de xclip puede haber fallado",
+        "userCopyCmd": "Usuario copió comando de instalación: {0}",
+        "userDismiss": "Usuario desactivó notificación de instalación de xclip",
+        "checkException": "Excepción en verificación de dependencias Linux: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] Archivo corrupto detectado ({0} bytes), descargando de nuevo",
+        "tryDownload": "[yt-dlp] Intentando descargar de {0}...",
+        "downloadSuccess": "[yt-dlp] {0} descarga exitosa",
+        "downloadFailed": "[yt-dlp] {0} descarga fallida: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 coincidencia perfecta: {0}",
+        "l1Imperfect": "[PythonCheck] L1 imperfecto: {0}",
+        "l1ImperfectMissing": ", faltante: {0}",
+        "inCooldown": "[PythonCheck] En período de espera de 72h (quedan {0}h{1}m), descarga omitida",
+        "triggerL4": "[PythonCheck] L1 imperfecto y no en espera, iniciando flujo L4 en 20 segundos",
+        "startL4": "[PythonCheck] Iniciando proceso de descarga e instalación L4...",
+        "enteredCooldown": "[PythonCheck] Entró en período de espera, descarga omitida",
+        "l4Success": "[PythonCheck] L4 descarga e instalación exitosa: {0}",
+        "l4Callback": "[PythonCheck] Activando callback \"desde cero\", inicio en caliente del daemon...",
+        "l4CallbackFailed": "[PythonCheck] Callback \"desde cero\" falló: {0}",
+        "l4Failed": "[PythonCheck] L4 falló: {0}",
+        "l4Exception": "[PythonCheck] L4 excepción: {0}",
+        "ytdlpInstallFailed": "Instalación de yt-dlp falló: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] Todo el caché limpiado",
+            "ffmpegError": "Error de proceso FFmpeg: {0}",
+            "anchorLost": "[AnchorWatch] Ancla perdida, reversión inmediata: {0}",
+            "anchorReadError": "[AnchorWatch] No se pudo leer documento, considerado como ancla perdida: {0}",
+            "openFileFailed": "Fallo al abrir archivo: {0}",
+            "configUpdateCallback": "[q1] Callback de actualización de configuración: {0}",
+            "transactionRecoverError": "Recuperación de transacción q1 falló: {0}"
+        }
+    },
+    "q2": {
+        "ui": {
+            "pin": "Fijar",
+            "newFile": "Nuevo archivo",
+            "newFolder": "Nueva carpeta",
+            "openFolder": "Abrir carpeta actual en explorador",
+            "szSize": "Columna sz: tamaño de archivo",
+            "szCtime": "Columna sz: fecha de creación",
+            "szMtime": "Columna sz: fecha de modificación",
+            "sortSize": "Ordenar: por tamaño",
+            "sortCtime": "Ordenar: por fecha de creación",
+            "sortMtime": "Ordenar: por fecha de modificación",
+            "movedToRecycleBin": "{0} movido a papelera",
+            "deleteFailed": "qqq: eliminación falló: {0}",
+            "deleteItemFailed": "Eliminación de elemento falló: {0} - {1}",
+            "multiDeleteSuccess": "{0} elementos movidos a papelera",
+            "multiDeletePartial": "{0} elementos movidos a papelera, {1} fallaron",
+            "multiDeleteFailed": "Eliminación de {0} elementos falló.",
+            "permanentDeleted": "{0} eliminado permanentemente",
+            "permanentDeleteFailed": "Eliminación permanente falló: {0}",
+            "permanentDeleteItemFailed": "Eliminación permanente de elemento falló: {0} - {1}",
+            "multiPermanentDeleteSuccess": "{0} elementos eliminados permanentemente",
+            "multiPermanentDeletePartial": "{0} elementos eliminados permanentemente, {1} fallaron",
+            "multiPermanentDeleteFailed": "Eliminación permanente de {0} elementos falló."
+        },
+        "paste": {
+            "plainTextOnly": "qqq: el portapapeles solo contiene texto, no se puede pegar en el administrador de archivos"
+        },
+        "error": {
+            "integrityFailed": "Verificación de integridad falló.",
+            "renameFailed": "Renombrar falló: ya existe un elemento con el mismo nombre en el destino.",
+            "renameError": "Renombrar falló: {0}",
+            "invalidPath": "Ruta de directorio inválida: {0}",
+            "navError": "Navegación falló: {0}",
+            "createFileFolderExists": "No se puede crear archivo, ya existe una carpeta con el mismo nombre: \"{0}\"",
+            "createFileError": "Creación de archivo falló: {0}",
+            "folderExists": "No se puede crear, \"{0}\" ya existe.",
+            "unsupportedFile": "Este tipo de archivo no es compatible con VS Code: \"{0}\"",
+            "fileNotExists": "El archivo ya no existe: {0}",
+            "openFileError": "Fallo al abrir archivo: {0}",
+            "deleteParentForbidden": "Operación ilegal: está prohibido eliminar el directorio padre."
+        },
+        "confirm": {
+            "overwriteFile": "El archivo \"{0}\" ya existe. ¿Sobrescribir?",
+            "yes": "Sí",
+            "no": "No"
+        },
+        "log": {
+            "getFolderSizeError": "Fallo al obtener tamaño de carpeta: {0} - {1}",
+            "readScmError": "Fallo al leer SCM: {0}",
+            "saveScmError": "Fallo al guardar SCM: {0}",
+            "readDirError": "Fallo al leer contenido del directorio: {0} - {1}",
+            "templateReadError": "No se pudo leer plantilla q2.html: {0}",
+            "updatePreviewError": "Fallo al actualizar área de vista previa: {0}",
+            "watchStartError": "[Q2] Fallo al iniciar vigilancia de archivos: {0}",
+            "diskFreeError": "getDiskFree falló: {0}",
+            "createOpenError": "[Q2] Fallo al abrir después de crear: archivo no encontrado {0}",
+            "openDocError": "[Q2] openTextDocument falló: {0}",
+            "openFileError": "[Q2] Fallo al abrir archivo: {0}",
+            "activated": "Q2: Administrador de archivos activado",
+            "configRefresh": "Q2: Configuración cambiada, actualizando..."
+        }
+    },
+    "q4": {
+        "export": {
+            "success": "📦 Historial exportado completamente",
+            "error": "Exportación falló: {0}"
+        },
+        "import": {
+            "success": "📥 Importados {0} registros exitosamente",
+            "error": "Importación falló: {0}"
+        },
+        "editor": {
+            "noActive": "No hay editor activo",
+            "noSelection": "No hay texto seleccionado"
+        },
+        "cache": {
+            "clearing": "Ejecutando tarea de limpieza, nivel: {0}",
+            "cacheCleared": "qqq_cache limpiado",
+            "cacheClearError": "Limpieza de caché falló: {0}",
+            "historyCleared": "Historial de portapapeles limpiado",
+            "stateCleared": "globalState limpiado",
+            "stateClearError": "Limpieza de globalState falló: {0}"
+        },
+        "log": {
+            "audioReset": "Estado de fuente de audio reiniciado",
+            "pythonCrash": "Proceso Python bloqueado, UI de reproducción detenida",
+            "pythonNoMiniaudio": "Motor Python conectado pero dependencia miniaudio no detectada",
+            "pythonProbeError": "Excepción de sondeo Python: {0}",
+            "pythonProbeFail": "Sondeo de motor Python falló, usando Webview como respaldo",
+            "audioPlay": "Motor {0} reproduciendo: {1}, bucle: {2}",
+            "pythonPlaying": "q4 detectó Python reproduciendo al iniciar, sincronizando UI",
+            "audioSavor": "Motor {0} reproduciendo favorito: {1}, bucle: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "Operación de pegar cancelada por usuario ({0})",
+            "allFilesSkipped": "Todos los {0} archivos son inaccesibles, omitidos",
+            "folderScan": "{0}: {1}ms, {2} archivos, {3}",
+            "folderScanJs": "{0}: {1}ms, {2} archivos, {3} (JS)",
+            "pythonUnavailable": "Motor Python no disponible: {0}",
+            "pythonCheckError": "Excepción de verificación de motor Python: {0}",
+            "contextWaiting": "extensionContext no inicializado, esperando...",
+            "pythonPlay": "Motor Python reproduciendo: {0}, bucle: {1}",
+            "pythonPlayFail": "Reproducción Python falló: {0}",
+            "pythonPlayError": "Excepción de reproducción Python: {0}",
+            "audioPlayError": "Reproducción de audio falló: {0}",
+            "anchorFileNotExist": "Archivo no existe, considerado como ancla perdida: {0}",
+            "anchorLost": "Ancla perdida, reversión inmediata: {0}",
+            "anchorReadError": "No se pudo leer documento, considerado como ancla perdida: {0}",
+            "anchorReplaceFail": "Reemplazo de ancla falló, revirtiendo transacción",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) detectado exitosamente",
+            "taskCancelled": "Tarea {0} cancelada por usuario",
+            "anchorLostCancel": "[AnchorLost] Pérdida de ancla activó cancelación",
+            "videoDownloadFailed": "Descarga de video falló: {0}",
+            "activating": "Activando extensión qqq...",
+            "cacheInitError": "Inicialización de caché falló: {0}",
+            "delayedInitError": "Inicialización retardada falló: {0}",
+            "delayedInitStart": "Inicialización retardada de qqq iniciada...",
+            "dowWarmup": "Calentamiento de qqq dow.js iniciado",
+            "q4LoadError": "Carga de q4 falló: {0}",
+            "daemonsStart": "qqq startDaemons iniciado",
+            "engineSwitch": "Motor cambiado a: {0}",
+            "pythonEnvImperfect": "[Motor IO] Entorno Python imperfecto: {0}",
+            "transactionRecoverError": "Recuperación de transacción falló: {0}",
+            "activateComplete": "Activación de extensión qqq completada",
+            "q1LoadError": "Carga de q1 falló: {0}",
+            "q2LoadError": "Carga de q2 falló: {0}",
+            "deactivated": "Extensión qqq desactivada",
+            "fsError": "[Error del sistema de archivos] {0}: {1}",
+            "uncaughtException": "Excepción no capturada: {0}",
+            "unhandledRejection": "Rechazo de Promise no manejado: {0}",
+            "pythonNoInterpreter": "Intérprete Python no instalado",
+            "pythonInvalid": "Intérprete Python no disponible",
+            "pythonDepsMissing": "Dependencias faltantes: {0}",
+            "pythonNoContext": "Entorno no listo"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} cancelado y revertido",
+            "anchorLostRollback": "{0} ancla perdida, revertido",
+            "downloadFailedRollback": "{0} descarga falló, revertido",
+            "videoDownloadFailed": "Descarga de video falló: {0}",
+            "plainPasteOnly": "qqq: solo disponible pegado simple.",
+            "clickSidebarToRelax": "qqq: haga clic en el botón de la barra lateral para relajarse.",
+            "cooldownCleared": "qqq: período de espera de descarga de dependencias limpiado.",
+            "cooldownClearError": "qqq: limpieza de período de espera falló: {0}",
+            "cacheNotInit": "qqq: directorio de caché no inicializado",
+            "openCacheDirError": "qqq: fallo al abrir directorio de caché: {0}",
+            "noStoragePath": "qqq: no se pudo obtener ruta de almacenamiento",
+            "ytdlpDeleted": "qqq: eliminado {0}",
+            "ytdlpNotExist": "qqq: yt-dlp.exe no existe",
+            "ytdlpDeleteError": "qqq: eliminación de yt-dlp.exe falló: {0}",
+            "globalStateCleared": "qqq: limpiados {0} datos de globalStates, total {1}.",
+            "globalStateClearError": "qqq: limpieza de globalStates falló: {0}",
+            "clipboardHistoryCleared": "qqq: historial de portapapeles limpiado",
+            "clipboardManagerNotInit": "qqq: administrador de historial de portapapeles no inicializado",
+            "clipboardClearError": "qqq: limpieza de historial de portapapeles falló: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "Limpiar período de espera de descarga",
+            "clearCooldownDesc": "Permite descargar inmediatamente de nuevo",
+            "openCacheDir": "Abrir directorio de caché",
+            "deleteYtDlp": "Eliminar yt-dlp",
+            "deleteYtDlpDesc": "Puede activar actualización de yt-dlp",
+            "clearGlobalStates": "Limpiar base de datos globalStates",
+            "clearGlobalStatesDesc": "Limpiar datos",
+            "clearClipboardHistory": "Limpiar historial de portapapeles",
+            "selectTitle": "Seleccionar operación de caché",
+            "selectPlaceholder": "Seleccione la operación de caché a ejecutar"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "URL inválida.",
+            "cancelled": "Marcado como cancelado ({0}), limpiando...",
+            "fallbackCleanup": "Ejecutado inmediatamente después de killAll",
+            "fallbackCleanupError": "Falló: {0}",
+            "anchorLost": "Pérdida de ancla detectada",
+            "startProcess": "Iniciando procesamiento: {0}",
+            "usingCookies": "Usando archivo Cookie global: {0}",
+            "cookieSearchError": "Error de búsqueda: {0}",
+            "cookieInvalid": "Posible Cookie inválido detectado ({0})",
+            "sniffing": "Detección inteligente de recursos...",
+            "playlistDetected": "Identificado como lista de reproducción, {0} videos en total.",
+            "singleVideo": "Identificado como video único: {0}",
+            "probe403": "Sondeo devolvió 403"
+        }
+    },
+    "log": {
+        "msgpackError": "Error crítico: no se pudo cargar dependencia msgpack-lite",
+        "binaryLoadError": "Carga binaria falló, aislando:",
+        "capacityFuse": "Fusible de capacidad activado, ejecutando limpieza por lotes...",
+        "storageError": "Error crítico de almacenamiento:",
+        "ipcSerializeError": "Serialización de mensaje IPC falló:",
+        "pythonPlaybackError": "Reproducción Python falló, cambiando permanentemente a Webview:",
+        "disposeError": "Terminación forzada de Dispose falló:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) sondeo exitoso {1}, cambiando a modo alto rendimiento"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "Estrategia de exportación: resolución de marco",
+            "exportOriginalRes": "Estrategia de exportación: resolución original",
+            "exportCipherKeep": "Estrategia de exportación: mantener cifrado",
+            "exportCipherRemove": "Estrategia de exportación: eliminar cifrado",
+            "exportFailed": "Exportación falló: {0}",
+            "zipWarning": "Advertencia ZIP: {0}",
+            "addFileFailed": "Fallo al agregar archivo: {0} - {1}",
+            "zipComplete": "Exportación ZIP completada: {0}, {1} elementos",
+            "zipFailed": "Exportación ZIP falló: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "Fallo al extraer URL de video del fragmento HTML:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] Intentando spawn: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] Ruta no existe: {0}",
+        "bridgeStartFailed": "Inicio de Python bridge falló ({0}): {1}",
+        "bridgeProcessError": "Error de proceso Python bridge ({0}): {1}",
+        "bridgeStartAllFailed": "Inicio de Python Bridge falló: {0}",
+        "fromScratchCallback": "[Python] Callback \"desde cero\" activado, intentando inicio en caliente del daemon: {0}",
+        "audioResetQqq": "[Python] Caché de motor de audio qqq reiniciado",
+        "audioResetQqqError": "[Python] Reinicio de caché de motor de audio qqq falló: {0}",
+        "audioResetQ4": "[Python] Estado de fuente de audio Q4 reiniciado",
+        "audioResetQ4Error": "[Python] Reinicio de estado de fuente de audio Q4 falló: {0}",
+        "daemonAvailable": "[Python] daemon ya disponible, inicio en caliente omitido",
+        "hotStartSuccess": "[Python] Inicio en caliente exitoso: {0}",
+        "ioEngineMain": "[Python] Preferencia de motor IO {0}, daemon como principal",
+        "ioEngineStandby": "[Python] Preferencia de motor IO {0}, daemon en espera",
+        "ioEngineReadError": "[Python] Fallo al leer preferencia de motor IO: {0}",
+        "hotStartFailed": "[Python] Inicio en caliente falló",
+        "daemonSkipStart": "[Python] daemon ya disponible, inicio global omitido",
+        "bridgeUseSuccess": "Python Bridge iniciado exitosamente con {0}",
+        "l1ImperfectWait": "[Python] L1 imperfecto, inicio en caliente después de descarga en segundo plano",
+        "bridgeStartException": "Excepción de inicio de Python Bridge: {0}"
+    },
+    "rust": {
+        "exeNotFound": "Ejecutable de Rust Bridge no encontrado",
+        "tryStart": "Intentando iniciar Rust Bridge: \"{0}\" --daemon",
+        "processError": "Error de proceso Rust Bridge: {0}",
+        "startSuccess": "Rust Bridge iniciado exitosamente",
+        "startFailed": "Inicio de Rust Bridge falló: {0}",
+        "startException": "Excepción de inicio de Rust Bridge: {0}"
+    },
+    "shell": {
+        "tryStart": "Intentando iniciar proceso PowerShell",
+        "tryOption": "Intentando iniciar PowerShell con opción {0}: {1}",
+        "processCreated": "Proceso PowerShell creado: {0}",
+        "optionFailed": "Inicio de PowerShell con opción {0} falló: {1}",
+        "processError": "Error de proceso PowerShell: {0}",
+        "processExit": "Proceso PowerShell terminó, código: {0}, señal: {1}",
+        "bridgeStartFailed": "Inicio de Shell Bridge falló: {0}",
+        "processCreateFailed": "Creación de proceso PowerShell falló: {0}",
+        "tryBash": "Intentando iniciar proceso Bash",
+        "bashCreated": "Proceso Bash creado",
+        "bashCreateFailed": "Creación de proceso Bash falló: {0}",
+        "warmupSuccess": "Calentamiento de ShellBridge en segundo plano exitoso, componente C# listo"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] Bridge ya activo (py={0}, rust={1}, shell={2}), limpieza de procesos fantasma omitida",
+        "startWithEngine": "Iniciando daemons, motor seleccionado por usuario: {0}",
+        "startBridge": "Iniciando {0} bridge...",
+        "bridgeStartFailedNamed": "{0} Bridge inicio falló: {1}",
+        "bridgeStartException": "{0} Bridge excepción de inicio: {1}",
+        "flowException": "Excepción de flujo startDaemons: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "Validación de FFmpeg falló (Spawn Error): {0}",
+        "validateException": "Excepción de validación asíncrona de FFmpeg: {0}"
+    },
+    "editor": {
+        "showDocFailed": "showTextDocument falló: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] Limpieza de configuración falló {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] Fallo al obtener instantánea de directorio: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] ID de transacción inválido",
+        "notFound": "[Rollback] Transacción no encontrada: {0}",
+        "rollingBack": "[Rollback] Revirtiendo tarea: {0}",
+        "anchorDeleted": "[Rollback] Ancla residual eliminada: {0}",
+        "anchorDeleteFailed": "[Rollback] Eliminación de ancla falló: {0}",
+        "anchorError": "[Rollback] Error al procesar ancla: {0}",
+        "completed": "[Rollback] Reversión completada"
+    },
+    "cleanup": {
+        "tempFileFailed": "[Limpieza de archivos temporales] Falló: {0}",
+        "videoWaitKillAll": "[Limpieza de respaldo] Tarea tipo video, esperando killAll",
+        "fallbackFailed": "[Limpieza de respaldo] Falló: {0}",
+        "tempFileDeleted": "[Limpieza de archivos temporales] Eliminado: {0}{1}",
+        "exactMatch": " (coincidencia exacta de transId)",
+        "tempFileCompleted": "[Limpieza de archivos temporales] Completado, {0} archivos eliminados",
+        "refScanFailed": "[Escaneo de referencias] Falló: {0}",
+        "orphanFolderDeleted": "[Limpieza de respaldo] Carpeta huérfana eliminada: {0} (creada hace {1} seg)",
+        "orphanFileDeleted": "[Limpieza de respaldo] Archivo huérfano eliminado: {0} (creado hace {1} seg)",
+        "orphanCompleted": "[Limpieza de respaldo] Completado, {0} elementos huérfanos eliminados",
+        "orphanException": "[Limpieza de respaldo] Excepción: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] Encontradas {0} transacciones incompletas, iniciando limpieza..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] Pegar falló: directorio destino vacío",
+        "targetEmptyError": "Directorio destino vacío",
+        "triggering": "[Q2] Activando pegado del sistema a: {0}",
+        "shellUnavailable": "[Q2] Shell daemon no disponible",
+        "shellUnavailableError": "Shell daemon no disponible",
+        "shellResponse": "[Q2] Respuesta de Shell: {0}",
+        "shellError": "[Q2] Excepción de Shell: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! Protección de fusible: verificación de activos críticos falló, motor bloqueado !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] Copia automática de VC++ DLL: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL faltante (no bloqueante): {0}",
+        "optionalDepsMissing": "[PythonCheck] Dependencias opcionales faltantes (permitido): {0}",
+        "slimComplete": "[Slim] Completado: {0}MB liberados",
+        "platformArch": "[Python] plataforma={0}, arquitectura={1}, URL={2}",
+        "trySource": "[Python] Intentando {0}...",
+        "sourceSuccess": "[Python] {0} descarga exitosa",
+        "sourceFailed": "[Python] {0} falló: {1}",
+        "installPip": "[Python] Instalando pip...",
+        "installDeps": "[Python] Instalando dependencias: {0}",
+        "startSlim": "[Python] Iniciando optimización...",
+        "pywin32Done": "[Python] Configuración de pywin32 completada",
+        "copyVcDll": "[Python] Copiando VC++ DLL: {0}",
+        "installFailed": "[Python] Instalación falló: {0}"
+    }
+}

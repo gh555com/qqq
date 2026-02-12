@@ -1,0 +1,402 @@
+{
+    "bridge": {
+        "errorResponse": "{0} 錯誤回應: {1}",
+        "stdout": "{0} stdout: {1}",
+        "stderr": "{0} stderr: {1}",
+        "processError": "{0} 進程錯誤: {1}",
+        "processClose": "{0} 進程關閉，退出碼: {1}",
+        "pingFailed": "{0} ping 失敗，已嘗試 {1} 次",
+        "circuitBreaker": "{0} 1分鐘內崩潰超過5次，已觸發熔斷保護，永久停用該 Bridge。",
+        "shellDaemonCrash": "node shell daemon 陷入異常，qqq 將停止工作。解決方案：重啟。",
+        "shellDaemonDetail": "偵測到後台守護進程頻繁崩潰，可能是被防毒軟體攔截或環境異常。為保護系統穩定性，核心功能已暫停。",
+        "restartWindow": "立即重啟視窗",
+        "crashRestart": "{0} 進程崩潰，嘗試重啟 ({1}/{2})，延遲 {3}ms",
+        "restarting": "{0} 正在執行重啟...",
+        "restartSuccess": "{0} 重啟成功",
+        "restartFailed": "{0} 重啟失敗",
+        "restartException": "{0} 重啟異常: {1}",
+        "maxRestartsReached": "{0} 進程崩潰，達到最大重啟次數，標記為不可用",
+        "forceRevive": "{0} 達到最大重啟次數，但作為常駐服務將在 3秒 後強制復活",
+        "actionFailed": "{0} 函數 Action 執行失敗: {1}"
+    },
+    "linux": {
+        "xclipNotInstalled": "Linux 依賴偵測: xclip 未安裝，準備提示使用者",
+        "xclipPrompt": "qqq: 剪貼簿功能需要 xclip，是否立即安裝？",
+        "installNow": "立即安裝",
+        "copyCommand": "複製指令",
+        "dontAskAgain": "不再提示",
+        "installingXclip": "正在安裝 xclip，使用指令: {0}",
+        "terminalTitle": "qqq: 安裝 xclip",
+        "xclipInstalled": "Linux 依賴偵測: xclip 已安裝",
+        "xclipInstallSuccess": "xclip 安裝成功",
+        "xclipInstallMaybeFailed": "xclip 安裝可能失敗",
+        "userCopyCmd": "使用者選擇複製安裝指令: {0}",
+        "userDismiss": "使用者選擇不再提示 xclip 安裝",
+        "checkException": "Linux 依賴偵測異常: {0}"
+    },
+    "dow": {
+        "corruptedFile": "[yt-dlp] 偵測到損壞檔案 ({0} bytes)，重新下載",
+        "tryDownload": "[yt-dlp] 嘗試從 {0} 下載...",
+        "downloadSuccess": "[yt-dlp] {0} 下載成功",
+        "downloadFailed": "[yt-dlp] {0} 下載失敗: {1}",
+        "l1PerfectHit": "[PythonCheck] L1 完美命中: {0}",
+        "l1Imperfect": "[PythonCheck] L1 不完美: {0}",
+        "l1ImperfectMissing": ", 缺失: {0}",
+        "inCooldown": "[PythonCheck] 在 72 小時冷卻期內 (剩餘 {0}h{1}m)，跳過下載",
+        "triggerL4": "[PythonCheck] L1 不完美且不在冷卻期，20 秒後觸發 L4 下載流程",
+        "startL4": "[PythonCheck] 開始 L4 下載安裝流程...",
+        "enteredCooldown": "[PythonCheck] 已進入冷卻期，跳過下載",
+        "l4Success": "[PythonCheck] L4 下載安裝成功: {0}",
+        "l4Callback": "[PythonCheck] 觸發 \"從無到有\" 回呼，熱啟動 daemon...",
+        "l4CallbackFailed": "[PythonCheck] \"從無到有\" 回呼失敗: {0}",
+        "l4Failed": "[PythonCheck] L4 失敗: {0}",
+        "l4Exception": "[PythonCheck] L4 異常: {0}",
+        "ytdlpInstallFailed": "yt-dlp 安裝失敗: {0}"
+    },
+    "q1": {
+        "log": {
+            "cacheCleared": "[Cache] 所有快取已清空",
+            "ffmpegError": "FFmpeg 進程錯誤: {0}",
+            "anchorLost": "[AnchorWatch] 錨點遺失，立即觸發回滾: {0}",
+            "anchorReadError": "[AnchorWatch] 無法讀取文件，視為錨點遺失: {0}",
+            "openFileFailed": "開啟檔案失敗: {0}",
+            "configUpdateCallback": "[q1] 設定更新回呼: {0}",
+            "transactionRecoverError": "q1 事務恢復失敗: {0}"
+        }
+    },
+    "q2": {
+        "ui": {
+            "pin": "常駐",
+            "newFile": "新建檔案",
+            "newFolder": "新建資料夾",
+            "openFolder": "在檔案總管中開啟目前資料夾",
+            "szSize": "sz區顯示: 檔案大小",
+            "szCtime": "sz區顯示: 建立時間",
+            "szMtime": "sz區顯示: 修改時間",
+            "sortSize": "排序: 按檔案大小",
+            "sortCtime": "排序: 按建立時間",
+            "sortMtime": "排序: 按修改時間",
+            "movedToRecycleBin": "{0} 已移至資源回收筒",
+            "deleteFailed": "qqq: 刪除失敗: {0}",
+            "deleteItemFailed": "刪除項目失敗: {0} - {1}",
+            "multiDeleteSuccess": "已將 {0} 個項目移至資源回收筒",
+            "multiDeletePartial": "已將 {0} 個項目移至資源回收筒，{1} 個處理失敗",
+            "multiDeleteFailed": "{0} 個項目刪除失敗。",
+            "permanentDeleted": "{0} 已永久刪除",
+            "permanentDeleteFailed": "永久刪除失敗: {0}",
+            "permanentDeleteItemFailed": "永久刪除項目失敗: {0} - {1}",
+            "multiPermanentDeleteSuccess": "已永久刪除 {0} 個項目",
+            "multiPermanentDeletePartial": "已永久刪除 {0} 個項目，{1} 個處理失敗",
+            "multiPermanentDeleteFailed": "{0} 個項目永久刪除失敗。"
+        },
+        "paste": {
+            "plainTextOnly": "qqq: 剪貼簿中是純文字，無法貼上到檔案管理器"
+        },
+        "error": {
+            "integrityFailed": "完整性檢查失敗。",
+            "renameFailed": "重新命名失敗：目標位置已存在同名項目。",
+            "renameError": "重新命名失敗: {0}",
+            "invalidPath": "無效的目錄路徑: {0}",
+            "navError": "導覽失敗: {0}",
+            "createFileFolderExists": "無法建立檔案，因為已存在同名資料夾: \"{0}\"",
+            "createFileError": "建立檔案失敗: {0}",
+            "folderExists": "無法建立，\"{0}\" 已存在。",
+            "unsupportedFile": "該檔案不支援在 VS Code 裡開啟: \"{0}\"",
+            "fileNotExists": "檔案已不存在: {0}",
+            "openFileError": "開啟檔案失敗: {0}",
+            "deleteParentForbidden": "非法操作：禁止刪除上層目錄。"
+        },
+        "confirm": {
+            "overwriteFile": "檔案 \"{0}\" 已存在，是否覆蓋？",
+            "yes": "是",
+            "no": "否"
+        },
+        "log": {
+            "getFolderSizeError": "請求取得資料夾大小失敗: {0} - {1}",
+            "readScmError": "讀取精細 SCM 失敗: {0}",
+            "saveScmError": "儲存精細 SCM 失敗: {0}",
+            "readDirError": "讀取目錄內容失敗: {0} - {1}",
+            "templateReadError": "無法讀取 q2.html 範本檔案: {0}",
+            "updatePreviewError": "更新資源展示區失敗: {0}",
+            "watchStartError": "[Q2] 啟動檔案監視失敗: {0}",
+            "diskFreeError": "getDiskFree 失敗: {0}",
+            "createOpenError": "[Q2] 建立後開啟失敗：檔案未找到 {0}",
+            "openDocError": "[Q2] openTextDocument 失敗: {0}",
+            "openFileError": "[Q2] 開啟檔案失敗: {0}",
+            "activated": "Q2: 檔案管理器已啟用",
+            "configRefresh": "Q2: 設定已變更，正在重新整理..."
+        }
+    },
+    "q4": {
+        "export": {
+            "success": "📦 歷史記錄已全量匯出",
+            "error": "匯出失敗: {0}"
+        },
+        "import": {
+            "success": "📥 成功增量匯入 {0} 筆記錄",
+            "error": "匯入失敗: {0}"
+        },
+        "editor": {
+            "noActive": "沒有作用中的編輯器",
+            "noSelection": "沒有選取任何文字"
+        },
+        "cache": {
+            "clearing": "執行清理任務，級別: {0}",
+            "cacheCleared": "qqq_cache 已清空",
+            "cacheClearError": "清理 cache 失敗: {0}",
+            "historyCleared": "剪貼簿歷史已清空",
+            "stateCleared": "globalState 已清空",
+            "stateClearError": "清理 globalState 失敗: {0}"
+        },
+        "log": {
+            "audioReset": "音訊來源狀態已重設",
+            "pythonCrash": "Python 進程崩潰，已停止播放 UI",
+            "pythonNoMiniaudio": "Python 引擎已連線但未偵測到 miniaudio 依賴",
+            "pythonProbeError": "Python 探測異常: {0}",
+            "pythonProbeFail": "Python 引擎探測未通過，使用 Webview 兜底",
+            "audioPlay": "{0} 引擎播放: {1}, 循環: {2}",
+            "pythonPlaying": "q4 啟動時偵測到 Python 正在播放，同步 UI",
+            "audioSavor": "{0} 引擎播放品味: {1}, 循環: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "貼上操作被使用者取消 ({0})",
+            "allFilesSkipped": "所有 {0} 個檔案都無法存取，已跳過",
+            "folderScan": "{0}: {1}ms, {2}檔案, {3}",
+            "folderScanJs": "{0}: {1}ms, {2}檔案, {3} (JS)",
+            "pythonUnavailable": "Python 引擎不可用: {0}",
+            "pythonCheckError": "Python 引擎偵測異常: {0}",
+            "contextWaiting": "extensionContext 未初始化，等待中...",
+            "pythonPlay": "Python 引擎播放: {0}, 循環: {1}",
+            "pythonPlayFail": "Python 播放失敗: {0}",
+            "pythonPlayError": "Python 播放異常: {0}",
+            "audioPlayError": "播放音訊失敗: {0}",
+            "anchorFileNotExist": "檔案不存在，視為錨點遺失: {0}",
+            "anchorLost": "錨點遺失，立即觸發回滾: {0}",
+            "anchorReadError": "無法讀取文件，視為錨點遺失: {0}",
+            "anchorReplaceFail": "錨點替換失敗，回滾事務",
+            "pythonAudioDetected": "[Audio] Python (miniaudio v{0}) 偵測成功",
+            "taskCancelled": "任務 {0} 被使用者取消",
+            "anchorLostCancel": "[AnchorLost] 錨點遺失觸發取消",
+            "videoDownloadFailed": "影片下載任務失敗: {0}",
+            "activating": "qqq 擴充功能啟用中...",
+            "cacheInitError": "快取初始化失敗: {0}",
+            "delayedInitError": "延遲初始化失敗: {0}",
+            "delayedInitStart": "qqq 延遲初始化開始...",
+            "dowWarmup": "qqq dow.js 預熱開始",
+            "q4LoadError": "q4 載入失敗: {0}",
+            "daemonsStart": "qqq startDaemons 開始",
+            "engineSwitch": "引擎切換為: {0}",
+            "pythonEnvImperfect": "[IO引擎] Python 環境不完美: {0}",
+            "transactionRecoverError": "事務恢復失敗: {0}",
+            "activateComplete": "qqq 擴充功能啟用完成",
+            "q1LoadError": "q1 載入失敗: {0}",
+            "q2LoadError": "q2 載入失敗: {0}",
+            "deactivated": "qqq 擴充功能已停用",
+            "fsError": "[檔案系統錯誤] {0}: {1}",
+            "uncaughtException": "未捕獲的異常: {0}",
+            "unhandledRejection": "未處理的Promise拒絕: {0}",
+            "pythonNoInterpreter": "Python 直譯器未安裝",
+            "pythonInvalid": "Python 直譯器不可用",
+            "pythonDepsMissing": "缺少依賴: {0}",
+            "pythonNoContext": "環境未就緒"
+        },
+        "ui": {
+            "taskCancelledRollback": "{0} 已取消並回滾",
+            "anchorLostRollback": "{0} 錨點遺失，已回滾",
+            "downloadFailedRollback": "{0} 下載失敗，已回滾",
+            "videoDownloadFailed": "影片下載失敗: {0}",
+            "plainPasteOnly": "qqq: 只能使用原始貼上。",
+            "clickSidebarToRelax": "qqq: 請點擊側邊欄按鈕開始放鬆。",
+            "cooldownCleared": "qqq: 依賴下載冷卻時間已清除。",
+            "cooldownClearError": "qqq: 清除冷卻時間失敗: {0}",
+            "cacheNotInit": "qqq: 快取目錄未初始化",
+            "openCacheDirError": "qqq: 開啟快取目錄失敗: {0}",
+            "noStoragePath": "qqq: 無法取得儲存路徑",
+            "ytdlpDeleted": "qqq: 已刪除{0}",
+            "ytdlpNotExist": "qqq: yt-dlp.exe 不存在",
+            "ytdlpDeleteError": "qqq: 刪除 yt-dlp.exe 失敗: {0}",
+            "globalStateCleared": "qqq: globalStates 已清理 {0} 筆資料，共 {1}。",
+            "globalStateClearError": "qqq: 清理 globalStates 失敗: {0}",
+            "clipboardHistoryCleared": "qqq: 剪貼簿歷史記錄已清空",
+            "clipboardManagerNotInit": "qqq: 剪貼簿歷史管理器未初始化",
+            "clipboardClearError": "qqq: 清空剪貼簿歷史失敗: {0}"
+        },
+        "clearCache": {
+            "clearCooldown": "清除依賴下載冷卻時間",
+            "clearCooldownDesc": "便於立即重新下載",
+            "openCacheDir": "開啟快取目錄",
+            "deleteYtDlp": "刪除影片下載元件 yt-dlp",
+            "deleteYtDlpDesc": "可觸發 yt-dlp 更新",
+            "clearGlobalStates": "清理 globalStates 資料庫",
+            "clearGlobalStatesDesc": "清空資料",
+            "clearClipboardHistory": "清空剪貼簿歷史記錄",
+            "selectTitle": "選擇快取操作",
+            "selectPlaceholder": "選擇要執行的快取操作"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "無效網址。",
+            "cancelled": "已標記取消（{0}），正在清理...",
+            "fallbackCleanup": "已在 killAll 後立即執行",
+            "fallbackCleanupError": "失敗: {0}",
+            "anchorLost": "偵測到錨點遺失",
+            "startProcess": "開始處理: {0}",
+            "usingCookies": "使用全域 Cookie 檔案: {0}",
+            "cookieSearchError": "搜尋出錯: {0}",
+            "cookieInvalid": "偵測到可能的 Cookie 失效 ({0})",
+            "sniffing": "正在智慧嗅探資源...",
+            "playlistDetected": "識別為播放清單，共 {0} 個影片。",
+            "singleVideo": "識別為單一影片: {0}",
+            "probe403": "探測傳回 403"
+        }
+    },
+    "log": {
+        "msgpackError": "嚴重錯誤：無法載入 msgpack-lite 依賴",
+        "binaryLoadError": "二進位載入失敗，執行隔離:",
+        "capacityFuse": "觸發容量熔斷，執行批次清理...",
+        "storageError": "儲存嚴重故障:",
+        "ipcSerializeError": "IPC 訊息序列化失敗:",
+        "pythonPlaybackError": "Python 播放失敗，永久切換到 Webview:",
+        "disposeError": "Dispose 強制終止失敗:",
+        "pythonProbeSuccess": "[Audio] Python (miniaudio v{0}) 探測成功 {1}，切換到高效能模式"
+    },
+    "q3": {
+        "log": {
+            "exportFrameRes": "匯出策略：使用相框解析度",
+            "exportOriginalRes": "匯出策略：使用原始解析度",
+            "exportCipherKeep": "匯出策略：保留暗號字串",
+            "exportCipherRemove": "匯出策略：移除暗號字串",
+            "exportFailed": "匯出失敗: {0}",
+            "zipWarning": "ZIP 警告: {0}",
+            "addFileFailed": "新增檔案失敗: {0} - {1}",
+            "zipComplete": "ZIP 匯出完成: {0}, 包含 {1} 個項目",
+            "zipFailed": "ZIP 匯出失敗: {0}"
+        }
+    },
+    "h": {
+        "log": {
+            "extractVideoUrlFailed": "從HTML片段擷取影片URL失敗:"
+        }
+    },
+    "python": {
+        "trySpawn": "[Python] 嘗試 spawn: {0} \"{1}\" --daemon",
+        "pathNotExist": "[Python] 路徑不存在: {0}",
+        "bridgeStartFailed": "Python bridge 啟動失敗 ({0}): {1}",
+        "bridgeProcessError": "Python bridge 進程錯誤 ({0}): {1}",
+        "bridgeStartAllFailed": "Python Bridge 啟動失敗：{0}",
+        "fromScratchCallback": "[Python] \"從無到有\" 回呼觸發，嘗試熱啟動 daemon: {0}",
+        "audioResetQqq": "[Python] 已重設 qqq 音訊引擎快取",
+        "audioResetQqqError": "[Python] 重設 qqq 音訊引擎快取失敗: {0}",
+        "audioResetQ4": "[Python] 已重設 Q4 音訊來源狀態",
+        "audioResetQ4Error": "[Python] 重設 Q4 音訊來源狀態失敗: {0}",
+        "daemonAvailable": "[Python] daemon 已可用，跳過熱啟動",
+        "hotStartSuccess": "[Python] 熱啟動成功: {0}",
+        "ioEngineMain": "[Python] IO 引擎偏好為 {0}，daemon 作為主力",
+        "ioEngineStandby": "[Python] IO 引擎偏好為 {0}，daemon 待命",
+        "ioEngineReadError": "[Python] 讀取 IO 引擎偏好失敗: {0}",
+        "hotStartFailed": "[Python] 熱啟動失敗",
+        "daemonSkipStart": "[Python] daemon 已可用，跳過全域啟動",
+        "bridgeUseSuccess": "Python Bridge 使用 {0} 啟動成功",
+        "l1ImperfectWait": "[Python] L1 不完美，等待背景下載完成後熱啟動",
+        "bridgeStartException": "Python Bridge 啟動異常: {0}"
+    },
+    "rust": {
+        "exeNotFound": "Rust Bridge 可執行檔未找到",
+        "tryStart": "Rust Bridge 嘗試啟動: \"{0}\" --daemon",
+        "processError": "Rust Bridge 進程錯誤: {0}",
+        "startSuccess": "Rust Bridge 啟動成功",
+        "startFailed": "Rust Bridge 啟動失敗：{0}",
+        "startException": "Rust Bridge 啟動異常: {0}"
+    },
+    "shell": {
+        "tryStart": "嘗試啟動 PowerShell 進程",
+        "tryOption": "嘗試使用選項 {0} 啟動 PowerShell: {1}",
+        "processCreated": "PowerShell 進程已建立: {0}",
+        "optionFailed": "使用選項 {0} 啟動 PowerShell 失敗: {1}",
+        "processError": "PowerShell 進程錯誤: {0}",
+        "processExit": "PowerShell 進程結束，代碼: {0}, 訊號: {1}",
+        "bridgeStartFailed": "Shell Bridge 啟動失敗：{0}",
+        "processCreateFailed": "PowerShell 進程建立失敗: {0}",
+        "tryBash": "嘗試啟動 Bash 進程",
+        "bashCreated": "Bash 進程已建立",
+        "bashCreateFailed": "Bash 進程建立失敗: {0}",
+        "warmupSuccess": "ShellBridge 背景預熱成功，C# 元件已就緒"
+    },
+    "daemons": {
+        "bridgeBusy": "[startDaemons] 已有 bridge 活動中 (py={0}, rust={1}, shell={2})，跳過幽靈進程清理",
+        "startWithEngine": "開始啟動守護進程，使用者選擇的引擎: {0}",
+        "startBridge": "啟動 {0} bridge...",
+        "bridgeStartFailedNamed": "{0} Bridge 啟動失敗：{1}",
+        "bridgeStartException": "{0} Bridge 啟動異常：{1}",
+        "flowException": "startDaemons 流程異常: {0}"
+    },
+    "ffmpeg": {
+        "validateFailed": "FFmpeg 驗證失敗 (Spawn Error): {0}",
+        "validateException": "FFmpeg 非同步驗證異常: {0}"
+    },
+    "editor": {
+        "showDocFailed": "showTextDocument 失敗: {0}"
+    },
+    "config": {
+        "clearFailed": "[ConfigGate] 清除設定失敗 {0}: {1}"
+    },
+    "snapshot": {
+        "getFailed": "[Snapshot] 取得目錄快照失敗: {0}"
+    },
+    "rollback": {
+        "invalidId": "[Rollback] 無效的事務ID",
+        "notFound": "[Rollback] 未找到事務: {0}",
+        "rollingBack": "[Rollback] 正在回滾任務: {0}",
+        "anchorDeleted": "[Rollback] 已刪除殘留錨點: {0}",
+        "anchorDeleteFailed": "[Rollback] 刪除錨點失敗: {0}",
+        "anchorError": "[Rollback] 處理錨點時出錯: {0}",
+        "completed": "[Rollback] 回滾完成"
+    },
+    "cleanup": {
+        "tempFileFailed": "[暫存檔清理] 失敗: {0}",
+        "videoWaitKillAll": "[兜底清理] video 類型任務，等待 killAll 後執行",
+        "fallbackFailed": "[兜底清理] 失敗: {0}",
+        "tempFileDeleted": "[暫存檔清理] 刪除: {0}{1}",
+        "exactMatch": " (transId精確比對)",
+        "tempFileCompleted": "[暫存檔清理] 完成，共刪除 {0} 個檔案",
+        "refScanFailed": "[參照掃描] 失敗: {0}",
+        "orphanFolderDeleted": "[兜底清理] 刪除孤兒資料夾: {0} (建立 {1}秒前)",
+        "orphanFileDeleted": "[兜底清理] 刪除孤兒檔案: {0} (建立 {1}秒前)",
+        "orphanCompleted": "[兜底清理] 完成，共刪除 {0} 個孤兒項目",
+        "orphanException": "[兜底清理] 異常: {0}"
+    },
+    "recovery": {
+        "found": "[Recovery] 發現 {0} 個未完成事務，開始清理..."
+    },
+    "q2paste": {
+        "targetEmpty": "[Q2] 貼上失敗：目標目錄為空",
+        "targetEmptyError": "目標目錄為空",
+        "triggering": "[Q2] 正在觸發系統貼上至: {0}",
+        "shellUnavailable": "[Q2] Shell daemon 不可用",
+        "shellUnavailableError": "Shell daemon 不可用",
+        "shellResponse": "[Q2] Shell 傳回: {0}",
+        "shellError": "[Q2] Shell 異常: {0}"
+    },
+    "integrity": {
+        "fuseLocked": "!!! 熔斷保護：核心資產驗證失敗，引擎已鎖定 !!!"
+    },
+    "qvenv": {
+        "vcppDllCopy": "[PythonCheck] 自動複製 VC++ DLL: {0}",
+        "vcppDllMissing": "[PythonCheck] VC++ DLL 缺失 (不阻擋): {0}",
+        "optionalDepsMissing": "[PythonCheck] 可選依賴缺失 (允許): {0}",
+        "slimComplete": "[Slim] 完成: 釋放 {0}MB",
+        "platformArch": "[Python] 平台={0}, 架構={1}, URL={2}",
+        "trySource": "[Python] 嘗試 {0}...",
+        "sourceSuccess": "[Python] {0} 下載成功",
+        "sourceFailed": "[Python] {0} 失敗: {1}",
+        "installPip": "[Python] 安裝 pip...",
+        "installDeps": "[Python] 安裝依賴: {0}",
+        "startSlim": "[Python] 開始精簡...",
+        "pywin32Done": "[Python] pywin32 設定完成",
+        "copyVcDll": "[Python] 複製 VC++ DLL: {0}",
+        "installFailed": "[Python] 安裝失敗: {0}"
+    }
+}

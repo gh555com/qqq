@@ -6,6 +6,7 @@
     "config.title.docExport": "📦 Configurações de exportação Doc",
     "config.language.desc": "☀️ Idioma / Language:",
     "config.language.enum.zh": "中文 (Chinês)",
+    "config.language.enum.zh-tw": "繁體中文 (Chinês tradicional)",
     "config.language.enum.en": "English (Inglês)",
     "config.language.enum.ja": "日本語 (Japonês)",
     "config.language.enum.de": "Deutsch (Alemão)",
