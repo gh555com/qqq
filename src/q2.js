@@ -2623,9 +2623,7 @@ function generateSidebarHtml(config) {
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const showRecycleBin =
-    (global.getConfig("showHistoryRecycleBin") !== false) &&
-    safeRecycleBin.length > 0;
+  const showRecycleBin = safeRecycleBin.length > 0;
 
   const recycleBinHtml = showRecycleBin
     ? `

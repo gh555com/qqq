@@ -1858,7 +1858,6 @@ let _durationTimer = null;
 // ★ ConfigGate (ULTIMATE VIP/Trial Config System)
 // ============================================================================
 const DEFAULT_CONFIG = {
-	"showHistoryRecycleBin": true,
 	"enlargeSmallImages": true,
 	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
@@ -1882,7 +1881,6 @@ const DEFAULT_CONFIG = {
 };
 
 const CONFIG_METADATA = {
-	"showHistoryRecycleBin": { name: "显示历史回收站", type: "boolean" },
 	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" },
 	"performanceMode": {
 		name: "性能模式", type: "enum",

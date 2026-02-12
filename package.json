@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.63.57",
+  "version": "15.63.58",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -105,12 +105,6 @@
         "title": "%config.title.rover%",
         "order": 20,
         "properties": {
-          "qqq.showHistoryRecycleBin": {
-            "order": 10,
-            "type": "boolean",
-            "default": true,
-            "markdownDescription": "%config.showHistoryRecycleBin.desc%"
-          },
           "qqq.szDisplayMode": {
             "order": 20,
             "type": "string",
