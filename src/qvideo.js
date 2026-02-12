@@ -11,7 +11,7 @@ const { TaskCounter, TaskMessage } = require('./global');
 const { q } = require('./i18n');
 
 // ★ 模块级工具函数
-const _sleep = ms => new Promise(r => setTimeouq(r, ms));
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ==================== ★ 视频下载消息适配器（使用 TaskMessage 统一真理源） ====================
 const QvideoMsg = {
@@ -74,7 +74,7 @@ const QvideoMsg = {
         let width = 0;
         let i = 0;
         for (; i < s.length; i++) {
-            const code = s.charCodeAq(i);
+            const code = s.charCodeAt(i);
             // 全角字符范围：CJK + 日文假名 + 全角标点 + Emoji + 阿拉伯文/希伯来文等
             const isWide = (
                 (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK 基本区
@@ -117,8 +117,8 @@ const QvideoMsg = {
         const s = total % 60;
         const m = Math.floor(total / 60) % 60;
         const h = Math.floor(total / 3600);
-        const ss = String(s).padStarq(2, '0');
-        const mm = String(m).padStarq(2, '0');
+        const ss = String(s).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
         if (h > 0) return `${h}:${mm}:${ss}`;
         return `${m}:${ss}`;
     },
@@ -146,14 +146,14 @@ const QvideoMsg = {
      * @param {Object} task - 任务对象
      * @param {string} message - 提示内容
      */
-    prompq(task, message) {
-        return TaskMessage.prompq(task?.taskTitle, message);
+    prompt(task, message) {
+        return TaskMessage.prompt(task?.taskTitle, message);
     }
 };
 
 class ChildProcessTracker {
     constructor() {
-        this._procs = new Seq();
+        this._procs = new Set();
         this._cancelled = false;
     }
 
@@ -297,7 +297,7 @@ class ChildProcessTracker {
             if (args.length >= 3 && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
             else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
 
-            if (!shouldIntercepq(cmd, options)) {
+            if (!shouldIntercept(cmd, options)) {
                 return ChildProcessTracker.__origSpawn(...args);
             }
 
@@ -333,7 +333,7 @@ class ChildProcessTracker {
             else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
             else if (args.length >= 3 && isObj(args[2]) && !Array.isArray(args[2])) { optionsIndex = 2; options = args[2]; }
 
-            if (!shouldIntercepq(cmd, options)) {
+            if (!shouldIntercept(cmd, options)) {
                 return ChildProcessTracker.__origExecFile(...args);
             }
 
@@ -366,7 +366,7 @@ class ChildProcessTracker {
 
             if (args.length >= 2 && isObj(args[1])) { optionsIndex = 1; options = args[1]; }
 
-            if (!shouldIntercepq(cmd, options)) {
+            if (!shouldIntercept(cmd, options)) {
                 return ChildProcessTracker.__origExec(...args);
             }
 
@@ -401,7 +401,7 @@ class ChildProcessTracker {
                 if (args.length >= 3 && isObj(args[2])) { optionsIndex = 2; options = args[2]; }
                 else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
 
-                if (!shouldIntercepq(cmd, options)) {
+                if (!shouldIntercept(cmd, options)) {
                     return ChildProcessTracker.__origFork(...args);
                 }
 
@@ -437,7 +437,7 @@ class ChildProcessTracker {
                 else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
 
                 // 不在 ALS scope / NO_TRACK / 排除 => 不动
-                if (!shouldIntercepq(cmd, options)) return ChildProcessTracker.__origSpawnSync(...args);
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origSpawnSync(...args);
 
                 if (optionsIndex >= 0) {
                     const fixed = cloneOptionsDetachedFalse(options);
@@ -462,7 +462,7 @@ class ChildProcessTracker {
                 else if (args.length >= 2 && isObj(args[1]) && !Array.isArray(args[1])) { optionsIndex = 1; options = args[1]; }
                 else if (args.length >= 3 && isObj(args[2]) && !Array.isArray(args[2])) { optionsIndex = 2; options = args[2]; }
 
-                if (!shouldIntercepq(cmd, options)) return ChildProcessTracker.__origExecFileSync(...args);
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origExecFileSync(...args);
 
                 if (optionsIndex >= 0) {
                     const fixed = cloneOptionsDetachedFalse(options);
@@ -485,7 +485,7 @@ class ChildProcessTracker {
                 // execSync(command[, options])
                 if (args.length >= 2 && isObj(args[1])) { optionsIndex = 1; options = args[1]; }
 
-                if (!shouldIntercepq(cmd, options)) return ChildProcessTracker.__origExecSync(...args);
+                if (!shouldIntercept(cmd, options)) return ChildProcessTracker.__origExecSync(...args);
 
                 if (optionsIndex >= 0) {
                     const fixed = cloneOptionsDetachedFalse(options);
@@ -525,7 +525,7 @@ ChildProcessTracker.__als = new AsyncLocalStorage();
 ChildProcessTracker.__patched = false;
 
 // 这些命令属于“打开/外壳 UI”，不要纳入追踪，不然取消会误杀
-ChildProcessTracker.__excludedCmds = new Seq([
+ChildProcessTracker.__excludedCmds = new Set([
     'explorer.exe',
     'open',
     'xdg-open',
@@ -543,7 +543,7 @@ function getSharedOutputChannel() {
 }
 
 // ★ 活跃任务集合（用于避免多任务互相干扰）
-const _activeTasks = new Seq();
+const _activeTasks = new Set();
 
 // ★ 弹窗兜底状态：记录消息弹窗是否被 VS Code “吃掉”（模块级变量，跨任务持久化）
 let _isInfoMessageEaten = false;
@@ -584,7 +584,7 @@ class Qvideo {
         if (!sizeStr) return 0;
         const match = sizeStr.match(/([\d\.]+)([KMGTiB]+)/i);
         if (!match) return 0;
-        const val = parseFloaq(match[1]);
+        const val = parseFloat(match[1]);
         const unit = match[2].toUpperCase();
         let multiplier = 1;
         if (unit.startsWith('K')) multiplier = 1024;
@@ -593,7 +593,7 @@ class Qvideo {
         return Math.floor(val * multiplier);
     }
 
-    _makeUrlSnippeq(url) {
+    _makeUrlSnippet(url) {
         return QvideoMsg._truncateByWidth(String(url || ''), 28);
     }
 
@@ -610,7 +610,7 @@ class Qvideo {
     }
 
     _deduplicateTasks(tasks) {
-        const seen = new Seq();
+        const seen = new Set();
         return tasks.filter(t => {
             if (!t.url) return false;
             if (seen.has(t.url)) return false;
@@ -634,7 +634,7 @@ class Qvideo {
                 const base = path.basename(u.pathname);
                 if (base && base.match(/\.(mp4|webm|mkv|mov|flv|avi|wmv|m4v|mpg|mpeg|3gp|ts|ogv)$/i)) {
                     // ★ 解码后用 _sanitizeFilename 处理，保留中文等字符
-                    const decoded = decodeURIComponenq(base);
+                    const decoded = decodeURIComponent(base);
                     const ext = path.extname(decoded);
                     const nameWithoutExt = path.basename(decoded, ext);
                     const sanitized = this._sanitizeFilename(nameWithoutExt);
@@ -669,7 +669,7 @@ class Qvideo {
         if (!s) return { ok: false };
 
         // 任何空白字符都直接判定为非网址（“自定义按钮 123”之类）
-        if (/\s/.tesq(s)) return { ok: false };
+        if (/\s/.test(s)) return { ok: false };
 
         // 宽松修正：https:/xxx -> https://xxx
         s = s.replace(/^(https?):\/(?!\/)/i, '$1://');
@@ -678,14 +678,14 @@ class Qvideo {
             const u = new URL(s);
             if (u.protocol === 'http:' || u.protocol === 'https:') {
                 const host = (u.hostname || '').trim();
-                if (host === 'localhost' || host.includes('.') || /^\d{1,3}(\.\d{1,3}){3}$/.tesq(host)) {
+                if (host === 'localhost' || host.includes('.') || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
                     return { ok: true, url: u.toString() };
                 }
             }
         } catch (e) { }
 
         const domainLike = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/;
-        if (domainLike.tesq(s)) {
+        if (domainLike.test(s)) {
             try {
                 const u2 = new URL('https://' + s);
                 return { ok: true, url: u2.toString() };
@@ -751,7 +751,7 @@ class Qvideo {
     }
 
     // ==================== 关闭通知（自动消失用） ====================
-    async _hideToastsBestEfforq() {
+    async _hideToastsBestEffort() {
         const cmds = [
             'notifications.hideToasts',
             'workbench.action.closeMessages',
@@ -766,7 +766,7 @@ class Qvideo {
     }
 
     // ==================== 三号弹窗：无效网址（9秒关闭） ====================
-    async _showInvalidUrlToasq(taskTitle = '') {
+    async _showInvalidUrlToast(taskTitle = '') {
         const prefix = taskTitle ? `${taskTitle} ` : 'qqq: ';
         const msg = `${prefix}${q('video.log.invalidUrl')}`;
         this.log(msg);
@@ -776,7 +776,7 @@ class Qvideo {
             title: "",
             cancellable: true
         }, async (progress, token) => {
-            progress.reporq({ message: msg });
+            progress.report({ message: msg });
 
             let done = false;
             return await new Promise((resolve) => {
@@ -786,17 +786,17 @@ class Qvideo {
                     resolve(null);
                 };
                 token.onCancellationRequested(() => finish());
-                setTimeouq(() => finish(), 9000);
+                setTimeout(() => finish(), 9000);
             });
         });
     }
 
     // ==================== 三号弹窗：任务结束（15秒自动关闭） ====================
-    async _showTaskDoneToasq(message, canOpen, filePath, folderPath, taskTitle = '') {
+    async _showTaskDoneToast(message, canOpen, filePath, folderPath, taskTitle = '') {
         // ★ 使用 withProgress 确保15秒自动关闭
         // VS Code 的 showInformationMessage 不支持自动关闭
         const { TaskMessage } = global;
-        await TaskMessage.showSimpleToasq(message, 15000, 'success');
+        await TaskMessage.showSimpleToast(message, 15000, 'success');
     }
 
     // ==================== downloader 内部弹窗屏蔽 ====================
@@ -846,7 +846,7 @@ class Qvideo {
                 landedFiles: [],
                 landedFolders: [],
                 taskType: 'video',  // ★ 视频下载任务
-                existingFiles: await global.getDirectorySnapshoq(targetDir)  // ★ 任务开始时的目录快照
+                existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
             });
         }
 
@@ -864,7 +864,7 @@ class Qvideo {
         // ★ 如果是内部事务（start 方法直接调用），显示弹窗
         if (!task.isExternalTrans) {
             const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
-            global.TaskMessage.showSimpleToasq(cancelMsg, 15000, 'cancel');
+            global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
         // ★ 先执行回滚（删除锚点等），但跳过延迟兜底清理
@@ -884,7 +884,7 @@ class Qvideo {
         } catch (e) { }
 
         // ★ 进程杀完后，稍微等待一下（给 OS 时间释放文件句柄）
-        await new Promise(resolve => setTimeouq(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         // ★ 进程杀完后立即执行兜底清理（pure）
         // 这样可以确保文件不被锁定
@@ -937,7 +937,7 @@ class Qvideo {
     }
 
     // ==================== start ====================
-    async starq() {
+    async start() {
         const raw = await vscode.window.showInputBox({
             prompt: "直接粘贴 [ 包含视频的网址 ] ",
             ignoreFocusOut: true,
@@ -957,7 +957,7 @@ class Qvideo {
 
         // ★ 生成任务标识
         const filePath = editor.document.uri.fsPath;
-        const taskNum = await TaskCounter.incremenq(filePath);  // 数据库递增编号（按文件）
+        const taskNum = await TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
         const iconNum = await TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
         const transId = global.TransactionManager.createTransactionId();  // 六位随机ID
         const taskTitle = TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
@@ -968,7 +968,7 @@ class Qvideo {
         // ★ 进度弹窗结束后，显示完成弹窗（15秒自动关闭）
         // ★ 取消弹窗已在 _cancelTask 中显示，这里只显示成功消息
         if (result && result.doneMessage && !result.cancelled) {
-            global.TaskMessage.showSimpleToasq(result.doneMessage, 15000, 'success');
+            global.TaskMessage.showSimpleToast(result.doneMessage, 15000, 'success');
             // ★ 报告统计数据 (仅当独立启动时，headless 模式由 q1.js 报告)
             if (result.finalTotalBytes) {
                 global.saveVideoStats(result.finalTotalBytes);
@@ -1005,7 +1005,7 @@ class Qvideo {
             return await ChildProcessTracker.runWithTracker(task.tracker, async () => {
                 const v = this._normalizeAndValidateUrl(rawUrl);
                 if (!v.ok) {
-                    if (!progressCallback) await this._showInvalidUrlToasq(task.taskTitle);
+                    if (!progressCallback) await this._showInvalidUrlToast(task.taskTitle);
                     return null;
                 }
 
@@ -1052,7 +1052,7 @@ class Qvideo {
             }
             if (candidates.length === 0) return null;
             // 按时间倒序，取最新的
-            candidates.sorq((a, b) => b.mtime - a.mtime);
+            candidates.sort((a, b) => b.mtime - a.mtime);
             return candidates[0].path;
         } catch (e) {
             this.log(`[Cookies] ${q('video.log.cookieSearchError', e.message)}`);
@@ -1085,12 +1085,12 @@ class Qvideo {
             const docPath = 'e:\\s\\wol\\py\\q3\\docs\\expert_cookies.txt';
             try {
                 if (fs.existsSync(docPath)) {
-                    await vscode.window.showTextDocumenq(vscode.Uri.file(docPath));
+                    await vscode.window.showTextDocument(vscode.Uri.file(docPath));
                 }
             } catch (e) { }
 
             // ★ 修复：使用 prompt 添加统一前缀
-            const promptMsg = QvideoMsg.prompq(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。');
+            const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。');
             global.showAutoCloseNotification('warning', promptMsg);
         }
     }
@@ -1098,12 +1098,12 @@ class Qvideo {
     // ==================== 普通流程：一号 + 三号 ====================
     async _fastProcess(task, url, targetDir, cookiesFilePath, progressCallback) {
         try {
-            const urlSnippet = this._makeUrlSnippeq(url);
+            const urlSnippet = this._makeUrlSnippet(url);
             const isYouTube = this._isYouTubeUrl(url);
 
             const runLogic = async (progress, token) => {
                 // ★ 解析阶段：使用新的 parsing 方法
-                progress.reporq({ message: QvideoMsg.parsing(task, url) });
+                progress.report({ message: QvideoMsg.parsing(task, url) });
 
                 if (token) {
                     token.onCancellationRequested(
@@ -1118,7 +1118,7 @@ class Qvideo {
 
                 let probeForbidden = false;
                 let hasStaticDirectVideo = false; // 标记是否有静态分析找到的直连视频
-                const staticDirectVideoUrls = new Seq(); // ★ 追踪静态分析找到的直连视频 URL
+                const staticDirectVideoUrls = new Set(); // ★ 追踪静态分析找到的直连视频 URL
                 try {
                     if (this._isTaskCancelled(task)) return null;
 
@@ -1205,7 +1205,7 @@ class Qvideo {
                 }
 
                 this.log(`准备下载 ${tasks.length} 个任务...`);
-                progress.reporq({ message: QvideoMsg.progress(task, '0k', url, 0, '') });
+                progress.report({ message: QvideoMsg.progress(task, '0k', url, 0, '') });
 
                 // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
                 // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
@@ -1215,7 +1215,7 @@ class Qvideo {
                         if (trans) {
                             const allDestPaths = tasks.map(t => t.destPath).filter(Boolean);
                             const newTempFiles = [...(trans.tempFiles || []), ...allDestPaths];
-                            await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Seq(newTempFiles)] });
+                            await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(newTempFiles)] });
                         }
                     } catch (e) {
                         this.log(`[事务] 预注册 tempFiles 失败: ${e.message}`);
@@ -1290,7 +1290,7 @@ class Qvideo {
                         const totalStr = this._formatBytesSimple(finalBytes);
                         // ★ 计算已耗时（格式 mm:ss 或 hh:mm:ss）
                         const elapsedMs = Date.now() - downloadStartMs;
-                        progress.reporq({ message: QvideoMsg.progress(task, totalStr, url, elapsedMs, '') });
+                        progress.report({ message: QvideoMsg.progress(task, totalStr, url, elapsedMs, '') });
                     }, 500);
 
                     if (this._isTaskCancelled(task)) return null;
@@ -1319,7 +1319,7 @@ class Qvideo {
                                         }
                                         if (currentBytes > 0) {
                                             // ★ 简化累计器：检测进度回退就累加
-                                            const entry = logProgressMap.geq(t.url) || { completed: 0, current: 0, lastPeak: 0 };
+                                            const entry = logProgressMap.get(t.url) || { completed: 0, current: 0, lastPeak: 0 };
 
                                             // ★ 关键：如果 currentBytes 明显小于 lastPeak，说明新阶段开始
                                             if (currentBytes < entry.lastPeak * 0.8 && entry.lastPeak > 512 * 1024) {
@@ -1333,7 +1333,7 @@ class Qvideo {
                                                 entry.lastPeak = Math.max(entry.lastPeak, currentBytes);
                                             }
 
-                                            logProgressMap.seq(t.url, entry);
+                                            logProgressMap.set(t.url, entry);
 
                                             // ★ 求和：completed + current
                                             let sum = 0;
@@ -1560,7 +1560,7 @@ class Qvideo {
         try {
             if (this._isTaskCancelled(task)) return null;  // ★ 取消检查
 
-            const currentFp = h.computeFingerprinq(filePath);
+            const currentFp = h.computeFingerprint(filePath);
             if (currentFp) {
                 // ★ 只在同一文件夹内去重，不同文件夹允许有相同文件
                 const dir = path.dirname(filePath);
@@ -1573,7 +1573,7 @@ class Qvideo {
                     if (!fs.statSync(full).isFile()) continue;
                     if (f.endsWith('.part') || f.endsWith('.ytdl') || f.endsWith('.tmp')) continue;
 
-                    const otherFp = h.computeFingerprinq(full);
+                    const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
                         this.log(`指纹重复，删除临时文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`);
                         try { fs.unlinkSync(filePath); } catch (e) { }
@@ -1632,7 +1632,7 @@ class Qvideo {
                             if (trans) {
                                 const oldTemp = (trans.tempFiles || []).filter(f => f !== verifiedPath && f !== filePath);
                                 oldTemp.push(targetPath);  // 添加新路径
-                                await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Seq(oldTemp)] });
+                                await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(oldTemp)] });
                             }
                         } catch (e) {
                             this.log(`[事务] 更新 tempFiles 失败: ${e.message}`);
@@ -1655,7 +1655,7 @@ class Qvideo {
             if (trans) {
                 const newLanded = [...(trans.landedFiles || []), normalizedPath];
                 // De-dupe
-                await global.TransactionManager.updateTransaction(task.transId, { landedFiles: [...new Seq(newLanded)] });
+                await global.TransactionManager.updateTransaction(task.transId, { landedFiles: [...new Set(newLanded)] });
             }
         }
 
@@ -1676,14 +1676,14 @@ class Qvideo {
             try {
                 // ★ 拦截不存在的路径，防止触发编辑器找不到文件的弹窗
                 if (!fs.existsSync(targetUri.fsPath)) return;
-                const doc = await vscode.workspace.openTextDocumenq(targetUri);
+                const doc = await vscode.workspace.openTextDocument(targetUri);
                 const lastLine = doc.lineCount - 1;
-                const range = new vscode.Range(lastLine, doc.lineAq(lastLine).text.length, lastLine, doc.lineAq(lastLine).text.length);
+                const range = new vscode.Range(lastLine, doc.lineAt(lastLine).text.length, lastLine, doc.lineAt(lastLine).text.length);
 
-                const edit = new vscode.WorkspaceEdiq();
+                const edit = new vscode.WorkspaceEdit();
                 const relPath = path.relative(path.dirname(targetUri.fsPath), fullPath).replace(/\\/g, '/');
-                edit.inserq(targetUri, range, `\n/\\${relPath}\\/\n`);
-                await vscode.workspace.applyEdiq(edit);
+                edit.insert(targetUri, range, `\n/\\${relPath}\\/\n`);
+                await vscode.workspace.applyEdit(edit);
             } catch (e) {
                 this.log(`Background insert failed: ${e.message}`);
             }
@@ -1697,8 +1697,8 @@ class Qvideo {
             const docDir = path.dirname(editor.document.uri.fsPath);
             let relPath = path.relative(docDir, fullPath).replace(/\\/g, '/');
 
-            await editor.ediq(editBuilder => {
-                editBuilder.inserq(editor.selection.active, `/\\${relPath}\\/\n`);
+            await editor.edit(editBuilder => {
+                editBuilder.insert(editor.selection.active, `/\\${relPath}\\/\n`);
             });
         } catch (e) {
             this.log(`insertPathToEditor failed: ${e.message}`);
@@ -1853,7 +1853,7 @@ class Qvideo {
         if (this._isTaskCancelled(task)) return null;
 
         // ★ 1. 检查记忆（用户之前选择的浏览器）
-        const custom = this.context.globalState.geq(this.KEY_CUSTOM_BROWSER);
+        const custom = this.context.globalState.get(this.KEY_CUSTOM_BROWSER);
         if (custom && fs.existsSync(custom)) {
             const v = await this._validateChromiumSilently(custom);
             if (v.valid) {
@@ -2005,14 +2005,14 @@ class Qvideo {
 
     async _cleanupSavedBrowserPaths() {
         try {
-            const savedDedicated = this.context.globalState.geq(this.KEY_DEDICATED_BROWSER);
+            const savedDedicated = this.context.globalState.get(this.KEY_DEDICATED_BROWSER);
             if (savedDedicated && !fs.existsSync(savedDedicated)) {
                 await this.context.globalState.update(this.KEY_DEDICATED_BROWSER, undefined);
             }
         } catch (e) { }
 
         try {
-            const savedCustom = this.context.globalState.geq(this.KEY_CUSTOM_BROWSER);
+            const savedCustom = this.context.globalState.get(this.KEY_CUSTOM_BROWSER);
             if (savedCustom && !fs.existsSync(savedCustom)) {
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
@@ -2061,7 +2061,7 @@ $of = $vi.OriginalFilename;
                         return;
                     }
 
-                    const parts = out.spliq('|').map(s => (s || '').trim());
+                    const parts = out.split('|').map(s => (s || '').trim());
                     const productName = parts[0] || '';
                     const fileDesc = parts[1] || '';
                     const productVersion = parts[2] || '';
@@ -2078,7 +2078,7 @@ $of = $vi.OriginalFilename;
                         text.includes('opera');
 
                     const version = productVersion || fileVersion || '';
-                    const hasVersion = /\d+\.\d+\.\d+\.\d+/.tesq(version) || /\d+\.\d+/.tesq(version);
+                    const hasVersion = /\d+\.\d+\.\d+\.\d+/.test(version) || /\d+\.\d+/.test(version);
 
                     if (isChromiumFamily && hasVersion) {
                         resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim(), raw: out });
@@ -2175,7 +2175,7 @@ $of = $vi.OriginalFilename;
 
                 this.log(`[Chrome] 尝试源 ${i + 1}/${chromeInfo.sources.length}: ${source.name}`);
                 this.log(`[Chrome] URL: ${source.url}`);
-                progress.reporq({ message: `0% - ${source.name} (版本 ${chromeInfo.version})` });
+                progress.report({ message: `0% - ${source.name} (版本 ${chromeInfo.version})` });
 
                 try {
                     await this._downloadFile(source.url, zipPath, progress, () => cancelled || this._isTaskCancelled(task));
@@ -2187,7 +2187,7 @@ $of = $vi.OriginalFilename;
 
                     // ★ 下载成功，继续解压
                     this.log(`[Chrome] 下载成功，来源: ${source.name}`);
-                    progress.reporq({ message: "解压中..." });
+                    progress.report({ message: "解压中..." });
 
                     await this._extractZip(zipPath, this.chromeHome);
 
@@ -2239,12 +2239,12 @@ $of = $vi.OriginalFilename;
     _downloadFile(url, destPath, progress, isCancelled) {
         return new Promise((resolve, reject) => {
             const doRequest = (currentUrl, redirectCount = 0) => {
-                if (redirectCount > 10) return rejecq(new Error('重定向次数过多'));
+                if (redirectCount > 10) return reject(new Error('重定向次数过多'));
                 if (isCancelled && isCancelled()) return resolve();
 
                 const protocol = currentUrl.startsWith('https') ? https : require('http');
 
-                protocol.geq(currentUrl, {
+                protocol.get(currentUrl, {
                     headers: { 'User-Agent': 'Mozilla/5.0 qqq-vscode-extension' }
                 }, (res) => {
                     if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -2256,15 +2256,15 @@ $of = $vi.OriginalFilename;
                                 : `${urlObj.protocol}//${urlObj.host}${urlObj.pathname.replace(/\/[^\/]*$/, '/')}${next}`;
                         }
                         res.resume();
-                        return doRequesq(next, redirectCount + 1);
+                        return doRequest(next, redirectCount + 1);
                     }
 
                     if (res.statusCode !== 200) {
                         res.resume();
-                        return rejecq(new Error(`HTTP ${res.statusCode}`));
+                        return reject(new Error(`HTTP ${res.statusCode}`));
                     }
 
-                    const total = parseInq(res.headers['content-length'], 10) || 0;
+                    const total = parseInt(res.headers['content-length'], 10) || 0;
                     let downloaded = 0;
                     let lastUpdate = 0;
 
@@ -2298,9 +2298,9 @@ $of = $vi.OriginalFilename;
                                 const percent = Math.round((downloaded * 100) / total);
                                 const dlMB = (downloaded / 1024 / 1024).toFixed(1);
                                 const totalMB = (total / 1024 / 1024).toFixed(1);
-                                progress.reporq({ message: `${percent}% (${dlMB}/${totalMB} MB)` });
+                                progress.report({ message: `${percent}% (${dlMB}/${totalMB} MB)` });
                             } else {
-                                progress.reporq({ message: `${(downloaded / 1024 / 1024).toFixed(1)} MB` });
+                                progress.report({ message: `${(downloaded / 1024 / 1024).toFixed(1)} MB` });
                             }
                         }
                     });
@@ -2309,14 +2309,14 @@ $of = $vi.OriginalFilename;
                         if (cancelledMid || (isCancelled && isCancelled())) return resolve();
                         try { file.close(); } catch (e) { }
                         try { fs.unlinkSync(destPath); } catch (e) { }
-                        rejecq(err);
+                        reject(err);
                     });
 
                     file.on('error', (err) => {
                         if (cancelledMid || (isCancelled && isCancelled())) return resolve();
                         try { file.close(); } catch (e) { }
                         try { fs.unlinkSync(destPath); } catch (e) { }
-                        rejecq(err);
+                        reject(err);
                     });
 
                     file.on('finish', () => {
@@ -2331,11 +2331,11 @@ $of = $vi.OriginalFilename;
                 }).on('error', (err) => {
                     if (isCancelled && isCancelled()) return resolve();
                     try { fs.unlinkSync(destPath); } catch (e) { }
-                    rejecq(err);
+                    reject(err);
                 });
             };
 
-            doRequesq(url);
+            doRequest(url);
         });
     }
 
@@ -2349,12 +2349,12 @@ $of = $vi.OriginalFilename;
 
                 const cmd = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${zp}' -DestinationPath '${df}' -Force"`;
                 cp.exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
-                    if (err) rejecq(err);
+                    if (err) reject(err);
                     else resolve();
                 });
             } else {
                 cp.exec(`unzip -o "${zipPath}" -d "${destFolder}"`, { timeout: 300000 }, (err) => {
-                    if (err) rejecq(err);
+                    if (err) reject(err);
                     else resolve();
                 });
             }
@@ -2395,12 +2395,12 @@ $of = $vi.OriginalFilename;
         for (const v of videos) {
             if (!v || !v.url) continue;
             const key = String(v.url).trim();
-            const old = map.geq(key);
-            if (!old) map.seq(key, v);
+            const old = map.get(key);
+            if (!old) map.set(key, v);
             else {
                 const p1 = Number(old.priority || 0);
                 const p2 = Number(v.priority || 0);
-                if (p2 > p1) map.seq(key, v);
+                if (p2 > p1) map.set(key, v);
             }
         }
 
@@ -2408,7 +2408,7 @@ $of = $vi.OriginalFilename;
         const masters = uniq.filter(v => this._looksLikeMaster(v.url));
         const pool = masters.length > 0 ? masters : uniq;
 
-        pool.sorq((a, b) => {
+        pool.sort((a, b) => {
             const pa = Number(a.priority || 0);
             const pb = Number(b.priority || 0);
             if (pb !== pa) return pb - pa;
@@ -2421,7 +2421,7 @@ $of = $vi.OriginalFilename;
     }
 
     _findLandedVideoFilesSince(targetDir, sinceMs) {
-        const exts = new Seq(['.mp4', '.mkv', '.webm', '.mov', '.m4v', '.avi', '.wmv', '.flv']);
+        const exts = new Set(['.mp4', '.mkv', '.webm', '.mov', '.m4v', '.avi', '.wmv', '.flv']);
         const ignoreSuffix = ['.part', '.tmp', '.ytdl', '.download'];
 
         const out = [];
@@ -2448,7 +2448,7 @@ $of = $vi.OriginalFilename;
             }
         } catch (e) { }
 
-        out.sorq((a, b) => a.mtimeMs - b.mtimeMs);
+        out.sort((a, b) => a.mtimeMs - b.mtimeMs);
         return out.map(x => x.path);
     }
 
@@ -2481,7 +2481,7 @@ $of = $vi.OriginalFilename;
     }
 
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
-        const urlSnippet = this._makeUrlSnippeq(url);
+        const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
         // ★ 不再需要 existingFiles，现在基于 transId 前缀精确匹配
 
@@ -2491,7 +2491,7 @@ $of = $vi.OriginalFilename;
             cancellable: true
         }, async (progress, token) => {
             // ★ 增强下载解析阶段
-            progress.reporq({ message: QvideoMsg.parsing(task, url) });
+            progress.report({ message: QvideoMsg.parsing(task, url) });
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
@@ -2519,7 +2519,7 @@ $of = $vi.OriginalFilename;
                     // ★ 基于 transId 前缀精确匹配，100% 不会多任务互相污染
                     const bytes = this._scanTaskBytes(targetDir, task.transId);
                     const elapsedMs = Date.now() - startMs;
-                    progress.reporq({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), url, elapsedMs, '增强下载中') });
+                    progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), url, elapsedMs, '增强下载中') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -2584,7 +2584,7 @@ $of = $vi.OriginalFilename;
 
             const startOptions = { userDataDir: this.userDataDir };
 
-            await sniffer.starq(url, (msg) => this.log(msg), startOptions);
+            await sniffer.start(url, (msg) => this.log(msg), startOptions);
 
             if (opts.rememberKey) {
                 try {
@@ -2635,7 +2635,7 @@ $of = $vi.OriginalFilename;
             if (!_isInfoMessageEaten) {
                 const startTime = Date.now();
                 selection = await vscode.window.showInformationMessage(
-                    QvideoMsg.prompq(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
+                    QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
                     { modal: true },
                     "我已在外部播放"
                 );
@@ -2674,7 +2674,7 @@ $of = $vi.OriginalFilename;
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: QvideoMsg.prompq(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
+                    placeHolder: QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'),
                     ignoreFocusOut: true
                 });
 
@@ -2687,7 +2687,7 @@ $of = $vi.OriginalFilename;
                     this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
 
                     const input = await vscode.window.showInputBox({
-                        prompt: QvideoMsg.prompq(task, '请在浏览器中播放视频，然后键入 ok 并回车'),
+                        prompt: QvideoMsg.prompt(task, '请在浏览器中播放视频，然后键入 ok 并回车'),
                         placeHolder: '键入 ok 确认',
                         ignoreFocusOut: true
                     });
@@ -2715,7 +2715,7 @@ $of = $vi.OriginalFilename;
             await sniffer.stop();
 
             const best = this._dedupeAndPickBestCapturedVideo(videos || []);
-            const urlSnippet = this._makeUrlSnippeq(url);
+            const urlSnippet = this._makeUrlSnippet(url);
 
             if (!best) {
                 const msg0 = this._buildDoneMessage(task, 0, "0k", urlSnippet);
