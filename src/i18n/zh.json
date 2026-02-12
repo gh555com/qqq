@@ -1,57 +1,57 @@
 {
-  "q2": {
-    "paste": {
-      "plainTextOnly": "qqq: 剪贴板中是纯文本，无法粘贴到文件管理器"
+    "q2": {
+        "paste": {
+            "plainTextOnly": "qqq: 剪贴板中是纯文本，无法粘贴到文件管理器"
+        },
+        "error": {
+            "integrityFailed": "Integrity check failed.",
+            "renameFailed": "重命名失败：目标位置已存在同名项。",
+            "renameError": "重命名失败: {0}",
+            "invalidPath": "无效的目录路径: {0}",
+            "navError": "导航失败: {0}",
+            "createFileFolderExists": "无法创建文件，因为已存在同名文件夹: \"{0}\"",
+            "createFileError": "创建文件失败: {0}",
+            "folderExists": "无法创建，\"{0}\" 已存在。",
+            "unsupportedFile": "该文件不支持在 VS Code 里打开: \"{0}\"",
+            "fileNotExists": "文件已不存在: {0}",
+            "openFileError": "打开文件失败: {0}",
+            "deleteParentForbidden": "非法操作：禁止删除上级目录。"
+        },
+        "confirm": {
+            "overwriteFile": "文件 \"{0}\" 已存在，是否覆盖？",
+            "yes": "是",
+            "no": "否"
+        }
     },
-    "error": {
-      "integrityFailed": "Integrity check failed.",
-      "renameFailed": "重命名失败：目标位置已存在同名项。",
-      "renameError": "重命名失败: {0}",
-      "invalidPath": "无效的目录路径: {0}",
-      "navError": "导航失败: {0}",
-      "createFileFolderExists": "无法创建文件，因为已存在同名文件夹: \"{0}\"",
-      "createFileError": "创建文件失败: {0}",
-      "folderExists": "无法创建，\"{0}\" 已存在。",
-      "unsupportedFile": "该文件不支持在 VS Code 里打开: \"{0}\"",
-      "fileNotExists": "文件已不存在: {0}",
-      "openFileError": "打开文件失败: {0}",
-      "deleteParentForbidden": "非法操作：禁止删除上级目录。"
+    "q4": {
+        "export": {
+            "success": "📦 历史记录已全量导出",
+            "error": "导出失败: {0}"
+        },
+        "import": {
+            "success": "📥 成功增量导入 {0} 条记录",
+            "error": "导入失败: {0}"
+        },
+        "editor": {
+            "noActive": "没有活动的编辑器",
+            "noSelection": "没有选中任何文本"
+        },
+        "cache": {
+            "clearing": "执行清理任务，级别: {0}",
+            "cacheCleared": "qqq_cache 已清空",
+            "cacheClearError": "清理 cache 失败: {0}",
+            "historyCleared": "剪切板历史已清空",
+            "stateCleared": "globalState 已清空",
+            "stateClearError": "清理 globalState 失败: {0}"
+        }
     },
-    "confirm": {
-      "overwriteFile": "文件 \"{0}\" 已存在，是否覆盖？",
-      "yes": "是",
-      "no": "否"
+    "log": {
+        "msgpackError": "严重错误：无法加载 msgpack-lite 依赖",
+        "binaryLoadError": "二进制加载失败，执行隔离:",
+        "capacityFuse": "触发容量熔断，执行批量清理...",
+        "storageError": "存储严重故障:",
+        "ipcSerializeError": "IPC 消息序列化失败:",
+        "pythonPlaybackError": "Python 播放失败，永久切换到 Webview:",
+        "disposeError": "Dispose 强杀失败:"
     }
-  },
-  "q4": {
-    "export": {
-      "success": "📦 历史记录已全量导出",
-      "error": "导出失败: {0}"
-    },
-    "import": {
-      "success": "📥 成功增量导入 {0} 条记录",
-      "error": "导入失败: {0}"
-    },
-    "editor": {
-      "noActive": "没有活动的编辑器",
-      "noSelection": "没有选中任何文本"
-    },
-    "cache": {
-      "clearing": "执行清理任务，级别: {0}",
-      "cacheCleared": "qqq_cache 已清空",
-      "cacheClearError": "清理 cache 失败: {0}",
-      "historyCleared": "剪切板历史已清空",
-      "stateCleared": "globalState 已清空",
-      "stateClearError": "清理 globalState 失败: {0}"
-    }
-  },
-  "log": {
-    "msgpackError": "严重错误：无法加载 msgpack-lite 依赖",
-    "binaryLoadError": "二进制加载失败，执行隔离:",
-    "capacityFuse": "触发容量熔断，执行批量清理...",
-    "storageError": "存储严重故障:",
-    "ipcSerializeError": "IPC 消息序列化失败:",
-    "pythonPlaybackError": "Python 播放失败，永久切换到 Webview:",
-    "disposeError": "Dispose 强杀失败:"
-  }
 }

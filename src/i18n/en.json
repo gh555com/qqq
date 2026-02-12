@@ -1,57 +1,57 @@
 {
-  "q2": {
-    "paste": {
-      "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"
+    "q2": {
+        "paste": {
+            "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"
+        },
+        "error": {
+            "integrityFailed": "Integrity check failed.",
+            "renameFailed": "Rename failed: A file or folder with the same name already exists at target location.",
+            "renameError": "Rename failed: {0}",
+            "invalidPath": "Invalid directory path: {0}",
+            "navError": "Navigation failed: {0}",
+            "createFileFolderExists": "Cannot create file because a folder with the same name already exists: \"{0}\"",
+            "createFileError": "Failed to create file: {0}",
+            "folderExists": "Cannot create, \"{0}\" already exists.",
+            "unsupportedFile": "This file type is not supported in VS Code: \"{0}\"",
+            "fileNotExists": "File no longer exists: {0}",
+            "openFileError": "Failed to open file: {0}",
+            "deleteParentForbidden": "Illegal operation: Deleting parent directory is forbidden."
+        },
+        "confirm": {
+            "overwriteFile": "File \"{0}\" already exists. Overwrite?",
+            "yes": "Yes",
+            "no": "No"
+        }
     },
-    "error": {
-      "integrityFailed": "Integrity check failed.",
-      "renameFailed": "Rename failed: A file or folder with the same name already exists at target location.",
-      "renameError": "Rename failed: {0}",
-      "invalidPath": "Invalid directory path: {0}",
-      "navError": "Navigation failed: {0}",
-      "createFileFolderExists": "Cannot create file because a folder with the same name already exists: \"{0}\"",
-      "createFileError": "Failed to create file: {0}",
-      "folderExists": "Cannot create, \"{0}\" already exists.",
-      "unsupportedFile": "This file type is not supported in VS Code: \"{0}\"",
-      "fileNotExists": "File no longer exists: {0}",
-      "openFileError": "Failed to open file: {0}",
-      "deleteParentForbidden": "Illegal operation: Deleting parent directory is forbidden."
+    "q4": {
+        "export": {
+            "success": "📦 History exported successfully",
+            "error": "Export failed: {0}"
+        },
+        "import": {
+            "success": "📥 Successfully imported {0} records",
+            "error": "Import failed: {0}"
+        },
+        "editor": {
+            "noActive": "No active editor",
+            "noSelection": "No text selected"
+        },
+        "cache": {
+            "clearing": "Running cleanup task, level: {0}",
+            "cacheCleared": "qqq_cache cleared",
+            "cacheClearError": "Failed to clear cache: {0}",
+            "historyCleared": "Clipboard history cleared",
+            "stateCleared": "globalState cleared",
+            "stateClearError": "Failed to clear globalState: {0}"
+        }
     },
-    "confirm": {
-      "overwriteFile": "File \"{0}\" already exists. Overwrite?",
-      "yes": "Yes",
-      "no": "No"
+    "log": {
+        "msgpackError": "Critical error: Failed to load msgpack-lite dependency",
+        "binaryLoadError": "Binary load failed, isolating:",
+        "capacityFuse": "Capacity fuse triggered, executing batch cleanup...",
+        "storageError": "Critical storage error:",
+        "ipcSerializeError": "IPC message serialization failed:",
+        "pythonPlaybackError": "Python playback failed, permanently switching to Webview:",
+        "disposeError": "Dispose kill failed:"
     }
-  },
-  "q4": {
-    "export": {
-      "success": "📦 History exported successfully",
-      "error": "Export failed: {0}"
-    },
-    "import": {
-      "success": "📥 Successfully imported {0} records",
-      "error": "Import failed: {0}"
-    },
-    "editor": {
-      "noActive": "No active editor",
-      "noSelection": "No text selected"
-    },
-    "cache": {
-      "clearing": "Running cleanup task, level: {0}",
-      "cacheCleared": "qqq_cache cleared",
-      "cacheClearError": "Failed to clear cache: {0}",
-      "historyCleared": "Clipboard history cleared",
-      "stateCleared": "globalState cleared",
-      "stateClearError": "Failed to clear globalState: {0}"
-    }
-  },
-  "log": {
-    "msgpackError": "Critical error: Failed to load msgpack-lite dependency",
-    "binaryLoadError": "Binary load failed, isolating:",
-    "capacityFuse": "Capacity fuse triggered, executing batch cleanup...",
-    "storageError": "Critical storage error:",
-    "ipcSerializeError": "IPC message serialization failed:",
-    "pythonPlaybackError": "Python playback failed, permanently switching to Webview:",
-    "disposeError": "Dispose kill failed:"
-  }
 }

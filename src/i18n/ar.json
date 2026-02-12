@@ -1,57 +1,57 @@
 {
-  "q2": {
-    "paste": {
-      "plainTextOnly": "qqq: الحافظة تحتوي على نص عادي فقط، لا يمكن اللصق في مدير الملفات"
+    "q2": {
+        "paste": {
+            "plainTextOnly": "qqq: الحافظة تحتوي على نص عادي فقط، لا يمكن اللصق في مدير الملفات"
+        },
+        "error": {
+            "integrityFailed": "فشل فحص السلامة.",
+            "renameFailed": "فشلت إعادة التسمية: يوجد ملف أو مجلد بنفس الاسم في الموقع المستهدف.",
+            "renameError": "فشلت إعادة التسمية: {0}",
+            "invalidPath": "مسار دليل غير صالح: {0}",
+            "navError": "فشل التنقل: {0}",
+            "createFileFolderExists": "لا يمكن إنشاء الملف لأن مجلداً بنفس الاسم موجود بالفعل: \"{0}\"",
+            "createFileError": "فشل إنشاء الملف: {0}",
+            "folderExists": "لا يمكن الإنشاء، \"{0}\" موجود بالفعل.",
+            "unsupportedFile": "نوع الملف هذا غير مدعوم في VS Code: \"{0}\"",
+            "fileNotExists": "الملف لم يعد موجوداً: {0}",
+            "openFileError": "فشل فتح الملف: {0}",
+            "deleteParentForbidden": "عملية غير قانونية: حذف الدليل الأب ممنوع."
+        },
+        "confirm": {
+            "overwriteFile": "الملف \"{0}\" موجود بالفعل. هل تريد الكتابة فوقه؟",
+            "yes": "نعم",
+            "no": "لا"
+        }
     },
-    "error": {
-      "integrityFailed": "فشل فحص السلامة.",
-      "renameFailed": "فشلت إعادة التسمية: يوجد ملف أو مجلد بنفس الاسم في الموقع المستهدف.",
-      "renameError": "فشلت إعادة التسمية: {0}",
-      "invalidPath": "مسار دليل غير صالح: {0}",
-      "navError": "فشل التنقل: {0}",
-      "createFileFolderExists": "لا يمكن إنشاء الملف لأن مجلداً بنفس الاسم موجود بالفعل: \"{0}\"",
-      "createFileError": "فشل إنشاء الملف: {0}",
-      "folderExists": "لا يمكن الإنشاء، \"{0}\" موجود بالفعل.",
-      "unsupportedFile": "نوع الملف هذا غير مدعوم في VS Code: \"{0}\"",
-      "fileNotExists": "الملف لم يعد موجوداً: {0}",
-      "openFileError": "فشل فتح الملف: {0}",
-      "deleteParentForbidden": "عملية غير قانونية: حذف الدليل الأب ممنوع."
+    "q4": {
+        "export": {
+            "success": "📦 تم تصدير السجل بنجاح",
+            "error": "فشل التصدير: {0}"
+        },
+        "import": {
+            "success": "📥 تم استيراد {0} سجل بنجاح",
+            "error": "فشل الاستيراد: {0}"
+        },
+        "editor": {
+            "noActive": "لا يوجد محرر نشط",
+            "noSelection": "لم يتم تحديد أي نص"
+        },
+        "cache": {
+            "clearing": "جاري تنفيذ مهمة التنظيف، المستوى: {0}",
+            "cacheCleared": "تم مسح qqq_cache",
+            "cacheClearError": "فشل مسح ذاكرة التخزين المؤقت: {0}",
+            "historyCleared": "تم مسح سجل الحافظة",
+            "stateCleared": "تم مسح globalState",
+            "stateClearError": "فشل مسح globalState: {0}"
+        }
     },
-    "confirm": {
-      "overwriteFile": "الملف \"{0}\" موجود بالفعل. هل تريد الكتابة فوقه؟",
-      "yes": "نعم",
-      "no": "لا"
+    "log": {
+        "msgpackError": "خطأ حرج: فشل تحميل تبعية msgpack-lite",
+        "binaryLoadError": "فشل تحميل الثنائي، جاري العزل:",
+        "capacityFuse": "تم تفعيل فيوز السعة، جاري تنفيذ التنظيف الدفعي...",
+        "storageError": "خطأ تخزين حرج:",
+        "ipcSerializeError": "فشل تسلسل رسالة IPC:",
+        "pythonPlaybackError": "فشل تشغيل Python، التبديل الدائم إلى Webview:",
+        "disposeError": "فشل إنهاء العملية:"
     }
-  },
-  "q4": {
-    "export": {
-      "success": "📦 تم تصدير السجل بنجاح",
-      "error": "فشل التصدير: {0}"
-    },
-    "import": {
-      "success": "📥 تم استيراد {0} سجل بنجاح",
-      "error": "فشل الاستيراد: {0}"
-    },
-    "editor": {
-      "noActive": "لا يوجد محرر نشط",
-      "noSelection": "لم يتم تحديد أي نص"
-    },
-    "cache": {
-      "clearing": "جاري تنفيذ مهمة التنظيف، المستوى: {0}",
-      "cacheCleared": "تم مسح qqq_cache",
-      "cacheClearError": "فشل مسح ذاكرة التخزين المؤقت: {0}",
-      "historyCleared": "تم مسح سجل الحافظة",
-      "stateCleared": "تم مسح globalState",
-      "stateClearError": "فشل مسح globalState: {0}"
-    }
-  },
-  "log": {
-    "msgpackError": "خطأ حرج: فشل تحميل تبعية msgpack-lite",
-    "binaryLoadError": "فشل تحميل الثنائي، جاري العزل:",
-    "capacityFuse": "تم تفعيل فيوز السعة، جاري تنفيذ التنظيف الدفعي...",
-    "storageError": "خطأ تخزين حرج:",
-    "ipcSerializeError": "فشل تسلسل رسالة IPC:",
-    "pythonPlaybackError": "فشل تشغيل Python، التبديل الدائم إلى Webview:",
-    "disposeError": "فشل إنهاء العملية:"
-  }
 }
