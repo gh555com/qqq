@@ -1531,8 +1531,14 @@ async function activate(context) {
 	downloadContext = context;
 	global.init(context);
 
+	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+	if (!extensionPath) {
+		global.logMessage("activate: extensionPath is undefined!", "ERROR");
+		return;
+	}
+
 	// ★ 初始化国际化模块：读取语言设置，监听配置变更
-	initI18n();
+	initI18n(extensionPath);
 
 	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 false 换成实际的 isVip 变量）
 	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存
@@ -1541,12 +1547,6 @@ async function activate(context) {
 	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保“重启还原”
 	if (!isVip) {
 		global.ConfigManager.nonVipBootstrapResetAll().catch(() => { });
-	}
-
-	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-	if (!extensionPath) {
-		global.logMessage("activate: extensionPath is undefined!", "ERROR");
-		return;
 	}
 
 	// ★ 缓存必须立即初始化（不延迟），否则用户操作会触发 SETUP_FAIL

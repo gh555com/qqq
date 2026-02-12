@@ -1,7 +1,7 @@
 {
     "q2": {
         "ui": {
-            "pin": "Pin",
+            "pin": "Pin ",
             "newFile": "New file",
             "newFolder": "New folder",
             "openFolder": "Open current folder in Explorer",
