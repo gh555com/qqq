@@ -157,6 +157,45 @@
             "audioPlay": "Motor {0} reproduciendo: {1}, bucle: {2}",
             "pythonPlaying": "q4 detectó Python reproduciendo al iniciar, sincronizando UI",
             "audioSavor": "Motor {0} reproduciendo favorito: {1}, bucle: {2}"
+        },
+        "timeAgo": {
+            "seconds": "hace {0}s",
+            "minutes": "hace {0}min",
+            "hours": "hace {0}h",
+            "days": "hace {0}d"
+        },
+        "error": {
+            "msgpackUnavailable": "Motor Msgpack no disponible",
+            "invalidBinaryFormat": "Formato de almacenamiento binario inválido",
+            "msgpackMissing": "Motor Msgpack faltante"
+        },
+        "status": {
+            "insertSuccess": "Insertado en el editor",
+            "insertFailed": "Inserción falló"
+        },
+        "ui": {
+            "loopInfinite": "Infinito",
+            "emptyHint": "Sin registros"
+        },
+        "quickPick": {
+            "placeholder": "Escriba para buscar",
+            "fullExport": "📦 Exportar completo",
+            "incrementalImport": "📥 Importar incremental",
+            "separatorCommands": "--- COMANDOS ---",
+            "separatorMatched": "--- COINCIDENCIAS ---",
+            "separatorHistory": "--- HISTORIAL ---"
+        },
+        "dialog": {
+            "exportTitle": "Exportar historial de portapapeles (JSON)"
+        },
+        "stats": {
+            "title": "📊 Estadísticas del historial de portapapeles",
+            "totalRecords": "Total de registros",
+            "watching": "Monitoreando",
+            "yes": "Sí",
+            "no": "No",
+            "sessionDuration": "Duración de sesión",
+            "quarantinedFiles": "Archivos en cuarentena"
         }
     },
     "qqq": {

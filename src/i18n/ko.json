@@ -157,6 +157,45 @@
             "audioPlay": "{0} 엔진 재생 중: {1}, 루프: {2}",
             "pythonPlaying": "q4 시작 시 Python 재생 중 감지, UI 동기화",
             "audioSavor": "{0} 엔진 세이버 재생 중: {1}, 루프: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0}초 전",
+            "minutes": "{0}분 전",
+            "hours": "{0}시간 전",
+            "days": "{0}일 전"
+        },
+        "error": {
+            "msgpackUnavailable": "Msgpack 엔진 사용 불가",
+            "invalidBinaryFormat": "잘못된 바이너리 저장 형식",
+            "msgpackMissing": "Msgpack 엔진 없음"
+        },
+        "status": {
+            "insertSuccess": "편집기에 삽입됨",
+            "insertFailed": "삽입 실패"
+        },
+        "ui": {
+            "loopInfinite": "무한",
+            "emptyHint": "레코드 없음"
+        },
+        "quickPick": {
+            "placeholder": "검색하려면 입력",
+            "fullExport": "📦 전체 내보내기",
+            "incrementalImport": "📥 증분 가져오기",
+            "separatorCommands": "--- 명령 ---",
+            "separatorMatched": "--- 일치 ---",
+            "separatorHistory": "--- 기록 ---"
+        },
+        "dialog": {
+            "exportTitle": "클립보드 기록 내보내기 (JSON)"
+        },
+        "stats": {
+            "title": "📊 클립보드 기록 통계",
+            "totalRecords": "총 레코드",
+            "watching": "감시 중",
+            "yes": "예",
+            "no": "아니오",
+            "sessionDuration": "세션 시간",
+            "quarantinedFiles": "격리 파일 수"
         }
     },
     "qqq": {

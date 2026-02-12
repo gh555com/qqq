@@ -157,6 +157,45 @@
             "audioPlay": "{0} engine playing: {1}, loop: {2}",
             "pythonPlaying": "q4 detected Python playing at startup, syncing UI",
             "audioSavor": "{0} engine savor playing: {1}, loop: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0}s ago",
+            "minutes": "{0}m ago",
+            "hours": "{0}h ago",
+            "days": "{0}d ago"
+        },
+        "error": {
+            "msgpackUnavailable": "Msgpack engine unavailable",
+            "invalidBinaryFormat": "Invalid binary storage format",
+            "msgpackMissing": "Msgpack engine missing"
+        },
+        "status": {
+            "insertSuccess": "Inserted to editor",
+            "insertFailed": "Insert failed"
+        },
+        "ui": {
+            "loopInfinite": "Infinite",
+            "emptyHint": "No records"
+        },
+        "quickPick": {
+            "placeholder": "Type to search",
+            "fullExport": "📦 Full Export",
+            "incrementalImport": "📥 Incremental Import",
+            "separatorCommands": "--- COMMANDS ---",
+            "separatorMatched": "--- MATCHED ---",
+            "separatorHistory": "--- HISTORY ---"
+        },
+        "dialog": {
+            "exportTitle": "Export Clipboard History (JSON)"
+        },
+        "stats": {
+            "title": "📊 Clipboard History Statistics",
+            "totalRecords": "Total Records",
+            "watching": "Watching",
+            "yes": "Yes",
+            "no": "No",
+            "sessionDuration": "Session Duration",
+            "quarantinedFiles": "Quarantined Files"
         }
     },
     "qqq": {

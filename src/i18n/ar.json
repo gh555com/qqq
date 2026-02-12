@@ -157,6 +157,45 @@
             "audioPlay": "محرك {0} يشغل: {1}، تكرار: {2}",
             "pythonPlaying": "q4 اكتشف Python يشغل عند البدء، مزامنة الواجهة",
             "audioSavor": "محرك {0} يشغل المفضل: {1}، تكرار: {2}"
+        },
+        "timeAgo": {
+            "seconds": "منذ {0} ثانية",
+            "minutes": "منذ {0} دقيقة",
+            "hours": "منذ {0} ساعة",
+            "days": "منذ {0} يوم"
+        },
+        "error": {
+            "msgpackUnavailable": "محرك Msgpack غير متاح",
+            "invalidBinaryFormat": "تنسيق تخزين ثنائي غير صالح",
+            "msgpackMissing": "محرك Msgpack مفقود"
+        },
+        "status": {
+            "insertSuccess": "تم الإدراج في المحرر",
+            "insertFailed": "فشل الإدراج"
+        },
+        "ui": {
+            "loopInfinite": "لا نهاية",
+            "emptyHint": "لا توجد سجلات"
+        },
+        "quickPick": {
+            "placeholder": "اكتب للبحث",
+            "fullExport": "📦 تصدير كامل",
+            "incrementalImport": "📥 استيراد تدريجي",
+            "separatorCommands": "--- الأوامر ---",
+            "separatorMatched": "--- مطابق ---",
+            "separatorHistory": "--- السجل ---"
+        },
+        "dialog": {
+            "exportTitle": "تصدير سجل الحافظة (JSON)"
+        },
+        "stats": {
+            "title": "📊 إحصائيات سجل الحافظة",
+            "totalRecords": "إجمالي السجلات",
+            "watching": "المراقبة",
+            "yes": "نعم",
+            "no": "لا",
+            "sessionDuration": "مدة الجلسة",
+            "quarantinedFiles": "الملفات المعزولة"
         }
     },
     "qqq": {

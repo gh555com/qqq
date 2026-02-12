@@ -153,10 +153,49 @@
             "pythonCrash": "Python 進程崩潰，已停止播放 UI",
             "pythonNoMiniaudio": "Python 引擎已連線但未偵測到 miniaudio 依賴",
             "pythonProbeError": "Python 探測異常: {0}",
-            "pythonProbeFail": "Python 引擎探測未通過，使用 Webview 兜底",
+            "pythonProbeFail": "Python 引擎探測未通過，使用 Webview 兆底",
             "audioPlay": "{0} 引擎播放: {1}, 循環: {2}",
             "pythonPlaying": "q4 啟動時偵測到 Python 正在播放，同步 UI",
             "audioSavor": "{0} 引擎播放品味: {1}, 循環: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0}秒前",
+            "minutes": "{0}分鐘前",
+            "hours": "{0}小時前",
+            "days": "{0}天前"
+        },
+        "error": {
+            "msgpackUnavailable": "Msgpack 引擎不可用",
+            "invalidBinaryFormat": "無效的二進位儲存格式",
+            "msgpackMissing": "Msgpack 引擎遺失"
+        },
+        "status": {
+            "insertSuccess": "已插入到編輯器",
+            "insertFailed": "插入失敗"
+        },
+        "ui": {
+            "loopInfinite": "無限",
+            "emptyHint": "暫無記錄"
+        },
+        "quickPick": {
+            "placeholder": "輸入以搜尋",
+            "fullExport": "📦 全量匯出",
+            "incrementalImport": "📥 增量匯入",
+            "separatorCommands": "--- 指令 ---",
+            "separatorMatched": "--- 符合 ---",
+            "separatorHistory": "--- 歷史記錄 ---"
+        },
+        "dialog": {
+            "exportTitle": "全量匯出剪貼簿歷史 (JSON)"
+        },
+        "stats": {
+            "title": "📊 剪貼簿歷史統計",
+            "totalRecords": "總記錄數",
+            "watching": "監視中",
+            "yes": "是",
+            "no": "否",
+            "sessionDuration": "工作階段時長",
+            "quarantinedFiles": "隔離檔案數"
         }
     },
     "qqq": {

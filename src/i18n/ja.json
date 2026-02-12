@@ -157,6 +157,45 @@
             "audioPlay": "{0} エンジン再生中: {1}、ループ: {2}",
             "pythonPlaying": "q4 起動時に Python が再生中を検出、UI を同期",
             "audioSavor": "{0} エンジンでセイバー再生中: {1}、ループ: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0}秒前",
+            "minutes": "{0}分前",
+            "hours": "{0}時間前",
+            "days": "{0}日前"
+        },
+        "error": {
+            "msgpackUnavailable": "Msgpack エンジンが利用できません",
+            "invalidBinaryFormat": "無効なバイナリストレージ形式",
+            "msgpackMissing": "Msgpack エンジンが見つかりません"
+        },
+        "status": {
+            "insertSuccess": "エディタに挿入しました",
+            "insertFailed": "挿入に失敗しました"
+        },
+        "ui": {
+            "loopInfinite": "無限",
+            "emptyHint": "レコードがありません"
+        },
+        "quickPick": {
+            "placeholder": "検索するには入力",
+            "fullExport": "📦 完全エクスポート",
+            "incrementalImport": "📥 差分インポート",
+            "separatorCommands": "--- コマンド ---",
+            "separatorMatched": "--- 一致 ---",
+            "separatorHistory": "--- 履歴 ---"
+        },
+        "dialog": {
+            "exportTitle": "クリップボード履歴をエクスポート (JSON)"
+        },
+        "stats": {
+            "title": "📊 クリップボード履歴統計",
+            "totalRecords": "総レコード数",
+            "watching": "監視中",
+            "yes": "はい",
+            "no": "いいえ",
+            "sessionDuration": "セッション時間",
+            "quarantinedFiles": "隔離ファイル数"
         }
     },
     "qqq": {

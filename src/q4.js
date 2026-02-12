@@ -294,11 +294,11 @@ function formatTime(timestamp) {
     const t = Number(timestamp) || now;
     const diff = now - t;
 
-    if (diff < CONSTANTS.MS_PER_MINUTE) return `${Math.floor(diff / 1000)}秒前`;
-    if (diff < CONSTANTS.MS_PER_HOUR) return `${Math.floor(diff / CONSTANTS.MS_PER_MINUTE)}分钟前`;
-    if (diff < CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_HOUR)}小时前`;
-    if (diff < 7 * CONSTANTS.MS_PER_DAY) return `${Math.floor(diff / CONSTANTS.MS_PER_DAY)}天前`;
-    return new Intl.DateTimeFormat('zh-CN').format(new Date(t));
+    if (diff < CONSTANTS.MS_PER_MINUTE) return q('q4.timeAgo.seconds', Math.floor(diff / 1000));
+    if (diff < CONSTANTS.MS_PER_HOUR) return q('q4.timeAgo.minutes', Math.floor(diff / CONSTANTS.MS_PER_MINUTE));
+    if (diff < CONSTANTS.MS_PER_DAY) return q('q4.timeAgo.hours', Math.floor(diff / CONSTANTS.MS_PER_HOUR));
+    if (diff < 7 * CONSTANTS.MS_PER_DAY) return q('q4.timeAgo.days', Math.floor(diff / CONSTANTS.MS_PER_DAY));
+    return new Intl.DateTimeFormat(undefined).format(new Date(t));
 }
 
 // ============================================================================
@@ -428,11 +428,11 @@ class ClipboardHistoryManager {
 
             // 3. 唯一来源：Msgpack 解码
             const mp = getMsgpack();
-            if (!mp) throw new Error('Msgpack 引擎不可用');
+            if (!mp) throw new Error(q('q4.error.msgpackUnavailable'));
 
             const parsed = mp.decode(raw);
             if (!parsed || (!Array.isArray(parsed) && !Array.isArray(parsed.history))) {
-                throw new Error('无效的二进制存储格式');
+                throw new Error(q('q4.error.invalidBinaryFormat'));
             }
 
             const historyArr = Array.isArray(parsed) ? parsed : parsed.history;
@@ -780,7 +780,7 @@ class ClipboardHistoryManager {
             const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
 
             const mp = getMsgpack();
-            if (!mp) throw new Error('Msgpack 引擎丢失');
+            if (!mp) throw new Error(q('q4.error.msgpackMissing'));
 
             const rawBuf = mp.encode(payload);
             const outBuf = await gzipAsync(rawBuf);
@@ -1136,7 +1136,7 @@ class ClipboardHistorySidebarProvider {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
                         const ok = await this._historyManager.insertToEditor(node.content);
-                        vscode.window.setStatusBarMessage(ok ? '已插入到编辑器' : '插入失败', 2000);
+                        vscode.window.setStatusBarMessage(ok ? q('q4.status.insertSuccess') : q('q4.status.insertFailed'), 2000);
                     }
                     break;
                 }
@@ -1575,7 +1575,7 @@ class ClipboardHistorySidebarProvider {
         const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
 
         const loopCount = mode === 'loop' ? (source === AUDIO_SOURCE.PYTHON ? 0 : -1) : getRand(2, 7);
-        const displayCount = (loopCount === -1 || loopCount === 0) ? '无限' : loopCount;
+        const displayCount = (loopCount === -1 || loopCount === 0) ? q('q4.ui.loopInfinite') : loopCount;
 
         this._global.logMessage(`[Audio] ${q('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
 
@@ -2138,7 +2138,7 @@ class ClipboardHistorySidebarProvider {
                 el.tooltip.style.display = 'none';
 
                 if (currentHistory.length === 0) {
-                    el.historyList.innerHTML = '<div class="empty-hint">暂无记录</div>';
+                    el.historyList.innerHTML = '<div class="empty-hint">' + q('q4.ui.emptyHint') + '</div>';
                     selectedId = '';
                     selectedIndex = -1;
                     setTimeout(updateAllScrollbars, 50);
@@ -2544,11 +2544,11 @@ class ClipboardHistorySidebarProvider {
 
 async function searchHistoryCommand(historyManager) {
     const quickPick = vscode.window.createQuickPick();
-    quickPick.placeholder = '键入搜索';
+    quickPick.placeholder = q('q4.quickPick.placeholder');
 
     const META_COMMANDS = [
-        { label: '📦 全量导出', detail: 'Full Export (JSON)', cmd: 'qqq.exportHistory' },
-        { label: '📥 增量导入', detail: 'Incremental Import (JSON)', cmd: 'qqq.importHistory' }
+        { label: q('q4.quickPick.fullExport'), detail: 'Full Export (JSON)', cmd: 'qqq.exportHistory' },
+        { label: q('q4.quickPick.incrementalImport'), detail: 'Incremental Import (JSON)', cmd: 'qqq.importHistory' }
     ];
 
     const updateItems = (keyword) => {
@@ -2557,7 +2557,7 @@ async function searchHistoryCommand(historyManager) {
 
         // 1. 处理指令匹配
         if (!kw) {
-            items.push({ label: '--- 指令 COMMANDS ---', kind: vscode.QuickPickItemKind.Separator });
+            items.push({ label: q('q4.quickPick.separatorCommands'), kind: vscode.QuickPickItemKind.Separator });
             items.push(...META_COMMANDS);
         } else {
             const matchedCmds = META_COMMANDS.filter(c =>
@@ -2565,7 +2565,7 @@ async function searchHistoryCommand(historyManager) {
                 c.detail.toLowerCase().includes(kw)
             );
             if (matchedCmds.length > 0) {
-                items.push({ label: '--- 匹配指令 MATCHED ---', kind: vscode.QuickPickItemKind.Separator });
+                items.push({ label: q('q4.quickPick.separatorMatched'), kind: vscode.QuickPickItemKind.Separator });
                 items.push(...matchedCmds);
             }
         }
@@ -2575,7 +2575,7 @@ async function searchHistoryCommand(historyManager) {
         const results = historyManager.searchHistory(kw, limit);
 
         if (results.length > 0) {
-            items.push({ label: '--- 历史记录 HISTORY ---', kind: vscode.QuickPickItemKind.Separator });
+            items.push({ label: q('q4.quickPick.separatorHistory'), kind: vscode.QuickPickItemKind.Separator });
             items.push(...results.map(it => ({
                 label: it.preview,
                 detail: ` ${formatTime(it.timestamp)}   📏 ${(it.size || 0).toLocaleString()}b`,
@@ -2619,7 +2619,7 @@ async function searchHistoryCommand(historyManager) {
 
 async function exportHistoryCommand(historyManager) {
     const uri = await vscode.window.showSaveDialog({
-        title: '全量导出剪贴板历史 (JSON)',
+        title: q('q4.dialog.exportTitle'),
         filters: { 'JSON': ['json'] },
         defaultUri: vscode.Uri.file(`q4-history-${Date.now()}.json`)
     });
@@ -2669,12 +2669,12 @@ function showStatsCommand(historyManager) {
     const snap = historyManager.getStatsSnapshot();
 
     const message = [
-        `📊 剪贴板历史统计`,
+        q('q4.stats.title'),
         ``,
-        `总记录数: ${snap.historyCount}`,
-        `监听中: ${snap.isWatching ? '是' : '否'}`,
-        `会话时长: ${snap.uptime.h}h ${snap.uptime.m}m`,
-        `物理文件隔离数: ${snap.perf.quarantinedFiles}`,
+        `${q('q4.stats.totalRecords')}: ${snap.historyCount}`,
+        `${q('q4.stats.watching')}: ${snap.isWatching ? q('q4.stats.yes') : q('q4.stats.no')}`,
+        `${q('q4.stats.sessionDuration')}: ${snap.uptime.h}h ${snap.uptime.m}m`,
+        `${q('q4.stats.quarantinedFiles')}: ${snap.perf.quarantinedFiles}`,
     ].join('\n');
 
     vscode.window.showInformationMessage(message, { modal: true });

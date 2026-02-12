@@ -153,10 +153,49 @@
             "pythonCrash": "Python 进程崩溃，已停止播放 UI",
             "pythonNoMiniaudio": "Python 引擎已连接但未检测到 miniaudio 依赖",
             "pythonProbeError": "Python 探测异常: {0}",
-            "pythonProbeFail": "Python 引擎探测未通过，使用 Webview 兜底",
+            "pythonProbeFail": "Python 引擎探测未通过，使用 Webview 兖底",
             "audioPlay": "{0} 引擎播放: {1}, 循环: {2}",
             "pythonPlaying": "q4 启动时检测到 Python 正在播放，同步 UI",
             "audioSavor": "{0} 引擎播放品味: {1}, 循环: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0}秒前",
+            "minutes": "{0}分钟前",
+            "hours": "{0}小时前",
+            "days": "{0}天前"
+        },
+        "error": {
+            "msgpackUnavailable": "Msgpack 引擎不可用",
+            "invalidBinaryFormat": "无效的二进制存储格式",
+            "msgpackMissing": "Msgpack 引擎丢失"
+        },
+        "status": {
+            "insertSuccess": "已插入到编辑器",
+            "insertFailed": "插入失败"
+        },
+        "ui": {
+            "loopInfinite": "无限",
+            "emptyHint": "暂无记录"
+        },
+        "quickPick": {
+            "placeholder": "键入搜索",
+            "fullExport": "📦 全量导出",
+            "incrementalImport": "📥 增量导入",
+            "separatorCommands": "--- 指令 COMMANDS ---",
+            "separatorMatched": "--- 匹配指令 MATCHED ---",
+            "separatorHistory": "--- 历史记录 HISTORY ---"
+        },
+        "dialog": {
+            "exportTitle": "全量导出剪贴板历史 (JSON)"
+        },
+        "stats": {
+            "title": "📊 剪贴板历史统计",
+            "totalRecords": "总记录数",
+            "watching": "监听中",
+            "yes": "是",
+            "no": "否",
+            "sessionDuration": "会话时长",
+            "quarantinedFiles": "物理文件隔离数"
         }
     },
     "qqq": {

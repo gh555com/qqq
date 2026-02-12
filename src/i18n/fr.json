@@ -157,6 +157,45 @@
             "audioPlay": "Moteur {0} lecture: {1}, boucle: {2}",
             "pythonPlaying": "q4 a détecté Python en lecture au démarrage, synchronisation de l'UI",
             "audioSavor": "Moteur {0} lecture favori: {1}, boucle: {2}"
+        },
+        "timeAgo": {
+            "seconds": "il y a {0}s",
+            "minutes": "il y a {0}min",
+            "hours": "il y a {0}h",
+            "days": "il y a {0}j"
+        },
+        "error": {
+            "msgpackUnavailable": "Moteur Msgpack non disponible",
+            "invalidBinaryFormat": "Format de stockage binaire invalide",
+            "msgpackMissing": "Moteur Msgpack manquant"
+        },
+        "status": {
+            "insertSuccess": "Inséré dans l'éditeur",
+            "insertFailed": "Insertion échouée"
+        },
+        "ui": {
+            "loopInfinite": "Infini",
+            "emptyHint": "Aucun enregistrement"
+        },
+        "quickPick": {
+            "placeholder": "Tapez pour rechercher",
+            "fullExport": "📦 Export complet",
+            "incrementalImport": "📥 Import incrémentiel",
+            "separatorCommands": "--- COMMANDES ---",
+            "separatorMatched": "--- CORRESPONDANCES ---",
+            "separatorHistory": "--- HISTORIQUE ---"
+        },
+        "dialog": {
+            "exportTitle": "Exporter l'historique du presse-papiers (JSON)"
+        },
+        "stats": {
+            "title": "📊 Statistiques de l'historique du presse-papiers",
+            "totalRecords": "Total des enregistrements",
+            "watching": "Surveillance",
+            "yes": "Oui",
+            "no": "Non",
+            "sessionDuration": "Durée de session",
+            "quarantinedFiles": "Fichiers en quarantaine"
         }
     },
     "qqq": {

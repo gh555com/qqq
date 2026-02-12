@@ -157,6 +157,45 @@
             "audioPlay": "Motor {0} reproduzindo: {1}, loop: {2}",
             "pythonPlaying": "q4 detectou Python reproduzindo ao iniciar, sincronizando UI",
             "audioSavor": "Motor {0} reproduzindo favorito: {1}, loop: {2}"
+        },
+        "timeAgo": {
+            "seconds": "há {0}s",
+            "minutes": "há {0}min",
+            "hours": "há {0}h",
+            "days": "há {0}d"
+        },
+        "error": {
+            "msgpackUnavailable": "Motor Msgpack não disponível",
+            "invalidBinaryFormat": "Formato de armazenamento binário inválido",
+            "msgpackMissing": "Motor Msgpack ausente"
+        },
+        "status": {
+            "insertSuccess": "Inserido no editor",
+            "insertFailed": "Inserção falhou"
+        },
+        "ui": {
+            "loopInfinite": "Infinito",
+            "emptyHint": "Sem registros"
+        },
+        "quickPick": {
+            "placeholder": "Digite para pesquisar",
+            "fullExport": "📦 Exportar completo",
+            "incrementalImport": "📥 Importar incremental",
+            "separatorCommands": "--- COMANDOS ---",
+            "separatorMatched": "--- CORRESPONDÊNCIAS ---",
+            "separatorHistory": "--- HISTÓRICO ---"
+        },
+        "dialog": {
+            "exportTitle": "Exportar histórico da área de transferência (JSON)"
+        },
+        "stats": {
+            "title": "📊 Estatísticas do histórico da área de transferência",
+            "totalRecords": "Total de registros",
+            "watching": "Monitorando",
+            "yes": "Sim",
+            "no": "Não",
+            "sessionDuration": "Duração da sessão",
+            "quarantinedFiles": "Arquivos em quarentena"
         }
     },
     "qqq": {

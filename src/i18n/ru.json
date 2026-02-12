@@ -157,6 +157,45 @@
             "audioPlay": "Движок {0} воспроизводит: {1}, цикл: {2}",
             "pythonPlaying": "q4 обнаружил воспроизведение Python при запуске, синхронизация UI",
             "audioSavor": "Движок {0} воспроизводит избранное: {1}, цикл: {2}"
+        },
+        "timeAgo": {
+            "seconds": "{0} сек. назад",
+            "minutes": "{0} мин. назад",
+            "hours": "{0} ч. назад",
+            "days": "{0} д. назад"
+        },
+        "error": {
+            "msgpackUnavailable": "Движок Msgpack недоступен",
+            "invalidBinaryFormat": "Недопустимый формат двоичного хранилища",
+            "msgpackMissing": "Движок Msgpack отсутствует"
+        },
+        "status": {
+            "insertSuccess": "Вставлено в редактор",
+            "insertFailed": "Вставка не удалась"
+        },
+        "ui": {
+            "loopInfinite": "Бесконечно",
+            "emptyHint": "Нет записей"
+        },
+        "quickPick": {
+            "placeholder": "Введите для поиска",
+            "fullExport": "📦 Полный экспорт",
+            "incrementalImport": "📥 Инкрементный импорт",
+            "separatorCommands": "--- КОМАНДЫ ---",
+            "separatorMatched": "--- СОВПАДЕНИЯ ---",
+            "separatorHistory": "--- ИСТОРИЯ ---"
+        },
+        "dialog": {
+            "exportTitle": "Экспорт истории буфера обмена (JSON)"
+        },
+        "stats": {
+            "title": "📊 Статистика истории буфера обмена",
+            "totalRecords": "Всего записей",
+            "watching": "Мониторинг",
+            "yes": "Да",
+            "no": "Нет",
+            "sessionDuration": "Длительность сессии",
+            "quarantinedFiles": "Файлы на карантине"
         }
     },
     "qqq": {
