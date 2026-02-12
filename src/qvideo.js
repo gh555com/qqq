@@ -8,6 +8,7 @@ const { getSharedDownloader } = require('./dow');
 const https = require('https');
 const global = require('./global');
 const { TaskCounter, TaskMessage } = require('./global');
+const { t } = require('./i18n');
 
 // ★ 模块级工具函数
 const _sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -767,7 +768,7 @@ class Qvideo {
     // ==================== 三号弹窗：无效网址（9秒关闭） ====================
     async _showInvalidUrlToast(taskTitle = '') {
         const prefix = taskTitle ? `${taskTitle} ` : 'qqq: ';
-        const msg = `${prefix}无效网址。`;
+        const msg = `${prefix}${t('video.log.invalidUrl')}`;
         this.log(msg);
 
         await vscode.window.withProgress({
@@ -857,7 +858,7 @@ class Qvideo {
         // ★ 确保设置取消标志
         task.tracker.markCancelled();
         task.isCancelled = true;
-        this.log(`qqq: 已标记取消（${reason}），正在清理...`);
+        this.log(`qqq: ${t('video.log.cancelled', reason)}`);
 
         // ★ 如果是外部事务（从 performCurvedPaste 调用），不显示弹窗，由外部统一管理
         // ★ 如果是内部事务（start 方法直接调用），显示弹窗
@@ -890,9 +891,9 @@ class Qvideo {
         if (targetDir) {
             try {
                 await global.TransactionManager._cleanupOrphanFiles(targetDir);
-                this.log(`[兜底清理] 已在 killAll 后立即执行`);
+                this.log(`[兜底清理] ${t('video.log.fallbackCleanup')}`);
             } catch (e) {
-                this.log(`[兜底清理] 失败: ${e.message}`);
+                this.log(`[兜底清理] ${t('video.log.fallbackCleanupError', e.message)}`);
             }
         }
     }
@@ -914,7 +915,7 @@ class Qvideo {
             if (!task.isCancelled) {
                 task.isCancelled = true;
                 if (task.tracker) task.tracker.markCancelled();
-                this.log('[AnchorLost] 检测到锚点丢失，立即标记取消并杀死进程');
+                this.log(`[AnchorLost] ${t('video.log.anchorLost')}`);
                 // ★ 后台执行杀进程和清理（不等待）
                 this._cancelTask(task, '锚点丢失').catch(e => { });
             }
@@ -1013,13 +1014,13 @@ class Qvideo {
                 // 异步确保 yt-dlp
                 this.downloader.ensureYtdlpReady(this.context).catch(e => console.error(e));
 
-                this.log(`开始处理: ${url}`);
+                this.log(t('video.log.startProcess', url));
                 if (!progressCallback) this.outputChannel.show(true);
 
                 // Cookies
                 let cookiesFilePath = this._findBestCookieFileInGlobalStorage();
                 if (cookiesFilePath) {
-                    this.log(`[Cookies] 使用全局 Cookie 文件: ${cookiesFilePath}`);
+                    this.log(`[Cookies] ${t('video.log.usingCookies', cookiesFilePath)}`);
                 }
 
                 // 4. 执行核心流程
@@ -1054,7 +1055,7 @@ class Qvideo {
             candidates.sort((a, b) => b.mtime - a.mtime);
             return candidates[0].path;
         } catch (e) {
-            this.log(`[Cookies] 搜索出错: ${e.message}`);
+            this.log(`[Cookies] ${t('video.log.cookieSearchError', e.message)}`);
             return null;
         }
     }
@@ -1071,7 +1072,7 @@ class Qvideo {
         const hit = keywords.some(k => msg.includes(k));
 
         if (hit) {
-            this.log(`[Cookies] 检测到可能的 Cookie 失效/缺失 (${msg})，正在自动打开配置目录...`);
+            this.log(`[Cookies] ${t('video.log.cookieInvalid', msg)}`);
 
             // 1. 打开文件夹
             const dir = this.context.globalStorageUri.fsPath;
@@ -1112,7 +1113,7 @@ class Qvideo {
                     );
                 }
 
-                this.log("正在智能嗅探资源...");
+                this.log(t('video.log.sniffing'));
                 let tasks = [];
 
                 let probeForbidden = false;
@@ -1127,12 +1128,12 @@ class Qvideo {
 
                     if (res && res.success) {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
-                            this.log(`识别为列表，共 ${res.entries.length} 个视频。`);
+                            this.log(t('video.log.playlistDetected', res.entries.length));
                             tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url, task.transId));
                             // ★ 播放列表：保存完整标题（截断由 QvideoMsg 统一处理）
                             task.videoTitle = res.entries[0]?.title || '';
                         } else {
-                            this.log(`识别为单个视频: ${res.title}`);
+                            this.log(t('video.log.singleVideo', res.title));
                             tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url, task.transId));
                             // ★ 单个视频：保存完整标题（截断由 QvideoMsg 统一处理）
                             task.videoTitle = res.title || '';
@@ -1141,7 +1142,7 @@ class Qvideo {
                         if (this._isForbidden(403, res?.error)) {
                             if (!isYouTube) {
                                 probeForbidden = true;
-                                this.log("探测返回 403，尝试直接加入下载队列以触发增强流程。");
+                                this.log(t('video.log.probe403'));
                                 tasks.push(this._createTask(url, null, targetDir, url, task.transId));
                             } else {
                                 // ✅ 前置排除：YouTube 的 403 不作为增强信号

@@ -21,6 +21,10 @@
             "overwriteFile": "文件 \"{0}\" 已存在，是否覆盖？",
             "yes": "是",
             "no": "否"
+        },
+        "log": {
+            "getFolderSizeError": "s请求获取文件夹大小失败: {0} - {1}",
+            "readScmError": "读取精细 SCM 失败: {0}"
         }
     },
     "q4": {
@@ -43,6 +47,52 @@
             "historyCleared": "剪切板历史已清空",
             "stateCleared": "globalState 已清空",
             "stateClearError": "清理 globalState 失败: {0}"
+        },
+        "log": {
+            "audioReset": "音频源状态已重置",
+            "pythonCrash": "Python 进程崩溃，已停止播放 UI",
+            "pythonNoMiniaudio": "Python 引擎已连接但未检测到 miniaudio 依赖",
+            "pythonProbeError": "Python 探测异常: {0}",
+            "pythonProbeFail": "Python 引擎探测未通过，使用 Webview 兜底",
+            "audioPlay": "{0} 引擎播放: {1}, 循环: {2}",
+            "pythonPlaying": "q4 启动时检测到 Python 正在播放，同步 UI",
+            "audioSavor": "{0} 引擎播放品味: {1}, 循环: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "粘贴操作被用户取消 ({0})",
+            "allFilesSkipped": "所有 {0} 个文件都无法访问，已跳过",
+            "folderScan": "{0}: {1}ms, {2}文件, {3}",
+            "folderScanJs": "{0}: {1}ms, {2}文件, {3} (JS)",
+            "pythonUnavailable": "Python 引擎不可用: {0}",
+            "pythonCheckError": "Python 引擎检测异常: {0}",
+            "contextWaiting": "extensionContext 未初始化，等待中...",
+            "pythonPlay": "Python 引擎播放: {0}, 循环: {1}",
+            "pythonPlayFail": "Python 播放失败: {0}",
+            "pythonPlayError": "Python 播放异常: {0}",
+            "audioPlayError": "播放音频失败: {0}",
+            "anchorFileNotExist": "文件不存在，视为锚点丢失: {0}",
+            "anchorLost": "锚点丢失，立即触发回滚: {0}",
+            "anchorReadError": "无法读取文档，视为锚点丢失: {0}",
+            "anchorReplaceFail": "锚点替换失败，回滚事务"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "无效网址。",
+            "cancelled": "已标记取消（{0}），正在清理...",
+            "fallbackCleanup": "已在 killAll 后立即执行",
+            "fallbackCleanupError": "失败: {0}",
+            "anchorLost": "检测到锚点丢失，立即标记取消并杀死进程",
+            "startProcess": "开始处理: {0}",
+            "usingCookies": "使用全局 Cookie 文件: {0}",
+            "cookieSearchError": "搜索出错: {0}",
+            "cookieInvalid": "检测到可能的 Cookie 失效/缺失 ({0})，正在自动打开配置目录...",
+            "sniffing": "正在智能嗅探资源...",
+            "playlistDetected": "识别为列表，共 {0} 个视频。",
+            "singleVideo": "识别为单个视频: {0}",
+            "probe403": "探测返回 403，尝试直接加入下载队列以触发增强流程。"
         }
     },
     "log": {

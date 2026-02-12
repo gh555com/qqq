@@ -21,6 +21,10 @@
             "overwriteFile": "File \"{0}\" already exists. Overwrite?",
             "yes": "Yes",
             "no": "No"
+        },
+        "log": {
+            "getFolderSizeError": "sRequest get folder size failed: {0} - {1}",
+            "readScmError": "Read fine-grained SCM failed: {0}"
         }
     },
     "q4": {
@@ -43,6 +47,52 @@
             "historyCleared": "Clipboard history cleared",
             "stateCleared": "globalState cleared",
             "stateClearError": "Failed to clear globalState: {0}"
+        },
+        "log": {
+            "audioReset": "Audio source state has been reset",
+            "pythonCrash": "Python process crashed, stopped playback UI",
+            "pythonNoMiniaudio": "Python engine connected but miniaudio dependency not detected",
+            "pythonProbeError": "Python probe exception: {0}",
+            "pythonProbeFail": "Python engine probe failed, using Webview fallback",
+            "audioPlay": "{0} engine playing: {1}, loop: {2}",
+            "pythonPlaying": "q4 detected Python playing at startup, syncing UI",
+            "audioSavor": "{0} engine savor playing: {1}, loop: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "Paste operation cancelled by user ({0})",
+            "allFilesSkipped": "All {0} files are inaccessible, skipped",
+            "folderScan": "{0}: {1}ms, {2} files, {3}",
+            "folderScanJs": "{0}: {1}ms, {2} files, {3} (JS)",
+            "pythonUnavailable": "Python engine unavailable: {0}",
+            "pythonCheckError": "Python engine check exception: {0}",
+            "contextWaiting": "extensionContext not initialized, waiting...",
+            "pythonPlay": "Python engine playing: {0}, loop: {1}",
+            "pythonPlayFail": "Python playback failed: {0}",
+            "pythonPlayError": "Python playback exception: {0}",
+            "audioPlayError": "Audio playback failed: {0}",
+            "anchorFileNotExist": "File does not exist, anchor considered lost: {0}",
+            "anchorLost": "Anchor lost, triggering rollback immediately: {0}",
+            "anchorReadError": "Cannot read document, anchor considered lost: {0}",
+            "anchorReplaceFail": "Anchor replacement failed, rolling back transaction"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "Invalid URL.",
+            "cancelled": "Marked as cancelled ({0}), cleaning up...",
+            "fallbackCleanup": "Executed immediately after killAll",
+            "fallbackCleanupError": "Failed: {0}",
+            "anchorLost": "Anchor lost detected, marking cancelled and killing process immediately",
+            "startProcess": "Starting process: {0}",
+            "usingCookies": "Using global cookie file: {0}",
+            "cookieSearchError": "Search error: {0}",
+            "cookieInvalid": "Detected possible cookie invalid/missing ({0}), auto-opening config directory...",
+            "sniffing": "Smart sniffing resources...",
+            "playlistDetected": "Detected as playlist, {0} videos total.",
+            "singleVideo": "Detected as single video: {0}",
+            "probe403": "Probe returned 403, trying to add to download queue to trigger enhanced flow."
         }
     },
     "log": {

@@ -1036,7 +1036,7 @@ class ClipboardHistorySidebarProvider {
     resetAudioSource() {
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
-        this._global.logMessage(`[Q4] 音频源状态已重置`, "INFO");
+        this._global.logMessage(`[Q4] ${t('q4.log.audioReset')}`, "INFO");
     }
 
     resolveWebviewView(webviewView) {
@@ -1078,7 +1078,7 @@ class ClipboardHistorySidebarProvider {
                 // ★ Python 进程崩溃，立即停止 UI 播放状态
                 this._pythonPlayState.playing = false;
                 this._postMessage({ command: 'stopAudio' });
-                this._global.logMessage(`[Q4] Python 进程崩溃，已停止播放 UI`, "WARN");
+                this._global.logMessage(`[Q4] ${t('q4.log.pythonCrash')}`, "WARN");
             }
         };
         this._global.pythonBridge.on('event', this._onPythonEvent);
@@ -1389,15 +1389,15 @@ class ClipboardHistorySidebarProvider {
                         this._audioSource = AUDIO_SOURCE.PYTHON;
                         return AUDIO_SOURCE.PYTHON;
                     } else {
-                        this._global.logMessage(`[Audio] Python 引擎已连接但未检测到 miniaudio 依赖`, "WARN");
+                        this._global.logMessage(`[Audio] ${t('q4.log.pythonNoMiniaudio')}`, "WARN");
                     }
                 }
             }
         } catch (e) {
-            this._global.logMessage(`[Audio] Python 探测异常: ${e.message}`, "WARN");
+            this._global.logMessage(`[Audio] ${t('q4.log.pythonProbeError', e.message)}`, "WARN");
         }
 
-        this._global.logMessage(`[Audio] Python 引擎探测未通过，使用 Webview 兜底`, "WARN");
+        this._global.logMessage(`[Audio] ${t('q4.log.pythonProbeFail')}`, "WARN");
         this._audioSource = AUDIO_SOURCE.WEBVIEW;
         return AUDIO_SOURCE.WEBVIEW;
     }
@@ -1453,7 +1453,7 @@ class ClipboardHistorySidebarProvider {
         const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
         const loopCount = 1;
 
-        this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放: ${info.fileName}, 循环: ${loopCount}`, "INFO");
+        this._global.logMessage(`[Audio] ${t('q4.log.audioPlay', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, loopCount)}`, "INFO");
 
         if (source === AUDIO_SOURCE.PYTHON) {
             // Python 模式：先发 UI-only（无 base64）
@@ -1498,7 +1498,7 @@ class ClipboardHistorySidebarProvider {
             const res = await this._global.pythonBridge.call('get_audio_state');
             if (res && res.playing) {
                 // Python 正在播放，同步 UI 状态
-                this._global.logMessage('[Audio] q4 启动时检测到 Python 正在播放，同步 UI', "INFO");
+                this._global.logMessage(`[Audio] ${t('q4.log.pythonPlaying')}`, "INFO");
                 // 从 Python 引擎获取当前播放的文件和循环信息
                 // 由于无法直接获取文件名，使用 _pythonPlayState 中保存的信息
                 if (this._pythonPlayState && this._pythonPlayState.fileName) {
@@ -1577,7 +1577,7 @@ class ClipboardHistorySidebarProvider {
         const loopCount = mode === 'loop' ? (source === AUDIO_SOURCE.PYTHON ? 0 : -1) : getRand(2, 7);
         const displayCount = (loopCount === -1 || loopCount === 0) ? '无限' : loopCount;
 
-        this._global.logMessage(`[Audio] ${source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview'} 引擎播放品味: ${info.fileName}, 循环: ${displayCount}`, "INFO");
+        this._global.logMessage(`[Audio] ${t('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
 
         if (source === AUDIO_SOURCE.PYTHON) {
             // Python 模式：先发 UI-only（无 base64）

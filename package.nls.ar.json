@@ -60,7 +60,7 @@
     "config.docExportImageResolution.enum.original": "الدقة الأصلية — دقة كاملة.",
     "config.docExportImageResolution.enum.frame": "المزايا: 1. حجم ملف أصغر؛ 2. الصور المصغرة في الإطار تتوافق دائماً مع معاينة صورة كاملة (بدون اقتصاص بسبب حدود حجم صفحة Word).",
     "config.docExportIncludeCipher.desc": "📦 تصدير سلسلة رمز الصورة (مثال: /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",
-    "view.name": "gaea",
+    "view.name": "的梦gaea",
     "cmd.q1": "qqq: لصق ( Ctrl+V or F2 )",
     "cmd.q2": "qqq: تصفّح ( Tab or F6 )",
     "cmd.pure": "qqq: Pure",

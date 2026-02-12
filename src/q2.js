@@ -116,7 +116,7 @@ async function getSizeForSRequest(itemPath, isFolder) {
     }
     return 0;
   } catch (error) {
-    global.logMessage(`s请求获取文件夹大小失败: ${canon} - ${error.message}`, "ERROR");
+    global.logMessage(t('q2.log.getFolderSizeError', canon, error.message), "ERROR");
     return 0;
   }
 }
@@ -356,7 +356,7 @@ function getFineSCM(folderPath) {
       };
     }
   } catch (e) {
-    geq().logMessage(`读取精细 SCM 失败: ${e.message}`, "WARN");
+    geq().logMessage(t('q2.log.readScmError', e.message), "WARN");
   }
   return { szMode: null, sortBy: null };
 }

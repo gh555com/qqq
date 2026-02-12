@@ -21,6 +21,10 @@
             "overwriteFile": "الملف \"{0}\" موجود بالفعل. هل تريد الكتابة فوقه؟",
             "yes": "نعم",
             "no": "لا"
+        },
+        "log": {
+            "getFolderSizeError": "فشل طلب حجم المجلد: {0} - {1}",
+            "readScmError": "فشل قراءة SCM الدقيق: {0}"
         }
     },
     "q4": {
@@ -43,6 +47,52 @@
             "historyCleared": "تم مسح سجل الحافظة",
             "stateCleared": "تم مسح globalState",
             "stateClearError": "فشل مسح globalState: {0}"
+        },
+        "log": {
+            "audioReset": "تم إعادة تعيين حالة مصدر الصوت",
+            "pythonCrash": "تعطل عملية Python، تم إيقاف واجهة التشغيل",
+            "pythonNoMiniaudio": "محرك Python متصل لكن لم يتم اكتشاف تبعية miniaudio",
+            "pythonProbeError": "استثناء فحص Python: {0}",
+            "pythonProbeFail": "فشل فحص محرك Python، استخدام Webview كبديل",
+            "audioPlay": "محرك {0} يشغل: {1}، تكرار: {2}",
+            "pythonPlaying": "اكتشف q4 أن Python يشغل عند بدء التشغيل، مزامنة الواجهة",
+            "audioSavor": "محرك {0} يشغل للاستمتاع: {1}، تكرار: {2}"
+        }
+    },
+    "qqq": {
+        "log": {
+            "pasteCancelled": "تم إلغاء عملية اللصق من قبل المستخدم ({0})",
+            "allFilesSkipped": "جميع الملفات {0} غير قابلة للوصول، تم تخطيها",
+            "folderScan": "{0}: {1}ms، {2} ملف، {3}",
+            "folderScanJs": "{0}: {1}ms، {2} ملف، {3} (JS)",
+            "pythonUnavailable": "محرك Python غير متاح: {0}",
+            "pythonCheckError": "استثناء فحص محرك Python: {0}",
+            "contextWaiting": "extensionContext لم يتم تهيئته، جاري الانتظار...",
+            "pythonPlay": "محرك Python يشغل: {0}، تكرار: {1}",
+            "pythonPlayFail": "فشل تشغيل Python: {0}",
+            "pythonPlayError": "استثناء تشغيل Python: {0}",
+            "audioPlayError": "فشل تشغيل الصوت: {0}",
+            "anchorFileNotExist": "الملف غير موجود، يعتبر المرساة مفقودة: {0}",
+            "anchorLost": "المرساة مفقودة، تفعيل التراجع فوراً: {0}",
+            "anchorReadError": "لا يمكن قراءة المستند، يعتبر المرساة مفقودة: {0}",
+            "anchorReplaceFail": "فشل استبدال المرساة، التراجع عن المعاملة"
+        }
+    },
+    "video": {
+        "log": {
+            "invalidUrl": "رابط غير صالح.",
+            "cancelled": "تم وضع علامة إلغاء ({0})، جاري التنظيف...",
+            "fallbackCleanup": "تم التنفيذ فوراً بعد killAll",
+            "fallbackCleanupError": "فشل: {0}",
+            "anchorLost": "اكتشاف فقدان المرساة، وضع علامة إلغاء وقتل العملية فوراً",
+            "startProcess": "بدء المعالجة: {0}",
+            "usingCookies": "استخدام ملف Cookie العام: {0}",
+            "cookieSearchError": "خطأ في البحث: {0}",
+            "cookieInvalid": "اكتشاف Cookie غير صالح/مفقود محتمل ({0})، فتح دليل التكوين تلقائياً...",
+            "sniffing": "جاري الاستشعار الذكي للموارد...",
+            "playlistDetected": "تم التعرف عليها كقائمة تشغيل، إجمالي {0} فيديو.",
+            "singleVideo": "تم التعرف عليه كفيديو واحد: {0}",
+            "probe403": "الفحص أعاد 403، محاولة الإضافة إلى قائمة التنزيل لتفعيل التدفق المحسن."
         }
     },
     "log": {

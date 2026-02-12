@@ -60,7 +60,7 @@
     "config.docExportImageResolution.enum.original": "Original resolution — full precision.",
     "config.docExportImageResolution.enum.frame": "Advantages: 1. Smaller file size; 2. Frame thumbnails always correspond to a complete image preview (no cropping due to Word page-size limits).",
     "config.docExportIncludeCipher.desc": "📦 Export image cipher string (e.g. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",
-    "view.name": "gaea",
+    "view.name": "的梦gaea",
     "cmd.q1": "qqq: Paste ( Ctrl+V or F2 )",
     "cmd.q2": "qqq: Roam ( Tab or F6 )",
     "cmd.pure": "qqq: Pure",

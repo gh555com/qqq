@@ -10,7 +10,7 @@ const global = require("./global");
 const h = require("./h");
 const q1 = require("./q1");
 const q4 = require("./q4");
-const i18n = require("./i18n");
+const { t } = require("./i18n");
 
 // 引用 global.js 的核心对象
 const {
@@ -798,7 +798,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 				cancellable: true
 			}, async (progress, token) => {
 				token.onCancellationRequested(async () => {
-					global.logMessage(`粘贴操作被用户取消 (${transId})`, "WARN");
+					global.logMessage(t('qqq.log.pasteCancelled', transId), "WARN");
 					await global.TransactionManager.rollback(transId);
 				});
 
@@ -835,7 +835,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 			if (res) {
 				// 如果所有文件都被跳过，显示警告
 				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
-					global.logMessage(`所有 ${res.skippedCount} 个文件都无法访问，已跳过`, "WARN");
+					global.logMessage(t('qqq.log.allFilesSkipped', res.skippedCount), "WARN");
 				}
 				if (callback) callback(res, 100);
 			}
@@ -871,7 +871,7 @@ async function getFolderInfo(folderPath) {
 
 	if (res) {
 		const elapsed = Date.now() - startTime;
-		global.logMessage(`[FolderScan] ${folderPath}: ${elapsed}ms, ${res.file_count_root || 0}文件, ${global.formatBytes(res.total_size || 0)}`, "DEBUG");
+		global.logMessage(`[FolderScan] ${t('qqq.log.folderScan', folderPath, elapsed, res.file_count_root || 0, global.formatBytes(res.total_size || 0))}`, "DEBUG");
 		return res;
 	}
 
@@ -912,7 +912,7 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 	}
 
 	const elapsed = Date.now() - startTime;
-	global.logMessage(`[FolderScan] ${folderPath}: ${elapsed}ms, ${fileCount}文件, ${global.formatBytes(totalSize)} (JS)`, "DEBUG");
+	global.logMessage(`[FolderScan] ${t('qqq.log.folderScanJs', folderPath, elapsed, fileCount, global.formatBytes(totalSize))}`, "DEBUG");
 
 	return {
 		success: true,
@@ -1114,11 +1114,11 @@ async function checkPythonAudioEngine() {
 		} else {
 			_pythonAudioError = res?.error || 'miniaudio not available';
 			// 在日志面板打印错误原因
-			global.logMessage(`[Audio] Python 引擎不可用: ${_pythonAudioError}`, "WARN");
+			global.logMessage(`[Audio] ${t('qqq.log.pythonUnavailable', _pythonAudioError)}`, "WARN");
 		}
 	} catch (e) {
 		_pythonAudioError = e.message;
-		global.logMessage(`[Audio] Python 引擎检测异常: ${e.message}`, "WARN");
+		global.logMessage(`[Audio] ${t('qqq.log.pythonCheckError', e.message)}`, "WARN");
 	}
 
 	_pythonAudioChecked = true;
@@ -1163,7 +1163,7 @@ async function savorMomentsCommand() {
 	try {
 		// ★ 保护性检查：确保 extensionContext 已初始化
 		if (!extensionContext || !extensionContext.extensionPath) {
-			global.logMessage('[Audio] extensionContext 未初始化，等待中...', "WARN");
+			global.logMessage(`[Audio] ${t('qqq.log.contextWaiting')}`, "WARN");
 			// 回退到 webview 播放（不打开侧边栏）
 			if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 				activeSidebarProvider.triggerSavor('normal');
@@ -1182,7 +1182,7 @@ async function savorMomentsCommand() {
 			const info = getSavorAudioInfo(extensionContext);
 			const loopCount = getRandomLoopCount();
 
-			global.logMessage(`[Audio] Python 引擎播放: ${info.fileName}, 循环: ${loopCount}`, "INFO");
+			global.logMessage(`[Audio] ${t('qqq.log.pythonPlay', info.fileName, loopCount)}`, "INFO");
 
 			try {
 				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
@@ -1203,9 +1203,9 @@ async function savorMomentsCommand() {
 					return;
 				}
 				// Python 播放失败，回退到 webview
-				global.logMessage(`[Audio] Python 播放失败: ${res?.error || 'unknown'}`, "WARN");
+				global.logMessage(`[Audio] ${t('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
 			} catch (e) {
-				global.logMessage(`[Audio] Python 播放异常: ${e.message}`, "WARN");
+				global.logMessage(`[Audio] ${t('qqq.log.pythonPlayError', e.message)}`, "WARN");
 			}
 		}
 
@@ -1219,7 +1219,7 @@ async function savorMomentsCommand() {
 		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
 		global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
 	} catch (e) {
-		global.logMessage(`播放音频失败: ${e.message}`, "ERROR");
+		global.logMessage(t('qqq.log.audioPlayError', e.message), "ERROR");
 	}
 }
 
@@ -1309,7 +1309,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			if (!fs.existsSync(targetUri.fsPath)) {
 				if (!anchorLost) {
 					anchorLost = true;
-					global.logMessage(`[AnchorWatch] 文件不存在，视为锚点丢失: ${targetUri.fsPath}`, 'WARN');
+					global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorFileNotExist', targetUri.fsPath)}`, 'WARN');
 					anchorLostSource.cancel();
 				}
 				return false;
@@ -1320,7 +1320,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 			if (!exists && !anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] 锚点丢失，立即触发回滚: ${anchor}`, 'WARN');
+				global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorLost', anchor)}`, 'WARN');
 				anchorLostSource.cancel();
 				return false;
 			}
@@ -1328,7 +1328,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		} catch (e) {
 			if (!anchorLost) {
 				anchorLost = true;
-				global.logMessage(`[AnchorWatch] 无法读取文档，视为锚点丢失: ${e.message}`, 'WARN');
+				global.logMessage(`[AnchorWatch] ${t('qqq.log.anchorReadError', e.message)}`, 'WARN');
 				anchorLostSource.cancel();
 			}
 			return false;
@@ -1389,7 +1389,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				await global.TransactionManager.removeTransaction(transId);
 				return res;
 			} else {
-				global.logMessage("锚点替换失败，回滚事务", "ERROR");
+				global.logMessage(t('qqq.log.anchorReplaceFail'), "ERROR");
 				await global.TransactionManager.rollback(transId);
 				return { ...res, anchorLost: true };
 			}
