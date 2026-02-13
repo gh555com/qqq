@@ -289,7 +289,58 @@
             "sniffing": "スマートリソーススニッフィング中...",
             "playlistDetected": "プレイリストとして検出、合計 {0} 本の動画。",
             "singleVideo": "単一の動画として検出: {0}",
-            "probe403": "探査で 403 が返されました、拡張フローをトリガーするためにダウンロードキューに直接追加を試みます。"
+            "probe403": "探査で 403 が返されました、拡張フローをトリガーするためにダウンロードキューに直接追加を試みます。",
+            "probeNoResource": "yt-dlp 探査でリソースが見つからないかサポートされていません: {0}",
+            "probeException": "yt-dlp 探査例外: {0}",
+            "staticAnalysisStart": "ウェブページの静的分析を開始: {0}",
+            "staticAnalysisResult": "静的分析結果: {0} URL",
+            "staticAnalysisFound": "静的分析で {0} 個のリソースリンクが見つかりました。",
+            "staticAnalysisFailed": "静的分析失敗: {0}",
+            "noResourceTryDirect": "明確なリソースが検出されません、直接リンクダウンロードを試みます...",
+            "preparingDownload": "{0} タスクのダウンロードを準備中...",
+            "transPreregisterFailed": "[トランザクション] tempFiles の事前登録失敗: {0}",
+            "youtubeProbe403": "YouTube 探査 403: 拡張トリガーを無視 (yt-dlp 直接ダウンロードを試みます)。",
+            "staticFoundDirect": "静的分析で直接動画が見つかりました、元の 403 タスクを削除。",
+            "anchorLostEnhanced": "[拡張] アンカー喪失を検出",
+            "userCancelEnhanced": "ユーザーが拡張フローをキャンセル"
+        },
+        "msg": {
+            "parsing": "{0} を解析中",
+            "exchanged": "{0}{1}{2} を {3} で交換",
+            "landed0": "0 件ランディング、{0} から",
+            "landedN": "{0} 本の動画合計 {1}、{2} から",
+            "cancelledRollback": "{0} キャンセルされロールバック"
+        },
+        "reason": {
+            "userCancel": "ユーザーキャンセル",
+            "anchorLost": "アンカー喪失",
+            "userCancelWindow1": "ユーザーがウィンドウ 1 でキャンセル",
+            "userCancelEnhanced": "ユーザーが拡張ダウンロードウィンドウでキャンセル",
+            "externalToken": "外部トークンキャンセル"
+        },
+        "ui": {
+            "inputPrompt": "動画を含むURLを貼り付け",
+            "noEditorError": "動画を挿入するには、まずドキュメントを開いてください。",
+            "youtubeFailed": "YouTubeダウンロード失敗、Cookieを設定してみてください。または動画を切り替えるか待つことも有効です。",
+            "enhancedStart": "🚀 拡張フローを開始",
+            "pickBrowser": "📂 chrome.exe のようなブラウザ実行ファイルを選択",
+            "cancel": "❌ キャンセル",
+            "input12": "1 または 2 を入力",
+            "downloadChrome": "📥 Chrome をダウンロード (~150m)",
+            "terminateAll": "❌ すべて終了",
+            "noBrowserSelect": "qqq: 有効なブラウザが選択されていません、操作を選択してください",
+            "rejected": "ダウンロードが拒否されました ({0})、拡張フローを試すことができます。",
+            "rejectedFallback": "(ウィンドウが VS Code に吃われました、ドロップダウンを使用)",
+            "input12Prompt": "ダウンロード拒否 ({0})、1 で拡張、2 でブラウザ、その他でキャンセル",
+            "noBrowserConfirm": "qqq: 有効なブラウザがありません。Chrome (~150m) をダウンロードまたは終了。",
+            "downloadChromeBtn": "Chrome をダウンロード",
+            "terminateBtn": "すべて終了",
+            "enhancedDownloading": "拡張ダウンロード中"
+        },
+        "error": {
+            "fileNotExist": "ファイルが存在しません",
+            "cannotReadVersion": "バージョン情報を読み取れません",
+            "versionEmpty": "バージョン情報が空です"
         }
     },
     "log": {

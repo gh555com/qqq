@@ -289,7 +289,58 @@
             "sniffing": "Detecção inteligente de recursos...",
             "playlistDetected": "Identificado como playlist, {0} vídeos no total.",
             "singleVideo": "Identificado como vídeo único: {0}",
-            "probe403": "Sondagem retornou 403"
+            "probe403": "Sondagem retornou 403",
+            "probeNoResource": "yt-dlp não encontrou recurso: {0}",
+            "probeException": "Exceção yt-dlp: {0}",
+            "staticAnalysisStart": "Iniciando análise estática: {0}",
+            "staticAnalysisResult": "Resultado análise estática: {0} URLs",
+            "staticAnalysisFound": "Análise estática encontrou {0} links.",
+            "staticAnalysisFailed": "Análise estática falhou: {0}",
+            "noResourceTryDirect": "Nenhum recurso detectado, tentando download direto...",
+            "preparingDownload": "Preparando download de {0} tarefas...",
+            "transPreregisterFailed": "[Transação] Pré-registro tempFiles falhou: {0}",
+            "youtubeProbe403": "YouTube sondagem 403: Gatilho aprimorado ignorado.",
+            "staticFoundDirect": "Análise estática encontrou vídeo direto.",
+            "anchorLostEnhanced": "[Aprimorado] Perda de âncora detectada",
+            "userCancelEnhanced": "Usuário cancelou fluxo aprimorado"
+        },
+        "msg": {
+            "parsing": "Analisando {0}",
+            "exchanged": "Trocado {0}{1}{2} em {3}",
+            "landed0": "0 pousados, de {0}",
+            "landedN": "{0} vídeos totalizando {1}, de {2}",
+            "cancelledRollback": "{0} cancelado e revertido"
+        },
+        "reason": {
+            "userCancel": "Cancelado pelo usuário",
+            "anchorLost": "Âncora perdida",
+            "userCancelWindow1": "Usuário cancelou na janela 1",
+            "userCancelEnhanced": "Usuário cancelou na janela aprimorada",
+            "externalToken": "Token externo cancelado"
+        },
+        "ui": {
+            "inputPrompt": "Cole URL com vídeo",
+            "noEditorError": "Por favor abra um documento primeiro.",
+            "youtubeFailed": "YouTube falhou, tente configurar cookies.",
+            "enhancedStart": "🚀 Iniciar fluxo aprimorado",
+            "pickBrowser": "📂 Escolher executável do navegador",
+            "cancel": "❌ Cancelar",
+            "input12": "Digite 1 ou 2",
+            "downloadChrome": "📥 Baixar Chrome (~150m)",
+            "terminateAll": "❌ Encerrar tudo",
+            "noBrowserSelect": "qqq: Nenhum navegador válido, escolha uma ação",
+            "rejected": "Download rejeitado ({0}), tente fluxo aprimorado.",
+            "rejectedFallback": "(Janela absorvida pelo VS Code)",
+            "input12Prompt": "Rejeitado ({0}), 1 para aprimorado, 2 para navegador",
+            "noBrowserConfirm": "qqq: Sem navegador. Baixar Chrome ou encerrar.",
+            "downloadChromeBtn": "Baixar Chrome",
+            "terminateBtn": "Encerrar tudo",
+            "enhancedDownloading": "Download aprimorado"
+        },
+        "error": {
+            "fileNotExist": "Arquivo não existe",
+            "cannotReadVersion": "Não foi possível ler info de versão",
+            "versionEmpty": "Info de versão vazia"
         }
     },
     "log": {

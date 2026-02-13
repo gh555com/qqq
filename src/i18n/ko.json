@@ -289,7 +289,58 @@
             "sniffing": "스마트 리소스 스니핑 중...",
             "playlistDetected": "재생목록으로 감지됨, 총 {0}개 동영상.",
             "singleVideo": "단일 동영상으로 감지됨: {0}",
-            "probe403": "탐사에서 403 반환"
+            "probe403": "탐사에서 403 반환",
+            "probeNoResource": "yt-dlp 탐사에서 리소스 발견 안됨: {0}",
+            "probeException": "yt-dlp 탐사 예외: {0}",
+            "staticAnalysisStart": "정적 분석 시작: {0}",
+            "staticAnalysisResult": "정적 분석 결과: {0} URLs",
+            "staticAnalysisFound": "정적 분석에서 {0}개 링크 발견.",
+            "staticAnalysisFailed": "정적 분석 실패: {0}",
+            "noResourceTryDirect": "리소스 감지 안됨, 직접 다운로드 시도...",
+            "preparingDownload": "{0}개 작업 다운로드 준비 중...",
+            "transPreregisterFailed": "[트랜잭션] tempFiles 사전 등록 실패: {0}",
+            "youtubeProbe403": "YouTube 탐사 403: 강화 트리거 무시.",
+            "staticFoundDirect": "정적 분석에서 직접 동영상 발견.",
+            "anchorLostEnhanced": "[강화] 앵커 손실 감지",
+            "userCancelEnhanced": "사용자가 강화 흐름 취소"
+        },
+        "msg": {
+            "parsing": "{0} 분석 중",
+            "exchanged": "{0}{1}{2} 교환됨 {3}에서",
+            "landed0": "0개 랜딩, {0}에서",
+            "landedN": "{0}개 동영상 총 {1}, {2}에서",
+            "cancelledRollback": "{0} 취소 및 롤백"
+        },
+        "reason": {
+            "userCancel": "사용자 취소",
+            "anchorLost": "앵커 손실",
+            "userCancelWindow1": "사용자가 창 1에서 취소",
+            "userCancelEnhanced": "사용자가 강화 다운로드 창에서 취소",
+            "externalToken": "외부 토큰 취소"
+        },
+        "ui": {
+            "inputPrompt": "동영상 URL 붙여넣기",
+            "noEditorError": "먼저 문서를 여세요.",
+            "youtubeFailed": "YouTube 실패, 쿠키 설정을 시도하세요.",
+            "enhancedStart": "🚀 강화 흐름 시작",
+            "pickBrowser": "📂 브라우저 실행 파일 선택",
+            "cancel": "❌ 취소",
+            "input12": "1 또는 2 입력",
+            "downloadChrome": "📥 Chrome 다운로드 (~150m)",
+            "terminateAll": "❌ 모두 종료",
+            "noBrowserSelect": "qqq: 유효한 브라우저 없음, 작업 선택",
+            "rejected": "다운로드 거부됨 ({0}), 강화 흐름을 시도하세요.",
+            "rejectedFallback": "(창이 VS Code에 의해 흡수됨)",
+            "input12Prompt": "거부됨 ({0}), 1은 강화, 2는 브라우저",
+            "noBrowserConfirm": "qqq: 브라우저 없음. Chrome 다운로드 또는 종료.",
+            "downloadChromeBtn": "Chrome 다운로드",
+            "terminateBtn": "모두 종료",
+            "enhancedDownloading": "강화 다운로드 중"
+        },
+        "error": {
+            "fileNotExist": "파일이 존재하지 않습니다",
+            "cannotReadVersion": "버전 정보를 읽을 수 없습니다",
+            "versionEmpty": "버전 정보가 비어 있습니다"
         }
     },
     "log": {

@@ -289,7 +289,58 @@
             "sniffing": "Ressourcen werden intelligent erkannt...",
             "playlistDetected": "Als Playlist erkannt, {0} Videos.",
             "singleVideo": "Als einzelnes Video erkannt: {0}",
-            "probe403": "Probe gab 403 zurück, versuche direktes Hinzufügen zur Download-Warteschlange."
+            "probe403": "Probe gab 403 zurück, versuche direktes Hinzufügen zur Download-Warteschlange.",
+            "probeNoResource": "yt-dlp Probe fand keine Ressource oder nicht unterstützt: {0}",
+            "probeException": "yt-dlp Probe-Ausnahme: {0}",
+            "staticAnalysisStart": "Starte statische Analyse der Webseite: {0}",
+            "staticAnalysisResult": "Statische Analyse Ergebnis: {0} URLs",
+            "staticAnalysisFound": "Statische Analyse fand {0} Ressourcen-Links.",
+            "staticAnalysisFailed": "Statische Analyse fehlgeschlagen: {0}",
+            "noResourceTryDirect": "Keine klare Ressource erkannt, versuche direkten Link-Download...",
+            "preparingDownload": "Vorbereitung zum Download von {0} Aufgaben...",
+            "transPreregisterFailed": "[Transaktion] Vorregistrierung tempFiles fehlgeschlagen: {0}",
+            "youtubeProbe403": "YouTube Probe 403: Erweiterter Trigger ignoriert (versuche trotzdem yt-dlp direkten Download).",
+            "staticFoundDirect": "Statische Analyse fand direktes Video, entferne ursprüngliche 403-Aufgabe.",
+            "anchorLostEnhanced": "[Erweitert] Ankerverlust erkannt",
+            "userCancelEnhanced": "Benutzer hat erweiterten Ablauf abgebrochen"
+        },
+        "msg": {
+            "parsing": "Analysiere {0}",
+            "exchanged": "Ausgetauscht {0}{1}{2} bei {3}",
+            "landed0": "0 gelandet, von {0}",
+            "landedN": "{0} Videos gelandet, insgesamt {1}, von {2}",
+            "cancelledRollback": "{0} abgebrochen und zurückgesetzt"
+        },
+        "reason": {
+            "userCancel": "Benutzer abgebrochen",
+            "anchorLost": "Anker verloren",
+            "userCancelWindow1": "Benutzer hat im Fenster 1 abgebrochen",
+            "userCancelEnhanced": "Benutzer hat im erweiterten Download-Fenster abgebrochen",
+            "externalToken": "Externes Token abgebrochen"
+        },
+        "ui": {
+            "inputPrompt": "URL mit Video einfügen",
+            "noEditorError": "Bitte öffnen Sie zuerst ein Dokument zum Einfügen.",
+            "youtubeFailed": "YouTube-Download fehlgeschlagen, versuchen Sie Cookies zu konfigurieren. Alternativ kann Wechseln oder Warten helfen.",
+            "enhancedStart": "🚀 Erweiterten Ablauf starten",
+            "pickBrowser": "📂 Browser-Executable wie chrome.exe auswählen",
+            "cancel": "❌ Abbrechen",
+            "input12": "1 oder 2 eingeben",
+            "downloadChrome": "📥 Chrome herunterladen (~150m)",
+            "terminateAll": "❌ Alles beenden",
+            "noBrowserSelect": "qqq: Kein gültiger Browser ausgewählt, bitte Aktion wählen",
+            "rejected": "Download abgelehnt ({0}), Sie können erweiterten Ablauf versuchen.",
+            "rejectedFallback": "(Fenster von VS Code verschluckt, nutze Dropdown)",
+            "input12Prompt": "Download abgelehnt ({0}), 1 für erweitert, 2 für Browser, sonst abbrechen",
+            "noBrowserConfirm": "qqq: Kein gültiger Browser. Chrome herunterladen (~150m) oder beenden.",
+            "downloadChromeBtn": "Chrome herunterladen",
+            "terminateBtn": "Alles beenden",
+            "enhancedDownloading": "Erweiterter Download läuft"
+        },
+        "error": {
+            "fileNotExist": "Datei existiert nicht",
+            "cannotReadVersion": "Versionsinformationen nicht lesbar",
+            "versionEmpty": "Versionsinformationen leer"
         }
     },
     "log": {

@@ -21,7 +21,7 @@ const QvideoMsg = {
     parsing(task, url) {
         const prefix = task?.taskTitle ? `${task.taskTitle} ` : 'qqq: ';
         const urlSnippet = this._truncateUrl(url, 44);
-        return `${prefix}正在解析 ${urlSnippet}`;
+        return `${prefix}${q('video.msg.parsing', urlSnippet)}`;
     },
 
     /**
@@ -52,7 +52,7 @@ const QvideoMsg = {
             locationPart = this._truncateUrl(url, 44);
         }
 
-        return `${prefix}已交换 ${sizeStr}${timePart}${statusPart} 于 ${locationPart}`;
+        return `${prefix}${q('video.msg.exchanged', sizeStr, timePart, statusPart, locationPart)}`;
     },
 
     /**
@@ -122,9 +122,9 @@ const QvideoMsg = {
         const elapsedMs = Date.now() - (task?.startMs || Date.now());
         let summary;
         if (!landedCount || landedCount <= 0) {
-            summary = `0 落盘，从 ${urlSnippet}`;
+            summary = q('video.msg.landed0', urlSnippet);
         } else {
-            summary = `共落盘 ${landedCount}个视频共 ${totalStr}，从 ${urlSnippet}`;
+            summary = q('video.msg.landedN', landedCount, totalStr, urlSnippet);
         }
         return TaskMessage.done(task?.taskTitle, summary, elapsedMs, task?.taskNum || '');
     },
@@ -158,7 +158,7 @@ class ChildProcessTracker {
         } catch (e) { }
     }
 
-    async killAll(reason = '用户取消') {
+    async killAll(reason = q('video.reason.userCancel')) {
         this._cancelled = true;
 
         const pids = [];
@@ -835,7 +835,7 @@ class Qvideo {
         return task;
     }
 
-    async _cancelTask(task, reason = '用户取消') {
+    async _cancelTask(task, reason = q('video.reason.userCancel')) {
         if (!task || !task.tracker) return;
         // ★ 确保设置取消标志
         task.tracker.markCancelled();
@@ -845,7 +845,7 @@ class Qvideo {
         // ★ 如果是外部事务（从 performCurvedPaste 调用），不显示弹窗，由外部统一管理
         // ★ 如果是内部事务（start 方法直接调用），显示弹窗
         if (!task.isExternalTrans) {
-            const cancelMsg = `${task.taskTitle || 'qqq'} 已取消并回滚`;
+            const cancelMsg = q('video.msg.cancelledRollback', task.taskTitle || 'qqq');
             global.TaskMessage.showSimpleToast(cancelMsg, 15000, 'cancel');
         }
 
@@ -899,7 +899,7 @@ class Qvideo {
                 if (task.tracker) task.tracker.markCancelled();
                 this.log(`[AnchorLost] ${q('video.log.anchorLost')}`);
                 // ★ 后台执行杀进程和清理（不等待）
-                this._cancelTask(task, '锚点丢失').catch(e => { });
+                this._cancelTask(task, q('video.reason.anchorLost')).catch(e => { });
             }
             return true;
         }
@@ -921,7 +921,7 @@ class Qvideo {
     // ==================== start ====================
     async start() {
         const raw = await vscode.window.showInputBox({
-            prompt: "直接粘贴 [ 包含视频的网址 ] ",
+            prompt: q('video.ui.inputPrompt'),
             ignoreFocusOut: true,
             placeHolder: "https://..."
         });
@@ -929,7 +929,7 @@ class Qvideo {
 
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            global.showAutoCloseNotification('error', "请先打开一个文档以便插入视频。");
+            global.showAutoCloseNotification('error', q('video.ui.noEditorError'));
             return;
         }
 
@@ -1072,7 +1072,7 @@ class Qvideo {
             } catch (e) { }
 
             // ★ 修复：使用 prompt 添加统一前缀
-            const promptMsg = QvideoMsg.prompt(this._task, 'youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。');
+            const promptMsg = QvideoMsg.prompt(this._task, q('video.ui.youtubeFailed'));
             global.showAutoCloseNotification('warning', promptMsg);
         }
     }
@@ -1090,7 +1090,7 @@ class Qvideo {
                 if (token) {
                     token.onCancellationRequested(
                         ChildProcessTracker.bind(async () => {
-                            await this._cancelTask(task, '用户在一号窗口点取消');
+                            await this._cancelTask(task, q('video.reason.userCancelWindow1'));
                         })
                     );
                 }
@@ -1128,28 +1128,28 @@ class Qvideo {
                                 tasks.push(this._createTask(url, null, targetDir, url, task.transId));
                             } else {
                                 // ✅ 前置排除：YouTube 的 403 不作为增强信号
-                                this.log("YouTube 探测 403：忽略增强触发（仍尝试交给 yt-dlp 直接下载）。");
+                                this.log(q('video.log.youtubeProbe403'));
                                 tasks.push(this._createTask(url, null, targetDir, url, task.transId));
                             }
                         } else {
-                            this.log(`yt-dlp 探测未发现资源或不支持: ${res?.error}`);
+                            this.log(q('video.log.probeNoResource', res?.error));
                             await this._handleCookieErrorIfNeeded(res?.error, url);
                         }
                     }
                 } catch (e) {
                     if (this._isTaskCancelled(task)) return null;
-                    this.log(`yt-dlp 探测异常: ${e.message}`);
+                    this.log(q('video.log.probeException', e.message));
                     await this._handleCookieErrorIfNeeded(e.message, url);
                 }
 
                 // 静态分析（优先于 403 增强）
                 try {
                     if (this._isTaskCancelled(task)) return null;
-                    this.log(`开始静态分析网页: ${url}`);
+                    this.log(q('video.log.staticAnalysisStart', url));
                     const webUrls = await h.extractVideoUrlsFromWebPage(url);
-                    this.log(`静态分析结果: ${webUrls ? webUrls.length : 0} 个 URL`);
+                    this.log(q('video.log.staticAnalysisResult', webUrls ? webUrls.length : 0));
                     if (webUrls && webUrls.length > 0) {
-                        this.log(`静态分析发现 ${webUrls.length} 个资源链接。`);
+                        this.log(q('video.log.staticAnalysisFound', webUrls.length));
 
                         // 检查是否有直连视频 URL，并记录这些 URL
                         const directVideoPattern = /\.(mp4|m3u8|mpd|webm|mkv)(\?|$)/i;
@@ -1164,7 +1164,7 @@ class Qvideo {
                         if (hasDirectVideo) {
                             hasStaticDirectVideo = true;
                             if (probeForbidden) {
-                                this.log("静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。");
+                                this.log(q('video.log.staticFoundDirect'));
                                 // Filter out the task that is just the raw URL
                                 tasks = tasks.filter(t => t.url !== url);
                                 probeForbidden = false; // Reset forbidden flag so we don't trigger enhanced mode unnecessarily
@@ -1174,7 +1174,7 @@ class Qvideo {
                         webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url, task.transId)));
                     }
                 } catch (e) {
-                    this.log(`静态分析失败: ${e.message}`);
+                    this.log(q('video.log.staticAnalysisFailed', e.message));
                 }
 
                 if (this._isTaskCancelled(task)) return null;
@@ -1182,11 +1182,11 @@ class Qvideo {
                 tasks = this._deduplicateTasks(tasks);
 
                 if (tasks.length === 0) {
-                    this.log("未探测到明确资源，尝试直接下载原链接...");
+                    this.log(q('video.log.noResourceTryDirect'));
                     tasks.push(this._createTask(url, 'Direct Link', targetDir, url, task.transId));
                 }
 
-                this.log(`准备下载 ${tasks.length} 个任务...`);
+                this.log(q('video.log.preparingDownload', tasks.length));
                 progress.report({ message: QvideoMsg.progress(task, '0k', url, 0, '') });
 
                 // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
@@ -1732,13 +1732,13 @@ class Qvideo {
                 if (this._isTaskCancelled(task)) return null;
 
                 const items = [
-                    { label: '🚀 启动增强流程', value: 'enhanced' },
-                    { label: '📂 选择类似 chrome.exe 的浏览器入口文件', value: 'pick' },
-                    { label: '❌ 取消', value: 'cancel' }
+                    { label: q('video.ui.enhancedStart'), value: 'enhanced' },
+                    { label: q('video.ui.pickBrowser'), value: 'pick' },
+                    { label: q('video.ui.cancel'), value: 'cancel' }
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: `${prefix}下载被拒（${code}），当前可尝试启动增强流程。（窗口被vs code吃掉，固走本下拉框流程，本质是一样）`,
+                    placeHolder: `${prefix}${q('video.ui.rejected', code)}${q('video.ui.rejectedFallback')}`,
                     ignoreFocusOut: true
                 });
 
@@ -1753,8 +1753,8 @@ class Qvideo {
                     this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`);
 
                     const input = await vscode.window.showInputBox({
-                        prompt: `${prefix}下载被拒（${code}），键入 1 启动增强流程，2 选择浏览器，其他取消`,
-                        placeHolder: '键入 1 或 2',
+                        prompt: `${prefix}${q('video.ui.input12Prompt', code)}`,
+                        placeHolder: q('video.ui.input12'),
                         ignoreFocusOut: true
                     });
 
@@ -1775,7 +1775,7 @@ class Qvideo {
             } else if (selection === "选择类似 chrome.exe 的浏览器入口文件") {
                 return await this._runEnhancedForcePick(task, url, targetDir);
             } else {
-                this.log("用户取消增强流程");
+                this.log(q('video.log.userCancelEnhanced'));
                 return null;
             }
         });
@@ -1947,8 +1947,8 @@ class Qvideo {
         const startTime = Date.now();
 
         sel = await vscode.window.showErrorMessage(
-            "qqq: 未选择有效浏览器。可选下载chrome（约150m）或终止一切。",
-            "下载 chrome", "终止一切"
+            q('video.ui.noBrowserConfirm'),
+            q('video.ui.downloadChromeBtn'), q('video.ui.terminateBtn')
         );
 
         const elapsed = Date.now() - startTime;
@@ -1960,23 +1960,23 @@ class Qvideo {
             this.log(`[二次确认] 弹窗被吃掉 (${elapsed}ms)，使用 QuickPick 兜底...`);
 
             const items = [
-                { label: '📥 下载 chrome（约150m）', value: 'download' },
-                { label: '❌ 终止一切', value: 'cancel' }
+                { label: q('video.ui.downloadChrome'), value: 'download' },
+                { label: q('video.ui.terminateAll'), value: 'cancel' }
             ];
 
             const picked = await vscode.window.showQuickPick(items, {
-                placeHolder: 'qqq: 未选择有效浏览器，请选择操作',
+                placeHolder: q('video.ui.noBrowserSelect'),
                 ignoreFocusOut: true
             });
 
             if (this._isTaskCancelled(task)) return null;
 
             if (picked?.value === 'download') {
-                sel = "下载 chrome";
+                sel = q('video.ui.downloadChromeBtn');
             }
         }
 
-        if (sel === "下载 chrome") {
+        if (sel === q('video.ui.downloadChromeBtn')) {
             this.log(`[二次确认] 用户选择下载chrome`);
             return await this._downloadChrome(task, url, targetDir);
         } else {
@@ -2006,7 +2006,7 @@ class Qvideo {
     _validateChromiumSilently(exePath) {
         return new Promise((resolve) => {
             if (!exePath || !fs.existsSync(exePath)) {
-                resolve({ valid: false, error: '文件不存在' });
+                resolve({ valid: false, error: q('video.error.fileNotExist') });
                 return;
             }
 
@@ -2033,13 +2033,13 @@ $of = $vi.OriginalFilename;
 
                 cp.execFile('powershell', cmd, { windowsHide: true, timeout: 8000 }, (err, stdout) => {
                     if (err) {
-                        resolve({ valid: false, error: '无法读取版本信息' });
+                        resolve({ valid: false, error: q('video.error.cannotReadVersion') });
                         return;
                     }
 
                     const out = String(stdout || '').trim();
                     if (!out) {
-                        resolve({ valid: false, error: '版本信息为空' });
+                        resolve({ valid: false, error: q('video.error.versionEmpty') });
                         return;
                     }
 
@@ -2477,7 +2477,7 @@ $of = $vi.OriginalFilename;
 
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
-                    await this._cancelTask(task, '用户在增强下载窗口点取消');
+                    await this._cancelTask(task, q('video.reason.userCancelEnhanced'));
                 })
             );
 
@@ -2490,9 +2490,9 @@ $of = $vi.OriginalFilename;
                     if (task.shouldCancel && typeof task.shouldCancel === 'function') {
                         try {
                             if (task.shouldCancel()) {
-                                this.log('[AnchorLost] 增强流程检测到锚点丢失');
+                                this.log(q('video.log.anchorLostEnhanced'));
                                 task.anchorLost = true;
-                                this._cancelTask(task, '锚点丢失').catch(e => { });
+                                this._cancelTask(task, q('video.reason.anchorLost')).catch(e => { });
                                 return;
                             }
                         } catch (e) { }
@@ -2501,7 +2501,7 @@ $of = $vi.OriginalFilename;
                     // ★ 基于 transId 前缀精确匹配，100% 不会多任务互相污染
                     const bytes = this._scanTaskBytes(targetDir, task.transId);
                     const elapsedMs = Date.now() - startMs;
-                    progress.report({ message: QvideoMsg.progress(task, formatBytesCompact(bytes), url, elapsedMs, '增强下载中') });
+                    progress.report({ message: QvideoMsg.progress(task, formatBytesCompact(bytes), url, elapsedMs, q('video.ui.enhancedDownloading')) });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -2591,10 +2591,10 @@ $of = $vi.OriginalFilename;
                 if (task.shouldCancel && typeof task.shouldCancel === 'function') {
                     try {
                         if (task.shouldCancel()) {
-                            this.log('[AnchorLost] 噗探等待期间检测到锚点丢失');
+                            this.log('[AnchorLost] ' + q('video.log.anchorLostEnhanced'));
                             task.anchorLost = true;
                             anchorLostDuringWait = true;
-                            this._cancelTask(task, '锚点丢失').catch(e => { });
+                            this._cancelTask(task, q('video.reason.anchorLost')).catch(e => { });
                             // 尝试停止 sniffer（如果它未被 track 追踪到）
                             if (sniffer) try { sniffer.stop(); } catch (e) { }
                         }

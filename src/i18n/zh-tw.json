@@ -289,7 +289,58 @@
             "sniffing": "正在智慧嗅探資源...",
             "playlistDetected": "識別為播放清單，共 {0} 個影片。",
             "singleVideo": "識別為單一影片: {0}",
-            "probe403": "探測傳回 403"
+            "probe403": "探測傳回 403",
+            "probeNoResource": "yt-dlp 探測未發現資源: {0}",
+            "probeException": "yt-dlp 探測異常: {0}",
+            "staticAnalysisStart": "開始靜態分析網頁: {0}",
+            "staticAnalysisResult": "靜態分析結果: {0} 個 URL",
+            "staticAnalysisFound": "靜態分析發現 {0} 個資源連結。",
+            "staticAnalysisFailed": "靜態分析失敗: {0}",
+            "noResourceTryDirect": "未偵測到明確資源，嘗試直接下載原連結...",
+            "preparingDownload": "準備下載 {0} 個任務...",
+            "transPreregisterFailed": "[事務] 預註冊 tempFiles 失敗: {0}",
+            "youtubeProbe403": "YouTube 探測 403：忽略增強觸發。",
+            "staticFoundDirect": "靜態分析找到直連影片。",
+            "anchorLostEnhanced": "[增強] 偵測到錨點遺失",
+            "userCancelEnhanced": "使用者取消增強流程"
+        },
+        "msg": {
+            "parsing": "正在解析 {0}",
+            "exchanged": "已交換 {0}{1}{2} 於 {3}",
+            "landed0": "0 落盤，從 {0}",
+            "landedN": "共落盤 {0} 個影片共 {1}，從 {2}",
+            "cancelledRollback": "{0} 已取消並回滾"
+        },
+        "reason": {
+            "userCancel": "使用者取消",
+            "anchorLost": "錨點遺失",
+            "userCancelWindow1": "使用者在一號視窗點取消",
+            "userCancelEnhanced": "使用者在增強下載視窗點取消",
+            "externalToken": "外部 Token 取消"
+        },
+        "ui": {
+            "inputPrompt": "直接貼上 [ 包含影片的網址 ]",
+            "noEditorError": "請先開啟一個文件以便插入影片。",
+            "youtubeFailed": "YouTube 下載失敗，可嘗試設定 cookies。",
+            "enhancedStart": "🚀 啟動增強流程",
+            "pickBrowser": "📂 選擇類似 chrome.exe 的瀏覽器入口檔案",
+            "cancel": "❌ 取消",
+            "input12": "輸入 1 或 2",
+            "downloadChrome": "📥 下載 Chrome（約 150m）",
+            "terminateAll": "❌ 終止一切",
+            "noBrowserSelect": "qqq: 未選擇有效瀏覽器，請選擇操作",
+            "rejected": "下載被拒（{0}），可嘗試啟動增強流程。",
+            "rejectedFallback": "（視窗被 VS Code 吃掉，固走本下拉框流程）",
+            "input12Prompt": "下載被拒（{0}），輸入 1 啟動增強流程，2 選擇瀏覽器",
+            "noBrowserConfirm": "qqq: 未選擇有效瀏覽器。可選下載 Chrome（約 150m）或終止。",
+            "downloadChromeBtn": "下載 Chrome",
+            "terminateBtn": "終止一切",
+            "enhancedDownloading": "增強下載中"
+        },
+        "error": {
+            "fileNotExist": "檔案不存在",
+            "cannotReadVersion": "無法讀取版本資訊",
+            "versionEmpty": "版本資訊為空"
         }
     },
     "log": {

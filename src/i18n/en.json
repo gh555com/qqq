@@ -289,7 +289,58 @@
             "sniffing": "Smart sniffing resources...",
             "playlistDetected": "Detected as playlist, {0} videos total.",
             "singleVideo": "Detected as single video: {0}",
-            "probe403": "Probe returned 403, trying to add to download queue to trigger enhanced flow."
+            "probe403": "Probe returned 403, trying to add to download queue to trigger enhanced flow.",
+            "probeNoResource": "yt-dlp probe found no resource or unsupported: {0}",
+            "probeException": "yt-dlp probe exception: {0}",
+            "staticAnalysisStart": "Starting static analysis of webpage: {0}",
+            "staticAnalysisResult": "Static analysis result: {0} URLs",
+            "staticAnalysisFound": "Static analysis found {0} resource links.",
+            "staticAnalysisFailed": "Static analysis failed: {0}",
+            "noResourceTryDirect": "No clear resource detected, trying direct link download...",
+            "preparingDownload": "Preparing to download {0} tasks...",
+            "transPreregisterFailed": "[Transaction] Pre-register tempFiles failed: {0}",
+            "youtubeProbe403": "YouTube probe 403: Ignoring enhanced trigger (still trying yt-dlp direct download).",
+            "staticFoundDirect": "Static analysis found direct video, removing original 403 task to avoid enhanced flow.",
+            "anchorLostEnhanced": "[Enhanced] Anchor lost detected",
+            "userCancelEnhanced": "User cancelled enhanced flow"
+        },
+        "msg": {
+            "parsing": "Parsing {0}",
+            "exchanged": "Exchanged {0}{1}{2} at {3}",
+            "landed0": "0 landed, from {0}",
+            "landedN": "Landed {0} videos totaling {1}, from {2}",
+            "cancelledRollback": "{0} cancelled and rolled back"
+        },
+        "reason": {
+            "userCancel": "User cancelled",
+            "anchorLost": "Anchor lost",
+            "userCancelWindow1": "User clicked cancel in window 1",
+            "userCancelEnhanced": "User clicked cancel in enhanced download window",
+            "externalToken": "External token cancelled"
+        },
+        "ui": {
+            "inputPrompt": "Paste [ URL containing video ]",
+            "noEditorError": "Please open a document first to insert video.",
+            "youtubeFailed": "YouTube download failed, try configuring cookies (refer to opened doc). Alternatively, switching videos or waiting a bit may help.",
+            "enhancedStart": "🚀 Start Enhanced Flow",
+            "pickBrowser": "📂 Pick browser executable like chrome.exe",
+            "cancel": "❌ Cancel",
+            "input12": "Enter 1 or 2",
+            "downloadChrome": "📥 Download Chrome (~150m)",
+            "terminateAll": "❌ Terminate All",
+            "noBrowserSelect": "qqq: No valid browser selected, please choose an action",
+            "rejected": "Download rejected ({0}), you can try starting enhanced flow.",
+            "rejectedFallback": "(Window eaten by VS Code, using dropdown instead, same effect)",
+            "input12Prompt": "Download rejected ({0}), enter 1 to start enhanced flow, 2 to pick browser, other to cancel",
+            "noBrowserConfirm": "qqq: No valid browser selected. You can download Chrome (~150m) or terminate.",
+            "downloadChromeBtn": "Download Chrome",
+            "terminateBtn": "Terminate All",
+            "enhancedDownloading": "Enhanced downloading"
+        },
+        "error": {
+            "fileNotExist": "File does not exist",
+            "cannotReadVersion": "Cannot read version info",
+            "versionEmpty": "Version info is empty"
         }
     },
     "log": {

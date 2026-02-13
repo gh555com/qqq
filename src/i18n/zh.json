@@ -289,7 +289,58 @@
             "sniffing": "正在智能嗅探资源...",
             "playlistDetected": "识别为列表，共 {0} 个视频。",
             "singleVideo": "识别为单个视频: {0}",
-            "probe403": "探测返回 403，尝试直接加入下载队列以触发增强流程。"
+            "probe403": "探测返回 403，尝试直接加入下载队列以触发增强流程。",
+            "probeNoResource": "yt-dlp 探测未发现资源或不支持: {0}",
+            "probeException": "yt-dlp 探测异常: {0}",
+            "staticAnalysisStart": "开始静态分析网页: {0}",
+            "staticAnalysisResult": "静态分析结果: {0} 个 URL",
+            "staticAnalysisFound": "静态分析发现 {0} 个资源链接。",
+            "staticAnalysisFailed": "静态分析失败: {0}",
+            "noResourceTryDirect": "未探测到明确资源，尝试直接下载原链接...",
+            "preparingDownload": "准备下载 {0} 个任务...",
+            "transPreregisterFailed": "[事务] 预注册 tempFiles 失败: {0}",
+            "youtubeProbe403": "YouTube 探测 403：忽略增强触发（仍尝试交给 yt-dlp 直接下载）。",
+            "staticFoundDirect": "静态分析找到直连视频，移除原始 403 任务，避免进入增强流程。",
+            "anchorLostEnhanced": "[增强流程] 检测到锚点丢失",
+            "userCancelEnhanced": "用户取消增强流程"
+        },
+        "msg": {
+            "parsing": "正在解析 {0}",
+            "exchanged": "已交换 {0}{1}{2} 于 {3}",
+            "landed0": "0 落盘，从 {0}",
+            "landedN": "共落盘 {0}个视频共 {1}，从 {2}",
+            "cancelledRollback": "{0} 已取消并回滚"
+        },
+        "reason": {
+            "userCancel": "用户取消",
+            "anchorLost": "锚点丢失",
+            "userCancelWindow1": "用户在一号窗口点取消",
+            "userCancelEnhanced": "用户在增强下载窗口点取消",
+            "externalToken": "外部 Token 取消"
+        },
+        "ui": {
+            "inputPrompt": "直接粘贴 [ 包含视频的网址 ]",
+            "noEditorError": "请先打开一个文档以便插入视频。",
+            "youtubeFailed": "youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。",
+            "enhancedStart": "🚀 启动增强流程",
+            "pickBrowser": "📂 选择类似 chrome.exe 的浏览器入口文件",
+            "cancel": "❌ 取消",
+            "input12": "键入 1 或 2",
+            "downloadChrome": "📥 下载 chrome（约150m）",
+            "terminateAll": "❌ 终止一切",
+            "noBrowserSelect": "qqq: 未选择有效浏览器，请选择操作",
+            "rejected": "下载被拒（{0}），当前可尝试启动增强流程。",
+            "rejectedFallback": "（窗口被 vs code 吃掉，固走本下拉框流程，本质是一样）",
+            "input12Prompt": "下载被拒（{0}），键入 1 启动增强流程，2 选择浏览器，其他取消",
+            "noBrowserConfirm": "qqq: 未选择有效浏览器。可选下载chrome（约150m）或终止一切。",
+            "downloadChromeBtn": "下载 chrome",
+            "terminateBtn": "终止一切",
+            "enhancedDownloading": "增强下载中"
+        },
+        "error": {
+            "fileNotExist": "文件不存在",
+            "cannotReadVersion": "无法读取版本信息",
+            "versionEmpty": "版本信息为空"
         }
     },
     "log": {

@@ -289,7 +289,58 @@
             "sniffing": "Detección inteligente de recursos...",
             "playlistDetected": "Identificado como lista de reproducción, {0} videos en total.",
             "singleVideo": "Identificado como video único: {0}",
-            "probe403": "Sondeo devolvió 403"
+            "probe403": "Sondeo devolvió 403",
+            "probeNoResource": "yt-dlp no encontró recurso: {0}",
+            "probeException": "Excepción yt-dlp: {0}",
+            "staticAnalysisStart": "Iniciando análisis estático: {0}",
+            "staticAnalysisResult": "Resultado análisis estático: {0} URLs",
+            "staticAnalysisFound": "Análisis estático encontró {0} enlaces.",
+            "staticAnalysisFailed": "Análisis estático falló: {0}",
+            "noResourceTryDirect": "Sin recurso detectado, intentando descarga directa...",
+            "preparingDownload": "Preparando descarga de {0} tareas...",
+            "transPreregisterFailed": "[Transacción] Pre-registro tempFiles falló: {0}",
+            "youtubeProbe403": "YouTube sondeo 403: Disparador mejorado ignorado.",
+            "staticFoundDirect": "Análisis estático encontró video directo.",
+            "anchorLostEnhanced": "[Mejorado] Pérdida de ancla detectada",
+            "userCancelEnhanced": "Usuario canceló flujo mejorado"
+        },
+        "msg": {
+            "parsing": "Analizando {0}",
+            "exchanged": "Intercambiado {0}{1}{2} en {3}",
+            "landed0": "0 aterrizados, de {0}",
+            "landedN": "{0} videos totalizando {1}, de {2}",
+            "cancelledRollback": "{0} cancelado y revertido"
+        },
+        "reason": {
+            "userCancel": "Cancelado por usuario",
+            "anchorLost": "Ancla perdida",
+            "userCancelWindow1": "Usuario canceló en ventana 1",
+            "userCancelEnhanced": "Usuario canceló en ventana mejorada",
+            "externalToken": "Token externo cancelado"
+        },
+        "ui": {
+            "inputPrompt": "Pegue URL con video",
+            "noEditorError": "Por favor abra un documento primero.",
+            "youtubeFailed": "YouTube falló, intente configurar cookies.",
+            "enhancedStart": "🚀 Iniciar flujo mejorado",
+            "pickBrowser": "📂 Elegir ejecutable del navegador",
+            "cancel": "❌ Cancelar",
+            "input12": "Ingrese 1 o 2",
+            "downloadChrome": "📥 Descargar Chrome (~150m)",
+            "terminateAll": "❌ Terminar todo",
+            "noBrowserSelect": "qqq: Sin navegador válido, elija una acción",
+            "rejected": "Descarga rechazada ({0}), intente flujo mejorado.",
+            "rejectedFallback": "(Ventana absorbida por VS Code)",
+            "input12Prompt": "Rechazado ({0}), 1 para mejorado, 2 para navegador",
+            "noBrowserConfirm": "qqq: Sin navegador. Descargar Chrome o terminar.",
+            "downloadChromeBtn": "Descargar Chrome",
+            "terminateBtn": "Terminar todo",
+            "enhancedDownloading": "Descarga mejorada"
+        },
+        "error": {
+            "fileNotExist": "El archivo no existe",
+            "cannotReadVersion": "No se puede leer info de versión",
+            "versionEmpty": "Info de versión vacía"
         }
     },
     "log": {

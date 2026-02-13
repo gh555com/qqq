@@ -289,7 +289,58 @@
             "sniffing": "جاري الاكتشاف الذكي للموارد...",
             "playlistDetected": "تم التعرف عليها كقائمة تشغيل، إجمالي {0} فيديو.",
             "singleVideo": "تم التعرف عليه كفيديو واحد: {0}",
-            "probe403": "أعاد الفحص 403"
+            "probe403": "أعاد الفحص 403",
+            "probeNoResource": "yt-dlp لم يجد مورد: {0}",
+            "probeException": "استثناء yt-dlp: {0}",
+            "staticAnalysisStart": "بدء التحليل الثابت: {0}",
+            "staticAnalysisResult": "نتيجة التحليل الثابت: {0} روابط",
+            "staticAnalysisFound": "التحليل الثابت وجد {0} روابط.",
+            "staticAnalysisFailed": "فشل التحليل الثابت: {0}",
+            "noResourceTryDirect": "لم يتم اكتشاف مورد، محاولة التنزيل المباشر...",
+            "preparingDownload": "تحضير تنزيل {0} مهام...",
+            "transPreregisterFailed": "[معاملة] فشل التسجيل المسبق tempFiles: {0}",
+            "youtubeProbe403": "YouTube فحص 403: تم تجاهل المشغل المحسن.",
+            "staticFoundDirect": "التحليل الثابت وجد فيديو مباشر.",
+            "anchorLostEnhanced": "[محسن] تم اكتشاف فقدان المرساة",
+            "userCancelEnhanced": "ألغى المستخدم التدفق المحسن"
+        },
+        "msg": {
+            "parsing": "جاري تحليل {0}",
+            "exchanged": "تم تبادل {0}{1}{2} في {3}",
+            "landed0": "0 هبطت، من {0}",
+            "landedN": "{0} فيديو إجمالي {1}، من {2}",
+            "cancelledRollback": "{0} تم إلغاؤه واستعادته"
+        },
+        "reason": {
+            "userCancel": "إلغاء المستخدم",
+            "anchorLost": "فقدان المرساة",
+            "userCancelWindow1": "ألغى المستخدم في النافذة 1",
+            "userCancelEnhanced": "ألغى المستخدم في نافذة التنزيل المحسن",
+            "externalToken": "تم إلغاء الرمز الخارجي"
+        },
+        "ui": {
+            "inputPrompt": "الصق رابط يحتوي على فيديو",
+            "noEditorError": "يرجى فتح مستند أولاً.",
+            "youtubeFailed": "فشل YouTube، حاول تكوين cookies.",
+            "enhancedStart": "🚀 بدء التدفق المحسن",
+            "pickBrowser": "📂 اختيار ملف المتصفح التنفيذي",
+            "cancel": "❌ إلغاء",
+            "input12": "أدخل 1 أو 2",
+            "downloadChrome": "📥 تنزيل Chrome (~150m)",
+            "terminateAll": "❌ إنهاء الكل",
+            "noBrowserSelect": "qqq: لا يوجد متصفح صالح، اختر إجراء",
+            "rejected": "تم رفض التنزيل ({0})، جرب التدفق المحسن.",
+            "rejectedFallback": "(النافذة ابتلعها VS Code)",
+            "input12Prompt": "مرفوض ({0})، 1 للمحسن، 2 للمتصفح",
+            "noBrowserConfirm": "qqq: لا يوجد متصفح. تنزيل Chrome أو إنهاء.",
+            "downloadChromeBtn": "تنزيل Chrome",
+            "terminateBtn": "إنهاء الكل",
+            "enhancedDownloading": "تنزيل محسن"
+        },
+        "error": {
+            "fileNotExist": "الملف غير موجود",
+            "cannotReadVersion": "تعذر قراءة معلومات الإصدار",
+            "versionEmpty": "معلومات الإصدار فارغة"
         }
     },
     "log": {

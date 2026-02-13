@@ -289,7 +289,58 @@
             "sniffing": "Умное обнаружение ресурсов...",
             "playlistDetected": "Определён как плейлист, всего {0} видео.",
             "singleVideo": "Определено как одиночное видео: {0}",
-            "probe403": "Проверка вернула 403"
+            "probe403": "Проверка вернула 403",
+            "probeNoResource": "yt-dlp не нашёл ресурс: {0}",
+            "probeException": "Исключение yt-dlp: {0}",
+            "staticAnalysisStart": "Начало статического анализа: {0}",
+            "staticAnalysisResult": "Результат статического анализа: {0} URL",
+            "staticAnalysisFound": "Статический анализ нашёл {0} ссылок.",
+            "staticAnalysisFailed": "Статический анализ не удался: {0}",
+            "noResourceTryDirect": "Ресурс не обнаружен, попытка прямой загрузки...",
+            "preparingDownload": "Подготовка загрузки {0} задач...",
+            "transPreregisterFailed": "[Транзакция] Предрегистрация tempFiles не удалась: {0}",
+            "youtubeProbe403": "YouTube проверка 403: Улучшенный триггер игнорируется.",
+            "staticFoundDirect": "Статический анализ нашёл прямое видео.",
+            "anchorLostEnhanced": "[Улучшенный] Обнаружена потеря якоря",
+            "userCancelEnhanced": "Пользователь отменил улучшенный поток"
+        },
+        "msg": {
+            "parsing": "Анализ {0}",
+            "exchanged": "Обменяно {0}{1}{2} в {3}",
+            "landed0": "0 приземлилось, из {0}",
+            "landedN": "{0} видео всего {1}, из {2}",
+            "cancelledRollback": "{0} отменено и откачено"
+        },
+        "reason": {
+            "userCancel": "Отменено пользователем",
+            "anchorLost": "Якорь потерян",
+            "userCancelWindow1": "Пользователь отменил в окне 1",
+            "userCancelEnhanced": "Пользователь отменил в улучшенном окне",
+            "externalToken": "Внешний токен отменён"
+        },
+        "ui": {
+            "inputPrompt": "Вставьте URL с видео",
+            "noEditorError": "Пожалуйста, сначала откройте документ.",
+            "youtubeFailed": "YouTube не удалось, попробуйте настроить cookies.",
+            "enhancedStart": "🚀 Запустить улучшенный поток",
+            "pickBrowser": "📂 Выбрать исполняемый файл браузера",
+            "cancel": "❌ Отмена",
+            "input12": "Введите 1 или 2",
+            "downloadChrome": "📥 Скачать Chrome (~150m)",
+            "terminateAll": "❌ Завершить всё",
+            "noBrowserSelect": "qqq: Нет валидного браузера, выберите действие",
+            "rejected": "Загрузка отклонена ({0}), попробуйте улучшенный поток.",
+            "rejectedFallback": "(Окно поглощено VS Code)",
+            "input12Prompt": "Отклонено ({0}), 1 для улучшенного, 2 для браузера",
+            "noBrowserConfirm": "qqq: Нет браузера. Скачать Chrome или завершить.",
+            "downloadChromeBtn": "Скачать Chrome",
+            "terminateBtn": "Завершить всё",
+            "enhancedDownloading": "Улучшенная загрузка"
+        },
+        "error": {
+            "fileNotExist": "Файл не существует",
+            "cannotReadVersion": "Не удалось прочитать инфо о версии",
+            "versionEmpty": "Инфо о версии пуста"
         }
     },
     "log": {
