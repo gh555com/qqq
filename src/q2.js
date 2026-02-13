@@ -3182,10 +3182,14 @@ function showSaveAsDialog() {
   activePanel = panel;
   activePanelAlive = true;
 
+  // ★ 注册 webview 用于播放音效
+  global.registerWebviewForSound(panel);
+
   const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
   panel.onDidDispose(() => {
+    global.unregisterWebviewForSound(panel);  // ★ 取消注册
     activePanelAlive = false;
     activePanel = null;
     sRequestVersion++; // 使所有正在进行的 sRequest 失效

@@ -3736,13 +3736,41 @@ function isValidUrl(input) {
 // ★ Copy Success Sound (kope 1-7 random)
 // ============================================================================
 let _lastCopySoundIdx = 0;
+const _availableWebviews = new Set();  // ★ 追踪所有可用的 webview
+
+/**
+ * 注册一个 webview 用于播放音效
+ * @param {vscode.WebviewPanel|vscode.WebviewView} panelOrView
+ */
+function registerWebviewForSound(panelOrView) {
+	if (panelOrView?.webview) {
+		_availableWebviews.add(panelOrView);
+	}
+}
+
+/**
+ * 取消注册 webview
+ * @param {vscode.WebviewPanel|vscode.WebviewView} panelOrView
+ */
+function unregisterWebviewForSound(panelOrView) {
+	_availableWebviews.delete(panelOrView);
+}
 
 /**
  * Play random copy success sound (kope/1-7.mp3) to a webview
- * @param {vscode.WebviewPanel|vscode.WebviewView} panelOrView - The webview panel or view to play sound
+ * @param {vscode.WebviewPanel|vscode.WebviewView} [panelOrView] - The webview panel or view to play sound (可选，不传则自动选择)
  */
 function playCopySuccessSound(panelOrView) {
-	const webview = panelOrView?.webview;
+	// ★ 如果没传入 webview 或传入的不可用，尝试使用已注册的 webview
+	let webview = panelOrView?.webview;
+	if (!webview) {
+		for (const pv of _availableWebviews) {
+			if (pv?.webview) {
+				webview = pv.webview;
+				break;
+			}
+		}
+	}
 	if (!webview || !extensionContext) return;
 	try {
 		// Random 1-7, avoid repeating last
@@ -3883,5 +3911,7 @@ module.exports = {
 	isValidUrl,
 
 	// ★ Copy Success Sound
+	registerWebviewForSound,
+	unregisterWebviewForSound,
 	playCopySuccessSound
 };

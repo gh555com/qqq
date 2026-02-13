@@ -41,7 +41,7 @@ const CONSTANTS = Object.freeze({
     PREVIEW_LENGTH: 200,
 
     // 监听
-    CLIPBOARD_POLL_MS: 1000,
+    CLIPBOARD_POLL_MS: 300,  // ★ 降低轮询间隔，提高音效灵敏度
     SIDEBAR_UPDATE_MS: 5000,
 
     // 保存（批处理 + 节流 + 串行写入）
@@ -833,10 +833,8 @@ class ClipboardHistoryManager {
                 const cur = await vscode.env.clipboard.readText();
                 if (cur && cur !== this._lastClipboardContent) {
                     await this.addToHistory(cur);
-                    // ★ 播放复制成功音效（文本复制）
-                    if (_currentSidebarProvider?._view) {
-                        global.playCopySuccessSound(_currentSidebarProvider._view);
-                    }
+                    // ★ 播放复制成功音效（自动选择可用 webview）
+                    global.playCopySuccessSound();
                 }
             } catch { } finally { this._watcherBusy = false; }
         }, CONSTANTS.CLIPBOARD_POLL_MS);
@@ -852,6 +850,7 @@ class ClipboardHistoryManager {
             const s = String(content ?? '');
             await vscode.env.clipboard.writeText(s);
             this._lastClipboardContent = s;
+            // ★ 不在这里播放音效，由调用方决定用哪个 webview
             return true;
         } catch { return false; }
     }
@@ -1046,6 +1045,8 @@ class ClipboardHistorySidebarProvider {
 
     resolveWebviewView(webviewView) {
         this._view = webviewView;
+        // ★ 注册 webview 用于播放音效
+        this._global.registerWebviewForSound(webviewView);
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._context.extensionUri],
@@ -1121,8 +1122,9 @@ class ClipboardHistorySidebarProvider {
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
-                        this._handleSfxFeedback();
                         await this._historyManager.copyToClipboard(node.content);
+                        // ★ 使用 q4 的 view 播放音效
+                        this._global.playCopySuccessSound(this._view);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
                     }
@@ -1131,8 +1133,9 @@ class ClipboardHistorySidebarProvider {
                 case 'pasteToEditor': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
-                        this._handleSfxFeedback();
                         await this._historyManager.copyToClipboard(node.content);
+                        // ★ 使用 q4 的 view 播放音效
+                        this._global.playCopySuccessSound(this._view);
                         await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
                     }
                     break;
@@ -1190,6 +1193,7 @@ class ClipboardHistorySidebarProvider {
         });
 
         webviewView.onDidDispose(() => {
+            this._global.unregisterWebviewForSound(webviewView);  // ★ 取消注册
             this._stopPeriodicUpdate();
         });
     }
