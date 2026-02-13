@@ -8,6 +8,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const os = require("os");
+const cp = require("child_process");
 const h = require("./h");
 const { q, onLanguageChange } = require("./i18n");
 
@@ -91,6 +92,87 @@ function cancelAllScans() {
   try { geq().cancelScansJS(); } catch { }
   // Python/Rust daemon：发送取消命令
   cancelScans();
+}
+
+/**
+ * 打开管理员权限终端（CMD 或 PowerShell）
+ * @param {string} targetPath - 目标目录路径
+ * @param {string} termType - 'cmd' 或 'powershell'
+ */
+function openAdminTerminal(targetPath, termType) {
+  try {
+    const absPath = path.resolve(targetPath);
+    const platform = process.platform;
+
+    if (platform === 'win32') {
+      // Windows: 使用 ShellExecuteW 以 runas 方式打开管理员终端
+      if (termType === 'cmd') {
+        // 管理员 CMD
+        const command = `/k "cd /d "${absPath}""`;
+        cp.spawn('powershell', [
+          '-NoProfile', '-Command',
+          `Start-Process cmd.exe -ArgumentList '${command}' -Verb RunAs`
+        ], { windowsHide: true, detached: true }).unref();
+      } else {
+        // 管理员 PowerShell
+        const command = `-NoExit -Command cd '${absPath.replace(/'/g, "''")}'`;
+        cp.spawn('powershell', [
+          '-NoProfile', '-Command',
+          `Start-Process powershell.exe -ArgumentList '${command}' -Verb RunAs`
+        ], { windowsHide: true, detached: true }).unref();
+      }
+    } else if (platform === 'darwin') {
+      // macOS: 使用 osascript 打开带 sudo 的终端
+      const escapedPath = absPath.replace(/"/g, '\\"');
+      const script = `
+        tell application "Terminal"
+          activate
+          do script "cd '${escapedPath}' && sudo -s"
+        end tell
+      `;
+      cp.spawn('osascript', ['-e', script], { detached: true }).unref();
+    } else {
+      // Linux: 尝试常见的终端模拟器
+      const escapedPath = absPath.replace(/'/g, "'\"'\"'");
+      const sudoCmd = `cd '${escapedPath}' && sudo -s`;
+
+      // 尝试常见的 Linux 终端
+      const terminals = [
+        { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', sudoCmd + '; exec bash'] },
+        { cmd: 'konsole', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
+        { cmd: 'xfce4-terminal', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'xterm', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'tilix', args: ['-e', `bash -c "${sudoCmd}; exec bash"`] },
+        { cmd: 'alacritty', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
+        { cmd: 'kitty', args: ['bash', '-c', sudoCmd + '; exec bash'] }
+      ];
+
+      // 依次尝试打开终端
+      (async () => {
+        for (const term of terminals) {
+          try {
+            const exists = await new Promise((resolve) => {
+              const child = cp.spawn('which', [term.cmd], { stdio: 'ignore' });
+              child.on('close', (code) => resolve(code === 0));
+              child.on('error', () => resolve(false));
+              setTimeout(() => { try { child.kill(); } catch { } resolve(false); }, 1000);
+            });
+            if (exists) {
+              cp.spawn(term.cmd, term.args, { detached: true, stdio: 'ignore' }).unref();
+              geq().logMessage(`Opened admin terminal using ${term.cmd}`, "INFO");
+              return;
+            }
+          } catch { }
+        }
+        global.showAutoCloseNotification('error', 'No supported terminal emulator found');
+      })();
+    }
+
+    geq().logMessage(`Opening admin ${termType} at: ${absPath}`, "INFO");
+  } catch (e) {
+    geq().logMessage(`Failed to open admin terminal: ${e.message}`, "ERROR");
+    global.showAutoCloseNotification('error', `Failed to open admin terminal: ${e.message}`);
+  }
 }
 
 // ==================== s 请求：获取文件/文件夹 size ====================
@@ -2674,6 +2756,19 @@ function setupCustomScrollbar() {
 }
 
 setTimeout(setupCustomScrollbar, 100);
+
+// 按 z 打开管理员 CMD，按 x 打开管理员 PowerShell（编辑状态下不监听）
+document.addEventListener('keydown', function(e) {
+  if (isInputFocused()) return;
+  const key = (e.key || '').toLowerCase();
+  if (key === 'z') {
+    e.preventDefault();
+    vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
+  } else if (key === 'x') {
+    e.preventDefault();
+    vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
+  }
+}, true);
 `;
 }
 
@@ -3850,6 +3945,19 @@ function showSaveAsDialog() {
         const msgType = message.type || 'info';
         const msgText = message.message || '';
         global.showAutoCloseNotification(msgType, msgText);
+        break;
+      }
+
+      // ★★★ 管理员终端：z 键打开 CMD，x 键打开 PowerShell ★★★
+      case "openAdminCmd": {
+        const targetPath = canonicalizeExistingPath(message.path || currentPath);
+        openAdminTerminal(targetPath, 'cmd');
+        break;
+      }
+
+      case "openAdminPowershell": {
+        const targetPath = canonicalizeExistingPath(message.path || currentPath);
+        openAdminTerminal(targetPath, 'powershell');
         break;
       }
     }
