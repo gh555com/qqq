@@ -1,11 +1,4 @@
-收到，的梦。
-你要的是：**剪贴板监听 + 极致低延迟 + 支持并发叠加播放 + 功能完备单文件版**。
-下面给你一个可直接跑的版本（Windows，`ctypes + miniaudio`）。
 
----
-
-```python
-# -*- coding: utf-8 -*-
 """
 clipboard_sfx_a_plus_plus.py
 ========================================================
@@ -425,54 +418,3 @@ if __name__ == "__main__":
         print("退出中...")
         app.stop()
         print("已退出")
-```
-
----
-
-### 说明（很短）
-
-* **并发播放**：靠 `ThreadPoolExecutor(max_workers=24)`，每个事件单独 voice worker。
-* **低延迟关键**：`WndProc` 不做耗时，回调线程只做 `sfx.play()` 提交。
-* **首播优化**：`prime()` 预解码缓存，减少首次卡顿。
-
-如果你要，我可以下一步给你一个 **“压测脚本”**，专门测：
-`100次剪贴板触发下平均触发到出声耗时`、`并发上限`、`丢包率`。
-是，的梦，**两个不同接口**：
-
-* **直接调用播放**：`sfx.play(path)`
-* **预热缓存**：`sfx.prime(paths)`
-
----
-
-## 最小示范
-
-```python
-from clipboard_sfx_a_plus_plus import UltraFastConcurrentSFX
-
-sfx = UltraFastConcurrentSFX(max_concurrent_voices=24)
-
-# 1) 预热缓存（可选，但强烈建议）
-hot_list = [
-    r"D:\sounds\1.wav",
-    r"D:\sounds\q1.mp3",
-    r"D:\sounds\z1.wav",
-]
-sfx.prime(hot_list)   # 先解码到内存，后续首发更快
-
-# 2) 直接播放（核心接口）
-sfx.play(r"D:\sounds\1.wav")
-sfx.play(r"D:\sounds\q1.mp3")   # 可连续调，支持并发叠加
-```
-
----
-
-## 在组合器里怎么用预热？
-
-你用 `ClipboardSFXAPlusPlus(sound_paths=...)` 时，内部已经自动：
-
-```python
-self.sfx.prime(self.sound_paths)
-```
-
-也就是**你不写也会预热**。
-如果你想手动控制，可以把那行删掉，自己在 `start()` 前调用 `app.sfx.prime(...)`。

@@ -1,15 +1,40 @@
+# -*- coding: utf-8 -*-
+"""
+final_audio_hub_v16_fusion.py
+========================================================
+的梦专用：v16音乐播放器 + A++并发音效 + 剪贴板触发 + 任意事件触发（单文件融合版）
+
+设计目标：
+1) 保留你 v16 的核心接口（NonBlockingAudioEngine / az）尽量不改
+2) 新增极简高速并发音效接口（play_sfx(path), prime_sfx(paths)）
+3) 支持剪贴板触发 + 任意条件触发（event bus）
+4) 尽量最小侵入；如设备并发冲突，可切换到“复用音乐引擎播放音效”模式
+
+依赖：
+    pip install miniaudio
+========================================================
+"""
+
 import time
 import os
+import random
+import ctypes
+import queue
+import threading
+import ctypes.wintypes as wt
 from concurrent.futures import ThreadPoolExecutor
+
 import array
 import sys
 import math
 import atexit
-import threading
 from functools import lru_cache
 from collections import OrderedDict
 import traceback
 
+# =========================
+# miniaudio import
+# =========================
 _MINIAUDIO_IMPORT_ERROR = None
 try:
     import miniaudio  # noqa
@@ -17,6 +42,9 @@ except Exception as e:
     miniaudio = None  # type: ignore
     _MINIAUDIO_IMPORT_ERROR = e
 
+# =========================
+# v16 参数
+# =========================
 SILENCE_DB = -80.0
 TRIM_WINDOW_SECONDS = 30.0
 LOUD_RUN_MS = 8.0
@@ -69,7 +97,7 @@ def _miniaudio_file_hint() -> str:
         return ""
     p = getattr(miniaudio, "__file__", "") or ""
     if not p:
-        return "miniaudio.__file__ 为空（异常情况，可能是被奇怪的模块遮蔽）"
+        return "miniaudio.__file__ 为空（异常情况）"
     cwd = os.path.abspath(os.getcwd())
     ap = os.path.abspath(p)
     if ap.startswith(cwd + os.sep) or ap == cwd:
@@ -77,7 +105,7 @@ def _miniaudio_file_hint() -> str:
             "⚠️ 疑似同名遮蔽：当前导入的 miniaudio 来自工作目录/项目目录。\n"
             f"  当前工作目录: {cwd}\n"
             f"  miniaudio.__file__: {ap}\n"
-            "  请检查是否存在 miniaudio.py 或 miniaudio/ 目录，导致覆盖了 site-packages 的 miniaudio。"
+            "  请检查是否存在 miniaudio.py 或 miniaudio/ 目录。"
         )
     return ""
 
@@ -181,7 +209,7 @@ class PlaybackToken:
 class NonBlockingAudioEngine:
     def __init__(self, asset_folder="assets", max_workers=32, silent=False):
         self.silent = silent
-        self._log("非阻塞音频引擎 (NonBlockingAudioEngine) 正在初始化...")
+        self._log("非阻塞音频引擎初始化中...")
         self.asset_folder = asset_folder
 
         self._compat = _MiniaudioCompat()
@@ -207,7 +235,6 @@ class NonBlockingAudioEngine:
         self._pcm_cache_lock = threading.Lock()
 
         atexit.register(self.cleanup)
-
         self._log("非阻塞音频引擎初始化完毕。")
 
     def _log(self, msg: str):
@@ -231,7 +258,6 @@ class NonBlockingAudioEngine:
             return b""
         if frames > SOURCE_READ_FRAMES_MAX:
             frames = SOURCE_READ_FRAMES_MAX
-
         for _ in range(EMPTY_READ_RETRIES):
             data = self._send_primed(gen, frames)
             if data:
@@ -273,7 +299,6 @@ class NonBlockingAudioEngine:
         if sys.byteorder != "little":
             samples.byteswap()
         ch = self.REQUESTED_CHANNELS
-
         run = carry_run
         for f in range(frames_in_block):
             base = f * ch
@@ -286,22 +311,12 @@ class NonBlockingAudioEngine:
                 run = 0
         return -1, run
 
-    def _find_last_loud_run_end_in_block(
-        self,
-        pcm_bytes: bytes,
-        frames_in_block: int,
-        thr: int,
-        need_run: int,
-        carry_run: int,
-        last_end_global: int,
-        global_offset: int,
-    ):
+    def _find_last_loud_run_end_in_block(self, pcm_bytes: bytes, frames_in_block: int, thr: int, need_run: int, carry_run: int, last_end_global: int, global_offset: int):
         samples = array.array("h")
         samples.frombytes(pcm_bytes)
         if sys.byteorder != "little":
             samples.byteswap()
         ch = self.REQUESTED_CHANNELS
-
         run = carry_run
         last = last_end_global
         for f in range(frames_in_block):
@@ -325,25 +340,16 @@ class NonBlockingAudioEngine:
         lead_frames = min(window_frames, total_frames)
         tail_frames = min(window_frames, total_frames)
         tail_start_offset = max(0, total_frames - tail_frames)
-
         need_run = max(1, int((LOUD_RUN_MS / 1000.0) * rate))
 
-        src = miniaudio.stream_file(
-            file_path,
-            output_format=self.REQUESTED_FORMAT,
-            nchannels=self.REQUESTED_CHANNELS,
-            sample_rate=self.REQUESTED_RATE,
-        )
-
+        src = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
         try:
-            if start_frame > 0:
-                if not self._skip_frames(src, start_frame, token):
-                    return start_frame, end_frame
+            if start_frame > 0 and (not self._skip_frames(src, start_frame, token)):
+                return start_frame, end_frame
 
             first_loud = None
             carry = 0
             analyzed = 0
-
             while analyzed < lead_frames:
                 if token.stopped:
                     return start_frame, end_frame
@@ -355,7 +361,6 @@ class NonBlockingAudioEngine:
                 if got <= 0:
                     break
                 block = b[: got * self._frame_bytes]
-
                 if self._block_peak_over_threshold(block, SILENCE_THR):
                     idx, carry = self._find_first_loud_run_in_block(block, got, SILENCE_THR, need_run, carry)
                     if idx >= 0:
@@ -364,7 +369,6 @@ class NonBlockingAudioEngine:
                         break
                 else:
                     carry = 0
-
                 analyzed += got
 
             if first_loud is None:
@@ -394,14 +398,10 @@ class NonBlockingAudioEngine:
                 if got <= 0:
                     break
                 block = b[: got * self._frame_bytes]
-
                 if self._block_peak_over_threshold(block, SILENCE_THR):
-                    carry_tail, last_loud_end = self._find_last_loud_run_end_in_block(
-                        block, got, SILENCE_THR, need_run, carry_tail, last_loud_end, seg_pos
-                    )
+                    carry_tail, last_loud_end = self._find_last_loud_run_end_in_block(block, got, SILENCE_THR, need_run, carry_tail, last_loud_end, seg_pos)
                 else:
                     carry_tail = 0
-
                 seg_pos += got
 
             if last_loud_end < 0:
@@ -414,7 +414,6 @@ class NonBlockingAudioEngine:
             if new_end < new_start:
                 new_end = new_start
             return new_start, new_end
-
         finally:
             try:
                 src.close()
@@ -429,17 +428,7 @@ class NonBlockingAudioEngine:
         except Exception:
             return self._trim_silence_edges_uncached(file_path, start_frame, end_frame, token)
 
-        key = (
-            file_path,
-            start_frame,
-            end_frame,
-            SILENCE_DB,
-            LOUD_RUN_MS,
-            TRIM_WINDOW_SECONDS,
-            self.REQUESTED_RATE,
-            self.REQUESTED_CHANNELS,
-        )
-
+        key = (file_path, start_frame, end_frame, SILENCE_DB, LOUD_RUN_MS, TRIM_WINDOW_SECONDS, self.REQUESTED_RATE, self.REQUESTED_CHANNELS)
         with self._trim_cache_lock:
             ent = self._trim_cache.get(key)
             if ent and ent[0] == mtime_ns and ent[1] == size:
@@ -450,18 +439,9 @@ class NonBlockingAudioEngine:
             self._trim_cache[key] = (mtime_ns, size, new_start, new_end)
         return new_start, new_end
 
-    def _apply_fadeout_to_chunk_s16(
-        self,
-        chunk_bytes: bytes,
-        chunk_frames: int,
-        frames_played_before_chunk: int,
-        fade_start_frame: int,
-        fade_frames: int,
-        fade_gains,
-    ) -> bytes:
+    def _apply_fadeout_to_chunk_s16(self, chunk_bytes: bytes, chunk_frames: int, frames_played_before_chunk: int, fade_start_frame: int, fade_frames: int, fade_gains):
         if fade_frames <= 0 or chunk_frames <= 0 or not fade_gains:
             return chunk_bytes
-
         samples = array.array("h")
         samples.frombytes(chunk_bytes)
         if sys.byteorder != "little":
@@ -477,10 +457,7 @@ class NonBlockingAudioEngine:
             base = f * ch
             for c in range(ch):
                 v = int(samples[base + c] * g)
-                if v > 32767:
-                    v = 32767
-                elif v < -32768:
-                    v = -32768
+                v = 32767 if v > 32767 else -32768 if v < -32768 else v
                 samples[base + c] = v
 
         if sys.byteorder != "little":
@@ -491,7 +468,6 @@ class NonBlockingAudioEngine:
         if seg_frames <= 0:
             framecount = yield b""
             return
-
         if fade_frames > seg_frames:
             fade_frames = seg_frames
         fade_start = seg_frames - fade_frames
@@ -499,7 +475,6 @@ class NonBlockingAudioEngine:
 
         played = 0
         framecount = yield b""
-
         while True:
             if token.stopped:
                 return
@@ -512,12 +487,10 @@ class NonBlockingAudioEngine:
                 continue
 
             remain = seg_frames - played
-            want = want_total if want_total <= remain else remain
-
+            want = min(want_total, remain)
             data = self._send_primed(source_gen, want)
             if not data:
                 return
-
             audio = bytes(data)
             need_len = want * self._frame_bytes
             if len(audio) < need_len:
@@ -526,21 +499,62 @@ class NonBlockingAudioEngine:
                 audio = audio[:need_len]
 
             if fade_frames > 0 and (played + want) > fade_start:
-                audio = self._apply_fadeout_to_chunk_s16(
-                    chunk_bytes=audio,
-                    chunk_frames=want,
-                    frames_played_before_chunk=played,
-                    fade_start_frame=fade_start,
-                    fade_frames=fade_frames,
-                    fade_gains=fade_gains,
-                )
+                audio = self._apply_fadeout_to_chunk_s16(audio, want, played, fade_start, fade_frames, fade_gains)
 
             played += want
-
             if want < want_total:
                 audio += b"\x00" * ((want_total - want) * self._frame_bytes)
 
             framecount = yield audio
+
+    def _prepare_pcm_loop_crossfade(self, pcm_bytes: bytes, crossfade_ms: float):
+        try:
+            xms = float(crossfade_ms or 0.0)
+        except Exception:
+            xms = 0.0
+        if xms <= 0.0:
+            return pcm_bytes, 0
+
+        total_frames = len(pcm_bytes) // self._frame_bytes
+        if total_frames < 16:
+            return pcm_bytes, 0
+
+        xfade_frames = int((xms / 1000.0) * self.REQUESTED_RATE)
+        if xfade_frames <= 0:
+            return pcm_bytes, 0
+        if xfade_frames * 2 >= total_frames:
+            xfade_frames = max(1, total_frames // 4)
+        if xfade_frames <= 0 or xfade_frames * 2 >= total_frames:
+            return pcm_bytes, 0
+
+        out_g, in_g = _raised_cosine_crossfade_gains(xfade_frames)
+        if not out_g:
+            return pcm_bytes, 0
+
+        samples = array.array("h")
+        samples.frombytes(pcm_bytes)
+        if sys.byteorder != "little":
+            samples.byteswap()
+
+        ch = self.REQUESTED_CHANNELS
+        tail_start_frame = total_frames - xfade_frames
+        for i in range(xfade_frames):
+            og = out_g[i]
+            ig = in_g[i]
+            tail_f = tail_start_frame + i
+            head_f = i
+            tail_base = tail_f * ch
+            head_base = head_f * ch
+            for c in range(ch):
+                t = samples[tail_base + c]
+                h = samples[head_base + c]
+                v = int(t * og + h * ig)
+                v = 32767 if v > 32767 else -32768 if v < -32768 else v
+                samples[tail_base + c] = v
+
+        if sys.byteorder != "little":
+            samples.byteswap()
+        return samples.tobytes(), xfade_frames
 
     def _get_pcm_cached_or_decode(self, file_path: str, start_frame: int, end_frame: int, token: PlaybackToken, crossfade_ms: float):
         try:
@@ -557,7 +571,6 @@ class NonBlockingAudioEngine:
         xms_key = round(xms, 3)
 
         key = (file_path, start_frame, end_frame, self.REQUESTED_RATE, self.REQUESTED_CHANNELS, xms_key)
-
         with self._pcm_cache_lock:
             ent = self._pcm_cache.get(key)
             if ent and ent[0] == mtime_ns and ent[1] == size:
@@ -568,21 +581,14 @@ class NonBlockingAudioEngine:
         if total_frames <= 0:
             return b"", 0
 
-        src = miniaudio.stream_file(
-            file_path,
-            output_format=self.REQUESTED_FORMAT,
-            nchannels=self.REQUESTED_CHANNELS,
-            sample_rate=self.REQUESTED_RATE,
-        )
+        src = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
         try:
-            if start_frame > 0:
-                if not self._skip_frames(src, start_frame, token):
-                    return b"", 0
-
+            if start_frame > 0 and (not self._skip_frames(src, start_frame, token)):
+                return b"", 0
             remain = total_frames
             buf = bytearray()
             while remain > 0 and (not token.stopped):
-                req = SOURCE_READ_FRAMES_MAX if remain > SOURCE_READ_FRAMES_MAX else remain
+                req = min(SOURCE_READ_FRAMES_MAX, remain)
                 b = self._read_frames_retry(src, req)
                 if not b:
                     break
@@ -591,7 +597,6 @@ class NonBlockingAudioEngine:
                     break
                 buf.extend(b[: got * self._frame_bytes])
                 remain -= got
-
             pcm = bytes(buf)
         finally:
             try:
@@ -612,117 +617,40 @@ class NonBlockingAudioEngine:
 
         return pcm2, xfade_frames
 
-    def _prepare_pcm_loop_crossfade(self, pcm_bytes: bytes, crossfade_ms: float):
-        try:
-            xms = float(crossfade_ms or 0.0)
-        except Exception:
-            xms = 0.0
-        if xms <= 0.0:
-            return pcm_bytes, 0
-
-        total_frames = len(pcm_bytes) // self._frame_bytes
-        if total_frames < 16:
-            return pcm_bytes, 0
-
-        xfade_frames = int((xms / 1000.0) * self.REQUESTED_RATE)
-        if xfade_frames <= 0:
-            return pcm_bytes, 0
-
-        if xfade_frames * 2 >= total_frames:
-            xfade_frames = max(1, total_frames // 4)
-
-        if xfade_frames <= 0 or xfade_frames * 2 >= total_frames:
-            return pcm_bytes, 0
-
-        out_g, in_g = _raised_cosine_crossfade_gains(xfade_frames)
-        if not out_g:
-            return pcm_bytes, 0
-
-        samples = array.array("h")
-        samples.frombytes(pcm_bytes)
-        if sys.byteorder != "little":
-            samples.byteswap()
-
-        ch = self.REQUESTED_CHANNELS
-        tail_start_frame = total_frames - xfade_frames
-
-        for i in range(xfade_frames):
-            og = out_g[i]
-            ig = in_g[i]
-            tail_f = tail_start_frame + i
-            head_f = i
-
-            tail_base = tail_f * ch
-            head_base = head_f * ch
-
-            for c in range(ch):
-                t = samples[tail_base + c]
-                h = samples[head_base + c]
-                v = int(t * og + h * ig)
-                if v > 32767:
-                    v = 32767
-                elif v < -32768:
-                    v = -32768
-                samples[tail_base + c] = v
-
-        if sys.byteorder != "little":
-            samples.byteswap()
-
-        return samples.tobytes(), xfade_frames
-
     def _pcm_loop_stream(self, pcm_bytes: bytes, token: PlaybackToken, xfade_frames: int = 0):
         total_frames = len(pcm_bytes) // self._frame_bytes
         if total_frames <= 0:
             framecount = yield b""
             return
-
-        if xfade_frames < 0:
-            xfade_frames = 0
-        if xfade_frames * 2 >= total_frames:
+        if xfade_frames < 0 or xfade_frames * 2 >= total_frames:
             xfade_frames = 0
 
         pos = 0
         framecount = yield b""
-
         while True:
             if token.stopped:
                 return
-
             want = int(framecount) if framecount else 0
             if want <= 0:
                 framecount = yield b""
                 continue
-
             out = bytearray(want * self._frame_bytes)
             filled = 0
-
             while filled < want:
                 if token.stopped:
                     return
-
                 remain_seg = total_frames - pos
-                take = remain_seg if remain_seg < (want - filled) else (want - filled)
-
+                take = min(remain_seg, want - filled)
                 s = pos * self._frame_bytes
                 e = s + take * self._frame_bytes
-                out[filled * self._frame_bytes : (filled + take) * self._frame_bytes] = pcm_bytes[s:e]
-
+                out[filled * self._frame_bytes:(filled + take) * self._frame_bytes] = pcm_bytes[s:e]
                 filled += take
                 pos += take
-
                 if pos >= total_frames:
                     pos = xfade_frames if xfade_frames > 0 else 0
-
             framecount = yield bytes(out)
 
-    def _pcm_nloop_stream(
-        self,
-        pcm_bytes: bytes,
-        loop_times: int,
-        token: PlaybackToken,
-        between_loop_crossfade_ms: float,
-        final_fade_seconds: float,
-    ):
+    def _pcm_nloop_stream(self, pcm_bytes: bytes, loop_times: int, token: PlaybackToken, between_loop_crossfade_ms: float, final_fade_seconds: float):
         total_frames = len(pcm_bytes) // self._frame_bytes
         if total_frames <= 0 or loop_times <= 0:
             framecount = yield b""
@@ -742,29 +670,20 @@ class NonBlockingAudioEngine:
                 if out_g:
                     head_b = pcm_bytes[: xfade_frames * self._frame_bytes]
                     tail_b = pcm_bytes[(total_frames - xfade_frames) * self._frame_bytes : total_frames * self._frame_bytes]
-
-                    head_s = array.array("h")
-                    tail_s = array.array("h")
-                    head_s.frombytes(head_b)
-                    tail_s.frombytes(tail_b)
+                    head_s = array.array("h"); tail_s = array.array("h")
+                    head_s.frombytes(head_b); tail_s.frombytes(tail_b)
                     if sys.byteorder != "little":
-                        head_s.byteswap()
-                        tail_s.byteswap()
+                        head_s.byteswap(); tail_s.byteswap()
 
                     ch = self.REQUESTED_CHANNELS
                     mixed = array.array("h", [0] * (xfade_frames * ch))
                     for i in range(xfade_frames):
-                        og = out_g[i]
-                        ig = in_g[i]
+                        og = out_g[i]; ig = in_g[i]
                         base = i * ch
                         for c in range(ch):
                             v = int(tail_s[base + c] * og + head_s[base + c] * ig)
-                            if v > 32767:
-                                v = 32767
-                            elif v < -32768:
-                                v = -32768
+                            v = 32767 if v > 32767 else -32768 if v < -32768 else v
                             mixed[base + c] = v
-
                     if sys.byteorder != "little":
                         mixed.byteswap()
                     mixed_xfade_bytes = mixed.tobytes()
@@ -775,15 +694,8 @@ class NonBlockingAudioEngine:
             fos = float(final_fade_seconds or 0.0)
         except Exception:
             fos = 0.0
-        if fos < 0:
-            fos = 0.0
-        if fos > 0:
-            fade_frames = int(fos * self.REQUESTED_RATE)
-            if fade_frames > total_frames:
-                fade_frames = total_frames
-        else:
-            fade_frames = 0
-
+        fos = max(0.0, fos)
+        fade_frames = int(min(fos, total_frames / self.REQUESTED_RATE) * self.REQUESTED_RATE) if fos > 0 else 0
         fade_start = total_frames - fade_frames
         fade_gains = _cosine_fade_table(fade_frames) if fade_frames > 0 else None
 
@@ -792,7 +704,6 @@ class NonBlockingAudioEngine:
         mix_pos = -1
 
         framecount = yield b""
-
         while True:
             if token.stopped:
                 return
@@ -804,22 +715,18 @@ class NonBlockingAudioEngine:
 
             out = bytearray(want_total * self._frame_bytes)
             filled = 0
-
             while filled < want_total and loops_left > 0:
                 if token.stopped:
                     return
 
                 if mix_pos >= 0:
                     remain_mix = xfade_frames - mix_pos
-                    take = remain_mix if remain_mix < (want_total - filled) else (want_total - filled)
-
+                    take = min(remain_mix, want_total - filled)
                     sb = mix_pos * self._frame_bytes
                     eb = sb + take * self._frame_bytes
-                    out[filled * self._frame_bytes : (filled + take) * self._frame_bytes] = mixed_xfade_bytes[sb:eb]
-
+                    out[filled * self._frame_bytes:(filled + take) * self._frame_bytes] = mixed_xfade_bytes[sb:eb]
                     mix_pos += take
                     filled += take
-
                     if mix_pos >= xfade_frames:
                         loops_left -= 1
                         if loops_left <= 0:
@@ -829,39 +736,27 @@ class NonBlockingAudioEngine:
                     continue
 
                 is_last_loop = (loops_left == 1)
-                if (not is_last_loop) and (xfade_frames > 0):
-                    normal_end = total_frames - xfade_frames
-                else:
-                    normal_end = total_frames
+                normal_end = (total_frames - xfade_frames) if ((not is_last_loop) and (xfade_frames > 0)) else total_frames
 
                 if pos >= normal_end:
                     if (not is_last_loop) and (xfade_frames > 0) and mixed_xfade_bytes:
                         mix_pos = 0
                         continue
-                    else:
-                        loops_left -= 1
-                        if loops_left <= 0:
-                            break
-                        pos = 0
-                        continue
+                    loops_left -= 1
+                    if loops_left <= 0:
+                        break
+                    pos = 0
+                    continue
 
-                take = (normal_end - pos) if (normal_end - pos) < (want_total - filled) else (want_total - filled)
+                take = min(normal_end - pos, want_total - filled)
                 sb = pos * self._frame_bytes
                 eb = sb + take * self._frame_bytes
                 chunk = pcm_bytes[sb:eb]
 
                 if is_last_loop and fade_frames > 0 and (pos + take) > fade_start:
-                    chunk = self._apply_fadeout_to_chunk_s16(
-                        chunk_bytes=chunk,
-                        chunk_frames=take,
-                        frames_played_before_chunk=pos,
-                        fade_start_frame=fade_start,
-                        fade_frames=fade_frames,
-                        fade_gains=fade_gains,
-                    )
+                    chunk = self._apply_fadeout_to_chunk_s16(chunk, take, pos, fade_start, fade_frames, fade_gains)
 
-                out[filled * self._frame_bytes : (filled + take) * self._frame_bytes] = chunk
-
+                out[filled * self._frame_bytes:(filled + take) * self._frame_bytes] = chunk
                 pos += take
                 filled += take
 
@@ -881,36 +776,24 @@ class NonBlockingAudioEngine:
     def _play_sound_worker(self, file_path, play_range, fade_out_seconds, loop, trim_silence, token: PlaybackToken, loop_crossfade_ms: float):
         device = None
         decoder = None
-
         try:
             if not os.path.exists(file_path):
                 self._log(f"【!!】 文件不存在: {file_path}")
                 return
 
-            try:
-                info = miniaudio.get_file_info(file_path)
-                file_duration = float(info.duration or 0.0)
-                if file_duration <= 0:
-                    raise ValueError("duration<=0")
-            except Exception as e:
-                self._log(f"【!!】 获取文件信息失败 {file_path}: {e}")
+            info = miniaudio.get_file_info(file_path)
+            file_duration = float(info.duration or 0.0)
+            if file_duration <= 0:
                 return
 
             if play_range is None:
                 start_s, end_s = 0.0, file_duration
             else:
-                try:
-                    start_s, end_s = float(play_range[0]), float(play_range[1])
-                except Exception:
-                    self._log(f"【!!】 play_range 无效（应为 (start,end)）: {play_range}")
-                    return
+                start_s, end_s = float(play_range[0]), float(play_range[1])
 
-            if start_s < 0:
-                start_s = 0.0
-            if end_s > file_duration:
-                end_s = file_duration
+            start_s = max(0.0, start_s)
+            end_s = min(file_duration, end_s)
             if end_s <= start_s:
-                self._log(f"提示：播放区间为空或非法：({start_s}, {end_s})")
                 return
 
             rate = self.REQUESTED_RATE
@@ -922,11 +805,9 @@ class NonBlockingAudioEngine:
 
             if token.stopped:
                 return
-
             seg_frames = end_frame - start_frame
             if seg_frames <= 0:
                 return
-
             seg_duration = seg_frames / float(rate)
 
             if loop:
@@ -934,101 +815,45 @@ class NonBlockingAudioEngine:
                     pcm, xfade_frames = self._get_pcm_cached_or_decode(file_path, start_frame, end_frame, token, loop_crossfade_ms)
                     if token.stopped or not pcm:
                         return
-
                     stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
-                    try:
-                        stream.send(None)
-                    except StopIteration:
-                        return
-
-                    device = self.PlaybackDevice(
-                        output_format=self.REQUESTED_FORMAT,
-                        nchannels=self.REQUESTED_CHANNELS,
-                        sample_rate=self.REQUESTED_RATE,
-                    )
+                    stream.send(None)
+                    device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                     device.start(stream)
-
                     while not token.stopped:
                         time.sleep(0.1)
                     return
 
-                self._log(f"提示：片段 {seg_duration:.1f}s 过长，避免预解码循环（可调 LOOP_PREDECODE_MAX_SECONDS）。")
                 while not token.stopped:
-                    decoder = miniaudio.stream_file(
-                        file_path,
-                        output_format=self.REQUESTED_FORMAT,
-                        nchannels=self.REQUESTED_CHANNELS,
-                        sample_rate=self.REQUESTED_RATE,
-                    )
-                    if start_frame > 0:
-                        if not self._skip_frames(decoder, start_frame, token):
-                            return
-
-                    stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=0, token=token)
-                    try:
-                        stream.send(None)
-                    except StopIteration:
+                    decoder = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                    if start_frame > 0 and (not self._skip_frames(decoder, start_frame, token)):
                         return
-
-                    device = self.PlaybackDevice(
-                        output_format=self.REQUESTED_FORMAT,
-                        nchannels=self.REQUESTED_CHANNELS,
-                        sample_rate=self.REQUESTED_RATE,
-                    )
+                    stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=0, token=token)
+                    stream.send(None)
+                    device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                     device.start(stream)
-
                     t_end = time.time() + seg_duration + 0.25
                     while (time.time() < t_end) and (not token.stopped):
                         time.sleep(0.05)
-
-                    try:
-                        device.stop()
-                    except Exception:
-                        pass
-                    try:
-                        device.close()
-                    except Exception:
-                        pass
+                    try: device.stop()
+                    except Exception: pass
+                    try: device.close()
+                    except Exception: pass
                     device = None
-
-                    try:
-                        decoder.close()
-                    except Exception:
-                        pass
+                    try: decoder.close()
+                    except Exception: pass
                     decoder = None
                 return
 
-            try:
-                fos = float(fade_out_seconds or 0.0)
-            except Exception:
-                fos = 0.0
-            if fos < 0:
-                fos = 0.0
-            if fos > seg_duration:
-                fos = seg_duration
+            fos = max(0.0, min(float(fade_out_seconds or 0.0), seg_duration))
             fade_frames = int(fos * rate)
 
-            decoder = miniaudio.stream_file(
-                file_path,
-                output_format=self.REQUESTED_FORMAT,
-                nchannels=self.REQUESTED_CHANNELS,
-                sample_rate=self.REQUESTED_RATE,
-            )
-            if start_frame > 0:
-                if not self._skip_frames(decoder, start_frame, token):
-                    return
-
-            stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
-            try:
-                stream.send(None)
-            except StopIteration:
+            decoder = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+            if start_frame > 0 and (not self._skip_frames(decoder, start_frame, token)):
                 return
+            stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
+            stream.send(None)
 
-            device = self.PlaybackDevice(
-                output_format=self.REQUESTED_FORMAT,
-                nchannels=self.REQUESTED_CHANNELS,
-                sample_rate=self.REQUESTED_RATE,
-            )
+            device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
             device.start(stream)
 
             t_end = time.time() + seg_duration + 0.25
@@ -1040,70 +865,36 @@ class NonBlockingAudioEngine:
             self._log(traceback.format_exc())
         finally:
             if device:
-                try:
-                    device.stop()
-                except Exception:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
+                try: device.stop()
+                except Exception: pass
+                try: device.close()
+                except Exception: pass
             if decoder:
-                try:
-                    decoder.close()
-                except Exception:
-                    pass
+                try: decoder.close()
+                except Exception: pass
 
-    def _play_sound_worker_loops(
-        self,
-        file_path,
-        play_range,
-        loop_times: int,
-        final_fade_seconds: float,
-        trim_silence: bool,
-        token: PlaybackToken,
-        between_loop_crossfade_ms: float,
-    ):
+    def _play_sound_worker_loops(self, file_path, play_range, loop_times: int, final_fade_seconds: float, trim_silence: bool, token: PlaybackToken, between_loop_crossfade_ms: float):
         device = None
         decoder = None
-
         try:
             if not os.path.exists(file_path):
-                self._log(f"【!!】 文件不存在: {file_path}")
                 return
-
-            try:
-                info = miniaudio.get_file_info(file_path)
-                file_duration = float(info.duration or 0.0)
-                if file_duration <= 0:
-                    raise ValueError("duration<=0")
-            except Exception as e:
-                self._log(f"【!!】 获取文件信息失败 {file_path}: {e}")
+            info = miniaudio.get_file_info(file_path)
+            file_duration = float(info.duration or 0.0)
+            if file_duration <= 0:
                 return
 
             if play_range is None:
                 start_s, end_s = 0.0, file_duration
             else:
-                try:
-                    start_s, end_s = float(play_range[0]), float(play_range[1])
-                except Exception:
-                    self._log(f"【!!】 play_range 无效（应为 (start,end)）: {play_range}")
-                    return
+                start_s, end_s = float(play_range[0]), float(play_range[1])
 
-            if start_s < 0:
-                start_s = 0.0
-            if end_s > file_duration:
-                end_s = file_duration
+            start_s = max(0.0, start_s)
+            end_s = min(file_duration, end_s)
             if end_s <= start_s:
-                self._log(f"提示：播放区间为空或非法：({start_s}, {end_s})")
                 return
 
-            if loop_times is None:
-                loop_times = 1
-            try:
-                loop_times = int(loop_times)
-            except Exception:
-                loop_times = 1
+            loop_times = int(loop_times or 1)
             if loop_times <= 0:
                 return
 
@@ -1113,14 +904,12 @@ class NonBlockingAudioEngine:
 
             if trim_silence and not token.stopped:
                 start_frame, end_frame = self._trim_silence_edges(file_path, start_frame, end_frame, token)
-
             if token.stopped:
                 return
 
             seg_frames = end_frame - start_frame
             if seg_frames <= 0:
                 return
-
             seg_duration = seg_frames / float(rate)
 
             if seg_duration <= LOOP_PREDECODE_MAX_SECONDS:
@@ -1129,103 +918,57 @@ class NonBlockingAudioEngine:
                     return
 
                 stream = self._pcm_nloop_stream(
-                    pcm_bytes=pcm,
-                    loop_times=loop_times,
-                    token=token,
+                    pcm_bytes=pcm, loop_times=loop_times, token=token,
                     between_loop_crossfade_ms=between_loop_crossfade_ms,
-                    final_fade_seconds=final_fade_seconds,
+                    final_fade_seconds=final_fade_seconds
                 )
-                try:
-                    stream.send(None)
-                except StopIteration:
-                    return
-
-                device = self.PlaybackDevice(
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE,
-                )
+                stream.send(None)
+                device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                 device.start(stream)
 
                 xfade_frames = 0
                 if loop_times > 1:
-                    try:
-                        xms = float(between_loop_crossfade_ms or 0.0)
-                    except Exception:
-                        xms = 0.0
+                    xms = float(between_loop_crossfade_ms or 0.0)
                     if xms > 0:
                         xfade_frames = int((xms / 1000.0) * rate)
                         if xfade_frames * 2 >= seg_frames:
                             xfade_frames = 0
 
-                if loop_times > 1 and xfade_frames > 0:
-                    total_out_frames = seg_frames + (loop_times - 1) * (seg_frames - xfade_frames)
-                else:
-                    total_out_frames = seg_frames * loop_times
-
+                total_out_frames = seg_frames + (loop_times - 1) * (seg_frames - xfade_frames) if (loop_times > 1 and xfade_frames > 0) else seg_frames * loop_times
                 total_out_sec = total_out_frames / float(rate)
                 t_end = time.time() + total_out_sec + 0.25
                 while (time.time() < t_end) and (not token.stopped):
                     time.sleep(0.05)
                 return
 
-            self._log(f"提示：片段 {seg_duration:.1f}s 过长，az 将使用逐次循环方案（可能有轻微间隙）。")
             for i in range(loop_times):
                 if token.stopped:
                     return
-
                 is_last = (i == loop_times - 1)
-                try:
-                    fos = float(final_fade_seconds or 0.0) if is_last else 0.0
-                except Exception:
-                    fos = 0.0
-                if fos < 0:
-                    fos = 0.0
-                if fos > seg_duration:
-                    fos = seg_duration
+                fos = float(final_fade_seconds or 0.0) if is_last else 0.0
+                fos = max(0.0, min(fos, seg_duration))
                 fade_frames = int(fos * rate)
 
-                decoder = miniaudio.stream_file(
-                    file_path,
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE,
-                )
-                if start_frame > 0:
-                    if not self._skip_frames(decoder, start_frame, token):
-                        return
-
-                stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
-                try:
-                    stream.send(None)
-                except StopIteration:
+                decoder = miniaudio.stream_file(file_path, output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                if start_frame > 0 and (not self._skip_frames(decoder, start_frame, token)):
                     return
 
-                device = self.PlaybackDevice(
-                    output_format=self.REQUESTED_FORMAT,
-                    nchannels=self.REQUESTED_CHANNELS,
-                    sample_rate=self.REQUESTED_RATE,
-                )
+                stream = self._segment_stream_from_here(decoder, seg_frames, fade_frames=fade_frames, token=token)
+                stream.send(None)
+                device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                 device.start(stream)
 
                 t_end = time.time() + seg_duration + 0.25
                 while (time.time() < t_end) and (not token.stopped):
                     time.sleep(0.05)
 
-                try:
-                    device.stop()
-                except Exception:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
+                try: device.stop()
+                except Exception: pass
+                try: device.close()
+                except Exception: pass
                 device = None
-
-                try:
-                    decoder.close()
-                except Exception:
-                    pass
+                try: decoder.close()
+                except Exception: pass
                 decoder = None
 
         except Exception:
@@ -1233,37 +976,13 @@ class NonBlockingAudioEngine:
             self._log(traceback.format_exc())
         finally:
             if device:
-                try:
-                    device.stop()
-                except Exception:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
+                try: device.stop()
+                except Exception: pass
+                try: device.close()
+                except Exception: pass
             if decoder:
-                try:
-                    decoder.close()
-                except Exception:
-                    pass
-
-    def play_sound_file(self, file_path, play_range=None, fade_out_seconds=0.0, loop=False, trim_silence=True, loop_crossfade_ms=None):
-        if loop_crossfade_ms is None:
-            loop_crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
-
-        token = PlaybackToken()
-        self._register_token(token)
-        self.executor.submit(
-            self._play_wrapper,
-            file_path,
-            play_range,
-            fade_out_seconds,
-            loop,
-            trim_silence,
-            token,
-            float(loop_crossfade_ms or 0.0),
-        )
-        return token
+                try: decoder.close()
+                except Exception: pass
 
     def _play_wrapper(self, file_path, play_range, fade_out_seconds, loop, trim_silence, token: PlaybackToken, loop_crossfade_ms: float):
         try:
@@ -1271,54 +990,31 @@ class NonBlockingAudioEngine:
         finally:
             self._unregister_token(token)
 
-    def play_sound_file_loops(
-        self,
-        file_path,
-        loop_times: int,
-        final_fade_seconds: float,
-        play_range=None,
-        trim_silence=True,
-        between_loop_crossfade_ms=None,
-    ):
+    def _play_wrapper_loops(self, file_path, play_range, loop_times, final_fade_seconds, trim_silence, token: PlaybackToken, between_loop_crossfade_ms: float):
+        try:
+            self._play_sound_worker_loops(file_path, play_range, loop_times, final_fade_seconds, trim_silence, token, between_loop_crossfade_ms)
+        finally:
+            self._unregister_token(token)
+
+    def play_sound_file(self, file_path, play_range=None, fade_out_seconds=0.0, loop=False, trim_silence=True, loop_crossfade_ms=None):
+        if loop_crossfade_ms is None:
+            loop_crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
+        token = PlaybackToken()
+        self._register_token(token)
+        self.executor.submit(self._play_wrapper, file_path, play_range, fade_out_seconds, loop, trim_silence, token, float(loop_crossfade_ms or 0.0))
+        return token
+
+    def play_sound_file_loops(self, file_path, loop_times: int, final_fade_seconds: float, play_range=None, trim_silence=True, between_loop_crossfade_ms=None):
         if between_loop_crossfade_ms is None:
             between_loop_crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
-
         token = PlaybackToken()
         self._register_token(token)
         self.executor.submit(
             self._play_wrapper_loops,
-            file_path,
-            play_range,
-            int(loop_times),
-            float(final_fade_seconds or 0.0),
-            bool(trim_silence),
-            token,
-            float(between_loop_crossfade_ms or 0.0),
+            file_path, play_range, int(loop_times), float(final_fade_seconds or 0.0),
+            bool(trim_silence), token, float(between_loop_crossfade_ms or 0.0),
         )
         return token
-
-    def _play_wrapper_loops(
-        self,
-        file_path,
-        play_range,
-        loop_times,
-        final_fade_seconds,
-        trim_silence,
-        token: PlaybackToken,
-        between_loop_crossfade_ms: float,
-    ):
-        try:
-            self._play_sound_worker_loops(
-                file_path=file_path,
-                play_range=play_range,
-                loop_times=loop_times,
-                final_fade_seconds=final_fade_seconds,
-                trim_silence=trim_silence,
-                token=token,
-                between_loop_crossfade_ms=between_loop_crossfade_ms,
-            )
-        finally:
-            self._unregister_token(token)
 
     def az(self, file_path: str, loop_times: int, final_fade_seconds: float, trim_silence: bool = True):
         return self.play_sound_file_loops(
@@ -1339,7 +1035,7 @@ class NonBlockingAudioEngine:
                     pass
 
     def cleanup(self):
-        if self._cleaned:
+        if getattr(self, "_cleaned", False):
             return
         self._cleaned = True
         self._log("正在关闭非阻塞音频引擎...")
@@ -1350,93 +1046,419 @@ class NonBlockingAudioEngine:
         finally:
             self._log("非阻塞音频引擎已关闭。")
 
-    @classmethod
-    def validate_environment(cls, verbose=False, timeout_sec=0.15):
-        compat = _MiniaudioCompat()
-        if not compat.ok:
-            return "not ok: miniaudio API mismatch\n" + compat.reason(with_diag=True)
-
-        device = None
-        token = None
-        try:
-            engine = cls(asset_folder=".", max_workers=1, silent=(not verbose))
-
-            rate = engine.REQUESTED_RATE
-            dur = 0.12
-            frames = max(32, int(dur * rate))
-            freq = 440.0
-            amp = 0.02
-
-            samples = array.array("h")
-            for n in range(frames):
-                s = int(32767 * amp * math.sin(2.0 * math.pi * freq * (n / float(rate))))
-                samples.append(s)
-                samples.append(s)
-
-            if sys.byteorder != "little":
-                samples.byteswap()
-            pcm = samples.tobytes()
-
-            token = PlaybackToken()
-            stream = engine._pcm_loop_stream(pcm, token, xfade_frames=0)
-            stream.send(None)
-
-            device = compat.PlaybackDevice(
-                output_format=engine.REQUESTED_FORMAT,
-                nchannels=engine.REQUESTED_CHANNELS,
-                sample_rate=engine.REQUESTED_RATE,
-            )
-            device.start(stream)
-
-            time.sleep(float(timeout_sec))
-
-            token.stop()
-            time.sleep(0.03)
-
-            try:
-                device.stop()
-            except Exception:
-                pass
-            try:
-                device.close()
-            except Exception:
-                pass
-
-            engine.cleanup()
-            return "ok"
-
-        except Exception as e:
-            detail = _miniaudio_diagnostics(verbose_trace=False)
-            tb = traceback.format_exc()
-            return (
-                "not ok: runtime playback test failed\n"
-                + f"{_short_exc(e)}\n\n--- diagnostics ---\n{detail}\n\n--- traceback ---\n{tb}"
-            )
-
-        finally:
-            try:
-                if token is not None:
-                    token.stop()
-            except Exception:
-                pass
-            try:
-                if device is not None:
-                    device.stop()
-            except Exception:
-                pass
-            try:
-                if device is not None:
-                    device.close()
-            except Exception:
-                pass
-
 
 _DEFAULT_ENGINE = None
-
-
 def az(file_path: str, loop_times: int, final_fade_seconds: float, trim_silence: bool = True):
     global _DEFAULT_ENGINE
     if _DEFAULT_ENGINE is None:
         asset_folder = os.path.dirname(os.path.abspath(file_path)) or "."
         _DEFAULT_ENGINE = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=8)
     return _DEFAULT_ENGINE.az(file_path, loop_times, final_fade_seconds, trim_silence)
+
+
+# =========================
+# SFX
+# =========================
+_SENTINEL = object()
+
+class UltraFastConcurrentSFX:
+    def __init__(self, max_concurrent_voices=24, submit_queue_size=1024, sample_rate=44100, nchannels=2, sample_format=None):
+        if miniaudio is None:
+            raise RuntimeError("miniaudio not available")
+        if sample_format is None:
+            sample_format = miniaudio.SampleFormat.SIGNED16
+
+        self.sample_rate = sample_rate
+        self.nchannels = nchannels
+        self.sample_format = sample_format
+
+        self._submit_q = queue.Queue(maxsize=submit_queue_size)
+        self._cache = {}
+        self._cache_lock = threading.Lock()
+
+        self._running = threading.Event()
+        self._running.set()
+
+        self._pool = ThreadPoolExecutor(max_workers=max_concurrent_voices, thread_name_prefix="sfx-voice")
+        self._dispatch_thread = threading.Thread(target=self._dispatch_loop, name="sfx-dispatch", daemon=True)
+        self._dispatch_thread.start()
+
+    def play(self, path: str):
+        if not path:
+            return
+        try:
+            self._submit_q.put_nowait(path)
+        except queue.Full:
+            pass
+
+    def prime(self, paths):
+        for p in paths:
+            self._decode_cache(p)
+
+    def close(self):
+        self._running.clear()
+        try:
+            self._submit_q.put_nowait(_SENTINEL)
+        except Exception:
+            pass
+        self._dispatch_thread.join(timeout=2.0)
+        self._pool.shutdown(wait=False, cancel_futures=False)
+
+    def _decode_cache(self, path):
+        if not os.path.isfile(path):
+            return None
+        with self._cache_lock:
+            if path in self._cache:
+                return self._cache[path]
+        try:
+            decoded = miniaudio.decode_file(path, output_format=self.sample_format, nchannels=self.nchannels, sample_rate=self.sample_rate)
+            pcm = decoded.samples
+            dur = 0.0
+            if getattr(decoded, "sample_rate", 0) and getattr(decoded, "num_frames", 0):
+                dur = decoded.num_frames / decoded.sample_rate
+            item = (pcm, dur)
+            with self._cache_lock:
+                self._cache[path] = item
+            return item
+        except Exception:
+            return None
+
+    def _dispatch_loop(self):
+        while self._running.is_set():
+            item = self._submit_q.get()
+            if item is _SENTINEL:
+                break
+            self._pool.submit(self._voice_worker, item)
+
+    def _voice_worker(self, path):
+        cached = self._decode_cache(path)
+        if not cached:
+            return
+        pcm_bytes, duration = cached
+        device = None
+        try:
+            device = miniaudio.PlaybackDevice(output_format=self.sample_format, nchannels=self.nchannels, sample_rate=self.sample_rate)
+            stream = miniaudio.stream_raw_pcm_memory(pcm_bytes, nchannels=self.nchannels, sample_rate=self.sample_rate, output_format=self.sample_format)
+            device.start(stream)
+            time.sleep((duration if duration > 0 else 0.2) + 0.02)
+        except Exception:
+            pass
+        finally:
+            if device:
+                try: device.stop()
+                except Exception: pass
+                try: device.close()
+                except Exception: pass
+
+
+# =========================
+# ClipboardWatcher
+# =========================
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+WM_CLIPBOARDUPDATE = 0x031D
+WM_CLOSE = 0x0010
+HWND_MESSAGE = wt.HWND(-3)
+
+class WNDCLASSEXW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wt.UINT), ("style", wt.UINT), ("lpfnWndProc", ctypes.c_void_p),
+        ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int), ("hInstance", wt.HINSTANCE),
+        ("hIcon", wt.HICON), ("hCursor", wt.HANDLE), ("hbrBackground", wt.HBRUSH),
+        ("lpszMenuName", wt.LPCWSTR), ("lpszClassName", wt.LPCWSTR), ("hIconSm", wt.HICON),
+    ]
+
+user32.RegisterClassExW.argtypes = [ctypes.POINTER(WNDCLASSEXW)]
+user32.RegisterClassExW.restype = wt.ATOM
+user32.CreateWindowExW.argtypes = [wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID]
+user32.CreateWindowExW.restype = wt.HWND
+user32.DestroyWindow.argtypes = [wt.HWND]
+user32.DestroyWindow.restype = wt.BOOL
+user32.UnregisterClassW.argtypes = [wt.LPCWSTR, wt.HINSTANCE]
+user32.UnregisterClassW.restype = wt.BOOL
+user32.AddClipboardFormatListener.argtypes = [wt.HWND]
+user32.AddClipboardFormatListener.restype = wt.BOOL
+user32.RemoveClipboardFormatListener.argtypes = [wt.HWND]
+user32.RemoveClipboardFormatListener.restype = wt.BOOL
+user32.PostMessageW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+user32.PostMessageW.restype = wt.BOOL
+user32.GetMessageW.argtypes = [ctypes.POINTER(wt.MSG), wt.HWND, wt.UINT, wt.UINT]
+user32.GetMessageW.restype = ctypes.c_int
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wt.MSG)]
+user32.TranslateMessage.restype = wt.BOOL
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(wt.MSG)]
+user32.DispatchMessageW.restype = wt.LRESULT
+user32.DefWindowProcW.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
+user32.DefWindowProcW.restype = wt.LRESULT
+user32.PostQuitMessage.argtypes = [ctypes.c_int]
+user32.PostQuitMessage.restype = None
+kernel32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wt.HMODULE
+WNDPROC_T = ctypes.WINFUNCTYPE(wt.LRESULT, wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
+
+class ClipboardWatcher:
+    def __init__(self, callback, debounce_ms=0):
+        if not callable(callback):
+            raise TypeError("callback must be callable")
+        self._callback = callback
+        self._debounce_s = max(0.0, debounce_ms / 1000.0)
+
+        self._queue = queue.Queue()
+        self._msg_thread = None
+        self._work_thread = None
+        self._hwnd = None
+        self._wndproc_ref = None
+        self._cls_name = f"DGS_CB_{id(self):x}"
+        self._lock = threading.Lock()
+        self._ready = threading.Event()
+        self._started_ok = False
+
+    @property
+    def alive(self):
+        return self._msg_thread is not None and self._msg_thread.is_alive()
+
+    def start(self):
+        with self._lock:
+            if self.alive:
+                return
+            self._ready.clear()
+            self._started_ok = False
+            self._work_thread = threading.Thread(target=self._worker, name="cb-worker", daemon=True)
+            self._work_thread.start()
+            self._msg_thread = threading.Thread(target=self._pump, name="cb-pump", daemon=True)
+            self._msg_thread.start()
+            if not self._ready.wait(timeout=3.0) or not self._started_ok:
+                raise RuntimeError("ClipboardWatcher start failed")
+
+    def stop(self):
+        with self._lock:
+            if not self.alive:
+                return
+            if self._hwnd:
+                user32.PostMessageW(self._hwnd, WM_CLOSE, 0, 0)
+            self._msg_thread.join(timeout=3.0)
+            self._msg_thread = None
+            self._queue.put(_SENTINEL)
+            self._work_thread.join(timeout=3.0)
+            self._work_thread = None
+
+    def _wndproc(self, hwnd, msg, wp, lp):
+        if msg == WM_CLIPBOARDUPDATE:
+            try:
+                self._queue.put_nowait(time.perf_counter())
+            except Exception:
+                pass
+            return 0
+        if msg == WM_CLOSE:
+            user32.PostQuitMessage(0)
+            return 0
+        return user32.DefWindowProcW(hwnd, msg, wp, lp)
+
+    def _worker(self):
+        last = 0.0
+        ds = self._debounce_s
+        while True:
+            ts = self._queue.get()
+            if ts is _SENTINEL:
+                break
+            if ds > 0 and (ts - last) < ds:
+                continue
+            last = ts
+            try:
+                self._callback()
+            except Exception:
+                pass
+
+    def _pump(self):
+        self._wndproc_ref = WNDPROC_T(self._wndproc)
+        hinst = kernel32.GetModuleHandleW(None)
+
+        wc = WNDCLASSEXW()
+        wc.cbSize = ctypes.sizeof(WNDCLASSEXW)
+        wc.lpfnWndProc = ctypes.cast(self._wndproc_ref, ctypes.c_void_p).value
+        wc.hInstance = hinst
+        wc.lpszClassName = self._cls_name
+        user32.RegisterClassExW(ctypes.byref(wc))
+
+        try:
+            self._hwnd = user32.CreateWindowExW(0, self._cls_name, None, 0, 0, 0, 0, 0, HWND_MESSAGE, None, hinst, None)
+            if not self._hwnd:
+                self._ready.set()
+                return
+            ok = user32.AddClipboardFormatListener(self._hwnd)
+            if not ok:
+                self._ready.set()
+                return
+            self._started_ok = True
+            self._ready.set()
+
+            msg = wt.MSG()
+            while True:
+                ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if ret <= 0:
+                    break
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            if self._hwnd:
+                try: user32.RemoveClipboardFormatListener(self._hwnd)
+                except Exception: pass
+                try: user32.DestroyWindow(self._hwnd)
+                except Exception: pass
+                self._hwnd = None
+            try: user32.UnregisterClassW(self._cls_name, hinst)
+            except Exception: pass
+            self._wndproc_ref = None
+
+
+class TriggerBus:
+    def __init__(self):
+        self._handlers = {}
+        self._lock = threading.Lock()
+
+    def on(self, event_name: str, fn):
+        if not callable(fn):
+            raise TypeError("fn must be callable")
+        with self._lock:
+            self._handlers.setdefault(event_name, []).append(fn)
+
+    def emit(self, event_name: str, *args, **kwargs):
+        with self._lock:
+            hs = list(self._handlers.get(event_name, []))
+        for h in hs:
+            try:
+                h(*args, **kwargs)
+            except Exception:
+                pass
+
+
+class AudioHub:
+    def __init__(self, asset_folder="assets", music_workers=16, sfx_workers=24, sfx_use_music_engine=False, silent=False):
+        self.music = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=music_workers, silent=silent)
+        self.sfx_use_music_engine = bool(sfx_use_music_engine)
+
+        if not self.sfx_use_music_engine:
+            self.sfx = UltraFastConcurrentSFX(max_concurrent_voices=sfx_workers)
+        else:
+            self.sfx = None
+
+        self.bus = TriggerBus()
+        self.clipboard_watcher = None
+        self._clipboard_sounds = []
+        self._clipboard_lock = threading.Lock()
+
+    def az(self, file_path: str, loop_times: int, final_fade_seconds: float, trim_silence: bool = True):
+        return self.music.az(file_path, loop_times, final_fade_seconds, trim_silence)
+
+    def play_music_file(self, file_path, play_range=None, fade_out_seconds=0.0, loop=False, trim_silence=True, loop_crossfade_ms=None):
+        return self.music.play_sound_file(file_path, play_range, fade_out_seconds, loop, trim_silence, loop_crossfade_ms)
+
+    def prime_sfx(self, paths):
+        if self.sfx_use_music_engine:
+            return
+        self.sfx.prime(paths)
+
+    def play_sfx(self, path: str):
+        if self.sfx_use_music_engine:
+            self.music.play_sound_file(path, play_range=None, fade_out_seconds=0.0, loop=False, trim_silence=False, loop_crossfade_ms=0.0)
+            return
+        self.sfx.play(path)
+
+    def on(self, event_name: str, fn):
+        self.bus.on(event_name, fn)
+
+    def trigger(self, event_name: str, *args, **kwargs):
+        self.bus.emit(event_name, *args, **kwargs)
+
+    def bind_clipboard_to_random_sfx(self, sound_paths, debounce_ms=0, prewarm=True):
+        """
+        修正点（你指定）：
+        - 如果旧 watcher 存在且 alive，先 stop 再替换，避免残留线程/隐藏窗口
+        """
+        paths = [p for p in sound_paths if os.path.isfile(p)]
+        if not paths:
+            raise ValueError("sound_paths 为空或文件不存在")
+
+        with self._clipboard_lock:
+            # 关键修正：先停旧 watcher
+            old = self.clipboard_watcher
+            if old is not None and old.alive:
+                try:
+                    old.stop()
+                except Exception:
+                    pass
+
+            self._clipboard_sounds = paths
+
+            if prewarm and (not self.sfx_use_music_engine):
+                self.prime_sfx(paths)
+
+            def _on_clip():
+                p = random.choice(self._clipboard_sounds)
+                self.play_sfx(p)
+
+            self.clipboard_watcher = ClipboardWatcher(_on_clip, debounce_ms=debounce_ms)
+
+    def start_clipboard(self):
+        with self._clipboard_lock:
+            if self.clipboard_watcher:
+                self.clipboard_watcher.start()
+
+    def stop_clipboard(self):
+        with self._clipboard_lock:
+            if self.clipboard_watcher:
+                self.clipboard_watcher.stop()
+
+    def close(self):
+        try:
+            self.stop_clipboard()
+        except Exception:
+            pass
+        try:
+            if self.sfx:
+                self.sfx.close()
+        except Exception:
+            pass
+        try:
+            self.music.cleanup()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    print("AudioHub 启动...")
+
+    hub = AudioHub(
+        asset_folder="assets",
+        music_workers=16,
+        sfx_workers=24,
+        sfx_use_music_engine=False,
+        silent=False
+    )
+
+    sfx_list = [
+        r"D:\sounds\1.wav",
+        r"D:\sounds\2.mp3",
+        r"D:\sounds\q1.wav",
+        r"D:\sounds\z1.mp3",
+    ]
+
+    hub.bind_clipboard_to_random_sfx(sfx_list, debounce_ms=0, prewarm=True)
+    hub.start_clipboard()
+
+    def on_order_paid(order_id):
+        hub.play_sfx(random.choice(sfx_list))
+        print(f"order paid -> sfx played, order_id={order_id}")
+
+    hub.on("order_paid", on_order_paid)
+    hub.trigger("order_paid", 9527)
+
+    print("运行中：剪贴板变化会触发音效；Ctrl+C 退出")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("退出中...")
+        hub.close()
+        print("已退出")

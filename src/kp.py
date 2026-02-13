@@ -207,114 +207,154 @@ def _get_audio_state():
 
 
 # =============================================================================
-#  ★ 剪贴板监听 + kope 音效 (极简高效，内嵌实现)
+#  ★ 音效系统 (v16 AudioHub - 事件驱动 + 延迟预热 + 极速播放)
 # =============================================================================
-_CLIPBOARD_WATCHER_THREAD = None
-_CLIPBOARD_WATCHER_STOP = False
-_CLIPBOARD_LAST_SEQ = 0
+_AUDIO_HUB = None
+_AUDIO_HUB_LOCK = threading.Lock()
+_SFX_REGISTRY = {}   # {"kope": [path, ...], "yz": [path, ...], ...}
+_SFX_LAST_IDX = {}   # 每个分类的上次播放索引，避免连续重复
+_SFX_PRIMED = False  # 预热完成标志
+_SFX_PRIME_DELAY = 5  # 预热延迟秒数（错开 VS Code 启动高峰）
 
-# kope 播放器 (极简内嵌，不依赖外部文件)
-_KOPE_EXECUTOR = None
-_KOPE_MINIAUDIO = None
-_KOPE_PATHS = None
-_KOPE_LAST_IDX = 0
-_KOPE_FORMAT = None
-_KOPE_READY = False
+def _init_sfx_paths():
+    """初始化音效路径注册表"""
+    global _SFX_REGISTRY
+    if _SFX_REGISTRY:
+        return _SFX_REGISTRY
 
-def _init_kope_player():
-    """初始化 kope 播放器 - 预缓存一切"""
-    global _KOPE_EXECUTOR, _KOPE_MINIAUDIO, _KOPE_PATHS, _KOPE_FORMAT, _KOPE_READY
-    if _KOPE_READY:
-        return True
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    assets_dir = os.path.join(script_dir, "..", "assets")
+    if not os.path.isdir(assets_dir):
+        assets_dir = os.path.join(script_dir, "assets")
+
+    # kope 音效 (1-7.mp3) - 剪贴板复制
+    kope_dir = os.path.join(assets_dir, "kope")
+    if os.path.isdir(kope_dir):
+        _SFX_REGISTRY["kope"] = [os.path.join(kope_dir, f"{i}.mp3") for i in range(1, 8)]
+
+    # yz 音效 (删除文件、CMD 等) - 所有 mp3/wav
+    yz_dir = os.path.join(assets_dir, "yz")
+    if os.path.isdir(yz_dir):
+        yz_files = sorted([f for f in os.listdir(yz_dir) if f.endswith((".mp3", ".wav"))])
+        _SFX_REGISTRY["yz"] = [os.path.join(yz_dir, f) for f in yz_files]
+
+    return _SFX_REGISTRY
+
+def _background_prime_sfx():
+    """后台预热线程：延迟 N 秒后执行，错开 VS Code 启动高峰"""
+    global _SFX_PRIMED
+    time.sleep(_SFX_PRIME_DELAY)
+
+    hub = _AUDIO_HUB
+    if not hub:
+        return
+
     try:
-        import miniaudio as ma
-        _KOPE_MINIAUDIO = ma
-        _KOPE_FORMAT = ma.SampleFormat.SIGNED16
-        _KOPE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        # 预缓存路径
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        base = os.path.join(script_dir, "..", "assets", "kope")
-        if not os.path.isdir(base):
-            base = os.path.join(script_dir, "assets", "kope")
-        _KOPE_PATHS = [os.path.join(base, f"{i}.mp3") for i in range(1, 8)]
-        _KOPE_READY = True
-        return True
-    except:
-        return False
-
-def _kope_worker(path):
-    """极简播放: stream → device → play → sleep → close"""
-    ma = _KOPE_MINIAUDIO
-    fmt = _KOPE_FORMAT
-    stream = None
-    device = None
-    try:
-        dur = ma.get_file_info(path).duration
-        stream = ma.stream_file(path, output_format=fmt, nchannels=2, sample_rate=44100)
-        device = ma.PlaybackDevice(output_format=fmt, nchannels=2, sample_rate=44100)
-        device.start(stream)
-        time.sleep(dur + 0.05)
+        _init_sfx_paths()
+        all_paths = []
+        for paths in _SFX_REGISTRY.values():
+            all_paths.extend([p for p in paths if os.path.isfile(p)])
+        if all_paths:
+            hub.prime_sfx(all_paths)
+        _SFX_PRIMED = True
     except:
         pass
-    finally:
-        if device:
-            try: device.close()
-            except: pass
-        if stream:
-            try: stream.close()
-            except: pass
 
-def _play_kope_sound():
-    """播放随机 kope 音效 (1-7)"""
-    global _KOPE_LAST_IDX
-    if not _KOPE_READY and not _init_kope_player():
+def _get_audio_hub():
+    """获取 AudioHub 单例 (懒加载 + 延迟预热)"""
+    global _AUDIO_HUB
+    if _AUDIO_HUB is not None:
+        return _AUDIO_HUB
+
+    with _AUDIO_HUB_LOCK:
+        if _AUDIO_HUB is not None:
+            return _AUDIO_HUB
+
+        try:
+            # 动态导入 v16
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            v16_path = os.path.join(script_dir, "miniaudio_v16.py")
+            spec = importlib.util.spec_from_file_location("miniaudio_v16", v16_path)
+            v16 = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(v16)
+
+            # 创建 AudioHub: sfx_use_music_engine=False 独立引擎，内存 PCM 播放最快
+            hub = v16.AudioHub(
+                asset_folder=".",
+                music_workers=16,
+                sfx_workers=24,           # 24 并发音效通道
+                sfx_use_music_engine=False,  # 独立 SFX 引擎
+                silent=True
+            )
+
+            _AUDIO_HUB = hub
+
+            # 启动后台预热线程（不阻塞当前请求）
+            threading.Thread(target=_background_prime_sfx, daemon=True, name="sfx-prime").start()
+
+            return hub
+        except Exception as e:
+            return None
+
+def _play_sfx(category: str, idx: int = -1):
+    """
+    播放音效
+    category: "kope" / "yz" 等
+    idx: -1 = 随机（避免连续重复），>=0 = 指定索引
+    """
+    global _SFX_LAST_IDX
+    hub = _get_audio_hub()
+    if not hub:
         return
-    # 随机选择，避免重复
-    idx = _KOPE_LAST_IDX
-    while idx == _KOPE_LAST_IDX:
-        idx = random.randint(0, 6)
-    _KOPE_LAST_IDX = idx
-    path = _KOPE_PATHS[idx]
-    _KOPE_EXECUTOR.submit(_kope_worker, path)
 
-def _clipboard_watcher_loop():
-    global _CLIPBOARD_WATCHER_STOP, _CLIPBOARD_LAST_SEQ
+    _init_sfx_paths()
+    paths = _SFX_REGISTRY.get(category, [])
+    if not paths:
+        return
 
-    # 预初始化播放器
-    _init_kope_player()
+    # 过滤存在的文件
+    valid_paths = [p for p in paths if os.path.isfile(p)]
+    if not valid_paths:
+        return
 
-    # 缓存 API 函数，避免每次循环查找
-    get_seq = ctypes.windll.user32.GetClipboardSequenceNumber
-    sleep = time.sleep
+    if idx < 0:
+        # 随机选择，避免连续重复
+        last = _SFX_LAST_IDX.get(category, -1)
+        if len(valid_paths) > 1:
+            choices = [i for i in range(len(valid_paths)) if i != last]
+            idx = random.choice(choices)
+        else:
+            idx = 0
+        _SFX_LAST_IDX[category] = idx
+        path = valid_paths[idx]
+    else:
+        path = valid_paths[idx % len(valid_paths)]
 
-    # 用局部变量，减少全局访问开销
-    last_seq = get_seq()
-    _CLIPBOARD_LAST_SEQ = last_seq
-
-    while not _CLIPBOARD_WATCHER_STOP:
-        sleep(0.02)  # 20ms
-        current_seq = get_seq()
-        if current_seq != last_seq:
-            last_seq = current_seq
-            _CLIPBOARD_LAST_SEQ = current_seq
-            _play_kope_sound()
+    hub.play_sfx(path)
 
 def _start_clipboard_watcher():
-    """启动剪贴板监听"""
-    global _CLIPBOARD_WATCHER_THREAD, _CLIPBOARD_WATCHER_STOP
+    """启动剪贴板音效 (事件驱动 - 0ms 检测延迟)"""
+    hub = _get_audio_hub()
+    if not hub:
+        return {"status": "error", "error": "AudioHub init failed"}
 
-    if _CLIPBOARD_WATCHER_THREAD and _CLIPBOARD_WATCHER_THREAD.is_alive():
-        return {"status": "already_running"}
+    _init_sfx_paths()
+    kope_paths = [p for p in _SFX_REGISTRY.get("kope", []) if os.path.isfile(p)]
+    if not kope_paths:
+        return {"status": "error", "error": "No kope sounds found"}
 
-    _CLIPBOARD_WATCHER_STOP = False
-    _CLIPBOARD_WATCHER_THREAD = threading.Thread(target=_clipboard_watcher_loop, daemon=True)
-    _CLIPBOARD_WATCHER_THREAD.start()
-    return {"status": "started"}
+    try:
+        hub.bind_clipboard_to_random_sfx(kope_paths, debounce_ms=0, prewarm=True)
+        hub.start_clipboard()
+        return {"status": "started"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 def _stop_clipboard_watcher():
-    """停止剪贴板监听"""
-    global _CLIPBOARD_WATCHER_STOP
-    _CLIPBOARD_WATCHER_STOP = True
+    """停止剪贴板音效"""
+    hub = _get_audio_hub()
+    if hub:
+        hub.stop_clipboard()
     return {"status": "stopped"}
 
 # =============================================================================
@@ -1629,6 +1669,15 @@ def _dispatch_action(cmd, cancel_version: int = None):
         return out
     if action == "stop_clipboard_watcher":
         out.update(_stop_clipboard_watcher())
+        return out
+    # =============================================================================
+    #  音效播放命令 (play_sfx)
+    # =============================================================================
+    if action == "play_sfx":
+        category = payload.get("category", "kope")
+        idx = payload.get("idx", -1)  # -1 = 随机
+        _play_sfx(category, idx)
+        out["status"] = "played"
         return out
     out["error"] = f"unknown action: {action}"
     return out
