@@ -1808,16 +1808,6 @@ window.addEventListener('message', event => {
       section.dataset.total = message.total;
       recycleBinLoading = false;
     }
-  } else if (message.command === 'playSfx') {
-    // Play sound effect (copy success) - max 3 simultaneous
-    if (message.base64) {
-      if (!window._sfxPool) window._sfxPool = [];
-      window._sfxPool = window._sfxPool.filter(a => !a.ended);
-      if (window._sfxPool.length >= 3) return;
-      const audio = new Audio('data:audio/mp3;base64,' + message.base64);
-      window._sfxPool.push(audio);
-      audio.play().catch(() => {});
-    }
   }
 });
 
@@ -3182,14 +3172,10 @@ function showSaveAsDialog() {
   activePanel = panel;
   activePanelAlive = true;
 
-  // ★ 注册 webview 用于播放音效
-  global.registerWebviewForSound(panel);
-
   const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
   panel.onDidDispose(() => {
-    global.unregisterWebviewForSound(panel);  // ★ 取消注册
     activePanelAlive = false;
     activePanel = null;
     sRequestVersion++; // 使所有正在进行的 sRequest 失效
@@ -3952,11 +3938,7 @@ function showSaveAsDialog() {
           // 插件侧安全过滤：只过滤掉字面意义上的 ".." 相对路径，允许已解析的绝对路径
           const safePaths = message.paths.filter(p => p !== '..' && !p.endsWith(path.sep + '..'));
           if (safePaths.length > 0) {
-            const result = await h.copyFilesToClipboard(safePaths);
-            // ★ 只在使用 engine 成功时播放音效（fallback 到文本时 q4 会检测到并播放）
-            if (result?.usedEngine) {
-              global.playCopySuccessSound(panel);
-            }
+            await h.copyFilesToClipboard(safePaths);
           }
         }
         break;
@@ -3995,12 +3977,6 @@ function showSaveAsDialog() {
       case "openAdminPowershell": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'powershell');
-        break;
-      }
-
-      // Play copy success sound
-      case "playCopySound": {
-        global.playCopySuccessSound(panel);
         break;
       }
     }

@@ -205,6 +205,118 @@ def _get_audio_state():
         return {"playing": True}
     return {"playing": False}
 
+
+# =============================================================================
+#  ★ 剪贴板监听 + kope 音效 (极简高效，内嵌实现)
+# =============================================================================
+_CLIPBOARD_WATCHER_THREAD = None
+_CLIPBOARD_WATCHER_STOP = False
+_CLIPBOARD_LAST_SEQ = 0
+
+# kope 播放器 (极简内嵌，不依赖外部文件)
+_KOPE_EXECUTOR = None
+_KOPE_MINIAUDIO = None
+_KOPE_PATHS = None
+_KOPE_LAST_IDX = 0
+_KOPE_FORMAT = None
+_KOPE_READY = False
+
+def _init_kope_player():
+    """初始化 kope 播放器 - 预缓存一切"""
+    global _KOPE_EXECUTOR, _KOPE_MINIAUDIO, _KOPE_PATHS, _KOPE_FORMAT, _KOPE_READY
+    if _KOPE_READY:
+        return True
+    try:
+        import miniaudio as ma
+        _KOPE_MINIAUDIO = ma
+        _KOPE_FORMAT = ma.SampleFormat.SIGNED16
+        _KOPE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        # 预缓存路径
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        base = os.path.join(script_dir, "..", "assets", "kope")
+        if not os.path.isdir(base):
+            base = os.path.join(script_dir, "assets", "kope")
+        _KOPE_PATHS = [os.path.join(base, f"{i}.mp3") for i in range(1, 8)]
+        _KOPE_READY = True
+        return True
+    except:
+        return False
+
+def _kope_worker(path):
+    """极简播放: stream → device → play → sleep → close"""
+    ma = _KOPE_MINIAUDIO
+    fmt = _KOPE_FORMAT
+    stream = None
+    device = None
+    try:
+        dur = ma.get_file_info(path).duration
+        stream = ma.stream_file(path, output_format=fmt, nchannels=2, sample_rate=44100)
+        device = ma.PlaybackDevice(output_format=fmt, nchannels=2, sample_rate=44100)
+        device.start(stream)
+        time.sleep(dur + 0.05)
+    except:
+        pass
+    finally:
+        if device:
+            try: device.close()
+            except: pass
+        if stream:
+            try: stream.close()
+            except: pass
+
+def _play_kope_sound():
+    """播放随机 kope 音效 (1-7)"""
+    global _KOPE_LAST_IDX
+    if not _KOPE_READY and not _init_kope_player():
+        return
+    # 随机选择，避免重复
+    idx = _KOPE_LAST_IDX
+    while idx == _KOPE_LAST_IDX:
+        idx = random.randint(0, 6)
+    _KOPE_LAST_IDX = idx
+    path = _KOPE_PATHS[idx]
+    _KOPE_EXECUTOR.submit(_kope_worker, path)
+
+def _clipboard_watcher_loop():
+    global _CLIPBOARD_WATCHER_STOP, _CLIPBOARD_LAST_SEQ
+
+    # 预初始化播放器
+    _init_kope_player()
+
+    # 缓存 API 函数，避免每次循环查找
+    get_seq = ctypes.windll.user32.GetClipboardSequenceNumber
+    sleep = time.sleep
+
+    # 用局部变量，减少全局访问开销
+    last_seq = get_seq()
+    _CLIPBOARD_LAST_SEQ = last_seq
+
+    while not _CLIPBOARD_WATCHER_STOP:
+        sleep(0.02)  # 20ms
+        current_seq = get_seq()
+        if current_seq != last_seq:
+            last_seq = current_seq
+            _CLIPBOARD_LAST_SEQ = current_seq
+            _play_kope_sound()
+
+def _start_clipboard_watcher():
+    """启动剪贴板监听"""
+    global _CLIPBOARD_WATCHER_THREAD, _CLIPBOARD_WATCHER_STOP
+
+    if _CLIPBOARD_WATCHER_THREAD and _CLIPBOARD_WATCHER_THREAD.is_alive():
+        return {"status": "already_running"}
+
+    _CLIPBOARD_WATCHER_STOP = False
+    _CLIPBOARD_WATCHER_THREAD = threading.Thread(target=_clipboard_watcher_loop, daemon=True)
+    _CLIPBOARD_WATCHER_THREAD.start()
+    return {"status": "started"}
+
+def _stop_clipboard_watcher():
+    """停止剪贴板监听"""
+    global _CLIPBOARD_WATCHER_STOP
+    _CLIPBOARD_WATCHER_STOP = True
+    return {"status": "stopped"}
+
 # =============================================================================
 #  配置
 # =============================================================================
@@ -1508,6 +1620,15 @@ def _dispatch_action(cmd, cancel_version: int = None):
         return out
     if action == "get_audio_state":
         out.update(_get_audio_state())
+        return out
+    # =============================================================================
+    #  剪贴板监听命令
+    # =============================================================================
+    if action == "start_clipboard_watcher":
+        out.update(_start_clipboard_watcher())
+        return out
+    if action == "stop_clipboard_watcher":
+        out.update(_stop_clipboard_watcher())
         return out
     out["error"] = f"unknown action: {action}"
     return out

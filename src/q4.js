@@ -41,7 +41,7 @@ const CONSTANTS = Object.freeze({
     PREVIEW_LENGTH: 200,
 
     // 监听
-    CLIPBOARD_POLL_MS: 300,  // ★ 降低轮询间隔，提高音效灵敏度
+    CLIPBOARD_POLL_MS: 1000,  // 仅用于历史记录，音效由 py 引擎处理
     SIDEBAR_UPDATE_MS: 5000,
 
     // 保存（批处理 + 节流 + 串行写入）
@@ -833,8 +833,6 @@ class ClipboardHistoryManager {
                 const cur = await vscode.env.clipboard.readText();
                 if (cur && cur !== this._lastClipboardContent) {
                     await this.addToHistory(cur);
-                    // ★ 播放复制成功音效（自动选择可用 webview）
-                    global.playCopySuccessSound();
                 }
             } catch { } finally { this._watcherBusy = false; }
         }, CONSTANTS.CLIPBOARD_POLL_MS);
@@ -1045,8 +1043,6 @@ class ClipboardHistorySidebarProvider {
 
     resolveWebviewView(webviewView) {
         this._view = webviewView;
-        // ★ 注册 webview 用于播放音效
-        this._global.registerWebviewForSound(webviewView);
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._context.extensionUri],
@@ -1123,8 +1119,6 @@ class ClipboardHistorySidebarProvider {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
                         await this._historyManager.copyToClipboard(node.content);
-                        // ★ 使用 q4 的 view 播放音效
-                        this._global.playCopySuccessSound(this._view);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
                     }
@@ -1134,8 +1128,6 @@ class ClipboardHistorySidebarProvider {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
                         await this._historyManager.copyToClipboard(node.content);
-                        // ★ 使用 q4 的 view 播放音效
-                        this._global.playCopySuccessSound(this._view);
                         await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
                     }
                     break;
@@ -1193,13 +1185,8 @@ class ClipboardHistorySidebarProvider {
         });
 
         webviewView.onDidDispose(() => {
-            this._global.unregisterWebviewForSound(webviewView);  // ★ 取消注册
             this._stopPeriodicUpdate();
         });
-    }
-
-    _handleSfxFeedback() {
-        this._global.playCopySuccessSound(this._view);
     }
 
     _startPeriodicUpdate() {
@@ -2301,8 +2288,6 @@ class ClipboardHistorySidebarProvider {
                     renderList(m.history, m.triggerStorm);
                 } else if (m.command === 'playAudio') {
                     playAudio(m.base64, m.count);
-                } else if (m.command === 'playSfx') {
-                    playSfx(m.base64);
                 } else if (m.command === 'stopAudio') {
                     stopAudio();
                 }
@@ -2312,16 +2297,6 @@ class ClipboardHistorySidebarProvider {
             var loopRemaining = 0;
             var playStartTime = 0;
             var fadeTimer = null;  // Fade-out timer
-            var sfxPool = [];
-            function playSfx(base64) {
-                // Clean up ended audio
-                sfxPool = sfxPool.filter(a => !a.ended);
-                // Limit to max 3 simultaneous
-                if (sfxPool.length >= 3) return;
-                var audio = new Audio('data:audio/mp3;base64,' + base64);
-                sfxPool.push(audio);
-                audio.play();
-            }
 
             function updateSavorText() {
                 var elLabel = document.getElementById('ms-label');
