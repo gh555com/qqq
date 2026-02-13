@@ -108,7 +108,6 @@
             "noTerminal": "未找到支援的終端模擬器",
             "openTerminalFailed": "開啟管理員終端失敗: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "檔案 \"{0}\" 已存在，是否覆蓋？",
             "yes": "是",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python 引擎已連線但未偵測到 miniaudio 依賴",
             "pythonProbeError": "Python 探測異常: {0}",
             "pythonProbeFail": "Python 引擎探測未通過，使用 Webview 兆底",
-            "audioPlay": "{0} 引擎播放: {1}, 循環: {2}",
             "pythonPlaying": "q4 啟動時偵測到 Python 正在播放，同步 UI",
             "audioSavor": "{0} 引擎播放品味: {1}, 循環: {2}"
         },

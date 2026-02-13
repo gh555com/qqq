@@ -108,7 +108,6 @@
             "noTerminal": "Kein unterstützter Terminalemulator gefunden",
             "openTerminalFailed": "Admin-Terminal öffnen fehlgeschlagen: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "Datei \"{0}\" existiert bereits, überschreiben?",
             "yes": "Ja",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python-Engine verbunden, aber miniaudio-Abhängigkeit nicht erkannt",
             "pythonProbeError": "Python-Probe Ausnahme: {0}",
             "pythonProbeFail": "Python-Engine Probe fehlgeschlagen, Webview-Fallback verwendet",
-            "audioPlay": "{0} Engine spielt: {1}, Wiederholung: {2}",
             "pythonPlaying": "q4 erkannte laufende Python-Wiedergabe beim Start, UI synchronisiert",
             "audioSavor": "{0} Engine Genuss-Wiedergabe: {1}, Wiederholung: {2}"
         },

@@ -3732,6 +3732,36 @@ function isValidUrl(input) {
 	}
 }
 
+// ============================================================================
+// ★ Copy Success Sound (kope 1-7 random)
+// ============================================================================
+let _lastCopySoundIdx = 0;
+
+/**
+ * Play random copy success sound (kope/1-7.mp3) to a webview
+ * @param {vscode.WebviewPanel|vscode.WebviewView} panelOrView - The webview panel or view to play sound
+ */
+function playCopySuccessSound(panelOrView) {
+	const webview = panelOrView?.webview;
+	if (!webview || !extensionContext) return;
+	try {
+		// Random 1-7, avoid repeating last
+		let idx;
+		do {
+			idx = Math.floor(Math.random() * 7) + 1;
+		} while (idx === _lastCopySoundIdx);
+		_lastCopySoundIdx = idx;
+
+		const audioPath = path.join(extensionContext.extensionPath, 'assets', 'kope', `${idx}.mp3`);
+		if (fs.existsSync(audioPath)) {
+			const base64 = fs.readFileSync(audioPath).toString('base64');
+			webview.postMessage({ command: 'playSfx', base64 });
+		}
+	} catch (e) {
+		// Silently ignore errors
+	}
+}
+
 module.exports = {
 	init,
 	getIcon,
@@ -3850,5 +3880,8 @@ module.exports = {
 	NON_TEXT_EXTS,
 
 	// URL 验证 (统一真理源)
-	isValidUrl
+	isValidUrl,
+
+	// ★ Copy Success Sound
+	playCopySuccessSound
 };

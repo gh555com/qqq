@@ -108,7 +108,6 @@
             "noTerminal": "Aucun émulateur de terminal pris en charge trouvé",
             "openTerminalFailed": "Échec de l'ouverture du terminal administrateur: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "Le fichier \"{0}\" existe déjà. Écraser?",
             "yes": "Oui",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Moteur Python connecté mais dépendance miniaudio non détectée",
             "pythonProbeError": "Exception de sonde Python: {0}",
             "pythonProbeFail": "Sonde du moteur Python échouée, utilisation de Webview en secours",
-            "audioPlay": "Moteur {0} lecture: {1}, boucle: {2}",
             "pythonPlaying": "q4 a détecté Python en lecture au démarrage, synchronisation de l'UI",
             "audioSavor": "Moteur {0} lecture favori: {1}, boucle: {2}"
         },

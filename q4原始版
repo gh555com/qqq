@@ -1008,6 +1008,7 @@ class ClipboardHistorySidebarProvider {
         this._updateTimer = null;
         this._watchdogTimer = null;
         this._lastHeartbeat = Date.now();
+        this._lastAudioIdx = -1;
         this._currentLimit = CONSTANTS.UI_HISTORY_LIMIT;
         this._isFocused = false;
         this._needsUpdate = false;
@@ -1189,7 +1190,12 @@ class ClipboardHistorySidebarProvider {
     }
 
     _handleSfxFeedback() {
-        this._global.playCopySuccessSound(this._view);
+        let audioIdx;
+        do {
+            audioIdx = Math.floor(Math.random() * 7) + 1;
+        } while (audioIdx === this._lastAudioIdx);
+        this._lastAudioIdx = audioIdx;
+        this._playEffect('kope', audioIdx);
     }
 
     _startPeriodicUpdate() {
@@ -1416,6 +1422,74 @@ class ClipboardHistorySidebarProvider {
                 } catch { return ''; }
             }
         };
+    }
+
+    _getKopeAudioInfo(idx) {
+        const filename = `${idx}.mp3`;
+        const fullPath = path.join(this._context.extensionPath, "assets", "kope", filename);
+        return {
+            path: fullPath,
+            fileName: filename,
+            base64: () => {
+                try {
+                    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath).toString('base64') : '';
+                } catch { return ''; }
+            }
+        };
+    }
+
+    async _playEffect(type, idx = null) {
+        // 如果是点击音效 (kope)，强制走 Webview 且不发 playAudio 指令（不干扰 UI 文字）
+        if (type === 'kope') {
+            const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
+            const b64 = info.base64();
+            if (b64) {
+                this._postMessage({ command: 'playSfx', base64: b64 });
+            }
+            return;
+        }
+
+        const source = await this._ensureAudioSource();
+        const info = idx !== null ? this._getKopeAudioInfo(idx) : this._getSavorAudioInfo();
+        const loopCount = 1;
+
+        this._global.logMessage(`[Audio] ${q('q4.log.audioPlay', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, loopCount)}`, "INFO");
+
+        if (source === AUDIO_SOURCE.PYTHON) {
+            // Python 模式：先发 UI-only（无 base64）
+            this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
+            try {
+                const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+
+                // [Fix] 兼容 'ok' (新版 kp.py) 和 'playing' (旧版习惯)
+                if (res && (res.status === 'playing' || res.status === 'ok')) {
+                    return;
+                }
+
+                // 优先报告明确的错误信息
+                if (res && res.error) throw new Error(res.error);
+                if (res && res.reason) throw new Error(res.reason);
+
+                throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
+            } catch (e) {
+                console.error('[Q4]', q('log.pythonPlaybackError'), e.message);
+                this._pythonAudioFailed = true;
+                this._audioSource = AUDIO_SOURCE.WEBVIEW;
+                // 继续落到 Webview 兜底
+            }
+        }
+
+        // Webview 模式：只发一次（带 base64）
+        const b64 = info.base64();
+        if (b64) {
+            this._postMessage({
+                command: 'playAudio',
+                base64: b64,
+                fileName: info.fileName,
+                count: loopCount
+            });
+        }
     }
 
     // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
@@ -2299,17 +2373,15 @@ class ClipboardHistorySidebarProvider {
             });
 
             var currentAudio = null;
+            var currentSfx = null;
             var loopRemaining = 0;
             var playStartTime = 0;
-            var fadeTimer = null;  // Fade-out timer
-            var sfxPool = [];
+            var fadeTimer = null;  // ★ 淡出定时器，移到全局以便 stopAudio 清理
+
             function playSfx(base64) {
-                // Clean up ended audio
-                sfxPool = sfxPool.filter(a => !a.ended);
-                // Limit to max 3 simultaneous
-                if (sfxPool.length >= 3) return;
+                if (currentSfx) { currentSfx.pause(); currentSfx = null; }
                 var audio = new Audio('data:audio/mp3;base64,' + base64);
-                sfxPool.push(audio);
+                currentSfx = audio;
                 audio.play();
             }
 

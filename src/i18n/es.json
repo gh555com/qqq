@@ -108,7 +108,6 @@
             "noTerminal": "No se encontró un emulador de terminal compatible",
             "openTerminalFailed": "Fallo al abrir terminal de administrador: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "El archivo \"{0}\" ya existe. ¿Sobrescribir?",
             "yes": "Sí",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Motor Python conectado pero dependencia miniaudio no detectada",
             "pythonProbeError": "Excepción de sondeo Python: {0}",
             "pythonProbeFail": "Sondeo de motor Python falló, usando Webview como respaldo",
-            "audioPlay": "Motor {0} reproduciendo: {1}, bucle: {2}",
             "pythonPlaying": "q4 detectó Python reproduciendo al iniciar, sincronizando UI",
             "audioSavor": "Motor {0} reproduciendo favorito: {1}, bucle: {2}"
         },

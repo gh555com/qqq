@@ -108,7 +108,6 @@
             "noTerminal": "サポートされているターミナルエミュレータが見つかりません",
             "openTerminalFailed": "管理者ターミナルを開けませんでした: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "ファイル \"{0}\" は既に存在します。上書きしますか？",
             "yes": "はい",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python エンジンは接続されていますが、miniaudio 依存が検出されません",
             "pythonProbeError": "Python 探査例外: {0}",
             "pythonProbeFail": "Python エンジンの探査に失敗、Webview にフォールバック",
-            "audioPlay": "{0} エンジン再生中: {1}、ループ: {2}",
             "pythonPlaying": "q4 起動時に Python が再生中を検出、UI を同期",
             "audioSavor": "{0} エンジンでセイバー再生中: {1}、ループ: {2}"
         },

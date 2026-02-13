@@ -108,7 +108,6 @@
             "noTerminal": "No supported terminal emulator found",
             "openTerminalFailed": "Failed to open admin terminal: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "File \"{0}\" already exists. Overwrite?",
             "yes": "Yes",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python engine connected but miniaudio dependency not detected",
             "pythonProbeError": "Python probe exception: {0}",
             "pythonProbeFail": "Python engine probe failed, using Webview fallback",
-            "audioPlay": "{0} engine playing: {1}, loop: {2}",
             "pythonPlaying": "q4 detected Python playing at startup, syncing UI",
             "audioSavor": "{0} engine savor playing: {1}, loop: {2}"
         },

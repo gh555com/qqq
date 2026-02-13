@@ -108,7 +108,6 @@
             "noTerminal": "지원되는 터미널 에뮬레이터를 찾을 수 없습니다",
             "openTerminalFailed": "관리자 터미널 열기 실패: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "파일 \"{0}\"이(가) 이미 존재합니다. 덮어쓰시겠습니까?",
             "yes": "예",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python 엔진이 연결되었지만 miniaudio 종속성이 감지되지 않음",
             "pythonProbeError": "Python 탐사 예외: {0}",
             "pythonProbeFail": "Python 엔진 탐사 실패, Webview로 폴백",
-            "audioPlay": "{0} 엔진 재생 중: {1}, 루프: {2}",
             "pythonPlaying": "q4 시작 시 Python 재생 중 감지, UI 동기화",
             "audioSavor": "{0} 엔진 세이버 재생 중: {1}, 루프: {2}"
         },

@@ -108,7 +108,6 @@
             "noTerminal": "未找到支持的终端模拟器",
             "openTerminalFailed": "打开管理员终端失败: {0}"
         },
-        "info": {},
         "confirm": {
             "overwriteFile": "文件 \"{0}\" 已存在，是否覆盖？",
             "yes": "是",
@@ -157,7 +156,6 @@
             "pythonNoMiniaudio": "Python 引擎已连接但未检测到 miniaudio 依赖",
             "pythonProbeError": "Python 探测异常: {0}",
             "pythonProbeFail": "Python 引擎探测未通过，使用 Webview 兖底",
-            "audioPlay": "{0} 引擎播放: {1}, 循环: {2}",
             "pythonPlaying": "q4 启动时检测到 Python 正在播放，同步 UI",
             "audioSavor": "{0} 引擎播放品味: {1}, 循环: {2}"
         },

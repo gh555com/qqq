@@ -1800,13 +1800,23 @@ window.addEventListener('message', event => {
     // 完成后安排下一轮
     scheduleDiskFreeUpdate();
   } else if (message.command === 'appendRecycleBin') {
-    // 回收站懒加载：追加新条目
+    // Recycle bin lazy load: append new items
     const section = document.querySelector('.recycle-bin-section');
     if (section && message.itemsHtml) {
       section.insertAdjacentHTML('beforeend', message.itemsHtml);
       section.dataset.loaded = message.loaded;
       section.dataset.total = message.total;
       recycleBinLoading = false;
+    }
+  } else if (message.command === 'playSfx') {
+    // Play sound effect (copy success) - max 3 simultaneous
+    if (message.base64) {
+      if (!window._sfxPool) window._sfxPool = [];
+      window._sfxPool = window._sfxPool.filter(a => !a.ended);
+      if (window._sfxPool.length >= 3) return;
+      const audio = new Audio('data:audio/mp3;base64,' + message.base64);
+      window._sfxPool.push(audio);
+      audio.play().catch(() => {});
     }
   }
 });
@@ -2177,6 +2187,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!isDropdownElement) {
         hideAllDropdowns();
       }
+    });
+
+    // Right-click: restore to currentPath and copy to clipboard
+    addressInput.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      addressInput.value = currentPath;
+      updateAddressDisplay(currentPath);
+      addressInput.setAttribute('data-tooltip', currentPath || '');
+      navigator.clipboard.writeText(currentPath).then(() => {
+        vscode.postMessage({ command: 'playCopySound' });
+      }).catch(() => {});
     });
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {
@@ -2758,12 +2779,12 @@ function setupCustomScrollbar() {
 
 setTimeout(setupCustomScrollbar, 100);
 
-// c key -> admin CMD/Terminal, z key -> admin PowerShell (Windows only)
+// c/F7 key -> admin CMD/Terminal, z key -> admin PowerShell (Windows only)
 const isWindows = {{IS_WINDOWS}};
 document.addEventListener('keydown', function(e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'c') {
+  if (key === 'c' || key === 'f7') {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
   } else if (key === 'z' && isWindows) {
@@ -3966,6 +3987,12 @@ function showSaveAsDialog() {
       case "openAdminPowershell": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'powershell');
+        break;
+      }
+
+      // Play copy success sound
+      case "playCopySound": {
+        global.playCopySuccessSound(panel);
         break;
       }
     }
