@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] Tous les moteurs indisponibles, chemins copiés en texte brut",
             "shellClipboardFailed": "Échec du traitement du presse-papiers Shell: {0}",
             "topLevelError": "Erreur de niveau supérieur: {0}",
-            "extractedVideoUrls": "[SmartPaste] {0} URLs vidéo extraites du HTML"
+            "extractedVideoUrls": "[SmartPaste] {0} URLs vidéo extraites du HTML",
+            "createDirFailed": "Échec création répertoire {0}: {1}",
+            "readDirFailed": "Échec lecture répertoire {0}: {1}"
         },
         "progress": {
             "readHtml": "Lecture HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Format Markdown détecté, HTML sans média, utilisation du texte brut",
             "markdownWithMedia": "[AutoDetect] Format Markdown détecté, mais HTML contient des médias, continuation du traitement HTML",
             "htmlParseFailed": "[AutoDetect] Échec d'analyse HTML, utilisation du texte Markdown brut",
-            "markdownDetectFailed": "[AutoDetect] Détection Markdown échouée: {0}"
+            "markdownDetectFailed": "[AutoDetect] Détection Markdown échouée: {0}",
+            "detectedText": "[AutoDetect] Texte brut détecté",
+            "noContentDetected": "[AutoDetect] Aucun contenu détecté"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "Entrez l'URL de la page contenant la vidéo",
             "urlEmpty": "L'URL ne peut pas être vide",
-            "urlInvalid": "Veuillez entrer une URL valide"
+            "urlInvalid": "Veuillez entrer une URL valide",
+            "selectVideoDir": "Sélectionner le répertoire de téléchargement vidéo"
         }
     },
     "python": {

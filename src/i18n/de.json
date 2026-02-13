@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] Alle Engines nicht verfügbar, Pfade als Klartext kopiert",
             "shellClipboardFailed": "Shell Zwischenablage-Verarbeitung fehlgeschlagen: {0}",
             "topLevelError": "Fehler auf oberster Ebene: {0}",
-            "extractedVideoUrls": "[SmartPaste] {0} Video-URLs aus HTML extrahiert"
+            "extractedVideoUrls": "[SmartPaste] {0} Video-URLs aus HTML extrahiert",
+            "createDirFailed": "Verzeichnis erstellen fehlgeschlagen {0}: {1}",
+            "readDirFailed": "Verzeichnis lesen fehlgeschlagen {0}: {1}"
         },
         "progress": {
             "readHtml": "HTML lesen...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Markdown-Format erkannt, HTML ohne Medien, verwende Klartext",
             "markdownWithMedia": "[AutoDetect] Markdown-Format erkannt, aber HTML enthält Medien, fahre mit HTML-Verarbeitung fort",
             "htmlParseFailed": "[AutoDetect] HTML-Parsing fehlgeschlagen, verwende Markdown-Klartext",
-            "markdownDetectFailed": "[AutoDetect] Markdown-Erkennung fehlgeschlagen: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown-Erkennung fehlgeschlagen: {0}",
+            "detectedText": "[AutoDetect] Reintext erkannt",
+            "noContentDetected": "[AutoDetect] Kein Inhalt erkannt"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "Webseiten-URL mit Video eingeben",
             "urlEmpty": "URL darf nicht leer sein",
-            "urlInvalid": "Bitte gültige URL eingeben"
+            "urlInvalid": "Bitte gültige URL eingeben",
+            "selectVideoDir": "Video-Download-Verzeichnis auswählen"
         }
     },
     "python": {

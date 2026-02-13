@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] すべてのエンジンが利用不可、パスをプレーンテキストとしてコピー",
             "shellClipboardFailed": "Shell クリップボード処理に失敗: {0}",
             "topLevelError": "トップレベルエラー: {0}",
-            "extractedVideoUrls": "[SmartPaste] HTML から {0} 個の動画URLを抽出"
+            "extractedVideoUrls": "[SmartPaste] HTMLから {0} 個の動画URLを抽出",
+            "createDirFailed": "ディレクトリ作成失敗 {0}: {1}",
+            "readDirFailed": "ディレクトリ読み取り失敗 {0}: {1}"
         },
         "progress": {
             "readHtml": "HTML 読み込み中...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Markdown 形式を検出、HTML にメディアなし、プレーンテキストを使用",
             "markdownWithMedia": "[AutoDetect] Markdown 形式を検出、ただし HTML にメディアあり、HTML 処理を継続",
             "htmlParseFailed": "[AutoDetect] HTML 解析失敗、Markdown プレーンテキストを使用",
-            "markdownDetectFailed": "[AutoDetect] Markdown 検出失敗: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown 検出失敗: {0}",
+            "detectedText": "[AutoDetect] プレーンテキストを検出",
+            "noContentDetected": "[AutoDetect] コンテンツが検出されませんでした"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "動画を含むウェブページURLを入力",
             "urlEmpty": "URLは空にできません",
-            "urlInvalid": "有効なURLを入力してください"
+            "urlInvalid": "有効なURLを入力してください",
+            "selectVideoDir": "動画ダウンロードディレクトリを選択"
         }
     },
     "python": {

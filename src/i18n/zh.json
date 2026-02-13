@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] 所有引擎不可用，已将路径作为纯文本复制",
             "shellClipboardFailed": "Shell剪贴板处理失败: {0}",
             "topLevelError": "顶层错误: {0}",
-            "extractedVideoUrls": "[SmartPaste] 从HTML中提取到 {0} 个视频URL"
+            "extractedVideoUrls": "[SmartPaste] 从HTML中提取到 {0} 个视频URL",
+            "createDirFailed": "创建目录失败 {0}: {1}",
+            "readDirFailed": "无法读取目录 {0}: {1}"
         },
         "progress": {
             "readHtml": "读取 HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] 检测到 Markdown 格式纯文本，且 HTML 无媒体资源，优先使用纯文本",
             "markdownWithMedia": "[AutoDetect] 检测到 Markdown 格式，但 HTML 包含媒体资源，继续 HTML 处理",
             "htmlParseFailed": "[AutoDetect] HTML 解析失败，使用 Markdown 纯文本",
-            "markdownDetectFailed": "[AutoDetect] Markdown 检测失败: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown 检测失败: {0}",
+            "detectedText": "[AutoDetect] 检测到纯文本",
+            "noContentDetected": "[AutoDetect] 未检测到任何内容"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "请键入包含视频的网页URL",
             "urlEmpty": "URL不能为空",
-            "urlInvalid": "请键入有效的URL"
+            "urlInvalid": "请键入有效的URL",
+            "selectVideoDir": "选择视频下载目录"
         }
     },
     "python": {

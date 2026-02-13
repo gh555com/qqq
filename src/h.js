@@ -1832,7 +1832,7 @@ async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCance
                         await fs.promises.mkdir(destPath, { recursive: true });
                     }
                 } catch (e) {
-                    errors.push(`创建目录失败 ${destPath}: ${e.message}`);
+                    errors.push(q('h.log.createDirFailed', destPath, e.message));
                     return;
                 }
 
@@ -1840,7 +1840,7 @@ async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCance
                 try {
                     entries = await fs.promises.readdir(srcPath);
                 } catch (e) {
-                    errors.push(`无法读取目录 ${srcPath}: ${e.message}`);
+                    errors.push(q('h.log.readDirFailed', srcPath, e.message));
                     return;
                 }
 
@@ -2431,17 +2431,15 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
                 //     log(`[AutoDetect] 检测到视频 URL`, "INFO");
                 //     return { type: "video_url", text, url: text };
                 // }
-                log(`[AutoDetect] 检测到纯文本`, "INFO");
+                log(q('h.autoDetect.detectedText'), "INFO");
                 return { type: "text", text };
             }
         } catch (e) { }
     }
 
-    log(`[AutoDetect] 未检测到任何内容`, "WARN");
+    log(q('h.autoDetect.noContentDetected'), "WARN");
     return null;
 }
-
-// getClipboardTotalSize 已废弃 - 由 wq 单一真理源提供 totalSize
 
 // Helper needed for video detection
 // const { isPlatformOrSegmentVideo } = require("./dow");
@@ -2471,7 +2469,7 @@ async function pickTargetDirectory() {
         canSelectFolders: true,
         canSelectFiles: false,
         canSelectMany: false,
-        title: "选择视频下载目录"
+        title: q('h.ui.selectVideoDir')
     });
     return selectedDir && selectedDir.length > 0 ? selectedDir[0].fsPath : null;
 }
@@ -2530,5 +2528,4 @@ module.exports = {
     pickTargetDirectory,
     log,
     verifyVideoFile
-    // getClipboardTotalSize 已废弃
 };

@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] 모든 엔진 사용 불가, 경로를 일반 텍스트로 복사",
             "shellClipboardFailed": "Shell 클립보드 처리 실패: {0}",
             "topLevelError": "최상위 오류: {0}",
-            "extractedVideoUrls": "[SmartPaste] HTML에서 {0}개의 동영상 URL 추출"
+            "extractedVideoUrls": "[SmartPaste] HTML에서 {0}개의 동영상 URL 추출",
+            "createDirFailed": "디렉토리 생성 실패 {0}: {1}",
+            "readDirFailed": "디렉토리 읽기 실패 {0}: {1}"
         },
         "progress": {
             "readHtml": "HTML 읽는 중...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Markdown 형식 감지, HTML에 미디어 없음, 일반 텍스트 사용",
             "markdownWithMedia": "[AutoDetect] Markdown 형식 감지, 하지만 HTML에 미디어 있음, HTML 처리 계속",
             "htmlParseFailed": "[AutoDetect] HTML 분석 실패, Markdown 일반 텍스트 사용",
-            "markdownDetectFailed": "[AutoDetect] Markdown 감지 실패: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown 감지 실패: {0}",
+            "detectedText": "[AutoDetect] 일반 텍스트 감지됨",
+            "noContentDetected": "[AutoDetect] 콘텐츠가 감지되지 않음"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "동영상을 포함한 웹페이지 URL 입력",
             "urlEmpty": "URL을 비워둘 수 없습니다",
-            "urlInvalid": "유효한 URL을 입력하세요"
+            "urlInvalid": "유효한 URL을 입력하세요",
+            "selectVideoDir": "동영상 다운로드 디렉토리 선택"
         }
     },
     "python": {

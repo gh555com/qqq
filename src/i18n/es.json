@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] Todos los motores no disponibles, rutas copiadas como texto plano",
             "shellClipboardFailed": "Fallo en procesamiento de portapapeles Shell: {0}",
             "topLevelError": "Error de nivel superior: {0}",
-            "extractedVideoUrls": "[SmartPaste] {0} URLs de video extraídas del HTML"
+            "extractedVideoUrls": "[SmartPaste] {0} URLs de video extraídas del HTML",
+            "createDirFailed": "Error al crear directorio {0}: {1}",
+            "readDirFailed": "Error al leer directorio {0}: {1}"
         },
         "progress": {
             "readHtml": "Leyendo HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Formato Markdown detectado, HTML sin medios, usando texto plano",
             "markdownWithMedia": "[AutoDetect] Formato Markdown detectado, pero HTML contiene medios, continuando procesamiento HTML",
             "htmlParseFailed": "[AutoDetect] Análisis HTML fallido, usando texto plano Markdown",
-            "markdownDetectFailed": "[AutoDetect] Detección Markdown fallida: {0}"
+            "markdownDetectFailed": "[AutoDetect] Detección Markdown fallida: {0}",
+            "detectedText": "[AutoDetect] Texto plano detectado",
+            "noContentDetected": "[AutoDetect] No se detectó contenido"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "Ingrese URL de página web con video",
             "urlEmpty": "URL no puede estar vacío",
-            "urlInvalid": "Por favor ingrese una URL válida"
+            "urlInvalid": "Por favor ingrese una URL válida",
+            "selectVideoDir": "Seleccionar directorio de descarga de video"
         }
     },
     "python": {

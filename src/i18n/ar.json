@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] جميع المحركات غير متاحة، تم نسخ المسارات كنص عادي",
             "shellClipboardFailed": "فشل معالجة الحافظة Shell: {0}",
             "topLevelError": "خطأ المستوى الأعلى: {0}",
-            "extractedVideoUrls": "[SmartPaste] تم استخراج {0} رابط فيديو من HTML"
+            "extractedVideoUrls": "[SmartPaste] تم استخراج {0} رابط فيديو من HTML",
+            "createDirFailed": "فشل إنشاء الدليل {0}: {1}",
+            "readDirFailed": "فشل قراءة الدليل {0}: {1}"
         },
         "progress": {
             "readHtml": "قراءة HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] تم اكتشاف تنسيق Markdown، HTML بدون وسائط، استخدام نص عادي",
             "markdownWithMedia": "[AutoDetect] تم اكتشاف تنسيق Markdown، لكن HTML يحتوي على وسائط، متابعة معالجة HTML",
             "htmlParseFailed": "[AutoDetect] فشل تحليل HTML، استخدام نص Markdown العادي",
-            "markdownDetectFailed": "[AutoDetect] فشل اكتشاف Markdown: {0}"
+            "markdownDetectFailed": "[AutoDetect] فشل اكتشاف Markdown: {0}",
+            "detectedText": "[AutoDetect] تم اكتشاف نص عادي",
+            "noContentDetected": "[AutoDetect] لم يتم اكتشاف محتوى"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}، integrity={1}، plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "أدخل رابط الصفحة التي تحتوي على فيديو",
             "urlEmpty": "الرابط لا يمكن أن يكون فارغاً",
-            "urlInvalid": "يرجى إدخال رابط صالح"
+            "urlInvalid": "يرجى إدخال رابط صالح",
+            "selectVideoDir": "اختر دليل تنزيل الفيديو"
         }
     },
     "python": {

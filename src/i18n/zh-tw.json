@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] 所有引擎皆不可用，已將路徑以純文字複製",
             "shellClipboardFailed": "Shell 剪貼簿處理失敗: {0}",
             "topLevelError": "頂層錯誤: {0}",
-            "extractedVideoUrls": "[SmartPaste] 從 HTML 擷取了 {0} 個影片URL"
+            "extractedVideoUrls": "[SmartPaste] 從 HTML 擷取了 {0} 個影片URL",
+            "createDirFailed": "建立目錄失敗 {0}: {1}",
+            "readDirFailed": "無法讀取目錄 {0}: {1}"
         },
         "progress": {
             "readHtml": "讀取 HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] 偵測到 Markdown 格式，HTML 無媒體，使用純文字",
             "markdownWithMedia": "[AutoDetect] 偵測到 Markdown 格式，但 HTML 包含媒體，繼續 HTML 處理",
             "htmlParseFailed": "[AutoDetect] HTML 解析失敗，使用 Markdown 純文字",
-            "markdownDetectFailed": "[AutoDetect] Markdown 偵測失敗: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown 偵測失敗: {0}",
+            "detectedText": "[AutoDetect] 偵測到純文字",
+            "noContentDetected": "[AutoDetect] 未偵測到任何內容"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "請輸入包含影片的網頁URL",
             "urlEmpty": "URL不能為空",
-            "urlInvalid": "請輸入有效的URL"
+            "urlInvalid": "請輸入有效的URL",
+            "selectVideoDir": "選擇影片下載目錄"
         }
     },
     "python": {

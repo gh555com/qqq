@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] All engines unavailable, copied paths as plain text",
             "shellClipboardFailed": "Shell clipboard handling failed: {0}",
             "topLevelError": "Top level error: {0}",
-            "extractedVideoUrls": "[SmartPaste] Extracted {0} video URLs from HTML"
+            "extractedVideoUrls": "[SmartPaste] Extracted {0} video URLs from HTML",
+            "createDirFailed": "Failed to create directory {0}: {1}",
+            "readDirFailed": "Failed to read directory {0}: {1}"
         },
         "progress": {
             "readHtml": "Reading HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Detected Markdown format plain text, HTML has no media, using plain text",
             "markdownWithMedia": "[AutoDetect] Detected Markdown format, but HTML contains media, continuing HTML processing",
             "htmlParseFailed": "[AutoDetect] HTML parse failed, using Markdown plain text",
-            "markdownDetectFailed": "[AutoDetect] Markdown detection failed: {0}"
+            "markdownDetectFailed": "[AutoDetect] Markdown detection failed: {0}",
+            "detectedText": "[AutoDetect] Detected plain text",
+            "noContentDetected": "[AutoDetect] No content detected"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "Enter webpage URL containing video",
             "urlEmpty": "URL cannot be empty",
-            "urlInvalid": "Please enter a valid URL"
+            "urlInvalid": "Please enter a valid URL",
+            "selectVideoDir": "Select video download directory"
         }
     },
     "python": {

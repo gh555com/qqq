@@ -397,7 +397,9 @@
             "copyFallbackText": "[Clipboard] Все движки недоступны, пути скопированы как обычный текст",
             "shellClipboardFailed": "Ошибка обработки буфера обмена Shell: {0}",
             "topLevelError": "Ошибка верхнего уровня: {0}",
-            "extractedVideoUrls": "[SmartPaste] {0} URL видео извлечено из HTML"
+            "extractedVideoUrls": "[SmartPaste] {0} URL видео извлечено из HTML",
+            "createDirFailed": "Ошибка создания каталога {0}: {1}",
+            "readDirFailed": "Ошибка чтения каталога {0}: {1}"
         },
         "progress": {
             "readHtml": "Чтение HTML...",
@@ -436,7 +438,9 @@
             "markdownDetected": "[AutoDetect] Обнаружен формат Markdown, HTML без медиа, используется обычный текст",
             "markdownWithMedia": "[AutoDetect] Обнаружен формат Markdown, но HTML содержит медиа, продолжение обработки HTML",
             "htmlParseFailed": "[AutoDetect] Анализ HTML не удался, используется обычный текст Markdown",
-            "markdownDetectFailed": "[AutoDetect] Обнаружение Markdown не удалось: {0}"
+            "markdownDetectFailed": "[AutoDetect] Обнаружение Markdown не удалось: {0}",
+            "detectedText": "[AutoDetect] Обнаружен простой текст",
+            "noContentDetected": "[AutoDetect] Контент не обнаружен"
         },
         "smartPaste": {
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
@@ -446,7 +450,8 @@
         "ui": {
             "promptUrlDefault": "Введите URL страницы с видео",
             "urlEmpty": "URL не может быть пустым",
-            "urlInvalid": "Пожалуйста, введите действительный URL"
+            "urlInvalid": "Пожалуйста, введите действительный URL",
+            "selectVideoDir": "Выберите каталог загрузки видео"
         }
     },
     "python": {
