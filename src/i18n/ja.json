@@ -108,10 +108,7 @@
             "noTerminal": "サポートされているターミナルエミュレータが見つかりません",
             "openTerminalFailed": "管理者ターミナルを開けませんでした: {0}"
         },
-        "info": {
-            "openedTerminal": "{0} で管理者ターミナルを開きました",
-            "openingAdminTerminal": "管理者 {0} を開いています。パス: {1}"
-        },
+        "info": {},
         "confirm": {
             "overwriteFile": "ファイル \"{0}\" は既に存在します。上書きしますか？",
             "yes": "はい",

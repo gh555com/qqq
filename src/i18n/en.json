@@ -108,10 +108,7 @@
             "noTerminal": "No supported terminal emulator found",
             "openTerminalFailed": "Failed to open admin terminal: {0}"
         },
-        "info": {
-            "openedTerminal": "Opened admin terminal using {0}",
-            "openingAdminTerminal": "Opening admin {0} at: {1}"
-        },
+        "info": {},
         "confirm": {
             "overwriteFile": "File \"{0}\" already exists. Overwrite?",
             "yes": "Yes",

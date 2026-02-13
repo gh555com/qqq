@@ -108,10 +108,7 @@
             "noTerminal": "未找到支援的終端模擬器",
             "openTerminalFailed": "開啟管理員終端失敗: {0}"
         },
-        "info": {
-            "openedTerminal": "已使用 {0} 開啟管理員終端",
-            "openingAdminTerminal": "正在開啟管理員 {0}，路徑: {1}"
-        },
+        "info": {},
         "confirm": {
             "overwriteFile": "檔案 \"{0}\" 已存在，是否覆蓋？",
             "yes": "是",

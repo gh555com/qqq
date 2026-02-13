@@ -75,7 +75,7 @@
             "szMtime": "Columna sz: fecha de modificación",
             "sortSize": "Ordenar: por tamaño",
             "sortCtime": "Ordenar: por fecha de creación",
-            "sortMtime": "Ordenar: por fecha de modificación",
+            "sortMtime": "Ordenar: Por fecha de modificación",
             "movedToRecycleBin": "{0} movido a papelera",
             "deleteFailed": "qqq: eliminación falló: {0}",
             "deleteItemFailed": "Eliminación de elemento falló: {0} - {1}",
@@ -108,10 +108,7 @@
             "noTerminal": "No se encontró un emulador de terminal compatible",
             "openTerminalFailed": "Fallo al abrir terminal de administrador: {0}"
         },
-        "info": {
-            "openedTerminal": "Terminal de administrador abierto con {0}",
-            "openingAdminTerminal": "Abriendo {0} de administrador, ruta: {1}"
-        },
+        "info": {},
         "confirm": {
             "overwriteFile": "El archivo \"{0}\" ya existe. ¿Sobrescribir?",
             "yes": "Sí",

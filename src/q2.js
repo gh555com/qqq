@@ -152,7 +152,7 @@ function openAdminTerminal(targetPath, termType) {
             });
             if (exists) {
               cp.spawn(term.cmd, term.args, { detached: true, stdio: 'ignore' }).unref();
-              global.showAutoCloseNotification('info', q('q2.info.openedTerminal', term.cmd));
+              global.showAutoCloseNotification('info', `qqq: Terminal ${absPath}`);
               return;
             }
           } catch { }
@@ -161,9 +161,13 @@ function openAdminTerminal(targetPath, termType) {
       })();
     }
 
-    // Show success notification
-    const termName = termType === 'cmd' ? 'CMD' : 'PowerShell';
-    global.showAutoCloseNotification('info', q('q2.info.openingAdminTerminal', termName, absPath));
+    // Show success notification (Windows only - Linux handled above)
+    if (platform === 'win32') {
+      const termName = termType === 'cmd' ? 'CMD' : 'PowerShell';
+      global.showAutoCloseNotification('info', `qqq: ${termName} ${absPath}`);
+    } else if (platform === 'darwin') {
+      global.showAutoCloseNotification('info', `qqq: Terminal ${absPath}`);
+    }
   } catch (e) {
     global.showAutoCloseNotification('error', q('q2.error.openTerminalFailed', e.message));
   }
@@ -2440,7 +2444,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // empty menu: 若模板里有 data-mode / data-action，这里自动接管
+  // empty menu: admin terminal shortcuts
   const emptyMenu = document.getElementById('emptyContextMenu');
   if (emptyMenu) {
     emptyMenu.querySelectorAll('[data-mode]').forEach(btn => {
@@ -2453,9 +2457,12 @@ document.addEventListener('DOMContentLoaded', () => {
     emptyMenu.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation();
+        hideAllContextMenus();
         const act = e.currentTarget.dataset.action;
         if (act === 'createFolder') createFolder();
         else if (act === 'saveFile') saveFile();
+        else if (act === 'openAdminCmd') vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
+        else if (act === 'openAdminPowershell') vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
       });
     });
   }
@@ -2751,14 +2758,15 @@ function setupCustomScrollbar() {
 
 setTimeout(setupCustomScrollbar, 100);
 
-// c key -> admin CMD, z key -> admin PowerShell (not active when editing)
+// c key -> admin CMD/Terminal, z key -> admin PowerShell (Windows only)
+const isWindows = {{IS_WINDOWS}};
 document.addEventListener('keydown', function(e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
   if (key === 'c') {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
-  } else if (key === 'z') {
+  } else if (key === 'z' && isWindows) {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
   }
@@ -2885,7 +2893,13 @@ function getWebviewContent(currentPath) {
     .replace("{{I18N_SZ_MTIME}}", q('q2.ui.szMtime'))
     .replace("{{I18N_SORT_SIZE}}", q('q2.ui.sortSize'))
     .replace("{{I18N_SORT_CTIME}}", q('q2.ui.sortCtime'))
-    .replace("{{I18N_SORT_MTIME}}", q('q2.ui.sortMtime'));
+    .replace("{{I18N_SORT_MTIME}}", q('q2.ui.sortMtime'))
+    // Admin terminal context menu - platform specific (hardcoded, no i18n)
+    .replace("{{ADMIN_TERM_1}}", process.platform === 'win32' ? 'CMD' : 'Terminal')
+    .replace("{{ADMIN_TERM_2_HTML}}", process.platform === 'win32'
+      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut">= "z"</span></div>`
+      : '')
+    .replace("{{IS_WINDOWS}}", process.platform === 'win32' ? 'true' : 'false');
 
   return finalHtml;
 }

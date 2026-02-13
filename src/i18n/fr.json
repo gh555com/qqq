@@ -108,10 +108,7 @@
             "noTerminal": "Aucun émulateur de terminal pris en charge trouvé",
             "openTerminalFailed": "Échec de l'ouverture du terminal administrateur: {0}"
         },
-        "info": {
-            "openedTerminal": "Terminal administrateur ouvert avec {0}",
-            "openingAdminTerminal": "Ouverture de {0} administrateur, chemin: {1}"
-        },
+        "info": {},
         "confirm": {
             "overwriteFile": "Le fichier \"{0}\" existe déjà. Écraser?",
             "yes": "Oui",
