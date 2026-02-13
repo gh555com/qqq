@@ -2477,9 +2477,10 @@ async function pickTargetDirectory() {
 /**
  * 将文件/文件夹路径列表复制到系统剪贴板 (Windows CF_HDROP 格式)
  * @param {string[]} filePaths - 绝对路径列表
+ * @returns {Promise<{success: boolean, usedEngine: boolean}>} success=是否成功, usedEngine=是否使用了engine(非text fallback)
  */
 async function copyFilesToClipboard(filePaths) {
-    if (!filePaths || filePaths.length === 0) return;
+    if (!filePaths || filePaths.length === 0) return { success: false, usedEngine: false };
 
     const global = getGlobal();
     try {
@@ -2487,13 +2488,13 @@ async function copyFilesToClipboard(filePaths) {
         const res = await global.tryEngineCall({
             rust: "setFiles",
             python: "setFiles",
-            shell: "setFiles" // Node Daemon 兜底
+            shell: "setFiles" // Node Daemon 兔底
         }, { paths: filePaths }, 3000);
 
         if (res && res.success) {
             const activeName = global.getActiveEngineName(global.pythonBridge, global.rustBridge, global.shellBridge);
             log(q('h.log.copyViaEngine', activeName, filePaths.length), "INFO");
-            return;
+            return { success: true, usedEngine: true };
         }
     } catch (e) {
         log(q('h.log.copyException', e.message), "WARN");
@@ -2503,7 +2504,9 @@ async function copyFilesToClipboard(filePaths) {
     try {
         await vscode.env.clipboard.writeText(filePaths.join("\n"));
         log(q('h.log.copyFallbackText'), "WARN");
+        return { success: true, usedEngine: false }; // q4 会检测到并播放音效
     } catch { }
+    return { success: false, usedEngine: false };
 }
 
 module.exports = {

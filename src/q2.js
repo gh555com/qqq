@@ -3948,7 +3948,11 @@ function showSaveAsDialog() {
           // 插件侧安全过滤：只过滤掉字面意义上的 ".." 相对路径，允许已解析的绝对路径
           const safePaths = message.paths.filter(p => p !== '..' && !p.endsWith(path.sep + '..'));
           if (safePaths.length > 0) {
-            await h.copyFilesToClipboard(safePaths);
+            const result = await h.copyFilesToClipboard(safePaths);
+            // ★ 只在使用 engine 成功时播放音效（fallback 到文本时 q4 会检测到并播放）
+            if (result?.usedEngine) {
+              global.playCopySuccessSound(panel);
+            }
           }
         }
         break;

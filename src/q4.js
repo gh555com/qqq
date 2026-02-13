@@ -831,7 +831,13 @@ class ClipboardHistoryManager {
             this._watcherBusy = true;
             try {
                 const cur = await vscode.env.clipboard.readText();
-                if (cur && cur !== this._lastClipboardContent) await this.addToHistory(cur);
+                if (cur && cur !== this._lastClipboardContent) {
+                    await this.addToHistory(cur);
+                    // ★ 播放复制成功音效（文本复制）
+                    if (_currentSidebarProvider?._view) {
+                        global.playCopySuccessSound(_currentSidebarProvider._view);
+                    }
+                }
             } catch { } finally { this._watcherBusy = false; }
         }, CONSTANTS.CLIPBOARD_POLL_MS);
     }
