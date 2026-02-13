@@ -236,10 +236,10 @@ function _tryLocalDeduplicate(filePath) {
             if (otherFp === currentFp) {
                 try {
                     fs.unlinkSync(filePath);
-                    log(`[Dedupe] 同文件夹重复，已复用本地文件: ${f}`, "INFO");
+                    log(q('h.log.dedupeReuse', f), "INFO");
                     return full;
                 } catch (e) {
-                    log(`[Dedupe] 复用本地文件失败 ${filePath}: ${e.message}`, "WARN");
+                    log(q('h.log.dedupeReuseFailed', filePath, e.message), "WARN");
                 }
             }
         }
@@ -318,10 +318,10 @@ function cleanupEmptyQqqFolder(docDir) {
         // 先删 ADS 流，再删空目录
         try { fs.unlinkSync(qqqPath + ":qqq"); } catch { }
         fs.rmdirSync(qqqPath);
-        log(`[Cleanup] 已删除空 qqq 文件夹: ${qqqPath}`, "INFO");
+        log(q('h.log.cleanupEmptyFolder', qqqPath), "INFO");
         return true;
     } catch (e) {
-        log(`[Cleanup] 清理空 qqq 文件夹失败: ${e.message}`, "WARN");
+        log(q('h.log.cleanupEmptyFolderFailed', e.message), "WARN");
         return false;
     }
 }
@@ -335,7 +335,52 @@ function isImageExtForClipboard(ext) {
 }
 
 /**
- * 生成带时间戳的文件名
+ * 格式化大小（如 "222m"、"1.2g"）
+ * @param {number} bytes - 字节数
+ * @returns {string}
+ */
+function _formatSizeSimple(bytes) {
+    if (bytes < 1024) return `${bytes}b`;
+    if (bytes < 1048576) return `${Math.round(bytes / 1024)}k`;
+    if (bytes < 1073741824) return `${Math.round(bytes / 1048576)}m`;
+    return `${(bytes / 1073741824).toFixed(1)}g`;
+}
+
+/**
+ * 格式化时间 mm:ss 或 h:mm:ss
+ * @param {number} ms - 毫秒数
+ * @returns {string}
+ */
+function _formatTime(ms) {
+    const total = Math.floor(ms / 1000);
+    const s = total % 60;
+    const m = Math.floor(total / 60) % 60;
+    const h = Math.floor(total / 3600);
+    const ss = String(s).padStart(2, '0');
+    const mm = String(m).padStart(2, '0');
+    if (h > 0) return `${h}:${mm}:${ss}`;
+    return `${m}:${ss}`;
+}
+
+/**
+ * 生成带大小和时间的进度消息
+ * @param {string} stepInfo - 步骤信息，如 "文件夹 1/3"
+ * @param {string} itemName - 当前项名称
+ * @param {number} totalSize - 已复制总大小（字节）
+ * @param {number} elapsedMs - 已耗时（毫秒）
+ * @returns {string}
+ */
+function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
+    const TWENTY_MIN = 20 * 60 * 1000;
+    const sizeStr = totalSize > 0 ? ` ${_formatSizeSimple(totalSize)}` : '';
+    const timePart = elapsedMs >= TWENTY_MIN ? ` (${_formatTime(elapsedMs)})` : '';
+
+    // 格式：[复制文件夹 1/3] 222m (31:22) folderName
+    return `[${stepInfo}]${sizeStr}${timePart} ${itemName}`;
+}
+
+/**
+ * 生成带大小的时间戳文件名
  * @param {string} ext - 文件扩展名（如 '.mp4'）
  * @param {string} [transId] - 可选的事务ID，作为文件名前缀（用于回滚时精确匹配）
  * @returns {string} 文件名，格式为：{transId}_{date}__{day}__{time}{ext}
@@ -531,7 +576,7 @@ function safeAccessCheck(filePath) {
         return true;
     } catch (e) {
         // 文件被占用、权限不足、路径无效等情况
-        log(`[SafeAccess] 无法访问: ${filePath} - ${e.code || e.message}`, "WARN");
+        log(q('h.log.safeAccessDenied', filePath, e.code || e.message), "WARN");
         return false;
     }
 }
@@ -789,7 +834,7 @@ function _looksLikeMarkdown(text) {
 // ============================================================================
 async function _getSmartHtmlFromClipboard(progressCallback, token) {
     if (token?.isCancellationRequested) return null;
-    if (progressCallback) progressCallback(0, "读取 HTML...");
+    if (progressCallback) progressCallback(0, q('h.progress.readHtml'));
 
     let rawBuf = null;
     let rawText = null;
@@ -849,7 +894,7 @@ ${CLIPBOARD_HELPER_CS}
     if (!rawBuf && !rawText) return null;
 
     if (token?.isCancellationRequested) return null;
-    if (progressCallback) progressCallback(0, "智能解码...");
+    if (progressCallback) progressCallback(0, q('h.progress.smartDecode'));
 
     let htmlText = "";
     let payload = null;
@@ -886,7 +931,7 @@ ${CLIPBOARD_HELPER_CS}
     if (!safeHtml || !safeHtml.trim()) return null;
 
     if (token?.isCancellationRequested) return null;
-    if (progressCallback) progressCallback(0, "HTML 解析...");
+    if (progressCallback) progressCallback(0, q('h.progress.htmlParse'));
 
     let $;
     try {
@@ -1592,7 +1637,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 await global.TransactionManager.updateTransaction(transId, { tempFiles: [...new Set(newTempFiles)] });
             }
         } catch (e) {
-            log(`[事务] 预注册 tempFiles 失败: ${e.message}`, "WARN");
+            log(q('h.log.transactionPreregisterFailed', e.message), "WARN");
         }
     }
 
@@ -1654,7 +1699,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                     } catch { b.status = "failed"; }
                     doneCount++;
-                    if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+                    if (progressCallback) progressCallback((doneCount / total) * 100, q('h.progress.processLocalResource', doneCount, total));
                     continue;
                 }
             }
@@ -1696,12 +1741,12 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             }
         } catch { b.status = "failed"; }
         doneCount++;
-        if (progressCallback) progressCallback((doneCount / total) * 100, `处理本地资源 ${doneCount}/${total}`);
+        if (progressCallback) progressCallback((doneCount / total) * 100, q('h.progress.processLocalResource', doneCount, total));
     }
     if (httpTasks.length > 0) {
         try {
             const r = await d.downloadAll(httpTasks, targetDir, {
-                onProgress: (t, e) => { if (e.type === "done" || e.type === "error") { doneCount++; if (progressCallback) progressCallback((doneCount / total) * 100, `下载中 ${doneCount}/${total}`); } }
+                onProgress: (t, e) => { if (e.type === "done" || e.type === "error") { doneCount++; if (progressCallback) progressCallback((doneCount / total) * 100, q('h.progress.downloading', doneCount, total)); } }
             });
             for (const res of r.results) {
                 try {
@@ -1773,7 +1818,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         }
                     } else { block.status = "failed"; block.error = res.error; }
                 } catch (e) {
-                    log(`处理下载结果失败 (${res.tag}): ${e.message}`, "ERROR");
+                    log(q('h.log.downloadResultFailed', res.tag, e.message), "ERROR");
                 }
             }
         } catch (e) { log(`dow.js downloadAll failed: ${e.message}`, "ERROR"); }
@@ -1835,14 +1880,14 @@ async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCance
                 } catch (e) {
                     if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM') {
                         skipped.push(srcPath);
-                        log(`[SafeCopyAsync] 文件被占用/权限不足，跳过: ${srcPath}`, "WARN");
+                        log(q('h.log.safeCopyBusy', srcPath), "WARN");
                     } else {
-                        errors.push(`复制文件失败 ${srcPath}: ${e.message}`);
+                        errors.push(q('h.log.copyFileFailed', srcPath, e.message));
                     }
                 }
             }
         } catch (e) {
-            errors.push(`处理 ${srcPath} 时发生错误: ${e.message}`);
+            errors.push(`${srcPath}: ${e.message}`);
         }
     }
 
@@ -1850,7 +1895,7 @@ async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCance
         await copyRecursive(src, dest);
         return { success: !isCancelled(), skipped, errors, totalSize };
     } catch (e) {
-        return { success: false, skipped, errors: [...errors, `顶层错误: ${e.message}`], totalSize: 0 };
+        return { success: false, skipped, errors: [...errors, q('h.log.topLevelError', e.message)], totalSize: 0 };
     }
 }
 
@@ -1867,6 +1912,15 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     let processedItems = 0;
     let skippedCount = 0;
     let totalSize = 0;
+
+    // ★ 记录任务开始时间，用于计算耗时
+    const taskStartMs = Date.now();
+
+    // ★ 当前步骤信息（用于定时更新显示）
+    let currentStepInfo = '';
+    let currentItemName = '';
+    let lastProgressUpdateMs = 0;
+    const PROGRESS_UPDATE_INTERVAL = 3000; // 每3秒更新一次
 
     // ★ 让出事件循环的辅助函数
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
@@ -1895,25 +1949,43 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 }
                 if (Object.keys(updates).length > 0) {
                     await global.TransactionManager.updateTransaction(transId, updates);
-                    log(`[事务] 批量更新: ${allFiles.length} 文件, ${allFolders.length} 文件夹`, "INFO");
+                    log(q('h.log.transactionBatchUpdate', allFiles.length, allFolders.length), "INFO");
                 }
             }
         } catch (e) {
-            log(`[事务] 批量更新失败: ${e.message}`, "WARN");
+            log(q('h.log.transactionBatchUpdateFailed', e.message), "WARN");
         }
     };
 
     // ★ 初始进度显示
     if (progressCallback && totalItems > 0) {
-        progressCallback(2, `准备复制 ${totalItems} 个项目 (文件夹${folders.length}, 文件${validFiles.length})...`);
+        progressCallback(2, q('h.progress.prepareCopy', totalItems, folders.length, validFiles.length));
         await yieldToUI();
+    }
+
+    // ★ 添加定时器，每3秒更新进度显示（用于大文件/大文件夹复制期间）
+    let progressTimer = null;
+    if (progressCallback) {
+        progressTimer = setInterval(() => {
+            if (isCancelled()) {
+                clearInterval(progressTimer);
+                progressTimer = null;
+                return;
+            }
+            if (currentStepInfo && currentItemName) {
+                const elapsedMs = Date.now() - taskStartMs;
+                const pct = Math.round(((processedItems + 1) / Math.max(totalItems, 1)) * 85) + 5;
+                const msg = _formatCopyProgress(currentStepInfo, currentItemName, totalSize, elapsedMs);
+                progressCallback(pct, msg);
+            }
+        }, PROGRESS_UPDATE_INTERVAL);
     }
 
     // 复制文件夹
     for (let i = 0; i < folders.length; i++) {
         // ★ 检查取消状态（用户取消 或 锚点丢失）
         if (isCancelled()) {
-            log(`[复制] 取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            log(q('h.log.copyCancelled', copiedFolders.length, copiedFiles.length), "WARN");
             // ★ 取消时先批量更新事务，确保所有已复制文件都被记录
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
@@ -1924,7 +1996,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const folderName = path.basename(folder);
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
-                progressCallback(pct, `[复制文件夹 ${i + 1}/${folders.length}] ${folderName}`);
+                currentStepInfo = q('h.progress.copyFolder', i + 1, folders.length, '').replace(/\]\s*$/, '').replace(/^\[/, '');
+                currentItemName = folderName;
+                const elapsedMs = Date.now() - taskStartMs;
+                const msg = _formatCopyProgress(currentStepInfo, currentItemName, totalSize, elapsedMs);
+                progressCallback(pct, msg);
+                lastProgressUpdateMs = Date.now();
                 await yieldToUI();
             }
             // 同名文件夹静默重命名（q1/q2 统一行为，不再覆盖）
@@ -1941,15 +2018,15 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 totalSize += result.totalSize;
                 if (result.skipped.length > 0) {
                     skippedCount += result.skipped.length;
-                    log(`[Clipboard] 复制文件夹 ${folder} 时跳过 ${result.skipped.length} 个无法访问的文件`, "WARN");
+                    log(q('h.log.copyFolderSkip', folder, result.skipped.length), "WARN");
                 }
             } else {
                 skippedCount++;
-                log(`[Clipboard] 复制文件夹失败 ${folder}: ${result.errors.slice(0, 3).join('; ')}`, "WARN");
+                log(q('h.log.copyFolderFailed', folder, result.errors.slice(0, 3).join('; ')), "WARN");
             }
         } catch (e) {
             skippedCount++;
-            log(`复制文件夹异常 ${folder}: ${e.message}`, "WARN");
+            log(q('h.log.copyFolderException', folder, e.message), "WARN");
         }
         processedItems++;
     }
@@ -1958,7 +2035,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     for (let i = 0; i < validFiles.length; i++) {
         // ★ 检查取消状态（用户取消 或 锚点丢失）
         if (isCancelled()) {
-            log(`[复制] 取消，停止复制 (已复制 ${copiedFolders.length} 个文件夹, ${copiedFiles.length} 个文件)`, "WARN");
+            log(q('h.log.copyCancelled', copiedFolders.length, copiedFiles.length), "WARN");
             // ★ 取消时先批量更新事务
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
@@ -1969,7 +2046,16 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             const fileName = path.basename(f);
             if (progressCallback) {
                 const pct = Math.round(((processedItems + 1) / totalItems) * 85) + 5;
-                progressCallback(pct, `[复制文件 ${i + 1}/${validFiles.length}] ${fileName}`);
+                currentStepInfo = q('h.progress.copyFile', i + 1, validFiles.length, '').replace(/\]\s*$/, '').replace(/^\[/, '');
+                currentItemName = fileName;
+                const now = Date.now();
+                const elapsedMs = now - taskStartMs;
+                // ★ 每3秒强制更新一次，显示当前已拷贝总大小
+                if (now - lastProgressUpdateMs >= PROGRESS_UPDATE_INTERVAL || i === 0 || i === validFiles.length - 1) {
+                    const msg = _formatCopyProgress(currentStepInfo, currentItemName, totalSize, elapsedMs);
+                    progressCallback(pct, msg);
+                    lastProgressUpdateMs = now;
+                }
                 // 异步复制时不需要频繁 yieldToUI，因为 fs.promises 已经是不阻塞的了
                 // 但每 10 个文件 yield 一下还是稳妥的，给微任务队列一点空间
                 if (i % 10 === 0) {
@@ -1979,7 +2065,7 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             if (!safeAccessCheck(f)) {
                 skippedCount++;
-                log(`[Clipboard] 跳过无法访问的文件: ${f}`, "WARN");
+                log(q('h.log.skipInaccessible', f), "WARN");
                 processedItems++;
                 continue;
             }
@@ -2033,9 +2119,9 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         } catch (e) {
             if (e.code === 'EBUSY' || e.code === 'EACCES' || e.code === 'EPERM' || e.code === 'ENOENT') {
                 skippedCount++;
-                log(`[Clipboard] 跳过文件 (${e.code}): ${f}`, "WARN");
+                log(q('h.log.skipFile', e.code, f), "WARN");
             } else {
-                log(`复制文件失败 ${f}: ${e.message}`, "WARN");
+                log(q('h.log.copyFileFailed', f, e.message), "WARN");
             }
         }
         processedItems++;
@@ -2044,6 +2130,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     // ★ 复制完成后批量更新事务（如果没有取消）
     if (!isCancelled()) {
         await batchUpdateTransaction(copiedFiles, copiedFolders);
+    }
+
+    // ★ 清理定时器
+    if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = null;
     }
 
     return {
@@ -2065,29 +2157,29 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
 
             // ★ 优先使用预获取的文件列表（单一真理源）
             if (files && files.length > 0) {
-                log(`[Clipboard] 使用预获取的 ${files.length} 个文件`, "INFO");
+                log(q('h.log.usePreFetchedFiles', files.length), "INFO");
             } else {
                 // 备选方案：现场获取
-                log(`[Clipboard] 无预获取文件，调用 tryEngineCall...`, "INFO");
+                log(q('h.log.noPreFetchedFiles'), "INFO");
                 if (progressCallback) {
-                    progressCallback(1, `正在获取剪贴板文件列表...`);
+                    progressCallback(1, q('h.progress.getFileList'));
                 }
                 const res = await getGlobal().tryEngineCall({ python: "get_clipboard_files", shell: "getFiles" }, {}, 8000);
                 if (res) {
                     if (res.paths && res.paths.length > 0) files = res.paths;
                     else if (res.files && res.files.length > 0) files = res.files;
-                    log(`[Clipboard] tryEngineCall 返回: ${JSON.stringify(res).slice(0, 200)}`, "INFO");
+                    log(q('h.log.tryEngineCallResult', JSON.stringify(res).slice(0, 200)), "INFO");
                 } else {
-                    log(`[Clipboard] tryEngineCall 返回空`, "WARN");
+                    log(q('h.log.tryEngineCallEmpty'), "WARN");
                 }
             }
 
             if (files && files.length > 0) {
-                log(`[Clipboard] 开始复制 ${files.length} 个文件: ${files.slice(0, 3).join(', ')}...`, "INFO");
+                log(q('h.log.startCopyFiles', files.length, files.slice(0, 3).join(', ') + '...'), "INFO");
 
                 // ★ 显示进度（简洁格式，不带前缀）
                 if (progressCallback) {
-                    progressCallback(1, `检测到 ${files.length} 个项目，开始复制...`);
+                    progressCallback(1, q('h.progress.detectItems', files.length));
                 }
 
                 // ★ 传入 token 和 transId，边复制边记录事务
@@ -2097,7 +2189,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                 const successFiles = (result?.files || []).length;
                 const successFolders = (result?.folders || []).length;
                 const skipped = result?.skippedCount || 0;
-                log(`[Clipboard] 复制结果: files=${successFiles}, folders=${successFolders}, skipped=${skipped}`, "INFO");
+                log(q('h.log.copyResult', successFiles, successFolders, skipped), "INFO");
                 // ★ 事务已在 processFilesForClipboardWithProgress 中边复制边记录，这里不再重复更新
                 return result;
             }
@@ -2145,7 +2237,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         if (text && (text.includes("<html") || text.includes("<body") || text.includes("<div") || text.includes("<img"))) {
             return await handleClipboardUnified(targetDir, progressCallback, token, transId, null, autoRename);
         }
-    } catch (e) { log(`Shell剪贴板处理失败: ${e.message}`, "ERROR"); }
+    } catch (e) { log(q('h.log.shellClipboardFailed', e.message), "ERROR"); }
     return null;
 }
 
@@ -2195,17 +2287,17 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
     // Execution
     if (useScheme1) {
-        if (progressCallback) progressCallback(0, "方案一：混合排版...");
+        if (progressCallback) progressCallback(0, q('h.progress.schemeOne'));
         const cleanText = await vscode.env.clipboard.readText() || "";
         blocks = await _zipDomWithCleanText($, cleanText, baseUrl);
     } else {
-        if (progressCallback) progressCallback(0, "方案二：DOM排版...");
+        if (progressCallback) progressCallback(0, q('h.progress.schemeTwo'));
         blocks = _buildBlocksFromSanitizedDom($, baseUrl);
 
         // Quality Check for Scheme 2 Result
         if (!_isResultQualityAcceptable(blocks)) {
             log("[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1", "WARN");
-            if (progressCallback) progressCallback(0, "质量检测不通过，回退到方案一...");
+            if (progressCallback) progressCallback(0, q('h.progress.qualityFallback'));
             const cleanText = await vscode.env.clipboard.readText() || "";
             blocks = await _zipDomWithCleanText($, cleanText, baseUrl);
         }
@@ -2214,7 +2306,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
     // 检查是否有视频URL需要处理
     const videoUrls = extractVideoUrlsFromHtmlFragment(htmlText, baseUrl);
     if (videoUrls.length > 0) {
-        log(`[SmartPaste] 从HTML中提取到 ${videoUrls.length} 个视频URL`, "INFO");
+        log(q('h.log.extractedVideoUrls', videoUrls.length), "INFO");
 
         // 收集已有的媒体链接，避免重复
         const existingMediaSrcs = new Set(blocks.filter(b => b.type === "media").map(b => b.src));
@@ -2235,7 +2327,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
     }
 
     if (blocks.some(b => b.type === "media")) {
-        if (progressCallback) progressCallback(10, `发现 ${blocks.filter(b => b.type === "media").length} 个媒体资源，准备下载...`);
+        if (progressCallback) progressCallback(10, q('h.progress.detectMediaResources', blocks.filter(b => b.type === "media").length));
         await _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename);
     }
 
@@ -2254,34 +2346,34 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     let preFiles = snapshot?.files || null;
     let handled = snapshot !== null && snapshot.rawStatus !== undefined;
 
-    log(`[AutoDetect] 开始检测, snapshot=${!!snapshot}, handled=${handled}`, "INFO");
+    log(q('h.autoDetect.startDetect', !!snapshot, handled), "INFO");
 
     // 备选方案：如果没有传入快照，尝试获取
     if (!handled) {
         if (progressCallback) {
-            progressCallback(1, `正在检测剪贴板内容...`);
+            progressCallback(1, q('h.progress.detectClipboard'));
         }
         try {
             if (global.shellBridge && global.shellBridge.isAvailable()) {
-                log(`[AutoDetect] 尝试 shellBridge.wq...`, "INFO");
+                log(q('h.autoDetect.tryShellBridge'), "INFO");
                 const res = await global.shellBridge.call("wq", {}, 3000);
                 if (res && !res.error) {
                     qStatus = res;
                     if (res.files) preFiles = res.files;
                     handled = true;
-                    log(`[AutoDetect] shellBridge.wq 成功: hasFile=${res.hasFile}, hasHtml=${res.hasHtml}, hasImage=${res.hasImage}, files=${res.files?.length || 0}`, "INFO");
+                    log(q('h.autoDetect.shellBridgeSuccess', res.hasFile, res.hasHtml, res.hasImage, res.files?.length || 0), "INFO");
                 }
             } else {
-                log(`[AutoDetect] shellBridge 不可用`, "INFO");
+                log(q('h.autoDetect.shellBridgeUnavailable'), "INFO");
             }
         } catch (e) {
-            log(`[AutoDetect] shellBridge.wq 失败: ${e.message}`, "WARN");
+            log(q('h.autoDetect.shellBridgeFailed', e.message), "WARN");
         }
     }
 
     if (!handled && process.platform === "win32") {
         try {
-            log(`[AutoDetect] 尝试 PowerShell 检测...`, "INFO");
+            log(q('h.autoDetect.tryPowerShell'), "INFO");
             const psScript = `Add-Type -A System.Windows.Forms;$f=[System.Windows.Forms.Clipboard]::GetDataObject().GetFormats();$o=@{hasFile=$false;hasHtml=$false;hasImage=$false;hasText=$false};if($f -contains 'FileDrop'){$o.hasFile=$true};if($f -contains 'HTML Format'){$o.hasHtml=$true};if(($f -contains 'Bitmap')-or($f -contains 'DeviceIndependentBitmap')-or($f -contains 'PNG')){$o.hasImage=$true};if(($f -contains 'Text')-or($f -contains 'UnicodeText')){$o.hasText=$true};$o|ConvertTo-Json -Compress`;
             const jsonStr = await spawnOutput("powershell", ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript]);
             if (jsonStr && jsonStr.trim()) {
@@ -2289,11 +2381,11 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
                 if (parsed) {
                     qStatus = parsed;
                     handled = true;
-                    log(`[AutoDetect] PowerShell 检测成功: hasFile=${parsed.hasFile}, hasHtml=${parsed.hasHtml}, hasImage=${parsed.hasImage}`, "INFO");
+                    log(q('h.autoDetect.powerShellSuccess', parsed.hasFile, parsed.hasHtml, parsed.hasImage), "INFO");
                 }
             }
         } catch (e) {
-            log(`[AutoDetect] PowerShell 检测失败: ${e.message}`, "WARN");
+            log(q('h.autoDetect.powerShellFailed', e.message), "WARN");
         }
     }
 
@@ -2302,16 +2394,16 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
             const text = await vscode.env.clipboard.readText();
             if (text) {
                 qStatus.hasText = true;
-                log(`[AutoDetect] VS Code API 检测到文本`, "INFO");
+                log(q('h.autoDetect.vsCodeApiText'), "INFO");
             }
         } catch (e) { }
     }
 
-    log(`[AutoDetect] 最终状态: hasFile=${qStatus.hasFile}, hasHtml=${qStatus.hasHtml}, hasImage=${qStatus.hasImage}, hasText=${qStatus.hasText}`, "INFO");
+    log(q('h.autoDetect.finalStatus', qStatus.hasFile, qStatus.hasHtml, qStatus.hasImage, qStatus.hasText), "INFO");
 
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
-        log(`[AutoDetect] 进入文件复制流程, preFiles=${preFiles?.length || 0}`, "INFO");
+        log(q('h.autoDetect.enterFileCopy', preFiles?.length || 0), "INFO");
         // ★ 传递预获取的文件列表，并透传 autoRename
         return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel, autoRename);
     }
@@ -2329,29 +2421,29 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
                     const $ = htmlResult.$;
                     const hasMedia = $('img, video, iframe, embed, object, picture, source[type^="video"]').length > 0;
                     if (!hasMedia) {
-                        log(`[AutoDetect] 检测到 Markdown 格式纯文本，且 HTML 无媒体资源，优先使用纯文本`, "INFO");
+                        log(q('h.autoDetect.markdownDetected'), "INFO");
                         return { type: "text", text: plainText };
                     } else {
-                        log(`[AutoDetect] 检测到 Markdown 格式，但 HTML 包含媒体资源，继续 HTML 处理`, "INFO");
+                        log(q('h.autoDetect.markdownWithMedia'), "INFO");
                     }
                 } else {
                     // HTML 解析失败，直接使用纯文本
-                    log(`[AutoDetect] HTML 解析失败，使用 Markdown 纯文本`, "INFO");
+                    log(q('h.autoDetect.htmlParseFailed'), "INFO");
                     return { type: "text", text: plainText };
                 }
             }
         } catch (e) {
-            log(`[AutoDetect] Markdown 检测失败: ${e.message}`, "WARN");
+            log(q('h.autoDetect.markdownDetectFailed', e.message), "WARN");
         }
     }
 
     if (qStatus.hasHtml) {
-        log(`[AutoDetect] 进入 HTML 处理流程`, "INFO");
+        log(q('h.autoDetect.enterHtmlProcess'), "INFO");
         return await handleClipboardUnified(targetDir, progressCallback, token, transId, shouldCancel, autoRename);
     }
 
     if (qStatus.hasImage) {
-        log(`[AutoDetect] 进入图片处理流程`, "INFO");
+        log(q('h.autoDetect.enterImageProcess'), "INFO");
         return await handleClipboardShell(targetDir, token, progressCallback, null, 0, transId, onCancelCallback, shouldCancel);
     }
 
@@ -2427,17 +2519,17 @@ async function copyFilesToClipboard(filePaths) {
 
         if (res && res.success) {
             const activeName = global.getActiveEngineName(global.pythonBridge, global.rustBridge, global.shellBridge);
-            log(`[Clipboard] 通过 ${activeName} 复制了 ${filePaths.length} 个项目`, "INFO");
+            log(q('h.log.copyViaEngine', activeName, filePaths.length), "INFO");
             return;
         }
     } catch (e) {
-        log(`[Clipboard] 复制操作异常: ${e.message}`, "WARN");
+        log(q('h.log.copyException', e.message), "WARN");
     }
 
     // 如果所有 Bridge 都不可用，执行最低限度的纯文本回退
     try {
         await vscode.env.clipboard.writeText(filePaths.join("\n"));
-        log(`[Clipboard] 所有引擎不可用，已将路径作为纯文本复制`, "WARN");
+        log(q('h.log.copyFallbackText'), "WARN");
     } catch { }
 }
 
