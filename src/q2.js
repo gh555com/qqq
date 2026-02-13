@@ -95,9 +95,9 @@ function cancelAllScans() {
 }
 
 /**
- * 打开管理员权限终端（CMD 或 PowerShell）
- * @param {string} targetPath - 目标目录路径
- * @param {string} termType - 'cmd' 或 'powershell'
+ * Open admin terminal (CMD or PowerShell)
+ * @param {string} targetPath - target directory path
+ * @param {string} termType - 'cmd' or 'powershell'
  */
 function openAdminTerminal(targetPath, termType) {
   try {
@@ -105,38 +105,31 @@ function openAdminTerminal(targetPath, termType) {
     const platform = process.platform;
 
     if (platform === 'win32') {
-      // Windows: 使用 ShellExecuteW 以 runas 方式打开管理员终端
+      // Windows: use PowerShell Start-Process -Verb RunAs for elevation
+      // Escape single quotes for PowerShell and use single-quoted path to avoid backslash escape issues
+      const safePath = absPath.replace(/'/g, "''");
+
       if (termType === 'cmd') {
-        // 管理员 CMD
-        const command = `/k "cd /d "${absPath}""`;
-        cp.spawn('powershell', [
-          '-NoProfile', '-Command',
-          `Start-Process cmd.exe -ArgumentList '${command}' -Verb RunAs`
-        ], { windowsHide: true, detached: true }).unref();
+        // Admin CMD: cd /d to target directory
+        const psScript = `Start-Process cmd.exe -ArgumentList '/k','cd /d """${safePath}"""' -Verb RunAs`;
+        cp.spawn('powershell.exe', ['-NoProfile', '-Command', psScript], { windowsHide: true, shell: false });
       } else {
-        // 管理员 PowerShell
-        const command = `-NoExit -Command cd '${absPath.replace(/'/g, "''")}'`;
-        cp.spawn('powershell', [
-          '-NoProfile', '-Command',
-          `Start-Process powershell.exe -ArgumentList '${command}' -Verb RunAs`
-        ], { windowsHide: true, detached: true }).unref();
+        // Admin PowerShell: Set-Location to target directory
+        // Use triple quotes to properly escape path with trailing backslash (e.g. C:\)
+        const psScript = `Start-Process powershell.exe -ArgumentList '-NoExit','-Command',"Set-Location -LiteralPath '${safePath}'" -Verb RunAs`;
+        cp.spawn('powershell.exe', ['-NoProfile', '-Command', psScript], { windowsHide: true, shell: false });
       }
     } else if (platform === 'darwin') {
-      // macOS: 使用 osascript 打开带 sudo 的终端
-      const escapedPath = absPath.replace(/"/g, '\\"');
-      const script = `
-        tell application "Terminal"
-          activate
-          do script "cd '${escapedPath}' && sudo -s"
-        end tell
-      `;
+      // macOS: use osascript to open Terminal with sudo
+      const escapedPath = absPath.replace(/'/g, "'\\''");
+      const script = `tell application "Terminal" to do script "cd '${escapedPath}' && sudo -s"`;
       cp.spawn('osascript', ['-e', script], { detached: true }).unref();
     } else {
-      // Linux: 尝试常见的终端模拟器
+      // Linux: try common terminal emulators
       const escapedPath = absPath.replace(/'/g, "'\"'\"'");
       const sudoCmd = `cd '${escapedPath}' && sudo -s`;
 
-      // 尝试常见的 Linux 终端
+      // Try common Linux terminals
       const terminals = [
         { cmd: 'gnome-terminal', args: ['--', 'bash', '-c', sudoCmd + '; exec bash'] },
         { cmd: 'konsole', args: ['-e', 'bash', '-c', sudoCmd + '; exec bash'] },
@@ -147,7 +140,7 @@ function openAdminTerminal(targetPath, termType) {
         { cmd: 'kitty', args: ['bash', '-c', sudoCmd + '; exec bash'] }
       ];
 
-      // 依次尝试打开终端
+      // Try to open terminal one by one
       (async () => {
         for (const term of terminals) {
           try {
@@ -159,19 +152,20 @@ function openAdminTerminal(targetPath, termType) {
             });
             if (exists) {
               cp.spawn(term.cmd, term.args, { detached: true, stdio: 'ignore' }).unref();
-              geq().logMessage(`Opened admin terminal using ${term.cmd}`, "INFO");
+              global.showAutoCloseNotification('info', q('q2.info.openedTerminal', term.cmd));
               return;
             }
           } catch { }
         }
-        global.showAutoCloseNotification('error', 'No supported terminal emulator found');
+        global.showAutoCloseNotification('error', q('q2.error.noTerminal'));
       })();
     }
 
-    geq().logMessage(`Opening admin ${termType} at: ${absPath}`, "INFO");
+    // Show success notification
+    const termName = termType === 'cmd' ? 'CMD' : 'PowerShell';
+    global.showAutoCloseNotification('info', q('q2.info.openingAdminTerminal', termName, absPath));
   } catch (e) {
-    geq().logMessage(`Failed to open admin terminal: ${e.message}`, "ERROR");
-    global.showAutoCloseNotification('error', `Failed to open admin terminal: ${e.message}`);
+    global.showAutoCloseNotification('error', q('q2.error.openTerminalFailed', e.message));
   }
 }
 
@@ -2757,14 +2751,14 @@ function setupCustomScrollbar() {
 
 setTimeout(setupCustomScrollbar, 100);
 
-// 按 z 打开管理员 CMD，按 x 打开管理员 PowerShell（编辑状态下不监听）
+// c key -> admin CMD, z key -> admin PowerShell (not active when editing)
 document.addEventListener('keydown', function(e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'z') {
+  if (key === 'c') {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
-  } else if (key === 'x') {
+  } else if (key === 'z') {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
   }
@@ -3948,7 +3942,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      // ★★★ 管理员终端：z 键打开 CMD，x 键打开 PowerShell ★★★
+      // Admin terminal: c key -> CMD, z key -> PowerShell
       case "openAdminCmd": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'cmd');

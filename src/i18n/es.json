@@ -104,7 +104,13 @@
             "unsupportedFile": "Este tipo de archivo no es compatible con VS Code: \"{0}\"",
             "fileNotExists": "El archivo ya no existe: {0}",
             "openFileError": "Fallo al abrir archivo: {0}",
-            "deleteParentForbidden": "Operación ilegal: está prohibido eliminar el directorio padre."
+            "deleteParentForbidden": "Operación ilegal: está prohibido eliminar el directorio padre.",
+            "noTerminal": "No se encontró un emulador de terminal compatible",
+            "openTerminalFailed": "Fallo al abrir terminal de administrador: {0}"
+        },
+        "info": {
+            "openedTerminal": "Terminal de administrador abierto con {0}",
+            "openingAdminTerminal": "Abriendo {0} de administrador, ruta: {1}"
         },
         "confirm": {
             "overwriteFile": "El archivo \"{0}\" ya existe. ¿Sobrescribir?",

@@ -104,7 +104,13 @@
             "unsupportedFile": "هذا النوع من الملفات غير مدعوم في VS Code: \"{0}\"",
             "fileNotExists": "الملف لم يعد موجوداً: {0}",
             "openFileError": "فشل فتح الملف: {0}",
-            "deleteParentForbidden": "عملية غير قانونية: حذف الدليل الأب ممنوع."
+            "deleteParentForbidden": "عملية غير قانونية: حذف الدليل الأب ممنوع.",
+            "noTerminal": "لم يتم العثور على محاكي طرفية مدعومة",
+            "openTerminalFailed": "فشل فتح طرفية المسؤول: {0}"
+        },
+        "info": {
+            "openedTerminal": "تم فتح طرفية المسؤول باستخدام {0}",
+            "openingAdminTerminal": "جاري فتح {0} المسؤول، المسار: {1}"
         },
         "confirm": {
             "overwriteFile": "الملف \"{0}\" موجود بالفعل. هل تريد الكتابة فوقه؟",

@@ -104,7 +104,13 @@
             "unsupportedFile": "このファイル形式は VS Code でサポートされていません: \"{0}\"",
             "fileNotExists": "ファイルが存在しません: {0}",
             "openFileError": "ファイルを開けませんでした: {0}",
-            "deleteParentForbidden": "不正な操作：親ディレクトリの削除は禁止されています。"
+            "deleteParentForbidden": "不正な操作：親ディレクトリの削除は禁止されています。",
+            "noTerminal": "サポートされているターミナルエミュレータが見つかりません",
+            "openTerminalFailed": "管理者ターミナルを開けませんでした: {0}"
+        },
+        "info": {
+            "openedTerminal": "{0} で管理者ターミナルを開きました",
+            "openingAdminTerminal": "管理者 {0} を開いています。パス: {1}"
         },
         "confirm": {
             "overwriteFile": "ファイル \"{0}\" は既に存在します。上書きしますか？",

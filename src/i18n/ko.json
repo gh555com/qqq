@@ -104,7 +104,13 @@
             "unsupportedFile": "이 파일 형식은 VS Code에서 지원되지 않습니다: \"{0}\"",
             "fileNotExists": "파일이 더 이상 존재하지 않습니다: {0}",
             "openFileError": "파일 열기 실패: {0}",
-            "deleteParentForbidden": "잘못된 작업: 상위 디렉토리 삭제는 금지됩니다."
+            "deleteParentForbidden": "잘못된 작업: 상위 디렉토리 삭제는 금지됩니다.",
+            "noTerminal": "지원되는 터미널 에뮬레이터를 찾을 수 없습니다",
+            "openTerminalFailed": "관리자 터미널 열기 실패: {0}"
+        },
+        "info": {
+            "openedTerminal": "{0}을(를) 사용하여 관리자 터미널을 열었습니다",
+            "openingAdminTerminal": "관리자 {0} 여는 중, 경로: {1}"
         },
         "confirm": {
             "overwriteFile": "파일 \"{0}\"이(가) 이미 존재합니다. 덮어쓰시겠습니까?",

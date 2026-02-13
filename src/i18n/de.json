@@ -104,7 +104,13 @@
             "unsupportedFile": "Diese Datei kann nicht in VS Code geöffnet werden: \"{0}\"",
             "fileNotExists": "Datei existiert nicht mehr: {0}",
             "openFileError": "Datei öffnen fehlgeschlagen: {0}",
-            "deleteParentForbidden": "Ungültige Operation: Löschen des übergeordneten Verzeichnisses verboten."
+            "deleteParentForbidden": "Ungültige Operation: Löschen des übergeordneten Verzeichnisses verboten.",
+            "noTerminal": "Kein unterstützter Terminalemulator gefunden",
+            "openTerminalFailed": "Admin-Terminal öffnen fehlgeschlagen: {0}"
+        },
+        "info": {
+            "openedTerminal": "Admin-Terminal mit {0} geöffnet",
+            "openingAdminTerminal": "Admin {0} wird geöffnet, Pfad: {1}"
         },
         "confirm": {
             "overwriteFile": "Datei \"{0}\" existiert bereits, überschreiben?",

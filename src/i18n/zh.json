@@ -104,7 +104,13 @@
             "unsupportedFile": "该文件不支持在 VS Code 里打开: \"{0}\"",
             "fileNotExists": "文件已不存在: {0}",
             "openFileError": "打开文件失败: {0}",
-            "deleteParentForbidden": "非法操作：禁止删除上级目录。"
+            "deleteParentForbidden": "非法操作：禁止删除上级目录。",
+            "noTerminal": "未找到支持的终端模拟器",
+            "openTerminalFailed": "打开管理员终端失败: {0}"
+        },
+        "info": {
+            "openedTerminal": "已使用 {0} 打开管理员终端",
+            "openingAdminTerminal": "正在打开管理员 {0}，路径: {1}"
         },
         "confirm": {
             "overwriteFile": "文件 \"{0}\" 已存在，是否覆盖？",

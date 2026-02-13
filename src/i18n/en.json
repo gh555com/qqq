@@ -104,7 +104,13 @@
             "unsupportedFile": "This file type is not supported in VS Code: \"{0}\"",
             "fileNotExists": "File no longer exists: {0}",
             "openFileError": "Failed to open file: {0}",
-            "deleteParentForbidden": "Illegal operation: Deleting parent directory is forbidden."
+            "deleteParentForbidden": "Illegal operation: Deleting parent directory is forbidden.",
+            "noTerminal": "No supported terminal emulator found",
+            "openTerminalFailed": "Failed to open admin terminal: {0}"
+        },
+        "info": {
+            "openedTerminal": "Opened admin terminal using {0}",
+            "openingAdminTerminal": "Opening admin {0} at: {1}"
         },
         "confirm": {
             "overwriteFile": "File \"{0}\" already exists. Overwrite?",

@@ -104,7 +104,13 @@
             "unsupportedFile": "Ce type de fichier n'est pas pris en charge dans VS Code: \"{0}\"",
             "fileNotExists": "Le fichier n'existe plus: {0}",
             "openFileError": "Échec de l'ouverture du fichier: {0}",
-            "deleteParentForbidden": "Opération illégale: la suppression du répertoire parent est interdite."
+            "deleteParentForbidden": "Opération illégale: La suppression du répertoire parent est interdite.",
+            "noTerminal": "Aucun émulateur de terminal pris en charge trouvé",
+            "openTerminalFailed": "Échec de l'ouverture du terminal administrateur: {0}"
+        },
+        "info": {
+            "openedTerminal": "Terminal administrateur ouvert avec {0}",
+            "openingAdminTerminal": "Ouverture de {0} administrateur, chemin: {1}"
         },
         "confirm": {
             "overwriteFile": "Le fichier \"{0}\" existe déjà. Écraser?",

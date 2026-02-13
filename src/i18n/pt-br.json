@@ -104,7 +104,13 @@
             "unsupportedFile": "Este tipo de arquivo não é suportado no VS Code: \"{0}\"",
             "fileNotExists": "O arquivo não existe mais: {0}",
             "openFileError": "Falha ao abrir arquivo: {0}",
-            "deleteParentForbidden": "Operação ilegal: é proibido excluir o diretório pai."
+            "deleteParentForbidden": "Operação ilegal: é proibido excluir o diretório pai.",
+            "noTerminal": "Nenhum emulador de terminal suportado encontrado",
+            "openTerminalFailed": "Falha ao abrir terminal de administrador: {0}"
+        },
+        "info": {
+            "openedTerminal": "Terminal de administrador aberto com {0}",
+            "openingAdminTerminal": "Abrindo {0} de administrador, caminho: {1}"
         },
         "confirm": {
             "overwriteFile": "O arquivo \"{0}\" já existe. Substituir?",
