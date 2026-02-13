@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: очистка истории буфера не удалась: {0}"
         },
         "clearCache": {
-            "clearCooldown": "Сбросить период ожидания загрузки",
-            "clearCooldownDesc": "Позволяет немедленно загрузить снова",
+            "clearCooldown": "Сбросить ожидание загрузки зависимостей (по умолчанию 72ч)",
+            "clearCooldownDesc": " Позволяет немедленно загрузить снова",
             "openCacheDir": "Открыть каталог кэша",
-            "deleteYtDlp": "Удалить yt-dlp",
+            "deleteYtDlp": "Удалить компонент загрузки видео yt-dlp",
             "deleteYtDlpDesc": "Может вызвать обновление yt-dlp",
             "clearGlobalStates": "Очистить базу globalStates",
-            "clearGlobalStatesDesc": "Очистить данные",
+            "clearGlobalStatesDesc": "Очистить и потерять: 1. Массив быстрого перехода rover; 2. Вход браузера улучшенной загрузки; 3. Кэш отката и дедупликации; 4. Настройки sz/сортировки rover.",
             "clearClipboardHistory": "Очистить историю буфера обмена",
             "selectTitle": "Выберите операцию с кэшем",
             "selectPlaceholder": "Выберите операцию с кэшем для выполнения",

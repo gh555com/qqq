@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: 清空剪貼簿歷史失敗: {0}"
         },
         "clearCache": {
-            "clearCooldown": "清除依賴下載冷卻時間",
-            "clearCooldownDesc": "便於立即重新下載",
+            "clearCooldown": "清除依賴下載滴冷却時間（預設72小時）",
+            "clearCooldownDesc": " 便於立即重新下載",
             "openCacheDir": "開啟快取目錄",
             "deleteYtDlp": "刪除影片下載元件 yt-dlp",
             "deleteYtDlpDesc": "可觸發 yt-dlp 更新",
             "clearGlobalStates": "清理 globalStates 資料庫",
-            "clearGlobalStatesDesc": "清空資料",
+            "clearGlobalStatesDesc": "清空並丟失 ：1、漫遊器快速跳轉陣列；2、影片增強下載流程已指定滴瀏覽器入口；3、已快取滴用於 “事物回滾和檔案去重” 滴關鍵資訊；4、漫遊器關於不同資料夾 “sz 區列印偏好” 和 “排序” 滴精細記憶。",
             "clearClipboardHistory": "清空剪貼簿歷史記錄",
             "selectTitle": "選擇快取操作",
             "selectPlaceholder": "選擇要執行的快取操作",

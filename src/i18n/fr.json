@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: nettoyage de l'historique du presse-papiers échoué: {0}"
         },
         "clearCache": {
-            "clearCooldown": "Effacer la période d'attente de téléchargement",
-            "clearCooldownDesc": "Permet de télécharger à nouveau immédiatement",
+            "clearCooldown": "Effacer la période d'attente de téléchargement des dépendances (défaut 72h)",
+            "clearCooldownDesc": " Permet de télécharger à nouveau immédiatement",
             "openCacheDir": "Ouvrir le répertoire de cache",
-            "deleteYtDlp": "Supprimer yt-dlp",
+            "deleteYtDlp": "Supprimer le composant de téléchargement vidéo yt-dlp",
             "deleteYtDlpDesc": "Peut déclencher la mise à jour de yt-dlp",
             "clearGlobalStates": "Nettoyer la base de données globalStates",
-            "clearGlobalStatesDesc": "Effacer les données",
+            "clearGlobalStatesDesc": "Effacer et perdre : 1. Tableau de saut rapide du rover; 2. Entrée de navigateur du téléchargement vidéo amélioré; 3. Infos de rollback et dédoublonnage en cache; 4. Préférences sz/tri du dossier rover.",
             "clearClipboardHistory": "Vider l'historique du presse-papiers",
             "selectTitle": "Sélectionner l'opération de cache",
             "selectPlaceholder": "Sélectionnez l'opération de cache à exécuter",

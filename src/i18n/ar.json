@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: فشل مسح سجل الحافظة: {0}"
         },
         "clearCache": {
-            "clearCooldown": "مسح فترة انتظار التحميل",
-            "clearCooldownDesc": "يسمح بالتحميل مرة أخرى فوراً",
+            "clearCooldown": "مسح فترة انتظار تحميل التبعيات (افتراضي 72 ساعة)",
+            "clearCooldownDesc": " يسمح بالتحميل مرة أخرى فوراً",
             "openCacheDir": "فتح دليل ذاكرة التخزين المؤقت",
-            "deleteYtDlp": "حذف yt-dlp",
+            "deleteYtDlp": "حذف مكون تحميل الفيديو yt-dlp",
             "deleteYtDlpDesc": "قد يؤدي إلى تحديث yt-dlp",
             "clearGlobalStates": "مسح قاعدة بيانات globalStates",
-            "clearGlobalStatesDesc": "مسح البيانات",
+            "clearGlobalStatesDesc": "مسح وفقدان: 1. مصفوفة القفز السريع للروفر; 2. إدخال المتصفح للتحميل المحسن; 3. معلومات التراجع وإزالة التكرار المخزنة; 4. إعدادات sz/الترتيب للروفر.",
             "clearClipboardHistory": "مسح سجل الحافظة",
             "selectTitle": "اختر عملية ذاكرة التخزين المؤقت",
             "selectPlaceholder": "اختر عملية ذاكرة التخزين المؤقت للتنفيذ",

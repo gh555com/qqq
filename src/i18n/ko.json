@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: 클립보드 기록 지우기 실패: {0}"
         },
         "clearCache": {
-            "clearCooldown": "종속성 다운로드 쿨다운 지우기",
-            "clearCooldownDesc": "즉시 다시 다운로드 가능",
+            "clearCooldown": "종속성 다운로드 쿨다운 지우기 (기본 72시간)",
+            "clearCooldownDesc": " 즉시 다시 다운로드 가능",
             "openCacheDir": "캐시 디렉토리 열기",
-            "deleteYtDlp": "yt-dlp 삭제",
+            "deleteYtDlp": "동영상 다운로드 컴포넌트 yt-dlp 삭제",
             "deleteYtDlpDesc": "yt-dlp 업데이트를 트리거할 수 있음",
             "clearGlobalStates": "globalStates 데이터베이스 지우기",
-            "clearGlobalStatesDesc": "데이터를 지우고 잃게 됩니다",
+            "clearGlobalStatesDesc": "지우고 잃음: 1. 로버 빠른 점프 배열; 2. 향상된 다운로드 브라우저 입력; 3. 롤백 및 중복 제거 캐시 정보; 4. 로버 폴더 sz/정렬 설정.",
             "clearClipboardHistory": "클립보드 기록 지우기",
             "selectTitle": "캐시 작업 선택",
             "selectPlaceholder": "실행할 캐시 작업 선택",

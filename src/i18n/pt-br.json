@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: limpeza do histórico da área de transferência falhou: {0}"
         },
         "clearCache": {
-            "clearCooldown": "Limpar período de espera de download",
-            "clearCooldownDesc": "Permite baixar novamente imediatamente",
+            "clearCooldown": "Limpar tempo de espera de download de dependências (padrão 72h)",
+            "clearCooldownDesc": " Permite baixar novamente imediatamente",
             "openCacheDir": "Abrir diretório de cache",
-            "deleteYtDlp": "Excluir yt-dlp",
+            "deleteYtDlp": "Excluir componente de download de vídeo yt-dlp",
             "deleteYtDlpDesc": "Pode acionar atualização do yt-dlp",
             "clearGlobalStates": "Limpar banco de dados globalStates",
-            "clearGlobalStatesDesc": "Limpar dados",
+            "clearGlobalStatesDesc": "Limpar e perder: 1. Matriz de salto rápido do rover; 2. Entrada de navegador de download aprimorado; 3. Info de rollback e dedup em cache; 4. Preferências sz/ordem do rover.",
             "clearClipboardHistory": "Limpar histórico da área de transferência",
             "selectTitle": "Selecionar operação de cache",
             "selectPlaceholder": "Selecione a operação de cache a executar",

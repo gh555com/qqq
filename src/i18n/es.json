@@ -267,13 +267,13 @@
             "clipboardClearError": "qqq: limpieza de historial de portapapeles falló: {0}"
         },
         "clearCache": {
-            "clearCooldown": "Limpiar período de espera de descarga",
-            "clearCooldownDesc": "Permite descargar inmediatamente de nuevo",
+            "clearCooldown": "Limpiar tiempo de espera de descarga de dependencias (72h por defecto)",
+            "clearCooldownDesc": " Permite descargar inmediatamente de nuevo",
             "openCacheDir": "Abrir directorio de caché",
-            "deleteYtDlp": "Eliminar yt-dlp",
+            "deleteYtDlp": "Eliminar componente de descarga de video yt-dlp",
             "deleteYtDlpDesc": "Puede activar actualización de yt-dlp",
             "clearGlobalStates": "Limpiar base de datos globalStates",
-            "clearGlobalStatesDesc": "Limpiar datos",
+            "clearGlobalStatesDesc": "Limpiar y perder: 1. Matriz de salto rápido del rover; 2. Entrada de navegador de descarga mejorada; 3. Info de rollback y deduplicación en caché; 4. Preferencias sz/orden del rover.",
             "clearClipboardHistory": "Limpiar historial de portapapeles",
             "selectTitle": "Seleccionar operación de caché",
             "selectPlaceholder": "Seleccione la operación de caché a ejecutar",
