@@ -2810,7 +2810,7 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
           const fileName = escapeHtmlAttribute(path.basename(item.path));
           return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
         } else {
-          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M4 17 L16 5 M16 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
       })
       .join("")}
@@ -2840,7 +2840,7 @@ function generateRecycleBinItemHtml(item) {
     const fileName = escapeHtmlAttribute(path.basename(item.path));
     return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
   } else {
-    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M4 17 L16 5 M16 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
 }
 
