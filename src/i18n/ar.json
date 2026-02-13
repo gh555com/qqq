@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}، integrity={1}، plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] المستخدم فرض المخطط 1 عبر الإعدادات",
             "scheme2QualityLow": "[SmartPaste] جودة نتيجة المخطط 2 منخفضة، الرجوع للمخطط 1"
+        },
+        "ui": {
+            "promptUrlDefault": "أدخل رابط الصفحة التي تحتوي على فيديو",
+            "urlEmpty": "الرابط لا يمكن أن يكون فارغاً",
+            "urlInvalid": "يرجى إدخال رابط صالح"
         }
     },
     "python": {

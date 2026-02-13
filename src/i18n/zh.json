@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] User forced Scheme 1 via config",
             "scheme2QualityLow": "[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1"
+        },
+        "ui": {
+            "promptUrlDefault": "请键入包含视频的网页URL",
+            "urlEmpty": "URL不能为空",
+            "urlInvalid": "请键入有效的URL"
         }
     },
     "python": {

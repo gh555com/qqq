@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] Usuário forçou esquema 1 via configuração",
             "scheme2QualityLow": "[SmartPaste] Qualidade do resultado do esquema 2 baixa, retornando ao esquema 1"
+        },
+        "ui": {
+            "promptUrlDefault": "Digite URL da página com vídeo",
+            "urlEmpty": "URL não pode estar vazio",
+            "urlInvalid": "Por favor digite uma URL válida"
         }
     },
     "python": {

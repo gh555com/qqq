@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] 使用者透過設定強制方案 1",
             "scheme2QualityLow": "[SmartPaste] 方案 2 結果品質低，回退到方案 1"
+        },
+        "ui": {
+            "promptUrlDefault": "請輸入包含影片的網頁URL",
+            "urlEmpty": "URL不能為空",
+            "urlInvalid": "請輸入有效的URL"
         }
     },
     "python": {

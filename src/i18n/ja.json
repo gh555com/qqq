@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] ユーザーが設定でスキーム 1 を強制",
             "scheme2QualityLow": "[SmartPaste] スキーム 2 の結果品質が低い、スキーム 1 にフォールバック"
+        },
+        "ui": {
+            "promptUrlDefault": "動画を含むウェブページURLを入力",
+            "urlEmpty": "URLは空にできません",
+            "urlInvalid": "有効なURLを入力してください"
         }
     },
     "python": {

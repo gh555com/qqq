@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] Пользователь принудительно выбрал схему 1 через настройки",
             "scheme2QualityLow": "[SmartPaste] Качество результата схемы 2 низкое, возврат к схеме 1"
+        },
+        "ui": {
+            "promptUrlDefault": "Введите URL страницы с видео",
+            "urlEmpty": "URL не может быть пустым",
+            "urlInvalid": "Пожалуйста, введите действительный URL"
         }
     },
     "python": {

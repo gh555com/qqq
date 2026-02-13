@@ -442,6 +442,11 @@
             "qualityScores": "[SmartPaste] conf={0}, integrity={1}, plainTextOk={2}",
             "userForcedScheme1": "[SmartPaste] 사용자가 설정에서 스키마 1 강제",
             "scheme2QualityLow": "[SmartPaste] 스키마 2 결과 품질 낮음, 스키마 1로 폴백"
+        },
+        "ui": {
+            "promptUrlDefault": "동영상을 포함한 웹페이지 URL 입력",
+            "urlEmpty": "URL을 비워둘 수 없습니다",
+            "urlInvalid": "유효한 URL을 입력하세요"
         }
     },
     "python": {
