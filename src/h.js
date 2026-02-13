@@ -265,26 +265,49 @@ function ensureDir(dirPath) {
     }
 }
 
+// xattr key 常量
+const XATTR_KEY_DARWIN = "com.qqq.owner";
+const XATTR_KEY_LINUX = "user.qqq.owner";
+
 /**
- * 给 qqq 文件夹加盐（Windows ADS），标记为我们创建的
+ * 给 qqq 文件夹加盐，标记为我们创建的
+ * - Windows: ADS (Alternate Data Stream)
+ * - macOS: xattr com.qqq.owner
+ * - Linux: xattr user.qqq.owner
+ * 注意：所有平台都静默失败，不阻塞主流程
  */
 function _saltQqqFolder(dirPath) {
-    if (process.platform !== "win32") return;
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
     try {
-        fs.writeFileSync(dirPath + ":qqq", QQQ_ADS_SALT, "utf8");
+        if (process.platform === "win32") {
+            fs.writeFileSync(dirPath + ":qqq", QQQ_ADS_SALT, "utf8");
+        } else if (process.platform === "darwin") {
+            cp.execFileSync("xattr", ["-w", XATTR_KEY_DARWIN, QQQ_ADS_SALT, dirPath], { timeout: 1000 });
+        } else {
+            // Linux: setfattr 可能未安装，静默失败
+            cp.execFileSync("setfattr", ["-n", XATTR_KEY_LINUX, "-v", QQQ_ADS_SALT, dirPath], { timeout: 1000 });
+        }
     } catch { }
 }
 
 /**
  * 检查一个 qqq 文件夹是否是我们创建的（验盐）
+ * 所有平台静默失败返回 false
  */
 function isOurQqqFolder(dirPath) {
-    if (process.platform !== "win32") return false;
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return false;
     try {
-        const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
-        return salt === QQQ_ADS_SALT;
+        if (process.platform === "win32") {
+            const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
+            return salt === QQQ_ADS_SALT;
+        } else if (process.platform === "darwin") {
+            const out = cp.execFileSync("xattr", ["-p", XATTR_KEY_DARWIN, dirPath], { timeout: 1000, encoding: "utf8" });
+            return out.trim() === QQQ_ADS_SALT;
+        } else {
+            // Linux: getfattr
+            const out = cp.execFileSync("getfattr", ["--only-values", "-n", XATTR_KEY_LINUX, dirPath], { timeout: 1000, encoding: "utf8" });
+            return out.trim() === QQQ_ADS_SALT;
+        }
     } catch {
         return false;
     }
