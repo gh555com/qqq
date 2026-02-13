@@ -242,6 +242,10 @@
             "pythonNoContext": "Environnement non prêt"
         },
         "ui": {
+            "fileCopyProgress": "qqq: Copie des fichiers...",
+            "openDocFirst": "Veuillez d'abord ouvrir un document",
+            "videoUrlPlaceholder": " Collez l'URL contenant la vidéo ",
+            "invalidUrl": "URL invalide",
             "taskCancelledRollback": "{0} annulé et restauré",
             "anchorLostRollback": "{0} ancre perdue, restauré",
             "downloadFailedRollback": "{0} téléchargement échoué, restauré",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "Effacer les données",
             "clearClipboardHistory": "Vider l'historique du presse-papiers",
             "selectTitle": "Sélectionner l'opération de cache",
-            "selectPlaceholder": "Sélectionnez l'opération de cache à exécuter"
+            "selectPlaceholder": "Sélectionnez l'opération de cache à exécuter",
+            "uninitialized": "Non initialisé"
         }
     },
     "video": {

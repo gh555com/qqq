@@ -242,6 +242,10 @@
             "pythonNoContext": "Environment not ready"
         },
         "ui": {
+            "fileCopyProgress": "qqq: Copying files...",
+            "openDocFirst": "Please open a document first",
+            "videoUrlPlaceholder": " Paste URL containing video directly ",
+            "invalidUrl": "Invalid URL",
             "taskCancelledRollback": "{0} cancelled and rolled back",
             "anchorLostRollback": "{0} anchor lost, rolled back",
             "downloadFailedRollback": "{0} download failed, rolled back",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "Clear and lose: 1. Rover quick jump array; 2. Video enhanced download browser entry; 3. Cached transaction rollback and dedup info; 4. Rover folder sz/sort preferences.",
             "clearClipboardHistory": "Clear clipboard history",
             "selectTitle": "Select cache operation",
-            "selectPlaceholder": "Select cache operation to execute"
+            "selectPlaceholder": "Select cache operation to execute",
+            "uninitialized": "Not initialized"
         }
     },
     "video": {

@@ -242,6 +242,10 @@
             "pythonNoContext": "環境が準備できていません"
         },
         "ui": {
+            "fileCopyProgress": "qqq: ファイルをコピー中...",
+            "openDocFirst": "先にドキュメントを開いてください",
+            "videoUrlPlaceholder": " 動画を含むURLを貼り付け ",
+            "invalidUrl": "無効なURL",
             "taskCancelledRollback": "{0} がキャンセルされロールバックされました",
             "anchorLostRollback": "{0} アンカーが失われ、ロールバックされました",
             "downloadFailedRollback": "{0} ダウンロードに失敗、ロールバックされました",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "クリアして失われるもの: 1. ローバークイックジャンプ配列; 2. 動画拡張ダウンロードブラウザエントリー; 3. トランザクションロールバックと重複排除のキャッシュ情報; 4. ローバーフォルダ sz/ソート設定。",
             "clearClipboardHistory": "クリップボード履歴をクリア",
             "selectTitle": "キャッシュ操作を選択",
-            "selectPlaceholder": "実行するキャッシュ操作を選択"
+            "selectPlaceholder": "実行するキャッシュ操作を選択",
+            "uninitialized": "未初期化"
         }
     },
     "video": {

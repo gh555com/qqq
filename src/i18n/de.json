@@ -242,6 +242,10 @@
             "pythonNoContext": "Umgebung nicht bereit"
         },
         "ui": {
+            "fileCopyProgress": "qqq: Dateien werden kopiert...",
+            "openDocFirst": "Bitte öffnen Sie zuerst ein Dokument",
+            "videoUrlPlaceholder": " URL mit Video hier einfügen ",
+            "invalidUrl": "Ungültige URL",
             "taskCancelledRollback": "{0} abgebrochen und zurückgerollt",
             "anchorLostRollback": "{0} Anker verloren, zurückgerollt",
             "downloadFailedRollback": "{0} Download fehlgeschlagen, zurückgerollt",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "Leert und verliert: 1. Rover Schnellsprung-Array; 2. Video-Download Browser-Eingaben; 3. Gecachte Rollback und Deduplizierungs-Infos; 4. Rover sz-Bereich und Sortierungspräferenzen.",
             "clearClipboardHistory": "Zwischenablage-Verlauf leeren",
             "selectTitle": "Cache-Operation auswählen",
-            "selectPlaceholder": "Wählen Sie eine Cache-Operation"
+            "selectPlaceholder": "Wählen Sie eine Cache-Operation",
+            "uninitialized": "Nicht initialisiert"
         }
     },
     "video": {

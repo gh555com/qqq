@@ -794,7 +794,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 		try {
 			const res = await global.withProgress({
 				location: vscode.ProgressLocation.Notification,
-				title: "qqq: 文件复制...",
+				title: q('qqq.ui.fileCopyProgress'),
 				cancellable: true
 			}, async (progress, token) => {
 				token.onCancellationRequested(async () => {
@@ -1170,7 +1170,7 @@ async function savorMomentsCommand() {
 				return;
 			}
 			// ★ 核心理念：永远不改变用户侧边栏布局，只弹窗提示
-			global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
+			global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
 			return;
 		}
 
@@ -1217,7 +1217,7 @@ async function savorMomentsCommand() {
 		}
 
 		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
-		global.showAutoCloseNotification('info', 'qqq: 请点击侧边按钮开始放松。');
+		global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
 	} catch (e) {
 		global.logMessage(q('qqq.log.audioPlayError', e.message), "ERROR");
 	}
@@ -1226,7 +1226,7 @@ async function savorMomentsCommand() {
 async function downloadVideosFromUrlCommand(urlArg) {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
-		global.showAutoCloseNotification('error', "请先打开一个文档");
+		global.showAutoCloseNotification('error', q('qqq.ui.openDocFirst'));
 		return;
 	}
 
@@ -1240,11 +1240,11 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		rawUrl = await vscode.window.showInputBox({
 			prompt: " ",
 			ignoreFocusOut: true,
-			placeHolder: " 直接粘贴 [ 包含视频的网址 ]",
+			placeHolder: q('qqq.ui.videoUrlPlaceholder'),
 			validateInput: (text) => {
 				const s = (text || "").trim();
 				if (!s) return null;
-				return global.isValidUrl(s) ? null : "无效网址";
+				return global.isValidUrl(s) ? null : q('qqq.ui.invalidUrl');
 			}
 		});
 	}
@@ -1477,13 +1477,13 @@ async function downloadVideosFromUrlCommand(urlArg) {
 	if (downloadResult) {
 		if (downloadResult.cancelled) {
 			// ★ 取消
-			global.TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToast(q('qqq.ui.taskCancelledRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.anchorLost) {
 			// ★ 锚点丢失
-			global.TaskMessage.showSimpleToast(`${taskTitle} 锚点丢失，已回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToast(q('qqq.ui.anchorLostRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.failed) {
 			// ★ 下载失败
-			global.TaskMessage.showSimpleToast(`${taskTitle} 下载失败，已回滚`, 15000, 'cancel');
+			global.TaskMessage.showSimpleToast(q('qqq.ui.downloadFailedRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.doneMessage) {
 			// ★ 成功
 			global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
@@ -1641,16 +1641,16 @@ function _registerCommands(context) {
 			// ★ 9秒自动关闭弹窗 → 统一使用 global.showAutoCloseNotification（唯一真理源）
 
 			const options = [
-				{ label: "清除依赖下载滴冷却时间（默认72小时）", description: " 便于立即重新下载", id: "clearCooldown" },
-				{ label: "打开缓存目录", description: ` ${cacheDir || '未初始化'}`, id: "openCacheDir" },
-				{ label: "删除视频下载组件 yt-dlp", description: "可触发 yt-dlp 更新", id: "deleteYtDlp" },
-				{ label: "清理 globalStates 数据库", description: "清空并丢失 ：1、漫游器快速跳转阵列；2、视频增强下载流程已指定滴浏览器入口；3、已缓存滴用于 “事物回滚和文件去重” 滴关键信息；4、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆。", id: "clearGlobalStates" },
-				{ label: "清空剪切板历史记录", description: " ", id: "clearClipboardHistory" }
+				{ label: q('qqq.clearCache.clearCooldown'), description: q('qqq.clearCache.clearCooldownDesc'), id: "clearCooldown" },
+				{ label: q('qqq.clearCache.openCacheDir'), description: ` ${cacheDir || q('qqq.clearCache.uninitialized')}`, id: "openCacheDir" },
+				{ label: q('qqq.clearCache.deleteYtDlp'), description: q('qqq.clearCache.deleteYtDlpDesc'), id: "deleteYtDlp" },
+				{ label: q('qqq.clearCache.clearGlobalStates'), description: q('qqq.clearCache.clearGlobalStatesDesc'), id: "clearGlobalStates" },
+				{ label: q('qqq.clearCache.clearClipboardHistory'), description: " ", id: "clearClipboardHistory" }
 			];
 
 			const selected = await vscode.window.showQuickPick(options, {
-				title: "选择缓存操作",
-				placeHolder: "选择要执行的缓存操作"
+				title: q('qqq.clearCache.selectTitle'),
+				placeHolder: q('qqq.clearCache.selectPlaceholder')
 			});
 
 			if (!selected) return;
@@ -1662,14 +1662,14 @@ function _registerCommands(context) {
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
-					global.showAutoCloseNotification('info', "qqq: 依赖下载冷却时间已清除，可以重新下载依赖。");
+					global.showAutoCloseNotification('info', q('qqq.ui.cooldownCleared'));
 				} catch (e) {
-					global.showAutoCloseNotification('error', `qqq: 清除冷却时间失败: ${e.message}`);
+					global.showAutoCloseNotification('error', q('qqq.ui.cooldownClearError', e.message));
 				}
 			} else if (selected.id === "openCacheDir") {
 				// 打开缓存目录
 				if (!cacheDir) {
-					global.showAutoCloseNotification('warning', "qqq: 缓存目录未初始化");
+					global.showAutoCloseNotification('warning', q('qqq.ui.cacheNotInit'));
 					return;
 				}
 
@@ -1690,25 +1690,25 @@ function _registerCommands(context) {
 						cp.spawn('xdg-open', [cacheDir], { detached: true });
 					}
 				} catch (e) {
-					global.showAutoCloseNotification('error', `qqq: 打开缓存目录失败: ${e.message}`);
+					global.showAutoCloseNotification('error', q('qqq.ui.openCacheDirError', e.message));
 				}
 			} else if (selected.id === "deleteYtDlp") {
 				// 删除视频下载组件 yt-dlp.exe
 				try {
 					const globalStoragePath = context?.globalStorageUri?.fsPath;
 					if (!globalStoragePath) {
-						global.showAutoCloseNotification('warning', "qqq: 无法获取存储路径");
+						global.showAutoCloseNotification('warning', q('qqq.ui.noStoragePath'));
 						return;
 					}
 					const ytDlpPath = path.join(globalStoragePath, 'yt-dlp.exe');
 					if (fs.existsSync(ytDlpPath)) {
 						fs.unlinkSync(ytDlpPath);
-						global.showAutoCloseNotification('info', `qqq: 已删除${ytDlpPath}`);
+						global.showAutoCloseNotification('info', q('qqq.ui.ytdlpDeleted', ytDlpPath));
 					} else {
-						global.showAutoCloseNotification('info', "qqq: yt-dlp.exe 不存在");
+						global.showAutoCloseNotification('info', q('qqq.ui.ytdlpNotExist'));
 					}
 				} catch (e) {
-					global.showAutoCloseNotification('error', `qqq: 删除 yt-dlp.exe 失败: ${e.message}`);
+					global.showAutoCloseNotification('error', q('qqq.ui.ytdlpDeleteError', e.message));
 				}
 			} else if (selected.id === "clearGlobalStates") {
 				// 清理 globalStates 数据库（保留状态区信息）
@@ -1747,9 +1747,9 @@ function _registerCommands(context) {
 						return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
 					};
 
-					global.showAutoCloseNotification('info', `qqq: globalStates 已清理 ${clearedCount} 条数据，共 ${formatBytes(totalSize)}。`);
+					global.showAutoCloseNotification('info', q('qqq.ui.globalStateCleared', clearedCount, formatBytes(totalSize)));
 				} catch (e) {
-					global.showAutoCloseNotification('error', `qqq: 清理 globalStates 失败: ${e.message}`);
+					global.showAutoCloseNotification('error', q('qqq.ui.globalStateClearError', e.message));
 				}
 			} else if (selected.id === "clearClipboardHistory") {
 				// 清空剪切板历史记录
@@ -1757,12 +1757,12 @@ function _registerCommands(context) {
 					const historyManager = global.clipboardHistoryManager;
 					if (historyManager && typeof historyManager.clearHistory === 'function') {
 						await historyManager.clearHistory({ deleteFiles: true });
-						global.showAutoCloseNotification('info', "qqq: 剪切板历史记录已清空");
+						global.showAutoCloseNotification('info', q('qqq.ui.clipboardHistoryCleared'));
 					} else {
-						global.showAutoCloseNotification('warning', "qqq: 剪切板历史管理器未初始化");
+						global.showAutoCloseNotification('warning', q('qqq.ui.clipboardManagerNotInit'));
 					}
 				} catch (e) {
-					global.showAutoCloseNotification('error', `qqq: 清空剪切板历史失败: ${e.message}`);
+					global.showAutoCloseNotification('error', q('qqq.ui.clipboardClearError', e.message));
 				}
 			}
 		})),
@@ -1784,10 +1784,10 @@ function _registerCommands(context) {
 
 						if (status.imperfect) {
 							const reasonMsg = {
-								'no_interpreter': 'Python 解释器未安装',
-								'interpreter_invalid': 'Python 解释器不可用',
-								'deps_missing': `缺少依赖: ${status.missing.join(', ')}`,
-								'no_context': '环境未就绪'
+								'no_interpreter': q('qqq.log.pythonNoInterpreter'),
+								'interpreter_invalid': q('qqq.log.pythonInvalid'),
+								'deps_missing': q('qqq.log.pythonDepsMissing', status.missing.join(', ')),
+								'no_context': q('qqq.log.pythonNoContext')
 							}[status.reason] || status.reason;
 							global.logMessage(q('qqq.log.pythonEnvImperfect', reasonMsg), "WARN");
 						}

@@ -242,6 +242,10 @@
             "pythonNoContext": "환경이 준비되지 않음"
         },
         "ui": {
+            "fileCopyProgress": "qqq: 파일 복사 중...",
+            "openDocFirst": "먼저 문서를 열어주세요",
+            "videoUrlPlaceholder": " 동영상 포함 URL 붙여넣기 ",
+            "invalidUrl": "잘못된 URL",
             "taskCancelledRollback": "{0} 취소되고 롤백됨",
             "anchorLostRollback": "{0} 앵커 손실, 롤백됨",
             "downloadFailedRollback": "{0} 다운로드 실패, 롤백됨",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "데이터를 지우고 잃게 됩니다",
             "clearClipboardHistory": "클립보드 기록 지우기",
             "selectTitle": "캐시 작업 선택",
-            "selectPlaceholder": "실행할 캐시 작업 선택"
+            "selectPlaceholder": "실행할 캐시 작업 선택",
+            "uninitialized": "초기화되지 않음"
         }
     },
     "video": {

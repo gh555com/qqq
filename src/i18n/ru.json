@@ -242,6 +242,10 @@
             "pythonNoContext": "Среда не готова"
         },
         "ui": {
+            "fileCopyProgress": "qqq: Копирование файлов...",
+            "openDocFirst": "Пожалуйста, сначала откройте документ",
+            "videoUrlPlaceholder": " Вставьте URL с видео ",
+            "invalidUrl": "Неверный URL",
             "taskCancelledRollback": "{0} отменено и откачено",
             "anchorLostRollback": "{0} якорь потерян, откачено",
             "downloadFailedRollback": "{0} загрузка не удалась, откачено",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "Очистить данные",
             "clearClipboardHistory": "Очистить историю буфера обмена",
             "selectTitle": "Выберите операцию с кэшем",
-            "selectPlaceholder": "Выберите операцию с кэшем для выполнения"
+            "selectPlaceholder": "Выберите операцию с кэшем для выполнения",
+            "uninitialized": "Не инициализировано"
         }
     },
     "video": {

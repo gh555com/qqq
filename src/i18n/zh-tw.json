@@ -242,6 +242,10 @@
             "pythonNoContext": "環境未就緒"
         },
         "ui": {
+            "fileCopyProgress": "qqq: 檔案複製中...",
+            "openDocFirst": "請先開啟一個文件",
+            "videoUrlPlaceholder": " 直接貼上包含影片的網址 ",
+            "invalidUrl": "無效網址",
             "taskCancelledRollback": "{0} 已取消並回滾",
             "anchorLostRollback": "{0} 錨點遺失，已回滾",
             "downloadFailedRollback": "{0} 下載失敗，已回滾",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "清空資料",
             "clearClipboardHistory": "清空剪貼簿歷史記錄",
             "selectTitle": "選擇快取操作",
-            "selectPlaceholder": "選擇要執行的快取操作"
+            "selectPlaceholder": "選擇要執行的快取操作",
+            "uninitialized": "未初始化"
         }
     },
     "video": {

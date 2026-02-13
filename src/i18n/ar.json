@@ -242,6 +242,10 @@
             "pythonNoContext": "البيئة غير جاهزة"
         },
         "ui": {
+            "fileCopyProgress": "qqq: جاري نسخ الملفات...",
+            "openDocFirst": "يرجى فتح مستند أولاً",
+            "videoUrlPlaceholder": " ألصق رابط مع فيديو ",
+            "invalidUrl": "رابط غير صالح",
             "taskCancelledRollback": "{0} تم إلغاؤه والتراجع عنه",
             "anchorLostRollback": "{0} فُقد المرساة، تم التراجع",
             "downloadFailedRollback": "{0} فشل التحميل، تم التراجع",
@@ -272,7 +276,8 @@
             "clearGlobalStatesDesc": "مسح البيانات",
             "clearClipboardHistory": "مسح سجل الحافظة",
             "selectTitle": "اختر عملية ذاكرة التخزين المؤقت",
-            "selectPlaceholder": "اختر عملية ذاكرة التخزين المؤقت للتنفيذ"
+            "selectPlaceholder": "اختر عملية ذاكرة التخزين المؤقت للتنفيذ",
+            "uninitialized": "غير مهيأ"
         }
     },
     "video": {

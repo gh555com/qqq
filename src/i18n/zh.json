@@ -242,6 +242,10 @@
             "pythonNoContext": "环境未就绪"
         },
         "ui": {
+            "fileCopyProgress": "qqq: 文件复制...",
+            "openDocFirst": "请先打开一个文档",
+            "videoUrlPlaceholder": " 直接粘贴 [ 包含视频的网址 ]",
+            "invalidUrl": "无效网址",
             "taskCancelledRollback": "{0} 已取消并回滚",
             "anchorLostRollback": "{0} 锚点丢失，已回滚",
             "downloadFailedRollback": "{0} 下载失败，已回滚",
@@ -263,16 +267,17 @@
             "clipboardClearError": "qqq: 清空剪切板历史失败: {0}"
         },
         "clearCache": {
-            "clearCooldown": "清除依赖下载满冷却时间（默认72小时）",
+            "clearCooldown": "清除依赖下载滴冷却时间（默认72小时）",
             "clearCooldownDesc": " 便于立即重新下载",
             "openCacheDir": "打开缓存目录",
             "deleteYtDlp": "删除视频下载组件 yt-dlp",
             "deleteYtDlpDesc": "可触发 yt-dlp 更新",
             "clearGlobalStates": "清理 globalStates 数据库",
-            "clearGlobalStatesDesc": "清空并丢失 ：1、漫游器快速跳转阵列；2、视频增强下载流程已指定满浏览器入口；3、已缓存满用于 “事物回滚和文件去重” 满关键信息；4、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 满精细记忆。",
+            "clearGlobalStatesDesc": "清空并丢失 ：1、漫游器快速跳转阵列；2、视频增强下载流程已指定滴浏览器入口；3、已缓存滴用于 “事物回滚和文件去重” 滴关键信息；4、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆。",
             "clearClipboardHistory": "清空剪切板历史记录",
             "selectTitle": "选择缓存操作",
-            "selectPlaceholder": "选择要执行的缓存操作"
+            "selectPlaceholder": "选择要执行的缓存操作",
+            "uninitialized": "未初始化"
         }
     },
     "video": {
