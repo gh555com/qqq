@@ -7,7 +7,7 @@ const h = require('./h');
 const { getSharedDownloader } = require('./dow');
 const https = require('https');
 const global = require('./global');
-const { TaskCounter, TaskMessage } = require('./global');
+const { TaskCounter, TaskMessage, formatTimeCompact, formatBytesCompact } = require('./global');
 const { q } = require('./i18n');
 
 // ★ 模块级工具函数
@@ -37,7 +37,7 @@ const QvideoMsg = {
 
         // ★ 耗时：只有 >20分钟才显示
         const TWENTY_MIN = 20 * 60 * 1000;
-        const timePart = elapsedMs >= TWENTY_MIN ? ` (${this._formatTime(elapsedMs)})` : '';
+        const timePart = elapsedMs >= TWENTY_MIN ? ` (${formatTimeCompact(elapsedMs)})` : '';
 
         // ★ 状态后缀
         const statusPart = statusSuffix ? ` (${statusSuffix})` : '';
@@ -109,19 +109,7 @@ const QvideoMsg = {
         }
     },
 
-    /**
-     * ★ 格式化时间 mm:ss 或 h:mm:ss
-     */
-    _formatTime(ms) {
-        const total = Math.floor(ms / 1000);
-        const s = total % 60;
-        const m = Math.floor(total / 60) % 60;
-        const h = Math.floor(total / 3600);
-        const ss = String(s).padStart(2, '0');
-        const mm = String(m).padStart(2, '0');
-        if (h > 0) return `${h}:${mm}:${ss}`;
-        return `${m}:${ss}`;
-    },
+    // ★ _formatTime 已移至 global.js 的 formatTimeCompact，避免重复实现
 
     /**
      * 生成任务完成消息
@@ -572,13 +560,7 @@ class Qvideo {
         this.outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
     }
 
-    _formatBytesSimple(bytes) {
-        if (!bytes || bytes <= 0) return "0k";
-        const k = 1024;
-        const m = 1048576;
-        if (bytes >= m) return Math.round(bytes / m) + "m";
-        return Math.round(bytes / k) + "k";
-    }
+    // ★ _formatBytesSimple 已移至 global.js 的 formatBytesCompact，避免重复实现
 
     _parseSizeToBytes(sizeStr) {
         if (!sizeStr) return 0;
@@ -1287,7 +1269,7 @@ class Qvideo {
                             }
                         }
 
-                        const totalStr = this._formatBytesSimple(finalBytes);
+                        const totalStr = formatBytesCompact(finalBytes);
                         // ★ 计算已耗时（格式 mm:ss 或 hh:mm:ss）
                         const elapsedMs = Date.now() - downloadStartMs;
                         progress.report({ message: QvideoMsg.progress(task, totalStr, url, elapsedMs, '') });
@@ -1504,7 +1486,7 @@ class Qvideo {
             }
 
             const landedCount = (outcome.landedFiles || []).length;
-            const totalStr = this._formatBytesSimple(outcome.finalTotalBytes || 0);
+            const totalStr = formatBytesCompact(outcome.finalTotalBytes);
 
             const msg = this._buildDoneMessage(task, landedCount, totalStr, outcome.urlSnippet);
             this.log(msg);
@@ -2519,7 +2501,7 @@ $of = $vi.OriginalFilename;
                     // ★ 基于 transId 前缀精确匹配，100% 不会多任务互相污染
                     const bytes = this._scanTaskBytes(targetDir, task.transId);
                     const elapsedMs = Date.now() - startMs;
-                    progress.report({ message: QvideoMsg.progress(task, this._formatBytesSimple(bytes), url, elapsedMs, '增强下载中') });
+                    progress.report({ message: QvideoMsg.progress(task, formatBytesCompact(bytes), url, elapsedMs, '增强下载中') });
                 }, 500);
 
                 if (this._isTaskCancelled(task)) return null;
@@ -2740,7 +2722,7 @@ $of = $vi.OriginalFilename;
             if (this._isTaskCancelled(task)) return null;
 
             const landedCount = (out?.landedFiles || []).length;
-            const totalStr = this._formatBytesSimple(out?.totalBytes || 0);
+            const totalStr = formatBytesCompact(out?.totalBytes);
 
             const msg = this._buildDoneMessage(task, landedCount, totalStr, out?.urlSnippet || urlSnippet);
             this.log(msg);

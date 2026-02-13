@@ -334,33 +334,8 @@ function isImageExtForClipboard(ext) {
     return IMAGE_EXTS_FOR_CLIPBOARD.has(ext.toLowerCase());
 }
 
-/**
- * 格式化大小（如 "222m"、"1.2g"）
- * @param {number} bytes - 字节数
- * @returns {string}
- */
-function _formatSizeSimple(bytes) {
-    if (bytes < 1024) return `${bytes}b`;
-    if (bytes < 1048576) return `${Math.round(bytes / 1024)}k`;
-    if (bytes < 1073741824) return `${Math.round(bytes / 1048576)}m`;
-    return `${(bytes / 1073741824).toFixed(1)}g`;
-}
-
-/**
- * 格式化时间 mm:ss 或 h:mm:ss
- * @param {number} ms - 毫秒数
- * @returns {string}
- */
-function _formatTime(ms) {
-    const total = Math.floor(ms / 1000);
-    const s = total % 60;
-    const m = Math.floor(total / 60) % 60;
-    const h = Math.floor(total / 3600);
-    const ss = String(s).padStart(2, '0');
-    const mm = String(m).padStart(2, '0');
-    if (h > 0) return `${h}:${mm}:${ss}`;
-    return `${m}:${ss}`;
-}
+// ★ 使用 global.js 的统一格式化函数，避免重复实现
+const { formatBytesCompact, formatTimeCompact } = global;
 
 /**
  * 生成带大小和时间的进度消息
@@ -372,8 +347,8 @@ function _formatTime(ms) {
  */
 function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
     const TWENTY_MIN = 20 * 60 * 1000;
-    const sizeStr = totalSize > 0 ? ` ${_formatSizeSimple(totalSize)}` : '';
-    const timePart = elapsedMs >= TWENTY_MIN ? ` (${_formatTime(elapsedMs)})` : '';
+    const sizeStr = totalSize > 0 ? ` ${formatBytesCompact(totalSize)}` : '';
+    const timePart = elapsedMs >= TWENTY_MIN ? ` (${formatTimeCompact(elapsedMs)})` : '';
 
     // 格式：[复制文件夹 1/3] 222m (31:22) folderName
     return `[${stepInfo}]${sizeStr}${timePart} ${itemName}`;

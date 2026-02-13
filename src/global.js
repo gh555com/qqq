@@ -2278,6 +2278,34 @@ function formatHours(totalSeconds) {
 	return `${h}h : ${m.toString().padStart(2, '0')}m`;
 }
 
+/**
+ * ★ 统一的时间格式化函数 (mm:ss 或 h:mm:ss)
+ * @param {number} ms - 毫秒数
+ * @returns {string}
+ */
+function formatTimeCompact(ms) {
+	const total = Math.floor(ms / 1000);
+	const s = total % 60;
+	const m = Math.floor(total / 60) % 60;
+	const h = Math.floor(total / 3600);
+	const ss = String(s).padStart(2, '0');
+	const mm = String(m).padStart(2, '0');
+	if (h > 0) return `${h}:${mm}:${ss}`;
+	return `${m}:${ss}`;
+}
+
+/**
+ * ★ 统一的简洁字节格式化函数 (如 "222m", "1.2g")
+ * @param {number} bytes - 字节数
+ * @returns {string}
+ */
+function formatBytesCompact(bytes) {
+	if (!bytes || bytes <= 0) return '0k';
+	if (bytes < 1048576) return `${Math.round(bytes / 1024)}k`;
+	if (bytes < 1073741824) return `${Math.round(bytes / 1048576)}m`;
+	return `${(bytes / 1073741824).toFixed(1)}g`;
+}
+
 function formatCompactTime(totalSeconds) {
 	const h = Math.floor(totalSeconds / 3600);
 	const m = Math.floor((totalSeconds % 3600) / 60);
@@ -3783,6 +3811,8 @@ module.exports = {
 	// 格式化辅助 (给 CodeLens 等用)
 	formatBytes,
 	formatHours,
+	formatTimeCompact,    // ★ 统一时间格式化 (mm:ss 或 h:mm:ss)
+	formatBytesCompact,   // ★ 统一简洁字节格式化 ("222m", "1.2g")
 
 	// 路径工具函数
 	canonicalizeExistingPath,
