@@ -1018,6 +1018,7 @@ class ClipboardHistorySidebarProvider {
 
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
+        this._kopeSfxBase64 = null;  // ★ kope 音效 base64 缓存（懒加载）
 
         // ★ 新增：跟踪 Python 播放状态，支持绑定/解绑
         this._pythonPlayState = {
@@ -1032,13 +1033,35 @@ class ClipboardHistorySidebarProvider {
     }
 
     /**
-     * ★ 重置音频源状态（当 Python 环境"从无到有"时调用）
+     * ★ 重置音频源状态（当 Python 环境“从无到有”时调用）
      * 下次播放时会重新探测 Python 引擎
      */
     resetAudioSource() {
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
         this._global.logMessage(`[Q4] ${q('q4.log.audioReset')}`, "INFO");
+    }
+
+    /**
+     * ★ 懒加载 kope 音效 base64（仅在需要时加载一次）
+     */
+    _ensureKopeSfx() {
+        if (this._kopeSfxBase64) return this._kopeSfxBase64;
+        try {
+            const extPath = this._context.extensionPath;
+            const kopeDir = path.join(extPath, 'assets', 'kope');
+            const arr = [];
+            for (let i = 1; i <= 7; i++) {
+                const p = path.join(kopeDir, `${i}.mp3`);
+                if (fs.existsSync(p)) {
+                    arr.push(fs.readFileSync(p).toString('base64'));
+                }
+            }
+            this._kopeSfxBase64 = arr.length > 0 ? arr : null;
+        } catch {
+            this._kopeSfxBase64 = null;
+        }
+        return this._kopeSfxBase64;
     }
 
     resolveWebviewView(webviewView) {
@@ -1121,6 +1144,15 @@ class ClipboardHistorySidebarProvider {
                         await this._historyManager.copyToClipboard(node.content);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
+                        // ★ 检测 Python 状态，不可用时用 webview 播放随机 kope 音效
+                        const source = await this._ensureAudioSource();
+                        if (source !== AUDIO_SOURCE.PYTHON) {
+                            const sfx = this._ensureKopeSfx();
+                            if (sfx && sfx.length > 0) {
+                                const b64 = sfx[Math.floor(Math.random() * sfx.length)];
+                                this._postMessage({ command: 'playCopySfx', base64: b64 });
+                            }
+                        }
                     }
                     break;
                 }
@@ -2290,6 +2322,8 @@ class ClipboardHistorySidebarProvider {
                     playAudio(m.base64, m.count);
                 } else if (m.command === 'stopAudio') {
                     stopAudio();
+                } else if (m.command === 'playCopySfx') {
+                    playCopySfx(m.base64);
                 }
             });
 
@@ -2337,6 +2371,16 @@ class ClipboardHistorySidebarProvider {
                 updateSavorText();
                 var iconLoop = document.querySelector('.icon-loop');
                 if (iconLoop) iconLoop.classList.remove('spinning');
+            }
+
+            // ★ 复制音效兆底（Python 不可用时播放 kope mp3）
+            function playCopySfx(base64) {
+                if (!base64) return;
+                try {
+                    var audio = new Audio('data:audio/mp3;base64,' + base64);
+                    audio.volume = 0.6;
+                    audio.play();
+                } catch(e) {}
             }
 
             function playAudio(base64, count) {

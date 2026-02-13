@@ -2185,9 +2185,8 @@ document.addEventListener('DOMContentLoaded', () => {
       addressInput.value = currentPath;
       updateAddressDisplay(currentPath);
       addressInput.setAttribute('data-tooltip', currentPath || '');
-      navigator.clipboard.writeText(currentPath).then(() => {
-        vscode.postMessage({ command: 'playCopySound' });
-      }).catch(() => {});
+      navigator.clipboard.writeText(currentPath).catch(() => {});
+      // ★ 剪贴板音效由 Python clipboard_watcher 统一处理
     });
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {

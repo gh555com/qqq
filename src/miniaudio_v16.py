@@ -1157,6 +1157,10 @@ class UltraFastConcurrentSFX:
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+# ★ 兼容修复：某些 Python 版本的 wintypes 没有 LRESULT
+if not hasattr(wt, 'LRESULT'):
+    wt.LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+
 WM_CLIPBOARDUPDATE = 0x031D
 WM_CLOSE = 0x0010
 HWND_MESSAGE = wt.HWND(-3)

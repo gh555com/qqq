@@ -1418,7 +1418,15 @@ async function startDaemons() {
 
 			// ★ Python 可用时启动剪贴板监听 (kope 音效)
 			if (pythonBridge.isAvailable()) {
-				pythonBridge.call("start_clipboard_watcher", {}, 3000).catch(() => { });
+				pythonBridge.call("start_clipboard_watcher", {}, 5000).then(res => {
+					if (res && res.status === 'started') {
+						logMessage("[Audio] Clipboard watcher started (kope sfx)", "INFO");
+					} else {
+						logMessage(`[Audio] Clipboard watcher failed: ${JSON.stringify(res)}`, "WARN");
+					}
+				}).catch(e => {
+					logMessage(`[Audio] Clipboard watcher error: ${e?.message || e}`, "WARN");
+				});
 			}
 
 			// ★ 检测 Linux 依赖（延迟执行，避免阻塞启动流程）

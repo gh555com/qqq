@@ -19,6 +19,7 @@ from collections import OrderedDict
 import re
 import base64
 import importlib.util
+import threading
 
 # =============================================================================
 #  音频引擎（miniaudio_v16）
@@ -56,12 +57,6 @@ def _init_audio_engine():
             spec = importlib.util.spec_from_file_location("miniaudio_v16", ma_path)
             ma_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(ma_module)
-
-            # 先验证环境
-            validate_result = ma_module.NonBlockingAudioEngine.validate_environment(verbose=False, timeout_sec=0.15)
-            if validate_result != "ok":
-                _AUDIO_ENGINE_ERROR = validate_result
-                return None, _AUDIO_ENGINE_ERROR
 
             # 初始化引擎（silent=True 不打印日志）
             _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(asset_folder=".", max_workers=8, silent=True)
@@ -278,12 +273,12 @@ def _get_audio_hub():
             v16 = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(v16)
 
-            # 创建 AudioHub: sfx_use_music_engine=False 独立引擎，内存 PCM 播放最快
+            # 创建 AudioHub: sfx_use_music_engine=True 复用音乐引擎，避免设备冲突
             hub = v16.AudioHub(
                 asset_folder=".",
                 music_workers=16,
-                sfx_workers=24,           # 24 并发音效通道
-                sfx_use_music_engine=False,  # 独立 SFX 引擎
+                sfx_workers=24,
+                sfx_use_music_engine=True,  # ★ 复用音乐引擎，避免独立设备问题
                 silent=True
             )
 
@@ -294,6 +289,9 @@ def _get_audio_hub():
 
             return hub
         except Exception as e:
+            import traceback
+            sys.stderr.write(f"[AudioHub] Init failed: {e}\n{traceback.format_exc()}")
+            sys.stderr.flush()
             return None
 
 def _play_sfx(category: str, idx: int = -1):
