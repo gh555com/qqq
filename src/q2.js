@@ -2773,10 +2773,10 @@ const isWindows = {{IS_WINDOWS}};
 document.addEventListener('keydown', function(e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'c' || key === 'f7') {
+  if (key === 'a' || key === 'f7') {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
-  } else if (key === 'z' && isWindows) {
+  } else if (key === 'x' && isWindows) {
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
   }
@@ -2810,7 +2810,7 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
           const fileName = escapeHtmlAttribute(path.basename(item.path));
           return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
         } else {
-          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')">\ud83d\udccc</span></div>`;
+          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M4 17 L16 5 M16 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
       })
       .join("")}
@@ -2840,7 +2840,7 @@ function generateRecycleBinItemHtml(item) {
     const fileName = escapeHtmlAttribute(path.basename(item.path));
     return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
   } else {
-    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')">\ud83d\udccc</span></div>`;
+    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M4 17 L16 5 M16 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
 }
 
@@ -2907,7 +2907,7 @@ function getWebviewContent(currentPath) {
     // Admin terminal context menu - platform specific (hardcoded, no i18n)
     .replace("{{ADMIN_TERM_1}}", process.platform === 'win32' ? 'CMD' : 'Terminal')
     .replace("{{ADMIN_TERM_2_HTML}}", process.platform === 'win32'
-      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut">= "z"</span></div>`
+      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut">= "x"</span></div>`
       : '')
     .replace("{{IS_WINDOWS}}", process.platform === 'win32' ? 'true' : 'false');
 

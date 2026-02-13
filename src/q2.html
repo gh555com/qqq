@@ -337,6 +337,10 @@
 		}
 
 		/* 文件行：整行 hover */
+		.recycle-file {
+			padding-left: 16px;
+		}
+
 		.recycle-file:hover {
 			background-color: var(--bg-highlight);
 		}
@@ -359,19 +363,17 @@
 		.recycle-dir .pin-icon {
 			flex-shrink: 0;
 			padding: 3px 10px;
-			font-size: 13px;
-			opacity: 0.3;
 			cursor: pointer;
-			transition: opacity 0.15s, background-color 0.15s;
-		}
-
-		.recycle-dir:hover .pin-icon {
-			opacity: 0.9;
+			transition: color 0.15s, background-color 0.15s, opacity 0.15s;
+			color: var(--text-dim);
+			opacity: 0.4;
+			display: flex;
+			align-items: center;
 		}
 
 		.recycle-dir .pin-icon:hover {
 			background-color: rgb(223, 202, 136);
-			opacity: 1;
+			color: var(--text-primary);
 		}
 
 		/* 图钉 hover 时：暖金色下划线延伸到左边界，标识要 pin 的文件夹 */
@@ -1108,7 +1110,7 @@
 	<div id="emptyContextMenu" class="context-menu">
 		<div class="context-menu-item" data-action="openAdminCmd">
 			<span>{{ADMIN_TERM_1}}</span>
-			<span class="context-menu-shortcut">= "c"</span>
+		<span class="context-menu-shortcut">= "a"</span>
 		</div>
 		{{ADMIN_TERM_2_HTML}}
 	</div>
