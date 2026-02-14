@@ -1026,7 +1026,7 @@ mod win {
                 }
             } else if has_files {
                 let h_drop = GetClipboardData(CF_HDROP);
-                if h_drop != std::ptr::null_mut() {
+                if h_drop as isize != 0 {
                     let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
                     let mut paths: Vec<String> = Vec::new();
 
@@ -1155,7 +1155,7 @@ mod win {
 
             if IsClipboardFormatAvailable(CF_HDROP) != 0 {
                 let h_drop = GetClipboardData(CF_HDROP);
-                if h_drop != std::ptr::null_mut() {
+                if h_drop as isize != 0 {
                     let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
                     let mut paths: Vec<PyV> = Vec::new();
 
