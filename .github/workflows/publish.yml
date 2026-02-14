@@ -1,0 +1,67 @@
+name: publish
+
+on:
+  push:
+    branches:
+      - qq
+  workflow_dispatch:
+
+jobs:
+  build-rust:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            asset: q_linux_x64
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            asset: q_win_x64.exe
+            target: x86_64-pc-windows-msvc
+          - os: macos-14
+            asset: q_mac_x64
+            target: x86_64-apple-darwin
+          - os: macos-14
+            asset: q_mac_arm64
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+      - name: build
+        run: |
+          cd rust
+          cp Cargo_win.toml Cargo.toml 2>/dev/null || true
+          cargo build --release --target ${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/q ../assets/${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: assets/${{ matrix.asset }}
+
+  release:
+    needs: build-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+      - run: npm run bundle
+      - name: package
+        run: |
+          rm -rf assets/runtimes/x86
+          npx @vscode/vsce package --target win32-x64 -o dist/qqq-win32-x64.vsix
+          git checkout assets/runtimes/x86 2>/dev/null || true
+      - name: publish
+        run: |
+          npx @vscode/vsce publish --packagePath dist/qqq-win32-x64.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
