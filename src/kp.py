@@ -1681,9 +1681,9 @@ def _dispatch_action(cmd, cancel_version: int = None):
     #  音效播放命令 (play_sfx)
     # =============================================================================
     if action == "play_sfx":
-        category = payload.get("category", "kope")
-        idx = payload.get("idx", -1)  # -1 = 随机
-        name = payload.get("name")    # 指定文件名（优先级最高）
+        category = cmd.get("category", "kope")
+        idx = cmd.get("idx", -1)  # -1 = 随机
+        name = cmd.get("name")    # 指定文件名（优先级最高）
         _play_sfx(category, idx, name)
         out["status"] = "played"
         return out

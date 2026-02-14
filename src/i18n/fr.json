@@ -66,7 +66,7 @@
     },
     "q2": {
         "ui": {
-            "pin": "Épingler",
+            "pin": "Pin",
             "newFile": "Nouveau fichier",
             "newFolder": "Nouveau dossier",
             "openFolder": "Ouvrir le dossier actuel dans l'explorateur",
