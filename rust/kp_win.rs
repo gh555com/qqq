@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
@@ -151,8 +151,14 @@ impl serde_json::ser::Formatter for PyFormatter {
 }
 
 fn dumps_py(value: &PyV, _ensure_ascii: bool) -> String {
-    // 简化：不再尝试模拟 Python 的 separators 细节，直接用标准 JSON 确保 100% 合法
-    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string())
+    let mut buf: Vec<u8> = Vec::new();
+    let formatter = PyFormatter;
+    let mut ser = serde_json::ser::Serializer::with_formatter(&mut buf, formatter);
+    if value.serialize(&mut ser).is_ok() {
+        String::from_utf8(buf).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    }
 }
 
 // =============================================================================
@@ -570,6 +576,67 @@ fn python_like_ext_lower(path: &Path) -> String {
     ext
 }
 
+/// 只获取单文件或目录递归总大小（极限优化，不统计后缀名）
+fn get_path_size(path: &str) -> PyV {
+    if path.is_empty() {
+        return PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("empty path".to_string())),
+        ]);
+    }
+
+    let p = PathBuf::from(path);
+
+    // 文件：直接 stat
+    if p.is_file() {
+        match fs::metadata(&p) {
+            Ok(meta) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(true)),
+                    ("total_size".to_string(), py_num_u64(meta.len())),
+                ]);
+            }
+            Err(e) => {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(e.to_string())),
+                ]);
+            }
+        }
+    }
+
+    // 目录：递归累加（不统计 ext_stats）
+    if !p.exists() || !p.is_dir() {
+        return PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("path not a file or directory".to_string())),
+        ]);
+    }
+
+    let mut total_size: u64 = 0;
+
+    for entry in WalkDir::new(&p).follow_links(false) {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let sp = entry.path();
+        let meta = match fs::metadata(sp) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        total_size = total_size.saturating_add(meta.len());
+    }
+
+    PyV::Obj(vec![
+        ("success".to_string(), PyV::Bool(true)),
+        ("total_size".to_string(), py_num_u64(total_size)),
+    ])
+}
+
 fn get_folder_info(folder_path: &str) -> PyV {
     // Python:
     // if not folder_path or not isinstance(folder_path, str):
@@ -755,6 +822,10 @@ mod win {
     const CF_HDROP: u32 = 15;
     const CF_DIB: u32 = 8;
     const CF_DIBV5: u32 = 17;
+
+    const SHGFI_ICON: u32 = 0x000000100;
+    const SHGFI_LARGEICON: u32 = 0x000000000;
+    const SHGFI_SMALLICON: u32 = 0x000000001;
 
     #[allow(unused_imports)]
     use windows_sys::Win32::System::DataExchange::{
@@ -1131,9 +1202,62 @@ mod win {
         bmiColors: [u32; 3],
     }
 
+    // =============================================================================
+    //  disk_free —— 获取磁盘剩余空间 (Windows: GetDiskFreeSpaceExW)
+    // =============================================================================
+
+    pub fn get_disk_free(drive: &str) -> PyV {
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+        // 处理盘符格式：C -> C:\, C: -> C:\
+        let drive_path = if drive.is_empty() {
+            "C:\\".to_string()
+        } else {
+            let d = drive.trim().to_uppercase();
+            if d.len() == 1 && d.chars().next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
+                format!("{}:\\", d)
+            } else if d.len() == 2 && d.ends_with(':') {
+                format!("{}\\" , d)
+            } else if !d.ends_with('\\') && !d.ends_with('/') {
+                format!("{}\\" , d)
+            } else {
+                d
+            }
+        };
+
+        let wide_path = to_wide_null(&drive_path);
+
+        let mut free_bytes_available: u64 = 0;
+        let mut total_bytes: u64 = 0;
+        let mut total_free_bytes: u64 = 0;
+
+        let result = unsafe {
+            GetDiskFreeSpaceExW(
+                wide_path.as_ptr(),
+                &mut free_bytes_available,
+                &mut total_bytes,
+                &mut total_free_bytes,
+            )
+        };
+
+        if result != 0 {
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(true)),
+                ("free".to_string(), py_num_u64(free_bytes_available)),
+                ("total".to_string(), py_num_u64(total_bytes)),
+                ("used".to_string(), py_num_u64(total_bytes.saturating_sub(free_bytes_available))),
+            ])
+        } else {
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str(format!("GetDiskFreeSpaceExW failed for: {}", drive_path))),
+            ])
+        }
+    }
+
     pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
         // Python 逻辑：
-        // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_SMALLICON)
+        // - SHGetFileInfoW(path, ..., SHGFI_ICON | SHGFI_LARGEICON)
         // - CreateCompatibleDC + CreateDIBSection 32bpp top-down
         // - DrawIconEx
         // - BGRA -> PNG base64
@@ -1146,7 +1270,7 @@ mod win {
                 0,
                 &mut shfi,
                 std::mem::size_of::<SHFILEINFOW>() as u32,
-                SHGFI_ICON | SHGFI_SMALLICON,
+                SHGFI_ICON | SHGFI_LARGEICON,
             );
 
             if res == 0 || shfi.hIcon == std::ptr::null_mut() {
@@ -1172,8 +1296,8 @@ mod win {
                 return None;
             }
 
-            let width: i32 = 16;
-            let height: i32 = 16;
+            let width: i32 = 32;
+            let height: i32 = 32;
 
             let mut bmi = BITMAPINFO32 {
                 bmiHeader: BITMAPINFOHEADER {
@@ -1380,6 +1504,24 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             }
             (PyV::Obj(out_pairs), false, false)
         }
+        "path_size" => {
+            // 极限优化版：只获取文件/目录大小，不统计后缀名
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = get_path_size(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        "disk_free" => {
+            // 获取磁盘剩余空间
+            let drive = cmd.get("drive").and_then(|v| v.as_str())
+                .or_else(|| cmd.get("path").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if let PyV::Obj(extra) = win::get_disk_free(drive) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
         _ => {
             let msg = format!("unknown action: {}", py_str_like(action_v));
             out_pairs.push(("error".to_string(), PyV::Str(msg)));
@@ -1393,12 +1535,12 @@ fn daemon_mode() {
     eprintln!("Daemon started. PID={}", process::id());
 
     let stdin = io::stdin();
-    let mut reader = io::BufReader::new(stdin.lock());
+    let mut reader = stdin.lock();
     let mut stdout = io::stdout();
 
     loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
+        let mut line_bytes: Vec<u8> = Vec::new();
+        match reader.read_until(b'\n', &mut line_bytes) {
             Ok(0) => {
                 // EOF
                 eprintln!("Daemon stdin EOF. Exiting.");
@@ -1412,6 +1554,7 @@ fn daemon_mode() {
             }
         }
 
+        let line = decode_utf8_ignore(&line_bytes);
         let line = line.trim();
         if line.is_empty() {
             continue;
