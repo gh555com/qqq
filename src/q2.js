@@ -2769,7 +2769,6 @@ function setupCustomScrollbar() {
     const midPoint = maxScroll / 2;
     const currentPos = container.scrollTop;
     const tolerance = 10; // 容差值，避免浮点精度问题
-
     if (e.key === '1') {
       e.preventDefault();
       if (currentPos <= midPoint + tolerance) {
@@ -3692,7 +3691,7 @@ function showSaveAsDialog() {
         // ★ 勾选音效
         if (global.pythonBridge?.isAvailable()) {
           const sfxName = message.isPinned ? "a1.mp3" : "pas2.mp3";
-          global.pythonBridge.call("play_sfx", { category: "yz", name: sfxName }, 1000).catch(() => {});
+          global.pythonBridge.call("play_sfx", { category: "yz", name: sfxName }, 1000).catch(() => { });
         }
         break;
 
