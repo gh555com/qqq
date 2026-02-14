@@ -2768,14 +2768,12 @@ function setupCustomScrollbar() {
     const maxScroll = container.scrollHeight - container.clientHeight;
     const midPoint = maxScroll / 2;
     const currentPos = container.scrollTop;
-    // 判断当前位置：上半部分（< midPoint）、下半部分（> midPoint）、中间
-    const inUpperHalf = currentPos < midPoint;
-    const inLowerHalf = currentPos > midPoint;
+    const tolerance = 10; // 容差值，避免浮点精度问题
 
     if (e.key === '1') {
       e.preventDefault();
-      if (inUpperHalf || currentPos === midPoint) {
-        // 上半部分或正好中间：直接到顶部
+      if (currentPos <= midPoint + tolerance) {
+        // 在中间或上半部分：直接到顶部
         container.scrollTop = 0;
       } else {
         // 下半部分：先到中间
@@ -2784,8 +2782,8 @@ function setupCustomScrollbar() {
       vscode.postMessage({ command: 'playEnterSfx' });
     } else if (e.key === '2') {
       e.preventDefault();
-      if (inLowerHalf || currentPos === midPoint) {
-        // 下半部分或正好中间：直接到底部
+      if (currentPos >= midPoint - tolerance) {
+        // 在中间或下半部分：直接到底部
         container.scrollTop = maxScroll;
       } else {
         // 上半部分：先到中间
@@ -3691,6 +3689,11 @@ function showSaveAsDialog() {
           currentConfig.recycleBin,
           message.isPinned
         );
+        // ★ 勾选音效
+        if (global.pythonBridge?.isAvailable()) {
+          const sfxName = message.isPinned ? "a1.mp3" : "pas2.mp3";
+          global.pythonBridge.call("play_sfx", { category: "yz", name: sfxName }, 1000).catch(() => {});
+        }
         break;
 
       case "save": {
