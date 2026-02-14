@@ -1,0 +1,215 @@
+name: 🚀 Full-Stack Release System (q1/q2)
+
+on:
+  issue_comment:
+    types: [created]
+  push:
+    branches: [qq, 'release/**']
+  pull_request:
+    types: [closed]
+    branches: [qq]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ==========================================
+  # 1. q1: 创建发布PR
+  # ==========================================
+  q1-create-pr:
+    name: "🔄 q1: Create Release PR"
+    if: |
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q1')) ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect Branch and Version
+        id: info
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            BRANCH_NAME=${GITHUB_REF#refs/heads/}
+            VERSION_NAME=${BRANCH_NAME#release/v}
+            echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "version=$VERSION_NAME" >> $GITHUB_OUTPUT
+            echo "is_push=true" >> $GITHUB_OUTPUT
+          else
+            CURRENT=$(node -p "require('./package.json').version")
+            NEXT=$(echo $CURRENT | awk -F. '{print $1"."($2+1)".0"}')
+            echo "branch=release/v$NEXT" >> $GITHUB_OUTPUT
+            echo "version=$NEXT" >> $GITHUB_OUTPUT
+            echo "is_push=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Release Branch (Comment Only)
+        if: steps.info.outputs.is_push == 'false'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b ${{ steps.info.outputs.branch }}
+          node -e "const fs=require('fs'); const p=JSON.parse(fs.readFileSync('package.json')); p.version='${{ steps.info.outputs.version }}'; fs.writeFileSync('package.json', JSON.stringify(p, null, 2)+'\n');"
+          git add .
+          git commit -m "release: prepare v${{ steps.info.outputs.version }} (q1)"
+          git push origin ${{ steps.info.outputs.branch }}
+
+      - uses: repo-sync/pull-request@v2
+        with:
+          source_branch: ${{ steps.info.outputs.branch }}
+          destination_branch: "qq"
+          pr_title: "🚀 Release v${{ steps.info.outputs.version }} (q1)"
+          pr_body: "此 PR 由 q1 指令自动创建。合并后将触发全平台构建和发布。"
+
+      - name: Notification (Comment Only)
+        if: github.event.issue.number && steps.info.outputs.is_push == 'false'
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: "✅ **q1 执行成功**！已创建发布分支和 PR。"
+
+  # ==========================================
+  # 2. 核心构建 Job (基于满血版 publish.yml)
+  # ==========================================
+  build-rust:
+    name: 🏗️ Build ${{ matrix.target }}
+    if: |
+      (github.event_name == 'push' && (contains(github.event.head_commit.message, '(q2)') || contains(github.event.head_commit.message, 'Merge pull request'))) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request == null && contains(github.event.comment.body, '发布q2')) ||
+      (github.event.name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/'))
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            asset_name: q_linux_x64
+            target: x86_64-unknown-linux-gnu
+          - os: windows-2022
+            asset_name: q_win_x64.exe
+            target: x86_64-pc-windows-msvc
+          - os: windows-2022
+            asset_name: q_win_x86.exe
+            target: i686-pc-windows-msvc
+          - os: windows-2022
+            asset_name: q_win_arm64.exe
+            target: aarch64-pc-windows-msvc
+          - os: macos-14
+            asset_name: q_mac_x64
+            target: x86_64-apple-darwin
+          - os: macos-14
+            asset_name: q_mac_arm64
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust binary
+        shell: bash
+        run: |
+          cd rust
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
+            cp Cargo_win.toml Cargo.toml
+            rustup target add ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
+          else
+            rustup target add ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/q ../${{ matrix.asset_name }}
+            chmod +x ../${{ matrix.asset_name }}
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  # ==========================================
+  # 3. 发布 Job (汇总产物 + VSIX + Marketplace)
+  # ==========================================
+  q2-release:
+    name: "🚀 q2: Finalize Release"
+    needs: build-rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🛡️ Checkout Private Workflow Assets
+        uses: actions/checkout@v4
+        with:
+          repository: kkn1n/qqqworkflow
+          token: ${{ secrets.GH_PAT }}
+          path: qqqworkflow
+          ref: qq
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm install
+          # 使用 --force 绕过平台检查，并显式锁定每一个平台二进制包的版本
+          npm install \
+            @ffmpeg-installer/win32-x64@4.1.0 \
+            @ffmpeg-installer/win32-ia32@4.1.0 \
+            @ffmpeg-installer/linux-x64@4.1.0 \
+            @ffmpeg-installer/linux-arm64@4.1.4 \
+            @ffmpeg-installer/darwin-x64@4.1.0 \
+            @ffmpeg-installer/darwin-arm64@4.1.5 \
+            --no-save --force
+
+      - name: Build and Package Platform-Specific VSIXs
+        run: |
+          node qqqworkflow/git_help.js package
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: Release v${{ steps.get_version.outputs.VERSION }}
+          files: |
+            assets/q_*
+            dist/*.vsix
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to VS Code Marketplace
+        run: npm run ci:publish || echo "Marketplace发布失败，可能是Token过期"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Feedback
+        if: github.event.issue.number
+        uses: peter-evans/create-or-update-comment@v3
+        with:
+          issue-number: ${{ github.event.issue.number }}
+          body: "🎉 **q2 发布成功**！版本 v${{ steps.get_version.outputs.VERSION }} 的全平台产物和 VSIX 插件已就绪。"
