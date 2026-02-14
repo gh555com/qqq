@@ -15,7 +15,17 @@ Conclusion: Rust > Python > N(D): Node Daemon (1st-level Fallback) > N(S): Node 
 
 This document evaluates and scores each engine across **14 dimensions** on a scale of 1-10 (10 being the best), providing insights into their respective use cases.
 
-Especially for the **Rust engine**: the **official gh555.com release** must be **version 16.0.0 or later** to support the Rust engine.
+
+
+News:
+
+Especially for the **Rust engine**: only **gh555.com Official Edition** with a version **≥ 16.0.0** officially supports the Rust engine.
+
+20260214: Starting from **v15.63.92**, the **Python engine** has independently added an audio system, such as global copy sound effects, q2 rover file operation sound effects, and more.The qqq official stance is very clear: **audio effects are mandatory and not optional**. If you want to disable sound effects, please choose an engine other than Python.
+
+
+
+
 
 
 | Engine                | Label | Implementation                       | Positioning              |
@@ -44,6 +54,7 @@ Especially for the **Rust engine**: the **official gh555.com release** must be *
 | 12. Cross-Platform Capability     |    7   |    8   |    **8**   |   ★☆☆  | Win/macOS/Linux coverage            |
 | 13. File Icon Extraction          |    9   |    9   |    **9**   |   ★★☆  | Multi-platform native APIs          |
 | 14. Disk Free Space Query         | **10** | **10** |      7     |   ★★☆  | Cross-platform disk usage retrieval |
+| 15. Sound Effects | Not Scored | Not Scored | Not Scored | Not Scored | No separate switch for sound effects; controlled by switching engines |
 
 ### Total Scores
 
@@ -251,7 +262,15 @@ Copying 10,000+ small files (e.g., `node_modules`):
 - **Rust**: Uses zero-extra-dep system calls: `GetDiskFreeSpaceExW` (Windows via windows-sys) and `statvfs` (Unix via libc). Both are standard system calls with no runtime dependencies.
 - **Node Fallback**: When Python/Rust unavailable, falls back to `fs.statfs` (Node 18.15+) or spawns `wmic`/`df` commands.
 
+---
 
+### 15. Sound Effects
+
+| Engine | Description |
+|:-------|:-----------:|
+| Python | Global sound effects |
+| Rust | No sound effects at all: especially for those who prefer silence |
+| Node Shell | Partial sound effects |
 
 
 
@@ -313,7 +332,14 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 本文档从 **14 个维度** 进行量化打分（1-10 分，10 分最优），助于理解各引擎滴适用场景。
 
-特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才支持 Rust 引擎。
+
+
+新闻：
+
+特别对于 **Rust 引擎**：**gh555.com 官方版**的版本号要**大于等于 16.0.0** 才正式支持 Rust 引擎。
+
+20260214：从 **v15.63.92** 开始，**Python 引擎**独立加入了音效系统比如：全局复制音效、q2漫游器 文件操作音效...等等，qqq 官方态度明确：**对于音效是强制加入不做可选项**。如果想关闭音效，请选择 Python 之外滴其他引擎。
+
 
 
 | 引擎 | 标志 | 实现方式 | 定位 |
@@ -342,6 +368,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 | 12. 跨平台能力 | 7 | 8 | **8** | ★☆☆ | Win/Mac/Linux 支持程度 |
 | 13. 文件原始图标提取 | 9 | 9 | **9** | ★★☆ | 多平台原生 API 支持 |
 | 14. 磁盘剩余空间查询 | **10** | **10** | 7 | ★★☆ | 跨平台磁盘用量获取 |
+| 15. 音效 | 不计分 | 不计分 | 不计分 | 不计分 | 是否打开音效不设开关、靠切换引擎实现 |
 
 ### 总分
 
@@ -355,7 +382,7 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 ---
 
-## 2. 按 维度详细分析
+## 2. 按维度详细分析
 
 ### 1. 冷启动速度
 
@@ -548,7 +575,15 @@ Copying 10,000+ small files (e.g., `node_modules`):
 - **Rust**: 使用零额外依赖系统调用：`GetDiskFreeSpaceExW` (Windows 通过 windows-sys) 和 `statvfs` (Unix 通过 libc)。两者都是标准系统调用，无运行时依赖。
 - **Node 兜底**: 当 Python/Rust 不可用时，回退到 `fs.statfs` (Node 18.15+) 或 spawn `wmic`/`df` 命令。
 
+---
 
+### 15. 音效
+
+| 引擎 | 说明 |
+|:-----|:--------:|
+| Python | 全局音效 |
+| Rust | 无任何音效：特别，如果你喜欢安静 |
+| Node Shell | 部分音效 |
 
 
 
