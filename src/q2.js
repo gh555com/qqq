@@ -3816,12 +3816,7 @@ function showSaveAsDialog() {
 
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
-        recordDirHistory(message.type === "folder" ? p : path.dirname(p));
-        // ★ 立即更新 sidebar
-        if (panel && activePanelAlive) {
-          const sbData = generateSidebarHtml(getConfig());
-          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
-        }
+        // w 键打开不记录历史
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
