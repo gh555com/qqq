@@ -1595,7 +1595,7 @@ fn daemon_mode() {
                     thread::sleep(Duration::from_secs(6));
                     unsafe {
                         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, ppid);
-                        if handle == 0 {
+                        if handle as isize == 0 {
                             eprintln!("Parent process {} died, exiting...", ppid);
                             process::exit(0);
                         }
