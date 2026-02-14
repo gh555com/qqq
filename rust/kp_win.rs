@@ -1588,7 +1588,8 @@ fn daemon_mode() {
         if let Ok(ppid) = ppid_str.parse::<u32>() {
             thread::spawn(move || {
                 use windows_sys::Win32::Foundation::CloseHandle;
-                use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+                use windows_sys::Win32::System::Threading::OpenProcess;
+                const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 
                 loop {
                     thread::sleep(Duration::from_secs(6));
