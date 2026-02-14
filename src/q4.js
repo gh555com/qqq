@@ -1204,12 +1204,6 @@ class ClipboardHistorySidebarProvider {
                 case 'recordGenericUsage':
                     if (msg.type) await this._historyManager.recordGenericUsage(msg.type);
                     break;
-                case 'playEnterSfx':
-                    // ★ 回车音效
-                    if (this._global.pythonBridge?.isAvailable()) {
-                        this._global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
-                    }
-                    break;
             }
         });
 
@@ -2069,7 +2063,6 @@ class ClipboardHistorySidebarProvider {
                     }
                     hideAllDropdowns();
                     el.searchBox.blur(); // ★ 回车后失去焦点
-                    post('playEnterSfx'); // ★ 回车音效
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
                 }
@@ -2277,7 +2270,6 @@ class ClipboardHistorySidebarProvider {
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
                     hideAllDropdowns();
-                    post('playEnterSfx'); // ★ 回车音效
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
                 }
@@ -2558,10 +2550,6 @@ async function searchHistoryCommand(historyManager) {
     quickPick.onDidAccept(async () => {
         const selected = quickPick.selectedItems[0];
         if (selected) {
-            // ★ 回车音效
-            if (global.pythonBridge?.isAvailable()) {
-                global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
-            }
             if (selected.isHistory) {
                 const node = historyManager.getItemById(selected.id);
                 if (node) {

@@ -2,21 +2,14 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.54.2",
+  "version": "15.65.0",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
     "vscode": "^1.73.0"
   },
   "activationEvents": [
-    "*",
-    "onCommand:qqq.q1",
-    "onCommand:qqq.q2",
-    "onCommand:qqq.pure",
-    "onCommand:qqq.allSettings",
-    "onCommand:qqq.cleanUp",
-    "onCommand:qqq.exportDoc",
-    "onCommand:qqq.exportZip"
+    "onStartupFinished"
   ],
   "main": "./dist/qqq.js",
   "contributes": {
@@ -33,9 +26,41 @@
     ],
     "configuration": [
       {
-        "title": "☀️ 核心",
+        "title": "%config.title.core%",
         "order": 10,
         "properties": {
+          "qqq.language": {
+            "order": 5,
+            "type": "string",
+            "default": "中文",
+            "enum": [
+              "中文",
+              "繁體中文",
+              "English",
+              "日本語",
+              "Deutsch",
+              "Русский",
+              "العربية",
+              "한국어",
+              "Español",
+              "Français",
+              "Português BR"
+            ],
+            "markdownEnumDescriptions": [
+              "%config.language.enum.zh%",
+              "%config.language.enum.zh-tw%",
+              "%config.language.enum.en%",
+              "%config.language.enum.ja%",
+              "%config.language.enum.de%",
+              "%config.language.enum.ru%",
+              "%config.language.enum.ar%",
+              "%config.language.enum.ko%",
+              "%config.language.enum.es%",
+              "%config.language.enum.fr%",
+              "%config.language.enum.pt-br%"
+            ],
+            "markdownDescription": "%config.language.desc%"
+          },
           "qqq.performanceMode": {
             "order": 10,
             "type": "string",
@@ -46,11 +71,11 @@
               "optmum"
             ],
             "markdownEnumDescriptions": [
-              "极限性能：只保留首帧，质量47",
-              "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47，不显示进度条",
-              "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71"
+              "%config.performanceMode.enum.extreme%",
+              "%config.performanceMode.enum.accelerated%",
+              "%config.performanceMode.enum.optmum%"
             ],
-            "markdownDescription": "☀️ 性能模式："
+            "markdownDescription": "%config.performanceMode.desc%"
           },
           "qqq.ioEngine": {
             "order": 20,
@@ -63,12 +88,12 @@
               "node"
             ],
             "markdownEnumDescriptions": [
-              "自动选择最佳引擎",
-              "Python 引擎",
-              "Rust 引擎（ gh555.com 官方版的版本号要 ≥ 16.0.0 才支持 Rust 引擎）",
-              "Node 引擎"
+              "%config.ioEngine.enum.auto%",
+              "%config.ioEngine.enum.python%",
+              "%config.ioEngine.enum.rust%",
+              "%config.ioEngine.enum.node%"
             ],
-            "markdownDescription": "☀️ IO 引擎，取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md"
+            "markdownDescription": "%config.ioEngine.desc%"
           },
           "qqq.transactionLevel": {
             "order": 40,
@@ -79,27 +104,63 @@
               "half"
             ],
             "markdownEnumDescriptions": [
-              "全包（抗造优先）：一切“耗时操作”（如视频下载、批量文件、混合富文本等）都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",
-              "半包（轻便优先）：细分出耗时操作中的“轻便操作”（如小于80m的文件（文件夹）混合落盘、内存截图等）做简单粘贴：最快响应，无进度条，异常**无**回滚和清理。"
+              "%config.transactionLevel.enum.full%",
+              "%config.transactionLevel.enum.half%"
             ],
-            "markdownDescription": "☀️ 事务包裹级别："
+            "markdownDescription": "%config.transactionLevel.desc%"
           }
         }
       },
       {
-        "title": "🛸 漫游器",
+        "title": "%config.title.rover%",
         "order": 20,
         "properties": {
-          "qqq.showHistoryRecycleBin": {
-            "order": 10,
+          "qqq.szDisplayMode": {
+            "order": 20,
+            "type": "string",
+            "default": "nothing",
+            "enum": [
+              "nothing",
+              "size",
+              "ctime",
+              "mtime"
+            ],
+            "markdownEnumDescriptions": [
+              "%config.szDisplayMode.enum.nothing%",
+              "%config.szDisplayMode.enum.size%",
+              "%config.szDisplayMode.enum.ctime%",
+              "%config.szDisplayMode.enum.mtime%"
+            ],
+            "markdownDescription": "%config.szDisplayMode.desc%"
+          },
+          "qqq.sortBy": {
+            "order": 30,
+            "type": "string",
+            "default": "name",
+            "enum": [
+              "name",
+              "size",
+              "ctime",
+              "mtime"
+            ],
+            "markdownEnumDescriptions": [
+              "%config.sortBy.enum.name%",
+              "%config.sortBy.enum.size%",
+              "%config.sortBy.enum.ctime%",
+              "%config.sortBy.enum.mtime%"
+            ],
+            "markdownDescription": "%config.sortBy.desc%"
+          },
+          "qqq.autoWatchChanges": {
+            "order": 25,
             "type": "boolean",
-            "default": true,
-            "markdownDescription": "🛸 是否在文件导航中显示历史回收站。"
+            "default": false,
+            "description": "%config.autoWatchChanges.desc%"
           }
         }
       },
       {
-        "title": "👁️ 观察",
+        "title": "%config.title.observe%",
         "order": 30,
         "properties": {
           "qqq.frameSizeMode": {
@@ -112,23 +173,33 @@
               "fix"
             ],
             "markdownEnumDescriptions": [
-              "大相框：512x288",
-              "小相框：256x144",
-              "Fix：根据图片尺寸自动选择相框"
+              "%config.frameSizeMode.enum.large%",
+              "%config.frameSizeMode.enum.small%",
+              "%config.frameSizeMode.enum.fix%"
             ],
-            "markdownDescription": "👁️ 相框尺寸模式：控制预览图像的显示尺寸。"
+            "markdownDescription": "%config.frameSizeMode.desc%"
           },
           "qqq.cleanFreak": {
             "order": 20,
-            "type": "boolean",
-            "default": false,
-            "markdownDescription": "👁️ 洁癖（防遮挡）：保存文档前，自动确保所有暗号（/path/）下方有足够空行，防止预览/内容遮挡。相框类型（图片/视频/GIF）计算动态 n（基于字体/行高，约15行）；非相框类型至少1行。只处理下方。"
+            "type": "string",
+            "default": "add",
+            "enum": [
+              "never",
+              "add",
+              "add & remove"
+            ],
+            "markdownEnumDescriptions": [
+              "%config.cleanFreak.enum.never%",
+              "%config.cleanFreak.enum.add%",
+              "%config.cleanFreak.enum.addRemove%"
+            ],
+            "markdownDescription": "%config.cleanFreak.desc%"
           },
           "qqq.enlargeSmallImages": {
             "order": 30,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "👁️ 图片/视频预览时，小于相框（512×288）的图片是否放大以填满相框。关闭时，小图保持原尺寸，只在相框中居中摆放。"
+            "markdownDescription": "%config.enlargeSmallImages.desc%"
           },
           "qqq.textSlideColorScheme": {
             "order": 40,
@@ -138,7 +209,7 @@
               "light",
               "dark"
             ],
-            "markdownDescription": "👁️ 文本胶片底色："
+            "markdownDescription": "%config.textSlideColorScheme.desc%"
           },
           "qqq.textSlideFontSize": {
             "order": 50,
@@ -146,7 +217,7 @@
             "default": 14,
             "minimum": 1,
             "maximum": 218,
-            "markdownDescription": "👁️ 文本胶片字体大小："
+            "markdownDescription": "%config.textSlideFontSize.desc%"
           },
           "qqq.codelensLevel": {
             "order": 60,
@@ -158,22 +229,22 @@
               "3"
             ],
             "markdownEnumDescriptions": [
-              "none",
-              "open file",
-              "✎open folder  ✎rename  ✎open file  ±[✎qode]"
+              "%config.codelensLevel.enum.0%",
+              "%config.codelensLevel.enum.1%",
+              "%config.codelensLevel.enum.3%"
             ],
-            "markdownDescription": "👁️ codelens level："
+            "markdownDescription": "%config.codelensLevel.desc%"
           },
           "qqq.takeOverCodelensStyle": {
             "order": 70,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "👁️ 接管 codelens 样式：红色13号大小。"
+            "markdownDescription": "%config.takeOverCodelensStyle.desc%"
           }
         }
       },
       {
-        "title": "🍌 html与富文本",
+        "title": "%config.title.html%",
         "order": 40,
         "properties": {
           "qqq.downloadSecurityLevel": {
@@ -186,28 +257,28 @@
               "2: 最严格"
             ],
             "enumDescriptions": [
-              "11项安全开关全部关闭。",
-              "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
-              "11项安全开关全部开启。 \n  \n  额外开启的 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。"
+              "%config.downloadSecurityLevel.enum.0%",
+              "%config.downloadSecurityLevel.enum.1%",
+              "%config.downloadSecurityLevel.enum.2%"
             ],
-            "markdownDescription": "🍌 如果下载视频失败，可以在此尝试更宽松的策略。取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md"
+            "markdownDescription": "%config.downloadSecurityLevel.desc%"
           },
           "qqq.forceTextFlowScheme": {
             "order": 20,
             "type": "boolean",
             "default": false,
-            "markdownDescription": "🍌 强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。"
+            "markdownDescription": "%config.forceTextFlowScheme.desc%"
           },
           "qqq.autoDownload": {
             "order": 30,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "🍌 是否在检测到视频时自动下载"
+            "markdownDescription": "%config.autoDownload.desc%"
           }
         }
       },
       {
-        "title": "📦 doc导出设置",
+        "title": "%config.title.docExport%",
         "order": 50,
         "properties": {
           "qqq.docExportImageResolution": {
@@ -218,17 +289,17 @@
               "原始分辨率",
               "相框分辨率"
             ],
-            "markdownDescription": "📦 图片使用何种分辨率：",
+            "markdownDescription": "%config.docExportImageResolution.desc%",
             "markdownEnumDescriptions": [
-              "得到原始精度。",
-              "优势在于: 1、文件更小； 2、相框显示的缩略图总能对应一个完整的图片预览（不会因为 Word 页面尺寸限制导致 预览 被截断）。"
+              "%config.docExportImageResolution.enum.original%",
+              "%config.docExportImageResolution.enum.frame%"
             ]
           },
           "qqq.docExportIncludeCipher": {
             "order": 20,
             "type": "boolean",
             "default": true,
-            "markdownDescription": "📦 导出 图片暗号字符串（如：/\\qqq/739yp_2026.01.03__6__11.09.56.png\\\\/ ）。"
+            "markdownDescription": "%config.docExportIncludeCipher.desc%"
           }
         }
       }
@@ -246,7 +317,7 @@
       "qqqView": [
         {
           "id": "qqq.Viewq",
-          "name": "的梦gaea",
+          "name": "%view.name%",
           "type": "webview",
           "when": "true"
         }
@@ -255,39 +326,47 @@
     "commands": [
       {
         "command": "qqq.q1",
-        "title": "qqq: Paste everything ( Ctrl+V or F2 )"
+        "title": "%cmd.q1%"
       },
       {
         "command": "qqq.q2",
-        "title": "qqq: Roam everywhere ( Tab or F6 )"
+        "title": "%cmd.q2%"
       },
       {
         "command": "qqq.pure",
-        "title": "qqq: pure"
+        "title": "%cmd.pure%"
       },
       {
         "command": "qqq.allSettings",
-        "title": "qqq: all settings"
+        "title": "%cmd.allSettings%"
       },
       {
-        "command": "qqq.cleanUp",
-        "title": "qqq: clean up"
+        "command": "qqq.weave",
+        "title": "%cmd.weave%"
+      },
+      {
+        "command": "qqq.clipboardHistory",
+        "title": "%cmd.clipboardHistory%"
       },
       {
         "command": "qqq.exportDoc",
-        "title": "qqq: 导出文档 (Doc/Docx)"
+        "title": "%cmd.exportDoc%"
       },
       {
         "command": "qqq.exportZip",
-        "title": "qqq: 导出 ZIP"
+        "title": "%cmd.exportZip%"
       },
       {
         "command": "qqq.downloadVideosFromUrl",
-        "title": "qqq: insert Videos From Url"
+        "title": "%cmd.downloadVideosFromUrl%"
       },
       {
         "command": "qqq.savorMoments",
-        "title": "qqq: savor moments for yourself"
+        "title": "%cmd.savorMoments%"
+      },
+      {
+        "command": "qqq.clearCache",
+        "title": "%cmd.clearCache%"
       }
     ],
     "keybindings": [
@@ -362,7 +441,6 @@
     "写真",
     "ペースト",
     "画像を貼り付け",
-    "画像貼り付け",
     "사진을 붙이다",
     "사진붙이기",
     "Bild einfügen",
@@ -481,8 +559,7 @@
     "docx-parser": "^0.2.1",
     "image-size": "^2.0.2",
     "msgpack-lite": "^0.1.26",
-    "node-fetch": "^2.7.0",
-    "trash": "^7.2.0"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",

@@ -1247,10 +1247,6 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				return global.isValidUrl(s) ? null : q('qqq.ui.invalidUrl');
 			}
 		});
-		// ★ 回车音效
-		if (rawUrl && global.pythonBridge?.isAvailable()) {
-			global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
-		}
 	}
 	if (!rawUrl) return;
 
@@ -1775,15 +1771,7 @@ function _registerCommands(context) {
 
 		// ★ 终极版：统一的设置变更入口（通过 ConfigGate）
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			// ★ 只处理 qqq. 配置变化
-			if (!event.affectsConfiguration("qqq")) return;
-
 			global.ConfigManager.handleVscodeConfigChanged(event).then(() => {
-				// ★ 播放设置更新音效 (kj3.mp3)
-				if (global.pythonBridge && global.pythonBridge.isAvailable()) {
-					global.pythonBridge.call("play_sfx", { category: "yz", name: "kj3.mp3" }, 1000).catch(() => { });
-				}
-
 				// ioEngine 切换后别处理
 				if (event.affectsConfiguration("qqq.ioEngine")) {
 					const val = global.getConfig("ioEngine");
