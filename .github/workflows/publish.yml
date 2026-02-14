@@ -39,10 +39,9 @@ jobs:
           - os: ubuntu-22.04
             asset: q_linux_x64
             target: x86_64-unknown-linux-gnu
-          # Windows 暂时禁用，待修复
-          # - os: windows-2022
-          #   asset: q_win_x64.exe
-          #   target: x86_64-pc-windows-msvc
+          - os: windows-2022
+            asset: q_win_x64.exe
+            target: x86_64-pc-windows-msvc
           - os: macos-14
             asset: q_mac_x64
             target: x86_64-apple-darwin
