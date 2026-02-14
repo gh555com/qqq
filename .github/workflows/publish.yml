@@ -65,17 +65,16 @@ jobs:
           fi
           rustup target add ${{ matrix.target }}
           cargo build --release --target ${{ matrix.target }}
-          mkdir -p ../assets
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp target/${{ matrix.target }}/release/q.exe ../assets/${{ matrix.asset }}
+            cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset }}
           else
-            cp target/${{ matrix.target }}/release/q ../assets/${{ matrix.asset }}
-            chmod +x ../assets/${{ matrix.asset }}
+            cp target/${{ matrix.target }}/release/q ../${{ matrix.asset }}
+            chmod +x ../${{ matrix.asset }}
           fi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: assets/${{ matrix.asset }}
+          path: ${{ matrix.asset }}
 
   release:
     needs: [check, build-rust]
