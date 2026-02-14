@@ -294,11 +294,12 @@ def _get_audio_hub():
             sys.stderr.flush()
             return None
 
-def _play_sfx(category: str, idx: int = -1):
+def _play_sfx(category: str, idx: int = -1, name: str = None):
     """
     播放音效
     category: "kope" / "yz" 等
     idx: -1 = 随机（避免连续重复），>=0 = 指定索引
+    name: 指定文件名（如 "kj3.mp3"），优先级最高
     """
     global _SFX_LAST_IDX
     hub = _get_audio_hub()
@@ -314,6 +315,14 @@ def _play_sfx(category: str, idx: int = -1):
     valid_paths = [p for p in paths if os.path.isfile(p)]
     if not valid_paths:
         return
+
+    # ★ 指定文件名播放
+    if name:
+        for p in valid_paths:
+            if os.path.basename(p) == name:
+                hub.play_sfx(p)
+                return
+        return  # 未找到指定文件
 
     if idx < 0:
         # 随机选择，避免连续重复
@@ -1674,7 +1683,8 @@ def _dispatch_action(cmd, cancel_version: int = None):
     if action == "play_sfx":
         category = payload.get("category", "kope")
         idx = payload.get("idx", -1)  # -1 = 随机
-        _play_sfx(category, idx)
+        name = payload.get("name")    # 指定文件名（优先级最高）
+        _play_sfx(category, idx, name)
         out["status"] = "played"
         return out
     out["error"] = f"unknown action: {action}"

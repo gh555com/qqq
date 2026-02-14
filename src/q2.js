@@ -1394,6 +1394,7 @@ function startRename(itemPath, itemName, itemType){
     if (e.key === 'Enter') {
       e.preventDefault(); e.stopPropagation();
       commitRename(itemElement, itemPath, itemType, input.value.trim());
+      vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
     } else if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation();
       cancelRename(itemElement, originalContent);
@@ -2143,7 +2144,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // ★ 初始化逐字撤销/重做功能
     initInputUndoRedo(filenameInput);
     filenameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') saveFile();
+      if (e.key === 'Enter') {
+        saveFile();
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
+      }
     });
   }
 
@@ -2201,6 +2205,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // ★ 不在这里保存历史，等待后端 navigateSuccess 消息
         }
         hideAllDropdowns();
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
       } else if (e.key === 'Escape') {
         hideAllDropdowns();
       } else if (e.key === ' ') {
@@ -2284,6 +2289,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 hideAllDropdowns();
                 fileFilterInput.blur(); // ★ 回车保存后失去焦点
+                vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
             } else if (e.key === 'Escape') {
                 hideAllDropdowns();
             }
@@ -3812,6 +3818,10 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
               global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
+              // ★ 删除到回收站音效
+              if (global.pythonBridge?.isAvailable()) {
+                global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
+              }
             } catch (error) {
               global.showAutoCloseNotification('error', q('q2.ui.deleteFailed', error.message));
             } finally {
@@ -3848,6 +3858,10 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
+              // ★ 删除到回收站音效
+              if (global.pythonBridge?.isAvailable()) {
+                global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
+              }
               if (errorCount > 0) {
                 global.showAutoCloseNotification('info', q('q2.ui.multiDeletePartial', deletedCount, errorCount));
               } else {
@@ -3881,6 +3895,10 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
               global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
+              // ★ 永久删除音效
+              if (global.pythonBridge?.isAvailable()) {
+                global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
+              }
             } catch (error) {
               global.showAutoCloseNotification('error', q('q2.ui.permanentDeleteFailed', error.message));
             } finally {
@@ -3922,6 +3940,11 @@ function showSaveAsDialog() {
               global.showAutoCloseNotification('warning', q('q2.ui.multiPermanentDeletePartial', deletedCount, errorCount));
             } else if (errorCount > 0) {
               global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', errorCount));
+            }
+
+            // ★ 永久删除音效
+            if (deletedCount > 0 && global.pythonBridge?.isAvailable()) {
+              global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
             }
 
             if (activePanel && activePanelAlive) refreshWebview();
@@ -3966,16 +3989,32 @@ function showSaveAsDialog() {
         break;
       }
 
-      // Admin terminal: c key -> CMD, z key -> PowerShell
+      // Admin terminal: a key -> CMD, x key -> PowerShell
       case "openAdminCmd": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'cmd');
+        // ★ 打开终端音效
+        if (global.pythonBridge?.isAvailable()) {
+          global.pythonBridge.call("play_sfx", { category: "yz", name: "zs861.mp3" }, 1000).catch(() => { });
+        }
         break;
       }
 
       case "openAdminPowershell": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'powershell');
+        // ★ 打开终端音效
+        if (global.pythonBridge?.isAvailable()) {
+          global.pythonBridge.call("play_sfx", { category: "yz", name: "zs861.mp3" }, 1000).catch(() => { });
+        }
+        break;
+      }
+
+      case "playEnterSfx": {
+        // ★ 回车音效
+        if (global.pythonBridge?.isAvailable()) {
+          global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
+        }
         break;
       }
     }
