@@ -51,11 +51,10 @@ assets/q_mac_*
 assets/q_x64
 assets/q_arm64
 assets/q_win_x86.exe
-# 2. 显式允许打包时生成的“真理”文件
+# 2. 显式允许打包时生成的"真理"文件
 !assets/q_engine
 !assets/q_engine.exe
-!assets/ffmpeg
-!assets/ffmpeg.exe
+# FFmpeg 由打包脚本动态处理，不在此处声明
 
 # 其他开发文件
 .eslintrc.json
