@@ -393,7 +393,7 @@
     ]
   },
   "scripts": {
-    "bundle": "node qqqworkflow/esbuild.config.js",
+    "bundle": "node esbuild.config.js",
     "ci:test": "vscode-test --config .vscode-test.js",
     "ci:package": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
     "ci:publish": "node qqqworkflow/git_help.js publish",
