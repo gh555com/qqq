@@ -39,38 +39,38 @@ jobs:
           - os: ubuntu-22.04
             asset: q_linux_x64
             target: x86_64-unknown-linux-gnu
-            cargo: Cargo.toml
           - os: windows-2022
             asset: q_win_x64.exe
             target: x86_64-pc-windows-msvc
-            cargo: Cargo_win.toml
           - os: macos-14
             asset: q_mac_x64
             target: x86_64-apple-darwin
-            cargo: Cargo.toml
           - os: macos-14
             asset: q_mac_arm64
             target: aarch64-apple-darwin
-            cargo: Cargo.toml
     steps:
       - uses: actions/checkout@v4
-      - name: Install GTK (Linux)
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
       - name: Build
         shell: bash
         run: |
           cd rust
-          cp ${{ matrix.cargo }} Cargo.toml
+          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
+            cp Cargo_win.toml Cargo.toml
+          fi
+          rustup target add ${{ matrix.target }}
           cargo build --release --target ${{ matrix.target }}
           mkdir -p ../assets
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp target/${{ matrix.target }}/release/q.exe ../assets/${{ matrix.asset }}
           else
             cp target/${{ matrix.target }}/release/q ../assets/${{ matrix.asset }}
+            chmod +x ../assets/${{ matrix.asset }}
           fi
       - uses: actions/upload-artifact@v4
         with:
