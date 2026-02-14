@@ -494,6 +494,24 @@
 			right: 0;
 		}
 
+		.scroll-hint {
+			position: absolute;
+			right: 2px;
+			font-size: 9px;
+			color: #333;
+			pointer-events: none;
+			user-select: none;
+			z-index: 1001;
+		}
+
+		.scroll-hint-top {
+			top: 2px;
+		}
+
+		.scroll-hint-bottom {
+			bottom: 2px;
+		}
+
 		::selection {
 			background: rgb(255, 211, 2) !important;
 			color: black !important;
@@ -1052,7 +1070,7 @@
 		<div class="file-list-wrapper" id="fileListWrapper">
 			<div class="file-list-container" id="fileList" style="margin: 0;">
 			</div>
-			<div class="custom-scrollbar-outer" id="customScrollbar"><div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div></div>
+			<div class="custom-scrollbar-outer" id="customScrollbar"><span class="scroll-hint scroll-hint-top">1</span><div class="custom-scrollbar-thumb" id="customScrollbarThumb"></div><span class="scroll-hint scroll-hint-bottom">2</span></div>
 		</div>
 
 			<div class="footer">

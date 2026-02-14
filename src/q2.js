@@ -1967,9 +1967,11 @@ document.addEventListener('keydown', (e) => {
   if (key === 'q') {
     e.preventDefault(); e.stopPropagation();
     performCodeAction(selectedItem);
+    vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
   } else if (key === 'w') {
     e.preventDefault(); e.stopPropagation();
     performOpenAction(selectedItem);
+    vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
   } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
     if (selectedItems.length > 1) {
@@ -1997,6 +1999,7 @@ document.addEventListener('keydown', (e) => {
     }
     if (selectedItem && selectedItem.name !== '..') {
         performEditAction(selectedItem);
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
     }
   } else if (e.key === 'Delete' && e.shiftKey) {
     // Shift+Delete: 永久删除，无确认提示
@@ -2759,15 +2762,36 @@ function setupCustomScrollbar() {
   container.addEventListener('scroll', scheduleIdleRepaint);
   container.addEventListener('mousemove', scheduleIdleRepaint);
 
-  // 按 1 滚到顶部，按 2 滚到底部（编辑状态下不监听）
+  // 按 1 滚到顶部，按 2 滚到底部（以中间点为界，分段跳转）
   document.addEventListener('keydown', function(e) {
     if (isInputFocused()) return;
+    const maxScroll = container.scrollHeight - container.clientHeight;
+    const midPoint = maxScroll / 2;
+    const currentPos = container.scrollTop;
+    // 判断当前位置：上半部分（< midPoint）、下半部分（> midPoint）、中间
+    const inUpperHalf = currentPos < midPoint;
+    const inLowerHalf = currentPos > midPoint;
+
     if (e.key === '1') {
       e.preventDefault();
-      container.scrollTop = 0;
+      if (inUpperHalf || currentPos === midPoint) {
+        // 上半部分或正好中间：直接到顶部
+        container.scrollTop = 0;
+      } else {
+        // 下半部分：先到中间
+        container.scrollTop = midPoint;
+      }
+      vscode.postMessage({ command: 'playEnterSfx' });
     } else if (e.key === '2') {
       e.preventDefault();
-      container.scrollTop = container.scrollHeight;
+      if (inLowerHalf || currentPos === midPoint) {
+        // 下半部分或正好中间：直接到底部
+        container.scrollTop = maxScroll;
+      } else {
+        // 上半部分：先到中间
+        container.scrollTop = midPoint;
+      }
+      vscode.postMessage({ command: 'playEnterSfx' });
     }
   }, true);
 }
@@ -3479,6 +3503,7 @@ function showSaveAsDialog() {
       case "pinDirectory":
         if (message.path) {
           pinDirectory(message.path);
+          currentPath = canonicalizeExistingPath(message.path);
           refreshWebview();
         }
         break;
