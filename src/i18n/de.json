@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "Element dauerhaft löschen fehlgeschlagen: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0} Elemente dauerhaft gelöscht",
             "multiPermanentDeletePartial": "{0} Elemente dauerhaft gelöscht, {1} fehlgeschlagen",
-            "multiPermanentDeleteFailed": "{0} Elemente konnten nicht dauerhaft gelöscht werden."
+            "multiPermanentDeleteFailed": "{0} Elemente konnten nicht dauerhaft gelöscht werden.",
+            "enterFileName": "Bitte Dateiname eingeben",
+            "enterFolderName": "Bitte Ordnername eingeben",
+            "selectSingleForRename": "qqq: Zum Umbenennen bitte einzeln auswählen",
+            "imageSaved": "Bild gespeichert",
+            "noPasteContent": "{0} Kein einfügbarer Inhalt erkannt",
         },
         "paste": {
             "plainTextOnly": "qqq: Nur Text in Zwischenablage, kann nicht in Dateimanager eingefügt werden"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Integritätsprüfung fehlgeschlagen.",
             "renameFailed": "Umbenennen fehlgeschlagen: Ziel existiert bereits.",
+            "templateLoadFailed": "Fehler: q2.html Vorlage konnte nicht geladen werden",
             "renameError": "Umbenennen fehlgeschlagen: {0}",
             "invalidPath": "Ungültiger Verzeichnispfad: {0}",
             "navError": "Navigation fehlgeschlagen: {0}",

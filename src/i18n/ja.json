@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "アイテムの完全削除に失敗: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0} 個のアイテムを完全に削除しました",
             "multiPermanentDeletePartial": "{0} 個のアイテムを完全に削除、{1} 個失敗",
-            "multiPermanentDeleteFailed": "{0} 個のアイテムの完全削除に失敗しました。"
+            "multiPermanentDeleteFailed": "{0} 個のアイテムの完全削除に失敗しました。",
+            "enterFileName": "ファイル名を入力してください",
+            "enterFolderName": "フォルダー名を入力してください",
+            "selectSingleForRename": "qqq: 名前変更は単一選択で行ってください",
+            "imageSaved": "画像を保存しました",
+            "noPasteContent": "{0} 貼り付け可能な内容が見つかりません",
         },
         "paste": {
             "plainTextOnly": "qqq: クリップボードにはプレーンテキストのみです。ファイルマネージャーに貼り付けできません"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "整合性チェックに失敗しました。",
             "renameFailed": "名前の変更に失敗：同じ名前のファイルまたはフォルダが既に存在します。",
+            "templateLoadFailed": "エラー: q2.html テンプレートの読み込みに失敗",
             "renameError": "名前の変更に失敗: {0}",
             "invalidPath": "無効なディレクトリパス: {0}",
             "navError": "ナビゲーションに失敗: {0}",

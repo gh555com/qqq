@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "Permanent delete item failed: {0} - {1}",
             "multiPermanentDeleteSuccess": "Permanently deleted {0} items",
             "multiPermanentDeletePartial": "Permanently deleted {0} items, {1} failed",
-            "multiPermanentDeleteFailed": "{0} items failed to permanently delete."
+            "multiPermanentDeleteFailed": "{0} items failed to permanently delete.",
+            "enterFileName": "Please enter a file name",
+            "enterFolderName": "Please enter a folder name",
+            "selectSingleForRename": "qqq: Please select single item for rename",
+            "imageSaved": "Image saved",
+            "noPasteContent": "{0} No pasteable content detected",
         },
         "paste": {
             "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Integrity check failed.",
             "renameFailed": "Rename failed: A file or folder with the same name already exists at target location.",
+            "templateLoadFailed": "Error: Failed to load q2.html template",
             "renameError": "Rename failed: {0}",
             "invalidPath": "Invalid directory path: {0}",
             "navError": "Navigation failed: {0}",

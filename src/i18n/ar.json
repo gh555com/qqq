@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "فشل الحذف النهائي للعنصر: {0} - {1}",
             "multiPermanentDeleteSuccess": "تم حذف {0} عنصر نهائياً",
             "multiPermanentDeletePartial": "تم حذف {0} عنصر نهائياً، فشل {1}",
-            "multiPermanentDeleteFailed": "فشل الحذف النهائي لـ {0} عنصر."
+            "multiPermanentDeleteFailed": "فشل الحذف النهائي لـ {0} عنصر.",
+            "enterFileName": "الرجاء إدخال اسم الملف",
+            "enterFolderName": "الرجاء إدخال اسم المجلد",
+            "selectSingleForRename": "qqq: الرجاء تحديد عنصر واحد لإعادة التسمية",
+            "imageSaved": "تم حفظ الصورة",
+            "noPasteContent": "{0} لم يتم اكتشاف محتوى قابل للصق",
         },
         "paste": {
             "plainTextOnly": "qqq: الحافظة تحتوي على نص فقط، لا يمكن اللصق في مدير الملفات"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "فشل فحص السلامة.",
             "renameFailed": "فشلت إعادة التسمية: يوجد عنصر بنفس الاسم في الوجهة.",
+            "templateLoadFailed": "خطأ: فشل تحميل قالب q2.html",
             "renameError": "فشلت إعادة التسمية: {0}",
             "invalidPath": "مسار دليل غير صالح: {0}",
             "navError": "فشل التنقل: {0}",

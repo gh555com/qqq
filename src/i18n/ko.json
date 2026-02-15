@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "항목 영구 삭제 실패: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0}개 항목을 영구 삭제함",
             "multiPermanentDeletePartial": "{0}개 항목 영구 삭제, {1}개 실패",
-            "multiPermanentDeleteFailed": "{0}개 항목 영구 삭제 실패."
+            "multiPermanentDeleteFailed": "{0}개 항목 영구 삭제 실패.",
+            "enterFileName": "파일 이름을 입력하세요",
+            "enterFolderName": "폴더 이름을 입력하세요",
+            "selectSingleForRename": "qqq: 이름 바꾸기는 단일 선택으로 해주세요",
+            "imageSaved": "이미지 저장됨",
+            "noPasteContent": "{0} 붙여넣기 가능한 콘텐츠가 없습니다",
         },
         "paste": {
             "plainTextOnly": "qqq: 클립보드에 일반 텍스트만 있습니다. 파일 관리자에 붙여넣기할 수 없습니다"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "무결성 검사 실패.",
             "renameFailed": "이름 바꾸기 실패: 대상 위치에 같은 이름의 파일 또는 폴더가 이미 존재합니다.",
+            "templateLoadFailed": "오류: q2.html 템플릿 로드 실패",
             "renameError": "이름 바꾸기 실패: {0}",
             "invalidPath": "잘못된 디렉토리 경로: {0}",
             "navError": "탐색 실패: {0}",

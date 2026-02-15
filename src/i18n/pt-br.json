@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "Exclusão permanente de item falhou: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0} itens excluídos permanentemente",
             "multiPermanentDeletePartial": "{0} itens excluídos permanentemente, {1} falharam",
-            "multiPermanentDeleteFailed": "Exclusão permanente de {0} itens falhou."
+            "multiPermanentDeleteFailed": "Exclusão permanente de {0} itens falhou.",
+            "enterFileName": "Por favor digite um nome de arquivo",
+            "enterFolderName": "Por favor digite um nome de pasta",
+            "selectSingleForRename": "qqq: Por favor selecione um único item para renomear",
+            "imageSaved": "Imagem salva",
+            "noPasteContent": "{0} Nenhum conteúdo colável detectado",
         },
         "paste": {
             "plainTextOnly": "qqq: a área de transferência contém apenas texto, não é possível colar no gerenciador de arquivos"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Verificação de integridade falhou.",
             "renameFailed": "Renomeação falhou: já existe um item com o mesmo nome no destino.",
+            "templateLoadFailed": "Erro: Falha ao carregar template q2.html",
             "renameError": "Renomeação falhou: {0}",
             "invalidPath": "Caminho de diretório inválido: {0}",
             "navError": "Navegação falhou: {0}",
