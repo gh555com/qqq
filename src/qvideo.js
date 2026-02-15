@@ -873,9 +873,9 @@ class Qvideo {
         if (targetDir) {
             try {
                 await global.TransactionManager._cleanupOrphanFiles(targetDir);
-                this.log(`[兜底清理] ${q('video.log.fallbackCleanup')}`); // qq2q
+                this.log(`[兆底清理] ${q('video.log.fallbackCleanup')}`);
             } catch (e) {
-                this.log(`[兜底清理] ${q('video.log.fallbackCleanupError', e.message)}`); // qq2q
+                this.log(`[兆底清理] ${q('video.log.fallbackCleanupError', e.message)}`);
             }
         }
     }
@@ -978,7 +978,7 @@ class Qvideo {
         // 2. Bind external cancel Token (if any)
         if (token) {
             token.onCancellationRequested(async () => {
-                await this._cancelTask(task, '外部 Token 取消'); // qq2q
+                await this._cancelTask(task, q('video.reason.externalToken'));
             });
         }
 
@@ -1200,7 +1200,7 @@ class Qvideo {
                             await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(newTempFiles)] });
                         }
                     } catch (e) {
-                        this.log(`[事务] 预注册 tempFiles 失败: ${e.message}`); // qq2q
+                        this.log(q('video.log.transPreregisterFailed', e.message));
                     }
                 }
 
@@ -1292,7 +1292,7 @@ class Qvideo {
                                     if (this._isTaskCancelled(task)) return;
 
                                     if (event.type === 'start') {
-                                        this.log(`开始: ${String(t.url).slice(0, 60)}...`); // qq2q
+                                        this.log(q('video.log.downloadStart', String(t.url).slice(0, 60)));
                                     } else if (event.type === 'progress') {
                                         const p = event.progress;
                                         let currentBytes = 0;
@@ -1325,11 +1325,11 @@ class Qvideo {
                                             logTotalBytes = sum;
                                         }
                                     } else if (event.type === 'done') {
-                                        this.log(`完成: ${path.basename(t.destPath || '')}`); // qq2q
+                                        this.log(q('video.log.downloadComplete', path.basename(t.destPath || '')));
                                     } else if (event.type === 'error') {
-                                        this.log(`失败: ${t.url} - ${event.error}`); // qq2q
+                                        this.log(q('video.log.downloadFailed', t.url, event.error));
                                     } else if (event.type === 'retry') {
-                                        this.log(`重试: ${t.url} (Wait ${event.delayMs}ms)`); // qq2q
+                                        this.log(q('video.log.downloadRetry', t.url, event.delayMs));
                                     }
                                 }
                             });
@@ -1362,7 +1362,7 @@ class Qvideo {
 
                     for (const r of successResults) {
                         if (this._isTaskCancelled(task)) {
-                            this.log(`[取消] 在 _postProcess 循环中检测到取消，跳出`); // qq2q
+                            this.log(q('video.log.cancelInPostProcess'));
                             return null;
                         }
                         const p = r.path || r.destPath;
@@ -1395,7 +1395,7 @@ class Qvideo {
                         // Only when not all 403 do we consider static analysis effective
                         staticVideoEffective = !staticVideoAllForbidden;
                         if (staticVideoAllForbidden) {
-                            this.log(`[增强判断] 静态分析的 ${staticVideoResults.length} 个直连视频全部 403 失败，允许进入增强流程`); // qq2q
+                            this.log(q('video.log.staticAll403', staticVideoResults.length));
                         }
                     }
                     // ★ Only trigger enhanced when there are actual 403 errors
@@ -1466,7 +1466,7 @@ class Qvideo {
             // ✅ Final safeguard: even if someone breaks needEnhanced in the future, hard block YouTube enhanced here
             if (outcome.needEnhanced) {
                 if (outcome.isYouTube || this._isYouTubeUrl(url)) {
-                    this.log(`[增强] 检测到 YouTube 链接，忽略增强流程`); // qq2q
+                    this.log(q('video.log.youtubeIgnoreEnhanced'));
                 } else {
                     // ★ Return special marker; outer qqq.js will call handleForbidden after withProgress closes
                     return {
@@ -1515,7 +1515,7 @@ class Qvideo {
                     targetDir: targetDir
                 };
             }
-            this.log(`处理失败: ${error.message}`); // qq2q
+            this.log(q('video.log.processFailed', error.message));
             return { landedFiles: [], finalTotalBytes: 0 };
         }
     }
@@ -1528,9 +1528,9 @@ class Qvideo {
     // ★ originalFileName: original file name (optional) used for renaming on landing (remove timestamp)
     async _postProcess(task, filePath, originalFileName = null) {
         // ★ Debug log
-        this.log(`[_postProcess] 开始: filePath=${path.basename(filePath)}, originalFileName=${originalFileName || '(null)'}`); // qq2q
+        this.log(q('video.log.postProcessStart', path.basename(filePath), originalFileName || '(null)'));
         if (this._isTaskCancelled(task)) {
-            this.log(`[_postProcess] 开始时已取消，跳过`); // qq2q
+            this.log(q('video.log.postProcessCancelled'));
             if (filePath && fs.existsSync(filePath)) {
                 try { fs.unlinkSync(filePath); } catch (e) { }
             }
@@ -1557,7 +1557,7 @@ class Qvideo {
 
                     const otherFp = h.computeFingerprint(full);
                     if (otherFp === currentFp) {
-                        this.log(`指纹重复，删除临时文件: ${path.basename(filePath)} -> 复用旧文件: ${f}`); // qq2q
+                        this.log(q('video.log.fingerprintDupe', path.basename(filePath), f));
                         try { fs.unlinkSync(filePath); } catch (e) { }
                         await this._insertToCursor(task, f, full);
                         // ★ Return isNew: false (reuse old file), do not record in transaction
@@ -1566,10 +1566,10 @@ class Qvideo {
                 }
             }
         } catch (e) {
-            this.log(`指纹检查出错: ${e.message}`); // qq2q
+            this.log(q('video.log.fingerprintError', e.message));
         }
 
-        this.log(`正在验证文件: ${path.basename(filePath)}`); // qq2q
+        this.log(q('video.log.verifyingFile', path.basename(filePath)));
 
         if (this._isTaskCancelled(task)) return null;  // ★ Cancel check
 
@@ -1579,7 +1579,7 @@ class Qvideo {
         if (this._isTaskCancelled(task)) return null;  // ★ Cancel check
 
         if (!verifiedPath) {
-            this.log(`文件无效 (非视频或损坏)，已由 verifyVideoFile 删除: ${filePath}`); // qq2q
+            this.log(q('video.log.fileInvalid', filePath));
             return null;
         }
 
@@ -1604,7 +1604,7 @@ class Qvideo {
             if (targetPath !== verifiedPath) {
                 try {
                     fs.renameSync(verifiedPath, targetPath);
-                    this.log(`重命名: ${path.basename(verifiedPath)} -> ${path.basename(targetPath)}`); // qq2q
+                    this.log(q('video.log.renamed', path.basename(verifiedPath), path.basename(targetPath)));
 
                     // ★ After rename, immediately update transaction: replace old path with new path
                     // So even if canceled before landedFiles is recorded, rollback can clean correctly
@@ -1617,13 +1617,13 @@ class Qvideo {
                                 await global.TransactionManager.updateTransaction(task.transId, { tempFiles: [...new Set(oldTemp)] });
                             }
                         } catch (e) {
-                            this.log(`[事务] 更新 tempFiles 失败: ${e.message}`); // qq2q
+                            this.log(q('video.log.transUpdateFailed', e.message));
                         }
                     }
 
                     finalPath = targetPath;
                 } catch (e) {
-                    this.log(`重命名失败: ${e.message}，保留原文件名`); // qq2q
+                    this.log(q('video.log.renameFailed', e.message));
                 }
             }
         }
@@ -1699,7 +1699,7 @@ class Qvideo {
             // ★ If there are no other active download tasks, reset the "popup eaten" state so we can try Q popup first
             if (_activeTasks.size <= 1) {
                 if (_isInfoMessageEaten) {
-                    this.log(`[增强] 检测到环境已恢复正常（活跃任务数: ${_activeTasks.size}），重置弹窗判断状态。`); // qq2q
+                    this.log(q('video.log.envRecovered', _activeTasks.size));
                     _isInfoMessageEaten = false;
                 }
             }
@@ -1713,20 +1713,20 @@ class Qvideo {
             if (!_isInfoMessageEaten) {
                 const startTime = Date.now();
                 selection = await vscode.window.showInformationMessage(
-                    `${prefix}下载被拒（${code}），当前可尝试启动增强流程。`, // qq2q
+                    `${prefix}${q('video.ui.rejected', code)}`,
                     { modal: false },
-                    "🚀启动增强流程", // qq2q
-                    "选择类似 chrome.exe 的浏览器入口文件" // qq2q
+                    q('video.ui.enhancedStart'),
+                    q('video.ui.pickBrowser')
                 );
                 elapsed = Date.now() - startTime;
             } else {
-                this.log(`[增强] 处于弹窗被吃掉模式，跳过 InformationMessage 直接进入 QuickPick 兜底...`); // qq2q
+                this.log(q('video.log.popupEaten'));
                 elapsed = 0;  // ★ Key fix: force 0 to trigger QuickPick fallback
             }
 
             // ★ If closed immediately (< 500ms and undefined), use QuickPick fallback
             if (selection === undefined && elapsed < 500) {
-                this.log(`[增强] 弹窗被异常关闭 (${elapsed}ms)，记录状态并改用下拉选择...`); // qq2q
+                this.log(q('video.log.popupAbnormalClose', elapsed));
                 _isInfoMessageEaten = true;
 
                 if (this._isTaskCancelled(task)) return null;
@@ -1742,15 +1742,15 @@ class Qvideo {
                     ignoreFocusOut: true
                 });
 
-                this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`); // qq2q
+                this.log(q('video.log.quickPickResult', picked?.value || 'undefined'));
 
                 if (picked?.value === 'enhanced') {
-                    selection = "🚀启动增强流程"; // qq2q
+                    selection = q('video.ui.enhancedStart');
                 } else if (picked?.value === 'pick') {
-                    selection = "选择类似 chrome.exe 的浏览器入口文件"; // qq2q
+                    selection = q('video.ui.pickBrowser');
                 } else if (picked === undefined) {
                     // ★ QuickPick also failed; use InputBox as ultimate fallback
-                    this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`); // qq2q
+                    this.log(q('video.log.quickPickFailed'));
 
                     const input = await vscode.window.showInputBox({
                         prompt: `${prefix}${q('video.ui.input12Prompt', code)}`,
@@ -1758,21 +1758,21 @@ class Qvideo {
                         ignoreFocusOut: true
                     });
 
-                    this.log(`[增强] InputBox 返回: ${input}`); // qq2q
+                    this.log(q('video.log.inputBoxResult', input));
 
                     if (input?.trim() === '1') {
-                        selection = "🚀启动增强流程"; // qq2q
+                        selection = q('video.ui.enhancedStart');
                     } else if (input?.trim() === '2') {
-                        selection = "选择类似 chrome.exe 的浏览器入口文件"; // qq2q
+                        selection = q('video.ui.pickBrowser');
                     }
                 }
             }
 
             if (this._isTaskCancelled(task)) return null;
 
-            if (selection === "🚀启动增强流程") { // qq2q
+            if (selection === q('video.ui.enhancedStart')) {
                 return await this._runEnhancedPreferSaved(task, url, targetDir);
-            } else if (selection === "选择类似 chrome.exe 的浏览器入口文件") { // qq2q
+            } else if (selection === q('video.ui.pickBrowser')) {
                 return await this._runEnhancedForcePick(task, url, targetDir);
             } else {
                 this.log(q('video.log.userCancelEnhanced'));
@@ -1807,19 +1807,19 @@ class Qvideo {
      */
     async _checkEmbeddedChrome() {
         const embeddedPath = this._getEmbeddedChromePath();
-        this.log(`[z判断] 检查内嵌环境: ${embeddedPath}`); // qq2q
+        this.log(q('video.log.checkEmbedded', embeddedPath));
 
         if (!fs.existsSync(embeddedPath)) {
-            this.log(`[z判断] 内嵌环境不存在`); // qq2q
+            this.log(q('video.log.embeddedNotExist'));
             return { available: false, path: embeddedPath };
         }
 
         const v = await this._validateChromiumSilently(embeddedPath);
         if (v.valid) {
-            this.log(`[z判断] 内嵌环境可用: ${v.version}`); // qq2q
+            this.log(q('video.log.embeddedAvailable', v.version));
             return { available: true, path: embeddedPath, version: v.version };
         } else {
-            this.log(`[z判断] 内嵌环境验证失败: ${v.error}`); // qq2q
+            this.log(q('video.log.embeddedVerifyFailed', v.error));
             return { available: false, path: embeddedPath };
         }
     }
@@ -1839,10 +1839,10 @@ class Qvideo {
         if (custom && fs.existsSync(custom)) {
             const v = await this._validateChromiumSilently(custom);
             if (v.valid) {
-                this.log(`[按钮一] 使用记忆的用户浏览器: ${custom} (${v.version})`); // qq2q
+                this.log(q('video.log.usingSavedBrowser', custom, v.version));
                 return await this._startSniffer(task, custom, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             } else {
-                this.log(`[按钮一] 记忆的浏览器已失效，清除记忆`); // qq2q
+                this.log(q('video.log.savedBrowserInvalid'));
                 await this.context.globalState.update(this.KEY_CUSTOM_BROWSER, undefined);
             }
         }
@@ -1852,7 +1852,7 @@ class Qvideo {
         // ★ 2. z-check: check embedded environment
         const embedded = await this._checkEmbeddedChrome();
         if (embedded.available) {
-            this.log(`[按钮一] 使用内嵌环境: ${embedded.path}`); // qq2q
+            this.log(q('video.log.usingEmbedded', embedded.path));
             return await this._startSniffer(task, embedded.path, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
         }
 
@@ -1889,7 +1889,7 @@ class Qvideo {
             filters: process.platform === 'win32'
                 ? { 'Executables': ['exe'] }
                 : { 'Executables': ['', 'app'] },
-            title: "请选择 Chromium 内核浏览器的可执行文件" // qq2q
+            title: q('video.ui.selectChromiumExe')
         });
 
         if (this._isTaskCancelled(task)) return null;
@@ -1897,21 +1897,21 @@ class Qvideo {
         // ★ User picked a file
         if (uris && uris.length > 0) {
             const exePath = uris[0].fsPath;
-            this.log(`[选择exe] 用户选择: ${exePath}`); // qq2q
+            this.log(q('video.log.exeUserSelect', exePath));
 
             const validation = await this._validateChromiumSilently(exePath);
             if (this._isTaskCancelled(task)) return null;
 
             if (validation.valid) {
-                this.log(`[选择exe] 验证通过: ${validation.version}，记忆并启动`); // qq2q
+                this.log(q('video.log.exeVerifyPassed', validation.version));
                 return await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_CUSTOM_BROWSER });
             }
 
             // ★ Picked a non-working exe
-            this.log(`[选择exe] 验证失败: ${validation.error}`); // qq2q
+            this.log(q('video.log.exeVerifyFailed', validation.error));
         } else {
             // ★ User closed picker window
-            this.log(`[选择exe] 用户关闭了选择窗口`); // qq2q
+            this.log(q('video.log.exeUserClosed'));
         }
 
         if (this._isTaskCancelled(task)) return null;
@@ -1921,7 +1921,7 @@ class Qvideo {
             // Button 2 scenario: check embedded environment first
             const embedded = await this._checkEmbeddedChrome();
             if (embedded.available) {
-                this.log(`[选择exe兜底] 内嵌环境可用，直接使用`); // qq2q
+                this.log(q('video.log.exeFallbackEmbedded'));
                 return await this._startSniffer(task, embedded.path, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
             }
         }
@@ -1941,7 +1941,7 @@ class Qvideo {
     async _showSecondaryConfirmation(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return null;
 
-        this.log(`[二次确认] 弹出选择: 下载chrome / 终止一切`); // qq2q
+        this.log(q('video.log.secondConfirmShow'));
 
         let sel = undefined;
         const startTime = Date.now();
@@ -1957,7 +1957,7 @@ class Qvideo {
 
         // ★ Use QuickPick fallback when popup is eaten
         if (sel === undefined && elapsed < 500) {
-            this.log(`[二次确认] 弹窗被吃掉 (${elapsed}ms)，使用 QuickPick 兜底...`); // qq2q
+            this.log(q('video.log.secondConfirmEaten', elapsed));
 
             const items = [
                 { label: q('video.ui.downloadChrome'), value: 'download' },
@@ -1977,10 +1977,10 @@ class Qvideo {
         }
 
         if (sel === q('video.ui.downloadChromeBtn')) {
-            this.log(`[二次确认] 用户选择下载chrome`); // qq2q
+            this.log(q('video.log.secondConfirmDownload'));
             return await this._downloadChrome(task, url, targetDir);
         } else {
-            this.log(`[二次确认] 用户终止增强流程`); // qq2q
+            this.log(q('video.log.secondConfirmTerminate'));
         }
         return null;
     }
@@ -2067,7 +2067,7 @@ $of = $vi.OriginalFilename;
                     } else if (isChromiumFamily) {
                         resolve({ valid: true, version: (productName || fileDesc || 'Chromium').slice(0, 80), raw: out });
                     } else {
-                        resolve({ valid: false, error: '不是 Chromium 内核浏览器' }); // qq2q
+                        resolve({ valid: false, error: q('video.error.notChromium') });
                     }
                 });
 
@@ -2076,7 +2076,7 @@ $of = $vi.OriginalFilename;
 
             cp.execFile(exePath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
                 if (err) {
-                    resolve({ valid: false, error: '无法执行 --version' }); // qq2q
+                    resolve({ valid: false, error: q('video.error.cannotExecVersion') });
                     return;
                 }
                 const output = ((stdout || '') + (stderr || '')).trim();
@@ -2112,8 +2112,8 @@ $of = $vi.OriginalFilename;
         // ★ Multi-source fallback: npmmirror (CN) → Google official (overseas)
         return {
             sources: [
-                { name: 'npmmirror (国内)', url: `https://cdn.npmmirror.com/binaries/chrome-for-testing/${version}/${platformKey}/${zipName}` }, // qq2q
-                { name: 'Google (官方)', url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platformKey}/${zipName}` } // qq2q
+                { name: q('video.ui.sourceNpmmirror'), url: `https://cdn.npmmirror.com/binaries/chrome-for-testing/${version}/${platformKey}/${zipName}` },
+                { name: q('video.ui.sourceGoogle'), url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platformKey}/${zipName}` }
             ],
             version,
             platform: platformKey,
@@ -2129,23 +2129,23 @@ $of = $vi.OriginalFilename;
         const zipPath = path.join(this.chromeHome, 'chrome.zip');
         const chromeInfo = this._getChromeDownloadInfo();
 
-        this.log(`[Chrome] 版本: ${chromeInfo.version}`); // qq2q
-        this.log(`[Chrome] 平台: ${chromeInfo.platform}`); // qq2q
-        this.log(`[Chrome] 目标目录: ${this.chromeHome}`); // qq2q
-        this.log(`[Chrome] 可用源: ${chromeInfo.sources.map(s => s.name).join(', ')}`); // qq2q
+        this.log(q('video.log.chromeVersion', chromeInfo.version));
+        this.log(q('video.log.chromePlatform', chromeInfo.platform));
+        this.log(q('video.log.chromeTargetDir', this.chromeHome));
+        this.log(q('video.log.chromeSources', chromeInfo.sources.map(s => s.name).join(', ')));
 
         let exePath = null;
 
         exePath = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: "qqq: 正在下载 Chrome for Testing...", // qq2q
+            title: q('video.ui.downloadingChrome'),
             cancellable: true
         }, async (progress, token) => {
             let cancelled = false;
             token.onCancellationRequested(
                 ChildProcessTracker.bind(async () => {
                     cancelled = true;
-                    await this._cancelTask(task, '用户取消 Chrome 下载'); // qq2q
+                    await this._cancelTask(task, q('video.reason.userCancel'));
                 })
             );
 
@@ -2155,9 +2155,9 @@ $of = $vi.OriginalFilename;
                 const source = chromeInfo.sources[i];
                 if (cancelled || this._isTaskCancelled(task)) return null;
 
-                this.log(`[Chrome] 尝试源 ${i + 1}/${chromeInfo.sources.length}: ${source.name}`); // qq2q
+                this.log(q('video.log.chromeTrySource', i + 1, chromeInfo.sources.length, source.name));
                 this.log(`[Chrome] URL: ${source.url}`);
-                progress.report({ message: `0% - ${source.name} (版本 ${chromeInfo.version})` }); // qq2q
+                progress.report({ message: q('video.ui.chromeProgress', source.name, chromeInfo.version) });
 
                 try {
                     await this._downloadFile(source.url, zipPath, progress, () => cancelled || this._isTaskCancelled(task));
@@ -2168,8 +2168,8 @@ $of = $vi.OriginalFilename;
                     }
 
                     // ★ Download succeeded, continue to extract
-                    this.log(`[Chrome] 下载成功，来源: ${source.name}`); // qq2q
-                    progress.report({ message: "解压中..." }); // qq2q
+                    this.log(q('video.log.chromeDownloadSuccess', source.name));
+                    progress.report({ message: q('video.ui.extracting') });
 
                     await this._extractZip(zipPath, this.chromeHome);
 
@@ -2178,29 +2178,29 @@ $of = $vi.OriginalFilename;
                     const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
                     const foundExe = this._findFileRecursive(this.chromeHome, exeName, 6);
 
-                    if (!foundExe) throw new Error("解压完成但找不到 chrome 可执行文件"); // qq2q
+                    if (!foundExe) throw new Error(q('video.error.extractNoExe'));
 
-                    this.log(`[Chrome] 找到: ${foundExe}`); // qq2q
+                    this.log(q('video.log.chromeFound', foundExe));
 
                     if (process.platform === 'darwin' || process.platform === 'linux') {
                         try { cp.execSync(`chmod +x "${foundExe}"`); } catch (e) { }
                     }
 
                     const validation = await this._validateChromiumSilently(foundExe);
-                    if (!validation.valid) throw new Error(`下载的 Chrome 验证失败: ${validation.error}`); // qq2q
+                    if (!validation.valid) throw new Error(q('video.error.chromeVerifyFailed', validation.error));
 
-                    this.log(`[Chrome] 验证通过: ${validation.version}`); // qq2q
+                    this.log(q('video.log.chromeVerifyPassed', validation.version));
 
                     return foundExe;
 
                 } catch (e) {
                     lastError = e;
-                    this.log(`[Chrome] 源 ${source.name} 失败: ${e.message}`); // qq2q
+                    this.log(q('video.log.chromeSourceFailed', source.name, e.message));
                     try { fs.unlinkSync(zipPath); } catch (e) { }
 
                     // ★ There is another source, continue
                     if (i < chromeInfo.sources.length - 1) {
-                        this.log(`[Chrome] 尝试下一个源...`); // qq2q
+                        this.log(q('video.log.chromeTryNext'));
                         continue;
                     }
                 }
@@ -2208,8 +2208,8 @@ $of = $vi.OriginalFilename;
 
             // ★ All sources failed
             if (this._isTaskCancelled(task)) return null;
-            this.log(`[Chrome] 所有源都失败`); // qq2q
-            global.showAutoCloseNotification('error', `下载 Chrome 失败: ${lastError?.message || '未知错误'}`); // qq2q
+            this.log(q('video.log.chromeAllFailed'));
+            global.showAutoCloseNotification('error', q('video.ui.chromeDownloadFailed', lastError?.message || 'Unknown'));
             return null;
         });
 
@@ -2221,7 +2221,7 @@ $of = $vi.OriginalFilename;
     _downloadFile(url, destPath, progress, isCancelled) {
         return new Promise((resolve, reject) => {
             const doRequest = (currentUrl, redirectCount = 0) => {
-                if (redirectCount > 10) return reject(new Error('重定向次数过多')); // qq2q
+                if (redirectCount > 10) return reject(new Error(q('video.error.tooManyRedirects')));
                 if (isCancelled && isCancelled()) return resolve();
 
                 const protocol = currentUrl.startsWith('https') ? https : require('http');
@@ -2490,7 +2490,7 @@ $of = $vi.OriginalFilename;
                     if (task.shouldCancel && typeof task.shouldCancel === 'function') {
                         try {
                             if (task.shouldCancel()) {
-                                this.log(q('video.log.anchorLostEnhanced')); // qq2q
+                                this.log(q('video.log.anchorLostEnhanced'));
                                 task.anchorLost = true;
                                 this._cancelTask(task, q('video.reason.anchorLost')).catch(e => { });
                                 return;
@@ -2546,9 +2546,9 @@ $of = $vi.OriginalFilename;
     async _startSniffer(task, browserPath, url, targetDir, opts = {}) {
         if (this._isTaskCancelled(task)) return null;
 
-        this.log("启动增强嗅探流程..."); // qq2q
-        this.log(`浏览器: ${browserPath}`); // qq2q
-        this.log(`用户数据目录: ${this.userDataDir}`); // qq2q
+        this.log(q('video.log.startSniffing'));
+        this.log(q('video.log.sniffBrowser', browserPath));
+        this.log(q('video.log.sniffUserDataDir', this.userDataDir));
 
         if (!fs.existsSync(this.userDataDir)) fs.mkdirSync(this.userDataDir, { recursive: true });
 
@@ -2571,9 +2571,9 @@ $of = $vi.OriginalFilename;
             if (opts.rememberKey) {
                 try {
                     await this.context.globalState.update(opts.rememberKey, browserPath);
-                    this.log(`[增强] 已写入 globalState: ${opts.rememberKey} = ${browserPath}`); // qq2q
+                    this.log(q('video.log.globalStateSaved', opts.rememberKey, browserPath));
                 } catch (e) {
-                    this.log(`[增强] 写入 globalState 失败: ${e.message}`); // qq2q
+                    this.log(q('video.log.globalStateFailed', e.message));
                 }
             }
 
@@ -2582,7 +2582,7 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            this.log(`[增强] 准备显示"我已在外部播放"弹窗...`); // qq2q
+            this.log(q('video.log.showPlaybackPopup'));
 
             // ★ Start anchor check timer (check anchor during waiting for user confirmation)
             let anchorCheckTimer = null;
@@ -2591,7 +2591,7 @@ $of = $vi.OriginalFilename;
                 if (task.shouldCancel && typeof task.shouldCancel === 'function') {
                     try {
                         if (task.shouldCancel()) {
-                            this.log('[AnchorLost] ' + q('video.log.anchorLostEnhanced')); // qq2q
+                            this.log('[AnchorLost] ' + q('video.log.anchorLostEnhanced'));
                             task.anchorLost = true;
                             anchorLostDuringWait = true;
                             this._cancelTask(task, q('video.reason.anchorLost')).catch(e => { });
@@ -2605,7 +2605,7 @@ $of = $vi.OriginalFilename;
             // ★ If there are no other active download tasks, reset the "popup eaten" state
             if (_activeTasks.size <= 1) {
                 if (_isInfoMessageEaten) {
-                    this.log(`[增强] 嘗探阶段检测到环境已恢复正常，重置弹窗判断状态。`); // qq2q
+                    this.log(q('video.log.sniffEnvRecovered'));
                     _isInfoMessageEaten = false;
                 }
             }
@@ -2617,13 +2617,13 @@ $of = $vi.OriginalFilename;
             if (!_isInfoMessageEaten) {
                 const startTime = Date.now();
                 selection = await vscode.window.showInformationMessage(
-                    QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'), // qq2q
+                    QvideoMsg.prompt(task, q('video.ui.playInBrowser')),
                     { modal: true },
-                    "我已在外部播放" // qq2q
+                    q('video.ui.playedExternally')
                 );
                 elapsed = Date.now() - startTime;
             } else {
-                this.log(`[增强] 嘗探阶段处于弹窗被吃掉模式，跳过 InformationMessage 直接尝试兜底逻辑...`); // qq2q
+                this.log(q('video.log.sniffPopupEaten'));
             }
 
             // ★ Stop anchor check timer
@@ -2638,11 +2638,11 @@ $of = $vi.OriginalFilename;
                 return null;
             }
 
-            this.log(`[增强] 弹窗返回: selection=${selection}, 耗时=${elapsed}ms`); // qq2q
+            this.log(q('video.log.sniffPopupResult', selection, elapsed));
 
             // ★ If closed immediately, use QuickPick fallback
             if (selection === undefined && elapsed < 500) {
-                this.log(`[增强] 嘗探确认弹窗被异常关闭 (${elapsed}ms)，记录状态并改用下拉选择...`); // qq2q
+                this.log(q('video.log.sniffPopupAbnormalClose', elapsed));
                 _isInfoMessageEaten = true;
 
                 if (this._isTaskCancelled(task)) {
@@ -2651,40 +2651,40 @@ $of = $vi.OriginalFilename;
                 }
 
                 const items = [
-                    { label: '✅ 我已在外部播放', value: 'done' }, // qq2q
-                    { label: '❌ 取消', value: 'cancel' } // qq2q
+                    { label: q('video.ui.playedExternallyLabel'), value: 'done' },
+                    { label: q('video.ui.cancelLabel'), value: 'cancel' }
                 ];
 
                 const picked = await vscode.window.showQuickPick(items, {
-                    placeHolder: QvideoMsg.prompt(task, '请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。'), // qq2q
+                    placeHolder: QvideoMsg.prompt(task, q('video.ui.playInBrowser')),
                     ignoreFocusOut: true
                 });
 
-                this.log(`[增强] QuickPick 返回: ${picked?.value || 'undefined'}`); // qq2q
+                this.log(q('video.log.quickPickResult', picked?.value || 'undefined'));
 
                 if (picked?.value === 'done') {
-                    selection = "我已在外部播放"; // qq2q
+                    selection = q('video.ui.playedExternally');
                 } else if (picked === undefined) {
                     // ★ QuickPick also failed; use InputBox as ultimate fallback
-                    this.log(`[增强] QuickPick 也失败，使用 InputBox 终极兆底...`); // qq2q
+                    this.log(q('video.log.sniffQuickPickFailed'));
 
                     const input = await vscode.window.showInputBox({
-                        prompt: QvideoMsg.prompt(task, '请在浏览器中播放视频，然后键入 ok 并回车'), // qq2q
-                        placeHolder: '键入 ok 确认', // qq2q
+                        prompt: QvideoMsg.prompt(task, q('video.ui.typeOkToConfirm')),
+                        placeHolder: q('video.ui.typeOkPlaceholder'),
                         ignoreFocusOut: true
                     });
 
-                    this.log(`[增强] InputBox 返回: ${input}`); // qq2q
+                    this.log(q('video.log.sniffInputBoxResult', input));
 
                     if (input && input.toLowerCase().trim() === 'ok') {
-                        selection = "我已在外部播放"; // qq2q
+                        selection = q('video.ui.playedExternally');
                     }
                 }
             }
 
-            if (selection !== "我已在外部播放") { // qq2q
+            if (selection !== q('video.ui.playedExternally')) {
                 try { await sniffer.stop(); } catch (e) { }
-                this.log("用户取消增强嘗探"); // qq2q
+                this.log(q('video.log.userCancelSniff'));
                 return null;
             }
 
@@ -2741,7 +2741,7 @@ $of = $vi.OriginalFilename;
         } catch (e) {
             if (this._isTaskCancelled(task)) return null;
 
-            this.log(`增强流程出错: ${e.message}`); // qq2q
+            this.log(q('video.log.enhancedError', e.message));
             if (sniffer) {
                 try { await sniffer.stop(); } catch (e2) { }
             }
