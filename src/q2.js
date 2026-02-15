@@ -2938,7 +2938,7 @@ function getWebviewContent(currentPath) {
     // Admin terminal context menu - platform specific (hardcoded, no i18n)
     .replace("{{ADMIN_TERM_1}}", process.platform === 'win32' ? 'CMD' : 'Terminal')
     .replace("{{ADMIN_TERM_2_HTML}}", process.platform === 'win32'
-      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut"></span></div>`
+      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut">= "x"</span></div>`
       : '')
     .replace("{{IS_WINDOWS}}", process.platform === 'win32' ? 'true' : 'false');
 
