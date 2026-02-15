@@ -63,7 +63,7 @@
         "downloadingVideoEngine": "qqq: جاري تحميل محرك الفيديو...",
         "ytdlpInstallSuccess": "qqq: تم تثبيت yt-dlp بنجاح",
         "ytdlpInstallFailedMsg": "qqq: فشل تحميل محرك الفيديو (yt-dlp): {0}",
-        "ytdlpNotInstalledWarning": "لم يتم تثبيت yt-dlp، بلا فرصة للرهانطون على مقاطع الفيديو. هذا yt-dlp وحاول مرة أخرى.",
+        "ytdlpNotInstalledWarning": "لم يتم تثبيت yt-dlp، لا يمكن تنزيل مقاطع الفيديو من المنصة. يرجى تثبيت yt-dlp والمحاولة مرة أخرى.",
         "probingVideoResources": "جاري استطلاع موارد الفيديو...",
         "ytdlpProbeFailed": "فشل استطلاع yt-dlp، جاري تحليل الصفحة مباشرة...",
         "directVideoLink": "رابط الفيديو مباشر {0}",
