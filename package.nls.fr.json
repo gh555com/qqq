@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 Forcer la correction du texte HTML corrompu. Cocher uniquement en cas de problèmes persistants d'encodage HTML (ou texte enrichi); sinon garder décoché — le compromis est une précision de mise en page réduite.",
     "config.autoDownload.desc": "🍌 Téléchargement automatique lorsqu'une vidéo est détectée",
     "config.docExportImageResolution.desc": "📦 Résolution d'image à utiliser:",
+    "config.docExportImageResolution.label.original": "Résolution originale",
+    "config.docExportImageResolution.label.frame": "Résolution du cadre",
     "config.docExportImageResolution.enum.original": "Résolution originale — précision complète",
     "config.docExportImageResolution.enum.frame": "Avantages: 1. Taille de fichier plus petite; 2. Les miniatures du cadre correspondent toujours à une prévisualisation d'image complète (pas de recadrage dû aux limites de taille de page Word).",
     "config.docExportIncludeCipher.desc": "📦 Exporter la chaîne de chiffrement d'image (ex. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

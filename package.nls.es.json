@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 Forzar corrección de texto HTML corrupto. Solo marcar cuando encuentres problemas persistentes de codificación HTML (o texto enriquecido); de lo contrario mantener desmarcado — la compensación es precisión de diseño reducida.",
     "config.autoDownload.desc": "🍌 Descargar automáticamente cuando se detecte un video",
     "config.docExportImageResolution.desc": "📦 Resolución de imagen a usar:",
+    "config.docExportImageResolution.label.original": "Resolución original",
+    "config.docExportImageResolution.label.frame": "Resolución del marco",
     "config.docExportImageResolution.enum.original": "Resolución original — precisión completa",
     "config.docExportImageResolution.enum.frame": "Ventajas: 1. Tamaño de archivo más pequeño; 2. Las miniaturas del marco siempre corresponden a una vista previa de imagen completa (sin recorte por límites de tamaño de página de Word).",
     "config.docExportIncludeCipher.desc": "📦 Exportar cadena de cifrado de imagen (ej. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

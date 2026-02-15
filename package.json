@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.68.16",
+  "version": "15.68.17",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -284,10 +284,14 @@
           "qqq.docExportImageResolution": {
             "order": 10,
             "type": "string",
-            "default": "原始分辨率",
+            "default": "original",
             "enum": [
-              "原始分辨率",
-              "相框分辨率"
+              "original",
+              "frame"
+            ],
+            "enumItemLabels": [
+              "%config.docExportImageResolution.label.original%",
+              "%config.docExportImageResolution.label.frame%"
             ],
             "markdownDescription": "%config.docExportImageResolution.desc%",
             "markdownEnumDescriptions": [

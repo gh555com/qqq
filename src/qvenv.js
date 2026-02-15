@@ -1,8 +1,8 @@
 /**
- * ★ QVEnv - 环境管理模块
- * 负责 Python、yt-dlp 及所有依赖的下载、安装、检测
- * 从 dow.js 迁移而来，提供统一的环境管理接口
- */
+* ★ QVEnv - Environment Management Module
+* Responsible for downloading, installing, and checking Python, yt-dlp, and all dependencies
+* Migrated from dow.js, providing a unified environment management interface
+*/
 
 "use strict";
 
@@ -16,7 +16,7 @@ let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
 // ============================================================================
-// ★ Python 引擎下载器
+// ★ Python Engine Downloader
 // ============================================================================
 
 class PythonEngineDownloader {
@@ -24,26 +24,26 @@ class PythonEngineDownloader {
         this.pythonPath = options.pythonPath || null;
         this._installInProgress = false;
         this._installTimer = null;
-        // ★ "从无到有" 回调：当 Python 环境从无到有时触发
+        // ★ "From scratch" callback: triggered when Python environment goes from absent to present
         this._onPythonReady = null;
-        // ★ L1 "已知不完美" 状态缓存
+        // ★ L1 "known imperfect" status cache
         this._l1KnownImperfect = false;
         this._l1ImperfectReason = null;
         this._l1ImperfectMissing = [];
-        // ★ 已解析的 Python 路径
+        // ★ Resolved Python path
         this._resolvedPath = null;
     }
 
     /**
-     * 注册 "从无到有" 回调
-     * @param {Function} callback - 当 Python 环境从无到有时调用
+     * Register "from scratch" callback
+     * @param {Function} callback - Called when Python environment goes from absent to present
      */
     onPythonReady(callback) {
         this._onPythonReady = callback;
     }
 
     /**
-     * ★ 查询 L1 是否已知不完美
+     * ★ Query whether L1 is known imperfect
      * @returns {Object} - { imperfect: boolean, reason: string|null, missing: string[] }
      */
     getL1ImperfectStatus() {
@@ -55,7 +55,7 @@ class PythonEngineDownloader {
     }
 
     /**
-     * ★ 清除 L1 不完美缓存（当环境变化时调用）
+     * ★ Clear L1 imperfect cache (call when environment changes)
      */
     clearL1ImperfectCache() {
         this._l1KnownImperfect = false;
@@ -64,11 +64,11 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 读取上次安装时间戳（globalState）
+     * Read last install timestamp (globalState)
      */
     _readState(context) {
         try {
-            // ★ 先读主 key，如果为 0 则读备份 key
+            // ★ First read primary key; if 0 then read backup key
             let ts = context.globalState.get('pythonInstallTimestamp', 0);
             if (!ts) {
                 ts = context.globalState.get('python_cooldown_ts', 0);
@@ -81,14 +81,14 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 保存安装时间戳（globalState）
+     * Save install timestamp (globalState)
      */
     _saveState(context, state) {
         try {
-            // ★ 关键：globalState.update 是异步的，但这里不需要等待
-            // 因为 VS Code 会在内部队列处理，只要调用就会生效
+            // ★ Key: globalState.update is async, but no need to await here
+            // Because VS Code processes it in an internal queue; calling it is enough
             context.globalState.update('pythonInstallTimestamp', state.installTimestamp);
-            // ★ 同时写入一个备份 key，确保写入成功
+            // ★ Also write a backup key to ensure persistence
             context.globalState.update('python_cooldown_ts', state.installTimestamp);
         } catch (e) {
             console.error('[PythonCheck] _saveState error:', e.message);
@@ -96,20 +96,20 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 检查是否在 72 小时冷却期内
+     * Check whether within 72-hour cooldown
      */
     _isInCooldown(context) {
-        const COOLDOWN_MS = 259200000; // 72 小时
+        const COOLDOWN_MS = 259200000; // 72 hours
         const state = this._readState(context);
         const now = Date.now();
         return (now - state.installTimestamp) < COOLDOWN_MS;
     }
 
     /**
-     * 检查冷却期剩余时间
+     * Check remaining cooldown time
      */
     _getCooldownStatus(context) {
-        const COOLDOWN_MS = 259200000; // 72 小时
+        const COOLDOWN_MS = 259200000; // 72 hours
         const state = this._readState(context);
         const now = Date.now();
         const elapsed = now - state.installTimestamp;
@@ -124,7 +124,7 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 依赖名到导入名的映射
+     * Mapping from dependency name to import name
      */
     _getImportName(dep) {
         const importMap = {
@@ -135,8 +135,8 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 获取锁定版本的依赖列表
-     * ★ 版本锁定：pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22
+     * Get locked-version dependency list
+     * ★ Version lock: pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22
      */
     _getLockedDeps() {
         const baseDeps = [
@@ -145,14 +145,14 @@ class PythonEngineDownloader {
             'cffi==1.16.0',
             'pycparser==2.22'
         ];
-        // Windows 专属依赖：pywin32==311（不跑 postinstall）
+        // Windows-only dependency: pywin32==311 (no postinstall)
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32==311']
             : baseDeps;
     }
 
     /**
-     * 获取依赖检测列表（不带版本号）
+     * Get dependency check list (without versions)
      */
     _getDepsForCheck() {
         const baseDeps = ['miniaudio', 'Pillow'];
@@ -162,8 +162,8 @@ class PythonEngineDownloader {
     }
 
     /**
-     * ★ 获取必需依赖（不包括可选的 Pillow）
-     * Pillow 在 Embed 版中容易因缺少 msvcp140.dll 而失败
+     * ★ Get required dependencies (excluding optional Pillow)
+     * Pillow in embed builds can easily fail due to missing msvcp140.dll
      */
     _getRequiredDeps() {
         const baseDeps = ['miniaudio'];
@@ -173,28 +173,28 @@ class PythonEngineDownloader {
     }
 
     /**
-     * ★ 获取可选依赖
+     * ★ Get optional dependencies
      */
     _getOptionalDeps() {
         return ['Pillow'];
     }
 
     /**
-     * ★ 获取需要的 VC++ 运行时 DLL 列表
-     * Pillow 10.4.0 依赖这些 DLL
+     * ★ Get required VC++ runtime DLL list
+     * Pillow 10.4.0 depends on these DLLs
      */
     _getRequiredVCDlls() {
         return [
-            'msvcp140.dll',      // 核心：Pillow 必需
-            'vcruntime140.dll',  // 核心：C 运行时
-            'vcruntime140_1.dll' // x64 专属
+            'msvcp140.dll',      // Core: required by Pillow
+            'vcruntime140.dll',  // Core: C runtime
+            'vcruntime140_1.dll' // x64-only
         ];
     }
 
     /**
-     * ★ 复制 VC++ 运行时 DLL 到 Python 引擎目录
-     * @param {Object} context - VS Code 扩展上下文
-     * @param {string} installDir - Python 引擎安装目录
+     * ★ Copy VC++ runtime DLLs to Python engine directory
+     * @param {Object} context - VS Code extension context
+     * @param {string} installDir - Python engine install directory
      * @returns {Object} - { success: boolean, copied: string[], missing: string[] }
      */
     _copyVCRuntimeDlls(context, installDir) {
@@ -209,7 +209,7 @@ class PythonEngineDownloader {
         const missing = [];
         const alreadyExists = [];
 
-        // 所有可用的 DLL
+        // All available DLLs
         const allDlls = [
             'msvcp140.dll',
             'msvcp140_1.dll',
@@ -225,18 +225,18 @@ class PythonEngineDownloader {
             const dstPath = path.join(installDir, dll);
 
             try {
-                // 已存在则跳过
+                // If already exists, skip
                 if (fs.existsSync(dstPath)) {
                     alreadyExists.push(dll);
                     continue;
                 }
 
-                // 源文件存在则复制
+                // Copy if source exists
                 if (fs.existsSync(srcPath)) {
                     fs.copyFileSync(srcPath, dstPath);
                     copied.push(dll);
                 } else {
-                    // x86 没有 vcruntime140_1.dll，不算 missing
+                    // x86 doesn't have vcruntime140_1.dll, not considered missing
                     if (dll === 'vcruntime140_1.dll' && arch === 'x86') continue;
                     missing.push(dll);
                 }
@@ -254,8 +254,8 @@ class PythonEngineDownloader {
     }
 
     /**
-     * ★ 检查 VC++ 运行时 DLL 是否存在
-     * @param {string} installDir - Python 引擎安装目录
+     * ★ Check whether VC++ runtime DLLs exist
+     * @param {string} installDir - Python engine install directory
      * @returns {Object} - { ok: boolean, missing: string[] }
      */
     _checkVCRuntimeDlls(installDir) {
@@ -268,7 +268,7 @@ class PythonEngineDownloader {
 
         for (const dll of requiredDlls) {
             const dllPath = path.join(installDir, dll);
-            // x86 没有 vcruntime140_1.dll
+            // x86 doesn't have vcruntime140_1.dll
             if (dll === 'vcruntime140_1.dll' && process.arch !== 'x64') continue;
             if (!fs.existsSync(dllPath)) {
                 missing.push(dll);
@@ -282,8 +282,8 @@ class PythonEngineDownloader {
     }
 
     /**
-     * 快速检测依赖是否存在
-     * ★ 关键：区分必需和可选依赖
+     * Quick check whether dependencies exist
+     * ★ Key: distinguish required vs optional dependencies
      */
     async checkDeps(pythonBin) {
         const { spawnSync } = require("child_process");
@@ -312,7 +312,7 @@ sys.exit(0)
                 encoding: 'utf8',
                 windowsHide: true,
                 timeout: 15000,
-                // ★ 关键：禁用弹窗，防止 Pillow 缺少 DLL 时弹窗
+                // ★ Key: disable popup to prevent popup when Pillow is missing DLLs
                 stdio: ['ignore', 'pipe', 'pipe']
             });
 
@@ -338,11 +338,11 @@ sys.exit(0)
                 }
             }
 
-            // ★ 关键：只要必需依赖完整，就认为 hasAll=true
+            // ★ Key: as long as required deps are complete, treat hasAll=true
             return {
                 hasAll: missingRequired.length === 0,
-                missing: missingRequired,  // 只返回必需的缺失
-                missingOptional,  // 可选的缺失
+                missing: missingRequired,  // Only return missing required deps
+                missingOptional,  // Missing optional deps
                 detail
             };
         } catch (e) {
@@ -357,7 +357,7 @@ sys.exit(0)
     }
 
     /**
-     * 检查 Python 解释器是否可用（简化版，不检查版本范围）
+     * Check whether Python interpreter is available (simplified, no version range check)
      */
     async isAvailable(pythonBin = null) {
         const bin = pythonBin || this.pythonPath;
@@ -389,14 +389,14 @@ sys.exit(0)
     }
 
     /**
-     * ★ L1 完美性检查：解释器存在 + 依赖完整 + VC++ DLL 存在才算完美
+     * ★ L1 perfection check: interpreter exists + dependencies complete + VC++ DLLs exist => perfect
      * @returns {Object} - { perfect: boolean, pythonPath: string|null, missing: string[] }
      */
     async checkL1Perfect(context) {
         const path = require('path');
         const fs = require('fs');
 
-        // ★ 辅助函数：记录不完美状态
+        // ★ Helper: record imperfect status
         const markImperfect = (reason, missing = []) => {
             this._l1KnownImperfect = true;
             this._l1ImperfectReason = reason;
@@ -412,42 +412,42 @@ sys.exit(0)
         const binName = process.platform === "win32" ? "python.exe" : "bin/python3";
         const pythonPath = path.join(installDir, binName);
 
-        // 1. 检查解释器是否存在
+        // 1. Check whether interpreter exists
         if (!fs.existsSync(pythonPath)) {
             markImperfect('no_interpreter');
             return { perfect: false, pythonPath: null, missing: [], reason: 'no_interpreter' };
         }
 
-        // 2. 检查解释器是否可用
+        // 2. Check whether interpreter is usable
         if (!await this.isAvailable(pythonPath)) {
             markImperfect('interpreter_invalid');
             return { perfect: false, pythonPath, missing: [], reason: 'interpreter_invalid' };
         }
 
-        // 3. ★ 检查并自动复制 VC++ 运行时 DLL（Windows 专属）
-        // ★ 关键：DLL 缺失不阻塞启动，只是尝试复制并记录
+        // 3. ★ Check and auto-copy VC++ runtime DLLs (Windows only)
+        // ★ Key: missing DLLs do not block startup; only attempt to copy and record
         let missingDlls = [];
         if (process.platform === 'win32' && context.extensionPath) {
             const dllCheck = this._checkVCRuntimeDlls(installDir);
             if (!dllCheck.ok) {
-                // 尝试自动复制 DLL
+                // Try auto-copy DLLs
                 const copyResult = this._copyVCRuntimeDlls(context, installDir);
                 if (copyResult.copied.length > 0) {
                     const global = require('./global');
                     global.logMessage(q('qvenv.vcppDllCopy', copyResult.copied.join(', ')), 'INFO');
                 }
-                // 再次检查，但不阻塞
+                // Recheck, but do not block
                 const recheckDll = this._checkVCRuntimeDlls(installDir);
                 if (!recheckDll.ok) {
                     missingDlls = recheckDll.missing;
                     const global = require('./global');
                     global.logMessage(q('qvenv.vcppDllMissing', missingDlls.join(', ')), 'WARN');
-                    // ★ 不返回，继续检查依赖
+                    // ★ Do not return; continue checking dependencies
                 }
             }
         }
 
-        // 4. 检查依赖是否完整
+        // 4. Check whether dependencies are complete
         const depsResult = await this.checkDeps(pythonPath);
         if (!depsResult.hasAll) {
             markImperfect('deps_missing', depsResult.missing);
@@ -461,14 +461,14 @@ sys.exit(0)
             };
         }
 
-        // ★ 记录可选依赖的状态（Pillow 静默失败不阻塞）
+        // ★ Record optional dependency status (Pillow silent failure does not block)
         const missingOptional = depsResult.missingOptional || [];
         if (missingOptional.length > 0) {
             const global = require('./global');
             global.logMessage(q('qvenv.optionalDepsMissing', missingOptional.join(', ')), 'INFO');
         }
 
-        // 完美！清除不完美缓存
+        // Perfect! Clear imperfect cache
         this.clearL1ImperfectCache();
         this.pythonPath = pythonPath;
         return {
@@ -476,15 +476,15 @@ sys.exit(0)
             pythonPath,
             missing: [],
             missingOptional: missingOptional,
-            missingDlls,  // ★ 记录但不阻塞
+            missingDlls,  // ★ Record but do not block
             reason: 'ok'
         };
     }
 
     /**
-     * ★ Python 精简器 - 激进版
-     * 策略：不动 python38.zip，删除所有不需要的文件
-     * 预期释放：~20MB+
+     * ★ Python Slimmer - Aggressive Version
+     * Strategy: do not touch python38.zip; delete all unnecessary files
+     * Expected savings: ~20MB+
      */
     async _slimPython(installDir, pythonBin) {
         const global = require('./global');
@@ -494,23 +494,23 @@ sys.exit(0)
 
         let totalSaved = 0;
 
-        // ★ 步骤1：删除不需要的 .pyd 文件（C 扩展模块）
+        // ★ Step 1: delete unneeded .pyd files (C extension modules)
         const unneededPyd = [
-            '_sqlite3.pyd',      // SQLite 数据库 (~1MB)
+            '_sqlite3.pyd',      // SQLite database (~1MB)
             '_tkinter.pyd',      // GUI
-            '_testcapi.pyd',     // 测试
-            '_testbuffer.pyd',   // 测试
-            '_testconsole.pyd',  // 测试
-            '_testimportmultiple.pyd', // 测试
-            '_testmultiphase.pyd', // 测试
-            'winsound.pyd',      // Windows 声音（我们用 miniaudio）
-            '_msi.pyd',          // MSI 安装包
-            '_distutils_findvs.pyd', // VS 查找
-            '_lzma.pyd',         // LZMA 压缩
-            '_bz2.pyd',          // BZ2 压缩
-            '_decimal.pyd',      // 高精度小数
-            'pyexpat.pyd',       // XML 解析
-            '_elementtree.pyd',  // XML 解析
+            '_testcapi.pyd',     // tests
+            '_testbuffer.pyd',   // tests
+            '_testconsole.pyd',  // tests
+            '_testimportmultiple.pyd', // tests
+            '_testmultiphase.pyd', // tests
+            'winsound.pyd',      // Windows sound (we use miniaudio)
+            '_msi.pyd',          // MSI installer
+            '_distutils_findvs.pyd', // VS finder
+            '_lzma.pyd',         // LZMA compression
+            '_bz2.pyd',          // BZ2 compression
+            '_decimal.pyd',      // high-precision decimal
+            'pyexpat.pyd',       // XML parser
+            '_elementtree.pyd',  // XML parser
         ];
 
         for (const pyd of unneededPyd) {
@@ -524,11 +524,11 @@ sys.exit(0)
             } catch { }
         }
 
-        // ★ 步骤2：删除不需要的大文件和 DLL
+        // ★ Step 2: delete unneeded large files and DLLs
         const unneededFiles = [
-            'python.cat',        // 签名目录 (~500KB)
-            'LICENSE.txt',       // 许可证
-            'NEWS.txt',          // 新闻
+            'python.cat',        // signature catalog (~500KB)
+            'LICENSE.txt',       // license
+            'NEWS.txt',          // news
             'sqlite3.dll',       // SQLite DLL (~1.5MB)
         ];
 
@@ -543,10 +543,10 @@ sys.exit(0)
             } catch { }
         }
 
-        // ★ 步骤3：删除不需要的目录
+        // ★ Step 3: delete unneeded directories
         const unneededDirs = [
-            'Scripts',           // pip 脚本目录 (~432KB)
-            'Lib',               // 解压出来的库（如果存在）
+            'Scripts',           // pip scripts directory (~432KB)
+            'Lib',               // extracted libraries (if any)
         ];
 
         for (const d of unneededDirs) {
@@ -559,7 +559,7 @@ sys.exit(0)
             } catch { }
         }
 
-        // ★ 步骤4：深度清理 site-packages
+        // ★ Step 4: deep clean site-packages
         const siteDir = path.join(installDir, 'site-packages');
         if (fs.existsSync(siteDir)) {
             totalSaved += this._deepCleanSitePackages(siteDir);
@@ -572,26 +572,26 @@ sys.exit(0)
     }
 
     /**
-     * ★ 深度清理 site-packages
-     * 删除 pip/setuptools/wheel + pywin32 垃圾 + 文档/测试
+     * ★ Deep clean site-packages
+     * Delete pip/setuptools/wheel + pywin32 junk + docs/tests
      */
     _deepCleanSitePackages(siteDir) {
         let saved = 0;
 
-        // ★ 删除 pip/setuptools/wheel 相关（安装完不再需要）
+        // ★ Delete pip/setuptools/wheel related (not needed after install)
         const pipRelated = [
             'pip', '_pip', 'pip-*',
             'setuptools', 'pkg_resources', '_distutils_hack',
             'wheel', 'distutils-precedence.pth',
         ];
 
-        // ★ 删除 pywin32 不需要的组件
+        // ★ Delete unneeded pywin32 components
         const pywin32Junk = [
-            'pythonwin',         // GUI 编辑器 (~9.3MB)
-            'PyWin32.chm',       // 帮助文件 (~2.6MB)
-            'isapi',             // IIS 扩展 (~177KB)
-            'adodbapi',          // 数据库 ADO (~162KB)
-            'win32comext',       // COM 扩展 (~2.8MB)，测试后可考虑保留
+            'pythonwin',         // GUI editor (~9.3MB)
+            'PyWin32.chm',       // help file (~2.6MB)
+            'isapi',             // IIS extension (~177KB)
+            'adodbapi',          // ADO database (~162KB)
+            'win32comext',       // COM extensions (~2.8MB), consider keeping after testing
         ];
 
         const toDelete = [...pipRelated, ...pywin32Junk];
@@ -603,7 +603,7 @@ sys.exit(0)
                 const p = path.join(siteDir, item.name);
                 const name = item.name.toLowerCase();
 
-                // 删除指定的目录/文件
+                // Delete specified directories/files
                 const shouldDelete = toDelete.some(pattern => {
                     if (pattern.endsWith('*')) {
                         return name.startsWith(pattern.slice(0, -1).toLowerCase());
@@ -622,14 +622,14 @@ sys.exit(0)
                     continue;
                 }
 
-                // 删除 .dist-info 和 .egg-info 目录
+                // Delete .dist-info and .egg-info directories
                 if (item.isDirectory() && (name.endsWith('.dist-info') || name.endsWith('.egg-info'))) {
                     saved += this._getDirSize(p);
                     this._rmDir(p);
                     continue;
                 }
 
-                // 递归清理子目录
+                // Recursively clean subdirectories
                 if (item.isDirectory()) {
                     saved += this._cleanPackageDir(p);
                 }
@@ -640,12 +640,12 @@ sys.exit(0)
     }
 
     /**
-     * 清理单个包目录（深度清理版）
+     * Clean a single package directory (deep clean version)
      */
     _cleanPackageDir(dir) {
         let saved = 0;
 
-        // ★ 要删除的目录名
+        // ★ Directory names to delete
         const junkDirs = [
             '__pycache__',
             'tests', 'test', 'testing',
@@ -655,7 +655,7 @@ sys.exit(0)
             '.git', '.github', '.svn',
         ];
 
-        // ★ 要删除的文件名/扩展名
+        // ★ File names/extensions to delete
         const junkFiles = [
             '.pyc', '.pyo', '.pyd.lib', '.pdb',
             '.md', '.rst', '.txt', '.html',
@@ -674,14 +674,14 @@ sys.exit(0)
                 const p = path.join(dir, item.name);
                 const nameLower = item.name.toLowerCase();
 
-                // 删除垃圾目录
+                // Delete junk directories
                 if (item.isDirectory() && junkDirs.includes(nameLower)) {
                     saved += this._getDirSize(p);
                     this._rmDir(p);
                     continue;
                 }
 
-                // 删除垃圾文件
+                // Delete junk files
                 if (item.isFile()) {
                     const shouldDelete = junkFiles.some(pattern => {
                         if (pattern.startsWith('.')) {
@@ -698,7 +698,7 @@ sys.exit(0)
                     }
                 }
 
-                // 递归清理子目录
+                // Recursively clean subdirectories
                 if (item.isDirectory()) {
                     saved += this._cleanPackageDir(p);
                 }
@@ -736,8 +736,8 @@ sys.exit(0)
     }
 
     /**
-     * ★ 完整的 Python 自动安装流程
-     * 包含下载、解压、pip 安装、pywin32 配置、精简
+     * ★ Full Python auto-install workflow
+     * Includes download, extract, pip install, pywin32 config, slimming
      */
     async autoInstall(context) {
         const global = require('./global');
@@ -756,7 +756,7 @@ sys.exit(0)
 
             if (!fs.existsSync(installDir)) fs.mkdirSync(installDir, { recursive: true });
 
-            // 平台检测
+            // Platform detection
             let officialUrl, mirrorUrl;
             const releaseDate = '20230507';
             const pyVersion = '3.8.10';
@@ -782,7 +782,7 @@ sys.exit(0)
 
             global.logMessage(q('qvenv.platformArch', platform, arch, officialUrl), "INFO");
 
-            // 下载函数
+            // Download function
             const downloadFile = (url, targetPath, timeoutMs = 30000) => {
                 return new Promise((resolve, reject) => {
                     const doReq = (targetUrl, redirects = 0) => {
@@ -814,7 +814,7 @@ sys.exit(0)
                 });
             };
 
-            // 级联下载
+            // Cascading download
             const downloadUrls = platform === 'win32'
                 ? [{ url: mirrorUrl, timeout: 30000, name: '淘宝NPM' }, { url: officialUrl, timeout: 30000, name: '官方' }]
                 : [{ url: officialUrl, timeout: 15000, name: '官方' }, { url: mirrorUrl, timeout: 60000, name: 'ghproxy' }];
@@ -828,15 +828,15 @@ sys.exit(0)
                 } catch (e) {
                     global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(`所有源均失败: ${e.message}`);
+                        throw new Error(`所有源均失败: ${e.message}`); // qq2q
                     }
                 }
             }
 
-            // 解压
+            // Extract
             if (platform === 'win32') {
                 cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
-                // 修复 ._pth
+                // Fix ._pth
                 const pthFile = path.join(installDir, 'python38._pth');
                 if (fs.existsSync(pthFile)) {
                     let content = fs.readFileSync(pthFile, 'utf8');
@@ -851,20 +851,20 @@ sys.exit(0)
             fs.unlinkSync(zipPath);
 
             if (!await this.isAvailable(installPath)) {
-                return { success: false, error: "解压后验证失败" };
+                return { success: false, error: "解压后验证失败" }; // qq2q
             }
 
             this.pythonPath = installPath;
             const sitePackagesDir = path.join(installDir, 'site-packages');
             if (!fs.existsSync(sitePackagesDir)) fs.mkdirSync(sitePackagesDir, { recursive: true });
 
-            // 安装 pip (Windows embed)
+            // Install pip (Windows embed)
             if (platform === 'win32') {
                 global.logMessage(q('qvenv.installPip'), 'INFO');
                 const getPipPath = path.join(installDir, 'get-pip.py');
                 await new Promise((resolve, reject) => {
                     const downloadGetPip = (url, redirectCount = 0) => {
-                        if (redirectCount > 5) return reject(new Error('重定向过多'));
+                        if (redirectCount > 5) return reject(new Error('重定向过多')); // qq2q
                         const urlObj = new URL(url);
                         https.get({
                             hostname: urlObj.hostname,
@@ -895,7 +895,7 @@ sys.exit(0)
                 try { fs.unlinkSync(getPipPath); } catch { }
             }
 
-            // 安装依赖
+            // Install dependencies
             const lockedDeps = this._getLockedDeps();
             global.logMessage(q('qvenv.installDeps', lockedDeps.join(', ')), 'INFO');
             const pipCmd = `"${installPath}" -m pip install ${lockedDeps.join(' ')} --upgrade --force-reinstall --quiet --target="${sitePackagesDir}" --index-url https://mirrors.aliyun.com/pypi/simple/`;
@@ -905,12 +905,12 @@ sys.exit(0)
                 env: { ...process.env, PYTHONNOUSERSITE: '1' }
             });
 
-            // ★ 最聪明的调用时机：依赖安装完成后，pywin32配置之前
-            // 原因：此时包已完整，但还未被使用，删除最安全
+            // ★ Smartest invocation timing: after deps install, before pywin32 config
+            // Reason: packages are complete but not yet used; deletion is safest
             global.logMessage(q('qvenv.startSlim'), 'INFO');
             await this._slimPython(installDir, installPath);
 
-            // pywin32 配置
+            // pywin32 configuration
             if (platform === 'win32') {
                 const pywin32System32 = path.join(sitePackagesDir, 'pywin32_system32');
                 if (fs.existsSync(pywin32System32)) {
@@ -928,7 +928,7 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
                     global.logMessage(q('qvenv.pywin32Done'), 'INFO');
                 }
 
-                // ★ 复制 VC++ 运行时 DLL（Pillow 依赖）
+                // ★ Copy VC++ runtime DLLs (Pillow dependency)
                 if (context.extensionPath) {
                     const copyResult = this._copyVCRuntimeDlls(context, installDir);
                     if (copyResult.copied.length > 0) {
@@ -937,7 +937,7 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
                 }
             }
 
-            // 保存状态
+            // Save state
             this._saveState(context, { installTimestamp: Date.now() });
             this.clearL1ImperfectCache();
 
@@ -951,9 +951,11 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
 }
 
 // ============================================================================
-// ★ 导出（只导出 Python 相关）
+// ★ Export (Python-related only)
 // ============================================================================
 
 module.exports = {
     PythonEngineDownloader
 };
+
+

@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 Force fix HTML garbled text. Only check when encountering stubborn HTML (or rich text) encoding issues; otherwise keep unchecked — the tradeoff is reduced layout precision.",
     "config.autoDownload.desc": "🍌 Auto-download when a video is detected",
     "config.docExportImageResolution.desc": "📦 Image resolution to use:",
+    "config.docExportImageResolution.label.original": "Original Resolution",
+    "config.docExportImageResolution.label.frame": "Frame Resolution",
     "config.docExportImageResolution.enum.original": "Original resolution — full precision",
     "config.docExportImageResolution.enum.frame": "Advantages: 1. Smaller file size; 2. Frame thumbnails always correspond to a complete image preview (no cropping due to Word page-size limits).",
     "config.docExportIncludeCipher.desc": "📦 Export image cipher string (e.g. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

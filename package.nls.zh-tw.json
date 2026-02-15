@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 強制消除 html 亂碼。僅在遇到頑固 html（或富文字）亂碼時勾選，其餘時候確保無腦關閉（請無腦取消勾選）原因是，代價：犧牲排版精度。",
     "config.autoDownload.desc": "🍌 是否在偵測到影片時自動下載",
     "config.docExportImageResolution.desc": "📦 圖片使用何種解析度：",
+    "config.docExportImageResolution.label.original": "原始解析度",
+    "config.docExportImageResolution.label.frame": "相框解析度",
     "config.docExportImageResolution.enum.original": "得到原始精度",
     "config.docExportImageResolution.enum.frame": "優勢在於: 1、檔案更小； 2、相框顯示的縮圖總能對應一個完整的圖片預覽（不會因為 Word 頁面尺寸限制導致預覽被截斷）。",
     "config.docExportIncludeCipher.desc": "📦 匯出圖片暗號字串（如：/\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ ）",
