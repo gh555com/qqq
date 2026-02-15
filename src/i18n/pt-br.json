@@ -91,6 +91,30 @@
             "openFileFailed": "Falha ao abrir arquivo: {0}",
             "configUpdateCallback": "[q1] Callback de atualização de configuração: {0}",
             "transactionRecoverError": "Recuperação de transação q1 falhou: {0}"
+        },
+        "ui": {
+            "openFile": "Abrir arquivo",
+            "mediaLanded": "{0} arquivos salvos{1}",
+            "fromUrl": ", de {0}",
+            "fileFolderCopied": "Arquivos/pastas copiados {0}",
+            "skippedInaccessible": "({0} inacessíveis ignorados)",
+            "processFailed": "{0} processamento falhou, revertido",
+            "exceptionOccurred": "{0} exceção ocorreu, revertido",
+            "created": "Criado",
+            "modified": "Modificado",
+            "calculatingFolderSize": "Calculando tamanho da pasta...",
+            "codec": "Codec",
+            "aspectRatio": "Proporção",
+            "originalDuration": "Duração original",
+            "openInRightGroup": "Abrir arquivo no grupo direito e entrar em modo de edição",
+            "noExtension": "Sem extensão",
+            "filesCount": "{0} arquivos",
+            "filesCountWithBreakdown": "{0} arquivos: {1}",
+            "emptyFolder": "Pasta vazia",
+            "rename": "Renomear",
+            "fileNameEmpty": "Nome do arquivo não pode estar vazio",
+            "targetFileExists": "Arquivo de destino já existe",
+            "coreFilesIncomplete": "Arquivos principais incompletos, algumas funções podem estar limitadas"
         }
     },
     "q2": {

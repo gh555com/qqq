@@ -91,6 +91,30 @@
             "openFileFailed": "파일 열기 실패: {0}",
             "configUpdateCallback": "[q1] 설정 업데이트 콜백: {0}",
             "transactionRecoverError": "q1 트랜잭션 복구 실패: {0}"
+        },
+        "ui": {
+            "openFile": "파일 열기",
+            "mediaLanded": "{0}개 파일 저장{1}",
+            "fromUrl": ", {0}에서",
+            "fileFolderCopied": "파일/폴더 복사됨 {0}",
+            "skippedInaccessible": "({0}개 접근 불가 건너뛰)",
+            "processFailed": "{0} 처리 실패, 롤백됨",
+            "exceptionOccurred": "{0} 예외 발생, 롤백됨",
+            "created": "생성",
+            "modified": "수정",
+            "calculatingFolderSize": "폴더 크기 계산 중...",
+            "codec": "코덱",
+            "aspectRatio": "화면 비율",
+            "originalDuration": "원본 길이",
+            "openInRightGroup": "오른쪽 그룹에서 파일 열고 편집 모드 진입",
+            "noExtension": "확장자 없음",
+            "filesCount": "{0}개 파일",
+            "filesCountWithBreakdown": "{0}개 파일: {1}",
+            "emptyFolder": "빈 폴더",
+            "rename": "이름 바꾸기",
+            "fileNameEmpty": "파일 이름은 비워둘 수 없습니다",
+            "targetFileExists": "대상 파일이 이미 존재합니다",
+            "coreFilesIncomplete": "코어 파일이 불완전하여 일부 기능이 제한될 수 있습니다"
         }
     },
     "q2": {

@@ -91,6 +91,30 @@
             "openFileFailed": "開啟檔案失敗: {0}",
             "configUpdateCallback": "[q1] 設定更新回呼: {0}",
             "transactionRecoverError": "q1 事務恢復失敗: {0}"
+        },
+        "ui": {
+            "openFile": "開啟檔案",
+            "mediaLanded": "共落盤{0}個檔案{1}",
+            "fromUrl": "，從 {0}",
+            "fileFolderCopied": "檔案/資料夾已複製 {0}",
+            "skippedInaccessible": "(跳過 {0}個無法存取)",
+            "processFailed": "{0} 處理失敗，已回滾",
+            "exceptionOccurred": "{0} 發生例外，已回滾",
+            "created": "建立",
+            "modified": "修改",
+            "calculatingFolderSize": "正在計算資料夾大小...",
+            "codec": "編碼",
+            "aspectRatio": "寬高比",
+            "originalDuration": "原始時長",
+            "openInRightGroup": "在右側群組開啟檔案並進入編輯狀態",
+            "noExtension": "無副檔名",
+            "filesCount": "{0}個檔案",
+            "filesCountWithBreakdown": "{0}個檔案：{1}",
+            "emptyFolder": "空資料夾",
+            "rename": "重新命名",
+            "fileNameEmpty": "檔案名稱不能為空",
+            "targetFileExists": "目標檔案已存在",
+            "coreFilesIncomplete": "核心檔案不完整，部分功能可能受限"
         }
     },
     "q2": {

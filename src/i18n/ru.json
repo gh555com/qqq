@@ -91,6 +91,30 @@
             "openFileFailed": "Не удалось открыть файл: {0}",
             "configUpdateCallback": "[q1] Callback обновления конфигурации: {0}",
             "transactionRecoverError": "Восстановление транзакции q1 не удалось: {0}"
+        },
+        "ui": {
+            "openFile": "Открыть файл",
+            "mediaLanded": "{0} файлов сохранено{1}",
+            "fromUrl": ", из {0}",
+            "fileFolderCopied": "Файлы/папки скопированы {0}",
+            "skippedInaccessible": "({0} недоступных пропущено)",
+            "processFailed": "{0} обработка не удалась, откат",
+            "exceptionOccurred": "{0} исключение, откат",
+            "created": "Создано",
+            "modified": "Изменено",
+            "calculatingFolderSize": "Расчёт размера папки...",
+            "codec": "Кодек",
+            "aspectRatio": "Соотношение сторон",
+            "originalDuration": "Исходная длительность",
+            "openInRightGroup": "Открыть файл в правой группе и войти в режим редактирования",
+            "noExtension": "Без расширения",
+            "filesCount": "{0} файлов",
+            "filesCountWithBreakdown": "{0} файлов: {1}",
+            "emptyFolder": "Пустая папка",
+            "rename": "Переименовать",
+            "fileNameEmpty": "Имя файла не может быть пустым",
+            "targetFileExists": "Целевой файл уже существует",
+            "coreFilesIncomplete": "Основные файлы неполные, некоторые функции могут быть ограничены"
         }
     },
     "q2": {
