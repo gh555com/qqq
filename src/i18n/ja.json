@@ -374,7 +374,7 @@
             "downloadStart": "開始: {0}",
             "downloadComplete": "完了: {0}",
             "downloadFailed": "失敗: {0} - {1}",
-            "downloadRetry": "リトライ: {0} (Wait {1}ms)",
+            "downloadRetry": "リトライ: {0} (待機 {1}ms)",
             "cancelInPostProcess": "[キャンセル] _postProcess ループ内でキャンセルを検出、ブレーク",
             "staticAll403": "[拡張判定] 静的分析の {0} 個の直接動画が全て 403 失敗、拡張フローへの進入を許可",
             "youtubeIgnoreEnhanced": "[拡張] YouTube リンクを検出、拡張フローを無視",

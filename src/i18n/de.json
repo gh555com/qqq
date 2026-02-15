@@ -374,7 +374,7 @@
             "downloadStart": "Start: {0}",
             "downloadComplete": "Abgeschlossen: {0}",
             "downloadFailed": "Fehlgeschlagen: {0} - {1}",
-            "downloadRetry": "Wiederholung: {0} (Wait {1}ms)",
+            "downloadRetry": "Wiederholung: {0} (Warten {1}ms)",
             "cancelInPostProcess": "[Abbruch] Abbruch in _postProcess-Schleife erkannt, Ausbruch",
             "staticAll403": "[Erweiterte Prüfung] Alle {0} direkten Videos aus statischer Analyse mit 403 fehlgeschlagen, erweiterter Ablauf erlaubt",
             "youtubeIgnoreEnhanced": "[Erweitert] YouTube-Link erkannt, erweiterter Ablauf ignoriert",
