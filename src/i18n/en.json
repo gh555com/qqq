@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] pywin32 configuration complete",
         "copyVcDll": "[Python] Copy VC++ DLL: {0}",
         "installFailed": "[Python] Installation failed: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py not found: {0}",
+        "cannotStartPowerShell": "Cannot start any PowerShell process",
+        "pressKeyToClose": "Press any key to close this terminal...",
+        "xclipInstallSuccess": "qqq: xclip installed successfully! Clipboard functionality is now available.",
+        "xclipInstallMayFailed": "qqq: xclip installation may have failed. Please check terminal output or install manually.",
+        "cmdCopied": "qqq: Install command copied to clipboard: {0}",
+        "elapsed": "Elapsed",
+        "cannotOpenFile": "Cannot open file: {0}",
+        "trialModeHint": "Trial mode: Settings only valid for this session, will reset on restart.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Start failed / unavailable",
+        "unknownReason": "Unknown reason",
+        "mismatchExpected": "Expected {0}, start failed reason: {1}",
+        "tooltipAvgLatency": "Avg Latency",
+        "tooltipMax": "max {0}",
+        "tooltipCompanionTime": "Companion Time",
+        "tooltipDiskCache": "Disk Cache",
+        "tooltipCacheHit": "Cache Hit",
+        "tooltipIOEngine": "IO Engine"
     }
 }

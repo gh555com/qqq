@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] pywin32 Konfiguration abgeschlossen",
         "copyVcDll": "[Python] VC++ DLL kopieren: {0}",
         "installFailed": "[Python] Installation fehlgeschlagen: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py nicht gefunden: {0}",
+        "cannotStartPowerShell": "PowerShell-Prozess kann nicht gestartet werden",
+        "pressKeyToClose": "Drücken Sie eine beliebige Taste, um dieses Terminal zu schließen...",
+        "xclipInstallSuccess": "qqq: xclip erfolgreich installiert! Zwischenablage-Funktion ist jetzt verfügbar.",
+        "xclipInstallMayFailed": "qqq: xclip-Installation möglicherweise fehlgeschlagen. Bitte überprüfen Sie die Terminal-Ausgabe oder installieren Sie manuell.",
+        "cmdCopied": "qqq: Installationsbefehl in Zwischenablage kopiert: {0}",
+        "elapsed": "Dauer",
+        "cannotOpenFile": "Datei kann nicht geöffnet werden: {0}",
+        "trialModeHint": "Testmodus: Einstellungen gelten nur für diese Sitzung und werden nach Neustart zurückgesetzt.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Start fehlgeschlagen / nicht verfügbar",
+        "unknownReason": "Unbekannter Grund",
+        "mismatchExpected": "Erwartet {0}, Startfehler Grund: {1}",
+        "tooltipAvgLatency": "Durchschn. Latenz",
+        "tooltipMax": "max {0}",
+        "tooltipCompanionTime": "Nutzungszeit",
+        "tooltipDiskCache": "Festplatten-Cache",
+        "tooltipCacheHit": "Cache-Treffer",
+        "tooltipIOEngine": "IO-Engine"
     }
 }

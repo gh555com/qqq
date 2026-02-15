@@ -8,7 +8,7 @@ name = "q"
 path = "kp.rs"
 
 [features]
-# 默认全功能：剪贴板(文本/HTML/图片/文件) + extract_icon
+# 默认全功能：剪切板(文本/HTML/图片/文件) + extract_icon
 # 注意：Linux 的 extract_icon 依赖 GTK/GIO（file_icon_provider 的依赖）且必须在主线程调用。
 default = ["full"]
 full = ["icons"]

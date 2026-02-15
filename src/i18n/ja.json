@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] pywin32 設定完了",
         "copyVcDll": "[Python] VC++ DLL をコピー: {0}",
         "installFailed": "[Python] インストール失敗: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py が見つかりません：{0}",
+        "cannotStartPowerShell": "PowerShell プロセスを起動できません",
+        "pressKeyToClose": "任意のキーを押してこのターミナルを閉じてください...",
+        "xclipInstallSuccess": "qqq: xclip のインストールに成功しました！クリップボード機能が利用可能になりました。",
+        "xclipInstallMayFailed": "qqq: xclip のインストールに失敗した可能性があります。ターミナル出力を確認するか、手動でインストールしてください。",
+        "cmdCopied": "qqq: インストールコマンドをクリップボードにコピーしました: {0}",
+        "elapsed": "経過時間",
+        "cannotOpenFile": "ファイルを開けません: {0}",
+        "trialModeHint": "試用モード：設定は今回のみ有効で、再起動後にデフォルトに戻ります。",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: 起動失敗 / 利用不可",
+        "unknownReason": "不明な原因",
+        "mismatchExpected": "期待値 {0}、起動失敗の原因：{1}",
+        "tooltipAvgLatency": "平均レイテンシ",
+        "tooltipMax": "最大 {0}",
+        "tooltipCompanionTime": "使用時間",
+        "tooltipDiskCache": "ディスクキャッシュ",
+        "tooltipCacheHit": "キャッシュヒット",
+        "tooltipIOEngine": "IO エンジン"
     }
 }

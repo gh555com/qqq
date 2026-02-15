@@ -2,12 +2,12 @@
 """
 final_audio_hub_v16_fusion.py
 ========================================================
-的梦专用：v16音乐播放器 + A++并发音效 + 剪贴板触发 + 任意事件触发（单文件融合版）
+的梦专用：v16音乐播放器 + A++并发音效 + 剪切板触发 + 任意事件触发（单文件融合版）
 
 设计目标：
 1) 保留你 v16 的核心接口（NonBlockingAudioEngine / az）尽量不改
 2) 新增极简高速并发音效接口（play_sfx(path), prime_sfx(paths)）
-3) 支持剪贴板触发 + 任意条件触发（event bus）
+3) 支持剪切板触发 + 任意条件触发（event bus）
 4) 尽量最小侵入；如设备并发冲突，可切换到“复用音乐引擎播放音效”模式
 
 依赖：
@@ -1458,7 +1458,7 @@ if __name__ == "__main__":
     hub.on("order_paid", on_order_paid)
     hub.trigger("order_paid", 9527)
 
-    print("运行中：剪贴板变化会触发音效；Ctrl+C 退出")
+    print("运行中：剪切板变化会触发音效；Ctrl+C 退出")
     try:
         while True:
             time.sleep(1)

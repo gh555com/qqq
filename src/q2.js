@@ -12,7 +12,7 @@ const cp = require("child_process");
 const h = require("./h");
 const { q, onLanguageChange } = require("./i18n");
 
-// ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪贴板快照等 ★★★
+// ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪切板快照等 ★★★
 const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
 
 // ==================== 从 geq().js 导入核心接口 ====================
@@ -2193,7 +2193,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updateAddressDisplay(currentPath);
       addressInput.setAttribute('data-tooltip', currentPath || '');
       navigator.clipboard.writeText(currentPath).catch(() => {});
-      // ★ 剪贴板音效由 Python clipboard_watcher 统一处理
+      // ★ 剪切板音效由 Python clipboard_watcher 统一处理
     });
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {
@@ -2957,10 +2957,10 @@ async function performQ2Paste(targetDir, refreshCallback) {
   const transId = TransactionManager.createTransactionId();
   const taskTitle = TaskCounter.formatTitle(targetDir, transId, iconNum);
 
-  // ★ 获取剪贴板快照
+  // ★ 获取剪切板快照
   const snapshot = await wq();
 
-  // ★ 如果剪贴板是白名单类型（纯文本），不处理
+  // ★ 如果剪切板是白名单类型（纯文本），不处理
   if (snapshot.type === 'whitelist') {
     global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'))
     return;
