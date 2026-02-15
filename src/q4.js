@@ -1,4 +1,3 @@
-
 'use strict';
 
 const vscode = require('vscode');
@@ -8,14 +7,14 @@ const crypto = require('crypto');
 const global = require('./global');
 const { q } = require('./i18n');
 
-// ★ 终极最优解：全局实例追踪，用于生命周期强杀
+// ★ Ultimate best solution: global instance tracking for lifecycle hard kill
 let _currentHistoryManager = null;
-let _currentSidebarProvider = null;  // ★ 新增：跟踪当前侧边栏实例
+let _currentSidebarProvider = null;  // ★ NEW: track current sidebar instance
 const zlib = require('zlib');
 const { performance } = require('perf_hooks');
 
 // ============================================================================
-// 常量
+// Constants
 // ============================================================================
 const AUDIO_SOURCE = {
     DETECTING: 'DETECTING',
@@ -29,44 +28,44 @@ const CONSTANTS = Object.freeze({
     // SVG Spacers
     SPACER_5_BASE64: 'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNSIgaGVpZ2h0PSIxIj48L3N2Zz4=',
 
-    // 存储
+    // Storage
     STORAGE_DIR: 'clipboard-history',
     FILE_BIN_GZ: 'history.bin.gz',
 
-    // 限制
+    // Limits
     MAX_HISTORY_ITEMS: 2000,
     CLEANUP_BATCH_SIZE: 1000,
     UI_HISTORY_LIMIT: 30,
     MAX_CONTENT_LENGTH: 100000,
     PREVIEW_LENGTH: 200,
 
-    // 监听
-    CLIPBOARD_POLL_MS: 1000,  // 仅用于历史记录，音效由 py 引擎处理
+    // Watching
+    CLIPBOARD_POLL_MS: 1000,  // Only used for history; sfx handled by py engine
     SIDEBAR_UPDATE_MS: 5000,
 
-    // 保存（批处理 + 节流 + 串行写入）
+    // Save (batch + throttle + serial write)
     BATCH_SAVE_THRESHOLD: 5,
     SAVE_THROTTLE_MS: 1000,
     SAVE_RETRY_DELAY_MS: 120,
 
-    // 原子写
+    // Atomic write
     SAVE_TEMP_SUFFIX: '.tmp',
 
-    // 损坏隔离
+    // Corruption quarantine
     CORRUPT_SUFFIX_PREFIX: '.corrupt-',
 
     // watchdog
     WATCHDOG_REFRESH_MS: 30000,
     WATCHDOG_STALE_MS: 15000,
 
-    // 时间
+    // Time
     MS_PER_MINUTE: 60000,
     MS_PER_HOUR: 3600000,
     MS_PER_DAY: 86400000,
 });
 
 // ============================================================================
-// 正则
+// Regex
 // ============================================================================
 const REGEX = Object.freeze({
     WHITESPACE_ONLY: /^\s*$/,
@@ -75,7 +74,7 @@ const REGEX = Object.freeze({
 });
 
 // ============================================================================
-// HTML escape（仅用于 attribute 字符串拼接）
+// HTML escape (only for attribute string concatenation)
 // ============================================================================
 const HTML_ESCAPE_MAP = Object.freeze({
     '&': '&amp;',
@@ -90,7 +89,7 @@ function escapeHtmlAttr(text) {
 }
 
 // ============================================================================
-// msgpack（可选）惰性加载
+// msgpack (optional) lazy load
 // ============================================================================
 let _msgpack = null;
 let _msgpackLoaded = false;
@@ -107,7 +106,7 @@ function getMsgpack() {
 }
 
 // ============================================================================
-// 工具函数
+// Utility functions
 // ============================================================================
 function _bytesToHex(u8) {
     let out = '';
@@ -122,7 +121,7 @@ function _safeRandomBytes(n) {
         }
     } catch { /* ignore */ }
 
-    // WebCrypto / 浏览器环境
+    // WebCrypto / browser environment
     try {
         const c = (typeof globalThis !== 'undefined' && globalThis.crypto) ? globalThis.crypto : null;
         if (c && typeof c.getRandomValues === 'function') {
@@ -132,7 +131,7 @@ function _safeRandomBytes(n) {
         }
     } catch { /* ignore */ }
 
-    // 兜底（不加密强度）：仅用于非安全用途
+    // Fallback (not crypto strength): only for non-security use
     const u8 = new Uint8Array(n);
     for (let i = 0; i < n; i++) u8[i] = Math.floor(Math.random() * 256);
     return u8;
@@ -145,14 +144,14 @@ function randomId() {
     return _bytesToHex(_safeRandomBytes(16));
 }
 
-// 纯 JS 的 MD5（bytes -> hex），用于没有 crypto.createHash 的运行环境
+// Pure JS MD5 (bytes -> hex), used when crypto.createHash is unavailable
 function _md5BytesToHex(input) {
     const bytes = (input instanceof Uint8Array) ? input : new Uint8Array(input);
 
     // 32-bit left rotate
     const rol = (x, c) => ((x << c) | (x >>> (32 - c))) >>> 0;
 
-    // 常量 K[i] = floor(abs(sin(i+1)) * 2^32)
+    // Constant K[i] = floor(abs(sin(i+1)) * 2^32)
     const K = new Uint32Array(64);
     for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0;
 
@@ -238,14 +237,14 @@ function _md5BytesToHex(input) {
 function md5Hex(s) {
     const str = String(s);
 
-    // Node 环境：优先用 createHash（最快、兼容 Buffer）
+    // Node environment: prefer createHash (fastest, Buffer compatible)
     try {
         if (crypto && typeof crypto.createHash === 'function' && typeof Buffer !== 'undefined') {
             return crypto.createHash('md5').update(Buffer.from(str, 'utf8')).digest('hex');
         }
     } catch { /* ignore */ }
 
-    // fallback：纯 JS MD5
+    // fallback: pure JS MD5
     let bytes;
     if (typeof TextEncoder !== 'undefined') {
         bytes = new TextEncoder().encode(str);
@@ -278,7 +277,7 @@ function estimateBytes(obj) {
     try {
         const mp = getMsgpack();
         if (mp) return mp.encode(obj).length;
-        return 0; // Msgpack 缺失时，不再尝试 JSON 估算
+        return 0; // When Msgpack is missing, no longer try JSON estimation
     } catch {
         return 0;
     }
@@ -302,7 +301,7 @@ function formatTime(timestamp) {
 }
 
 // ============================================================================
-// 双向链表节点 typedef
+// Doubly-linked list node typedef
 // ============================================================================
 /**
  * @typedef {Object} HistoryNode
@@ -318,7 +317,7 @@ function formatTime(timestamp) {
  */
 
 // ============================================================================
-// ClipboardHistoryManager - O(1) 双向链表 + 物理隔离版本
+// ClipboardHistoryManager - O(1) doubly-linked list + physical isolation version
 // ============================================================================
 class ClipboardHistoryManager {
     constructor(context, opts = {}) {
@@ -337,7 +336,7 @@ class ClipboardHistoryManager {
             version: -1,
             uiList: null,
             uiBytes: 0,
-            lastUiKey: '', // 新增：用于跟踪 limit 变化
+            lastUiKey: '', // NEW: track limit changes
             lastSearchKey: '',
             searchList: null,
             searchBytes: 0,
@@ -371,28 +370,28 @@ class ClipboardHistoryManager {
         this._loadHistory().catch(() => { });
     }
 
-    // ★ 新增：管理命令历史
+    // ★ NEW: manage command history
     async addCommandToHistory(key, value) {
         if (!key || !value || !this.context.globalState) return;
         const fullKey = `q4_${key}_history`;
         let history = this.context.globalState.get(fullKey, []);
 
-        // 去重并移动到最前
+        // Deduplicate and move to front
         const existingIndex = history.indexOf(value);
         if (existingIndex > -1) {
             history.splice(existingIndex, 1);
         }
 
-        // 添加到开头
+        // Add to front
         history.unshift(value);
 
-        // 限制最近 5 条
+        // Limit to last 5 items
         const trimmedHistory = history.slice(0, 5);
 
         await this.context.globalState.update(fullKey, trimmedHistory);
     }
 
-    // ★ 新增：获取命令历史
+    // ★ NEW: get command history
     async getCommandHistory(key) {
         if (!key || !this.context.globalState) return [];
         const fullKey = `q4_${key}_history`;
@@ -407,7 +406,7 @@ class ClipboardHistoryManager {
             if (!fs.existsSync(this._storageDir)) fs.mkdirSync(this._storageDir, { recursive: true });
             this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
 
-            // ★ 终极自愈预警：如果发现 history.json.gz (旧版遗留)，将其迁移或清理（可选，此处暂保持纯净）
+            // ★ Ultimate self-heal warning: if history.json.gz (legacy) is found, migrate or clean it (optional; keep pure here for now)
         } catch { }
     }
 
@@ -417,16 +416,16 @@ class ClipboardHistoryManager {
         try {
             const dataBuf = await fs.promises.readFile(this._fileBinGz);
 
-            // 1. 解压 Gzip
+            // 1. Gunzip
             const raw = await gunzipAsync(dataBuf);
 
-            // 2. 长度预检
+            // 2. Length precheck
             if (!raw || raw.length === 0) {
                 this._resetInMemory();
                 return;
             }
 
-            // 3. 唯一来源：Msgpack 解码
+            // 3. Single source of truth: Msgpack decode
             const mp = getMsgpack();
             if (!mp) throw new Error(q('q4.error.msgpackUnavailable'));
 
@@ -438,7 +437,7 @@ class ClipboardHistoryManager {
             const historyArr = Array.isArray(parsed) ? parsed : parsed.history;
             this._resetInMemory();
 
-            // 逆序插入链表
+            // Insert into list in reverse order
             historyArr.slice().reverse().forEach(it => {
                 if (!it.content) return;
                 const node = {
@@ -483,7 +482,7 @@ class ClipboardHistoryManager {
         this._cache.lastSearchKey = '';
     }
 
-    // 边界保护工具：确保数值在合理范围内，防止异常数据污染统计
+    // Boundary protection: keep numbers in a reasonable range to prevent abnormal data from polluting stats
     _clampStat(val, min, max) {
         if (typeof val !== 'number' || isNaN(val)) return min;
         return Math.max(min, Math.min(max, val));
@@ -585,15 +584,15 @@ class ClipboardHistoryManager {
             cur = cur.next;
         }
 
-        // 1. 置顶项按置顶时间从小到大排序 (最近置顶的在置顶区最下方)
+        // 1. Pinned items: sort by pin time ascending (recently pinned appears lower in pinned area)
         pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
 
-        // 2. 普通项按复制时间从近到远排序 (最近复制的在最上方)
+        // 2. Normal items: sort by copy time descending (most recent on top)
         others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
-        // 激活内存检查：熔断机制，防止超大缓存撑爆内存
+        // Memory check: fuse to prevent huge cache from blowing up memory
         const bytes = estimateBytes(out);
         if (bytes <= this._cache.maxBytes) {
             this._cache.uiList = out;
@@ -608,7 +607,7 @@ class ClipboardHistoryManager {
         const kw = String(keyword || '').trim();
         if (!kw) return this.getHistory(limit);
 
-        // ★ 新功能：空格代表 AND 组合搜索（q a => 同时包含 q 和 a）
+        // ★ NEW: spaces mean AND search (q a => contains both q and a)
         const normalized = kw.toLowerCase().replace(REGEX.WHITESPACE_COLLAPSE, ' ').trim();
         const terms = normalized.split(' ').filter(Boolean);
 
@@ -645,15 +644,15 @@ class ClipboardHistoryManager {
             cur = cur.next;
         }
 
-        // 1. 搜索结果中的置顶项也按置顶时间从小到大排序
+        // 1. Pinned results: sort by pin time ascending
         pinned.sort((a, b) => (a.pinTimestamp || 0) - (b.pinTimestamp || 0));
 
-        // 2. 搜索结果中的普通项按时间从近到远排序
+        // 2. Normal results: sort by time descending
         others.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
         const out = [...pinned, ...others].slice(0, limit);
 
-        // 搜索结果缓存 + 内存防御
+        // Search cache + memory defense
         const bytes = estimateBytes(out);
         if (bytes <= this._cache.maxBytes) {
             this._cache.searchList = out;
@@ -667,7 +666,7 @@ class ClipboardHistoryManager {
         const node = this._idMap.get(String(id || ''));
         if (!node) return false;
         node.pinned = !node.pinned;
-        // 记录置顶时刻，用于排序
+        // Record pin moment for sorting
         node.pinTimestamp = node.pinned ? Date.now() : 0;
 
         this._touch();
@@ -684,7 +683,7 @@ class ClipboardHistoryManager {
             if (typeof content !== 'string' || !content.trim()) return;
             const text = content.length > CONSTANTS.MAX_CONTENT_LENGTH ? content.slice(0, CONSTANTS.MAX_CONTENT_LENGTH) : content;
 
-            // 除非是强制更新（内部点击），否则外部如果文本内容完全一致则跳过，避免轮询重复触发
+            // Unless forceUpdate (internal click), if external text is identical, skip to avoid poll repeat triggers
             if (!forceUpdate && text === this._lastClipboardContent) return;
 
             const hash = md5Hex(text);
@@ -710,7 +709,7 @@ class ClipboardHistoryManager {
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
 
-                // 批量容量清理：到达 2000 时，清理掉最老的 1000 条
+                // Batch capacity cleanup: when reaching 2000, remove the oldest 1000
                 if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
                     console.log('[Q4]', q('log.capacityFuse'));
                     for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
@@ -801,8 +800,8 @@ class ClipboardHistoryManager {
 
         await fs.promises.writeFile(tmpPath, buf);
 
-        // ★ 终极最优解：Windows 强力原子写
-        // Rename 在文件被锁时会报错，所以先尝试 unlink 旧文件再 rename，比单纯 rename 覆盖更稳
+        // ★ Ultimate best solution: Windows strong atomic write
+        // Rename errors when file is locked; try unlink old then rename, more stable than plain rename overwrite
         try {
             await fs.promises.rename(tmpPath, targetPath);
         } catch {
@@ -848,7 +847,7 @@ class ClipboardHistoryManager {
             const s = String(content ?? '');
             await vscode.env.clipboard.writeText(s);
             this._lastClipboardContent = s;
-            // ★ 不在这里播放音效，由调用方决定用哪个 webview
+            // ★ Do not play sfx here; caller decides which webview to use
             return true;
         } catch { return false; }
     }
@@ -873,7 +872,7 @@ class ClipboardHistoryManager {
         const cacheHitRate = denom > 0 ? (this._cache.hit / denom) * 100 : 0;
         const uptimeSec = Math.floor((Date.now() - this.sessionStartedAt) / 1000);
 
-        // 边界保护：限制平均耗时在 0-5000ms 之间，防止单次极端延迟（如磁盘休眠唤醒）永久拉高均值
+        // Boundary protection: clamp avg time to 0-5000ms to avoid one extreme delay (e.g., disk sleep wake) permanently raising the mean
         return {
             historyCount: this._size,
             isWatching: this._isWatching,
@@ -995,7 +994,7 @@ class ClipboardHistoryManager {
 }
 
 // ============================================================================
-// Sidebar Webview Provider（Solarized Dark + 暗金 + 破高对比度）
+// Sidebar Webview Provider (Solarized Dark + dark gold + extreme high-contrast break)
 // ============================================================================
 class ClipboardHistorySidebarProvider {
     /**
@@ -1018,9 +1017,9 @@ class ClipboardHistorySidebarProvider {
 
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
-        this._kopeSfxBase64 = null;  // ★ kope 音效 base64 缓存（懒加载）
+        this._kopeSfxBase64 = null;  // ★ kope sfx base64 cache (lazy load)
 
-        // ★ 新增：跟踪 Python 播放状态，支持绑定/解绑
+        // ★ NEW: track Python playback state, supports bind/unbind
         this._pythonPlayState = {
             playing: false,
             fileName: null,
@@ -1028,13 +1027,13 @@ class ClipboardHistorySidebarProvider {
             startTime: 0
         };
 
-        // ★ 新增：记录 PythonBridge 事件 handler 引用，便于 dispose 解绑，避免热重载堆监听
+        // ★ NEW: keep PythonBridge event handler ref for dispose unbind, avoid hot-reload listener pile-up
         this._onPythonEvent = null;
     }
 
     /**
-     * ★ 重置音频源状态（当 Python 环境“从无到有”时调用）
-     * 下次播放时会重新探测 Python 引擎
+     * ★ Reset audio source state (call when Python env goes from none to available)
+     * Next playback will re-probe Python engine
      */
     resetAudioSource() {
         this._audioSource = AUDIO_SOURCE.DETECTING;
@@ -1043,7 +1042,7 @@ class ClipboardHistorySidebarProvider {
     }
 
     /**
-     * ★ 懒加载 kope 音效 base64（仅在需要时加载一次）
+     * ★ Lazy-load kope sfx base64 (load once only when needed)
      */
     _ensureKopeSfx() {
         if (this._kopeSfxBase64) return this._kopeSfxBase64;
@@ -1071,19 +1070,19 @@ class ClipboardHistorySidebarProvider {
             localResourceRoots: [this._context.extensionUri],
         };
 
-        // ★ 闪电加载：立即渲染空骨架 HTML，1秒后再加载历史数据
+        // ★ Lightning load: render empty skeleton HTML immediately, then load history data after 1s
         this._view.webview.html = this._getHtml([], {});
 
-        // 1秒后加载完整数据（包括剩贴板历史 + Python 状态同步）
+        // Load full data after 1s (clipboard history + Python state sync)
         setTimeout(() => {
             this.updateContent(null, null, null, true);
-            // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
+            // ★ Startup check: is Python playing in background? If yes, sync UI
             this._syncPythonStateOnStartup();
         }, 1000);
 
-        // 监听 Python 引擎的异步通知（如自然播放结束）
+        // Listen to Python engine async notifications (e.g., natural playback end)
         try {
-            // 防止重复绑定（热重载/视图重建）
+            // Prevent double binding (hot reload / view rebuild)
             if (this._onPythonEvent && this._global?.pythonBridge) {
                 if (typeof this._global.pythonBridge.off === 'function') {
                     this._global.pythonBridge.off('event', this._onPythonEvent);
@@ -1095,12 +1094,12 @@ class ClipboardHistorySidebarProvider {
 
         this._onPythonEvent = (data) => {
             if (data && data.event === 'audio_finished') {
-                // ★ 更新 Python 播放状态
+                // ★ Update Python playback state
                 this._pythonPlayState.playing = false;
-                // 通知 webview 停止播放
+                // Tell webview to stop playback
                 this._postMessage({ command: 'stopAudio' });
             } else if (data && data.event === 'process_crashed' && data.bridge === 'Python') {
-                // ★ Python 进程崩溃，立即停止 UI 播放状态
+                // ★ Python process crashed: stop UI playback state immediately
                 this._pythonPlayState.playing = false;
                 this._postMessage({ command: 'stopAudio' });
                 this._global.logMessage(`[Q4] ${q('q4.log.pythonCrash')}`, "WARN");
@@ -1110,7 +1109,7 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
-                // ★ 新增：处理命令历史记录的获取和保存
+                // ★ NEW: handle command history get/save
                 case 'getHistory':
                     if (msg.key) {
                         const history = await this._historyManager.getCommandHistory(msg.key);
@@ -1144,7 +1143,7 @@ class ClipboardHistorySidebarProvider {
                         await this._historyManager.copyToClipboard(node.content);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
-                        // ★ 检测 Python 状态，不可用时用 webview 播放随机 kope 音效
+                        // ★ Detect Python status; if unavailable, play random kope sfx via webview
                         const source = await this._ensureAudioSource();
                         if (source !== AUDIO_SOURCE.PYTHON) {
                             const sfx = this._ensureKopeSfx();
@@ -1205,7 +1204,7 @@ class ClipboardHistorySidebarProvider {
                     if (msg.type) await this._historyManager.recordGenericUsage(msg.type);
                     break;
                 case 'playEnterSfx':
-                    // ★ 回车音效
+                    // ★ Enter key sfx
                     if (this._global.pythonBridge?.isAvailable()) {
                         this._global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
                     }
@@ -1228,19 +1227,19 @@ class ClipboardHistorySidebarProvider {
     }
 
     _startPeriodicUpdate() {
-        // 彻底停用 5 秒定时刷新
+        // Fully disable 5s periodic refresh
     }
 
     _stopPeriodicUpdate() {
-        // 无需清理定时器
+        // No timer cleanup needed
     }
 
     updateContent(reason, limit, keyword, force = false) {
         if (!this._view || !this._view.visible) return;
         if (limit) this._currentLimit = limit;
 
-        // 核心逻辑：如果在聚焦状态且不是搜索、不是强制更新、且不是关键手动操作(pin/remove/clear)，则挂起更新
-        const isSearchUpdate = !!keyword || (reason === null && !keyword); // 搜索键入或清空搜索
+        // Core logic: if focused and not search, not forced, and not key manual ops (pin/remove/clear), then defer update
+        const isSearchUpdate = !!keyword || (reason === null && !keyword); // search typing or clear search
         const isImmediate = force || isSearchUpdate || ['pin', 'remove', 'clear'].includes(reason);
         if (!isImmediate && this._isFocused) {
             this._needsUpdate = true;
@@ -1260,7 +1259,7 @@ class ClipboardHistorySidebarProvider {
             const exportZipStats = this._formatGenericStats(stats.exportZip);
             const allSettingsStats = this._formatGenericStats(stats.allSettings);
 
-            // 构建 placeholder 统计字符串
+            // Build placeholder stats string
             const hitRate = Math.round(stats.cache.hitRate || 0);
             const avgSave = Math.round(stats.perf.avgSaveMs || 0);
             const avgAdd = Math.round(stats.perf.avgAddMs || 0);
@@ -1277,7 +1276,7 @@ class ClipboardHistorySidebarProvider {
                 pinned: !!item.pinned
             }));
 
-            // ★ 极致纯净：初始化必要的 HTML
+            // ★ Extreme purity: init required HTML
             if (!this._view.webview.html || this._view.webview.html.length < 100) {
                 this._view.webview.html = this._getHtml(history, {
                     savorStats, pasteStats, videoStats, roamStats,
@@ -1380,7 +1379,7 @@ class ClipboardHistorySidebarProvider {
     _postMessage(msg) {
         if (!this._view) return;
         try {
-            // ★ 基因加固：深度纯净化，彻底根除 toJSON 报错与内部对象污染
+            // ★ Genetic hardening: deep sanitize to eliminate toJSON errors and internal object contamination
             const safeMsg = JSON.parse(JSON.stringify(msg));
             this._view.webview.postMessage(safeMsg).then(undefined, () => { });
         } catch (e) {
@@ -1389,8 +1388,8 @@ class ClipboardHistorySidebarProvider {
     }
 
     /**
-     * 外部接口：手动触发“品味瞬间”随机播放
-     * @param {string} mode 'normal' 或 'loop'
+     * External API: manually trigger "savor moments" random playback
+     * @param {string} mode 'normal' or 'loop'
      */
     async _ensureAudioSource() {
         if (this._pythonAudioFailed) {
@@ -1403,13 +1402,13 @@ class ClipboardHistorySidebarProvider {
 
         const bridge = this._global.pythonBridge;
 
-        // 探测 Python 引擎
+        // Probe Python engine
         try {
-            // ★ 修复：DaemonBridge 并没有 isAlive 方法，直接检查 available 属性
+            // ★ Fix: DaemonBridge has no isAlive; directly check available property
             if (bridge && bridge.available === true) {
                 const res = await bridge.call('ping');
                 if (res && res.status === 'alive') {
-                    // 显式检查 miniaudio 状态
+                    // Explicitly check miniaudio status
                     const check = await bridge.call('check_audio_engine');
                     if (check && check.has_miniaudio) {
                         const version = check.miniaudio_version || "unknown";
@@ -1453,15 +1452,15 @@ class ClipboardHistorySidebarProvider {
         };
     }
 
-    // ★ 启动时检查：Python 是否正在后台播放？如果是，同步 UI
+    // ★ Startup check: is Python playing in background? If yes, sync UI
     async _syncPythonStateOnStartup() {
         try {
             const res = await this._global.pythonBridge.call('get_audio_state');
             if (res && res.playing) {
-                // Python 正在播放，同步 UI 状态
+                // Python is playing, sync UI state
                 this._global.logMessage(`[Audio] ${q('q4.log.pythonPlaying')}`, "INFO");
-                // 从 Python 引擎获取当前播放的文件和循环信息
-                // 由于无法直接获取文件名，使用 _pythonPlayState 中保存的信息
+                // Get current playing file and loop info from Python engine
+                // Since filename cannot be obtained directly, use saved info in _pythonPlayState
                 if (this._pythonPlayState && this._pythonPlayState.fileName) {
                     this.syncPythonPlayState(
                         this._pythonPlayState.fileName,
@@ -1469,43 +1468,43 @@ class ClipboardHistorySidebarProvider {
                         true
                     );
                 } else {
-                    // 没有记录则只更新文字状态
+                    // No record; only update text status
                     this._postMessage({
                         command: 'playAudio',
                         fileName: 'Savoring...',
-                        count: -1  // 无限循环标志
+                        count: -1  // infinite loop flag
                     });
                 }
             }
         } catch (e) {
-            // Python 引擎不可用或调用失败，忽略
+            // Python engine unavailable or call failed; ignore
         }
     }
 
     async _stopAudio() {
         const source = await this._ensureAudioSource();
 
-        // 需求：只有“自然播完的最后一次”才淡出；停止/切歌一律不淡出
+        // Requirement: only fade out on the last natural end; stop/switch never fades out
         if (source === AUDIO_SOURCE.PYTHON) {
             try { await this._global.pythonBridge.call('stop_audio'); } catch (e) { }
         }
 
-        // ★ 清除 Python 播放状态
+        // ★ Clear Python playback state
         this._pythonPlayState.playing = false;
 
-        // 无论 Python 还是 Webview，都让 Webview 侧 UI 进入“停止”状态
+        // Whether Python or Webview, put Webview UI into "stopped" state
         this._postMessage({ command: 'stopAudio' });
     }
 
     /**
-     * ★ 外部接口：同步 Python 播放状态到 Webview UI
-     * 由 qqq.js 中的 savorMomentsCommand 调用，当 Python 引擎直接播放时同步 UI
-     * @param {string} fileName 播放的文件名
-     * @param {number} loopCount 循环次数
-     * @param {boolean} isPlaying 是否正在播放
+     * ★ External API: sync Python playback state to Webview UI
+     * Called by savorMomentsCommand in qqq.js when Python engine plays directly, to sync UI
+     * @param {string} fileName The playing filename
+     * @param {number} loopCount Loop count
+     * @param {boolean} isPlaying Whether currently playing
      */
     syncPythonPlayState(fileName, loopCount, isPlaying) {
-        // ★ 绑定到 Python 播放器
+        // ★ Bind to Python player
         this._audioSource = AUDIO_SOURCE.PYTHON;
         this._pythonPlayState = {
             playing: isPlaying,
@@ -1514,13 +1513,13 @@ class ClipboardHistorySidebarProvider {
             startTime: isPlaying ? Date.now() : 0
         };
 
-        // 同步 UI 状态（不发送 base64，让 webview 只更新文字状态）
+        // Sync UI state (no base64; webview only updates text state)
         if (isPlaying) {
             this._postMessage({
                 command: 'playAudio',
                 fileName: fileName,
                 count: loopCount
-                // 不发送 base64，让 webview 知道这是 Python 播放，只更新文字
+                // No base64; webview knows this is Python playback and only updates text
             });
         } else {
             this._postMessage({ command: 'stopAudio' });
@@ -1528,7 +1527,7 @@ class ClipboardHistorySidebarProvider {
     }
 
     async triggerSavor(mode = 'normal') {
-        // ★ 核心改进：播放前先停止，确保单实例叙事
+        // ★ Core improvement: stop before play to ensure single-instance narrative
         await this._stopAudio();
 
         const source = await this._ensureAudioSource();
@@ -1541,14 +1540,14 @@ class ClipboardHistorySidebarProvider {
         this._global.logMessage(`[Audio] ${q('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
 
         if (source === AUDIO_SOURCE.PYTHON) {
-            // Python 模式：先发 UI-only（无 base64）
+            // Python mode: send UI-only first (no base64)
             this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
 
             try {
                 const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 
                 if (res && (res.status === 'playing' || res.status === 'ok')) {
-                    // ★ 更新 Python 播放状态
+                    // ★ Update Python playback state
                     this._pythonPlayState = {
                         playing: true,
                         fileName: info.fileName,
@@ -1558,7 +1557,7 @@ class ClipboardHistorySidebarProvider {
                     return;
                 }
 
-                // 优先报告明确的错误信息
+                // Prefer explicit error info
                 if (res && res.error) throw new Error(res.error);
                 if (res && res.reason) throw new Error(res.reason);
 
@@ -1568,11 +1567,11 @@ class ClipboardHistorySidebarProvider {
                 this._pythonAudioFailed = true;
                 this._audioSource = AUDIO_SOURCE.WEBVIEW;
                 this._pythonPlayState.playing = false;
-                // 继续落到 Webview 兜底
+                // Fall back to Webview
             }
         }
 
-        // Webview 模式：只发一次（带 base64）
+        // Webview mode: send once (with base64)
         const b64 = info.base64();
         if (b64) {
             this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
@@ -1611,7 +1610,7 @@ class ClipboardHistorySidebarProvider {
         html { forced-color-adjust: none !important; }
         body {
             margin: 0; padding: 0; font-family: Tahoma, sans-serif; font-size: 13px; background: var(--background-color); color: var(--text-primary); overflow: hidden;
-            user-select: none; -webkit-user-select: none; /* 彻底禁用选中 */
+            user-select: none; -webkit-user-select: none; /* Completely disable selection */
         }
         .main-wrapper { height: 100vh; width: 100%; position: relative; overflow: hidden; background: var(--background-color) !important; display: flex; flex-direction: column; }
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; padding: 0 4px; scrollbar-width: none; }
@@ -1694,7 +1693,7 @@ class ClipboardHistorySidebarProvider {
 
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
-        /* 极致强烈：金刃狂飙 4.0 (Hyper-Gold Storm Max) */
+        /* Extreme: Gold Blade Rage 4.0 (Hyper-Gold Storm Max) */
         .history-container.storm::after {
             content: '';
             position: absolute;
@@ -1723,21 +1722,21 @@ class ClipboardHistorySidebarProvider {
         @keyframes hyper-storm {
             0% { transform: translate(-40%, 40%) rotate(-10deg) scale(0.5); opacity: 0; }
             15% { opacity: 1; transform: translate(-20%, 20%) rotate(0deg) scale(1.5) skewX(5deg); }
-            30% { transform: translate(-18%, 18%) scale(1.6) rotate(1deg); } /* 高能震颤点 */
+            30% { transform: translate(-18%, 18%) scale(1.6) rotate(1deg); } /* High-energy tremor point */
             100% { transform: translate(40%, -40%) rotate(10deg) scale(3); opacity: 0; }
         }
 
         .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: var(--base3); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
-        /* Hover：边框变虚线，颜色变红，文字变黑，边框宽度保持不变，防止布局抖动 */
+        /* Hover: border becomes dashed, turns red, text becomes black, border width unchanged to prevent layout jitter */
         .history-item:hover { border-color: var(--red); border-style: dashed; color: #000000; }
-        /* 选中项（最后一次点击）使用淡雅橙色 */
+        /* Selected item (last clicked) uses subtle orange */
         .history-item.selected { color: #e67e22; }
-        /* 置顶项文字永固黑色，优先级高于选中色，背景恢复浅色 base2 */
+        /* Pinned item text stays black always, higher priority than selected; background restores light base2 */
         .history-item.pinned { background: var(--base2); color: #000000 !important; }
 
-        /* 卡片内扫光特效 */
+        /* Card internal sweep highlight */
         .history-item.executing::before {
             content: '';
             position: absolute;
@@ -1770,11 +1769,11 @@ class ClipboardHistorySidebarProvider {
             -webkit-box-orient: vertical;
         }
 
-        /* 光标跟随提示框 */
+        /* Cursor-follow tooltip */
         #tooltip {
             position: fixed;
             pointer-events: none;
-            background: rgb(35, 30, 0); /* 近乎黑色的土黄色，B=0 */
+            background: rgb(35, 30, 0); /* Near-black earthy yellow, B=0 */
             color: var(--base2);
             padding: 4px 10px;
             border-radius: 4px;
@@ -1785,7 +1784,7 @@ class ClipboardHistorySidebarProvider {
             box-shadow: 0 1px 2px rgba(0,0,0,0.4);
             white-space: nowrap;
             border: 1px solid var(--primary-color);
-            transform: translateX(-50%); /* 水平居中 */
+            transform: translateX(-50%); /* Horizontally center */
         }
         .item-actions { margin-top: 5px; display: flex; gap: 5px; }
 
@@ -1803,7 +1802,7 @@ class ClipboardHistorySidebarProvider {
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
         .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; }
 
-        /* ★ 新增：命令历史下拉框样式 */
+        /* ★ NEW: command history dropdown styles */
         .history-dropdown {
             display: none;
             position: absolute;
@@ -1862,8 +1861,8 @@ class ClipboardHistorySidebarProvider {
                         <div class="input-box-wrapper">
                             <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
                             <button id="btnVideoStart"><span class="icon-play"></span></button>
-                            <div class="error-tip" id="urlErrorTip">无效网址</div>
-                             <!-- ★ 新增：video url 历史下拉框 -->
+                            <div class="error-tip" id="urlErrorTip">无效网址</div> // qq2q
+                             <!-- ★ NEW: video url history dropdown -->
                             <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
                     </div>
@@ -1904,12 +1903,12 @@ class ClipboardHistorySidebarProvider {
             </div>
             <div class="search-container">
                 <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
-                 <!-- ★ 新增：剪切板 history 历史下拉框 -->
+                 <!-- ★ NEW: clipboard history dropdown -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
-                    <div class="empty-hint">加载中...</div>
+                    <div class="empty-hint">加载中...</div> // qq2q
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
@@ -1920,7 +1919,7 @@ class ClipboardHistorySidebarProvider {
     </div>
     <script nonce="${nonce}">
         (function() {
-            // ---- ES5/老环境兜底：closest/matches polyfill ----
+            // ---- ES5/legacy environment fallback: closest/matches polyfill ----
             if (!Element.prototype.matches) {
                 Element.prototype.matches = Element.prototype.msMatchesSelector || Element.prototype.webkitMatchesSelector;
             }
@@ -1962,7 +1961,7 @@ class ClipboardHistorySidebarProvider {
                 outerThumb: document.getElementById('outerThumb'),
                 innerScrollbar: document.getElementById('innerScrollbar'),
                 outerScrollbar: document.getElementById('outerScrollbar'),
-                // ★ 新增：历史下拉框元素
+                // ★ NEW: dropdown elements
                 videoHistoryDropdown: document.getElementById('videoHistoryDropdown'),
                 searchHistoryDropdown: document.getElementById('searchHistoryDropdown'),
             };
@@ -1980,12 +1979,12 @@ class ClipboardHistorySidebarProvider {
                 vscode.postMessage(d);
             }
 
-            // 禁用右键菜单
+            // Disable context menu
             window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
             function initDynamicSizing() {
                 var containerH = el.historyContainer.clientHeight;
-                // 估算卡片平均高度
+                // Estimate average card height
                 batchSize = Math.max(10, Math.ceil(containerH / 120));
                 if (currentLimit === 0) {
                     currentLimit = batchSize * 2;
@@ -1993,7 +1992,7 @@ class ClipboardHistorySidebarProvider {
                 }
             }
 
-            // ★ 新增：历史下拉框功能
+            // ★ NEW: dropdown feature
             function hideAllDropdowns() {
                 if (el.videoHistoryDropdown) el.videoHistoryDropdown.style.display = 'none';
                 if (el.searchHistoryDropdown) el.searchHistoryDropdown.style.display = 'none';
@@ -2001,7 +2000,7 @@ class ClipboardHistorySidebarProvider {
 
             function showHistoryDropdown(inputEl, dropdownEl, history) {
                 hideAllDropdowns();
-                // ★ 加固：只有当键入框持有焦点时才弹出下拉框
+                // ★ Hardening: only show dropdown when input has focus
                 if (document.activeElement !== inputEl) {
                     return;
                 }
@@ -2025,15 +2024,15 @@ class ClipboardHistorySidebarProvider {
                 dropdownEl.style.display = 'block';
             }
 
-            // --- 修改/新增事件监听 ---
+            // --- Modified/added event listeners ---
 
             el.searchBox.addEventListener('input', function() {
-                // 有键入先隐藏下拉框
+                // Hide dropdown when typing
                 hideAllDropdowns();
                 el.historyList.scrollTop = 0;
                 el.tooltip.style.display = 'none';
                 post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
-                // 如果为空，请求历史
+                // If empty, request history
                 if (el.searchBox.value === '') {
                     post('getHistory', { key: 'search' });
                 }
@@ -2045,7 +2044,7 @@ class ClipboardHistorySidebarProvider {
                 }
             });
 
-            // blur 时立即隐藏下拉框
+            // Hide dropdown immediately on blur
             el.searchBox.addEventListener('blur', function(e) {
                 var relatedTarget = e.relatedTarget;
                 var isDropdownElement = relatedTarget && el.searchHistoryDropdown.contains(relatedTarget);
@@ -2054,7 +2053,7 @@ class ClipboardHistorySidebarProvider {
                 }
             });
 
-            // 点击下拉框时阻止冒泡，防止触发 blur
+            // Prevent bubbling on dropdown click to avoid triggering blur
             if (el.searchHistoryDropdown) {
                 el.searchHistoryDropdown.addEventListener('mousedown', function(e) {
                     e.preventDefault();
@@ -2068,8 +2067,8 @@ class ClipboardHistorySidebarProvider {
                         post('saveHistory', { key: 'search', value: val });
                     }
                     hideAllDropdowns();
-                    el.searchBox.blur(); // ★ 回车后失去焦点
-                    post('playEnterSfx'); // ★ 回车音效
+                    el.searchBox.blur(); // ★ Lose focus after Enter
+                    post('playEnterSfx'); // ★ Enter sfx
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
                 }
@@ -2207,7 +2206,7 @@ class ClipboardHistorySidebarProvider {
                     var cmd = cmdBtn.dataset.cmd;
                     post('executeCommand', { cmd: cmd });
 
-                    // 记录通用命令的使用次数
+                    // Record generic command usage counts
                     var generics = ['qqq.weave', 'qqq.exportDoc', 'qqq.pure', 'qqq.exportZip', 'qqq.allSettings'];
                     for (var i = 0; i < generics.length; i++) {
                         if (generics[i] === cmd) {
@@ -2223,7 +2222,7 @@ class ClipboardHistorySidebarProvider {
             el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
             el.btnSavorStop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'stop' }); };
 
-            // ★ 统一真理源：从 global.js 嵌入
+            // ★ Single source of truth: embedded from global.js
             var isValidUrl = ${this._global.isValidUrl.toString()};
 
             function showErrorTip() {
@@ -2236,10 +2235,10 @@ class ClipboardHistorySidebarProvider {
             }
 
             el.videoInput.addEventListener('input', function() {
-                // 有键入先隐藏下拉框
+                // Hide dropdown when typing
                 hideAllDropdowns();
                 el.videoInput.className = 'inline-input';
-                // 如果为空，请求历史
+                // If empty, request history
                 if (el.videoInput.value === '') {
                     post('getHistory', { key: 'video' });
                 }
@@ -2251,7 +2250,7 @@ class ClipboardHistorySidebarProvider {
                 }
             });
 
-            // blur 时立即隐藏下拉框
+            // Hide dropdown immediately on blur
             el.videoInput.addEventListener('blur', function(e) {
                 var relatedTarget = e.relatedTarget;
                 var isDropdownElement = relatedTarget && el.videoHistoryDropdown.contains(relatedTarget);
@@ -2260,7 +2259,7 @@ class ClipboardHistorySidebarProvider {
                 }
             });
 
-            // 点击下拉框时阻止冒泡，防止触发 blur
+            // Prevent bubbling on dropdown click to avoid triggering blur
             if (el.videoHistoryDropdown) {
                 el.videoHistoryDropdown.addEventListener('mousedown', function(e) {
                     e.preventDefault();
@@ -2272,12 +2271,12 @@ class ClipboardHistorySidebarProvider {
                     var val = el.videoInput.value.trim();
                     if (isValidUrl(val)) {
                         post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
-                        post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
-                        el.videoInput.blur(); // ★ 成功提交后先失去焦点
+                        post('saveHistory', { key: 'video', value: val }); // ★ Save history
+                        el.videoInput.blur(); // ★ Lose focus after successful submit
                         el.videoInput.value = '';
                     } else if (val) { showErrorTip(); }
                     hideAllDropdowns();
-                    post('playEnterSfx'); // ★ 回车音效
+                    post('playEnterSfx'); // ★ Enter sfx
                 } else if (e.key === 'Escape') {
                     hideAllDropdowns();
                 }
@@ -2288,13 +2287,13 @@ class ClipboardHistorySidebarProvider {
                 var val = el.videoInput.value.trim();
                 if (isValidUrl(val)) {
                     post('executeCommand', { cmd: 'qqq.downloadVideosFromUrl', args: [val] });
-                    post('saveHistory', { key: 'video', value: val }); // ★ 保存历史
-                    el.videoInput.blur(); // ★ 成功提交后先失去焦点
+                    post('saveHistory', { key: 'video', value: val }); // ★ Save history
+                    el.videoInput.blur(); // ★ Lose focus after successful submit
                     el.videoInput.value = '';
                 } else if (val) { showErrorTip(); }
             };
 
-            // 阻止点击事件冒泡到 videoCard
+            // Prevent click event bubbling to videoCard
             el.videoInput.onclick = function(e) { e.stopPropagation(); };
             el.videoCard.onclick = function() { el.videoInput.focus(); };
 
@@ -2302,14 +2301,14 @@ class ClipboardHistorySidebarProvider {
                 var m = e.data;
                 if (!m) return;
 
-                // ★ 新增：处理接收到的历史数据
+                // ★ NEW: handle received history data
                 if (m.command === 'historyData') {
                     if (m.key === 'video') {
                         showHistoryDropdown(el.videoInput, el.videoHistoryDropdown, m.history);
                     } else if (m.key === 'search') {
                         showHistoryDropdown(el.searchBox, el.searchHistoryDropdown, m.history);
                     }
-                    return; // 尽早返回
+                    return; // Return early
                 }
 
                 if (m.command === 'updateData') {
@@ -2346,7 +2345,7 @@ class ClipboardHistorySidebarProvider {
                 if (!elLabel || !elStats) return;
                 elStats.innerText = currentStats;
 
-                // 纯净叙事：不显示文件名
+                // Pure narrative: do not show file name
                 if (window.__isPlaying) {
                     if (loopRemaining === -1 || loopRemaining === 0) {
                         elLabel.innerText = 'Looping...';
@@ -2360,7 +2359,7 @@ class ClipboardHistorySidebarProvider {
 
             function stopAudio() {
                 window.__isPlaying = false;
-                // ★ 清理淡出定时器
+                // ★ Clear fade-out timer
                 if (fadeTimer) {
                     clearInterval(fadeTimer);
                     fadeTimer = null;
@@ -2381,7 +2380,7 @@ class ClipboardHistorySidebarProvider {
                 if (iconLoop) iconLoop.classList.remove('spinning');
             }
 
-            // ★ 复制音效兆底（Python 不可用时播放 kope mp3）
+            // ★ Copy sfx fallback (when Python unavailable, play kope mp3)
             function playCopySfx(base64) {
                 if (!base64) return;
                 try {
@@ -2394,17 +2393,17 @@ class ClipboardHistorySidebarProvider {
             function playAudio(base64, count) {
                 stopAudio();
                 window.__isPlaying = true;
-                // ★ 修复：count=0 表示无限循环，不能用 || 操作符
+                // ★ Fix: count=0 means infinite loop, cannot use || operator
                 loopRemaining = (count === undefined || count === null) ? 1 : count;
 
-                // ★ 先更新文字和图标状态
+                // ★ Update text and icon state first
                 updateSavorText();
                 if (loopRemaining === -1 || loopRemaining === 0) {
                     var iconLoop = document.querySelector('.icon-loop');
                     if (iconLoop) iconLoop.classList.add('spinning');
                 }
 
-                // ★ 如果没有 base64，说明是 Python 引擎播放，只更新 UI 状态
+                // ★ If no base64, it's Python engine playback; only update UI state
                 if (!base64) {
                     return;
                 }
@@ -2422,14 +2421,14 @@ class ClipboardHistorySidebarProvider {
                         audio.currentTime = 0;
                         audio.play();
                     } else {
-                        stopAudio(); // 正常结束，不淡出或由 ontimeupdate 预处理
+                        stopAudio(); // Normal end; no fade-out or preprocessed by ontimeupdate
                     }
                 };
 
-                // ★ 淡出条件：限定次数播放的最后一次，且时长 > 2秒
+                // ★ Fade-out condition: last play of finite count, and duration > 2s
                 audio.ontimeupdate = function() {
                     if (loopRemaining === 1 && audio.duration > 2 && audio.currentTime > audio.duration - 2.2) {
-                        audio.ontimeupdate = null; // 触发后立即卸载，由高频 Timer 接管
+                        audio.ontimeupdate = null; // Unload immediately after trigger; high-frequency timer takes over
                         if (fadeTimer) return;
 
                         fadeTimer = setInterval(function() {
@@ -2440,7 +2439,7 @@ class ClipboardHistorySidebarProvider {
                                 return;
                             }
                             audio.volume = Math.max(0, Math.min(1, rem / 2.0));
-                        }, 20); // 50Hz 高频淡出
+                        }, 20); // 50Hz high-frequency fade-out
                     }
                 };
 
@@ -2486,7 +2485,7 @@ class ClipboardHistorySidebarProvider {
 </html>`;
     }
 
-    // ★ 新增：供 activate() 的 subscriptions 安全调用，且解绑 pythonBridge 监听避免热重载堆监听
+    // ★ NEW: safe for activate() subscriptions call, and unbind pythonBridge listener to avoid hot-reload listener pile-up
     dispose() {
         try { this._stopPeriodicUpdate(); } catch { }
         try {
@@ -2504,7 +2503,7 @@ class ClipboardHistorySidebarProvider {
 }
 
 // ============================================================================
-// 维护与辅助工具
+// Maintenance and helper tools
 // ============================================================================
 
 async function searchHistoryCommand(historyManager) {
@@ -2520,7 +2519,7 @@ async function searchHistoryCommand(historyManager) {
         const kw = keyword.trim().toLowerCase();
         let items = [];
 
-        // 1. 处理指令匹配
+        // 1. Handle command matches
         if (!kw) {
             items.push({ label: q('q4.quickPick.separatorCommands'), kind: vscode.QuickPickItemKind.Separator });
             items.push(...META_COMMANDS);
@@ -2535,7 +2534,7 @@ async function searchHistoryCommand(historyManager) {
             }
         }
 
-        // 2. 处理历史记录
+        // 2. Handle history records
         const limit = kw ? 100 : 171;
         const results = historyManager.searchHistory(kw, limit);
 
@@ -2558,7 +2557,7 @@ async function searchHistoryCommand(historyManager) {
     quickPick.onDidAccept(async () => {
         const selected = quickPick.selectedItems[0];
         if (selected) {
-            // ★ 回车音效
+            // ★ Enter key sfx
             if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
             }
@@ -2609,7 +2608,7 @@ async function exportHistoryCommand(historyManager) {
 
 async function importHistoryCommand(historyManager) {
     const uris = await vscode.window.showOpenDialog({
-        title: '增量导入剪切板历史 (JSON)',
+        title: '增量导入剪切板历史 (JSON)', // qq2q
         canSelectMany: false,
         filters: { 'JSON': ['json'] }
     });
@@ -2623,7 +2622,7 @@ async function importHistoryCommand(historyManager) {
         let count = 0;
         for (const item of arr) {
             if (item.content) {
-                // 内部 addToHistory 会自动进行 MD5 哈希查重，实现“增量”
+                // Internal addToHistory will auto MD5 dedupe, achieving "incremental"
                 await historyManager.addToHistory(item.content);
                 count++;
             }
@@ -2650,7 +2649,7 @@ function showStatsCommand(historyManager) {
 }
 
 // ============================================================================
-// 复制选中内容到历史
+// Copy selected content to history
 // ============================================================================
 async function copyToHistoryCommand(historyManager) {
     const editor = vscode.window.activeTextEditor;
@@ -2669,11 +2668,11 @@ async function copyToHistoryCommand(historyManager) {
 
     await historyManager.copyToClipboard(text);
     await historyManager.addToHistory(text);
-    // vscode.window.showInformationMessage('已复制到剪切板并添加到历史');
+    // vscode.window.showInformationMessage('Copied to clipboard and added to history');
 }
 
 // ============================================================================
-// 状态栏项
+// Status bar item
 // ============================================================================
 class StatusBarManager {
     /**
@@ -2688,7 +2687,7 @@ class StatusBarManager {
         );
 
         this._statusBarItem.command = 'qqq.clipboardHistory';
-        this._statusBarItem.tooltip = '点击搜索/粘贴剪切板历史';
+        this._statusBarItem.tooltip = 'Click to search/paste clipboard history';
         this._updateTimer = null;
 
         this._update();
@@ -2717,17 +2716,17 @@ class StatusBarManager {
 }
 
 // ============================================================================
-// 终极维护工具 qsc(a)
+// Ultimate maintenance tool qsc(a)
 // ============================================================================
 /**
- * @param {number} a 清理级别：1-缓存, 2-剪切板, 3-globalState, 0-全清
+ * @param {number} a Cleanup level: 1-cache, 2-clipboard history, 3-globalState, 0-all
  * @param {ClipboardHistoryManager} historyManager
  */
 async function qsc(a, historyManager) {
     const context = historyManager?.context;
     console.log('[QSC]', q('q4.cache.clearing', a));
 
-    // 1. 清理 qqq_cache 文件夹
+    // 1. Clear qqq_cache folder
     const clearCache = async () => {
         try {
             const root = context?.globalStorageUri?.fsPath;
@@ -2746,7 +2745,7 @@ async function qsc(a, historyManager) {
         } catch (e) { console.error('[QSC]', q('q4.cache.cacheClearError', e.message)); }
     };
 
-    // 2. 清空剪切板历史
+    // 2. Clear clipboard history
     const clearHistory = async () => {
         if (historyManager) {
             await historyManager.clearHistory({ deleteFiles: true });
@@ -2754,7 +2753,7 @@ async function qsc(a, historyManager) {
         }
     };
 
-    // 3. 清空 globalState (高危操作)
+    // 3. Clear globalState (high-risk operation)
     const clearGlobalState = async () => {
         if (!context?.globalState) return;
         try {
@@ -2777,7 +2776,7 @@ async function qsc(a, historyManager) {
 }
 
 // ============================================================================
-// 扩展激活入口
+// Extension activation entry
 // ============================================================================
 function activate(context) {
     console.log('[Q4] QQQ Clipboard History (fusion-final) activating...');
@@ -2792,14 +2791,14 @@ function activate(context) {
         },
     });
 
-    // ★ 终极最优解：同步记录当前实例，供 deactivate 强杀
+    // ★ Ultimate best solution: sync record current instance for deactivate hard kill
     _currentHistoryManager = historyManager;
 
     historyManager.startWatching();
 
-    // 修复实例化：传入 context, historyManager 和 global 模块
+    // Fix instantiation: pass in context, historyManager and global module
     sidebarProvider = new ClipboardHistorySidebarProvider(context, historyManager, global);
-    _currentSidebarProvider = sidebarProvider;  // ★ 记录当前实例
+    _currentSidebarProvider = sidebarProvider;  // ★ Record current instance
 
     const sidebarDisposable = vscode.window.registerWebviewViewProvider(
         'qqq.Viewq',
@@ -2811,12 +2810,12 @@ function activate(context) {
     statusBarManager = new StatusBarManager(historyManager);
     context.subscriptions.push(statusBarManager);
 
-    // 命令注册
+    // Command registration
     context.subscriptions.push(
         vscode.commands.registerCommand('qqq.qsc', async () => {
             const input = await vscode.window.showInputBox({
-                placeHolder: '级别: 1-缓存, 2-历史, 3-State, 0-全清',
-                prompt: '执行 QSC 终极清理'
+                placeHolder: '级别: 1-缓存, 2-历史, 3-State, 0-全清', // qq2q
+                prompt: '执行 QSC 终极清理' // qq2q
             });
             if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
         }),
@@ -2827,7 +2826,7 @@ function activate(context) {
         vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager))
     );
 
-    // 清理
+    // Cleanup
     context.subscriptions.push({
         dispose: () => {
             historyManager.dispose().catch(() => { });
@@ -2846,12 +2845,12 @@ function activate(context) {
         getStats: () => historyManager.getStatsSnapshot(),
         qsc: (a) => qsc(a, historyManager),
         recordRoamUsage: (args) => historyManager.recordRoamUsage(args),
-        sidebarProvider: sidebarProvider // ★ 返回 sidebarProvider 实例
+        sidebarProvider: sidebarProvider // ★ Return sidebarProvider instance
     };
 }
 
 // ============================================================================
-// 扩展停用（全生命周期强杀保护）
+// Extension deactivation (full lifecycle hard-kill protection)
 // ============================================================================
 async function deactivate() {
     console.log('[Q4] QQQ Clipboard History (fusion-final) deactivating...');
@@ -2866,11 +2865,11 @@ async function deactivate() {
 }
 
 // ============================================================================
-// 导出
+// Exports
 // ============================================================================
 
 /**
- * ★ 重置 Q4 的音频源状态（当 Python 环境"从无到有"时调用）
+ * ★ Reset Q4 audio source state (call when Python environment goes from "none" to "available")
  */
 function resetQ4AudioSource() {
     if (_currentSidebarProvider && typeof _currentSidebarProvider.resetAudioSource === 'function') {
@@ -2883,7 +2882,8 @@ module.exports = {
     deactivate,
     ClipboardHistoryManager,
     ClipboardHistorySidebarProvider,
-    resetQ4AudioSource,  // ★ 导出重置函数
+    resetQ4AudioSource,  // ★ Export reset function
 };
+
 
 
