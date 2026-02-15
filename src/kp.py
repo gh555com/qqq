@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-#   - 极简模式：只负责读取系统剪切板并保存到指定目录（dumb saver）
-#   - 移除所有指纹计算、去重逻辑
-#   - 移除 HTML 解析逻辑（由 Node.js 侧处理）
-#   - 仅处理：纯文本、文件复制、原生图片保存
+#   - Minimal mode: only reads system clipboard and saves to the specified directory (dumb saver)
+#   - Removed all fingerprint calculation and deduplication logic
+#   - Removed HTML parsing logic (handled on the Node.js side)
+#   - Only handles: plain text, file copy, native image save
 import sys
 import os
 import json
@@ -22,17 +22,17 @@ import importlib.util
 import threading
 
 # =============================================================================
-#  音频引擎（miniaudio_v16）
+#  Audio engine (miniaudio_v16)
 # =============================================================================
 _AUDIO_ENGINE = None
 _AUDIO_ENGINE_ERROR = None
 _AUDIO_CURRENT_TOKEN = None
 _AUDIO_LOCK = None
 _AUDIO_MONITOR_THREAD = None
-_AUDIO_IS_LOOPING = False  # 标记是否为无限循环，无限循环不发送结束事件
+_AUDIO_IS_LOOPING = False  # Flag whether it is infinite loop; infinite loop does not send finished event
 
 def _init_audio_engine():
-    """懒加载音频引擎，返回 (engine, error_msg)"""
+    """Lazy-load audio engine, return (engine, error_msg)"""
     global _AUDIO_ENGINE, _AUDIO_ENGINE_ERROR, _AUDIO_LOCK
     import threading
     if _AUDIO_LOCK is None:
@@ -45,7 +45,7 @@ def _init_audio_engine():
             return None, _AUDIO_ENGINE_ERROR
 
         try:
-            # 查找 miniaudio_v16.py 的路径
+            # Locate miniaudio_v16.py path
             script_dir = os.path.dirname(os.path.abspath(__file__))
             ma_path = os.path.join(script_dir, "miniaudio_v16.py")
 
@@ -53,12 +53,12 @@ def _init_audio_engine():
                 _AUDIO_ENGINE_ERROR = f"miniaudio_v16.py not found: {ma_path}"
                 return None, _AUDIO_ENGINE_ERROR
 
-            # 动态导入模块
+            # Dynamically import module
             spec = importlib.util.spec_from_file_location("miniaudio_v16", ma_path)
             ma_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(ma_module)
 
-            # 初始化引擎（silent=True 不打印日志）
+            # Initialize engine (silent=True does not print logs)
             _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(asset_folder=".", max_workers=8, silent=True)
             return _AUDIO_ENGINE, None
         except Exception as e:
@@ -67,13 +67,13 @@ def _init_audio_engine():
             return None, _AUDIO_ENGINE_ERROR
 
 def _check_audio_engine():
-    """检查音频引擎状态，返回详细信息"""
+    """Check audio engine status, return detailed info"""
     engine, err = _init_audio_engine()
     if err:
         return {"has_miniaudio": False, "error": err}
 
     try:
-        # 尝试获取 miniaudio 版本信息
+        # Try to get miniaudio version info
         script_dir = os.path.dirname(os.path.abspath(__file__))
         ma_path = os.path.join(script_dir, "miniaudio_v16.py")
         spec = importlib.util.spec_from_file_location("miniaudio_v16", ma_path)
@@ -92,7 +92,7 @@ def _check_audio_engine():
         return {"has_miniaudio": True, "miniaudio_version": "unknown", "error": str(e)}
 
 def _play_audio(file_path, count=1):
-    """播放音频，返回状态"""
+    """Play audio, return status"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_MONITOR_THREAD, _AUDIO_IS_LOOPING
     import threading
 
@@ -104,7 +104,7 @@ def _play_audio(file_path, count=1):
         return {"status": "error", "error": f"file not found: {file_path}"}
 
     try:
-        # 先停止当前播放
+        # Stop current playback first
         if _AUDIO_CURRENT_TOKEN:
             try:
                 _AUDIO_CURRENT_TOKEN.stop()
@@ -112,37 +112,37 @@ def _play_audio(file_path, count=1):
                 pass
             _AUDIO_CURRENT_TOKEN = None
 
-        # count=0 或 count=-1 表示无限循环
+        # count=0 or count=-1 means infinite loop
         if count == 0 or count == -1:
-            # 无限循环播放
+            # Infinite loop playback
             _AUDIO_CURRENT_TOKEN = engine.play_sound_file(
                 file_path=file_path,
                 loop=True,
-                trim_silence=True  # 不去除首尾静音
+                trim_silence=True  # Do not remove leading/trailing silence
             )
             _AUDIO_IS_LOOPING = True
         elif count == 1:
-            # 单次播放，2秒淡出，不去除首尾静音
+            # Play once, 2s fade-out, do not remove leading/trailing silence
             _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, True)
             _AUDIO_IS_LOOPING = False
         else:
-            # 固定次数循环播放，最后2秒淡出，不去除首尾静音
+            # Fixed-count loop playback, last 2s fade-out, do not remove leading/trailing silence
             _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, True)
             _AUDIO_IS_LOOPING = False
 
-        # ★ 启动后台监控线程，在播放完成后发送事件
+        # ★ Start background monitor thread, send event after playback completes
         def _monitor_playback():
             global _AUDIO_CURRENT_TOKEN
             token = _AUDIO_CURRENT_TOKEN
-            eng = engine  # 闭包捕获引擎引用
+            eng = engine  # Closure captures engine reference
             if token is None:
                 return
-            # 等待播放完成：检查 token 是否被停止，或者被从 _active_tokens 中移除
+            # Wait for completion: check whether token is stopped, or removed from _active_tokens
             while True:
-                # 检查是否手动停止
+                # Check manual stop
                 if token.stopped:
                     break
-                # 检查 token 是否还在活动列表中（自然播放完成会被移除）
+                # Check whether token is still in active list (natural completion removes it)
                 try:
                     with eng._tokens_lock:
                         if token not in eng._active_tokens:
@@ -150,16 +150,16 @@ def _play_audio(file_path, count=1):
                 except:
                     break
                 time.sleep(0.2)
-            # 播放完成，发送事件（仅非无限循环模式）
+            # Playback finished, send event (only in non-infinite-loop mode)
             if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
                 _AUDIO_CURRENT_TOKEN = None
-                # 发送 JSON 事件到 stdout
+                # Send JSON event to stdout
                 try:
                     print(json.dumps({"event": "audio_finished"}), flush=True)
                 except:
                     pass
 
-        # 启动监控线程（如果不是无限循环）
+        # Start monitor thread (if not infinite loop)
         if not _AUDIO_IS_LOOPING:
             _AUDIO_MONITOR_THREAD = threading.Thread(target=_monitor_playback, daemon=True)
             _AUDIO_MONITOR_THREAD.start()
@@ -170,7 +170,7 @@ def _play_audio(file_path, count=1):
         return {"status": "error", "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
 
 def _stop_audio():
-    """停止音频播放"""
+    """Stop audio playback"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING
 
     if _AUDIO_CURRENT_TOKEN:
@@ -182,7 +182,7 @@ def _stop_audio():
 
     _AUDIO_IS_LOOPING = False
 
-    # 也尝试停止引擎的所有播放
+    # Also try to stop all playback in engine
     engine, _ = _init_audio_engine()
     if engine:
         try:
@@ -193,7 +193,7 @@ def _stop_audio():
     return {"status": "stopped"}
 
 def _get_audio_state():
-    """获取当前播放状态"""
+    """Get current playback state"""
     global _AUDIO_CURRENT_TOKEN
 
     if _AUDIO_CURRENT_TOKEN and not _AUDIO_CURRENT_TOKEN.stopped:
@@ -202,17 +202,17 @@ def _get_audio_state():
 
 
 # =============================================================================
-#  ★ 音效系统 (v16 AudioHub - 事件驱动 + 延迟预热 + 极速播放)
+#  ★ Sound effect system (v16 AudioHub - event-driven + delayed warmup + ultra-fast playback)
 # =============================================================================
 _AUDIO_HUB = None
 _AUDIO_HUB_LOCK = threading.Lock()
 _SFX_REGISTRY = {}   # {"kope": [path, ...], "yz": [path, ...], ...}
-_SFX_LAST_IDX = {}   # 每个分类的上次播放索引，避免连续重复
-_SFX_PRIMED = False  # 预热完成标志
-_SFX_PRIME_DELAY = 5  # 预热延迟秒数（错开 VS Code 启动高峰）
+_SFX_LAST_IDX = {}   # Last played index per category to avoid immediate repeats
+_SFX_PRIMED = False  # Warmup completion flag
+_SFX_PRIME_DELAY = 5  # Warmup delay seconds (stagger VS Code startup peak)
 
 def _init_sfx_paths():
-    """初始化音效路径注册表"""
+    """Initialize sound effect path registry"""
     global _SFX_REGISTRY
     if _SFX_REGISTRY:
         return _SFX_REGISTRY
@@ -222,12 +222,12 @@ def _init_sfx_paths():
     if not os.path.isdir(assets_dir):
         assets_dir = os.path.join(script_dir, "assets")
 
-    # kope 音效 (1-7.mp3) - 剪切板复制
+    # kope SFX (1-7.mp3) - clipboard copy
     kope_dir = os.path.join(assets_dir, "kope")
     if os.path.isdir(kope_dir):
         _SFX_REGISTRY["kope"] = [os.path.join(kope_dir, f"{i}.mp3") for i in range(1, 8)]
 
-    # yz 音效 (删除文件、CMD 等) - 所有 mp3/wav
+    # yz SFX (delete file, CMD, etc.) - all mp3/wav
     yz_dir = os.path.join(assets_dir, "yz")
     if os.path.isdir(yz_dir):
         yz_files = sorted([f for f in os.listdir(yz_dir) if f.endswith((".mp3", ".wav"))])
@@ -236,7 +236,7 @@ def _init_sfx_paths():
     return _SFX_REGISTRY
 
 def _background_prime_sfx():
-    """后台预热线程：延迟 N 秒后执行，错开 VS Code 启动高峰"""
+    """后台预热线程：延迟 N 秒后执行，错开 VS Code 启动高峰""" // qq2q
     global _SFX_PRIMED
     time.sleep(_SFX_PRIME_DELAY)
 
@@ -256,7 +256,7 @@ def _background_prime_sfx():
         pass
 
 def _get_audio_hub():
-    """获取 AudioHub 单例 (懒加载 + 延迟预热)"""
+    """获取 AudioHub 单例 (懒加载 + 延迟预热)""" // qq2q
     global _AUDIO_HUB
     if _AUDIO_HUB is not None:
         return _AUDIO_HUB
@@ -266,25 +266,25 @@ def _get_audio_hub():
             return _AUDIO_HUB
 
         try:
-            # 动态导入 v16
+            # Dynamically import v16
             script_dir = os.path.dirname(os.path.abspath(__file__))
             v16_path = os.path.join(script_dir, "miniaudio_v16.py")
             spec = importlib.util.spec_from_file_location("miniaudio_v16", v16_path)
             v16 = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(v16)
 
-            # 创建 AudioHub: sfx_use_music_engine=True 复用音乐引擎，避免设备冲突
+            # Create AudioHub: sfx_use_music_engine=True reuses music engine to avoid device conflicts
             hub = v16.AudioHub(
                 asset_folder=".",
                 music_workers=16,
                 sfx_workers=24,
-                sfx_use_music_engine=True,  # ★ 复用音乐引擎，避免独立设备问题
+                sfx_use_music_engine=True,  # ★ Reuse music engine to avoid separate device issues
                 silent=True
             )
 
             _AUDIO_HUB = hub
 
-            # 启动后台预热线程（不阻塞当前请求）
+            # Start background warmup thread (does not block current request)
             threading.Thread(target=_background_prime_sfx, daemon=True, name="sfx-prime").start()
 
             return hub
@@ -296,10 +296,10 @@ def _get_audio_hub():
 
 def _play_sfx(category: str, idx: int = -1, name: str = None):
     """
-    播放音效
-    category: "kope" / "yz" 等
-    idx: -1 = 随机（避免连续重复），>=0 = 指定索引
-    name: 指定文件名（如 "kj3.mp3"），优先级最高
+    播放音效 // qq2q
+    category: "kope" / "yz" 等 // qq2q
+    idx: -1 = 随机（避免连续重复），>=0 = 指定索引 // qq2q
+    name: 指定文件名（如 "kj3.mp3"），优先级最高 // qq2q
     """
     global _SFX_LAST_IDX
     hub = _get_audio_hub()
@@ -311,21 +311,21 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     if not paths:
         return
 
-    # 过滤存在的文件
+    # Filter existing files
     valid_paths = [p for p in paths if os.path.isfile(p)]
     if not valid_paths:
         return
 
-    # ★ 指定文件名播放
+    # ★ Play by specified filename
     if name:
         for p in valid_paths:
             if os.path.basename(p) == name:
                 hub.play_sfx(p)
                 return
-        return  # 未找到指定文件
+        return  # Specified file not found
 
     if idx < 0:
-        # 随机选择，避免连续重复
+        # Random selection, avoid immediate repeats
         last = _SFX_LAST_IDX.get(category, -1)
         if len(valid_paths) > 1:
             choices = [i for i in range(len(valid_paths)) if i != last]
@@ -340,7 +340,7 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     hub.play_sfx(path)
 
 def _start_clipboard_watcher():
-    """启动剪切板音效 (事件驱动 - 0ms 检测延迟)"""
+    """启动剪切板音效 (事件驱动 - 0ms 检测延迟)""" // qq2q
     hub = _get_audio_hub()
     if not hub:
         return {"status": "error", "error": "AudioHub init failed"}
@@ -358,43 +358,43 @@ def _start_clipboard_watcher():
         return {"status": "error", "error": str(e)}
 
 def _stop_clipboard_watcher():
-    """停止剪切板音效"""
+    """停止剪切板音效""" // qq2q
     hub = _get_audio_hub()
     if hub:
         hub.stop_clipboard()
     return {"status": "stopped"}
 
 # =============================================================================
-#  配置
+#  Configuration
 # =============================================================================
-# 线程池（全局复用）
+# Thread pool (global reuse)
 _MAX_WORKERS = min(32, max(4, (os.cpu_count() or 4) * 2))
 _IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS)
 
 # =============================================================================
-#  扫描取消机制（用于取消 path_size/folder_info 等耗时操作）
+#  Scan cancel mechanism (used to cancel path_size/folder_info and other expensive ops)
 # =============================================================================
 import threading
-_SCAN_CANCEL_VERSION = 0  # 全局取消版本号
+_SCAN_CANCEL_VERSION = 0  # Global cancel version
 _SCAN_CANCEL_LOCK = threading.Lock()
 
 def _bump_scan_cancel_version():
-    """递增取消版本号，使所有正在进行的扫描失效"""
+    """Increment cancel version so all ongoing scans become invalid"""
     global _SCAN_CANCEL_VERSION
     with _SCAN_CANCEL_LOCK:
         _SCAN_CANCEL_VERSION += 1
         return _SCAN_CANCEL_VERSION
 
 def _get_scan_cancel_version():
-    """获取当前取消版本号"""
+    """Get current cancel version"""
     with _SCAN_CANCEL_LOCK:
         return _SCAN_CANCEL_VERSION
 
 def _is_scan_cancelled(my_version):
-    """检查扫描是否已被取消"""
+    """Check whether scan has been cancelled"""
     return _get_scan_cancel_version() != my_version
 # =============================================================================
-#  工具：路径/文件名
+#  Utilities: path/filename
 # =============================================================================
 
 
@@ -449,7 +449,7 @@ def safe_filename(name: str) -> str:
 
 
 def unique_path_in_dir(output_dir: Path, name: str, is_folder: bool = False) -> Path:
-    # 简单的重命名策略，防止覆盖
+    # Simple rename strategy to prevent overwriting
     base = output_dir / name
     if not base.exists():
         return base
@@ -460,7 +460,7 @@ def unique_path_in_dir(output_dir: Path, name: str, is_folder: bool = False) -> 
     else:
         stem = base.stem
         ext = base.suffix
-        # 特殊处理：如果没有主文件名（如 .gitignore），整体视为 stem
+        # Special case: if no main filename (e.g. .gitignore), treat whole as stem
         if not stem and ext.startswith('.'):
             stem = ext
             ext = ""
@@ -649,7 +649,7 @@ def bytes_from_pywin32_blob(blob) -> bytes:
         except Exception:
             return b""
 # =============================================================================
-#  PIL 保存：PNG
+#  PIL save: PNG
 # =============================================================================
 
 
@@ -660,7 +660,7 @@ def save_image_as_png(img, path: Path):
         img = img.convert("RGB")
     img.save(str(path), format="PNG", compress_level=6)
 # =============================================================================
-#  DIB / DIBV5 转 BMP
+#  DIB / DIBV5 to BMP
 # =============================================================================
 
 
@@ -697,7 +697,7 @@ def dib_to_bmp_bytes(dib: bytes) -> bytes:
     file_header += bf_off_bits.to_bytes(4, "little", signed=False)
     return file_header + dib
 # =============================================================================
-#  文件复制 (Dumb Copy)
+#  File copy (Dumb Copy)
 # =============================================================================
 
 
@@ -745,7 +745,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
             return None
         ensure_parent(output_dir / "dummy")
         dst_dir = output_dir / safe_filename(src_dir.name)
-        # 如果目录存在，生成唯一名
+        # If directory exists, generate unique name
         if dst_dir.exists():
             dst_dir = unique_path_in_dir(
                 output_dir, safe_filename(src_dir.name), is_folder=True)
@@ -783,13 +783,13 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
     except Exception:
         return None
 # =============================================================================
-#  文件夹统计（拆分：get_folder_info = 完整信息；get_path_size = 只求尺寸）
-#  - 极限 IO：os.scandir + DirEntry 缓存 + 显式栈（无递归深度风险）
-#  - 行为对齐原实现：不进入符号链接目录；符号链接文件按目标大小计（Path.stat 默认跟随）
+#  Folder stats (split: get_folder_info = full info; get_path_size = size only)
+#  - Extreme IO: os.scandir + DirEntry cache + explicit stack (no recursion depth risk)
+#  - Behavior aligned with original: do not enter symlink dirs; symlink files count target size (Path.stat follows by default)
 # =============================================================================
 
 def get_folder_info(folder_path: str, cancel_version: int = None):
-    """完整信息版：total_size + file_count_root + ext_stats（极限优化 + 可取消）"""
+    """完整信息版：total_size + file_count_root + ext_stats（极限优化 + 可取消）""" // qq2q
     if not folder_path or not isinstance(folder_path, str):
         return {"success": False, "error": "empty path"}
     if not os.path.isdir(folder_path):
@@ -798,7 +798,7 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
     total_size = 0
     file_count = 0
     ext_counts = {}
-    check_count = 0  # 用于取消检查点计数
+    check_count = 0  # Cancel checkpoint counter
 
     try:
         stack = [folder_path]
@@ -806,7 +806,7 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
         ext_get = ext_counts.get
 
         while stack:
-            # 每 5000 个文件检查一次取消
+            # Check cancel once every 5000 files
             if cancel_version is not None and check_count >= 5000:
                 check_count = 0
                 if _is_scan_cancelled(cancel_version):
@@ -817,12 +817,12 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
                 with scandir(d) as it:
                     for e in it:
                         try:
-                            # 不跟随链接目录（对齐 os.walk(followlinks=False)）
+                            # Do not follow symlink directories (align with os.walk(followlinks=False))
                             if e.is_dir(follow_symlinks=False):
                                 stack.append(e.path)
                                 continue
 
-                            # 若是链接且指向目录：不进入也不统计（对齐 os.walk 行为）
+                            # If it's a symlink to a directory: do not enter and do not count (align with os.walk behavior)
                             if e.is_symlink():
                                 try:
                                     if e.is_dir(follow_symlinks=True):
@@ -830,7 +830,7 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
                                 except OSError:
                                     continue
 
-                            # 文件（或链接文件）：按目标大小计（对齐 Path.stat 默认行为）
+                            # File (or symlink file): count target size (align with Path.stat default behavior)
                             try:
                                 st = e.stat(follow_symlinks=True)
                             except OSError:
@@ -840,7 +840,7 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
                             file_count += 1
                             check_count += 1
 
-                            # 扣后缀名：与 Path.suffix 的关键边界对齐（.gitignore -> no_ext）
+                            # Extract extension: align key edge cases with Path.suffix (.gitignore -> no_ext)
                             n = e.name
                             i = n.rfind(".")
                             if 0 < i < (len(n) - 1):
@@ -871,11 +871,11 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
 
 
 def get_disk_free(drive: str = None):
-    """获取磁盘剩余空间（单位：字节）"""
+    """获取磁盘剩余空间（单位：字节）""" // qq2q
     if not drive:
-        # 默认使用系统盘
+        # Default to system drive
         drive = os.environ.get('SystemDrive', 'C:')
-    # 确保格式正确：C: -> C:\
+    # Ensure correct format: C: -> C:\
     drive = drive.strip()
     if len(drive) == 1 and drive.isalpha():
         drive = drive.upper() + ":\\"
@@ -897,29 +897,29 @@ def get_disk_free(drive: str = None):
 
 
 def get_path_size(path: str, cancel_version: int = None):
-    """只获取单文件或目录递归总大小（极限优化 + 可取消，不统计后缀名）"""
+    """只获取单文件或目录递归总大小（极限优化 + 可取消，不统计后缀名）""" // qq2q
     if not path or not isinstance(path, str):
         return {"success": False, "error": "empty path"}
 
     try:
-        # 文件：直接 stat（跟随链接，与原 Path.stat 默认一致）
+        # File: stat directly (follow symlink, same as original Path.stat default)
         if os.path.isfile(path):
             try:
                 return {"success": True, "total_size": os.stat(path, follow_symlinks=True).st_size}
             except Exception as e:
                 return {"success": False, "error": str(e)}
 
-        # 目录：递归累加
+        # Directory: recursive sum
         if not os.path.isdir(path):
             return {"success": False, "error": "path not a file or directory"}
 
         total_size = 0
-        check_count = 0  # 用于取消检查点计数
+        check_count = 0  # Cancel checkpoint counter
         stack = [path]
         scandir = os.scandir
 
         while stack:
-            # 每 5000 个文件检查一次取消
+            # Check cancel once every 5000 files
             if cancel_version is not None and check_count >= 5000:
                 check_count = 0
                 if _is_scan_cancelled(cancel_version):
@@ -967,7 +967,7 @@ def get_path_size(path: str, cancel_version: int = None):
 
 
 def handle_windows_pywin32(wcb, wcon, output_dir: Path):
-    # ★ 阶段 1：只读取数据，必须毫秒级完成，立即释放锁
+    # ★ Stage 1: only read data; must finish in milliseconds; release lock immediately
     data_to_process = None  # {type: 'text'|'files'|'dib', payload: ...}
     try:
         wcb.OpenClipboard()
@@ -978,7 +978,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
             dibv5_format = getattr(wcon, "CF_DIBV5", 17)
             has_dib = (wcb.IsClipboardFormatAvailable(dibv5_format)
                        or wcb.IsClipboardFormatAvailable(wcon.CF_DIB))
-            # 1) 纯文本
+            # 1) Plain text
             if has_text and not has_files and not has_dib:
                 try:
                     if wcb.IsClipboardFormatAvailable(wcon.CF_UNICODETEXT):
@@ -987,17 +987,17 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                             data_to_process = {"type": "text", "text": text}
                 except Exception:
                     pass
-            # 2) 文件/文件夹 (只读取路径，不复制文件！)
+            # 2) Files/Folders (only read paths; do not copy files!)
             elif has_files:
                 try:
                     paths = wcb.GetClipboardData(wcon.CF_HDROP) or []
-                    # 确保是列表且非空
+                    # Ensure it's a list and non-empty
                     if paths:
                         data_to_process = {
                             "type": "files", "paths": list(paths)}
                 except:
                     pass
-            # 3) DIB 截图 (读取 Buffer 到内存，不保存图片！)
+            # 3) DIB screenshot (read Buffer into memory; do not save image!)
             elif has_dib:
                 try:
                     dib_formats = []
@@ -1014,11 +1014,11 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                 except:
                     pass
         finally:
-            # ★ 必须立即关闭剪切板！
+            # ★ Must close clipboard immediately!
             wcb.CloseClipboard()
     except Exception:
         pass
-    # ★ 阶段 2：在锁外处理数据 (耗时操作)
+    # ★ Stage 2: process data outside the lock (time-consuming ops)
     if not data_to_process:
         return None
     try:
@@ -1053,7 +1053,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                     "folders": copied_dirs,
                     "files": copied_files,
                 }
-            return None  # 只有空路径或不存在的路径
+            return None  # Only empty/non-existent paths
         if data_to_process["type"] == "dib":
             try:
                 from PIL import Image
@@ -1075,7 +1075,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
 
 
 def handle_windows_ctypes(output_dir: Path):
-    # ★ 阶段 1：只读取数据，必须毫秒级完成，立即释放锁
+    # ★ Stage 1: only read data; must finish in milliseconds; release lock immediately
     data_to_process = None
     if not OpenClipboard(None):
         return {"error": "Cannot open clipboard"}
@@ -1132,9 +1132,9 @@ def handle_windows_ctypes(output_dir: Path):
                     data_to_process = {"type": "dib", "data": dib}
                     break
     finally:
-        # ★ 必须立即关闭剪切板！
+        # ★ Must close clipboard immediately!
         CloseClipboard()
-    # ★ 阶段 2：在锁外处理数据 (耗时操作)
+    # ★ Stage 2: process data outside the lock (time-consuming ops)
     if not data_to_process:
         return {"type": "unknown"}
     try:
@@ -1215,7 +1215,7 @@ def get_clipboard_files_only():
     sys_name = platform.system()
     if sys_name == "Windows":
         try:
-            # 优先尝试 ctypes
+            # Prefer ctypes
             if OpenClipboard(None):
                 try:
                     if IsClipboardFormatAvailable(CF_HDROP):
@@ -1233,7 +1233,7 @@ def get_clipboard_files_only():
                     CloseClipboard()
         except:
             pass
-        # 备选 pywin32
+        # Fallback: pywin32
         try:
             import win32clipboard as wcb
             import win32con as wcon
@@ -1261,7 +1261,7 @@ def set_clipboard_files(paths):
     sys_name = platform.system()
     if sys_name == "Windows":
         try:
-            # 优先尝试 ctypes (无依赖)
+            # Prefer ctypes (no dependencies)
             if OpenClipboard(None):
                 try:
                     EmptyClipboard()
@@ -1296,7 +1296,7 @@ def set_clipboard_files(paths):
             return {"success": False, "error": str(e)}
 
         try:
-            # 备选 pywin32
+            # Fallback: pywin32
             import win32clipboard as wcb
             import win32con as wcon
             wcb.OpenClipboard()
@@ -1429,7 +1429,7 @@ def save_clipboard_image_to_path(dest_path: str):
         return {"success": False, "error": "not_supported_on_platform"}
 
     try:
-        # 1. 尝试 pywin32
+        # 1. Try pywin32
         try:
             import win32clipboard as wcb
             import win32con as wcon
@@ -1459,7 +1459,7 @@ def save_clipboard_image_to_path(dest_path: str):
         except:
             pass
 
-        # 2. 尝试 ctypes
+        # 2. Try ctypes
         if OpenClipboard(None):
             try:
                 fmt = None
@@ -1490,12 +1490,12 @@ def save_clipboard_image_to_path(dest_path: str):
 
 
 def trigger_system_paste(target_dir):
-    """触发系统原生粘贴（仅 win32com，不依赖 PowerShell）"""
+    """触发系统原生粘贴（仅 win32com，不依赖 PowerShell）""" // qq2q
     if not target_dir:
-        return {"success": False, "error": "目标目录为空"}
+        return {"success": False, "error": "目标目录为空"} // qq2q
 
     if not _IS_WINDOWS:
-        # macOS 处理 (通过 osascript)
+        # macOS handling (via osascript)
         if platform.system() == "Darwin":
             import subprocess
             try:
@@ -1506,7 +1506,7 @@ def trigger_system_paste(target_dir):
                 return {"success": False, "error": f"osascript failed: {e}"}
         return {"success": False, "error": f"Not supported on {platform.system()}"}
 
-    # Windows: 使用 win32com 触发系统粘贴
+    # Windows: use win32com to trigger system paste
     try:
         import win32com.client
         import pythoncom
@@ -1516,11 +1516,11 @@ def trigger_system_paste(target_dir):
     try:
         clean_path = os.path.abspath(target_dir).rstrip("\\")
 
-        # 检查目标目录是否存在
+        # Check whether target directory exists
         if not os.path.isdir(clean_path):
             return {"success": False, "error": f"Target folder not found: {clean_path}"}
 
-        # 检查剪切板是否有文件
+        # Check whether clipboard has files
         files = get_clipboard_files_only()
         if not files or not files.get("paths"):
             return {"success": False, "error": "No files in clipboard"}
@@ -1529,11 +1529,11 @@ def trigger_system_paste(target_dir):
         try:
             shell = win32com.client.Dispatch("Shell.Application")
 
-            # 处理特殊路径：尝试短路径
+            # Handle special paths: try short path
             folder = shell.NameSpace(clean_path)
 
             if not folder:
-                # 回退：尝试使用短路径 (8.3)
+                # Fallback: try using short path (8.3)
                 try:
                     import ctypes
                     buf = ctypes.create_unicode_buffer(260)
@@ -1547,7 +1547,7 @@ def trigger_system_paste(target_dir):
             if not folder:
                 return {"success": False, "error": f"Cannot access folder via Shell: {clean_path}"}
 
-            # 触发系统粘贴
+            # Trigger system paste
             folder.Self.InvokeVerb("Paste")
             return {"success": True, "fileCount": len(files["paths"])}
         finally:
@@ -1557,7 +1557,7 @@ def trigger_system_paste(target_dir):
 
 
 def _dispatch_action(cmd, cancel_version: int = None):
-    """分发命令处理，cancel_version 用于可取消的耗时操作"""
+    """分发命令处理，cancel_version 用于可取消的耗时操作""" // qq2q
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
@@ -1565,7 +1565,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out["status"] = "alive"
         return out
     if action == "cancel_scans":
-        # 取消所有正在进行的扫描操作
+        # Cancel all ongoing scan operations
         new_ver = _bump_scan_cancel_version()
         out["status"] = "cancelled"
         out["new_version"] = new_ver
@@ -1574,11 +1574,11 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(get_folder_info(cmd.get("path", ""), cancel_version))
         return out
     if action == "path_size":
-        # 极限优化版：只获取文件/目录大小，不统计后缀名
+        # Extreme optimized version: only get file/dir size, do not count extensions
         out.update(get_path_size(cmd.get("path", ""), cancel_version))
         return out
     if action == "disk_free":
-        # 获取磁盘剩余空间
+        # Get disk free space
         out.update(get_disk_free(cmd.get("drive", cmd.get("path", ""))))
         return out
     if action == "extract_icon":
@@ -1620,7 +1620,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
             out.update(save_clipboard_image_to_path(dest_path))
         return out
     if action in ("clipboard_peek", "peek"):
-        # 简化 peek，只返回基本信息，具体内容由 clipboard 接口处理
+        # Simplified peek: only returns basic info; content handled by clipboard interface
         out["type"] = "peek"
         return out
     if action == "get_clipboard_files":
@@ -1634,9 +1634,9 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(get_clipboard_html())
         return out
     if action == "exit":
-        # ★ 优雅退出指令
+        # ★ Graceful exit command
         out["status"] = "exiting"
-        # 先打印响应，再退出
+        # Print response first, then exit
         print(json.dumps(out, ensure_ascii=False), flush=True)
         sys.exit(0)
     if action == "trigger_system_paste":
@@ -1648,7 +1648,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(handle_clipboard(target_dir))
         return out
     # =============================================================================
-    #  音频播放命令
+    #  Audio playback commands
     # =============================================================================
     if action == "check_audio_engine":
         out.update(_check_audio_engine())
@@ -1669,7 +1669,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(_get_audio_state())
         return out
     # =============================================================================
-    #  剪切板监听命令
+    #  Clipboard watcher commands
     # =============================================================================
     if action == "start_clipboard_watcher":
         out.update(_start_clipboard_watcher())
@@ -1678,12 +1678,12 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(_stop_clipboard_watcher())
         return out
     # =============================================================================
-    #  音效播放命令 (play_sfx)
+    #  SFX playback commands (play_sfx)
     # =============================================================================
     if action == "play_sfx":
         category = cmd.get("category", "kope")
-        idx = cmd.get("idx", -1)  # -1 = 随机
-        name = cmd.get("name")    # 指定文件名（优先级最高）
+        idx = cmd.get("idx", -1)  # -1 = random
+        name = cmd.get("name")    # Specify filename (highest priority)
         _play_sfx(category, idx, name)
         out["status"] = "played"
         return out
@@ -1692,7 +1692,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
 
 
 def daemon_mode():
-    """多线程 daemon 模式：支持取消耗时操作"""
+    """多线程 daemon 模式：支持取消耗时操作""" // qq2q
     import queue
 
     try:
@@ -1706,14 +1706,14 @@ def daemon_mode():
     sys.stderr.write(f"Daemon started (multithreaded). PID={os.getpid()}\n")
     sys.stderr.flush()
 
-    # ★ 工业级修复：父进程监控 watchdog
-    # 当父进程（VS Code）崩溃时，自动退出避免成为僵尸进程
+    # ★ Industrial-grade fix: parent process watchdog
+    # When parent process (VS Code) crashes, auto-exit to avoid becoming a zombie process
     parent_pid = os.getppid()
     def parent_watchdog():
         while True:
             time.sleep(6)
             try:
-                # 检查父进程是否存在（信号0只检查，不杀死）
+                # Check whether parent process exists (signal 0 checks only; does not kill)
                 if platform.system() == "Windows":
                     import ctypes
                     kernel32 = ctypes.windll.kernel32
@@ -1735,15 +1735,15 @@ def daemon_mode():
     watchdog_thread = threading.Thread(target=parent_watchdog, daemon=True)
     watchdog_thread.start()
 
-    # 结果队列：线程安全
+    # Result queue: thread-safe
     result_queue = queue.Queue()
 
-    # stdout 写入线程：从 result_queue 取结果写入 stdout
+    # stdout writer thread: take results from result_queue and write to stdout
     def stdout_writer():
         while True:
             try:
                 result = result_queue.get()
-                if result is None:  # 终止信号
+                if result is None:  # termination signal
                     break
                 try:
                     print(json.dumps(result, ensure_ascii=True), flush=True)
@@ -1755,10 +1755,10 @@ def daemon_mode():
     writer_thread = threading.Thread(target=stdout_writer, daemon=True)
     writer_thread.start()
 
-    # 耗时操作列表（需要提交到线程池执行）
+    # Slow actions list (need to submit to thread pool)
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
 
-    # 工作函数：在线程池中执行耗时操作
+    # Worker function: execute slow actions in thread pool
     def execute_slow_action(cmd, cancel_ver):
         try:
             res = _dispatch_action(cmd, cancel_ver)
@@ -1766,12 +1766,12 @@ def daemon_mode():
             res = {"_id": cmd.get("_id", 0), "error": str(e)}
         result_queue.put(res)
 
-    # 主循环：读 stdin，分发命令
+    # Main loop: read stdin and dispatch commands
     while True:
         try:
             line_bytes = sys.stdin.buffer.readline()
             if not line_bytes:
-                # ★ 工业级修复：stdin EOF 表示父进程关闭，立即退出
+                # ★ Industrial-grade fix: stdin EOF means parent closed; exit immediately
                 sys.stderr.write("Daemon stdin EOF, exiting...\n")
                 sys.stderr.flush()
                 break
@@ -1789,11 +1789,11 @@ def daemon_mode():
             action = cmd.get("action") or cmd.get("cmd") or ""
 
             if action in SLOW_ACTIONS:
-                # 耗时操作：提交到线程池，附带当前取消版本号
+                # Slow action: submit to thread pool with current cancel version
                 cancel_ver = _get_scan_cancel_version()
                 _IO_EXECUTOR.submit(execute_slow_action, cmd, cancel_ver)
             else:
-                # 快速操作：直接执行（包括 cancel_scans）
+                # Fast action: execute directly (including cancel_scans)
                 try:
                     res = _dispatch_action(cmd)
                 except Exception as e:
@@ -1807,8 +1807,8 @@ def daemon_mode():
             sys.stderr.flush()
             time.sleep(0.05)
 
-    # 清理
-    result_queue.put(None)  # 终止 stdout_writer 线程
+    # Cleanup
+    result_queue.put(None)  # Terminate stdout_writer thread
 
 
 def main():
