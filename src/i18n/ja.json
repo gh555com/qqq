@@ -692,7 +692,10 @@
         "startSlim": "[Python] スリム化を開始...",
         "pywin32Done": "[Python] pywin32 設定完了",
         "copyVcDll": "[Python] VC++ DLL をコピー: {0}",
-        "installFailed": "[Python] インストール失敗: {0}"
+        "installFailed": "[Python] インストール失敗: {0}",
+        "allSourcesFailed": "すべてのソースが失敗: {0}",
+        "extractVerifyFailed": "展開後の検証に失敗",
+        "tooManyRedirects": "リダイレクトが多すぎます"
     },
     "global": {
         "kpNotExist": "kp.py が見つかりません：{0}",

@@ -828,7 +828,7 @@ sys.exit(0)
                 } catch (e) {
                     global.logMessage(q('qvenv.sourceFailed', name, e.message), "WARN");
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(`所有源均失败: ${e.message}`); // qq2q
+                        throw new Error(q('qvenv.allSourcesFailed', e.message));
                     }
                 }
             }
@@ -851,7 +851,7 @@ sys.exit(0)
             fs.unlinkSync(zipPath);
 
             if (!await this.isAvailable(installPath)) {
-                return { success: false, error: "解压后验证失败" }; // qq2q
+                return { success: false, error: q('qvenv.extractVerifyFailed') };
             }
 
             this.pythonPath = installPath;
@@ -864,7 +864,7 @@ sys.exit(0)
                 const getPipPath = path.join(installDir, 'get-pip.py');
                 await new Promise((resolve, reject) => {
                     const downloadGetPip = (url, redirectCount = 0) => {
-                        if (redirectCount > 5) return reject(new Error('重定向过多')); // qq2q
+                        if (redirectCount > 5) return reject(new Error(q('qvenv.tooManyRedirects')));
                         const urlObj = new URL(url);
                         https.get({
                             hostname: urlObj.hostname,

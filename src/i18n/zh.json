@@ -692,7 +692,10 @@
         "startSlim": "[Python] 开始精简...",
         "pywin32Done": "[Python] pywin32 配置完成",
         "copyVcDll": "[Python] 复制 VC++ DLL: {0}",
-        "installFailed": "[Python] 安装失败: {0}"
+        "installFailed": "[Python] 安装失败: {0}",
+        "allSourcesFailed": "所有源均失败: {0}",
+        "extractVerifyFailed": "解压后验证失败",
+        "tooManyRedirects": "重定向过多"
     },
     "global": {
         "kpNotExist": "kp.py 不存在：{0}",

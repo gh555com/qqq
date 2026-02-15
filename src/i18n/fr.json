@@ -692,7 +692,10 @@
         "startSlim": "[Python] Démarrage de l'optimisation...",
         "pywin32Done": "[Python] Configuration de pywin32 terminée",
         "copyVcDll": "[Python] Copie de VC++ DLL: {0}",
-        "installFailed": "[Python] Installation échouée: {0}"
+        "installFailed": "[Python] Installation échouée: {0}",
+        "allSourcesFailed": "Toutes les sources ont échoué: {0}",
+        "extractVerifyFailed": "Vérification après extraction échouée",
+        "tooManyRedirects": "Trop de redirections"
     },
     "global": {
         "kpNotExist": "kp.py introuvable: {0}",

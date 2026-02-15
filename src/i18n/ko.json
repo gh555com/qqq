@@ -692,7 +692,10 @@
         "startSlim": "[Python] 슬림화 시작...",
         "pywin32Done": "[Python] pywin32 설정 완료",
         "copyVcDll": "[Python] VC++ DLL 복사: {0}",
-        "installFailed": "[Python] 설치 실패: {0}"
+        "installFailed": "[Python] 설치 실패: {0}",
+        "allSourcesFailed": "모든 소스 실패: {0}",
+        "extractVerifyFailed": "압축 해제 후 검증 실패",
+        "tooManyRedirects": "리디렉션이 너무 많음"
     },
     "global": {
         "kpNotExist": "kp.py를 찾을 수 없습니다: {0}",
