@@ -4,7 +4,7 @@
 // ★★★ Keep deliverables as consistent as possible across the two document formats; only the underlying encoding differs ★★★
 // Fix/Adapt: unified cross-platform paths, more stable scan results, clearer directory references
 // Fix: restore ZIP progress bar, correct comments, do not strip absolute paths on Linux/macOS
-// Enhancement: more stable attachment index de-duplication, include SHA256 computation in progress提示 // qq2q
+// Enhancement: more stable attachment index de-duplication, include SHA256 computation in progress
 // ==========================================
 const vscode = require("vscode");
 const cp = require("child_process");
@@ -151,9 +151,9 @@ function computeFileSHA256(filePath) {
             const stream = fs.createReadStream(filePath);
             stream.on("data", (chunk) => hash.update(chunk));
             stream.on("end", () => resolve(hash.digest("hex")));
-            stream.on("error", () => resolve("无法计算")); // qq2q
+            stream.on("error", () => resolve(q('q3.export.cannotCompute')));
         } catch {
-            resolve("无法计算"); // qq2q
+            resolve(q('q3.export.cannotCompute'));
         }
     });
 }
@@ -163,8 +163,8 @@ function computeFileSHA256(filePath) {
  */
 function buildExportSuccessMessage(fileName, fileSize, hasQqqLinks) {
     const sizeStr = global.formatBytes(fileSize);
-    let msg = `qqq: 文档已导出 (${sizeStr}): ${fileName}`; // qq2q
-    if (!hasQqqLinks) msg += "，但，制品中不包含 qqq 的韵味。"; // qq2q
+    let msg = q('q3.export.docExported', sizeStr, fileName);
+    if (!hasQqqLinks) msg += q('q3.export.noQqqVibe');
     return msg;
 }
 
@@ -400,7 +400,7 @@ function generateRtfDocument(elements, attachments, title) {
             parts.push("\\par");
             parts.push("\\pard\\ltrpar\\ql\\f0\\fs22");
         } else if (elem.type === "image_error") {
-            parts.push(`\\pard\\ltrpar\\f0\\fs22 [${escapeRtf("媒体转换失败: " + elem.path)}]\\par`); // qq2q
+            parts.push(`\\pard\\ltrpar\\f0\\fs22 [${escapeRtf(q('q3.export.mediaConversionFailed', elem.path))}]\\par`);
         }
     }
 
@@ -408,20 +408,20 @@ function generateRtfDocument(elements, attachments, title) {
         parts.push("\\pard\\ltrpar\\sb600\\sa200\\brdrb\\brdrs\\brdrw10\\brsp20 \\par");
 
         parts.push("\\pard\\ltrpar\\sb200\\sa200\\f0\\fs28\\b");
-        parts.push(escapeRtf("📁 附件索引")); // qq2q
+        parts.push(escapeRtf(q('q3.export.attachmentIndex')));
         parts.push("\\b0\\fs22\\par");
 
         parts.push("\\pard\\ltrpar\\tx500\\tx4500\\tx5500\\tx6800\\sa100\\f0\\fs18\\b");
         parts.push(
-            escapeRtf("序号") + // qq2q
+            escapeRtf(q('q3.export.colIndex')) +
             "\\tab " +
-            escapeRtf("文件名") + // qq2q
+            escapeRtf(q('q3.export.colFileName')) +
             "\\tab " +
-            escapeRtf("类型") + // qq2q
+            escapeRtf(q('q3.export.colType')) +
             "\\tab " +
-            escapeRtf("大小") + // qq2q
+            escapeRtf(q('q3.export.colSize')) +
             "\\tab " +
-            escapeRtf("SHA256（前16位）") // qq2q
+            escapeRtf(q('q3.export.colSha256Short'))
         );
         parts.push("\\b0\\par");
 
@@ -440,7 +440,7 @@ function generateRtfDocument(elements, attachments, title) {
         }
 
         parts.push("\\pard\\ltrpar\\sb300\\sa100\\f0\\fs18\\b");
-        parts.push(escapeRtf("完整 SHA256 哈希值：")); // qq2q
+        parts.push(escapeRtf(q('q3.export.fullSha256')));
         parts.push("\\b0\\par");
 
         for (const att of attachments) {
@@ -518,7 +518,7 @@ function generateDocxDocument(elements, attachments, title) {
         } else if (elem.type === "image_error") {
             children.push(
                 new Paragraph({
-                    children: [new TextRun({ text: `[媒体转换失败: ${elem.path}]`, size: 22, font: "Arial" })], // qq2q
+                    children: [new TextRun({ text: `[${q('q3.export.mediaConversionFailed', elem.path)}]`, size: 22, font: "Arial" })],
                     spacing: { after: 0 },
                 })
             );
@@ -535,7 +535,7 @@ function generateDocxDocument(elements, attachments, title) {
 
         children.push(
             new Paragraph({
-                children: [new TextRun({ text: "📁 附件索引", bold: true, size: 28, font: "Arial" })], // qq2q
+                children: [new TextRun({ text: q('q3.export.attachmentIndex'), bold: true, size: 28, font: "Arial" })],
                 spacing: { before: 200, after: 200 },
             })
         );
@@ -543,15 +543,15 @@ function generateDocxDocument(elements, attachments, title) {
         children.push(
             new Paragraph({
                 children: [
-                    new TextRun({ text: "序号", bold: true, size: 18, font: "Arial" }), // qq2q
+                    new TextRun({ text: q('q3.export.colIndex'), bold: true, size: 18, font: "Arial" }),
                     new TextRun({ text: "\t", size: 18 }),
-                    new TextRun({ text: "文件名", bold: true, size: 18, font: "Arial" }), // qq2q
+                    new TextRun({ text: q('q3.export.colFileName'), bold: true, size: 18, font: "Arial" }),
                     new TextRun({ text: "\t", size: 18 }),
-                    new TextRun({ text: "类型", bold: true, size: 18, font: "Arial" }), // qq2q
+                    new TextRun({ text: q('q3.export.colType'), bold: true, size: 18, font: "Arial" }),
                     new TextRun({ text: "\t", size: 18 }),
-                    new TextRun({ text: "大小", bold: true, size: 18, font: "Arial" }), // qq2q
+                    new TextRun({ text: q('q3.export.colSize'), bold: true, size: 18, font: "Arial" }),
                     new TextRun({ text: "\t", size: 18 }),
-                    new TextRun({ text: "SHA256（前16位）", bold: true, size: 18, font: "Arial" }), // qq2q
+                    new TextRun({ text: q('q3.export.colSha256Short'), bold: true, size: 18, font: "Arial" })
                 ],
                 tabStops: [
                     { type: TabStopType.LEFT, position: TAB_POS_1 },
@@ -594,7 +594,7 @@ function generateDocxDocument(elements, attachments, title) {
 
         children.push(
             new Paragraph({
-                children: [new TextRun({ text: "完整 SHA256 哈希值：", bold: true, size: 18, font: "Arial" })], // qq2q
+                children: [new TextRun({ text: q('q3.export.fullSha256'), bold: true, size: 18, font: "Arial" })],
                 spacing: { before: 300, after: 100 },
             })
         );
@@ -618,7 +618,7 @@ function generateDocxDocument(elements, attachments, title) {
 
     return new Document({
         creator: "qqq extension",
-        title: title || "qqq 导出文档", // qq2q
+        title: title || q('q3.export.defaultDocTitle'),
         sections: [{ properties: {}, children }],
     });
 }
@@ -683,13 +683,13 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     }
 
     if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
-        global.showAutoCloseNotification('warning', `qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.maxConcurrentExports', activeExportCount));
         return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showAutoCloseNotification('warning', "qqq: 请选择打开滴文档"); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.noOpenDocument'));
         return;
     }
 
@@ -706,13 +706,13 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const pickItems = [
         {
-            label: "$(file) .doc 文档（兼容 Office 2003, RTF） ", // qq2q
-            description: "RTF 编码 ◉ 兼容性更好", // qq2q
+            label: "$(file) " + q('q3.export.docFormatRtf') + " ",
+            description: q('q3.export.docFormatRtfDesc'),
             format: ExportFormat.RTF_DOC,
         },
         {
-            label: "$(file) .docx 文档 （支持 Google Docs/腾讯文档） ", // qq2q
-            description: "Office Open XML 编码 ◉ 功能更强、压缩率更高（文件体积能小一半）", // qq2q
+            label: "$(file) " + q('q3.export.docFormatDocx') + " ",
+            description: q('q3.export.docFormatDocxDesc'),
             format: ExportFormat.DOCX,
         },
     ];
@@ -726,8 +726,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     }
 
     const formatChoice = await global.showQuickPick(pickItems, {
-        placeHolder: "选择导出格式", // qq2q
-        title: "qqq: 导出文档格式", // qq2q
+        placeHolder: q('q3.export.selectExportFormat'),
+        title: q('q3.export.exportDocFormat'),
     });
 
     if (!formatChoice) return;
@@ -738,8 +738,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const regex = qqq.createPathRegex();
 
     // Get image resolution config (read via ConfigGate)
-    const resolutionConfig = global.getConfig("docExportImageResolution") || "原始分辨率"; // qq2q
-    const useFrameResolution = resolutionConfig === "相框分辨率"; // qq2q
+    const resolutionConfig = global.getConfig("docExportImageResolution") || "原始分辨率";
+    const useFrameResolution = resolutionConfig === "相框分辨率";
     if (useFrameResolution) {
         global.logMessage(q('q3.log.exportFrameRes'), "INFO");
     } else {
@@ -779,7 +779,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
             // Directory: keep marker as-is in the document; do not include in attachment index
             if (stat && stat.isDirectory()) {
                 // If codeword should be kept, output as-is; otherwise ignore this segment (i.e., do not output)
-                // ★★★ Fix: user要求除媒体外的暗号必须导出，所以目录总是导出 ★★★ // qq2q
                 rawElements.push({ type: "text", content: originalMark });
             } else if (isMediaFile(ext)) {
                 // Media: always output media (if codeword should be kept, originalMark field will have a value)
@@ -792,7 +791,6 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 });
             } else {
                 // Non-media file (exe, bat, txt, etc):
-                // ★★★ Fix: user要求除媒体外的暗号必须导出，所以这里总是导出 ★★★ // qq2q
                 rawElements.push({ type: "text", content: originalMark });
 
                 // Attachment index collection (de-dup) logic unchanged
@@ -835,7 +833,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
     const mediaCount = rawElements.filter((e) => e.type === "media").length;
     if (rawElements.length === 0) {
-        global.showAutoCloseNotification('warning', "qqq: 文档为空，无法导出"); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.emptyDocument'));
         return;
     }
 
@@ -846,7 +844,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     await global.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
-            title: `qqq: 正在导出 ${formatLabel} 文档...`, // qq2q
+            title: q('q3.export.exportingDoc', formatLabel),
             cancellable: true,
         },
         async (progress, token) => {
@@ -862,7 +860,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
                 for (const elem of rawElements) {
                     if (token.isCancellationRequested) {
-                        global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                        global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                         return;
                     }
 
@@ -871,7 +869,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     } else if (elem.type === "media") {
                         processedCount++;
                         progress.report({
-                            message: `转换媒体 ${processedCount}/${mediaCount}: ${path.basename(elem.path)}`, // qq2q
+                            message: q('q3.export.convertingMedia', processedCount, mediaCount, path.basename(elem.path)),
                             increment: mediaInc,
                         });
 
@@ -881,7 +879,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                         if (fingerprint && conversionCache.has(fingerprint)) {
                             pngResult = conversionCache.get(fingerprint);
                             global.logMessage(
-                                `复用缓存: ${path.basename(elem.path)} (指纹: ${fingerprint.substring(0, 8)}...)`, // qq2q
+                                q('q3.log.reusingCache', path.basename(elem.path), fingerprint.substring(0, 8)),
                                 "INFO"
                             );
                         } else {
@@ -914,7 +912,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                    global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                     return;
                 }
 
@@ -926,12 +924,12 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                     let idx = 0;
                     for (const att of attachments) {
                         if (token.isCancellationRequested) {
-                            global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                            global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                             return;
                         }
                         idx++;
                         progress.report({
-                            message: `计算附件哈希 ${idx}/${attachments.length}: ${att.name}`, // qq2q
+                            message: q('q3.export.computingHash', idx, attachments.length, att.name),
                             increment: attInc,
                         });
                         att.sha256 = await computeFileSHA256(att.absPath);
@@ -939,11 +937,11 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                    global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                     return;
                 }
 
-                progress.report({ message: `生成 ${formatLabel} 文档...`, increment: 5 }); // qq2q
+                progress.report({ message: q('q3.export.generatingDoc', formatLabel), increment: 5 });
 
                 let fileContent;
                 let fileExt;
@@ -952,15 +950,15 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                 if (selectedFormat === ExportFormat.RTF_DOC) {
                     fileContent = generateRtfDocument(processedElements, attachments, docFullName);
                     fileExt = ".doc";
-                    filterLabel = "Word 文档（兼容 Office 2003, RTF）"; // qq2q
+                    filterLabel = q('q3.export.filterRtf');
                 } else {
                     const docxDocument = generateDocxDocument(processedElements, attachments, docFullName);
                     fileContent = await getDocx().Packer.toBuffer(docxDocument);
                     fileExt = ".docx";
-                    filterLabel = "Word 文档"; // qq2q
+                    filterLabel = q('q3.export.filterDocx');
                 }
 
-                progress.report({ message: "保存文件...", increment: 5 }); // qq2q
+                progress.report({ message: q('q3.export.savingFile'), increment: 5 });
 
                 const defaultExportPath = path.join(docDir, `${docBaseName}${fileExt}`);
                 let finalSavePath = defaultExportPath;
@@ -974,7 +972,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
                         filters,
                     });
                     if (!saveUri) {
-                        global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                        global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                         return;
                     }
                     finalSavePath = saveUri.fsPath;
@@ -1001,7 +999,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
                 setTimeout(async () => {
                     // ★★★ Success toast: auto close + reveal and select; unified via TaskMessage.showDoneToast ★★★
-                    const OPEN_LABEL = "打开文件夹"; // qq2q
+                    const OPEN_LABEL = q('q3.export.openFolder');
                     await global.TaskMessage.showDoneToast(successMsg, {
                         buttons: [OPEN_LABEL],
                         timeout: 9000,
@@ -1014,7 +1012,7 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
 
             } catch (e) {
                 global.logMessage(q('q3.log.exportFailed', `${e.message}\n${e.stack}`), "ERROR");
-                global.showAutoCloseNotification('error', `qqq: 导出失败: ${e.message}`); // qq2q
+                global.showAutoCloseNotification('error', q('q3.export.exportFailed', e.message));
             } finally {
                 cleanupExportSession(exportId);
                 activeExportCount--;
@@ -1038,19 +1036,19 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
     }
 
     if (activeExportCount >= MAX_CONCURRENT_EXPORTS) {
-        global.showAutoCloseNotification('warning', `qqq: 已有 ${activeExportCount} 个导出任务正在运行，请等待完成后再试`); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.maxConcurrentExports', activeExportCount));
         return;
     }
 
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showAutoCloseNotification('warning', "qqq: 请选择打开滴文档"); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.noOpenDocument'));
         return;
     }
 
     const document = editor.document;
     if (document.isUntitled) {
-        global.showAutoCloseNotification('warning', "qqq: 请先保存文档后再导出 ZIP"); // qq2q
+        global.showAutoCloseNotification('warning', q('q3.export.saveDocFirst'));
         return;
     }
 
@@ -1066,7 +1064,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
     await global.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
-            title: "qqq: 正在导出 ZIP...", // qq2q
+            title: q('q3.export.exportingZip'),
             cancellable: true,
         },
         async (progress, token) => {
@@ -1075,7 +1073,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
             let finalZipPath = null;
 
             try {
-                progress.report({ message: "准备文件列表...", increment: 5 }); // qq2q
+                progress.report({ message: q('q3.export.preparingFiles'), increment: 5 });
 
                 const defaultZipPath = path.join(docDir, `${docBaseName}.zip`);
                 finalZipPath = defaultZipPath;
@@ -1083,21 +1081,21 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                 if (fs.existsSync(defaultZipPath)) {
                     const saveUri = await global.showSaveDialog({
                         defaultUri: vscode.Uri.file(defaultZipPath),
-                        filters: { "ZIP 压缩包": ["zip"] }, // qq2q
+                        filters: { [q('q3.export.filterZip')]: ["zip"] },
                     });
                     if (!saveUri) {
-                        global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                        global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                         return;
                     }
                     finalZipPath = saveUri.fsPath;
                 }
 
                 if (token.isCancellationRequested) {
-                    global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                    global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                     return;
                 }
 
-                progress.report({ message: "创建压缩包...", increment: 5 }); // qq2q
+                progress.report({ message: q('q3.export.creatingArchive'), increment: 5 });
 
                 await new Promise((resolve, reject) => {
                     output = fs.createWriteStream(finalZipPath);
@@ -1156,8 +1154,8 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                         const msg =
                             totalBytes > 0
-                                ? `压缩中... ${global.formatBytes(processedBytes)} / ${global.formatBytes(totalBytes)}（${percent}%）` // qq2q
-                                : `压缩中... 条目 ${processedEntries}/${totalEntries || "?"}（${percent}%）`; // qq2q
+                                ? q('q3.export.compressingBytes', global.formatBytes(processedBytes), global.formatBytes(totalBytes), percent)
+                                : q('q3.export.compressingEntries', processedEntries, totalEntries || "?", percent);
 
                         progress.report({ message: msg, increment: inc });
                     });
@@ -1186,7 +1184,7 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                     token.onCancellationRequested(() => {
                         try { if (archive) archive.abort(); } catch { }
-                        finish(new Error("用户取消")); // qq2q
+                        finish(new Error(q('q3.export.userCancelled')));
                     });
 
                     archive.finalize();
@@ -1196,11 +1194,11 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
                     try {
                         if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath);
                     } catch { }
-                    global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                    global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                     return;
                 }
 
-                progress.report({ message: "完成", increment: 100 }); // qq2q
+                progress.report({ message: q('q3.export.done'), increment: 100 });
 
                 const stats = fs.statSync(finalZipPath);
                 const successMsg = buildExportSuccessMessage(
@@ -1211,13 +1209,13 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                 const fileCount = scanResult.referencedFiles.length;
                 const detailMsg = scanResult.hasQqqLinks
-                    ? `${successMsg}（包含 ${fileCount} 个引用项）` // qq2q
+                    ? successMsg + q('q3.export.includesRefs', fileCount)
                     : successMsg;
 
                 // ★★★ Ensure the first popup (Progress) closes before showing the third popup (Message) ★★★
                 setTimeout(async () => {
                     // ★★★ Success toast: auto close + reveal and select; unified via TaskMessage.showDoneToast ★★★
-                    const OPEN_LABEL = "打开文件夹"; // qq2q
+                    const OPEN_LABEL = q('q3.export.openFolder');
                     await global.TaskMessage.showDoneToast(detailMsg, {
                         buttons: [OPEN_LABEL],
                         timeout: 9000,
@@ -1230,14 +1228,14 @@ async function executeExportZipCommand(isCoreIntegrityValid) {
 
                 global.logMessage(q('q3.log.zipComplete', finalZipPath, fileCount + 1), "INFO");
             } catch (e) {
-                if (e && e.message === "用户取消") { // qq2q
+                if (e && e.message === q('q3.export.userCancelled')) {
                     try {
                         if (finalZipPath && fs.existsSync(finalZipPath)) fs.unlinkSync(finalZipPath);
                     } catch { }
-                    global.showAutoCloseNotification('warning', "qqq: 导出已取消"); // qq2q
+                    global.showAutoCloseNotification('warning', q('q3.export.exportCancelled'));
                 } else {
                     global.logMessage(q('q3.log.zipFailed', `${e.message}\n${e.stack}`), "ERROR");
-                    global.showAutoCloseNotification('error', `qqq: ZIP 导出失败: ${e.message}`); // qq2q
+                    global.showAutoCloseNotification('error', q('q3.export.zipExportFailed', e.message));
                 }
             } finally {
                 try { if (archive) archive.abort(); } catch { }
@@ -1346,7 +1344,7 @@ function isLikelyBinary(filePath) {
 async function pureCommand() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        global.showAutoCloseNotification('info', "请先打开一个文件"); // qq2q
+        global.showAutoCloseNotification('info', q('q3.pure.openFileFirst'));
         return;
     }
 
@@ -1355,7 +1353,7 @@ async function pureCommand() {
     const qqqDir = path.join(parentDir, "qqq");
 
     if (!fs.existsSync(qqqDir) || !fs.statSync(qqqDir).isDirectory()) {
-        global.showAutoCloseNotification('info', "当前目录下没有 qqq 文件夹"); // qq2q
+        global.showAutoCloseNotification('info', q('q3.pure.noQqqFolder'));
         return;
     }
 
@@ -1371,12 +1369,12 @@ async function pureCommand() {
             } catch { }
         }
     } catch (e) {
-        global.showAutoCloseNotification('error', "读取 qqq 目录失败"); // qq2q
+        global.showAutoCloseNotification('error', q('q3.pure.readQqqFolderFailed'));
         return;
     }
 
     if (!qqqItems.length) {
-        global.showAutoCloseNotification('info', "qqq 文件夹是空的"); // qq2q
+        global.showAutoCloseNotification('info', q('q3.pure.qqqFolderEmpty'));
         return;
     }
 
@@ -1430,7 +1428,7 @@ async function pureCommand() {
     const orphanItems = qqqItems.filter((item) => !referencedItems.has(item.name.toLowerCase()));
 
     if (!orphanItems.length) {
-        global.showAutoCloseNotification('info', "未发现孤儿文件或文件夹"); // qq2q
+        global.showAutoCloseNotification('info', q('q3.pure.noOrphanFiles'));
         return;
     }
 
@@ -1465,7 +1463,7 @@ async function pureCommand() {
     // ★ All orphan paths (files and folders)
     const allOrphanPaths = orphanItems.map((item) => path.join(qqqDir, item.name));
 
-    let content = "\n".repeat(13) + " 请在终端中执行下面命令：\n\n\n " + cmdStr + "\n\n\n"; // qq2q
+    let content = "\n".repeat(13) + " " + q('q3.pure.executeCommandPrompt') + "\n\n\n " + cmdStr + "\n\n\n";
     content += allOrphanPaths.map((p) => `/\\${p}\\/`).join("\n\n\n\n\n");
 
     const purePath = path.join(parentDir, "qqq.pure");
@@ -1476,7 +1474,7 @@ async function pureCommand() {
         const doc = await vscode.workspace.openTextDocument(purePath);
         await global.showTextDocument(doc);
     } catch (e) {
-        global.showAutoCloseNotification('error', "无法生成 qqq.pure 文件"); // qq2q
+        global.showAutoCloseNotification('error', q('q3.pure.cannotGeneratePureFile'));
     }
 }
 
