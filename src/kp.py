@@ -236,7 +236,7 @@ def _init_sfx_paths():
     return _SFX_REGISTRY
 
 def _background_prime_sfx():
-    """后台预热线程：延迟 N 秒后执行，错开 VS Code 启动高峰""" // qq2q
+    """Background warmup thread: delay N seconds, stagger VS Code startup peak"""
     global _SFX_PRIMED
     time.sleep(_SFX_PRIME_DELAY)
 
@@ -256,7 +256,7 @@ def _background_prime_sfx():
         pass
 
 def _get_audio_hub():
-    """获取 AudioHub 单例 (懒加载 + 延迟预热)""" // qq2q
+    """Get AudioHub singleton (lazy load + delayed warmup)"""
     global _AUDIO_HUB
     if _AUDIO_HUB is not None:
         return _AUDIO_HUB
@@ -296,10 +296,10 @@ def _get_audio_hub():
 
 def _play_sfx(category: str, idx: int = -1, name: str = None):
     """
-    播放音效 // qq2q
-    category: "kope" / "yz" 等 // qq2q
-    idx: -1 = 随机（避免连续重复），>=0 = 指定索引 // qq2q
-    name: 指定文件名（如 "kj3.mp3"），优先级最高 // qq2q
+    Play sound effect
+    category: "kope" / "yz" etc.
+    idx: -1 = random (avoid repeats), >=0 = specific index
+    name: specify filename (e.g. "kj3.mp3"), highest priority
     """
     global _SFX_LAST_IDX
     hub = _get_audio_hub()
@@ -340,7 +340,7 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     hub.play_sfx(path)
 
 def _start_clipboard_watcher():
-    """启动剪切板音效 (事件驱动 - 0ms 检测延迟)""" // qq2q
+    """Start clipboard sound effect (event-driven - 0ms detection delay)"""
     hub = _get_audio_hub()
     if not hub:
         return {"status": "error", "error": "AudioHub init failed"}
@@ -358,7 +358,7 @@ def _start_clipboard_watcher():
         return {"status": "error", "error": str(e)}
 
 def _stop_clipboard_watcher():
-    """停止剪切板音效""" // qq2q
+    """Stop clipboard sound effect"""
     hub = _get_audio_hub()
     if hub:
         hub.stop_clipboard()
@@ -789,7 +789,7 @@ def copytree_parallel(src_dir: Path, output_dir: Path) -> str:
 # =============================================================================
 
 def get_folder_info(folder_path: str, cancel_version: int = None):
-    """完整信息版：total_size + file_count_root + ext_stats（极限优化 + 可取消）""" // qq2q
+    """Full info: total_size + file_count_root + ext_stats (optimized + cancellable)"""
     if not folder_path or not isinstance(folder_path, str):
         return {"success": False, "error": "empty path"}
     if not os.path.isdir(folder_path):
@@ -871,7 +871,7 @@ def get_folder_info(folder_path: str, cancel_version: int = None):
 
 
 def get_disk_free(drive: str = None):
-    """获取磁盘剩余空间（单位：字节）""" // qq2q
+    """Get disk free space (in bytes)"""
     if not drive:
         # Default to system drive
         drive = os.environ.get('SystemDrive', 'C:')
@@ -897,7 +897,7 @@ def get_disk_free(drive: str = None):
 
 
 def get_path_size(path: str, cancel_version: int = None):
-    """只获取单文件或目录递归总大小（极限优化 + 可取消，不统计后缀名）""" // qq2q
+    """Get file/dir size only (optimized + cancellable, no ext stats)"""
     if not path or not isinstance(path, str):
         return {"success": False, "error": "empty path"}
 
@@ -1490,9 +1490,9 @@ def save_clipboard_image_to_path(dest_path: str):
 
 
 def trigger_system_paste(target_dir):
-    """触发系统原生粘贴（仅 win32com，不依赖 PowerShell）""" // qq2q
+    """Trigger native system paste (win32com only, no PowerShell)"""
     if not target_dir:
-        return {"success": False, "error": "目标目录为空"} // qq2q
+        return {"success": False, "error": "target directory is empty"}
 
     if not _IS_WINDOWS:
         # macOS handling (via osascript)
@@ -1557,7 +1557,7 @@ def trigger_system_paste(target_dir):
 
 
 def _dispatch_action(cmd, cancel_version: int = None):
-    """分发命令处理，cancel_version 用于可取消的耗时操作""" // qq2q
+    """Dispatch command handler, cancel_version for cancellable ops"""
     request_id = cmd.get("_id", cmd.get("id", 0))
     out = {"_id": request_id}
     action = cmd.get("action") or cmd.get("cmd")
@@ -1692,7 +1692,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
 
 
 def daemon_mode():
-    """多线程 daemon 模式：支持取消耗时操作""" // qq2q
+    """Multithreaded daemon mode: supports cancelling slow ops"""
     import queue
 
     try:
