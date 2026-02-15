@@ -2430,11 +2430,11 @@ class YtDlpDownloader {
             // ★ Cascading download strategy: gh-proxy.com (fastest in CN) → official → ghproxy.net
             const downloadUrls = [
                 // ★ gh-proxy.com (fastest in CN, stable)
-                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy镜像' }, // qq2q
+                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: q('dow.sourceMirror.ghProxy') },
                 // ★ Official source (latest, +60s timeout)
-                { url: officialUrl, timeout: 60000, name: '官方源' }, // qq2q
+                { url: officialUrl, timeout: 60000, name: q('dow.sourceOfficial') },
                 // ★ ghproxy.net (backup)
-                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net镜像' }, // qq2q
+                { url: mirrorUrl, timeout: 60000, name: q('dow.sourceMirror.ghproxyNet') },
             ];
 
             let lastError = null;
@@ -2449,7 +2449,7 @@ class YtDlpDownloader {
                     global.logMessage(q('dow.downloadFailed', name, e.message), "WARN");
                     // If it's the last URL, throw error
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`); // qq2q
+                        throw new Error(q('dow.allSourcesFailed', e.message));
                     }
                 }
             }
@@ -2469,7 +2469,7 @@ class YtDlpDownloader {
                 timeout: 5000
             });
             if (r.status !== 0 || !(r.stdout || '').match(/^\d+/)) {
-                throw new Error('下载完成但验证失败'); // qq2q
+                throw new Error(q('dow.downloadVerifyFailed'));
             }
 
             this.ytdlpPath = installPath;
@@ -2836,12 +2836,12 @@ class UnifiedMediaDownloader {
 
             if (!shouldInstall) {
                 const installConfirmed = await vscode.window.showInformationMessage(
-                    "yt-dlp 未安装，是否自动下载安装？", // qq2q
+                    q('dow.ytdlpNotInstalledPrompt'),
                     { modal: true },
-                    "是", // qq2q
-                    "否" // qq2q
+                    q('dow.yes'),
+                    q('dow.no')
                 );
-                shouldInstall = (installConfirmed === "是"); // qq2q
+                shouldInstall = (installConfirmed === q('dow.yes'));
             }
 
             if (shouldInstall) {
@@ -2851,7 +2851,7 @@ class UnifiedMediaDownloader {
                     if (!background && vscode) {
                         vscode.window.withProgress({
                             location: vscode.ProgressLocation.Notification,
-                            title: "qqq: 正在下载视频引擎...", // qq2q
+                            title: q('dow.downloadingVideoEngine'),
                             cancellable: false
                         }, async () => {
                             await this._installPromise;
@@ -2863,19 +2863,19 @@ class UnifiedMediaDownloader {
                 this._installPromise = (async () => {
                     try {
                         const downloadAction = async (progress) => {
-                            if (progress) progress.report({ message: "正在下载视频引擎...", increment: 10 }); // qq2q
+                            if (progress) progress.report({ message: q('dow.downloadingVideoEngine'), increment: 10 });
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
                                 if (!background) {
                                     // ★ Always use global.showAutoCloseNotification (single source of truth)
-                                    try { require('./global').showAutoCloseNotification('success', "qqq: yt-dlp 安装成功"); } catch { } // qq2q
+                                    try { require('./global').showAutoCloseNotification('success', q('dow.ytdlpInstallSuccess')); } catch { }
                                 }
                                 return true;
                             } else {
                                 // Only show error in non-background mode
                                 if (!background && vscode) {
                                     // ★ Always use global.showAutoCloseNotification (single source of truth)
-                                    try { require('./global').showAutoCloseNotification('error', `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`); } catch { } // qq2q
+                                    try { require('./global').showAutoCloseNotification('error', q('dow.ytdlpInstallFailedMsg', res.error)); } catch { }
                                 }
                                 try {
                                     const global = require('./global');
@@ -2892,7 +2892,7 @@ class UnifiedMediaDownloader {
                             // Non-background mode: show progress UI
                             return await vscode.window.withProgress({
                                 location: vscode.ProgressLocation.Notification,
-                                title: "qqq: ", // qq2q
+                                title: "qqq: ",
                                 cancellable: false
                             }, downloadAction);
                         }
@@ -2904,7 +2904,7 @@ class UnifiedMediaDownloader {
                 return this._installPromise;
             } else {
                 if (!background) {
-                    try { require('./global').showAutoCloseNotification('warning', "yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。"); } catch { } // qq2q
+                    try { require('./global').showAutoCloseNotification('warning', q('dow.ytdlpNotInstalledWarning')); } catch { }
                 }
                 return false;
             }
@@ -2913,7 +2913,7 @@ class UnifiedMediaDownloader {
     }
 
     async probeAndSelect(url, progress) {
-        if (progress) progress.report({ message: "正在探测视频资源...", increment: 10 }); // qq2q
+        if (progress) progress.report({ message: q('dow.probingVideoResources'), increment: 10 });
 
         let probeResult = null;
         let probeError = null;
@@ -2924,7 +2924,7 @@ class UnifiedMediaDownloader {
         }
 
         if (!probeResult || !probeResult.success) {
-            if (progress) progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 }); // qq2q
+            if (progress) progress.report({ message: q('dow.ytdlpProbeFailed'), increment: 15 });
             try {
                 const h = require('./h');
                 const videoUrls = await h.extractVideoUrlsFromWebPage(url);
@@ -2934,47 +2934,47 @@ class UnifiedMediaDownloader {
                         isPlaylist: videoUrls.length > 1,
                         entries: videoUrls.map((videoUrl, index) => ({
                             id: `direct_video_${index}`,
-                            title: `直接视频链接 ${index + 1}`, // qq2q
+                            title: q('dow.directVideoLink', index + 1),
                             url: videoUrl,
                             webpageUrl: url
                         }))
                     };
                     if (videoUrls.length === 1) {
-                        probeResult.title = '直接视频链接'; // qq2q
+                        probeResult.title = q('dow.directVideo');
                         probeResult.url = videoUrls[0];
                     } else {
                         probeResult.entriesCount = videoUrls.length;
                     }
                 } else {
-                    if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 }); // qq2q
+                    if (progress) progress.report({ message: q('dow.directParseNoVideo'), increment: 20 });
                     probeResult = await this.ytdlp.probe(url);
                     if (!probeResult || !probeResult.success) {
-                        if (vscode) { try { require('./global').showAutoCloseNotification('error', `视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`); } catch { } } // qq2q
+                        if (vscode) { try { require('./global').showAutoCloseNotification('error', q('dow.videoProbeError', probeError ? probeError.message : (probeResult?.error || q('dow.webpageNoDirectVideo')))); } catch { } }
                         return null;
                     }
                 }
             } catch (webError) {
-                if (vscode) { try { require('./global').showAutoCloseNotification('error', `网页解析失败: ${webError.message}`); } catch { } } // qq2q
+                if (vscode) { try { require('./global').showAutoCloseNotification('error', q('dow.webParseError', webError.message)); } catch { } }
                 return null;
             }
         }
 
-        if (progress) progress.report({ message: "发现视频资源，准备选择...", increment: 30 }); // qq2q
+        if (progress) progress.report({ message: q('dow.videoResourceFound'), increment: 30 });
 
         let videosToDownload = [];
 
         if (probeResult.isPlaylist) {
             if (!vscode) return null;
             const items = probeResult.entries.map((entry, index) => ({
-                label: entry.title || `视频 ${index + 1}`, // qq2q
-                description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`, // qq2q
+                label: entry.title || q('dow.videoNumber', index + 1),
+                description: `${entry.duration ? Math.floor(entry.duration) + q('dow.second') : q('dow.unknownDuration')}`,
                 detail: entry.url,
                 video: entry
             }));
 
             const selectedItems = await vscode.window.showQuickPick(items, {
                 canPickMany: true,
-                placeHolder: "选择要下载的视频", // qq2q
+                placeHolder: q('dow.selectVideoToDownload'),
                 matchOnDescription: true,
                 matchOnDetail: true
             });
@@ -2992,7 +2992,7 @@ class UnifiedMediaDownloader {
 
     async downloadVideos(videos, targetDir, progress, transId = null) {
         if (!videos || videos.length === 0) return;
-        if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 }); // qq2q
+        if (progress) progress.report({ message: q('dow.preparingDownloadCount', videos.length), increment: 50 });
 
         const h = require('./h');
 
@@ -3004,7 +3004,7 @@ class UnifiedMediaDownloader {
                 url: video.url,
                 destPath: destPath,
                 tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
-                title: video.title || '网页视频', // qq2q
+                title: video.title || q('dow.webpageVideo'),
 
 
                 meta: video._meta || video.meta
@@ -3016,9 +3016,9 @@ class UnifiedMediaDownloader {
             onProgress: (task, event) => {
                 if (progress) {
                     if (event.type === "progress") {
-                        progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 }); // qq2q
+                        progress.report({ message: q('dow.downloading', task.title || q('dow.webpageVideo')), increment: 5 });
                     } else if (event.type === "done") {
-                        progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 }); // qq2q
+                        progress.report({ message: q('dow.downloaded', task.title || q('dow.webpageVideo')), increment: 10 });
                     }
                 }
             }
