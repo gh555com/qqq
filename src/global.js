@@ -1,4 +1,4 @@
-// src/global.js - 全局状态、日志和对话框管理
+// src/global.js - Global state, logging, and dialog management
 const vscode = require("vscode");
 const fs = require("fs");
 const path = require("path");
@@ -10,7 +10,7 @@ const { q } = require('./i18n');
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
 // ============================================================================
-// ★ Daemon Bridge (从 qqq.js 迁移)
+// ★ Daemon Bridge (migrated from qqq.js)
 // ============================================================================
 const EventEmitter = require('events');
 
@@ -30,12 +30,12 @@ class DaemonBridge extends EventEmitter {
 
 		this._stopping = false;
 
-		// ★ 失败原因收集（用于 tooltip + err.log）
+		// ★ Failure reason collection (for tooltip + err.log)
 		this.lastStartError = "";
 		this.lastCrashReason = "";
 		this.lastStderrSnippet = "";
 
-		// ★ DoS 防护：1分钟内崩溃超过5次则永久禁用
+		// ★ DoS protection: if crashes >5 times within 1 minute, permanently disable
 		this.recentCrashes = [];
 		this.isPermDisabled = false;
 	}
@@ -54,13 +54,13 @@ class DaemonBridge extends EventEmitter {
 	async start() {
 		this._stopping = false;
 
-		// 防止重入
+		// Prevent re-entrancy
 		if (this.isStarting) return this.startPromise;
 
-		// 检查现有进程：只有 available === true 才认为健康
+		// Check existing process: only available === true is considered healthy
 		if (this.process && !this.process.killed) {
 			if (this.available === true) return true;
-			// 进程存在但不可用，杀掉重启
+			// Process exists but unavailable, kill and restart
 			try { this.process.kill(); } catch { }
 			this.process = null;
 		}
@@ -98,7 +98,7 @@ class DaemonBridge extends EventEmitter {
 				try {
 					result = JSON.parse(line);
 				} catch (e) {
-					// 尝试 Base64 解码 (PowerShell 模式下输出是 Base64 封装的)
+					// Try Base64 decode (PowerShell mode output is Base64-wrapped)
 					try {
 						const decoded = Buffer.from(line, "base64").toString("utf8");
 						result = JSON.parse(decoded);
@@ -109,7 +109,7 @@ class DaemonBridge extends EventEmitter {
 
 				const id = result._id;
 
-				// ★ 增加：处理异步事件（没有 _id 或是明确标记为 event 的消息）
+				// ★ Added: handle async events (no _id or explicitly marked as event)
 				if (id === undefined || result.event) {
 					this.emit("event", result);
 					return;
@@ -124,7 +124,7 @@ class DaemonBridge extends EventEmitter {
 					res(result);
 				}
 			} catch (e) {
-				// 非JSON输出，可能是Python脚本的调试输出或错误信息
+				// Non-JSON output,可能是Python脚本的调试输出或错误信息 // qq2q
 				logMessage(`${this.name} stdout: ${line}`, "WARN");
 			}
 		});
@@ -149,11 +149,11 @@ class DaemonBridge extends EventEmitter {
 			this._handleCrash();
 		});
 
-		// 实现ping重试逻辑，最多重试 15 次，总计约 7.5 秒
+		// Implement ping retry logic, up to 15 attempts, totaling about 7.5 seconds
 		let pingAttempts = 0;
 		const maxPingAttempts = 15;
-		const pingInterval = 500; // 每次ping间隔500ms
-		const pingTimeout = 5000; // 增加ping超时时间到5秒
+		const pingInterval = 500; // 500ms between pings
+		const pingTimeout = 5000; // Increase ping timeout to 5 seconds
 
 		const attemptPing = async () => {
 			pingAttempts++;
@@ -163,7 +163,7 @@ class DaemonBridge extends EventEmitter {
 					this.restartCount = 0;
 					this.available = true;
 					this._setStartError("");
-					invalidateEngineCache(); // ★ 引擎状态变化，清除缓存
+					invalidateEngineCache(); // ★ Engine state changed, clear cache
 					logMessage(`${this.name} bridge started and handshaked`, "INFO");
 					resolve(true);
 					return true;
@@ -177,7 +177,7 @@ class DaemonBridge extends EventEmitter {
 				return;
 			}
 
-			// 所有 ping 尝试都失败
+			// All ping attempts failed
 			const reason = `ping_failed_after_${maxPingAttempts}_attempts${this.lastStderrSnippet ? ` ; stderr=${this.lastStderrSnippet}` : ""}`;
 			this._setStartError(reason);
 			logMessage(q('bridge.pingFailed', this.name, maxPingAttempts), "WARN");
@@ -187,15 +187,15 @@ class DaemonBridge extends EventEmitter {
 			resolve(false);
 		};
 
-		// 启动ping尝试，增加初始延迟到 100ms，给进程一点启动时间
+		// Start ping attempts with an initial 100ms delay to give the process time to boot
 		setTimeout(attemptPing, 100);
 	}
 
 	_handleCrash() {
 		this.process = null;
-		invalidateEngineCache(); // ★ 引擎崩溃，清除缓存
+		invalidateEngineCache(); // ★ Engine crashed, clear cache
 
-		// ★ 发出崩溃事件，让 UI 层感知
+		// ★ Emit crash event so UI layer can react
 		this.emit("event", { event: "process_crashed", bridge: this.name });
 
 		for (const [id, { resolve, timer }] of this.pending) {
@@ -214,10 +214,10 @@ class DaemonBridge extends EventEmitter {
 			return;
 		}
 
-		// ★ DoS 检查
+		// ★ DoS check
 		const now = Date.now();
 		this.recentCrashes.push(now);
-		this.recentCrashes = this.recentCrashes.filter(t => now - t < 60000); // 只保留最近1分钟
+		this.recentCrashes = this.recentCrashes.filter(t => now - t < 60000); // Keep only last 1 minute
 
 		if (this.recentCrashes.length > 5) {
 			this.isPermDisabled = true;
@@ -226,7 +226,7 @@ class DaemonBridge extends EventEmitter {
 			this._setStartError(msg);
 			logMessage(msg, "ERROR");
 
-			// ★ Shell Daemon 致命错误弹窗
+			// ★ Shell Daemon fatal error modal
 			if (this.name === "Shell") {
 				showErrorMessage(
 					q('bridge.shellDaemonCrash'),
@@ -247,11 +247,11 @@ class DaemonBridge extends EventEmitter {
 
 		if (this.restartCount < this.maxRestarts) {
 			this.restartCount++;
-			// 指数退避策略：从 50ms 开始，快速重试
+			// Exponential backoff: start at 50ms, retry fast
 			const backoff = 50 * Math.pow(2, this.restartCount - 1);
 			logMessage(q('bridge.crashRestart', this.name, this.restartCount, this.maxRestarts, backoff), "WARN");
 
-			// ★ 工业级修复：重启前确保 available 不是 false，否则 start() 中的检查会阻止重启
+			// ★ Industrial-grade fix: ensure available isn't false, otherwise start() checks may block restart
 			this.available = null;
 
 			setTimeout(() => {
@@ -270,10 +270,10 @@ class DaemonBridge extends EventEmitter {
 			logMessage(q('bridge.maxRestartsReached', this.name), "ERROR");
 			this.available = false;
 
-			// ★ Shell Daemon 特权：无限复活
+			// ★ Shell Daemon privilege: infinite revive
 			if (this.name === "Shell") {
 				logMessage(q('bridge.forceRevive', this.name), "WARN");
-				this.restartCount = 0; // 重置计数以允许再次进入重启循环
+				this.restartCount = 0; // Reset count to allow restart loop again
 				setTimeout(() => this.start(), 3000);
 			}
 		}
@@ -287,9 +287,9 @@ class DaemonBridge extends EventEmitter {
 			return { error: `${this.name}_disabled_too_many_crashes` };
 		}
 
-		// ★ 工业级修复：如果引擎已知不可用，不要反复尝试启动
-		// available === false 表示已确认失败/崩溃，不应该在每次 call 时重试
-		// 只有通过 startDaemons 或明确的重启操作才应该重试
+		// ★ Industrial-grade fix: if engine is known unavailable, don't keep trying to start
+		// available === false means confirmed failure/crash; should not retry on every call
+		// Only startDaemons or explicit restart should retry
 		if (this.available === false) {
 			return { error: `${this.name}_not_available` };
 		}
@@ -323,7 +323,7 @@ class DaemonBridge extends EventEmitter {
 	}
 
 	/**
-	 * 检查 daemon 进程是否存活
+	 * Check if daemon process is alive
 	 */
 	isAlive() {
 		return !!(this.process && !this.process.killed && this.available === true);
@@ -349,7 +349,7 @@ class DaemonBridge extends EventEmitter {
 		}
 
 		if (!this.process.killed) {
-			// 协商退出
+			// Graceful negotiated exit
 			let exitedCleanly = false;
 			try {
 				const exitCmd = JSON.stringify({ _id: 0, action: "exit" }) + "\n";
@@ -365,7 +365,7 @@ class DaemonBridge extends EventEmitter {
 			} catch (e) { }
 
 			if (!exitedCleanly) {
-				// 强制退出
+				// Force exit
 				try {
 					if (process.platform === "win32") {
 						try { cp.execSync(`taskkill /pid ${this.process.pid} /T /F`); } catch { }
@@ -386,17 +386,17 @@ class DaemonBridge extends EventEmitter {
 // ★ Bridge Instances & Management
 // ============================================================================
 
-// Python bridge：优先 python，其次 python3（非 win32）
+// Python bridge: prefer python, then python3 (non-win32)
 const pythonBridge = new DaemonBridge("Python", (bridge) => {
 	return new Promise((resolve) => {
-		// Python 引擎优先在 dist 中寻找（针对 Bundle 环境），如果找不到则尝试 src
+		// Python engine: prefer dist (bundle), fallback to src
 		let scriptPath = path.join(extensionContext.extensionPath, "dist", "kp.py");
 		if (!fs.existsSync(scriptPath)) {
 			scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
 		}
 
 		if (!fs.existsSync(scriptPath)) {
-			bridge._setStartError(`kp.py 不存在：${scriptPath}`);
+			bridge._setStartError(`kp.py 不存在：${scriptPath}`); // qq2q
 			bridge.available = false;
 			resolve(false);
 			return;
@@ -404,15 +404,15 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 
 		const spawnWith = (bin) => {
 			return new Promise(async (res) => {
-				// ★ 多实例修复：移除系统级单例检查
-				// 每个 IDE 实例独立运行自己的 daemon，不会被别的 IDE 干扰
-				// 实例级检查（this.process/isStarting）已足够防止同一 IDE 重复启动
+				// ★ Multi-instance fix: remove system-level singleton check
+				// Each IDE instance runs its own daemon independently, no interference
+				// Instance-level checks (this.process/isStarting) are enough to prevent duplicate starts within same IDE
 
 				let proc;
 				try {
 					logMessage(q('python.trySpawn', bin, scriptPath), "INFO");
 
-					// 检查 bin 是否为绝对路径且存在
+					// Check if bin is absolute path and exists
 					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
 						logMessage(q('python.pathNotExist', bin), "WARN");
 						res(false);
@@ -443,7 +443,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					settled = true;
 					try { proc.kill(); } catch { }
 					bridge.available = false;
-					bridge.process = null;  // ★ 确保清理 process 引用
+					bridge.process = null;  // ★ Ensure process reference is cleared
 					res(false);
 				};
 
@@ -469,14 +469,14 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 			const { getSharedDownloader } = require("./dow");
 			const downloader = getSharedDownloader();
 
-			// ★ 注册 "从无到有" 回调：下载完成后热启动 daemon
+			// ★ Register "from-scratch" callback: hot-start daemon after download completes
 			downloader.python.onPythonReady(async (pythonPath, context) => {
 				logMessage(q('python.fromScratchCallback', pythonPath), "INFO");
 
-				// ★ 环境已完美，刷新引擎缓存
+				// ★ Environment is perfect now, refresh engine cache
 				invalidateEngineCache();
 
-				// ★ 重置 Python 音频引擎缓存（很重要！）
+				// ★ Reset Python audio engine cache (very important!)
 				try {
 					const qqq = require('./qqq');
 					if (qqq.resetPythonAudioCache) {
@@ -487,7 +487,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					logMessage(q('python.audioResetQqqError', e.message), "WARN");
 				}
 
-				// ★ 重置 Q4 音频源状态
+				// ★ Reset Q4 audio source state
 				try {
 					const q4 = require('./q4');
 					if (q4.resetQ4AudioSource) {
@@ -498,21 +498,21 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					logMessage(q('python.audioResetQ4Error', e.message), "WARN");
 				}
 
-				// 检查是否已经有可用的 daemon
+				// Check if daemon is already available
 				if (bridge.available) {
 					logMessage(q('python.daemonAvailable'), "INFO");
 					return;
 				}
 
-				// 热启动 daemon
+				// Hot-start daemon
 				const ok = await spawnWith(pythonPath);
 				if (ok) {
 					logMessage(q('python.hotStartSuccess', pythonPath), "INFO");
 
-					// ★ 热启动成功后再次刷新引擎缓存
+					// ★ Refresh engine cache again after hot-start succeeds
 					invalidateEngineCache();
 
-					// ★ 根据 IO 引擎偏好决定是待命还是主力（通过 ConfigGate 读取）
+					// ★ Decide standby/main based on IO engine preference (read via ConfigGate)
 					try {
 						const ioEngine = getConfig('ioEngine') || 'auto';
 
@@ -529,12 +529,12 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				}
 			});
 
-			// ★ 新架构：只检查 L1 完美性
-			// 如果 L1 完美，直接启动 daemon
-			// 如果 L1 不完美，返回 null，等待 20 秒后下载完成后通过回调热启动
+			// ★ New architecture: only check L1 perfection
+			// If L1 is perfect, start daemon directly
+			// If L1 is imperfect, return null; wait 20 seconds then hot-start via callback after download completes
 			const pythonPath = await downloader.ensurePythonReady(extensionContext);
 
-			// ★ 检查 daemon 是否已经可用
+			// ★ Check if daemon is already available
 			if (pythonBridge.available === true) {
 				logMessage(q('python.daemonSkipStart'), "DEBUG");
 				resolve(true);
@@ -550,16 +550,16 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 				}
 			}
 
-			// L1 不完美或启动失败，等待后台下载完成后热启动
+			// L1 imperfect or start failed; wait for background download then hot-start via callback
 			if (!pythonPath) {
 				logMessage(q('python.l1ImperfectWait'), "INFO");
-				// 不设置错误，因为可能会通过回调热启动
+				// Do not set error; may hot-start via callback
 				bridge.available = false;
 				resolve(false);
 				return;
 			}
 
-			// 启动失败
+			// Start failed
 			if (!bridge.lastStartError) {
 				bridge._setStartError("python_spawn_failed");
 			}
@@ -601,15 +601,15 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			return;
 		}
 
-		// ★ 多实例修复：移除系统级单例检查
-		// 每个 IDE 实例独立运行自己的 daemon，不会被别的 IDE 干扰
+		// ★ Multi-instance fix: remove system-level singleton check
+		// Each IDE instance runs its own daemon independently, no interference
 		(async () => {
 			try {
 				logMessage(q('rust.tryStart', exePath), "INFO");
 				const proc = cp.spawn(exePath, ["--daemon"], {
 					stdio: ["pipe", "pipe", "pipe"],
 					windowsHide: true,
-					// ★ 工业级修复：传入父进程 PID，供 daemon watchdog 检测父进程死亡
+					// ★ Industrial-grade fix: pass parent PID for daemon watchdog to detect parent death
 					env: { ...process.env, Q_PARENT_PID: String(process.pid) }
 				});
 
@@ -635,9 +635,9 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 				bridge.available = false;
 				resolve(false);
 			}
-		})();  // ★ 结束 async IIFE
-	});  // ★ 结束 Promise
-});  // ★ 结束 DaemonBridge
+		})();  // ★ End async IIFE
+	});  // ★ End Promise
+});  // ★ End DaemonBridge
 
 // Shell bridge
 const shellBridge = new DaemonBridge("Shell", (bridge) => {
@@ -651,11 +651,11 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 
 			const simplePsScript = `
 # --- Optimized PowerShell Daemon ---
-# 确保所有输出使用UTF-8编码
+# Ensure all output uses UTF-8 encoding
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 
-# 基础组件加载（较快）
+# Load basic components (faster)
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 function Ensure-ClipboardHelper {
@@ -767,10 +767,10 @@ function Process-Command {
       }
       'extract_icon' {
          try {
-             # 确保 C# Helper 已加载（IconHelper 和 ClipboardHelper 在同一个代码块中）
+             # Ensure the C# Helper is loaded (IconHelper and ClipboardHelper are in the same code block)
              Ensure-ClipboardHelper
-             # 优先尝试 C# 高质量提取
-             # 确保路径使用正确的Unicode编码
+             # Prefer high-quality extraction via C#
+             # Ensure path uses correct Unicode encoding
              $iconB64 = [IconHelper]::GetIconBase64($cmd.path)
              if ($iconB64) {
                  $result.icon = $iconB64
@@ -779,7 +779,7 @@ function Process-Command {
                  throw "C# extraction failed"
              }
          } catch {
-             # 回退：纯 PowerShell 原生方案 (虽然只能拿文件关联图标)
+             # Fallback: pure PowerShell native approach (only gets file association icon)
              try {
                  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($cmd.path)
                  if ($icon) {
@@ -801,23 +801,23 @@ function Process-Command {
           $rawPath = $cmd.path -replace '/', '\'
           $cleanPath = $rawPath.TrimEnd('\')
 
-          # 检查是否是点结尾路径
+          # Check if this is a dot-ending path
           $hasDotPath = $cleanPath.EndsWith('.') -or $cleanPath.Contains('.\\')
 
-          # 检查目标目录
+          # Check target directory
           $checkPath = if ($hasDotPath) { '\\\\?\\' + $cleanPath } else { $cleanPath }
           $dirExists = [System.IO.Directory]::Exists($checkPath)
           if (-not $dirExists) {
             $result.success = $false
             $result.error = "Target folder not found: $cleanPath"
           } else {
-            # 获取剪贴板文件
+            # Get clipboard files
             $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
             if (-not $files -or $files.Count -eq 0) {
               $result.success = $false
               $result.error = "No files in clipboard"
             } else {
-              # 计算总大小
+              # Compute total size
               $totalSize = 0
               foreach ($src in $files) {
                 if ([System.IO.File]::Exists($src)) {
@@ -827,10 +827,10 @@ function Process-Command {
                 }
               }
 
-              # 大文件阈值：100MB
+              # Large file threshold: 100MB
               $useBgCopy = $totalSize -gt 100MB
 
-              # ★ 点结尾路径必须用 .NET 方法，普通路径用 robocopy/cmd
+              # ★ Dot-ending path must use .NET methods; normal path uses robocopy/cmd
               $copiedCount = 0
               $errors = @()
 
@@ -839,11 +839,11 @@ function Process-Command {
                   $srcName = [System.IO.Path]::GetFileName($src)
 
                   if ($hasDotPath) {
-                    # ★ 点结尾路径：使用 .NET 方法 + \\?\ 前缀
+                    # ★ Dot-ending path: use .NET methods + \\?\ prefix
                     $destPath = '\\\\?\\' + $cleanPath + '\\' + $srcName
 
                     if ([System.IO.Directory]::Exists($src)) {
-                      # 递归复制文件夹
+                      # Recursively copy folder
                       $srcPrefix = '\\\\?\\' + $src
                       [System.IO.Directory]::CreateDirectory($destPath) | Out-Null
                       $allFiles = [System.IO.Directory]::GetFiles($srcPrefix, '*', 'AllDirectories')
@@ -858,13 +858,13 @@ function Process-Command {
                       }
                       $copiedCount++
                     } elseif ([System.IO.File]::Exists($src)) {
-                      # 复制文件
+                      # Copy file
                       $srcPath = '\\\\?\\' + $src
                       [System.IO.File]::Copy($srcPath, $destPath, $true)
                       $copiedCount++
                     }
                   } else {
-                    # ★ 普通路径：使用 robocopy/cmd
+                    # ★ Normal path: use robocopy/cmd
                     if ([System.IO.Directory]::Exists($src)) {
                       $destDir = $cleanPath + '\\' + $srcName
                       if ($useBgCopy) {
@@ -941,7 +941,7 @@ function Process-Command {
   [Console]::Out.WriteLine($b64)
 }
 
-# 使用UTF-8编码读取键入
+# Read input using UTF-8 encoding
 $encoding = [System.Text.Encoding]::UTF8
 $reader = New-Object System.IO.StreamReader([System.Console]::OpenStandardInput(), $encoding)
 
@@ -962,10 +962,10 @@ while ($true) {
 
 			logMessage(q('shell.tryStart'), "DEBUG");
 
-			// ★ 关键修复：将整个启动逻辑放在 async IIFE 内部，并在内部 resolve
+			// ★ Key fix: wrap the entire startup logic in async IIFE and resolve inside
 			(async () => {
-				// ★ 移除单例检查，依赖 cleanupGhostDaemons 清理残留进程
-				// 单例检查会导致误判（残留进程未完全退出时）
+				// ★ Remove singleton check; rely on cleanupGhostDaemons to clear residual processes
+				// Singleton check can mis-detect (when residual process hasn't fully exited)
 
 				try {
 					const psOptions = [
@@ -992,7 +992,7 @@ while ($true) {
 					}
 
 					if (!proc) {
-						throw lastError || new Error("无法启动任何PowerShell进程");
+						throw lastError || new Error("无法启动任何PowerShell进程"); // qq2q
 					}
 
 					proc.on("error", (err) => {
@@ -1003,7 +1003,7 @@ while ($true) {
 						logMessage(q('shell.processExit', code, signal), "INFO");
 					});
 
-					// ★ 关键：在 async IIFE 内部调用 setupProcess
+					// ★ Key: call setupProcess inside async IIFE
 					bridge.setupProcess(proc, (ok) => {
 						if (!ok) logMessage(q('shell.bridgeStartFailed', bridge.lastStartError || "unknown"), "WARN");
 						resolve(ok);
@@ -1015,7 +1015,7 @@ while ($true) {
 					resolve(false);
 				}
 			})();
-			return;  // ★ 关键：Windows 分支提前返回，不执行下面的通用代码
+			return;  // ★ Key: return early in Windows branch; do not execute common code below
 		} else {
 			const nodeBin = process.execPath.replace(/"/g, '\\"');
 			const bashScript = platform === "darwin"
@@ -1055,8 +1055,8 @@ while ($true) {
       paths=$(json_get "$line" "paths")
       # macOS setFiles implementation via osascript
       script="set the clipboard to "
-      # simplified single file for now as array handling in bash+osascript is tricky
-      # but it's a fallback anyway
+      # Simplified single file for now as array handling in bash+osascript is tricky
+      # But it's a fallback anyway
       if osascript -e "set the clipboard to POSIX file \"$paths\"" >/dev/null 2>&1; then
         echo '{"_id":'"$id"',"success":true}'
       else
@@ -1085,7 +1085,7 @@ content = $(xclip - selection clipboard - o - t text / html 2 > /dev/null | pyth
       if command -v xclip > /dev/null 2>&1 && xclip -selection clipboard -t image/png -o > "$dest" 2>/dev/null && [ -s "$dest" ]; then echo '{"_id":'"$id"',"success":true}'; else echo '{"_id":'"$id"',"success":false}'; fi;;
     extract_icon)
       path=$(json_get "$line" "path")
-      # Linux: 尝试使用 python3 + gi (Gio/GdkPixbuf) 提取图标
+      # Linux: try extracting icon via python3 + gi (Gio/GdkPixbuf)
       icon_b64=$(python3 -c "
 import sys, os
 try:
@@ -1100,7 +1100,7 @@ try:
     icon = info.get_icon()
 
     theme = Gio.IconTheme.get_default()
-    # 尝试查找图标
+    # Try locating icon
     icon_info = theme.lookup_by_gicon(icon, 32, Gio.IconLookupFlags.FORCE_SIZE)
     if icon_info:
         pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon_info.get_filename(), 32, 32)
@@ -1156,12 +1156,12 @@ function updateStatusBarNow() {
 }
 
 // ============================================================================
-// ★ Linux 依赖检测与安装引导
+// ★ Linux dependency detection and install guidance
 // ============================================================================
 let _linuxDepsChecked = false;
 
 /**
- * 检测 Linux 上是否安装了 xclip
+ * Detect whether xclip is installed on Linux
  * @returns {Promise<boolean>}
  */
 async function checkXclipInstalled() {
@@ -1186,7 +1186,7 @@ async function checkXclipInstalled() {
 }
 
 /**
- * 检测 Linux 包管理器类型
+ * Detect Linux package manager type
  * @returns {Promise<'apt'|'dnf'|'yum'|'pacman'|'zypper'|null>}
  */
 async function detectLinuxPackageManager() {
@@ -1211,8 +1211,8 @@ async function detectLinuxPackageManager() {
 }
 
 /**
- * 获取安装 xclip 的命令
- * @param {string} pkgMgr - 包管理器名称
+ * Get command to install xclip
+ * @param {string} pkgMgr - package manager name
  * @returns {string}
  */
 function getXclipInstallCommand(pkgMgr) {
@@ -1227,41 +1227,41 @@ function getXclipInstallCommand(pkgMgr) {
 }
 
 /**
- * 在 VS Code 终端中执行安装命令
- * @param {string} command - 要执行的命令
- * @param {string} title - 终端标题
+ * Run install command in VS Code terminal
+ * @param {string} command - command to execute
+ * @param {string} title - terminal title
  * @returns {Promise<void>}
  */
 async function runInTerminal(command, title) {
 	const terminal = vscode.window.createTerminal({
 		name: title,
 		shellPath: '/bin/bash',
-		shellArgs: ['-c', `${command}; echo ''; echo '按任意键关闭此终端...'; read -n 1`]
+		shellArgs: ['-c', `${command}; echo ''; echo '按任意键关闭此终端...'; read -n 1`] // qq2q
 	});
 	terminal.show();
 	return terminal;
 }
 
 /**
- * 检测并引导安装 Linux 依赖 (xclip)
- * 只在首次启动时检测一次，避免频繁打扰用户
+ * Detect and guide installation of Linux dependency (xclip)
+ * Only check once on first startup to avoid frequent user interruption
  */
 async function checkAndInstallLinuxDeps() {
-	// 仅 Linux 平台检测
+	// Linux only
 	if (process.platform !== 'linux') return;
 
-	// 避免重复检测
+	// Avoid repeated checks
 	if (_linuxDepsChecked) return;
 	_linuxDepsChecked = true;
 
-	// 检查是否已经提示过（用户选择了"不再提示"）
+	// Check if already prompted (user chose "don't ask again")
 	const suppressKey = 'xclipInstallSuppressed';
 	if (extensionContext) {
 		const suppressed = extensionContext.globalState.get(suppressKey);
 		if (suppressed) return;
 	}
 
-	// 检测 xclip 是否已安装
+	// Detect whether xclip is installed
 	const hasXclip = await checkXclipInstalled();
 	if (hasXclip) {
 		logMessage(q('linux.xclipInstalled'), 'INFO');
@@ -1270,11 +1270,11 @@ async function checkAndInstallLinuxDeps() {
 
 	logMessage(q('linux.xclipNotInstalled'), 'INFO');
 
-	// 检测包管理器
+	// Detect package manager
 	const pkgMgr = await detectLinuxPackageManager();
 	const installCmd = getXclipInstallCommand(pkgMgr);
 
-	// 弹窗询问用户
+	// Prompt user
 	const choice = await vscode.window.showWarningMessage(
 		q('linux.xclipPrompt'),
 		{ modal: false },
@@ -1286,24 +1286,24 @@ async function checkAndInstallLinuxDeps() {
 	if (choice === q('linux.installNow')) {
 		logMessage(q('linux.installingXclip', installCmd), 'INFO');
 
-		// 在终端中执行安装命令
+		// Execute install command in terminal
 		const terminal = await runInTerminal(installCmd, q('linux.terminalTitle'));
 
-		// 监听终端关闭，检测是否安装成功
+		// Listen for terminal close and verify install success
 		const disposable = vscode.window.onDidCloseTerminal(async (closedTerminal) => {
 			if (closedTerminal === terminal) {
 				disposable.dispose();
 
-				// 等待一下让系统刷新
+				// Wait a bit for system refresh
 				await new Promise(r => setTimeout(r, 500));
 
-				// 重新检测
+				// Re-check
 				const nowHasXclip = await checkXclipInstalled();
 				if (nowHasXclip) {
-					showAutoCloseNotification('success', 'qqq: xclip 安装成功！剪贴板功能现已可用。');
+					showAutoCloseNotification('success', 'qqq: xclip 安装成功！剪贴板功能现已可用。'); // qq2q
 					logMessage(q('linux.xclipInstallSuccess'), 'INFO');
 				} else {
-					showAutoCloseNotification('warning', 'qqq: xclip 安装可能未成功，请检查终端输出或手动安装。');
+					showAutoCloseNotification('warning', 'qqq: xclip 安装可能未成功，请检查终端输出或手动安装。'); // qq2q
 					logMessage(q('linux.xclipInstallMaybeFailed'), 'WARN');
 				}
 			}
@@ -1311,7 +1311,7 @@ async function checkAndInstallLinuxDeps() {
 
 	} else if (choice === q('linux.copyCommand')) {
 		await vscode.env.clipboard.writeText(installCmd);
-		showAutoCloseNotification('info', `qqq: 安装命令已复制到剪贴板: ${installCmd}`);
+		showAutoCloseNotification('info', `qqq: 安装命令已复制到剪贴板: ${installCmd}`); // qq2q
 		logMessage(q('linux.userCopyCmd', installCmd), 'INFO');
 
 	} else if (choice === q('linux.dontAskAgain')) {
@@ -1323,26 +1323,26 @@ async function checkAndInstallLinuxDeps() {
 }
 
 /**
- * ★ 幽灵进程肃清协议 - 已禁用
+ * ★ Ghost process purge protocol - disabled
  *
- * 多实例修复：不再清理任何 daemon 进程
- * 因为所有 daemon（Python/Rust/Shell）都使用 stdin/stdout 通信
- * 多个 IDE 实例各自独立运行自己的 daemon，清理会误杀别人的进程
+ * Multi-instance fix: no longer clean up any daemon processes
+ * Because all daemons (Python/Rust/Shell) use stdin/stdout for communication
+ * Multiple IDE instances each run their own daemon; cleanup would kill others by mistake
  *
- * 僵尸进程由各自 daemon 的 watchdog 机制处理：
- * - Python: watchdog (6s) + stdin EOF 退出
- * - Rust: watchdog (6s) + stdin EOF 退出
- * - Shell: stdin 关闭时自动退出
+ * Zombie processes are handled by each daemon's watchdog mechanism:
+ * - Python: watchdog (6s) + exit on stdin EOF
+ * - Rust: watchdog (6s) + exit on stdin EOF
+ * - Shell: auto-exit when stdin closes
  */
 async function cleanupGhostDaemons() {
-	// 空操作：不再清理任何进程
+	// No-op: no longer clean up any processes
 }
 
 async function startDaemons() {
-	// ★ 终极修复：检查是否已有 bridge 可用或正在启动
-	// available === true 表示已可用
-	// isStarting === true 表示正在启动中（spawn 到 handshake 之间）
-	// process 存在表示进程已启动
+	// ★ Ultimate fix: check if any bridge is available or starting
+	// available === true means usable
+	// isStarting === true means in startup (spawn -> handshake)
+	// process exists means process started
 	const pythonBusy = pythonBridge.available === true || pythonBridge.isStarting || pythonBridge.process;
 	const rustBusy = rustBridge.available === true || rustBridge.isStarting || rustBridge.process;
 	const shellBusy = shellBridge.available === true || shellBridge.isStarting || shellBridge.process;
@@ -1350,13 +1350,13 @@ async function startDaemons() {
 	if (pythonBusy || rustBusy || shellBusy) {
 		logMessage(q('daemons.bridgeBusy', pythonBusy, rustBusy, shellBusy), "INFO");
 	} else {
-		// ★ 初始化首要任务：肃清所有“前世”残留的幽灵进程
+		// ★ Primary init task: purge all "previous life" residual ghost processes
 		try { await cleanupGhostDaemons(); } catch (e) { }
 	}
 
 	const bootSeq = ++_daemonBootSeq;
 
-	// ★ 关键点：打印唯一版本标识，确保日志溯源准确
+	// ★ Key: print unique version marker for accurate log tracing
 	try {
 		const pkg = require(path.join(extensionContext.extensionPath, 'package.json'));
 		const buildTime = new Date().toLocaleString();
@@ -1396,17 +1396,17 @@ async function startDaemons() {
 	};
 
 	(async () => {
-		// ★ 终极最优解：启动前检查是否已停用
+		// ★ Ultimate optimal: check if already deactivated before starting
 		if (_isDeactivated) return;
 
-		// ★ 核心设计：三个引擎全部启动，全部待命
-		// 不管用户选什么，能启动滨都启动起来
-		// 切换引擎时只是改变“谁来响应”，不杀不重启
+		// ★ Core design: start all three engines, all standby-ready
+		// Regardless of user selection, start as many as possible
+		// Switching engines just changes who responds; no kill/restart
 		const shellPromise = ensureStarted(shellBridge);
 		const pythonPromise = ensureStarted(pythonBridge);
 		const rustPromise = ensureStarted(rustBridge);
 
-		// 并行等待所有引擎启动完成
+		// Wait for all engines in parallel
 		await Promise.all([shellPromise, pythonPromise, rustPromise]);
 
 		if (bootSeq === _daemonBootSeq) {
@@ -1416,7 +1416,7 @@ async function startDaemons() {
 			}
 			updateStatusBarNow();
 
-			// ★ Python 可用时启动剪贴板监听 (kope 音效)
+			// ★ Start clipboard watcher when Python is available (kope sfx)
 			if (pythonBridge.isAvailable()) {
 				pythonBridge.call("start_clipboard_watcher", {}, 5000).then(res => {
 					if (res && res.status === 'started') {
@@ -1429,7 +1429,7 @@ async function startDaemons() {
 				});
 			}
 
-			// ★ 检测 Linux 依赖（延迟执行，避免阻塞启动流程）
+			// ★ Detect Linux dependency (delayed to avoid blocking startup)
 			setTimeout(() => {
 				checkAndInstallLinuxDeps().catch(e => {
 					logMessage(q('linux.checkException', e?.message || e), 'WARN');
@@ -1443,17 +1443,17 @@ async function startDaemons() {
 }
 
 // ============================================================================
-// ★ 全局上下文
+// ★ Global context
 // ============================================================================
 let extensionContext = null;
 let ffmpegPath = null;
 let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
 
-// ★ 终极最优解：全局停用标志位
+// ★ Ultimate optimal: global deactivation flag
 let _isDeactivated = false;
 
-// ★ 终极最优解：全局进程追踪器
+// ★ Ultimate optimal: global process tracker
 const _activeProcesses = new Set();
 
 function trackProcess(proc) {
@@ -1479,20 +1479,20 @@ async function killAllProcesses() {
 					resolve();
 				}
 			} catch { resolve(); }
-			// 兜底超时
+			// Fallback timeout
 			setTimeout(resolve, 1000);
 		});
 	});
 	await Promise.all(killPromises);
 }
 
-// ★ 终极最优解：启动就绪信号灯
+// ★ Ultimate optimal: ready signal
 let _resolveReady;
 const _readyPromise = new Promise(resolve => { _resolveReady = resolve; });
 
 /**
- * 高阶函数：包装需要等待就绪的函数
- * 特别确保水印校验通过
+ * Higher-order wrapper: ensure readiness before running a function
+ * Especially ensure watermark verification passed
  */
 function withReady(fn) {
 	return async (...args) => {
@@ -1502,10 +1502,10 @@ function withReady(fn) {
 }
 
 function init(context) {
-	_isDeactivated = false; // 启动时重置
+	_isDeactivated = false; // Reset on startup
 	extensionContext = context;
 
-	// 初始化 FFmpeg 路径
+	// Initialize FFmpeg path
 	const isWin = process.platform === "win32";
 	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
 	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
@@ -1515,7 +1515,7 @@ function init(context) {
 		ffmpegPath = ffInAssets;
 		ffmpegSource = "ASSETS (Verified)";
 		logMessage(`Global FFmpeg initialized from assets: ${ffInAssets}`, "INFO");
-		// 异步验证，不阻塞启动
+		// Async verify, do not block startup
 		(async () => {
 			try {
 				const { spawn } = require('child_process');
@@ -1529,19 +1529,19 @@ function init(context) {
 		})();
 	} else {
 		ffmpegSource = "NOT_FOUND";
-		ffmpegPath = ffName; // 系统环境变量兜底
+		ffmpegPath = ffName; // System PATH fallback
 	}
 
 	if (ffmpegPath) {
 		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
 	}
 
-	// 启动资产哨兵
+	// Start assets sentinel
 	startAssetsSentinel(context);
 
 	initUserTracking(context);
 
-	// ★ 后台预热 ShellBridge，消除首次粘贴时的 C# 注入延迟
+	// ★ Pre-warm ShellBridge in background to remove first-paste C# injection delay
 	setTimeout(() => {
 		if (shellBridge && shellBridge.isAvailable()) {
 			shellBridge.call("warmup", {}, 5000).then(res => {
@@ -1554,7 +1554,7 @@ function init(context) {
 }
 
 // ============================================================================
-// ★ 日志相关
+// ★ Logging
 // ============================================================================
 let LOG_PATH = null;
 const outputChannel = vscode.window.createOutputChannel("qqq");
@@ -1567,7 +1567,7 @@ function getLogPath() {
 	return LOG_PATH;
 }
 
-// ★ 日志降噪（rate-limit）基础设施
+// ★ Log noise reduction (rate-limit) infrastructure
 const _rateLimitLastTs = new Map();
 function logMessageRateLimited(key, message, level = "WARN", intervalMs = 300000) {
 	const now = Date.now();
@@ -1598,13 +1598,13 @@ function rotateLogIfNeeded() {
 			}
 		}
 	} catch (e) {
-		// 日志轮转失败不影响主程序
+		// Log rotation failure should not affect main program
 	}
 }
 
 function logMessage(message, level = "INFO") {
 	const now = new Date();
-	// ★ 使用客户电脑本地时间 + 时区偏移
+	// ★ Use client local time + timezone offset
 	const tzOffset = -now.getTimezoneOffset();
 	const tzSign = tzOffset >= 0 ? '+' : '-';
 	const tzHours = String(Math.floor(Math.abs(tzOffset) / 60)).padStart(2, '0');
@@ -1633,14 +1633,14 @@ function logMessage(message, level = "INFO") {
 }
 
 // ============================================================================
-// ★ 统一任务消息模块（唯一真理源）
-// 用于文件粘贴、视频下载等所有任务的进度/完成消息格式化和显示
+// ★ Unified task message module (single source of truth)
+// Used for formatting/displaying progress/done messages for file paste, video downloads, etc.
 // ============================================================================
 const TaskMessage = {
 	/**
-	 * 格式化耗时
-	 * @param {number} ms - 毫秒数
-	 * @returns {string} 如 "6s", "1m30s"
+	 * Format duration
+	 * @param {number} ms - milliseconds
+	 * @returns {string} like "6s", "1m30s"
 	 */
 	formatDuration(ms) {
 		const sec = Math.round(ms / 1000);
@@ -1651,9 +1651,9 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 生成进度消息
-	 * @param {string} taskTitle - 任务标题，如 "qqq：'d:/122.txt 任务 19'"
-	 * @param {string} content - 进度内容，如 "已交换 7m 于 https://..."
+	 * Build progress message
+	 * @param {string} taskTitle - task title, e.g. "qqq：'d:/122.txt task 19'"
+	 * @param {string} content - progress content, e.g. "swapped 7m at https://..."
 	 * @returns {string}
 	 */
 	progress(taskTitle, content) {
@@ -1662,25 +1662,25 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 生成完成消息
-	 * @param {string} taskTitle - 任务标题
-	 * @param {string} summary - 结果摘要，如 "文件/文件夹已复制 59" 或 "共落盘 3个视频共 19m"
-	 * @param {string|number} elapsed - 耗时，可以是字符串 "6s" 或毫秒数
-	 * @param {string} taskId - 任务ID（可选）
+	 * Build done message
+	 * @param {string} taskTitle - task title
+	 * @param {string} summary - result summary, e.g. "files/folders copied 59" or "flushed 3 videos total 19m"
+	 * @param {string|number} elapsed - duration, can be string "6s" or ms number
+	 * @param {string} taskId - task id (optional)
 	 * @returns {string}
 	 */
 	done(taskTitle, summary, elapsed, taskId = '') {
 		const prefix = taskTitle || 'qqq';
 		const dur = typeof elapsed === 'number' ? this.formatDuration(elapsed) : elapsed;
-		// ★ taskTitle 和 summary 之间用两个空格
+		// ★ Two spaces between taskTitle and summary
 		const idPart = taskId ? `;  id: ${taskId}` : '';
-		return `${prefix}  ${summary}( 耗时: ${dur}${idPart} )`;
+		return `${prefix}  ${summary}( 耗时: ${dur}${idPart} )`; // qq2q
 	},
 
 	/**
-	 * 生成用户提示消息
-	 * @param {string} taskTitle - 任务标题
-	 * @param {string} message - 提示内容
+	 * Build user prompt message
+	 * @param {string} taskTitle - task title
+	 * @param {string} message - prompt text
 	 * @returns {string}
 	 */
 	prompt(taskTitle, message) {
@@ -1689,13 +1689,13 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示自动关闭的完成弹窗（可带按钮）
-	 * @param {string} message - 消息内容
-	 * @param {Object} options - 选项
-	 * @param {string[]} options.buttons - 按钮文本数组
-	 * @param {number} options.timeout - 自动关闭时间（毫秒），默认 15000
-	 * @param {Function} options.onButton - 按钮点击回调 (buttonText) => {}
-	 * @returns {Promise<string|undefined>} 用户点击的按钮文本，或 undefined（超时/无操作）
+	 * Show auto-close done toast (with optional buttons)
+	 * @param {string} message - message content
+	 * @param {Object} options - options
+	 * @param {string[]} options.buttons - button texts
+	 * @param {number} options.timeout - auto close ms, default 15000
+	 * @param {Function} options.onButton - callback on click (buttonText) => {}
+	 * @returns {Promise<string|undefined>} clicked button text, or undefined (timeout/no action)
 	 */
 	async showDoneToast(message, options = {}) {
 		const { buttons = [], timeout = 15000, onButton } = options;
@@ -1718,10 +1718,10 @@ const TaskMessage = {
 	},
 
 	/**
-	 * 显示简单的自动关闭消息（无按钮），统一委托 showAutoCloseNotification
-	 * @param {string} message - 消息内容
-	 * @param {number} [_timeout] - 已弃用，保留参数兼容旧调用签名
-	 * @param {'success'|'cancel'|'error'|'info'} type - 消息类型
+	 * Show simple auto-close message (no buttons), delegate to showAutoCloseNotification
+	 * @param {string} message - message content
+	 * @param {number} [_timeout] - deprecated, kept for signature compatibility
+	 * @param {'success'|'cancel'|'error'|'info'} type - message type
 	 */
 	showSimpleToast(message, _timeout, type = 'info') {
 		showAutoCloseNotification(type, message);
@@ -1729,29 +1729,29 @@ const TaskMessage = {
 };
 
 // ============================================================================
-// ★ 对话框包装 (qqq 涉及的对话框)
+// ★ Dialog wrappers (dialogs used by qqq)
 // ============================================================================
 function showInformationMessage(message, ...items) {
 	return vscode.window.showInformationMessage(message, ...items);
 }
 
 // ============================================================================
-// ★ 唯一真理源：9 秒精确倒计时自动关闭弹窗
-// 所有「纯通知弹窗」统一调用此函数，修改秒数只需改这里的默认值
+// ★ Single source of truth: precise 9-second countdown auto-close notification
+// All "pure notification" popups must call this function; change default seconds only here
 // ============================================================================
-const AUTO_CLOSE_SECONDS = 9; // ★ 全局默认秒数，改这一个数字即可
+const AUTO_CLOSE_SECONDS = 9; // ★ Global default seconds; change this one number only
 
 /**
- * 显示一个带倒计时进度条的自动关闭通知（唯一真理源）
- * @param {'info'|'warning'|'error'|'success'|'cancel'} type - 消息类型
- * @param {string} message - 消息内容
- * @param {number} [seconds] - 自动关闭秒数，默认 AUTO_CLOSE_SECONDS
+ * Show an auto-close notification with countdown progress (single source of truth)
+ * @param {'info'|'warning'|'error'|'success'|'cancel'} type - message type
+ * @param {string} message - message text
+ * @param {number} [seconds] - auto close seconds, default AUTO_CLOSE_SECONDS
  */
 function showAutoCloseNotification(type, message, seconds) {
 	const sec = (typeof seconds === 'number' && seconds > 0) ? seconds : AUTO_CLOSE_SECONDS;
 	const prefixMap = { 'success': '✅ ', 'cancel': '❌ ', 'error': '⚠️ ', 'warning': '⚠️ ', 'info': '' };
 	const prefix = prefixMap[type] || '';
-	// ★ 唯一真理源：自动补 "qqq: " 前缀，已有则跳过
+	// ★ Single source of truth: auto-prepend "qqq: " prefix if missing
 	const qPrefix = /^qqq[:\uff1a]/i.test(message) ? '' : 'qqq: ';
 	const text = `${prefix}${qPrefix}${message}`;
 	vscode.window.withProgress({
@@ -1804,27 +1804,27 @@ function showTextDocument(document, column, preserveFocus) {
 function openExternal(uri) {
 	const filePath = uri.fsPath;
 
-	// 首先尝试使用 Node.js 引擎打开
+	// First try opening via Node.js engine
 	try {
 		if (process.platform === 'win32') {
-			// Windows 平台使用 start 命令
+			// Windows: use start
 			require('child_process').execSync(`start "" "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
 			return Promise.resolve();
 		} else if (process.platform === 'darwin') {
-			// macOS 平台使用 open 命令
+			// macOS: use open
 			require('child_process').execSync(`open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
 			return Promise.resolve();
 		} else {
-			// Linux 平台使用 xdg-open 命令
+			// Linux: use xdg-open
 			require('child_process').execSync(`xdg-open "${filePath.replace(/"/g, '""')}"`, { stdio: 'ignore' });
 			return Promise.resolve();
 		}
 	} catch (error) {
-		// 如果 Node.js 引擎打开失败，尝试使用 VS Code 提供的 API
+		// If Node.js open fails, try VS Code API
 		try {
 			return vscode.env.openExternal(uri);
 		} catch (vsCodeError) {
-			// 如果 VS Code API 也失败，尝试使用 Python 作为兜底
+			// If VS Code API also fails, try Python fallback
 			try {
 				const pythonCode = `
 				import os
@@ -1841,15 +1841,15 @@ function openExternal(uri) {
 					except ImportError:
 						pass
 
-				# 通用方法
+				# Generic method
 				os.startfile(file_path)
 				`;
 
 				require('child_process').execSync(`python -c "${pythonCode}"`, { stdio: 'ignore' });
 				return Promise.resolve();
 			} catch (pythonError) {
-				// 所有方法都失败，返回错误
-				return Promise.reject(new Error(`无法打开文件: ${filePath}`));
+				// All methods failed, return error
+				return Promise.reject(new Error(`无法打开文件: ${filePath}`)); // qq2q
 			}
 		}
 	}
@@ -1860,7 +1860,7 @@ function setStatusBarMessage(text, hideAfterTimeout) {
 }
 
 // ============================================================================
-// ★ 使用时长统计（极简：每60秒 +60秒）
+// ★ Usage duration stats (minimal: +60s every 60 seconds)
 // ============================================================================
 const KEY_TOTAL_SECONDS = "qqq_stats_total_seconds";
 const KEY_CACHE_HIT_TOTAL = "qqq_stats_cache_hit_total";
@@ -1877,14 +1877,14 @@ const DEFAULT_CONFIG = {
 	"frameSizeMode": "fix",
 	"cleanFreak": false,
 	"ioEngine": "auto",
-	"downloadSecurityLevel": "1: 平衡",
+	"downloadSecurityLevel": "1: 平衡", // qq2q
 	"enhancedHtmlPasteCompatibility": false,
-	"docExportImageResolution": "原始分辨率",
+	"docExportImageResolution": "原始分辨率", // qq2q
 	"docExportIncludeCipher": true,
 	"transactionLevel": "full",
 	"textSlideColorScheme": "light",
 	"textSlideFontSize": 14,
-	// ★ 补充缺失的配置项（确保 VIP Gate 完整覆盖）
+	// ★ Add missing config items (ensure VIP Gate fully covers)
 	"szDisplayMode": "nothing",
 	"sortBy": "name",
 	"autoWatchChanges": false,
@@ -1895,86 +1895,86 @@ const DEFAULT_CONFIG = {
 };
 
 const CONFIG_METADATA = {
-	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" },
+	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" }, // qq2q
 	"performanceMode": {
-		name: "性能模式", type: "enum",
+		name: "性能模式", type: "enum", // qq2q
 		options: ["optmum", "extreme", "accelerated"],
 		descriptions: []
 	},
 	"frameSizeMode": {
-		name: "相框尺寸", type: "enum",
+		name: "相框尺寸", type: "enum", // qq2q
 		options: ["fix", "large", "small"],
 		descriptions: []
 	},
-	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" },
+	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" }, // qq2q
 	"ioEngine": {
-		name: "IO 引擎", type: "enum",
+		name: "IO 引擎", type: "enum", // qq2q
 		options: ["auto", "python", "rust", "node"],
 		descriptions: []
 	},
 	"downloadSecurityLevel": {
-		name: "下载安全等级", type: "enum",
-		options: ["0: 最宽松", "1: 平衡", "2: 最严格"],
+		name: "下载安全等级", type: "enum", // qq2q
+		options: ["0: 最宽松", "1: 平衡", "2: 最严格"], // qq2q
 		descriptions: []
 	},
-	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" },
+	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }, // qq2q
 	"docExportImageResolution": {
-		name: "导出图片分辨率", type: "enum",
-		options: ["原始分辨率", "相框分辨率"],
+		name: "导出图片分辨率", type: "enum", // qq2q
+		options: ["原始分辨率", "相框分辨率"], // qq2q
 		descriptions: []
 	},
-	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" },
+	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }, // qq2q
 	"transactionLevel": {
-		name: "事物包裹倾向", type: "enum",
+		name: "事物包裹倾向", type: "enum", // qq2q
 		options: ["full", "half"],
-		descriptions: ["全包模式: 黄名单全部走事务(a)", "半包模式: 截图和小文件走直粘(q), 其他走事务(a)"]
+		descriptions: ["全包模式: 黄名单全部走事务(a)", "半包模式: 截图和小文件走直粘(q), 其他走事务(a)"] // qq2q
 	},
 	"textSlideColorScheme": {
-		name: "文本胶片底色", type: "enum",
+		name: "文本胶片底色", type: "enum", // qq2q
 		options: ["light", "dark"],
-		descriptions: ["白底黑字", "黑巧克力底白字"]
+		descriptions: ["白底黑字", "黑巧克力底白字"] // qq2q
 	},
 	"textSlideFontSize": {
-		name: "文本胶片字体大小", type: "number"
+		name: "文本胶片字体大小", type: "number" // qq2q
 	},
-	// ★ 补充缺失的元数据
+	// ★ Add missing metadata
 	"szDisplayMode": {
-		name: "sz区显示模式", type: "enum",
+		name: "sz区显示模式", type: "enum", // qq2q
 		options: ["nothing", "size", "ctime", "mtime"],
 		descriptions: []
 	},
 	"sortBy": {
-		name: "排序方式", type: "enum",
+		name: "排序方式", type: "enum", // qq2q
 		options: ["name", "size", "ctime", "mtime"],
 		descriptions: []
 	},
-	"autoWatchChanges": { name: "自动监听变更", type: "boolean" },
+	"autoWatchChanges": { name: "自动监听变更", type: "boolean" }, // qq2q
 	"codelensLevel": {
-		name: "CodeLens 级别", type: "enum",
+		name: "CodeLens 级别", type: "enum", // qq2q
 		options: ["0", "1", "2", "3"],
 		descriptions: []
 	},
-	"takeOverCodelensStyle": { name: "接管 CodeLens 样式", type: "boolean" },
-	"forceTextFlowScheme": { name: "强制文本流方案", type: "boolean" },
-	"autoDownload": { name: "自动下载视频", type: "boolean" }
+	"takeOverCodelensStyle": { name: "接管 CodeLens 样式", type: "boolean" }, // qq2q
+	"forceTextFlowScheme": { name: "强制文本流方案", type: "boolean" }, // qq2q
+	"autoDownload": { name: "自动下载视频", type: "boolean" } // qq2q
 };
 
 // ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
-let _isVip = true; // ★ 默认 true = VIP 行为（向后兼容，直到 setVipMode 被调用）
+let _isVip = true; // ★ Default true = VIP behavior (backward compatible until setVipMode is called)
 let _sessionOverrides = Object.create(null);
-let _suppressConfigEcho = 0; // 防止"我们自己回弹 settings"触发死循环
+let _suppressConfigEcho = 0; // Prevent "we echo settings back" from causing infinite loop
 let _trialHintShown = false;
 let _configChangeCallback = null;
-let _configUpdateCallbacks = []; // ★ 配置更新完成后的回调列表（解决竞态问题）
+let _configUpdateCallbacks = []; // ★ List of callbacks after config update completes (fix race conditions)
 
 function setVipMode(v) {
 	_isVip = !!v;
-	_sessionOverrides = Object.create(null); // 模式切换时清会话覆写，防串味
-	// logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO");
+	_sessionOverrides = Object.create(null); // Clear session overrides on mode switch to avoid cross-contamination
+	// logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO"); // qq2q
 }
 function isVip() { return _isVip; }
 
-// 强回弹：把 settings.json 里的 qqq.xxx 删除（Global/Workspace/WorkspaceFolder 都清）
+// Hard bounce: delete qqq.xxx from settings.json (clear Global/Workspace/WorkspaceFolder)
 async function _clearVscodeSettingEverywhere(key) {
 	_suppressConfigEcho++;
 	try {
@@ -1986,7 +1986,7 @@ async function _clearVscodeSettingEverywhere(key) {
 		if (ins?.workspaceValue !== undefined) {
 			await cfg.update(key, undefined, vscode.ConfigurationTarget.Workspace);
 		}
-		// WorkspaceFolder（每个 folder 单独清）
+		// WorkspaceFolder (clear per folder)
 		const folders = vscode.workspace.workspaceFolders || [];
 		for (const wf of folders) {
 			const folderCfg = vscode.workspace.getConfiguration("qqq", wf.uri);
@@ -2004,24 +2004,24 @@ async function _clearVscodeSettingEverywhere(key) {
 
 const ConfigManager = {
 	get(key) {
-		// 1) session overrides 永远优先（VIP/非VIP都可以用作"即时覆盖"）
+		// 1) Session overrides always win (VIP/non-VIP can both use for "instant override")
 		if (Object.prototype.hasOwnProperty.call(_sessionOverrides, key)) {
 			return _sessionOverrides[key];
 		}
 
-		// 2) 非 VIP：彻底不读任何落盘（DB / settings.json 一律当不存在）
+		// 2) Non-VIP: never read any persisted storage (DB/settings.json treated as non-existent)
 		if (!_isVip) return DEFAULT_CONFIG[key];
 
-		// 3) VIP：读 DB（globalState）
+		// 3) VIP: read DB (globalState)
 		if (extensionContext) {
-			// 兼容旧尾空格 key
+			// Backward compatible old trailing-space key
 			const v1 = extensionContext.globalState.get(`cfg_${key}`);
 			if (v1 !== undefined) return v1;
 			const v2 = extensionContext.globalState.get(`cfg_${key} `);
 			if (v2 !== undefined) return v2;
 		}
 
-		// 4) VIP：可选读 settings 做迁移
+		// 4) VIP: optionally read settings for migration
 		try {
 			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
 			if (wsVal !== undefined) return wsVal;
@@ -2031,30 +2031,30 @@ const ConfigManager = {
 		return DEFAULT_CONFIG[key];
 	},
 
-	// 终极 set：VIP 可持久；非 VIP 只能 session
+	// Ultimate set: VIP can persist; non-VIP session-only
 	async set(key, value, opts = {}) {
-		const persist = opts.persist !== false; // 默认 true
+		const persist = opts.persist !== false; // default true
 		_sessionOverrides[key] = value;
 
 		if (_configChangeCallback) _configChangeCallback(key, value);
 
 		if (!_isVip || !persist) {
-			// 非VIP：绝不写DB
-			// ★ 终极修复：不再实时回弹清除 settings.json
-			// 因为 VS Code 不会为"选择默认值"触发事件（如果 settings.json 中没有该值）
-			// 保留 settings.json 中的值，让 VS Code 能正常检测到变化
-			// 重启还原通过 nonVipBootstrapResetAll() 在启动时实现
+			// Non-VIP: never write DB
+			// ★ Ultimate fix: no longer aggressively clear settings.json in real time
+			// Because VS Code won't fire events for "choose default" (if settings.json doesn't have it)
+			// Keep settings.json value so VS Code can detect changes normally
+			// Reset on restart is done via nonVipBootstrapResetAll() during startup
 			if (!_isVip && !_trialHintShown) {
 				_trialHintShown = true;
-				try { showAutoCloseNotification('info', "试用模式：设置仅本次有效，重启后恢复默认。"); } catch { }
+				try { showAutoCloseNotification('info', "试用模式：设置仅本次有效，重启后恢复默认。"); } catch { } // qq2q
 			}
 			return;
 		}
 
-		// VIP：写 DB（globalState），用新 key（无尾空格），同时清旧 key
+		// VIP: write DB (globalState) with new key (no trailing space), and clear old key
 		if (extensionContext) {
 			await extensionContext.globalState.update(`cfg_${key}`, value);
-			await extensionContext.globalState.update(`cfg_${key} `, undefined); // 清旧
+			await extensionContext.globalState.update(`cfg_${key} `, undefined); // Clear old
 		}
 	},
 
@@ -2074,16 +2074,16 @@ const ConfigManager = {
 		_configChangeCallback = cb;
 	},
 
-	// 非VIP启动时：清一次所有 qqq.* setting，确保"重启还原"
+	// On non-VIP startup: clear all qqq.* settings once to ensure "reset on restart"
 	async nonVipBootstrapResetAll() {
 		if (_isVip) return;
-		// logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO");
+		// logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO"); // qq2q
 		for (const k of Object.keys(DEFAULT_CONFIG)) {
 			await _clearVscodeSettingEverywhere(k);
 		}
 	},
 
-	// VS Code 设置变更入口（唯一入口）
+	// VS Code settings change entry (single entry)
 	async handleVscodeConfigChanged(event) {
 		if (_suppressConfigEcho) return;
 
@@ -2096,12 +2096,12 @@ const ConfigManager = {
 			const cur = this.get(key);
 			if (val === cur) continue;
 
-			// VIP：persist；非VIP：session + 回弹清除
+			// VIP: persist; non-VIP: session + bounce-clear
 			await this.set(key, val, { persist: _isVip });
 			changedKeys.push(key);
 		}
 
-		// ★ 配置更新完成后，通知所有订阅者（解决竞态问题）
+		// ★ After config update completes, notify all subscribers (fix race conditions)
 		if (changedKeys.length > 0) {
 			for (const cb of _configUpdateCallbacks) {
 				try { cb(changedKeys, event); } catch (e) { }
@@ -2109,14 +2109,15 @@ const ConfigManager = {
 		}
 	},
 
-	// ★ 注册配置更新完成后的回调（解决 q1.js/q2.js 的竞态问题）
+
+	// ★ Callback after config update completes (solves the race condition between q1.js/q2.js)
 	onConfigUpdated(callback) {
 		if (typeof callback === 'function' && !_configUpdateCallbacks.includes(callback)) {
 			_configUpdateCallbacks.push(callback);
 		}
 	},
 
-	// ★ 移除回调
+	// ★ Remove callback
 	offConfigUpdated(callback) {
 		const idx = _configUpdateCallbacks.indexOf(callback);
 		if (idx !== -1) _configUpdateCallbacks.splice(idx, 1);
@@ -2136,7 +2137,7 @@ let _cacheMissTotal = 0;
 let _statsFlushTimer = null;
 let _statsDirty = false;
 
-// ★ 修复 Crash：添加缺失的 Getter 定义
+// ★ Crash fix: add missing Getter definition
 let _cacheStatsGetter = () => ({ totalSize: 0, fileCount: 0, hitCount: 0, missCount: 0 });
 
 function setCacheStatsGetter(fn) {
@@ -2197,7 +2198,7 @@ function _startDurationTimer() {
 		if (!extensionContext) return;
 		const total = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
 		extensionContext.globalState.update(KEY_TOTAL_SECONDS, total + 60);
-		_durationTimer = setTimeout(tick, 60000); // 执行完再调度下一次
+		_durationTimer = setTimeout(tick, 60000); // Schedule the next run after finishing
 	};
 
 	_durationTimer = setTimeout(tick, 60000);
@@ -2222,7 +2223,7 @@ function getTotalSecondsIncludingSession() {
 }
 
 // ============================================================================
-// ★ 状态栏管理
+// ★ Status bar management
 // ============================================================================
 let statusBarItem = null;
 
@@ -2242,9 +2243,9 @@ function disposeStatusBar() {
 	}
 }
 
-// ==================== 路径工具函数 ====================
+// ==================== Path helper functions ====================
 
-// ★ 统一的路径规范化函数（盘符大写 + 去尾部斜杠 + 移除 UNC 前缀）
+// ★ Unified path canonicalization (uppercase drive letter + trim trailing slash + remove UNC prefix)
 function canonicalizeExistingPath(p) {
 	if (!p) return "";
 	let out = path.normalize(p);
@@ -2254,7 +2255,7 @@ function canonicalizeExistingPath(p) {
 		out = out.replace(/^[a-z]:/i, (m) => m.toUpperCase());
 	}
 
-	// 去除尾部斜杠（保留根目录如 C:\ 或 /）
+	// Remove trailing slashes (keep root like C:\ or /)
 	try {
 		const root = path.parse(out).root;
 		if (out.length > root.length) out = out.replace(/[\\\/]+$/, "");
@@ -2264,14 +2265,14 @@ function canonicalizeExistingPath(p) {
 }
 
 
-// ★ 统一的缓存键生成函数（Windows 下不区分大小写）
+// ★ Unified cache-key generator (case-insensitive on Windows)
 function cacheKeyForPath(p) {
 	const canon = canonicalizeExistingPath(p);
 	return process.platform === "win32" ? canon.toLowerCase() : canon;
 }
 
 
-// ★ 统一的字节格式化函数，decimals 控制小数位数（默认 1 位）
+// ★ Unified byte formatter, decimals controls fractional digits (default 1)
 function formatBytes(size, decimals = 1) {
 	if (size == null || isNaN(size)) return "?";
 	// const units = ["b", "kb", "mb", "gb"];
@@ -2292,8 +2293,8 @@ function formatHours(totalSeconds) {
 }
 
 /**
- * ★ 统一的时间格式化函数 (mm:ss 或 h:mm:ss)
- * @param {number} ms - 毫秒数
+ * ★ Unified compact time formatter (mm:ss or h:mm:ss)
+ * @param {number} ms - Milliseconds
  * @returns {string}
  */
 function formatTimeCompact(ms) {
@@ -2308,8 +2309,8 @@ function formatTimeCompact(ms) {
 }
 
 /**
- * ★ 统一的简洁字节格式化函数 (如 "222m", "1.2g")
- * @param {number} bytes - 字节数
+ * ★ Unified compact byte formatter (e.g. "222m", "1.2g")
+ * @param {number} bytes - Bytes
  * @returns {string}
  */
 function formatBytesCompact(bytes) {
@@ -2333,7 +2334,7 @@ function cleanReason(s, maxLen = 260) {
 function getEnginePreference() {
 	try {
 		const v = getConfig("ioEngine") || "auto";
-		// 统一映射：配置里的 "node" 对应内部逻辑的 "shell" (Shell Daemon)
+		// Unified mapping: config "node" maps to internal "shell" (Shell Daemon)
 		if (v === "node") return "shell";
 		return v;
 	} catch {
@@ -2342,14 +2343,14 @@ function getEnginePreference() {
 }
 
 // ============================================================================
-// ★ Transaction Manager (基于 globalState 的强一致性管理)
+// ★ Transaction Manager (strong consistency management based on globalState)
 // ============================================================================
 const KEY_TRANSACTIONS = "qqq.transactions";
 
 /**
- * 异步获取目录快照：记录目录中所有已存在的文件和文件夹的完整路径
- * @param {string} targetDir - 目标目录
- * @returns {Promise<string[]>} - 文件和文件夹的完整路径数组（已规范化）
+ * Async get directory snapshot: record full paths of all existing files and folders in the directory
+ * @param {string} targetDir - Target directory
+ * @returns {Promise<string[]>} - Array of full paths (normalized)
  */
 async function getDirectorySnapshot(targetDir) {
 	if (!targetDir || !fs.existsSync(targetDir)) {
@@ -2382,33 +2383,33 @@ const TransactionManager = {
 		if (!extensionContext) return;
 		let list = this.getTransactions();
 
-		// ★ 终极最优解：完美白名单字段清洗 (防止 1.8MB 爆炸)
+		// ★ Ultimate optimal solution: perfect whitelist field sanitization (prevent 1.8MB explosion)
 		const now = Date.now();
 		const cleanTrans = {
 			id: trans.id,
 			targetDir: trans.targetDir,
-			// 使用 toString() 替代 fsPath，确保 100% 兼容所有协议
+			// Use toString() instead of fsPath to ensure 100% compatibility with all schemes
 			targetUri: typeof trans.targetUri === 'string' ? trans.targetUri : trans.targetUri?.toString(),
 			docUri: typeof trans.docUri === 'string' ? trans.docUri : trans.docUri?.toString(),
 			tempFiles: Array.isArray(trans.tempFiles) ? trans.tempFiles : [],
 			status: 'pending',
 			createdAt: trans.createdAt || now,
-			// ★ lastActiveAt: 事务最后活跃时间，用于 recover 场景的时间基准判断
-			// 每次 cancel check 时更新，回滚时用此时间而非文件 birthtime
+			// ★ lastActiveAt: last active time of the transaction, used as time baseline for recover scenario
+			// Updated on each cancel check; rollback uses this time instead of file birthtime
 			lastActiveAt: trans.lastActiveAt || now,
 			taskType: trans.taskType || 'unknown',
-			// 预留元数据空间 (仅限简单类型)
+			// Reserved metadata space (simple types only)
 			extra: trans.extra || {}
 		};
 
 		list.push(cleanTrans);
 
-		// ★ 终极最优解：200/100 优先级截断逻辑
+		// ★ Ultimate optimal solution: 200/100 priority truncation logic
 		if (list.length > 200) {
-			const SIXTY_DAYS = 5184000000;  // 60天
+			const SIXTY_DAYS = 5184000000;  // 60 days
 			const now = Date.now();
 
-			// 定义清理权重：已结案(success/cancelled) 权重最高，超期(>60天) 权重次之
+			// Define cleanup weight: closed (success/cancelled) highest, expired (>60 days) next
 			const getWeight = (t) => {
 				let weight = 0;
 				if (t.status === 'success' || t.status === 'cancelled') weight += 2;
@@ -2416,12 +2417,12 @@ const TransactionManager = {
 				return weight;
 			};
 
-			// 按权重从大到小排序，权重相同按时间从老到新排序
+			// Sort by weight desc, tie-breaker by time oldest->newest
 			const sortedForDeletion = [...list].sort((a, b) => {
 				const wA = getWeight(a);
 				const wB = getWeight(b);
-				if (wA !== wB) return wB - wA; // 权重大的在前
-				return (a.createdAt || 0) - (b.createdAt || 0); // 时间老的在前
+				if (wA !== wB) return wB - wA; // higher weight first
+				return (a.createdAt || 0) - (b.createdAt || 0); // older first
 			});
 
 			const toDeleteIds = new Set(sortedForDeletion.slice(0, 100).map(t => t.id));
@@ -2439,14 +2440,14 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 轻量级更新 lastActiveAt（用于 cancel check 时频繁调用）
-	 * 使用节流逻辑，最多每 5 秒更新一次，避免过于频繁的 I/O
+	 * ★ Lightweight update of lastActiveAt (used for frequent calls during cancel check)
+	 * Throttled to at most once per 5 seconds to avoid excessive I/O
 	 */
 	_lastActiveThrottle: {},
 	async touchLastActive(transId) {
 		if (!extensionContext || !transId) return;
 		const now = Date.now();
-		// 节流：每 5 秒最多更新一次
+		// Throttle: at most once per 5 seconds
 		const lastTouch = this._lastActiveThrottle[transId] || 0;
 		if (now - lastTouch < 5000) return;
 		this._lastActiveThrottle[transId] = now;
@@ -2465,7 +2466,7 @@ const TransactionManager = {
 				await extensionContext.globalState.update(KEY_TRANSACTIONS, list);
 			}
 		} catch (e) {
-			// 静默失败，不影响主流程
+			// Silent failure, do not affect main flow
 		}
 	},
 
@@ -2477,14 +2478,14 @@ const TransactionManager = {
 	},
 
 	async rollback(transOrId, options = {}) {
-		// ★ 始终从 globalState 获取最新的事务数据（避免使用过时的快照）
+		// ★ Always fetch the latest transaction data from globalState (avoid stale snapshot)
 		const transId = typeof transOrId === 'string' ? transOrId : transOrId?.id;
 		if (!transId) {
 			logMessage(q('rollback.invalidId'), "WARN");
 			return;
 		}
 
-		// 从 globalState 重新获取最新数据
+		// Re-fetch latest data from globalState
 		const trans = this.getTransactions().find(t => t.id === transId);
 		if (!trans) {
 			logMessage(q('rollback.notFound', transId), "WARN");
@@ -2493,7 +2494,7 @@ const TransactionManager = {
 
 		logMessage(q('rollback.rollingBack', trans.id), "WARN");
 
-		// 0. ★ 删除残留锚点（零代价零风险：只删除特定格式的锚点字符串）
+		// 0. ★ Delete residual anchor (zero-cost, zero-risk: only delete the specific anchor string format)
 		try {
 			const anchor = `/__PENDING_${trans.id}/`;
 			const targetUri = trans.targetUri || trans.docUri;
@@ -2525,33 +2526,33 @@ const TransactionManager = {
 		logMessage(q('rollback.completed'), "INFO");
 		await this.removeTransaction(trans.id);
 
-		// ★ 后台清理（不阻塞弹窗和用户交互）
+		// ★ Background cleanup (do not block dialogs and user interaction)
 		const isRecover = options.isRecover === true;
 		if (trans.targetDir) {
 			setTimeout(() => {
-				// 1. 清理 .part/.ytdl 临时文件 (传入 trans 以便清理预注册的 tempFiles)
-				// ★ 传递 isRecover 选项，让清理逻辑使用事务时间基准
+				// 1. Clean .part/.ytdl temp files (pass trans to clean pre-registered tempFiles)
+				// ★ Pass isRecover so cleanup uses transaction time baseline
 				this._cleanupTempFiles(trans.targetDir, trans, { isRecover }).catch(e => {
 					logMessage(q('cleanup.tempFileFailed', e.message), "WARN");
 				});
 			}, 100);
 
-			// ★ 根据任务类型决定兜底清理时机
+			// ★ Decide fallback cleanup timing based on task type
 			const taskType = trans.taskType || '';
 
 			if (taskType === 'video') {
-				// ★ video 类型：跳过此处清理，由 VideoDownloadController 在 killAll 后立即执行
-				// （因为需要先杀死 yt-dlp 进程才能删除文件）
+				// ★ video type: skip cleanup here; VideoDownloadController will run it right after killAll
+				// (because yt-dlp process must be killed before deleting files)
 				logMessage(q('cleanup.videoWaitKillAll'), "INFO");
 			} else if (taskType === 'html') {
-				// ★ html 类型：无长进程，1秒后立即执行清理
+				// ★ html type: no long-running process, run cleanup after 1 second
 				setTimeout(() => {
 					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
 						logMessage(q('cleanup.fallbackFailed', e.message), "WARN");
 					});
 				}, 1000);
 			} else {
-				// ★ 其他类型（local_file 等）：11秒后执行 pure 兜底
+				// ★ Other types (local_file, etc.): run pure fallback after 11 seconds
 				setTimeout(() => {
 					this._cleanupOrphanFiles(trans.targetDir).catch(e => {
 						logMessage(q('cleanup.fallbackFailed', e.message), "WARN");
@@ -2560,15 +2561,15 @@ const TransactionManager = {
 			}
 		}
 
-		// ★ 返回 trans 便于调用方获取 targetDir
+		// ★ Return trans so caller can get targetDir
 		return trans;
 	},
 
 	/**
-	 * ★ 后台清理临时文件（基于 transId 前缀精确匹配 + 模糊匹配 .part/.ytdl 等）
+	 * ★ Background temp file cleanup (precise match by transId prefix + fuzzy match for .part/.ytdl etc.)
 	 * @param {string} targetDir
-	 * @param {object} trans - 可选的事务对象，包含 id 和 tempFiles
-	 * @param {object} options - 可选参数 { isRecover: boolean }
+	 * @param {object} trans - Optional transaction object containing id and tempFiles
+	 * @param {object} options - Optional params { isRecover: boolean }
 	 */
 	async _cleanupTempFiles(targetDir, trans = null, options = {}) {
 		if (!targetDir || !fs.existsSync(targetDir)) return;
@@ -2578,33 +2579,33 @@ const TransactionManager = {
 		const SIX_MINUTES = 360000;
 		const transId = trans?.id || null;
 
-		// 收集需要清理的文件（区分精确匹配 vs 模糊匹配）
-		const transIdMatchFiles = new Set(); // ★ 基于 transId 前缀精确匹配的文件（无时间限制）
-		const fuzzyTempFiles = new Set();    // 模糊匹配的临时文件（有 6 分钟限制）
+		// Collect files to clean (exact match vs fuzzy match)
+		const transIdMatchFiles = new Set(); // ★ Exact match by transId prefix (no time limit)
+		const fuzzyTempFiles = new Set();    // Fuzzy temp files (with 6-minute limit)
 
-		// 1. 扫描目录下的文件
+		// 1. Scan files in directory
 		try {
 			const files = fs.readdirSync(targetDir);
 			for (const f of files) {
 				const fullPath = path.normalize(path.join(targetDir, f));
 				const ext = path.extname(f).toLowerCase();
 
-				// ★ 策略 A：基于 transId 前缀精确匹配（无时间限制，100% 精确）
-				// 文件名格式：{transId}_{date}__{day}__{time}{ext}
-				// 例如：jhrYLq_2026.02.06__5__12.20.30.mp4
+				// ★ Strategy A: exact match by transId prefix (no time limit, 100% precise)
+				// Filename format: {transId}_{date}__{day}__{time}{ext}
+				// Example: jhrYLq_2026.02.06__5__12.20.30.mp4
 				if (transId && f.startsWith(transId + '_')) {
 					transIdMatchFiles.add(fullPath);
-					continue; // 已精确匹配，不需要模糊匹配
+					continue; // Already exact matched, no need fuzzy match
 				}
 
-				// ★ 策略 B：模糊匹配临时后缀文件（有 6 分钟限制）
+				// ★ Strategy B: fuzzy match temp suffix files (with 6-minute limit)
 				if (tempExts.includes(ext) || /\.f\d+\.(mp4|m4a|webm|mkv|mp3|opus|aac)(\.part)?$/i.test(f)) {
 					fuzzyTempFiles.add(fullPath);
 				}
 			}
 		} catch { }
 
-		// 2. 加上事务显式记录的 tempFiles（也用精确匹配，无时间限制）
+		// 2. Include trans.tempFiles explicitly recorded (also exact match, no time limit)
 		if (trans && Array.isArray(trans.tempFiles)) {
 			trans.tempFiles.forEach(f => {
 				if (f && typeof f === 'string') transIdMatchFiles.add(path.normalize(f));
@@ -2614,17 +2615,17 @@ const TransactionManager = {
 		const allFiles = new Set([...transIdMatchFiles, ...fuzzyTempFiles]);
 		if (allFiles.size === 0) return;
 
-		// ★ 关键修复：在删除任何文件之前，先获取全量引用“白名单”
-		// 这样即便文件在 tempFiles 中，只要有文档正在引用它，就绝不删除
+		// ★ Key fix: before deleting anything, first fetch the full reference whitelist
+		// So even if a file is in tempFiles, if it's referenced by a document, never delete it
 		const referencedItems = this._getReferencedItemsSync(targetDir);
 
 		let deletedCount = 0;
 
-		// 3. 执行删除
+		// 3. Execute deletion
 		for (const fullPath of allFiles) {
 			try {
 				const fileName = path.basename(fullPath);
-				// ★ 引用保护：如果在白名单中，跳过
+				// ★ Reference protection: if in whitelist, skip
 				if (referencedItems.has(fileName.toLowerCase())) {
 					continue;
 				}
@@ -2633,16 +2634,16 @@ const TransactionManager = {
 				const stat = fs.statSync(fullPath);
 				if (!stat.isFile()) continue;
 
-				// ★ 精确匹配的文件：无时间限制，直接删除
-				// ★ 模糊匹配的文件：保留 6 分钟限制
+				// ★ Exact-match files: no time limit, delete directly
+				// ★ Fuzzy-match files: keep 6-minute limit
 				const isExactMatch = transIdMatchFiles.has(fullPath);
 				let shouldDelete = false;
 
 				if (isExactMatch) {
-					// ★ transId 前缀匹配 / tempFiles 记录：无时间限制，100% 精确删除
+					// ★ transId prefix match / tempFiles record: no time limit, 100% precise delete
 					shouldDelete = true;
 				} else {
-					// ★ 模糊匹配文件：保留 6 分钟限制
+					// ★ Fuzzy-match files: keep 6-minute limit
 					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
 					if (birthtime && !isNaN(birthtime)) {
 						const age = now - birthtime;
@@ -2652,7 +2653,7 @@ const TransactionManager = {
 
 				if (!shouldDelete) continue;
 
-				// ★ 带重试逻辑
+				// ★ With retry logic
 				let deleted = false;
 				for (let retry = 0; retry < 5 && !deleted; retry++) {
 					try {
@@ -2675,8 +2676,8 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 同步/快速获取当前目录下的所有引用（用于清理前的白名单检查）
-	 * 包含：内存文档、磁盘文档、活跃事务
+	 * ★ Sync/fast get all current references in the directory (for whitelist check before cleanup)
+	 * Includes: in-memory docs, on-disk docs, active transactions
 	 */
 	_getReferencedItemsSync(targetDir) {
 		const referencedItems = new Set();
@@ -2684,7 +2685,7 @@ const TransactionManager = {
 			const parentDir = path.dirname(targetDir);
 			if (!parentDir || !fs.existsSync(parentDir)) return referencedItems;
 
-			// 1. 扫描当前打开的所有文档（内存保护）
+			// 1. Scan all currently open documents (memory protection)
 			vscode.workspace.textDocuments.forEach(doc => {
 				try {
 					const docDir = path.dirname(doc.uri.fsPath);
@@ -2694,7 +2695,7 @@ const TransactionManager = {
 				} catch { }
 			});
 
-			// 2. 扫描磁盘上的文件（仅限文本文件）
+			// 2. Scan files on disk (text files only)
 			const BINARY_EXTS = new Set([
 				".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico",
 				".exe", ".dll", ".zip", ".tar", ".gz",
@@ -2710,14 +2711,14 @@ const TransactionManager = {
 					if (BINARY_EXTS.has(ext)) continue;
 
 					const stat = fs.statSync(fullPath);
-					if (!stat.isFile() || stat.size > 60 * 1048576) continue; // 缩小范围提高速度
+					if (!stat.isFile() || stat.size > 60 * 1048576) continue; // Narrow scope to improve speed
 
 					const content = fs.readFileSync(fullPath, "utf-8");
 					this._extractReferences(content, referencedItems);
 				} catch { }
 			}
 
-			// 3. 扫描所有活跃事务（保护正在下载的文件）
+			// 3. Scan all active transactions (protect files being downloaded)
 			const allTrans = this.getTransactions();
 			for (const otherTrans of allTrans) {
 				if (Array.isArray(otherTrans.landedFiles)) {
@@ -2738,19 +2739,19 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 终极兖底：清理 qqq 文件夹中创建时间 < 5分钟的孤儿文件和文件夹
-	 * @param {string} targetDir - qqq 文件夹路径
+	 * ★ Ultimate fallback: clean orphan files and folders created < 5 minutes in qqq folder
+	 * @param {string} targetDir - Path to qqq folder
 	 */
 	async _cleanupOrphanFiles(targetDir) {
-		// ★ 整个函数包在 try-catch 中，防止任何异常导致扩展崩溃
+		// ★ Wrap the whole function in try-catch to prevent any exception from crashing the extension
 		try {
 			if (!targetDir || typeof targetDir !== 'string') return;
 			if (!fs.existsSync(targetDir)) return;
 
-			// ★ 使用统一的引用扫描逻辑 (内存 + 磁盘 + 事务)
+			// ★ Use unified reference scanning logic (memory + disk + transactions)
 			const referencedItems = this._getReferencedItemsSync(targetDir);
 
-			// ★ 获取 qqq 文件夹中的所有文件和文件夹（一视同仁）
+			// ★ Get all files and folders in qqq folder (treat equally)
 			let qqqItems = [];  // { name: string, isDir: boolean }
 			try {
 				const entries = fs.readdirSync(targetDir);
@@ -2765,11 +2766,11 @@ const TransactionManager = {
 
 			if (!qqqItems.length) return;
 
-			// ★ 找出孤儿（文件和文件夹一视同仁）
+			// ★ Find orphans (files and folders treated equally)
 			const orphans = qqqItems.filter(item => !referencedItems.has(item.name.toLowerCase()));
 			if (!orphans.length) return;
 
-			// ★ 删除创建时间 < 5分钟的孤儿文件/文件夹
+			// ★ Delete orphan files/folders created < 5 minutes
 			const now = Date.now();
 			const FIVE_MINUTES = 300000;
 			let cleanedCount = 0;
@@ -2778,19 +2779,19 @@ const TransactionManager = {
 				try {
 					const fullPath = path.join(targetDir, orphan.name);
 					const stat = fs.statSync(fullPath);
-					// ★ 确保 birthtimeMs 有效
+					// ★ Ensure birthtimeMs is valid
 					const birthtime = stat.birthtimeMs || stat.mtimeMs || 0;
 					if (!birthtime || isNaN(birthtime)) continue;
 
 					const age = now - birthtime;
-					// ★ 放宽限制：允许 age < 0 (系统时钟微调)，且扩展到 6分钟
+					// ★ Relax: allow age < 0 (system clock adjustment), and extend to 6 minutes
 					if (age < 360000) {
 						if (orphan.isDir) {
-							// ★ 文件夹：使用 rmSync 递归删除
+							// ★ Folder: recursive delete with rmSync
 							fs.rmSync(fullPath, { recursive: true, force: true });
 							logMessage(q('cleanup.orphanFolderDeleted', orphan.name, Math.round(age / 1000)), "INFO");
 						} else {
-							// ★ 文件：带重试逻辑的 unlink
+							// ★ File: unlink with retry logic
 							let deleted = false;
 							for (let retry = 0; retry < 3 && !deleted; retry++) {
 								try {
@@ -2813,7 +2814,7 @@ const TransactionManager = {
 				logMessage(q('cleanup.orphanCompleted', cleanedCount), "INFO");
 			}
 		} catch (e) {
-			// ★ 捕获所有异常，防止扩展崩溃
+			// ★ Catch all exceptions to prevent extension crash
 			logMessage(q('cleanup.orphanException', e.message), "WARN");
 		}
 	},
@@ -2824,9 +2825,9 @@ const TransactionManager = {
 
 		logMessage(q('recovery.found', list.length), "WARN");
 		for (const trans of list) {
-			// 简单的判断：只要是残留的，就清理。因为 recover 只在启动时调用。
-			// ★ 传入 isRecover: true，让清理逻辑使用 lastActiveAt 作为时间基准
-			// 而非文件 birthtime，这样即使 VS Code 崩溃后过了很久才重启也能正确回滚
+			// Simple rule: if leftover, clean it. recover is only called on startup.
+			// ★ Pass isRecover: true so cleanup uses lastActiveAt as time baseline
+			// instead of file birthtime, so even if VS Code restarts long after crash, rollback works correctly
 			await this.rollback(trans, { isRecover: true });
 		}
 	},
@@ -2841,20 +2842,20 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ 辅助函数：从内容中提取所有引用的 qqq 文件名
-	 * 改进的正则：支持包含空格和特殊字符的文件名，直到遇到常见的结束符
+	 * ★ Helper: extract all referenced qqq file names from content
+	 * Improved regex: supports filenames with spaces and special chars until common terminators
 	 */
 	_extractReferences(content, set) {
 		if (!content) return;
-		// 改进后的正则：
-		// 1. 匹配 qqq/ 或 qqq\
-		// 2. 匹配后续字符，直到遇到引号、尖括号、方括号、圆括号、换行符 或 我们特有的 \/ 结束符
+		// Improved regex:
+		// 1. Match qqq/ or qqq\
+		// 2. Match subsequent chars until encountering quotes, angle brackets, brackets, parentheses, newline, or our special \/ terminator
 		const regex = /qqq[\\/]([^"'<>\[\]\(\)\r\n]+?)(?=[\\"']|[\r\n]|\\\/|\s*[\)\}\]]|$)/gi;
 		let match;
 		regex.lastIndex = 0;
 		while ((match = regex.exec(content))) {
 			let name = (match[1] || "").trim();
-			// 如果文件名末尾有反斜杠（可能是我们的 /\\...\\/ 格式），去掉它
+			// If filename ends with backslash (possibly our /\\...\\/ format), remove it
 			if (name.endsWith('\\')) name = name.slice(0, -1).trim();
 			if (name) set.add(name.toLowerCase());
 		}
@@ -2862,7 +2863,7 @@ const TransactionManager = {
 
 	async insertAnchor(editor, transId) {
 		try {
-			// 检查编辑器是否仍然有效
+			// Check if editor is still valid
 			if (!editor || !vscode.window.visibleTextEditors.includes(editor)) {
 				return false;
 			}
@@ -2879,7 +2880,7 @@ const TransactionManager = {
 };
 
 // ============================================================================
-// ★ 任务计数器系统（每个文件路径维护一个永久递增的任务计数 q）
+// ★ Task counter system (per file path, a permanently increasing task counter q)
 // ============================================================================
 const KEY_TASK_COUNTERS = "qqq.task_counters";
 let _iconCounter = Math.floor(Math.random() * 17);
@@ -2891,7 +2892,7 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 递增并返回新的任务计数（永不重置，按文件分别计数）
+	 * Increment and return new task count (never resets, counted per file)
 	 */
 	async increment(filePath) {
 		if (!extensionContext) return 1;
@@ -2908,14 +2909,14 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 截断路径显示：目录部分超过22字符时截断
-	 * 例：E:\s\dqqqqqqqqqqqqqqqqqqq\11.txt -> ...qqqqqqqqqqqqqqq\11.txt
-	 * ★ 统一使用正斜杠显示（避免 Windows 反斜杠被转义显示为双斜杠）
+	 * Truncate path display: truncate directory part if it exceeds 22 chars
+	 * Example: E:\s\dqqqqqqqqqqqqqqqqqqq\11.txt -> ...qqqqqqqqqqqqqqq\11.txt
+	 * ★ Always display with forward slashes (avoid Windows backslashes being escaped as double slashes)
 	 */
 	formatPath(filePath, maxDirLen = 22) {
 		if (!filePath) return '';
 
-		// ★ 统一转换为正斜杠（对用户友好，避免反斜杠转义问题）
+		// ★ Convert to forward slashes for user-friendly display, avoid backslash escaping issues
 		const normalizedPath = filePath.replace(/\\/g, '/');
 		const lastSlash = normalizedPath.lastIndexOf('/');
 
@@ -2924,7 +2925,7 @@ const TaskCounter = {
 
 		let displayDir = dir;
 		if (dir.length > maxDirLen) {
-			// 只保留最右边的22个字符
+			// Keep only the rightmost 22 characters
 			displayDir = '...' + dir.slice(-maxDirLen);
 		}
 
@@ -2932,15 +2933,15 @@ const TaskCounter = {
 	},
 
 	/**
-	 * 生成任务标题：qqq：'截断路径❤️taskId'
-	 * @param {string} filePath - 文件路径
-	 * @param {string} taskId - 任务ID（六位随机字符串）
-	 * @param {number} iconNum - 全局图形编号（跨文件递增，用于选择图形）
-	 * @param {string} suffix - 可选后缀描述
+	 * Generate task title: qqq: 'truncated path ❤️ taskId'
+	 * @param {string} filePath - File path
+	 * @param {string} taskId - Task ID (6-char random string)
+	 * @param {number} iconNum - Global icon index (increments across files)
+	 * @param {string} suffix - Optional suffix description
 	 */
 	formatTitle(filePath, taskId, iconNum = 1, suffix = '') {
-		// ★ 17个图形固定顺序循环（跨文件全局队列）
-		// 规则：形状交替（心形 vs 非心形），颜色交替，避免视觉重复
+		// ★ Fixed sequence of 17 icons looping (global queue across files)
+		// Rules: alternate shape (heart vs non-heart), alternate color, avoid visual repetition
 		const ICONS = [
 			'❤️', '⬛', '💚', '⭐', '💜', '🔵',
 			'💙', '🌸', '🤎', '⬜', '💛', '🔷',
@@ -2949,19 +2950,19 @@ const TaskCounter = {
 		const icon = ICONS[(iconNum - 1) % ICONS.length];
 
 		const displayPath = this.formatPath(filePath);
-		const base = `qqq：'${displayPath}${icon}${taskId}'`;
+		const base = `qqq：'${displayPath}${icon}${taskId}'`; // qq2q
 		return suffix ? `${base} ${suffix}` : base;
 	}
 };
 
 /**
- * ★ 单一真理源：精准分类 + 完整快照
- * 返回 { type, subType, files?, totalSize?, rawStatus }
+ * ★ Single source of truth: precise classification + full snapshot
+ * Returns { type, subType, files?, totalSize?, rawStatus }
  * - type: 'whitelist' | 'yellowlist'
  * - subType: 'text' | 'html_text' | 'file' | 'image' | 'html_rich' | 'video_url' | 'unknown'
- * - files: 文件列表 (仅当 hasFile 时)
- * - totalSize: 文件总大小 (仅当 hasFile 时)
- * - rawStatus: 原始状态 { hasFile, hasHtml, hasImage, hasText }
+ * - files: file list (only when hasFile)
+ * - totalSize: total file size (only when hasFile)
+ * - rawStatus: original status { hasFile, hasHtml, hasImage, hasText }
  */
 async function wq() {
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
@@ -2970,24 +2971,24 @@ async function wq() {
 	let totalSize = 0;
 	let wqExecutionTime = 0;
 
-	// 1. 尝试使用 Daemon Bridge (高性能)
+	// 1. Try Daemon Bridge (high performance)
 	if (shellBridge && shellBridge.isAvailable()) {
 		try {
-			const startTime = Date.now(); // 只在核心操作前开始计时
+			const startTime = Date.now(); // Start timing only right before core operation
 			const res = await shellBridge.call("wq", {}, 3000);
-			wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
+			wqExecutionTime = Date.now() - startTime; // Measure only core operation time
 
 			if (res && !res.error) {
 				status = res;
 				handled = true;
 
-				// ★ 如果有文件，立即获取文件列表（同一次 Shell 调用窗口）
+				// ★ If there are files, immediately fetch file list (within same Shell call window)
 				if (status.hasFile) {
 					try {
 						const filesRes = await shellBridge.call("getFiles", {}, 3000);
 						if (filesRes && filesRes.files) {
 							files = filesRes.files;
-							// 计算总大小
+							// Calculate total size
 							for (const f of files) {
 								try { totalSize += fs.statSync(f).size; } catch { }
 							}
@@ -2997,19 +2998,19 @@ async function wq() {
 			}
 		} catch (e) { }
 	} else {
-		// 2. 备选方案 (VS Code API)
-		const startTime = Date.now(); // 只在核心操作前开始计时
+		// 2. Fallback (VS Code API)
+		const startTime = Date.now(); // Start timing only right before core operation
 		const text = await vscode.env.clipboard.readText();
-		wqExecutionTime = Date.now() - startTime; // 只测量核心操作时间
+		wqExecutionTime = Date.now() - startTime; // Measure only core operation time
 		if (text) status.hasText = true;
 	}
 
-	// --- 核心分类逻辑 ---
+	// --- Core classification logic ---
 	const baseResult = { rawStatus: status, files, totalSize };
 
-	// A. 白名单识别 (1.纯文本 2.纯文字HTML)
+	// A. Whitelist recognition (1. pure text 2. text-only HTML)
 	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
-		// 保存统计数据
+		// Save stats data
 		saveWqStats(wqExecutionTime);
 		return { type: 'whitelist', subType: 'text', ...baseResult };
 	}
@@ -3022,7 +3023,7 @@ async function wq() {
 				const $ = res.$;
 				const hasImg = $('img, video, iframe, embed, object').length > 0;
 				if (!hasImg) {
-					// 保存统计数据
+					// Save stats data
 					saveWqStats(wqExecutionTime);
 					return { type: 'whitelist', subType: 'html_text', ...baseResult };
 				}
@@ -3030,7 +3031,7 @@ async function wq() {
 		} catch (e) { }
 	}
 
-	// B. 黄名单识别 (其余一切)
+	// B. Yellowlist recognition (everything else)
 	let subType = 'unknown';
 	if (status.hasFile) subType = 'file';
 	else if (status.hasImage) subType = 'image';
@@ -3043,17 +3044,17 @@ async function wq() {
 		}
 	}
 
-	// 保存统计数据
+	// Save stats data
 	saveWqStats(wqExecutionTime);
 
 	return { type: 'yellowlist', subType, ...baseResult };
 }
 
-// 保存wq统计数据的辅助函数
+// Helper function to save wq stats
 function saveWqStats(wqExecutionTime) {
-	// 异常值过滤：只统计1ms到1000ms之间的时间
+	// Outlier filtering: only count times between 1ms and 1000ms
 	if (wqExecutionTime >= 1 && wqExecutionTime <= 1000) {
-		// 持久化统计到globalState
+		// Persist stats to globalState
 		if (extensionContext) {
 			const wqStats = extensionContext.globalState.get("qqq_wq_stats", {
 				totalTime: 0,
@@ -3062,24 +3063,24 @@ function saveWqStats(wqExecutionTime) {
 				maxTime: 0
 			});
 
-			// 更新统计数据
+			// Update stats
 			wqStats.totalTime += wqExecutionTime;
 			wqStats.count += 1;
 
-			// 更新最近7次时间（使用环形缓冲区）
+			// Update last 7 times (ring buffer)
 			wqStats.recentTimes.push(wqExecutionTime);
 			if (wqStats.recentTimes.length > 7) {
 				wqStats.recentTimes.shift();
 			}
 
-			// 更新最大时间
+			// Update max time
 			if (wqExecutionTime > wqStats.maxTime) {
 				wqStats.maxTime = wqExecutionTime;
 			}
 
-			// 保存到globalState
+			// Save to globalState
 			extensionContext.globalState.update("qqq_wq_stats", wqStats);
-			// 触发状态栏更新
+			// Trigger status bar update
 			if (typeof updateStatusBarNow === 'function') {
 				updateStatusBarNow();
 			}
@@ -3087,7 +3088,7 @@ function saveWqStats(wqExecutionTime) {
 	}
 }
 
-// 保存粘贴统计数据的辅助函数
+// Helper function to save paste stats
 function savePasteStats(sizeInBytes) {
 	if (extensionContext) {
 		const stats = extensionContext.globalState.get("qqq_paste_stats", {
@@ -3099,19 +3100,19 @@ function savePasteStats(sizeInBytes) {
 		stats.count += 1;
 		stats.totalSize += (sizeInBytes || 0);
 
-		// 如果是首次使用且未设置，初始化时间（兼容旧数据）
+		// If firstUse is missing (compat with old data), init it
 		if (!stats.firstUse) stats.firstUse = Date.now();
 
 		extensionContext.globalState.update("qqq_paste_stats", stats);
 
-		// 触发侧边栏更新（如果有 Webview 正在监听）
+		// Trigger sidebar update (if a Webview is listening)
 		if (typeof updateStatusBarNow === 'function') {
 			updateStatusBarNow();
 		}
 	}
 }
 
-// 保存视频下载统计数据的辅助函数
+// Helper function to save video download stats
 function saveVideoStats(sizeInBytes) {
 	if (extensionContext) {
 		const stats = extensionContext.globalState.get("qqq_video_stats", {
@@ -3134,14 +3135,14 @@ function saveVideoStats(sizeInBytes) {
 }
 
 function getEngineTryOrder(pref) {
-	// ★ 核心真理：定义不同偏好下的回退顺序
-	// 最后的 "spawn" 是隐式保底，通常由调用方处理，但这里列出以明确逻辑
+	// ★ Core truth: define fallback order under different preferences
+	// The final "spawn" is an implicit last resort, usually handled by caller, listed here to clarify logic
 	switch (pref) {
 		case "python":
 			return ["python", "rust", "shell", "spawn"];
 		case "rust":
 			return ["rust", "python", "shell", "spawn"];
-		case "shell": // 对应配置 "node"
+		case "shell": // Corresponds to config "node"
 			return ["shell", "spawn"];
 		case "auto":
 		default:
@@ -3149,29 +3150,29 @@ function getEngineTryOrder(pref) {
 	}
 }
 
-// ★★★ 引擎调度优化：缓存有效引擎顺序 ★★★
+// ★★★ Engine scheduling optimization: cache effective engine order ★★★
 let _cachedEffectiveOrder = null;
 let _cachedPref = null;
 
 function getEffectiveEngineOrder() {
 	const pref = getEnginePreference();
 
-	// 偏好变化时重新计算
+	// Recompute if preference changes
 	if (_cachedPref !== pref) {
 		_cachedEffectiveOrder = null;
 		_cachedPref = pref;
 	}
 
-	// ★ 已有缓存（包括空数组），直接返回
+	// ★ Cached (including empty array), return directly
 	if (_cachedEffectiveOrder !== null) {
 		return _cachedEffectiveOrder;
 	}
 
-	// 重新计算：只保留可用引擎
+	// Recompute: keep only available engines
 	const fullOrder = getEngineTryOrder(pref);
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
 
-	// ★ 获取 Python L1 不完美状态
+	// ★ Get Python L1 imperfect status
 	let pythonL1Imperfect = false;
 	try {
 		const { getSharedDownloader } = require("./dow");
@@ -3183,9 +3184,9 @@ function getEffectiveEngineOrder() {
 	} catch { }
 
 	_cachedEffectiveOrder = fullOrder.filter(name => {
-		if (name === "spawn") return false; // spawn 由调用方单独处理
+		if (name === "spawn") return false; // spawn is handled separately by caller
 
-		// ★ 如果 Python L1 已知不完美，跳过 Python
+		// ★ If Python L1 is known imperfect, skip Python
 		if (name === "python" && pythonL1Imperfect) {
 			return false;
 		}
@@ -3197,7 +3198,7 @@ function getEffectiveEngineOrder() {
 	return _cachedEffectiveOrder;
 }
 
-// ★ 引擎状态变化时清除缓存
+// ★ Clear cache when engine state changes
 function invalidateEngineCache() {
 	_cachedEffectiveOrder = null;
 }
@@ -3210,27 +3211,27 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 	const shReason = cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
 
 	if (activeState.code === "N" && activeState.nodeMode === "S") {
-		if (shReason) reasons.push(`Shell daemon：${shReason} `);
-		else reasons.push(`Shell daemon：启动失败 / 不可用`);
+		if (shReason) reasons.push(`Shell daemon：${shReason} `); // qq2q
+		else reasons.push(`Shell daemon：启动失败 / 不可用`); // qq2q
 	}
 
 	if (pref === "python" && activeState.code !== "P") {
-		if (pyReason) reasons.unshift(`Python：${pyReason} `);
-		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // 只有当真的不可用时才报
+		if (pyReason) reasons.unshift(`Python：${pyReason} `); // qq2q
+		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // qq2q // Only report if truly unavailable
 
-		// Rust 只有在真的被尝试过且失败时才报
+		// Rust only report if it was actually tried and failed
 		if (activeState.code === "N" && rustBridge.lastStartError) {
-			if (rsReason) reasons.push(`Rust：${rsReason} `);
-			else reasons.push(`Rust：启动失败 / 不可用`);
+			if (rsReason) reasons.push(`Rust：${rsReason} `); // qq2q
+			else reasons.push(`Rust：启动失败 / 不可用`); // qq2q
 		}
 	}
 
 	if (pref === "rust" && activeState.code !== "R") {
-		if (rsReason) reasons.unshift(`Rust：${rsReason} `);
-		else reasons.unshift(`Rust：启动失败 / 不可用`);
+		if (rsReason) reasons.unshift(`Rust：${rsReason} `); // qq2q
+		else reasons.unshift(`Rust：启动失败 / 不可用`); // qq2q
 		if (activeState.code === "N") {
-			if (pyReason) reasons.push(`Python：${pyReason} `);
-			else reasons.push(`Python：启动失败 / 不可用`);
+			if (pyReason) reasons.push(`Python：${pyReason} `); // qq2q
+			else reasons.push(`Python：启动失败 / 不可用`); // qq2q
 		}
 	}
 
@@ -3255,13 +3256,13 @@ function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 			return { code: "N", nodeMode: "S", name: "Node (Node spawn)" };
 		}
 	}
-	// 兜底
+	// Fallback
 	const mode = sh ? "D" : "S";
 	return { code: "N", nodeMode: mode, name: mode === "D" ? "Node (Shell daemon)" : "Node (Node spawn)" };
 }
 
 async function tryOneByOne(callback) {
-	// ★ 简化版：直接使用缓存的有效引擎顺序
+	// ★ Simplified: directly use cached effective engine order
 	const effectiveOrder = getEffectiveEngineOrder();
 	const bridges = { "python": pythonBridge, "rust": rustBridge, "shell": shellBridge };
 
@@ -3279,8 +3280,8 @@ async function tryOneByOne(callback) {
 }
 
 /**
- * 触发系统原生粘贴（与用户 IO 引擎偏好无关）
- * 简单直接：只用 shell daemon
+ * Trigger system native paste (independent of user's IO engine preference)
+ * Simple and direct: only use shell daemon
  */
 async function triggerSystemPaste(targetDir) {
 	if (!targetDir) {
@@ -3311,7 +3312,7 @@ const LARGE_WATERMARK_HASH = "dd931dba64fd02a5fd683dd83692bc04311e4bc8ce5df5b44d
 const SMALL_WATERMARK_HASH = "7e2d52d43e5383b8638026552dc4b01e84012643415916ffe745d047541c3c67";
 
 /**
- * 异步系统完整性校验（防阻塞启动）
+ * Async system integrity check (non-blocking startup)
  */
 async function verifySystemIntegrityAsync(context, force = false) {
 	if (!force && _integrityCache !== null) return _integrityCache;
@@ -3337,7 +3338,7 @@ async function verifySystemIntegrityAsync(context, force = false) {
 
 		const isValid = (largeHash === LARGE_WATERMARK_HASH && smallHash === SMALL_WATERMARK_HASH);
 
-		// ★ 熔断机制：如果发现被篡改，主动瘫痪核心引擎
+		// ★ Fuse mechanism: if tampering is detected, proactively disable core engine
 		if (isValid === false) {
 			logMessage(q('integrity.fuseLocked'), "ERROR");
 			killAllProcesses();
@@ -3355,13 +3356,13 @@ async function verifySystemIntegrityAsync(context, force = false) {
 }
 
 /**
- * 资产哨兵逻辑已移至 q3.js 独立模块实现
+ * Asset sentinel logic has been moved to q3.js as an independent module
  */
 function startAssetsSentinel(context) {
-	// 已迁移
+	// Migrated
 }
 
-// ==================== 共享常量与扩展名 ====================
+// ==================== Shared constants and extensions ====================
 const IMAGE_EXTS = new Set([
 	".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif",
 	".svg", ".ai", ".eps", ".cdr", ".psd"
@@ -3388,7 +3389,7 @@ const EXECUTABLE_EXTS = new Set([
 	".exe", ".dll", ".bin", ".dat", ".iso", ".msi", ".bat", ".cmd", ".ps1"
 ]);
 
-// 包含所有预览不支持或不应作为文本读取的文件类型（q2 使用）
+// Includes all file types that preview does not support or should not be read as text (used by q2)
 const NON_TEXT_EXTS = new Set([
 	...EXECUTABLE_EXTS,
 	...ARCHIVE_EXTS,
@@ -3403,7 +3404,7 @@ async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 		const action = typeof actionOrMap === "object" ? actionOrMap[name] : actionOrMap;
 		if (!action) return null;
 
-		// ★ 关键修复：支持函数式 Action 映射，用于 Node 侧逻辑直接注入
+		// ★ Key fix: support function-style Action mapping, for direct Node-side logic injection
 		if (typeof action === "function") {
 			try {
 				const res = await action(params);
@@ -3416,22 +3417,22 @@ async function tryEngineCall(actionOrMap, params = {}, timeout = 5000) {
 		}
 
 		const res = await bridge.call(action, params, timeout);
-		// ★ 容错增强：只要有 success 标志或者没有 error 且不是 unknown，都视为成功
+		// ★ Fault-tolerance: success if success flag exists, or no error and not unknown
 		if (res && (res.success === true || (res.success !== false && !res.error && res.type !== "unknown"))) return res;
 		return null;
 	});
 }
 
 /**
- * 向所有活跃的 daemon 发送 cancel_scans 命令
- * 用于取消正在进行的耗时扫描操作（path_size, folder_info）
+ * Send cancel_scans command to all active daemons
+ * Used to cancel long-running scan operations (path_size, folder_info)
  */
 async function cancelScans() {
 	const bridges = [pythonBridge, rustBridge];
 	const promises = bridges.map(async (bridge) => {
 		if (!bridge || !bridge.isAlive()) return null;
 		try {
-			// 快速调用，不等待响应（fire and forget）
+			// Fast call, do not wait for response (fire and forget)
 			bridge.call("cancel_scans", {}, 500).catch(() => { });
 		} catch { }
 	});
@@ -3446,7 +3447,7 @@ function getActiveEngineName(pythonBridge, rustBridge, shellBridge) {
 	return getActiveEngineState(pythonBridge, rustBridge, shellBridge).name;
 }
 
-// ★ 核心更新逻辑：接收外部数据（缓存快照、Bridge对象），渲染状态栏
+// ★ Core update logic: receive external data (cache snapshot, Bridge objects), render status bar
 function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBridge) {
 	if (!statusBarItem) return;
 
@@ -3460,7 +3461,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const denom = pstats.hitTotal + pstats.missTotal;
 	const hitRate = denom > 0 ? (pstats.hitTotal / denom) * 100 : 0;
 
-	// 获取wq前摇时间统计
+	// Get wq windup time stats
 	let wqStats = { totalTime: 0, count: 0, recentTimes: [], maxTime: 0 };
 	if (extensionContext) {
 		wqStats = extensionContext.globalState.get("qqq_wq_stats", wqStats);
@@ -3490,26 +3491,26 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	let mismatchText = "";
 	if ((pref === "python" && active.code !== "P") || (pref === "rust" && active.code !== "R")) {
 		const expectedName = pref === "python" ? "Python" : "Rust";
-		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : "未知原因";
-		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `;
+		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : "未知原因"; // qq2q
+		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `; // qq2q
 	}
 
 	const ioLine = `${active.name}${mismatchText}`;
 
-	// 格式化wq时间显示
+	// Format wq time display
 	const recentTimesStr = wqStats.recentTimes.join(', ');
-	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`;
+	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`; // qq2q
 
 	const tooltip = new vscode.MarkdownString(
-		`⏱️ **陪伴时间：** ${formatHours(totalSeconds)}
+		`⏱️ **陪伴时间：** ${formatHours(totalSeconds)} // qq2q
 
-💾 **磁盘缓存：** ${formatBytes(cacheBytes)}
+💾 **磁盘缓存：** ${formatBytes(cacheBytes)} // qq2q
 
-🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})
+🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal}) // qq2q
 
 ${wqLine}
 
-⚡ **IO 引擎：** ${ioLine}`
+⚡ **IO 引擎：** ${ioLine}` // qq2q
 	);
 
 	tooltip.isTrusted = true;
@@ -3591,7 +3592,7 @@ class TaskQueue {
 
 const probeScheduler = new TaskScheduler(12);
 const genScheduler = new TaskScheduler(6);
-const iconScheduler = new TaskScheduler(4); // 用于图标获取的调度器
+const iconScheduler = new TaskScheduler(4); // Scheduler for icon fetching
 const pasteQueue = new TaskQueue();
 const metaSaveQueue = new TaskQueue();
 
@@ -3614,25 +3615,25 @@ async function getIcon(filePath) {
 }
 
 // ============================================================================
-// ★ URL 验证 (统一真理源，供 Node.js 和 Webview 两端共用)
+// ★ URL validation (single source of truth, shared by Node.js and Webview)
 // ============================================================================
 function isValidUrl(input) {
 	if (input === null || input === undefined) return false;
 
-	// ES3/ES5 都能跑的 trim
+	// ES3/ES5 compatible trim
 	var s = ('' + input).replace(/^\s+|\s+$/g, '');
 	if (!s) return false;
 
-	// 任意空白直接判无效（防止 "http://a b.com"）
+	// Any whitespace is invalid (prevent "http://a b.com")
 	if (/\s/.test(s)) return false;
 
-	// 拒绝反斜杠，避免把 Windows 路径误判成 URL
+	// Reject backslashes to avoid mistaking Windows paths as URLs
 	if (/\\/.test(s)) return false;
 
-	// 拒绝 scheme-relative: //example.com
+	// Reject scheme-relative: //example.com
 	if (s.indexOf('//') === 0) return false;
 
-	// 解析 scheme（若写了必须是 http/https）
+	// Parse scheme (if present, must be http/https)
 	var rest = s;
 	var m = rest.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
 	if (m) {
@@ -3641,15 +3642,15 @@ function isValidUrl(input) {
 		rest = rest.slice(m[0].length);
 	}
 
-	// authority 到第一个 / ? # 为止
+	// authority until first / ? #
 	var cut = rest.search(/[\/?#]/);
 	var authority = (cut === -1) ? rest : rest.slice(0, cut);
 	if (!authority) return false;
 
-	// 不支持 userinfo（更安全）：user:pass@host
+	// Do not support userinfo (safer): user:pass@host
 	if (authority.indexOf('@') !== -1) return false;
 
-	// 拆 host / port
+	// Split host / port
 	var host = '';
 	var portStr = '';
 
@@ -3665,7 +3666,7 @@ function isValidUrl(input) {
 			if (!portStr) return false;
 		}
 	} else {
-		// host:port（用最后一个冒号切）
+		// host:port (split by last colon)
 		var lastColon = authority.lastIndexOf(':');
 		if (lastColon !== -1 && authority.indexOf(':') === lastColon) {
 			var possiblePort = authority.slice(lastColon + 1);
@@ -3682,14 +3683,14 @@ function isValidUrl(input) {
 
 	if (!host) return false;
 
-	// 端口 1..65535
+	// Port 1..65535
 	if (portStr) {
 		if (!/^\d{1,5}$/.test(portStr)) return false;
 		var port = parseInt(portStr, 10);
 		if (!(port >= 1 && port <= 65535)) return false;
 	}
 
-	// host 校验：localhost / IPv4 / [IPv6] / 域名（含 punycode）
+	// Host validation: localhost / IPv4 / [IPv6] / domain (including punycode)
 	if (isLocal(host) || isIPv4(host) || isBracketIPv6(host) || isDomain(host)) return true;
 	return false;
 
@@ -3699,7 +3700,7 @@ function isValidUrl(input) {
 	}
 
 	function isBracketIPv6(h) {
-		// 实用型 IPv6 校验（不做完整 RFC，但足够稳）
+		// Practical IPv6 validation (not full RFC, but robust enough)
 		if (h.length < 4) return false;
 		if (h.charAt(0) !== '[' || h.charAt(h.length - 1) !== ']') return false;
 		var inner = h.slice(1, -1);
@@ -3719,12 +3720,12 @@ function isValidUrl(input) {
 	}
 
 	function isDomain(h) {
-		// 允许末尾点：example.com.
+		// Allow trailing dot: example.com.
 		if (h.charAt(h.length - 1) === '.') h = h.slice(0, -1);
 		if (!h) return false;
 		if (h.length > 253) return false;
 
-		// 必须至少一个点（避免把 "abc" 当域名；localhost 走 isLocal）
+		// Must contain at least one dot (avoid treating "abc" as a domain; localhost handled by isLocal)
 		if (h.indexOf('.') === -1) return false;
 
 		var labels = h.split('.');
@@ -3733,11 +3734,11 @@ function isValidUrl(input) {
 		for (var i = 0; i < labels.length; i++) {
 			var lab = labels[i];
 			if (!lab || lab.length > 63) return false;
-			// 每段：字母数字开头结尾，中间允许 -
+			// Each label: alnum start/end, hyphen allowed in middle
 			if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(lab)) return false;
 		}
 
-		// TLD：纯字母 2-63 或 punycode xn--
+		// TLD: letters 2-63 or punycode xn--
 		var tld = labels[labels.length - 1];
 		if (!/^(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i.test(tld)) return false;
 
@@ -3749,7 +3750,7 @@ module.exports = {
 	init,
 	getIcon,
 
-	// 调度器与队列
+	// Schedulers and queues
 	TaskScheduler,
 	TaskQueue,
 	probeScheduler,
@@ -3758,14 +3759,14 @@ module.exports = {
 	pasteQueue,
 	metaSaveQueue,
 
-	// 日志
+	// Logs
 	setLogPath,
 	getLogPath,
 	logMessage,
 	logMessageRateLimited,
 	bridgeStderrKey,
 
-	// 对话框
+	// Dialogs
 	showInformationMessage,
 	showAutoCloseNotification,
 	showErrorMessage,
@@ -3778,24 +3779,24 @@ module.exports = {
 	openExternal,
 	setStatusBarMessage,
 
-	// ★ 统一任务消息模块
+	// ★ Unified task message module
 	TaskMessage,
 
-	// 统计
+	// Stats
 	markCacheHit,
 	markCacheMiss,
 	getPersistentCacheStatsSnapshot,
 	setCacheStatsGetter,
 	finishUserTracking,
 
-	// 状态栏相关
+	// Status bar related
 	initStatusBar,
 	disposeStatusBar,
 	updateStatusBar,
 
 	cleanReason,
 
-	// 引擎辅助 (给外部用)
+	// Engine helpers (for external use)
 	DaemonBridge,
 	ConfigManager,
 	getConfig,
@@ -3816,30 +3817,30 @@ module.exports = {
 	triggerSystemPaste,
 	getActiveEngineCode,
 	getActiveEngineName,
-	invalidateEngineCache,  // ★ 刷新引擎缓存
+	invalidateEngineCache,  // ★ Refresh engine cache
 	extensionPath: () => extensionContext?.extensionPath,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 
-	// 格式化辅助 (给 CodeLens 等用)
+	// Formatting helpers (for CodeLens etc.)
 	formatBytes,
 	formatHours,
-	formatTimeCompact,    // ★ 统一时间格式化 (mm:ss 或 h:mm:ss)
-	formatBytesCompact,   // ★ 统一简洁字节格式化 ("222m", "1.2g")
+	formatTimeCompact,    // ★ Unified time formatter (mm:ss or h:mm:ss)
+	formatBytesCompact,   // ★ Unified compact byte formatter ("222m", "1.2g")
 
-	// 路径工具函数
+	// Path helper functions
 	canonicalizeExistingPath,
 	cacheKeyForPath,
 
-	// ★ 核心逻辑导出
+	// ★ Core logic exports
 	savePasteStats,
 	saveVideoStats,
 	wq,
 	TransactionManager,
 	TaskCounter,
-	getDirectorySnapshot,  // ★ 目录快照函数
+	getDirectorySnapshot,  // ★ Directory snapshot function
 
-	// ★ 终极最优解：进程与状态管理接口
+	// ★ Ultimate optimal solution: process and state management APIs
 	trackProcess,
 	killAllProcesses,
 	isValid: () => _integrityCache !== false,
@@ -3847,14 +3848,14 @@ module.exports = {
 	markReady: () => {
 		if (_resolveReady) {
 			_resolveReady();
-			_resolveReady = null; // 释放引用
+			_resolveReady = null; // Release reference
 		}
 	},
 	withReady,
 	setDeactivated: (v) => { _isDeactivated = !!v; },
 	isDeactivated: () => _isDeactivated,
 
-	// 常量
+	// Constants
 	IMAGE_EXTS,
 	VIDEO_EXTS,
 	AUDIO_EXTS,
@@ -3862,6 +3863,7 @@ module.exports = {
 	ARCHIVE_EXTS,
 	NON_TEXT_EXTS,
 
-	// URL 验证 (统一真理源)
+	// URL validation (single source of truth)
 	isValidUrl
 };
+
