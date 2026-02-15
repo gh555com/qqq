@@ -286,7 +286,7 @@
             "cacheInitError": "缓存初始化失败: {0}",
             "delayedInitError": "延迟初始化失败: {0}",
             "delayedInitStart": "qqq 延迟初始化开始...",
-            "dowWarmup": "qqq dow.js 预热开始 (10秒延迟)",
+            "dowWarmup": "qqq dow.js 预热 (w10)",
             "q4LoadError": "q4 (剪切板/侧边栏) 加载失败: {0}",
             "daemonsStart": "qqq startDaemons 开始 (6秒延迟)",
             "engineSwitch": "引擎切换为: {0}，更新状态栏",
