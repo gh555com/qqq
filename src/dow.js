@@ -9,13 +9,13 @@ const zlib = require("zlib");
 const dns = require("dns");
 const net = require("net");
 const { pipeline, Transform } = require("stream");
-// ★ 不在顶部缓存 spawn，改为每次使用时动态获取，以便 ChildProcessTracker 能正确追踪
+// ★ Do not cache spawn at top; require it dynamically each time so ChildProcessTracker can track correctly
 const { spawnSync } = require("child_process");
 const { q } = require('./i18n');
 let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
-// ★ 从 qvenv.js 导入 Python 环境管理类（YtDlpDownloader 保留在 dow.js）
+// ★ Import Python environment manager from qvenv.js (YtDlpDownloader stays in dow.js)
 const { PythonEngineDownloader } = require('./qvenv');
 
 async function runPool(items, concurrency, worker) {
@@ -1687,9 +1687,9 @@ class SmartHttpDownloader {
     }
 
     /**
-     * 跨域 redirect 专用：遵守 maxHosts，优先 H2，否则 H1
-     * 这里也会走完整重试逻辑（内部调用 _downloadOneWithRetries）
-     * maxRedirects 真计数：依赖 task._redirectDepth
+     * Cross-origin redirect helper: respects maxHosts, prefers H2, otherwise H1
+     * This also goes through full retry logic (internally calls _downloadOneWithRetries)
+     * maxRedirects is counted for real: depends on task._redirectDepth
      */
     async _downloadOneUniversal(task) {
         const d = Math.max(0, Number(task?._redirectDepth || 0));
@@ -1843,9 +1843,9 @@ class YtDlpDownloader {
     }
 
     /**
-     * probe：获取视频信息而不下载
-     * - 兼容单视频、以及（可能）playlist 的多行 dump-json 输出
-     * - 开关 10：stdout/stderr 限制避免内存炸
+     * probe: get video info without downloading
+     * - Compatible with single video and (possible) playlist multi-line dump-json output
+     * - Switch 10: stdout/stderr limits to avoid memory blow-up
      */
     async probe(url, options = {}) {
         if (!this.isAvailable()) {
@@ -1859,7 +1859,7 @@ class YtDlpDownloader {
                 "--no-download",
                 "--no-warnings",
                 "--ignore-errors",
-                "--no-flat-playlist", // 强制深入解析每个条目
+                "--no-flat-playlist", // Force deep parsing for each entry
                 "--no-check-certificate",
                 url,
             ];
@@ -1871,7 +1871,7 @@ class YtDlpDownloader {
 
             const doProbe = (extraArgs = []) => {
                 return new Promise((resolveProbe) => {
-                    // ★ 动态获取 spawn（确保使用 patched 版本）
+                    // ★ Require spawn dynamically (ensure patched version is used)
                     const { spawn } = require("child_process");
                     const proc = spawn(this.ytdlpPath, [...args, ...extraArgs], { windowsHide: true });
 
@@ -2020,7 +2020,7 @@ class YtDlpDownloader {
             doProbe().then(res => {
 
 
-                // 成功但缺少关键信息时尝试使用浏览器 Cookie 进行深度解析
+                // If success but missing key metadata, try using browser cookies for deeper parsing
                 if (res.success) {
                     const hasMeta = res.isPlaylist
                         ? Array.isArray(res.entries) && res.entries.some(e => e.width || e.height || e.resolution || e.filesize || e.filesize_approx)
@@ -2088,21 +2088,21 @@ class YtDlpDownloader {
                     destPath,
                     "--no-warnings",
                     "--no-playlist",
-                    "--force-ipv4", // 强制 IPv4
+                    "--force-ipv4", // Force IPv4
                     "--merge-output-format",
                     "mp4",
                     "-f",
                     fmt,
-                    "--no-mtime", // 不修改文件时间，避免某些文件系统操作延迟
+                    "--no-mtime", // Do not modify file mtime to avoid filesystem delays on some platforms
                     "--no-check-certificate",
                     "--no-cache-dir",
-                    // 移除所有可能触发风控的 extractor-args
+                    // Remove all extractor-args that might trigger risk controls
                     // "--extractor-args", "youtubetab:skip=authcheck;youtube:player_skip=webpage,configs",
                     "--referer", referer,
                     ...extraArgs
                 ];
 
-                // 只有当明确传入 userAgent 时才设置，否则完全留空让 yt-dlp 自己处理
+                // Only set userAgent when explicitly provided; otherwise leave it empty and let yt-dlp handle it
                 if (options.userAgent) {
                     args.push("--user-agent", options.userAgent);
                 }
@@ -2127,7 +2127,7 @@ class YtDlpDownloader {
 
                 args.push(url);
 
-                // ★ 动态获取 spawn（确保使用 patched 版本）
+                // ★ Require spawn dynamically (ensure patched version is used)
                 const { spawn } = require("child_process");
                 const proc = spawn(this.ytdlpPath, args, { windowsHide: true });
 
@@ -2135,8 +2135,8 @@ class YtDlpDownloader {
 
                 const onLine = (line) => {
                     const str = String(line);
-                    // 解析 yt-dlp 进度输出:
-                    // 1. 标准格式: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
+                    // Parse yt-dlp progress output:
+                    // 1. Standard format: [download]  23.5% of 10.00MiB at  2.00MiB/s ETA 00:03
                     const match = str.match(/\[download\]\s+(\d+(\.\d+)?)%\s+of\s+([~\d\.]+\w+)(?:\s+at\s+([\d\.]+\w+\/s))?(?:\s+ETA\s+([\d:]+))?/);
 
                     if (match && options.onProgress) {
@@ -2145,7 +2145,7 @@ class YtDlpDownloader {
                         const speed = match[4] || "";
                         const eta = match[5] || "";
 
-                        // 计算已下载大小 (粗略估算)
+                        // Compute downloaded size (rough estimate)
                         let currentSize = "";
                         try {
                             const sizeMatch = totalSize.match(/([\d\.]+)(\w+)/);
@@ -2160,29 +2160,29 @@ class YtDlpDownloader {
                         options.onProgress({
                             percent,
                             totalSize,
-                            currentSize, // 新增：已下载大小
+                            currentSize, // New: downloaded size
                             speed,
                             eta,
                             raw: str.trim()
                         });
                     } else if (options.onProgress) {
-                        // 2. Fragment 格式: [download] Downloading video fragment 10 of 150
+                        // 2. Fragment format: [download] Downloading video fragment 10 of 150
                         const matchFrag = str.match(/Downloading video fragment\s+(\d+)\s+of\s+(\d+)/);
                         if (matchFrag) {
                             const currentFrag = parseInt(matchFrag[1]);
                             const totalFrag = parseInt(matchFrag[2]);
                             const percent = (currentFrag / totalFrag * 100).toFixed(1);
-                            // 估算：假设每个 Fragment 2MB (HLS 常见大小)
+                            // Estimate: assume each fragment is 2MB (common HLS fragment size)
                             const estimatedSize = (currentFrag * 2).toFixed(2) + "MiB";
 
                             options.onProgress({
                                 percent: parseFloat(percent),
-                                currentSize: estimatedSize, // 估算值，用于兜底
+                                currentSize: estimatedSize, // Estimated value as fallback
                                 raw: str.trim()
                             });
                         }
-                        // 3. 纯字节格式: [download] 123456 bytes (0%)
-                        // 或者是 [download] 10.00MiB at 2.00MiB/s (没有总大小)
+                        // 3. Pure bytes format: [download] 123456 bytes (0%)
+                        // Or: [download] 10.00MiB at 2.00MiB/s (no total size)
                         else {
                             const matchSize = str.match(/\[download\]\s+([\d\.]+\w+)\s+at/);
                             if (matchSize) {
@@ -2281,7 +2281,7 @@ class YtDlpDownloader {
     }
 
     /**
-     * 尝试从全局存储路径加载 yt-dlp
+     * Try to load yt-dlp from global storage path
      */
     trySetFromGlobalStorage(context) {
         try {
@@ -2305,7 +2305,7 @@ class YtDlpDownloader {
     }
 
     /**
-     * 自动下载安装yt-dlp
+     * Auto download and install yt-dlp
      */
     async autoInstall(context) {
         try {
@@ -2313,7 +2313,7 @@ class YtDlpDownloader {
             const fs = require('fs');
             const path = require('path');
             const https = require('https');
-            const global = require('./global'); // ★ 引入 global 模块
+            const global = require('./global'); // ★ Import global module
 
             const platform = os.platform();
             const arch = os.arch();
@@ -2343,12 +2343,12 @@ class YtDlpDownloader {
                 fs.mkdirSync(installDir, { recursive: true });
             }
 
-            // ★ 关键修复1：检查文件是否正常（>10MB）
+            // ★ Key fix 1: check whether file is healthy (>10MB)
             const MIN_SIZE = 10 * 1024 * 1024; // 10MB
             if (fs.existsSync(installPath)) {
                 const stat = fs.statSync(installPath);
                 if (stat.size > MIN_SIZE) {
-                    // ★ 验证可用性
+                    // ★ Verify availability
                     const { spawnSync } = require('child_process');
                     const r = spawnSync(installPath, ['--version'], {
                         encoding: 'utf8',
@@ -2360,16 +2360,16 @@ class YtDlpDownloader {
                         return { success: true, path: installPath };
                     }
                 }
-                // 文件损坏，删除
+                // File corrupted, delete it
                 global.logMessage(q('dow.corruptedFile', stat.size), 'WARN');
                 fs.unlinkSync(installPath);
             }
 
-            // ★ 关键修复2：使用临时文件，防止并发覆盖
+            // ★ Key fix 2: use temp file to avoid concurrent overwrite
             const tmpPath = installPath + '.tmp';
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
 
-            // 尝试下载逻辑：先官方，失败则尝试镜像
+            // Download attempt logic: try official first, then mirror on failure
             const tryDownload = async (url, timeoutMs = 20000) => {
                 return new Promise((resolve, reject) => {
                     const downloadFile = (targetUrl, redirectCount = 0) => {
@@ -2401,7 +2401,7 @@ class YtDlpDownloader {
                             }
 
                             if (res.statusCode === 200) {
-                                // ★ 下载到临时文件
+                                // ★ Download to temp file
                                 const file = fs.createWriteStream(tmpPath);
                                 res.pipe(file);
                                 file.on('finish', () => {
@@ -2427,14 +2427,14 @@ class YtDlpDownloader {
                 });
             };
 
-            // ★ 级联下载策略：gh-proxy.com (国内最快) → 官方 → ghproxy.net
+            // ★ Cascading download strategy: gh-proxy.com (fastest in CN) → official → ghproxy.net
             const downloadUrls = [
-                // ★ gh-proxy.com（国内最快，稳定）
-                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy镜像' },
-                // ★ 官方源（最新版，超时加60秒）
-                { url: officialUrl, timeout: 60000, name: '官方源' },
-                // ★ ghproxy.net（备用）
-                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net镜像' },
+                // ★ gh-proxy.com (fastest in CN, stable)
+                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy镜像' }, // qq2q
+                // ★ Official source (latest, +60s timeout)
+                { url: officialUrl, timeout: 60000, name: '官方源' }, // qq2q
+                // ★ ghproxy.net (backup)
+                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net镜像' }, // qq2q
             ];
 
             let lastError = null;
@@ -2443,25 +2443,25 @@ class YtDlpDownloader {
                     global.logMessage(q('dow.tryDownload', name), "INFO");
                     await tryDownload(url, timeout);
                     global.logMessage(q('dow.downloadSuccess', name), "INFO");
-                    break; // 成功则跳出循环
+                    break; // Break on success
                 } catch (e) {
                     lastError = e;
                     global.logMessage(q('dow.downloadFailed', name, e.message), "WARN");
-                    // 如果是最后一个 URL，则抛出错误
+                    // If it's the last URL, throw error
                     if (url === downloadUrls[downloadUrls.length - 1].url) {
-                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`);
+                        throw new Error(`所有下载源均失败，最后错误: ${e.message}`); // qq2q
                     }
                 }
             }
 
-            // ★ 原子移动：下载完成后再 rename
+            // ★ Atomic move: rename only after download completes
             fs.renameSync(tmpPath, installPath);
 
             if (platform !== 'win32') {
                 fs.chmodSync(installPath, '755');
             }
 
-            // ★ 最终验证
+            // ★ Final verification
             const { spawnSync } = require('child_process');
             const r = spawnSync(installPath, ['--version'], {
                 encoding: 'utf8',
@@ -2469,7 +2469,7 @@ class YtDlpDownloader {
                 timeout: 5000
             });
             if (r.status !== 0 || !(r.stdout || '').match(/^\d+/)) {
-                throw new Error('下载完成但验证失败');
+                throw new Error('下载完成但验证失败'); // qq2q
             }
 
             this.ytdlpPath = installPath;
@@ -2521,7 +2521,7 @@ class UnifiedMediaDownloader {
     }
 
     /**
-     * probe：用于 UI “下载前预览”
+     * probe: used for UI "preview before download"
      */
     async probe(url) {
         return await this.ytdlp.probe(url);
@@ -2601,7 +2601,7 @@ class UnifiedMediaDownloader {
                     rateLimit: opts.videoRateLimit,
                     format: opts.videoFormat,
 
-                    // ★ 优先使用全局 cookiesFilePath，其次使用 task 级别的
+                    // ★ Prefer global cookiesFilePath, then task-level one
                     cookiesFilePath: opts.cookiesFilePath || t.meta?.cookiesFilePath,
                     cookieSource: t.meta?.cookieSource,
                     referer: t.meta?.referer,
@@ -2638,27 +2638,27 @@ class UnifiedMediaDownloader {
     async ensurePythonReady(context, options = {}) {
         const global = require('./global');
 
-        // ★ 新架构：只信任 L1 (插件自维护目录) 和 L4 (下载安装)
-        // ★ 彻底去除 L2 (VS Code 配置) 和 L3 (系统 PATH)
+        // ★ New architecture: only trust L1 (plugin-managed directory) and L4 (auto download/install)
+        // ★ Completely remove L2 (VS Code config) and L3 (system PATH)
 
-        // ★ 关键：防止整个 ensurePythonReady 被并发调用，确保单例
+        // ★ Key: prevent concurrent calls to ensurePythonReady, ensure singleton
         if (this._ensurePythonReadyPromise) {
             return this._ensurePythonReadyPromise;
         }
 
-        // ★ 创建单例 Promise
+        // ★ Create singleton Promise
         this._ensurePythonReadyPromise = (async () => {
             try {
-                // ★ 内层检查：如果已有正在进行的下载流程，直接返回
+                // ★ Inner check: if an install flow is already running, return it directly
                 if (this._pyInstallPromise) {
                     return this._pyInstallPromise;
                 }
 
-                // 1. L1 完美性检查：解释器存在 + 依赖完整才算完美
+                // 1. L1 perfection check: interpreter exists + dependencies complete => perfect
                 const l1Result = await this.python.checkL1Perfect(context);
 
                 if (l1Result.perfect) {
-                    // L1 完美！直接返回，可以启动 daemon
+                    // L1 perfect! return directly, daemon can start
                     const finalPath = this.python._resolvedPath || l1Result.pythonPath;
                     if (this._lastLoggedPython !== finalPath) {
                         global.logMessage(q('dow.l1PerfectHit', finalPath), "INFO");
@@ -2667,36 +2667,36 @@ class UnifiedMediaDownloader {
                     return l1Result.pythonPath;
                 }
 
-                // L1 不完美，记录原因
+                // L1 imperfect, log reason
                 global.logMessage(q('dow.l1Imperfect', l1Result.reason) + (l1Result.missing.length > 0 ? q('dow.l1ImperfectMissing', l1Result.missing.join(', ')) : ''), "INFO");
 
-                // 2. 检查 72 小时冷却期
+                // 2. Check 72-hour cooldown
                 const cooldownStatus = this.python._getCooldownStatus(context);
                 if (cooldownStatus.inCooldown) {
                     global.logMessage(q('dow.inCooldown', cooldownStatus.remainingHours, cooldownStatus.remainingMinutes), "INFO");
-                    // 冷却期内不启动 daemon，返回 null
+                    // In cooldown: do not start daemon, return null
                     return null;
                 }
 
-                // 3. L4 触发：等待 20 秒后后台静默下载
-                // ★ 注意：_pyInstallPromise 检查已移到函数开头，确保单例
+                // 3. Trigger L4: wait 20 seconds then silently download in background
+                // ★ Note: _pyInstallPromise check moved to function start to ensure singleton
 
                 global.logMessage(q('dow.triggerL4'), "INFO");
 
                 this._pyInstallPromise = new Promise((resolve) => {
-                    // ★ 20 秒延迟，错开启动高峰
+                    // ★ 20s delay to stagger startup peak
                     setTimeout(async () => {
                         try {
                             global.logMessage(q('dow.startL4'), "INFO");
 
-                            // 再次检查冷却期（防止 20 秒内多次触发）
+                            // Re-check cooldown (avoid multiple triggers within 20s)
                             if (this.python._isInCooldown(context)) {
                                 global.logMessage(q('dow.enteredCooldown'), "INFO");
                                 resolve(null);
                                 return;
                             }
 
-                            // 执行下载安装（百分百静默，无 UI）
+                            // Run auto install (100% silent, no UI)
                             const res = await this.python.autoInstall(context);
 
                             if (res.success) {
@@ -2704,7 +2704,7 @@ class UnifiedMediaDownloader {
                                 global.logMessage(q('dow.l4Success', finalPath), "INFO");
                                 this._lastLoggedPython = finalPath;
 
-                                // ★ "从无到有" 回调：热启动 daemon
+                                // ★ "from scratch" callback: hot-start daemon
                                 if (res.fromScratch && this.python._onPythonReady) {
                                     global.logMessage(q('dow.l4Callback'), "INFO");
                                     try {
@@ -2725,15 +2725,15 @@ class UnifiedMediaDownloader {
                         } finally {
                             this._pyInstallPromise = null;
                         }
-                    }, 20000); // ★ 20 秒延迟
+                    }, 20000); // ★ 20s delay
                 });
 
-                // 立即返回 null，不阻塞启动
-                // 下载完成后会通过回调热启动 daemon
+                // Return null immediately, do not block startup
+                // After download completes, daemon will be hot-started via callback
                 return null;
             } finally {
-                // ★ 不要立即清理锁！延迟清理，防止并发调用
-                // ★ 等待 1 秒后清理，确保所有并发调用都能命中同一个 Promise
+                // ★ Do not clear the lock immediately! Delay clearing to prevent concurrent calls
+                // ★ Clear after 1s so concurrent calls can hit the same Promise
                 setTimeout(() => {
                     this._ensurePythonReadyPromise = null;
                 }, 1000);
@@ -2821,8 +2821,8 @@ class UnifiedMediaDownloader {
 
     async ensureYtdlpReady(context, options = {}) {
         const {
-            silent = false,      // 为 true 时：不弹出“是否安装”的询问框，直接静默开始安装
-            background = false   // 为 true 时：不显示进度条，安装失败也不弹出错误提示（用于启动预热）
+            silent = false,      // When true: do not prompt "install?" dialog, start silent install directly
+            background = false   // When true: no progress UI, and no error popup on failure (used for startup warm-up)
         } = options;
 
         if (context && this.ytdlp.trySetFromGlobalStorage(context)) {
@@ -2836,22 +2836,22 @@ class UnifiedMediaDownloader {
 
             if (!shouldInstall) {
                 const installConfirmed = await vscode.window.showInformationMessage(
-                    "yt-dlp 未安装，是否自动下载安装？",
+                    "yt-dlp 未安装，是否自动下载安装？", // qq2q
                     { modal: true },
-                    "是",
-                    "否"
+                    "是", // qq2q
+                    "否" // qq2q
                 );
-                shouldInstall = (installConfirmed === "是");
+                shouldInstall = (installConfirmed === "是"); // qq2q
             }
 
             if (shouldInstall) {
-                // ★ 如果已经有正在进行的安装，复用它
+                // ★ If an install is already running, reuse it
                 if (this._installPromise) {
-                    // ★ 关键修复：如果当前调用不是后台模式，显示等待提示
+                    // ★ Key fix: if this call is not in background mode, show waiting progress
                     if (!background && vscode) {
                         vscode.window.withProgress({
                             location: vscode.ProgressLocation.Notification,
-                            title: "qqq: 正在下载视频引擎...",
+                            title: "qqq: 正在下载视频引擎...", // qq2q
                             cancellable: false
                         }, async () => {
                             await this._installPromise;
@@ -2863,19 +2863,19 @@ class UnifiedMediaDownloader {
                 this._installPromise = (async () => {
                     try {
                         const downloadAction = async (progress) => {
-                            if (progress) progress.report({ message: "正在下载视频引擎...", increment: 10 });
+                            if (progress) progress.report({ message: "正在下载视频引擎...", increment: 10 }); // qq2q
                             const res = await this.ytdlp.autoInstall(context);
                             if (res.success) {
                                 if (!background) {
-                                    // ★ 统一使用 global.showAutoCloseNotification（唯一真理源）
-                                    try { require('./global').showAutoCloseNotification('success', "qqq: yt-dlp 安装成功"); } catch { }
+                                    // ★ Always use global.showAutoCloseNotification (single source of truth)
+                                    try { require('./global').showAutoCloseNotification('success', "qqq: yt-dlp 安装成功"); } catch { } // qq2q
                                 }
                                 return true;
                             } else {
-                                // 仅在非后台模式下弹出错误提示
+                                // Only show error in non-background mode
                                 if (!background && vscode) {
-                                    // ★ 统一使用 global.showAutoCloseNotification（唯一真理源）
-                                    try { require('./global').showAutoCloseNotification('error', `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`); } catch { }
+                                    // ★ Always use global.showAutoCloseNotification (single source of truth)
+                                    try { require('./global').showAutoCloseNotification('error', `qqq: 视频引擎 (yt-dlp) 下载失败: ${res.error}`); } catch { } // qq2q
                                 }
                                 try {
                                     const global = require('./global');
@@ -2886,13 +2886,13 @@ class UnifiedMediaDownloader {
                         };
 
                         if (background) {
-                            // 后台模式：真正静默，无 UI
+                            // Background mode: truly silent, no UI
                             return await downloadAction(null);
                         } else {
-                            // 非后台模式：显示进度条反馈
+                            // Non-background mode: show progress UI
                             return await vscode.window.withProgress({
                                 location: vscode.ProgressLocation.Notification,
-                                title: "qqq: ",
+                                title: "qqq: ", // qq2q
                                 cancellable: false
                             }, downloadAction);
                         }
@@ -2904,7 +2904,7 @@ class UnifiedMediaDownloader {
                 return this._installPromise;
             } else {
                 if (!background) {
-                    try { require('./global').showAutoCloseNotification('warning', "yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。"); } catch { }
+                    try { require('./global').showAutoCloseNotification('warning', "yt-dlp 未安装，无法下载平台视频。请安装 yt-dlp 后重试。"); } catch { } // qq2q
                 }
                 return false;
             }
@@ -2913,7 +2913,7 @@ class UnifiedMediaDownloader {
     }
 
     async probeAndSelect(url, progress) {
-        if (progress) progress.report({ message: "正在探测视频资源...", increment: 10 });
+        if (progress) progress.report({ message: "正在探测视频资源...", increment: 10 }); // qq2q
 
         let probeResult = null;
         let probeError = null;
@@ -2924,7 +2924,7 @@ class UnifiedMediaDownloader {
         }
 
         if (!probeResult || !probeResult.success) {
-            if (progress) progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 });
+            if (progress) progress.report({ message: "yt-dlp探测失败，尝试直接解析网页...", increment: 15 }); // qq2q
             try {
                 const h = require('./h');
                 const videoUrls = await h.extractVideoUrlsFromWebPage(url);
@@ -2934,47 +2934,47 @@ class UnifiedMediaDownloader {
                         isPlaylist: videoUrls.length > 1,
                         entries: videoUrls.map((videoUrl, index) => ({
                             id: `direct_video_${index}`,
-                            title: `直接视频链接 ${index + 1}`,
+                            title: `直接视频链接 ${index + 1}`, // qq2q
                             url: videoUrl,
                             webpageUrl: url
                         }))
                     };
                     if (videoUrls.length === 1) {
-                        probeResult.title = '直接视频链接';
+                        probeResult.title = '直接视频链接'; // qq2q
                         probeResult.url = videoUrls[0];
                     } else {
                         probeResult.entriesCount = videoUrls.length;
                     }
                 } else {
-                    if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 });
+                    if (progress) progress.report({ message: "直接解析未找到视频，尝试使用yt-dlp探测...", increment: 20 }); // qq2q
                     probeResult = await this.ytdlp.probe(url);
                     if (!probeResult || !probeResult.success) {
-                        if (vscode) { try { require('./global').showAutoCloseNotification('error', `视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`); } catch { } }
+                        if (vscode) { try { require('./global').showAutoCloseNotification('error', `视频探测失败: ${probeError ? probeError.message : (probeResult?.error || '网页中未找到可直接下载的视频，yt-dlp也无法处理此页面')}`); } catch { } } // qq2q
                         return null;
                     }
                 }
             } catch (webError) {
-                if (vscode) { try { require('./global').showAutoCloseNotification('error', `网页解析失败: ${webError.message}`); } catch { } }
+                if (vscode) { try { require('./global').showAutoCloseNotification('error', `网页解析失败: ${webError.message}`); } catch { } } // qq2q
                 return null;
             }
         }
 
-        if (progress) progress.report({ message: "发现视频资源，准备选择...", increment: 30 });
+        if (progress) progress.report({ message: "发现视频资源，准备选择...", increment: 30 }); // qq2q
 
         let videosToDownload = [];
 
         if (probeResult.isPlaylist) {
             if (!vscode) return null;
             const items = probeResult.entries.map((entry, index) => ({
-                label: entry.title || `视频 ${index + 1}`,
-                description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`,
+                label: entry.title || `视频 ${index + 1}`, // qq2q
+                description: `${entry.duration ? Math.floor(entry.duration) + '秒' : '未知时长'}`, // qq2q
                 detail: entry.url,
                 video: entry
             }));
 
             const selectedItems = await vscode.window.showQuickPick(items, {
                 canPickMany: true,
-                placeHolder: "选择要下载的视频",
+                placeHolder: "选择要下载的视频", // qq2q
                 matchOnDescription: true,
                 matchOnDetail: true
             });
@@ -2992,19 +2992,19 @@ class UnifiedMediaDownloader {
 
     async downloadVideos(videos, targetDir, progress, transId = null) {
         if (!videos || videos.length === 0) return;
-        if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 });
+        if (progress) progress.report({ message: `准备下载 ${videos.length} 个视频`, increment: 50 }); // qq2q
 
         const h = require('./h');
 
         const downloadTasks = videos.map(video => {
-            // ★ 使用 transId 作为文件名前缀，回滚时可精确匹配删除
+            // ★ Use transId as filename prefix so rollback can precisely match and delete
             const filename = h.getTimestampFilename('.mp4', transId);
             const destPath = require('path').join(targetDir, filename);
             return {
                 url: video.url,
                 destPath: destPath,
                 tag: Math.random().toString(36).slice(2) + "_" + Date.now(),
-                title: video.title || '网页视频',
+                title: video.title || '网页视频', // qq2q
 
 
                 meta: video._meta || video.meta
@@ -3016,15 +3016,15 @@ class UnifiedMediaDownloader {
             onProgress: (task, event) => {
                 if (progress) {
                     if (event.type === "progress") {
-                        progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 });
+                        progress.report({ message: `下载中: ${task.title || '视频'}`, increment: 5 }); // qq2q
                     } else if (event.type === "done") {
-                        progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 });
+                        progress.report({ message: `已下载: ${task.title || '视频'}`, increment: 10 }); // qq2q
                     }
                 }
             }
         });
 
-        // ★ 不在这里显示弹窗，由调用方统一处理
+        // ★ No popup here; handled uniformly by caller
 
         if (progress) progress.report({ increment: 100 });
         return downloadResult;
