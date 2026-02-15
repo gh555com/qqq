@@ -3774,12 +3774,6 @@ function showSaveAsDialog() {
         break;
 
       case "editFile": {
-        recordFileHistory(message.path);
-        // ★ Update sidebar immediately (may not go through refreshWebview)
-        if (panel && activePanelAlive) {
-          const sbData = generateSidebarHtml(getConfig());
-          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
-        }
         const p = canonicalizeExistingPath(message.path);
         const ext = path.extname(p).toLowerCase();
 
@@ -3792,6 +3786,14 @@ function showSaveAsDialog() {
           global.showAutoCloseNotification('warning', q('q2.error.fileNotExists', path.basename(p)));
           refreshWebview();
           break;
+        }
+
+        // ★ Record history only after all checks pass
+        recordFileHistory(message.path);
+        // ★ Update sidebar immediately (may not go through refreshWebview)
+        if (panel && activePanelAlive) {
+          const sbData = generateSidebarHtml(getConfig());
+          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
         }
 
         vscode.workspace
