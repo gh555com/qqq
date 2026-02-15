@@ -692,7 +692,10 @@
         "startSlim": "[Python] بدء التحسين...",
         "pywin32Done": "[Python] اكتمل تكوين pywin32",
         "copyVcDll": "[Python] نسخ VC++ DLL: {0}",
-        "installFailed": "[Python] فشل التثبيت: {0}"
+        "installFailed": "[Python] فشل التثبيت: {0}",
+        "allSourcesFailed": "فشلت جميع المصادر: {0}",
+        "extractVerifyFailed": "فشل التحقق بعد الاستخراج",
+        "tooManyRedirects": "عمليات إعادة التوجيه كثيرة جدًا"
     },
     "global": {
         "kpNotExist": "kp.py غير موجود: {0}",
