@@ -1,7 +1,6 @@
-// File: src/q2.js
-// ★★★ 文件管理器：Webview 界面 + 使用 geq().js 四级回退 + 防惊群尺寸调度/缓存 ★★★
-// 适配：匹配最新 qqq IO 引擎路径逻辑（跨平台 normalize + 绝对路径保留 + canonical 去重）
-// 说明：本文件内置 normalize/resolve/canonical，若 geq().js 导出同名函数会自动优先使用 qqq 的实现
+// ★★★ File Manager: Webview UI + use geq().js four-level fallback + thundering-herd-proof size scheduling/cache ★★★
+// Adaptation: match latest qqq IO engine path logic (cross-platform normalize + keep absolute paths + canonical dedup)
+// Note: this file has built-in normalize/resolve/canonical; if geq().js exports same-name functions it will automatically prefer qqq's implementation
 
 const vscode = require("vscode");
 const path = require("path");
@@ -12,11 +11,11 @@ const cp = require("child_process");
 const h = require("./h");
 const { q, onLanguageChange } = require("./i18n");
 
-// ★★★ 粘贴功能核心模块：从 global.js 导入事务管理、任务计数、剪切板快照等 ★★★
+// ★★★ Paste feature core module: import transaction manager, task counter, clipboard snapshot, etc. from global.js ★★★
 const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
 
-// ==================== 从 geq().js 导入核心接口 ====================
-// 延迟加载 qqq 以避免循环依赖
+// ==================== Import core interfaces from geq().js ====================
+// Lazy-load qqq to avoid circular dependency
 let qqq = null;
 function geq() {
   if (!qqq) {
@@ -31,30 +30,30 @@ function geq() {
 const global = require("./global");
 
 
-// ==================== 配置常量 ====================
+// ==================== Configuration Constants ====================
 
-// 并发控制
+// Concurrency control
 const MAX_CONCURRENT_TASKS = 6;
 
 const UNSUPPORTED_CODE_EXTENSIONS = global.NON_TEXT_EXTS;
 
-// ==================== 全局变量 ====================
+// ==================== Global Variables ====================
 let activePanel = null;
 let activePanelAlive = false;
-let currentWatcher = null; // 用于监听当前目录变化
-let sRequestVersion = 0; // sRequest 版本号，用于取消过期请求
+let currentWatcher = null; // Used to watch current directory changes
+let sRequestVersion = 0; // sRequest version number, used to cancel stale requests
 const usePanelReveal = 1;
 
 
 let globalContext = null;
 
-// 全局刷新函数引用（由 showSaveAsDialog 设置）
+// Global refresh function reference (set by showSaveAsDialog)
 let globalRefreshWebview = null;
 
-let cachedInMemoryConfig = null; // 增加内存缓存，防止 globalState 防抖导致的读取延迟/冲突
-let lastResourceExplorerPath = ""; // 记录上一次更新资源展示区时的路径，用于清除尺寸缓存
+let cachedInMemoryConfig = null; // Add in-memory cache to prevent read delay/conflicts caused by globalState debounce
+let lastResourceExplorerPath = ""; // Record last path used to update the resource display area, used to clear size cache
 
-// ==================== IO / Path：匹配最新引擎逻辑（关键） ====================
+// ==================== IO / Path: match latest engine logic (key) ====================
 
 function _stripDocJunk(s) {
   return geq()._stripDocJunk(s);
@@ -85,12 +84,12 @@ let activeAbortController = new AbortController();
 const globalScheduler = new global.TaskScheduler(MAX_CONCURRENT_TASKS);
 
 /**
- * 取消所有引擎的扫描操作（Node + Python + Rust）
+ * Cancel all engine scan operations (Node + Python + Rust)
  */
 function cancelAllScans() {
-  // Node 引擎：立即生效
+  // Node engine: takes effect immediately
   try { geq().cancelScansJS(); } catch { }
-  // Python/Rust daemon：发送取消命令
+  // Python/Rust daemon: send cancel command
   cancelScans();
 }
 
@@ -173,13 +172,13 @@ function openAdminTerminal(targetPath, termType) {
   }
 }
 
-// ==================== s 请求：获取文件/文件夹 size ====================
-// 用于点击 sz 区时强制获取 size（文件夹需要递归计算）
+// ==================== s request: get file/folder size ====================
+// Used to force-get size when clicking sz area (folder needs recursive calculation)
 async function getSizeForSRequest(itemPath, isFolder) {
   const canon = canonicalizeExistingPath(itemPath);
 
   if (!isFolder) {
-    // 文件：直接获取 size
+    // File: get size directly
     try {
       const stats = await fs.promises.stat(canon);
       return Number(stats.size) || 0;
@@ -188,7 +187,7 @@ async function getSizeForSRequest(itemPath, isFolder) {
     }
   }
 
-  // 文件夹：使用极限优化版 getPathSize（只获取大小，不统计后缀名）
+  // Folder: use extreme-optimized getPathSize (size only, no extension stats)
   try {
     const result = await geq().getPathSize(canon);
     if (result && result.success) {
@@ -202,7 +201,7 @@ async function getSizeForSRequest(itemPath, isFolder) {
 }
 
 
-// ==================== 辅助函数 ====================
+// ==================== Helper Functions ====================
 function escapeHtmlAttribute(str) {
   if (typeof str !== "string") str = String(str);
   return str
@@ -224,7 +223,7 @@ function escapeJsStringLiteral(str) {
     .replace(/\u2029/g, "\\u2029");
 }
 
-// ==================== 文件大小格式化 ====================
+// ==================== File Size Formatting ====================
 function getFileSizeSync(filePath) {
   try {
     const stats = fs.statSync(filePath);
@@ -234,20 +233,20 @@ function getFileSizeSync(filePath) {
   }
 }
 
-// ==================== 尺寸格式化 ====================
+// ==================== Size Formatting ====================
 const SZ_GB_THRESHOLD = 1000000000; // 1GB
 const SZ_GB_COLOR = 'rgb(248, 48, 0)';
 
-// 返回格式化结果：{ text, gbPart, restPart }
+// Return formatted result: { text, gbPart, restPart }
 function formatFileSizeEx(bytes) {
   const formatted = bytes.toLocaleString();
 
-  // 检查是否超过 1GB
+  // Check if it exceeds 1GB
   if (bytes >= SZ_GB_THRESHOLD) {
     const parts = formatted.split(',');
     if (parts.length >= 4) {
-      // GB 部分是前 (parts.length - 3) 个部分
-      // 例如: "14,111,222,999" -> GB部分是 "14"
+      // GB part is the first (parts.length - 3) parts
+      // Example: "14,111,222,999" -> GB part is "14"
       const gbParts = parts.slice(0, parts.length - 3);
       const restParts = parts.slice(parts.length - 3);
       return {
@@ -261,16 +260,16 @@ function formatFileSizeEx(bytes) {
 }
 
 function formatFileSize(bytes) {
-  // 简单版本，只返回文本
+  // Simple version, return text only
   return bytes.toLocaleString();
 }
 
 function formatDateTime(date) {
-  // 格式化日期时间：YYYY-MM-DD HH:mm（完整年份）
+  // Format date time: YYYY-MM-DD HH:mm (full year)
   if (!date) return "";
   const d = new Date(date);
-  if (isNaN(d.getTime())) return "";  // 无效日期
-  const year = d.getFullYear();  // 完整 4 位年份
+  if (isNaN(d.getTime())) return "";  // Invalid date
+  const year = d.getFullYear();  // Full 4-digit year
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   const hour = String(d.getHours()).padStart(2, '0');
@@ -278,9 +277,9 @@ function formatDateTime(date) {
   return `${year}.${month}.${day} ${hour}:${minute}`;
 }
 
-// ★ 9秒自动关闭弹窗 → 已提取到 global.showAutoCloseNotification（唯一真理源）
+// ★ 9-second auto-close popup -> extracted to global.showAutoCloseNotification (single source of truth)
 
-// ==================== 命令历史管理 ====================
+// ==================== Command History Management ====================
 async function addCommandToHistory(key, value) {
   if (!key || !value || !globalContext || !globalContext.globalState) return;
   const fullKey = `q2_${key}_history`;
@@ -300,7 +299,7 @@ async function getCommandHistory(key) {
   return globalContext.globalState.get(fullKey, []);
 }
 
-// ==================== 配置读写 ====================
+// ==================== Config Read/Write ====================
 function getConfig() {
   const defaultConfig = {
     pinnedDirs: [],
@@ -315,25 +314,25 @@ function getConfig() {
 
   if (!globalContext) return defaultConfig;
 
-  // 优先使用内存缓存，确保读取到的是最新的（即便还在 1s 的写入防抖期内）
+  // Prefer in-memory cache to ensure we read the latest (even if still in 1s write debounce window)
   if (cachedInMemoryConfig) {
     return cachedInMemoryConfig;
   }
 
-  // ★ 终极最优解：容错性配置加载，防止 globalState 返回非预期值
+  // ★ Ultimate best solution: tolerant config loading to prevent globalState returning unexpected values
   const storedConfig = globalContext.globalState.get("qqq_config") || {};
   const config = { ...defaultConfig, ...storedConfig };
 
-  // 迁移旧数据：recentDirs → pinnedDirs
+  // Migrate old data: recentDirs -> pinnedDirs
   if (Array.isArray(storedConfig.recentDirs) && !Array.isArray(storedConfig.pinnedDirs)) {
     config.pinnedDirs = storedConfig.recentDirs.slice(0, 6);
   }
   delete config.recentDirs;
 
-  // 确保数组字段存在
+  // Ensure array fields exist
   if (!Array.isArray(config.pinnedDirs)) config.pinnedDirs = [];
   if (!Array.isArray(config.recycleBin)) config.recycleBin = [];
-  // 迁移旧 recycleBin 格式（字符串 → 对象）
+  // Migrate old recycleBin format (string -> object)
   config.recycleBin = config.recycleBin.map(item => {
     if (typeof item === 'string') return { path: item, type: 'dir' };
     if (item && typeof item.path === 'string') return item;
@@ -344,13 +343,13 @@ function getConfig() {
   if (typeof config.sidebarRatio !== "number") config.sidebarRatio = 0.2;
   if (typeof config.isPinned !== "boolean") config.isPinned = false;
 
-  // 读取全局设置（通过 ConfigGate 读取）
+  // Read global settings (via ConfigGate)
   try {
     const szDisplayMode = global.getConfig("szDisplayMode") || "nothing";
     const sortBy = global.getConfig("sortBy") || "name";
     const autoWatchChanges = global.getConfig("autoWatchChanges") || false;
 
-    // 验证并设置有效值
+    // Validate and set effective values
     const validDisplayModes = ["nothing", "size", "ctime", "mtime"];
     const validSortBy = ["name", "size", "ctime", "mtime"];
 
@@ -358,7 +357,7 @@ function getConfig() {
     config.sortBy = validSortBy.includes(sortBy) ? sortBy : "name";
     config.autoWatchChanges = autoWatchChanges === true;
   } catch (e) {
-    // 如果读取失败，使用默认值
+    // If reading fails, use default values
     config.szDisplayMode = "nothing";
     config.sortBy = "name";
     config.autoWatchChanges = false;
@@ -389,22 +388,22 @@ function saveConfig(
     isPinned,
   };
 
-  // ★ 关键修复：保留全局设置字段（szDisplayMode, sortBy, autoWatchChanges）
-  // 这些字段由 VS Code 配置管理，不应被覆盖
+  // ★ Key fix: preserve global setting fields (szDisplayMode, sortBy, autoWatchChanges)
+  // These fields are managed by VS Code configuration and should not be overwritten
   if (cachedInMemoryConfig) {
     newConfig.szDisplayMode = cachedInMemoryConfig.szDisplayMode;
     newConfig.sortBy = cachedInMemoryConfig.sortBy;
     newConfig.autoWatchChanges = cachedInMemoryConfig.autoWatchChanges;
   }
 
-  // 立即更新内存状态，确保后续读取（如 refreshWebview）拿到的是正确的
+  // Update memory state immediately to ensure subsequent reads (e.g. refreshWebview) get correct values
   cachedInMemoryConfig = newConfig;
 
-  // 性能优化：防抖处理。频繁切换目录时，不要同步更新 globalState
+  // Performance optimization: debounce. When switching directories frequently, do not sync-update globalState
   if (saveConfigTimer) clearTimeout(saveConfigTimer);
   saveConfigTimer = setTimeout(() => {
     try {
-      // 保存时排除全局设置字段（它们由 VS Code 配置管理）
+      // Exclude global setting fields when saving (they are managed by VS Code config)
       const configToSave = {
         pinnedDirs: newConfig.pinnedDirs,
         lineSpacing: newConfig.lineSpacing,
@@ -419,8 +418,8 @@ function saveConfig(
   }, 1000);
 }
 
-// ==================== 上次访问目录存储 ====================
-// 立即保存，确保即使崩溃也能恢复到最后访问的目录
+// ==================== Last Visited Directory Storage ====================
+// Save immediately to ensure even if it crashes we can restore the last visited directory
 const LAST_VISITED_DIR_KEY = "qqq_last_visited_dir";
 
 function getLastVisitedDir() {
@@ -437,8 +436,8 @@ function saveLastVisitedDir(dirPath) {
   } catch { }
 }
 
-// ==================== 精细 SCM 存储 ====================
-// 独立存储，与配置分离，避免影响其他配置项
+// ==================== Fine-grained SCM Storage ====================
+// Stored separately from config to avoid affecting other config items
 const FINE_SCM_KEY = "qqq_fine_scm";
 
 function getFineSCM(folderPath) {
@@ -465,7 +464,7 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
     const allFineSCM = globalContext.globalState.get(FINE_SCM_KEY) || {};
     const key = cacheKeyForPath(folderPath);
 
-    // 如果两个都是 null，删除该条目
+    // If both are null, delete this entry
     if (szMode === null && sortBy === null) {
       delete allFineSCM[key];
     } else {
@@ -478,15 +477,15 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
   }
 }
 
-// ==================== 历史记录管理（新版） ====================
-// recycleBin: [{path, type:'dir'|'file'}] 最多60条，新条目在上方
-// pinnedDirs: [string] 最多6条，新条目在下方（仅目录）
+// ==================== History Management (New) ====================
+// recycleBin: [{path, type:'dir'|'file'}] up to 60 items, newest on top
+// pinnedDirs: [string] up to 6 items, newest at bottom (directories only)
 
 function _recycleBinKey(p) {
   return cacheKeyForPath(canonicalizeExistingPath(p) || p);
 }
 
-/** 从 recycleBin 中移除指定路径 */
+/** Remove specified path from recycleBin */
 function removeFromRecycleBin(targetPath) {
   const config = getConfig();
   const key = _recycleBinKey(targetPath);
@@ -496,11 +495,11 @@ function removeFromRecycleBin(targetPath) {
   }
 }
 
-/** 向 recycleBin 顶部插入一条记录（去重，且跳过已 pin 的目录） */
+/** Insert a record at the top of recycleBin (dedup, and skip pinned dirs) */
 function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
   const canon = canonicalizeExistingPath(itemPath);
   if (!canon) return bin;
-  // 如果是目录且已在 pinnedDirs 中，不插入
+  // If it's a dir and already in pinnedDirs, do not insert
   if (itemType === 'dir' && Array.isArray(pinnedDirs)) {
     const key = cacheKeyForPath(canon);
     if (pinnedDirs.some(d => cacheKeyForPath(d) === key)) return bin;
@@ -511,33 +510,33 @@ function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
   return filtered.slice(0, 60);
 }
 
-/** 记录目录历史（仅向 recycleBin 添加目录，已 pin 的跳过） */
+/** Record directory history (only add directories to recycleBin; skip pinned ones) */
 function recordDirHistory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon || !fs.existsSync(canon)) return;
-  // 已在 pinnedDirs 中，不重复进入回收站
+  // Already in pinnedDirs, do not duplicate into recycle bin
   const key = cacheKeyForPath(canon);
   if ((config.pinnedDirs || []).some(d => cacheKeyForPath(d) === key)) return;
   const newBin = _insertToRecycleBinTop(config.recycleBin || [], canon, 'dir', config.pinnedDirs);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
 }
 
-/** 记录文件历史（向 recycleBin 添加目录+文件对，目录在上文件在下） */
+/** Record file history (add directory+file pair to recycleBin, dir on top and file below) */
 function recordFileHistory(filePath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(filePath);
   if (!canon) return;
   const dirCanon = canonicalizeExistingPath(path.dirname(canon));
   if (!dirCanon) return;
-  // 先移除两者的旧记录
+  // Remove old records for both
   const dirKey = cacheKeyForPath(dirCanon);
   const fileKey = cacheKeyForPath(canon);
   let bin = (config.recycleBin || []).filter(item => {
     const k = _recycleBinKey(item.path);
     return k !== dirKey && k !== fileKey;
   });
-  // 插入顺序：目录在上，文件在下——但已 pin 的目录不插入
+  // Insert order: dir on top, file below — but pinned dir is not inserted
   const pinnedKeys = new Set((config.pinnedDirs || []).map(d => cacheKeyForPath(d)));
   const toInsert = [];
   if (!pinnedKeys.has(dirKey)) {
@@ -549,19 +548,19 @@ function recordFileHistory(filePath) {
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
 
-/** 图钉目录：从 recycleBin 移至 pinnedDirs 底部（最多6条，溢出时自动解除最老的） */
+/** Pin directory: move from recycleBin to bottom of pinnedDirs (max 6; overflow auto-unpins oldest) */
 function pinDirectory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon || !fs.existsSync(canon)) return;
   const key = cacheKeyForPath(canon);
-  // 从 pinnedDirs 去重
+  // Dedup from pinnedDirs
   let pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
-  // 从 recycleBin 移除该目录
+  // Remove this dir from recycleBin
   let bin = (config.recycleBin || []).filter(item => _recycleBinKey(item.path) !== key);
-  // 加到 pinnedDirs 底部
+  // Add to bottom of pinnedDirs
   pinned.push(canon);
-  // 如果超出6条，把最老的（第一条）放回 recycleBin 顶部
+  // If exceeds 6, put oldest (first) back to top of recycleBin
   while (pinned.length > 6) {
     const removed = pinned.shift();
     const removedCanon = canonicalizeExistingPath(removed);
@@ -572,7 +571,7 @@ function pinDirectory(dirPath) {
   saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
 
-/** 解除图钉：从 pinnedDirs 移至 recycleBin 顶部 */
+/** Unpin: move from pinnedDirs to top of recycleBin */
 function unpinDirectory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
@@ -591,15 +590,15 @@ let lastDrivesQueryTime = 0;
 
 function getDrives() {
   const now = Date.now();
-  // 缓存 5 分钟，盘符不会频繁变动
+  // Cache for 5 minutes; drive letters won't change frequently
   if (cachedDrives && (now - lastDrivesQueryTime < 300000)) {
     return cachedDrives;
   }
 
   const drives = [];
   if (process.platform === "win32") {
-    // 性能优化：直接使用 fs.existsSync 穷举 A-Z。
-    // 这比 spawn powershell 快 100 倍且不阻塞 Extension Host 主线程。
+    // Performance optimization: use fs.existsSync to brute-force A-Z.
+    // This is 100x faster than spawning powershell and does not block the Extension Host main thread.
     for (let i = 65; i <= 90; i++) {
       try {
         const drive = String.fromCharCode(i) + ":\\";
@@ -622,11 +621,11 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
   const contents = { dirs: [], files: [] };
   const canonDir = canonicalizeExistingPath(dirPath);
 
-  // 判断是否需要预获取 stats 信息
+  // Determine whether we need to prefetch stats info
   const needStats = sortBy !== "name" || szDisplayMode !== "nothing";
 
   try {
-    // 异步性能优化：改用 VS Code 原生异步接口，不阻塞 Extension Host，且完美支持跨平台/远程路径
+    // Async performance optimization: use VS Code native async API, do not block Extension Host, and perfectly support cross-platform/remote paths
     const uri = vscode.Uri.file(canonDir);
     const entries = await vscode.workspace.fs.readDirectory(uri);
 
@@ -643,7 +642,7 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
         isDir: isDir
       };
 
-      // 预获取 stats 用于排序和 sz-area 显示
+      // Prefetch stats for sorting and sz-area display
       if (needStats) {
         try {
           const stats = fs.statSync(itemPath);
@@ -661,23 +660,23 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
       else contents.files.push(item);
     }
 
-    // 根据 sortBy 参数进行排序
+    // Sort according to sortBy param
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
     if (sortBy === "name") {
-      // name: 文件夹在上，按名称排序
+      // name: folders on top, sort by name
       contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
       contents.files.sort((a, b) => collator.compare(a.name, b.name));
     } else if (sortBy === "size") {
-      // size: 文件夹在上（按名称排序），文件在下（按大小倒序，大的在上）
+      // size: folders on top (sorted by name), files below (sorted by size desc, larger first)
       contents.dirs.sort((a, b) => collator.compare(a.name, b.name));
       contents.files.sort((a, b) => (b.size || 0) - (a.size || 0));
     } else if (sortBy === "ctime") {
-      // ctime: 文件夹在上（按时间倒序，新的在上），文件在下（按时间倒序）
+      // ctime: folders on top (time desc, newer first), files below (time desc)
       contents.dirs.sort((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
       contents.files.sort((a, b) => new Date(b.ctime || 0) - new Date(a.ctime || 0));
     } else if (sortBy === "mtime") {
-      // mtime: 文件夹在上（按时间倒序，新的在上），文件在下（按时间倒序）
+      // mtime: folders on top (time desc, newer first), files below (time desc)
       contents.dirs.sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
       contents.files.sort((a, b) => new Date(b.mtime || 0) - new Date(a.mtime || 0));
     }
@@ -688,7 +687,7 @@ async function getDirectoryContents(dirPath, sortBy = "name", szDisplayMode = "n
   return contents;
 }
 
-// ==================== Webview 脚本生成 ====================
+// ==================== Webview Script Generation ====================
 function generateWebviewScript(currentPath, sidebarRatio) {
   const escapedCurrentPath = escapeJsStringLiteral(currentPath);
   const escapedSidebarRatio = Number(sidebarRatio || 0.2).toFixed(4);
@@ -696,11 +695,15 @@ function generateWebviewScript(currentPath, sidebarRatio) {
   return `
 const vscode = acquireVsCodeApi();
 
+// i18n strings injected from extension
+const I18N_ENTER_FILE_NAME = '${escapeJsStringLiteral(q('q2.ui.enterFileName'))}';
+const I18N_ENTER_FOLDER_NAME = '${escapeJsStringLiteral(q('q2.ui.enterFolderName'))}';
+
 let currentPath = '${escapedCurrentPath}';
 let sidebarRatio = ${escapedSidebarRatio};
 
 let sessionSizeCache = new Map(); // path -> { text, gbPart, restPart }
-let currentSizeMode = 'nothing'; // 当前 sz 区显示模式
+let currentSizeMode = 'nothing'; // Current sz-area display mode
 
 let resizeObserver = null;
 const MIN_RESPONSIVE_WIDTH = 240;
@@ -711,12 +714,12 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
-// ====== 回收站懒加载 ======
+// ====== Recycle bin lazy load ======
 let recycleBinLoading = false;
 const RECYCLE_BATCH_SIZE = 20;
 
-// ====== 逐字撤销/重做系统 ======
-// 为所有编辑框提供逐字级别的 Ctrl+Z / Ctrl+Y 功能
+// ====== Character-level undo/redo system ======
+// Provide character-level Ctrl+Z / Ctrl+Y for all input boxes
 const inputUndoStacks = new WeakMap(); // input -> { history: [], index: -1, lastValue: '', isProgrammatic: false }
 
 function getInputUndoState(input) {
@@ -737,11 +740,11 @@ function initInputUndoRedo(input) {
 
   const state = getInputUndoState(input);
 
-  // 监听键入变化，记录每次改变
+  // Listen to typing changes and record every change
   input.addEventListener('input', () => {
     const st = getInputUndoState(input);
 
-    // 如果是程序触发的撤销/重做，不记录历史
+    // If it's programmatic undo/redo, do not record history
     if (st.isProgrammatic) {
       st.isProgrammatic = false;
       return;
@@ -749,12 +752,12 @@ function initInputUndoRedo(input) {
 
     const currentValue = input.value;
 
-    // 如果当前不在历史末尾，截断后面的历史
+    // If currently not at end of history, truncate later history
     if (st.index < st.history.length - 1) {
       st.history = st.history.slice(0, st.index + 1);
     }
 
-    // 只有当值真正变化时才记录
+    // Only record when value actually changes
     if (currentValue !== st.lastValue) {
       st.history.push(currentValue);
       st.index = st.history.length - 1;
@@ -762,7 +765,7 @@ function initInputUndoRedo(input) {
     }
   });
 
-  // 拦截 Ctrl+Z 和 Ctrl+Y
+  // Intercept Ctrl+Z and Ctrl+Y
   input.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
@@ -773,7 +776,7 @@ function initInputUndoRedo(input) {
         st.isProgrammatic = true;
         input.value = st.history[st.index];
         st.lastValue = input.value;
-        // 触发 input 事件以便其他监听器能响应
+        // Trigger input event so other listeners can respond
         input.dispatchEvent(new Event('input', { bubbles: true }));
       }
       return;
@@ -787,7 +790,7 @@ function initInputUndoRedo(input) {
         st.isProgrammatic = true;
         input.value = st.history[st.index];
         st.lastValue = input.value;
-        // 触发 input 事件
+        // Trigger input event
         input.dispatchEvent(new Event('input', { bubbles: true }));
       }
       return;
@@ -806,25 +809,25 @@ function resetInputUndoState(input, initialValue) {
   });
 }
 
-// ====== 盘符剩余空间更新机制 ======
-// 规则：
-// - 只在 webview 可见时轮询（6秒间隔）
-// - 合批请求：一次请求返回所有盘符的完整答卷
-// - 最终答卷比较：只有不同于上次答卷时才更新 UI
-// - 空间 < 1% 或 < 2GB 时显示红色警告（并显示小数位）
+// ====== Drive free space update mechanism ======
+// Rules:
+// - Poll only when webview is visible (6s interval)
+// - Batch request: one request returns full answers for all drives
+// - Compare final answers: update UI only when different from last answer
+// - When free space < 1% or < 2GB show red warning (and show decimals)
 const DISK_FREE_INTERVAL_MS = 6000;
 const DISK_FREE_WARNING_PERCENT = 0.01; // 1%
 const DISK_FREE_WARNING_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
 const DISK_FREE_WARNING_COLOR = 'rgb(248, 48, 0)';
 let diskFreeTimer = null;
-let lastDiskFreeSnapshot = ''; // 上次答卷的 JSON 序列化，用于比较
+let lastDiskFreeSnapshot = ''; // Last answer JSON string, used for compare
 let diskFreeInFlight = false;
 
-// ====== 精细 SCM 系统 ======
-// 当前文件夹的精细 SCM 设置（从后端传来）
+// ====== Fine-grained SCM system ======
+// Fine-grained SCM settings for current folder (sent from backend)
 let currentFineSCM = { szMode: null, sortBy: null };
 
-// ====== 命令历史下拉框 ======
+// ====== Command history dropdown ======
 function hideAllDropdowns() {
     const dropdowns = document.querySelectorAll('.history-dropdown');
     dropdowns.forEach(d => d.style.display = 'none');
@@ -832,7 +835,7 @@ function hideAllDropdowns() {
 
 function showHistoryDropdown(inputEl, dropdownEl, history) {
     hideAllDropdowns();
-    // ★ 加固：只有当键入框持有焦点时才弹出下拉框
+    // ★ Harden: show dropdown only when input holds focus
     if (document.activeElement !== inputEl) return;
     if (!history || history.length === 0) return;
     dropdownEl.innerHTML = '';
@@ -857,7 +860,7 @@ function showHistoryDropdown(inputEl, dropdownEl, history) {
 
 
 function updateFineSCMButtons() {
-  // 更新左侧 szMode 按钮
+  // Update left szMode buttons
   const szModeGroup = document.getElementById('szModeGroup');
   if (szModeGroup) {
     szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
@@ -870,7 +873,7 @@ function updateFineSCMButtons() {
     });
   }
 
-  // 更新右侧 sortBy 按钮
+  // Update right sortBy buttons
   const sortByGroup = document.getElementById('sortByGroup');
   if (sortByGroup) {
     sortByGroup.querySelectorAll('.scm-btn').forEach(btn => {
@@ -885,11 +888,11 @@ function updateFineSCMButtons() {
 }
 
 function handleSzModeClick(mode) {
-  // 如果已经选中，再次点击 = 取消
+  // If already selected, click again = cancel
   const newMode = (currentFineSCM.szMode === mode) ? null : mode;
   currentFineSCM.szMode = newMode;
   updateFineSCMButtons();
-  // 发送给后端保存并刷新
+  // Send to backend to save and refresh
   vscode.postMessage({
     command: 'setFineSCM',
     path: currentPath,
@@ -899,11 +902,11 @@ function handleSzModeClick(mode) {
 }
 
 function handleSortByClick(sort) {
-  // 如果已经选中，再次点击 = 取消
+  // If already selected, click again = cancel
   const newSort = (currentFineSCM.sortBy === sort) ? null : sort;
   currentFineSCM.sortBy = newSort;
   updateFineSCMButtons();
-  // 发送给后端保存并刷新
+  // Send to backend to save and refresh
   vscode.postMessage({
     command: 'setFineSCM',
     path: currentPath,
@@ -913,7 +916,7 @@ function handleSortByClick(sort) {
 }
 
 function handleOpenFolderClick() {
-  // 在默认资源管理器中打开当前文件夹
+  // Open current folder in default file explorer
   vscode.postMessage({
     command: 'openWithDefault',
     path: currentPath,
@@ -943,7 +946,7 @@ function showPathTooltip(text, clientX, clientY){
   const vw = window.innerWidth || document.documentElement.clientWidth;
   const vh = window.innerHeight || document.documentElement.clientHeight;
 
-  // 先以单行测量实际宽度
+  // Measure actual width in single-line first
   pathTooltipEl.style.whiteSpace = 'nowrap';
   pathTooltipEl.style.maxWidth = '';
   pathTooltipEl.style.left = '0px';
@@ -953,25 +956,25 @@ function showPathTooltip(text, clientX, clientY){
 
   const naturalWidth = pathTooltipEl.offsetWidth;
 
-  // 判断单行能否放得下：左对齐或右对齐任一方式不超出视口
+  // Determine whether single-line can fit: either left-aligned or right-aligned without exceeding viewport
   const leftAlignOk = (clientX + margin + naturalWidth) <= vw - 4;
   const rightAlignOk = (clientX - margin - naturalWidth) >= 4;
 
   if (leftAlignOk || rightAlignOk) {
-    // 单行显示
+    // Single-line display
     pathTooltipEl.style.whiteSpace = 'nowrap';
     pathTooltipEl.style.maxWidth = '';
     let left = leftAlignOk ? (clientX + margin) : (clientX - margin - naturalWidth);
     let top = clientY + margin;
     pathTooltipEl.style.left = left + 'px';
     pathTooltipEl.style.top = top + 'px';
-    // 垂直越界保护
+    // Vertical out-of-bounds protection
     const rect = pathTooltipEl.getBoundingClientRect();
     if (rect.bottom > vh - 4) {
       pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
     }
   } else {
-    // 两边都放不下，允许换行
+    // Cannot fit on either side, allow wrapping
     pathTooltipEl.style.whiteSpace = 'pre-wrap';
     pathTooltipEl.style.maxWidth = (vw - 8) + 'px';
     let left = 4;
@@ -987,9 +990,9 @@ function showPathTooltip(text, clientX, clientY){
 
 function isEllipsisActive(el){
   if (!el) return false;
-  // 方法1: 标准 scrollWidth 检查（对大多数 block/flex-child 有效）
+  // Method 1: standard scrollWidth check (works for most block/flex-child)
   if (el.scrollWidth > el.clientWidth + 1) return true;
-  // 方法2: Range 测量兜底（对 button 等 scrollWidth 不可靠的元素有效）
+  // Method 2: Range measurement fallback (for elements like button where scrollWidth is unreliable)
   try {
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -1001,7 +1004,7 @@ function isEllipsisActive(el){
   return false;
 }
 
-// 关键修复：不要用 querySelector attribute 拼接路径（特殊字符会炸）
+// Key fix: do not use querySelector attribute concatenation for paths (special chars will break)
 function findItemElementByPath(p, type){
   const all = document.querySelectorAll('.file-item');
   for (const el of all) {
@@ -1013,14 +1016,14 @@ function findItemElementByPath(p, type){
   return null;
 }
 
-// ====== 统一 pathTooltip hover 处理（覆盖全部4个区域） ======
-// 区域1: 盘符区 .nav-item  区域2: 回收站区 .recycle-item
-// 区域3: 历史区 .recent-item  区域4: 资源列表区 .file-item
+// ====== Unified pathTooltip hover handler (covers all 4 areas) ======
+// Area 1: drive area .nav-item  Area 2: recycle bin area .recycle-item
+// Area 3: history area .recent-item  Area 4: resource list area .file-item
 function handlePathTooltipHover(e){
   const t = e.target;
   if (!t || typeof t.closest !== 'function') return;
 
-  // ---- 区域1: 盘符区 (.nav-item button) ----
+  // ---- Area 1: drive area (.nav-item button) ----
   const navItem = t.closest('.nav-item');
   if (navItem) {
     if (isEllipsisActive(navItem)) {
@@ -1029,17 +1032,17 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // ---- 区域2: 回收站区 (.recycle-item) ----
+  // ---- Area 2: recycle bin area (.recycle-item) ----
   const recycleItem = t.closest('.recycle-item');
   if (recycleItem) {
-    // 文件行：无条件弹出完整路径（显示的只是文件名，完整路径始终有意义）
+    // File row: always show full path (displayed is only filename, full path is always meaningful)
     if (recycleItem.classList.contains('recycle-file')) {
       const tip = recycleItem.getAttribute('data-fullpath') || '';
       if (tip) { showPathTooltip(tip, e.clientX, e.clientY); }
       else if (pathTooltipVisible) { hidePathTooltip(); }
       return;
     }
-    // 目录行：仅截断时弹出
+    // Dir row: show only when truncated
     const textEl = recycleItem.querySelector('.recycle-text');
     const checkEl = textEl || recycleItem;
     if (isEllipsisActive(checkEl)) {
@@ -1049,7 +1052,7 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // ---- 区域3: 历史区 (.recent-item) ----
+  // ---- Area 3: history area (.recent-item) ----
   const recentItem = t.closest('.recent-item');
   if (recentItem) {
     const span = recentItem.querySelector('span:not(.delete-button)');
@@ -1060,7 +1063,7 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // ---- 区域4: 资源列表区 (.file-item) ----
+  // ---- Area 4: resource list area (.file-item) ----
   const fileItem = t.closest('.file-item');
   if (fileItem) {
     const nameArea = fileItem.querySelector('.folder-name-area, .file-name-area');
@@ -1070,7 +1073,7 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // 不在任何目标元素上
+  // Not on any target element
   if (pathTooltipVisible) hidePathTooltip();
 }
 
@@ -1105,7 +1108,7 @@ function checkAndApplyResponsive(){
   const saveButton = footer ? footer.querySelector('.save-button') : null;
   const createFolderBtn = footer ? footer.querySelector('.cancel-button') : null;
 
-  // footer: 按页面宽度计算
+  // footer: calculate by page width
   if (pinContainer) pinContainer.style.display = (pageW < PIN_HIDE_WIDTH) ? 'none' : 'block';
 
   if (pageW < MIN_RESPONSIVE_WIDTH) {
@@ -1125,7 +1128,7 @@ function checkAndApplyResponsive(){
     if (footer) footer.classList.remove('responsive-extreme');
   }
 
-  // 地址栏一排：按右侧面板宽度计算
+  // Address bar row: calculate by right panel width
   if (kyContent) {
     const rw = kyContent.clientWidth;
     const sortByGroup = document.getElementById('sortByGroup');
@@ -1207,7 +1210,7 @@ function saveFile(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const filename = (filenameInput.value || '').trim();
-  if (!filename) { alert('请键入文件名'); return; }
+  if (!filename) { alert(I18N_ENTER_FILE_NAME); return; }
 
   const pinned = isPinned();
   vscode.postMessage({ command: 'save', filename, isPinned: pinned, openInCurrentGroup: !pinned });
@@ -1222,16 +1225,16 @@ function createFolder(){
   const filenameInput = document.getElementById('filenameInput');
   if (!filenameInput) return;
   const folderName = (filenameInput.value || '').trim();
-  if (!folderName) { alert('请键入文件夹名'); return; }
+  if (!folderName) { alert(I18N_ENTER_FOLDER_NAME); return; }
   vscode.postMessage({ command: 'createFolder', folderName });
 }
 
 
 
-// ===== 选择/重命名 =====
+// ===== Selection/Rename =====
 let selectedItem = null;
-let selectedItems = []; // 存储多选项目
-let lastSelectedItem = null; // 跟踪上一次选择的项目，用于Shift连续选择
+let selectedItems = []; // Store multi-select items
+let lastSelectedItem = null; // Track the last selected item, used for Shift range selection
 let currentFocusType = 'filenameInput';
 
 function updateFocusType(element){
@@ -1246,7 +1249,7 @@ function updateFocusType(element){
 function selectFileItem(fileItem, requestSize, shiftPressed = false){
   if (!fileItem) return;
 
-  // 关键：选择项目时，如果当前焦点在键入框，则强制失去焦点，以便热键生效
+  // Key: when selecting an item, if focus is on an input box, force blur so hotkeys work
   if (isInputFocused()) {
     document.activeElement.blur();
   }
@@ -1256,7 +1259,7 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
   const name = fileItem.dataset.name;
 
   if (!shiftPressed) {
-    // 非Shift键点击：清除之前的选择
+    // Non-Shift click: clear previous selection
     const prevSelectedItems = document.querySelectorAll('.file-item.selected');
     prevSelectedItems.forEach(item => {
       if (item.querySelector('.rename-input')) cancelRename(item);
@@ -1266,19 +1269,19 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
     fileItem.classList.add('selected');
     selectedItem = { type, path: p, name };
     selectedItems.push(selectedItem);
-    lastSelectedItem = fileItem; // 更新上一次选择的项目
+    lastSelectedItem = fileItem; // Update last selected item
   } else {
-    // Shift键点击：连续选择从lastSelectedItem到当前项
+    // Shift click: range-select from lastSelectedItem to current item
     if (lastSelectedItem) {
-      // 获取所有文件项
+      // Get all file items
       const allFileItems = Array.from(document.querySelectorAll('.file-item'));
 
-      // 找到起点和终点的索引
+      // Find start and end indexes
       const startIndex = allFileItems.indexOf(lastSelectedItem);
       const endIndex = allFileItems.indexOf(fileItem);
 
       if (startIndex !== -1 && endIndex !== -1) {
-        // 清除之前的选择
+        // Clear previous selection
         const prevSelectedItems = document.querySelectorAll('.file-item.selected');
         prevSelectedItems.forEach(item => {
           if (item.querySelector('.rename-input')) cancelRename(item);
@@ -1286,11 +1289,11 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
         });
         selectedItems = [];
 
-        // 确定选择范围
+        // Determine selection range
         const start = Math.min(startIndex, endIndex);
         const end = Math.max(startIndex, endIndex);
 
-        // 选中范围内的所有项目
+        // Select all items in range
         for (let i = start; i <= end; i++) {
           const item = allFileItems[i];
           if (item) {
@@ -1302,11 +1305,11 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
           }
         }
 
-        // 更新最后选中的项目
+        // Update last selected item
         selectedItem = { type, path: p, name };
       }
     } else {
-      // 如果没有上一次选择的项目，就只选择当前项目
+      // If no last selected item, just select current item
       fileItem.classList.add('selected');
       selectedItem = { type, path: p, name };
       selectedItems = [selectedItem];
@@ -1316,7 +1319,7 @@ function selectFileItem(fileItem, requestSize, shiftPressed = false){
 
   currentFocusType = 'fileList';
 
-  // 选中文件时，始终例外请求尺寸显示 (force: true)
+  // When selecting a file, always request size display exceptionally (force: true)
   if (type === 'file' && requestSize) {
     if (sessionSizeCache.has(p)) {
       const szArea = fileItem.querySelector('.sz-area');
@@ -1380,7 +1383,7 @@ function startRename(itemPath, itemName, itemType){
   nameArea.appendChild(input);
   input.focus();
 
-  // ★ 初始化逐字撤销/重做功能
+  // ★ Initialize character-level undo/redo
   initInputUndoRedo(input);
   resetInputUndoState(input, itemName);
 
@@ -1394,47 +1397,47 @@ function startRename(itemPath, itemName, itemType){
     if (e.key === 'Enter') {
       e.preventDefault(); e.stopPropagation();
       commitRename(itemElement, itemPath, itemType, input.value.trim());
-      vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
+      vscode.postMessage({ command: 'playEnterSfx' }); // ★ Enter key SFX
     } else if (e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation();
       cancelRename(itemElement, originalContent);
     }
   };
 
-  // ★ 点击处理：编辑框内点击移动光标，编辑框外点击等于保存
+  // ★ Click handling: clicking inside input moves caret; clicking outside input equals save
   renameMouseHandler = (e) => {
-    if (e.button !== 0) return; // 只处理左键
+    if (e.button !== 0) return; // Only handle left click
     if (input.contains(e.target) || e.target === input) {
-      // 点击编辑框内：不做任何处理，让光标自然移动
+      // Click inside input: do nothing, let caret move naturally
       return;
     }
-    // 点击编辑框外：等于按回车保存
+    // Click outside input: same as pressing Enter to save
     e.preventDefault();
     e.stopPropagation();
     commitRename(itemElement, itemPath, itemType, input.value.trim());
   };
 
-  // ★ 屏蔽编辑过程中的右键菜单
+  // ★ Block right-click menu during edit
   renameContextMenuHandler = (e) => {
     e.preventDefault();
     e.stopPropagation();
   };
 
-  // ★ 屏蔽编辑过程中的滚轮事件
+  // ★ Block wheel events during edit
   renameWheelHandler = (e) => {
     e.preventDefault();
     e.stopPropagation();
   };
 
-  // ★ 屏蔽编辑过程中的中键点击
+  // ★ Block middle-click during edit
   renameMiddleClickHandler = (e) => {
-    if (e.button === 1) { // 中键
+    if (e.button === 1) { // Middle button
       e.preventDefault();
       e.stopPropagation();
     }
   };
 
-  // 注册事件监听（使用 capture 确保优先拦截）
+  // Register event listeners (use capture to ensure intercept first)
   document.addEventListener('mousedown', renameMouseHandler, true);
   document.addEventListener('contextmenu', renameContextMenuHandler, true);
   document.addEventListener('wheel', renameWheelHandler, { capture: true, passive: false });
@@ -1491,17 +1494,17 @@ function cancelRename(itemElement, originalContent){
   }
 }
 
-// ===== 操作 =====
+// ===== Actions =====
 function performEditAction(item){
   if (item) {
-    if (item.name === '..') return; // 严禁重命名上级目录
+    if (item.name === '..') return; // Strictly forbid renaming parent directory
     startRename(item.path, item.name, item.type);
   }
 }
 function performOpenAction(item){ if (item) vscode.postMessage({ command: 'openWithDefault', path: item.path, type: item.type }); }
 function performDeleteAction(item){
   if (!item) return;
-  if (item.name === '..') return; // 严禁删除上级目录
+  if (item.name === '..') return; // Strictly forbid deleting parent directory
   const el = findItemElementByPath(item.path);
   if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
   vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: item.path, type: item.type });
@@ -1518,23 +1521,23 @@ function performCodeAction(item){
 }
 function performCopyAction(item){
   if (!item) return;
-  // 准许单选上级目录进行复制操作，这被认为是用户的明确意图
+  // Allow copying parent dir in single-select; this is considered the user's explicit intent
   vscode.postMessage({ command: 'copy', paths: [item.path] });
 }
 function performPasteAction(){
   vscode.postMessage({ command: 'paste', destDir: currentPath });
 }
 
-// ===== 右键菜单 =====
+// ===== Context Menu =====
 function handleContextMenuAction(action){
   const menu = document.getElementById('itemContextMenu');
   if (!menu) return;
   hideAllContextMenus();
 
   if (selectedItems.length > 1) {
-    // 多选情况
+    // Multi-select case
     if (action === 'delete') {
-      // 过滤掉上级目录，严禁删除
+      // Filter out parent directory, strictly forbid delete
       const targets = selectedItems.filter(item => item.name !== '..');
       if (targets.length === 0) return;
 
@@ -1546,21 +1549,21 @@ function handleContextMenuAction(action){
       selectedItem = null;
       selectedItems = [];
     } else if (action === 'rename') {
-      // 多选时禁止重命名
-      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: 'qqq: 请单选再做重命名' });
+      // Renaming is forbidden in multi-select
+      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: '${escapeJsStringLiteral(q('q2.ui.selectSingleForRename'))}' });
     } else if (action === 'open') {
-      // 多选情况：只打开第一个选中的项目
+      // Multi-select: open only the first selected item
       const firstItem = selectedItems.find(item => item.name !== '..');
       if (firstItem) {
         performOpenAction(firstItem);
       }
     }
   } else {
-    // 单选情况
+    // Single-select case
     const item = { path: menu.dataset.path, name: menu.dataset.name, type: menu.dataset.type };
     if (!item.path) return;
     if (item.name === '..') {
-        // 对于上级目录，只允许 q (code) 和 w (open) 操作，屏蔽删除、重命名
+        // For parent directory, only allow q (code) and w (open); block delete/rename
         if (['rename', 'delete'].includes(action)) return;
     }
 
@@ -1574,11 +1577,11 @@ function handleContextMenuAction(action){
 }
 
 function refreshSizeDisplay(){
-  // 已废弃：后端已预填充 sz-area，不需要 Webview 端主动请求
+  // Deprecated: backend has prefilled sz-area; webview does not need to request actively
 }
 
 function requestFileSizeUpdates(items){
-  // 已废弃：后端已预填充 sz-area，不需要 Webview 端主动请求
+  // Deprecated: backend has prefilled sz-area; webview does not need to request actively
 }
 
 // ====== message ======
@@ -1603,7 +1606,7 @@ window.addEventListener('message', event => {
         return;
     }
 
-    // ★ 地址栏导航成功后：保存历史并失去焦点
+    // ★ After address-bar navigation succeeds: save history and blur
     if (message.command === 'navigateSuccess') {
         const addr = document.getElementById('addressInput');
         if (message.path) {
@@ -1621,17 +1624,17 @@ window.addEventListener('message', event => {
       const isModeChanged = newSizeMode !== currentSizeMode;
       const isNewDir = (message.currentPath || '') !== currentPath;
 
-      // 模式切换或目录切换时，清除缓存
+      // Clear cache when mode changes or directory changes
       if (isNewDir || isModeChanged) {
         sessionSizeCache.clear();
       }
 
-      // ★ 切换目录时清空筛选框
+      // ★ Clear filter box when switching directory
       if (isNewDir) {
         const fileFilterInput = document.getElementById('fileFilterInput');
         if (fileFilterInput) {
           fileFilterInput.value = '';
-          // 重置文件列表显示（不触发 input 事件，避免弹出下拉列表）
+          // Reset file list display (do not trigger input event to avoid dropdown)
           const fileItems = document.querySelectorAll('.file-item');
           fileItems.forEach(item => {
             item.style.display = '';
@@ -1640,11 +1643,11 @@ window.addEventListener('message', event => {
         hideAllDropdowns();
       }
 
-      // 更新当前模式
+      // Update current mode
       currentSizeMode = newSizeMode;
       currentPath = message.currentPath || '';
 
-      // ★ 更新精细 SCM 状态
+      // ★ Update fine-grained SCM state
       currentFineSCM = {
         szMode: message.fineSCM?.szMode || null,
         sortBy: message.fineSCM?.sortBy || null
@@ -1655,19 +1658,19 @@ window.addEventListener('message', event => {
       if (addr) {
         addr.value = message.currentPath || '';
         updateAddressDisplay(addr.value);
-        // 更新 tooltip 为当前地址
+        // Update tooltip to current address
         addr.setAttribute('data-tooltip', addr.value || '');
       }
 
       const list = document.getElementById('fileList');
       if (list) {
-        // ★ 同目录刷新（SCM 切换等）：保存当前选中状态
+        // ★ Same-directory refresh (SCM switch etc.): save current selection state
         const lastSelPath = lastSelectedItem ? lastSelectedItem.dataset?.path : null;
 
-        // 重新渲染列表（后端已预填充 sz-area 内容）
+        // Re-render list (backend has prefilled sz-area content)
         list.innerHTML = message.fileListHtml || '';
 
-        // 从缓存恢复 sz-area 显示（优先使用缓存值，可能是 s 请求结果）
+        // Restore sz-area display from cache (prefer cache value, may be s request result)
         const allItems = list.querySelectorAll('.file-item');
         allItems.forEach(item => {
           const p = item.dataset.path;
@@ -1684,7 +1687,7 @@ window.addEventListener('message', event => {
           }
         });
 
-        // ★ 恢复选中状态：同目录刷新时保持单选/多选红色高亮
+        // ★ Restore selection state: keep single/multi red highlight on same-directory refresh
         if (!isNewDir && selectedItems.length > 0) {
           const selectedPaths = new Set(selectedItems.map(s => s.path));
           let newLastSelected = null;
@@ -1705,7 +1708,7 @@ window.addEventListener('message', event => {
           }
         }
 
-        // ★ 切换目录时清空选中状态
+        // ★ Clear selection state when switching directories
         if (isNewDir) {
           selectedItems = [];
           selectedItem = null;
@@ -1713,13 +1716,13 @@ window.addEventListener('message', event => {
         }
       }
 
-      // 注：后端已预填充 sz-area，不需要再主动请求
-      // requestFileSizeUpdates 只在 s 请求时使用
+      // Note: backend has prefilled sz-area; no need to request actively
+      // requestFileSizeUpdates is only used for s requests
 
       setTimeout(() => { calculateAndAdjustScroll(); checkAndApplyResponsive(); }, 100);
     } else if (message.command === 'updateSizeBatch') {
       (message.results || []).forEach(res => {
-        // 只有确实拿到了尺寸字符串才缓存（避免缓存空的或错误提示）
+        // Cache only when we actually got size string (avoid caching empty or error tips)
         if (res.sizeDisplay && !res.sizeDisplay.includes('err')) {
           sessionSizeCache.set(res.path, {
             text: res.sizeDisplay,
@@ -1732,7 +1735,7 @@ window.addEventListener('message', event => {
         if (el) {
           const sz = el.querySelector('.sz-area');
           if (sz) {
-            // 如果有 GB 部分，用 innerHTML 显示红色
+            // If GB part exists, use innerHTML to show red
             if (res.gbPart) {
               sz.innerHTML = '<span style="color:rgb(248,48,0)">' + res.gbPart + '</span>' + res.restPart + ' ';
             } else {
@@ -1752,11 +1755,11 @@ window.addEventListener('message', event => {
     const el = findItemElementByPath(message.path);
     if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
   } else if (message.command === 'updateSidebar') {
-      // 动态更新 sidebar 区域
+      // Dynamically update sidebar area
       const recycleSec = document.querySelector('.sidebar .recycle-bin-section');
       const divider = document.querySelector('.sidebar .divider');
       if (message.recycleBinHtml) {
-        // 有内容：替换或插入
+        // Has content: replace or insert
         const temp = document.createElement('div');
         temp.innerHTML = message.recycleBinHtml;
         const newDivider = temp.querySelector('.divider');
@@ -1769,11 +1772,11 @@ window.addEventListener('message', event => {
           if (sidebar) { sidebar.appendChild(newDivider); sidebar.appendChild(newSection); }
         }
       } else {
-        // 没内容：移除
+        // No content: remove
         if (recycleSec) recycleSec.remove();
         if (divider) divider.remove();
       }
-      // 更新图钉历史区
+      // Update pinned history area
       const recentList = document.querySelector('.recent-list');
       if (recentList) recentList.innerHTML = message.pinnedDirsHtml || '';
   } else if (message.command === 'updateSidebarRatio') {
@@ -1783,22 +1786,22 @@ window.addEventListener('message', event => {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
   } else if (message.command === 'diskFreeResult') {
-    // 合批答卷返回：{ data: { 'C': {free, total}, 'D': {free, total}, ... } }
+    // Batch answer returned: { data: { 'C': {free, total}, 'D': {free, total}, ... } }
     diskFreeInFlight = false;
     const data = message.data;
     if (data && typeof data === 'object') {
-      // 答卷比较：JSON 序列化后比较
+      // Answer compare: compare after JSON serialization
       const snapshot = JSON.stringify(data);
       if (snapshot !== lastDiskFreeSnapshot) {
         lastDiskFreeSnapshot = snapshot;
-        // 批量更新所有盘符显示
+        // Batch update all drive displays
         for (const drive in data) {
           const info = data[drive];
           updateDriveDisplay(drive, info.free, info.total);
         }
       }
     }
-    // 完成后安排下一轮
+    // After completion, schedule next round
     scheduleDiskFreeUpdate();
   } else if (message.command === 'appendRecycleBin') {
     // Recycle bin lazy load: append new items
@@ -1812,7 +1815,7 @@ window.addEventListener('message', event => {
   }
 });
 
-// ====== 回收站滚动懒加载 ======
+// ====== Recycle bin scroll lazy load ======
 function initRecycleBinLazyLoad() {
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
@@ -1826,10 +1829,10 @@ function initRecycleBinLazyLoad() {
     const total = parseInt(section.dataset.total || '0', 10);
     const loaded = parseInt(section.dataset.loaded || '0', 10);
 
-    // 已加载完毕
+    // Fully loaded
     if (loaded >= total) return;
 
-    // 检查是否滚动到底部附近（距离底部 100px 内）
+    // Check if scrolled near bottom (within 100px)
     if (sidebar.scrollTop + sidebar.clientHeight > sidebar.scrollHeight - 100) {
       recycleBinLoading = true;
       vscode.postMessage({
@@ -1870,12 +1873,12 @@ document.addEventListener('keydown', (e) => {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
 
-  // Ctrl+C / Ctrl+V / Ctrl+A 处理
+  // Ctrl+C / Ctrl+V / Ctrl+A handling
   if (e.ctrlKey || e.metaKey) {
     if (key === 'c') {
       e.preventDefault(); e.stopPropagation();
       if (selectedItems.length > 1) {
-        // 多选复制：自动过滤掉上级目录，防止在全选等操作中意外包含父文件夹
+        // Multi-select copy: auto-filter out parent directory to avoid accidental inclusion via select-all, etc.
         const paths = selectedItems
           .filter(item => item.name !== '..')
           .map(item => item.path);
@@ -1884,7 +1887,7 @@ document.addEventListener('keydown', (e) => {
           vscode.postMessage({ command: 'copy', paths: paths });
         }
       } else if (selectedItem) {
-        // 单选复制：准许包含上级目录（用户手动选中的意图）
+        // Single-select copy: allow including parent directory (user's manual selection intent)
         performCopyAction(selectedItem);
       }
       return;
@@ -1896,7 +1899,7 @@ document.addEventListener('keydown', (e) => {
     }
     if (key === 'a') {
       e.preventDefault(); e.stopPropagation();
-      // 全选所有文件项（排除 ".." 上级目录项）
+      // Select all file items (exclude ".." parent directory item)
       const prevSelectedItems = document.querySelectorAll('.file-item.selected');
       prevSelectedItems.forEach(item => {
         if (item.querySelector('.rename-input')) cancelRename(item);
@@ -1907,7 +1910,7 @@ document.addEventListener('keydown', (e) => {
       const allFileItems = document.querySelectorAll('.file-item');
       let lastEl = null;
       allFileItems.forEach(item => {
-        if (item.dataset.name === '..') return; // Ctrl+A 时排除上级目录
+        if (item.dataset.name === '..') return; // Exclude parent directory for Ctrl+A
         item.classList.add('selected');
         const itemType = item.dataset.type;
         const itemPath = item.dataset.path;
@@ -1924,23 +1927,23 @@ document.addEventListener('keydown', (e) => {
       currentFocusType = 'fileList';
       return;
     }
-    // 允许其他 Ctrl 组合键透传
+    // Allow other Ctrl combos to pass through
     return;
   }
 
-  // ★ 空格键：s 请求（获取选中项或全部项的尺寸信息）
+  // ★ Space key: s request (get size info for selected items or all items)
   if (key === ' ' || e.key === ' ') {
     e.preventDefault(); e.stopPropagation();
 
     let itemsToRequest = [];
 
     if (selectedItems.length > 0) {
-      // 有选中项目：对选中的项目触发 sRequest
+      // Has selection: trigger sRequest for selected items
       itemsToRequest = selectedItems
         .filter(item => item.name !== '..')
         .map(item => ({ path: item.path, type: item.type }));
     } else {
-      // 没有选中项目：对当前目录所有项目触发 sRequest
+      // No selection: trigger sRequest for all items in current directory
       const allFileItems = document.querySelectorAll('.file-item');
       allFileItems.forEach(item => {
         if (item.dataset.name === '..') return;
@@ -1949,7 +1952,7 @@ document.addEventListener('keydown', (e) => {
     }
 
     if (itemsToRequest.length > 0) {
-      // 显示加载状态
+      // Show loading state
       itemsToRequest.forEach(item => {
         const el = findItemElementByPath(item.path);
         if (el) {
@@ -1967,15 +1970,15 @@ document.addEventListener('keydown', (e) => {
   if (key === 'q') {
     e.preventDefault(); e.stopPropagation();
     performCodeAction(selectedItem);
-    vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
+    vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (key === 'w') {
     e.preventDefault(); e.stopPropagation();
     performOpenAction(selectedItem);
-    vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
+    vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
     if (selectedItems.length > 1) {
-      // 多选删除：过滤掉上级目录
+      // Multi-select delete: filter out parent directory
       const targets = selectedItems.filter(item => item.name !== '..');
       if (targets.length > 0) {
         targets.forEach(item => {
@@ -1987,25 +1990,25 @@ document.addEventListener('keydown', (e) => {
         selectedItems = [];
       }
     } else if (selectedItem && selectedItem.name !== '..') {
-      // 单选删除：排除上级目录
+      // Single-select delete: exclude parent directory
       performDeleteAction(selectedItem);
     }
   } else if (key === 'e') {
     e.preventDefault(); e.stopPropagation();
     if (selectedItems.length > 1) {
-      // 多选时禁止重命名
-      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: 'qqq: 请单选再做重命名' });
+      // Renaming is forbidden in multi-select
+      vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: '${escapeJsStringLiteral(q('q2.ui.selectSingleForRename'))}' });
       return;
     }
     if (selectedItem && selectedItem.name !== '..') {
         performEditAction(selectedItem);
-        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 按键音效
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
     }
   } else if (e.key === 'Delete' && e.shiftKey) {
-    // Shift+Delete: 永久删除，无确认提示
+    // Shift+Delete: permanent delete, no confirmation prompt
     e.preventDefault(); e.stopPropagation();
     if (selectedItems.length > 1) {
-      // 多选永久删除
+      // Multi-select permanent delete
       const targets = selectedItems.filter(item => item.name !== '..');
       if (targets.length > 0) {
         targets.forEach(item => {
@@ -2017,7 +2020,7 @@ document.addEventListener('keydown', (e) => {
         selectedItems = [];
       }
     } else if (selectedItem && selectedItem.name !== '..') {
-      // 单选永久删除
+      // Single-select permanent delete
       const el = findItemElementByPath(selectedItem.path);
       if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
       vscode.postMessage({ command: 'quickPermanentDelete', path: selectedItem.path, type: selectedItem.type });
@@ -2028,19 +2031,19 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
-  initRecycleBinLazyLoad(); // 初始化回收站懒加载
+  initRecycleBinLazyLoad(); // Initialize recycle bin lazy loading
 
-  // ★ 禁用系统默认右键菜单
+  // ★ Disable the system default context menu
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
   }, false);
 
-  // ★ 全局自定义 tooltip 系统
+  // ★ Global custom tooltip system
   const globalTooltip = document.getElementById('globalTooltip');
   if (globalTooltip) {
     let currentTooltipTarget = null;
 
-    // 为所有带有 data-tooltip 的元素添加 tooltip 事件
+    // Add tooltip events for all elements with data-tooltip
     document.addEventListener('mouseenter', (e) => {
       if (!e.target || typeof e.target.closest !== 'function') return;
       const target = e.target.closest('[data-tooltip]');
@@ -2048,7 +2051,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTooltipTarget = target;
         const text = target.getAttribute('data-tooltip');
         if (text) {
-          // 先以单行测量，防止提前换行
+          // Measure in single line first to prevent premature wrapping
           globalTooltip.style.whiteSpace = 'nowrap';
           globalTooltip.style.maxWidth = '';
           globalTooltip.textContent = text;
@@ -2060,47 +2063,47 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('mousemove', (e) => {
       if (globalTooltip.style.display === 'block' && currentTooltipTarget) {
         const pageWidth = window.innerWidth;
-        const leftPadding = 10; // 左边界留白
-        const rightPadding = 0; // 右边界不留白，可以延伸到滚动条区域
+        const leftPadding = 10; // Left margin padding
+        const rightPadding = 0; // No right padding; can extend into the scrollbar area
 
-        // 先以 nowrap 测量自然宽度
+        // Measure natural width with nowrap first
         globalTooltip.style.whiteSpace = 'nowrap';
         globalTooltip.style.maxWidth = '';
         const naturalWidth = globalTooltip.offsetWidth;
 
-        // 判断元素位置类别，决定 tooltip 对齐方式
+        // Determine element position category to decide tooltip alignment
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
-                                currentTooltipTarget.closest('#szModeGroup');
+          currentTooltipTarget.closest('#szModeGroup');
         const isOpenButton = currentTooltipTarget.classList.contains('open-btn');
         const isRightSideButton = currentTooltipTarget.classList.contains('save-button') ||
-                                  currentTooltipTarget.classList.contains('cancel-button') ||
-                                  (currentTooltipTarget.classList.contains('scm-btn') &&
-                                   currentTooltipTarget.closest('#sortByGroup'));
+          currentTooltipTarget.classList.contains('cancel-button') ||
+          (currentTooltipTarget.classList.contains('scm-btn') &&
+            currentTooltipTarget.closest('#sortByGroup'));
 
-        // 垂直位置
+        // Vertical position
         if (currentTooltipTarget.classList.contains('save-button') ||
-            currentTooltipTarget.classList.contains('cancel-button')) {
+          currentTooltipTarget.classList.contains('cancel-button')) {
           globalTooltip.style.top = (e.clientY - 44) + 'px';
         } else {
           globalTooltip.style.top = (e.clientY + 22) + 'px';
         }
 
-        // 计算初始位置
+        // Compute initial position
         let leftPos;
         if (isLeftScmButton || isOpenButton) {
           leftPos = e.clientX - 11;
         } else if (isRightSideButton) {
           leftPos = e.clientX - naturalWidth + 11;
         } else {
-          // 默认/地址框：居中
+          // Default/address bar: centered
           leftPos = e.clientX - naturalWidth / 2;
         }
 
-        // 检查边界
+        // Check boundaries
         const overflowLeft = leftPos < leftPadding;
         const overflowRight = leftPos + naturalWidth > pageWidth - rightPadding;
 
-        // 只有左右两边都被截断时才自动换行
+        // Only auto-wrap when both left and right are clipped
         if (overflowLeft && overflowRight) {
           const availableWidth = pageWidth - leftPadding - rightPadding;
           if (availableWidth > 50) {
@@ -2109,17 +2112,17 @@ document.addEventListener('DOMContentLoaded', () => {
             leftPos = leftPadding;
           }
         } else if (overflowLeft) {
-          // 只有左边超出，向右躲避，保持单行
+          // Only left overflow; shift right, keep single line
           leftPos = leftPadding;
         } else if (overflowRight) {
-          // 只有右边超出，向左躲避，保持单行
+          // Only right overflow; shift left, keep single line
           leftPos = pageWidth - naturalWidth - rightPadding;
         }
 
-        // 重新获取宽度（可能已经换行）
+        // Re-get width (may have wrapped)
         const tooltipWidth = globalTooltip.offsetWidth;
 
-        // 最终边界保护
+        // Final boundary protection
         if (leftPos + tooltipWidth > pageWidth - rightPadding) {
           leftPos = pageWidth - tooltipWidth - rightPadding;
         }
@@ -2144,32 +2147,32 @@ document.addEventListener('DOMContentLoaded', () => {
   const filenameInput = document.getElementById('filenameInput');
   if (filenameInput) {
     filenameInput.focus();
-    // ★ 初始化逐字撤销/重做功能
+    // ★ Initialize per-character undo/redo
     initInputUndoRedo(filenameInput);
     filenameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         saveFile();
-        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ Enter key SFX
       }
     });
   }
 
-  // ★ 地址栏逻辑（带历史下拉框）
+  // ★ Address bar logic (with history dropdown)
   const addressInput = document.getElementById('addressInput');
   const addressHistoryDropdown = document.getElementById('addressHistoryDropdown');
   if (addressInput && addressHistoryDropdown) {
     initInputUndoRedo(addressInput);
     addressInput.addEventListener('input', (e) => {
       updateAddressDisplay(e.target.value);
-      // 动态更新 tooltip 为当前地址
+      // Dynamically update tooltip to current address
       addressInput.setAttribute('data-tooltip', e.target.value || '');
-      // 有键入先隐藏下拉框，然后判断是否为空
+      // Hide dropdown on input first, then check if empty
       hideAllDropdowns();
       if (addressInput.value === '') {
         vscode.postMessage({ command: 'getHistory', key: 'address' });
       }
     });
-    // 初始设置 tooltip
+    // Initial tooltip setup
     addressInput.setAttribute('data-tooltip', addressInput.value || '');
 
     addressInput.addEventListener('focus', () => {
@@ -2192,8 +2195,8 @@ document.addEventListener('DOMContentLoaded', () => {
       addressInput.value = currentPath;
       updateAddressDisplay(currentPath);
       addressInput.setAttribute('data-tooltip', currentPath || '');
-      navigator.clipboard.writeText(currentPath).catch(() => {});
-      // ★ 剪切板音效由 Python clipboard_watcher 统一处理
+      navigator.clipboard.writeText(currentPath).catch(() => { });
+      // ★ Clipboard SFX is handled uniformly by Python clipboard_watcher
     });
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {
@@ -2205,19 +2208,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = addressInput.value.trim();
         if (p) {
           vscode.postMessage({ command: 'navigate', path: p });
-          // ★ 不在这里保存历史，等待后端 navigateSuccess 消息
+          // ★ Do not save history here; wait for backend navigateSuccess message
         }
         hideAllDropdowns();
-        vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ Enter key SFX
       } else if (e.key === 'Escape') {
         hideAllDropdowns();
       } else if (e.key === ' ') {
-        // 空格键隐藏下拉框（空格不算无文本，所以隐藏）
+        // Space key hides dropdown (space is not empty text, so hide)
         hideAllDropdowns();
       }
     });
 
-    // 点击下拉框 item
+    // Click dropdown item
     addressHistoryDropdown.addEventListener('click', (e) => {
       const item = e.target.closest('.history-dropdown-item');
       if (item) {
@@ -2230,88 +2233,88 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-    // ★ 新增：文件筛选键入框逻辑（改进版）
-    const fileFilterInput = document.getElementById('fileFilterInput');
-    const fileFilterDropdown = document.getElementById('fileFilterHistoryDropdown');
-    if (fileFilterInput && fileFilterDropdown) {
-        initInputUndoRedo(fileFilterInput);
+  // ★ Added: file filter input logic (improved)
+  const fileFilterInput = document.getElementById('fileFilterInput');
+  const fileFilterDropdown = document.getElementById('fileFilterHistoryDropdown');
+  if (fileFilterInput && fileFilterDropdown) {
+    initInputUndoRedo(fileFilterInput);
 
-        fileFilterInput.addEventListener('input', () => {
-            // 有键入先隐藏下拉框
-            hideAllDropdowns();
+    fileFilterInput.addEventListener('input', () => {
+      // Hide dropdown on input first
+      hideAllDropdowns();
 
-            // 如果为空，请求历史
-            if (fileFilterInput.value === '') {
-                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
-            }
+      // If empty, request history
+      if (fileFilterInput.value === '') {
+        vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+      }
 
-            // 执行筛选
-            const filterText = fileFilterInput.value.trim().toLowerCase();
-            const keywords = filterText.split(/\\s+/).filter(Boolean);
-            const fileItems = document.querySelectorAll('.file-item');
+      // Apply filter
+      const filterText = fileFilterInput.value.trim().toLowerCase();
+      const keywords = filterText.split(/\\s+/).filter(Boolean);
+      const fileItems = document.querySelectorAll('.file-item');
 
-            fileItems.forEach(item => {
-                const itemName = (item.dataset.name || '').toLowerCase();
-                const isMatch = keywords.every(kw => itemName.includes(kw));
-                item.style.display = isMatch ? '' : 'none';
-            });
-        });
+      fileItems.forEach(item => {
+        const itemName = (item.dataset.name || '').toLowerCase();
+        const isMatch = keywords.every(kw => itemName.includes(kw));
+        item.style.display = isMatch ? '' : 'none';
+      });
+    });
 
-        fileFilterInput.addEventListener('focus', () => {
-            if (fileFilterInput.value === '') {
-                vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
-            }
-        });
+    fileFilterInput.addEventListener('focus', () => {
+      if (fileFilterInput.value === '') {
+        vscode.postMessage({ command: 'getHistory', key: 'fileFilter' });
+      }
+    });
 
-        // 确保点击时获得焦点（用 mousedown 更早触发）
-        fileFilterInput.addEventListener('mousedown', (e) => {
-            // 延迟一下确保焦点转移
-            setTimeout(() => fileFilterInput.focus(), 0);
-        });
+    // Ensure focus on click (use mousedown to trigger earlier)
+    fileFilterInput.addEventListener('mousedown', (e) => {
+      // Delay a bit to ensure focus transfer
+      setTimeout(() => fileFilterInput.focus(), 0);
+    });
 
-        // blur 时立即隐藏下拉框
-        fileFilterInput.addEventListener('blur', (e) => {
-            // 检查 relatedTarget 是否是下拉框内的元素
-            const relatedTarget = e.relatedTarget;
-            const isDropdownElement = relatedTarget && fileFilterDropdown.contains(relatedTarget);
-            if (!isDropdownElement) {
-                hideAllDropdowns();
-            }
-        });
+    // Hide dropdown immediately on blur
+    fileFilterInput.addEventListener('blur', (e) => {
+      // Check whether relatedTarget is an element inside dropdown
+      const relatedTarget = e.relatedTarget;
+      const isDropdownElement = relatedTarget && fileFilterDropdown.contains(relatedTarget);
+      if (!isDropdownElement) {
+        hideAllDropdowns();
+      }
+    });
 
-        // 点击下拉框时阻止冒泡，防止触发 blur
-        fileFilterDropdown.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-        });
+    // Prevent default on dropdown click to avoid triggering blur
+    fileFilterDropdown.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
 
-        fileFilterInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const value = fileFilterInput.value.trim();
-                if (value) {
-                    vscode.postMessage({ command: 'saveHistory', key: 'fileFilter', value: value });
-                }
-                hideAllDropdowns();
-                fileFilterInput.blur(); // ★ 回车保存后失去焦点
-                vscode.postMessage({ command: 'playEnterSfx' }); // ★ 回车音效
-            } else if (e.key === 'Escape') {
-                hideAllDropdowns();
-            }
-        });
+    fileFilterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const value = fileFilterInput.value.trim();
+        if (value) {
+          vscode.postMessage({ command: 'saveHistory', key: 'fileFilter', value: value });
+        }
+        hideAllDropdowns();
+        fileFilterInput.blur(); // ★ Lose focus after Enter to save
+        vscode.postMessage({ command: 'playEnterSfx' }); // ★ Enter key SFX
+      } else if (e.key === 'Escape') {
+        hideAllDropdowns();
+      }
+    });
 
-        // 点击下拉框 item
-        fileFilterDropdown.addEventListener('click', (e) => {
-            const item = e.target.closest('.history-dropdown-item');
-            if (item) {
-                fileFilterInput.value = item.textContent;
-                hideAllDropdowns();
-                fileFilterInput.focus();
-                // 触发 input 事件执行筛选
-                fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        });
-    }
+    // Click dropdown item
+    fileFilterDropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('.history-dropdown-item');
+      if (item) {
+        fileFilterInput.value = item.textContent;
+        hideAllDropdowns();
+        fileFilterInput.focus();
+        // Trigger input event to apply filter
+        fileFilterInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }
 
-  // ★ 精细 SCM 按钮事件监听
+  // ★ Fine-grained SCM button event listeners
   const szModeGroup = document.getElementById('szModeGroup');
   if (szModeGroup) {
     szModeGroup.querySelectorAll('.scm-btn').forEach(btn => {
@@ -2371,11 +2374,11 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeObserver.observe(container);
   }
 
-  // 点击选择/进入
+  // Click to select/enter
   const fileList = document.getElementById('fileList');
   if (fileList) {
     fileList.addEventListener('click', (event) => {
-      // ★ 正在重命名时，点击 rename-input 内部不做任何处理，让光标自然移动
+      // ★ While renaming, clicking inside rename-input does nothing so the cursor moves naturally
       if (event.target.classList && event.target.classList.contains('rename-input')) return;
       const fileItem = event.target.closest('.file-item');
       if (!fileItem) {
@@ -2396,7 +2399,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemPath = fileItem.dataset.path;
       const itemName = fileItem.dataset.name;
 
-      // 排除上级目录
+      // Exclude parent directory
       if (itemName === '..') {
         if (type === 'folder' && !isSzArea) {
           vscode.postMessage({ command: 'navigate', path: itemPath });
@@ -2406,23 +2409,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (type === 'folder') {
         if (isSzArea) {
-          // 点击文件夹的 sz 区：只选中
+          // Clicking folder sz area: select only
           selectFileItem(fileItem, false, event.shiftKey);
           currentFocusType = 'fileList';
           return;
         }
-        // 非 sz-area 区域：直接进入文件夹
+        // Non sz-area: enter folder directly
         vscode.postMessage({ command: 'navigate', path: itemPath });
         currentFocusType = 'fileList';
         return;
       }
 
-      // 文件点击：统一只选中
+      // File click: always select only
       selectFileItem(fileItem, false, event.shiftKey);
       currentFocusType = 'fileList';
     });
 
-    // 右键：item / empty
+    // Right-click: item / empty
     fileList.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       hideAllContextMenus();
@@ -2432,7 +2435,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const emptyMenu = document.getElementById('emptyContextMenu');
 
       if (itemElement && itemMenu) {
-        // 如果已经有选中的项目，并且点击的是其中一个，保持所有选中状态
+        // If there are selected items and you right-click one of them, keep selection
         if (selectedItems.length === 0) {
           selectFileItem(itemElement, false);
         }
@@ -2486,7 +2489,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // sidebar 拖动
+  // Sidebar drag
   const sidebarResizer = document.getElementById('sidebarResizer');
   const sidebar = document.querySelector('.sidebar');
   const kyContent = document.querySelector('.ky-content');
@@ -2535,47 +2538,47 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 最终：首次渲染后调一轮布局
+  // Final: run a layout pass after first render
   adjustSidebarByRatio();
   checkAndApplyResponsive();
   updateAddressDisplay(currentPath);
 
-  // 注意：真正的列表刷新由 extension 侧 postMessage(update) 完成
+  // Note: actual list refresh is performed by extension-side postMessage(update)
 });
 
-// ====== 盘符剩余空间更新机制函数 ======
+// ====== Drive free-space polling mechanism functions ======
 
 /**
- * 更新盘符显示文本
- * @param {string} drive - 盘符字母，如 'C', 'D'
- * @param {number} freeBytes - 剩余字节数
- * @param {number} totalBytes - 总字节数
+ * Update drive display text
+ * @param {string} drive - drive letter, e.g. 'C', 'D'
+ * @param {number} freeBytes - free bytes
+ * @param {number} totalBytes - total bytes
  */
 function updateDriveDisplay(drive, freeBytes, totalBytes) {
   const el = document.getElementById('drive-' + drive.toLowerCase() + '-text');
   if (!el) return;
   const freeGB = freeBytes / (1024 * 1024 * 1024);
 
-  // 检查是否需要红色警告: 空间 < 1% 或 < 2GB
+  // Check if red warning is needed: space < 1% or < 2GB
   const isLow = (totalBytes > 0 && freeBytes / totalBytes < DISK_FREE_WARNING_PERCENT) ||
-                (freeBytes < DISK_FREE_WARNING_BYTES);
+    (freeBytes < DISK_FREE_WARNING_BYTES);
 
-  // 正常显示整数，红色时才显示小数位
+  // Show integer normally; show decimals only when red
   const gbText = isLow ? freeGB.toFixed(2) : Math.floor(freeGB).toString();
   el.textContent = drive.toUpperCase() + ':\\  ' + gbText;
   el.style.color = isLow ? DISK_FREE_WARNING_COLOR : '';
 }
 
 /**
- * 检测 webview 是否可见
+ * Detect whether webview is visible
  */
 function isDiskFreePollingAllowed() {
-  // 只在页面可见时轮询
+  // Poll only when page is visible
   return document.visibilityState === 'visible';
 }
 
 /**
- * 请求所有盘符剩余空间（合批）
+ * Request free space for all drives (batched)
  */
 function requestDiskFree() {
   if (diskFreeInFlight) return;
@@ -2584,7 +2587,7 @@ function requestDiskFree() {
 }
 
 /**
- * 安排下一轮 C 盘剩余空间更新
+ * Schedule next C drive free-space update
  */
 function scheduleDiskFreeUpdate() {
   if (diskFreeTimer) {
@@ -2596,13 +2599,13 @@ function scheduleDiskFreeUpdate() {
     if (isDiskFreePollingAllowed()) {
       requestDiskFree();
     } else {
-      scheduleDiskFreeUpdate(); // 稍后重试
+      scheduleDiskFreeUpdate(); // Retry later
     }
   }, DISK_FREE_INTERVAL_MS);
 }
 
 /**
- * 停止 C 盘剩余空间轮询
+ * Stop C drive free-space polling
  */
 function stopDiskFreePolling() {
   if (diskFreeTimer) {
@@ -2611,23 +2614,23 @@ function stopDiskFreePolling() {
   }
 }
 
-// 监听可见性变化
+// Listen for visibility changes
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    // 变为可见，立即请求一次并启动轮询
+    // Became visible: request once immediately and start polling
     requestDiskFree();
   } else {
-    // 隐藏时停止轮询
+    // Stop polling when hidden
     stopDiskFreePolling();
   }
 });
 
-// 初始化：立即请求一次
+// Initialization: request once immediately
 if (isDiskFreePollingAllowed()) {
   requestDiskFree();
 }
 
-// ====== 导出给模板内联 onclick ======
+// ====== Export for template inline onclick ======
 window.navigateTo = navigateTo;
 window.navigateIntoFolder = navigateIntoFolder;
 window.unpinDir = unpinDir;
@@ -2638,7 +2641,7 @@ window.saveFile = saveFile;
 window.createFolder = createFolder;
 window.togglePin = togglePin;
 
-// ====== 自定义滚动条（与 q4 外层滚动条完全一致）======
+// ====== Custom scrollbar (exactly matches q4 outer scrollbar)======
 function setupCustomScrollbar() {
   const container = document.getElementById('fileList');
   const scrollbar = document.getElementById('customScrollbar');
@@ -2665,13 +2668,13 @@ function setupCustomScrollbar() {
 
   container.addEventListener('scroll', update);
 
-  // 拖动滚动块
+  // Drag the scrollbar thumb
   let isDragging = false, startY, startST;
-  thumb.onmousedown = function(e) {
+  thumb.onmousedown = function (e) {
     isDragging = true;
     startY = e.clientY;
     startST = container.scrollTop;
-    document.onmousemove = function(e) {
+    document.onmousemove = function (e) {
       if (!isDragging) return;
       const dy = e.clientY - startY;
       const barH = scrollbar.clientHeight;
@@ -2679,7 +2682,7 @@ function setupCustomScrollbar() {
       const sh = container.scrollHeight, ch = container.clientHeight;
       container.scrollTop = startST + (dy / (barH - th)) * (sh - ch);
     };
-    document.onmouseup = function() {
+    document.onmouseup = function () {
       isDragging = false;
       document.onmousemove = null;
     };
@@ -2687,7 +2690,7 @@ function setupCustomScrollbar() {
     e.stopPropagation();
   };
 
-  // 点击轨道背景：左键翻页 / Shift+左键或右键闪现
+  // Click track: left click page / Shift+left click or right click jump
   scrollbar.style.pointerEvents = 'auto';
 
   function jumpToClick(e) {
@@ -2701,15 +2704,15 @@ function setupCustomScrollbar() {
     container.scrollTop = Math.max(0, Math.min(1, ratio)) * (sh - ch);
   }
 
-  scrollbar.addEventListener('mousedown', function(e) {
+  scrollbar.addEventListener('mousedown', function (e) {
     if (e.target === thumb) return;
     e.preventDefault();
 
     if (e.shiftKey || e.button === 2) {
-      // Shift+左键 或 右键：闪现到点击位置
+      // Shift+left click or right click: jump to click position
       jumpToClick(e);
     } else if (e.button === 0) {
-      // 普通左键：翻页
+      // Normal left click: page
       const rect = scrollbar.getBoundingClientRect();
       const clickY = e.clientY - rect.top;
       const thumbTop = parseFloat(thumb.style.top) || 0;
@@ -2723,69 +2726,69 @@ function setupCustomScrollbar() {
     }
   });
 
-  // 屏蔽滚动条区域的右键菜单
-  scrollbar.addEventListener('contextmenu', function(e) {
+  // Block right-click context menu in scrollbar area
+  scrollbar.addEventListener('contextmenu', function (e) {
     e.preventDefault();
     e.stopPropagation();
   });
 
-  // 初始更新
+  // Initial update
   update();
   window.addEventListener('resize', update);
   const observer = new MutationObserver(update);
   observer.observe(container, { childList: true, subtree: true });
 
-  // JS hover：仅光标真正移动时才切换 hover，滚动时光标不动则零触发，消除残影
+  // JS hover: only switch hover when cursor actually moves; if cursor doesn't move during scroll, trigger zero times to remove artifacts
   let hoveredItem = null;
-  container.addEventListener('mousemove', function(e) {
+  container.addEventListener('mousemove', function (e) {
     const item = e.target.closest('.file-item');
     if (item === hoveredItem) return;
     if (hoveredItem) hoveredItem.classList.remove('js-hover');
     hoveredItem = item;
     if (hoveredItem) hoveredItem.classList.add('js-hover');
   });
-  container.addEventListener('mouseleave', function() {
+  container.addEventListener('mouseleave', function () {
     if (hoveredItem) hoveredItem.classList.remove('js-hover');
     hoveredItem = null;
   });
 
-  // 兑底：交互停止后，浏览器空闲时刷新一次，清除一切残影
+  // Final backstop: after interaction stops, repaint once when browser is idle to clear all artifacts
   let idleHandle = null;
   function scheduleIdleRepaint() {
     if (idleHandle) return;
-    idleHandle = requestIdleCallback(function() {
+    idleHandle = requestIdleCallback(function () {
       idleHandle = null;
       container.style.willChange = 'transform';
-      requestAnimationFrame(function() { container.style.willChange = ''; });
+      requestAnimationFrame(function () { container.style.willChange = ''; });
     });
   }
   container.addEventListener('scroll', scheduleIdleRepaint);
   container.addEventListener('mousemove', scheduleIdleRepaint);
 
-  // 按 1 滚到顶部，按 2 滚到底部（以中间点为界，分段跳转）
-  document.addEventListener('keydown', function(e) {
+  // Press 1 to scroll to top, press 2 to scroll to bottom (split jump based on midpoint)
+  document.addEventListener('keydown', function (e) {
     if (isInputFocused()) return;
     const maxScroll = container.scrollHeight - container.clientHeight;
     const midPoint = maxScroll / 2;
     const currentPos = container.scrollTop;
-    const tolerance = 10; // 容差值，避免浮点精度问题
+    const tolerance = 10; // Tolerance to avoid floating-point precision issues
     if (e.key === '1') {
       e.preventDefault();
       if (currentPos <= midPoint + tolerance) {
-        // 在中间或上半部分：直接到顶部
+        // At midpoint or upper half: go directly to top
         container.scrollTop = 0;
       } else {
-        // 下半部分：先到中间
+        // Lower half: go to midpoint first
         container.scrollTop = midPoint;
       }
       vscode.postMessage({ command: 'playEnterSfx' });
     } else if (e.key === '2') {
       e.preventDefault();
       if (currentPos >= midPoint - tolerance) {
-        // 在中间或下半部分：直接到底部
+        // At midpoint or lower half: go directly to bottom
         container.scrollTop = maxScroll;
       } else {
-        // 上半部分：先到中间
+        // Upper half: go to midpoint first
         container.scrollTop = midPoint;
       }
       vscode.postMessage({ command: 'playEnterSfx' });
@@ -2796,8 +2799,8 @@ function setupCustomScrollbar() {
 setTimeout(setupCustomScrollbar, 100);
 
 // c/F7 key -> admin CMD/Terminal, z key -> admin PowerShell (Windows only)
-const isWindows = {{IS_WINDOWS}};
-document.addEventListener('keydown', function(e) {
+const isWindows = {{ IS_WINDOWS }};
+document.addEventListener('keydown', function (e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
   if (key === 'a' || key === 'f7') {
@@ -2811,8 +2814,8 @@ document.addEventListener('keydown', function(e) {
 `;
 }
 
-// ==================== sidebar HTML 生成（共用） ====================
-const RECYCLE_BIN_BATCH_SIZE = 20; // 每批加载条数
+// ==================== sidebar HTML generation (shared) ====================
+const RECYCLE_BIN_BATCH_SIZE = 20; // Items per batch
 
 function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
@@ -2827,9 +2830,9 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
 
   const recycleBinHtml = showRecycleBin
     ? `
-<div class="divider"></div>
-<div class="recycle-bin-section" data-total="${totalRecycleBin}" data-loaded="${displayedRecycleBin.length}">
-  ${displayedRecycleBin
+  < div class="divider" ></div >
+    <div class="recycle-bin-section" data-total="${totalRecycleBin}" data-loaded="${displayedRecycleBin.length}">
+      ${displayedRecycleBin
       .map((item) => {
         const escaped = escapeJsStringLiteral(item.path);
         const fullDisplay = escapeHtmlAttribute(item.path);
@@ -2841,37 +2844,37 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
         }
       })
       .join("")}
-</div>`
+    </div>`
     : "";
 
   const pinnedDirsHtml = safePinnedDirs
     .map(
       (dir) => `
-<div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
+      < div class="recent-item" onclick = "navigateTo('${escapeJsStringLiteral(dir)}')" >
   <span class="delete-button" onclick="event.stopPropagation(); unpinDir('${escapeJsStringLiteral(
         dir
       )}')">\u00d7</span>
   <span>${escapeHtmlAttribute(dir)}</span>
-</div>`
+</div > `
     )
     .join("");
 
   return { recycleBinHtml, pinnedDirsHtml };
 }
 
-// 生成回收站单条项目 HTML
+// Generate HTML for a single recycle bin item
 function generateRecycleBinItemHtml(item) {
   const escaped = escapeJsStringLiteral(item.path);
   const fullDisplay = escapeHtmlAttribute(item.path);
   if (item.type === 'file') {
     const fileName = escapeHtmlAttribute(path.basename(item.path));
-    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
+    return `< div class="recycle-item recycle-file" onclick = "onRecycleFileClick('${escaped}')" data - fullpath="${fullDisplay}" > <span class="recycle-text">${fileName}</span></div > `;
   } else {
-    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+    return `< div class="recycle-item recycle-dir" onclick = "navigateTo('${escaped}')" data - fullpath="${fullDisplay}" ><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div > `;
   }
 }
 
-// 获取指定范围的回收站项目
+// Get recycle bin items within a specified range
 function getRecycleBinItems(offset, limit) {
   const config = getConfig();
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
@@ -2897,7 +2900,7 @@ function getWebviewContent(currentPath) {
     htmlTemplate = require("./q2.html");
   } catch (error) {
     geq().logMessage(q('q2.log.templateReadError', error.message), "ERROR");
-    return `<h1>错误: 无法加载 q2.html 模板</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
+    return `<h1>${q('q2.error.templateLoadFailed')}</h1><p>${escapeHtmlAttribute(error.message)}</p>`;
   }
 
   const drivesHtml = drives
@@ -2920,7 +2923,7 @@ function getWebviewContent(currentPath) {
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
     .replace("{{PIN_CHECKBOX}}", config.isPinned ? "✓" : "□")
     .replace("{{INLINE_SCRIPT}}", inlineScript.replace(/<\/script>/gi, "<\\/script>"))
-    // ★ i18n 占位符替换
+    // ★ i18n placeholder replacement
     .replace("{{I18N_PIN}}", q('q2.ui.pin'))
     .replace("{{I18N_NEW_FILE}}", q('q2.ui.newFile'))
     .replace("{{I18N_NEW_FOLDER}}", q('q2.ui.newFolder'))
@@ -2934,7 +2937,7 @@ function getWebviewContent(currentPath) {
     // Admin terminal context menu - platform specific (hardcoded, no i18n)
     .replace("{{ADMIN_TERM_1}}", process.platform === 'win32' ? 'CMD' : 'Terminal')
     .replace("{{ADMIN_TERM_2_HTML}}", process.platform === 'win32'
-      ? `<div class="context-menu-item" data-action="openAdminPowershell"><span>PowerShell</span><span class="context-menu-shortcut">= "x"</span></div>`
+      ? `< div class="context-menu-item" data - action="openAdminPowershell" ><span>PowerShell</span><span class="context-menu-shortcut">= "x"</span></div > `
       : '')
     .replace("{{IS_WINDOWS}}", process.platform === 'win32' ? 'true' : 'false');
 
@@ -2942,31 +2945,31 @@ function getWebviewContent(currentPath) {
 }
 
 
-// ==================== Q2 粘贴功能（完全移植自 Q1） ====================
-// ★★★ 基于事务、多任务、指纹去重、同名自动重命名、完美取消回滚、完备UI ★★★
+// ==================== Q2 paste feature (fully ported from Q1) ====================
+// ★★★ Based on transactions, multi-tasks, fingerprint dedupe, auto-rename on same name, perfect cancel rollback, complete UI ★★★
 
 /**
- * 执行 Q2 漫游器的粘贴操作
- * @param {string} targetDir - 目标目录
- * @param {Function} refreshCallback - 刷新 Webview 的回调函数
+ * Execute paste operation for Q2 explorer
+ * @param {string} targetDir - target directory
+ * @param {Function} refreshCallback - callback to refresh Webview
  */
 async function performQ2Paste(targetDir, refreshCallback) {
-  // ★ 使用目标目录生成任务标题（等价于 q1 的方式）
+  // ★ Generate task title using target directory (equivalent to q1 approach)
   const taskNum = await TaskCounter.increment(targetDir);
   const iconNum = await TaskCounter.incrementIcon();
   const transId = TransactionManager.createTransactionId();
   const taskTitle = TaskCounter.formatTitle(targetDir, transId, iconNum);
 
-  // ★ 获取剪切板快照
+  // ★ Get clipboard snapshot
   const snapshot = await wq();
 
-  // ★ 如果剪切板是白名单类型（纯文本），不处理
+  // ★ If clipboard is whitelist type (plain text), do not process
   if (snapshot.type === 'whitelist') {
     global.showAutoCloseNotification('info', q('q2.paste.plainTextOnly'))
     return;
   }
 
-  // ★ 确定任务类型和预计大小
+  // ★ Determine task type and estimated size
   let taskType = 'local_file';
   let intentTotalSize = 0;
   if (snapshot.subType === 'html_rich' || snapshot.subType === 'html_text') {
@@ -2978,7 +2981,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
     intentTotalSize = snapshot.totalSize || 0;
   }
 
-  // ★ 保存事务（用于回滚）
+  // ★ Save transaction (for rollback)
   await TransactionManager.saveTransaction({
     id: transId,
     targetDir: targetDir,
@@ -2993,7 +2996,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
   const taskStartTime = Date.now();
 
-  // ★ 使用 VS Code 进度条 + 取消按钮
+  // ★ Use VS Code progress bar + cancel button
   vscode.window.withProgress({
     location: vscode.ProgressLocation.Notification,
     title: taskTitle,
@@ -3002,7 +3005,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
     const isCancelled = () => token.isCancellationRequested;
 
     try {
-      // ★ 调用 h.autoDetectAndPaste 执行实际粘贴，传入进度回调
+      // ★ Call h.autoDetectAndPaste to perform actual paste, passing progress callback
       let result = await h.autoDetectAndPaste(
         targetDir,
         async (p, msg) => {
@@ -3010,35 +3013,35 @@ async function performQ2Paste(targetDir, refreshCallback) {
         },
         token,
         transId,
-        snapshot,  // 传入快照，避免重复检测
+        snapshot,  // pass snapshot to avoid redundant detection
         null,
         () => token.isCancellationRequested,
-        true  // autoRename = true，同名文件自动重命名
+        true  // autoRename = true, auto-rename same-name files
       );
 
-      // ★ 用户取消处理
+      // ★ User cancellation handling
       if (isCancelled()) {
         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
         if (trans) await TransactionManager.rollback(trans);
 
-        TaskMessage.showSimpleToast(`${taskTitle} 已取消并回滚`, 15000, 'cancel');
+        TaskMessage.showSimpleToast(q('qqq.ui.taskCancelledRollback', taskTitle), 15000, 'cancel');
 
-        // 刷新 Webview
+        // Refresh Webview
         if (refreshCallback) setTimeout(refreshCallback, 300);
         return;
       }
 
-      // ★ 处理结果
+      // ★ Handle result
       if (result) {
         await TransactionManager.removeTransaction(transId);
 
-        // ★ 统计并显示完成消息
+        // ★ Stats and completion message
         const elapsedMs = Date.now() - taskStartTime;
         let detail = '';
         let totalSizeForStats = 0;
 
         if (result.type === 'html_blocks' || result.type === 'skeleton') {
-          // HTML 粘贴
+          // HTML paste
           const mediaBlocks = result.blocks?.filter(b => b.type === 'media' && b.status === 'ok') || [];
           const mediaCount = mediaBlocks.length;
           const totalSize = mediaBlocks.reduce((sum, block) => sum + (block.size || 0), 0);
@@ -3046,26 +3049,26 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
           let sizeStr = '';
           if (totalSize > 0) {
-            if (totalSize < 1024) sizeStr = `${totalSize}b`;
-            else if (totalSize < 1048576) sizeStr = `${(totalSize / 1024).toFixed(1)}k`;
-            else sizeStr = `${(totalSize / 1048576).toFixed(1)}m`;
+            if (totalSize < 1024) sizeStr = `${totalSize} b`;
+            else if (totalSize < 1048576) sizeStr = `${(totalSize / 1024).toFixed(1)} k`;
+            else sizeStr = `${(totalSize / 1048576).toFixed(1)} m`;
           }
-          detail = `共落盘${mediaCount}个文件${sizeStr ? ` ${sizeStr}` : ''}`;
+          detail = q('q1.ui.mediaLanded', mediaCount, sizeStr ? ` ${sizeStr}` : '');
 
           if (result.baseUrl) {
             const urlSnippet = result.baseUrl.length > 33 ? result.baseUrl.substring(0, 33) + '...' : result.baseUrl;
-            detail += `，从 ${urlSnippet}`;
+            detail += q('q1.ui.fromUrl', urlSnippet);
           }
         } else if (result.type === 'file_folder' || result.type === 'file') {
-          // 文件/文件夹粘贴
+          // File/folder paste
           const totalCount = (result.files?.length || 0) + (result.folders?.length || 0);
           const skippedCount = result.skippedCount || 0;
-          detail = `文件/文件夹已复制 ${totalCount}`;
+          detail = q('q1.ui.fileFolderCopied', totalCount);
           if (skippedCount > 0) {
-            detail += ` (跳过 ${skippedCount}个无法访问)`;
+            detail += ` ${q('q1.ui.skippedInaccessible', skippedCount)}`;
           }
 
-          // 获取总大小
+          // Get total size
           if (result.totalSize) {
             totalSizeForStats = result.totalSize;
           } else if (snapshot && snapshot.totalSize) {
@@ -3076,37 +3079,37 @@ async function performQ2Paste(targetDir, refreshCallback) {
             }
           }
         } else if (result.type === 'image') {
-          // 图片粘贴
-          detail = `图片已保存`;
+          // Image paste
+          detail = q('q2.ui.imageSaved');
           if (result.path) {
             try { totalSizeForStats = fs.statSync(result.path).size; } catch { }
           }
         }
 
-        // ★ 显示完成消息
+        // ★ Show completion message
         if (detail) {
           const msg = TaskMessage.done(taskTitle, detail, elapsedMs, taskNum);
           TaskMessage.showSimpleToast(msg, 15000, 'success');
         }
 
-        // ★ 统计上报
+        // ★ Stats reporting
         if (taskType === 'video') {
           global.saveVideoStats(totalSizeForStats);
         } else {
           savePasteStats(totalSizeForStats);
         }
 
-        // ★ 粘贴成功，记录目标目录到历史
+        // ★ Paste succeeded: record target directory to history
         recordDirHistory(targetDir);
 
-        // 刷新 Webview
+        // Refresh Webview
         if (refreshCallback) setTimeout(refreshCallback, 300);
       } else {
-        // 结果为空，回滚
+        // Result is empty: rollback
         const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
         if (trans) await TransactionManager.rollback(trans);
 
-        TaskMessage.showSimpleToast(`${taskTitle} 未检测到可粘贴内容`, 10000, 'info');
+        TaskMessage.showSimpleToast(q('q2.ui.noPasteContent', taskTitle), 10000, 'info');
 
         if (refreshCallback) setTimeout(refreshCallback, 300);
       }
@@ -3115,14 +3118,14 @@ async function performQ2Paste(targetDir, refreshCallback) {
       const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
       if (trans) await TransactionManager.rollback(trans);
 
-      TaskMessage.showSimpleToast(`${taskTitle} 发生异常，已回滚`, 15000, 'cancel');
+      TaskMessage.showSimpleToast(q('q1.ui.exceptionOccurred', taskTitle), 15000, 'cancel');
 
       if (refreshCallback) setTimeout(refreshCallback, 300);
     }
   });
 }
 
-// ==================== 主逻辑 ====================
+// ==================== Main logic ====================
 function showSaveAsDialog() {
   if (!global.isValid()) {
     global.showAutoCloseNotification('error', q('q2.error.integrityFailed'));
@@ -3142,11 +3145,11 @@ function showSaveAsDialog() {
 
   const config = getConfig();
 
-  // 起始目录优先级：
-  // 1. 上次访问的目录（恢复会话）
-  // 2. pinnedDirs 第一项
-  // 3. recycleBin 中的第一个目录
-  // 4. 平台默认目录
+  // Start directory priority:
+  // 1. last visited directory (restore session)
+  // 2. first item in pinnedDirs
+  // 3. first directory in recycleBin
+  // 4. platform default directory
   let currentPath = "";
   const lastVisited = getLastVisitedDir();
   if (lastVisited) {
@@ -3192,7 +3195,7 @@ function showSaveAsDialog() {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [extensionUri],
-      contentSecurityPolicy: `default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;`
+      contentSecurityPolicy: `default -src 'none'; script - src 'unsafe-inline' vscode - webview - resource: ; style - src 'unsafe-inline' vscode - webview - resource: ; img - src vscode - webview - resource: data: ; font - src vscode - webview - resource: ; `
     }
   );
   activePanel = panel;
@@ -3204,15 +3207,15 @@ function showSaveAsDialog() {
   panel.onDidDispose(() => {
     activePanelAlive = false;
     activePanel = null;
-    sRequestVersion++; // 使所有正在进行的 sRequest 失效
-    cancelAllScans(); // 取消所有引擎的耗时扫描
+    sRequestVersion++; // Invalidate all in-flight sRequest operations
+    cancelAllScans(); // Cancel long-running scans in all engines
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
     }
   });
 
-  // ★ 监听语言切换，实时刷新 Webview
+  // ★ Listen for language changes and refresh Webview in real time
   const langChangeDisposable = onLanguageChange(() => {
     if (panel && activePanelAlive) {
       console.log('[Q2] Language changed, refreshing webview...');
@@ -3224,26 +3227,26 @@ function showSaveAsDialog() {
       }, 100);
     }
   });
-  // 面板关闭时取消订阅
+  // Unsubscribe when panel is closed
   panel.onDidDispose(() => langChangeDisposable.dispose());
 
   async function updateResourceExplorer() {
     try {
       if (!panel || !activePanelAlive) return;
 
-      // 记录当前目录，用于检测目录切换
+      // Record current directory for detecting directory changes
       if (currentPath !== lastResourceExplorerPath) {
         lastResourceExplorerPath = currentPath;
-        // ★ 立即保存最后访问的目录（即使崩溃也能恢复）
+        // ★ Save last visited directory immediately (can restore even if crashed)
         saveLastVisitedDir(currentPath);
       }
 
-      // 切换目录时，取消之前的待处理尺寸请求
+      // When switching directories, cancel previous pending size requests
       activeAbortController.abort();
       activeAbortController = new AbortController();
       const currentSignal = activeAbortController.signal;
 
-      // 清理旧的文件监视器
+      // Clean up old file watcher
       if (currentWatcher) {
         currentWatcher.dispose();
         currentWatcher = null;
@@ -3251,7 +3254,7 @@ function showSaveAsDialog() {
 
       const config = getConfig();
 
-      // ★ 精细 SCM 优先级高于全局设置
+      // ★ Fine-grained SCM has higher priority than global settings
       const fineSCM = getFineSCM(currentPath);
       const szDisplayMode = fineSCM.szMode || config.szDisplayMode;
       const sortBy = fineSCM.sortBy || config.sortBy;
@@ -3260,15 +3263,15 @@ function showSaveAsDialog() {
       const items = [];
       let fileListHtml = "";
 
-      // 辅助函数：根据 szDisplayMode 生成 sz-area 内容
+      // Helper: generate sz-area content based on szDisplayMode
       function getSzContent(item, isFolder) {
         if (szDisplayMode === "nothing") return "";
         if (szDisplayMode === "size") {
-          // size 模式：只显示文件大小，文件夹不参与
+          // size mode: only show file sizes; folders do not participate
           if (isFolder) return "";
           const bytes = item.size || 0;
           const sizeInfo = formatFileSizeEx(bytes);
-          // 如果有 GB 部分，返回带红色的 HTML
+          // If there is a GB part, return HTML with red color
           if (sizeInfo.gbPart) {
             return '<span style="color:' + SZ_GB_COLOR + '">' + sizeInfo.gbPart + '</span>' + sizeInfo.restPart + ' ';
           }
@@ -3281,12 +3284,12 @@ function showSaveAsDialog() {
         return "";
       }
 
-      // 允许返回上级：root 不显示 ..
+      // Allow parent navigation: root does not show ..
       const canonCur = canonicalizeExistingPath(currentPath);
       const parent = canonicalizeExistingPath(path.dirname(canonCur));
       const root = (() => {
         try {
-          // 使用 vscode.Uri 辅助解析根路径，增强跨平台兼容性
+          // Use vscode.Uri to help resolve root path and improve cross-platform compatibility
           return vscode.Uri.file(canonCur).fsPath === vscode.Uri.file(path.parse(canonCur).root).fsPath ? canonCur : path.parse(canonCur).root;
         } catch {
           return "";
@@ -3298,9 +3301,9 @@ function showSaveAsDialog() {
       if (canGoUp) {
         const parentPath = parent;
         items.push({ path: parentPath, name: "..", type: "folder" });
-        fileListHtml += `<div class="file-item folder" data-path="${escapeHtmlAttribute(
+        fileListHtml += `< div class="file-item folder" data - path="${escapeHtmlAttribute(
           parentPath
-        )}" data-name=".." data-type="folder"><div class="file-select-area"><div class="sz-area"></div><span class="file-icon">📁</span></div><div class="folder-name-area"><span class="file-name">..</span></div></div>`;
+        )}" data-name=".." data-type="folder"><div class="file - select - area"><div class="sz - area"></div><span class="file - icon">📁</span></div><div class="folder - name - area"><span class="file - name">..</span></div></div>`;
       }
 
       directoryContents.dirs.forEach((dir) => {
@@ -3332,7 +3335,7 @@ function showSaveAsDialog() {
         fineSCM: fineSCM,
       });
 
-      // ★ 同步更新 sidebar（历史回收站 + 图钉历史区）
+      // ★ Update sidebar synchronously (history recycle bin + pinned history)
       const sidebarData = generateSidebarHtml(config);
       panel.webview.postMessage({
         command: "updateSidebar",
@@ -3340,7 +3343,7 @@ function showSaveAsDialog() {
         pinnedDirsHtml: sidebarData.pinnedDirsHtml,
       });
 
-      // ★ 智能文件监视器：只在用户开启 autoWatchChanges 时启用
+      // ★ Smart file watcher: only enable when user has autoWatchChanges enabled
       if (config.autoWatchChanges) {
         setupFileWatcher(currentPath);
       }
@@ -3349,47 +3352,47 @@ function showSaveAsDialog() {
     }
   }
 
-  // 文件监视器设置（智能防抖，避免重复触发）
+  // File watcher setup (smart debounce to avoid repeated triggers)
   let watcherDebounceTimer = null;
   let lastWatcherTriggerTime = 0;
-  const WATCHER_DEBOUNCE_MS = 500; // 防抖时间
-  const WATCHER_COOLDOWN_MS = 1000; // 冷却时间，避免短时间内多次触发
+  const WATCHER_DEBOUNCE_MS = 500; // Debounce time
+  const WATCHER_COOLDOWN_MS = 1000; // Cooldown time to avoid multiple triggers in a short period
 
   function setupFileWatcher(watchPath) {
-    // 清理旧的监视器
+    // Clean up old watcher
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
     }
 
     try {
-      // 智能防抖刷新函数
+      // Smart debounced refresh function
       const smartRefresh = () => {
         const now = Date.now();
 
-        // 冷却期内不触发
+        // Do not trigger within cooldown window
         if (now - lastWatcherTriggerTime < WATCHER_COOLDOWN_MS) {
           return;
         }
 
-        // 清除之前的定时器
+        // Clear previous timer
         if (watcherDebounceTimer) {
           clearTimeout(watcherDebounceTimer);
         }
 
-        // 设置新的防抖定时器
+        // Set new debounce timer
         watcherDebounceTimer = setTimeout(() => {
           watcherDebounceTimer = null;
           lastWatcherTriggerTime = Date.now();
 
-          // 确保面板仍然活跃
+          // Ensure panel is still active
           if (activePanel && activePanelAlive && globalRefreshWebview) {
             globalRefreshWebview();
           }
         }, WATCHER_DEBOUNCE_MS);
       };
 
-      // 使用 VS Code 的 FileSystemWatcher
+      // Use VS Code FileSystemWatcher
       const watchPattern = new vscode.RelativePattern(watchPath, "*");
       currentWatcher = vscode.workspace.createFileSystemWatcher(watchPattern);
       currentWatcher.onDidCreate(smartRefresh);
@@ -3404,11 +3407,11 @@ function showSaveAsDialog() {
   async function refreshWebview() {
     if (!panel || !activePanelAlive) return;
     try {
-      // 性能优化：如果 Webview 已经加载过内容，不要全量重刷 HTML
-      // 只有在 HTML 为空时才进行初始化。切换目录通过 update 消息处理。
+      // Performance optimization: if Webview already has content, do not fully refresh HTML
+      // Only initialize when HTML is empty. Directory switching is handled via update messages.
       if (!panel.webview.html || panel.webview.html === "") {
         panel.webview.html = getWebviewContent(currentPath);
-        // 首次加载需要给一点时间
+        // First load needs a bit of time
         setTimeout(async () => {
           if (!panel || !activePanelAlive) return;
           await updateResourceExplorer();
@@ -3417,7 +3420,7 @@ function showSaveAsDialog() {
           } catch { }
         }, 300);
       } else {
-        // 已经是激活状态，直接异步更新内容，实现"秒开"响应
+        // Already active: update content asynchronously for "instant-open" responsiveness
         await updateResourceExplorer();
       }
     } catch (e) {
@@ -3425,7 +3428,7 @@ function showSaveAsDialog() {
     }
   }
 
-  // 注册全局刷新函数
+  // Register global refresh function
   globalRefreshWebview = refreshWebview;
 
   function getShowOptions(openInCurrentGroup) {
@@ -3438,12 +3441,12 @@ function showSaveAsDialog() {
     const currentCol = activePanel.viewColumn || vscode.ViewColumn.One;
 
     if (openInCurrentGroup) {
-      // !isPinned case: 实现“一换一”，在 q2 所在的分组打开
+      // !isPinned case: implement "one-for-one", open in the group where q2 is
       options.viewColumn = currentCol;
       return options;
     }
 
-    // isPinned case: 智能寻找紧邻的分组（左右方向）
+    // isPinned case: smartly find the adjacent group (left/right direction)
     if (!vscode.window.tabGroups || !vscode.window.tabGroups.all) {
       options.viewColumn = vscode.ViewColumn.Beside;
       return options;
@@ -3458,13 +3461,13 @@ function showSaveAsDialog() {
     const idx = columns.indexOf(currentCol);
     if (idx !== -1) {
       if (idx < columns.length - 1) {
-        // 1. 优先使用紧邻右侧的分组
+        // 1. Prefer the adjacent right group
         options.viewColumn = columns[idx + 1];
       } else if (idx > 0) {
-        // 2. 如果已是右侧极限，则使用左侧邻居
+        // 2. If already at rightmost limit, use left neighbor
         options.viewColumn = columns[idx - 1];
       } else {
-        // 3. 只有一个分组，则在侧边新建
+        // 3. Only one group: create beside
         options.viewColumn = vscode.ViewColumn.Beside;
       }
     } else {
@@ -3505,11 +3508,11 @@ function showSaveAsDialog() {
         }
         break;
       case "recycleFileClick": {
-        // 点击回收站文件：重新置顶 dir+file，然后编辑该文件
+        // Click recycle bin file: re-pin dir+file, then edit the file
         const clickedFile = canonicalizeExistingPath(message.path);
         if (clickedFile && fs.existsSync(clickedFile)) {
           recordFileHistory(clickedFile);
-          // 打开编辑
+          // Open for editing
           const ext = path.extname(clickedFile).toLowerCase();
           if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
             try { global.openExternal(vscode.Uri.file(clickedFile)); } catch { }
@@ -3523,7 +3526,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      // 回收站懒加载：请求更多条目
+      // Recycle bin lazy load: request more items
       case "requestRecycleBin": {
         const offset = message.offset || 0;
         const limit = message.limit || RECYCLE_BIN_BATCH_SIZE;
@@ -3539,7 +3542,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      // 盘符剩余空间请求（合批）
+      // Drive free space request (batched)
       case "getDiskFree": {
         (async () => {
           try {
@@ -3555,7 +3558,7 @@ function showSaveAsDialog() {
             if (panel && activePanelAlive) {
               panel.webview.postMessage({
                 command: "diskFreeResult",
-                data: result // 一次性返回所有盘符的完整答卷
+                data: result // Return complete answer for all drives at once
               });
             }
           } catch (e) {
@@ -3565,28 +3568,28 @@ function showSaveAsDialog() {
         break;
       }
 
-      // s 请求：点击 sz 区强制获取 size（包括文件夹递归大小）
-      // 优化：边算边渲染 + 版本号取消机制
+      // s request: click sz area to force-get size (including recursive folder size)
+      // Optimization: render-as-you-go + version cancel mechanism
       case "sRequest": {
-        const thisVersion = ++sRequestVersion; // 递增版本号，使之前的请求失效
-        cancelAllScans(); // ★ 取消正在进行的底层扫描
+        const thisVersion = ++sRequestVersion; // Increment version to invalidate previous requests
+        cancelAllScans(); // ★ Cancel ongoing underlying scans
         (async () => {
           const items = message.items || [];
           if (items.length === 0) return;
 
-          // 边算边渲染：每个完成后立即发送，不阻塞其他项
+          // Render-as-you-go: send each result immediately when done, without blocking other items
           const promises = items.map(async (item) => {
-            // 版本号检查：如果已过期，直接跳过
+            // Version check: if expired, skip
             if (sRequestVersion !== thisVersion) return;
 
             const isFolder = item.type === 'folder';
             const size = await getSizeForSRequest(item.path, isFolder);
 
-            // 再次检查版本号：计算完成后可能已经切换目录了
+            // Check version again: directory may have changed after computation finished
             if (sRequestVersion !== thisVersion) return;
             if (!panel || !activePanelAlive) return;
 
-            // 单个结果立即发送渲染
+            // Send single result for immediate render
             const sizeInfo = formatFileSizeEx(size);
             panel.webview.postMessage({
               command: "updateSizeBatch",
@@ -3600,7 +3603,7 @@ function showSaveAsDialog() {
             });
           });
 
-          // 并发执行，但不等待全部完成
+          // Execute concurrently, but do not wait for all to complete
           await Promise.allSettled(promises);
         })();
         break;
@@ -3630,11 +3633,11 @@ function showSaveAsDialog() {
 
       case "navigate":
         try {
-          sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
-          cancelAllScans(); // 取消所有引擎的耗时扫描
+          sRequestVersion++; // Invalidate in-flight sRequest when switching directories
+          cancelAllScans(); // Cancel long-running scans in all engines
           const resolved = resolveNavPath(message.path, currentPath);
 
-          // Windows：若用户点了 drives 的 "C:"，resolve 后可能仍是 "C:"；这里强制成根
+          // Windows: if user clicked drives "C:", after resolve it may still be "C:"; force root here
           let newPath = resolved;
           if (process.platform === "win32" && /^[A-Z]:$/i.test(newPath)) newPath = newPath.toUpperCase() + "\\";
 
@@ -3643,7 +3646,7 @@ function showSaveAsDialog() {
           if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
             currentPath = newPath;
             refreshWebview();
-            // ★ 导航成功后发送成功消息，前端可以据此保存历史并 blur
+            // ★ After successful navigation, send success message so frontend can save history and blur
             if (panel && activePanelAlive) {
               panel.webview.postMessage({ command: 'navigateSuccess', path: message.path });
             }
@@ -3656,8 +3659,8 @@ function showSaveAsDialog() {
         break;
 
       case "navigateUp": {
-        sRequestVersion++; // 切换目录时使正在进行的 sRequest 失效
-        cancelAllScans(); // 取消所有引擎的耗时扫描
+        sRequestVersion++; // Invalidate in-flight sRequest when switching directories
+        cancelAllScans(); // Cancel long-running scans in all engines
         const parentDir = canonicalizeExistingPath(path.dirname(currentPath));
         if (parentDir && parentDir !== currentPath) {
           currentPath = parentDir;
@@ -3688,7 +3691,7 @@ function showSaveAsDialog() {
           currentConfig.recycleBin,
           message.isPinned
         );
-        // ★ 勾选音效
+        // ★ Checkmark SFX
         if (global.pythonBridge?.isAvailable()) {
           const sfxName = message.isPinned ? "a1.mp3" : "pas2.mp3";
           global.pythonBridge.call("play_sfx", { category: "yz", name: sfxName }, 1000).catch(() => { });
@@ -3708,7 +3711,7 @@ function showSaveAsDialog() {
             fs.writeFileSync(fullFilePath, "\n".repeat(199), "utf8");
             recordDirHistory(currentPath);
 
-            // 联动 Q4 统计：累加新建文件数
+            // Link Q4 stats: accumulate created file count
             try {
               const q4 = vscode.extensions.getExtension('gh555.qqq')?.exports;
               if (q4 && typeof q4.recordRoamUsage === 'function') {
@@ -3772,7 +3775,7 @@ function showSaveAsDialog() {
 
       case "editFile": {
         recordFileHistory(message.path);
-        // ★ 立即更新 sidebar（可能不会走 refreshWebview）
+        // ★ Update sidebar immediately (may not go through refreshWebview)
         if (panel && activePanelAlive) {
           const sbData = generateSidebarHtml(getConfig());
           panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
@@ -3816,7 +3819,7 @@ function showSaveAsDialog() {
 
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
-        // w 键打开不记录历史
+        // Do not record history for w-key open
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
@@ -3827,7 +3830,7 @@ function showSaveAsDialog() {
 
       case "quickDeleteToRecycleBin": {
         const itemToDelete = canonicalizeExistingPath(message.path);
-        // 安全保护：绝对禁止删除上级目录
+        // Safety guard: absolutely forbid deleting parent directory
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
           global.showAutoCloseNotification('error', q('q2.error.deleteParentForbidden'));
           refreshWebview();
@@ -3840,14 +3843,14 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
               global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
-              // ★ 删除到回收站音效
+              // ★ Move-to-recycle-bin SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
             } catch (error) {
               global.showAutoCloseNotification('error', q('q2.ui.deleteFailed', error.message));
             } finally {
-              // 无论成功失败，都刷新列表并恢复状态
+              // Refresh list and restore state regardless of success/failure
               if (activePanel && activePanelAlive) refreshWebview();
             }
           })();
@@ -3858,7 +3861,7 @@ function showSaveAsDialog() {
       }
 
       case "quickDeleteMultipleToRecycleBin": {
-        const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // 插件侧二次过滤，确保安全
+        const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // Second-pass filtering on extension side to ensure safety
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
           (async () => {
@@ -3880,7 +3883,7 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
-              // ★ 删除到回收站音效
+              // ★ Move-to-recycle-bin SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
@@ -3893,7 +3896,7 @@ function showSaveAsDialog() {
               global.showAutoCloseNotification('error', q('q2.ui.multiDeleteFailed', errorCount));
             }
 
-            // 无论删除过程中发生什么错误，最后都必须强制刷新列表以恢复界面（变灰项会消失或恢复）
+            // No matter what errors happen during deletion, must force refresh at end to restore UI (grayed items will disappear or recover)
             if (activePanel && activePanelAlive) refreshWebview();
           })();
         } else {
@@ -3903,7 +3906,7 @@ function showSaveAsDialog() {
       }
 
       case "quickPermanentDelete": {
-        // Shift+Delete 永久删除单个项目
+        // Shift+Delete permanently delete a single item
         const itemToDelete = canonicalizeExistingPath(message.path);
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
           global.showAutoCloseNotification('error', q('q2.error.deleteParentForbidden'));
@@ -3917,7 +3920,7 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
               global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
-              // ★ 永久删除音效
+              // ★ Permanent delete SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
               }
@@ -3934,7 +3937,7 @@ function showSaveAsDialog() {
       }
 
       case "quickPermanentDeleteMultiple": {
-        // Shift+Delete 永久删除多个项目
+        // Shift+Delete permanently delete multiple items
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..');
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
@@ -3964,7 +3967,7 @@ function showSaveAsDialog() {
               global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', errorCount));
             }
 
-            // ★ 永久删除音效
+            // ★ Permanent delete SFX
             if (deletedCount > 0 && global.pythonBridge?.isAvailable()) {
               global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
             }
@@ -3979,7 +3982,7 @@ function showSaveAsDialog() {
 
       case "copy":
         if (message.paths && message.paths.length > 0) {
-          // 插件侧安全过滤：只过滤掉字面意义上的 ".." 相对路径，允许已解析的绝对路径
+          // Extension-side safety filter: only filter literal ".." relative paths; allow resolved absolute paths
           const safePaths = message.paths.filter(p => p !== '..' && !p.endsWith(path.sep + '..'));
           if (safePaths.length > 0) {
             await h.copyFilesToClipboard(safePaths);
@@ -3988,23 +3991,23 @@ function showSaveAsDialog() {
         break;
 
       case "paste":
-        // ★★★ Q2 粘贴功能：完全移植自 Q1，基于事务、带进度条、可取消 ★★★
+        // ★★★ Q2 paste feature: fully ported from Q1, transaction-based, with progress bar, cancellable ★★★
         await performQ2Paste(message.destDir, refreshWebview);
         break;
 
       case "setFineSCM": {
-        // ★ 保存精细 SCM 并立即刷新
+        // ★ Save fine-grained SCM and refresh immediately
         const folderPath = message.path;
         const szMode = message.szMode;
         const sortByValue = message.sortBy;
         setFineSCMValue(folderPath, szMode, sortByValue);
-        // 立即刷新界面
+        // Refresh UI immediately
         if (activePanel && activePanelAlive) refreshWebview();
         break;
       }
 
       case "showAutoCloseMessage": {
-        // ★ 9秒自动关闭的弹窗
+        // ★ Auto-close popup (9 seconds)
         const msgType = message.type || 'info';
         const msgText = message.message || '';
         global.showAutoCloseNotification(msgType, msgText);
@@ -4015,7 +4018,7 @@ function showSaveAsDialog() {
       case "openAdminCmd": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'cmd');
-        // ★ 打开终端音效
+        // ★ Open terminal SFX
         if (global.pythonBridge?.isAvailable()) {
           global.pythonBridge.call("play_sfx", { category: "yz", name: "zs861.mp3" }, 1000).catch(() => { });
         }
@@ -4025,7 +4028,7 @@ function showSaveAsDialog() {
       case "openAdminPowershell": {
         const targetPath = canonicalizeExistingPath(message.path || currentPath);
         openAdminTerminal(targetPath, 'powershell');
-        // ★ 打开终端音效
+        // ★ Open terminal SFX
         if (global.pythonBridge?.isAvailable()) {
           global.pythonBridge.call("play_sfx", { category: "yz", name: "zs861.mp3" }, 1000).catch(() => { });
         }
@@ -4033,7 +4036,7 @@ function showSaveAsDialog() {
       }
 
       case "playEnterSfx": {
-        // ★ 回车音效
+        // ★ Enter key SFX
         if (global.pythonBridge?.isAvailable()) {
           global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
         }
@@ -4045,7 +4048,7 @@ function showSaveAsDialog() {
   refreshWebview();
 }
 
-// ==================== 扩展激活 ====================
+// ==================== Extension activation ====================
 async function activate(context) {
   if (!context) {
     global.logMessage("q2.activate: context is undefined!", "ERROR");
@@ -4058,13 +4061,13 @@ async function activate(context) {
     return;
   }
 
-  // ★ 调试 i18n
+  // ★ Debug i18n
   console.log(`[Q2] i18n test: q('q2.ui.pin') = "${q('q2.ui.pin')}"`);
 
   LARGE_WATERMARK_PATH = path.join(extensionPath, "assets", "al.png");
   SMALL_WATERMARK_PATH = path.join(extensionPath, "assets", "as.png");
 
-  // 异步校验完整性，不阻塞激活
+  // Verify integrity asynchronously without blocking activation
   global.verifySystemIntegrityAsync(context).then(valid => {
     geq().logMessage(`Q2 Integrity: ${valid ? "PASSED" : "FAILED"}`, "INFO");
   });
@@ -4072,17 +4075,17 @@ async function activate(context) {
   getConfig();
   geq().logMessage(q('q2.log.activated'), "INFO");
 
-  // ★ 终极修复：通过 ConfigGate 回调机制获取配置更新通知（解决竞态问题）
-  // 之前直接监听 onDidChangeConfiguration 会导致在 sessionOverrides 更新前就读取配置
+  // ★ Ultimate fix: use ConfigGate callback mechanism to receive config update notifications (resolve race condition)
+  // Previously, directly listening to onDidChangeConfiguration caused reading config before sessionOverrides update
   global.ConfigManager.onConfigUpdated((changedKeys, event) => {
-    // 只关心 q2 相关的配置
+    // Only care about q2-related config
     const q2Keys = ["szDisplayMode", "sortBy", "autoWatchChanges"];
     if (!changedKeys.some(k => q2Keys.includes(k))) return;
 
-    // 清除配置缓存，强制重新读取
+    // Clear config cache and force re-read
     cachedInMemoryConfig = null;
     geq().logMessage(q('q2.log.configRefresh'), "INFO");
-    // 如果面板正在显示，刷新它
+    // If panel is showing, refresh it
     if (activePanel && activePanelAlive && globalRefreshWebview) {
       globalRefreshWebview();
     }

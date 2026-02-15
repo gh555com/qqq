@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "永久删除项失败: {0} - {1}",
             "multiPermanentDeleteSuccess": "已永久删除 {0} 个项目",
             "multiPermanentDeletePartial": "已永久删除 {0} 个项目，{1} 个处理失败",
-            "multiPermanentDeleteFailed": "{0} 个项目永久删除失败。"
+            "multiPermanentDeleteFailed": "{0} 个项目永久删除失败。",
+            "enterFileName": "请键入文件名",
+            "enterFolderName": "请键入文件夹名",
+            "selectSingleForRename": "qqq: 请单选再做重命名",
+            "imageSaved": "图片已保存",
+            "noPasteContent": "{0} 未检测到可粘贴内容",
         },
         "paste": {
             "plainTextOnly": "qqq: 剪切板中是纯文本，无法粘贴到文件管理器"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Integrity check failed.",
             "renameFailed": "重命名失败：目标位置已存在同名项。",
+            "templateLoadFailed": "错误: 无法加载 q2.html 模板",
             "renameError": "重命名失败: {0}",
             "invalidPath": "无效的目录路径: {0}",
             "navError": "导航失败: {0}",

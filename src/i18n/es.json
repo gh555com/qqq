@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "Eliminación permanente de elemento falló: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0} elementos eliminados permanentemente",
             "multiPermanentDeletePartial": "{0} elementos eliminados permanentemente, {1} fallaron",
-            "multiPermanentDeleteFailed": "Eliminación permanente de {0} elementos falló."
+            "multiPermanentDeleteFailed": "Eliminación permanente de {0} elementos falló.",
+            "enterFileName": "Por favor ingrese un nombre de archivo",
+            "enterFolderName": "Por favor ingrese un nombre de carpeta",
+            "selectSingleForRename": "qqq: Por favor seleccione un solo elemento para renombrar",
+            "imageSaved": "Imagen guardada",
+            "noPasteContent": "{0} No se detectó contenido para pegar",
         },
         "paste": {
             "plainTextOnly": "qqq: el portapapeles solo contiene texto, no se puede pegar en el administrador de archivos"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Verificación de integridad falló.",
             "renameFailed": "Renombrar falló: ya existe un elemento con el mismo nombre en el destino.",
+            "templateLoadFailed": "Error: No se pudo cargar la plantilla q2.html",
             "renameError": "Renombrar falló: {0}",
             "invalidPath": "Ruta de directorio inválida: {0}",
             "navError": "Navegación falló: {0}",

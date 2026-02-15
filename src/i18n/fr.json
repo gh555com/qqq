@@ -140,7 +140,12 @@
             "permanentDeleteItemFailed": "Suppression définitive de l'élément échouée: {0} - {1}",
             "multiPermanentDeleteSuccess": "{0} éléments supprimés définitivement",
             "multiPermanentDeletePartial": "{0} éléments supprimés définitivement, {1} échoués",
-            "multiPermanentDeleteFailed": "Suppression définitive de {0} éléments échouée."
+            "multiPermanentDeleteFailed": "Suppression définitive de {0} éléments échouée.",
+            "enterFileName": "Veuillez entrer un nom de fichier",
+            "enterFolderName": "Veuillez entrer un nom de dossier",
+            "selectSingleForRename": "qqq: Veuillez sélectionner un seul élément pour renommer",
+            "imageSaved": "Image enregistrée",
+            "noPasteContent": "{0} Aucun contenu collable détecté",
         },
         "paste": {
             "plainTextOnly": "qqq: le presse-papiers ne contient que du texte, impossible de coller dans le gestionnaire de fichiers"
@@ -148,6 +153,7 @@
         "error": {
             "integrityFailed": "Vérification d'intégrité échouée.",
             "renameFailed": "Renommage échoué: un élément du même nom existe déjà à la destination.",
+            "templateLoadFailed": "Erreur: Échec du chargement du modèle q2.html",
             "renameError": "Renommage échoué: {0}",
             "invalidPath": "Chemin de répertoire invalide: {0}",
             "navError": "Navigation échouée: {0}",
