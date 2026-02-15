@@ -184,7 +184,7 @@
             "createOpenError": "[Q2] Falha ao abrir após criar: arquivo não encontrado {0}",
             "openDocError": "[Q2] openTextDocument falhou: {0}",
             "openFileError": "[Q2] Falha ao abrir arquivo: {0}",
-            "activated": "Q2: Gerenciador de arquivos ativado",
+            "activated": "Q2: Gerenciador de arquivos ativado (usando geq().js fallback de 4 níveis + agendamento/cache de tamanho + lógica de caminho IO mais recente)",
             "configRefresh": "Q2: Configuração alterada, atualizando..."
         }
     },
@@ -286,9 +286,9 @@
             "cacheInitError": "Inicialização de cache falhou: {0}",
             "delayedInitError": "Inicialização atrasada falhou: {0}",
             "delayedInitStart": "Inicialização atrasada de qqq iniciada...",
-            "dowWarmup": "Aquecimento de qqq dow.js iniciado",
+            "dowWarmup": "Aquecimento de qqq dow.js iniciado (atraso 10s)",
             "q4LoadError": "Carregamento de q4 falhou: {0}",
-            "daemonsStart": "qqq startDaemons iniciado",
+            "daemonsStart": "qqq startDaemons iniciado (atraso 6s)",
             "engineSwitch": "Motor alterado para: {0}",
             "pythonEnvImperfect": "[Motor IO] Ambiente Python imperfeito: {0}",
             "transactionRecoverError": "Recuperação de transação falhou: {0}",

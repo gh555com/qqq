@@ -184,7 +184,7 @@
             "createOpenError": "[Q2] فشل الفتح بعد الإنشاء: الملف غير موجود {0}",
             "openDocError": "[Q2] فشل openTextDocument: {0}",
             "openFileError": "[Q2] فشل فتح الملف: {0}",
-            "activated": "Q2: تم تفعيل مدير الملفات",
+            "activated": "Q2: تم تفعيل مدير الملفات (باستخدام geq().js الرجوع 4 مستويات + جدولة/تخزين الحجم + أحدث منطق مسار IO)",
             "configRefresh": "Q2: تم تغيير الإعدادات، جاري التحديث..."
         }
     },
@@ -286,9 +286,9 @@
             "cacheInitError": "فشل تهيئة ذاكرة التخزين المؤقت: {0}",
             "delayedInitError": "فشل التهيئة المؤجلة: {0}",
             "delayedInitStart": "بدأت التهيئة المؤجلة لـ qqq...",
-            "dowWarmup": "بدأ تسخين qqq dow.js",
+            "dowWarmup": "بدأ تسخين qqq dow.js (تأخير 10 ثواني)",
             "q4LoadError": "فشل تحميل q4: {0}",
-            "daemonsStart": "بدأ qqq startDaemons",
+            "daemonsStart": "بدأ qqq startDaemons (تأخير 6 ثواني)",
             "engineSwitch": "تم تغيير المحرك إلى: {0}",
             "pythonEnvImperfect": "[محرك IO] بيئة Python غير مكتملة: {0}",
             "transactionRecoverError": "فشل استعادة المعاملة: {0}",
