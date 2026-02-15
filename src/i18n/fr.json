@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] Configuration de pywin32 terminée",
         "copyVcDll": "[Python] Copie de VC++ DLL: {0}",
         "installFailed": "[Python] Installation échouée: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py introuvable: {0}",
+        "cannotStartPowerShell": "Impossible de démarrer un processus PowerShell",
+        "pressKeyToClose": "Appuyez sur une touche pour fermer ce terminal...",
+        "xclipInstallSuccess": "qqq: xclip installé avec succès! La fonction presse-papiers est maintenant disponible.",
+        "xclipInstallMayFailed": "qqq: L'installation de xclip a peut-être échoué. Veuillez vérifier la sortie du terminal ou installer manuellement.",
+        "cmdCopied": "qqq: Commande d'installation copiée dans le presse-papiers: {0}",
+        "elapsed": "Durée",
+        "cannotOpenFile": "Impossible d'ouvrir le fichier: {0}",
+        "trialModeHint": "Mode d'essai: Les paramètres ne sont valides que pour cette session et seront réinitialisés au redémarrage.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Échec du démarrage / indisponible",
+        "unknownReason": "Raison inconnue",
+        "mismatchExpected": "Attendu {0}, raison de l'échec du démarrage: {1}",
+        "tooltipAvgLatency": "Latence moy.",
+        "tooltipMax": "max {0}",
+        "tooltipCompanionTime": "Temps d'utilisation",
+        "tooltipDiskCache": "Cache disque",
+        "tooltipCacheHit": "Succès cache",
+        "tooltipIOEngine": "Moteur IO"
     }
 }

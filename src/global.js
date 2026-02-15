@@ -124,7 +124,6 @@ class DaemonBridge extends EventEmitter {
 					res(result);
 				}
 			} catch (e) {
-				// Non-JSON output,可能是Python脚本的调试输出或错误信息 // qq2q
 				logMessage(`${this.name} stdout: ${line}`, "WARN");
 			}
 		});
@@ -396,7 +395,7 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 		}
 
 		if (!fs.existsSync(scriptPath)) {
-			bridge._setStartError(`kp.py 不存在：${scriptPath}`); // qq2q
+			bridge._setStartError(q('global.kpNotExist', scriptPath));
 			bridge.available = false;
 			resolve(false);
 			return;
@@ -992,7 +991,7 @@ while ($true) {
 					}
 
 					if (!proc) {
-						throw lastError || new Error("无法启动任何PowerShell进程"); // qq2q
+						throw lastError || new Error(q('global.cannotStartPowerShell'));
 					}
 
 					proc.on("error", (err) => {
@@ -1236,7 +1235,7 @@ async function runInTerminal(command, title) {
 	const terminal = vscode.window.createTerminal({
 		name: title,
 		shellPath: '/bin/bash',
-		shellArgs: ['-c', `${command}; echo ''; echo '按任意键关闭此终端...'; read -n 1`] // qq2q
+		shellArgs: ['-c', `${command}; echo ''; echo '${q('global.pressKeyToClose')}'; read -n 1`]
 	});
 	terminal.show();
 	return terminal;
@@ -1300,10 +1299,10 @@ async function checkAndInstallLinuxDeps() {
 				// Re-check
 				const nowHasXclip = await checkXclipInstalled();
 				if (nowHasXclip) {
-					showAutoCloseNotification('success', 'qqq: xclip 安装成功！剪贴板功能现已可用。'); // qq2q
+					showAutoCloseNotification('success', q('global.xclipInstallSuccess'));
 					logMessage(q('linux.xclipInstallSuccess'), 'INFO');
 				} else {
-					showAutoCloseNotification('warning', 'qqq: xclip 安装可能未成功，请检查终端输出或手动安装。'); // qq2q
+					showAutoCloseNotification('warning', q('global.xclipInstallMayFailed'));
 					logMessage(q('linux.xclipInstallMaybeFailed'), 'WARN');
 				}
 			}
@@ -1311,7 +1310,7 @@ async function checkAndInstallLinuxDeps() {
 
 	} else if (choice === q('linux.copyCommand')) {
 		await vscode.env.clipboard.writeText(installCmd);
-		showAutoCloseNotification('info', `qqq: 安装命令已复制到剪贴板: ${installCmd}`); // qq2q
+		showAutoCloseNotification('info', q('global.cmdCopied', installCmd));
 		logMessage(q('linux.userCopyCmd', installCmd), 'INFO');
 
 	} else if (choice === q('linux.dontAskAgain')) {
@@ -1674,7 +1673,7 @@ const TaskMessage = {
 		const dur = typeof elapsed === 'number' ? this.formatDuration(elapsed) : elapsed;
 		// ★ Two spaces between taskTitle and summary
 		const idPart = taskId ? `;  id: ${taskId}` : '';
-		return `${prefix}  ${summary}( 耗时: ${dur}${idPart} )`; // qq2q
+		return `${prefix}  ${summary}( ${q('global.elapsed')}: ${dur}${idPart} )`;
 	},
 
 	/**
@@ -1849,7 +1848,7 @@ function openExternal(uri) {
 				return Promise.resolve();
 			} catch (pythonError) {
 				// All methods failed, return error
-				return Promise.reject(new Error(`无法打开文件: ${filePath}`)); // qq2q
+				return Promise.reject(new Error(q('global.cannotOpenFile', filePath)));
 			}
 		}
 	}
@@ -1894,70 +1893,6 @@ const DEFAULT_CONFIG = {
 	"autoDownload": true
 };
 
-const CONFIG_METADATA = {
-	"enlargeSmallImages": { name: "放大预览小图", type: "boolean" }, // qq2q
-	"performanceMode": {
-		name: "性能模式", type: "enum", // qq2q
-		options: ["optmum", "extreme", "accelerated"],
-		descriptions: []
-	},
-	"frameSizeMode": {
-		name: "相框尺寸", type: "enum", // qq2q
-		options: ["fix", "large", "small"],
-		descriptions: []
-	},
-	"cleanFreak": { name: "洁癖模式 (防遮挡)", type: "boolean" }, // qq2q
-	"ioEngine": {
-		name: "IO 引擎", type: "enum", // qq2q
-		options: ["auto", "python", "rust", "node"],
-		descriptions: []
-	},
-	"downloadSecurityLevel": {
-		name: "下载安全等级", type: "enum", // qq2q
-		options: ["0: 最宽松", "1: 平衡", "2: 最严格"], // qq2q
-		descriptions: []
-	},
-	"enhancedHtmlPasteCompatibility": { name: "HTML 增强粘贴 (防乱码)", type: "boolean" }, // qq2q
-	"docExportImageResolution": {
-		name: "导出图片分辨率", type: "enum", // qq2q
-		options: ["原始分辨率", "相框分辨率"], // qq2q
-		descriptions: []
-	},
-	"docExportIncludeCipher": { name: "导出含暗号", type: "boolean" }, // qq2q
-	"transactionLevel": {
-		name: "事物包裹倾向", type: "enum", // qq2q
-		options: ["full", "half"],
-		descriptions: ["全包模式: 黄名单全部走事务(a)", "半包模式: 截图和小文件走直粘(q), 其他走事务(a)"] // qq2q
-	},
-	"textSlideColorScheme": {
-		name: "文本胶片底色", type: "enum", // qq2q
-		options: ["light", "dark"],
-		descriptions: ["白底黑字", "黑巧克力底白字"] // qq2q
-	},
-	"textSlideFontSize": {
-		name: "文本胶片字体大小", type: "number" // qq2q
-	},
-	// ★ Add missing metadata
-	"szDisplayMode": {
-		name: "sz区显示模式", type: "enum", // qq2q
-		options: ["nothing", "size", "ctime", "mtime"],
-		descriptions: []
-	},
-	"sortBy": {
-		name: "排序方式", type: "enum", // qq2q
-		options: ["name", "size", "ctime", "mtime"],
-		descriptions: []
-	},
-	"autoWatchChanges": { name: "自动监听变更", type: "boolean" }, // qq2q
-	"codelensLevel": {
-		name: "CodeLens 级别", type: "enum", // qq2q
-		options: ["0", "1", "2", "3"],
-		descriptions: []
-	},
-	"takeOverCodelensStyle": { name: "接管 CodeLens 样式", type: "boolean" }, // qq2q
-	"forceTextFlowScheme": { name: "强制文本流方案", type: "boolean" }, // qq2q
-	"autoDownload": { name: "自动下载视频", type: "boolean" } // qq2q
-};
 
 // ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
 let _isVip = true; // ★ Default true = VIP behavior (backward compatible until setVipMode is called)
@@ -2046,7 +1981,7 @@ const ConfigManager = {
 			// Reset on restart is done via nonVipBootstrapResetAll() during startup
 			if (!_isVip && !_trialHintShown) {
 				_trialHintShown = true;
-				try { showAutoCloseNotification('info', "试用模式：设置仅本次有效，重启后恢复默认。"); } catch { } // qq2q
+				try { showAutoCloseNotification('info', q('global.trialModeHint')); } catch { }
 			}
 			return;
 		}
@@ -2066,9 +2001,6 @@ const ConfigManager = {
 		return res;
 	},
 
-	getMetadata(key) {
-		return CONFIG_METADATA[key];
-	},
 
 	onChange(cb) {
 		_configChangeCallback = cb;
@@ -2950,7 +2882,7 @@ const TaskCounter = {
 		const icon = ICONS[(iconNum - 1) % ICONS.length];
 
 		const displayPath = this.formatPath(filePath);
-		const base = `qqq：'${displayPath}${icon}${taskId}'`; // qq2q
+		const base = q('global.taskPrefix', displayPath, icon, taskId);
 		return suffix ? `${base} ${suffix}` : base;
 	}
 };
@@ -3211,27 +3143,27 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 	const shReason = cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
 
 	if (activeState.code === "N" && activeState.nodeMode === "S") {
-		if (shReason) reasons.push(`Shell daemon：${shReason} `); // qq2q
-		else reasons.push(`Shell daemon：启动失败 / 不可用`); // qq2q
+		if (shReason) reasons.push(q('global.engineReason', 'Shell daemon', shReason));
+		else reasons.push(q('global.engineStartFailed', 'Shell daemon'));
 	}
 
 	if (pref === "python" && activeState.code !== "P") {
-		if (pyReason) reasons.unshift(`Python：${pyReason} `); // qq2q
-		else if (!pythonBridge.isAvailable()) reasons.unshift(`Python：启动失败 / 不可用`); // qq2q // Only report if truly unavailable
+		if (pyReason) reasons.unshift(q('global.engineReason', 'Python', pyReason));
+		else if (!pythonBridge.isAvailable()) reasons.unshift(q('global.engineStartFailed', 'Python')); // Only report if truly unavailable
 
 		// Rust only report if it was actually tried and failed
 		if (activeState.code === "N" && rustBridge.lastStartError) {
-			if (rsReason) reasons.push(`Rust：${rsReason} `); // qq2q
-			else reasons.push(`Rust：启动失败 / 不可用`); // qq2q
+			if (rsReason) reasons.push(q('global.engineReason', 'Rust', rsReason));
+			else reasons.push(q('global.engineStartFailed', 'Rust'));
 		}
 	}
 
 	if (pref === "rust" && activeState.code !== "R") {
-		if (rsReason) reasons.unshift(`Rust：${rsReason} `); // qq2q
-		else reasons.unshift(`Rust：启动失败 / 不可用`); // qq2q
+		if (rsReason) reasons.unshift(q('global.engineReason', 'Rust', rsReason));
+		else reasons.unshift(q('global.engineStartFailed', 'Rust'));
 		if (activeState.code === "N") {
-			if (pyReason) reasons.push(`Python：${pyReason} `); // qq2q
-			else reasons.push(`Python：启动失败 / 不可用`); // qq2q
+			if (pyReason) reasons.push(q('global.engineReason', 'Python', pyReason));
+			else reasons.push(q('global.engineStartFailed', 'Python'));
 		}
 	}
 
@@ -3491,26 +3423,26 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	let mismatchText = "";
 	if ((pref === "python" && active.code !== "P") || (pref === "rust" && active.code !== "R")) {
 		const expectedName = pref === "python" ? "Python" : "Rust";
-		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : "未知原因"; // qq2q
-		mismatchText = ` ▬ 期待值${expectedName}，启动失败原因：${reasonStr} `; // qq2q
+		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : q('global.unknownReason');
+		mismatchText = ` ▬ ${q('global.mismatchExpected', expectedName, reasonStr)} `;
 	}
 
 	const ioLine = `${active.name}${mismatchText}`;
 
 	// Format wq time display
 	const recentTimesStr = wqStats.recentTimes.join(', ');
-	const wqLine = `💪 **平均前摇：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[最大${wqStats.maxTime}]` : ''}）` : ''}`; // qq2q
+	const wqLine = `💪 **${q('global.tooltipAvgLatency')}：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[${q('global.tooltipMax', wqStats.maxTime)}]` : ''}）` : ''}`;
 
 	const tooltip = new vscode.MarkdownString(
-		`⏱️ **陪伴时间：** ${formatHours(totalSeconds)} // qq2q
+		`⏱️ **${q('global.tooltipCompanionTime')}：** ${formatHours(totalSeconds)}
 
-💾 **磁盘缓存：** ${formatBytes(cacheBytes)} // qq2q
+💾 **${q('global.tooltipDiskCache')}：** ${formatBytes(cacheBytes)}
 
-🎯 **缓存命中：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal}) // qq2q
+🎯 **${q('global.tooltipCacheHit')}：** ${hitRate.toFixed(2)}% (hit = ${pstats.hitTotal}, miss = ${pstats.missTotal})
 
 ${wqLine}
 
-⚡ **IO 引擎：** ${ioLine}` // qq2q
+⚡ **${q('global.tooltipIOEngine')}：** ${ioLine}`
 	);
 
 	tooltip.isTrusted = true;

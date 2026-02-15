@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] Configuração do pywin32 concluída",
         "copyVcDll": "[Python] Copiando VC++ DLL: {0}",
         "installFailed": "[Python] Instalação falhou: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py não encontrado: {0}",
+        "cannotStartPowerShell": "Não foi possível iniciar o processo PowerShell",
+        "pressKeyToClose": "Pressione qualquer tecla para fechar este terminal...",
+        "xclipInstallSuccess": "qqq: xclip instalado com sucesso! A função da área de transferência está disponível agora.",
+        "xclipInstallMayFailed": "qqq: A instalação do xclip pode ter falhado. Verifique a saída do terminal ou instale manualmente.",
+        "cmdCopied": "qqq: Comando de instalação copiado para a área de transferência: {0}",
+        "elapsed": "Tempo",
+        "cannotOpenFile": "Não foi possível abrir o arquivo: {0}",
+        "trialModeHint": "Modo de teste: As configurações são válidas apenas para esta sessão e serão redefinidas ao reiniciar.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Falha ao iniciar / indisponível",
+        "unknownReason": "Motivo desconhecido",
+        "mismatchExpected": "Esperado {0}, motivo da falha ao iniciar: {1}",
+        "tooltipAvgLatency": "Latência média",
+        "tooltipMax": "máx {0}",
+        "tooltipCompanionTime": "Tempo de uso",
+        "tooltipDiskCache": "Cache de disco",
+        "tooltipCacheHit": "Acerto de cache",
+        "tooltipIOEngine": "Motor IO"
     }
 }

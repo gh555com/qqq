@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] Configuración de pywin32 completada",
         "copyVcDll": "[Python] Copiando VC++ DLL: {0}",
         "installFailed": "[Python] Instalación falló: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py no encontrado: {0}",
+        "cannotStartPowerShell": "No se puede iniciar ningún proceso de PowerShell",
+        "pressKeyToClose": "Presione cualquier tecla para cerrar esta terminal...",
+        "xclipInstallSuccess": "qqq: xclip instalado correctamente! La función del portapapeles ya está disponible.",
+        "xclipInstallMayFailed": "qqq: La instalación de xclip pudo haber fallado. Verifique la salida del terminal o instale manualmente.",
+        "cmdCopied": "qqq: Comando de instalación copiado al portapapeles: {0}",
+        "elapsed": "Tiempo",
+        "cannotOpenFile": "No se puede abrir el archivo: {0}",
+        "trialModeHint": "Modo de prueba: La configuración solo es válida para esta sesión y se restablecerá al reiniciar.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Fallo de inicio / no disponible",
+        "unknownReason": "Razón desconocida",
+        "mismatchExpected": "Esperado {0}, razón del fallo de inicio: {1}",
+        "tooltipAvgLatency": "Latencia prom.",
+        "tooltipMax": "máx {0}",
+        "tooltipCompanionTime": "Tiempo de uso",
+        "tooltipDiskCache": "Caché de disco",
+        "tooltipCacheHit": "Acierto de caché",
+        "tooltipIOEngine": "Motor IO"
     }
 }

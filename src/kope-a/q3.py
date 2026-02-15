@@ -261,7 +261,7 @@ class ClipboardMonitor(Qaqqlication):
         try:
             self.setup_clipboard_monitor()
         except Exception as e:
-            print(f"设置剪贴板监控异常: {e}")
+            print(f"设置剪切板监控异常: {e}")
 
         self.executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=os.cpu_count() or 8
@@ -330,14 +330,14 @@ class ClipboardMonitor(Qaqqlication):
             except Exception as e:
                 print(f"播放清空音效失败: {e}")
 
-    # --- 剪贴板监控 ---
+    # --- 剪切板监控 ---
 
     def setup_clipboard_monitor(self):
         try:
             self.clipboard().dataChanged.connect(self.on_clipboard_changed)
-            print("剪贴板监控已连接")
+            print("剪切板监控已连接")
         except Exception as e:
-            print(f"剪贴板监控连接失败: {e}")
+            print(f"剪切板监控连接失败: {e}")
 
     # === 数据解析 ===
 
@@ -582,7 +582,7 @@ class ClipboardMonitor(Qaqqlication):
 
     def on_clipboard_changed(self):
         """
-        剪贴板一有变动就进这里：
+        剪切板一有变动就进这里：
         - 不做 Fast Clear，全部走“轮询确认”；
         - 模式 0/1 的区别只在 _capture_max_attempts 和 _capture_hard_timeout_ms。
         """
@@ -612,7 +612,7 @@ class ClipboardMonitor(Qaqqlication):
 
     def _poll_clipboard(self):
         """
-        轮询读取剪贴板：
+        轮询读取剪切板：
         - 非空数据：立即结束 capture 并弹窗；
         - 空数据：记录 clear，继续轮询；
         - attempts 达到上限 或 elapsed 超过 hard timeout：结束 capture。
@@ -636,7 +636,7 @@ class ClipboardMonitor(Qaqqlication):
                 try:
                     data = self.process_clipboard_data(mime_data)
                 except Exception as e:
-                    print(f"处理剪贴板数据异常: {e}")
+                    print(f"处理剪切板数据异常: {e}")
                     data = None
             else:
                 data = None
@@ -1250,7 +1250,7 @@ if __name__ == "__main__":
     Qaqqlication.setAttribute(Qt.AA_UseHighDpiPixmaps)
 
     mode_text = "快速模式(0)" if CLEAR_STRATEGY_MODE == 0 else "严格模式(1)"
-    print(f"剪贴板监控工具版本: {VERSION}，清空策略: {mode_text}")
+    print(f"剪切板监控工具版本: {VERSION}，清空策略: {mode_text}")
 
     try:
         app = ClipboardMonitor(sys.argv)

@@ -1,7 +1,7 @@
 // -*- coding: utf-8 -*-
 //
 // Rust port of the given Python "dumb saver" clipboard daemon.
-// - 极简模式：只负责读取系统剪贴板并保存到指定目录（dumb saver）
+// - 极简模式：只负责读取系统剪切板并保存到指定目录（dumb saver）
 // - 移除所有指纹计算、去重逻辑
 // - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 // - 仅处理：纯文本、文件复制、原生图片保存

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-#   - 极简模式：只负责读取系统剪贴板并保存到指定目录（dumb saver）
+#   - 极简模式：只负责读取系统剪切板并保存到指定目录（dumb saver）
 #   - 移除所有指纹计算、去重逻辑
 #   - 移除 HTML 解析逻辑（由 Node.js 侧处理）
 #   - 仅处理：纯文本、文件复制、原生图片保存
@@ -222,7 +222,7 @@ def _init_sfx_paths():
     if not os.path.isdir(assets_dir):
         assets_dir = os.path.join(script_dir, "assets")
 
-    # kope 音效 (1-7.mp3) - 剪贴板复制
+    # kope 音效 (1-7.mp3) - 剪切板复制
     kope_dir = os.path.join(assets_dir, "kope")
     if os.path.isdir(kope_dir):
         _SFX_REGISTRY["kope"] = [os.path.join(kope_dir, f"{i}.mp3") for i in range(1, 8)]
@@ -340,7 +340,7 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     hub.play_sfx(path)
 
 def _start_clipboard_watcher():
-    """启动剪贴板音效 (事件驱动 - 0ms 检测延迟)"""
+    """启动剪切板音效 (事件驱动 - 0ms 检测延迟)"""
     hub = _get_audio_hub()
     if not hub:
         return {"status": "error", "error": "AudioHub init failed"}
@@ -358,7 +358,7 @@ def _start_clipboard_watcher():
         return {"status": "error", "error": str(e)}
 
 def _stop_clipboard_watcher():
-    """停止剪贴板音效"""
+    """停止剪切板音效"""
     hub = _get_audio_hub()
     if hub:
         hub.stop_clipboard()
@@ -1014,7 +1014,7 @@ def handle_windows_pywin32(wcb, wcon, output_dir: Path):
                 except:
                     pass
         finally:
-            # ★ 必须立即关闭剪贴板！
+            # ★ 必须立即关闭剪切板！
             wcb.CloseClipboard()
     except Exception:
         pass
@@ -1132,7 +1132,7 @@ def handle_windows_ctypes(output_dir: Path):
                     data_to_process = {"type": "dib", "data": dib}
                     break
     finally:
-        # ★ 必须立即关闭剪贴板！
+        # ★ 必须立即关闭剪切板！
         CloseClipboard()
     # ★ 阶段 2：在锁外处理数据 (耗时操作)
     if not data_to_process:
@@ -1520,7 +1520,7 @@ def trigger_system_paste(target_dir):
         if not os.path.isdir(clean_path):
             return {"success": False, "error": f"Target folder not found: {clean_path}"}
 
-        # 检查剪贴板是否有文件
+        # 检查剪切板是否有文件
         files = get_clipboard_files_only()
         if not files or not files.get("paths"):
             return {"success": False, "error": "No files in clipboard"}
@@ -1669,7 +1669,7 @@ def _dispatch_action(cmd, cancel_version: int = None):
         out.update(_get_audio_state())
         return out
     # =============================================================================
-    #  剪贴板监听命令
+    #  剪切板监听命令
     # =============================================================================
     if action == "start_clipboard_watcher":
         out.update(_start_clipboard_watcher())

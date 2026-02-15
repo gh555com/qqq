@@ -2514,7 +2514,7 @@ async function executeClipboardCommand() {
 	if (!editor) return;
 
 	if (editor.document.isUntitled) {
-		// 先用 wq() 判断剪贴板内容类型
+		// 先用 wq() 判断剪切板内容类型
 		const snapshot = await wq();
 		// 只有当内容不是纯文本时才弹出提示框
 		if (snapshot.type !== 'whitelist') {

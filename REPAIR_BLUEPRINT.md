@@ -297,7 +297,7 @@ qqq.transactions.backup：注意这个 .backup 后缀，这是旧版用来存备
 
 . obsoleteKeys 到底是清理了哪些“陈年旧账”？
 我的清理逻辑遵循您“向前看”的原则，在 activate 瞬间直接执行了以下物理卸载：
-qqq_clipboard_history：这是旧版本直接存放在 VS Code 内部数据库（SQLite/LevelDB）里的全部剪贴板文本。它通常是那 2MB 报警的罪魁祸首。
+qqq_clipboard_history：这是旧版本直接存放在 VS Code 内部数据库（SQLite/LevelDB）里的全部剪切板文本。它通常是那 2MB 报警的罪魁祸首。
 qqq_history_manager_state：旧版本用来记录“哪个是最后一条”的元数据。
 qqq.transactions.backup：您之前担心的“事务残留”。如果之前的下载或漫游任务崩溃，旧版本会将未完成的事务存入这里。我直接将其抹除，强制让插件从“零状态”干净启动。
 

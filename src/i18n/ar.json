@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] اكتمل تكوين pywin32",
         "copyVcDll": "[Python] نسخ VC++ DLL: {0}",
         "installFailed": "[Python] فشل التثبيت: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py غير موجود: {0}",
+        "cannotStartPowerShell": "تعذر بدء أي عملية PowerShell",
+        "pressKeyToClose": "اضغط أي مفتاح لإغلاق هذا الطرفية...",
+        "xclipInstallSuccess": "qqq: تم تثبيت xclip بنجاح! وظيفة الحافظة متاحة الآن.",
+        "xclipInstallMayFailed": "qqq: ربما فشل تثبيت xclip. يرجى التحقق من إخراج الطرفية أو التثبيت يدويًا.",
+        "cmdCopied": "qqq: تم نسخ أمر التثبيت إلى الحافظة: {0}",
+        "elapsed": "الوقت",
+        "cannotOpenFile": "تعذر فتح الملف: {0}",
+        "trialModeHint": "الوضع التجريبي: الإعدادات صالحة لهذه الجلسة فقط وستتم إعادة تعيينها عند إعادة التشغيل.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: فشل البدء / غير متاح",
+        "unknownReason": "سبب غير معروف",
+        "mismatchExpected": "المتوقع {0}، سبب فشل البدء: {1}",
+        "tooltipAvgLatency": "متوسط التأخير",
+        "tooltipMax": "الحد الأقصى {0}",
+        "tooltipCompanionTime": "وقت الاستخدام",
+        "tooltipDiskCache": "ذاكرة القرص المؤقتة",
+        "tooltipCacheHit": "إصابة الذاكرة المؤقتة",
+        "tooltipIOEngine": "محرك IO"
     }
 }

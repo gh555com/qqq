@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] pywin32 設定完成",
         "copyVcDll": "[Python] 複製 VC++ DLL: {0}",
         "installFailed": "[Python] 安裝失敗: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py 不存在：{0}",
+        "cannotStartPowerShell": "無法啟動任何 PowerShell 進程",
+        "pressKeyToClose": "按任意鍵關閉此終端...",
+        "xclipInstallSuccess": "qqq: xclip 安裝成功！剪貼簿功能現已可用。",
+        "xclipInstallMayFailed": "qqq: xclip 安裝可能未成功，請檢查終端輸出或手動安裝。",
+        "cmdCopied": "qqq: 安裝命令已複製到剪貼簿: {0}",
+        "elapsed": "耗時",
+        "cannotOpenFile": "無法開啟檔案: {0}",
+        "trialModeHint": "試用模式：設定僅本次有效，重啟後恢復預設。",
+        "taskPrefix": "qqq：'{0}{1}{2}'",
+        "engineReason": "{0}：{1}",
+        "engineStartFailed": "{0}：啟動失敗 / 不可用",
+        "unknownReason": "未知原因",
+        "mismatchExpected": "期待值{0}，啟動失敗原因：{1}",
+        "tooltipAvgLatency": "平均前搖",
+        "tooltipMax": "最大{0}",
+        "tooltipCompanionTime": "陪伴時間",
+        "tooltipDiskCache": "磁碟快取",
+        "tooltipCacheHit": "快取命中",
+        "tooltipIOEngine": "IO 引擎"
     }
 }

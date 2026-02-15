@@ -606,5 +606,27 @@
         "pywin32Done": "[Python] Настройка pywin32 завершена",
         "copyVcDll": "[Python] Копирование VC++ DLL: {0}",
         "installFailed": "[Python] Установка не удалась: {0}"
+    },
+    "global": {
+        "kpNotExist": "kp.py не найден: {0}",
+        "cannotStartPowerShell": "Не удается запустить процесс PowerShell",
+        "pressKeyToClose": "Нажмите любую клавишу, чтобы закрыть этот терминал...",
+        "xclipInstallSuccess": "qqq: xclip успешно установлен! Функция буфера обмена теперь доступна.",
+        "xclipInstallMayFailed": "qqq: Установка xclip могла завершиться неудачно. Проверьте вывод терминала или установите вручную.",
+        "cmdCopied": "qqq: Команда установки скопирована в буфер обмена: {0}",
+        "elapsed": "Время",
+        "cannotOpenFile": "Не удается открыть файл: {0}",
+        "trialModeHint": "Пробный режим: Настройки действительны только для этого сеанса и будут сброшены при перезапуске.",
+        "taskPrefix": "qqq: '{0}{1}{2}'",
+        "engineReason": "{0}: {1}",
+        "engineStartFailed": "{0}: Ошибка запуска / недоступен",
+        "unknownReason": "Неизвестная причина",
+        "mismatchExpected": "Ожидалось {0}, причина ошибки запуска: {1}",
+        "tooltipAvgLatency": "Ср. задержка",
+        "tooltipMax": "макс {0}",
+        "tooltipCompanionTime": "Время использования",
+        "tooltipDiskCache": "Дисковый кэш",
+        "tooltipCacheHit": "Попадание кэша",
+        "tooltipIOEngine": "IO-движок"
     }
 }

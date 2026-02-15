@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const cp = require("child_process");
-// ★ 懒加载 cheerio，仅在解析 HTML 时才加载，加快启动速度
+// ★ Lazy-load cheerio; only load when parsing HTML to speed up startup
 let _cheerio = null;
 function getCheerio() {
     if (!_cheerio) _cheerio = require("cheerio");
@@ -150,7 +150,7 @@ public class IconHelper {
 `;
 
 // ============================================================================
-// Process / Spawn Helpers  (✅ 配套：默认 NO_TRACK，不进入下载任务 tracker)
+// Process / Spawn Helpers  (✅ Companion: default NO_TRACK; do not enter download task tracker)
 // ============================================================================
 const NO_TRACK_ENV_KEY = "QQQ_NO_TRACK";
 function _envNoTrack() {
@@ -160,11 +160,11 @@ function _envNoTrack() {
 function spawnRun(cmd, args, opts = {}) {
     const { checkExpected, returnOutput } = opts;
     return new Promise((resolve) => {
-        // ✅ 双保险：显式 env 标记 NO_TRACK
+        // ✅ Double safety: explicitly mark env NO_TRACK
         const child = cp.spawn(cmd, args, {
             windowsHide: true,
             env: _envNoTrack(),
-            // detached 默认就是 false；这里不强行写也行
+            // detached default is false; it's fine not to force it here
         });
 
         let output = "";
@@ -203,12 +203,12 @@ function spawnOutput(cmd, args) {
 }
 
 // ============================================================================
-// Deduplication Helper (仅同文件夹内去重，不跨文件夹)
+// Deduplication Helper (dedupe only within the same folder; no cross-folder)
 // ============================================================================
 /**
- * 尝试在文件所在目录内进行去重（仅限同文件夹）
+ * Try to deduplicate within the file's directory (same-folder only)
  * @param {string} filePath
- * @returns {string} 最终使用的文件路径
+ * @returns {string} The final file path to use
  */
 function _tryLocalDeduplicate(filePath) {
     if (!filePath || !fs.existsSync(filePath)) return filePath;
@@ -216,7 +216,7 @@ function _tryLocalDeduplicate(filePath) {
         const currentFp = computeFingerprint(filePath);
         if (!currentFp) return filePath;
 
-        // ★ 核心修复：严格限制在同一文件夹内去重，禁止跨文件夹引用
+        // ★ Core fix: strictly limit dedupe to the same folder; forbid cross-folder reference
         const dir = path.dirname(filePath);
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         const isWin = process.platform === "win32";
@@ -259,22 +259,22 @@ function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) {
         try {
             fs.mkdirSync(dirPath, { recursive: true });
-            // ★ 加盐：如果创建的是 qqq 文件夹，写入 ADS 标记（Windows NTFS）
+            // ★ Add salt: if creating the qqq folder, write ADS marker (Windows NTFS)
             _saltQqqFolder(dirPath);
         } catch (e) { }
     }
 }
 
-// xattr key 常量
+// xattr key constants
 const XATTR_KEY_DARWIN = "com.qqq.owner";
 const XATTR_KEY_LINUX = "user.qqq.owner";
 
 /**
- * 给 qqq 文件夹加盐，标记为我们创建的
+ * Salt the qqq folder to mark it as created by us
  * - Windows: ADS (Alternate Data Stream)
  * - macOS: xattr com.qqq.owner
  * - Linux: xattr user.qqq.owner
- * 注意：所有平台都静默失败，不阻塞主流程
+ * Note: silently fail on all platforms; never block main flow
  */
 function _saltQqqFolder(dirPath) {
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
@@ -284,15 +284,15 @@ function _saltQqqFolder(dirPath) {
         } else if (process.platform === "darwin") {
             cp.execFileSync("xattr", ["-w", XATTR_KEY_DARWIN, QQQ_ADS_SALT, dirPath], { timeout: 1000 });
         } else {
-            // Linux: setfattr 可能未安装，静默失败
+            // Linux: setfattr may not be installed; silently fail
             cp.execFileSync("setfattr", ["-n", XATTR_KEY_LINUX, "-v", QQQ_ADS_SALT, dirPath], { timeout: 1000 });
         }
     } catch { }
 }
 
 /**
- * 检查一个 qqq 文件夹是否是我们创建的（验盐）
- * 所有平台静默失败返回 false
+ * Check whether a qqq folder is created by us (verify salt)
+ * Silently fail and return false on all platforms
  */
 function isOurQqqFolder(dirPath) {
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return false;
@@ -314,7 +314,7 @@ function isOurQqqFolder(dirPath) {
 }
 
 /**
- * 检查目录是否为空（不含任何文件或子目录）
+ * Check whether a directory is empty (no files or subdirectories)
  */
 function isDirEmpty(dirPath) {
     try {
@@ -326,9 +326,9 @@ function isDirEmpty(dirPath) {
 }
 
 /**
- * ★ 兜底清理：如果 qqq 文件夹为空且是我们创建的，永久删除
- * 供 onDidSaveTextDocument 调用
- * @returns {boolean} 是否执行了删除
+ * ★ Fallback cleanup: if qqq folder is empty and created by us, delete permanently
+ * Called by onDidSaveTextDocument
+ * @returns {boolean} Whether deletion was performed
  */
 function cleanupEmptyQqqFolder(docDir) {
     if (!docDir) return false;
@@ -338,7 +338,7 @@ function cleanupEmptyQqqFolder(docDir) {
         if (!fs.statSync(qqqPath).isDirectory()) return false;
         if (!isDirEmpty(qqqPath)) return false;
         if (!isOurQqqFolder(qqqPath)) return false;
-        // 先删 ADS 流，再删空目录
+        // Delete ADS stream first, then delete empty directory
         try { fs.unlinkSync(qqqPath + ":qqq"); } catch { }
         fs.rmdirSync(qqqPath);
         log(q('h.log.cleanupEmptyFolder', qqqPath), "INFO");
@@ -357,15 +357,15 @@ function isImageExtForClipboard(ext) {
     return IMAGE_EXTS_FOR_CLIPBOARD.has(ext.toLowerCase());
 }
 
-// ★ 使用 global.js 的统一格式化函数，避免重复实现
+// ★ Use the unified formatter from global.js to avoid re-implementing
 const { formatBytesCompact, formatTimeCompact } = global;
 
 /**
- * 生成带大小和时间的进度消息
- * @param {string} stepInfo - 步骤信息，如 "文件夹 1/3"
- * @param {string} itemName - 当前项名称
- * @param {number} totalSize - 已复制总大小（字节）
- * @param {number} elapsedMs - 已耗时（毫秒）
+ * Generate a progress message with size and time
+ * @param {string} stepInfo - Step info, e.g. "Folder 1/3"
+ * @param {string} itemName - Current item name
+ * @param {number} totalSize - Total copied size (bytes)
+ * @param {number} elapsedMs - Elapsed time (ms)
  * @returns {string}
  */
 function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
@@ -373,19 +373,19 @@ function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
     const sizeStr = totalSize > 0 ? ` ${formatBytesCompact(totalSize)}` : '';
     const timePart = elapsedMs >= TWENTY_MIN ? ` (${formatTimeCompact(elapsedMs)})` : '';
 
-    // 格式：[复制文件夹 1/3] 222m (31:22) folderName
+    // Format: [Copy folder 1/3] 222m (31:22) folderName
     return `[${stepInfo}]${sizeStr}${timePart} ${itemName}`;
 }
 
 /**
- * 生成带大小的时间戳文件名
- * @param {string} ext - 文件扩展名（如 '.mp4'）
- * @param {string} [transId] - 可选的事务ID，作为文件名前缀（用于回滚时精确匹配）
- * @returns {string} 文件名，格式为：{transId}_{date}__{day}__{time}{ext}
+ * Generate a timestamp filename with size
+ * @param {string} ext - File extension (e.g. '.mp4')
+ * @param {string} [transId] - Optional transaction ID as filename prefix (for precise rollback matching)
+ * @returns {string} Filename in format: {transId}_{date}__{day}__{time}{ext}
  *
- * 示例：
- * - 有 transId: jhrYLq_2026.02.06__5__12.20.30.mp4
- * - 无 transId: 587kD_2026.02.06__5__12.20.30.mp4（随机前缀）
+ * Example:
+ * - With transId: jhrYLq_2026.02.06__5__12.20.30.mp4
+ * - Without transId: 587kD_2026.02.06__5__12.20.30.mp4 (random prefix)
  */
 function getTimestampFilename(ext, transId = null) {
     const now = new Date();
@@ -394,13 +394,13 @@ function getTimestampFilename(ext, transId = null) {
     const day = now.getDay() || 7;
     const ms = String(now.getMilliseconds()).padStart(3, "0");
 
-    // ★ 如果提供了 transId，直接使用它作为前缀
-    // 这样回滚时可以通过 transId 前缀精确匹配删除
+    // ★ If transId is provided, use it directly as prefix
+    // This allows rollback to precisely match deletions via the transId prefix
     if (transId && typeof transId === 'string' && transId.length > 0) {
         return `${transId}_${date}__${day}__${time}${ext}`;
     }
 
-    // ★ 无 transId 时使用随机前缀（向后兼容）
+    // ★ If no transId, use a random prefix (backward compatible)
     const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
     const valid = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         .split("")
@@ -417,18 +417,18 @@ function getTimestampFilename(ext, transId = null) {
 }
 
 /**
- * 获取一个不冲突的路径 (如 file (1).txt)
+ * Get a non-conflicting path (e.g. file (1).txt)
  */
 function getUniquePath(baseDir, originalName, isFolder = false) {
     let nameWithoutExt, ext;
     if (isFolder) {
-        // 文件夹不拆分后缀，整体视为名称
+        // For folders, do not split extension; treat the whole string as the name
         nameWithoutExt = originalName;
         ext = "";
     } else {
         ext = path.extname(originalName);
         nameWithoutExt = path.basename(originalName, ext);
-        // 特殊情况：如果是 .gitignore 这种隐藏文件，path.extname 会返回全名，这里修正
+        // Special case: for hidden files like .gitignore, path.extname returns the full name; fix it here
         if (!nameWithoutExt && ext.startsWith('.')) {
             nameWithoutExt = ext;
             ext = "";
@@ -446,10 +446,10 @@ function getUniquePath(baseDir, originalName, isFolder = false) {
 }
 
 /**
- * ★ 从 URL 提取原始文件名（与 VideoDownloadController._createTask 统一逻辑）
- * @param {string} url - 资源 URL
- * @param {string} kind - 'video' 或 'image'
- * @returns {string|null} - 文件名，失败返回 null
+ * ★ Extract original filename from URL (unified with VideoDownloadController._createTask logic)
+ * @param {string} url - Resource URL
+ * @param {string} kind - 'video' or 'image'
+ * @returns {string|null} - Filename, null on failure
  */
 function getFilenameFromUrl(url, kind = 'video') {
     try {
@@ -458,16 +458,16 @@ function getFilenameFromUrl(url, kind = 'video') {
         const base = path.basename(pathname);
 
         if (kind === 'video') {
-            // ★ 视频：匹配常见视频扩展名
+            // ★ Video: match common video extensions
             if (base && /\.(mp4|webm|mkv|mov|flv|avi|wmv|m4v|mpg|mpeg|3gp|ts|ogv)$/i.test(base)) {
                 const decoded = decodeURIComponent(base);
-                // ★ 文件名合理检查：不能太长，不能有特殊字符
+                // ★ Reasonableness check: not too long, no special characters
                 if (decoded.length <= 100 && /^[a-zA-Z0-9._\-\u4e00-\u9fff]+$/.test(decoded)) {
                     return decoded;
                 }
             }
         } else {
-            // ★ 图片：匹配常见图片扩展名
+            // ★ Image: match common image extensions
             if (base && /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(base)) {
                 const decoded = decodeURIComponent(base);
                 if (decoded.length <= 100 && /^[a-zA-Z0-9._\-\u4e00-\u9fff]+$/.test(decoded)) {
@@ -561,19 +561,19 @@ function canonicalizeExistingPath(p) {
 }
 
 /**
- * 安全检查文件/文件夹是否可以被访问和读取
- * @param {string} filePath - 要检查的路径
- * @returns {boolean} - 是否可以安全访问
+ * Safety-check whether a file/folder can be accessed and read
+ * @param {string} filePath - Path to check
+ * @returns {boolean} - Whether it can be safely accessed
  */
 function safeAccessCheck(filePath) {
     try {
-        // 检查是否能访问（读取权限）
+        // Check accessibility (read permission)
         fs.accessSync(filePath, fs.constants.R_OK);
-        // 检查是否能获取状态信息
+        // Check whether stat info can be obtained
         fs.statSync(filePath);
         return true;
     } catch (e) {
-        // 文件被占用、权限不足、路径无效等情况
+        // File locked, insufficient permissions, invalid path, etc.
         log(q('h.log.safeAccessDenied', filePath, e.code || e.message), "WARN");
         return false;
     }
@@ -595,7 +595,7 @@ function computeFingerprint(filePath) {
     try {
         const stat = fs.statSync(filePath);
         const size = stat.size;
-        // 使用秒级精度或整数毫秒，防止文件系统精度抖动导致的 miss
+        // Use second-level precision or integer ms to avoid FS precision jitter causing misses
         const mtime = Math.floor(stat.mtimeMs);
         const key = cacheKeyForPath(filePath);
 
@@ -603,7 +603,7 @@ function computeFingerprint(filePath) {
         if (cached && cached.mtime === mtime && cached.size === size) return cached.fp;
 
         if (size === 0) {
-            // 空文件：必须使用路径+mtime 来区分，不能所有空文件都返回相同指纹
+            // Empty file: must use path+mtime to distinguish; cannot return the same fp for all empty files
             const fp = crypto.createHash("md5").update(`empty:0:${key}:${mtime}`).digest("hex");
             _fingerprintCache.set(key, { mtime, size, fp });
             if (_fingerprintCache.size > 2000) _fingerprintCache.clear();
@@ -786,44 +786,44 @@ function _isResultQualityAcceptable(blocks) {
 
 // ============================================================================
 // Markdown Format Detection
-// 检测纯文本是否包含 Markdown 格式符号，用于决定是否优先保留纯文本而非 HTML
+// Detect whether plain text contains Markdown symbols, used to decide whether to prefer plain text over HTML
 // ============================================================================
 function _looksLikeMarkdown(text) {
     if (!text || text.length < 3) return false;
 
-    // Markdown 格式符号模式
+    // Markdown symbol patterns
     const markdownPatterns = [
-        /^#{1,6}\s+\S/m,                    // 标题: # ## ### 等
-        /^\s*[-*+]\s+\S/m,                  // 无序列表: - * +
-        /^\s*\d+\.\s+\S/m,                  // 有序列表: 1. 2. 3.
-        /^\s*>\s+\S/m,                      // 引用: >
-        /^---\s*$/m,                         // 分隔线: ---
-        /^\*\*\*\s*$/m,                      // 分隔线: ***
-        /^___\s*$/m,                         // 分隔线: ___
-        /\*\*[^*]+\*\*/,                     // 粗体: **text**
-        /\*[^*]+\*/,                         // 斜体: *text* (注意排除列表)
-        /`[^`]+`/,                           // 行内代码: `code`
-        /^```/m,                             // 代码块: ```
-        /\[([^\]]+)\]\(([^)]+)\)/,          // 链接: [text](url)
-        /!\[([^\]]*)\]\(([^)]+)\)/,         // 图片: ![alt](url)
+        /^#{1,6}\s+\S/m,                    // Headings: # ## ### etc.
+        /^\s*[-*+]\s+\S/m,                  // Unordered list: - * +
+        /^\s*\d+\.\s+\S/m,                  // Ordered list: 1. 2. 3.
+        /^\s*>\s+\S/m,                      // Blockquote: >
+        /^---\s*$/m,                         // Horizontal rule: ---
+        /^\*\*\*\s*$/m,                      // Horizontal rule: ***
+        /^___\s*$/m,                         // Horizontal rule: ___
+        /\*\*[^*]+\*\*/,                     // Bold: **text**
+        /\*[^*]+\*/,                         // Italic: *text* (exclude list cases)
+        /`[^`]+`/,                           // Inline code: `code`
+        /^```/m,                             // Code block: ```
+        /\[([^\]]+)\]\(([^)]+)\)/,          // Link: [text](url)
+        /!\[([^\]]*)\]\(([^)]+)\)/,         // Image: ![alt](url)
     ];
 
-    // 统计匹配到的模式数量
+    // Count matched patterns
     let matchCount = 0;
     for (const pattern of markdownPatterns) {
         if (pattern.test(text)) {
             matchCount++;
-            // 如果匹配到了明确的 Markdown 标记（标题、分隔线、代码块），直接返回 true
-            if (/^#{1,6}\s+\S/m.test(text) ||      // 标题
-                /^---\s*$/m.test(text) ||          // 分隔线
-                /^\*\*\*\s*$/m.test(text) ||       // 分隔线
-                /^```/m.test(text)) {               // 代码块
+            // If matched clear Markdown markers (heading, hr, code block), return true directly
+            if (/^#{1,6}\s+\S/m.test(text) ||      // Heading
+                /^---\s*$/m.test(text) ||          // Horizontal rule
+                /^\*\*\*\s*$/m.test(text) ||       // Horizontal rule
+                /^```/m.test(text)) {               // Code block
                 return true;
             }
         }
     }
 
-    // 如果匹配到 2 个以上模式，认为是 Markdown
+    // If 2+ patterns match, treat as Markdown
     return matchCount >= 2;
 }
 
@@ -1036,7 +1036,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
         const $ = cheerio.load(htmlContent);
         const videoUrls = new Set();
 
-        // 查找 <video> 标签中的视频源
+        // Find video sources within <video> tags
         $('video source, video').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1044,12 +1044,12 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     const fullUrl = new URL(src, baseUrl).href;
                     videoUrls.add(fullUrl);
                 } catch (e) {
-                    // 如果URL解析失败，直接添加原始URL
+                    // If URL parsing fails, add the raw URL
                     videoUrls.add(src);
                 }
             }
 
-            // 检查其他可能的视频源属性
+            // Check other possible video source attributes
             const attrsToCheck = ['data-src', 'data-source', 'data-video', 'data-url'];
             for (const attr of attrsToCheck) {
                 const attrValue = $(elem).attr(attr);
@@ -1064,7 +1064,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
             }
         });
 
-        // 查找 <iframe> 标签（可能是视频播放器）
+        // Find <iframe> tags (may be video players)
         $('iframe').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1072,13 +1072,13 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     const fullUrl = new URL(src, baseUrl).href;
                     videoUrls.add(fullUrl);
                 } catch (e) {
-                    // 如果URL解析失败，直接添加原始URL
+                    // If URL parsing fails, add the raw URL
                     videoUrls.add(src);
                 }
             }
         });
 
-        // 查找具有视频类名或ID的元素
+        // Find elements whose class or id suggests video
         $('[class*="video" i], [id*="video" i]').each((i, elem) => {
             const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source') || $(elem).attr('data-video');
             if (src) {
@@ -1086,13 +1086,13 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     const fullUrl = new URL(src, baseUrl).href;
                     videoUrls.add(fullUrl);
                 } catch (e) {
-                    // 如果URL解析失败，直接添加原始URL
+                    // If URL parsing fails, add the raw URL
                     videoUrls.add(src);
                 }
             }
         });
 
-        // 查找可能的视频文件扩展名链接
+        // Find links that look like video files by extension
         const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv', '.mkv', '.m3u8', '.mpd'];
         $('a, [href], [data-href]').each((i, elem) => {
             const href = $(elem).attr('href') || $(elem).attr('data-href');
@@ -1103,33 +1103,32 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                         const fullUrl = new URL(href, baseUrl).href;
                         videoUrls.add(fullUrl);
                     } catch (e) {
-                        // 如果URL解析失败，直接添加原始URL
                         videoUrls.add(href);
                     }
                 }
             }
         });
 
-        // 尝试从 script 标签和全局文本中提取 JSON 格式的视频 URL
-        // 很多 SPA 或移动端页面（如百度新闻）将视频信息存储在 JSON 中
+        // Try extracting JSON-style video URLs from script tags and global text
+        // Many SPA/mobile pages store video info in JSON (e.g. Baidu News)
         $('script').each((i, elem) => {
             let scriptContent = $(elem).text();
             if (scriptContent && scriptContent.trim()) {
-                // 1. 预处理：反转义 JSON 中的斜杠，以及 Unicode 转义
+                // 1. Preprocess: unescape slashes and Unicode escapes in JSON
                 scriptContent = scriptContent.replace(/\\\//g, '/').replace(/\\u002F/gi, '/');
 
-                // 2. 扫描常见的视频字段 (增强版正则，兼容更多格式)
-                // 兼容: "video_url":"http..." 和 video_url="http..." 和 video_url: "http..."
+                // 2. Scan common video fields (enhanced regex, more formats)
+                // Compatible with: "video_url":"http..." and video_url="http..." and video_url: "http..."
                 const commonKeys = ['play_url', 'video_url', 'playUrl', 'videoUrl', 'src', 'url', 'mp4', 'm3u8'];
 
-                // 宽容正则：key 后面跟任意符号，直到遇到 http
+                // Lenient regex: key followed by any symbols until http
                 const keyRegexStr = `(${commonKeys.join('|')})[^:="']*[:="']+\s*["']?(https?://[^"']+)["']?`;
                 const keyRegex = new RegExp(keyRegexStr, 'gi');
 
                 let keyMatch;
                 while ((keyMatch = keyRegex.exec(scriptContent)) !== null) {
                     const potentialUrl = keyMatch[2];
-                    // 验证是否包含视频扩展名，或者看起来像视频 URL
+                    // Validate if it contains a video extension or looks like a video URL
                     if (extensions.some(ext => potentialUrl.includes('.' + ext)) || potentialUrl.includes('video')) {
                         try {
                             const fullUrl = new URL(potentialUrl, baseUrl).href;
@@ -1140,7 +1139,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
                     }
                 }
 
-                // 3. 原有的通用正则提取
+                // 3. Original generic regex extraction
                 const videoUrlRegex = /https?:\/\/[^\s"'<>()\[\]{}]+\.(mp4|webm|ogg|mov|avi|m4v|flv|mkv|m3u8|mpd)[^\s"'<>()\[\]{}]*(\?[\w\-._~:?#[\]@!$&'()*+,;=%]*)?/gi;
                 let match;
                 while ((match = videoUrlRegex.exec(scriptContent)) !== null) {
@@ -1161,7 +1160,7 @@ function extractVideoUrlsFromHtmlFragment(htmlContent, baseUrl = '') {
     }
 }
 
-// 从网页中提取视频URL的辅助函数
+// Helper function to extract video URLs from a web page
 async function extractVideoUrlsFromWebPage(url) {
     try {
         const cheerio = require('cheerio');
@@ -1173,7 +1172,7 @@ async function extractVideoUrlsFromWebPage(url) {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         };
 
-        // ★ 始终使用 fetchViaHttps，因为它使用简化的 headers，避免被服务器拒绝
+        // ★ Always use fetchViaHttps because it uses simplified headers to avoid server rejection
         function fetchViaHttps(targetUrl, customHeaders = {}) {
             return new Promise((resolve, reject) => {
                 const urlObj = new NodeURL(targetUrl);
@@ -1188,7 +1187,7 @@ async function extractVideoUrlsFromWebPage(url) {
                 };
 
                 const request = client.get(targetUrl, options, (response) => {
-                    // 处理重定向
+                    // Handle redirects
                     if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                         fetchViaHttps(new NodeURL(response.headers.location, targetUrl).href, customHeaders)
                             .then(resolve)
@@ -1216,10 +1215,10 @@ async function extractVideoUrlsFromWebPage(url) {
             });
         }
 
-        // 直接使用 fetchViaHttps，不依赖 node-fetch 或 global.fetch
+        // Use fetchViaHttps directly; do not rely on node-fetch or global.fetch
         const html = await fetchViaHttps(url, commonHeaders);
 
-        // 检测 Cloudflare 挑战页面特征
+        // Detect Cloudflare challenge page signatures
         if (html.includes('cf-turnstile') || html.includes('challenge-platform') || html.includes('Cloudflare Ray ID')) {
             throw new Error(`HTTP 403: Cloudflare Challenge Detected`);
         }
@@ -1228,7 +1227,7 @@ async function extractVideoUrlsFromWebPage(url) {
 
         const videoUrls = new Set();
 
-        // 查找 <video> 标签中的视频源
+        // Find video sources within <video> tags
         $('video source').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1243,7 +1242,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找直接的 <video> 标签的src属性
+        // Find src attribute on <video> tags directly
         $('video').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1252,7 +1251,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找 <iframe> 标签（可能是视频播放器）
+        // Find <iframe> tags (may be video players)
         $('iframe').each((i, elem) => {
             const src = $(elem).attr('src');
             if (src) {
@@ -1261,7 +1260,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找具有视频类名的元素
+        // Find elements whose class suggests video
         $('[class*="video" i], [id*="video" i]').each((i, elem) => {
             const src = $(elem).attr('src') || $(elem).attr('data-src') || $(elem).attr('data-source');
             if (src) {
@@ -1270,7 +1269,7 @@ async function extractVideoUrlsFromWebPage(url) {
             }
         });
 
-        // 查找可能的视频文件扩展名链接
+        // Find links that look like video files by extension
         const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.flv'];
         $('a, [href]').each((i, elem) => {
             const href = $(elem).attr('href');
@@ -1593,7 +1592,7 @@ async function verifyVideoFile(filePath) {
 async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallback, token, transId, autoRename = false) {
     const pending = blocks.filter(b => b && b.type === "media" && (b.kind === "image" || b.kind === "video") && b.src && b.status === "pending");
     if (!pending.length) return;
-    const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松";
+    const securityLevelString = getGlobal().getConfig("downloadSecurityLevel") || "0: 最宽松"; // qq2q
     let securityLevel = 0;
     if (securityLevelString.startsWith("1")) securityLevel = 1;
     if (securityLevelString.startsWith("2")) securityLevel = 2;
@@ -1601,7 +1600,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
     const httpTasks = [];
     const localTasks = [];
     const taskMap = new Map();
-    const originalFilenames = new Map(); // 保存原始文件名映射
+    const originalFilenames = new Map(); // Save original filename mapping
     for (const b of pending) {
         const src = String(b.src || "");
         if (/^data:/i.test(src) || /^file:/i.test(src)) localTasks.push(b);
@@ -1609,10 +1608,10 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const tag = Math.random().toString(36).slice(2) + "_" + Date.now();
             b._tag = tag;
             const ext = b.kind === "video" ? ".mp4" : ".png";
-            // ★ 统一真理源：先尝试从 URL 提取原始文件名，失败再用时间戳
-            // 这样 HTML 块粘贴和 downloadVideosFromUrl 的文件名一致
+            // ★ Unified source of truth: first try extracting original filename from URL; fall back to timestamp on failure
+            // This keeps filenames consistent between HTML-block paste and downloadVideosFromUrl
             const originalFileName = getFilenameFromUrl(src, b.kind);
-            // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+            // ★ Use transId as prefix so rollback can precisely match deletions
             const filename = originalFileName || getTimestampFilename(ext, transId);
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 20000 * 1048576 });
@@ -1623,8 +1622,8 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
         }
     }
 
-    // ★ 关键修复：预先将所有 destPath 记录到事务的 tempFiles 中
-    // 这样取消时即使文件已下载但还没记录到 landedFiles，也能通过 tempFiles 删除
+    // ★ Key fix: pre-register all destPath into transaction tempFiles
+    // This way on cancel, even if downloaded but not yet recorded into landedFiles, it can be deleted via tempFiles
     if (transId && httpTasks.length > 0) {
         try {
             const global = getGlobal();
@@ -1655,22 +1654,22 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     ensureDir(targetDir);
                     const ext = path.extname(localPath) || ".png";
                     const originalName = path.basename(localPath);
-                    // 优先使用原文件名。只有当拿不到文件名（如原名仅为后缀）时，才回退到时间戳风格。
+                    // Prefer using original filename. Only fall back to timestamp style when filename is unavailable (e.g. only extension).
                     let filename = originalName;
                     if (!originalName || originalName === ext) {
-                        // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                        // ★ Use transId as prefix so rollback can precisely match deletions
                         filename = getTimestampFilename(ext, transId);
                     }
                     const destPath = path.join(targetDir, filename);
                     try {
                         fs.copyFileSync(localPath, destPath);
 
-                        // 先计算指纹，然后在同目录内去重
+                        // Compute fingerprint first, then dedupe within the same directory
                         const fp = computeFingerprint(destPath);
                         let finalPath = destPath;
 
                         if (!autoRename && fp) {
-                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
+                            // Fix: strictly forbid cross-folder dedupe; call local dedupe logic directly
                             finalPath = _tryLocalDeduplicate(destPath);
                         } else {
                             finalPath = autoRename ? destPath : _tryLocalDeduplicate(destPath);
@@ -1682,7 +1681,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         b.size = fs.statSync(finalPath).size;
                         b.status = "ok";
 
-                        // ★ Register Transaction（使用规范化路径）
+                        // ★ Register Transaction (use normalized path)
                         if (transId) {
                             const global = getGlobal();
                             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
@@ -1693,7 +1692,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             }
                         }
 
-                        // 预填充指纹缓存
+                        // Prefill fingerprint cache
                         if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                     } catch { b.status = "failed"; }
                     doneCount++;
@@ -1707,7 +1706,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (!isImageExtForClipboard(ext)) {
                     try { const dim = sizeOf(buf); if (dim && dim.type) ext = "." + dim.type; } catch { ext = ".webp"; }
                 }
-                // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                // ★ Use transId as prefix so rollback can precisely match deletions
                 const filename = getTimestampFilename(ext, transId);
                 const destPath = path.join(targetDir, filename);
                 try {
@@ -1722,7 +1721,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     b.size = fs.statSync(finalPath).size;
                     b.status = "ok";
 
-                    // ★ Register Transaction（使用规范化路径）
+                    // ★ Register Transaction (use normalized path)
                     if (transId) {
                         const global = getGlobal();
                         const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
@@ -1733,7 +1732,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         }
                     }
 
-                    // 预填充指纹缓存
+                    // Prefill fingerprint cache
                     if (b.fingerprint) prefillFingerprint(finalPath, b.fingerprint);
                 } catch { b.status = "failed"; }
             }
@@ -1763,13 +1762,13 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             }
                         }
 
-                        // 先计算指纹，然后在同目录内去重
+                        // Compute fingerprint first, then dedupe within the same directory
                         const fp = computeFingerprint(dlPath);
                         let finalPath = dlPath;
                         let isNewFile = true;
 
                         if (!autoRename && fp) {
-                            // 修正：严禁跨文件夹查重，直接调用本地去重逻辑
+                            // Fix: strictly forbid cross-folder dedupe; call local dedupe logic directly
                             const tempPath = _tryLocalDeduplicate(dlPath);
                             isNewFile = (tempPath === dlPath);
                             finalPath = tempPath;
@@ -1790,15 +1789,15 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         block.fingerprint = computeFingerprint(block.path);
                         if (block.fingerprint) prefillFingerprint(block.path, block.fingerprint);
 
-                        // ★ 事务记录：只有新文件才记入 landedFiles（使用规范化路径）
-                        // 复用的旧文件不记入，取消时不删除
+                        // ★ Transaction record: only record new files into landedFiles (use normalized path)
+                        // Reused old files are not recorded; they should not be deleted on cancel
                         if (transId && isNewFile) {
                             const global = getGlobal();
                             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                             if (trans) {
                                 const normalizedPath = path.normalize(finalPath);
                                 const newLanded = [...(trans.landedFiles || []), normalizedPath];
-                                // ★ 同时从 tempFiles 中移除（因为已经记入 landedFiles）
+                                // ★ Also remove from tempFiles (since it has been recorded into landedFiles)
                                 const newTempFiles = (trans.tempFiles || []).filter(f => f !== dlPath && f !== finalPath);
                                 await global.TransactionManager.updateTransaction(transId, {
                                     landedFiles: [...new Set(newLanded)],
@@ -1806,7 +1805,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                                 });
                             }
                         } else if (transId && !isNewFile) {
-                            // ★ 复用旧文件：从 tempFiles 中移除（因为 dlPath 已被删除）
+                            // ★ Reused old file: remove from tempFiles (since dlPath has been deleted)
                             const global = getGlobal();
                             const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
                             if (trans) {
@@ -1826,9 +1825,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 // ============================================================================
 // Shell / File Clipboard
 // ============================================================================
-// ★ 带进度显示的文件复制（异步版本，让 UI 能够更新）
+// ★ File copy with progress (async version so UI can update)
 /**
- * 异步安全的递归复制文件夹，支持取消检查，并返回累计大小
+ * Async safe recursive folder copy; supports cancel checks and returns accumulated size
  */
 async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCancel = null) {
     const skipped = [];
@@ -1897,7 +1896,7 @@ async function safeCopyFolderRecursiveAsync(src, dest, token = null, shouldCance
     }
 }
 
-// ★ 修复：添加 token 和 transId 参数，边复制边记录事务
+// ★ Fix: add token and transId parameters; record transaction while copying
 async function processFilesForClipboardWithProgress(files, targetDir, progressCallback, token = null, transId = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     const folders = files.filter((f) => { try { return fs.statSync(f).isDirectory(); } catch { return false; } });
     const validFiles = files.filter((f) => { try { return !fs.statSync(f).isDirectory(); } catch { return false; } });
@@ -1911,22 +1910,22 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
     let skippedCount = 0;
     let totalSize = 0;
 
-    // ★ 记录任务开始时间，用于计算耗时
+    // ★ Record task start time for elapsed calculation
     const taskStartMs = Date.now();
 
-    // ★ 当前步骤信息（用于定时更新显示）
+    // ★ Current step info (for timed UI updates)
     let currentStepInfo = '';
     let currentItemName = '';
     let lastProgressUpdateMs = 0;
-    const PROGRESS_UPDATE_INTERVAL = 3000; // 每3秒更新一次
+    const PROGRESS_UPDATE_INTERVAL = 3000; // Update once every 3 seconds
 
-    // ★ 让出事件循环的辅助函数
+    // ★ Helper to yield the event loop
     const yieldToUI = () => new Promise(resolve => setImmediate(resolve));
 
-    // ★ 组合取消检查：token 或 shouldCancel 回调
+    // ★ Combined cancel check: token or shouldCancel callback
     const isCancelled = () => token?.isCancellationRequested || (shouldCancel && shouldCancel());
 
-    // ★ 批量更新事务记录（一次性更新所有文件，使用规范化路径）
+    // ★ Batch update transaction record (update all files at once, using normalized paths)
     const batchUpdateTransaction = async (allFiles, allFolders) => {
         if (!transId) return;
         if (allFiles.length === 0 && allFolders.length === 0) return;
@@ -1936,12 +1935,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
             if (trans) {
                 const updates = {};
                 if (allFiles.length > 0) {
-                    // ★ 规范化所有路径
+                    // ★ Normalize all paths
                     const normalizedFiles = allFiles.map(f => path.normalize(f));
                     updates.landedFiles = [...new Set([...(trans.landedFiles || []), ...normalizedFiles])];
                 }
                 if (allFolders.length > 0) {
-                    // ★ 规范化所有路径
+                    // ★ Normalize all paths
                     const normalizedFolders = allFolders.map(f => path.normalize(f));
                     updates.landedFolders = [...new Set([...(trans.landedFolders || []), ...normalizedFolders])];
                 }
@@ -1955,13 +1954,13 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         }
     };
 
-    // ★ 初始进度显示
+    // ★ Initial progress display
     if (progressCallback && totalItems > 0) {
         progressCallback(2, q('h.progress.prepareCopy', totalItems, folders.length, validFiles.length));
         await yieldToUI();
     }
 
-    // ★ 添加定时器，每3秒更新进度显示（用于大文件/大文件夹复制期间）
+    // ★ Add timer: update progress display every 3s (for large file/folder copy)
     let progressTimer = null;
     if (progressCallback) {
         progressTimer = setInterval(() => {
@@ -1979,12 +1978,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         }, PROGRESS_UPDATE_INTERVAL);
     }
 
-    // 复制文件夹
+    // Copy folders
     for (let i = 0; i < folders.length; i++) {
-        // ★ 检查取消状态（用户取消 或 锚点丢失）
+        // ★ Check cancel state (user cancel or anchor lost)
         if (isCancelled()) {
             log(q('h.log.copyCancelled', copiedFolders.length, copiedFiles.length), "WARN");
-            // ★ 取消时先批量更新事务，确保所有已复制文件都被记录
+            // ★ On cancel, batch-update transaction first to ensure all copied files are recorded
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
             break;
@@ -2002,13 +2001,13 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 lastProgressUpdateMs = Date.now();
                 await yieldToUI();
             }
-            // 同名文件夹静默重命名（q1/q2 统一行为，不再覆盖）
+            // Same-name folder: silent rename (unified behavior for q1/q2, no overwrite)
             let destFolder = path.join(targetDir, folderName);
             if (fs.existsSync(destFolder)) {
                 destFolder = getUniquePath(targetDir, folderName, true);
             }
 
-            // ★ 改为异步复制文件夹，避免大文件夹阻塞主线程
+            // ★ Switch to async folder copy to avoid blocking main thread for large folders
             const result = await safeCopyFolderRecursiveAsync(folder, destFolder, token, shouldCancel);
 
             if (result.success || result.errors.length === 0) {
@@ -2029,12 +2028,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         processedItems++;
     }
 
-    // 复制文件
+    // Copy files
     for (let i = 0; i < validFiles.length; i++) {
-        // ★ 检查取消状态（用户取消 或 锚点丢失）
+        // ★ Check cancel state (user cancel or anchor lost)
         if (isCancelled()) {
             log(q('h.log.copyCancelled', copiedFolders.length, copiedFiles.length), "WARN");
-            // ★ 取消时先批量更新事务
+            // ★ On cancel, batch-update transaction first
             await batchUpdateTransaction(copiedFiles, copiedFolders);
             if (onCancelCallback) onCancelCallback();
             break;
@@ -2048,14 +2047,14 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
                 currentItemName = fileName;
                 const now = Date.now();
                 const elapsedMs = now - taskStartMs;
-                // ★ 每3秒强制更新一次，显示当前已拷贝总大小
+                // ★ Force update once every 3s to show total copied size so far
                 if (now - lastProgressUpdateMs >= PROGRESS_UPDATE_INTERVAL || i === 0 || i === validFiles.length - 1) {
                     const msg = _formatCopyProgress(currentStepInfo, currentItemName, totalSize, elapsedMs);
                     progressCallback(pct, msg);
                     lastProgressUpdateMs = now;
                 }
-                // 异步复制时不需要频繁 yieldToUI，因为 fs.promises 已经是不阻塞的了
-                // 但每 10 个文件 yield 一下还是稳妥的，给微任务队列一点空间
+                // Async copy doesn't need frequent yields, since fs.promises is non-blocking
+                // But yielding every 10 files is still safer to give microtasks some room
                 if (i % 10 === 0) {
                     await yieldToUI();
                 }
@@ -2079,30 +2078,30 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             let destName = originalName;
             if (isImg && (!originalName || originalName === ext)) {
-                // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                // ★ Use transId as prefix so rollback can precisely match deletions
                 destName = getTimestampFilename(ext, transId);
             }
             let dest = path.join(targetDir, destName);
 
-            // 同名文件静默重命名（q1/q2 统一行为，不再覆盖）
+            // Same-name file: silent rename (unified behavior for q1/q2, no overwrite)
             if (fs.existsSync(dest)) {
                 const dstFingerprint = computeFingerprint(dest);
                 const srcFingerprint2 = srcFingerprint || computeFingerprint(f);
                 if (dstFingerprint === srcFingerprint2) {
-                    // 内容相同，跳过复制
+                    // Same content, skip copy
                     copiedFiles.push(dest);
                     if (srcFingerprint2) prefillFingerprint(dest, srcFingerprint2);
                     processedItems++;
                     continue;
                 }
-                // 内容不同，重命名
+                // Different content, rename
                 dest = getUniquePath(targetDir, destName, false);
             }
 
-            // ★ 改为异步复制文件，彻底解决大文件粘贴卡顿
+            // ★ Switch to async file copy; fully solve big-file paste stutter
             await fs.promises.copyFile(f, dest);
 
-            // 本地去重检查
+            // Local dedupe check
             const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
             if (finalPath !== dest) {
                 copiedFiles.push(finalPath);
@@ -2125,12 +2124,12 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
         processedItems++;
     }
 
-    // ★ 复制完成后批量更新事务（如果没有取消）
+    // ★ Batch update transaction after copy completes (if not cancelled)
     if (!isCancelled()) {
         await batchUpdateTransaction(copiedFiles, copiedFolders);
     }
 
-    // ★ 清理定时器
+    // ★ Clear timer
     if (progressTimer) {
         clearInterval(progressTimer);
         progressTimer = null;
@@ -2153,11 +2152,11 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
         if (process.platform === "win32") {
             let files = preFetchedFiles;
 
-            // ★ 优先使用预获取的文件列表（单一真理源）
+            // ★ Prefer using pre-fetched file list (single source of truth)
             if (files && files.length > 0) {
                 log(q('h.log.usePreFetchedFiles', files.length), "INFO");
             } else {
-                // 备选方案：现场获取
+                // Fallback: fetch on demand
                 log(q('h.log.noPreFetchedFiles'), "INFO");
                 if (progressCallback) {
                     progressCallback(1, q('h.progress.getFileList'));
@@ -2175,20 +2174,20 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             if (files && files.length > 0) {
                 log(q('h.log.startCopyFiles', files.length, files.slice(0, 3).join(', ') + '...'), "INFO");
 
-                // ★ 显示进度（简洁格式，不带前缀）
+                // ★ Show progress (concise format, no prefix)
                 if (progressCallback) {
                     progressCallback(1, q('h.progress.detectItems', files.length));
                 }
 
-                // ★ 传入 token 和 transId，边复制边记录事务
+                // ★ Pass token and transId; record transaction while copying
                 const result = await processFilesForClipboardWithProgress(files, targetDir, progressCallback, token, transId, onCancelCallback, shouldCancel, autoRename);
 
-                // ★ 记录复制结果（包含跳过信息）
+                // ★ Record copy result (including skipped info)
                 const successFiles = (result?.files || []).length;
                 const successFolders = (result?.folders || []).length;
                 const skipped = result?.skippedCount || 0;
                 log(q('h.log.copyResult', successFiles, successFolders, skipped), "INFO");
-                // ★ 事务已在 processFilesForClipboardWithProgress 中边复制边记录，这里不再重复更新
+                // ★ Transaction is already recorded during processFilesForClipboardWithProgress; no duplicate updates here
                 return result;
             }
         }
@@ -2197,7 +2196,7 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             try {
                 const hasImg = await bridge.call("hasImage", {}, 1500);
                 if (hasImg?.value) {
-                    // ★ 使用 transId 作为前缀，回滚时可精确匹配删除
+                    // ★ Use transId as prefix so rollback can precisely match deletions
                     const fname = getTimestampFilename(".png", transId);
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
@@ -2205,12 +2204,12 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
                     if (saved?.success && fs.existsSync(dest)) {
                         const st = fs.statSync(dest);
                         if (st.size > 0) {
-                            // ✅ 关键：内存截图也要走本地去重
+                            // ✅ Key: in-memory screenshot must also go through local dedupe
                             const finalPath = autoRename ? dest : _tryLocalDeduplicate(dest);
                             const fp = computeFingerprint(finalPath);
                             const finalSize = (finalPath === dest) ? st.size : fs.statSync(finalPath).size;
 
-                            // ★ Register Transaction（使用规范化路径）
+                            // ★ Register Transaction (use normalized path)
                             if (transId) {
                                 const global = getGlobal();
                                 const trans = global.TransactionManager.getTransactions().find(t => t.id === transId);
@@ -2247,7 +2246,7 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
     const result = await _getSmartHtmlFromClipboard(progressCallback, token);
     if (!result) return null;
 
-    // ★ 检查取消状态
+    // ★ Check cancel state
     if (token?.isCancellationRequested || (shouldCancel && shouldCancel())) return null;
 
     const { $, baseUrl, payload, htmlText } = result;
@@ -2301,17 +2300,17 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
         }
     }
 
-    // 检查是否有视频URL需要处理
+    // Check whether there are video URLs to process
     const videoUrls = extractVideoUrlsFromHtmlFragment(htmlText, baseUrl);
     if (videoUrls.length > 0) {
         log(q('h.log.extractedVideoUrls', videoUrls.length), "INFO");
 
-        // 收集已有的媒体链接，避免重复
+        // Collect existing media links to avoid duplicates
         const existingMediaSrcs = new Set(blocks.filter(b => b.type === "media").map(b => b.src));
 
-        // 将视频URL添加到blocks中作为媒体资源
+        // Add video URLs into blocks as media resources
         for (const videoUrl of videoUrls) {
-            // 如果已经在DOM解析中添加过，则跳过
+            // If already added during DOM parsing, skip
             if (existingMediaSrcs.has(videoUrl)) continue;
 
             blocks.push({
@@ -2334,19 +2333,19 @@ async function handleClipboardUnified(targetDir, progressCallback, token, transI
 
 // ============================================================================
 // Auto-Detect & Dispatch (Migrated from qqq.js raceClipboard)
-// ★ 接受完整快照（单一真理源），不再重复调用 Shell
+// ★ Accept full snapshot (single source of truth); no repeated Shell calls
 // ============================================================================
 async function autoDetectAndPaste(targetDir, progressCallback, token, transId, snapshot = null, onCancelCallback = null, shouldCancel = null, autoRename = false) {
     const global = getGlobal();
 
-    // ★ 从快照中提取信息
+    // ★ Extract info from snapshot
     let qStatus = snapshot?.rawStatus || { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
     let preFiles = snapshot?.files || null;
     let handled = snapshot !== null && snapshot.rawStatus !== undefined;
 
     log(q('h.autoDetect.startDetect', !!snapshot, handled), "INFO");
 
-    // 备选方案：如果没有传入快照，尝试获取
+    // Fallback: if no snapshot passed in, try fetching
     if (!handled) {
         if (progressCallback) {
             progressCallback(1, q('h.progress.detectClipboard'));
@@ -2402,18 +2401,18 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
     // Dispatch based on priority: File > HTML > Image > Text
     if (qStatus.hasFile) {
         log(q('h.autoDetect.enterFileCopy', preFiles?.length || 0), "INFO");
-        // ★ 传递预获取的文件列表，并透传 autoRename
+        // ★ Pass the pre-fetched file list and propagate autoRename
         return await handleClipboardShell(targetDir, token, progressCallback, preFiles, 0, transId, onCancelCallback, shouldCancel, autoRename);
     }
 
-    // ★★★ Markdown 格式保留检测 ★★★
-    // 当 hasHtml 和 hasText 同时存在时，检测纯文本是否包含 Markdown 格式符号
-    // 如果是 Markdown 文本且 HTML 中没有媒体资源，则优先使用纯文本
+    // ★★★ Markdown preservation detection ★★★
+    // When hasHtml and hasText both exist, detect whether plain text contains Markdown symbols
+    // If it's Markdown text and HTML has no media resources, prefer plain text
     if (qStatus.hasHtml && qStatus.hasText) {
         try {
             const plainText = await vscode.env.clipboard.readText();
             if (plainText && _looksLikeMarkdown(plainText)) {
-                // 检查 HTML 是否有媒体资源
+                // Check whether HTML has media resources
                 const htmlResult = await _getSmartHtmlFromClipboard(null, token);
                 if (htmlResult && htmlResult.$) {
                     const $ = htmlResult.$;
@@ -2425,7 +2424,7 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
                         log(q('h.autoDetect.markdownWithMedia'), "INFO");
                     }
                 } else {
-                    // HTML 解析失败，直接使用纯文本
+                    // HTML parse failed; use plain text directly
                     log(q('h.autoDetect.htmlParseFailed'), "INFO");
                     return { type: "text", text: plainText };
                 }
@@ -2449,9 +2448,9 @@ async function autoDetectAndPaste(targetDir, progressCallback, token, transId, s
         try {
             const text = await vscode.env.clipboard.readText();
             if (text) {
-                // ★ 移除纯文本 URL 自动识别为视频下载的逻辑
+                // ★ Remove logic that auto-detects plain-text URL as video download
                 // if (isPlatformOrSegmentVideo(text) || /\.(mp4|webm|mkv|mov)(\?|$)/i.test(text)) {
-                //     log(`[AutoDetect] 检测到视频 URL`, "INFO");
+                //     log(`[AutoDetect] Detected video URL`, "INFO");
                 //     return { type: "video_url", text, url: text };
                 // }
                 log(q('h.autoDetect.detectedText'), "INFO");
@@ -2498,20 +2497,20 @@ async function pickTargetDirectory() {
 }
 
 /**
- * 将文件/文件夹路径列表复制到系统剪贴板 (Windows CF_HDROP 格式)
- * @param {string[]} filePaths - 绝对路径列表
- * @returns {Promise<{success: boolean, usedEngine: boolean}>} success=是否成功, usedEngine=是否使用了engine(非text fallback)
+ * Copy file/folder paths into system clipboard (Windows CF_HDROP format)
+ * @param {string[]} filePaths - Absolute path list
+ * @returns {Promise<{success: boolean, usedEngine: boolean}>} success=whether succeeded, usedEngine=whether engine was used (non-text fallback)
  */
 async function copyFilesToClipboard(filePaths) {
     if (!filePaths || filePaths.length === 0) return { success: false, usedEngine: false };
 
     const global = getGlobal();
     try {
-        // ★ 统一使用 global.tryEngineCall，享受 Rust -> Python -> Node 的完美回退
+        // ★ Always use global.tryEngineCall to enjoy perfect fallback: Rust -> Python -> Node
         const res = await global.tryEngineCall({
             rust: "setFiles",
             python: "setFiles",
-            shell: "setFiles" // Node Daemon 兔底
+            shell: "setFiles" // Node Daemon fallback
         }, { paths: filePaths }, 3000);
 
         if (res && res.success) {
@@ -2523,11 +2522,11 @@ async function copyFilesToClipboard(filePaths) {
         log(q('h.log.copyException', e.message), "WARN");
     }
 
-    // 如果所有 Bridge 都不可用，执行最低限度的纯文本回退
+    // If all Bridges are unavailable, do minimal plain-text fallback
     try {
         await vscode.env.clipboard.writeText(filePaths.join("\n"));
         log(q('h.log.copyFallbackText'), "WARN");
-        return { success: true, usedEngine: false }; // q4 会检测到并播放音效
+        return { success: true, usedEngine: false }; // q4 will detect and play SFX
     } catch { }
     return { success: false, usedEngine: false };
 }

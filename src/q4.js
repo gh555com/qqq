@@ -1904,7 +1904,7 @@ class ClipboardHistorySidebarProvider {
             </div>
             <div class="search-container">
                 <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
-                 <!-- ★ 新增：剪贴板 history 历史下拉框 -->
+                 <!-- ★ 新增：剪切板 history 历史下拉框 -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
             <div class="history-container" id="historyContainer">
@@ -2609,7 +2609,7 @@ async function exportHistoryCommand(historyManager) {
 
 async function importHistoryCommand(historyManager) {
     const uris = await vscode.window.showOpenDialog({
-        title: '增量导入剪贴板历史 (JSON)',
+        title: '增量导入剪切板历史 (JSON)',
         canSelectMany: false,
         filters: { 'JSON': ['json'] }
     });
@@ -2669,7 +2669,7 @@ async function copyToHistoryCommand(historyManager) {
 
     await historyManager.copyToClipboard(text);
     await historyManager.addToHistory(text);
-    // vscode.window.showInformationMessage('已复制到剪贴板并添加到历史');
+    // vscode.window.showInformationMessage('已复制到剪切板并添加到历史');
 }
 
 // ============================================================================
@@ -2688,7 +2688,7 @@ class StatusBarManager {
         );
 
         this._statusBarItem.command = 'qqq.clipboardHistory';
-        this._statusBarItem.tooltip = '点击搜索/粘贴剪贴板历史';
+        this._statusBarItem.tooltip = '点击搜索/粘贴剪切板历史';
         this._updateTimer = null;
 
         this._update();
