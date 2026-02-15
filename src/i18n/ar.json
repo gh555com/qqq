@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "لا نهاية",
-            "emptyHint": "لا توجد سجلات"
+            "emptyHint": "لا توجد سجلات",
+            "invalidUrl": "عنوان URL غير صالح",
+            "loading": "جاري التحميل..."
         },
         "quickPick": {
             "placeholder": "اكتب للبحث",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- السجل ---"
         },
         "dialog": {
-            "exportTitle": "تصدير سجل الحافظة (JSON)"
+            "exportTitle": "تصدير سجل الحافظة (JSON)",
+            "importTitle": "استيراد سجل الحافظة (JSON)"
         },
         "stats": {
             "title": "📊 إحصائيات سجل الحافظة",

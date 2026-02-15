@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Unendlich",
-            "emptyHint": "Keine Einträge"
+            "emptyHint": "Keine Einträge",
+            "invalidUrl": "Ungültige URL",
+            "loading": "Laden..."
         },
         "quickPick": {
             "placeholder": "Zum Suchen tippen",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- VERLAUF ---"
         },
         "dialog": {
-            "exportTitle": "Zwischenablage-Verlauf exportieren (JSON)"
+            "exportTitle": "Zwischenablage-Verlauf exportieren (JSON)",
+            "importTitle": "Zwischenablage-Verlauf importieren (JSON)"
         },
         "stats": {
             "title": "📊 Zwischenablage-Verlauf Statistiken",

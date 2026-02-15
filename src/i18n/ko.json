@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "무한",
-            "emptyHint": "레코드 없음"
+            "emptyHint": "레코드 없음",
+            "invalidUrl": "잘못된 URL",
+            "loading": "로딩 중..."
         },
         "quickPick": {
             "placeholder": "검색하려면 입력",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- 기록 ---"
         },
         "dialog": {
-            "exportTitle": "클립보드 기록 내보내기 (JSON)"
+            "exportTitle": "클립보드 기록 내보내기 (JSON)",
+            "importTitle": "클립보드 기록 가져오기 (JSON)"
         },
         "stats": {
             "title": "📊 클립보드 기록 통계",

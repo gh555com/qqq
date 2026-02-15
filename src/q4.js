@@ -1861,7 +1861,7 @@ class ClipboardHistorySidebarProvider {
                         <div class="input-box-wrapper">
                             <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
                             <button id="btnVideoStart"><span class="icon-play"></span></button>
-                            <div class="error-tip" id="urlErrorTip">无效网址</div> // qq2q
+                            <div class="error-tip" id="urlErrorTip">${q('q4.ui.invalidUrl')}</div>
                              <!-- ★ NEW: video url history dropdown -->
                             <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
@@ -1908,7 +1908,7 @@ class ClipboardHistorySidebarProvider {
             </div>
             <div class="history-container" id="historyContainer">
                 <div class="history-list" id="historyList">
-                    <div class="empty-hint">加载中...</div> // qq2q
+                    <div class="empty-hint">${q('q4.ui.loading')}</div>
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
@@ -2606,7 +2606,7 @@ async function exportHistoryCommand(historyManager) {
 
 async function importHistoryCommand(historyManager) {
     const uris = await vscode.window.showOpenDialog({
-        title: '增量导入剪切板历史 (JSON)', // qq2q
+        title: q('q4.dialog.importTitle'),
         canSelectMany: false,
         filters: { 'JSON': ['json'] }
     });

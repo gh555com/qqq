@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Infinite",
-            "emptyHint": "No records"
+            "emptyHint": "No records",
+            "invalidUrl": "Invalid URL",
+            "loading": "Loading..."
         },
         "quickPick": {
             "placeholder": "Type to search",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- HISTORY ---"
         },
         "dialog": {
-            "exportTitle": "Export Clipboard History (JSON)"
+            "exportTitle": "Export Clipboard History (JSON)",
+            "importTitle": "Import Clipboard History (JSON)"
         },
         "stats": {
             "title": "📊 Clipboard History Statistics",

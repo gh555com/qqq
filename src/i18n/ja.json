@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "無限",
-            "emptyHint": "レコードがありません"
+            "emptyHint": "レコードがありません",
+            "invalidUrl": "無効なURL",
+            "loading": "読み込み中..."
         },
         "quickPick": {
             "placeholder": "検索するには入力",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- 履歴 ---"
         },
         "dialog": {
-            "exportTitle": "クリップボード履歴をエクスポート (JSON)"
+            "exportTitle": "クリップボード履歴をエクスポート (JSON)",
+            "importTitle": "クリップボード履歴をインポート (JSON)"
         },
         "stats": {
             "title": "📊 クリップボード履歴統計",
