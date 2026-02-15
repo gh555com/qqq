@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Infinito",
-            "emptyHint": "Sem registros"
+            "emptyHint": "Sem registros",
+            "invalidUrl": "URL inválida",
+            "loading": "Carregando..."
         },
         "quickPick": {
             "placeholder": "Digite para pesquisar",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- HISTÓRICO ---"
         },
         "dialog": {
-            "exportTitle": "Exportar histórico da área de transferência (JSON)"
+            "exportTitle": "Exportar histórico da área de transferência (JSON)",
+            "importTitle": "Importar histórico da área de transferência (JSON)"
         },
         "stats": {
             "title": "📊 Estatísticas do histórico da área de transferência",

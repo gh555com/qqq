@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Бесконечно",
-            "emptyHint": "Нет записей"
+            "emptyHint": "Нет записей",
+            "invalidUrl": "Неверный URL",
+            "loading": "Загрузка..."
         },
         "quickPick": {
             "placeholder": "Введите для поиска",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- ИСТОРИЯ ---"
         },
         "dialog": {
-            "exportTitle": "Экспорт истории буфера обмена (JSON)"
+            "exportTitle": "Экспорт истории буфера обмена (JSON)",
+            "importTitle": "Импорт истории буфера обмена (JSON)"
         },
         "stats": {
             "title": "📊 Статистика истории буфера обмена",

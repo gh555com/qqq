@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Infinito",
-            "emptyHint": "Sin registros"
+            "emptyHint": "Sin registros",
+            "invalidUrl": "URL inválida",
+            "loading": "Cargando..."
         },
         "quickPick": {
             "placeholder": "Escriba para buscar",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- HISTORIAL ---"
         },
         "dialog": {
-            "exportTitle": "Exportar historial de portapapeles (JSON)"
+            "exportTitle": "Exportar historial de portapapeles (JSON)",
+            "importTitle": "Importar historial de portapapeles (JSON)"
         },
         "stats": {
             "title": "📊 Estadísticas del historial de portapapeles",

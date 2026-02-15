@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "無限",
-            "emptyHint": "暫無記錄"
+            "emptyHint": "暫無記錄",
+            "invalidUrl": "無效網址",
+            "loading": "載入中..."
         },
         "quickPick": {
             "placeholder": "輸入以搜尋",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- 歷史記錄 ---"
         },
         "dialog": {
-            "exportTitle": "全量匯出剪貼簿歷史 (JSON)"
+            "exportTitle": "全量匯出剪貼簿歷史 (JSON)",
+            "importTitle": "增量匯入剪貼簿歷史 (JSON)"
         },
         "stats": {
             "title": "📊 剪貼簿歷史統計",

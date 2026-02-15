@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "无限",
-            "emptyHint": "暂无记录"
+            "emptyHint": "暂无记录",
+            "invalidUrl": "无效网址",
+            "loading": "加载中..."
         },
         "quickPick": {
             "placeholder": "键入搜索",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- 历史记录 HISTORY ---"
         },
         "dialog": {
-            "exportTitle": "全量导出剪切板历史 (JSON)"
+            "exportTitle": "全量导出剪切板历史 (JSON)",
+            "importTitle": "增量导入剪切板历史 (JSON)"
         },
         "stats": {
             "title": "📊 剪切板历史统计",

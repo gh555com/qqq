@@ -235,7 +235,9 @@
         },
         "ui": {
             "loopInfinite": "Infini",
-            "emptyHint": "Aucun enregistrement"
+            "emptyHint": "Aucun enregistrement",
+            "invalidUrl": "URL invalide",
+            "loading": "Chargement..."
         },
         "quickPick": {
             "placeholder": "Tapez pour rechercher",
@@ -246,7 +248,8 @@
             "separatorHistory": "--- HISTORIQUE ---"
         },
         "dialog": {
-            "exportTitle": "Exporter l'historique du presse-papiers (JSON)"
+            "exportTitle": "Exporter l'historique du presse-papiers (JSON)",
+            "importTitle": "Importer l'historique du presse-papiers (JSON)"
         },
         "stats": {
             "title": "📊 Statistiques de l'historique du presse-papiers",
