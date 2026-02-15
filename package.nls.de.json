@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 HTML-Zeichensalat erzwingen. Nur aktivieren bei hartnäckigen HTML (oder Rich Text) Codierungsproblemen; andernfalls deaktiviert lassen — der Kompromiss ist reduzierte Layout-Präzision.",
     "config.autoDownload.desc": "🍌 Automatischer Download wenn ein Video erkannt wird",
     "config.docExportImageResolution.desc": "📦 Zu verwendende Bildauflösung:",
+    "config.docExportImageResolution.label.original": "Originalauflösung",
+    "config.docExportImageResolution.label.frame": "Rahmenauflösung",
     "config.docExportImageResolution.enum.original": "Originalauflösung — volle Präzision",
     "config.docExportImageResolution.enum.frame": "Vorteile: 1. Kleinere Dateigröße; 2. Rahmen-Miniaturansichten entsprechen immer einer vollständigen Bildvorschau (kein Zuschneiden aufgrund von Word-Seitenbegrenzungen).",
     "config.docExportIncludeCipher.desc": "📦 Bild-Chiffre-String exportieren (z.B. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

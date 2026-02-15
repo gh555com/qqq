@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 إصلاح نص HTML المشوّه إجبارياً. فعّل فقط عند مواجهة مشاكل ترميز HTML (أو نص منسق) عنيدة؛ وإلا أبقِه مُعطّلاً — المقايضة هي تقليل دقة التخطيط.",
     "config.autoDownload.desc": "🍌 تنزيل تلقائي عند اكتشاف فيديو",
     "config.docExportImageResolution.desc": "📦 دقة الصورة المستخدمة:",
+    "config.docExportImageResolution.label.original": "الدقة الأصلية",
+    "config.docExportImageResolution.label.frame": "دقة الإطار",
     "config.docExportImageResolution.enum.original": "الدقة الأصلية — دقة كاملة",
     "config.docExportImageResolution.enum.frame": "المزايا: 1. حجم ملف أصغر؛ 2. الصور المصغرة في الإطار تتوافق دائماً مع معاينة صورة كاملة (بدون اقتصاص بسبب حدود حجم صفحة Word).",
     "config.docExportIncludeCipher.desc": "📦 تصدير سلسلة رمز الصورة (مثال: /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

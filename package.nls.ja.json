@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 HTMLの文字化けを強制修正。頑固なHTML(またはリッチテキスト)のエンコーディング問題に遭遇した場合のみチェック。それ以外はチェックを外す — トレードオフはレイアウト精度の低下。",
     "config.autoDownload.desc": "🍌 動画検出時に自動ダウンロード",
     "config.docExportImageResolution.desc": "📦 使用する画像解像度:",
+    "config.docExportImageResolution.label.original": "元の解像度",
+    "config.docExportImageResolution.label.frame": "フレーム解像度",
     "config.docExportImageResolution.enum.original": "元の解像度 — フル精度",
     "config.docExportImageResolution.enum.frame": "利点: 1. ファイルサイズが小さい; 2. フレームのサムネイルは常に完全な画像プレビューに対応(Wordページサイズ制限によるトリミングなし)。",
     "config.docExportIncludeCipher.desc": "📦 画像暗号文字列をエクスポート (例: /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

@@ -738,8 +738,8 @@ async function executeExportDocCommand(isCoreIntegrityValid) {
     const regex = qqq.createPathRegex();
 
     // Get image resolution config (read via ConfigGate)
-    const resolutionConfig = global.getConfig("docExportImageResolution") || "原始分辨率";
-    const useFrameResolution = resolutionConfig === "相框分辨率";
+    const resolutionConfig = global.getConfig("docExportImageResolution") || "original";
+    const useFrameResolution = resolutionConfig === "frame";
     if (useFrameResolution) {
         global.logMessage(q('q3.log.exportFrameRes'), "INFO");
     } else {

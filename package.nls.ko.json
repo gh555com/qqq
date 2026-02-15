@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 HTML 깨짐 강제 수정. 완고한 HTML(또는 리치 텍스트) 인코딩 문제를 만났을 때만 체크; 그 외에는 체크 해제 유지 — 트레이드오프는 레이아웃 정밀도 감소.",
     "config.autoDownload.desc": "🍌 동영상 감지 시 자동 다운로드",
     "config.docExportImageResolution.desc": "📦 사용할 이미지 해상도:",
+    "config.docExportImageResolution.label.original": "원본 해상도",
+    "config.docExportImageResolution.label.frame": "프레임 해상도",
     "config.docExportImageResolution.enum.original": "원본 해상도 — 전체 정밀도",
     "config.docExportImageResolution.enum.frame": "장점: 1. 파일 크기가 작음; 2. 프레임 썸네일은 항상 완전한 이미지 미리보기에 대응 (Word 페이지 크기 제한으로 인한 잘림 없음).",
     "config.docExportIncludeCipher.desc": "📦 이미지 암호 문자열 내보내기 (예: /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

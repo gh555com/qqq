@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 Принудительное исправление искажённого HTML текста. Отмечайте только при столкновении с упорными проблемами кодировки HTML (или форматированного текста); иначе держите не отмеченным — компромисс: снижение точности макета.",
     "config.autoDownload.desc": "🍌 Автозагрузка при обнаружении видео",
     "config.docExportImageResolution.desc": "📦 Разрешение изображения для использования:",
+    "config.docExportImageResolution.label.original": "Исходное разрешение",
+    "config.docExportImageResolution.label.frame": "Разрешение рамки",
     "config.docExportImageResolution.enum.original": "Исходное разрешение — полная точность",
     "config.docExportImageResolution.enum.frame": "Преимущества: 1. Меньший размер файла; 2. Миниатюры рамки всегда соответствуют полному превью изображения (без обрезки из-за ограничений размера страницы Word).",
     "config.docExportIncludeCipher.desc": "📦 Экспортировать строку шифра изображения (напр. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",

@@ -12,7 +12,7 @@ const q1 = require("./q1");
 const q4 = require("./q4");
 const { q, init: initI18n } = require("./i18n");
 
-// 引用 global.js 的核心对象
+// Reference core objects from global.js
 const {
 	pythonBridge,
 	rustBridge,
@@ -36,12 +36,12 @@ const CACHE_TARGET_SIZE = 28 * 1048576;
 const PASTE_SIZE_THRESHOLD = 80 * 1048576;
 
 // =============================================================================
-//  扫描取消机制（Node 引擎）
+//  Scan cancellation mechanism (Node engine)
 // =============================================================================
 let _scanCancelVersion = 0;
 
 /**
- * 递增取消版本号，使所有正在进行的扫描失效
+ * Increment the cancellation version so all in-progress scans become invalid
  */
 function cancelScansJS() {
 	_scanCancelVersion++;
@@ -50,14 +50,14 @@ function cancelScansJS() {
 }
 
 /**
- * 获取当前取消版本号
+ * Get the current cancellation version
  */
 function getScanCancelVersion() {
 	return _scanCancelVersion;
 }
 
 /**
- * 检查扫描是否已被取消
+ * Check whether the scan has been cancelled
  */
 function isScanCancelled(myVersion) {
 	return _scanCancelVersion !== myVersion;
@@ -166,7 +166,7 @@ async function initCache(context) {
 		} catch (e) { }
 	}
 	await loadCacheMetaAsync();
-	// validateCache 不在启动阶段执行，避免阻塞，改为延时后台执行
+	// validateCache is not executed during startup to avoid blocking; changed to delayed background execution
 	setTimeout(() => {
 		validateCacheAsync().catch(() => { });
 	}, 10000);
@@ -247,7 +247,7 @@ async function validateCacheAsync() {
 	}
 
 	for (const orphan of actualFiles) {
-		// 保护图标文件不被误删，除非它们在 meta 中已不存在
+		// Protect icon files from accidental deletion unless they no longer exist in meta
 		if (orphan.startsWith("icon_") && orphan.endsWith(".png")) {
 			continue;
 		}
@@ -289,7 +289,7 @@ function createEmptyMeta() {
 }
 
 
-// 返回一个 Promise，确保调用者可以等待 meta.json 写入完成
+// Return a Promise to ensure the caller can wait for meta.json to be fully written
 function saveCacheMeta() {
 	if (!cacheDir || !cacheMeta) return Promise.resolve();
 
@@ -627,7 +627,7 @@ function getCacheQualityMeta(contentId, quality) {
 	return qInfo?.meta || null;
 }
 
-// 返回 Promise，调用者可以 await 确保 meta.json 写入完成
+// Return a Promise so the caller can await until meta.json write is completed
 async function setCacheEntry(contentId, quality, buffer, meta) {
 	if (!cacheDir || !cacheMeta) {
 		global.logMessage(`[Cache] SETUP_FAIL: cacheDir or cacheMeta not ready`, "WARN");
@@ -670,7 +670,7 @@ async function setCacheEntry(contentId, quality, buffer, meta) {
 	cacheMeta.stats.totalSize = cacheMeta.stats.totalSize - prevSize + buffer.length;
 
 	global.logMessage(`[Cache] SAVED_META: ${fileName}, total=${cacheMeta.stats.totalSize}, count=${cacheMeta.stats.fileCount}`, "DEBUG");
-	// 异步等待 meta.json 写入完成，确保后续 getCachedBuffer 查询时能看到最新的条目
+	// Asynchronously wait for meta.json write to complete, ensuring subsequent getCachedBuffer can see the latest entry
 	try {
 		await saveCacheMeta();
 	} catch (e) {
@@ -802,7 +802,7 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 					await global.TransactionManager.rollback(transId);
 				});
 
-				// ★ 注册事务，让 IO 引擎享有完美的事务包裹流程
+				// ★ Register the transaction so the IO engine can enjoy a fully wrapped transactional flow
 				await global.TransactionManager.saveTransaction({
 					id: transId,
 					targetDir: targetDir,
@@ -820,20 +820,20 @@ async function raceClipboard(targetDir, callback, autoRename = false) {
 				const result = await h.autoDetectAndPaste(targetDir, progCb, token, transId, null, null, null, autoRename);
 
 				if (token.isCancellationRequested) {
-					// 已在 onCancellationRequested 处理 rollback
+					// rollback already handled in onCancellationRequested
 					return null;
 				}
 
-				// 成功完成，移除事务记录
+				// Completed successfully, remove the transaction record
 				if (result) {
 					await global.TransactionManager.removeTransaction(transId);
 				}
 				return result;
 			});
 
-			// ★ 无论结果如何都调用 callback，确保用户能看到结果
+			// ★ Call callback regardless of result to ensure the user can see the outcome
 			if (res) {
-				// 如果所有文件都被跳过，显示警告
+				// If all files were skipped, show a warning
 				if (res.type === "file_folder" && res.files?.length === 0 && res.folders?.length === 0 && res.skippedCount > 0) {
 					global.logMessage(q('qqq.log.allFilesSkipped', res.skippedCount), "WARN");
 				}
@@ -886,14 +886,15 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 	let fileCount = 0;
 	const extStats = {};
 
-	// 性能优化：使用迭代而非递归，并利用 Promise.all 控制并发，避免深层目录导致的栈溢出和单线程阻塞
+	// Performance optimization: use iteration instead of recursion, and use Promise.all to control concurrency,
+	// avoiding deep directories causing stack overflow and single-thread blocking
 	const queue = [folderPath];
 	while (queue.length > 0) {
 		const currentDir = queue.shift();
 		try {
 			const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
 
-			// 批量获取 stats
+			// Batch stat retrieval
 			await Promise.all(entries.map(async (entry) => {
 				const fullPath = path.join(currentDir, entry.name);
 				if (entry.isDirectory()) {
@@ -923,9 +924,9 @@ async function getFolderInfoJS(folderPath, startTime = null) {
 }
 
 /**
- * 极限优化版：只获取文件/目录大小，不统计后缀名、文件数
- * 适用场景：szDisplayMode="size" 时只需要知道大小
- * @param {string} targetPath 文件或目录路径
+ * Extreme optimized version: only get file/folder size, do not count extensions or file count
+ * Suitable for: szDisplayMode="size" where only size is needed
+ * @param {string} targetPath file or folder path
  * @returns {Promise<{success: boolean, total_size?: number, error?: string}>}
  */
 async function getPathSize(targetPath) {
@@ -947,7 +948,7 @@ async function getPathSize(targetPath) {
 }
 
 /**
- * JS 回退实现：只获取大小（简化版本，支持取消）
+ * JS fallback implementation: only get size (simplified version, supports cancellation)
  */
 async function getPathSizeJS(targetPath, startTime = null, cancelVersion = null) {
 	if (!startTime) startTime = Date.now();
@@ -969,7 +970,7 @@ async function getPathSizeJS(targetPath, startTime = null, cancelVersion = null)
 	const queue = [targetPath];
 
 	while (queue.length > 0) {
-		// 每 100 个目录检查一次取消（Node 比 Rust/Python 慢，所以用更小的间隔）
+		// Check cancellation every 100 directories (Node is slower than Rust/Python, so use a smaller interval)
 		if (++checkCount % 100 === 0) {
 			if (isScanCancelled(cancelVersion)) {
 				global.logMessage(`[PathSize] ${targetPath}: cancelled after ${checkCount} dirs`, "DEBUG");
@@ -1001,8 +1002,8 @@ async function getPathSizeJS(targetPath, startTime = null, cancelVersion = null)
 }
 
 /**
- * 获取磁盘剩余空间
- * @param {string} drive - 盘符，如 "C:" 或 "C:\\"
+ * Get remaining disk space
+ * @param {string} drive - drive letter, e.g. "C:" or "C:\\"
  * @returns {Promise<{success: boolean, free?: number, total?: number, error?: string}>}
  */
 async function getDiskFree(drive = "C:") {
@@ -1015,20 +1016,20 @@ async function getDiskFree(drive = "C:") {
 		return res;
 	}
 
-	// JS 回退：使用 Node.js 的 fs.statfs（Node 18.15+）或 child_process
+	// JS fallback: use Node.js fs.statfs (Node 18.15+) or child_process
 	return getDiskFreeJS(drive);
 }
 
 /**
- * JS 回退：获取磁盘剩余空间
+ * JS fallback: get remaining disk space
  */
 async function getDiskFreeJS(drive = "C:") {
 	try {
-		// 确保盘符格式正确
+		// Ensure drive format is correct
 		let d = drive.toUpperCase().replace(/[^A-Z]/g, "") || "C";
 		const drivePath = d + ":\\";
 
-		// Node 18.15+ 有 fs.statfs
+		// Node 18.15+ has fs.statfs
 		if (fs.statfs) {
 			return new Promise((resolve) => {
 				fs.statfs(drivePath, (err, stats) => {
@@ -1043,7 +1044,7 @@ async function getDiskFreeJS(drive = "C:") {
 			});
 		}
 
-		// 回退：wmic 命令
+		// Fallback: wmic command
 		const cp = require("child_process");
 		return new Promise((resolve) => {
 			cp.execFile("wmic", ["logicaldisk", "where", `DeviceID='${d}:'`, "get", "FreeSpace", "/value"],
@@ -1075,14 +1076,14 @@ function shouldShowDuration(info) {
 let downloadContext = null;
 
 // =============================================================================
-// 音频播放状态管理
+// Audio playback state management
 // =============================================================================
 let _pythonAudioChecked = false;
 let _pythonAudioAvailable = false;
 let _pythonAudioError = null;
 
 /**
- * ★ 重置 Python 音频引擎缓存（当 Python 环境"从无到有"时调用）
+ * ★ Reset Python audio engine cache (call when Python environment changes from "unavailable" to "available")
  */
 function resetPythonAudioCache() {
 	_pythonAudioChecked = false;
@@ -1113,7 +1114,7 @@ async function checkPythonAudioEngine() {
 			return true;
 		} else {
 			_pythonAudioError = res?.error || 'miniaudio not available';
-			// 在日志面板打印错误原因
+			// Print the error reason in the log panel
 			global.logMessage(`[Audio] ${q('qqq.log.pythonUnavailable', _pythonAudioError)}`, "WARN");
 		}
 	} catch (e) {
@@ -1127,7 +1128,7 @@ async function checkPythonAudioEngine() {
 }
 
 /**
- * 获取 Savor 音频信息（随机选择）
+ * Get Savor audio info (random selection)
  */
 function getSavorAudioInfo(context) {
 	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
@@ -1152,7 +1153,7 @@ function getSavorAudioInfo(context) {
 }
 
 /**
- * 随机生成循环次数 (2-6)
+ * Random loop count (2-6)
  */
 function getRandomLoopCount() {
 	const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
@@ -1161,24 +1162,24 @@ function getRandomLoopCount() {
 
 async function savorMomentsCommand() {
 	try {
-		// ★ 保护性检查：确保 extensionContext 已初始化
+		// ★ Protective check: ensure extensionContext is initialized
 		if (!extensionContext || !extensionContext.extensionPath) {
 			global.logMessage(`[Audio] ${q('qqq.log.contextWaiting')}`, "WARN");
-			// 回退到 webview 播放（不打开侧边栏）
+			// Fallback to webview playback (do not open the sidebar)
 			if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 				activeSidebarProvider.triggerSavor('normal');
 				return;
 			}
-			// ★ 核心理念：永远不改变用户侧边栏布局，只弹窗提示
+			// ★ Core principle: never change the user's sidebar layout; only show a popup prompt
 			global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
 			return;
 		}
 
-		// 第一步：检测 Python 音频引擎
+		// Step 1: detect Python audio engine
 		const pythonAvailable = await checkPythonAudioEngine();
 
 		if (pythonAvailable) {
-			// ★ Python 引擎可用，直接播放（不需要 webview，不打开侧边栏）
+			// ★ Python engine available, play directly (no webview, do not open sidebar)
 			const info = getSavorAudioInfo(extensionContext);
 			const loopCount = getRandomLoopCount();
 
@@ -1187,7 +1188,7 @@ async function savorMomentsCommand() {
 			try {
 				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 				if (res && (res.status === 'ok' || res.status === 'playing')) {
-					// ★ 无论 q4 是否打开，都记录 Python 播放状态
+					// ★ Record Python playback state whether or not q4 is open
 					if (activeSidebarProvider) {
 						activeSidebarProvider._pythonPlayState = {
 							playing: true,
@@ -1196,27 +1197,27 @@ async function savorMomentsCommand() {
 							startTime: Date.now()
 						};
 					}
-					// ★ 如果 q4 webview 已经打开，同步 UI 状态（不主动打开）
+					// ★ If q4 webview is already open, sync UI state (do not open proactively)
 					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 						activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
 					}
 					return;
 				}
-				// Python 播放失败，回退到 webview
+				// Python playback failed, fallback to webview
 				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
 			} catch (e) {
 				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayError', e.message)}`, "WARN");
 			}
 		}
 
-		// 第二步：Python 不可用或失败，检查 webview（不打开侧边栏）
+		// Step 2: Python unavailable or failed, check webview (do not open sidebar)
 		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-			// Webview 已准备好，使用 webview 播放
+			// Webview ready, use webview playback
 			activeSidebarProvider.triggerSavor('normal');
 			return;
 		}
 
-		// 第三步：都不可用，弹出 q弹窗（★ 核心理念：永远不改变用户侧边栏布局）
+		// Step 3: neither available, show q popup (★ Core principle: never change the user's sidebar layout)
 		global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
 	} catch (e) {
 		global.logMessage(q('qqq.log.audioPlayError', e.message), "ERROR");
@@ -1247,14 +1248,14 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				return global.isValidUrl(s) ? null : q('qqq.ui.invalidUrl');
 			}
 		});
-		// ★ 回车音效
+		// ★ Enter key sound effect
 		if (rawUrl && global.pythonBridge?.isAvailable()) {
 			global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
 		}
 	}
 	if (!rawUrl) return;
 
-	// ★ 将 “已经安装 yt-dlp ” 作为一个先决必要条件 (仅针对 downloadVideosFromUrlCommand)
+	// ★ Treat "yt-dlp is installed" as a prerequisite (only for downloadVideosFromUrlCommand)
 	const { getSharedDownloader } = require('./dow');
 	const downloader = getSharedDownloader();
 	const isYtdlpReady = await downloader.ensureYtdlpReady(extensionContext, { silent: true });
@@ -1269,16 +1270,16 @@ async function downloadVideosFromUrlCommand(urlArg) {
 	const transId = global.TransactionManager.createTransactionId();
 	const targetUri = editor.document.uri;
 
-	// ★ 生成 taskTitle
+	// ★ Generate taskTitle
 	const filePath = editor.document.uri.fsPath;
-	const taskNum = await global.TaskCounter.increment(filePath);  // 数据库递增编号（按文件）
-	const iconNum = await global.TaskCounter.incrementIcon();  // 全局图形编号（跨文件）
-	const taskTitle = global.TaskCounter.formatTitle(filePath, transId, iconNum);  // 标题用 transId + 图形
+	const taskNum = await global.TaskCounter.increment(filePath);  // Database incremental number (per file)
+	const iconNum = await global.TaskCounter.incrementIcon();  // Global icon number (across files)
+	const taskTitle = global.TaskCounter.formatTitle(filePath, transId, iconNum);  // Title uses transId + icon
 
-	// 1. 立即插入锚点
+	// 1. Insert anchor immediately
 	await global.TransactionManager.insertAnchor(editor, transId);
 
-	// ★ 保存事务到 globalState
+	// ★ Save transaction to globalState
 	await global.TransactionManager.saveTransaction({
 		id: transId,
 		targetDir: targetDir,
@@ -1286,19 +1287,19 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		tempFiles: [],
 		landedFiles: [],
 		landedFolders: [],
-		taskType: 'video',  // ★ 视频下载任务
-		existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ 任务开始时的目录快照
+		taskType: 'video',  // ★ Video download task
+		existingFiles: await global.getDirectorySnapshot(targetDir)  // ★ Directory snapshot at task start
 	});
 
-	// 2. 启动带进度条的弹窗任务
-	// ★ 创建自定义取消源（用于锚点丢失时主动取消）
+	// 2. Start a popup task with progress bar
+	// ★ Create a custom cancellation source (used to actively cancel when anchor is lost)
 	const anchor = `/__PENDING_${transId}/`;
 	const anchorLostSource = new vscode.CancellationTokenSource();
 	let anchorLost = false;
 	let lastAnchorCheckTime = 0;
-	const ANCHOR_CHECK_INTERVAL = 800;  // 每 800ms 检查一次锚点
+	const ANCHOR_CHECK_INTERVAL = 800;  // Check anchor every 800ms
 
-	// ★ 锚点检查函数（带节流）
+	// ★ Anchor check function (with throttling)
 	const checkAnchorExists = async () => {
 		if (anchorLost) return false;
 
@@ -1309,7 +1310,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		lastAnchorCheckTime = now;
 
 		try {
-			// ★ 防御性校验：确保文件依然存在，避免 VS Code 内部报错打印
+			// ★ Defensive validation: ensure file still exists to avoid VS Code internal error noise
 			if (!fs.existsSync(targetUri.fsPath)) {
 				if (!anchorLost) {
 					anchorLost = true;
@@ -1339,16 +1340,16 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		}
 	};
 
-	// ★ shouldCancel 回调：返回当前状态，同时触发后台检查
+	// ★ shouldCancel callback: returns current state and triggers a background check
 	const shouldCancelCallback = () => {
-		// 先返回当前状态
+		// Return current state first
 		if (anchorLost) return true;
-		// 后台触发检查（不等待结果）
+		// Trigger check in background (do not await)
 		checkAnchorExists().catch(() => { });
 		return anchorLost;
 	};
 
-	// 3. 定义结果处理函数（复用）
+	// 3. Define result processing function (reusable)
 	const processResult = async (res) => {
 		if (res && res.needEnhancedAction) {
 			return res;
@@ -1360,18 +1361,18 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				const rel = path.relative(currentDocDir, f).replace(/\\/g, '/');
 				return `/\\${rel}\\/`;
 			});
-			// 按照 q1.js 的洁癖标准处理每个视频文件
+			// Process each video file by q1.js cleanliness standards
 			let replacement = "";
 			for (let i = 0; i < res.landedFiles.length; i++) {
 				const f = res.landedFiles[i];
 				const relPath = path.relative(currentDocDir, f).replace(/\\/g, '/');
 				const isLastItem = i === res.landedFiles.length - 1;
 
-				// 添加文件路径
+				// Add file path
 				if (i > 0) replacement += eol;
 				replacement += `/\\${relPath}\\/`;
 
-				// 为视频文件计算精确的空行数（遵循洁癖标准）
+				// Compute the exact number of blank lines for video files (following cleanliness standards)
 				let pxHeight = q1.LARGE_PREVIEW_HEIGHT;
 				try {
 					let mtimeMs = 0;
@@ -1387,7 +1388,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			}
 			const newText = replacement;
 
-			// 替换锚点
+			// Replace anchor
 			const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);
 			if (replaced) {
 				await global.TransactionManager.removeTransaction(transId);
@@ -1402,7 +1403,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			await replaceAnchorInDoc(targetUri, anchor, "");
 			return res;
 		} else {
-			// 下载失败或为 null，回滚
+			// Download failed or null, rollback
 			await global.TransactionManager.rollback(transId);
 			await replaceAnchorInDoc(targetUri, anchor, "");
 			return { failed: true };
@@ -1411,14 +1412,14 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 	let downloadResult = await global.withProgress({
 		location: vscode.ProgressLocation.Notification,
-		title: "",  // ★ 标题留空，由 VideoMsg.progress 生成完整消息
+		title: "",  // ★ Leave title empty; VideoMsg.progress generates the full message
 		cancellable: true
 	}, async (progress, token) => {
 		token.onCancellationRequested(() => {
 			global.logMessage(q('qqq.log.taskCancelled', transId), "WARN");
 		});
 
-		// ★ 锚点丢失也触发回滚提示
+		// ★ Anchor loss also triggers rollback prompt
 		anchorLostSource.token.onCancellationRequested(() => {
 			global.logMessage(q('qqq.log.anchorLostCancel'), 'WARN');
 		});
@@ -1426,17 +1427,17 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		const Qvideo = require('./qvideo');
 		const controller = new Qvideo(downloadContext, module.exports);
 
-		// ★ 进度回调中检查锚点
+		// ★ Check anchor in progress callback
 		const progressAdapter = async (pct, msg) => {
 			progress.report({ message: msg, increment: 0 });
 			await checkAnchorExists();
 		};
 
 		try {
-			// ★ 传递 taskTitle 和 shouldCancel 回调
+			// ★ Pass taskTitle and shouldCancel callback
 			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, shouldCancelCallback, taskNum);
 
-			// ★ 检查是否已取消（用户取消 或 锚点丢失）
+			// ★ Check if cancelled (user cancel or anchor lost)
 			if (token.isCancellationRequested || anchorLost) {
 				await global.TransactionManager.rollback(transId);
 				await replaceAnchorInDoc(targetUri, anchor, "");
@@ -1446,7 +1447,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				return { cancelled: true };
 			}
 
-			// ★ 使用统一处理函数
+			// ★ Use unified processing function
 			return await processResult(res);
 
 		} catch (e) {
@@ -1458,12 +1459,12 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		}
 	});
 
-	// ★ 处理增强流程（此时前一个弹窗已关闭）
+	// ★ Handle enhanced flow (the previous popup has been closed)
 	if (downloadResult && downloadResult.needEnhancedAction) {
 		const Qvideo = require('./qvideo');
 		const controller = new Qvideo(downloadContext, module.exports);
 
-		// 调用 handleForbidden 并获取最终结果
+		// Call handleForbidden and get the final result
 		let enhancedRes = await controller.handleForbidden(
 			downloadResult.task,
 			downloadResult.code,
@@ -1477,28 +1478,28 @@ async function downloadVideosFromUrlCommand(urlArg) {
 		downloadResult = await processResult(enhancedRes);
 	}
 
-	// ★ 进度弹窗结束后，统一显示最终弹窗（唯一真理源）
+	// ★ After the progress popup ends, show a unified final toast (single source of truth)
 	if (downloadResult) {
 		if (downloadResult.cancelled) {
-			// ★ 取消
+			// ★ Cancelled
 			global.TaskMessage.showSimpleToast(q('qqq.ui.taskCancelledRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.anchorLost) {
-			// ★ 锚点丢失
+			// ★ Anchor lost
 			global.TaskMessage.showSimpleToast(q('qqq.ui.anchorLostRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.failed) {
-			// ★ 下载失败
+			// ★ Download failed
 			global.TaskMessage.showSimpleToast(q('qqq.ui.downloadFailedRollback', taskTitle), 15000, 'cancel');
 		} else if (downloadResult.doneMessage) {
-			// ★ 成功
+			// ★ Success
 			global.TaskMessage.showSimpleToast(downloadResult.doneMessage, 15000, 'success');
 		}
 	}
 }
 
-// ==================== 锚点替换辅助 ====================
+// ==================== Anchor replacement helper ====================
 async function replaceAnchorInDoc(uri, anchor, newText) {
 	try {
-		// ★ 性能无损校验：在打开前检查文件物理存在，消除 net::ERR_FILE_NOT_FOUND 噪音
+		// ★ Zero-cost validation: check physical file existence before opening to remove net::ERR_FILE_NOT_FOUND noise
 		if (!fs.existsSync(uri.fsPath)) return false;
 		const doc = await vscode.workspace.openTextDocument(uri);
 		const text = doc.getText();
@@ -1522,7 +1523,7 @@ let q1Module = null;
 let q2Module = null;
 
 async function activate(context) {
-	// ★ 终极最优解：启动时立即重置状态，且后续注册必须早于任何 await
+	// ★ Ultimate optimal solution: reset state immediately at startup, and ensure subsequent registrations happen before any await
 	global.setDeactivated(false);
 
 	if (!context) {
@@ -1540,43 +1541,43 @@ async function activate(context) {
 		return;
 	}
 
-	// ★ 初始化国际化模块：必须在任何 q() 调用之前
+	// ★ Initialize i18n module: must be done before any q() calls
 	initI18n(extensionPath);
 
 	global.logMessage(q('qqq.log.activating'), "INFO");
 
-	// ★ 终极版：注入 VIP 模式（待你校验完成后，把 false 换成实际的 isVip 变量）
-	const isVip = false; // ★ 当前为非 VIP 模式，所有配置不能保存
+	// ★ Ultimate version: inject VIP mode (after you verify, replace false with actual isVip variable)
+	const isVip = false; // ★ Currently non-VIP mode; all configs cannot be saved
 	global.setVipMode(isVip);
 
-	// ★ 非 VIP 启动时清空所有 settings.json 中的 qqq.* 配置，确保“重启还原”
+	// ★ On non-VIP startup, clear all qqq.* configs in settings.json to ensure "restart resets"
 	if (!isVip) {
 		global.ConfigManager.nonVipBootstrapResetAll().catch(() => { });
 	}
 
-	// ★ 缓存必须立即初始化（不延迟），否则用户操作会触发 SETUP_FAIL
+	// ★ Cache must be initialized immediately (no delay), otherwise user actions will trigger SETUP_FAIL
 	initCache(context).catch(e => {
 		global.logMessage(q('qqq.log.cacheInitError', e?.message || e), "ERROR");
 	});
 
-	// ★ 延迟启动策略：onStartupFinished 后再等 3 秒才执行重载初始化
+	// ★ Delayed startup strategy: execute reload init 3 seconds after onStartupFinished
 	setTimeout(() => {
 		_delayedActivate(context).catch(e => {
 			global.logMessage(q('qqq.log.delayedInitError', e?.message || e), "ERROR");
 		});
 	}, 3000);
 
-	// ★ 立即注册命令（不延迟，确保用户可以立即使用）
+	// ★ Register commands immediately (no delay) to ensure user can use them right away
 	_registerCommands(context);
 }
 
-// ★ 延迟初始化逻辑（onStartupFinished + 3秒后执行）
+// ★ Delayed initialization logic (runs after onStartupFinished + 3 seconds)
 async function _delayedActivate(context) {
 	global.logMessage(q('qqq.log.delayedInitStart'), "INFO");
 
-	// initCache 已移至 activate() 立即执行，此处无需重复
+	// initCache has been moved to activate() for immediate execution; no need to repeat here
 
-	// ★ 预热/静默安装视频引擎和 Python 引擎（延迟 10 秒）
+	// ★ Warm up / silently install video engine and Python engine (delay 10 seconds)
 	setTimeout(() => {
 		try {
 			const { getSharedDownloader } = require('./dow');
@@ -1584,13 +1585,13 @@ async function _delayedActivate(context) {
 			downloader.ensureYtdlpReady(context, { background: true }).catch(() => { });
 			global.logMessage(q('qqq.log.dowWarmup'), "INFO");
 		} catch (e) { }
-	}, 7000); // 相对于 _delayedActivate 开始，再延迟 7 秒 = 总共 3+7=10 秒
+	}, 7000); // relative to _delayedActivate start, delay another 7s = total 3+7=10s
 
-	// 初始化核心模块 (q4 现已合并了剪切板历史逻辑)
+	// Initialize core modules (q4 has now merged clipboard history logic)
 	try {
 		const q4Api = q4.activate(context);
-		global.clipboardHistoryManager = q4Api; // 保持全局引用兼容性
-		activeSidebarProvider = q4Api.sidebarProvider; // ★ 正确初始化 activeSidebarProvider
+		global.clipboardHistoryManager = q4Api; // Keep global reference for compatibility
+		activeSidebarProvider = q4Api.sidebarProvider; // ★ Correctly initialize activeSidebarProvider
 	} catch (e) {
 		global.logMessage(q('qqq.log.q4LoadError', e.message), "ERROR");
 	}
@@ -1599,26 +1600,26 @@ async function _delayedActivate(context) {
 	global.initStatusBar();
 	updateStatusBarThrottled();
 
-	// ★ startDaemons 延迟 6 秒（相对于 _delayedActivate 开始，再延迟 3 秒 = 总共 3+3=6 秒）
+	// ★ startDaemons delayed 6 seconds (relative to _delayedActivate start, delay 3 seconds = total 3+3=6 seconds)
 	setTimeout(() => {
 		global.logMessage(q('qqq.log.daemonsStart'), "INFO");
 		startDaemons();
 	}, 3000);
 
-	// 设置 CodeLens 样式（通过 ConfigGate 读取）
+	// Set CodeLens style (read via ConfigGate)
 	function updateCodeLensStyle() {
 		const takeOver = global.getConfig("takeOverCodelensStyle");
 		if (takeOver === undefined ? true : takeOver) {
-			// 设置 CodeLens 字体和字号
+			// Set CodeLens font family and size
 			vscode.workspace.getConfiguration("editor").update("codeLensFontFamily", "Tahoma", vscode.ConfigurationTarget.Global);
 			vscode.workspace.getConfiguration("editor").update("codeLensFontSize", 13, vscode.ConfigurationTarget.Global);
 		}
 	}
 
-	// 激活时设置一次
+	// Set once on activation
 	updateCodeLensStyle();
 
-	// 监听配置变化
+	// Listen for configuration changes
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration("qqq.takeOverCodelensStyle")) {
@@ -1628,11 +1629,11 @@ async function _delayedActivate(context) {
 	);
 }
 
-// ★ 抽取命令注册到单独函数（立即注册，不延迟）
+// ★ Extract command registration into a separate function (register immediately, no delay)
 function _registerCommands(context) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand("qqq.showStatusPanel", global.withReady(() => {
-			// 聚焦到侧边栏视图
+			// Focus the sidebar view
 			vscode.commands.executeCommand('workbench.view.extension.qqqView');
 		})),
 		vscode.commands.registerCommand("qqq.pure", global.withReady(q3.pureCommand)),
@@ -1642,7 +1643,7 @@ function _registerCommands(context) {
 		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
 		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
-			// ★ 9秒自动关闭弹窗 → 统一使用 global.showAutoCloseNotification（唯一真理源）
+			// ★ 9-second auto-close popup → unify using global.showAutoCloseNotification (single source of truth)
 
 			const options = [
 				{ label: q('qqq.clearCache.clearCooldown'), description: q('qqq.clearCache.clearCooldownDesc'), id: "clearCooldown" },
@@ -1660,29 +1661,29 @@ function _registerCommands(context) {
 			if (!selected) return;
 
 			if (selected.id === "clearCooldown") {
-				// 清除依赖下载冷却时间
+				// Clear download dependency cooldown time
 				try {
-					// ★ 清除所有相关的 globalState key
+					// ★ Clear all related globalState keys
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
-					await context.globalState.update('pythonDepsInstallTimestamp', 0); // 兼容旧版
+					await context.globalState.update('pythonDepsInstallTimestamp', 0); // Backward compatibility
 					global.showAutoCloseNotification('info', q('qqq.ui.cooldownCleared'));
 				} catch (e) {
 					global.showAutoCloseNotification('error', q('qqq.ui.cooldownClearError', e.message));
 				}
 			} else if (selected.id === "openCacheDir") {
-				// 打开缓存目录
+				// Open cache directory
 				if (!cacheDir) {
 					global.showAutoCloseNotification('warning', q('qqq.ui.cacheNotInit'));
 					return;
 				}
 
 				try {
-					// 确保缓存目录存在
+					// Ensure cache directory exists
 					if (!fs.existsSync(cacheDir)) {
 						await fs.promises.mkdir(cacheDir, { recursive: true });
 					}
-					// 打开文件资源管理器
+					// Open file explorer
 					if (process.platform === 'win32') {
 						// Windows
 						cp.spawn('explorer.exe', [cacheDir], { detached: true });
@@ -1697,7 +1698,7 @@ function _registerCommands(context) {
 					global.showAutoCloseNotification('error', q('qqq.ui.openCacheDirError', e.message));
 				}
 			} else if (selected.id === "deleteYtDlp") {
-				// 删除视频下载组件 yt-dlp.exe
+				// Delete video download component yt-dlp.exe
 				try {
 					const globalStoragePath = context?.globalStorageUri?.fsPath;
 					if (!globalStoragePath) {
@@ -1715,14 +1716,14 @@ function _registerCommands(context) {
 					global.showAutoCloseNotification('error', q('qqq.ui.ytdlpDeleteError', e.message));
 				}
 			} else if (selected.id === "clearGlobalStates") {
-				// 清理 globalStates 数据库（保留状态区信息）
+				// Clear globalStates database (preserve status bar info)
 				try {
-					// 状态区 keys（不清除）：用户使用时长、缓存命中、前摇
+					// Status bar keys (do not clear): user usage time, cache hit, warm-up
 					const preserveKeys = new Set([
-						'qqq_stats_total_seconds',    // 用户使用时长
-						'qqq_stats_cache_hit_total',  // 缓存命中
-						'qqq_stats_cache_miss_total', // 缓存未命中
-						'qqq_wq_stats'                // 前摇时间统计
+						'qqq_stats_total_seconds',    // User usage time
+						'qqq_stats_cache_hit_total',  // Cache hits
+						'qqq_stats_cache_miss_total', // Cache misses
+						'qqq_wq_stats'                // Warm-up time stats
 					]);
 
 					const allKeys = context.globalState.keys();
@@ -1736,7 +1737,7 @@ function _registerCommands(context) {
 								const jsonString = JSON.stringify(value);
 								totalSize += Buffer.byteLength(jsonString, 'utf8');
 							} catch {
-								// 忽略无法序列化的值
+								// Ignore values that cannot be serialized
 							}
 							await context.globalState.update(key, undefined);
 							clearedCount++;
@@ -1756,7 +1757,7 @@ function _registerCommands(context) {
 					global.showAutoCloseNotification('error', q('qqq.ui.globalStateClearError', e.message));
 				}
 			} else if (selected.id === "clearClipboardHistory") {
-				// 清空剪切板历史记录
+				// Clear clipboard history
 				try {
 					const historyManager = global.clipboardHistoryManager;
 					if (historyManager && typeof historyManager.clearHistory === 'function') {
@@ -1773,18 +1774,18 @@ function _registerCommands(context) {
 
 
 
-		// ★ 终极版：统一的设置变更入口（通过 ConfigGate）
+		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			// ★ 只处理 qqq. 配置变化
+			// ★ Only handle qqq. configuration changes
 			if (!event.affectsConfiguration("qqq")) return;
 
 			global.ConfigManager.handleVscodeConfigChanged(event).then(() => {
-				// ★ 播放设置更新音效 (kj3.mp3)
+				// ★ Play settings update sound (kj3.mp3)
 				if (global.pythonBridge && global.pythonBridge.isAvailable()) {
 					global.pythonBridge.call("play_sfx", { category: "yz", name: "kj3.mp3" }, 1000).catch(() => { });
 				}
 
-				// ioEngine 切换后别处理
+				// Don't handle after ioEngine switch
 				if (event.affectsConfiguration("qqq.ioEngine")) {
 					const val = global.getConfig("ioEngine");
 					global.logMessage(q('qqq.log.engineSwitch', val), "INFO");
@@ -1820,15 +1821,15 @@ function _registerCommands(context) {
 		} catch { }
 	}, 5000);
 
-	// ★ 终极最优解：启动时恢复/清理事务 (移至 activate 底部或后台执行)
-	// 不要让它阻塞主注册流程
+	// ★ Ultimate optimal solution: recover/cleanup transactions at startup (moved to bottom of activate or run in background)
+	// Do not block the main registration flow
 	(async () => {
 		try {
 			await global.TransactionManager.recover();
 		} catch (e) {
 			global.logMessage(q('qqq.log.transactionRecoverError', e.message), "ERROR");
 		} finally {
-			// ★ 无论成功失败，推开信号灯，允许命令执行
+			// ★ No matter success or failure, open the gate so commands can run
 			global.markReady();
 		}
 	})();
@@ -1853,10 +1854,10 @@ function loadSubModules(context) {
 }
 
 async function deactivate() {
-	// ★ 终极最优解：焦土政策，第一时间设置停用标志位
+	// ★ Ultimate optimal solution: scorched-earth policy, set deactivated flag immediately
 	global.setDeactivated(true);
 
-	// ★ 终极最优解：Await 所有 bridge 停止，且强杀所有追踪中的子进程
+	// ★ Ultimate optimal solution: await all bridge stops, and force-kill all tracked child processes
 	await Promise.allSettled([
 		pythonBridge.stop(),
 		rustBridge.stop(),
@@ -1873,7 +1874,7 @@ async function deactivate() {
 	} catch { }
 
 	try { await validateCacheAsync(); } catch { }
-	try { await saveCacheMeta(); } catch { }  // ★ 必须 await，否则进程终止时文件会被截断为 0 字节
+	try { await saveCacheMeta(); } catch { }  // ★ Must await, otherwise file may be truncated to 0 bytes when process exits
 
 	if (q1Module?.deactivate) {
 		try { await q1Module.deactivate(); } catch { }
@@ -1883,7 +1884,7 @@ async function deactivate() {
 		try { await q2Module.deactivate(); } catch { }
 	}
 
-	// ★ 补充：停用 q4 (剪切板历史管理器)
+	// ★ Additional: deactivate q4 (clipboard history manager)
 	try { await q4.deactivate(); } catch { }
 
 	global.logMessage(q('qqq.log.deactivated'), "INFO");
@@ -1892,22 +1893,22 @@ async function deactivate() {
 function getIconCache(filePath) {
 	if (!cacheMeta || !cacheMeta.icons) return null;
 	try {
-		// 合并文件系统调用，减少IO操作
+		// Merge file system calls to reduce IO operations
 		let mtime = 0;
 		try {
 			const stat = fs.statSync(filePath);
 			mtime = stat.mtimeMs;
 		} catch {
-			return null; // 文件不存在，直接返回
+			return null; // File does not exist, return directly
 		}
 		const entry = cacheMeta.icons[filePath];
 		if (entry && entry.mtime === mtime) {
 			const iconPath = path.join(cacheDir, `icon_${entry.hash}.png`);
 			try {
-				// 合并existsSync和readFileSync为一次操作
+				// Merge existsSync and readFileSync into one operation
 				return fs.readFileSync(iconPath).toString("base64");
 			} catch {
-				// 图标文件不存在
+				// Icon file does not exist
 				return null;
 			}
 		}
@@ -1975,9 +1976,9 @@ const exported = {
 	handleClipboardSlow,
 
 	getFolderInfo,
-	getPathSize,  // 极限优化版：只获取大小，不统计后缀名
-	getDiskFree,  // 获取磁盘剩余空间
-	cancelScansJS,  // 取消正在进行的 JS 扫描
+	getPathSize,  // Extreme optimized version: only get size, do not count extensions
+	getDiskFree,  // Get remaining disk space
+	cancelScansJS,  // Cancel in-progress JS scans
 
 	// Delegate to h.js
 	getTimestampFilename: h.getTimestampFilename,
@@ -1997,7 +1998,7 @@ const exported = {
 	getActiveEngineName: global.getActiveEngineName,
 	updateStatusBarNow,
 
-	// ★ Python 环境变化时调用
+	// ★ Call when Python environment changes
 	resetPythonAudioCache,
 };
 
@@ -2011,7 +2012,7 @@ if (!process.__qqq_error_listeners_attached) {
 	process.__qqq_error_listeners_attached = true;
 	process.on("uncaughtException", (error) => {
 		const stack = error.stack || "";
-		// ★ 对于文件系统相关的错误，只记录日志不崩溃
+		// ★ For filesystem-related errors, only log and do not crash
 		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 		if (error.code && fsErrorCodes.includes(error.code)) {
 			global.logMessage(q('qqq.log.fsError', error.code, error.message), "WARN");
@@ -2022,7 +2023,7 @@ if (!process.__qqq_error_listeners_attached) {
 
 	process.on("unhandledRejection", (reason) => {
 		const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
-		// ★ 对于文件系统相关的错误，只记录日志不崩溃
+		// ★ For filesystem-related errors, only log and do not crash
 		const fsErrorCodes = ['EBUSY', 'EACCES', 'EPERM', 'ENOENT', 'EMFILE', 'ENFILE', 'ENOSPC'];
 		if (reason instanceof Error && reason.code && fsErrorCodes.includes(reason.code)) {
 			global.logMessage(q('qqq.log.fsError', reason.code, reason.message), "WARN");
@@ -2031,5 +2032,4 @@ if (!process.__qqq_error_listeners_attached) {
 		}
 	});
 }
-
 

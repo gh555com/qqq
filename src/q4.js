@@ -2569,9 +2569,7 @@ async function searchHistoryCommand(historyManager) {
                     await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
                 }
             } else if (selected.cmd) {
-                if (selected.cmd === 'qqq.qsc_all') {
-                    await qsc(0, historyManager);
-                } else if (selected.cmd !== 'qqq.clipboardHistory') {
+                if (selected.cmd !== 'qqq.clipboardHistory') {
                     vscode.commands.executeCommand(selected.cmd);
                 }
             }
@@ -2715,65 +2713,6 @@ class StatusBarManager {
     }
 }
 
-// ============================================================================
-// Ultimate maintenance tool qsc(a)
-// ============================================================================
-/**
- * @param {number} a Cleanup level: 1-cache, 2-clipboard history, 3-globalState, 0-all
- * @param {ClipboardHistoryManager} historyManager
- */
-async function qsc(a, historyManager) {
-    const context = historyManager?.context;
-    console.log('[QSC]', q('q4.cache.clearing', a));
-
-    // 1. Clear qqq_cache folder
-    const clearCache = async () => {
-        try {
-            const root = context?.globalStorageUri?.fsPath;
-            if (!root) return;
-            const cacheDir = path.join(root, 'qqq_cache');
-            if (fs.existsSync(cacheDir)) {
-                const files = fs.readdirSync(cacheDir);
-                for (const file of files) {
-                    const filePath = path.join(cacheDir, file);
-                    try {
-                        if (fs.statSync(filePath).isFile()) fs.unlinkSync(filePath);
-                    } catch { }
-                }
-                console.log('[QSC]', q('q4.cache.cacheCleared'));
-            }
-        } catch (e) { console.error('[QSC]', q('q4.cache.cacheClearError', e.message)); }
-    };
-
-    // 2. Clear clipboard history
-    const clearHistory = async () => {
-        if (historyManager) {
-            await historyManager.clearHistory({ deleteFiles: true });
-            console.log('[QSC]', q('q4.cache.historyCleared'));
-        }
-    };
-
-    // 3. Clear globalState (high-risk operation)
-    const clearGlobalState = async () => {
-        if (!context?.globalState) return;
-        try {
-            const keys = ['qqq.transactions', 'qqq_config', 'qqq_clipboard_history', 'qqq_history_manager_state', 'qqq.transactions.backup'];
-            for (const key of keys) {
-                await context.globalState.update(key, undefined);
-            }
-            console.log('[QSC]', q('q4.cache.stateCleared'));
-        } catch (e) { console.error('[QSC]', q('q4.cache.stateClearError', e.message)); }
-    };
-
-    if (a === 1) await clearCache();
-    else if (a === 2) await clearHistory();
-    else if (a === 3) await clearGlobalState();
-    else if (a === 0) {
-        await clearCache();
-        await clearHistory();
-        await clearGlobalState();
-    }
-}
 
 // ============================================================================
 // Extension activation entry
@@ -2812,13 +2751,6 @@ function activate(context) {
 
     // Command registration
     context.subscriptions.push(
-        vscode.commands.registerCommand('qqq.qsc', async () => {
-            const input = await vscode.window.showInputBox({
-                placeHolder: '级别: 1-缓存, 2-历史, 3-State, 0-全清', // qq2q
-                prompt: '执行 QSC 终极清理' // qq2q
-            });
-            if (input !== undefined) await qsc(parseInt(input, 10), historyManager);
-        }),
         vscode.commands.registerCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
         vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
@@ -2843,7 +2775,6 @@ function activate(context) {
         searchHistory: (keyword, limit) => historyManager.searchHistory(keyword, limit),
         clearHistory: () => historyManager.clearHistory(),
         getStats: () => historyManager.getStatsSnapshot(),
-        qsc: (a) => qsc(a, historyManager),
         recordRoamUsage: (args) => historyManager.recordRoamUsage(args),
         sidebarProvider: sidebarProvider // ★ Return sidebarProvider instance
     };

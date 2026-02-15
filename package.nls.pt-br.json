@@ -62,6 +62,8 @@
     "config.forceTextFlowScheme.desc": "🍌 Forçar correção de texto HTML corrompido. Marcar apenas ao encontrar problemas persistentes de codificação HTML (ou texto formatado); caso contrário, manter desmarcado — o compromisso é precisão de layout reduzida.",
     "config.autoDownload.desc": "🍌 Download automático quando um vídeo é detectado",
     "config.docExportImageResolution.desc": "📦 Resolução de imagem a usar:",
+    "config.docExportImageResolution.label.original": "Resolução original",
+    "config.docExportImageResolution.label.frame": "Resolução do quadro",
     "config.docExportImageResolution.enum.original": "Resolução original — precisão completa",
     "config.docExportImageResolution.enum.frame": "Vantagens: 1. Tamanho de arquivo menor; 2. As miniaturas da moldura sempre correspondem a uma visualização de imagem completa (sem corte devido aos limites de tamanho de página do Word).",
     "config.docExportIncludeCipher.desc": "📦 Exportar string de cifra de imagem (ex. /\\qqq/bN9Khq_2026.01.03__6__11.09.56.png\\\\/ )",
