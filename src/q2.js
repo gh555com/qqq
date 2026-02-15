@@ -922,6 +922,7 @@ function handleOpenFolderClick() {
     path: currentPath,
     type: 'folder'
   });
+  vscode.postMessage({ command: 'playEnterSfx' }); // ★ Open folder SFX
 }
 
 function ensurePathTooltip(){
@@ -3777,6 +3778,7 @@ function showSaveAsDialog() {
         const p = canonicalizeExistingPath(message.path);
         const ext = path.extname(p).toLowerCase();
 
+        // Quick filter for known binary extensions
         if (UNSUPPORTED_CODE_EXTENSIONS.has(ext)) {
           global.showAutoCloseNotification('warning', q('q2.error.unsupportedFile', path.basename(p)));
           break;
@@ -3788,22 +3790,24 @@ function showSaveAsDialog() {
           break;
         }
 
-        // ★ Record history only after all checks pass
-        recordFileHistory(message.path);
-        // ★ Update sidebar immediately (may not go through refreshWebview)
-        if (panel && activePanelAlive) {
-          const sbData = generateSidebarHtml(getConfig());
-          panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
-        }
-
+        // ★ Perfect mechanism: try to open first, record history only on success
         vscode.workspace
           .openTextDocument(p)
           .then((doc) => {
+            // ★ Only record history after successful open
+            recordFileHistory(message.path);
+            // ★ Update sidebar immediately
+            if (panel && activePanelAlive) {
+              const sbData = generateSidebarHtml(getConfig());
+              panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+            }
             vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
               if (!message.isPinned && panel && activePanelAlive) panel.dispose();
             });
           })
           .catch((error) => {
+            // ★ Failed to open: show warning, do NOT record history
+            global.showAutoCloseNotification('warning', q('q2.error.unsupportedFile', path.basename(p)));
             global.logMessage(q('q2.log.openFileError', error.message), "ERROR");
           });
         break;
