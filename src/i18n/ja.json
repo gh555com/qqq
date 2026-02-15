@@ -91,6 +91,30 @@
             "openFileFailed": "ファイルを開けませんでした: {0}",
             "configUpdateCallback": "[q1] 設定更新コールバック: {0}",
             "transactionRecoverError": "q1 トランザクション回復失敗: {0}"
+        },
+        "ui": {
+            "openFile": "ファイルを開く",
+            "mediaLanded": "{0}個のファイルを保存{1}",
+            "fromUrl": "、{0}から",
+            "fileFolderCopied": "ファイル/フォルダーをコピー {0}",
+            "skippedInaccessible": "({0}個のアクセス不可をスキップ)",
+            "processFailed": "{0} 処理失敗、ロールバック済み",
+            "exceptionOccurred": "{0} 例外が発生、ロールバック済み",
+            "created": "作成",
+            "modified": "変更",
+            "calculatingFolderSize": "フォルダーサイズを計算中...",
+            "codec": "コーデック",
+            "aspectRatio": "アスペクト比",
+            "originalDuration": "元の長さ",
+            "openInRightGroup": "右グループでファイルを開いて編集モードに入る",
+            "noExtension": "拡張子なし",
+            "filesCount": "{0}個のファイル",
+            "filesCountWithBreakdown": "{0}個のファイル：{1}",
+            "emptyFolder": "空のフォルダー",
+            "rename": "名前変更",
+            "fileNameEmpty": "ファイル名は空にできません",
+            "targetFileExists": "ターゲットファイルは既に存在します",
+            "coreFilesIncomplete": "コアファイルが不完全、一部の機能が制限される可能性があります"
         }
     },
     "q2": {

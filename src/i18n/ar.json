@@ -91,6 +91,30 @@
             "openFileFailed": "فشل فتح الملف: {0}",
             "configUpdateCallback": "[q1] callback تحديث الإعدادات: {0}",
             "transactionRecoverError": "فشل استعادة معاملة q1: {0}"
+        },
+        "ui": {
+            "openFile": "فتح الملف",
+            "mediaLanded": "تم حفظ {0} ملفات{1}",
+            "fromUrl": "، من {0}",
+            "fileFolderCopied": "تم نسخ الملفات/المجلدات {0}",
+            "skippedInaccessible": "(تم تخطي {0} غير قابلة للوصول)",
+            "processFailed": "{0} فشلت المعالجة، تم التراجع",
+            "exceptionOccurred": "{0} حدث استثناء، تم التراجع",
+            "created": "تم الإنشاء",
+            "modified": "تم التعديل",
+            "calculatingFolderSize": "جاري حساب حجم المجلد...",
+            "codec": "الترميز",
+            "aspectRatio": "نسبة العرض إلى الارتفاع",
+            "originalDuration": "المدة الأصلية",
+            "openInRightGroup": "فتح الملف في المجموعة اليمنى والدخول في وضع التحرير",
+            "noExtension": "بدون امتداد",
+            "filesCount": "{0} ملفات",
+            "filesCountWithBreakdown": "{0} ملفات: {1}",
+            "emptyFolder": "مجلد فارغ",
+            "rename": "إعادة تسمية",
+            "fileNameEmpty": "لا يمكن أن يكون اسم الملف فارغًا",
+            "targetFileExists": "الملف الهدف موجود بالفعل",
+            "coreFilesIncomplete": "الملفات الأساسية غير مكتملة، قد تكون بعض الوظائف محدودة"
         }
     },
     "q2": {

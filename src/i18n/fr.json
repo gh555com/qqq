@@ -91,6 +91,30 @@
             "openFileFailed": "Échec de l'ouverture du fichier: {0}",
             "configUpdateCallback": "[q1] Callback de mise à jour de configuration: {0}",
             "transactionRecoverError": "Récupération de transaction q1 échouée: {0}"
+        },
+        "ui": {
+            "openFile": "Ouvrir le fichier",
+            "mediaLanded": "{0} fichiers enregistrés{1}",
+            "fromUrl": ", depuis {0}",
+            "fileFolderCopied": "Fichiers/dossiers copiés {0}",
+            "skippedInaccessible": "({0} inaccessibles ignorés)",
+            "processFailed": "{0} traitement échoué, annulé",
+            "exceptionOccurred": "{0} exception survenue, annulé",
+            "created": "Créé",
+            "modified": "Modifié",
+            "calculatingFolderSize": "Calcul de la taille du dossier...",
+            "codec": "Codec",
+            "aspectRatio": "Ratio d'aspect",
+            "originalDuration": "Durée originale",
+            "openInRightGroup": "Ouvrir le fichier dans le groupe de droite et entrer en mode édition",
+            "noExtension": "Sans extension",
+            "filesCount": "{0} fichiers",
+            "filesCountWithBreakdown": "{0} fichiers: {1}",
+            "emptyFolder": "Dossier vide",
+            "rename": "Renommer",
+            "fileNameEmpty": "Le nom de fichier ne peut pas être vide",
+            "targetFileExists": "Le fichier cible existe déjà",
+            "coreFilesIncomplete": "Fichiers principaux incomplets, certaines fonctions peuvent être limitées"
         }
     },
     "q2": {

@@ -91,6 +91,30 @@
             "openFileFailed": "Fallo al abrir archivo: {0}",
             "configUpdateCallback": "[q1] Callback de actualización de configuración: {0}",
             "transactionRecoverError": "Recuperación de transacción q1 falló: {0}"
+        },
+        "ui": {
+            "openFile": "Abrir archivo",
+            "mediaLanded": "{0} archivos guardados{1}",
+            "fromUrl": ", desde {0}",
+            "fileFolderCopied": "Archivos/carpetas copiados {0}",
+            "skippedInaccessible": "({0} inaccesibles omitidos)",
+            "processFailed": "{0} procesamiento fallido, revertido",
+            "exceptionOccurred": "{0} excepción ocurrida, revertido",
+            "created": "Creado",
+            "modified": "Modificado",
+            "calculatingFolderSize": "Calculando tamaño de carpeta...",
+            "codec": "Códec",
+            "aspectRatio": "Relación de aspecto",
+            "originalDuration": "Duración original",
+            "openInRightGroup": "Abrir archivo en grupo derecho y entrar en modo edición",
+            "noExtension": "Sin extensión",
+            "filesCount": "{0} archivos",
+            "filesCountWithBreakdown": "{0} archivos: {1}",
+            "emptyFolder": "Carpeta vacía",
+            "rename": "Renombrar",
+            "fileNameEmpty": "El nombre de archivo no puede estar vacío",
+            "targetFileExists": "El archivo destino ya existe",
+            "coreFilesIncomplete": "Archivos principales incompletos, algunas funciones pueden estar limitadas"
         }
     },
     "q2": {

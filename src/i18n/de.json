@@ -91,6 +91,30 @@
             "openFileFailed": "Datei öffnen fehlgeschlagen: {0}",
             "configUpdateCallback": "[q1] Konfigurations-Update Callback: {0}",
             "transactionRecoverError": "q1 Transaktionswiederherstellung fehlgeschlagen: {0}"
+        },
+        "ui": {
+            "openFile": "Datei öffnen",
+            "mediaLanded": "{0} Dateien gespeichert{1}",
+            "fromUrl": ", von {0}",
+            "fileFolderCopied": "Dateien/Ordner kopiert {0}",
+            "skippedInaccessible": "({0} nicht zugänglich übersprungen)",
+            "processFailed": "{0} Verarbeitung fehlgeschlagen, zurückgesetzt",
+            "exceptionOccurred": "{0} Ausnahme aufgetreten, zurückgesetzt",
+            "created": "Erstellt",
+            "modified": "Geändert",
+            "calculatingFolderSize": "Ordnergröße wird berechnet...",
+            "codec": "Codec",
+            "aspectRatio": "Seitenverhältnis",
+            "originalDuration": "Originallänge",
+            "openInRightGroup": "Datei in rechter Gruppe öffnen und Bearbeitungsmodus",
+            "noExtension": "Keine Erweiterung",
+            "filesCount": "{0} Dateien",
+            "filesCountWithBreakdown": "{0} Dateien: {1}",
+            "emptyFolder": "Leerer Ordner",
+            "rename": "Umbenennen",
+            "fileNameEmpty": "Dateiname darf nicht leer sein",
+            "targetFileExists": "Zieldatei existiert bereits",
+            "coreFilesIncomplete": "Kerndateien unvollständig, einige Funktionen könnten eingeschränkt sein"
         }
     },
     "q2": {
