@@ -91,6 +91,30 @@
             "openFileFailed": "Open file failed: {0}",
             "configUpdateCallback": "[q1] Config update callback: {0}",
             "transactionRecoverError": "q1 transaction recovery failed: {0}"
+        },
+        "ui": {
+            "openFile": "Open File",
+            "mediaLanded": "{0} files landed{1}",
+            "fromUrl": ", from {0}",
+            "fileFolderCopied": "Files/folders copied {0}",
+            "skippedInaccessible": "(skipped {0} inaccessible)",
+            "processFailed": "{0} processing failed, rolled back",
+            "exceptionOccurred": "{0} exception occurred, rolled back",
+            "created": "Created",
+            "modified": "Modified",
+            "calculatingFolderSize": "Calculating folder size...",
+            "codec": "Codec",
+            "aspectRatio": "Aspect Ratio",
+            "originalDuration": "Original Duration",
+            "openInRightGroup": "Open file in right group and enter edit mode",
+            "noExtension": "No Extension",
+            "filesCount": "{0} files",
+            "filesCountWithBreakdown": "{0} files: {1}",
+            "emptyFolder": "Empty folder",
+            "rename": "Rename",
+            "fileNameEmpty": "File name cannot be empty",
+            "targetFileExists": "Target file already exists",
+            "coreFilesIncomplete": "Core files incomplete, some features may be limited"
         }
     },
     "q2": {

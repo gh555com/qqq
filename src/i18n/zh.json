@@ -91,6 +91,30 @@
             "openFileFailed": "打开文件失败: {0}",
             "configUpdateCallback": "[q1] 配置更新回调: {0}",
             "transactionRecoverError": "q1 事务恢复失败: {0}"
+        },
+        "ui": {
+            "openFile": "打开文件",
+            "mediaLanded": "共落盘{0}个文件{1}",
+            "fromUrl": "，从 {0}",
+            "fileFolderCopied": "文件/文件夹已复制 {0}",
+            "skippedInaccessible": "(跳过 {0}个无法访问)",
+            "processFailed": "{0} 处理失败，已回滚",
+            "exceptionOccurred": "{0} 发生异常，已回滚",
+            "created": "创建",
+            "modified": "修改",
+            "calculatingFolderSize": "正在计算文件夹大小...",
+            "codec": "编码",
+            "aspectRatio": "宽高比",
+            "originalDuration": "原始时长",
+            "openInRightGroup": "在右边分组打开文件并进入编辑状态",
+            "noExtension": "无后缀",
+            "filesCount": "{0}个文件",
+            "filesCountWithBreakdown": "{0}个文件：{1}",
+            "emptyFolder": "空文件夹",
+            "rename": "重命名",
+            "fileNameEmpty": "文件名不能为空",
+            "targetFileExists": "目标文件已存在",
+            "coreFilesIncomplete": "核心文件不完整，部分功能可能受限"
         }
     },
     "q2": {
