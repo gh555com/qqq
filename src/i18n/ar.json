@@ -313,7 +313,7 @@
             "anchorLostRollback": "{0} فُقد المرساة، تم التراجع",
             "downloadFailedRollback": "{0} فشل التحميل، تم التراجع",
             "videoDownloadFailed": "فشل تحميل الفيديو: {0}",
-            "plainPasteOnly": "qqq: اللصق البسيط فقط متاح.",
+            "plainPasteOnly": "qqq: اللصق البسيط فقط متاح. الحل: احفظ الملف.",
             "clickSidebarToRelax": "qqq: انقر على زر الشريط الجانبي للاسترخاء.",
             "cooldownCleared": "qqq: تم مسح فترة انتظار تحميل التبعيات.",
             "cooldownClearError": "qqq: فشل مسح فترة الانتظار: {0}",
