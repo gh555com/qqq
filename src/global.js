@@ -88,6 +88,7 @@ class DaemonBridge extends EventEmitter {
 
 	setupProcess(proc, resolve) {
 		this.process = proc;
+		this.available = null; // ★ Reset available during startup to allow ping
 
 		const rl = readline.createInterface({ input: proc.stdout, crlfDelay: Infinity });
 		rl.on("line", (line) => {
