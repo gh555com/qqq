@@ -919,19 +919,37 @@
 
 		.address-copy-btn {
 			position: absolute;
-			right: 4px;
-			top: 50%;
-			transform: translateY(-50%);
-			width: 16px;
-			height: 16px;
+			right: 0;
+			top: 0;
+			width: 24px;
+			height: 100%;
 			cursor: pointer;
 			color: var(--icon-subtle);
-			z-index: 20;
+			z-index: 100;
+			background: transparent; /* ★ 按钮本身透明 */
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 0 4px;
+			box-sizing: border-box;
+		}
+
+		/* ★ 伪元素作为背景遮罩，只遮文字不遮边框 */
+		.address-copy-btn::before {
+			content: '';
+			position: absolute;
+			top: 2px;
+			right: 2px;
+			bottom: 2px;
+			left: 0;
+			background-color: var(--bg-color);
+			z-index: -1;
 		}
 
 		.address-copy-btn svg {
-			width: 100%;
-			height: 100%;
+			width: 14px;
+			height: 14px;
+			flex-shrink: 0;
 		}
 
 		/* Hover: icon itself becomes filled */
