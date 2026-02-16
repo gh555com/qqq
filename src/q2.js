@@ -946,46 +946,63 @@ function showPathTooltip(text, clientX, clientY){
   const margin = 8;
   const vw = window.innerWidth || document.documentElement.clientWidth;
   const vh = window.innerHeight || document.documentElement.clientHeight;
+  const maxAllowedWidth = vw - 20;
 
-  // Measure actual width in single-line first
+  // ★ 测量真实内容宽度：必须用 max-width:none 移除所有限制
   pathTooltipEl.style.whiteSpace = 'nowrap';
-  pathTooltipEl.style.maxWidth = '';
+  pathTooltipEl.style.maxWidth = 'none'; // ★ 关键：用 none 而不是 '''
+  pathTooltipEl.style.width = 'auto';
   pathTooltipEl.style.left = '0px';
   pathTooltipEl.style.top = '0px';
   pathTooltipEl.style.display = 'block';
   pathTooltipVisible = true;
 
-  const naturalWidth = pathTooltipEl.offsetWidth;
+  const naturalWidth = pathTooltipEl.scrollWidth; // ★ 用 scrollWidth 而不是 offsetWidth
 
-  // Determine whether single-line can fit: either left-aligned or right-aligned without exceeding viewport
+  // ★ 如果内容宽度超过允许宽度，强制换行显示
+  if (naturalWidth > maxAllowedWidth) {
+    pathTooltipEl.style.whiteSpace = 'pre-wrap';
+    pathTooltipEl.style.wordBreak = 'break-all';
+    pathTooltipEl.style.maxWidth = maxAllowedWidth + 'px';
+    // 居中显示
+    let left = Math.max(4, Math.min(clientX - maxAllowedWidth / 2, vw - maxAllowedWidth - 4));
+    let top = clientY + margin;
+    pathTooltipEl.style.left = left + 'px';
+    pathTooltipEl.style.top = top + 'px';
+    const rect = pathTooltipEl.getBoundingClientRect();
+    if (rect.bottom > vh - 4) {
+      pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
+    }
+    return;
+  }
+
+  // 单行可以放下，判断左对齐还是右对齐
   const leftAlignOk = (clientX + margin + naturalWidth) <= vw - 4;
   const rightAlignOk = (clientX - margin - naturalWidth) >= 4;
 
-  if (leftAlignOk || rightAlignOk) {
-    // Single-line display
-    pathTooltipEl.style.whiteSpace = 'nowrap';
-    pathTooltipEl.style.maxWidth = '';
-    let left = leftAlignOk ? (clientX + margin) : (clientX - margin - naturalWidth);
-    let top = clientY + margin;
-    pathTooltipEl.style.left = left + 'px';
-    pathTooltipEl.style.top = top + 'px';
-    // Vertical out-of-bounds protection
-    const rect = pathTooltipEl.getBoundingClientRect();
-    if (rect.bottom > vh - 4) {
-      pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
-    }
+  // 单行显示
+  pathTooltipEl.style.whiteSpace = 'nowrap';
+  pathTooltipEl.style.maxWidth = 'none';
+  pathTooltipEl.style.wordBreak = '';
+
+  let left;
+  if (leftAlignOk) {
+    left = clientX + margin;
+  } else if (rightAlignOk) {
+    left = clientX - margin - naturalWidth;
   } else {
-    // Cannot fit on either side, allow wrapping
-    pathTooltipEl.style.whiteSpace = 'pre-wrap';
-    pathTooltipEl.style.maxWidth = (vw - 8) + 'px';
-    let left = 4;
-    let top = clientY + margin;
-    pathTooltipEl.style.left = left + 'px';
-    pathTooltipEl.style.top = top + 'px';
-    const rect = pathTooltipEl.getBoundingClientRect();
-    if (rect.bottom > vh - 4) {
-      pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
-    }
+    // 两边都放不下，居中显示
+    left = Math.max(4, (vw - naturalWidth) / 2);
+  }
+
+  let top = clientY + margin;
+  pathTooltipEl.style.left = left + 'px';
+  pathTooltipEl.style.top = top + 'px';
+
+  // 垂直越界保护
+  const rect = pathTooltipEl.getBoundingClientRect();
+  if (rect.bottom > vh - 4) {
+    pathTooltipEl.style.top = Math.max(4, vh - rect.height - 4) + 'px';
   }
 }
 
