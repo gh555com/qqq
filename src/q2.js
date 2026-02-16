@@ -2895,12 +2895,12 @@ function setupCustomScrollbar() {
 
 setTimeout(setupCustomScrollbar, 100);
 
-// c/F7 key -> admin CMD/Terminal, z key -> admin PowerShell (Windows only)
+// a key -> admin CMD/Terminal, x key -> admin PowerShell (Windows only)
 const isWindows = {{IS_WINDOWS}};
 document.addEventListener('keydown', function (e) {
   if (isInputFocused()) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'a' || key === 'f7') {
+  if (key === 'a' && !e.ctrlKey && !e.metaKey) { // ★ 排除 Ctrl+A 全选
     e.preventDefault();
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
   } else if (key === 'x' && isWindows) {
