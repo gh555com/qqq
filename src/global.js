@@ -651,6 +651,12 @@ const shellBridge = new DaemonBridge("Shell", (bridge) => {
 
 			const simplePsScript = `
 # --- Optimized PowerShell Daemon ---
+# ★ Win7 兼容: 检测 PowerShell 版本，低于 3.0 无法使用 ConvertTo-Json
+if ($PSVersionTable.PSVersion.Major -lt 3) {
+  [Console]::Error.WriteLine("PowerShell version too low: $($PSVersionTable.PSVersion). Requires 3.0+")
+  exit 1
+}
+
 # Ensure all output uses UTF-8 encoding
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
