@@ -1,12 +1,7 @@
 [package]
-name = "dumb_saver"
+name = "dgs_clipboard_dumb_saver_unix"
 version = "0.1.0"
 edition = "2021"
-
-# ★ Win7 兼容性配置
-[package.metadata.winres]
-FileDescription = "Q Clipboard Engine"
-ProductName = "qqq"
 
 [profile.release]
 strip = true
@@ -14,13 +9,9 @@ lto = true
 panic = "abort"
 codegen-units = 1
 
-# ★ Win7 关键: 静态链接 CRT，避免依赖 VCRUNTIME140.dll
-[profile.release.build-override]
-opt-level = 3
-
 [[bin]]
 name = "q"
-path = "kp_win.rs"
+path = "kp.rs"
 
 [dependencies]
 base64 = "0.22"
@@ -34,18 +25,4 @@ serde_json = "1.0"
 num_cpus = "1.16"
 threadpool = "1.8"
 walkdir = "2.5"
-# ★ Win7: image crate 用纯 Rust 实现，不依赖系统 API
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
-# ★ Win7 兼容性主要靠静态 CRT 链接 (.cargo/config.toml)
-windows-sys = { version = "0.61", features = [
-  "Win32_Foundation",
-  "Win32_System_DataExchange",
-  "Win32_System_Memory",
-  "Win32_System_Threading",
-  "Win32_UI_Shell",
-  "Win32_UI_WindowsAndMessaging",
-  "Win32_Graphics_Gdi",
-  "Win32_Storage_FileSystem",
-] }
-
-
