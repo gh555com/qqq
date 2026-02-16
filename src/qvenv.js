@@ -835,7 +835,23 @@ sys.exit(0)
 
             // Extract
             if (platform === 'win32') {
-                cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
+                // ★ Win7 兼容: 使用 PowerShell 解压 (Shell.Application COM, 所有 Windows 版本都支持)
+                const psScript = `
+                    $shell = New-Object -ComObject Shell.Application;
+                    $zip = $shell.NameSpace('${zipPath.replace(/\\/g, '/')}');
+                    $dest = $shell.NameSpace('${installDir.replace(/\\/g, '/')}');
+                    $dest.CopyHere($zip.Items(), 16);
+                `;
+                try {
+                    cp.execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, { windowsHide: true, timeout: 120000 });
+                } catch (psErr) {
+                    // 如果 PowerShell 方式失败，尝试 tar (适用于 Win10+)
+                    try {
+                        cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
+                    } catch (tarErr) {
+                        throw new Error(`Extract failed: PS=${psErr.message}, tar=${tarErr.message}`);
+                    }
+                }
                 // Fix ._pth
                 const pthFile = path.join(installDir, 'python38._pth');
                 if (fs.existsSync(pthFile)) {
