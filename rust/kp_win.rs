@@ -163,14 +163,13 @@ impl serde_json::ser::Formatter for PyFormatter {
         }
         Ok(())
     }
-    fn end_object_key<W: ?Sized + io::Write>(&mut self, _writer: &mut W) -> io::Result<()> {
-        // ★ Key fix: do NOT write anything here, let begin_object_value handle it
+    fn end_object_key<W: ?Sized + io::Write>(&mut self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(b": ")?;
         Ok(())
     }
-    fn begin_object_value<W: ?Sized + io::Write>(&mut self, writer: &mut W) -> io::Result<()> {
-        // ★ Key fix: write ": " here (key-value separator with Python-style spacing)
-        // Default implementation writes ":", we need ": " for Python json.dumps compatibility
-        writer.write_all(b": ")?;
+    #[inline]
+    fn begin_object_value<W: ?Sized + io::Write>(&mut self, _writer: &mut W) -> io::Result<()> {
+        // Override default to NOT write anything here (we already wrote ": " in end_object_key)
         Ok(())
     }
 }
