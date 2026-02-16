@@ -2,11 +2,11 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.1",
+  "version": "15.73.2",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
-    "vscode": "^1.55.0"
+    "vscode": "^1.61.0"
   },
   "activationEvents": [
     "onStartupFinished"
