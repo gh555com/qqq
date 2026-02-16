@@ -38,6 +38,7 @@ target/**
 
 # Bundling: 排除源码和依赖，保留 bundle 产物
 src/**
+!src/i18n/**
 node_modules/**
 !dist/qqq.js
 !dist/kp.py
