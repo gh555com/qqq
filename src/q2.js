@@ -2056,9 +2056,12 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTooltipTarget = target;
         const text = target.getAttribute('data-tooltip');
         if (text) {
-          // Measure in single line first to prevent premature wrapping
-          globalTooltip.style.whiteSpace = 'nowrap';
-          globalTooltip.style.maxWidth = '';
+          const pageWidth = window.innerWidth;
+          const availableWidth = pageWidth - 20;
+
+          // ★ Always use pre-wrap and limit max-width to prevent text overflow
+          globalTooltip.style.whiteSpace = 'pre-wrap';
+          globalTooltip.style.maxWidth = availableWidth + 'px';
           globalTooltip.textContent = text;
           globalTooltip.style.display = 'block';
         }
@@ -2068,13 +2071,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('mousemove', (e) => {
       if (globalTooltip.style.display === 'block' && currentTooltipTarget) {
         const pageWidth = window.innerWidth;
-        const leftPadding = 10; // Left margin padding
-        const rightPadding = 0; // No right padding; can extend into the scrollbar area
+        const leftPadding = 10;
+        const rightPadding = 0;
+        const availableWidth = pageWidth - leftPadding - rightPadding;
 
-        // Measure natural width with nowrap first
-        globalTooltip.style.whiteSpace = 'nowrap';
-        globalTooltip.style.maxWidth = '';
-        const naturalWidth = globalTooltip.offsetWidth;
+        // ★ Always keep pre-wrap and max-width to prevent text overflow
+        globalTooltip.style.whiteSpace = 'pre-wrap';
+        globalTooltip.style.maxWidth = availableWidth + 'px';
+
+        // Get tooltip width after wrapping
+        const tooltipWidth = globalTooltip.offsetWidth;
 
         // Determine element position category to decide tooltip alignment
         const isLeftScmButton = currentTooltipTarget.classList.contains('scm-btn') &&
@@ -2093,46 +2099,17 @@ document.addEventListener('DOMContentLoaded', () => {
           globalTooltip.style.top = (e.clientY + 22) + 'px';
         }
 
-        // Compute initial position
+        // Compute position
         let leftPos;
         if (isLeftScmButton || isOpenButton) {
           leftPos = e.clientX - 11;
         } else if (isRightSideButton) {
-          leftPos = e.clientX - naturalWidth + 11;
+          leftPos = e.clientX - tooltipWidth + 11;
         } else {
-          // Default/address bar: centered
-          leftPos = e.clientX - naturalWidth / 2;
+          leftPos = e.clientX - tooltipWidth / 2;
         }
 
-        // Check boundaries
-        const overflowLeft = leftPos < leftPadding;
-        const overflowRight = leftPos + naturalWidth > pageWidth - rightPadding;
-        const availableWidth = pageWidth - leftPadding - rightPadding;
-
-        // ★ Key fix: when text width exceeds available width, force wrap regardless of overflow direction
-        if (naturalWidth > availableWidth && availableWidth > 50) {
-          globalTooltip.style.whiteSpace = 'pre-wrap';
-          globalTooltip.style.maxWidth = availableWidth + 'px';
-          leftPos = leftPadding;
-        } else if (overflowLeft && overflowRight) {
-          // Both sides overflow (shouldn't happen after above check, but keep as fallback)
-          if (availableWidth > 50) {
-            globalTooltip.style.whiteSpace = 'pre-wrap';
-            globalTooltip.style.maxWidth = availableWidth + 'px';
-            leftPos = leftPadding;
-          }
-        } else if (overflowLeft) {
-          // Only left overflow; shift right, keep single line
-          leftPos = leftPadding;
-        } else if (overflowRight) {
-          // Only right overflow; shift left, keep single line
-          leftPos = pageWidth - naturalWidth - rightPadding;
-        }
-
-        // Re-get width (may have wrapped)
-        const tooltipWidth = globalTooltip.offsetWidth;
-
-        // Final boundary protection
+        // Boundary protection
         if (leftPos + tooltipWidth > pageWidth - rightPadding) {
           leftPos = pageWidth - tooltipWidth - rightPadding;
         }
