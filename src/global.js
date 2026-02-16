@@ -578,18 +578,8 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 const rustBridge = new DaemonBridge("Rust", (bridge) => {
 	return new Promise((resolve) => {
 		const platform = process.platform;
-		const arch = process.arch;
-
-		let filename;
-		if (platform === "win32") {
-			if (arch === "arm64") filename = "q_win_arm64.exe";
-			else if (arch === "ia32" || arch === "x86") filename = "q_win_x86.exe";
-			else filename = "q_win_x64.exe";
-		} else if (platform === "darwin") {
-			filename = arch === "arm64" ? "q_mac_arm64" : "q_mac_x64";
-		} else {
-			filename = arch === "arm64" ? "q_linux_arm64" : "q_linux_x64";
-		}
+		// ★ 统一使用 q_engine 文件名，平台特定 vsix 打包时会将对应二进制复制为此名
+		const filename = platform === "win32" ? "q_engine.exe" : "q_engine";
 
 		const exePath = path.join(extensionContext.extensionPath, "assets", filename);
 
