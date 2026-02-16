@@ -1632,7 +1632,9 @@ class ClipboardHistorySidebarProvider {
         .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
-        .spacer-5 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
+        .spacer-25 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
+        .spacer-75 { display: inline-block; width: 75px; height: 1px; vertical-align: middle; }
+        .spacer-50 { display: inline-block; width: 50px; height: 1px; vertical-align: middle; }
 
         #videoCard { height: 48px; overflow: visible; }
         [data-cmd="qqq.weave"] { height: 49px !important; }
@@ -1864,13 +1866,13 @@ class ClipboardHistorySidebarProvider {
                     </div>
                     <div class="text-content">
                         <span id="ms-label">Savor moments for yourself</span>
-                        <span class="spacer-5"></span> <span class="spacer-5"></span>
+                        <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span>
                         <span id="ms-stats">${savorStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        &nbsp;Paste <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-pen"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> ("Ctrl+V" or "F2") <span id="paste-stats">${pasteStats}</span>
+                        &nbsp;Paste <span class="spacer-25"></span> <span class="icon-pen"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Ctrl+V" or "F2") <span class="spacer-25"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
@@ -1884,43 +1886,43 @@ class ClipboardHistorySidebarProvider {
                             <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
                     </div>
-                    <span class="spacer-5"></span> <span class="spacer-5"></span>
+                    <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span>
                     <div class="text-content">
                         <span id="video-stats">${videoStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">
                     <div class="text-content">
-                        <span class="icon-ufo"></span> <span class="spacer-5"></span> Roam <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  ("Tab" or "F6") <span id="roam-stats">${roamStats}</span>
+                        <span class="icon-ufo"></span> <span class="spacer-25"></span> Roam <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Tab" or "F6") <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.weave">
                     <div class="text-content">
-                        &nbsp;Weave <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="weave-stats">${weaveStats}</span>
+                        &nbsp;Weave <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
                     <div class="text-content">
-                        &nbsp;export doc <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="exportDoc-stats">${exportDocStats}</span>
+                        &nbsp;export doc <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="exportDoc-stats">${exportDocStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.pure">
                     <div class="text-content">
-                        &nbsp;Pure <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="pure-stats">${pureStats}</span>
+                        &nbsp;Pure <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="pure-stats">${pureStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportZip">
                     <div class="text-content">
-                        &nbsp;export Zip <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span id="exportZip-stats">${exportZipStats}</span>
+                        &nbsp;export Zip <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="exportZip-stats">${exportZipStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings">
-                    <div class="text-content"> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="icon-all-settings"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span> <span class="spacer-5"></span>  <span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"> <span class="spacer-75"></span><span class="spacer-75"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false">
+                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false"><span class="spacer-50"></span><span class="spacer-50"></span><span id="clipboard-stats"></span>
                  <!-- ★ NEW: clipboard history dropdown -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>

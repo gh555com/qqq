@@ -2036,7 +2036,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
-  initRecycleBinLazyLoad(); // Initialize recycle bin lazy loading
+  // ★ Recycle bin lazy loading moved to deferred initialization (3s after UI stable)
 
   // ★ Disable the system default context menu
   document.addEventListener('contextmenu', (e) => {
@@ -2441,13 +2441,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   const container = document.querySelector('.container');
-  if (container && 'ResizeObserver' in window) {
-    resizeObserver = new ResizeObserver(() => {
-      adjustSidebarByRatio();
-      checkAndApplyResponsive();
-    });
-    resizeObserver.observe(container);
-  }
+  // ★ ResizeObserver moved to deferred initialization (3s after UI stable)
 
   // Click to select/enter
   const fileList = document.getElementById('fileList');
@@ -2700,10 +2694,44 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Initialization: request once immediately
-if (isDiskFreePollingAllowed()) {
-  requestDiskFree();
+// ★★★ Deferred initialization: wait for UI stable then delay 3 seconds ★★★
+// These operations are non-critical for initial render, delay them to speed up startup
+function runDeferredInitialization() {
+  // 1. Recycle bin lazy loading
+  initRecycleBinLazyLoad();
+
+  // 2. ResizeObserver for container
+  const container = document.querySelector('.container');
+  if (container && 'ResizeObserver' in window) {
+    resizeObserver = new ResizeObserver(() => {
+      adjustSidebarByRatio();
+      checkAndApplyResponsive();
+    });
+    resizeObserver.observe(container);
+  }
+
+  // 3. MutationObserver for custom scrollbar
+  if (window._scrollbarUpdateFn && window._scrollbarContainer) {
+    const scrollbarObserver = new MutationObserver(window._scrollbarUpdateFn);
+    scrollbarObserver.observe(window._scrollbarContainer, { childList: true, subtree: true });
+  }
+
+  // 4. Disk free space polling
+  if (isDiskFreePollingAllowed()) {
+    requestDiskFree();
+  }
 }
+
+// Wait for UI to be fully rendered and stable, then delay 3 seconds
+window.addEventListener('load', () => {
+  // Use requestAnimationFrame to ensure paint is complete
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      // UI is now stable, start 3 second countdown
+      setTimeout(runDeferredInitialization, 3000);
+    });
+  });
+});
 
 // ====== Export for template inline onclick ======
 window.navigateTo = navigateTo;
@@ -2810,8 +2838,10 @@ function setupCustomScrollbar() {
   // Initial update
   update();
   window.addEventListener('resize', update);
-  const observer = new MutationObserver(update);
-  observer.observe(container, { childList: true, subtree: true });
+  // ★ MutationObserver moved to deferred initialization (3s after UI stable)
+  // Store update function for deferred MutationObserver setup
+  window._scrollbarUpdateFn = update;
+  window._scrollbarContainer = container;
 
   // JS hover: only switch hover when cursor actually moves; if cursor doesn't move during scroll, trigger zero times to remove artifacts
   let hoveredItem = null;
