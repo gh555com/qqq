@@ -123,6 +123,7 @@
             "newFile": "Nuevo archivo",
             "newFolder": "Nueva carpeta",
             "openFolder": "Abrir carpeta actual en explorador",
+            "pasted": "Pegado",
             "szSize": "Columna sz: tamaño de archivo",
             "szCtime": "Columna sz: fecha de creación",
             "szMtime": "Columna sz: fecha de modificación",

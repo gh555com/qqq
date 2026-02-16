@@ -1691,6 +1691,23 @@ class ClipboardHistorySidebarProvider {
         }
         .error-tip::after { display: none; }
 
+        .paste-tip {
+            position: absolute;
+            top: 110%;
+            left: 0;
+            background: #d4edda;
+            color: #155724;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: Tahoma, sans-serif;
+            font-size: 13px;
+            white-space: nowrap;
+            display: none;
+            z-index: 100;
+            border: 1px solid #c3e6cb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
         .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; }
 
         /* Extreme: Gold Blade Rage 4.0 (Hyper-Gold Storm Max) */
@@ -1862,6 +1879,7 @@ class ClipboardHistorySidebarProvider {
                             <input type="text" class="inline-input" id="videoInput" placeholder=" Video Url" spellcheck="false">
                             <button id="btnVideoStart"><span class="icon-play"></span></button>
                             <div class="error-tip" id="urlErrorTip">${q('q4.ui.invalidUrl')}</div>
+                            <div class="paste-tip" id="videoPasteTip">${q('q2.ui.pasted')}</div>
                              <!-- ★ NEW: video url history dropdown -->
                             <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
@@ -2257,6 +2275,26 @@ class ClipboardHistorySidebarProvider {
                 if (!isDropdownElement) {
                     hideAllDropdowns();
                 }
+            });
+
+            // Right-click: paste from clipboard (clear -> paste -> cursor at end -> show tip)
+            el.videoInput.addEventListener('contextmenu', async function(e) {
+                e.preventDefault();
+                try {
+                    var text = await navigator.clipboard.readText();
+                    if (text) {
+                        el.videoInput.value = text;
+                        el.videoInput.focus();
+                        el.videoInput.setSelectionRange(text.length, text.length);
+                        el.videoInput.className = 'inline-input';
+                        // Show paste tip
+                        var tip = document.getElementById('videoPasteTip');
+                        if (tip) {
+                            tip.style.display = 'block';
+                            setTimeout(function() { tip.style.display = 'none'; }, 1500);
+                        }
+                    }
+                } catch(err) { }
             });
 
             // Prevent bubbling on dropdown click to avoid triggering blur

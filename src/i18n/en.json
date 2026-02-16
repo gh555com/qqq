@@ -123,6 +123,7 @@
             "newFile": "New file",
             "newFolder": "New folder",
             "openFolder": "Open current folder in Explorer",
+            "pasted": "Pasted",
             "szSize": "sz column: File size",
             "szCtime": "sz column: Creation time",
             "szMtime": "sz column: Modification time",

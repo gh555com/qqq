@@ -123,6 +123,7 @@
             "newFile": "Neue Datei",
             "newFolder": "Neuer Ordner",
             "openFolder": "Aktuellen Ordner im Explorer öffnen",
+            "pasted": "Eingefügt",
             "szSize": "sz-Bereich: Dateigröße",
             "szCtime": "sz-Bereich: Erstellungszeit",
             "szMtime": "sz-Bereich: Änderungszeit",

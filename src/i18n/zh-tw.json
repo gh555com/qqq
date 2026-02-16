@@ -76,7 +76,7 @@
         "duration": "{0}秒",
         "second": "秒",
         "unknownDuration": "未知時長",
-        "selectVideoToDownload": "選擇要下載的影片",
+        "selectVideoToDownload": "選擇要下載滴影片",
         "preparingDownloadCount": "正在準備下載 {0} 個影片",
         "webpageVideo": "網頁影片",
         "downloading": "下載中: {0}",
@@ -123,6 +123,7 @@
             "newFile": "新建檔案",
             "newFolder": "新建資料夾",
             "openFolder": "在檔案總管中開啟目前資料夾",
+            "pasted": "已貼上",
             "szSize": "sz區顯示: 檔案大小",
             "szCtime": "sz區顯示: 建立時間",
             "szMtime": "sz區顯示: 修改時間",
@@ -155,7 +156,7 @@
             "renameFailed": "重新命名失敗：目標位置已存在同名項目。",
             "templateLoadFailed": "錯誤: 無法載入 q2.html 範本",
             "renameError": "重新命名失敗: {0}",
-            "invalidPath": "無效的目錄路徑: {0}",
+            "invalidPath": "無效滴目錄路徑: {0}",
             "navError": "導覽失敗: {0}",
             "createFileFolderExists": "無法建立檔案，因為已存在同名資料夾: \"{0}\"",
             "createFileError": "建立檔案失敗: {0}",
@@ -164,7 +165,7 @@
             "fileNotExists": "檔案已不存在: {0}",
             "openFileError": "開啟檔案失敗: {0}",
             "deleteParentForbidden": "非法操作：禁止刪除上級目錄。",
-            "noTerminal": "未找到支援的終端模擬器",
+            "noTerminal": "未找到支援滴終端模擬器",
             "openTerminalFailed": "開啟管理員終端失敗: {0}"
         },
         "confirm": {
@@ -198,7 +199,7 @@
             "error": "匯入失敗: {0}"
         },
         "editor": {
-            "noActive": "沒有作用中的編輯器",
+            "noActive": "沒有作用中滴編輯器",
             "noSelection": "沒有選取任何文字"
         },
         "cache": {
@@ -226,7 +227,7 @@
         },
         "error": {
             "msgpackUnavailable": "Msgpack 引擎不可用",
-            "invalidBinaryFormat": "無效的二進位儲存格式",
+            "invalidBinaryFormat": "無效滴二進位儲存格式",
             "msgpackMissing": "Msgpack 引擎遺失"
         },
         "status": {
@@ -286,7 +287,7 @@
             "cacheInitError": "快取初始化失敗: {0}",
             "delayedInitError": "延遲初始化失敗: {0}",
             "delayedInitStart": "qqq 延遲初始化開始...",
-            "dowWarmup": "qqq dow.js 預熱開始 (10秒延遲)",
+            "dowWarmup": "qqq dow.js 預熱 (w10)",
             "q4LoadError": "q4 載入失敗: {0}",
             "daemonsStart": "qqq startDaemons 開始 (6秒延遲)",
             "engineSwitch": "引擎切換為: {0}，更新狀態列",
@@ -297,8 +298,8 @@
             "q2LoadError": "q2 載入失敗: {0}",
             "deactivated": "qqq 擴充功能已停用",
             "fsError": "[檔案系統錯誤] {0}: {1}",
-            "uncaughtException": "未捕獲的異常: {0}",
-            "unhandledRejection": "未處理的Promise拒絕: {0}",
+            "uncaughtException": "未捕獲滴異常: {0}",
+            "unhandledRejection": "未處理滴Promise拒絕: {0}",
             "pythonNoInterpreter": "Python 直譯器未安裝",
             "pythonInvalid": "Python 直譯器不可用",
             "pythonDepsMissing": "缺少依賴: {0}",
@@ -307,7 +308,7 @@
         "ui": {
             "fileCopyProgress": "qqq: 檔案複製中...",
             "openDocFirst": "請先開啟一個文件",
-            "videoUrlPlaceholder": " 直接貼上包含影片的網址 ",
+            "videoUrlPlaceholder": " 直接貼上包含影片滴網址 ",
             "invalidUrl": "無效網址",
             "taskCancelledRollback": "{0} 已取消並回滾",
             "anchorLostRollback": "{0} 錨點遺失，已回滾",
@@ -339,7 +340,7 @@
             "clearGlobalStatesDesc": "清空並丟失 ：1、漫遊器快速跳轉陣列；2、影片增強下載流程已指定滴瀏覽器入口；3、已快取滴用於 “事物回滾和檔案去重” 滴關鍵資訊；4、漫遊器關於不同資料夾 “sz 區列印偏好” 和 “排序” 滴精細記憶。",
             "clearClipboardHistory": "清空剪貼簿歷史記錄",
             "selectTitle": "選擇快取操作",
-            "selectPlaceholder": "選擇要執行的快取操作",
+            "selectPlaceholder": "選擇要執行滴快取操作",
             "uninitialized": "未初始化"
         }
     },
@@ -353,7 +354,7 @@
             "startProcess": "開始處理: {0}",
             "usingCookies": "使用全域 Cookie 檔案: {0}",
             "cookieSearchError": "搜尋出錯: {0}",
-            "cookieInvalid": "偵測到可能的 Cookie 失效/缺失 ({0})，正在自動開啟設定目錄...",
+            "cookieInvalid": "偵測到可能滴 Cookie 失效/缺失 ({0})，正在自動開啟設定目錄...",
             "sniffing": "正在智慧嗅探資源...",
             "playlistDetected": "識別為播放清單，共 {0} 個影片。",
             "singleVideo": "識別為單一影片: {0}",
@@ -376,7 +377,7 @@
             "downloadFailed": "失敗: {0} - {1}",
             "downloadRetry": "重試: {0} (等待 {1}ms)",
             "cancelInPostProcess": "[取消] 在 _postProcess 迴圈中偵測到取消，跳出",
-            "staticAll403": "[增強判斷] 靜態分析的 {0} 個直連影片全部 403 失敗，允許進入增強流程",
+            "staticAll403": "[增強判斷] 靜態分析滴 {0} 個直連影片全部 403 失敗，允許進入增強流程",
             "youtubeIgnoreEnhanced": "[增強] 偵測到 YouTube 連結，忽略增強流程",
             "processFailed": "處理失敗: {0}",
             "postProcessStart": "[_postProcess] 開始: filePath={0}, originalFileName={1}",
@@ -398,8 +399,8 @@
             "embeddedNotExist": "[z判斷] 內嵌環境不存在",
             "embeddedAvailable": "[z判斷] 內嵌環境可用: {0}",
             "embeddedVerifyFailed": "[z判斷] 內嵌環境驗證失敗: {0}",
-            "usingSavedBrowser": "[按鈕一] 使用記憶的使用者瀏覽器: {0} ({1})",
-            "savedBrowserInvalid": "[按鈕一] 記憶的瀏覽器已失效，清除記憶",
+            "usingSavedBrowser": "[按鈕一] 使用記憶滴使用者瀏覽器: {0} ({1})",
+            "savedBrowserInvalid": "[按鈕一] 記憶滴瀏覽器已失效，清除記憶",
             "usingEmbedded": "[按鈕一] 使用內嵌環境: {0}",
             "exeUserSelect": "[選擇exe] 使用者選擇: {0}",
             "exeVerifyPassed": "[選擇exe] 驗證通過: {0}，記憶並啟動",
@@ -451,11 +452,11 @@
             "externalToken": "外部 Token 取消"
         },
         "ui": {
-            "inputPrompt": "直接貼上 [ 包含影片的網址 ]",
+            "inputPrompt": "直接貼上 [ 包含影片滴網址 ]",
             "noEditorError": "請先開啟一個文件以便插入影片。",
             "youtubeFailed": "YouTube 下載失敗，可嘗試設定 cookies。",
             "enhancedStart": "🚀 啟動增強流程",
-            "pickBrowser": "📂 選擇類似 chrome.exe 的瀏覽器入口檔案",
+            "pickBrowser": "📂 選擇類似 chrome.exe 滴瀏覽器入口檔案",
             "cancel": "❌ 取消",
             "input12": "輸入 1 或 2",
             "downloadChrome": "📥 下載 Chrome（約 150m）",
@@ -468,11 +469,11 @@
             "downloadChromeBtn": "下載 Chrome",
             "terminateBtn": "終止一切",
             "enhancedDownloading": "增強下載中",
-            "selectChromiumExe": "請選擇 Chromium 核心瀏覽器的可執行檔案",
+            "selectChromiumExe": "請選擇 Chromium 核心瀏覽器滴可執行檔案",
             "downloadingChrome": "qqq: 正在下載 Chrome for Testing...",
             "extracting": "解壓縮中...",
             "chromeDownloadFailed": "下載 Chrome 失敗: {0}",
-            "playInBrowser": "請在開啟的瀏覽器中播放影片（用您期望的解析度），完成後點擊下方按鈕。",
+            "playInBrowser": "請在開啟滴瀏覽器中播放影片（用您期望滴解析度），完成後點擊下方按鈕。",
             "playedExternally": "我已在外部播放",
             "playedExternallyLabel": "✅ 我已在外部播放",
             "cancelLabel": "❌ 取消",
@@ -489,7 +490,7 @@
             "notChromium": "不是 Chromium 核心瀏覽器",
             "cannotExecVersion": "無法執行 --version",
             "extractNoExe": "解壓縮完成但找不到 chrome 可執行檔案",
-            "chromeVerifyFailed": "下載的 Chrome 驗證失敗: {0}",
+            "chromeVerifyFailed": "下載滴 Chrome 驗證失敗: {0}",
             "tooManyRedirects": "重新導向次數過多"
         }
     },
@@ -519,7 +520,7 @@
         "export": {
             "cannotCompute": "無法計算",
             "docExported": "qqq: 文件已匯出 ({0}): {1}",
-            "noQqqVibe": "，但製品中不包含 qqq 的韻味。",
+            "noQqqVibe": "，但製品中不包含 qqq 滴韻味。",
             "mediaConversionFailed": "媒體轉換失敗: {0}",
             "attachmentIndex": "📁 附件索引",
             "colIndex": "序號",
@@ -530,7 +531,7 @@
             "fullSha256": "完整 SHA256 雜湊值：",
             "defaultDocTitle": "qqq 匯出文件",
             "maxConcurrentExports": "qqq: 已有 {0} 個匯出任務正在運行，請等待完成後再試",
-            "noOpenDocument": "qqq: 請選擇打開的文件",
+            "noOpenDocument": "qqq: 請選擇打開滴文件",
             "docFormatRtf": ".doc 文件（相容 Office 2003, RTF）",
             "docFormatRtfDesc": "RTF 編碼 ◉ 相容性更好",
             "docFormatDocx": ".docx 文件（支援 Google Docs/騰訊文件）",
@@ -564,7 +565,7 @@
             "openFileFirst": "請先開啟一個檔案",
             "noQqqFolder": "目前目錄下沒有 qqq 資料夾",
             "readQqqFolderFailed": "讀取 qqq 目錄失敗",
-            "qqqFolderEmpty": "qqq 資料夾是空的",
+            "qqqFolderEmpty": "qqq 資料夾是空滴",
             "noOrphanFiles": "未發現孤兒檔案或資料夾",
             "executeCommandPrompt": "請在終端中執行下面指令：",
             "cannotGeneratePureFile": "無法產生 qqq.pure 檔案"
@@ -584,10 +585,10 @@
             "transactionBatchUpdate": "[事務] 批次更新: {0} 檔案, {1} 資料夾",
             "transactionBatchUpdateFailed": "[事務] 批次更新失敗: {0}",
             "copyCancelled": "[複製] 已取消，複製停止 (已複製: {0} 資料夾, {1} 檔案)",
-            "copyFolderSkip": "[Clipboard] 複製資料夾 {0} 時跳過 {1} 個無法存取的檔案",
+            "copyFolderSkip": "[Clipboard] 複製資料夾 {0} 時跳過 {1} 個無法存取滴檔案",
             "copyFolderFailed": "[Clipboard] 複製資料夾失敗 {0}: {1}",
             "copyFolderException": "複製資料夾異常 {0}: {1}",
-            "skipInaccessible": "[Clipboard] 跳過無法存取的檔案: {0}",
+            "skipInaccessible": "[Clipboard] 跳過無法存取滴檔案: {0}",
             "skipFile": "[Clipboard] 跳過檔案 ({0}): {1}",
             "copyFileFailed": "複製檔案失敗 {0}: {1}",
             "copyResult": "[Clipboard] 複製結果: 檔案={0}, 資料夾={1}, 跳過={2}",
@@ -652,9 +653,9 @@
             "scheme2QualityLow": "[SmartPaste] 方案 2 結果品質低，回退到方案 1"
         },
         "ui": {
-            "promptUrlDefault": "請輸入包含影片的網頁URL",
+            "promptUrlDefault": "請輸入包含影片滴網頁URL",
             "urlEmpty": "URL不能為空",
-            "urlInvalid": "請輸入有效的URL",
+            "urlInvalid": "請輸入有效滴URL",
             "selectVideoDir": "選擇影片下載目錄"
         }
     },
@@ -704,7 +705,7 @@
     },
     "daemons": {
         "bridgeBusy": "[startDaemons] 已有 bridge 活動中 (py={0}, rust={1}, shell={2})，跳過幽靈進程清理",
-        "startWithEngine": "開始啟動守護進程，使用者選擇的引擎: {0}",
+        "startWithEngine": "開始啟動守護進程，使用者選擇滴引擎: {0}",
         "startBridge": "啟動 {0} bridge...",
         "bridgeStartFailedNamed": "{0} Bridge 啟動失敗：{1}",
         "bridgeStartException": "{0} Bridge 啟動異常：{1}",
@@ -724,7 +725,7 @@
         "getFailed": "[Snapshot] 取得目錄快照失敗: {0}"
     },
     "rollback": {
-        "invalidId": "[Rollback] 無效的事務ID",
+        "invalidId": "[Rollback] 無效滴事務ID",
         "notFound": "[Rollback] 未找到事務: {0}",
         "rollingBack": "[Rollback] 正在回滾任務: {0}",
         "anchorDeleted": "[Rollback] 已刪除殘留錨點: {0}",
