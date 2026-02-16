@@ -123,6 +123,7 @@
             "newFile": "새 파일",
             "newFolder": "새 폴더",
             "openFolder": "탐색기에서 현재 폴더 열기",
+            "pasted": "붙여넣음",
             "szSize": "sz 열: 파일 크기",
             "szCtime": "sz 열: 생성 시간",
             "szMtime": "sz 열: 수정 시간",

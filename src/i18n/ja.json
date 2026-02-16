@@ -123,6 +123,7 @@
             "newFile": "新規ファイル",
             "newFolder": "新規フォルダ",
             "openFolder": "エクスプローラーで現在のフォルダを開く",
+            "pasted": "貼り付け済み",
             "szSize": "sz列: ファイルサイズ",
             "szCtime": "sz列: 作成時刻",
             "szMtime": "sz列: 更新時刻",

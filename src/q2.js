@@ -1656,11 +1656,15 @@ window.addEventListener('message', event => {
       updateFineSCMButtons();
 
       const addr = document.getElementById('addressInput');
+      const addrBar = document.getElementById('addressBarInner');
+      const addrDisplay = document.getElementById('addressDisplay');
       if (addr) {
         addr.value = message.currentPath || '';
         updateAddressDisplay(addr.value);
-        // Update tooltip to current address
-        addr.setAttribute('data-tooltip', addr.value || '');
+        // Update tooltip on entire address bar to currentPath
+        if (addrBar) addrBar.setAttribute('data-tooltip', message.currentPath || '');
+        // Update editing state (should be normal after navigation)
+        if (addrDisplay) addrDisplay.classList.remove('editing');
       }
 
       const list = document.getElementById('fileList');
@@ -2161,22 +2165,45 @@ document.addEventListener('DOMContentLoaded', () => {
   // ★ Address bar logic (with history dropdown)
   const addressInput = document.getElementById('addressInput');
   const addressHistoryDropdown = document.getElementById('addressHistoryDropdown');
+  const addressBarInner = document.getElementById('addressBarInner');
+  const addressDisplay = document.getElementById('addressDisplay');
   if (addressInput && addressHistoryDropdown) {
     initInputUndoRedo(addressInput);
+
+    // Helper: update tooltip on entire address bar
+    function updateAddressBarTooltip(path) {
+      if (addressBarInner) addressBarInner.setAttribute('data-tooltip', path || '');
+    }
+
+    // Helper: update editing state (italic + plain separators when editing or mismatched)
+    function updateAddressEditingState() {
+      if (!addressDisplay) return;
+      const isFocused = document.activeElement === addressInput;
+      const isMismatched = addressInput.value !== currentPath;
+      if (isFocused || isMismatched) {
+        addressDisplay.classList.add('editing');
+      } else {
+        addressDisplay.classList.remove('editing');
+      }
+    }
+
     addressInput.addEventListener('input', (e) => {
       updateAddressDisplay(e.target.value);
-      // Dynamically update tooltip to current address
-      addressInput.setAttribute('data-tooltip', e.target.value || '');
+      updateAddressEditingState();
+      // Dynamically update tooltip to current address (on entire bar)
+      updateAddressBarTooltip(currentPath);
       // Hide dropdown on input first, then check if empty
       hideAllDropdowns();
       if (addressInput.value === '') {
         vscode.postMessage({ command: 'getHistory', key: 'address' });
       }
     });
-    // Initial tooltip setup
-    addressInput.setAttribute('data-tooltip', addressInput.value || '');
+    // Initial tooltip setup (use currentPath, not input value)
+    updateAddressBarTooltip(currentPath);
+    updateAddressEditingState();
 
     addressInput.addEventListener('focus', () => {
+      updateAddressEditingState();
       if (addressInput.value === '') {
         vscode.postMessage({ command: 'getHistory', key: 'address' });
       }
@@ -2188,17 +2215,45 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!isDropdownElement) {
         hideAllDropdowns();
       }
+      updateAddressEditingState();
     });
 
-    // Right-click: restore to currentPath and copy to clipboard
-    addressInput.addEventListener('contextmenu', (e) => {
+    // Right-click: paste from clipboard (clear -> paste -> cursor at end -> show tip)
+    const addressPasteTip = document.getElementById('addressPasteTip');
+    addressInput.addEventListener('contextmenu', async (e) => {
       e.preventDefault();
-      addressInput.value = currentPath;
-      updateAddressDisplay(currentPath);
-      addressInput.setAttribute('data-tooltip', currentPath || '');
-      navigator.clipboard.writeText(currentPath).catch(() => { });
-      // ★ Clipboard SFX is handled uniformly by Python clipboard_watcher
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          addressInput.value = text;
+          // ★ Trigger input event to persist the change
+          addressInput.dispatchEvent(new Event('input', { bubbles: true }));
+          updateAddressDisplay(text);
+          addressInput.focus();
+          // Move cursor to end
+          addressInput.setSelectionRange(text.length, text.length);
+          // Show paste tip
+          if (addressPasteTip) {
+            addressPasteTip.classList.add('show');
+            setTimeout(() => addressPasteTip.classList.remove('show'), 1500);
+          }
+        }
+      } catch { }
     });
+
+    // Copy button: restore to currentPath and copy to clipboard
+    const addressCopyBtn = document.getElementById('addressCopyBtn');
+    if (addressCopyBtn) {
+      addressCopyBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        addressInput.value = currentPath;
+        updateAddressDisplay(currentPath);
+        updateAddressBarTooltip(currentPath);
+        navigator.clipboard.writeText(currentPath).catch(() => { });
+        // ★ Clipboard SFX is handled uniformly by Python clipboard_watcher
+      });
+    }
 
     addressHistoryDropdown.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -2929,6 +2984,7 @@ function getWebviewContent(currentPath) {
     .replace("{{I18N_NEW_FILE}}", q('q2.ui.newFile'))
     .replace("{{I18N_NEW_FOLDER}}", q('q2.ui.newFolder'))
     .replace("{{I18N_OPEN_FOLDER}}", q('q2.ui.openFolder'))
+    .replace("{{I18N_PASTED}}", q('q2.ui.pasted'))
     .replace("{{I18N_SZ_SIZE}}", q('q2.ui.szSize'))
     .replace("{{I18N_SZ_CTIME}}", q('q2.ui.szCtime'))
     .replace("{{I18N_SZ_MTIME}}", q('q2.ui.szMtime'))

@@ -76,7 +76,7 @@
         "duration": "{0}秒",
         "second": "秒",
         "unknownDuration": "未知时长",
-        "selectVideoToDownload": "选择要下载的视频",
+        "selectVideoToDownload": "选择要下载滴视频",
         "preparingDownloadCount": "准备下载 {0} 个视频",
         "webpageVideo": "网页视频",
         "downloading": "下载中: {0}",
@@ -123,6 +123,7 @@
             "newFile": "新建文件",
             "newFolder": "新建文件夹",
             "openFolder": "在资源管理器中打开当前文件夹",
+            "pasted": "已粘贴",
             "szSize": "sz区显示: 文件大小",
             "szCtime": "sz区显示: 创建时间",
             "szMtime": "sz区显示: 修改时间",
@@ -155,7 +156,7 @@
             "renameFailed": "重命名失败：目标位置已存在同名项。",
             "templateLoadFailed": "错误: 无法加载 q2.html 模板",
             "renameError": "重命名失败: {0}",
-            "invalidPath": "无效的目录路径: {0}",
+            "invalidPath": "无效滴目录路径: {0}",
             "navError": "导航失败: {0}",
             "createFileFolderExists": "无法创建文件，因为已存在同名文件夹: \"{0}\"",
             "createFileError": "创建文件失败: {0}",
@@ -164,7 +165,7 @@
             "fileNotExists": "文件已不存在: {0}",
             "openFileError": "打开文件失败: {0}",
             "deleteParentForbidden": "非法操作：禁止删除上级目录。",
-            "noTerminal": "未找到支持的终端模拟器",
+            "noTerminal": "未找到支持滴终端模拟器",
             "openTerminalFailed": "打开管理员终端失败: {0}"
         },
         "confirm": {
@@ -198,7 +199,7 @@
             "error": "导入失败: {0}"
         },
         "editor": {
-            "noActive": "没有活动的编辑器",
+            "noActive": "没有活动滴编辑器",
             "noSelection": "没有选中任何文本"
         },
         "cache": {
@@ -226,7 +227,7 @@
         },
         "error": {
             "msgpackUnavailable": "Msgpack 引擎不可用",
-            "invalidBinaryFormat": "无效的二进制存储格式",
+            "invalidBinaryFormat": "无效滴二进制存储格式",
             "msgpackMissing": "Msgpack 引擎丢失"
         },
         "status": {
@@ -297,8 +298,8 @@
             "q2LoadError": "q2 加载失败: {0}",
             "deactivated": "qqq 扩展已停用",
             "fsError": "[文件系统错误] {0}: {1}",
-            "uncaughtException": "未捕获的异常: {0}",
-            "unhandledRejection": "未处理的Promise拒绝: {0}",
+            "uncaughtException": "未捕获滴异常: {0}",
+            "unhandledRejection": "未处理滴Promise拒绝: {0}",
             "pythonNoInterpreter": "Python 解释器未安装",
             "pythonInvalid": "Python 解释器不可用",
             "pythonDepsMissing": "缺少依赖: {0}",
@@ -307,7 +308,7 @@
         "ui": {
             "fileCopyProgress": "qqq: 文件复制...",
             "openDocFirst": "请先打开一个文档",
-            "videoUrlPlaceholder": " 直接粘贴 [ 包含视频的网址 ]",
+            "videoUrlPlaceholder": " 直接粘贴 [ 包含视频滴网址 ]",
             "invalidUrl": "无效网址",
             "taskCancelledRollback": "{0} 已取消并回滚",
             "anchorLostRollback": "{0} 锚点丢失，已回滚",
@@ -339,7 +340,7 @@
             "clearGlobalStatesDesc": "清空并丢失 ：1、漫游器快速跳转阵列；2、视频增强下载流程已指定滴浏览器入口；3、已缓存滴用于 “事物回滚和文件去重” 滴关键信息；4、漫游器关于不同文件夹 “sz 区打印偏好” 和 “排序” 滴精细记忆。",
             "clearClipboardHistory": "清空剪切板历史记录",
             "selectTitle": "选择缓存操作",
-            "selectPlaceholder": "选择要执行的缓存操作",
+            "selectPlaceholder": "选择要执行滴缓存操作",
             "uninitialized": "未初始化"
         }
     },
@@ -353,7 +354,7 @@
             "startProcess": "开始处理: {0}",
             "usingCookies": "使用全局 Cookie 文件: {0}",
             "cookieSearchError": "搜索出错: {0}",
-            "cookieInvalid": "检测到可能的 Cookie 失效/缺失 ({0})，正在自动打开配置目录...",
+            "cookieInvalid": "检测到可能滴 Cookie 失效/缺失 ({0})，正在自动打开配置目录...",
             "sniffing": "正在智能嗅探资源...",
             "playlistDetected": "识别为列表，共 {0} 个视频。",
             "singleVideo": "识别为单个视频: {0}",
@@ -376,7 +377,7 @@
             "downloadFailed": "失败: {0} - {1}",
             "downloadRetry": "重试: {0} (等待 {1}ms)",
             "cancelInPostProcess": "[取消] 在 _postProcess 循环中检测到取消，跳出",
-            "staticAll403": "[增强判断] 静态分析的 {0} 个直连视频全部 403 失败，允许进入增强流程",
+            "staticAll403": "[增强判断] 静态分析滴 {0} 个直连视频全部 403 失败，允许进入增强流程",
             "youtubeIgnoreEnhanced": "[增强] 检测到 YouTube 链接，忽略增强流程",
             "processFailed": "处理失败: {0}",
             "postProcessStart": "[_postProcess] 开始: filePath={0}, originalFileName={1}",
@@ -398,8 +399,8 @@
             "embeddedNotExist": "[z判断] 内嵌环境不存在",
             "embeddedAvailable": "[z判断] 内嵌环境可用: {0}",
             "embeddedVerifyFailed": "[z判断] 内嵌环境验证失败: {0}",
-            "usingSavedBrowser": "[按钮一] 使用记忆的用户浏览器: {0} ({1})",
-            "savedBrowserInvalid": "[按钮一] 记忆的浏览器已失效，清除记忆",
+            "usingSavedBrowser": "[按钮一] 使用记忆滴用户浏览器: {0} ({1})",
+            "savedBrowserInvalid": "[按钮一] 记忆滴浏览器已失效，清除记忆",
             "usingEmbedded": "[按钮一] 使用内嵌环境: {0}",
             "exeUserSelect": "[选择exe] 用户选择: {0}",
             "exeVerifyPassed": "[选择exe] 验证通过: {0}，记忆并启动",
@@ -451,11 +452,11 @@
             "externalToken": "外部 Token 取消"
         },
         "ui": {
-            "inputPrompt": "直接粘贴 [ 包含视频的网址 ]",
+            "inputPrompt": "直接粘贴 [ 包含视频滴网址 ]",
             "noEditorError": "请先打开一个文档以便插入视频。",
             "youtubeFailed": "youtube下载失败，可尝试配置 cookies (参考打开滴文档)。 另一方面，切换影片、稍做等待也是一种解决方案。",
             "enhancedStart": "🚀 启动增强流程",
-            "pickBrowser": "📂 选择类似 chrome.exe 的浏览器入口文件",
+            "pickBrowser": "📂 选择类似 chrome.exe 滴浏览器入口文件",
             "cancel": "❌ 取消",
             "input12": "键入 1 或 2",
             "downloadChrome": "📥 下载 chrome（约150m）",
@@ -468,11 +469,11 @@
             "downloadChromeBtn": "下载 chrome",
             "terminateBtn": "终止一切",
             "enhancedDownloading": "增强下载中",
-            "selectChromiumExe": "请选择 Chromium 内核浏览器的可执行文件",
+            "selectChromiumExe": "请选择 Chromium 内核浏览器滴可执行文件",
             "downloadingChrome": "qqq: 正在下载 Chrome for Testing...",
             "extracting": "解压中...",
             "chromeDownloadFailed": "下载 Chrome 失败: {0}",
-            "playInBrowser": "请在打开的浏览器中播放视频（用你期望的分辨率），完成后点击下方按钮。",
+            "playInBrowser": "请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。",
             "playedExternally": "我已在外部播放",
             "playedExternallyLabel": "✅ 我已在外部播放",
             "cancelLabel": "❌ 取消",
@@ -489,7 +490,7 @@
             "notChromium": "不是 Chromium 内核浏览器",
             "cannotExecVersion": "无法执行 --version",
             "extractNoExe": "解压完成但找不到 chrome 可执行文件",
-            "chromeVerifyFailed": "下载的 Chrome 验证失败: {0}",
+            "chromeVerifyFailed": "下载滴 Chrome 验证失败: {0}",
             "tooManyRedirects": "重定向次数过多"
         }
     },
@@ -519,7 +520,7 @@
         "export": {
             "cannotCompute": "无法计算",
             "docExported": "qqq: 文档已导出 ({0}): {1}",
-            "noQqqVibe": "，但，制品中不包含 qqq 的韵味。",
+            "noQqqVibe": "，但，制品中不包含 qqq 滴韵味。",
             "mediaConversionFailed": "媒体转换失败: {0}",
             "attachmentIndex": "📁 附件索引",
             "colIndex": "序号",
@@ -564,7 +565,7 @@
             "openFileFirst": "请先打开一个文件",
             "noQqqFolder": "当前目录下没有 qqq 文件夹",
             "readQqqFolderFailed": "读取 qqq 目录失败",
-            "qqqFolderEmpty": "qqq 文件夹是空的",
+            "qqqFolderEmpty": "qqq 文件夹是空滴",
             "noOrphanFiles": "未发现孤儿文件或文件夹",
             "executeCommandPrompt": "请在终端中执行下面命令：",
             "cannotGeneratePureFile": "无法生成 qqq.pure 文件"
@@ -584,14 +585,14 @@
             "transactionBatchUpdate": "[事务] 批量更新: {0} 文件, {1} 文件夹",
             "transactionBatchUpdateFailed": "[事务] 批量更新失败: {0}",
             "copyCancelled": "[复制] 取消，停止复制 (已复制 {0} 个文件夹, {1} 个文件)",
-            "copyFolderSkip": "[Clipboard] 复制文件夹 {0} 时跳过 {1} 个无法访问的文件",
+            "copyFolderSkip": "[Clipboard] 复制文件夹 {0} 时跳过 {1} 个无法访问滴文件",
             "copyFolderFailed": "[Clipboard] 复制文件夹失败 {0}: {1}",
             "copyFolderException": "复制文件夹异常 {0}: {1}",
-            "skipInaccessible": "[Clipboard] 跳过无法访问的文件: {0}",
+            "skipInaccessible": "[Clipboard] 跳过无法访问滴文件: {0}",
             "skipFile": "[Clipboard] 跳过文件 ({0}): {1}",
             "copyFileFailed": "复制文件失败 {0}: {1}",
             "copyResult": "[Clipboard] 复制结果: files={0}, folders={1}, skipped={2}",
-            "usePreFetchedFiles": "[Clipboard] 使用预获取的 {0} 个文件",
+            "usePreFetchedFiles": "[Clipboard] 使用预获取滴 {0} 个文件",
             "noPreFetchedFiles": "[Clipboard] 无预获取文件，调用 tryEngineCall...",
             "startCopyFiles": "[Clipboard] 开始复制 {0} 个文件: {1}",
             "tryEngineCallResult": "[Clipboard] tryEngineCall 返回: {0}",
@@ -652,9 +653,9 @@
             "scheme2QualityLow": "[SmartPaste] Scheme 2 result quality low, falling back to Scheme 1"
         },
         "ui": {
-            "promptUrlDefault": "请键入包含视频的网页URL",
+            "promptUrlDefault": "请键入包含视频滴网页URL",
             "urlEmpty": "URL不能为空",
-            "urlInvalid": "请键入有效的URL",
+            "urlInvalid": "请键入有效滴URL",
             "selectVideoDir": "选择视频下载目录"
         }
     },
@@ -704,7 +705,7 @@
     },
     "daemons": {
         "bridgeBusy": "[startDaemons] 已有 bridge 活动中 (py={0}, rust={1}, shell={2})，跳过幽灵进程清理",
-        "startWithEngine": "开始启动守护进程，用户选择的引擎: {0}",
+        "startWithEngine": "开始启动守护进程，用户选择滴引擎: {0}",
         "startBridge": "启动 {0} bridge...",
         "bridgeStartFailedNamed": "{0} Bridge 启动失败：{1}",
         "bridgeStartException": "{0} Bridge 启动异常：{1}",
@@ -724,7 +725,7 @@
         "getFailed": "[Snapshot] 获取目录快照失败: {0}"
     },
     "rollback": {
-        "invalidId": "[Rollback] 无效的事务ID",
+        "invalidId": "[Rollback] 无效滴事务ID",
         "notFound": "[Rollback] 未找到事务: {0}",
         "rollingBack": "[Rollback] 正在回滚任务: {0}",
         "anchorDeleted": "[Rollback] 已删除残留锚点: {0}",
