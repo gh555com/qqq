@@ -1663,11 +1663,14 @@ function _registerCommands(context) {
 			if (selected.id === "clearCooldown") {
 				// Clear download dependency cooldown time
 				try {
+					// ★ Calculate remaining time before clearing
+					const cooldownStatus = pythonEnvManager._getCooldownStatus(context);
+					const erasedTime = `${cooldownStatus.remainingHours}h:${cooldownStatus.remainingMinutes}m`;
 					// ★ Clear all related globalState keys
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
 					await context.globalState.update('pythonDepsInstallTimestamp', 0); // Backward compatibility
-					global.showAutoCloseNotification('info', q('qqq.ui.cooldownCleared'));
+					global.showAutoCloseNotification('info', q('qqq.ui.cooldownCleared', erasedTime));
 				} catch (e) {
 					global.showAutoCloseNotification('error', q('qqq.ui.cooldownClearError', e.message));
 				}

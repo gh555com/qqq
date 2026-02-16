@@ -316,7 +316,7 @@
             "videoDownloadFailed": "동영상 다운로드 실패: {0}",
             "plainPasteOnly": "qqq: 원본 붙여넣기만 사용할 수 있습니다. 해결책: 파일을 저장하세요.",
             "clickSidebarToRelax": "qqq: 휴식을 시작하려면 사이드바 버튼을 클릭하세요.",
-            "cooldownCleared": "qqq: 종속성 다운로드 쿨다운이 지워졌습니다.",
+            "cooldownCleared": "qqq: 종속성 다운로드 쿨다운이 지워졌습니다. 삭제됨: {0}",
             "cooldownClearError": "qqq: 쿨다운 지우기 실패: {0}",
             "cacheNotInit": "qqq: 캐시 디렉토리가 초기화되지 않음",
             "openCacheDirError": "qqq: 캐시 디렉토리 열기 실패: {0}",

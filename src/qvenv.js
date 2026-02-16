@@ -750,7 +750,8 @@ sys.exit(0)
             const platform = os.platform();
             const arch = os.arch();
             const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
-            const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.tmp");
+            // ★ Win7 fix: Shell.Application.NameSpace() only works with .zip extension
+            const zipPath = path.join(context.globalStorageUri.fsPath, "python_3.8.10.zip");
             const binName = platform === "win32" ? "python.exe" : "bin/python3";
             const installPath = path.join(installDir, binName);
 
@@ -835,23 +836,60 @@ sys.exit(0)
 
             // Extract
             if (platform === 'win32') {
-                // ★ Win7 兼容: 使用 PowerShell 解压 (Shell.Application COM, 所有 Windows 版本都支持)
-                const psScript = `
+                // ★ Win7 兼容解压: 三级回退策略
+                // 1. .NET 4.5 ZipFile (最可靠，适用于 Win7 SP1 + .NET 4.5+)
+                // 2. Shell.Application COM (适用于所有 Windows，但路径必须用反斜杠且扩展名必须是 .zip)
+                // 3. tar (仅 Win10+)
+                const zipPathWin = zipPath.replace(/\//g, '\\\\');
+                const installDirWin = installDir.replace(/\//g, '\\\\');
+
+                // Method 1: .NET ZipFile (PowerShell 2.0 + .NET 4.5+)
+                const dotnetScript = `
+                    Add-Type -AssemblyName System.IO.Compression.FileSystem;
+                    [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPathWin}', '${installDirWin}');
+                `;
+
+                // Method 2: Shell.Application COM (Win7 兼容，需要反斜杠路径)
+                const comScript = `
                     $shell = New-Object -ComObject Shell.Application;
-                    $zip = $shell.NameSpace('${zipPath.replace(/\\/g, '/')}');
-                    $dest = $shell.NameSpace('${installDir.replace(/\\/g, '/')}');
+                    $zip = $shell.NameSpace('${zipPathWin}');
+                    $dest = $shell.NameSpace('${installDirWin}');
+                    if ($zip -eq $null) { throw 'Cannot open zip file' };
+                    if ($dest -eq $null) { throw 'Cannot open dest folder' };
                     $dest.CopyHere($zip.Items(), 16);
                 `;
+
+                let extractSuccess = false;
+                let lastError = '';
+
+                // Try .NET ZipFile first
                 try {
-                    cp.execSync(`powershell -NoProfile -Command "${psScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, { windowsHide: true, timeout: 120000 });
-                } catch (psErr) {
-                    // 如果 PowerShell 方式失败，尝试 tar (适用于 Win10+)
+                    cp.execSync(`powershell -NoProfile -Command "${dotnetScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
+                        { windowsHide: true, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
+                    extractSuccess = true;
+                } catch (e1) {
+                    lastError = `.NET=${e1.message}`;
+                    // Try Shell.Application COM
                     try {
-                        cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
-                    } catch (tarErr) {
-                        throw new Error(`Extract failed: PS=${psErr.message}, tar=${tarErr.message}`);
+                        cp.execSync(`powershell -NoProfile -Command "${comScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
+                            { windowsHide: true, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
+                        extractSuccess = true;
+                    } catch (e2) {
+                        lastError += `, COM=${e2.message}`;
+                        // Try tar (Win10+ only)
+                        try {
+                            cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
+                            extractSuccess = true;
+                        } catch (e3) {
+                            lastError += `, tar=${e3.message}`;
+                        }
                     }
                 }
+
+                if (!extractSuccess) {
+                    throw new Error(`Extract failed: ${lastError}`);
+                }
+
                 // Fix ._pth
                 const pthFile = path.join(installDir, 'python38._pth');
                 if (fs.existsSync(pthFile)) {
