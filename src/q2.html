@@ -801,16 +801,14 @@
 		.path-tooltip {
 			position: fixed;
 			z-index: 99999;
-			max-width: 600px;
 			background-color: var(--bg-highlight);
 			color: var(--text-primary);
 			border: 1px solid var(--border-strong);
 			border-radius: 3px;
 			padding: 4px 8px;
-			white-space: pre-wrap;
-			word-break: break-all; /* ★ 强制长文件名换行，避免文字溢出背景 */
 			box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 			pointer-events: none;
+			/* max-width/white-space/word-break 由 JS 动态控制 */
 		}
 
 		/* ====== 精细 SCM 按钮样式 ====== */
