@@ -2692,13 +2692,7 @@ function runDeferredInitialization() {
     resizeObserver.observe(container);
   }
 
-  // 3. MutationObserver for custom scrollbar
-  if (window._scrollbarUpdateFn && window._scrollbarContainer) {
-    const scrollbarObserver = new MutationObserver(window._scrollbarUpdateFn);
-    scrollbarObserver.observe(window._scrollbarContainer, { childList: true, subtree: true });
-  }
-
-  // 4. Disk free space polling
+  // 3. Disk free space polling
   if (isDiskFreePollingAllowed()) {
     requestDiskFree();
   }
@@ -2820,10 +2814,9 @@ function setupCustomScrollbar() {
   // Initial update
   update();
   window.addEventListener('resize', update);
-  // ★ MutationObserver moved to deferred initialization (3s after UI stable)
-  // Store update function for deferred MutationObserver setup
-  window._scrollbarUpdateFn = update;
-  window._scrollbarContainer = container;
+  // ★ MutationObserver: immediate load (low overhead, critical for scrollbar)
+  const observer = new MutationObserver(update);
+  observer.observe(container, { childList: true, subtree: true });
 
   // JS hover: only switch hover when cursor actually moves; if cursor doesn't move during scroll, trigger zero times to remove artifacts
   let hoveredItem = null;
