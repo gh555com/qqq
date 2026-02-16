@@ -1695,8 +1695,8 @@ class ClipboardHistorySidebarProvider {
             position: absolute;
             top: 110%;
             left: 0;
-            background: #d4edda;
-            color: #155724;
+            background: #e6ee9c;
+            color: #424242;
             padding: 4px 10px;
             border-radius: 4px;
             font-family: Tahoma, sans-serif;
@@ -1704,7 +1704,7 @@ class ClipboardHistorySidebarProvider {
             white-space: nowrap;
             display: none;
             z-index: 100;
-            border: 1px solid #c3e6cb;
+            border: 1px solid #dce775;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 

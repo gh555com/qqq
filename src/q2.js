@@ -2160,6 +2160,25 @@ document.addEventListener('DOMContentLoaded', () => {
         vscode.postMessage({ command: 'playEnterSfx' }); // ★ Enter key SFX
       }
     });
+    // ★ Right-click: paste at cursor position (no deletion, no tip)
+    filenameInput.addEventListener('contextmenu', async (e) => {
+      e.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const start = filenameInput.selectionStart;
+          const end = filenameInput.selectionEnd;
+          const before = filenameInput.value.substring(0, start);
+          const after = filenameInput.value.substring(end);
+          filenameInput.value = before + text + after;
+          // Move cursor to end of pasted text
+          const newPos = start + text.length;
+          filenameInput.setSelectionRange(newPos, newPos);
+          // Trigger input event to persist
+          filenameInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      } catch { }
+    });
   }
 
   // ★ Address bar logic (with history dropdown)
