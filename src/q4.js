@@ -2580,7 +2580,7 @@ async function searchHistoryCommand(historyManager) {
             items.push({ label: q('q4.quickPick.separatorHistory'), kind: vscode.QuickPickItemKind.Separator });
             items.push(...results.map(it => ({
                 label: it.preview,
-                detail: ` ${formatTime(it.timestamp)}   📏 ${(it.size || 0).toLocaleString()}b`,
+                detail: ` ${formatTime(it.timestamp)}   📏 ${(it.size || 0).toLocaleString()}`,
                 id: it.id,
                 content: it.content,
                 isHistory: true
