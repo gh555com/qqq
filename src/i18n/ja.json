@@ -316,7 +316,7 @@
             "videoDownloadFailed": "動画ダウンロード失敗: {0}",
             "plainPasteOnly": "qqq: 元の貼り付けのみ使用できます。解決策: ファイルを保存してください。",
             "clickSidebarToRelax": "qqq: リラックスするにはサイドバーボタンをクリックしてください。",
-            "cooldownCleared": "qqq: 依存関係ダウンロードのクールダウンがクリアされました。再ダウンロードできます。",
+            "cooldownCleared": "qqq: 依存関係ダウンロードのクールダウンがクリアされました。再ダウンロードできます。 消去済み: {0}",
             "cooldownClearError": "qqq: クールダウンのクリアに失敗: {0}",
             "cacheNotInit": "qqq: キャッシュディレクトリが初期化されていません",
             "openCacheDirError": "qqq: キャッシュディレクトリを開けませんでした: {0}",

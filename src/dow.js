@@ -2318,14 +2318,32 @@ class YtDlpDownloader {
             const platform = os.platform();
             const arch = os.arch();
 
+            // ★ Win7/8 兼容性检测: os.release() returns "6.1.xxxx" for Win7, "6.2.xxxx" for Win8, "6.3.xxxx" for Win8.1
+            // yt-dlp 2023.03.04 is the last version supporting Windows 7/8 (requires api-ms-win-core-path-l1-1-0.dll after)
+            let isLegacyWindows = false;
+            if (platform === 'win32') {
+                const winVer = os.release().split('.').slice(0, 2).map(Number);
+                // Win7=6.1, Win8=6.2, Win8.1=6.3, Win10+=10.x
+                if (winVer[0] < 10 && winVer[0] <= 6 && winVer[1] <= 3) {
+                    isLegacyWindows = true;
+                    global.logMessage('[yt-dlp] Detected Windows 7/8, using legacy version 2023.03.04', 'INFO');
+                }
+            }
+
             let binaryName;
             let officialUrl;
             let mirrorUrl;
 
             if (platform === 'win32') {
                 binaryName = 'yt-dlp.exe';
-                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
-                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                if (isLegacyWindows) {
+                    // ★ Win7/8: Use the last compatible version (2023.03.04)
+                    officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/download/2023.03.04/yt-dlp.exe';
+                    mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/download/2023.03.04/yt-dlp.exe';
+                } else {
+                    officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                    mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                }
             } else if (platform === 'darwin') {
                 binaryName = 'yt-dlp';
                 officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';

@@ -1,0 +1,16 @@
+# ★ Win7 兼容性配置
+# 静态链接 MSVC CRT，避免依赖 VCRUNTIME140.dll (Win7 可能缺失或版本不兼容)
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# 设置 Windows SDK 最低版本为 Windows 7 (0x0601)
+[env]
+WINVER = "0x0601"
+_WIN32_WINNT = "0x0601"

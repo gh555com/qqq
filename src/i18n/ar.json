@@ -316,7 +316,7 @@
             "videoDownloadFailed": "فشل تحميل الفيديو: {0}",
             "plainPasteOnly": "qqq: اللصق البسيط فقط متاح. الحل: احفظ الملف.",
             "clickSidebarToRelax": "qqq: انقر على زر الشريط الجانبي للاسترخاء.",
-            "cooldownCleared": "qqq: تم مسح فترة انتظار تحميل التبعيات.",
+            "cooldownCleared": "qqq: تم مسح فترة انتظار تحميل التبعيات. تم محو: {0}",
             "cooldownClearError": "qqq: فشل مسح فترة الانتظار: {0}",
             "cacheNotInit": "qqq: دليل ذاكرة التخزين المؤقت غير مهيأ",
             "openCacheDirError": "qqq: فشل فتح دليل ذاكرة التخزين المؤقت: {0}",

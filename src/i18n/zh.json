@@ -316,7 +316,7 @@
             "videoDownloadFailed": "视频下载失败: {0}",
             "plainPasteOnly": "qqq: 只能使用原始粘贴。解决方案：保存文件。",
             "clickSidebarToRelax": "qqq: 请点击侧边栏按钮开始放松。",
-            "cooldownCleared": "qqq: 依赖下载冷却时间已清除，可以重新下载依赖。",
+            "cooldownCleared": "qqq: 依赖下载冷却时间已清除，可以重新下载依赖。 已抹除：{0}",
             "cooldownClearError": "qqq: 清除冷却时间失败: {0}",
             "cacheNotInit": "qqq: 缓存目录未初始化",
             "openCacheDirError": "qqq: 打开缓存目录失败: {0}",
