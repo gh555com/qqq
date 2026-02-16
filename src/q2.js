@@ -2107,10 +2107,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check boundaries
         const overflowLeft = leftPos < leftPadding;
         const overflowRight = leftPos + naturalWidth > pageWidth - rightPadding;
+        const availableWidth = pageWidth - leftPadding - rightPadding;
 
-        // Only auto-wrap when both left and right are clipped
-        if (overflowLeft && overflowRight) {
-          const availableWidth = pageWidth - leftPadding - rightPadding;
+        // ★ Key fix: when text width exceeds available width, force wrap regardless of overflow direction
+        if (naturalWidth > availableWidth && availableWidth > 50) {
+          globalTooltip.style.whiteSpace = 'pre-wrap';
+          globalTooltip.style.maxWidth = availableWidth + 'px';
+          leftPos = leftPadding;
+        } else if (overflowLeft && overflowRight) {
+          // Both sides overflow (shouldn't happen after above check, but keep as fallback)
           if (availableWidth > 50) {
             globalTooltip.style.whiteSpace = 'pre-wrap';
             globalTooltip.style.maxWidth = availableWidth + 'px';

@@ -1872,7 +1872,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q1">
                     <div class="text-content">
-                        &nbsp;Paste <span class="spacer-25"></span> <span class="icon-pen"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Ctrl+V" or "F2") <span class="spacer-25"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="paste-stats">${pasteStats}</span>
+                        &nbsp;Paste <span class="spacer-25"></span> <span class="icon-pen"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Ctrl+V" or "F2") <span class="spacer-25"></span><span id="paste-stats">${pasteStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" id="videoCard">
@@ -1886,19 +1886,19 @@ class ClipboardHistorySidebarProvider {
                             <div id="videoHistoryDropdown" class="history-dropdown"></div>
                         </div>
                     </div>
-                    <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span>
+                    <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span>
                     <div class="text-content">
                         <span id="video-stats">${videoStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.q2">
                     <div class="text-content">
-                        <span class="icon-ufo"></span> <span class="spacer-25"></span> Roam <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Tab" or "F6") <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="roam-stats">${roamStats}</span>
+                        <span class="icon-ufo"></span> <span class="spacer-25"></span> Roam <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Tab" or "F6") <span class="spacer-25"></span><span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.weave">
                     <div class="text-content">
-                        &nbsp;Weave <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
+                        &nbsp;Weave <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
@@ -1908,7 +1908,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.pure">
                     <div class="text-content">
-                        &nbsp;Pure <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="pure-stats">${pureStats}</span>
+                        &nbsp;Pure <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="pure-stats">${pureStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportZip">
@@ -1917,12 +1917,12 @@ class ClipboardHistorySidebarProvider {
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.allSettings">
-                    <div class="text-content"> <span class="spacer-75"></span><span class="spacer-75"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
+                    <div class="text-content"><span class="spacer-50"></span> <span class="icon-all-settings"></span> <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="allSettings-stats">${allSettingsStats}</span>
                     </div>
                 </div>
             </div>
             <div class="search-container">
-                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false"><span class="spacer-50"></span><span class="spacer-50"></span><span id="clipboard-stats"></span>
+                <input type="text" class="search-input" id="searchBox" placeholder="clipboard history" spellcheck="false"><span class="spacer-75"><span class="spacer-75"></span><span id="clipboard-stats"></span>
                  <!-- ★ NEW: clipboard history dropdown -->
                 <div id="searchHistoryDropdown" class="history-dropdown"></div>
             </div>
