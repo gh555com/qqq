@@ -1788,15 +1788,26 @@ class Qvideo {
      */
     _getEmbeddedChromePath() {
         const platform = process.platform;
+        const arch = process.arch;
+        const os = require('os');
+
+        // ★ Win7/8 使用 Chromium Snapshots 的目录结构
+        const isLegacyWindows = platform === 'win32' && parseFloat(os.release()) < 10;
+
         let folderName;
-        if (platform === 'win32') {
-            folderName = 'chrome-win';  // Chromium snapshots 解压后的目录名
+        if (isLegacyWindows) {
+            // Chromium 109 Snapshots
+            folderName = 'chrome-win';
+        } else if (platform === 'win32') {
+            // Chrome for Testing 133
+            folderName = (arch === 'x64' || arch === 'arm64') ? 'chrome-win64' : 'chrome-win32';
         } else if (platform === 'darwin') {
-            folderName = 'chrome-mac';
+            folderName = (arch === 'arm64') ? 'chrome-mac-arm64' : 'chrome-mac-x64';
         } else {
-            folderName = 'chrome-linux';
+            folderName = 'chrome-linux64';
         }
-        const exeName = platform === 'win32' ? 'chrome.exe' : 'chrome';
+
+        const exeName = platform === 'win32' ? 'chrome.exe' : (platform === 'darwin' ? 'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' : 'chrome');
         return path.join(this.chromeHome, folderName, exeName);
     }
 
@@ -2158,18 +2169,35 @@ $of = $vi.OriginalFilename;
         });
     }
 
-    // ★ 精简 Chromium（删除测试文件、多余语言包等，324MB → 162MB）
+    // ★ 精简 Chromium（删除测试文件、多余语言包、DirectX/Vulkan 组件等）
     async _slimChromium(chromiumDir) {
         if (!chromiumDir || !fs.existsSync(chromiumDir)) return;
 
-        const toDelete = [
+        // ★ Chromium Snapshots 的测试文件
+        const snapshotsDelete = [
             'interactive_ui_tests.exe', 'interactive_ui_tests',
             'nacl_irt_x86_64.nexe', 'nacl_irt_x86_32.nexe',
             'elevation_service.exe', 'chrome_pwa_launcher.exe',
             'notification_helper.exe', 'chrome_proxy.exe',
-            'chrome_200_percent.pak', 'eventlog_provider.dll',
+            'eventlog_provider.dll',
             'First Run', 'swiftshader', 'MEIPreload'
         ];
+
+        // ★ Chrome for Testing 的可删除文件（DirectX/Vulkan/非必要组件）
+        const cftDelete = [
+            'D3DCompiler_47.dll',     // ~5MB, DirectX 编译器 (WebGPU)
+            'dxcompiler.dll',         // ~21MB, DirectX 编译器
+            'dxil.dll',               // ~1.5MB, DirectX IL
+            'vk_swiftshader.dll',     // ~5MB, Vulkan 软件渲染
+            'vk_swiftshader_icd.json',
+            'vulkan-1.dll',           // ~1MB, Vulkan
+            'chrome_wer.dll',         // Windows 错误报告
+            'chrome_100_percent.pak', // 高分屏资源
+            'chrome_200_percent.pak', // 高分屏资源
+        ];
+
+        // ★ 合并所有可删除项
+        const toDelete = [...new Set([...snapshotsDelete, ...cftDelete])];
 
         for (const item of toDelete) {
             const itemPath = path.join(chromiumDir, item);
@@ -2202,47 +2230,65 @@ $of = $vi.OriginalFilename;
     }
 
     _getChromeDownloadInfo() {
-        // ★ Chromium 109 (Win7 最后支持的版本)
-        // 不同平台 revision 不同，这是 snapshots 体系的正常现象
-        const version = '109.0.5414.120';
         const platform = process.platform;
         const arch = process.arch;
+        const os = require('os');
 
-        let platformPath, revision, zipName, folderName;
+        // ★ Win7/8 检测：os.release() < 10 表示 Win7/8/8.1
+        const isLegacyWindows = platform === 'win32' && parseFloat(os.release()) < 10;
 
-        if (platform === 'win32') {
-            // Windows: 区分 x64/x86
-            platformPath = (arch === 'x64' || arch === 'arm64') ? 'Win_x64' : 'Win';
-            revision = '1069666';
-            zipName = 'chrome-win.zip';
-            folderName = 'chrome-win';
-        } else if (platform === 'darwin') {
-            // Mac: revision 不同
-            platformPath = 'Mac';
-            revision = '1070113';
-            zipName = 'chrome-mac.zip';
-            folderName = 'chrome-mac';
-        } else {
-            // Linux
-            platformPath = 'Linux_x64';
-            revision = '1069666';
-            zipName = 'chrome-linux.zip';
-            folderName = 'chrome-linux';
+        if (isLegacyWindows) {
+            // ★ Win7/8: 使用 Chromium 109 Snapshots (最后支持 Win7 的版本)
+            const version = '109.0.5414.120';
+            const platformPath = (arch === 'x64' || arch === 'arm64') ? 'Win_x64' : 'Win';
+            const revision = '1069666';
+            const zipName = 'chrome-win.zip';
+            const folderName = 'chrome-win';
+
+            return {
+                sources: [
+                    { name: 'npmmirror', url: `https://cdn.npmmirror.com/binaries/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
+                    { name: 'huawei', url: `https://mirrors.huaweicloud.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
+                    { name: 'google', url: `https://storage.googleapis.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` }
+                ],
+                version,
+                revision,
+                platform: platformPath,
+                zipName,
+                folderName,
+                type: 'snapshots'
+            };
         }
 
-        // ★ 三级回退：npmmirror → 华为云 → Google
-        // 注意：Win_x86 和 Mac 的 npmmirror 可能 404，会自动回退到华为云
+        // ★ Win10+ / Mac / Linux: 使用 Chrome for Testing 123 (稳定版本)
+        const version = '123.0.6312.122';
+        let platformPath, zipName, folderName;
+
+        if (platform === 'win32') {
+            platformPath = (arch === 'x64' || arch === 'arm64') ? 'win64' : 'win32';
+            zipName = `chrome-${platformPath}.zip`;
+            folderName = `chrome-${platformPath}`;
+        } else if (platform === 'darwin') {
+            platformPath = (arch === 'arm64') ? 'mac-arm64' : 'mac-x64';
+            zipName = `chrome-${platformPath}.zip`;
+            folderName = `chrome-${platformPath}`;
+        } else {
+            platformPath = 'linux64';
+            zipName = 'chrome-linux64.zip';
+            folderName = 'chrome-linux64';
+        }
+
+        // ★ Chrome for Testing 源：npmmirror → Google 官方
         return {
             sources: [
-                { name: 'npmmirror', url: `https://cdn.npmmirror.com/binaries/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
-                { name: 'huawei', url: `https://mirrors.huaweicloud.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
-                { name: 'google', url: `https://storage.googleapis.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` }
+                { name: 'npmmirror', url: `https://registry.npmmirror.com/-/binary/chrome-for-testing/${version}/${platformPath}/${zipName}` },
+                { name: 'google', url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platformPath}/${zipName}` }
             ],
             version,
-            revision,
             platform: platformPath,
             zipName,
-            folderName
+            folderName,
+            type: 'chrome-for-testing'
         };
     }
 

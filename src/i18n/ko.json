@@ -470,7 +470,7 @@
             "terminateBtn": "모두 종료",
             "enhancedDownloading": "강화 다운로드 중",
             "selectChromiumExe": "Chromium 기반 브라우저의 실행 파일을 선택하세요",
-            "downloadingChrome": "qqq: chrome83 다운로드 중...",
+            "downloadingChrome": "qqq: chrome__ 다운로드 중...",
             "extracting": "압축 해제 중...",
             "chromeDownloadFailed": "Chrome 다운로드 실패: {0}",
             "playInBrowser": "열린 브라우저에서 동영상을 재생하고 (원하는 해상도로), 완료 후 아래 버튼을 클릭하세요.",

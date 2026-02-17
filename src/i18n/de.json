@@ -470,7 +470,7 @@
             "terminateBtn": "Alles beenden",
             "enhancedDownloading": "Erweiterter Download läuft",
             "selectChromiumExe": "Bitte wählen Sie die ausführbare Datei des Chromium-basierten Browsers",
-            "downloadingChrome": "qqq: chrome83 wird heruntergeladen...",
+            "downloadingChrome": "qqq: chrome__ wird heruntergeladen...",
             "extracting": "Entpacken...",
             "chromeDownloadFailed": "Chrome-Download fehlgeschlagen: {0}",
             "playInBrowser": "Spielen Sie das Video im geöffneten Browser ab (in gewünschter Auflösung), dann klicken Sie unten.",

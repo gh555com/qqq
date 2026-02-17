@@ -1447,7 +1447,16 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			// ★ Pass taskTitle and shouldCancel callback
 			const res = await controller.downloadEntry(rawUrl, targetDir, transId, progressAdapter, token, targetUri, taskTitle, shouldCancelCallback, taskNum);
 
-			// ★ Check if cancelled (user cancel or anchor lost)
+			// ★ BUG FIX: 如果下载成功（有文件落盘），优先处理结果，不要因为 anchorLost 而回滚
+			// 之前的 bug: 即使下载成功，也会因为等待期间 anchorLost 变为 true 而被错误回滚
+			const hasSuccessFiles = res && (res.landedFiles?.length > 0 || res.files?.length > 0);
+
+			if (hasSuccessFiles) {
+				// ★ 下载成功，直接处理结果
+				return await processResult(res);
+			}
+
+			// ★ 下载失败或取消时，才检查 anchorLost
 			if (token.isCancellationRequested || anchorLost) {
 				await global.TransactionManager.rollback(transId);
 				await replaceAnchorInDoc(targetUri, anchor, "");
@@ -1457,7 +1466,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 				return { cancelled: true };
 			}
 
-			// ★ Use unified processing function
+			// ★ 其他情况（无文件但没取消）也走 processResult
 			return await processResult(res);
 
 		} catch (e) {

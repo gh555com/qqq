@@ -470,7 +470,7 @@
             "terminateBtn": "Завершить всё",
             "enhancedDownloading": "Улучшенная загрузка",
             "selectChromiumExe": "Выберите исполняемый файл браузера на базе Chromium",
-            "downloadingChrome": "qqq: Загрузка chrome83...",
+            "downloadingChrome": "qqq: Загрузка chrome__...",
             "extracting": "Распаковка...",
             "chromeDownloadFailed": "Загрузка Chrome не удалась: {0}",
             "playInBrowser": "Воспроизведите видео в открытом браузере (в нужном разрешении), затем нажмите кнопку ниже.",
