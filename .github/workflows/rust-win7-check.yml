@@ -14,8 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust 1.76 (last Win7 compatible)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.76.0
 
       - name: Build Release (same as main workflow)
         shell: bash
