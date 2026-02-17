@@ -36,8 +36,8 @@ threadpool = "1.8"
 walkdir = "2.5"
 # ★ Win7: image crate 用纯 Rust 实现，不依赖系统 API
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
-# ★ Win7 兼容性主要靠静态 CRT 链接 (.cargo/config.toml)
-windows-sys = { version = "0.61", features = [
+# ★ Win7: windows-sys 0.48 是最后一个官方支持 Win7 的版本
+windows-sys = { version = "0.48", features = [
   "Win32_Foundation",
   "Win32_System_DataExchange",
   "Win32_System_Memory",
