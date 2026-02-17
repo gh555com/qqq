@@ -1,6 +1,11 @@
 name: Rust Win7 Compatibility Check
 
 on:
+  push:
+    branches: [qq]
+    paths:
+      - 'rust/**'
+      - '.github/workflows/rust-win7-check.yml'
   workflow_dispatch:
 
 jobs:
