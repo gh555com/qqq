@@ -273,41 +273,69 @@ Initially we used **Chromium 83**, but discovered:
 - Chrome 110+ requires Windows 10+
 - Using 109 provides better compatibility and features
 
+### Dual-Version Strategy
+
+We now use different Chrome versions based on OS:
+
+| OS | Chrome Version | Source Type | Reason |
+|----|----------------|-------------|--------|
+| Win7/8/8.1 | 109.0.5414.120 | Chromium Snapshots | Last Win7 support |
+| Win10+ | 133.0.6943.141 | Chrome for Testing | Latest stable |
+| macOS | 133.0.6943.141 | Chrome for Testing | Latest stable |
+| Linux | 133.0.6943.141 | Chrome for Testing | Latest stable |
+
 ### Version Configuration
 
 ```javascript
 // qvideo.js - _getChromeDownloadInfo()
-const version = '109.0.5414.120';
+const isLegacyWindows = platform === 'win32' && parseFloat(os.release()) < 10;
 
-// Different platforms have different revisions (normal for snapshots)
-if (platform === 'win32') {
-    platformPath = (arch === 'x64') ? 'Win_x64' : 'Win';
-    revision = '1069666';
-} else if (platform === 'darwin') {
-    platformPath = 'Mac';
-    revision = '1070113';  // Mac has different revision!
+if (isLegacyWindows) {
+    // Win7/8: Chromium 109 Snapshots
+    const version = '109.0.5414.120';
+    const revision = '1069666';
+    sources: [
+        'npmmirror/chromium-browser-snapshots',
+        'huawei/chromium-browser-snapshots',
+        'google/chromium-browser-snapshots'
+    ];
 } else {
-    platformPath = 'Linux_x64';
-    revision = '1069666';
+    // Win10+ / Mac / Linux: Chrome for Testing 133
+    const version = '133.0.6943.141';
+    sources: [
+        'npmmirror/chrome-for-testing',  // ★ Has mirror!
+        'google/chrome-for-testing-public'
+    ];
 }
 ```
 
-### Download Sources (3-level fallback)
+### Download Sources
 
-| Platform | npmmirror | Huawei Cloud | Google |
-|----------|-----------|--------------|--------|
-| Win_x64  | ✅ 200    | ✅ 200       | ⏱️     |
-| Win_x86  | ❌ 404    | ✅ 200       | -      |
-| Linux    | ✅ 200    | ✅ 200       | ⏱️     |
-| Mac      | ❌ 404    | ✅ 200       | -      |
+**Win7/8 (Chromium Snapshots - 3 sources):**
 
-```javascript
-sources: [
-    { name: 'npmmirror', url: `https://cdn.npmmirror.com/...` },
-    { name: 'huawei', url: `https://mirrors.huaweicloud.com/...` },
-    { name: 'google', url: `https://storage.googleapis.com/...` }
-]
-```
+| Priority | Source | URL Pattern |
+|----------|--------|-------------|
+| 1 | npmmirror | `cdn.npmmirror.com/binaries/chromium-browser-snapshots/...` |
+| 2 | Huawei | `mirrors.huaweicloud.com/chromium-browser-snapshots/...` |
+| 3 | Google | `storage.googleapis.com/chromium-browser-snapshots/...` |
+
+**Win10+ / Mac / Linux (Chrome for Testing - 2 sources):**
+
+| Priority | Source | URL Pattern |
+|----------|--------|-------------|
+| 1 | npmmirror | `registry.npmmirror.com/-/binary/chrome-for-testing/...` |
+| 2 | Google | `storage.googleapis.com/chrome-for-testing-public/...` |
+
+### Folder Structure Differences
+
+| Type | Platform | Folder Name |
+|------|----------|-------------|
+| Snapshots | Win | `chrome-win` |
+| Chrome for Testing | Win64 | `chrome-win64` |
+| Chrome for Testing | Win32 | `chrome-win32` |
+| Chrome for Testing | Mac ARM | `chrome-mac-arm64` |
+| Chrome for Testing | Mac x64 | `chrome-mac-x64` |
+| Chrome for Testing | Linux | `chrome-linux64` |
 
 ---
 

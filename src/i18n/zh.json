@@ -470,7 +470,7 @@
             "terminateBtn": "终止一切",
             "enhancedDownloading": "增强下载中",
             "selectChromiumExe": "请选择 Chromium 内核浏览器滴可执行文件",
-            "downloadingChrome": "qqq: 正在下载 chrome83...",
+            "downloadingChrome": "qqq: 正在下载 chrome__...",
             "extracting": "解压中...",
             "chromeDownloadFailed": "下载 Chrome 失败: {0}",
             "playInBrowser": "请在打开滴浏览器中播放视频（用你期望滴分辨率），完成后点击下方按钮。",

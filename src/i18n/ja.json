@@ -470,7 +470,7 @@
             "terminateBtn": "すべて終了",
             "enhancedDownloading": "拡張ダウンロード中",
             "selectChromiumExe": "Chromium ベースブラウザの実行ファイルを選択してください",
-            "downloadingChrome": "qqq: chrome83 をダウンロード中...",
+            "downloadingChrome": "qqq: chrome__ をダウンロード中...",
             "extracting": "解凍中...",
             "chromeDownloadFailed": "Chrome ダウンロード失敗: {0}",
             "playInBrowser": "開いたブラウザで動画を再生して（希望の解像度で）、完了後に下のボタンをクリックしてください。",
