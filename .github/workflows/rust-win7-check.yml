@@ -10,45 +10,41 @@ on:
 
 jobs:
   build-and-check:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust 1.77 (last Win7 compatible)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.77.0
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Prepare Cargo.toml
+      - name: Build Release (same as main workflow)
+        shell: bash
         run: |
           cd rust
-          copy Cargo_win.toml Cargo.toml
-
-      - name: Build Release
-        run: |
-          cd rust
-          cargo build --release
-          dir target\release\*.exe
+          cp Cargo_win.toml Cargo.toml
+          rustup target add x86_64-pc-windows-msvc
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc
+          ls -lh target/x86_64-pc-windows-msvc/release/q.exe
 
       - name: Check File Size
         run: |
-          $file = "rust/target/release/q.exe"
+          $file = "rust/target/x86_64-pc-windows-msvc/release/q.exe"
           $size = (Get-Item $file).Length
           $sizeMB = [math]::Round($size / 1MB, 2)
           Write-Host "=== FILE SIZE: $sizeMB MB ==="
-
+      
       - name: Dump Imports (API Check)
         run: |
           Write-Host "=== KERNEL32.DLL IMPORTS ==="
-          dumpbin /imports rust/target/release/q.exe | Select-String -Pattern "kernel32|KERNEL32" -Context 0,50
-
+          dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe | Select-String -Pattern "kernel32|KERNEL32" -Context 0,50
+                
           Write-Host ""
           Write-Host "=== ALL IMPORTS SUMMARY ==="
-          dumpbin /imports rust/target/release/q.exe | Select-String -Pattern "\.dll"
-
+          dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe | Select-String -Pattern "\.dll"
+      
       - name: Check for Win10+ APIs
         run: |
-          $output = dumpbin /imports rust/target/release/q.exe
+          $output = dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe
 
           # Known Win10+ APIs that don't exist in Win7
           $win10apis = @(
@@ -86,4 +82,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: q_win_x64
-          path: rust/target/release/q.exe
+          path: rust/target/x86_64-pc-windows-msvc/release/q.exe
