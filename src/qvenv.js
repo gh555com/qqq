@@ -940,11 +940,12 @@ sys.exit(0)
                     downloadGetPip('https://bootstrap.pypa.io/pip/3.8/get-pip.py');
                 });
 
-                cp.execSync(`"${installPath}" "${getPipPath}"`, {
+                cp.execSync(`"${installPath}" "${getPipPath}" --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com`, {
                     windowsHide: true,
                     timeout: 120000,
                     stdio: ['pipe', 'pipe', 'pipe'],
-                    env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                    // ★ 绕过代理，避免 ProxyError
+                    env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
                 });
                 try { fs.unlinkSync(getPipPath); } catch { }
             }
@@ -956,7 +957,8 @@ sys.exit(0)
             cp.execSync(pipCmd, {
                 windowsHide: true,
                 timeout: 300000,
-                env: { ...process.env, PYTHONNOUSERSITE: '1' }
+                // ★ 绕过代理，避免 ProxyError
+                env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }
             });
 
             // ★ Smartest invocation timing: after deps install, before pywin32 config
