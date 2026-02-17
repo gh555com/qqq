@@ -3215,11 +3215,14 @@ async function activate(context) {
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
 			if (cleanFreakMode !== "never" && e.document) {
-				e.waitUntil(
-					provideCleanlinessEditsAsync(e.document).then((edits) => {
-						return edits.map((edit) => new vscode.TextEdit(edit.range, edit.newText));
-					})
-				);
+				// ★ 添加超时保护，避免 VS Code 报错 "Aborted onWillSaveTextDocument-event after 1750ms"
+				const timeoutMs = 1500; // 给 VS Code 留 250ms 余量
+				const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), timeoutMs));
+				const editsPromise = provideCleanlinessEditsAsync(e.document).then((edits) => {
+					return edits.map((edit) => new vscode.TextEdit(edit.range, edit.newText));
+				}).catch(() => []);
+
+				e.waitUntil(Promise.race([editsPromise, timeoutPromise]));
 			}
 		}),
 		vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
