@@ -3752,53 +3752,67 @@ function isValidUrl(input) {
 }
 
 // ============================================================================
-// ★ 公用解压模块：三级回退策略 (Win7 兼容)
-// 1. .NET ZipFile (PowerShell 2.0 + .NET 4.5+)
-// 2. Shell.Application COM (Win7 兼容)
+// ★ 公用解压模块：四级回退策略 (Win7 兼容)
+// 1. VBScript Shell.Application (Win7 最稳定，不依赖 PowerShell)
+// 2. .NET ZipFile (PowerShell + .NET 4.5+)
 // 3. tar (Win10+)
+// 4. PowerShell Shell.Application COM
 // ============================================================================
 function extractZip(zipPath, destFolder) {
 	return new Promise((resolve, reject) => {
 		const platform = process.platform;
 
 		if (platform === 'win32') {
-			const zipPathWin = zipPath.replace(/\//g, '\\\\');
-			const destFolderWin = destFolder.replace(/\//g, '\\\\');
-
-			const dotnetScript = `
-				Add-Type -AssemblyName System.IO.Compression.FileSystem;
-				[System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPathWin}', '${destFolderWin}');
-			`;
-
-			const comScript = `
-				$shell = New-Object -ComObject Shell.Application;
-				$zip = $shell.NameSpace('${zipPathWin}');
-				$dest = $shell.NameSpace('${destFolderWin}');
-				if ($zip -eq $null) { throw 'Cannot open zip file' };
-				if ($dest -eq $null) { throw 'Cannot open dest folder' };
-				$dest.CopyHere($zip.Items(), 16);
-			`;
+			const zipPathWin = zipPath.replace(/\//g, '\\');
+			const destFolderWin = destFolder.replace(/\//g, '\\');
 
 			// Ensure dest folder exists
 			if (!fs.existsSync(destFolder)) fs.mkdirSync(destFolder, { recursive: true });
 
-			// Try .NET ZipFile first
-			cp.exec(`powershell -NoProfile -Command "${dotnetScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
-				{ windowsHide: true, timeout: 300000 }, (e1) => {
+			// ★ Win7 最稳定方案：VBScript 直接调用 Shell.Application
+			const vbsPath = path.join(os.tmpdir(), `extract_${Date.now()}.vbs`);
+			const vbsScript = `
+Set objShell = CreateObject("Shell.Application")
+Set zipFile = objShell.NameSpace("${zipPathWin}")
+Set destDir = objShell.NameSpace("${destFolderWin}")
+If zipFile Is Nothing Then
+    WScript.Echo "Cannot open zip"
+    WScript.Quit 1
+End If
+If destDir Is Nothing Then
+    WScript.Echo "Cannot open dest"
+    WScript.Quit 2
+End If
+destDir.CopyHere zipFile.Items, 16
+WScript.Quit 0
+`;
+
+			const tryVBS = () => {
+				fs.writeFileSync(vbsPath, vbsScript, 'utf8');
+				cp.exec(`cscript //nologo "${vbsPath}"`, { windowsHide: true, timeout: 300000 }, (e1) => {
+					try { fs.unlinkSync(vbsPath); } catch (x) { }
 					if (!e1) return resolve();
-
-					// Try Shell.Application COM
-					cp.exec(`powershell -NoProfile -Command "${comScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
-						{ windowsHide: true, timeout: 300000 }, (e2) => {
-							if (!e2) return resolve();
-
-							// Try tar (Win10+)
-							cp.exec(`tar -xf "${zipPath}" -C "${destFolder}"`, { windowsHide: true, timeout: 300000 }, (e3) => {
-								if (!e3) return resolve();
-								reject(new Error(`Extract failed: .NET=${e1.message}, COM=${e2.message}, tar=${e3.message}`));
-							});
-						});
+					tryDotNet(e1);
 				});
+			};
+
+			const tryDotNet = (prevErr) => {
+				const dotnetScript = `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPathWin}', '${destFolderWin}')`;
+				cp.exec(`powershell -NoProfile -Command "${dotnetScript.replace(/"/g, '\\"')}"`,
+					{ windowsHide: true, timeout: 300000 }, (e2) => {
+						if (!e2) return resolve();
+						tryTar(prevErr, e2);
+					});
+			};
+
+			const tryTar = (e1, e2) => {
+				cp.exec(`tar -xf "${zipPath}" -C "${destFolder}"`, { windowsHide: true, timeout: 300000 }, (e3) => {
+					if (!e3) return resolve();
+					reject(new Error(`Extract failed: VBS=${e1?.message}, .NET=${e2?.message}, tar=${e3.message}`));
+				});
+			};
+
+			tryVBS();
 		} else {
 			cp.exec(`unzip -o "${zipPath}" -d "${destFolder}"`, { timeout: 300000 }, (err) => {
 				if (err) reject(err);
