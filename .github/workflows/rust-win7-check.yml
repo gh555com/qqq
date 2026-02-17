@@ -35,17 +35,18 @@ jobs:
           $size = (Get-Item $file).Length
           $sizeMB = [math]::Round($size / 1MB, 2)
           Write-Host "=== FILE SIZE: $sizeMB MB ==="
-      
+
       - name: Dump ALL Imports
         shell: cmd
         run: |
-          echo === FULL IMPORT LIST ===
-          dumpbin /imports rust\target\x86_64-pc-windows-msvc\release\q.exe
+          echo === FULL IMPORT LIST === > dumpbin_output.txt
+          dumpbin /imports rust\target\x86_64-pc-windows-msvc\release\q.exe >> dumpbin_output.txt
+          type dumpbin_output.txt
 
       - name: Check for Win10+ APIs
         shell: pwsh
         run: |
-          $output = & dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe 2>&1 | Out-String
+          $output = Get-Content dumpbin_output.txt -Raw
 
           # Known Win10+ APIs that don't exist in Win7
           $win10apis = @(
@@ -82,4 +83,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: q_win_x64
-          path: rust/target/x86_64-pc-windows-msvc/release/q.exe
+          path: |
+            rust/target/x86_64-pc-windows-msvc/release/q.exe
+            dumpbin_output.txt
