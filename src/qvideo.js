@@ -2092,9 +2092,10 @@ $of = $vi.OriginalFilename;
     }
 
     _getChromeDownloadInfo() {
-        // Chrome 109 is the LAST version supporting Windows 7/8/8.1
-        // Chrome 110+ dropped Win7 support
-        const version = '109.0.5414.74';
+        // Chrome for Testing earliest available: 113+
+        // Chrome 109 (Win7 support) NOT available in Chrome for Testing
+        // Win7 users should select their own browser
+        const version = '113.0.5672.63';
         const platform = process.platform;
         const arch = process.arch;
 
