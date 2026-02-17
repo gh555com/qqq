@@ -1,0 +1,4 @@
+?? git_status.txt
+c9299a5 release: v15.73.31 (q2)
+8bd67ff fix: disable Rust engine on Win7/8 (WaitOnAddress API not available)
+8cb9f92 ci: try GNU toolchain (MinGW) for Win7 compat
