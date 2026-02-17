@@ -14,37 +14,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust (nightly for build-std)
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          components: rust-src
+          targets: x86_64-pc-windows-gnu
 
-      - name: Build Release with custom std (Win7 compat)
+      - name: Install MinGW
+        run: choco install mingw -y
+
+      - name: Build Release with GNU toolchain (Win7 compat)
         shell: bash
         run: |
           cd rust
           cp Cargo_win.toml Cargo.toml
-          rustup target add x86_64-pc-windows-msvc
-          # Build with custom std to avoid WaitOnAddress API
-          RUSTFLAGS="-C target-feature=+crt-static" cargo +nightly build --release --target x86_64-pc-windows-msvc -Z build-std=std,panic_abort 2>&1 | tee ../build_log.txt || true
-          ls -lh target/x86_64-pc-windows-msvc/release/q.exe 2>&1 || echo "Build failed, check build_log.txt"
-
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+          # Use GNU toolchain instead of MSVC - may avoid WaitOnAddress
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-gnu 2>&1 | tee ../build_log.txt || true
+          ls -lh target/x86_64-pc-windows-gnu/release/q.exe 2>&1 || echo "Build failed, check build_log.txt"
 
       - name: Check File Size
+        shell: bash
         run: |
-          $file = "rust/target/x86_64-pc-windows-msvc/release/q.exe"
-          $size = (Get-Item $file).Length
-          $sizeMB = [math]::Round($size / 1MB, 2)
-          Write-Host "=== FILE SIZE: $sizeMB MB ==="
+          ls -lh rust/target/x86_64-pc-windows-gnu/release/q.exe || echo "No exe found"
 
       - name: Dump ALL Imports
-        shell: cmd
+        shell: bash
         run: |
-          echo === FULL IMPORT LIST === > dumpbin_output.txt
-          dumpbin /imports rust\target\x86_64-pc-windows-msvc\release\q.exe >> dumpbin_output.txt
-          type dumpbin_output.txt
+          echo "=== FULL IMPORT LIST ===" > dumpbin_output.txt
+          # Use objdump for GNU builds
+          objdump -p rust/target/x86_64-pc-windows-gnu/release/q.exe 2>&1 >> dumpbin_output.txt || echo "objdump failed"
+          cat dumpbin_output.txt
 
       - name: Check for Win10+ APIs
         shell: pwsh
@@ -89,8 +87,8 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: q_win_x64
+          name: q_win_x64_gnu
           path: |
-            rust/target/x86_64-pc-windows-msvc/release/q.exe
+            rust/target/x86_64-pc-windows-gnu/release/q.exe
             dumpbin_output.txt
             build_log.txt
