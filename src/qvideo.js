@@ -2092,10 +2092,7 @@ $of = $vi.OriginalFilename;
     }
 
     _getChromeDownloadInfo() {
-        // Chrome for Testing earliest available: 113+
-        // Chrome 109 (Win7 support) NOT available in Chrome for Testing
-        // Win7 users should select their own browser
-        const version = '113.0.5672.63';
+        const version = '123.0.6312.4';
         const platform = process.platform;
         const arch = process.arch;
 
