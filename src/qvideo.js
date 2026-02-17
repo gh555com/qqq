@@ -1788,14 +1788,13 @@ class Qvideo {
      */
     _getEmbeddedChromePath() {
         const platform = process.platform;
-        const arch = process.arch;
         let folderName;
         if (platform === 'win32') {
-            folderName = (arch === 'x64' || arch === 'arm64') ? 'chrome-win64' : 'chrome-win32';
+            folderName = 'chrome-win';  // Chromium snapshots 解压后的目录名
         } else if (platform === 'darwin') {
-            folderName = arch === 'arm64' ? 'chrome-mac-arm64' : 'chrome-mac-x64';
+            folderName = 'chrome-mac';
         } else {
-            folderName = 'chrome-linux64';
+            folderName = 'chrome-linux';
         }
         const exeName = platform === 'win32' ? 'chrome.exe' : 'chrome';
         return path.join(this.chromeHome, folderName, exeName);
@@ -2003,6 +2002,53 @@ class Qvideo {
 
     _psQuote(s) { return String(s).replace(/'/g, "''"); }
 
+    // ★ Win7 备选验证：检查关键文件判断是否为有效 Chrome 安装
+    _validateChromiumByFiles(exePath) {
+        try {
+            const exeDir = path.dirname(exePath);
+
+            // 1. chrome.exe 必须 > 1MB（排除快捷方式/占位符）
+            const exeStat = fs.statSync(exePath);
+            if (exeStat.size < 1 * 1024 * 1024) {
+                return { valid: false, reason: 'exe_too_small' };
+            }
+
+            // 2. 必须有 resources.pak 或 icudtl.dat（Chrome 必备文件）
+            const hasResources = fs.existsSync(path.join(exeDir, 'resources.pak'));
+            const hasIcu = fs.existsSync(path.join(exeDir, 'icudtl.dat'));
+            if (!hasResources && !hasIcu) {
+                return { valid: false, reason: 'missing_key_files' };
+            }
+
+            // 3. 父目录大小 > 150MB（完整 Chrome 约 300MB）
+            let totalSize = 0;
+            const countSize = (dir, depth = 0) => {
+                if (depth > 3) return; // 限制递归深度
+                try {
+                    const items = fs.readdirSync(dir, { withFileTypes: true });
+                    for (const item of items) {
+                        const fullPath = path.join(dir, item.name);
+                        if (item.isFile()) {
+                            totalSize += fs.statSync(fullPath).size;
+                        } else if (item.isDirectory() && depth < 3) {
+                            countSize(fullPath, depth + 1);
+                        }
+                        if (totalSize > 150 * 1024 * 1024) return; // 超过 150MB 提前退出
+                    }
+                } catch (e) { }
+            };
+            countSize(exeDir);
+
+            if (totalSize < 150 * 1024 * 1024) {
+                return { valid: false, reason: 'dir_too_small' };
+            }
+
+            return { valid: true };
+        } catch (e) {
+            return { valid: false, reason: e.message };
+        }
+    }
+
     _validateChromiumSilently(exePath) {
         return new Promise((resolve) => {
             if (!exePath || !fs.existsSync(exePath)) {
@@ -2012,57 +2058,101 @@ class Qvideo {
 
             const platform = process.platform;
 
-            // ★ Win7 兼容：优先用 --version，避免 PowerShell 2.0 卡住
-            cp.execFile(exePath, ['--version'], { timeout: 8000, windowsHide: true }, (err, stdout, stderr) => {
-                const output = ((stdout || '') + (stderr || '')).trim();
+            // ★ Windows: 用 PowerShell 读版本，失败时用文件检查备选
+            if (platform === 'win32') {
+                const p = this._psQuote(exePath);
+                const cmd = [
+                    '-NoProfile',
+                    '-NonInteractive',
+                    '-ExecutionPolicy', 'Bypass',
+                    '-Command',
+                    `
+$it = Get-Item -LiteralPath '${p}' -ErrorAction Stop;
+$vi = $it.VersionInfo;
+$pn = $vi.ProductName;
+$fd = $vi.FileDescription;
+$pv = $vi.ProductVersion;
+$fv = $vi.FileVersion;
+$of = $vi.OriginalFilename;
+"$pn|$fd|$pv|$fv|$of"
+                    `.trim()
+                ];
 
-                if (!err && output) {
-                    const chromiumPattern = /(Chromium|Chrome|Brave|Edge|Opera|Vivaldi)[\s\/:]*([\.\d]+)/i;
-                    const match = output.match(chromiumPattern);
-                    if (match) {
-                        resolve({ valid: true, version: `${match[1]} ${match[2]}`, raw: output });
-                        return;
-                    }
-                    if (/chrom|edge|brave|vivaldi|opera/i.test(output)) {
-                        resolve({ valid: true, version: output.slice(0, 80) || 'Chromium', raw: output });
-                        return;
-                    }
-                }
-
-                // --version 失败，Windows 上用 PowerShell 备选
-                if (platform === 'win32') {
-                    const p = this._psQuote(exePath);
-                    const cmd = [
-                        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-                        `$it = Get-Item -LiteralPath '${p}' -EA Stop; $vi = $it.VersionInfo; "$($vi.ProductName)|$($vi.FileDescription)|$($vi.ProductVersion)|$($vi.FileVersion)|$($vi.OriginalFilename)"`
-                    ];
-
-                    cp.execFile('powershell', cmd, { windowsHide: true, timeout: 8000 }, (psErr, psOut) => {
-                        if (psErr || !psOut) {
-                            // PowerShell 也失败了（Win7 PS 2.0），文件存在就认为有效
-                            resolve({ valid: true, version: 'Chromium (unverified)', raw: '' });
-                            return;
+                cp.execFile('powershell', cmd, { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+                    if (err) {
+                        // ★ Win7 兼容：PowerShell 失败，用文件检查备选
+                        this.log(`[验证] PowerShell 失败，尝试文件检查备选: ${err.message}`);
+                        const fileCheck = this._validateChromiumByFiles(exePath);
+                        if (fileCheck.valid) {
+                            resolve({ valid: true, version: 'Chromium (file-verified)', raw: '' });
+                        } else {
+                            resolve({ valid: false, error: `验证失败: ${fileCheck.reason}` });
                         }
+                        return;
+                    }
 
-                        const parts = String(psOut).trim().split('|').map(s => (s || '').trim());
-                        const productName = parts[0] || '';
-                        const fileDesc = parts[1] || '';
-                        const productVersion = parts[2] || '';
-                        const fileVersion = parts[3] || '';
-                        const originalFilename = parts[4] || '';
+                    const out = String(stdout || '').trim();
+                    if (!out) {
+                        // 输出为空，用文件检查备选
+                        const fileCheck = this._validateChromiumByFiles(exePath);
+                        if (fileCheck.valid) {
+                            resolve({ valid: true, version: 'Chromium (file-verified)', raw: '' });
+                        } else {
+                            resolve({ valid: false, error: q('video.error.versionEmpty') });
+                        }
+                        return;
+                    }
 
-                        const text = `${productName} ${fileDesc} ${originalFilename}`.toLowerCase();
-                        const isChromiumFamily = /chrome|chromium|edge|brave|vivaldi|opera/.test(text);
-                        const version = productVersion || fileVersion || '';
+                    const parts = out.split('|').map(s => (s || '').trim());
+                    const productName = parts[0] || '';
+                    const fileDesc = parts[1] || '';
+                    const productVersion = parts[2] || '';
+                    const fileVersion = parts[3] || '';
+                    const originalFilename = parts[4] || '';
 
-                        if (isChromiumFamily) {
-                            resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim() || 'Chromium', raw: psOut });
+                    const text = `${productName} ${fileDesc} ${originalFilename}`.toLowerCase();
+                    const isChromiumFamily =
+                        text.includes('chrome') ||
+                        text.includes('chromium') ||
+                        text.includes('edge') ||
+                        text.includes('brave') ||
+                        text.includes('vivaldi') ||
+                        text.includes('opera');
+
+                    const version = productVersion || fileVersion || '';
+                    const hasVersion = /\d+\.\d+\.\d+\.\d+/.test(version) || /\d+\.\d+/.test(version);
+
+                    if (isChromiumFamily && hasVersion) {
+                        resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim(), raw: out });
+                    } else if (isChromiumFamily) {
+                        resolve({ valid: true, version: (productName || fileDesc || 'Chromium').slice(0, 80), raw: out });
+                    } else {
+                        // 不是 Chromium 家族，用文件检查备选
+                        const fileCheck = this._validateChromiumByFiles(exePath);
+                        if (fileCheck.valid) {
+                            resolve({ valid: true, version: 'Chromium (file-verified)', raw: out });
                         } else {
                             resolve({ valid: false, error: q('video.error.notChromium') });
                         }
-                    });
-                } else {
+                    }
+                });
+
+                return;
+            }
+
+            // ★ Linux/Mac: 用 --version
+            cp.execFile(exePath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
+                if (err) {
                     resolve({ valid: false, error: q('video.error.cannotExecVersion') });
+                    return;
+                }
+                const output = ((stdout || '') + (stderr || '')).trim();
+                const chromiumPattern = /(Chromium|Chrome|Brave|Edge|Opera|Vivaldi)[\s\/:]*([\.\d]+)/i;
+                const match = output.match(chromiumPattern);
+                if (match) {
+                    resolve({ valid: true, version: `${match[1]} ${match[2]}`, raw: output });
+                } else {
+                    resolve({ valid: true, version: output.slice(0, 80) || 'Chromium', raw: output });
                 }
             });
         });
@@ -2112,17 +2202,36 @@ class Qvideo {
     }
 
     _getChromeDownloadInfo() {
-        // ★ Chromium 83 (revision 756035) - 支持 Win7
-        const revision = '756035';
-        const version = '83.0.4103.0';
+        // ★ Chromium 109 (Win7 最后支持的版本)
+        // 不同平台 revision 不同，这是 snapshots 体系的正常现象
+        const version = '109.0.5414.120';
         const platform = process.platform;
+        const arch = process.arch;
 
-        // Chromium Browser Snapshots 目录结构
-        const platformMap = { 'win32': 'Win_x64', 'darwin': 'Mac', 'linux': 'Linux_x64' };
-        const platformPath = platformMap[platform] || 'Win_x64';
-        const zipName = platform === 'win32' ? 'chrome-win.zip' : (platform === 'darwin' ? 'chrome-mac.zip' : 'chrome-linux.zip');
-        const folderName = platform === 'win32' ? 'chrome-win' : (platform === 'darwin' ? 'chrome-mac' : 'chrome-linux');
+        let platformPath, revision, zipName, folderName;
 
+        if (platform === 'win32') {
+            // Windows: 区分 x64/x86
+            platformPath = (arch === 'x64' || arch === 'arm64') ? 'Win_x64' : 'Win';
+            revision = '1069666';
+            zipName = 'chrome-win.zip';
+            folderName = 'chrome-win';
+        } else if (platform === 'darwin') {
+            // Mac: revision 不同
+            platformPath = 'Mac';
+            revision = '1070113';
+            zipName = 'chrome-mac.zip';
+            folderName = 'chrome-mac';
+        } else {
+            // Linux
+            platformPath = 'Linux_x64';
+            revision = '1069666';
+            zipName = 'chrome-linux.zip';
+            folderName = 'chrome-linux';
+        }
+
+        // ★ 三级回退：npmmirror → 华为云 → Google
+        // 注意：Win_x86 和 Mac 的 npmmirror 可能 404，会自动回退到华为云
         return {
             sources: [
                 { name: 'npmmirror', url: `https://cdn.npmmirror.com/binaries/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
