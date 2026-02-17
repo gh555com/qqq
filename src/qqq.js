@@ -1664,8 +1664,10 @@ function _registerCommands(context) {
 				// Clear download dependency cooldown time
 				try {
 					// ★ Calculate remaining time before clearing
-					const cooldownStatus = pythonEnvManager._getCooldownStatus(context);
-					const erasedTime = `${cooldownStatus.remainingHours}h:${cooldownStatus.remainingMinutes}m`;
+					const COOLDOWN_MS = 259200000; // 72 hours
+					let ts = context.globalState.get('pythonInstallTimestamp', 0) || context.globalState.get('python_cooldown_ts', 0) || 0;
+					const remainingMs = Math.max(0, COOLDOWN_MS - (Date.now() - ts));
+					const erasedTime = `${Math.floor(remainingMs / 3600000)}h:${Math.floor((remainingMs % 3600000) / 60000)}m`;
 					// ★ Clear all related globalState keys
 					await context.globalState.update('pythonInstallTimestamp', 0);
 					await context.globalState.update('python_cooldown_ts', 0);
