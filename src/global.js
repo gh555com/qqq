@@ -1501,21 +1501,82 @@ function init(context) {
 	_isDeactivated = false; // Reset on startup
 	extensionContext = context;
 
-	// Initialize FFmpeg path
+	// ★ FFmpeg: 统一存放在 globalStorage（与 yt-dlp.exe 同目录）
 	const isWin = process.platform === "win32";
 	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
+	const ffprobeName = isWin ? "ffprobe.exe" : "ffprobe";
 	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+	const globalStoragePath = context.globalStorageUri?.fsPath;
 	const ffInAssets = path.join(extensionPath, "assets", ffName);
+	const ffprobeInAssets = path.join(extensionPath, "assets", ffprobeName);
+	const ffInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffName) : null;
+	const ffprobeInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffprobeName) : null;
 
-	if (fs.existsSync(ffInAssets)) {
+	// 确保 globalStorage 目录存在
+	if (globalStoragePath && !fs.existsSync(globalStoragePath)) {
+		try { fs.mkdirSync(globalStoragePath, { recursive: true }); } catch { }
+	}
+
+	// 检查 globalStorage 是否已有 ffmpeg
+	if (ffInGlobalStorage && fs.existsSync(ffInGlobalStorage)) {
+		// 已在 globalStorage，直接使用
+		ffmpegPath = ffInGlobalStorage;
+		ffprobePath = ffprobeInGlobalStorage;
+		ffmpegSource = "GLOBAL_STORAGE";
+		logMessage(`FFmpeg initialized from globalStorage: ${ffInGlobalStorage}`, "INFO");
+	} else if (fs.existsSync(ffInAssets) && ffInGlobalStorage) {
+		// assets 有但 globalStorage 没有，执行剪切（移动）
+		try {
+			fs.renameSync(ffInAssets, ffInGlobalStorage);
+			logMessage(`FFmpeg moved from assets to globalStorage: ${ffInGlobalStorage}`, "INFO");
+			// 同时移动 ffprobe（如果存在）
+			if (fs.existsSync(ffprobeInAssets) && ffprobeInGlobalStorage) {
+				try { fs.renameSync(ffprobeInAssets, ffprobeInGlobalStorage); } catch { }
+			}
+			ffmpegPath = ffInGlobalStorage;
+			ffprobePath = ffprobeInGlobalStorage;
+			ffmpegSource = "GLOBAL_STORAGE";
+		} catch (moveErr) {
+			// 跨磁盘无法 rename，改用复制+删除
+			try {
+				fs.copyFileSync(ffInAssets, ffInGlobalStorage);
+				fs.unlinkSync(ffInAssets);
+				if (fs.existsSync(ffprobeInAssets) && ffprobeInGlobalStorage) {
+					fs.copyFileSync(ffprobeInAssets, ffprobeInGlobalStorage);
+					fs.unlinkSync(ffprobeInAssets);
+				}
+				ffmpegPath = ffInGlobalStorage;
+				ffprobePath = ffprobeInGlobalStorage;
+				ffmpegSource = "GLOBAL_STORAGE";
+				logMessage(`FFmpeg copied+deleted to globalStorage: ${ffInGlobalStorage}`, "INFO");
+			} catch (cpErr) {
+				// 完全失败，回退使用 assets
+				ffmpegPath = ffInAssets;
+				ffprobePath = ffprobeInAssets;
+				ffmpegSource = "ASSETS (fallback)";
+				logMessage(`FFmpeg move failed, using assets: ${cpErr.message}`, "WARN");
+			}
+		}
+	} else if (fs.existsSync(ffInAssets)) {
+		// 没有 globalStorage，直接用 assets
 		ffmpegPath = ffInAssets;
-		ffmpegSource = "ASSETS (Verified)";
-		logMessage(`Global FFmpeg initialized from assets: ${ffInAssets}`, "INFO");
-		// Async verify, do not block startup
+		ffprobePath = ffprobeInAssets;
+		ffmpegSource = "ASSETS";
+		logMessage(`FFmpeg using assets (no globalStorage): ${ffInAssets}`, "INFO");
+	} else {
+		// 都没有，回退到系统 PATH
+		ffmpegSource = "NOT_FOUND";
+		ffmpegPath = ffName; // System PATH fallback
+		ffprobePath = ffprobeName;
+		logMessage(`FFmpeg not found, fallback to system PATH`, "DEBUG");
+	}
+
+	// 异步验证 ffmpeg 可用性
+	if (ffmpegPath && ffmpegPath !== ffName) {
 		(async () => {
 			try {
 				const { spawn } = require('child_process');
-				const cp = spawn(ffInAssets, ["-version"], { windowsHide: true });
+				const cp = spawn(ffmpegPath, ["-version"], { windowsHide: true });
 				cp.on('error', (e) => {
 					logMessage(q('ffmpeg.validateFailed', e.message), "WARN");
 				});
@@ -1523,13 +1584,6 @@ function init(context) {
 				logMessage(q('ffmpeg.validateException', e.message), "WARN");
 			}
 		})();
-	} else {
-		ffmpegSource = "NOT_FOUND";
-		ffmpegPath = ffName; // System PATH fallback
-	}
-
-	if (ffmpegPath) {
-		ffprobePath = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, (m) => m.replace("ffmpeg", "ffprobe"));
 	}
 
 	// Start assets sentinel

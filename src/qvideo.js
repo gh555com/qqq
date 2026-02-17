@@ -2091,33 +2091,72 @@ $of = $vi.OriginalFilename;
         });
     }
 
-    _getChromeDownloadInfo() {
-        const version = '123.0.6312.4';
-        const platform = process.platform;
-        const arch = process.arch;
+    // ★ 精简 Chromium（删除测试文件、多余语言包等，324MB → 162MB）
+    async _slimChromium(chromiumDir) {
+        if (!chromiumDir || !fs.existsSync(chromiumDir)) return;
 
-        let platformKey, zipName;
+        const toDelete = [
+            'interactive_ui_tests.exe', 'interactive_ui_tests',
+            'nacl_irt_x86_64.nexe', 'nacl_irt_x86_32.nexe',
+            'elevation_service.exe', 'chrome_pwa_launcher.exe',
+            'notification_helper.exe', 'chrome_proxy.exe',
+            'chrome_200_percent.pak', 'eventlog_provider.dll',
+            'First Run', 'swiftshader', 'MEIPreload'
+        ];
 
-        if (platform === 'win32') {
-            platformKey = (arch === 'x64' || arch === 'arm64') ? 'win64' : 'win32';
-            zipName = (arch === 'x64' || arch === 'arm64') ? 'chrome-win64.zip' : 'chrome-win32.zip';
-        } else if (platform === 'darwin') {
-            platformKey = arch === 'arm64' ? 'mac-arm64' : 'mac-x64';
-            zipName = arch === 'arm64' ? 'chrome-mac-arm64.zip' : 'chrome-mac-x64.zip';
-        } else {
-            platformKey = 'linux64';
-            zipName = 'chrome-linux64.zip';
+        for (const item of toDelete) {
+            const itemPath = path.join(chromiumDir, item);
+            try {
+                if (fs.existsSync(itemPath)) {
+                    const stat = fs.statSync(itemPath);
+                    if (stat.isDirectory()) {
+                        fs.rmSync(itemPath, { recursive: true, force: true });
+                    } else {
+                        fs.unlinkSync(itemPath);
+                    }
+                    this.log(`[Slim] Deleted: ${item}`);
+                }
+            } catch (e) { }
         }
 
-        // ★ Multi-source fallback: npmmirror (CN) → Google official (overseas)
+        // 只保留 en-US 语言包
+        const localesDir = path.join(chromiumDir, 'locales');
+        if (fs.existsSync(localesDir)) {
+            try {
+                const files = fs.readdirSync(localesDir);
+                for (const f of files) {
+                    if (f !== 'en-US.pak') {
+                        fs.unlinkSync(path.join(localesDir, f));
+                    }
+                }
+                this.log(`[Slim] Cleaned locales, kept en-US.pak only`);
+            } catch (e) { }
+        }
+    }
+
+    _getChromeDownloadInfo() {
+        // ★ Chromium 83 (revision 756035) - 支持 Win7
+        const revision = '756035';
+        const version = '83.0.4103.0';
+        const platform = process.platform;
+
+        // Chromium Browser Snapshots 目录结构
+        const platformMap = { 'win32': 'Win_x64', 'darwin': 'Mac', 'linux': 'Linux_x64' };
+        const platformPath = platformMap[platform] || 'Win_x64';
+        const zipName = platform === 'win32' ? 'chrome-win.zip' : (platform === 'darwin' ? 'chrome-mac.zip' : 'chrome-linux.zip');
+        const folderName = platform === 'win32' ? 'chrome-win' : (platform === 'darwin' ? 'chrome-mac' : 'chrome-linux');
+
         return {
             sources: [
-                { name: q('video.ui.sourceNpmmirror'), url: `https://cdn.npmmirror.com/binaries/chrome-for-testing/${version}/${platformKey}/${zipName}` },
-                { name: q('video.ui.sourceGoogle'), url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platformKey}/${zipName}` }
+                { name: 'npmmirror', url: `https://cdn.npmmirror.com/binaries/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
+                { name: 'huawei', url: `https://mirrors.huaweicloud.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` },
+                { name: 'google', url: `https://storage.googleapis.com/chromium-browser-snapshots/${platformPath}/${revision}/${zipName}` }
             ],
             version,
-            platform: platformKey,
-            zipName
+            revision,
+            platform: platformPath,
+            zipName,
+            folderName
         };
     }
 
@@ -2174,6 +2213,10 @@ $of = $vi.OriginalFilename;
                     await this._extractZip(zipPath, this.chromeHome);
 
                     try { fs.unlinkSync(zipPath); } catch (e) { }
+
+                    // ★ 精简 Chromium（删除测试文件、多余语言包等）
+                    progress.report({ message: 'Slimming...' });
+                    await this._slimChromium(path.join(this.chromeHome, chromeInfo.folderName));
 
                     const exeName = process.platform === 'win32' ? 'chrome.exe' : 'chrome';
                     const foundExe = this._findFileRecursive(this.chromeHome, exeName, 6);
