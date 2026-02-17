@@ -1834,7 +1834,7 @@ class ClipboardHistorySidebarProvider {
             overflow-y: auto;
             border-radius: 4px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            top: 100%; /* Position below the input */
+            top: calc(100% - 8px); /* Position below the input */
             left: 0;
         }
         .history-dropdown-item {
