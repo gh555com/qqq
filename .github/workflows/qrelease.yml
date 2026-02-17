@@ -121,7 +121,7 @@ jobs:
           cd rust
           if [[ "${{ matrix.os }}" == *"windows"* ]]; then
             cp Cargo_win.toml Cargo.toml
-            
+
             # ★ Win7 兼容性: 配置静态 CRT 链接
             mkdir -p .cargo
             printf '%s\n' \
@@ -134,7 +134,7 @@ jobs:
               '[target.aarch64-pc-windows-msvc]' \
               'rustflags = ["-C", "target-feature=+crt-static"]' \
               > .cargo/config.toml
-            
+
             rustup target add ${{ matrix.target }}
             cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
