@@ -836,59 +836,8 @@ sys.exit(0)
 
             // Extract
             if (platform === 'win32') {
-                // ★ Win7 兼容解压: 三级回退策略
-                // 1. .NET 4.5 ZipFile (最可靠，适用于 Win7 SP1 + .NET 4.5+)
-                // 2. Shell.Application COM (适用于所有 Windows，但路径必须用反斜杠且扩展名必须是 .zip)
-                // 3. tar (仅 Win10+)
-                const zipPathWin = zipPath.replace(/\//g, '\\\\');
-                const installDirWin = installDir.replace(/\//g, '\\\\');
-
-                // Method 1: .NET ZipFile (PowerShell 2.0 + .NET 4.5+)
-                const dotnetScript = `
-                    Add-Type -AssemblyName System.IO.Compression.FileSystem;
-                    [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPathWin}', '${installDirWin}');
-                `;
-
-                // Method 2: Shell.Application COM (Win7 兼容，需要反斜杠路径)
-                const comScript = `
-                    $shell = New-Object -ComObject Shell.Application;
-                    $zip = $shell.NameSpace('${zipPathWin}');
-                    $dest = $shell.NameSpace('${installDirWin}');
-                    if ($zip -eq $null) { throw 'Cannot open zip file' };
-                    if ($dest -eq $null) { throw 'Cannot open dest folder' };
-                    $dest.CopyHere($zip.Items(), 16);
-                `;
-
-                let extractSuccess = false;
-                let lastError = '';
-
-                // Try .NET ZipFile first
-                try {
-                    cp.execSync(`powershell -NoProfile -Command "${dotnetScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
-                        { windowsHide: true, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
-                    extractSuccess = true;
-                } catch (e1) {
-                    lastError = `.NET=${e1.message}`;
-                    // Try Shell.Application COM
-                    try {
-                        cp.execSync(`powershell -NoProfile -Command "${comScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
-                            { windowsHide: true, timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
-                        extractSuccess = true;
-                    } catch (e2) {
-                        lastError += `, COM=${e2.message}`;
-                        // Try tar (Win10+ only)
-                        try {
-                            cp.execSync(`tar -xf "${zipPath}" -C "${installDir}"`, { windowsHide: true });
-                            extractSuccess = true;
-                        } catch (e3) {
-                            lastError += `, tar=${e3.message}`;
-                        }
-                    }
-                }
-
-                if (!extractSuccess) {
-                    throw new Error(`Extract failed: ${lastError}`);
-                }
+                // ★ 使用公用解压模块 (Win7 兼容三级回退)
+                await global.extractZip(zipPath, installDir);
 
                 // Fix ._pth
                 const pthFile = path.join(installDir, 'python38._pth');
