@@ -2318,15 +2318,21 @@ class YtDlpDownloader {
             const platform = os.platform();
             const arch = os.arch();
 
-            // ★ Win7/8 兼容性检测: os.release() returns "6.1.xxxx" for Win7, "6.2.xxxx" for Win8, "6.3.xxxx" for Win8.1
-            // yt-dlp 2023.03.04 is the last version supporting Windows 7/8 (requires api-ms-win-core-path-l1-1-0.dll after)
-            let isLegacyWindows = false;
+            // ★ 老系统兼容性检测
+            // Win7/8/8.1: os.release() < 10
+            // Mac < 10.15 (Catalina): os.release() < 19 (Darwin 19.x = macOS 10.15)
+            let useLegacyFork = false;
             if (platform === 'win32') {
-                const winVer = os.release().split('.').slice(0, 2).map(Number);
-                // Win7=6.1, Win8=6.2, Win8.1=6.3, Win10+=10.x
-                if (winVer[0] < 10 && winVer[0] <= 6 && winVer[1] <= 3) {
-                    isLegacyWindows = true;
-                    global.logMessage('[yt-dlp] Detected Windows 7/8, using legacy version 2023.03.04', 'INFO');
+                const winVer = parseFloat(os.release());
+                if (winVer < 10) {
+                    useLegacyFork = true;
+                    global.logMessage('[yt-dlp] Detected Windows 7/8, using nicolaasjan fork', 'INFO');
+                }
+            } else if (platform === 'darwin') {
+                const darwinVer = parseFloat(os.release());
+                if (darwinVer < 19) { // macOS < 10.15
+                    useLegacyFork = true;
+                    global.logMessage('[yt-dlp] Detected macOS < 10.15, using nicolaasjan fork', 'INFO');
                 }
             }
 
@@ -2334,24 +2340,33 @@ class YtDlpDownloader {
             let officialUrl;
             let mirrorUrl;
 
+            // ★ nicolaasjan fork 支持老系统，三级回退：gh-proxy.com → GitHub → ghproxy.net
+            const LEGACY_BASE = 'https://github.com/nicolaasjan/yt-dlp/releases/latest/download';
+            const OFFICIAL_BASE = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download';
+
             if (platform === 'win32') {
                 binaryName = 'yt-dlp.exe';
-                if (isLegacyWindows) {
-                    // ★ Win7/8: Use the last compatible version (2023.03.04)
-                    officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/download/2023.03.04/yt-dlp.exe';
-                    mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/download/2023.03.04/yt-dlp.exe';
+                if (useLegacyFork) {
+                    officialUrl = `${LEGACY_BASE}/yt-dlp.exe`;
+                    mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp.exe`;
                 } else {
-                    officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
-                    mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
+                    officialUrl = `${OFFICIAL_BASE}/yt-dlp.exe`;
+                    mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp.exe`;
                 }
             } else if (platform === 'darwin') {
                 binaryName = 'yt-dlp';
-                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
-                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+                if (useLegacyFork) {
+                    officialUrl = `${LEGACY_BASE}/yt-dlp_macos`;
+                    mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp_macos`;
+                } else {
+                    officialUrl = `${OFFICIAL_BASE}/yt-dlp_macos`;
+                    mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp_macos`;
+                }
             } else {
+                // Linux: 先用官方，失败会回退到代理
                 binaryName = 'yt-dlp';
-                officialUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
-                mirrorUrl = 'https://ghproxy.net/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+                officialUrl = `${OFFICIAL_BASE}/yt-dlp`;
+                mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp`;
             }
 
             const installDir = context.globalStorageUri.fsPath;
@@ -2445,14 +2460,14 @@ class YtDlpDownloader {
                 });
             };
 
-            // ★ Cascading download strategy: gh-proxy.com (fastest in CN) → official → ghproxy.net
+            // ★ Cascading download strategy: gh-proxy.com → GitHub → ghproxy.net
             const downloadUrls = [
-                // ★ gh-proxy.com (fastest in CN, stable)
-                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: q('dow.sourceMirror.ghProxy') },
-                // ★ Official source (latest, +60s timeout)
-                { url: officialUrl, timeout: 60000, name: q('dow.sourceOfficial') },
+                // ★ gh-proxy.com (fastest in CN)
+                { url: officialUrl.replace('https://github.com/', 'https://gh-proxy.com/https://github.com/'), timeout: 60000, name: 'gh-proxy.com' },
+                // ★ GitHub official
+                { url: officialUrl, timeout: 60000, name: 'GitHub' },
                 // ★ ghproxy.net (backup)
-                { url: mirrorUrl, timeout: 60000, name: q('dow.sourceMirror.ghproxyNet') },
+                { url: mirrorUrl, timeout: 60000, name: 'ghproxy.net' },
             ];
 
             let lastError = null;
