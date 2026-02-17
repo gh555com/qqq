@@ -578,19 +578,6 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 const rustBridge = new DaemonBridge("Rust", (bridge) => {
 	return new Promise((resolve) => {
 		const platform = process.platform;
-
-		// ★ Win7/8 不支持 Rust 引擎 (WaitOnAddress API 在 Win7 上不存在)
-		if (platform === "win32") {
-			const winVer = parseFloat(os.release());
-			if (winVer < 10) {
-				bridge._setStartError("win7_not_supported");
-				logMessage("[Rust] Disabled on Windows 7/8 (WaitOnAddress API not available)", "INFO");
-				bridge.available = false;
-				resolve(false);
-				return;
-			}
-		}
-
 		// ★ 统一使用 q_engine 文件名，平台特定 vsix 打包时会将对应二进制复制为此名
 		const filename = platform === "win32" ? "q_engine.exe" : "q_engine";
 

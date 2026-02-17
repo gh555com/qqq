@@ -87,12 +87,14 @@ jobs:
           - os: ubuntu-22.04
             asset_name: q_linux_x64
             target: x86_64-unknown-linux-gnu
+          # Win7 compatible targets (also works on Win8/10/11)
           - os: windows-2022
             asset_name: q_win_x64.exe
-            target: x86_64-pc-windows-msvc
+            target: x86_64-win7-windows-msvc
           - os: windows-2022
             asset_name: q_win_x86.exe
-            target: i686-pc-windows-msvc
+            target: i686-win7-windows-msvc
+          # ARM64 has no Win7 (Win7 doesn't support ARM64)
           - os: windows-2022
             asset_name: q_win_arm64.exe
             target: aarch64-pc-windows-msvc
@@ -112,22 +114,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libglib2.0-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev libgtk-3-dev
 
-      - name: Set up Rust
+      - name: Set up Rust (nightly for Win7 targets)
+        if: contains(matrix.target, 'win7')
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Set up Rust (stable for others)
+        if: "!contains(matrix.target, 'win7')"
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build Rust binary
         shell: bash
         run: |
           cd rust
-          if [[ "${{ matrix.os }}" == *"windows"* ]]; then
+          if [[ "${{ matrix.target }}" == *"win7"* ]]; then
+            # Win7 target: use nightly + build-std
             cp Cargo_win.toml Cargo.toml
-            # Win7 compat: static CRT linking (inline env var)
+            RUSTFLAGS="-C target-feature=+crt-static" cargo +nightly build --release \
+              --target ${{ matrix.target }} \
+              -Z build-std=std,panic_abort
+            ls -lh target/${{ matrix.target }}/release/q.exe
+            cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
+          elif [[ "${{ matrix.os }}" == *"windows"* ]]; then
+            # ARM64 Windows: use stable + static CRT
+            cp Cargo_win.toml Cargo.toml
             rustup target add ${{ matrix.target }}
             RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target ${{ matrix.target }}
-            # Check file size (static CRT should be > 2MB)
             ls -lh target/${{ matrix.target }}/release/q.exe
             cp target/${{ matrix.target }}/release/q.exe ../${{ matrix.asset_name }}
           else
+            # Linux/macOS
             rustup target add ${{ matrix.target }}
             cargo build --release --target ${{ matrix.target }}
             cp target/${{ matrix.target }}/release/q ../${{ matrix.asset_name }}
