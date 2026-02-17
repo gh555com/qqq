@@ -581,7 +581,8 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 		// ★ 统一使用 q_engine 文件名，平台特定 vsix 打包时会将对应二进制复制为此名
 		const filename = platform === "win32" ? "q_engine.exe" : "q_engine";
 
-		const exePath = path.join(extensionContext.extensionPath, "assets", filename);
+		const assetsDir = path.join(extensionContext.extensionPath, "assets");
+		const exePath = path.join(assetsDir, filename);
 
 		if (!fs.existsSync(exePath)) {
 			bridge._setStartError(`exe_not_found: ${filename}`);
@@ -589,6 +590,27 @@ const rustBridge = new DaemonBridge("Rust", (bridge) => {
 			bridge.available = false;
 			resolve(false);
 			return;
+		}
+
+		// ★ Win7/8 兼容：复制 VC++ 运行库到 assets 目录
+		if (platform === "win32") {
+			try {
+				const arch = process.arch === "x64" ? "x64" : "x86";
+				const runtimesDir = path.join(assetsDir, "runtimes", arch);
+				if (fs.existsSync(runtimesDir)) {
+					const dlls = fs.readdirSync(runtimesDir).filter(f => f.endsWith(".dll"));
+					for (const dll of dlls) {
+						const src = path.join(runtimesDir, dll);
+						const dst = path.join(assetsDir, dll);
+						if (!fs.existsSync(dst)) {
+							fs.copyFileSync(src, dst);
+							logMessage(`[Rust] Copied ${dll} to assets`, "DEBUG");
+						}
+					}
+				}
+			} catch (e) {
+				logMessage(`[Rust] Failed to copy VC++ runtime: ${e.message}`, "WARN");
+			}
 		}
 
 		// ★ Multi-instance fix: remove system-level singleton check

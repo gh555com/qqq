@@ -2347,8 +2347,9 @@ class YtDlpDownloader {
             if (platform === 'win32') {
                 binaryName = 'yt-dlp.exe';
                 if (useLegacyFork) {
-                    officialUrl = `${LEGACY_BASE}/yt-dlp.exe`;
-                    mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp.exe`;
+                    // ★ Win7/8: 下载专门的 yt-dlp_win7.exe
+                    officialUrl = `${LEGACY_BASE}/yt-dlp_win7.exe`;
+                    mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp_win7.exe`;
                 } else {
                     officialUrl = `${OFFICIAL_BASE}/yt-dlp.exe`;
                     mirrorUrl = `https://ghproxy.net/${OFFICIAL_BASE}/yt-dlp.exe`;
@@ -2356,6 +2357,7 @@ class YtDlpDownloader {
             } else if (platform === 'darwin') {
                 binaryName = 'yt-dlp';
                 if (useLegacyFork) {
+                    // ★ macOS < 10.15: nicolaasjan fork 的 yt-dlp_macos 支持老系统
                     officialUrl = `${LEGACY_BASE}/yt-dlp_macos`;
                     mirrorUrl = `https://ghproxy.net/${LEGACY_BASE}/yt-dlp_macos`;
                 } else {

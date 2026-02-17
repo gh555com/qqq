@@ -1,0 +1,168 @@
+NSTALLATION
+Windows Unix MacOS PyPI Source Tarball Other variants All versions
+
+You can install yt-dlp using the binaries, pip or one using a third-party package manager. See the wiki for detailed instructions
+
+RELEASE FILES
+Recommended
+File	Description
+yt-dlp	Platform-independent zipimport binary. Needs Python (recommended for Linux/BSD)
+yt-dlp.exe	Windows (Win8+) standalone x64 binary (recommended for Windows)
+yt-dlp_macos	Universal MacOS (10.15+) standalone executable (recommended for MacOS)
+Alternatives
+File	Description
+yt-dlp_linux	Linux (glibc 2.17+) standalone x86_64 binary
+yt-dlp_linux.zip	Unpackaged Linux (glibc 2.17+) x86_64 executable (no auto-update)
+yt-dlp_linux_aarch64	Linux (glibc 2.17+) standalone aarch64 binary
+yt-dlp_linux_aarch64.zip	Unpackaged Linux (glibc 2.17+) aarch64 executable (no auto-update)
+yt-dlp_linux_armv7l.zip	Unpackaged Linux (glibc 2.31+) armv7l executable (no auto-update)
+yt-dlp_musllinux	Linux (musl 1.2+) standalone x86_64 binary
+yt-dlp_musllinux.zip	Unpackaged Linux (musl 1.2+) x86_64 executable (no auto-update)
+yt-dlp_musllinux_aarch64	Linux (musl 1.2+) standalone aarch64 binary
+yt-dlp_musllinux_aarch64.zip	Unpackaged Linux (musl 1.2+) aarch64 executable (no auto-update)
+yt-dlp_x86.exe	Windows (Win8+) standalone x86 (32-bit) binary
+yt-dlp_win_x86.zip	Unpackaged Windows (Win8+) x86 (32-bit) executable (no auto-update)
+yt-dlp_arm64.exe	Windows (Win10+) standalone ARM64 binary
+yt-dlp_win_arm64.zip	Unpackaged Windows (Win10+) ARM64 executable (no auto-update)
+yt-dlp_win.zip	Unpackaged Windows (Win8+) x64 executable (no auto-update)
+yt-dlp_macos.zip	Unpackaged MacOS (10.15+) executable (no auto-update)
+Misc
+File	Description
+yt-dlp.tar.gz	Source tarball
+SHA2-512SUMS	GNU-style SHA512 sums
+SHA2-512SUMS.sig	GPG signature file for SHA512 sums
+SHA2-256SUMS	GNU-style SHA256 sums
+SHA2-256SUMS.sig	GPG signature file for SHA256 sums
+The public key that can be used to verify the GPG signatures is available here Example usage:
+
+curl -L https://github.com/yt-dlp/yt-dlp/raw/master/public.key | gpg --import
+gpg --verify SHA2-256SUMS.sig SHA2-256SUMS
+gpg --verify SHA2-512SUMS.sig SHA2-512SUMS
+Licensing
+While yt-dlp is licensed under the Unlicense, many of the release files contain code from other projects with different licenses.
+
+Most notably, the PyInstaller-bundled executables include GPLv3+ licensed code, and as such the combined work is licensed under GPLv3+.
+
+The zipimport Unix executable (yt-dlp) contains ISC licensed code from meriyah and MIT licensed code from astring.
+
+See THIRD_PARTY_LICENSES.txt for more details.
+
+The git repository, the source tarball (yt-dlp.tar.gz), the PyPI source distribution and the PyPI built distribution (wheel) only contain code licensed under the Unlicense.
+
+Note: The manpages, shell completion (autocomplete) files etc. are available inside the source tarball
+
+UPDATE
+You can use yt-dlp -U to update if you are using the release binaries
+
+If you installed with pip, simply re-run the same command that was used to install the program
+
+For other third-party package managers, see the wiki or refer to their documentation
+
+
+There are currently three release channels for binaries: stable, nightly and master.
+
+stable is the default channel, and many of its changes have been tested by users of the nightly and master channels.
+The nightly channel has releases scheduled to build every day around midnight UTC, for a snapshot of the project's new patches and changes. This is the recommended channel for regular users of yt-dlp. The nightly releases are available from yt-dlp/yt-dlp-nightly-builds or as development releases of the yt-dlp PyPI package (which can be installed with pip's --pre flag).
+The master channel features releases that are built after each push to the master branch, and these will have the very latest fixes and additions, but may also be more prone to regressions. They are available from yt-dlp/yt-dlp-master-builds.
+When using --update/-U, a release binary will only update to its current channel. --update-to CHANNEL can be used to switch to a different channel when a newer version is available. --update-to [CHANNEL@]TAG can also be used to upgrade or downgrade to specific tags from a channel.
+
+You may also use --update-to <repository> (<owner>/<repository>) to update to a channel on a completely different repository. Be careful with what repository you are updating to though, there is no verification done for binaries from different repositories.
+
+Example usage:
+
+yt-dlp --update-to master switch to the master channel and update to its latest release
+yt-dlp --update-to stable@2023.07.06 upgrade/downgrade to release to stable channel tag 2023.07.06
+yt-dlp --update-to 2023.10.07 upgrade/downgrade to tag 2023.10.07 if it exists on the current channel
+yt-dlp --update-to example/yt-dlp@2023.09.24 upgrade/downgrade to the release from the example/yt-dlp repository, tag 2023.09.24
+Important: Any user experiencing an issue with the stable release should install or update to the nightly release before submitting a bug report:
+
+# To update to nightly from stable executable/binary:
+yt-dlp --update-to nightly
+
+# To install nightly with pip:
+python -m pip install -U --pre "yt-dlp[default]"
+When running a yt-dlp version that is older than 90 days, you will see a warning message suggesting to update to the latest version. You can suppress this warning by adding --no-update to your command or configuration file.
+
+DEPENDENCIES
+Python versions 3.10+ (CPython) and 3.11+ (PyPy) are supported. Other versions and implementations may or may not work correctly.
+
+While all the other dependencies are optional, ffmpeg, ffprobe, yt-dlp-ejs and a supported JavaScript runtime/engine are highly recommended
+
+Strongly recommended
+ffmpeg and ffprobe - Required for merging separate video and audio files, as well as for various post-processing tasks. License depends on the build
+
+There are bugs in ffmpeg that cause various issues when used alongside yt-dlp. Since ffmpeg is such an important dependency, we provide custom builds with patches for some of these issues at yt-dlp/FFmpeg-Builds. See the readme for details on the specific issues solved by these builds
+
+Important: What you need is ffmpeg binary, NOT the Python package of the same name
+
+yt-dlp-ejs - Required for full YouTube support. Licensed under Unlicense, bundles MIT and ISC components.
+
+A JavaScript runtime/engine like deno (recommended), node.js, bun, or QuickJS is also required to run yt-dlp-ejs. See the wiki.
+
+Networking
+certifi* - Provides Mozilla's root certificate bundle. Licensed under MPLv2
+brotli* or brotlicffi - Brotli content encoding support. Both licensed under MIT 1 2
+websockets* - For downloading over websocket. Licensed under BSD-3-Clause
+requests* - HTTP library. For HTTPS proxy and persistent connections support. Licensed under Apache-2.0
+Impersonation
+The following provide support for impersonating browser requests. This may be required for some sites that employ TLS fingerprinting.
+
+curl_cffi (recommended) - Python binding for curl-impersonate. Provides impersonation targets for Chrome, Edge and Safari. Licensed under MIT
+Can be installed with the curl-cffi extra, e.g. pip install "yt-dlp[default,curl-cffi]"
+Currently included in most builds except yt-dlp (Unix zipimport binary), yt-dlp_x86 (Windows 32-bit) and yt-dlp_musllinux_aarch64
+Metadata
+mutagen* - For --embed-thumbnail in certain formats. Licensed under GPLv2+
+AtomicParsley - For --embed-thumbnail in mp4/m4a files when mutagen/ffmpeg cannot. Licensed under GPLv2+
+xattr, pyxattr or setfattr - For writing xattr metadata (--xattrs) on Mac and BSD. Licensed under MIT, LGPL2.1 and GPLv2+ respectively
+Misc
+pycryptodomex* - For decrypting AES-128 HLS streams and various other data. Licensed under BSD-2-Clause
+phantomjs - Used in some extractors where JavaScript needs to be run. No longer used for YouTube. To be deprecated in the near future. Licensed under BSD-3-Clause
+secretstorage* - For --cookies-from-browser to access the Gnome keyring while decrypting cookies of Chromium-based browsers on Linux. Licensed under BSD-3-Clause
+Any external downloader that you want to use with --downloader
+Deprecated
+rtmpdump - For downloading rtmp streams. ffmpeg can be used instead with --downloader ffmpeg. Licensed under GPLv2+
+mplayer or mpv - For downloading rstp/mms streams. ffmpeg can be used instead with --downloader ffmpeg. Licensed under GPLv2+
+To use or redistribute the dependencies, you must agree to their respective licensing terms.
+
+The standalone release binaries are built with the Python interpreter and the packages marked with * included.
+
+If you do not have the necessary dependencies for a task you are attempting, yt-dlp will warn you. All the currently available dependencies are visible at the top of the --verbose output
+
+COMPILE
+Standalone PyInstaller Builds
+To build the standalone executable, you must have Python and pyinstaller (plus any of yt-dlp's optional dependencies if needed). The executable will be built for the same CPU architecture as the Python used.
+
+You can run the following commands:
+
+python devscripts/install_deps.py --include-extra pyinstaller
+python devscripts/make_lazy_extractors.py
+python -m bundle.pyinstaller
+On some systems, you may need to use py or python3 instead of python.
+
+python -m bundle.pyinstaller accepts any arguments that can be passed to pyinstaller, such as --onefile/-F or --onedir/-D, which is further documented here.
+
+Note: Pyinstaller versions below 4.4 do not support Python installed from the Windows store without using a virtual environment.
+
+Important: Running pyinstaller directly instead of using python -m bundle.pyinstaller is not officially supported. This may or may not work correctly.
+
+Platform-independent Binary (UNIX)
+You will need the build tools python (3.10+), zip, make (GNU), pandoc* and pytest*.
+
+After installing these, simply run make.
+
+You can also run make yt-dlp instead to compile only the binary without updating any of the additional files. (The build tools marked with * are not needed for this)
+
+Related scripts
+devscripts/install_deps.py - Install dependencies for yt-dlp.
+devscripts/update-version.py - Update the version number based on the current date.
+devscripts/set-variant.py - Set the build variant of the executable.
+devscripts/make_changelog.py - Create a markdown changelog using short commit messages and update CONTRIBUTORS file.
+devscripts/make_lazy_extractors.py - Create lazy extractors. Running this before building the binaries (any variant) will improve their startup performance. Set the environment variable YTDLP_NO_LAZY_EXTRACTORS to something nonempty to forcefully disable lazy extractor loading.
+Note: See their --help for more info.
+
+Forking the project
+If you fork the project on GitHub, you can run your fork's build workflow to automatically build the selected version(s) as artifacts. Alternatively, you can run the release workflow or enable the nightly workflow to create full (pre-)releases.
+
+USAGE AND OPTIONS
+yt-dlp [OPTIONS] [--] URL [URL...]
+Tip: Use CTRL+F (or Command+F) to search by keywords
