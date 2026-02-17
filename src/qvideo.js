@@ -2012,80 +2012,57 @@ class Qvideo {
 
             const platform = process.platform;
 
-            if (platform === 'win32') {
-                const p = this._psQuote(exePath);
-                const cmd = [
-                    '-NoProfile',
-                    '-NonInteractive',
-                    '-ExecutionPolicy', 'Bypass',
-                    '-Command',
-                    `
-$it = Get-Item -LiteralPath '${p}' -ErrorAction Stop;
-$vi = $it.VersionInfo;
-$pn = $vi.ProductName;
-$fd = $vi.FileDescription;
-$pv = $vi.ProductVersion;
-$fv = $vi.FileVersion;
-$of = $vi.OriginalFilename;
-"$pn|$fd|$pv|$fv|$of"
-                    `.trim()
-                ];
-
-                cp.execFile('powershell', cmd, { windowsHide: true, timeout: 8000 }, (err, stdout) => {
-                    if (err) {
-                        resolve({ valid: false, error: q('video.error.cannotReadVersion') });
-                        return;
-                    }
-
-                    const out = String(stdout || '').trim();
-                    if (!out) {
-                        resolve({ valid: false, error: q('video.error.versionEmpty') });
-                        return;
-                    }
-
-                    const parts = out.split('|').map(s => (s || '').trim());
-                    const productName = parts[0] || '';
-                    const fileDesc = parts[1] || '';
-                    const productVersion = parts[2] || '';
-                    const fileVersion = parts[3] || '';
-                    const originalFilename = parts[4] || '';
-
-                    const text = `${productName} ${fileDesc} ${originalFilename}`.toLowerCase();
-                    const isChromiumFamily =
-                        text.includes('chrome') ||
-                        text.includes('chromium') ||
-                        text.includes('edge') ||
-                        text.includes('brave') ||
-                        text.includes('vivaldi') ||
-                        text.includes('opera');
-
-                    const version = productVersion || fileVersion || '';
-                    const hasVersion = /\d+\.\d+\.\d+\.\d+/.test(version) || /\d+\.\d+/.test(version);
-
-                    if (isChromiumFamily && hasVersion) {
-                        resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim(), raw: out });
-                    } else if (isChromiumFamily) {
-                        resolve({ valid: true, version: (productName || fileDesc || 'Chromium').slice(0, 80), raw: out });
-                    } else {
-                        resolve({ valid: false, error: q('video.error.notChromium') });
-                    }
-                });
-
-                return;
-            }
-
-            cp.execFile(exePath, ['--version'], { timeout: 8000 }, (err, stdout, stderr) => {
-                if (err) {
-                    resolve({ valid: false, error: q('video.error.cannotExecVersion') });
-                    return;
-                }
+            // ★ Win7 兼容：优先用 --version，避免 PowerShell 2.0 卡住
+            cp.execFile(exePath, ['--version'], { timeout: 8000, windowsHide: true }, (err, stdout, stderr) => {
                 const output = ((stdout || '') + (stderr || '')).trim();
-                const chromiumPattern = /(Chromium|Chrome|Brave|Edge|Opera|Vivaldi)[\s\/:]*([\d\.]+)/i;
-                const match = output.match(chromiumPattern);
-                if (match) {
-                    resolve({ valid: true, version: `${match[1]} ${match[2]}`, raw: output });
+
+                if (!err && output) {
+                    const chromiumPattern = /(Chromium|Chrome|Brave|Edge|Opera|Vivaldi)[\s\/:]*([\.\d]+)/i;
+                    const match = output.match(chromiumPattern);
+                    if (match) {
+                        resolve({ valid: true, version: `${match[1]} ${match[2]}`, raw: output });
+                        return;
+                    }
+                    if (/chrom|edge|brave|vivaldi|opera/i.test(output)) {
+                        resolve({ valid: true, version: output.slice(0, 80) || 'Chromium', raw: output });
+                        return;
+                    }
+                }
+
+                // --version 失败，Windows 上用 PowerShell 备选
+                if (platform === 'win32') {
+                    const p = this._psQuote(exePath);
+                    const cmd = [
+                        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+                        `$it = Get-Item -LiteralPath '${p}' -EA Stop; $vi = $it.VersionInfo; "$($vi.ProductName)|$($vi.FileDescription)|$($vi.ProductVersion)|$($vi.FileVersion)|$($vi.OriginalFilename)"`
+                    ];
+
+                    cp.execFile('powershell', cmd, { windowsHide: true, timeout: 8000 }, (psErr, psOut) => {
+                        if (psErr || !psOut) {
+                            // PowerShell 也失败了（Win7 PS 2.0），文件存在就认为有效
+                            resolve({ valid: true, version: 'Chromium (unverified)', raw: '' });
+                            return;
+                        }
+
+                        const parts = String(psOut).trim().split('|').map(s => (s || '').trim());
+                        const productName = parts[0] || '';
+                        const fileDesc = parts[1] || '';
+                        const productVersion = parts[2] || '';
+                        const fileVersion = parts[3] || '';
+                        const originalFilename = parts[4] || '';
+
+                        const text = `${productName} ${fileDesc} ${originalFilename}`.toLowerCase();
+                        const isChromiumFamily = /chrome|chromium|edge|brave|vivaldi|opera/.test(text);
+                        const version = productVersion || fileVersion || '';
+
+                        if (isChromiumFamily) {
+                            resolve({ valid: true, version: `${productName || 'Chromium'} ${version}`.trim() || 'Chromium', raw: psOut });
+                        } else {
+                            resolve({ valid: false, error: q('video.error.notChromium') });
+                        }
+                    });
                 } else {
-                    resolve({ valid: true, version: output.slice(0, 80) || 'Chromium', raw: output });
+                    resolve({ valid: false, error: q('video.error.cannotExecVersion') });
                 }
             });
         });
