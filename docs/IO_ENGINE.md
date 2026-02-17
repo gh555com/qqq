@@ -274,7 +274,46 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 
 
-## 3. Scenario Recommendation Matrix
+## 3. Supported Operating Systems
+
+### Minimum Requirements
+
+| Engine | Windows | macOS | Linux |
+|:-------|:--------|:------|:------|
+| **Python** | **Windows 7 SP1+** | 10.9+ (Mavericks) | glibc 2.17+ |
+| **Rust** | **Windows 7 SP1+** | 10.7+ (Lion) | glibc 2.17+ |
+| **Node Shell** | **Windows 7 SP1+** | 10.10+ (Yosemite) | Any with bash |
+
+### Technical Details
+
+**Python Engine (Win7+)**:
+- Uses Python 3.8.10 - the **last version supporting Windows 7**
+- Python 3.9+ dropped Win7 support
+- Bundled VC++ 2015-2022 runtime DLLs for systems without redistributable installed
+
+**Rust Engine (Win7+)**:
+- Compiled with official Rust `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` targets
+- Avoids `WaitOnAddress` API (Win8+ only) by using Win7-compatible targets
+- Bundled VC++ runtime DLLs
+
+**Node Shell (Win7+)**:
+- PowerShell 2.0 is built-in on Windows 7
+- Uses VBScript for ZIP extraction (PowerShell 2.0 COM calls hang)
+- Bash is universal on macOS/Linux
+
+### Architecture Support
+
+| Engine | x64 | x86 | ARM64 |
+|:-------|:---:|:---:|:-----:|
+| Python | ✅ | ✅ | ✅ |
+| Rust | ✅ | ✅ | ✅ (Win10+) |
+| Node Shell | ✅ | ✅ | ✅ |
+
+> Note: Windows ARM64 requires Windows 10+. Win7 ARM does not exist.
+
+---
+
+## 4. Scenario Recommendation Matrix
 
 | Scenario                                    | Recommended Engine | Why                                     |
 | :------------------------------------------ | :----------------: | :-------------------------------------- |
@@ -587,7 +626,46 @@ Copying 10,000+ small files (e.g., `node_modules`):
 
 
 
-## 3. 场景推荐矩阵
+## 3. 支持的操作系统
+
+### 最低版本要求
+
+| 引擎 | Windows | macOS | Linux |
+|:-----|:--------|:------|:------|
+| **Python** | **Windows 7 SP1+** | 10.9+ (Mavericks) | glibc 2.17+ |
+| **Rust** | **Windows 7 SP1+** | 10.7+ (Lion) | glibc 2.17+ |
+| **Node Shell** | **Windows 7 SP1+** | 10.10+ (Yosemite) | 任何有 bash 的发行版 |
+
+### 技术细节
+
+**Python 引擎 (Win7+)**：
+- 使用 Python 3.8.10 - **最后一个支持 Windows 7 的版本**
+- Python 3.9+ 已放弃 Win7 支持
+- 内置 VC++ 2015-2022 运行时 DLL，适用于未安装运行时的系统
+
+**Rust 引擎 (Win7+)**：
+- 使用官方 Rust `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` 目标编译
+- 避免使用 `WaitOnAddress` API（仅 Win8+），通过 Win7 兼容目标实现
+- 内置 VC++ 运行时 DLL
+
+**Node Shell (Win7+)**：
+- Windows 7 内置 PowerShell 2.0
+- 使用 VBScript 解压 ZIP（PowerShell 2.0 COM 调用会卡死）
+- macOS/Linux 上 bash 是通用的
+
+### 架构支持
+
+| 引擎 | x64 | x86 | ARM64 |
+|:-----|:---:|:---:|:-----:|
+| Python | ✅ | ✅ | ✅ |
+| Rust | ✅ | ✅ | ✅ (Win10+) |
+| Node Shell | ✅ | ✅ | ✅ |
+
+> 注意：Windows ARM64 需要 Windows 10+。Win7 不存在 ARM 版本。
+
+---
+
+## 4. 场景推荐矩阵
 
 | 使用场景 | 推荐引擎 | 原因 |
 |:---------|:--------:|:-----|
