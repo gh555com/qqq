@@ -3784,7 +3784,7 @@ If destDir Is Nothing Then
     WScript.Echo "Cannot open dest"
     WScript.Quit 2
 End If
-destDir.CopyHere zipFile.Items, 16
+destDir.CopyHere zipFile.Items, 1044
 WScript.Quit 0
 `;
 
