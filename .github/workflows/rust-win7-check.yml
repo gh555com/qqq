@@ -72,14 +72,17 @@ jobs:
           }
 
           if ($found.Count -gt 0) {
-            Write-Host "=== WARNING: Win10+ APIs FOUND ==="
+            Write-Host "=== ERROR: Win10+ APIs FOUND ==="
             foreach ($api in $found) {
               Write-Host "  - $api"
             }
             Write-Host ""
             Write-Host "These APIs do NOT exist in Windows 7!"
+            Write-Host "Build is NOT Win7 compatible!"
+            exit 1
           } else {
-            Write-Host "=== OK: No known Win10+ APIs found ==="
+            Write-Host "=== SUCCESS: No Win10+ APIs found ==="
+            Write-Host "Build is Win7 compatible!"
           }
 
       - name: Upload Artifact
