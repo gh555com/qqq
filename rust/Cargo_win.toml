@@ -34,8 +34,6 @@ serde_json = "1.0"
 num_cpus = "1.16"
 threadpool = "1.8"
 walkdir = "2.5"
-# ★ Win7: parking_lot 有 Win7 兼容的同步原语
-parking_lot = "0.12"
 # ★ Win7: image crate 用纯 Rust 实现，不依赖系统 API
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
 # windows-sys for Win32 API
