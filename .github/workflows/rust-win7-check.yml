@@ -14,16 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust (nightly for build-std)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
 
-      - name: Build Release (same as main workflow)
+      - name: Build Release with custom std (Win7 compat)
         shell: bash
         run: |
           cd rust
           cp Cargo_win.toml Cargo.toml
           rustup target add x86_64-pc-windows-msvc
-          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc 2>&1 | tee ../build_log.txt || true
+          # Build with custom std to avoid WaitOnAddress API
+          RUSTFLAGS="-C target-feature=+crt-static" cargo +nightly build --release --target x86_64-pc-windows-msvc -Z build-std=std,panic_abort 2>&1 | tee ../build_log.txt || true
           ls -lh target/x86_64-pc-windows-msvc/release/q.exe 2>&1 || echo "Build failed, check build_log.txt"
 
       - name: Setup MSVC
