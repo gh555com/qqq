@@ -25,8 +25,8 @@ jobs:
           cd rust
           cp Cargo_win.toml Cargo.toml
           rustup target add x86_64-pc-windows-msvc
-          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc
-          ls -lh target/x86_64-pc-windows-msvc/release/q.exe
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc 2>&1 | tee ../build_log.txt || true
+          ls -lh target/x86_64-pc-windows-msvc/release/q.exe 2>&1 || echo "Build failed, check build_log.txt"
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -83,8 +83,10 @@ jobs:
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: q_win_x64
           path: |
             rust/target/x86_64-pc-windows-msvc/release/q.exe
             dumpbin_output.txt
+            build_log.txt
