@@ -26,6 +26,9 @@ jobs:
           RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-pc-windows-msvc
           ls -lh target/x86_64-pc-windows-msvc/release/q.exe
 
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Check File Size
         run: |
           $file = "rust/target/x86_64-pc-windows-msvc/release/q.exe"
@@ -33,18 +36,16 @@ jobs:
           $sizeMB = [math]::Round($size / 1MB, 2)
           Write-Host "=== FILE SIZE: $sizeMB MB ==="
       
-      - name: Dump Imports (API Check)
+      - name: Dump ALL Imports
+        shell: cmd
         run: |
-          Write-Host "=== KERNEL32.DLL IMPORTS ==="
-          dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe | Select-String -Pattern "kernel32|KERNEL32" -Context 0,50
-                
-          Write-Host ""
-          Write-Host "=== ALL IMPORTS SUMMARY ==="
-          dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe | Select-String -Pattern "\.dll"
-      
+          echo === FULL IMPORT LIST ===
+          dumpbin /imports rust\target\x86_64-pc-windows-msvc\release\q.exe
+
       - name: Check for Win10+ APIs
+        shell: pwsh
         run: |
-          $output = dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe
+          $output = & dumpbin /imports rust/target/x86_64-pc-windows-msvc/release/q.exe 2>&1 | Out-String
 
           # Known Win10+ APIs that don't exist in Win7
           $win10apis = @(
@@ -54,7 +55,6 @@ jobs:
             "GetProcessMitigationPolicy",
             "SetThreadSelectedCpuSets",
             "GetSystemCpuSetInformation",
-            "CreateEventExW",
             "WaitOnAddress",
             "WakeByAddressSingle",
             "WakeByAddressAll"
