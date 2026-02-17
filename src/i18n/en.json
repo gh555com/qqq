@@ -470,7 +470,7 @@
             "terminateBtn": "Terminate All",
             "enhancedDownloading": "Enhanced downloading",
             "selectChromiumExe": "Select Chromium-based browser executable",
-            "downloadingChrome": "qqq: Downloading Chrome for Testing...",
+            "downloadingChrome": "qqq: Downloading chrome83...",
             "extracting": "Extracting...",
             "chromeDownloadFailed": "Chrome download failed: {0}",
             "playInBrowser": "Play the video in the opened browser (at your desired resolution), then click the button below.",
