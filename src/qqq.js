@@ -1392,6 +1392,16 @@ async function downloadVideosFromUrlCommand(urlArg) {
 			const replaced = await replaceAnchorInDoc(targetUri, anchor, newText);
 			if (replaced) {
 				await global.TransactionManager.removeTransaction(transId);
+
+				// ★ Force refresh document to fix screen corruption (花屏) issue
+				// Flow: first render → clear cache → re-render (double render for safety fallback)
+				try {
+					await q1.forceRefreshDocument(targetUri);
+					global.logMessage(`[VideoDownload] Document force refresh completed: ${targetUri.fsPath}`, "DEBUG");
+				} catch (e) {
+					global.logMessage(`[VideoDownload] Force refresh error (non-fatal): ${e.message}`, "WARN");
+				}
+
 				return res;
 			} else {
 				global.logMessage(q('qqq.log.anchorReplaceFail'), "ERROR");

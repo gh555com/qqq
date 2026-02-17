@@ -2365,25 +2365,9 @@ $of = $vi.OriginalFilename;
     }
 
     _extractZip(zipPath, destFolder) {
-        return new Promise((resolve, reject) => {
-            const platform = process.platform;
-
-            if (platform === 'win32') {
-                const zp = this._psQuote(zipPath);
-                const df = this._psQuote(destFolder);
-
-                const cmd = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${zp}' -DestinationPath '${df}' -Force"`;
-                cp.exec(cmd, { timeout: 300000, windowsHide: true }, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            } else {
-                cp.exec(`unzip -o "${zipPath}" -d "${destFolder}"`, { timeout: 300000 }, (err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            }
-        });
+        // ★ 使用公用解压模块 (Win7 兼容三级回退)
+        const global = require('./global');
+        return global.extractZip(zipPath, destFolder);
     }
 
     _findFileRecursive(dir, fileName, maxDepth = 5, depth = 0) {

@@ -3100,6 +3100,58 @@ function renderVisibleEditors(delay = 50) {
 	if (editors?.length) editors.forEach((e) => debounceRender(e, delay));
 }
 
+/**
+ * ★ Force refresh a single document: clear its decoration cache and re-render
+ * Used after video download completes to fix screen corruption (花屏) issues
+ * Flow: first render → clear cache → render again (double render for safety)
+ * @param {vscode.Uri|string} uri - Document URI to refresh
+ */
+async function forceRefreshDocument(uri) {
+	try {
+		const docUri = typeof uri === 'string' ? uri : uri.toString();
+		const fsPath = typeof uri === 'string' ? vscode.Uri.parse(uri).fsPath : uri.fsPath;
+
+		global.logMessage(`[forceRefreshDocument] Refreshing document: ${fsPath}`, "DEBUG");
+
+		// Find all editors for this document (may be in foreground or background tabs)
+		const targetEditors = vscode.window.visibleTextEditors.filter(
+			e => e.document.uri.toString() === docUri
+		);
+
+		// Step 1: First render pass (let it display first)
+		for (const editor of targetEditors) {
+			await renderImages(editor);
+		}
+
+		// Small delay to ensure first render is applied
+		await new Promise(resolve => setTimeout(resolve, 50));
+
+		// Step 2: Clear decoration cache for this specific document
+		documentDecorationsMap.delete(docUri);
+		global.logMessage(`[forceRefreshDocument] Cache cleared for: ${fsPath}`, "DEBUG");
+
+		// Step 3: Second render pass (re-render with fresh cache)
+		for (const editor of targetEditors) {
+			await renderImages(editor);
+		}
+
+		// Step 4: Final safety render after a short delay
+		setTimeout(() => {
+			for (const editor of targetEditors) {
+				if (!editor.document.isClosed) {
+					renderImages(editor);
+				}
+			}
+		}, 200);
+
+		global.logMessage(`[forceRefreshDocument] Document refresh completed: ${fsPath}`, "DEBUG");
+		return true;
+	} catch (e) {
+		global.logMessage(`[forceRefreshDocument] Error: ${e.message}`, "WARN");
+		return false;
+	}
+}
+
 // ==================== Initialization ====================
 async function activate(context) {
 	if (!context) {
@@ -3283,7 +3335,8 @@ const q1Utils = {
 	getMediaInfo,
 	getFrameConfig,
 	LARGE_PREVIEW_HEIGHT,
-	PREVIEW_BORDER
+	PREVIEW_BORDER,
+	forceRefreshDocument
 };
 
 module.exports = { activate, deactivate, ...q1Utils };

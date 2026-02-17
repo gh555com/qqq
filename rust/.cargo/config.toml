@@ -1,6 +1,20 @@
-# ★ Win7 兼容性：静态链接 CRT，避免依赖 vcruntime140.dll
+# ★ Win7 兼容性配置
+# 1. 静态链接 CRT，避免依赖 vcruntime140.dll
+# 2. 设置 Windows 子系统版本为 6.1 (Win7)
+
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=/SUBSYSTEM:CONSOLE,6.01"
+]
 
 [target.i686-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=/SUBSYSTEM:CONSOLE,6.01"
+]
+
+# 设置 Windows SDK 版本为 Win7
+[env]
+WINVER = "0x0601"
+_WIN32_WINNT = "0x0601"
