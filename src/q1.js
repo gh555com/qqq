@@ -3101,8 +3101,9 @@ function renderVisibleEditors(delay = 50) {
 }
 
 /**
- * ★ Force refresh a single document: clear its decoration cache and re-render
+ * ★ Force refresh a single document: clear its decoration cache and re-render ALL markers
  * Used after video download completes to fix screen corruption (花屏) issues
+ * Only re-renders decorations, does NOT modify any text (safe for ongoing downloads & user typing)
  * @param {vscode.Uri|string} uri - Document URI to refresh
  */
 async function forceRefreshDocument(uri) {
@@ -3112,10 +3113,14 @@ async function forceRefreshDocument(uri) {
 
 		global.logMessage(`[forceRefreshDocument] Refreshing document: ${fsPath}`, "DEBUG");
 
-		// Step 1: Clear decoration cache for this specific document (forget old cache)
+		// Step 1: Clear decoration cache for this specific document (forget ALL old decorations)
 		documentDecorationsMap.delete(docUri);
 
-		// Step 2: Re-render all editors showing this document
+		// Step 2: Wait 200ms to ensure cache clear takes effect
+		await new Promise(resolve => setTimeout(resolve, 200));
+
+		// Step 3: Re-render ALL markers in this document (not just the downloaded one)
+		// renderImages only renders decorations, does NOT modify text
 		const targetEditors = vscode.window.visibleTextEditors.filter(
 			e => e.document.uri.toString() === docUri
 		);
