@@ -288,6 +288,16 @@ class DaemonBridge extends EventEmitter {
 			return { error: `${this.name}_disabled_too_many_crashes` };
 		}
 
+		// ★ Multi-window SFX deduplication: only one window plays within 300ms
+		if (action === 'play_sfx' || action === 'play_audio') {
+			const dedupKey = `sfx_${action}_${params.category || ''}_${params.name || params.path || ''}`;
+			const lastTime = extensionContext?.globalState?.get(dedupKey, 0) || 0;
+			if (Date.now() - lastTime < 300) {
+				return { status: 'ok', deduplicated: true };
+			}
+			extensionContext?.globalState?.update(dedupKey, Date.now());
+		}
+
 		// ★ Industrial-grade fix: if engine is known unavailable, don't keep trying to start
 		// available === false means confirmed failure/crash; should not retry on every call
 		// Only startDaemons or explicit restart should retry
