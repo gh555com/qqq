@@ -6,6 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const global = require('./global');
 const { q } = require('./i18n');
+const q1 = require('./q1');
 
 // ★ Ultimate best solution: global instance tracking for lifecycle hard kill
 let _currentHistoryManager = null;
@@ -1209,6 +1210,24 @@ class ClipboardHistorySidebarProvider {
                         this._global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
                     }
                     break;
+                // ★ NEW: weave embedded button handlers
+                case 'getCleanFreakMode':
+                    this._postMessage({ command: 'cleanFreakMode', mode: q1.getCleanFreakMode() });
+                    break;
+                case 'cycleCleanFreakMode': {
+                    const modes = ['never', 'add', 'add & remove'];
+                    const currentMode = q1.getCleanFreakMode();
+                    const currentIndex = modes.indexOf(currentMode);
+                    const nextIndex = (currentIndex + 1) % modes.length;
+                    const newMode = modes[nextIndex];
+                    q1.setCleanFreakMode(newMode);
+                    this._postMessage({ command: 'cleanFreakMode', mode: newMode });
+                    break;
+                }
+                case 'weaveWithRemove':
+                    // ★ Execute weave with "add & remove" mode (both add and remove empty lines)
+                    q1.performGlobalClean(vscode.window.activeTextEditor, true, "add & remove");
+                    break;
             }
         });
 
@@ -1632,6 +1651,18 @@ class ClipboardHistorySidebarProvider {
         .icon-pen { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTMgMTcuMjVWMjFoMy43NWwxMS4wNi0xMS4wNi0zLjc1LTMuNzVMMyAxNy4yNXpNMjAuNzEgNy4wNGMuMzktLjM5LjM5LTEuMDIgMC0xLjQxbC0yLjM0LTIuMzRjLS4zOS0uMzktMS4wMi0uMzktMS40MSAw bC0xLjgzIDEuODMgMy43NSAzLjc1IDEuODMtMS44M3oiLz48L3N2Zz4=') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-ufo { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTEyIDJDMi40OCAyIDEyIDIuNDggMTIgOCAxMiAxMy41MiA3LjUyIDIyIDEyIDIyYzQuNDggMCA5LjUyLTguNDggMTAtMTQgMC01LjUyLTkuNTItMTAtMTAtMTB6bTAgMThjLTMuMzEgMC02LTIuNjktNi02IDAtMy4zMSAyLjY5LTYgNi02czYgMi42OSA2IDYtMi42OSA2LTYgNnoiLz48cGF0aCBkPSJNMjEgMTNoLTRjLS41NSAwLTEgLjQ1LTEgMXMuNDUgMSAxIDFoNGMuNTUgMCAxLS40NSAxLTFzLS40NS0xLTEtMXpNNyAxM0gzYy0uNTUgMC0xIC40NS0xIDFzLjQ1IDEgMSAxaDRjLjU1IDAgMS0uNDUgMS0xcy0uNDUtMS0xLTF6TTEyIDhjLTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42LTMuMzEgMC02IDIuNjktNiA2IDAgMy4zMSAyLjY5IDYgNiA2czYtMi42OSA2LTYtMi42OS02LTYtNnoiIG9wYWNpdHk9Ii4zIi8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
+
+        /* ★ Weave inline buttons - positioned right after "Weave" text */
+        .weave-inline-btns { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; pointer-events: auto; }
+        .weave-mini-btn { padding: 1px 4px !important; min-width: 20px; min-height: 18px; pointer-events: auto; }
+        #weaveCard:hover { transform: none; }
+        /* ★ SVG icon for weave+remove button (± symbol, hand-drawn style) */
+        .icon-weave-remove { width: 14px; height: 14px; display: inline-block; vertical-align: middle; }
+        .icon-weave-remove svg { width: 14px; height: 14px; }
+        /* ★ cleanFreak mode icons (dynamic, set via JS) */
+        #cleanFreakIcon { width: 14px; height: 14px; display: inline-block; vertical-align: middle; }
+        #cleanFreakIcon svg { width: 14px; height: 14px; }
+
         .spacer-25 { display: inline-block; width: 25px; height: 1px; background: url('data:image/svg+xml;base64,${CONSTANTS.SPACER_5_BASE64}') no-repeat center; vertical-align: middle; }
         .spacer-75 { display: inline-block; width: 75px; height: 1px; vertical-align: middle; }
         .spacer-50 { display: inline-block; width: 50px; height: 1px; vertical-align: middle; }
@@ -1896,9 +1927,9 @@ class ClipboardHistorySidebarProvider {
                         <span class="icon-ufo"></span> <span class="spacer-25"></span> Roam <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span> ("Tab" or "F6") <span class="spacer-25"></span><span id="roam-stats">${roamStats}</span>
                     </div>
                 </div>
-                <div class="cmd-btn" data-cmd="qqq.weave">
+                <div class="cmd-btn" id="weaveCard" data-cmd="qqq.weave">
                     <div class="text-content">
-                        &nbsp;Weave <span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
+                        &nbsp;Weave <span class="weave-inline-btns"><button class="action-mini-btn weave-mini-btn" id="btnWeaveWithRemove" title="Weave + Remove (add & remove)"><span class="icon-weave-remove"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/><rect x="5" y="17" width="14" height="2" rx="1"/></svg></span></button><button class="action-mini-btn weave-mini-btn" id="btnCycleCleanFreak" title="Cycle Clean Freak Mode"><span id="cleanFreakIcon"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
@@ -1972,6 +2003,10 @@ class ClipboardHistorySidebarProvider {
                 videoStats: document.getElementById('video-stats'),
                 roamStats: document.getElementById('roam-stats'),
                 weaveStats: document.getElementById('weave-stats'),
+                weaveCard: document.getElementById('weaveCard'),
+                btnWeaveWithRemove: document.getElementById('btnWeaveWithRemove'),
+                btnCycleCleanFreak: document.getElementById('btnCycleCleanFreak'),
+                cleanFreakIcon: document.getElementById('cleanFreakIcon'),
                 exportDocStats: document.getElementById('exportDoc-stats'),
                 pureStats: document.getElementById('pure-stats'),
                 exportZipStats: document.getElementById('exportZip-stats'),
@@ -2242,6 +2277,24 @@ class ClipboardHistorySidebarProvider {
             el.btnSavorLoop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'loop' }); };
             el.btnSavorStop.onclick = function(e) { e.stopPropagation(); post('requestSavorAudio', { mode: 'stop' }); };
 
+            // ★ Weave inline buttons handlers
+            var currentCleanFreakMode = 'add'; // default
+            var cleanFreakSvgs = {
+                'never': '',
+                'add': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>',
+                'add & remove': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/><rect x="5" y="17" width="14" height="2" rx="1"/></svg>'
+            };
+            function updateCleanFreakIcon(mode) {
+                currentCleanFreakMode = mode;
+                if (el.cleanFreakIcon) {
+                    el.cleanFreakIcon.innerHTML = cleanFreakSvgs[mode] || '';
+                }
+            }
+            el.btnWeaveWithRemove.onclick = function(e) { e.stopPropagation(); post('weaveWithRemove', {}); };
+            el.btnCycleCleanFreak.onclick = function(e) { e.stopPropagation(); post('cycleCleanFreakMode', {}); };
+            // Request initial cleanFreakMode
+            post('getCleanFreakMode', {});
+
             // ★ Single source of truth: embedded from global.js
             var isValidUrl = ${this._global.isValidUrl.toString()};
 
@@ -2349,6 +2402,12 @@ class ClipboardHistorySidebarProvider {
                         showHistoryDropdown(el.searchBox, el.searchHistoryDropdown, m.history);
                     }
                     return; // Return early
+                }
+
+                // ★ Handle cleanFreakMode update
+                if (m.command === 'cleanFreakMode') {
+                    updateCleanFreakIcon(m.mode);
+                    return;
                 }
 
                 if (m.command === 'updateData') {
