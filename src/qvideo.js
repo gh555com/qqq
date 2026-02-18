@@ -2624,7 +2624,7 @@ $of = $vi.OriginalFilename;
     async _downloadEnhancedOne(task, url, targetDir, bestVideo) {
         const urlSnippet = this._makeUrlSnippet(url);
         const startMs = Date.now();
-        // ★ existingFiles no longer needed; now use transId prefix precise match
+        // ★ existingFiles no longer needed; now use transId anchor (first 4 chars) for precise match
 
         const out = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -2657,7 +2657,7 @@ $of = $vi.OriginalFilename;
                         } catch (e) { }
                     }
 
-                    // ★ Precise match by transId prefix; 100% no cross-task pollution
+                    // ★ Precise match by transId anchor; no cross-task pollution
                     const bytes = this._scanTaskBytes(targetDir, task.transId);
                     const elapsedMs = Date.now() - startMs;
                     progress.report({ message: QvideoMsg.progress(task, formatBytesCompact(bytes), url, elapsedMs, q('video.ui.enhancedDownloading')) });
@@ -2666,7 +2666,7 @@ $of = $vi.OriginalFilename;
                 if (this._isTaskCancelled(task)) return null;
 
                 await this._runWithSuppressedPopups(async () => {
-                    // ★ Pass transId so downloaded filenames have transId prefix; rollback can precisely delete
+                    // ★ Pass transId so downloaded filenames have transId anchor; rollback can precisely delete
                     await this.downloader.downloadVideos([bestVideo], targetDir, null, task.transId);
                 });
 
