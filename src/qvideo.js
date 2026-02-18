@@ -601,7 +601,7 @@ class Qvideo {
         });
     }
 
-    _createTask(videoUrl, title, targetDir, referer, transId = null) {
+    _createTask(videoUrl, title, targetDir, referer, transId = null, index = 0) {
         let destPath = null;
         let originalFileName = null;  // ★ Save original file name
         let tempFileName = null;      // ★ Temp file name (with timestamp)
@@ -627,8 +627,8 @@ class Qvideo {
             } catch (e) { }
         }
 
-        // ★ Use transId as filename prefix; rollback can precisely delete by transId
-        tempFileName = h.getTimestampFilename('.mp4', transId);
+        // ★ Unified batch mode: transId + index for unique filename
+        tempFileName = h.getTimestampFilename('.mp4', transId, index);
         destPath = path.join(targetDir, tempFileName);
 
         const headers = {};
@@ -1111,12 +1111,12 @@ class Qvideo {
                     if (res && res.success) {
                         if (res.isPlaylist && res.entries && res.entries.length > 0) {
                             this.log(q('video.log.playlistDetected', res.entries.length));
-                            tasks = res.entries.map(e => this._createTask(e.url || e.webpage_url, e.title, targetDir, url, task.transId));
+                            tasks = res.entries.map((e, idx) => this._createTask(e.url || e.webpage_url, e.title, targetDir, url, task.transId, idx));
                             // ★ Playlist: keep full title (truncate handled by QvideoMsg)
                             task.videoTitle = res.entries[0]?.title || '';
                         } else {
                             this.log(q('video.log.singleVideo', res.title));
-                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url, task.transId));
+                            tasks.push(this._createTask(res.url || res.webpageUrl || url, res.title, targetDir, url, task.transId, tasks.length));
                             // ★ Single video: keep full title (truncate handled by QvideoMsg)
                             task.videoTitle = res.title || '';
                         }
@@ -1125,11 +1125,11 @@ class Qvideo {
                             if (!isYouTube) {
                                 probeForbidden = true;
                                 this.log(q('video.log.probe403'));
-                                tasks.push(this._createTask(url, null, targetDir, url, task.transId));
+                                tasks.push(this._createTask(url, null, targetDir, url, task.transId, tasks.length));
                             } else {
                                 // ✅ Pre-exclude: YouTube 403 is not an enhanced signal
                                 this.log(q('video.log.youtubeProbe403'));
-                                tasks.push(this._createTask(url, null, targetDir, url, task.transId));
+                                tasks.push(this._createTask(url, null, targetDir, url, task.transId, tasks.length));
                             }
                         } else {
                             this.log(q('video.log.probeNoResource', res?.error));
@@ -1171,7 +1171,7 @@ class Qvideo {
                             }
                         }
 
-                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url, task.transId)));
+                        webUrls.forEach(u => tasks.push(this._createTask(u, 'Web Resource', targetDir, url, task.transId, tasks.length)));
                     }
                 } catch (e) {
                     this.log(q('video.log.staticAnalysisFailed', e.message));
@@ -1183,7 +1183,7 @@ class Qvideo {
 
                 if (tasks.length === 0) {
                     this.log(q('video.log.noResourceTryDirect'));
-                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url, task.transId));
+                    tasks.push(this._createTask(url, 'Direct Link', targetDir, url, task.transId, 0));
                 }
 
                 this.log(q('video.log.preparingDownload', tasks.length));
@@ -1204,9 +1204,9 @@ class Qvideo {
                     }
                 }
 
-                // ★ Precisely match by transId prefix; 100% no cross-task pollution
-                // Filename format: {transId}_{date}__{day}__{time}{ext}
-                const transIdPrefix = task.transId ? (task.transId + '_') : null;
+                // ★ Precisely match by transId anchor (first 4 chars); unified 4+2 filename format
+                // Filename format: {anchor4}{index2}_{date}__{day}__{time}{ext}
+                const transIdPrefix = task.transId ? task.transId.slice(0, 4) : null;
 
                 let logTotalBytes = 0;
                 // ★ Precise progress tracking: per URL + per stage independent counting
@@ -1249,13 +1249,13 @@ class Qvideo {
                             // ★ yt-dlp hasn't reported progress yet, count ticks
                             noProgressTicks++;
                             if (noProgressTicks >= FALLBACK_TICKS) {
-                                // ★ Fallback: scan disk by transId prefix (100% precise)
+                                // ★ Fallback: scan disk by transId anchor (first 4 chars)
                                 let diskBytes = 0;
                                 try {
                                     if (transIdPrefix && fs.existsSync(targetDir)) {
                                         const files = fs.readdirSync(targetDir);
                                         for (const f of files) {
-                                            // ★ Only count files starting with {transId}_
+                                            // ★ Only count files starting with {anchor4}
                                             if (f.startsWith(transIdPrefix)) {
                                                 try {
                                                     const s = fs.statSync(path.join(targetDir, f));
@@ -2594,9 +2594,9 @@ $of = $vi.OriginalFilename;
     }
 
     /**
-     * ★ Scan current task file size (precise match by transId prefix; 100% no cross-task pollution)
+     * ★ Scan current task file size (precise match by transId anchor; unified 4+2 filename format)
      * @param {string} targetDir - Target directory
-     * @param {string} transId - Task transaction ID; filename format {transId}_{date}__{day}__{time}{ext}
+     * @param {string} transId - Task transaction ID; filename format {anchor4}{index2}_{date}__{day}__{time}{ext}
      * @returns {number} Bytes downloaded so far by current task
      */
     _scanTaskBytes(targetDir, transId) {
@@ -2606,10 +2606,10 @@ $of = $vi.OriginalFilename;
         try {
             if (!fs.existsSync(targetDir)) return 0;
             const files = fs.readdirSync(targetDir);
-            const prefix = transId + '_';  // ★ Precise prefix match
+            const prefix = transId.slice(0, 4);  // ★ Match first 4 chars (anchor)
 
             for (const f of files) {
-                // ★ Only count files starting with {transId}_ (including .part etc. temp files)
+                // ★ Only count files starting with {anchor4} (including .part etc. temp files)
                 if (!f.startsWith(prefix)) continue;
                 const full = path.join(targetDir, f);
                 try {

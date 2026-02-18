@@ -3031,9 +3031,9 @@ class UnifiedMediaDownloader {
 
         const h = require('./h');
 
-        const downloadTasks = videos.map(video => {
-            // ★ Use transId as filename prefix so rollback can precisely match and delete
-            const filename = h.getTimestampFilename('.mp4', transId);
+        const downloadTasks = videos.map((video, index) => {
+            // ★ Unified batch mode: transId + index for unique filename
+            const filename = h.getTimestampFilename('.mp4', transId, index);
             const destPath = require('path').join(targetDir, filename);
             return {
                 url: video.url,
