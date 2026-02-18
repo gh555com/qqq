@@ -2090,8 +2090,9 @@ const ConfigManager = {
 	},
 
 	// VS Code settings change entry (single entry)
+	// ★ Returns changedKeys array for caller to determine if sound should play
 	async handleVscodeConfigChanged(event) {
-		if (_suppressConfigEcho) return;
+		if (_suppressConfigEcho) return [];
 
 		const changedKeys = [];
 		for (const key of Object.keys(DEFAULT_CONFIG)) {
@@ -2113,6 +2114,8 @@ const ConfigManager = {
 				try { cb(changedKeys, event); } catch (e) { }
 			}
 		}
+
+		return changedKeys;
 	},
 
 
