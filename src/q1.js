@@ -3323,7 +3323,18 @@ const q1Utils = {
 	getFrameConfig,
 	LARGE_PREVIEW_HEIGHT,
 	PREVIEW_BORDER,
-	forceRefreshDocument
+	forceRefreshDocument,
+	// ★ cleanFreakMode getter/setter for q4.js weave embedded buttons
+	getCleanFreakMode: () => cleanFreakMode,
+	setCleanFreakMode: (mode) => {
+		if (["never", "add", "add & remove"].includes(mode)) {
+			cleanFreakMode = mode;
+			return true;
+		}
+		return false;
+	},
+	// ★ performGlobalClean for direct invocation from q4
+	performGlobalClean
 };
 
 module.exports = { activate, deactivate, ...q1Utils };
