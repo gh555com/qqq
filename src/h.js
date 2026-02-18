@@ -377,43 +377,67 @@ function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
     return `[${stepInfo}]${sizeStr}${timePart} ${itemName}`;
 }
 
+// ★ Valid character set for filename encoding (letters + digits, excluding confusing chars)
+const FILENAME_VALID_CHARS = (() => {
+    const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
+    const letters = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        .split("")
+        .filter((c) => !excluded.has(c.toLowerCase()));
+    return [...letters, ..."0123456789"]; // 34 letters + 10 digits = 44 chars
+})();
+
 /**
- * Generate a timestamp filename with size
+ * Encode index to 3-char string using FILENAME_VALID_CHARS (base-44)
+ * Capacity: 44^3 = 85,184 files per transaction
+ * @param {number} index - 0-based index
+ * @returns {string} 3-char encoded string
+ */
+function _encodeFileIndex(index) {
+    const base = FILENAME_VALID_CHARS.length; // 44
+    const c1 = FILENAME_VALID_CHARS[Math.floor(index / (base * base)) % base];
+    const c2 = FILENAME_VALID_CHARS[Math.floor(index / base) % base];
+    const c3 = FILENAME_VALID_CHARS[index % base];
+    return `${c1}${c2}${c3}`;
+}
+
+/**
+ * Generate a timestamp filename with 6-char prefix
  * @param {string} ext - File extension (e.g. '.mp4')
- * @param {string} [transId] - Optional transaction ID as filename prefix (for precise rollback matching)
- * @returns {string} Filename in format: {transId}_{date}__{day}__{time}{ext}
+ * @param {string} [transId] - Optional transaction ID (first 3 chars used as batch anchor)
+ * @param {number} [index] - File index within batch (0-based), encoded to 3 chars
+ * @returns {string} Filename in format: {anchor}{index}_{date}__{day}__{time}{ext}
  *
  * Example:
- * - With transId: jhrYLq_2026.02.06__5__12.20.30.mp4
- * - Without transId: 587kD_2026.02.06__5__12.20.30.mp4 (random prefix)
+ * - With transId+index: y3W000_2026.02.06__5__12.20.30.png (batch mode)
+ * - Without transId: 587kD_2026.02.06__5__12.20.30.png (random mode, backward compatible)
  */
-function getTimestampFilename(ext, transId = null) {
+function getTimestampFilename(ext, transId = null, index = null) {
     const now = new Date();
     const date = now.toISOString().slice(0, 10).replace(/-/g, ".");
     const time = now.toTimeString().slice(0, 8).replace(/:/g, ".");
     const day = now.getDay() || 7;
-    const ms = String(now.getMilliseconds()).padStart(3, "0");
 
-    // ★ If transId is provided, use it directly as prefix
-    // This allows rollback to precisely match deletions via the transId prefix
-    if (transId && typeof transId === 'string' && transId.length > 0) {
-        return `${transId}_${date}__${day}__${time}${ext}`;
+    let prefix;
+
+    // ★ Batch mode: transId provides anchor (first 3 chars), index provides uniqueness
+    if (transId && typeof transId === 'string' && transId.length >= 3 && typeof index === 'number') {
+        const anchor = transId.slice(0, 3);
+        const indexStr = _encodeFileIndex(index);
+        prefix = `${anchor}${indexStr}`;
+    } else {
+        // ★ Random mode (backward compatible): ms + 2 random chars
+        const ms = String(now.getMilliseconds()).padStart(3, "0");
+        const validLetters = FILENAME_VALID_CHARS.slice(0, -10); // Only letters, no digits
+        const c1 = validLetters[Math.floor(Math.random() * validLetters.length)];
+        let c2 = validLetters[Math.floor(Math.random() * validLetters.length)];
+        if (c1.toLowerCase() === "g") {
+            const noG = validLetters.filter((c) => c.toLowerCase() !== "g");
+            c2 = noG[Math.floor(Math.random() * noG.length)];
+        }
+        prefix = `${ms}${c1}${c2}`;
     }
 
-    // ★ If no transId, use a random prefix (backward compatible)
-    const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
-    const valid = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        .split("")
-        .filter((c) => !excluded.has(c.toLowerCase()));
-
-    const c1 = valid[Math.floor(Math.random() * valid.length)];
-    let c2 = valid[Math.floor(Math.random() * valid.length)];
-    if (c1.toLowerCase() === "g") {
-        const noG = valid.filter((c) => c.toLowerCase() !== "g");
-        c2 = noG[Math.floor(Math.random() * noG.length)];
-    }
-
-    return `${ms}${c1}${c2}_${date}__${day}__${time}${ext}`;
+    return `${prefix}_${date}__${day}__${time}${ext}`;
 }
 
 /**
@@ -1601,6 +1625,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
     const localTasks = [];
     const taskMap = new Map();
     const originalFilenames = new Map(); // Save original filename mapping
+    let httpIndex = 0; // ★ Batch file index for unique filename generation
     for (const b of pending) {
         const src = String(b.src || "");
         if (/^data:/i.test(src) || /^file:/i.test(src)) localTasks.push(b);
@@ -1611,8 +1636,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             // ★ Unified source of truth: first try extracting original filename from URL; fall back to timestamp on failure
             // This keeps filenames consistent between HTML-block paste and downloadVideosFromUrl
             const originalFileName = getFilenameFromUrl(src, b.kind);
-            // ★ Use transId as prefix so rollback can precisely match deletions
-            const filename = originalFileName || getTimestampFilename(ext, transId);
+            // ★ Use transId + index for batch mode unique filename (fixes duplicate filename bug)
+            const filename = originalFileName || getTimestampFilename(ext, transId, httpIndex);
+            httpIndex++;
             const destPath = path.join(targetDir, filename);
             httpTasks.push({ url: src, tag, kind: b.kind || "image", destPath, referrer: b.referrer || "", maxBytes: 20000 * 1048576 });
             taskMap.set(tag, b);
@@ -1640,6 +1666,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
 
     let doneCount = 0;
     const total = pending.length;
+    let localIndex = httpIndex; // ★ Continue from httpIndex for unified batch indexing
     for (const b of localTasks) {
         try {
             const src = String(b.src || "");
@@ -1657,8 +1684,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                     // Prefer using original filename. Only fall back to timestamp style when filename is unavailable (e.g. only extension).
                     let filename = originalName;
                     if (!originalName || originalName === ext) {
-                        // ★ Use transId as prefix so rollback can precisely match deletions
-                        filename = getTimestampFilename(ext, transId);
+                        // ★ Use transId + index for batch mode unique filename
+                        filename = getTimestampFilename(ext, transId, localIndex);
+                        localIndex++;
                     }
                     const destPath = path.join(targetDir, filename);
                     try {
@@ -1706,8 +1734,9 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                 if (!isImageExtForClipboard(ext)) {
                     try { const dim = sizeOf(buf); if (dim && dim.type) ext = "." + dim.type; } catch { ext = ".webp"; }
                 }
-                // ★ Use transId as prefix so rollback can precisely match deletions
-                const filename = getTimestampFilename(ext, transId);
+                // ★ Use transId + index for batch mode unique filename
+                const filename = getTimestampFilename(ext, transId, localIndex);
+                localIndex++;
                 const destPath = path.join(targetDir, filename);
                 try {
                     fs.writeFileSync(destPath, buf);
