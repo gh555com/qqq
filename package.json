@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.51",
+  "version": "15.73.52",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -398,14 +398,12 @@
   },
   "scripts": {
     "bundle": "node qqqworkflow/esbuild.config.js",
-    "ci:test": "vscode-test --config .vscode-test.js",
     "ci:package": "npm run bundle && node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npx @vscode/vsce package --allow-missing-repository --allow-star-activation -o dist/qqq-${npm_package_version}.vsix",
     "ci:publish": "node qqqworkflow/git_help.js publish",
     "package": "node qqqworkflow/git_help.js package",
     "publish": "npx @vscode/vsce publish --allow-star-activation",
     "q": "npx @vscode/vsce publish patch --allow-star-activation",
-    "pub": "yes | npx vsce publish patch",
-    "test": "npm run ci:test"
+    "pub": "yes | npx vsce publish patch"
   },
   "repository": {
     "type": "git",
@@ -569,7 +567,7 @@
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.55.0",
     "@vscode/vsce": "^3.6.2",
-    "esbuild": "^0.20.0",
-    "mocha": "^10.0.0"
+    "adm-zip": "^0.5.16",
+    "esbuild": "^0.20.0"
   }
 }
