@@ -16,6 +16,65 @@ let vscode = null;
 try { vscode = require("vscode"); } catch { }
 
 // ============================================================================
+// ★ Cross-process Install Marker (atomic, prevents multi-window race)
+// ============================================================================
+
+/**
+ * Try to acquire install marker atomically (no waiting, instant return)
+ * Uses OS-level O_EXCL to guarantee only one process wins
+ * @param {string} markerPath - Path to marker file
+ * @param {number} staleMs - Marker expires after this (default 5 min)
+ * @returns {{acquired: boolean, release: Function}}
+ */
+function tryAcquireMarker(markerPath, staleMs = 300000) {
+    // Ensure directory exists
+    const dir = path.dirname(markerPath);
+    if (!fs.existsSync(dir)) {
+        try { fs.mkdirSync(dir, { recursive: true }); } catch { }
+    }
+
+    // Clean stale marker
+    try {
+        const st = fs.statSync(markerPath);
+        if (Date.now() - st.mtimeMs > staleMs) {
+            fs.unlinkSync(markerPath);
+        }
+    } catch { /* doesn't exist, good */ }
+
+    // Atomic exclusive create
+    try {
+        const fd = fs.openSync(markerPath, "wx");
+        fs.writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
+        fs.closeSync(fd);
+        return {
+            acquired: true,
+            release: () => { try { fs.unlinkSync(markerPath); } catch { } }
+        };
+    } catch (e) {
+        if (e.code === "EEXIST") {
+            return { acquired: false, release: () => {} };
+        }
+        // Other errors - proceed anyway
+        return { acquired: true, release: () => {} };
+    }
+}
+
+/**
+ * Check if install is in progress (marker exists and not stale)
+ * @param {string} markerPath - Path to marker file
+ * @param {number} staleMs - Marker expires after this
+ * @returns {boolean}
+ */
+function isMarkerActive(markerPath, staleMs = 300000) {
+    try {
+        const st = fs.statSync(markerPath);
+        return Date.now() - st.mtimeMs < staleMs;
+    } catch {
+        return false;
+    }
+}
+
+// ============================================================================
 // ★ Python Engine Downloader
 // ============================================================================
 
@@ -390,7 +449,8 @@ sys.exit(0)
 
     /**
      * ★ L1 perfection check: interpreter exists + dependencies complete + VC++ DLLs exist => perfect
-     * @returns {Object} - { perfect: boolean, pythonPath: string|null, missing: string[] }
+     * ★ Also checks if installation is in progress to prevent using intermediate state
+     * @returns {Object} - { perfect: boolean, pythonPath: string|null, missing: string[], reason: string }
      */
     async checkL1Perfect(context) {
         const path = require('path');
@@ -406,6 +466,20 @@ sys.exit(0)
         if (!context || !context.globalStorageUri) {
             markImperfect('no_context');
             return { perfect: false, pythonPath: null, missing: [], reason: 'no_context' };
+        }
+
+        // ★ CRITICAL: Check if another window is installing
+        // Prevents checking intermediate state (half-installed deps)
+        const markerPath = path.join(context.globalStorageUri.fsPath, "python_installing.marker");
+        if (isMarkerActive(markerPath, 300000)) {
+            markImperfect('install_in_progress');
+            return {
+                perfect: false,
+                pythonPath: null,
+                missing: [],
+                reason: 'install_in_progress',
+                installInProgress: true  // Flag for caller to schedule retry
+            };
         }
 
         const installDir = path.join(context.globalStorageUri.fsPath, "python_engine");
@@ -738,9 +812,19 @@ sys.exit(0)
     /**
      * ★ Full Python auto-install workflow
      * Includes download, extract, pip install, pywin32 config, slimming
+     * ★ Multi-window safe: uses atomic marker to prevent concurrent installs
      */
     async autoInstall(context) {
         const global = require('./global');
+
+        // ★ Atomic marker to prevent multi-window concurrent installs
+        const markerPath = path.join(context.globalStorageUri.fsPath, "python_installing.marker");
+        const marker = tryAcquireMarker(markerPath, 300000);
+
+        if (!marker.acquired) {
+            global.logMessage("[PythonInstall] Another window is installing, skip this window", "INFO");
+            return { success: false, error: 'install_in_progress', skipped: true };
+        }
 
         try {
             const os = require('os');
@@ -951,6 +1035,9 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
             this._saveState(context, { installTimestamp: Date.now() });
             global.logMessage(q('qvenv.installFailed', e.message), 'ERROR');
             return { success: false, error: e.message };
+        } finally {
+            // ★ Always release the marker
+            marker.release();
         }
     }
 }

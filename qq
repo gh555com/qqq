@@ -1,0 +1,56 @@
+[2026-02-18T22:16:30.661+08:00][INFO] FFmpeg initialized from globalStorage: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-18T22:16:30.674+08:00][INFO] qqq 扩展激活（中控模式）...
+[2026-02-18T22:16:30.681+08:00][INFO] Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）
+[2026-02-18T22:16:30.681+08:00][INFO] qqq 扩展激活完成
+[2026-02-18T22:16:30.701+08:00][INFO] Integrity: PASSED
+[2026-02-18T22:16:30.702+08:00][INFO] FFmpeg Path: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-18T22:16:30.702+08:00][INFO] Q2 Integrity: PASSED
+[2026-02-18T22:16:31.495+08:00][DEBUG] [FolderScan] F:\dq\qqq: 51ms, 35文件, 2.4 GB (JS)
+[2026-02-18T22:16:33.681+08:00][INFO] qqq 延迟初始化开始...
+[2026-02-18T22:16:35.058+08:00][INFO] [PythonCheck] L1 完美命中: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\python_engine\python.exe
+[2026-02-18T22:16:35.059+08:00][INFO] [Python] 尝试 spawn: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\python_engine\python.exe "e:\s\wol\py\q3\dist\kp.py" --daemon
+[2026-02-18T22:16:35.211+08:00][WARN] Python stderr: Daemon started (multithreaded). PID=45244
+[2026-02-18T22:16:35.226+08:00][INFO] Python bridge started and handshaked
+[2026-02-18T22:16:35.226+08:00][INFO] Python Bridge 使用 e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\python_engine\python.exe 启动成功
+[2026-02-18T22:16:36.698+08:00][INFO] qqq startDaemons 开始 (6秒延迟)
+[2026-02-18T22:16:36.698+08:00][INFO] [startDaemons] 已有 bridge 活动中 (py=true, rust=null, shell=null)，跳过幽灵进程清理
+[2026-02-18T22:16:36.700+08:00][INFO] ====================================================
+[2026-02-18T22:16:36.700+08:00][INFO] �� Q-ENGINE STARTING | VERSION: 15.73.53 | 18/02/2026 22:16:36
+[2026-02-18T22:16:36.700+08:00][INFO] �FFmpeg: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\ffmpeg.exe (GLOBAL_STORAGE)
+[2026-02-18T22:16:36.700+08:00][INFO] ====================================================
+[2026-02-18T22:16:36.700+08:00][INFO] 开始启动守护进程，用户选择滴引擎: auto
+[2026-02-18T22:16:36.700+08:00][INFO] 启动 Shell bridge...
+[2026-02-18T22:16:36.701+08:00][DEBUG] 尝试启动 PowerShell 进程
+[2026-02-18T22:16:36.701+08:00][DEBUG] 尝试使用选项 1 启动 PowerShell: powershell.exe
+[2026-02-18T22:16:36.706+08:00][DEBUG] PowerShell 进程已创建: powershell.exe
+[2026-02-18T22:16:36.707+08:00][INFO] 启动 Rust bridge...
+[2026-02-18T22:16:36.710+08:00][WARN] Rust Bridge 启动异常：os is not defined
+[2026-02-18T22:16:39.808+08:00][WARN] Shell ping response invalid: {"error":"timeout"}
+[2026-02-18T22:16:40.115+08:00][INFO] Shell bridge started and handshaked
+[2026-02-18T22:16:40.115+08:00][INFO] Shell Bridge OK
+[2026-02-18T22:16:40.120+08:00][WARN] Python stderr: [AudioHub] Init failed: miniaudio import failed
+ModuleNotFoundError: No module named 'miniaudio'
+--- diagnostics ---
+python: 3.8.10 (tags/v3.8.10:3d8993a, May  3 2021, 11:48:03) [MSC v.1928 64 bit (AMD64)]
+platform: win32
+cwd: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\python_engine
+miniaudio: IMPORT FAILED
+import error: ModuleNotFoundError: No module named 'miniaudio'
+Traceback (most recent call last):
+File "e:\s\wol\py\q3\dist\kp.py", line 277, in _get_audio_hub
+hub = v16.AudioHub(
+File "e:\s\wol\py\q3\dist\miniaudio_v16.py", line 1342, in __init__
+self.music = NonBlockingAudioEngine(asset_folder=asset_folder, max_workers=music_workers, silent=silent)
+File "e:\s\wol\py\q3\dist\miniaudio_v16.py", line 217, in __init__
+raise RuntimeError(self._compat.reason(with_diag=True))
+RuntimeError: miniaudio import failed
+ModuleNotFoundError: No module named 'miniaudio'
+--- diagnostics ---
+python: 3.8.10 (tags/v3.8.10:3d8993a, May  3 2021, 11:48:03) [MSC v.1928 64 bit (AMD64)]
+platform: win32
+cwd: e:\s\d\qoder\f\a\User\globalStorage\gh555.qqq\python_engine
+miniaudio: IMPORT FAILED
+import error: ModuleNotFoundError: No module named 'miniaudio'
+[2026-02-18T22:16:40.122+08:00][WARN] Python 错误响应: AudioHub init failed
+[2026-02-18T22:16:40.122+08:00][WARN] [Audio] Clipboard watcher failed: {"_id":3,"status":"error","error":"AudioHub init failed"}
+[2026-02-18T22:16:42.127+08:00][INFO] qqq dow.js 预热 (w10)

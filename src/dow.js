@@ -2710,6 +2710,13 @@ class UnifiedMediaDownloader {
                     return l1Result.pythonPath;
                 }
 
+                // ★ If another window is installing, schedule periodic check
+                if (l1Result.installInProgress) {
+                    global.logMessage("[PythonCheck] Another window is installing, scheduling periodic check...", "INFO");
+                    this._scheduleInstallCheck(context, 5000, 120000);
+                    return null;
+                }
+
                 // L1 imperfect, log reason
                 global.logMessage(q('dow.l1Imperfect', l1Result.reason) + (l1Result.missing.length > 0 ? q('dow.l1ImperfectMissing', l1Result.missing.join(', ')) : ''), "INFO");
 
@@ -2758,6 +2765,11 @@ class UnifiedMediaDownloader {
                                 }
 
                                 resolve(res.path);
+                            } else if (res.skipped) {
+                                // ★ Another window is installing, schedule periodic check
+                                global.logMessage("[PythonInstall] Install skipped (another window installing), scheduling periodic check...", "INFO");
+                                this._scheduleInstallCheck(context, 5000, 120000);
+                                resolve(null);
                             } else {
                                 global.logMessage(q('dow.l4Failed', res.error), "ERROR");
                                 resolve(null);
@@ -2784,6 +2796,55 @@ class UnifiedMediaDownloader {
         })();
 
         return this._ensurePythonReadyPromise;
+    }
+
+    /**
+     * ★ Schedule periodic check for install completion (for windows that skipped install)
+     * @param {Object} context - VS Code extension context
+     * @param {number} intervalMs - Check interval in ms (default 5s)
+     * @param {number} timeoutMs - Total timeout in ms (default 120s)
+     */
+    _scheduleInstallCheck(context, intervalMs = 5000, timeoutMs = 120000) {
+        const global = require('./global');
+
+        // Prevent multiple schedulers
+        if (this._installCheckTimer) return;
+
+        const startTime = Date.now();
+
+        this._installCheckTimer = setInterval(async () => {
+            // Check timeout
+            if (Date.now() - startTime > timeoutMs) {
+                global.logMessage("[PythonCheck] Periodic check timeout, stopping", "INFO");
+                clearInterval(this._installCheckTimer);
+                this._installCheckTimer = null;
+                return;
+            }
+
+            // Check if install completed
+            const l1Result = await this.python.checkL1Perfect(context);
+
+            if (l1Result.perfect) {
+                global.logMessage("[PythonCheck] Install completed, triggering hot-start...", "INFO");
+                clearInterval(this._installCheckTimer);
+                this._installCheckTimer = null;
+
+                // Trigger hot-start
+                if (this.python._onPythonReady) {
+                    try {
+                        await this.python._onPythonReady(l1Result.pythonPath, context);
+                    } catch (e) {
+                        global.logMessage(`[PythonCheck] Hot-start failed: ${e.message}`, "WARN");
+                    }
+                }
+            } else if (!l1Result.installInProgress) {
+                // Marker gone but not perfect - something went wrong
+                global.logMessage("[PythonCheck] Marker gone but env incomplete, stopping check", "WARN");
+                clearInterval(this._installCheckTimer);
+                this._installCheckTimer = null;
+            }
+            // If installInProgress, continue checking
+        }, intervalMs);
     }
 
     destroy() {

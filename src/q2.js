@@ -2062,10 +2062,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const globalTooltip = document.getElementById('globalTooltip');
   if (globalTooltip) {
     let currentTooltipTarget = null;
-    // Helper: escape HTML for safe innerHTML (use \x3c to avoid </script> parser issue)
-    function escapeHtml(s) {
-      return String(s).replace(/&/g, '&amp;').replace(/\x3c/g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
 
     // Add tooltip events for all elements with data-tooltip
     document.addEventListener('mouseenter', (e) => {
@@ -2081,22 +2077,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // ★ Always use pre-wrap and limit max-width to prevent text overflow
           globalTooltip.style.whiteSpace = 'pre-wrap';
           globalTooltip.style.maxWidth = availableWidth + 'px';
-
-          // ★ Special rendering for recycle-file: highlight last \\ as separator
-          const isRecycleFile = target.classList.contains('recycle-file');
-          if (isRecycleFile && (text.includes('\\') || text.includes('/'))) {
-            const sep = text.includes('\\') ? '\\' : '/';
-            const lastIdx = text.lastIndexOf(sep);
-            if (lastIdx > 0 && lastIdx < text.length - 1) {
-              const dirPart = text.substring(0, lastIdx);
-              const fileName = text.substring(lastIdx + 1);
-              globalTooltip.innerHTML = '<span class="tt-dim">' + escapeHtml(dirPart) + '</span><span class="tt-sep">' + sep + '</span><span class="tt-bright">' + escapeHtml(fileName) + '</span>';
-            } else {
-              globalTooltip.textContent = text;
-            }
-          } else {
-            globalTooltip.textContent = text;
-          }
+          globalTooltip.textContent = text;
           globalTooltip.style.display = 'block';
         }
       }
