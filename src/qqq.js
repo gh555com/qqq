@@ -1265,7 +1265,7 @@ async function downloadVideosFromUrlCommand(urlArg) {
 
 	const currentDocDir = path.dirname(editor.document.uri.fsPath);
 	const targetDir = path.join(currentDocDir, "qqq");
-	if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+	h.ensureDir(targetDir);  // ★ Use h.ensureDir for salt handling
 
 	const transId = global.TransactionManager.createTransactionId();
 	const targetUri = editor.document.uri;

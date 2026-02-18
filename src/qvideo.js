@@ -935,7 +935,7 @@ class Qvideo {
 
         const currentDocDir = path.dirname(editor.document.uri.fsPath);
         const targetDir = path.join(currentDocDir, "qqq");
-        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+        h.ensureDir(targetDir);  // ★ Use h.ensureDir for salt handling
 
         // ★ Generate task identifier
         const filePath = editor.document.uri.fsPath;

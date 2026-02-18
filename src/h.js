@@ -262,7 +262,23 @@ function ensureDir(dirPath) {
             // ★ Add salt: if creating the qqq folder, write ADS marker (Windows NTFS)
             _saltQqqFolder(dirPath);
         } catch (e) { }
+    } else {
+        // ★ Directory already exists: ensure salt is present (fix missing salt case)
+        _ensureSalt(dirPath);
     }
+}
+
+/**
+ * Ensure qqq folder has salt marker (called when folder already exists)
+ * Only adds salt if folder is qqq and doesn't have salt yet
+ */
+function _ensureSalt(dirPath) {
+    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
+    // Check if salt already exists
+    if (isOurQqqFolder(dirPath)) return;  // Already has valid salt
+    // No salt found, add it now
+    log(`[Salt] Folder exists but no salt, adding salt to: ${dirPath}`, "DEBUG");
+    _saltQqqFolder(dirPath);
 }
 
 // xattr key constants
@@ -281,13 +297,18 @@ function _saltQqqFolder(dirPath) {
     try {
         if (process.platform === "win32") {
             fs.writeFileSync(dirPath + ":qqq", QQQ_ADS_SALT, "utf8");
+            log(`[Salt] Written ADS to ${dirPath}:qqq = ${QQQ_ADS_SALT}`, "DEBUG");
         } else if (process.platform === "darwin") {
             cp.execFileSync("xattr", ["-w", XATTR_KEY_DARWIN, QQQ_ADS_SALT, dirPath], { timeout: 1000 });
+            log(`[Salt] Written xattr ${XATTR_KEY_DARWIN} to ${dirPath}`, "DEBUG");
         } else {
             // Linux: setfattr may not be installed; silently fail
             cp.execFileSync("setfattr", ["-n", XATTR_KEY_LINUX, "-v", QQQ_ADS_SALT, dirPath], { timeout: 1000 });
+            log(`[Salt] Written xattr ${XATTR_KEY_LINUX} to ${dirPath}`, "DEBUG");
         }
-    } catch { }
+    } catch (e) {
+        log(`[Salt] Failed to write salt to ${dirPath}: ${e.message}`, "WARN");
+    }
 }
 
 /**
@@ -295,20 +316,31 @@ function _saltQqqFolder(dirPath) {
  * Silently fail and return false on all platforms
  */
 function isOurQqqFolder(dirPath) {
-    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return false;
+    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) {
+        log(`[Salt] isOurQqqFolder: not a qqq folder: ${dirPath}`, "DEBUG");
+        return false;
+    }
     try {
         if (process.platform === "win32") {
-            const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
-            return salt === QQQ_ADS_SALT;
+            const adsPath = dirPath + ":qqq";
+            const salt = fs.readFileSync(adsPath, "utf8");
+            const match = salt === QQQ_ADS_SALT;
+            log(`[Salt] isOurQqqFolder: read ADS from ${adsPath}, salt="${salt}", expected="${QQQ_ADS_SALT}", match=${match}`, "DEBUG");
+            return match;
         } else if (process.platform === "darwin") {
             const out = cp.execFileSync("xattr", ["-p", XATTR_KEY_DARWIN, dirPath], { timeout: 1000, encoding: "utf8" });
-            return out.trim() === QQQ_ADS_SALT;
+            const match = out.trim() === QQQ_ADS_SALT;
+            log(`[Salt] isOurQqqFolder: read xattr, value="${out.trim()}", match=${match}`, "DEBUG");
+            return match;
         } else {
             // Linux: getfattr
             const out = cp.execFileSync("getfattr", ["--only-values", "-n", XATTR_KEY_LINUX, dirPath], { timeout: 1000, encoding: "utf8" });
-            return out.trim() === QQQ_ADS_SALT;
+            const match = out.trim() === QQQ_ADS_SALT;
+            log(`[Salt] isOurQqqFolder: read xattr, value="${out.trim()}", match=${match}`, "DEBUG");
+            return match;
         }
-    } catch {
+    } catch (e) {
+        log(`[Salt] isOurQqqFolder: failed to read salt from ${dirPath}: ${e.message}`, "DEBUG");
         return false;
     }
 }
@@ -331,20 +363,34 @@ function isDirEmpty(dirPath) {
  * @returns {boolean} Whether deletion was performed
  */
 function cleanupEmptyQqqFolder(docDir) {
-    if (!docDir) return false;
+    if (!docDir) {
+        log(`[Cleanup] cleanupEmptyQqqFolder: docDir is empty`, "DEBUG");
+        return false;
+    }
     const qqqPath = path.join(docDir, QQQ_FOLDER_NAME);
+    log(`[Cleanup] cleanupEmptyQqqFolder: checking ${qqqPath}`, "DEBUG");
     try {
-        if (!fs.existsSync(qqqPath)) return false;
-        if (!fs.statSync(qqqPath).isDirectory()) return false;
-        if (!isDirEmpty(qqqPath)) return false;
-        if (!isOurQqqFolder(qqqPath)) return false;
+        if (!fs.existsSync(qqqPath)) {
+            log(`[Cleanup] cleanupEmptyQqqFolder: ${qqqPath} does not exist`, "DEBUG");
+            return false;
+        }
+        if (!fs.statSync(qqqPath).isDirectory()) {
+            log(`[Cleanup] cleanupEmptyQqqFolder: ${qqqPath} is not a directory`, "DEBUG");
+            return false;
+        }
+        const empty = isDirEmpty(qqqPath);
+        log(`[Cleanup] cleanupEmptyQqqFolder: isDirEmpty=${empty}`, "DEBUG");
+        if (!empty) return false;
+        const ours = isOurQqqFolder(qqqPath);
+        log(`[Cleanup] cleanupEmptyQqqFolder: isOurQqqFolder=${ours}`, "DEBUG");
+        if (!ours) return false;
         // Delete ADS stream first, then delete empty directory
         try { fs.unlinkSync(qqqPath + ":qqq"); } catch { }
         fs.rmdirSync(qqqPath);
-        log(q('h.log.cleanupEmptyFolder', qqqPath), "INFO");
+        log(`[Cleanup] SUCCESS: deleted empty qqq folder: ${qqqPath}`, "INFO");
         return true;
     } catch (e) {
-        log(q('h.log.cleanupEmptyFolderFailed', e.message), "WARN");
+        log(`[Cleanup] cleanupEmptyQqqFolder FAILED: ${e.message}`, "WARN");
         return false;
     }
 }
