@@ -142,11 +142,10 @@ let enlargeSmallImages = true;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
 let cleanFreakMode = "add"; // "never" | "add" | "add & remove"
-let cleanFreakModeOverride = null; // ★ Runtime override from weave button (not persisted)
 
-// ★ Helper function to get effective cleanFreakMode (with override support)
+// ★ Helper function to get effective cleanFreakMode
 function getEffectiveCleanFreakMode() {
-	return cleanFreakModeOverride !== null ? cleanFreakModeOverride : cleanFreakMode;
+	return cleanFreakMode;
 }
 
 let textSlideColorScheme = "light";
@@ -3205,11 +3204,16 @@ async function activate(context) {
 	// Previously listening to onDidChangeConfiguration caused refreshConfig() to run before sessionOverrides update
 	global.ConfigManager.onConfigUpdated((changedKeys, event) => {
 		global.logMessage(q('q1.log.configUpdateCallback', changedKeys.join(', ')), "DEBUG");
+		const oldCleanFreakMode = cleanFreakMode; // ★ Remember old value before refresh
 		refreshConfig();
 		clearDecorations();
 		if (codeLensProvider) codeLensProvider.refresh();
 		renderVisibleEditors(10);
 		if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
+		// ★ Notify q4 if cleanFreakMode changed (for weave button sync)
+		if (cleanFreakMode !== oldCleanFreakMode && q1Utils.onCleanFreakModeChange) {
+			q1Utils.onCleanFreakModeChange(cleanFreakMode);
+		}
 	});
 
 	// ★ Ultimate optimal: privilege boost, never await before registration
@@ -3352,11 +3356,15 @@ const q1Utils = {
 	getCleanFreakMode: getEffectiveCleanFreakMode,
 	setCleanFreakMode: (mode) => {
 		if (["never", "add", "add & remove"].includes(mode)) {
-			cleanFreakModeOverride = mode; // ★ Set runtime override, not the base config
+			// ★ Sync to VS Code settings for UI consistency (both sides are "试玩")
+			// Real config will come from cloud in the future
+			vscode.workspace.getConfiguration('qqq').update('cleanFreak', mode, vscode.ConfigurationTarget.Global);
 			return true;
 		}
 		return false;
 	},
+	// ★ Callback for q4 to register when cleanFreakMode changes
+	onCleanFreakModeChange: null,
 	// ★ performGlobalClean for direct invocation from q4
 	performGlobalClean
 };
