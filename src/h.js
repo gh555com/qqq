@@ -255,6 +255,9 @@ function _tryLocalDeduplicate(filePath) {
 const QQQ_ADS_SALT = "gh555";
 const QQQ_FOLDER_NAME = "qqq";
 
+// ★ Cache for salted qqq folders (avoid repeated ADS reads)
+const _saltedQqqCache = new Set();
+
 function ensureDir(dirPath) {
     if (!fs.existsSync(dirPath)) {
         try {
@@ -271,11 +274,17 @@ function ensureDir(dirPath) {
 /**
  * Ensure qqq folder has salt marker (called when folder already exists)
  * Only adds salt if folder is qqq and doesn't have salt yet
+ * Uses cache to avoid repeated ADS reads
  */
 function _ensureSalt(dirPath) {
     if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return;
+    // ★ Check cache first (fast path)
+    if (_saltedQqqCache.has(dirPath)) return;
     // Check if salt already exists
-    if (isOurQqqFolder(dirPath)) return;  // Already has valid salt
+    if (isOurQqqFolder(dirPath)) {
+        _saltedQqqCache.add(dirPath);  // Cache it
+        return;
+    }
     // No salt found, add it now
     log(`[Salt] Folder exists but no salt, adding salt to: ${dirPath}`, "DEBUG");
     _saltQqqFolder(dirPath);
@@ -306,6 +315,8 @@ function _saltQqqFolder(dirPath) {
             cp.execFileSync("setfattr", ["-n", XATTR_KEY_LINUX, "-v", QQQ_ADS_SALT, dirPath], { timeout: 1000 });
             log(`[Salt] Written xattr ${XATTR_KEY_LINUX} to ${dirPath}`, "DEBUG");
         }
+        // ★ Cache it after successful write
+        _saltedQqqCache.add(dirPath);
     } catch (e) {
         log(`[Salt] Failed to write salt to ${dirPath}: ${e.message}`, "WARN");
     }
@@ -316,31 +327,20 @@ function _saltQqqFolder(dirPath) {
  * Silently fail and return false on all platforms
  */
 function isOurQqqFolder(dirPath) {
-    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) {
-        log(`[Salt] isOurQqqFolder: not a qqq folder: ${dirPath}`, "DEBUG");
-        return false;
-    }
+    if (path.basename(dirPath) !== QQQ_FOLDER_NAME) return false;
     try {
         if (process.platform === "win32") {
-            const adsPath = dirPath + ":qqq";
-            const salt = fs.readFileSync(adsPath, "utf8");
-            const match = salt === QQQ_ADS_SALT;
-            log(`[Salt] isOurQqqFolder: read ADS from ${adsPath}, salt="${salt}", expected="${QQQ_ADS_SALT}", match=${match}`, "DEBUG");
-            return match;
+            const salt = fs.readFileSync(dirPath + ":qqq", "utf8");
+            return salt === QQQ_ADS_SALT;
         } else if (process.platform === "darwin") {
             const out = cp.execFileSync("xattr", ["-p", XATTR_KEY_DARWIN, dirPath], { timeout: 1000, encoding: "utf8" });
-            const match = out.trim() === QQQ_ADS_SALT;
-            log(`[Salt] isOurQqqFolder: read xattr, value="${out.trim()}", match=${match}`, "DEBUG");
-            return match;
+            return out.trim() === QQQ_ADS_SALT;
         } else {
             // Linux: getfattr
             const out = cp.execFileSync("getfattr", ["--only-values", "-n", XATTR_KEY_LINUX, dirPath], { timeout: 1000, encoding: "utf8" });
-            const match = out.trim() === QQQ_ADS_SALT;
-            log(`[Salt] isOurQqqFolder: read xattr, value="${out.trim()}", match=${match}`, "DEBUG");
-            return match;
+            return out.trim() === QQQ_ADS_SALT;
         }
-    } catch (e) {
-        log(`[Salt] isOurQqqFolder: failed to read salt from ${dirPath}: ${e.message}`, "DEBUG");
+    } catch {
         return false;
     }
 }
@@ -363,34 +363,22 @@ function isDirEmpty(dirPath) {
  * @returns {boolean} Whether deletion was performed
  */
 function cleanupEmptyQqqFolder(docDir) {
-    if (!docDir) {
-        log(`[Cleanup] cleanupEmptyQqqFolder: docDir is empty`, "DEBUG");
-        return false;
-    }
+    if (!docDir) return false;
     const qqqPath = path.join(docDir, QQQ_FOLDER_NAME);
-    log(`[Cleanup] cleanupEmptyQqqFolder: checking ${qqqPath}`, "DEBUG");
     try {
-        if (!fs.existsSync(qqqPath)) {
-            log(`[Cleanup] cleanupEmptyQqqFolder: ${qqqPath} does not exist`, "DEBUG");
-            return false;
-        }
-        if (!fs.statSync(qqqPath).isDirectory()) {
-            log(`[Cleanup] cleanupEmptyQqqFolder: ${qqqPath} is not a directory`, "DEBUG");
-            return false;
-        }
-        const empty = isDirEmpty(qqqPath);
-        log(`[Cleanup] cleanupEmptyQqqFolder: isDirEmpty=${empty}`, "DEBUG");
-        if (!empty) return false;
-        const ours = isOurQqqFolder(qqqPath);
-        log(`[Cleanup] cleanupEmptyQqqFolder: isOurQqqFolder=${ours}`, "DEBUG");
-        if (!ours) return false;
+        if (!fs.existsSync(qqqPath)) return false;
+        if (!fs.statSync(qqqPath).isDirectory()) return false;
+        if (!isDirEmpty(qqqPath)) return false;
+        if (!isOurQqqFolder(qqqPath)) return false;
         // Delete ADS stream first, then delete empty directory
         try { fs.unlinkSync(qqqPath + ":qqq"); } catch { }
         fs.rmdirSync(qqqPath);
-        log(`[Cleanup] SUCCESS: deleted empty qqq folder: ${qqqPath}`, "INFO");
+        // ★ Clear from cache after deletion
+        _saltedQqqCache.delete(qqqPath);
+        log(`[Cleanup] Deleted empty qqq folder: ${qqqPath}`, "INFO");
         return true;
     } catch (e) {
-        log(`[Cleanup] cleanupEmptyQqqFolder FAILED: ${e.message}`, "WARN");
+        log(`[Cleanup] cleanupEmptyQqqFolder failed: ${e.message}`, "WARN");
         return false;
     }
 }
