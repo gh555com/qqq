@@ -1996,9 +1996,20 @@ class ClipboardHistorySidebarProvider {
             overflow-y: auto;
             border-radius: 4px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-            top: calc(100% - 2px); /* Position below the input, moved down 6px */
-            left: -2px; /* Moved left 2px */
         }
+
+        /* ★ Video input dropdown: custom offset */
+        #videoHistoryDropdown {
+            top: calc(100% + 1px  );
+            left: -5px;
+        }
+
+        /* ★ Search input dropdown: original offset */
+        #searchHistoryDropdown {
+            top: calc(100% - 9px);
+            left: 0;
+        }
+
         .history-dropdown-item {
             padding: 6px 10px;
             cursor: pointer;

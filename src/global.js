@@ -1428,15 +1428,30 @@ async function startDaemons() {
 		// ★ Ultimate optimal: check if already deactivated before starting
 		if (_isDeactivated) return;
 
-		// ★ Core design: start all three engines, all standby-ready
-		// Regardless of user selection, start as many as possible
-		// Switching engines just changes who responds; no kill/restart
+		// ★ Shell daemon always starts (needed for wq clipboard detection)
 		const shellPromise = ensureStarted(shellBridge);
-		const pythonPromise = ensureStarted(pythonBridge);
-		const rustPromise = ensureStarted(rustBridge);
 
-		// Wait for all engines in parallel
-		await Promise.all([shellPromise, pythonPromise, rustPromise]);
+		// ★ Only start the IO engine user selected (save memory)
+		const pref = getEnginePreference();
+
+		if (pref === 'rust') {
+			// Rust (+ Shell), fallback to Python if Rust fails
+			await shellPromise;
+			const rustOk = await ensureStarted(rustBridge);
+			if (!rustOk) {
+				await ensureStarted(pythonBridge);
+			}
+		} else if (pref === 'shell') {
+			// Shell only (already starting)
+			await shellPromise;
+		} else {
+			// 'python' or 'auto': start Python, Rust as fallback
+			await shellPromise;
+			const pyOk = await ensureStarted(pythonBridge);
+			if (!pyOk) {
+				await ensureStarted(rustBridge);
+			}
+		}
 
 		if (bootSeq === _daemonBootSeq) {
 			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
