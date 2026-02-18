@@ -1653,10 +1653,11 @@ class ClipboardHistorySidebarProvider {
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         /* ★ Weave inline buttons - positioned right after "Weave" text */
-        .weave-inline-btns { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; pointer-events: auto; }
-        .weave-mini-btn { padding: 1px 4px !important; min-width: 20px; min-height: 18px; pointer-events: auto; }
+        .weave-inline-btns { display: inline-flex; gap: 4px; margin-left: 2px; vertical-align: middle; pointer-events: auto; }
+        .weave-mini-btn { pointer-events: auto; }
         #weaveCard:hover { transform: none; }
-        /* ★ SVG icon for weave+remove button (± symbol, hand-drawn style) */
+        #weaveCard > .text-content { position: relative; top: 1px; }
+        /* ★ SVG icons for weave buttons */
         .icon-weave-remove { width: 14px; height: 14px; display: inline-block; vertical-align: middle; }
         .icon-weave-remove svg { width: 14px; height: 14px; }
         /* ★ cleanFreak mode icons (dynamic, set via JS) */
@@ -1929,7 +1930,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="cmd-btn" id="weaveCard" data-cmd="qqq.weave">
                     <div class="text-content">
-                        &nbsp;Weave <span class="weave-inline-btns"><button class="action-mini-btn weave-mini-btn" id="btnWeaveWithRemove" title="Weave + Remove (add & remove)"><span class="icon-weave-remove"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/><rect x="5" y="17" width="14" height="2" rx="1"/></svg></span></button><button class="action-mini-btn weave-mini-btn" id="btnCycleCleanFreak" title="Cycle Clean Freak Mode"><span id="cleanFreakIcon"></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
+                        &nbsp;Weave <span class="weave-inline-btns"><button class="action-mini-btn weave-mini-btn" id="btnCycleCleanFreak" title="Cycle Clean Freak Mode"><span id="cleanFreakIcon"></span></button><button class="action-mini-btn weave-mini-btn" id="btnWeaveWithRemove" title="Weave + Remove (add & remove)"><span class="icon-weave-remove"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" shape-rendering="crispEdges"><path d="M3 -2L12 7L21 -2" stroke="#333" stroke-width="2.5" fill="none"/><path d="M3 26L12 17L21 26" stroke="#333" stroke-width="2.5" fill="none"/></svg></span></button></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span class="spacer-75"></span><span id="weave-stats">${weaveStats}</span>
                     </div>
                 </div>
                 <div class="cmd-btn" data-cmd="qqq.exportDoc">
@@ -2281,8 +2282,8 @@ class ClipboardHistorySidebarProvider {
             var currentCleanFreakMode = 'add'; // default
             var cleanFreakSvgs = {
                 'never': '',
-                'add': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>',
-                'add & remove': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#545454"><path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z"/><rect x="5" y="17" width="14" height="2" rx="1"/></svg>'
+                'add': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" shape-rendering="crispEdges"><path d="M12 3V21M3 12H21" stroke="#d4a520" stroke-width="2.5"/></svg>',
+                'add & remove': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" shape-rendering="crispEdges"><path d="M12 -3V15M3 6H21" stroke="#d4a520" stroke-width="2.5"/><path d="M3 21H21" stroke="#d4a520" stroke-width="4"/></svg>'
             };
             function updateCleanFreakIcon(mode) {
                 currentCleanFreakMode = mode;

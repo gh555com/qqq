@@ -1954,7 +1954,7 @@ const DEFAULT_CONFIG = {
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率", // qq2q
 	"docExportIncludeCipher": true,
-	"transactionLevel": "full",
+	"transactionLevel": "half",
 	"textSlideColorScheme": "light",
 	"textSlideFontSize": 14,
 	// ★ Add missing config items (ensure VIP Gate fully covers)
