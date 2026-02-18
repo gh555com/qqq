@@ -2077,7 +2077,21 @@ document.addEventListener('DOMContentLoaded', () => {
           // ★ Always use pre-wrap and limit max-width to prevent text overflow
           globalTooltip.style.whiteSpace = 'pre-wrap';
           globalTooltip.style.maxWidth = availableWidth + 'px';
-          globalTooltip.textContent = text;
+
+          // ★ Special handling for recycle bin files: dim the path, highlight the filename
+          if (target.classList.contains('recycle-file')) {
+            const lastBackslashIndex = text.lastIndexOf('\\');
+            if (lastBackslashIndex !== -1) {
+              const pathPart = text.substring(0, lastBackslashIndex + 1);
+              const filePart = text.substring(lastBackslashIndex + 1);
+              globalTooltip.innerHTML = '<span style="opacity: 0.5;">' + pathPart + '</span>' + filePart;
+            } else {
+              globalTooltip.textContent = text;
+            }
+          } else {
+            globalTooltip.textContent = text;
+          }
+
           globalTooltip.style.display = 'block';
         }
       }

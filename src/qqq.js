@@ -1188,6 +1188,15 @@ async function savorMomentsCommand() {
 			try {
 				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 				if (res && (res.status === 'ok' || res.status === 'playing')) {
+					// ★ Write globalState for multi-window sync (always, even if sidebar not open)
+					context.globalState.update('qqq_savoring_state', {
+						playing: true,
+						windowId: process.pid.toString(),
+						fileName: info.fileName,
+						loopCount: loopCount,
+						startTime: Date.now()
+					});
+
 					// ★ Record Python playback state whether or not q4 is open
 					if (activeSidebarProvider) {
 						activeSidebarProvider._pythonPlayState = {
