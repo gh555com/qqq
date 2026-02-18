@@ -801,12 +801,12 @@
 		.path-tooltip {
 			position: fixed;
 			z-index: 99999;
-			background-color: #FAF8F0;
-			color: #3D3929;
-			border: 1px solid #D4CFC0;
+			background-color: #FFFbE6;
+			color: #5D4E37;
+			border: 1px solid #D8D0B8;
 			border-radius: 3px;
 			padding: 4px 8px;
-			box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+			box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 			pointer-events: none;
 			/* max-width/white-space/word-break 由 JS 动态控制 */
 		}
@@ -1044,7 +1044,7 @@
 			position: fixed;
 			pointer-events: none;
 			background: rgb(35, 30, 0);
-			color: var(--base2);
+			color: #FFD700;
 			padding: 4px 10px;
 			border-radius: 4px;
 			font-family: Tahoma, sans-serif;
@@ -1057,6 +1057,9 @@
 			border: 1px solid var(--border-strong);
 			max-width: calc(100vw - 20px); /* ★ Fallback: ensure background covers all text */
 		}
+		.dropdown-item-tooltip .tt-dim { color: #B8960B; }
+		.dropdown-item-tooltip .tt-sep { color: #FF4444; font-weight: bold; }
+		.dropdown-item-tooltip .tt-bright { color: #FFD700; }
 	</style>
 </head>
 
