@@ -1569,8 +1569,8 @@ async function activate(context) {
 		return;
 	}
 
-	// ★ Initialize i18n module: must be done before any q() calls
-	initI18n(extensionPath);
+	// ★ Initialize i18n module: must be done before any q() calls, pass context for globalState
+	initI18n(extensionPath, context);
 
 	global.logMessage(q('qqq.log.activating'), "INFO");
 
@@ -1820,10 +1820,26 @@ function _registerCommands(context) {
 					}
 				}
 
-				// Don't handle after ioEngine switch
+				// ★ Handle ioEngine switch: start the newly selected daemon
 				if (event.affectsConfiguration("qqq.ioEngine")) {
 					const val = global.getConfig("ioEngine");
 					global.logMessage(q('qqq.log.engineSwitch', val), "INFO");
+
+					// ★ Start the newly selected engine daemon
+					(async () => {
+						if (val === 'rust' && !global.rustBridge?.isAvailable()) {
+							global.logMessage("[Engine] Starting Rust daemon after switch...", "INFO");
+							await global.rustBridge?.start();
+						} else if (val === 'shell' && !global.shellBridge?.isAvailable()) {
+							global.logMessage("[Engine] Starting Shell daemon after switch...", "INFO");
+							await global.shellBridge?.start();
+						} else if ((val === 'python' || val === 'auto') && !global.pythonBridge?.isAvailable()) {
+							global.logMessage("[Engine] Starting Python daemon after switch...", "INFO");
+							await global.pythonBridge?.start();
+						}
+						global.invalidateEngineCache?.();
+						updateStatusBarThrottled();
+					})().catch(() => {});
 
 					if (val === "python") {
 						const { getSharedDownloader } = require('./dow');

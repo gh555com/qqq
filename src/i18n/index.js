@@ -15,6 +15,12 @@ let locales = null;
 // 扩展路径
 let extensionPath = null;
 
+// ★ Extension context for globalState access
+let extensionContext = null;
+
+// ★ Key for tracking first-time language initialization
+const LANG_INIT_KEY = 'qqq_language_initialized';
+
 // 语言代码映射 (qqq.language 设置值 → 语言文件名)
 const LANG_MAP = {
     '中文': 'zh',
@@ -174,21 +180,29 @@ function getLanguage() {
 /**
  * 初始化 i18n 模块
  * @param {string} [extPath] - 扩展路径
+ * @param {vscode.ExtensionContext} [context] - Extension context for globalState
  */
-function init(extPath) {
+function init(extPath, context) {
     // 设置扩展路径
     if (extPath) {
         extensionPath = extPath;
     }
 
+    // ★ Store context for globalState access
+    if (context) {
+        extensionContext = context;
+    }
+
     // 先加载所有语言包
     loadAllLocales();
 
-    // ★ Use inspect() to distinguish default value vs user-set value
+    // ★ Check if language was already initialized (persisted in globalState)
+    const alreadyInitialized = extensionContext?.globalState?.get(LANG_INIT_KEY, false);
+
     const config = vscode.workspace.getConfiguration('qqq');
     const langInspect = config.inspect('language');
 
-    // Check if user has explicitly set the language (not just using default)
+    // Check if user has explicitly set the language
     const hasUserSetLang = langInspect && (
         langInspect.globalValue !== undefined ||
         langInspect.workspaceValue !== undefined ||
@@ -196,17 +210,46 @@ function init(extPath) {
     );
 
     if (hasUserSetLang) {
-        // User explicitly set a language preference
+        // ★ User explicitly set a language → use it
         const userLang = config.get('language');
         if (userLang && LANG_MAP[userLang]) {
             setLanguage(userLang);
+            console.log(`[i18n] Using user-set language: ${userLang} → ${currentLang}`);
+        }
+    } else if (alreadyInitialized) {
+        // ★ Already initialized before, but user removed their setting → use default (zh)
+        // This handles the case where globalState says "initialized" but settings.json has no value
+        const defaultLang = config.get('language'); // Will be package.json default
+        if (defaultLang && LANG_MAP[defaultLang]) {
+            setLanguage(defaultLang);
+            console.log(`[i18n] Using default language (already initialized): ${defaultLang} → ${currentLang}`);
         }
     } else {
-        // ★ No user setting → follow VS Code display language
+        // ★ First time installation: auto-detect VS Code language and persist
         const vscodeLang = (vscode.env.language || 'en').toLowerCase();
         const mappedLang = VSCODE_LANG_MAP[vscodeLang] || 'en';
-        setLanguage(mappedLang);
-        console.log(`[i18n] Auto-detected language from VS Code: ${vscodeLang} → ${mappedLang}`);
+
+        // Find the display name for this language code
+        const displayName = Object.entries(LANG_MAP).find(([k, v]) => v === mappedLang)?.[0];
+
+        if (displayName) {
+            // ★ Persist to user settings (globalValue) so it survives across sessions
+            config.update('language', displayName, vscode.ConfigurationTarget.Global).then(() => {
+                console.log(`[i18n] First-time init: persisted language to settings: ${displayName}`);
+            }).catch(e => {
+                console.error(`[i18n] Failed to persist language setting:`, e);
+            });
+
+            setLanguage(mappedLang);
+        } else {
+            // Fallback to English if no mapping found
+            config.update('language', 'English', vscode.ConfigurationTarget.Global).catch(() => {});
+            setLanguage('en');
+        }
+
+        // ★ Mark as initialized in globalState
+        extensionContext?.globalState?.update(LANG_INIT_KEY, true);
+        console.log(`[i18n] First-time auto-detected: VS Code ${vscodeLang} → ${mappedLang}, persisted to settings`);
     }
 
     // 监听配置变更

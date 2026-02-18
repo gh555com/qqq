@@ -2078,31 +2078,9 @@ document.addEventListener('DOMContentLoaded', () => {
           globalTooltip.style.whiteSpace = 'pre-wrap';
           globalTooltip.style.maxWidth = availableWidth + 'px';
 
-          // ★ Check if text contains split marker for recycle bin files
-          if (text.includes('|SPLIT|')) {
-            const parts = text.split('|SPLIT|');
-            if (parts.length === 2) {
-              globalTooltip.textContent = '';
-              // Path part (before last backslash, excluding the backslash)
-              const pathWithoutSlash = parts[0].substring(0, parts[0].length - 1);
-              if (pathWithoutSlash) {
-                const pathSpan = document.createElement('span');
-                pathSpan.textContent = pathWithoutSlash;
-                globalTooltip.appendChild(pathSpan);
-              }
-              // Last backslash: bold + red
-              const slashSpan = document.createElement('span');
-              slashSpan.style.fontWeight = 'bold';
-              slashSpan.style.color = '#dc322f'; // Solarized red
-              slashSpan.textContent = '\\';
-              globalTooltip.appendChild(slashSpan);
-              // Filename part
-              const fileSpan = document.createElement('span');
-              fileSpan.textContent = parts[1];
-              globalTooltip.appendChild(fileSpan);
-            } else {
-              globalTooltip.textContent = text;
-            }
+          // ★ Check if should render as HTML (for styled tooltips like recycle bin files)
+          if (currentTooltipTarget.getAttribute('data-use-html') === 'true') {
+            globalTooltip.innerHTML = text; // text already escaped at generation time
           } else {
             globalTooltip.textContent = text;
           }
@@ -2962,15 +2940,17 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
         const fullDisplay = escapeHtmlAttribute(item.path);
         if (item.type === 'file') {
           const fileName = escapeHtmlAttribute(path.basename(item.path));
-          // ★ For tooltip: split path at last backslash for dim-path effect
+          // ★ For tooltip: highlight last backslash in bold red
           const lastBackslash = item.path.lastIndexOf('\\');
-          let tooltipData = fullDisplay;
+          let tooltipHtml = fullDisplay;
           if (lastBackslash !== -1) {
-            const pathPart = escapeHtmlAttribute(item.path.substring(0, lastBackslash + 1));
-            const filePart = escapeHtmlAttribute(item.path.substring(lastBackslash + 1));
-            tooltipData = `${pathPart}|SPLIT|${filePart}`; // Use marker for splitting
+            const beforeSlash = escapeHtmlAttribute(item.path.substring(0, lastBackslash));
+            const afterSlash = escapeHtmlAttribute(item.path.substring(lastBackslash + 1));
+            tooltipHtml = `${beforeSlash} <span style="font-weight:bold;color:#dc322f;">\\</span> ${afterSlash}`;
           }
-          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipData}"><span class="recycle-text">${fileName}</span></div>`;
+          // ★ Double-escape for HTML attribute: replace quotes and encode special chars
+          const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="recycle-text">${fileName}</span></div>`;
         } else {
           return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
@@ -3000,15 +2980,17 @@ function generateRecycleBinItemHtml(item) {
   const fullDisplay = escapeHtmlAttribute(item.path);
   if (item.type === 'file') {
     const fileName = escapeHtmlAttribute(path.basename(item.path));
-    // ★ For tooltip: split path at last backslash for dim-path effect
+    // ★ For tooltip: highlight last backslash in bold red
     const lastBackslash = item.path.lastIndexOf('\\');
-    let tooltipData = fullDisplay;
+    let tooltipHtml = fullDisplay;
     if (lastBackslash !== -1) {
-      const pathPart = escapeHtmlAttribute(item.path.substring(0, lastBackslash + 1));
-      const filePart = escapeHtmlAttribute(item.path.substring(lastBackslash + 1));
-      tooltipData = `${pathPart}|SPLIT|${filePart}`; // Use marker for splitting
+      const beforeSlash = escapeHtmlAttribute(item.path.substring(0, lastBackslash));
+      const afterSlash = escapeHtmlAttribute(item.path.substring(lastBackslash + 1));
+      tooltipHtml = `${beforeSlash} <span style="font-weight:bold;color:#dc322f;">\\</span> ${afterSlash}`;
     }
-    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipData}"><span class="recycle-text">${fileName}</span></div>`;
+    // ★ Double-escape for HTML attribute: replace quotes and encode special chars
+    const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="recycle-text">${fileName}</span></div>`;
   } else {
     return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
