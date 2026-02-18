@@ -2572,7 +2572,7 @@ const TransactionManager = {
 	},
 
 	/**
-	 * ★ Background temp file cleanup (precise match by transId prefix + fuzzy match for .part/.ytdl etc.)
+	 * ★ Background temp file cleanup (match by transId anchor + fuzzy match for .part/.ytdl etc.)
 	 * @param {string} targetDir
 	 * @param {object} trans - Optional transaction object containing id and tempFiles
 	 * @param {object} options - Optional params { isRecover: boolean }
@@ -2585,8 +2585,8 @@ const TransactionManager = {
 		const SIX_MINUTES = 360000;
 		const transId = trans?.id || null;
 
-		// Collect files to clean (exact match vs fuzzy match)
-		const transIdMatchFiles = new Set(); // ★ Exact match by transId prefix (no time limit)
+		// Collect files to clean (anchor match vs fuzzy match)
+		const transIdMatchFiles = new Set(); // ★ Match by transId anchor (first 4 chars, no time limit)
 		const fuzzyTempFiles = new Set();    // Fuzzy temp files (with 6-minute limit)
 
 		// 1. Scan files in directory
@@ -2596,12 +2596,12 @@ const TransactionManager = {
 				const fullPath = path.normalize(path.join(targetDir, f));
 				const ext = path.extname(f).toLowerCase();
 
-				// ★ Strategy A: exact match by transId prefix (no time limit, 100% precise)
-				// Filename format: {transId}_{date}__{day}__{time}{ext}
-				// Example: jhrYLq_2026.02.06__5__12.20.30.mp4
-				if (transId && f.startsWith(transId + '_')) {
+				// ★ Strategy A: match by transId anchor (first 4 chars); unified 4+2 filename format
+				// Filename format: {anchor4}{index2}_{date}__{day}__{time}{ext}
+				// Example: jhrY00_2026.02.06__5__12.20.30.mp4 (anchor=jhrY, index=00)
+				if (transId && transId.length >= 4 && f.startsWith(transId.slice(0, 4))) {
 					transIdMatchFiles.add(fullPath);
-					continue; // Already exact matched, no need fuzzy match
+					continue; // Already matched by anchor, no need fuzzy match
 				}
 
 				// ★ Strategy B: fuzzy match temp suffix files (with 6-minute limit)
@@ -2646,7 +2646,7 @@ const TransactionManager = {
 				let shouldDelete = false;
 
 				if (isExactMatch) {
-					// ★ transId prefix match / tempFiles record: no time limit, 100% precise delete
+					// ★ transId anchor match / tempFiles record: no time limit, delete directly
 					shouldDelete = true;
 				} else {
 					// ★ Fuzzy-match files: keep 6-minute limit
