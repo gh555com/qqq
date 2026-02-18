@@ -142,6 +142,13 @@ let enlargeSmallImages = true;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
 let cleanFreakMode = "add"; // "never" | "add" | "add & remove"
+let cleanFreakModeOverride = null; // ★ Runtime override from weave button (not persisted)
+
+// ★ Helper function to get effective cleanFreakMode (with override support)
+function getEffectiveCleanFreakMode() {
+	return cleanFreakModeOverride !== null ? cleanFreakModeOverride : cleanFreakMode;
+}
+
 let textSlideColorScheme = "light";
 let textSlideFontSize = 14;
 let codelensLevel = "3";
@@ -623,6 +630,10 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 					} else if (IMAGE_EXTS.has(ext)) {
 						info.type = "image";
 						info.isStaticImage = true;
+						// ★ Fix PSD bug: special formats that need conversion should set needsConversion = true
+						if ([".ai", ".eps", ".psd", ".cdr", ".tiff", ".tif"].includes(ext)) {
+							info.needsConversion = true;
+						}
 					} else if (AUDIO_EXTS.has(ext)) {
 						// ★★★ Add audio type check ★★★
 						info.type = "audio";
@@ -630,13 +641,9 @@ function _getMediaInfoInternal(filePath, mtimeMs) {
 				}
 			}
 
-			if (!info.width && [".ai", ".eps", ".psd", ".cdr"].includes(ext)) {
-				info.type = "image";
-				info.isStaticImage = true;
-				info.width = 512;
-				info.height = 512;
-				info.needsConversion = true;
-			}
+			// ★ REMOVED: Don't force default 512x512 for unrecognized formats
+			// If FFmpeg can't parse width/height, it means it can't render → return null
+			// This ensures shouldUseFrame will correctly use icon frame
 
 			resolutionCache.set(filePath, info);
 			// ★ FIFO cache size limit
@@ -1662,13 +1669,22 @@ async function shouldUseFrame(filePath) {
 		// Build cache key: file path + mtime
 		const cacheKey = `${filePath}:${mtimeMs}`;
 
-		// Check in-memory cache
+		const ext = path.extname(filePath).toLowerCase();
+
+		// ★★★ CHECK BROKEN FILE FIRST: If this file previously failed to render, use icon frame ★★★
+		// This ensures consistency between shouldUseFrame and actual rendering
+		// Must check BEFORE cache because broken status can change after caching
+		const contentId = geq().computeFingerprint ? geq().computeFingerprint(filePath) : null;
+		if (contentId && geq().isBrokenFile && geq().isBrokenFile(contentId, filePath)) {
+			// Don't cache broken status - it may recover later
+			return false;
+		}
+
+		// Check in-memory cache (only after broken check)
 		const cachedResult = shouldUseFrameCache.get(cacheKey);
 		if (cachedResult) {
 			return cachedResult.result;
 		}
-
-		const ext = path.extname(filePath).toLowerCase();
 
 		// Plain text files use text film frame
 		if (TEXT_EXTS.has(ext) || isPlainTextFile(filePath)) {
@@ -1679,32 +1695,40 @@ async function shouldUseFrame(filePath) {
 		// Get media info (non-media files return null)
 		const info = await getMediaInfo(filePath, mtimeMs);
 		if (!info) {
+			// FFmpeg cannot parse this file → icon frame
 			shouldUseFrameCache.set(cacheKey, { result: false, timestamp: Date.now() });
 			return false;
 		}
 
-		// Simple-format static images use frame directly
-		const simpleFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico"];
-		if (simpleFormats.includes(ext) && info.isStaticImage && !info.needsConversion) {
+		// ★★★ ROBUST LOGIC: If FFmpeg can parse width/height, it can render → use frame ★★★
+		// This covers PSD, AI, TXF, and any future unknown formats that FFmpeg supports
+
+		// Browser-native formats (no ffmpeg needed for display)
+		const browserNativeFormats = [".png", ".jpg", ".jpeg", ".svg", ".ico", ".gif", ".webp", ".bmp"];
+		if (browserNativeFormats.includes(ext) && info.isStaticImage) {
 			shouldUseFrameCache.set(cacheKey, { result: true, timestamp: Date.now() });
 			return true;
 		}
 
-		// Videos or animations require FFmpeg
+		// ★ Cache ffmpegPath check result to avoid multiple calls
+		const hasFFmpeg = !!global.ffmpegPath();
+
+		// Videos or animations require FFmpeg for conversion
 		if (info.type === "video" || info.type === "animated_image") {
-			const result = !!global.ffmpegPath();
-			shouldUseFrameCache.set(cacheKey, { result, timestamp: Date.now() });
-			return result;
+			shouldUseFrameCache.set(cacheKey, { result: hasFFmpeg, timestamp: Date.now() });
+			return hasFFmpeg;
 		}
 
-		// Other formats that need conversion require FFmpeg
-		if (info.needsConversion) {
-			const result = !!global.ffmpegPath();
-			shouldUseFrameCache.set(cacheKey, { result, timestamp: Date.now() });
-			return result;
+		// ★★★ KEY FIX: Any format with valid width/height can be rendered by FFmpeg ★★★
+		// Instead of checking needsConversion flag, check if we have dimensions
+		// This ensures PSD, AI, TXF, and any unknown format FFmpeg can parse will use frame
+		if (info.width > 0 && info.height > 0) {
+			// FFmpeg parsed this successfully → it can convert to displayable format
+			shouldUseFrameCache.set(cacheKey, { result: hasFFmpeg, timestamp: Date.now() });
+			return hasFFmpeg;
 		}
 
-		// Default to icon frame
+		// No dimensions → icon frame
 		shouldUseFrameCache.set(cacheKey, { result: false, timestamp: Date.now() });
 		return false;
 	} catch (error) {
@@ -2602,8 +2626,8 @@ async function executeClipboardCommand() {
 // ==================== Cleanliness Mode ====================
 async function provideCleanlinessEditsAsync(document, mode = null) {
 	if (!document) return [];
-	// If mode not specified, use global config
-	const effectiveMode = mode || cleanFreakMode;
+	// If mode not specified, use global config (with override support)
+	const effectiveMode = mode || getEffectiveCleanFreakMode();
 	const allowRemove = effectiveMode === "add & remove";
 
 	const edits = [];
@@ -2677,7 +2701,7 @@ async function provideCleanlinessEditsAsync(document, mode = null) {
 
 async function performGlobalClean(editor, force = false, mode = null) {
 	if (!editor) return;
-	if (!force && cleanFreakMode === "never") return;
+	if (!force && getEffectiveCleanFreakMode() === "never") return;
 	try {
 		// Check if editor is still valid
 		if (!vscode.window.visibleTextEditors.includes(editor)) return;
@@ -3185,7 +3209,7 @@ async function activate(context) {
 		clearDecorations();
 		if (codeLensProvider) codeLensProvider.refresh();
 		renderVisibleEditors(10);
-		if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
+		if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
 	});
 
 	// ★ Ultimate optimal: privilege boost, never await before registration
@@ -3194,7 +3218,7 @@ async function activate(context) {
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
 				refreshConfig();
-				if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
+				if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
 			}
 		}),
 		vscode.commands.registerCommand("qqq.q1", global.withReady(executeClipboardCommand)),
@@ -3214,7 +3238,7 @@ async function activate(context) {
 		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
 		vscode.workspace.onWillSaveTextDocument((e) => {
-			if (cleanFreakMode !== "never" && e.document) {
+			if (getEffectiveCleanFreakMode() !== "never" && e.document) {
 				// ★ 添加超时保护，避免 VS Code 报错 "Aborted onWillSaveTextDocument-event after 1750ms"
 				const timeoutMs = 1500; // 给 VS Code 留 250ms 余量
 				const timeoutPromise = new Promise(resolve => setTimeout(() => resolve([]), timeoutMs));
@@ -3282,7 +3306,7 @@ async function activate(context) {
 				}
 			}
 			renderVisibleEditors();
-			if (cleanFreakMode !== "never") performGlobalClean(vscode.window.activeTextEditor);
+			if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
 		})
 	);
 
@@ -3325,10 +3349,10 @@ const q1Utils = {
 	PREVIEW_BORDER,
 	forceRefreshDocument,
 	// ★ cleanFreakMode getter/setter for q4.js weave embedded buttons
-	getCleanFreakMode: () => cleanFreakMode,
+	getCleanFreakMode: getEffectiveCleanFreakMode,
 	setCleanFreakMode: (mode) => {
 		if (["never", "add", "add & remove"].includes(mode)) {
-			cleanFreakMode = mode;
+			cleanFreakModeOverride = mode; // ★ Set runtime override, not the base config
 			return true;
 		}
 		return false;
