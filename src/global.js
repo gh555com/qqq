@@ -2679,6 +2679,12 @@ const TransactionManager = {
 		if (deletedCount > 0) {
 			logMessage(q('cleanup.tempFileCompleted', deletedCount), "INFO");
 		}
+
+		// ★ After cleanup, check if qqq folder is empty and created by us; if so, delete it
+		try {
+			const h = require('./h');
+			h.cleanupEmptyQqqFolder(path.dirname(targetDir));
+		} catch { }
 	},
 
 	/**
@@ -2819,6 +2825,12 @@ const TransactionManager = {
 			if (cleanedCount > 0) {
 				logMessage(q('cleanup.orphanCompleted', cleanedCount), "INFO");
 			}
+
+			// ★ After cleanup, check if qqq folder is empty and created by us; if so, delete it
+			try {
+				const h = require('./h');
+				h.cleanupEmptyQqqFolder(path.dirname(targetDir));
+			} catch { }
 		} catch (e) {
 			// ★ Catch all exceptions to prevent extension crash
 			logMessage(q('cleanup.orphanException', e.message), "WARN");
