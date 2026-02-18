@@ -184,17 +184,29 @@ function init(extPath) {
     // 先加载所有语言包
     loadAllLocales();
 
-    // 读取用户设置
+    // ★ Use inspect() to distinguish default value vs user-set value
     const config = vscode.workspace.getConfiguration('qqq');
-    const userLang = config.get('language');
+    const langInspect = config.inspect('language');
 
-    if (userLang && LANG_MAP[userLang]) {
-        setLanguage(userLang);
+    // Check if user has explicitly set the language (not just using default)
+    const hasUserSetLang = langInspect && (
+        langInspect.globalValue !== undefined ||
+        langInspect.workspaceValue !== undefined ||
+        langInspect.workspaceFolderValue !== undefined
+    );
+
+    if (hasUserSetLang) {
+        // User explicitly set a language preference
+        const userLang = config.get('language');
+        if (userLang && LANG_MAP[userLang]) {
+            setLanguage(userLang);
+        }
     } else {
-        // 跟随 VS Code 显示语言
+        // ★ No user setting → follow VS Code display language
         const vscodeLang = (vscode.env.language || 'en').toLowerCase();
         const mappedLang = VSCODE_LANG_MAP[vscodeLang] || 'en';
         setLanguage(mappedLang);
+        console.log(`[i18n] Auto-detected language from VS Code: ${vscodeLang} → ${mappedLang}`);
     }
 
     // 监听配置变更
