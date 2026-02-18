@@ -99,7 +99,15 @@ function isBlobUrl(u) {
 }
 
 function ensureDirForFile(filePath) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    // ★ Delegate to h.js ensureDir for salt handling (if it's qqq folder)
+    try {
+        const h = require('./h');
+        h.ensureDir(dir);
+    } catch { }
 }
 
 function safeUnlink(filePath) {
