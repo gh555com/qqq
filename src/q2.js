@@ -1053,11 +1053,9 @@ function handlePathTooltipHover(e){
   // ---- Area 2: recycle bin area (.recycle-item) ----
   const recycleItem = t.closest('.recycle-item');
   if (recycleItem) {
-    // File row: always show full path (displayed is only filename, full path is always meaningful)
+    // File row: skip here, globalTooltip handles via data-tooltip
     if (recycleItem.classList.contains('recycle-file')) {
-      const tip = recycleItem.getAttribute('data-fullpath') || '';
-      if (tip) { showPathTooltip(tip, e.clientX, e.clientY); }
-      else if (pathTooltipVisible) { hidePathTooltip(); }
+      if (pathTooltipVisible) { hidePathTooltip(); }
       return;
     }
     // Dir row: show only when truncated
@@ -2935,7 +2933,7 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
         const fullDisplay = escapeHtmlAttribute(item.path);
         if (item.type === 'file') {
           const fileName = escapeHtmlAttribute(path.basename(item.path));
-          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
+          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
         } else {
           return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
@@ -2965,7 +2963,7 @@ function generateRecycleBinItemHtml(item) {
   const fullDisplay = escapeHtmlAttribute(item.path);
   if (item.type === 'file') {
     const fileName = escapeHtmlAttribute(path.basename(item.path));
-    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
+    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${fullDisplay}"><span class="recycle-text">${fileName}</span></div>`;
   } else {
     return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
