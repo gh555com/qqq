@@ -1803,10 +1803,12 @@ function _registerCommands(context) {
 			// ★ Only handle qqq. configuration changes
 			if (!event.affectsConfiguration("qqq")) return;
 
-			global.ConfigManager.handleVscodeConfigChanged(event).then(() => {
-				// ★ Play settings update sound (kj3.mp3)
-				if (global.pythonBridge && global.pythonBridge.isAvailable()) {
-					global.pythonBridge.call("play_sfx", { category: "yz", name: "kj3.mp3" }, 1000).catch(() => { });
+			global.ConfigManager.handleVscodeConfigChanged(event).then((changedKeys) => {
+				// ★ Sound: only play in focused window to avoid multi-window spam
+				if (changedKeys.length > 0 && vscode.window.state.focused) {
+					if (global.pythonBridge && global.pythonBridge.isAvailable()) {
+						global.pythonBridge.call("play_sfx", { category: "yz", name: "kj3.mp3" }, 1000).catch(() => { });
+					}
 				}
 
 				// Don't handle after ioEngine switch
