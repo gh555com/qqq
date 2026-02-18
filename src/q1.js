@@ -2637,7 +2637,10 @@ async function provideCleanlinessEditsAsync(document, mode = null) {
 	const markers = [];
 
 	while ((match = regex.exec(text))) {
-		markers.push({ text: match[0], index: match.index, inner: (match[1] || "").trim() });
+		// ★ Only process markers where inner path starts with "qqq" to avoid mismatching JS regex like /\\/ or /\n/
+		const inner = (match[1] || "").trim();
+		if (!inner.startsWith('qqq')) continue;
+		markers.push({ text: match[0], index: match.index, inner });
 	}
 
 	// Process from back to front to avoid index shift issues
