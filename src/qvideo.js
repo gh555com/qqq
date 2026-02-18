@@ -591,6 +591,48 @@ class Qvideo {
         return code === 403 || code === 401 || (error && error.toString().includes('403'));
     }
 
+    // ★ Cross-process marker for multi-window download protection
+    _tryAcquireMarker(markerPath, staleMs = 300000) {
+        // Ensure directory exists
+        const dir = path.dirname(markerPath);
+        if (!fs.existsSync(dir)) {
+            try { fs.mkdirSync(dir, { recursive: true }); } catch { }
+        }
+
+        // Clean stale marker
+        try {
+            const st = fs.statSync(markerPath);
+            if (Date.now() - st.mtimeMs > staleMs) {
+                fs.unlinkSync(markerPath);
+            }
+        } catch { /* doesn't exist */ }
+
+        // Atomic exclusive create
+        try {
+            const fd = fs.openSync(markerPath, "wx");
+            fs.writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
+            fs.closeSync(fd);
+            return {
+                acquired: true,
+                release: () => { try { fs.unlinkSync(markerPath); } catch { } }
+            };
+        } catch (e) {
+            if (e.code === "EEXIST") {
+                return { acquired: false, release: () => {} };
+            }
+            return { acquired: true, release: () => {} };
+        }
+    }
+
+    _isMarkerActive(markerPath, staleMs = 300000) {
+        try {
+            const st = fs.statSync(markerPath);
+            return Date.now() - st.mtimeMs < staleMs;
+        } catch {
+            return false;
+        }
+    }
+
     _deduplicateTasks(tasks) {
         const seen = new Set();
         return tasks.filter(t => {
@@ -2295,10 +2337,27 @@ $of = $vi.OriginalFilename;
     async _downloadChrome(task, url, targetDir) {
         if (this._isTaskCancelled(task)) return;
 
-        if (!fs.existsSync(this.chromeHome)) fs.mkdirSync(this.chromeHome, { recursive: true });
+        // ★ Check if another window is downloading Chrome
+        const markerPath = path.join(this.chromeHome, 'chrome_downloading.marker');
+        if (this._isMarkerActive(markerPath, 600000)) { // 10 min for large download
+            this.log("[Chrome] Another window is downloading Chrome, please wait");
+            global.showAutoCloseNotification('info', 'Another window is downloading Chrome, please wait for it to complete.');
+            return;
+        }
 
-        const zipPath = path.join(this.chromeHome, 'chrome.zip');
-        const chromeInfo = this._getChromeDownloadInfo();
+        // ★ Try to acquire marker
+        const marker = this._tryAcquireMarker(markerPath, 600000);
+        if (!marker.acquired) {
+            this.log("[Chrome] Failed to acquire download marker, another window may be downloading");
+            global.showAutoCloseNotification('info', 'Another window is downloading Chrome, please wait for it to complete.');
+            return;
+        }
+
+        try {
+            if (!fs.existsSync(this.chromeHome)) fs.mkdirSync(this.chromeHome, { recursive: true });
+
+            const zipPath = path.join(this.chromeHome, 'chrome.zip');
+            const chromeInfo = this._getChromeDownloadInfo();
 
         this.log(q('video.log.chromeVersion', chromeInfo.version));
         this.log(q('video.log.chromePlatform', chromeInfo.platform));
@@ -2391,6 +2450,10 @@ $of = $vi.OriginalFilename;
         if (!exePath) return;
 
         await this._startSniffer(task, exePath, url, targetDir, { rememberKey: this.KEY_DEDICATED_BROWSER });
+        } finally {
+            // ★ Always release marker
+            marker.release();
+        }
     }
 
     _downloadFile(url, destPath, progress, isCancelled) {

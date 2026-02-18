@@ -14,6 +14,9 @@ let _currentSidebarProvider = null;  // ★ NEW: track current sidebar instance
 const zlib = require('zlib');
 const { performance } = require('perf_hooks');
 
+// ★ Window unique ID (for multi-window Savoring sync)
+const _windowId = crypto.randomBytes(8).toString('hex');
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -58,6 +61,10 @@ const CONSTANTS = Object.freeze({
     // watchdog
     WATCHDOG_REFRESH_MS: 30000,
     WATCHDOG_STALE_MS: 15000,
+
+    // ★ Multi-window Savoring sync
+    SAVORING_SYNC_INTERVAL_MS: 1500,  // globalState polling interval
+    SAVORING_STATE_KEY: 'qqq_savoring_state',
 
     // Time
     MS_PER_MINUTE: 60000,
@@ -1030,6 +1037,80 @@ class ClipboardHistorySidebarProvider {
 
         // ★ NEW: keep PythonBridge event handler ref for dispose unbind, avoid hot-reload listener pile-up
         this._onPythonEvent = null;
+
+        // ★ Multi-window Savoring sync
+        this._savoringSyncTimer = null;
+        this._lastSyncState = null;  // Cache to avoid redundant UI updates
+    }
+
+    // ★ Read Savoring state from globalState (cross-window shared)
+    _readSavoringState() {
+        return this._context.globalState.get(CONSTANTS.SAVORING_STATE_KEY, null);
+    }
+
+    // ★ Write Savoring state to globalState
+    _writeSavoringState(state) {
+        this._context.globalState.update(CONSTANTS.SAVORING_STATE_KEY, state);
+    }
+
+    // ★ Clear Savoring state (when this window stops)
+    _clearSavoringState() {
+        const current = this._readSavoringState();
+        if (current && current.windowId === _windowId) {
+            this._context.globalState.update(CONSTANTS.SAVORING_STATE_KEY, null);
+        }
+    }
+
+    // ★ Start multi-window sync polling (only when webview visible)
+    _startSavoringSync() {
+        if (this._savoringSyncTimer) return;
+        this._savoringSyncTimer = setInterval(() => {
+            if (this._view?.visible) {
+                this._syncSavoringUI();
+            }
+        }, CONSTANTS.SAVORING_SYNC_INTERVAL_MS);
+    }
+
+    // ★ Stop sync polling
+    _stopSavoringSync() {
+        if (this._savoringSyncTimer) {
+            clearInterval(this._savoringSyncTimer);
+            this._savoringSyncTimer = null;
+        }
+    }
+
+    // ★ Sync UI based on globalState
+    _syncSavoringUI() {
+        const state = this._readSavoringState();
+        const stateKey = state ? `${state.windowId}-${state.playing}-${state.fileName}-${state.loopCount}` : 'none';
+
+        // Skip if state hasn't changed
+        if (stateKey === this._lastSyncState) return;
+        this._lastSyncState = stateKey;
+
+        if (state && state.playing) {
+            // Another window (or this window) is playing
+            if (state.windowId !== _windowId) {
+                // Another window is playing - sync UI only
+                this._pythonPlayState = {
+                    playing: true,
+                    fileName: state.fileName,
+                    loopCount: state.loopCount,
+                    startTime: state.startTime
+                };
+            }
+            this._postMessage({
+                command: 'playAudio',
+                fileName: state.fileName,
+                count: state.loopCount
+            });
+        } else {
+            // No one is playing
+            if (this._pythonPlayState.playing) {
+                this._pythonPlayState.playing = false;
+                this._postMessage({ command: 'stopAudio' });
+            }
+        }
     }
 
     /**
@@ -1074,6 +1155,9 @@ class ClipboardHistorySidebarProvider {
         // ★ Lightning load: render empty skeleton HTML immediately, then load history data after 1s
         this._view.webview.html = this._getHtml([], {});
 
+        // ★ Start multi-window Savoring sync
+        this._startSavoringSync();
+
         // ★ Register cleanFreakMode change callback for weave button sync
         q1.onCleanFreakModeChange = (newMode) => {
             this._postMessage({ command: 'cleanFreakMode', mode: newMode });
@@ -1102,11 +1186,15 @@ class ClipboardHistorySidebarProvider {
             if (data && data.event === 'audio_finished') {
                 // ★ Update Python playback state
                 this._pythonPlayState.playing = false;
+                // ★ Clear shared state file
+                this._clearSavoringState();
                 // Tell webview to stop playback
                 this._postMessage({ command: 'stopAudio' });
             } else if (data && data.event === 'process_crashed' && data.bridge === 'Python') {
                 // ★ Python process crashed: stop UI playback state immediately
                 this._pythonPlayState.playing = false;
+                // ★ Clear shared state file
+                this._clearSavoringState();
                 this._postMessage({ command: 'stopAudio' });
                 this._global.logMessage(`[Q4] ${q('q4.log.pythonCrash')}`, "WARN");
             }
@@ -1250,6 +1338,8 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.onDidDispose(() => {
             this._stopPeriodicUpdate();
+            // ★ Stop multi-window Savoring sync
+            this._stopSavoringSync();
         });
     }
 
@@ -1519,6 +1609,9 @@ class ClipboardHistorySidebarProvider {
         // ★ Clear Python playback state
         this._pythonPlayState.playing = false;
 
+        // ★ Clear shared state file for multi-window sync
+        this._clearSavoringState();
+
         // Whether Python or Webview, put Webview UI into "stopped" state
         this._postMessage({ command: 'stopAudio' });
     }
@@ -1539,6 +1632,19 @@ class ClipboardHistorySidebarProvider {
             loopCount: loopCount,
             startTime: isPlaying ? Date.now() : 0
         };
+
+        // ★ Write shared state for multi-window sync
+        if (isPlaying) {
+            this._writeSavoringState({
+                playing: true,
+                windowId: _windowId,
+                fileName: fileName,
+                loopCount: loopCount,
+                startTime: Date.now()
+            });
+        } else {
+            this._clearSavoringState();
+        }
 
         // Sync UI state (no base64; webview only updates text state)
         if (isPlaying) {
@@ -1581,6 +1687,14 @@ class ClipboardHistorySidebarProvider {
                         loopCount: loopCount,
                         startTime: Date.now()
                     };
+                    // ★ Write shared state for multi-window sync
+                    this._writeSavoringState({
+                        playing: true,
+                        windowId: _windowId,
+                        fileName: info.fileName,
+                        loopCount: loopCount,
+                        startTime: Date.now()
+                    });
                     return;
                 }
 
@@ -1601,6 +1715,14 @@ class ClipboardHistorySidebarProvider {
         // Webview mode: send once (with base64)
         const b64 = info.base64();
         if (b64) {
+            // ★ Write shared state for multi-window sync (Webview mode)
+            this._writeSavoringState({
+                playing: true,
+                windowId: _windowId,
+                fileName: info.fileName,
+                loopCount: loopCount,
+                startTime: Date.now()
+            });
             this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
         }
     }
