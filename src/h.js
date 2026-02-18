@@ -377,65 +377,58 @@ function _formatCopyProgress(stepInfo, itemName, totalSize, elapsedMs) {
     return `[${stepInfo}]${sizeStr}${timePart} ${itemName}`;
 }
 
-// ★ Valid character set for filename encoding (letters + digits, excluding confusing chars)
+// ★ Valid character set for filename encoding (digits + letters, excluding confusing chars)
+// Digits first so index=0 encodes to '00'
 const FILENAME_VALID_CHARS = (() => {
     const excluded = new Set(["l", "i", "s", "a", "m", "c", "b", "f", "t"]);
     const letters = "abcdefghjklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
         .split("")
         .filter((c) => !excluded.has(c.toLowerCase()));
-    return [...letters, ..."0123456789"]; // 34 letters + 10 digits = 44 chars
+    return [..."0123456789", ...letters]; // 10 digits + 34 letters = 44 chars, digits first!
 })();
 
 /**
- * Encode index to 3-char string using FILENAME_VALID_CHARS (base-44)
- * Capacity: 44^3 = 85,184 files per transaction
+ * Encode index to 2-char string using FILENAME_VALID_CHARS (base-44)
+ * Capacity: 44^2 = 1,936 files per transaction
  * @param {number} index - 0-based index
- * @returns {string} 3-char encoded string
+ * @returns {string} 2-char encoded string
  */
 function _encodeFileIndex(index) {
     const base = FILENAME_VALID_CHARS.length; // 44
-    const c1 = FILENAME_VALID_CHARS[Math.floor(index / (base * base)) % base];
-    const c2 = FILENAME_VALID_CHARS[Math.floor(index / base) % base];
-    const c3 = FILENAME_VALID_CHARS[index % base];
-    return `${c1}${c2}${c3}`;
+    const c1 = FILENAME_VALID_CHARS[Math.floor(index / base) % base];
+    const c2 = FILENAME_VALID_CHARS[index % base];
+    return `${c1}${c2}`;
 }
 
 /**
- * Generate a timestamp filename with 6-char prefix
+ * Generate a timestamp filename with 6-char prefix (4-char anchor + 2-char index)
+ * ★ UNIFIED BATCH MODE: All scenarios use transId + index
+ *
  * @param {string} ext - File extension (e.g. '.mp4')
- * @param {string} [transId] - Optional transaction ID (first 3 chars used as batch anchor)
- * @param {number} [index] - File index within batch (0-based), encoded to 3 chars
- * @returns {string} Filename in format: {anchor}{index}_{date}__{day}__{time}{ext}
+ * @param {string} transId - Transaction ID (first 4 chars used as anchor)
+ * @param {number} [index=0] - File index within batch (0-based), encoded to 2 chars
+ * @returns {string} Filename in format: {anchor4}{index2}_{date}__{day}__{time}{ext}
  *
  * Example:
- * - With transId+index: y3W000_2026.02.06__5__12.20.30.png (batch mode)
- * - Without transId: 587kD_2026.02.06__5__12.20.30.png (random mode, backward compatible)
+ * - Batch: y3Wx00_2026.02.06__5__12.20.30.png (index=0)
+ * - Batch: y3Wx01_2026.02.06__5__12.20.30.png (index=1)
+ * - Single file scenarios also use index=0 for consistency
+ *
+ * Anchor collision probability: 1/44^4 ≈ 1/3,748,096
+ * Files per transaction: 44^2 = 1,936
  */
-function getTimestampFilename(ext, transId = null, index = null) {
+function getTimestampFilename(ext, transId, index = 0) {
     const now = new Date();
     const date = now.toISOString().slice(0, 10).replace(/-/g, ".");
     const time = now.toTimeString().slice(0, 8).replace(/:/g, ".");
     const day = now.getDay() || 7;
 
-    let prefix;
-
-    // ★ Batch mode: transId provides anchor (first 3 chars), index provides uniqueness
-    if (transId && typeof transId === 'string' && transId.length >= 3 && typeof index === 'number') {
-        const anchor = transId.slice(0, 3);
-        const indexStr = _encodeFileIndex(index);
-        prefix = `${anchor}${indexStr}`;
-    } else {
-        // ★ Random mode (backward compatible): ms + 2 random chars
-        const ms = String(now.getMilliseconds()).padStart(3, "0");
-        const validLetters = FILENAME_VALID_CHARS.slice(0, -10); // Only letters, no digits
-        const c1 = validLetters[Math.floor(Math.random() * validLetters.length)];
-        let c2 = validLetters[Math.floor(Math.random() * validLetters.length)];
-        if (c1.toLowerCase() === "g") {
-            const noG = validLetters.filter((c) => c.toLowerCase() !== "g");
-            c2 = noG[Math.floor(Math.random() * noG.length)];
-        }
-        prefix = `${ms}${c1}${c2}`;
-    }
+    // ★ Unified batch mode: 4-char anchor + 2-char index
+    const anchor = (transId && typeof transId === 'string' && transId.length >= 4)
+        ? transId.slice(0, 4)
+        : '0000';  // Fallback anchor if transId is invalid (should not happen)
+    const indexStr = _encodeFileIndex(typeof index === 'number' ? index : 0);
+    const prefix = `${anchor}${indexStr}`;
 
     return `${prefix}_${date}__${day}__${time}${ext}`;
 }
@@ -1557,7 +1550,7 @@ async function _zipDomWithCleanText($, cleanText, baseUrl) {
     return blocks;
 }
 
-async function verifyVideoFile(filePath) {
+async function verifyVideoFile(filePath, transId = null) {
     if (!filePath || !fs.existsSync(filePath)) return null;
     let ffmpeg = 'ffmpeg';
     try {
@@ -1591,7 +1584,7 @@ async function verifyVideoFile(filePath) {
                 else if (stderr.includes("Video: vp9") && ext !== '.webm' && ext !== '.mkv') newExt = '.webm';
 
                 if (isTooLong) {
-                    const safeName = getTimestampFilename(newExt || '.mp4');
+                    const safeName = getTimestampFilename(newExt || '.mp4', transId || '0000', 0);
                     const p2 = path.join(path.dirname(filePath), safeName);
                     try { fs.renameSync(filePath, p2); finalPath = p2; } catch (e) { finalPath = filePath; }
                 } else if (newExt !== ext) {
@@ -1774,6 +1767,12 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
             const r = await d.downloadAll(httpTasks, targetDir, {
                 onProgress: (t, e) => { if (e.type === "done" || e.type === "error") { doneCount++; if (progressCallback) progressCallback((doneCount / total) * 100, q('h.progress.downloading', doneCount, total)); } }
             });
+            // ★ FIX: Use confirmed fingerprints map to avoid "pointing to deleted file" bug
+            // When same-batch files have identical content, earlier processed files might point to
+            // files that get deleted by later dedupe operations. This map ensures we always
+            // reference the FIRST confirmed file for each fingerprint.
+            const confirmedFingerprints = new Map(); // fingerprint -> confirmed path
+
             for (const res of r.results) {
                 try {
                     const block = taskMap.get(res.tag);
@@ -1783,7 +1782,7 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                         const originalFileName = originalFilenames.get(res.tag);
 
                         if (block.kind === "video") {
-                            dlPath = await verifyVideoFile(dlPath);
+                            dlPath = await verifyVideoFile(dlPath, transId);
                             if (!dlPath) {
                                 block.status = "failed";
                                 block.error = "Video verification failed";
@@ -1791,19 +1790,36 @@ async function _materializeImageBlocksToFiles(blocks, targetDir, progressCallbac
                             }
                         }
 
-                        // Compute fingerprint first, then dedupe within the same directory
+                        // Compute fingerprint first
                         const fp = computeFingerprint(dlPath);
                         let finalPath = dlPath;
                         let isNewFile = true;
 
                         if (!autoRename && fp) {
-                            // Fix: strictly forbid cross-folder dedupe; call local dedupe logic directly
-                            const tempPath = _tryLocalDeduplicate(dlPath);
-                            isNewFile = (tempPath === dlPath);
-                            finalPath = tempPath;
+                            // ★ Step 1: Check same-batch dedupe (confirmedFingerprints)
+                            if (confirmedFingerprints.has(fp)) {
+                                // Same fingerprint already confirmed in this batch, reuse it
+                                const existingPath = confirmedFingerprints.get(fp);
+                                try {
+                                    fs.unlinkSync(dlPath);
+                                    log(`[Dedupe] Same-batch duplicate: ${path.basename(dlPath)} -> reuse: ${path.basename(existingPath)}`, "INFO");
+                                } catch (e) {
+                                    log(`[Dedupe] Failed to delete duplicate ${dlPath}: ${e.message}`, "WARN");
+                                }
+                                finalPath = existingPath;
+                                isNewFile = false;
+                            } else {
+                                // ★ Step 2: Check cross-batch dedupe (existing files in directory)
+                                const tempPath = _tryLocalDeduplicate(dlPath);
+                                isNewFile = (tempPath === dlPath);
+                                finalPath = tempPath;
+                                // ★ Register this fingerprint as confirmed (whether new or reused from old batch)
+                                confirmedFingerprints.set(fp, finalPath);
+                            }
                         } else {
                             finalPath = autoRename ? dlPath : _tryLocalDeduplicate(dlPath);
                             isNewFile = (finalPath === dlPath);
+                            if (fp) confirmedFingerprints.set(fp, finalPath);
                         }
 
                         block.status = "ok";
@@ -2107,8 +2123,8 @@ async function processFilesForClipboardWithProgress(files, targetDir, progressCa
 
             let destName = originalName;
             if (isImg && (!originalName || originalName === ext)) {
-                // ★ Use transId as prefix so rollback can precisely match deletions
-                destName = getTimestampFilename(ext, transId);
+                // ★ Use transId + index for batch mode unique filename
+                destName = getTimestampFilename(ext, transId, i);
             }
             let dest = path.join(targetDir, destName);
 
@@ -2225,8 +2241,8 @@ async function handleClipboardShell(targetDir, token = null, progressCallback = 
             try {
                 const hasImg = await bridge.call("hasImage", {}, 1500);
                 if (hasImg?.value) {
-                    // ★ Use transId as prefix so rollback can precisely match deletions
-                    const fname = getTimestampFilename(".png", transId);
+                    // ★ Use transId + index=0 for single screenshot (unified batch mode)
+                    const fname = getTimestampFilename(".png", transId, 0);
                     const dest = path.join(targetDir, fname);
                     ensureDir(targetDir);
                     const saved = await bridge.call("saveImage", { path: dest }, 8000);
