@@ -1,54 +1,159 @@
 # IO Engine v16 Architecture
 
-## 概述：告别选择，自动协作
+## 概述
 
-**v16 架构的核心变化：用户不再需要选择 IO 引擎。**
+**v16 架构的核心变化：用户不再需要选择 IO 引擎，系统自动协作。**
 
-系统自动采用最优策略：
-- **Rust daemon** - 始终启动，处理所有 IO 操作（剪贴板读写、文件操作、系统粘贴）
-- **Python Broker** - 全局单例，专注音频播放和剪贴板监听（复制音效）
-- **Shell fallback** - 仅在 Rust 失败时（如 Win7）自动启用
+| 引擎 | 职责 | 生命周期 | 内存 |
+|------|------|----------|------|
+| **Rust daemon** | IO 操作（剪贴板、文件、粘贴） | per-window | ~7 MB |
+| **Python Broker** | 音频播放、剪贴板监听 | 全操作系统唯一单例 | ~50 MB |
+| **Shell fallback** | 兜底（仅 Rust 异常时） | per-window | ~70 MB |
 
-### 极端场景内存占用（3 种 IDE × 5 窗口 = 15 窗口）
-
-| 组件 | 进程数 | 单进程内存 | 总占用 |
-|------|--------|-----------|--------|
-| Rust daemon | 15 (per-window) | ~15 MB | ~225 MB |
-| Python Broker | **1** (全局单例) | ~60 MB | ~60 MB |
-| **总计** | 16 | - | **~285 MB** |
-
-对比老架构：15 × 75MB = **~1125 MB**，v16 节省 **75%** 内存。
+**15 窗口极端场景**：v16 仅占 **~155 MB**，对比老架构 ~855 MB，节省 **82%**。
 
 ---
 
-## 架构对比图
+## 进程标识规范
 
-### 老架构：每窗口独立 daemon（单打独斗）
+### 进程关系图
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    OLD ARCHITECTURE                          │
-│              (每窗口独立 daemon，互不通信)                    │
+│                    PROCESS HIERARCHY                         │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  VS Code Window 1          VS Code Window 2                  │
-│  ┌────────────────┐        ┌────────────────┐               │
-│  │ Extension      │        │ Extension      │               │
-│  │     ↓          │        │     ↓          │               │
-│  │ Python daemon  │        │ Python daemon  │    ...×15     │
-│  │   (~60 MB)     │        │   (~60 MB)     │               │
-│  │     +          │        │     +          │               │
-│  │ Rust daemon    │        │ Rust daemon    │               │
-│  │   (~15 MB)     │        │   (~15 MB)     │               │
-│  └────────────────┘        └────────────────┘               │
-│         ↑                         ↑                          │
-│         │                         │                          │
-│    独立状态，               独立状态，                         │
-│    互不感知                 互不感知                          │
+│  VS Code / Cursor / Windsurf (Host Process)                  │
+│      │                                                       │
+│      ├── Extension Host Process                              │
+│      │       │                                               │
+│      │       ├── q_engine.exe [per-window, ~7MB]             │
+│      │       │       ↓ stdio (JSON-RPC)                      │
+│      │       │                                               │
+│      │       └── [fallback] powershell.exe / bash            │
+│      │               ↓ stdio (JSON-RPC)                      │
+│      │                                                       │
+│      └── (IPC) ──────────────────────────────────────────┐   │
+│                                                          │   │
+│                                                          ↓   │
+│              python.exe kp.py --broker [global, ~50MB]       │
+│                      ↑                                       │
+│                      │ Named Pipe / Unix Socket              │
+│                      │                                       │
+│              (所有窗口共享此单例进程)                        │
 │                                                              │
-│  问题：状态不同步、内存爆炸、用户需手动选择引擎               │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### 1. Rust Daemon（主 IO 引擎）
+
+| 属性 | 值 |
+|------|-----|
+| **进程名** | `q_engine.exe` (Windows) / `q_engine` (macOS/Linux) |
+| **文件位置** | `{extensionPath}/assets/q_engine.exe` |
+| **启动参数** | `--daemon` |
+| **环境变量** | `Q_PARENT_PID={父进程PID}` |
+| **生命周期** | per-window，随 VS Code 窗口关闭自动退出 |
+| **内存占用** | ~7 MB |
+| **进程数量** | 每窗口 1 个 |
+
+```bash
+# 识别方法
+# Windows
+tasklist | findstr q_engine
+
+# macOS/Linux
+ps aux | grep q_engine
+```
+
+### 2. Python Broker（全局音频引擎）
+
+| 属性 | 值 |
+|------|-----|
+| **进程名** | `python.exe` / `python3` |
+| **Python 路径** | `{globalStorage}/python_engine/python.exe` (内置) 或系统 python |
+| **脚本文件** | `{extensionPath}/dist/kp.py` 或 `src/kp.py` |
+| **启动参数** | `--broker` |
+| **生命周期** | 全局单例，TTL 80s 无心跳自动退出 |
+| **内存占用** | ~50 MB |
+| **进程数量** | 全局 **1** 个 |
+
+**IPC 通信路径**：
+
+| 平台 | IPC 类型 | 路径格式 |
+|------|----------|----------|
+| Windows | Named Pipe | `\\.\pipe\vix_audio_broker_{USERDOMAIN}_{USERNAME}_{SESSIONNAME}` |
+| macOS/Linux | Unix Socket | `/tmp/vix_audio_broker_{uid}.sock` |
+
+**配置文件目录**：
+
+| 平台 | 目录路径 |
+|------|----------|
+| Windows | `%LOCALAPPDATA%\vix_audio_broker\` |
+| macOS/Linux | `~/.cache/vix_audio_broker/` |
+
+**配置文件**：
+- `endpoint.json` - IPC 端点信息（pipe/socket 路径、协议版本）
+- `token.txt` - 认证令牌（Base64 编码）
+
+```bash
+# 识别方法
+# Windows
+wmic process where "commandline like '%kp.py%'" get processid,commandline
+
+# macOS/Linux
+ps aux | grep "kp.py.*--broker"
+```
+
+### 3. Shell Daemon（兜底引擎）
+
+仅在 Rust daemon 启动异常时自动启用（如二进制损坏、被杀毒软件拦截等极端情况）。
+
+> ⚠️ 自 v16 起，Rust daemon 已使用 Win7 专用目标编译，正常情况下 **所有 Windows 版本（Win7+）均使用 Rust**，无需 Shell fallback。
+
+| 平台 | 进程名 | 启动命令 |
+|------|--------|----------|
+| Windows | `powershell.exe` / `pwsh.exe` | `-STA -NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -Command {script}` |
+| macOS/Linux | `bash` | `bash -c {script}` |
+
+| 属性 | 值 |
+|------|-----|
+| **生命周期** | per-window |
+| **内存占用** | ~70 MB (PowerShell) / ~20 MB (Bash) |
+| **进程数量** | 0 (正常) / 每窗口 1 个 (fallback) |
+
+```bash
+# 识别方法
+# Windows
+wmic process where "name='powershell.exe'" get processid,commandline | findstr /i "qqq\|vix"
+
+# macOS/Linux
+ps aux | grep "bash.*qqq"
+```
+
+### 常用排查命令
+
+```bash
+# === Windows ===
+tasklist | findstr /i "q_engine python powershell"
+wmic process where "name='q_engine.exe'" get processid,commandline
+dir \\.\pipe\ | findstr vix_audio_broker
+
+# 强制结束 (谨慎)
+taskkill /f /im q_engine.exe
+
+# === macOS / Linux ===
+ps aux | grep -E "q_engine|kp.py|vix"
+ls -la /tmp/*vix_audio_broker*
+
+# 强制结束 (谨慎)
+pkill -f q_engine
+pkill -f "kp.py.*--broker"
+```
+
+---
+
+## 架构对比
 
 ### v16 架构：Broker 单例 + 分工协作
 
@@ -61,7 +166,7 @@
 │  VS Code    Cursor     Windsurf    ...共 15 窗口             │
 │  ┌──────┐  ┌──────┐   ┌──────┐                              │
 │  │ Rust │  │ Rust │   │ Rust │    ← 每窗口独立 Rust          │
-│  │(15MB)│  │(15MB)│   │(15MB)│      处理 IO 操作             │
+│  │(7MB) │  │(7MB) │   │(7MB) │      处理 IO 操作             │
 │  └──┬───┘  └──┬───┘   └──┬───┘                              │
 │     │         │          │                                   │
 │     │    IPC (Named Pipe / Unix Socket)                      │
@@ -70,135 +175,121 @@
 │               ↓                                              │
 │     ┌─────────────────────┐                                  │
 │     │   Python Broker     │  ← 全局唯一，所有窗口共享        │
-│     │      (~60 MB)       │                                  │
-│     │                     │                                  │
+│     │      (~50 MB)       │                                  │
 │     │  • 音频播放         │                                  │
 │     │  • 剪贴板监听       │                                  │
 │     │  • 状态广播 ────────┼──→ 实时推送到所有窗口            │
 │     └─────────────────────┘                                  │
 │                                                              │
-│  优势：状态实时同步、内存节省75%、零配置                     │
+│  优势：状态实时同步、内存节省82%、零配置                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-> 📖 延伸阅读老架构细节：[IO_ENGINE.md](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md)
+### 老架构：每窗口独立 daemon
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    OLD ARCHITECTURE                          │
+│              (每窗口独立 daemon，互不通信)                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  VS Code Window 1          VS Code Window 2                  │
+│  ┌────────────────┐        ┌────────────────┐               │
+│  │ Python daemon  │        │ Python daemon  │    ...×15     │
+│  │   (~50 MB)     │        │   (~50 MB)     │               │
+│  │ Rust daemon    │        │ Rust daemon    │               │
+│  │   (~7 MB)      │        │   (~7 MB)      │               │
+│  └────────────────┘        └────────────────┘               │
+│                                                              │
+│  问题：状态不同步、内存爆炸、用户需手动选择引擎               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+> 📖 延伸阅读：[IO_ENGINE.md](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md)
 
 ---
 
-## 详细比较：v16 vs 老架构
+## 性能对比
 
-### 1. 内存占用比较
+### 内存占用
 
 | 场景 | 老架构 | v16 架构 | 节省 |
 |------|--------|----------|------|
-| 1 窗口 | ~75 MB | ~75 MB | 0% |
-| 3 窗口 | ~225 MB | ~105 MB | **53%** |
-| 5 窗口 | ~375 MB | ~135 MB | **64%** |
-| 10 窗口 | ~750 MB | ~210 MB | **72%** |
-| **15 窗口** | **~1125 MB** | **~285 MB** | **75%** |
-| 20 窗口 | ~1500 MB | ~360 MB | **76%** |
+| 1 窗口 | ~57 MB | ~57 MB | 0% |
+| 5 窗口 | ~285 MB | ~85 MB | **70%** |
+| **15 窗口** | **~855 MB** | **~155 MB** | **82%** |
+| 20 窗口 | ~1140 MB | ~190 MB | **83%** |
 
-**公式对比：**
-- 老架构：`N × (Python 60MB + Rust 15MB) = N × 75MB`
-- v16：`N × Rust 15MB + 1 × Python Broker 60MB = 15N + 60 MB`
+**公式**：
+- 老架构：`N × 57MB`
+- v16：`N × 7MB + 50MB`
 
-**结论**：窗口越多，v16 优势越明显。
-
-### 2. 性能比较
+### 其他指标
 
 | 指标 | 老架构 | v16 架构 |
 |------|--------|----------|
-| **启动时间** | 每窗口 spawn Python (~2-3s) | 首窗口 spawn，后续直连 (~50ms) |
-| **多窗口状态同步** | 轮询 globalState (1.5s 延迟) | Broker 广播 (<10ms 实时) |
-| **空闲 CPU 占用** | 每窗口持续轮询 | **零轮询，事件驱动** |
-| **IO 操作响应** | Python 解释器开销 | Rust 原生性能 |
-
-**关键优化**：
-- **零轮询**：v16 使用事件驱动，空闲时 CPU 占用为 0
-- **实时同步**：状态变化通过 IPC 广播，延迟 <10ms
-
-### 3. 稳定性比较
-
-| 场景 | 老架构 | v16 架构 |
-|------|--------|----------|
-| **Python 崩溃** | 该窗口所有功能失效 | 仅音频不可用，IO 操作正常 |
-| **Rust 崩溃** | 该窗口 IO 失效 | 该窗口 IO 失效（相同） |
-| **多窗口竞争** | 多 Python 进程竞争资源 | Broker 单例，无竞争 |
-| **进程泄漏** | N 个 Python 可能泄漏 | 仅 1 个 Python，TTL 自动回收 |
-| **热重载** | 可能残留僵尸进程 | Broker 有租约机制，80s 无心跳自动退出 |
-
-**关键改进**：
-- **故障隔离**：Rust 和 Python 分工明确，单点故障影响范围小
-- **自动回收**：Python Broker 有心跳租约机制，所有窗口关闭 80s 后自动退出
-
-### 4. 跨平台比较
-
-| 平台 | 老架构 | v16 架构 |
-|------|--------|----------|
-| **Windows 10+** | ✅ 完全支持 | ✅ Named Pipe IPC |
-| **Windows 7** | ✅ Python 兼容 | ⚠️ Rust 需特殊编译，Shell fallback |
-| **macOS** | ✅ 完全支持 | ✅ Unix Socket IPC |
-| **Linux** | ✅ 完全支持 | ✅ Unix Socket IPC |
-| **ARM64** | ⚠️ 需 Python 编译 | ✅ Rust 跨平台编译 |
-
-**v16 跨平台策略**：
-- Windows: Named Pipe (`\\.\pipe\qqq_broker_...`)
-- macOS/Linux: Unix Socket (`/tmp/qqq_broker_...`)
-- Win7 特殊处理：Rust 失败时自动 fallback 到 Shell (PowerShell)
-
-### 5. 边界情况比较
-
-| 边界情况 | 老架构 | v16 架构 |
-|------|--------|----------|
-| **多窗口同时启动** | 各自 spawn Python，资源浪费 | 随机延迟 + 单例检测，仅 1-2 次 spawn |
-| **跨 IDE 状态同步** | ❌ 不同 globalState，无法同步 | ✅ Broker 统一管理，实时同步 |
-| **网络断开** | 无影响 | 无影响（本地 IPC） |
-| **防火墙/安全软件** | 无影响 | ⚠️ Named Pipe 可能被拦截 |
-| **用户手动结束进程** | 该窗口功能失效 | Broker 被杀后其他窗口可重建连接 |
+| 启动时间 | 每窗口 ~2-3s | 首窗口后 ~50ms |
+| 状态同步 | 轮询 ~1.5s | 广播 <10ms |
+| 空闲 CPU | 持续轮询 | **零轮询** |
 
 ---
 
-## 问题罗列
+## 稳定性与平台支持
 
-### 老架构的问题（最严重的不足）
+### 故障隔离
 
-| 严重程度 | 问题 | 影响 |
-|----------|------|------|
-| 🔴 **致命** | 内存占用线性增长 | 15 窗口占用 1.1GB，系统卡顿 |
-| 🔴 **致命** | 多窗口状态不同步 | 窗口 A 播放，窗口 B 不知道 |
-| 🟠 **严重** | 用户需手动选择 IO 引擎 | 用户困惑，选错导致功能异常 |
-| 🟠 **严重** | 轮询机制持续占用 CPU | 空闲时仍有 CPU 开销 |
-| 🟡 **中等** | 启动慢 | 每窗口 spawn Python 需 2-3 秒 |
-| 🟡 **中等** | 跨 IDE 无法协作 | VS Code/Cursor/Windsurf 各自为政 |
-| 🟢 **轻微** | 热重载可能残留僵尸进程 | 需手动清理 |
+| 场景 | 老架构 | v16 架构 |
+|------|--------|----------|
+| Python 崩溃 | 窗口功能全失效 | 仅音频不可用 |
+| Rust 崩溃 | 窗口 IO 失效 | 相同 |
+| 进程泄漏 | N 个可能泄漏 | 仅 1 个，TTL 自动回收 |
 
-### v16 架构的问题（当前不足）
+### 跨平台
+
+| 平台 | v16 策略 |
+|------|----------|
+| Windows 10+ | ✅ Rust daemon + Named Pipe IPC |
+| Windows 7/8 | ✅ Rust daemon (Win7 目标编译) + Named Pipe IPC |
+| macOS/Linux | ✅ Rust daemon + Unix Socket IPC |
+| ARM64 | ✅ Rust 跨平台编译 |
+
+> Win7 兼容通过 `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` 目标编译实现，无需 Shell fallback。
+
+---
+
+## 已知问题
+
+### 老架构问题（已解决）
+
+| 严重程度 | 问题 | v16 解决方案 |
+|----------|------|--------------|
+| 🔴 致命 | 内存线性增长（15窗口 ~855MB） | Broker 单例，降至 ~155MB |
+| 🔴 致命 | 多窗口状态不同步 | IPC 广播，<10ms 实时同步 |
+| 🟠 严重 | 用户需手动选择 IO 引擎 | 自动协作，零配置 |
+| 🟠 严重 | 空闲时持续轮询占用 CPU | 事件驱动，零轮询 |
+| 🟡 中等 | 每窗口启动 Python 需 2-3s | 首次后直连 ~50ms |
+| 🟡 中等 | 跨 IDE 无法协作 | Broker 统一管理 |
+| 🟢 轻微 | 热重载残留僵尸进程 | TTL 80s 自动回收 |
+
+### v16 当前问题
 
 | 严重程度 | 问题 | 缓解措施 |
 |----------|------|----------|
-| 🟠 **严重** | Rust daemon 仍是 per-window | 可未来改为 Broker 模式 |
-| 🟡 **中等** | Win7 兼容需特殊处理 | 自动 fallback 到 Shell |
-| 🟡 **中等** | Named Pipe 可能被安全软件拦截 | 提示用户添加白名单 |
-| 🟡 **中等** | Python Broker 崩溃时音频不可用 | Rust IO 不受影响，可手动重启扩展 |
-| 🟢 **轻微** | 首次连接需等待 Broker 启动 | 6 秒延迟启动，不影响 VS Code 主界面 |
-| 🟢 **轻微** | Rust 需要为每个平台单独编译 | CI/CD 自动构建 |
+| 🟡 中等 | Named Pipe 可能被安全软件拦截 | 提示用户添加白名单 |
+| 🟢 轻微 | 首次连接需等待 Broker 启动 | 6 秒延迟启动 |
 
-### v16 架构可进一步优化的方向
-
-1. **Rust Broker 化**：将 Rust daemon 也改为单例模式，节省额外 ~210MB
-2. **按需启动 Python**：仅在用户使用音频功能时启动 Broker
-3. **连接池复用**：Rust 连接到 Python Broker 时复用连接
+> ✅ **设计决策**：Rust daemon per-window 是有意为之，确保窗口隔离性和独立文件处理能力。
 
 ---
 
 ## 总结
 
-| 维度 | 老架构 | v16 架构 | 改进幅度 |
-|------|--------|----------|----------|
-| 内存 (15窗口) | ~1125 MB | ~285 MB | **-75%** |
+| 维度 | 老架构 | v16 架构 | 改进 |
+|------|--------|----------|------|
+| 内存 (15窗口) | ~855 MB | ~155 MB | **-82%** |
 | CPU (空闲) | 持续轮询 | 零轮询 | **-100%** |
-| 状态同步延迟 | ~750ms | <10ms | **-99%** |
-| 用户配置 | 需手动选择 | 零配置 | **自动化** |
-| 跨 IDE 协作 | 不支持 | 完全支持 | **全新能力** |
+| 状态同步 | ~750ms | <10ms | **-99%** |
+| 用户配置 | 手动选择 | 零配置 | **自动化** |
+| 跨 IDE 协作 | 不支持 | 完全支持 | **新能力** |
 
-**v16 是一次架构级的升级，从"单打独斗"进化为"分工协作"。**
+**v16 是架构级升级，从"单打独斗"进化为"分工协作"。**
