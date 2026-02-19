@@ -107,6 +107,7 @@ class BrokerBridge extends EventEmitter {
 		// Context (set externally)
 		this.extensionPath = "";
 		this._downloadedPythonPath = null; // Set by dow.js when Python is ready
+		this._diagPrinted = false; // 诊断日志只打印一次
 	}
 
 	// =========================================================================
@@ -243,6 +244,15 @@ class BrokerBridge extends EventEmitter {
 		const token = readTextFile(tokenPath);
 
 		if (!endpoint || !token) {
+			// ★ 诊断：endpoint.json 或 token.txt 不存在
+			// 只在首次失败时打印，避免刷屏
+			if (!this._diagPrinted) {
+				this._diagPrinted = true;
+				try {
+					const global = require('./global');
+					global.logMessage(`[Broker] Connect check: endpoint=${!!endpoint}, token=${!!token}, dir=${cacheDir}`, "DEBUG");
+				} catch { }
+			}
 			return false;
 		}
 
@@ -418,7 +428,7 @@ class BrokerBridge extends EventEmitter {
 			// ★ OPTIMIZATION: Random delay (0-2s) to stagger multi-window spawns
 			// This reduces the chance of 8 windows spawning 8 Python processes simultaneously
 			// Most will find existing Broker after the first one succeeds
-			const randomDelayMs = Math.floor(Math.random() * 6000);
+			const randomDelayMs = Math.floor(Math.random() * 2000); // ★ 减少到 0-2s
 			if (randomDelayMs > 0) {
 				await this._sleep(randomDelayMs);
 
@@ -435,7 +445,17 @@ class BrokerBridge extends EventEmitter {
 			// Find Python executable and script
 			const { pythonPath, scriptPath } = this._findPythonAndScript();
 
+			// ★ 诊断日志：打印找到的路径
+			try {
+				const global = require('./global');
+				global.logMessage(`[Broker] Spawn paths: python=${pythonPath}, script=${scriptPath}`, "DEBUG");
+			} catch { }
+
 			if (!pythonPath || !scriptPath) {
+				try {
+					const global = require('./global');
+					global.logMessage(`[Broker] Missing path: python=${!!pythonPath}, script=${!!scriptPath}`, "WARN");
+				} catch { }
 				resolve();
 				return;
 			}
@@ -456,6 +476,12 @@ class BrokerBridge extends EventEmitter {
 					stdio: 'ignore',
 					windowsHide: true
 				});
+
+				// ★ 诊断日志：spawn 成功
+				try {
+					const global = require('./global');
+					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}`, "DEBUG");
+				} catch { }
 
 				child.unref();
 			} catch (e) {

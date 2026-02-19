@@ -12,6 +12,30 @@ const { BrokerBridge } = require('./brokerBridge');
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
 // ============================================================================
+// ★ 引擎可用时间戳追踪（用于状态栏按检测顺序显示引擎标签）
+// ============================================================================
+const _engineAvailableTimestamps = { R: 0, P: 0, N: 0 };
+
+function recordEngineAvailable(engineKey) {
+	if (_engineAvailableTimestamps[engineKey] === 0) {
+		_engineAvailableTimestamps[engineKey] = Date.now();
+	}
+}
+
+function clearEngineAvailable(engineKey) {
+	_engineAvailableTimestamps[engineKey] = 0;
+}
+
+function getEngineTagByOrder() {
+	// 过滤出已可用的引擎（时间戳 > 0），按时间戳排序
+	const available = Object.entries(_engineAvailableTimestamps)
+		.filter(([_, ts]) => ts > 0)
+		.sort((a, b) => a[1] - b[1])
+		.map(([key]) => key);
+	return available.join('');
+}
+
+// ============================================================================
 // ★ Daemon Bridge (migrated from qqq.js)
 // ============================================================================
 const EventEmitter = require('events');
@@ -164,6 +188,9 @@ class DaemonBridge extends EventEmitter {
 				if (pong?.status === "alive") {
 					this.restartCount = 0;
 					this.available = true;
+					// ★ 记录引擎可用时间戳（用于状态栏按检测顺序显示）
+					if (this.name === "Rust") recordEngineAvailable("R");
+					else if (this.name === "Shell") recordEngineAvailable("N");
 					this._setStartError("");
 					invalidateEngineCache(); // ★ Engine state changed, clear cache
 					logMessage(`${this.name} bridge started and handshaked`, "INFO");
@@ -196,6 +223,15 @@ class DaemonBridge extends EventEmitter {
 	_handleCrash() {
 		this.process = null;
 		invalidateEngineCache(); // ★ Engine crashed, clear cache
+
+		// ★ 清除引擎可用时间戳（状态栏会反映实际能力）
+		if (this.name === "Rust") clearEngineAvailable("R");
+		else if (this.name === "Shell") clearEngineAvailable("N");
+
+		// ★ 延迟更新状态栏（避免在 crash 重启循环中频繁更新）
+		setTimeout(() => {
+			if (typeof updateStatusBarNow === 'function') updateStatusBarNow();
+		}, 100);
 
 		// ★ Emit crash event so UI layer can react
 		this.emit("event", { event: "process_crashed", bridge: this.name });
@@ -354,6 +390,10 @@ class DaemonBridge extends EventEmitter {
 		}
 		this.pending.clear();
 
+		// ★ 清除引擎可用时间戳（stop 时也要清除）
+		if (this.name === "Rust") clearEngineAvailable("R");
+		else if (this.name === "Shell") clearEngineAvailable("N");
+
 		if (!this.process) {
 			this.available = false;
 			this.restartCount = 0;
@@ -409,9 +449,11 @@ pythonBridge.on('event', (evt) => {
 	if (evt.event === 'broker_connected') {
 		logMessage("[Broker] Connected, refreshing engine cache", "DEBUG");
 		invalidateEngineCache();
+		recordEngineAvailable("P"); // ★ 记录 Python 引擎可用时间戳
 	} else if (evt.event === 'broker_disconnected') {
 		logMessage("[Broker] Disconnected", "DEBUG");
 		invalidateEngineCache();
+		clearEngineAvailable("P"); // ★ 清除 Python 引擎可用时间戳
 	}
 });
 
@@ -3269,6 +3311,52 @@ function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, she
 	return reasons;
 }
 
+// ★ 生成引擎状态详情（用于 tooltip 显示每个引擎的对接状态和失败原因）
+function getEngineStatusDetails(pythonBridge, rustBridge, shellBridge) {
+	const details = [];
+
+	// Rust 状态
+	const rsAvailable = rustBridge?.isAvailable?.() === true || rustBridge?.available === true;
+	const rsReason = cleanReason(rustBridge?.lastStartError || rustBridge?.lastCrashReason || rustBridge?.lastStderrSnippet);
+	if (rsAvailable) {
+		details.push(`✅ **R** (Rust)`);
+	} else if (rsReason) {
+		details.push(`❌ **R** (Rust): ${rsReason}`);
+	} else if (rustBridge?.isStarting) {
+		details.push(`⏳ **R** (Rust): starting...`);
+	} else {
+		details.push(`⬜ **R** (Rust): not started`);
+	}
+
+	// Python 状态
+	const pyAvailable = pythonBridge?.isAvailable?.() === true;
+	const pyReason = cleanReason(pythonBridge?.lastStartError || pythonBridge?.lastCrashReason || pythonBridge?.lastStderrSnippet);
+	if (pyAvailable) {
+		details.push(`✅ **P** (Python Broker)`);
+	} else if (pyReason) {
+		details.push(`❌ **P** (Python): ${pyReason}`);
+	} else if (pythonBridge?.isStarting) {
+		details.push(`⏳ **P** (Python): connecting...`);
+	} else {
+		details.push(`⬜ **P** (Python): not connected`);
+	}
+
+	// Node/Shell 状态
+	const shAvailable = shellBridge?.isAvailable?.() === true || shellBridge?.available === true;
+	const shReason = cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
+	if (shAvailable) {
+		details.push(`✅ **N** (Shell daemon)`);
+	} else if (shReason) {
+		details.push(`❌ **N** (Shell): ${shReason}`);
+	} else if (shellBridge?.isStarting) {
+		details.push(`⏳ **N** (Shell): starting...`);
+	} else {
+		details.push(`⬜ **N** (Shell): not started`);
+	}
+
+	return details.join('\n\n');
+}
+
 function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
 	const pref = getEnginePreference();
 	const order = getEngineTryOrder(pref);
@@ -3497,7 +3585,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	if (!statusBarItem) return;
 
 	const totalSeconds = getTotalSecondsIncludingSession();
-	const { h, m } = formatCompactTime(totalSeconds);
+	const { h } = formatCompactTime(totalSeconds); // m 不再使用
 
 	const cacheBytes = cacheStatsSnapshot.totalSize;
 	const cacheMB = cacheBytes / 1048576;
@@ -3516,19 +3604,17 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const pref = getEnginePreference();
 	const active = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
 
-	const engineTag =
-		active.code === "P"
-			? "P"
-			: active.code === "R"
-				? "R"
-				: `N(${active.nodeMode})`;
+	// ★ v16 逻辑：按检测顺序显示引擎标签（R/P/N），不再区分 nd/ns
+	const engineTag = getEngineTagByOrder();
 
+	// ★ 分隔符逻辑：Rust 和 Python 双持双在线用 ▌，否则用 ▪（与 Node 无关）
+	const rs = rustBridge?.isAvailable?.() === true || rustBridge?.available === true;
+	const py = pythonBridge?.isAvailable?.() === true;
+	const dualOnline = rs && py;
 
-	if (active.code === "P" || active.code === "R") {
-
+	if (dualOnline) {
 		statusBarItem.text = ` ▌ qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%    ${engineTag}   ▌`;
 	} else {
-
 		statusBarItem.text = ` ▪  qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%    ${engineTag} ▪ `;
 	}
 
@@ -3546,6 +3632,9 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	const recentTimesStr = wqStats.recentTimes.join(', ');
 	const wqLine = `💪 **${q('global.tooltipAvgLatency')}：** ${averageTime} ms${wqStats.count > 0 ? `（ ${recentTimesStr}${wqStats.maxTime > 0 ? `...[${q('global.tooltipMax', wqStats.maxTime)}]` : ''}）` : ''}`;
 
+	// ★ 引擎状态详情（显示每个引擎的对接状态和失败原因）
+	const engineStatusDetails = getEngineStatusDetails(pythonBridge, rustBridge, shellBridge);
+
 	const tooltip = new vscode.MarkdownString(
 		`⏱️ **${q('global.tooltipCompanionTime')}：** ${formatHours(totalSeconds)}
 
@@ -3555,7 +3644,13 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 
 ${wqLine}
 
-⚡ **${q('global.tooltipIOEngine')}：** ${ioLine}`
+⚡ **${q('global.tooltipIOEngine')}：** ${ioLine}
+
+---
+
+🔌 **Engine Status:**
+
+${engineStatusDetails}`
 	);
 
 	tooltip.isTrusted = true;

@@ -1,255 +1,89 @@
-从你贴的 Actions 运行页来看，失败的是 **Windows 三个目标**（`aarch64-pc-windows-msvc`、`x86_64-win7-windows-msvc`、`i686-win7-windows-msvc`），并且都以 **`cargo` 退出码 101** 结束（这基本就是“编译期报错/构建脚本报错”的典型信号）。([GitHub][1])
-
-结合你的 workflow：Windows 构建步骤会进入 `rust/`，把 **`Cargo_win.toml` 覆盖为 `Cargo.toml`**，然后直接 `cargo build ...`。([GitHub][2])
-所以问题大概率就在 `rust/kp_win.rs` 的 **Windows 代码编译不过**（不是 npm / 打包那边）。
-
----
-
-## 最可能的“硬错误点”（会直接导致 Windows 编译失败）
-
-你在 `windows-sys` 下把很多 **Windows Handle 当成指针**用了：
-
-* `OpenClipboard` 的参数类型是 `HWND`（在 `windows-sys` 里通常是 `isize`），你传了 `std::ptr::null_mut()`
-* `GetClipboardData` 返回的是 `HANDLE`（通常也是 `isize`），你在代码里和 `std::ptr::null_mut()` 比较，还把它传给了一个参数是 `*mut c_void` 的函数
-* `SHFILEINFOW.hIcon` 这类句柄也通常是 `isize`，你拿它去和 `null_mut()` 比较
-
-这些在 Windows 上会直接触发类似 **E0308 mismatched types**（“期望 isize，得到 *mut T”）从而让 `cargo` 以 101 失败退出。
-
----
-
-## 你该怎么改（核心补丁）
-
-### 1) 所有 “null handle” 用 `0`，别用 `null_mut()`
-
-把这种：
-
-```rust
-OpenClipboard(std::ptr::null_mut())
-...
-if h_mem != std::ptr::null_mut() { ... }
-```
-
-改成：
-
-```rust
-OpenClipboard(0)
-...
-if h_mem != 0 { ... }
-```
-
-### 2) `read_global_data` 也别用指针入参，改成 handle（`isize`）
-
-把：
-
-```rust
-unsafe fn read_global_data(h_mem: *mut core::ffi::c_void) -> Option<Vec<u8>> {
-    if h_mem.is_null() { return None; }
-    let ptr = GlobalLock(h_mem) as *const u8;
-    ...
-}
-```
-
-改成（最稳妥的写法之一）：
-
-```rust
-unsafe fn read_global_data(h_mem: isize) -> Option<Vec<u8>> {
-    if h_mem == 0 {
-        return None;
-    }
-    let ptr = GlobalLock(h_mem) as *const u8;
-    if ptr.is_null() {
-        return None;
-    }
-    let size = GlobalSize(h_mem) as usize;
-    if size == 0 {
-        let _ = GlobalUnlock(h_mem);
-        return None;
-    }
-    let data = std::slice::from_raw_parts(ptr, size).to_vec();
-    let _ = GlobalUnlock(h_mem);
-    Some(data)
-}
-```
-
-然后所有调用点统一按 handle 传递、按 `0` 判断空值。
-
----
-
-## 怎么快速“证伪/证实”我说的点
-
-Actions 的详细编译报错日志在 GitHub UI 里通常要点进失败的 job（你那边可能因为未登录在页面上看不到完整日志）。你只要在日志里搜：
-
-* `error[E0308]`
-* `mismatched types`
-* `expected isize` / `found *mut`
-
-
-
- Your build is failing on this line:
-
-```rust
-use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalFree, ...};
-```
-
-because **`GlobalFree` is not exported by `windows-sys`’s Win32::System::Memory bindings** (same story even in newer versions). You can see the `windows-sys 0.61.2` Memory module lists `Global Alloc`, `Global Lock`, `Global Size`, `Global Unlock`, etc., but **no `Global Free`**. ([Docs.rs][1])
-
-### Fix (recommended): declare `GlobalFree` yourself (FFI)
-
-Patch around where you import the memory APIs (your `kp_win.rs:883` area):
-
-```rust
-use windows_sys::Win32::Foundation::HGLOBAL;
-use windows_sys::Win32::System::Memory::{
-    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GHND,
-};
-
-#[link(name = "kernel32")]
-extern "system" {
-    fn GlobalFree(hmem: HGLOBAL) -> HGLOBAL;
-}
-```
-
-Then keep your existing logic, but call the FFI `GlobalFree(...)` instead of importing it from `windows_sys`.
-
-Notes:
-
-* `GlobalFree` returns `NULL` on success; non-null means it failed (and returns the handle).
-* For clipboard code: **only call `GlobalFree` on error paths**. If `SetClipboardData` succeeds, Windows owns the `HGLOBAL` and you must not free it.
-
-### Alternative: use `winapi` just for `GlobalFree`
-
-Add `winapi` and import `winapi::um::winbase::GlobalFree` (works, but adds another Windows binding crate).
-
----
-
-The warnings (`unused import`, `unused variable`) aren’t stopping the build; the missing `GlobalFree` symbol is the blocker.
-
-[1]: https://docs.rs/windows-sys/0.61.2/windows_sys/Win32/System/Memory/index.html "windows_sys::Win32::System::Memory - Rust"
-的梦，日志里已经把原因钉死了：**不是 Win7 兼容/WaitOnAddress 那条线**，而是你在 `kp_win.rs` 里 `use windows_sys::Win32::System::Memory::GlobalFree` ——但在你当前实际参与编译的 `windows-sys` 版本/特性组合下，`Win32::System::Memory` 这个模块里 **根本没有导出 `GlobalFree`**，所以直接 E0432。你贴的错误是：
-
-```
-error[E0432]: unresolved import `windows_sys::Win32::System::Memory::GlobalFree`
---> kp_win.rs:883:59
-no `GlobalFree` in `Win32::System::Memory`
-```
-
----
-
-## 为什么会这样（最关键点）
-
-你 `Cargo.toml` 里声明的是：
-
-```toml
-windows-sys = { version = "0.59", features = [ ... "Win32_System_Memory", ... ] }
-```
-
-但日志里显示你这次编译时同时出现了：
-
-* `Compiling windows-sys v0.61.2`
-* `Compiling windows-sys v0.59.0`
-
-也就是说：**依赖树里拉进来了两个 windows-sys**（0.59 和 0.61.2），而且你的代码 `use windows_sys::...` 只会绑定到 *Cargo 最终解析到的那个 crate 实例*（通常是你直接依赖的 0.59），但某些模块的 re-export / cfg / feature 在不同版本里确实会有差异。
-
-更关键的是：在 `windows-sys` / `windows` 系列里，有些 Win32 API 的函数符号**并不总是以你想的名字出现在那个路径里**（可能在 `Win32::Foundation`、或者需要额外 feature，或者干脆该版本的 sys crate没生成该符号）。
-
----
-
-## 你应该怎么修（给你 3 个稳的方案，按推荐顺序）
-
-### 方案 A（最推荐）：别 import GlobalFree；用 `GlobalAlloc(GHND)` 分配的内存 **不需要你手动 GlobalFree**
-
-在 Win32 剪贴板里有个经典规则：
-
-* 你 `SetClipboardData(CF_HDROP, hMem)` 成功后，**系统接管该内存句柄的所有权**，你不能再 free 它。
-* 只有在 `SetClipboardData` 失败时，你才应该释放你自己分配的内存。
-
-你现在的代码里也写了这句注释：
-
-```rust
-// Note: Don't GlobalFree after successful SetClipboardData - system owns it now
-```
-
-因此你对 `GlobalFree` 的唯一用途就是“失败时清理”。
-那你可以直接改成：失败时调用 `GlobalUnlock` + `GlobalFree` 的逻辑，换成 **`GlobalFree` 用 FFI 自己声明**（见方案 B），或者更简单：**失败时用 `windows_sys::Win32::Foundation::LocalFree` / 或者直接 `GlobalFree` 的 extern**。
-
-但如果你想完全避免 `GlobalFree`：也可以在失败分支直接调用 `windows_sys::Win32::System::Memory::GlobalFree` 的替代 API ——不过你现在就是找不到这个符号，所以要么换路径，要么自己声明。
-
----
-
-### 方案 B（最稳、最不依赖 windows-sys 生成）：自己声明 `GlobalFree`，别从 windows-sys import
-
-在 `#[cfg(windows)] mod win { ... }` 里加一个 extern，直接链接 `kernel32`（Win7/Win10 都有）：
-
-```rust
-#[cfg(windows)]
-mod win {
-    use super::*;
-    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GHND};
-    use windows_sys::Win32::Foundation::HGLOBAL;
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GlobalFree(hMem: HGLOBAL) -> HGLOBAL;
-    }
-
-    ...
-    // 失败时：
-    unsafe { GlobalFree(h_mem as HGLOBAL); }
-}
-```
-
-注意 `windows_sys` 里 `HGLOBAL` 通常在 `Win32::Foundation`，你别从 Memory 里拿类型。
-
-这招的优点：
-
-* 不管 windows-sys 版本怎么变，你都能拿到 GlobalFree。
-* Win7 也没问题（kernel32 里一直有）。
-
----
-
-### 方案 C（你想保持“全 windows-sys 方式”）：改导入路径/特性并统一版本
-
-如果你坚持 `windows_sys::...::GlobalFree`，那要做两件事：
-
-1. **锁死依赖树只用一个 windows-sys 版本**（否则很容易出现“你以为有，实际上那版没有”的分裂）
-   在 Cargo.toml 加 patch（把所有 windows-sys 统一到 0.59.0 或 0.61.2 之一）：
-
-```toml
-[patch.crates-io]
-windows-sys = "=0.59.0"
-```
-
-或统一到 `=0.61.2`，但你自己代码要跟着调整。
-
-2. 找到 `GlobalFree` 在该版本对应的真实导出位置（有时在 `Win32::Foundation` 或者根本不导出，需要自己 extern）
-   由于你现在日志已经证明 `Win32::System::Memory` 下没有 `GlobalFree`，所以这个方案通常最终也会逼你走回方案 B。
-
----
-
-## 顺便：你 workflow 里还有一个逻辑小坑（但这次不是它导致失败）
-
-你 job 名是 “Build aarch64-pc-windows-msvc”，但是脚本里：
-
-```bash
-if [[ "aarch64-pc-windows-msvc" == *"win7"* ]]; then
-  # Win7 target...
-elif [[ "windows-2022" == *"windows"* ]]; then
-  # ARM64 Windows stable ...
-```
-
-也就是说 **ARM64 job 永远走 stable 分支**，不会走 nightly+build-std 分支（这倒是合理）。
-这次失败就是 stable 编译阶段的 `GlobalFree` 导入错误。
-
----
-
-## 你现在该做的最小改动（我建议你直接用 B）
-
-把 `GlobalFree` 从 `use windows_sys::Win32::System::Memory::{... GlobalFree ...}` 里去掉，然后按 **方案 B** 在 `mod win` 里加 extern 的 `GlobalFree`，并且只在 `SetClipboardData` 失败时调用它。
-
-这样你：
-
-* ARM64 Windows（aarch64-pc-windows-msvc）立刻能过编译；
-* x64/i686 也能过；
-* Win7 target 那条线之后再继续处理（build-std / target add 等）。
-
-如果你愿意，把你 `kp_win.rs` 里 `set_files()` 这一段（从 `GlobalAlloc` 到 `SetClipboardData` 的部分）贴出来，我可以按你“对齐 Python 行为”的要求，把失败清理、Unlock/Free、错误返回字段顺序都给你一起整理干净。
+[2026-02-19T10:25:39.252+02:00][DEBUG] [Broker] pythonBridge.extensionPath initialized
+[2026-02-19T10:25:39.266+02:00][INFO] FFmpeg moved from assets to globalStorage: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-19T10:25:39.299+02:00][INFO] qqq 擴充功能啟用中...
+[2026-02-19T10:25:39.310+02:00][INFO] Q2: 檔案管理器已啟用（使用 geq().js 四級回退 + size調度/快取 + 最新 IO 路徑邏輯）
+[2026-02-19T10:25:39.311+02:00][INFO] qqq 擴充功能啟用完成
+[2026-02-19T10:25:39.328+02:00][INFO] [PythonCheck] L1 不完美: no_interpreter
+[2026-02-19T10:25:39.328+02:00][INFO] [PythonCheck] L1 不完美且不在冷卻期，20 秒後觸發 L4 下載流程
+[2026-02-19T10:25:39.354+02:00][INFO] [Broker] Python L1 imperfect, waiting for download...
+[2026-02-19T10:25:39.381+02:00][INFO] Integrity: PASSED
+[2026-02-19T10:25:39.381+02:00][INFO] FFmpeg Path: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-19T10:25:39.383+02:00][INFO] Q2 Integrity: PASSED
+[2026-02-19T10:25:40.789+02:00][DEBUG] [FolderScan] C:\Users\q\Desktop\qqq: 12ms, 2檔案, 72.2 KB (JS)
+[2026-02-19T10:25:40.790+02:00][DEBUG] [FolderScan] C:\qqq: 7ms, 1檔案, 42.2 KB (JS)
+[2026-02-19T10:25:42.308+02:00][INFO] qqq 延遲初始化開始...
+[2026-02-19T10:25:45.326+02:00][INFO] qqq startDaemons 開始 (6秒延遲)
+[2026-02-19T10:25:45.328+02:00][INFO] ====================================================
+[2026-02-19T10:25:45.328+02:00][INFO] 🚀 Q-ENGINE STARTING | VERSION: 15.73.62 | 2026/2/19 10:25:45
+[2026-02-19T10:25:45.328+02:00][INFO] 🎯 ACTIVE FFmpeg: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe (GLOBAL_STORAGE)
+[2026-02-19T10:25:45.328+02:00][INFO] ====================================================
+[2026-02-19T10:25:45.328+02:00][INFO] 開始啟動守護進程，使用者選擇滴引擎: auto
+[2026-02-19T10:25:45.328+02:00][INFO] [Daemon] User preference: auto, but Rust always starts first
+[2026-02-19T10:25:45.328+02:00][INFO] 啟動 Rust bridge...
+[2026-02-19T10:25:45.330+02:00][INFO] Rust Bridge 嘗試啟動: "c:\Users\q\.vscode\extensions\gh555.qqq-15.73.62-win32-x64\assets\q_engine.exe" --daemon
+[2026-02-19T10:25:45.334+02:00][INFO] 啟動 Python bridge...
+[2026-02-19T10:25:45.660+02:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=6996
+Watchdog started, monitoring parent PID=8004
+
+[2026-02-19T10:25:45.662+02:00][INFO] Rust bridge started and handshaked
+[2026-02-19T10:25:45.662+02:00][INFO] Rust Bridge 啟動成功
+[2026-02-19T10:25:45.663+02:00][INFO] Rust Bridge OK
+[2026-02-19T10:25:49.320+02:00][INFO] [yt-dlp] 嘗試從 gh-proxy.com 下載...
+[2026-02-19T10:25:49.324+02:00][INFO] qqq dow.js 預熱 (w10)
+[2026-02-19T10:25:59.332+02:00][INFO] [PythonCheck] 開始 L4 下載安裝流程...
+[2026-02-19T10:25:59.334+02:00][INFO] [Python] 平台=win32, 架構=x64, URL=https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip
+[2026-02-19T10:25:59.334+02:00][INFO] [Python] 嘗試 淘宝NPM...
+[2026-02-19T10:26:02.691+02:00][INFO] [Python] 淘宝NPM 下載成功
+[2026-02-19T10:26:03.208+02:00][WARN] Python Bridge 啟動失敗：Broker connect failed after spawn+retries
+[2026-02-19T10:26:13.427+02:00][INFO] [Python] 安裝 pip...
+[2026-02-19T10:26:28.056+02:00][INFO] [Python] 安裝依賴: miniaudio==1.61, Pillow==10.4.0, cffi==1.16.0, pycparser==2.22, pywin32==311
+[2026-02-19T10:26:34.491+02:00][INFO] [Python] 開始精簡...
+[2026-02-19T10:26:35.884+02:00][INFO] [Slim] 完成: 釋放 39.8MB
+[2026-02-19T10:26:35.890+02:00][INFO] [Python] pywin32 設定完成
+[2026-02-19T10:26:35.898+02:00][INFO] [Python] 複製 VC++ DLL: msvcp140.dll, msvcp140_1.dll, msvcp140_2.dll, concrt140.dll, vccorlib140.dll
+[2026-02-19T10:26:35.899+02:00][INFO] [PythonCheck] L4 下載安裝成功: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
+[2026-02-19T10:26:35.899+02:00][INFO] [PythonCheck] 觸發 "從無到有" 回呼，熱啟動 daemon...
+[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Python ready callback triggered: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
+[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Audio cache reset (qqq)
+[2026-02-19T10:26:35.899+02:00][INFO] [Q4] 音訊來源狀態已重設
+[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Audio cache reset (q4)
+[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Attempting to start Broker after Python ready...
+[2026-02-19T10:26:49.648+02:00][INFO] [yt-dlp] gh-proxy.com 下載成功
+[2026-02-19T10:45:58.819+02:00][WARN] [Audio] Python 引擎探測未通過，使用 Webview 兜底
+[2026-02-19T10:45:58.821+02:00][INFO] [Audio] Webview 引擎播放品味: 3.mp3, 循環: 4
+
+[2026-02-19T16:47:55.690+08:00][DEBUG] [Broker] pythonBridge.extensionPath initialized
+[2026-02-19T16:47:55.776+08:00][INFO] FFmpeg initialized from globalStorage: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-19T16:47:55.797+08:00][INFO] qqq 扩展激活（中控模式）...
+[2026-02-19T16:47:55.800+08:00][INFO] Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）
+[2026-02-19T16:47:55.801+08:00][INFO] qqq 扩展激活完成
+[2026-02-19T16:47:56.061+08:00][INFO] [PythonCheck] L1 完美命中: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
+[2026-02-19T16:47:56.063+08:00][DEBUG] [Broker] Python path from downloader: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
+[2026-02-19T16:47:56.077+08:00][INFO] Integrity: PASSED
+[2026-02-19T16:47:56.077+08:00][INFO] FFmpeg Path: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
+[2026-02-19T16:47:56.077+08:00][INFO] Q2 Integrity: PASSED
+[2026-02-19T16:47:57.454+08:00][DEBUG] [FolderScan] C:\Users\Administrator\Desktop\qqq: 6ms, 1文件, 74.2 KB (JS)
+[2026-02-19T16:47:57.505+08:00][DEBUG] [FolderScan] Z:\F\dq\qqq: 73ms, 36文件, 2.4 GB (JS)
+[2026-02-19T16:47:58.805+08:00][INFO] qqq 延迟初始化开始...
+[2026-02-19T16:48:00.487+08:00][INFO] [Cache] HIT (text): 物资.2
+[2026-02-19T16:48:01.920+08:00][INFO] qqq startDaemons 开始 (6秒延迟)
+[2026-02-19T16:48:01.924+08:00][INFO] ====================================================
+[2026-02-19T16:48:01.924+08:00][INFO] 🚀 Q-ENGINE STARTING | VERSION: 15.73.62 | 2026/2/19 16:48:01
+[2026-02-19T16:48:01.924+08:00][INFO] 🎯 ACTIVE FFmpeg: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe (GLOBAL_STORAGE)
+[2026-02-19T16:48:01.924+08:00][INFO] ====================================================
+[2026-02-19T16:48:01.924+08:00][INFO] 开始启动守护进程，用户选择滴引擎: auto
+[2026-02-19T16:48:01.924+08:00][INFO] [Daemon] User preference: auto, but Rust always starts first
+[2026-02-19T16:48:01.924+08:00][INFO] 启动 Rust bridge...
+[2026-02-19T16:48:01.926+08:00][INFO] Rust Bridge 尝试启动: "c:\Users\Administrator\.vscode\extensions\gh555.qqq-15.73.62\assets\q_engine.exe" --daemon
+[2026-02-19T16:48:01.933+08:00][INFO] 启动 Python bridge...
+[2026-02-19T16:48:01.985+08:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=
+[2026-02-19T16:48:01.989+08:00][WARN] Rust stderr: 2960
+Watchdog started, monitoring parent PID=4152
+
+[2026-02-19T16:48:02.037+08:00][INFO] Rust bridge started and handshaked
+[2026-02-19T16:48:02.037+08:00][INFO] Rust Bridge 启动成功
+[2026-02-19T16:48:02.037+08:00][INFO] Rust Bridge OK
+[2026-02-19T16:48:07.779+08:00][INFO] qqq dow.js 预热 (w10)
+[2026-02-19T16:48:24.014+08:00][WARN] Python Bridge 启动失败：Broker connect failed after spawn+retries
+[2026-02-19T16:48:52.931+08:00][WARN] [Audio] Python 引擎探测未通过，使用 Webview 兜底
+[2026-02-19T16:48:52.936+08:00][INFO] [Audio] Webview 引擎播放品味: 3.mp3, 循环: 4
