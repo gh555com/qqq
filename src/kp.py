@@ -2438,27 +2438,33 @@ def _create_listen_endpoint(local_token: str):
         _write_endpoint_file(info)
         return ("unix", s, info)
 
-    # Windows: Use TCP socket (Named Pipe fails under Node.js spawn due to pywin32/window station issues)
-    # TCP is more reliable: pure network, no pywin32, no GUI dependency
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(('127.0.0.1', 0))  # Let OS pick a free port
-    tcp_port = s.getsockname()[1]
-    s.listen(64)
-    s.settimeout(0.5)
+    # Windows: Named Pipe (now that _openAndHello direct-write bug is fixed)
+    rid = _get_current_user_sid()
+    pipe_name = f"\\\\.\\pipe\\{ENDPOINT_DIRNAME}_{rid}"
+    global _PIPE_NAME
+    _PIPE_NAME = pipe_name
+
+    _log(f"Creating Named Pipe: {pipe_name}")
+    # Test create first pipe instance to verify we're the sole owner
+    hPipe = _create_named_pipe_instance(pipe_name, first_instance=True)
+    if _is_invalid_handle(hPipe):
+        _log(f"[FATAL] Failed to create Named Pipe: {pipe_name}")
+        return None
+
+    _log(f"Named Pipe created successfully: {pipe_name}")
+    # Close the test handle - _pipe_accept_loop will create instances
+    _pipe_close_handle(hPipe)
 
     info = {
         "app_id": APP_ID,
         "protocol": BROKER_PROTOCOL,
-        "family": "tcp",
-        "host": "127.0.0.1",
-        "port": tcp_port,
+        "family": "pipe",
+        "name": pipe_name,
         "pid": os.getpid(),
         "token_enabled": bool(ENABLE_LOCAL_TOKEN),
     }
     _write_endpoint_file(info)
-    _log(f"TCP endpoint: 127.0.0.1:{tcp_port}")
-    return ("tcp", s, info)
+    return ("pipe", pipe_name, info)  # Return pipe_name for accept loop
 
 # ---------------- Lease state (monotonic) ----------------
 _BROKER_START_TS = _now_mono()
