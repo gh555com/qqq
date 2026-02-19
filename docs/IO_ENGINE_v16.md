@@ -71,7 +71,7 @@ ps aux | grep q_engine
 | 属性 | 值 |
 |------|-----|
 | **进程名** | `python.exe` / `python3` |
-| **Python 路径** | `{globalStorage}/python_engine/python.exe` (内置) 或系统 python |
+| **Python 路径** | `{globalStorage}/python_engine/python.exe` (仅内置，禁用系统 Python) |
 | **脚本文件** | `{extensionPath}/dist/kp.py` 或 `src/kp.py` |
 | **启动参数** | `--broker` |
 | **生命周期** | 全局单例，TTL 80s 无心跳自动退出 |
@@ -82,7 +82,7 @@ ps aux | grep q_engine
 
 | 平台 | IPC 类型 | 路径格式 |
 |------|----------|----------|
-| Windows | Named Pipe | `\\.\pipe\vix_audio_broker_{USERDOMAIN}_{USERNAME}_{SESSIONNAME}` |
+| Windows | Named Pipe | `\\.\pipe\vix_audio_broker_{RID}` (如 `vix_audio_broker_1001`) |
 | macOS/Linux | Unix Socket | `/tmp/vix_audio_broker_{uid}.sock` |
 
 **配置文件目录**：
@@ -277,6 +277,8 @@ pkill -f "kp.py.*--broker"
 |----------|------|----------|
 | 🟡 中等 | Named Pipe 可能被安全软件拦截 | 提示用户添加白名单 |
 | 🟢 轻微 | 首次连接需等待 Broker 启动 | 6 秒延迟启动 |
+
+> ✅ **已解决**：`windowsHide: true` 和 `pythonw.exe` 都会导致 pywin32 Named Pipe 挂起 → 使用 `python.exe` + `detached: true`（接受短暂黑窗闪烁）
 
 > ✅ **设计决策**：Rust daemon per-window 是有意为之，确保窗口隔离性和独立文件处理能力。
 

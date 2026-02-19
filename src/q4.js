@@ -1570,6 +1570,10 @@ class ClipboardHistorySidebarProvider {
     // ★ Startup check: is Python playing in background? If yes, sync UI
     async _syncPythonStateOnStartup() {
         try {
+            // ★ Only sync if Broker is already available (don't trigger start here)
+            if (!this._global.pythonBridge?.isAvailable()) {
+                return; // Broker not ready yet, skip sync
+            }
             const res = await this._global.pythonBridge.call('get_audio_state');
             if (res && res.playing) {
                 // Python is playing, sync UI state
@@ -1773,7 +1777,9 @@ class ClipboardHistorySidebarProvider {
         .icon-all-settings { width: 14px; height: 14px; background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzU0NTQ1NCI+PHBhdGggZD0iTTE5LjE0IDEyLjk0Yy4wNC0uMy4wNi0uNjEuMDYtLjk0IDAtLjMyLS4wMi0uNjQtLjA3LS45NGwyLjAzLTEuNThjLjE4LS4xNC4yMy0uNDEuMTItLjYxbC0xLjkyLTMuMzJjLS4xMi0uMjItLjM3LS4yOS0uNTktLjIybC0yLjM5Ljk2Yy0uNS0uMzgtMS4wMy0uNy0xLjYyLS45NGwtLjM2LTIuNTRjLS4wNC0uMjQtLjI0LS40MS0uNDgtLjQxaC0zLjg0Yy0uMjQgMC0uNDMuMTctLjQ3LjQxbC0uMzYgMi41NGMtLjU5LjI0LTEuMTMuNTctMS42Mi45NGwtMi4zOS0uOTZjLS4yMi0uMDgtLjQ3IDAtLjU5LjIybC0xLjkyIDMuMzJjLS4xMi4yLS4wNy40Ny4xMi42MWwyLjAzIDEuNThjLS4wNS4zLS4wOS42My0uMDkuOTRzLjAyLjY0LjA3Ljk0bC0yLjAzIDEuNThjLS4xOC4xNC0uMjMuNDEtLjEyLjYxbDEuOTIgMy4zMmMuMTIuMjIuMzcuMjkuNTkuMjJsMi4zOS0uOTZjLjUuMzggMS4wMy43IDEuNjIuOTRsLjM2IDIuNTRjLjA1LjI0LjI0LjQxLjQ4LjQxaDMuODRjLjI0IDAgLjQ0LS4xNy40Ny0uNDFsLjM2LTIuNTRjLjU5LS4yNCAxLjEzLS41NiAxLjYyLS45NGwyLjM5Ljk2Yy4yMi4wOC40NyAwIC41OS0uMjJsMS45Mi0zLjMyYy4xMi0uMjIuMDctLjQ3LS4xMi0uNjFsLTIuMDEtMS41OHpNMTIgMTUuNmMtMS45OCAwLTMuNi0xLjYyLTMuNi0zLjZzMS42Mi0zLjYgMy42LTMuNiAzLjYgMS42MiAzLjYgMy42LTEuNjIgMy42LTMuNiAzLjZ6Ii8+PC9zdmc+') no-repeat center; display: inline-block; vertical-align: middle; position: relative; top: -1px; }
 
         /* ★ Weave inline buttons - positioned right after "Weave" text */
-        .weave-inline-btns { display: inline-flex; gap: 5px; margin-left: 2px; vertical-align: middle; pointer-events: auto; position: relative; top: -1px; }
+        /* ★ Hidden by default, shown for 9s (cumulative) when weave button clicked */
+        .weave-inline-btns { display: inline-flex; gap: 5px; margin-left: 2px; vertical-align: middle; position: relative; top: -1px; visibility: hidden; pointer-events: none; opacity: 0; }
+        .weave-inline-btns.visible { visibility: visible; pointer-events: auto; opacity: 1; }
         .weave-mini-btn { pointer-events: auto; padding-top: 3px; }
         #weaveCard:hover { transform: none; }
         #weaveCard > .text-content { position: relative; top: 1px; overflow: visible; }
@@ -2136,6 +2142,7 @@ class ClipboardHistorySidebarProvider {
                 roamStats: document.getElementById('roam-stats'),
                 weaveStats: document.getElementById('weave-stats'),
                 weaveCard: document.getElementById('weaveCard'),
+                weaveInlineBtns: document.querySelector('.weave-inline-btns'),
                 btnWeaveWithRemove: document.getElementById('btnWeaveWithRemove'),
                 btnCycleCleanFreak: document.getElementById('btnCycleCleanFreak'),
                 cleanFreakIcon: document.getElementById('cleanFreakIcon'),
@@ -2412,6 +2419,11 @@ class ClipboardHistorySidebarProvider {
                     var cmd = cmdBtn.dataset.cmd;
                     post('executeCommand', { cmd: cmd });
 
+                    // ★ Show weave inline buttons when weave main button is clicked
+                    if (cmd === 'qqq.weave') {
+                        showWeaveInlineBtns();
+                    }
+
                     // Record generic command usage counts
                     var generics = ['qqq.weave', 'qqq.exportDoc', 'qqq.pure', 'qqq.exportZip', 'qqq.allSettings'];
                     for (var i = 0; i < generics.length; i++) {
@@ -2441,6 +2453,35 @@ class ClipboardHistorySidebarProvider {
                     el.cleanFreakIcon.innerHTML = cleanFreakSvgs[mode] || '';
                 }
             }
+
+            // ★ Weave inline buttons visibility timer (hidden by default, shown for 9s cumulative per click)
+            var weaveInlineBtnsHideTimeout = null;
+            var weaveInlineBtnsRemainingMs = 0;
+            var weaveInlineBtnsShowTime = 0;
+            function showWeaveInlineBtns() {
+                // Calculate remaining time if timer is active
+                if (weaveInlineBtnsHideTimeout && weaveInlineBtnsShowTime > 0) {
+                    var elapsed = Date.now() - weaveInlineBtnsShowTime;
+                    weaveInlineBtnsRemainingMs = Math.max(0, weaveInlineBtnsRemainingMs - elapsed);
+                }
+                // Add 9 seconds each time weave button is clicked
+                weaveInlineBtnsRemainingMs += 9000;
+                el.weaveInlineBtns.classList.add('visible');
+                // Clear any existing timeout
+                if (weaveInlineBtnsHideTimeout) {
+                    clearTimeout(weaveInlineBtnsHideTimeout);
+                }
+                // Record when we started/extended
+                weaveInlineBtnsShowTime = Date.now();
+                // Set new timeout for the total remaining time
+                weaveInlineBtnsHideTimeout = setTimeout(function() {
+                    el.weaveInlineBtns.classList.remove('visible');
+                    weaveInlineBtnsRemainingMs = 0;
+                    weaveInlineBtnsHideTimeout = null;
+                    weaveInlineBtnsShowTime = 0;
+                }, weaveInlineBtnsRemainingMs);
+            }
+
             el.btnWeaveWithRemove.onclick = function(e) { e.stopPropagation(); post('weaveWithRemove', {}); };
             el.btnCycleCleanFreak.onclick = function(e) { e.stopPropagation(); post('cycleCleanFreakMode', {}); };
             // Request initial cleanFreakMode
