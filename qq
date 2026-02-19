@@ -565,5 +565,137 @@ context.subscriptions.push(
 
 
 
+在你这份代码里，`endpoint.json` / `token.txt` 的落盘位置**跟 IDE/扩展安装目录无关**，只跟“当前用户的系统缓存目录 + 固定子目录名”有关，所以多个 AI IDE（VS Code / Cursor / Windsurf…）只要在**同一个用户会话**里跑，默认就是**共享同一份**文件。
+
+下面按你代码 `_get_endpoint_dir()` 的逻辑，把三大平台的实际路径讲清楚（含 fallback）。
+
+---
+
+## 1) Windows：优先用 LOCALAPPDATA，其次 APPDATA，再不行用 temp
+
+代码：
+
+```py
+base = LOCALAPPDATA or APPDATA or tempfile.gettempdir()
+dir  = base / "vix_audio_broker"
+files: endpoint.json / token.txt
+```
+
+所以通常是：
+
+* **endpoint.json**
+  `%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
+* **token.txt**
+  `%LOCALAPPDATA%\vix_audio_broker\token.txt`
+
+常见展开示例（按用户名不同）：
+
+* `C:\Users\<You>\AppData\Local\vix_audio_broker\endpoint.json`
+* `C:\Users\<You>\AppData\Local\vix_audio_broker\token.txt`
+
+如果某些环境没有 `LOCALAPPDATA`（少见）：
+
+* `%APPDATA%\vix_audio_broker\...`（Roaming）
+
+再不行（极端/沙盒环境）：
+
+* `C:\Temp\vix_audio_broker\...` 或系统 temp 目录下
+
+---
+
+## 2) Linux / macOS：优先 XDG_CACHE_HOME，否则 ~/.cache，再不行 temp
+
+代码：
+
+```py
+base = XDG_CACHE_HOME or ~/.cache
+dir  = base / "vix_audio_broker"
+files: endpoint.json / token.txt
+```
+
+因此：
+
+* **Linux（常见）**
+
+  * `$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`（如果设了 XDG）
+  * 否则：`~/.cache/vix_audio_broker/endpoint.json`
+  * `token.txt` 同目录
+
+* **macOS（注意）**
+  你的代码**不会自动用** `~/Library/Caches`（除非你自己把 `XDG_CACHE_HOME` 指过去），所以默认是：
+
+  * `~/.cache/vix_audio_broker/endpoint.json`
+  * `~/.cache/vix_audio_broker/token.txt`
+
+如果 `~/.cache` 创建失败才会 fallback：
+
+* `tempfile.gettempdir()/vix_audio_broker/...`（通常是 `/tmp/...`）
+
+---
+
+## 3) IPC 地址文件里写的“真正连接地址”在哪里？
+
+### (A) Linux/mac：Unix socket 本体在 tempdir
+
+你 broker 的 unix socket 路径是：
+
+```py
+/tmp/vix_audio_broker_<uid>.sock
+```
+
+准确点说是 `tempfile.gettempdir()` 下，比如：
+
+* Linux/mac：`/tmp/vix_audio_broker_501.sock`（uid=501 举例）
+
+然后 `endpoint.json` 里会写：
+
+```json
+{ "family": "unix", "path": "/tmp/vix_audio_broker_501.sock", ... }
+```
+
+### (B) Windows：现在用 TCP 127.0.0.1:port
+
+`endpoint.json` 里会是：
+
+```json
+{ "family": "tcp", "host": "127.0.0.1", "port": 38xxx, ... }
+```
+
+> 你前面提到 Named Pipe 的版本：那时 `endpoint.json` 会写 `family:"pipe"` + `name:"\\\\.\\pipe\\xxx"` 之类；但你当前这份代码是 TCP。
+
+---
+
+## 4) 多 AI IDE / 多扩展目录时，会不会各写各的、互相找不到？
+
+**只要满足这两条，默认就不会：**
+
+1. 都在同一个 OS 用户下运行（同一套 `LOCALAPPDATA` / `HOME`）
+2. `ENDPOINT_DIRNAME`（你这里是 `vix_audio_broker`）保持一致
+
+因为落盘目录完全不依赖 `__file__` / 扩展安装路径。
+
+---
+
+## 5) Node/VS Code 侧应该怎么找这些文件（必须跟 Python 一致）
+
+建议 Node 侧完全照抄 Python 的“找目录规则”，不要自作主张换成 extension storage。
+
+最小等价规则：
+
+* Windows：`process.env.LOCALAPPDATA || process.env.APPDATA || os.tmpdir()`
+* Linux/mac：`process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache")`，如果创建失败再 `os.tmpdir()`
+
+如果你要我把这个写进“接入文档”，我可以直接给你一段 Node 的 `getEndpointDir()` 代码（跟你 Python 逻辑 1:1 对齐），这样你不会踩到“不同 IDE 目录不同导致找不到”的坑。
+
+---
+
+### 一个你可能很快会遇到的坑（提前提醒）
+
+你 Windows 端口的“初始 hash salt”里含了 `sys.executable` 和 `__file__`。这会导致**不同打包方式/不同 IDE 内置 python 路径**时，“默认端口候选”不同。
+不过你现在**优先读 endpoint.json**，并且 `_create_listen_socket()` 也会优先沿用 endpoint.json 里的旧端口，所以多数情况下没事；只是“第一次同时起多个 IDE 都在抢启动”的时候，端口漂移概率会变大一点。
+
+如果你想把“启动争抢”也做到更稳，我建议后面把 salt 简化成：`APP_ID + 用户 SID/uid` 就够了。
+
+需要的话我可以给你一个“完全不受 IDE/路径影响”的 salt 方案。
 
 

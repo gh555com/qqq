@@ -7,6 +7,7 @@ const os = require("os");
 const readline = require("readline");
 const crypto = require("crypto");
 const { q } = require('./i18n');
+const { BrokerBridge } = require('./brokerBridge');
 
 const NO_TRACK_ENV = { ...process.env, QQQ_NO_TRACK: "1" };
 
@@ -397,105 +398,53 @@ class DaemonBridge extends EventEmitter {
 // ★ Bridge Instances & Management
 // ============================================================================
 
-// Python bridge: prefer python, then python3 (non-win32)
-const pythonBridge = new DaemonBridge("Python", (bridge) => {
-	return new Promise((resolve) => {
-		// Python engine: prefer dist (bundle), fallback to src
-		let scriptPath = path.join(extensionContext.extensionPath, "dist", "kp.py");
-		if (!fs.existsSync(scriptPath)) {
-			scriptPath = path.join(extensionContext.extensionPath, "src", "kp.py");
-		}
+// ★ Python bridge: Now uses BrokerBridge for IPC Broker singleton mode
+// - All VS Code windows (across multiple AI IDEs) share ONE Python Broker process
+// - Handles: clipboard watching, audio playback, savoring
+// - Uses endpoint.json + token.txt for discovery and authentication
+const pythonBridge = new BrokerBridge("Python");
 
-		if (!fs.existsSync(scriptPath)) {
-			bridge._setStartError(q('global.kpNotExist', scriptPath));
-			bridge.available = false;
-			resolve(false);
-			return;
-		}
+// ★ Listen for Broker events to refresh engine cache
+pythonBridge.on('event', (evt) => {
+	if (evt.event === 'broker_connected') {
+		logMessage("[Broker] Connected, refreshing engine cache", "DEBUG");
+		invalidateEngineCache();
+	} else if (evt.event === 'broker_disconnected') {
+		logMessage("[Broker] Disconnected", "DEBUG");
+		invalidateEngineCache();
+	}
+});
 
-		const spawnWith = (bin) => {
-			return new Promise(async (res) => {
-				// ★ Multi-instance fix: remove system-level singleton check
-				// Each IDE instance runs its own daemon independently, no interference
-				// Instance-level checks (this.process/isStarting) are enough to prevent duplicate starts within same IDE
+// Initialize pythonBridge with extension path and Python downloader integration
+function initPythonBrokerBridge() {
+	if (!extensionContext || pythonBridge.extensionPath !== "") return;
 
-				let proc;
-				try {
-					logMessage(q('python.trySpawn', bin, scriptPath), "INFO");
+	pythonBridge.extensionPath = extensionContext.extensionPath;
+	logMessage("[Broker] pythonBridge.extensionPath initialized", "DEBUG");
 
-					// Check if bin is absolute path and exists
-					if (path.isAbsolute(bin) && !fs.existsSync(bin)) {
-						logMessage(q('python.pathNotExist', bin), "WARN");
-						res(false);
-						return;
-					}
-					const isInternal = bin.includes('python_engine');
-					const spawnEnv = isInternal
-						? { ...process.env, ...NO_TRACK_ENV, PYTHONNOUSERSITE: '1', PYTHONPATH: '' }
-						: { ...process.env, ...NO_TRACK_ENV };
-
-					proc = cp.spawn(bin, [scriptPath, "--daemon"], {
-						stdio: ["pipe", "pipe", "pipe"],
-						windowsHide: true,
-						env: spawnEnv,
-						cwd: isInternal ? path.dirname(bin) : undefined
-					});
-				} catch (e) {
-					const msg = `spawn_fail(${bin}): ${e.message}`;
-					bridge._setStartError(msg);
-					logMessage(q('python.bridgeStartFailed', bin, e.message), "WARN");
-					res(false);
-					return;
-				}
-
-				let settled = false;
-				const failFast = () => {
-					if (settled) return;
-					settled = true;
-					try { proc.kill(); } catch { }
-					bridge.available = false;
-					bridge.process = null;  // ★ Ensure process reference is cleared
-					res(false);
-				};
-
-				proc.once("error", (err) => {
-					const msg = `process_error(${bin}): ${err.message}`;
-					bridge._setStartError(msg);
-					logMessage(q('python.bridgeProcessError', bin, err.message), "WARN");
-					failFast();
-				});
-
-				bridge.setupProcess(proc, (ok) => {
-					if (settled) return;
-					settled = true;
-					if (!ok && bridge.lastStartError) {
-						logMessage(q('python.bridgeStartAllFailed', bridge.lastStartError), "WARN");
-					}
-					res(!!ok);
-				});
-			});
-		};
-
-		(async () => {
+	// ★ CRITICAL: Integrate with Python downloader (dow.js)
+	// This ensures Python environment is ready before spawning Broker
+	(async () => {
+		try {
 			const { getSharedDownloader } = require("./dow");
 			const downloader = getSharedDownloader();
 
-			// ★ Register "from-scratch" callback: hot-start daemon after download completes
+			// ★ Register hot-start callback: when Python download completes, refresh caches
 			downloader.python.onPythonReady(async (pythonPath, context) => {
-				logMessage(q('python.fromScratchCallback', pythonPath), "INFO");
+				logMessage(`[Broker] Python ready callback triggered: ${pythonPath}`, "INFO");
 
-				// ★ Environment is perfect now, refresh engine cache
+				// ★ Refresh engine cache (important!)
 				invalidateEngineCache();
 
-				// ★ Reset Python audio engine cache (very important!)
+				// ★ Reset Python audio engine cache
 				try {
 					const qqq = require('./qqq');
 					if (qqq.resetPythonAudioCache) {
 						qqq.resetPythonAudioCache();
-						logMessage(q('python.audioResetQqq'), "INFO");
+						logMessage("[Broker] Audio cache reset (qqq)", "INFO");
 					}
 				} catch (e) {
-					logMessage(q('python.audioResetQqqError', e.message), "WARN");
+					logMessage(`[Broker] Audio cache reset error (qqq): ${e.message}`, "WARN");
 				}
 
 				// ★ Reset Q4 audio source state
@@ -503,87 +452,41 @@ const pythonBridge = new DaemonBridge("Python", (bridge) => {
 					const q4 = require('./q4');
 					if (q4.resetQ4AudioSource) {
 						q4.resetQ4AudioSource();
-						logMessage(q('python.audioResetQ4'), "INFO");
+						logMessage("[Broker] Audio cache reset (q4)", "INFO");
 					}
 				} catch (e) {
-					logMessage(q('python.audioResetQ4Error', e.message), "WARN");
+					logMessage(`[Broker] Audio cache reset error (q4): ${e.message}`, "WARN");
 				}
 
-				// Check if daemon is already available
-				if (bridge.available) {
-					logMessage(q('python.daemonAvailable'), "INFO");
-					return;
-				}
-
-				// Hot-start daemon
-				const ok = await spawnWith(pythonPath);
-				if (ok) {
-					logMessage(q('python.hotStartSuccess', pythonPath), "INFO");
-
-					// ★ Refresh engine cache again after hot-start succeeds
-					invalidateEngineCache();
-
-					// ★ Decide standby/main based on IO engine preference (read via ConfigGate)
+				// ★ If Broker not connected yet, try to start it now with correct Python path
+				if (!pythonBridge.isAvailable()) {
+					logMessage("[Broker] Attempting to start Broker after Python ready...", "INFO");
+					pythonBridge._downloadedPythonPath = pythonPath;
 					try {
-						const ioEngine = getConfig('ioEngine') || 'auto';
-
-						if (ioEngine === 'auto' || ioEngine === 'python') {
-							logMessage(q('python.ioEngineMain', ioEngine), "INFO");
-						} else {
-							logMessage(q('python.ioEngineStandby', ioEngine), "INFO");
+						const ok = await pythonBridge.start();
+						if (ok) {
+							logMessage("[Broker] Broker hot-started successfully", "INFO");
+							invalidateEngineCache();
 						}
 					} catch (e) {
-						logMessage(q('python.ioEngineReadError', e.message), "WARN");
+						logMessage(`[Broker] Broker hot-start failed: ${e.message}`, "WARN");
 					}
-				} else {
-					logMessage(q('python.hotStartFailed'), "WARN");
 				}
 			});
 
-			// ★ New architecture: only check L1 perfection
-			// If L1 is perfect, start daemon directly
-			// If L1 is imperfect, return null; wait 20 seconds then hot-start via callback after download completes
+			// ★ Check current Python status (triggers download if needed)
 			const pythonPath = await downloader.ensurePythonReady(extensionContext);
-
-			// ★ Check if daemon is already available
-			if (pythonBridge.available === true) {
-				logMessage(q('python.daemonSkipStart'), "DEBUG");
-				resolve(true);
-				return;
-			}
-
 			if (pythonPath) {
-				const ok = await spawnWith(pythonPath);
-				if (ok) {
-					logMessage(q('python.bridgeUseSuccess', pythonPath), "INFO");
-					resolve(true);
-					return;
-				}
+				pythonBridge._downloadedPythonPath = pythonPath;
+				logMessage(`[Broker] Python path from downloader: ${pythonPath}`, "DEBUG");
+			} else {
+				logMessage("[Broker] Python L1 imperfect, waiting for download...", "INFO");
 			}
-
-			// L1 imperfect or start failed; wait for background download then hot-start via callback
-			if (!pythonPath) {
-				logMessage(q('python.l1ImperfectWait'), "INFO");
-				// Do not set error; may hot-start via callback
-				bridge.available = false;
-				resolve(false);
-				return;
-			}
-
-			// Start failed
-			if (!bridge.lastStartError) {
-				bridge._setStartError("python_spawn_failed");
-			}
-			logMessage(q('python.bridgeStartAllFailed', bridge.lastStartError), "WARN");
-			bridge.available = false;
-			resolve(false);
-		})().catch((e) => {
-			bridge._setStartError(`start_exception: ${e.message}`);
-			logMessage(q('python.bridgeStartException', e.message), "ERROR");
-			resolve(false);
-		});
-	});
-});
+		} catch (e) {
+			logMessage(`[Broker] Python downloader integration error: ${e.message}`, "WARN");
+		}
+	})();
+}
 
 // Rust bridge
 const rustBridge = new DaemonBridge("Rust", (bridge) => {
@@ -1371,8 +1274,9 @@ async function startDaemons() {
 	// ★ Ultimate fix: check if any bridge is available or starting
 	// available === true means usable
 	// isStarting === true means in startup (spawn -> handshake)
-	// process exists means process started
-	const pythonBusy = pythonBridge.available === true || pythonBridge.isStarting || pythonBridge.process;
+	// process/socket exists means connection started
+	// Note: pythonBridge uses BrokerBridge (IPC socket), not DaemonBridge (child process)
+	const pythonBusy = pythonBridge.available === true || pythonBridge.isStarting || pythonBridge.socket;
 	const rustBusy = rustBridge.available === true || rustBridge.isStarting || rustBridge.process;
 	const shellBusy = shellBridge.available === true || shellBridge.isStarting || shellBridge.process;
 
@@ -1428,31 +1332,31 @@ async function startDaemons() {
 		// ★ Ultimate optimal: check if already deactivated before starting
 		if (_isDeactivated) return;
 
-		// ★ Only start the IO engine user selected (save memory)
+		// ★ ARCHITECTURE UPGRADE: Rust ALWAYS starts first, regardless of ioEngine config
+		// Rust handles: wq, setFiles, getFiles, dumpHtmlToFile, trigger_system_paste
+		// If Rust fails, Shell (PowerShell) daemon becomes the fallback
 		const pref = getEnginePreference();
+		logMessage(`[Daemon] User preference: ${pref}, but Rust always starts first`, "INFO");
 
-		if (pref === 'rust') {
-			// ★ Rust 优先：Rust 成功则不启动 Shell（节省 ~50MB）
-			const rustOk = await ensureStarted(rustBridge);
-			if (!rustOk) {
-				// Rust 失败：启动 Shell 作为 wq fallback，再启动 Python 处理 IO
-				logMessage("[Daemon] Rust failed, starting Shell as wq fallback", "INFO");
-				await ensureStarted(shellBridge);
-				await ensureStarted(pythonBridge);
-			}
-		} else if (pref === 'shell') {
-			// Shell only mode
+		// ★ OPTIMIZATION: Start Rust and Python in PARALLEL (they don't depend on each other)
+		// - Rust: handles IO operations (wq, clipboard, paste)
+		// - Python: handles audio playback + clipboard watching (sfx)
+		// This saves 1-2 seconds on startup
+
+		const rustPromise = ensureStarted(rustBridge);
+		const pythonPromise = (pref !== 'shell') ? ensureStarted(pythonBridge) : Promise.resolve(false);
+
+		// Wait for Rust first (needed to decide if Shell fallback is required)
+		const rustOk = await rustPromise;
+
+		// ★ Step 2: Shell (PowerShell) is fallback only when Rust fails
+		if (!rustOk) {
+			logMessage("[Daemon] Rust failed, starting Shell as fallback for wq/clipboard", "INFO");
 			await ensureStarted(shellBridge);
-		} else {
-			// 'python' or 'auto': Rust wq 优先 + Python IO
-			const rustOk = await ensureStarted(rustBridge);
-			const pyOk = await ensureStarted(pythonBridge);
-			// 如果 Rust 和 Python 都失败，启动 Shell 作为 fallback
-			if (!rustOk && !pyOk) {
-				logMessage("[Daemon] Rust & Python failed, starting Shell as fallback", "INFO");
-				await ensureStarted(shellBridge);
-			}
 		}
+
+		// ★ Wait for Python to finish (it was started in parallel)
+		await pythonPromise;
 
 		if (bootSeq === _daemonBootSeq) {
 			const anyAvailable = pythonBridge.isAvailable() || rustBridge.isAvailable() || shellBridge.isAvailable();
@@ -1549,6 +1453,9 @@ function withReady(fn) {
 function init(context) {
 	_isDeactivated = false; // Reset on startup
 	extensionContext = context;
+
+	// ★ Initialize BrokerBridge with extension path (for IPC Broker singleton)
+	initPythonBrokerBridge();
 
 	// ★ FFmpeg: 统一存放在 globalStorage（与 yt-dlp.exe 同目录）
 	const isWin = process.platform === "win32";
