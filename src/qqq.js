@@ -1094,6 +1094,13 @@ function resetPythonAudioCache() {
 }
 
 async function checkPythonAudioEngine() {
+	// ★ excludePython: user explicitly disabled Python Broker
+	if (global.getEnginePreference() === 'excludePython') {
+		_pythonAudioChecked = true;
+		_pythonAudioAvailable = false;
+		return false;
+	}
+
 	if (_pythonAudioChecked) {
 		return _pythonAudioAvailable;
 	}
@@ -1817,19 +1824,16 @@ function _registerCommands(context) {
 
 				// ★ Handle ioEngine switch: start the newly selected daemon
 				if (event.affectsConfiguration("qqq.ioEngine")) {
-					const val = global.getConfig("ioEngine");
+					const val = global.getEnginePreference();
 					global.logMessage(q('qqq.log.engineSwitch', val), "INFO");
 
 					// ★ Start the newly selected engine daemon
 					(async () => {
-						if (val === 'rust' && !global.rustBridge?.isAvailable()) {
-							global.logMessage("[Engine] Starting Rust daemon after switch...", "INFO");
-							await global.rustBridge?.start();
-						} else if (val === 'shell' && !global.shellBridge?.isAvailable()) {
-							global.logMessage("[Engine] Starting Shell daemon after switch...", "INFO");
-							await global.shellBridge?.start();
-						} else if ((val === 'python' || val === 'auto') && !global.pythonBridge?.isAvailable()) {
-							global.logMessage("[Engine] Starting Python daemon after switch...", "INFO");
+						// ★ excludePython: skip Python Broker entirely
+						if (val === 'excludePython') {
+							global.logMessage("[Engine] Exclude Python mode - Python Broker disabled", "INFO");
+						} else if (!global.pythonBridge?.isAvailable()) {
+							global.logMessage("[Engine] Starting Python Broker...", "INFO");
 							await global.pythonBridge?.start();
 						}
 						global.invalidateEngineCache?.();

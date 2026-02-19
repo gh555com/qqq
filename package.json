@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.67",
+  "version": "15.73.68",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -80,18 +80,14 @@
           "qqq.ioEngine": {
             "order": 20,
             "type": "string",
-            "default": "auto",
+            "default": "v16  auto",
             "enum": [
-              "auto",
-              "python",
-              "rust",
-              "node"
+              "v16  auto",
+              "Exclude Python"
             ],
             "markdownEnumDescriptions": [
-              "%config.ioEngine.enum.auto%",
-              "%config.ioEngine.enum.python%",
-              "%config.ioEngine.enum.rust%",
-              "%config.ioEngine.enum.node%"
+              " Paramount Platinum  ",
+              "%config.ioEngine.enum.excludePython%"
             ],
             "markdownDescription": "%config.ioEngine.desc%"
           },
