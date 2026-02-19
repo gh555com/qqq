@@ -2189,6 +2189,7 @@ def _unix_client_loop(conn: socket.socket):
         pass
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
+    conn_tag = f"conn:{id(conn)}"
 
     try:
         while not _SHUTDOWN_FLAG:
@@ -2217,6 +2218,10 @@ def _unix_client_loop(conn: socket.socket):
                     except:
                         pass
                     continue
+
+                # 连接级兜底：客户端没带 client_id 时，用连接标识，避免 TTL 误判
+                if not (cmd.get("client_id") or cmd.get("clientId") or cmd.get("cid")):
+                    cmd["client_id"] = conn_tag
 
                 action = cmd.get("action") or cmd.get("cmd") or ""
                 if action in SLOW_ACTIONS:
@@ -2271,6 +2276,7 @@ def _pipe_close_handle(h: int):
 def _pipe_client_loop(hPipe: int):
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
+    conn_tag = f"pipe:{hPipe}"
     try:
         while not _SHUTDOWN_FLAG:
             chunk = _win_pipe_read_some_overlapped(hPipe, timeout_ms=300)
@@ -2292,6 +2298,10 @@ def _pipe_client_loop(hPipe: int):
                 except Exception as e:
                     _win_pipe_write(hPipe, (json.dumps({"_id": 0, "ok": False, "error": f"bad_json: {e}"}, ensure_ascii=False) + "\n").encode("utf-8"))
                     continue
+
+                # 连接级兜底：客户端没带 client_id 时，用连接标识，避免 TTL 误判
+                if not (cmd.get("client_id") or cmd.get("clientId") or cmd.get("cid")):
+                    cmd["client_id"] = conn_tag
 
                 action = cmd.get("action") or cmd.get("cmd") or ""
                 if action in SLOW_ACTIONS:

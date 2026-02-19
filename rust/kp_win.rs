@@ -876,10 +876,11 @@ mod win {
 
     #[allow(unused_imports)]
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        RegisterClipboardFormatW, SetClipboardData,
     };
     #[allow(unused_imports)]
-    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalFree, GlobalLock, GlobalSize, GlobalUnlock, GHND};
     #[allow(unused_imports)]
     use windows_sys::Win32::UI::Shell::DragQueryFileW;
 
@@ -1196,6 +1197,495 @@ mod win {
         }
     }
 
+    // =============================================================================
+    //  wq —— 剪贴板格式快速检测（核心前摇检测，对齐 PowerShell GetDataObject().GetFormats()）
+    //  ★ Win7 兼容：仅使用基础 Clipboard API，无 Win8+ 依赖
+    //  ★ 极致优化：缓存 RegisterClipboardFormatW 结果，避免重复系统调用
+    // =============================================================================
+
+    // ★ 缓存自定义剪贴板格式 ID（全局不变，只需注册一次）
+    static CF_HTML_CACHED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    static CF_PNG_CACHED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
+    fn get_cf_html() -> u32 {
+        *CF_HTML_CACHED.get_or_init(|| unsafe {
+            RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr())
+        })
+    }
+
+    fn get_cf_png() -> u32 {
+        *CF_PNG_CACHED.get_or_init(|| unsafe {
+            RegisterClipboardFormatW(to_wide_null("PNG").as_ptr())
+        })
+    }
+
+    pub fn wq() -> PyV {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                // 无法打开剪贴板时返回全 false（静默失败，不报错）
+                return PyV::Obj(vec![
+                    ("hasFile".to_string(), PyV::Bool(false)),
+                    ("hasHtml".to_string(), PyV::Bool(false)),
+                    ("hasImage".to_string(), PyV::Bool(false)),
+                    ("hasText".to_string(), PyV::Bool(false)),
+                ]);
+            }
+
+            // ★ 一次性批量检测所有格式（最小化剪贴板锁定时间）
+            // hasFile: CF_HDROP (15)
+            let has_file = IsClipboardFormatAvailable(CF_HDROP) != 0;
+
+            // hasHtml: "HTML Format" 自定义格式（使用缓存）
+            let cf_html = get_cf_html();
+            let has_html = cf_html != 0 && IsClipboardFormatAvailable(cf_html) != 0;
+
+            // hasImage: CF_BITMAP (2), CF_DIB (8), CF_DIBV5 (17), PNG
+            const CF_BITMAP: u32 = 2;
+            let cf_png = get_cf_png();
+            let has_image = IsClipboardFormatAvailable(CF_BITMAP) != 0
+                || IsClipboardFormatAvailable(CF_DIB) != 0
+                || IsClipboardFormatAvailable(CF_DIBV5) != 0
+                || (cf_png != 0 && IsClipboardFormatAvailable(cf_png) != 0);
+
+            // hasText: CF_TEXT (1), CF_UNICODETEXT (13)
+            let has_text = IsClipboardFormatAvailable(CF_TEXT) != 0
+                || IsClipboardFormatAvailable(CF_UNICODETEXT) != 0;
+
+            CloseClipboard();
+
+            PyV::Obj(vec![
+                ("hasFile".to_string(), PyV::Bool(has_file)),
+                ("hasHtml".to_string(), PyV::Bool(has_html)),
+                ("hasImage".to_string(), PyV::Bool(has_image)),
+                ("hasText".to_string(), PyV::Bool(has_text)),
+            ])
+        }
+    }
+
+    // =============================================================================
+    //  get_files —— 获取剪贴板文件列表（对齐 PowerShell GetFileDropList()）
+    // =============================================================================
+
+    pub fn get_files() -> PyV {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("files".to_string(), PyV::Arr(vec![])),
+                ]);
+            }
+
+            let mut files: Vec<PyV> = Vec::new();
+
+            if IsClipboardFormatAvailable(CF_HDROP) != 0 {
+                let h_drop = GetClipboardData(CF_HDROP);
+                if h_drop as isize != 0 {
+                    let count = DragQueryFileW(h_drop, 0xFFFFFFFF, std::ptr::null_mut(), 0);
+
+                    for i in 0..count {
+                        let needed = DragQueryFileW(h_drop, i, std::ptr::null_mut(), 0) + 1;
+                        if needed == 0 {
+                            continue;
+                        }
+                        let mut buf: Vec<u16> = vec![0; needed as usize];
+                        DragQueryFileW(h_drop, i, buf.as_mut_ptr(), needed);
+
+                        if let Some(pos) = buf.iter().position(|&c| c == 0) {
+                            buf.truncate(pos);
+                        }
+                        files.push(PyV::Str(String::from_utf16_lossy(&buf)));
+                    }
+                }
+            }
+
+            CloseClipboard();
+
+            PyV::Obj(vec![
+                ("files".to_string(), PyV::Arr(files)),
+            ])
+        }
+    }
+
+    // =============================================================================
+    //  set_files —— 设置剪贴板文件列表（对齐 PowerShell SetFileDropList / Python set_clipboard_files）
+    //  ★ Win7 兼容：使用 DROPFILES 结构 + CF_HDROP
+    //  ★ 极致优化：直接操作 Windows API，无中间层
+    // =============================================================================
+
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct DROPFILES {
+        pFiles: u32,   // Offset to file list
+        pt_x: i32,     // Drop point (unused)
+        pt_y: i32,     // Drop point (unused)
+        fNC: i32,      // Non-client area flag
+        fWide: i32,    // Wide char flag (1 = Unicode)
+    }
+
+    pub fn set_files(paths: &[String]) -> PyV {
+        if paths.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no paths".to_string())),
+            ]);
+        }
+
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("OpenClipboard failed".to_string())),
+                ]);
+            }
+
+            // Empty clipboard first
+            if EmptyClipboard() == 0 {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("EmptyClipboard failed".to_string())),
+                ]);
+            }
+
+            // Build DROPFILES structure + file list (UTF-16LE, double null terminated)
+            let offset = std::mem::size_of::<DROPFILES>();
+
+            // Join paths with \0, end with \0\0
+            let mut joined = String::new();
+            for p in paths {
+                joined.push_str(p);
+                joined.push('\0');
+            }
+            joined.push('\0'); // Double null terminator
+
+            let content_bytes: Vec<u16> = joined.encode_utf16().collect();
+            let content_size = content_bytes.len() * 2; // UTF-16 = 2 bytes per char
+            let total_size = offset + content_size;
+
+            // Allocate global memory
+            let h_mem = GlobalAlloc(GHND, total_size);
+            if h_mem == std::ptr::null_mut() {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalAlloc failed".to_string())),
+                ]);
+            }
+
+            let ptr = GlobalLock(h_mem);
+            if ptr == std::ptr::null_mut() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalLock failed".to_string())),
+                ]);
+            }
+
+            // Fill DROPFILES structure
+            let df = DROPFILES {
+                pFiles: offset as u32,
+                pt_x: 0,
+                pt_y: 0,
+                fNC: 0,
+                fWide: 1, // Unicode
+            };
+            std::ptr::copy_nonoverlapping(&df as *const _ as *const u8, ptr as *mut u8, offset);
+
+            // Copy file paths (UTF-16LE)
+            std::ptr::copy_nonoverlapping(
+                content_bytes.as_ptr() as *const u8,
+                (ptr as *mut u8).add(offset),
+                content_size,
+            );
+
+            GlobalUnlock(h_mem);
+
+            // Set clipboard data
+            if SetClipboardData(CF_HDROP, h_mem) == std::ptr::null_mut() {
+                GlobalFree(h_mem);
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("SetClipboardData failed".to_string())),
+                ]);
+            }
+
+            // Note: Don't GlobalFree after successful SetClipboardData - system owns it now
+            CloseClipboard();
+
+            PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(true)),
+            ])
+        }
+    }
+
+    // =============================================================================
+    //  dump_html_to_file —— HTML 剪贴板写文件（对齐 C# DumpHtmlToFile）
+    //  ★ Win7 兼容：使用 RegisterClipboardFormatW + GetClipboardData
+    //  ★ 直接写入原始字节，保持完整 HTML Format 头信息
+    // =============================================================================
+
+    pub fn dump_html_to_file(path: &str) -> PyV {
+        if path.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no path".to_string())),
+            ]);
+        }
+
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("OpenClipboard failed".to_string())),
+                ]);
+            }
+
+            let cf_html = RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr());
+            if cf_html == 0 {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("RegisterClipboardFormat failed".to_string())),
+                ]);
+            }
+
+            if IsClipboardFormatAvailable(cf_html) == 0 {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("HTML Format not available".to_string())),
+                ]);
+            }
+
+            let h_mem = GetClipboardData(cf_html);
+            if h_mem == std::ptr::null_mut() {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GetClipboardData failed".to_string())),
+                ]);
+            }
+
+            let ptr = GlobalLock(h_mem);
+            if ptr == std::ptr::null_mut() {
+                CloseClipboard();
+                return PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str("GlobalLock failed".to_string())),
+                ]);
+            }
+
+            let size = GlobalSize(h_mem) as usize;
+            let slice = std::slice::from_raw_parts(ptr as *const u8, size);
+            let data = slice.to_vec();
+            GlobalUnlock(h_mem);
+            CloseClipboard();
+
+            // Write to file
+            match std::fs::write(path, &data) {
+                Ok(_) => PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(true)),
+                ]),
+                Err(e) => PyV::Obj(vec![
+                    ("success".to_string(), PyV::Bool(false)),
+                    ("error".to_string(), PyV::Str(format!("write failed: {}", e))),
+                ]),
+            }
+        }
+    }
+
+    // =============================================================================
+    //  trigger_system_paste —— 系统粘贴（对齐 PowerShell trigger_system_paste）
+    //  ★ 支持点号路径（使用 \\?\ 前缀）
+    //  ★ 支持大文件后台复制（robocopy）
+    //  ★ Win7 兼容
+    // =============================================================================
+
+    pub fn trigger_system_paste(dest_path: &str) -> PyV {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+
+        if dest_path.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no path".to_string())),
+            ]);
+        }
+
+        // Normalize path
+        let clean_path = dest_path.replace('/', "\\").trim_end_matches('\\').to_string();
+
+        // Check if this is a dot-ending path
+        let has_dot_path = clean_path.ends_with('.') || clean_path.contains(".\\");
+
+        // Check target directory exists
+        let check_path = if has_dot_path {
+            format!("\\\\?\\{}", clean_path)
+        } else {
+            clean_path.clone()
+        };
+
+        if !Path::new(&check_path).exists() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str(format!("Target folder not found: {}", clean_path))),
+            ]);
+        }
+
+        // Get clipboard files via our own function
+        let files_result = get_files();
+        let files: Vec<String> = if let PyV::Obj(pairs) = files_result {
+            pairs.into_iter()
+                .find(|(k, _)| k == "files")
+                .and_then(|(_, v)| {
+                    if let PyV::Arr(arr) = v {
+                        Some(arr.into_iter().filter_map(|item| {
+                            if let PyV::Str(s) = item { Some(s) } else { None }
+                        }).collect())
+                    } else { None }
+                })
+                .unwrap_or_default()
+        } else { vec![] };
+
+        if files.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("No files in clipboard".to_string())),
+            ]);
+        }
+
+        // Calculate total size
+        let mut total_size: u64 = 0;
+        for src in &files {
+            let p = Path::new(src);
+            if p.is_file() {
+                if let Ok(meta) = p.metadata() {
+                    total_size += meta.len();
+                }
+            } else if p.is_dir() {
+                total_size += 100 * 1024 * 1024; // Estimate 100MB for dirs
+            }
+        }
+
+        // Large file threshold: 100MB
+        let use_bg_copy = total_size > 100 * 1024 * 1024;
+
+        let mut copied_count = 0u32;
+        let mut errors: Vec<String> = Vec::new();
+
+        for src in &files {
+            let src_path = Path::new(src);
+            let src_name = src_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+
+            if has_dot_path {
+                // ★ Dot-ending path: use Rust std::fs with \\?\ prefix
+                let dest_full = format!("\\\\?\\{}\\{}", clean_path, src_name);
+                let src_prefixed = format!("\\\\?\\{}", src);
+
+                if src_path.is_dir() {
+                    // Recursively copy folder
+                    match copy_dir_recursive(&src_prefixed, &dest_full) {
+                        Ok(_) => copied_count += 1,
+                        Err(e) => errors.push(format!("copy dir {}: {}", src_name, e)),
+                    }
+                } else if src_path.is_file() {
+                    // Copy single file
+                    match std::fs::copy(&src_prefixed, &dest_full) {
+                        Ok(_) => copied_count += 1,
+                        Err(e) => errors.push(format!("copy file {}: {}", src_name, e)),
+                    }
+                }
+            } else {
+                // ★ Normal path: use robocopy/cmd
+                if src_path.is_dir() {
+                    let dest_dir = format!("{}\\{}", clean_path, src_name);
+                    let args = format!("\"{}\" \"{}\" /E /R:1 /W:1", src, dest_dir);
+
+                    let result = if use_bg_copy {
+                        // Background copy - don't wait
+                        Command::new("robocopy")
+                            .raw_arg(&args)
+                            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                            .spawn()
+                            .map(|_| true)
+                    } else {
+                        // Sync copy - wait for completion
+                        Command::new("robocopy")
+                            .raw_arg(&args)
+                            .creation_flags(0x08000000)
+                            .status()
+                            .map(|s| s.code().unwrap_or(99) < 8) // robocopy: <8 is success
+                    };
+
+                    match result {
+                        Ok(true) => copied_count += 1,
+                        Ok(false) => errors.push(format!("robocopy failed for {}", src_name)),
+                        Err(e) => errors.push(format!("robocopy error {}: {}", src_name, e)),
+                    }
+                } else if src_path.is_file() {
+                    let args = format!("/c copy /Y \"{}\" \"{}\\\"", src, clean_path);
+
+                    let result = if use_bg_copy {
+                        Command::new("cmd")
+                            .raw_arg(&args)
+                            .creation_flags(0x08000000)
+                            .spawn()
+                            .map(|_| true)
+                    } else {
+                        Command::new("cmd")
+                            .raw_arg(&args)
+                            .creation_flags(0x08000000)
+                            .status()
+                            .map(|s| s.success())
+                    };
+
+                    match result {
+                        Ok(true) => copied_count += 1,
+                        Ok(false) => errors.push(format!("copy failed for {}", src_name)),
+                        Err(e) => errors.push(format!("copy error {}: {}", src_name, e)),
+                    }
+                }
+            }
+        }
+
+        let mut result = vec![
+            ("success".to_string(), PyV::Bool(copied_count > 0)),
+            ("mode".to_string(), PyV::Str(if use_bg_copy && !has_dot_path { "background" } else { "sync" }.to_string())),
+            ("copiedCount".to_string(), PyV::Num(copied_count.into())),
+            ("totalCount".to_string(), PyV::Num((files.len() as u32).into())),
+        ];
+
+        if !errors.is_empty() {
+            let err_str = errors.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            result.push(("partialErrors".to_string(), PyV::Str(err_str)));
+        }
+
+        PyV::Obj(result)
+    }
+
+    // Helper: recursive directory copy (for dot-ending paths)
+    fn copy_dir_recursive(src: &str, dest: &str) -> std::io::Result<()> {
+        std::fs::create_dir_all(dest)?;
+
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let file_name = entry.file_name();
+            let dest_path = format!("{}\\{}", dest, file_name.to_string_lossy());
+
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path.to_string_lossy(), &dest_path)?;
+            } else {
+                std::fs::copy(&src_path, &dest_path)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn get_clipboard_html() -> PyV {
         // 对齐 Python get_clipboard_html：读取 HTML Format；UTF-8 decode 失败则 base64
         unsafe {
@@ -1509,6 +1999,56 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         }
         "hasImage" => {
             out_pairs.push(("value".to_string(), PyV::Bool(win::has_image())));
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ wq —— 核心前摇检测（对齐 PowerShell GetDataObject().GetFormats()）
+        "wq" => {
+            if let PyV::Obj(extra) = win::wq() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ getFiles —— 获取剪贴板文件列表（对齐 PowerShell GetFileDropList()）
+        "getFiles" => {
+            if let PyV::Obj(extra) = win::get_files() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ setFiles —— 设置剪贴板文件列表（对齐 PowerShell SetFileDropList）
+        "setFiles" | "set_clipboard_files" => {
+            let paths: Vec<String> = cmd.get("paths")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let PyV::Obj(extra) = win::set_files(&paths) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ dumpHtmlToFile —— HTML 剪贴板写文件（对齐 C# DumpHtmlToFile）
+        "dumpHtmlToFile" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = win::dump_html_to_file(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ trigger_system_paste —— 系统粘贴（支持点号路径 + 大文件后台复制）
+        "trigger_system_paste" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = win::trigger_system_paste(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ warmup —— Rust 不需要预热，直接返回 ok
+        "warmup" => {
+            out_pairs.push(("status".to_string(), PyV::Str("warmed".to_string())));
             (PyV::Obj(out_pairs), false, false)
         }
         "saveImage" => {

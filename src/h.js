@@ -890,20 +890,40 @@ async function _getSmartHtmlFromClipboard(progressCallback, token) {
     let baseUrl = "";
 
     if (process.platform === "win32") {
-        const shellBridge = getGlobal().shellBridge;
-        if (shellBridge && shellBridge.isAvailable()) {
+        // ★ 优先使用 Rust daemon（更快，内存更小）
+        const rustBridge = getGlobal().rustBridge;
+        if (rustBridge && rustBridge.isAvailable()) {
             try {
-                const tempFileD = path.join(os.tmpdir(), `vscode_img_paste_d_${Date.now()}.bin`);
-                const r = await shellBridge.call("dumpHtmlToFile", { path: tempFileD }, 2000);
-                if (r && r.success && fs.existsSync(tempFileD)) {
-                    const buf = fs.readFileSync(tempFileD);
-                    try { fs.unlinkSync(tempFileD); } catch { }
+                const tempFileR = path.join(os.tmpdir(), `vscode_img_paste_r_${Date.now()}.bin`);
+                const r = await rustBridge.call("dumpHtmlToFile", { path: tempFileR }, 2000);
+                if (r && r.success && fs.existsSync(tempFileR)) {
+                    const buf = fs.readFileSync(tempFileR);
+                    try { fs.unlinkSync(tempFileR); } catch { }
                     if (buf && buf.length > 0) {
                         rawBuf = buf;
-                        log(`[ShellDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
+                        log(`[RustDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
                     }
                 }
-            } catch (e) { log(`[ShellDaemon] Dump failed: ${e.message}`, "WARN"); }
+            } catch (e) { log(`[RustDaemon] Dump failed: ${e.message}`, "DEBUG"); }
+        }
+
+        // ★ Fallback: Shell daemon
+        if (!rawBuf) {
+            const shellBridge = getGlobal().shellBridge;
+            if (shellBridge && shellBridge.isAvailable()) {
+                try {
+                    const tempFileD = path.join(os.tmpdir(), `vscode_img_paste_d_${Date.now()}.bin`);
+                    const r = await shellBridge.call("dumpHtmlToFile", { path: tempFileD }, 2000);
+                    if (r && r.success && fs.existsSync(tempFileD)) {
+                        const buf = fs.readFileSync(tempFileD);
+                        try { fs.unlinkSync(tempFileD); } catch { }
+                        if (buf && buf.length > 0) {
+                            rawBuf = buf;
+                            log(`[ShellDaemon] Successfully dumped ${buf.length} bytes`, "INFO");
+                        }
+                    }
+                } catch (e) { log(`[ShellDaemon] Dump failed: ${e.message}`, "WARN"); }
+            }
         }
 
         if (!rawBuf) {

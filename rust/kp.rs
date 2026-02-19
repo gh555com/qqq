@@ -1054,6 +1054,89 @@ mod platform {
         None
     }
 
+    // =============================================================================
+    //  wq —— 剪贴板格式快速检测（核心前摇检测）
+    //  Linux: 使用 clipboard-rs available_formats() 或 wl-paste --list-types
+    //  macOS: 使用 clipboard-rs available_formats()
+    // =============================================================================
+
+    pub fn wq() -> PyV {
+        #[cfg(target_os = "linux")]
+        {
+            // Wayland 优先：wl-paste --list-types
+            if is_wayland_session() && has_wl_paste() {
+                if let Some(types) = wl_paste_list_types() {
+                    let has_file = types.iter().any(|t| {
+                        t.contains("uri-list") || t.contains("gnome-copied-files") || t.contains("x-special")
+                    });
+                    let has_html = types.iter().any(|t| t.to_ascii_lowercase().contains("html"));
+                    let has_image = types.iter().any(|t| t.to_ascii_lowercase().contains("image"));
+                    let has_text = types.iter().any(|t| {
+                        t.contains("text/plain") || t.contains("UTF8_STRING") || t.contains("STRING")
+                    });
+
+                    return PyV::Obj(vec![
+                        ("hasFile".to_string(), PyV::Bool(has_file)),
+                        ("hasHtml".to_string(), PyV::Bool(has_html)),
+                        ("hasImage".to_string(), PyV::Bool(has_image)),
+                        ("hasText".to_string(), PyV::Bool(has_text)),
+                    ]);
+                }
+            }
+        }
+
+        // 兜底：使用 clipboard-rs
+        if let Ok(ctx) = setup_clipboard() {
+            if let Ok(formats) = ctx.available_formats() {
+                let has_file = formats.iter().any(|f| {
+                    f.contains("uri-list") || f.contains("FileDrop") || f.contains("gnome-copied-files")
+                        || f.contains("NSFilenamesPboardType") || f.contains("public.file-url")
+                });
+                let has_html = formats.iter().any(|f| {
+                    f.to_ascii_lowercase().contains("html")
+                });
+                let has_image = formats.iter().any(|f| {
+                    f.to_ascii_lowercase().contains("image") || f.contains("Bitmap")
+                        || f.contains("PNG") || f.contains("TIFF")
+                });
+                let has_text = formats.iter().any(|f| {
+                    f.contains("text") || f.contains("UTF8") || f.contains("STRING")
+                        || f.contains("Unicode")
+                });
+
+                return PyV::Obj(vec![
+                    ("hasFile".to_string(), PyV::Bool(has_file)),
+                    ("hasHtml".to_string(), PyV::Bool(has_html)),
+                    ("hasImage".to_string(), PyV::Bool(has_image)),
+                    ("hasText".to_string(), PyV::Bool(has_text)),
+                ]);
+            }
+        }
+
+        // 无法检测时返回全 false（静默失败）
+        PyV::Obj(vec![
+            ("hasFile".to_string(), PyV::Bool(false)),
+            ("hasHtml".to_string(), PyV::Bool(false)),
+            ("hasImage".to_string(), PyV::Bool(false)),
+            ("hasText".to_string(), PyV::Bool(false)),
+        ])
+    }
+
+    // =============================================================================
+    //  get_files —— 获取剪贴板文件列表
+    // =============================================================================
+
+    pub fn get_files() -> PyV {
+        let paths = read_files_from_clipboard();
+        let files: Vec<PyV> = paths.iter()
+            .map(|p| PyV::Str(p.to_string_lossy().to_string()))
+            .collect();
+
+        PyV::Obj(vec![
+            ("files".to_string(), PyV::Arr(files)),
+        ])
+    }
+
     pub fn get_clipboard_files_only() -> PyV {
         let mut paths: Vec<PyV> = Vec::new();
         for p in read_files_from_clipboard() {
@@ -1268,7 +1351,244 @@ mod platform {
         }
     }
 
-    // 用于更“硬核”的诊断：Wayland 是否能拿到 HTML/Files
+    // =============================================================================
+    //  set_files —— 设置剪贴板文件列表（Linux/macOS）
+    //  Linux: 使用 wl-copy 或 xclip
+    //  macOS: 使用 osascript
+    // =============================================================================
+
+    pub fn set_files(paths: &[String]) -> PyV {
+        if paths.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no paths".to_string())),
+            ]);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // 将路径转换为 URI 格式
+            let uris: Vec<String> = paths.iter()
+                .map(|p| {
+                    if p.starts_with("file://") {
+                        p.clone()
+                    } else {
+                        format!("file://{}", p)
+                    }
+                })
+                .collect();
+            let content = uris.join("\n");
+
+            // Wayland 优先
+            if is_wayland_session() && has_wl_copy() {
+                use std::process::{Command, Stdio};
+                if let Ok(mut child) = Command::new("wl-copy")
+                    .args(["--type", "text/uri-list"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                {
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        if stdin.write_all(content.as_bytes()).is_ok() {
+                            if let Ok(status) = child.wait() {
+                                if status.success() {
+                                    return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // X11 fallback: xclip
+            use std::process::{Command, Stdio};
+            if let Ok(mut child) = Command::new("xclip")
+                .args(["-selection", "clipboard", "-t", "text/uri-list"])
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    if stdin.write_all(content.as_bytes()).is_ok() {
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: 使用 osascript
+            use std::process::Command;
+            let posix_files: Vec<String> = paths.iter()
+                .map(|p| format!("POSIX file \"{}\"", p))
+                .collect();
+            let script = format!("set the clipboard to {{{}}}", posix_files.join(", "));
+
+            if let Ok(status) = Command::new("osascript")
+                .args(["-e", &script])
+                .status()
+            {
+                if status.success() {
+                    return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                }
+            }
+        }
+
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("setFiles not implemented for this platform".to_string())),
+        ])
+    }
+
+    // Helper: check if wl-copy is available
+    #[cfg(target_os = "linux")]
+    fn has_wl_copy() -> bool {
+        use std::process::Command;
+        Command::new("which")
+            .arg("wl-copy")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    // =============================================================================
+    //  dump_html_to_file —— HTML 剪贴板写文件（Linux/macOS）
+    // =============================================================================
+
+    pub fn dump_html_to_file(path: &str) -> PyV {
+        if path.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no path".to_string())),
+            ]);
+        }
+
+        // 获取 HTML 内容
+        let html_result = get_clipboard_html();
+        if let PyV::Obj(pairs) = &html_result {
+            // 查找 value 或 value_base64
+            for (k, v) in pairs {
+                if k == "value" {
+                    if let PyV::Str(s) = v {
+                        if std::fs::write(path, s.as_bytes()).is_ok() {
+                            return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                        }
+                    }
+                } else if k == "value_base64" {
+                    if let PyV::Str(b64) = v {
+                        if let Ok(bytes) = general_purpose::STANDARD.decode(b64) {
+                            if std::fs::write(path, bytes).is_ok() {
+                                return PyV::Obj(vec![("success".to_string(), PyV::Bool(true))]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        PyV::Obj(vec![
+            ("success".to_string(), PyV::Bool(false)),
+            ("error".to_string(), PyV::Str("no HTML in clipboard".to_string())),
+        ])
+    }
+
+    // =============================================================================
+    //  trigger_system_paste —— 系统粘贴（Linux/macOS）
+    //  Linux: 使用 cp 命令
+    //  macOS: 使用 Finder paste 或 cp
+    // =============================================================================
+
+    pub fn trigger_system_paste(dest_path: &str) -> PyV {
+        use std::process::Command;
+
+        if dest_path.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("no path".to_string())),
+            ]);
+        }
+
+        // 检查目标目录是否存在
+        if !Path::new(dest_path).exists() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str(format!("Target folder not found: {}", dest_path))),
+            ]);
+        }
+
+        // 获取剪贴板文件列表
+        let files_result = get_files();
+        let files: Vec<String> = if let PyV::Obj(pairs) = files_result {
+            pairs.into_iter()
+                .find(|(k, _)| k == "files")
+                .and_then(|(_, v)| {
+                    if let PyV::Arr(arr) = v {
+                        Some(arr.into_iter().filter_map(|item| {
+                            if let PyV::Str(s) = item { Some(s) } else { None }
+                        }).collect())
+                    } else { None }
+                })
+                .unwrap_or_default()
+        } else { vec![] };
+
+        if files.is_empty() {
+            return PyV::Obj(vec![
+                ("success".to_string(), PyV::Bool(false)),
+                ("error".to_string(), PyV::Str("No files in clipboard".to_string())),
+            ]);
+        }
+
+        let mut copied_count = 0u32;
+        let mut errors: Vec<String> = Vec::new();
+
+        for src in &files {
+            let src_path = Path::new(src);
+            let src_name = src_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown");
+
+            let dest_full = format!("{}/{}", dest_path.trim_end_matches('/'), src_name);
+
+            let result = if src_path.is_dir() {
+                // 复制目录: cp -r
+                Command::new("cp")
+                    .args(["-r", src, &dest_full])
+                    .status()
+                    .map(|s| s.success())
+            } else {
+                // 复制文件: cp
+                Command::new("cp")
+                    .args([src, &dest_full])
+                    .status()
+                    .map(|s| s.success())
+            };
+
+            match result {
+                Ok(true) => copied_count += 1,
+                Ok(false) => errors.push(format!("cp failed for {}", src_name)),
+                Err(e) => errors.push(format!("cp error {}: {}", src_name, e)),
+            }
+        }
+
+        let mut result = vec![
+            ("success".to_string(), PyV::Bool(copied_count > 0)),
+            ("mode".to_string(), PyV::Str("sync".to_string())),
+            ("copiedCount".to_string(), PyV::Num(copied_count.into())),
+            ("totalCount".to_string(), PyV::Num((files.len() as u32).into())),
+        ];
+
+        if !errors.is_empty() {
+            let err_str = errors.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            result.push(("partialErrors".to_string(), PyV::Str(err_str)));
+        }
+
+        PyV::Obj(result)
+    }
+
+    // 用于更"硬核"的诊断：Wayland 是否能拿到 HTML/Files
     #[allow(dead_code)]
     #[cfg(target_os = "linux")]
     fn _debug_wayland_types() -> Option<Vec<String>> {
@@ -1345,6 +1665,56 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
         }
         "hasImage" => {
             out_pairs.push(("value".to_string(), PyV::Bool(platform::has_image())));
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ wq —— 核心前摇检测（跨平台统一接口）
+        "wq" => {
+            if let PyV::Obj(extra) = platform::wq() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ getFiles —— 获取剪贴板文件列表
+        "getFiles" => {
+            if let PyV::Obj(extra) = platform::get_files() {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ setFiles —— 设置剪贴板文件列表（跨平台）
+        "setFiles" | "set_clipboard_files" => {
+            let paths: Vec<String> = cmd.get("paths")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if let PyV::Obj(extra) = platform::set_files(&paths) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ dumpHtmlToFile —— HTML 剪贴板写文件（跨平台）
+        "dumpHtmlToFile" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = platform::dump_html_to_file(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ trigger_system_paste —— 系统粘贴（跨平台）
+        "trigger_system_paste" => {
+            let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if let PyV::Obj(extra) = platform::trigger_system_paste(path) {
+                out_pairs.extend(extra);
+            }
+            (PyV::Obj(out_pairs), false, false)
+        }
+        // ★ warmup —— Rust 不需要预热，直接返回 ok
+        "warmup" => {
+            out_pairs.push(("status".to_string(), PyV::Str("warmed".to_string())));
             (PyV::Obj(out_pairs), false, false)
         }
         "saveImage" => {
