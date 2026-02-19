@@ -1,89 +1,1164 @@
-[2026-02-19T10:25:39.252+02:00][DEBUG] [Broker] pythonBridge.extensionPath initialized
-[2026-02-19T10:25:39.266+02:00][INFO] FFmpeg moved from assets to globalStorage: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
-[2026-02-19T10:25:39.299+02:00][INFO] qqq 擴充功能啟用中...
-[2026-02-19T10:25:39.310+02:00][INFO] Q2: 檔案管理器已啟用（使用 geq().js 四級回退 + size調度/快取 + 最新 IO 路徑邏輯）
-[2026-02-19T10:25:39.311+02:00][INFO] qqq 擴充功能啟用完成
-[2026-02-19T10:25:39.328+02:00][INFO] [PythonCheck] L1 不完美: no_interpreter
-[2026-02-19T10:25:39.328+02:00][INFO] [PythonCheck] L1 不完美且不在冷卻期，20 秒後觸發 L4 下載流程
-[2026-02-19T10:25:39.354+02:00][INFO] [Broker] Python L1 imperfect, waiting for download...
-[2026-02-19T10:25:39.381+02:00][INFO] Integrity: PASSED
-[2026-02-19T10:25:39.381+02:00][INFO] FFmpeg Path: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
-[2026-02-19T10:25:39.383+02:00][INFO] Q2 Integrity: PASSED
-[2026-02-19T10:25:40.789+02:00][DEBUG] [FolderScan] C:\Users\q\Desktop\qqq: 12ms, 2檔案, 72.2 KB (JS)
-[2026-02-19T10:25:40.790+02:00][DEBUG] [FolderScan] C:\qqq: 7ms, 1檔案, 42.2 KB (JS)
-[2026-02-19T10:25:42.308+02:00][INFO] qqq 延遲初始化開始...
-[2026-02-19T10:25:45.326+02:00][INFO] qqq startDaemons 開始 (6秒延遲)
-[2026-02-19T10:25:45.328+02:00][INFO] ====================================================
-[2026-02-19T10:25:45.328+02:00][INFO] 🚀 Q-ENGINE STARTING | VERSION: 15.73.62 | 2026/2/19 10:25:45
-[2026-02-19T10:25:45.328+02:00][INFO] 🎯 ACTIVE FFmpeg: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe (GLOBAL_STORAGE)
-[2026-02-19T10:25:45.328+02:00][INFO] ====================================================
-[2026-02-19T10:25:45.328+02:00][INFO] 開始啟動守護進程，使用者選擇滴引擎: auto
-[2026-02-19T10:25:45.328+02:00][INFO] [Daemon] User preference: auto, but Rust always starts first
-[2026-02-19T10:25:45.328+02:00][INFO] 啟動 Rust bridge...
-[2026-02-19T10:25:45.330+02:00][INFO] Rust Bridge 嘗試啟動: "c:\Users\q\.vscode\extensions\gh555.qqq-15.73.62-win32-x64\assets\q_engine.exe" --daemon
-[2026-02-19T10:25:45.334+02:00][INFO] 啟動 Python bridge...
-[2026-02-19T10:25:45.660+02:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=6996
-Watchdog started, monitoring parent PID=8004
+下面是一份**“VS Code 端怎么接入这个 Python Broker（Named Pipe / Unix Socket + JSONL 协议）”**的详细文档（偏工程落地，拿去就能写扩展）。
 
-[2026-02-19T10:25:45.662+02:00][INFO] Rust bridge started and handshaked
-[2026-02-19T10:25:45.662+02:00][INFO] Rust Bridge 啟動成功
-[2026-02-19T10:25:45.663+02:00][INFO] Rust Bridge OK
-[2026-02-19T10:25:49.320+02:00][INFO] [yt-dlp] 嘗試從 gh-proxy.com 下載...
-[2026-02-19T10:25:49.324+02:00][INFO] qqq dow.js 預熱 (w10)
-[2026-02-19T10:25:59.332+02:00][INFO] [PythonCheck] 開始 L4 下載安裝流程...
-[2026-02-19T10:25:59.334+02:00][INFO] [Python] 平台=win32, 架構=x64, URL=https://www.python.org/ftp/python/3.8.10/python-3.8.10-embed-amd64.zip
-[2026-02-19T10:25:59.334+02:00][INFO] [Python] 嘗試 淘宝NPM...
-[2026-02-19T10:26:02.691+02:00][INFO] [Python] 淘宝NPM 下載成功
-[2026-02-19T10:26:03.208+02:00][WARN] Python Bridge 啟動失敗：Broker connect failed after spawn+retries
-[2026-02-19T10:26:13.427+02:00][INFO] [Python] 安裝 pip...
-[2026-02-19T10:26:28.056+02:00][INFO] [Python] 安裝依賴: miniaudio==1.61, Pillow==10.4.0, cffi==1.16.0, pycparser==2.22, pywin32==311
-[2026-02-19T10:26:34.491+02:00][INFO] [Python] 開始精簡...
-[2026-02-19T10:26:35.884+02:00][INFO] [Slim] 完成: 釋放 39.8MB
-[2026-02-19T10:26:35.890+02:00][INFO] [Python] pywin32 設定完成
-[2026-02-19T10:26:35.898+02:00][INFO] [Python] 複製 VC++ DLL: msvcp140.dll, msvcp140_1.dll, msvcp140_2.dll, concrt140.dll, vccorlib140.dll
-[2026-02-19T10:26:35.899+02:00][INFO] [PythonCheck] L4 下載安裝成功: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
-[2026-02-19T10:26:35.899+02:00][INFO] [PythonCheck] 觸發 "從無到有" 回呼，熱啟動 daemon...
-[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Python ready callback triggered: c:\Users\q\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
-[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Audio cache reset (qqq)
-[2026-02-19T10:26:35.899+02:00][INFO] [Q4] 音訊來源狀態已重設
-[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Audio cache reset (q4)
-[2026-02-19T10:26:35.899+02:00][INFO] [Broker] Attempting to start Broker after Python ready...
-[2026-02-19T10:26:49.648+02:00][INFO] [yt-dlp] gh-proxy.com 下載成功
-[2026-02-19T10:45:58.819+02:00][WARN] [Audio] Python 引擎探測未通過，使用 Webview 兜底
-[2026-02-19T10:45:58.821+02:00][INFO] [Audio] Webview 引擎播放品味: 3.mp3, 循環: 4
+---
 
-[2026-02-19T16:47:55.690+08:00][DEBUG] [Broker] pythonBridge.extensionPath initialized
-[2026-02-19T16:47:55.776+08:00][INFO] FFmpeg initialized from globalStorage: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
-[2026-02-19T16:47:55.797+08:00][INFO] qqq 扩展激活（中控模式）...
-[2026-02-19T16:47:55.800+08:00][INFO] Q2: 文件管理器已激活（使用 geq().js 四级回退 + size调度/缓存 + 最新 IO 路径逻辑）
-[2026-02-19T16:47:55.801+08:00][INFO] qqq 扩展激活完成
-[2026-02-19T16:47:56.061+08:00][INFO] [PythonCheck] L1 完美命中: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
-[2026-02-19T16:47:56.063+08:00][DEBUG] [Broker] Python path from downloader: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\python_engine\python.exe
-[2026-02-19T16:47:56.077+08:00][INFO] Integrity: PASSED
-[2026-02-19T16:47:56.077+08:00][INFO] FFmpeg Path: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe
-[2026-02-19T16:47:56.077+08:00][INFO] Q2 Integrity: PASSED
-[2026-02-19T16:47:57.454+08:00][DEBUG] [FolderScan] C:\Users\Administrator\Desktop\qqq: 6ms, 1文件, 74.2 KB (JS)
-[2026-02-19T16:47:57.505+08:00][DEBUG] [FolderScan] Z:\F\dq\qqq: 73ms, 36文件, 2.4 GB (JS)
-[2026-02-19T16:47:58.805+08:00][INFO] qqq 延迟初始化开始...
-[2026-02-19T16:48:00.487+08:00][INFO] [Cache] HIT (text): 物资.2
-[2026-02-19T16:48:01.920+08:00][INFO] qqq startDaemons 开始 (6秒延迟)
-[2026-02-19T16:48:01.924+08:00][INFO] ====================================================
-[2026-02-19T16:48:01.924+08:00][INFO] 🚀 Q-ENGINE STARTING | VERSION: 15.73.62 | 2026/2/19 16:48:01
-[2026-02-19T16:48:01.924+08:00][INFO] 🎯 ACTIVE FFmpeg: c:\Users\Administrator\AppData\Roaming\Code\User\globalStorage\gh555.qqq\ffmpeg.exe (GLOBAL_STORAGE)
-[2026-02-19T16:48:01.924+08:00][INFO] ====================================================
-[2026-02-19T16:48:01.924+08:00][INFO] 开始启动守护进程，用户选择滴引擎: auto
-[2026-02-19T16:48:01.924+08:00][INFO] [Daemon] User preference: auto, but Rust always starts first
-[2026-02-19T16:48:01.924+08:00][INFO] 启动 Rust bridge...
-[2026-02-19T16:48:01.926+08:00][INFO] Rust Bridge 尝试启动: "c:\Users\Administrator\.vscode\extensions\gh555.qqq-15.73.62\assets\q_engine.exe" --daemon
-[2026-02-19T16:48:01.933+08:00][INFO] 启动 Python bridge...
-[2026-02-19T16:48:01.985+08:00][WARN] Rust stderr: Daemon started (multi-threaded). PID=
-[2026-02-19T16:48:01.989+08:00][WARN] Rust stderr: 2960
-Watchdog started, monitoring parent PID=4152
+## 0. 你现在拿到的 Python Broker 是什么形态
 
-[2026-02-19T16:48:02.037+08:00][INFO] Rust bridge started and handshaked
-[2026-02-19T16:48:02.037+08:00][INFO] Rust Bridge 启动成功
-[2026-02-19T16:48:02.037+08:00][INFO] Rust Bridge OK
-[2026-02-19T16:48:07.779+08:00][INFO] qqq dow.js 预热 (w10)
-[2026-02-19T16:48:24.014+08:00][WARN] Python Bridge 启动失败：Broker connect failed after spawn+retries
-[2026-02-19T16:48:52.931+08:00][WARN] [Audio] Python 引擎探测未通过，使用 Webview 兜底
-[2026-02-19T16:48:52.936+08:00][INFO] [Audio] Webview 引擎播放品味: 3.mp3, 循环: 4
+* Python 文件默认启动就是 `broker_mode()`（不带参数时）
+* Broker 对外只暴露 **一个本机 IPC 端点**：
+
+  * **Windows**：Named Pipe（`\\.\pipe\...`）
+  * **Linux/macOS**：Unix Domain Socket（`/tmp/...sock`）
+* 通讯协议：**JSONL（每条 JSON 后面一个 `\n`）**
+* 每个请求都要带：
+
+  * `_id`：请求 id（整数，递增）
+  * `action`：动作名（比如 `play_audio` / `clipboard`）
+  * `client_id`：客户端标识（建议固定一个，如 `vscode:<machine>:<random>`）
+  * `token`：本地 token（从 `token.txt` 读取）
+
+Broker 会回：
+
+* `_id`：对应请求 id
+* `ok`：布尔（成功/失败）
+* 以及动作返回字段（比如 `status` / `success` / `error` 等）
+
+---
+
+## 1) VS Code 侧总体接入流程（推荐的“工业模板”）
+
+### 1.1 目录与文件约定（你必须按它找 endpoint/token）
+
+Python 端会把 endpoint 和 token 写到一个目录里：
+
+#### Windows
+
+优先：
+
+* `%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
+* `%LOCALAPPDATA%\vix_audio_broker\token.txt`
+
+若 `LOCALAPPDATA` 不存在，会 fallback 到 `APPDATA` 或 temp（极少数环境）。
+
+#### Linux / macOS
+
+优先：
+
+* `$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`
+* `$XDG_CACHE_HOME/vix_audio_broker/token.txt`
+
+否则 fallback：
+
+* `~/.cache/vix_audio_broker/endpoint.json`
+* `~/.cache/vix_audio_broker/token.txt`
+
+### 1.2 典型接入步骤
+
+1. **读 token**（token.txt）
+2. **读 endpoint.json**（拿到 family + path/name）
+3. 试着连接（net.Socket）
+4. 连上后立刻发 `hello`（验证 token + 协议 + app_id）
+5. 维护长连接 + 请求/响应映射（按 `_id` 匹配）
+6. 每隔一段时间发一次 `hello`（心跳续租，避免 TTL 超时自动退出）
+
+---
+
+## 2) endpoint.json 长什么样（VS Code 需要解析）
+
+### Windows（Named Pipe）
+
+```json
+{
+  "app_id": "vix-broker",
+  "protocol": 1,
+  "family": "pipe",
+  "name": "\\\\.\\pipe\\vix_audio_broker_....",
+  "pid": 12345,
+  "token_enabled": true
+}
+```
+
+### Linux/macOS（Unix Socket）
+
+```json
+{
+  "app_id": "vix-broker",
+  "protocol": 1,
+  "family": "unix",
+  "path": "/tmp/vix_audio_broker_1000.sock",
+  "pid": 12345,
+  "token_enabled": true
+}
+```
+
+> VS Code 侧要做的：
+
+* `family === "pipe"` 用 `name` 去连接
+* `family === "unix"` 用 `path` 去连接
+
+---
+
+## 3) VS Code 扩展：如何启动（或确保）Broker
+
+### 3.1 你要解决的问题
+
+* 用户可能没启动过 broker
+* 用户可能已经启动过（重复启动要“无害”）
+* broker 可能崩了（要能重连/重拉起）
+
+### 3.2 推荐策略：`ensureBrokerRunning()`
+
+逻辑如下：
+
+1. 先尝试读 `endpoint.json` + `token.txt` 并连接、`hello`
+2. 如果失败：
+
+   * `spawn` 一次 python：`python your_script.py --broker`
+   * 然后再读 endpoint 并连接（可做短重试）
+3. 如果 broker 已存在，python 会识别并退出（不会多开）
+
+### 3.3 Node/TS 启动示例（VS Code extension）
+
+```ts
+import * as cp from "child_process";
+import * as path from "path";
+
+export function spawnBroker(pythonExe: string, scriptPath: string) {
+  const child = cp.spawn(pythonExe, [scriptPath, "--broker"], {
+    windowsHide: true,
+    stdio: ["ignore", "ignore", "ignore"],
+    detached: true, // 让 broker 不绑定 VSCode 进程生命周期（看你需求）
+  });
+  child.unref();
+}
+```
+
+> 小建议：
+
+* 如果你希望 VS Code 关掉时 broker 也跟着死：不要 `detached`，并保留 child handle。
+* 如果你希望 broker 做全局单例：`detached + unref` 很舒服。
+
+---
+
+## 4) VS Code 端：如何连接 Named Pipe / Unix Socket
+
+Node.js 的 `net` 模块能同时支持：
+
+* Windows Named Pipe：`net.connect("\\\\.\\pipe\\xxx")`
+* Unix Socket：`net.connect("/tmp/xxx.sock")`
+
+示例：
+
+```ts
+import * as net from "net";
+
+export function connectIpc(endpoint: { family: string; name?: string; path?: string }) {
+  const target = endpoint.family === "pipe" ? endpoint.name : endpoint.path;
+  if (!target) throw new Error("Bad endpoint");
+
+  const sock = net.createConnection(target);
+  sock.setNoDelay(true);
+  return sock;
+}
+```
+
+---
+
+## 5) 协议细节：JSONL、请求/响应、错误处理
+
+### 5.1 JSONL 编码规则
+
+* 每条消息：`JSON.stringify(obj) + "\n"`
+* 接收端：按 `\n` 分割，逐行 `JSON.parse`
+
+### 5.2 `_id` 的作用
+
+* VS Code 侧每发一个请求 `_id++`
+* broker 回包会带同样的 `_id`
+* 你用 `_id` 把 Promise resolve/reject 掉
+
+### 5.3 你必须带 token + client_id
+
+建议：写一个统一的 sendRequest，自动补这俩字段。
+
+---
+
+## 6) 一份可直接用的 VS Code BrokerClient（TypeScript）
+
+这段代码包含：
+
+* 自动解析 JSONL
+* `_id -> Promise` 映射
+* `hello` 校验
+* 心跳续租（每 25 秒发一次 hello）
+* 断线时可重连（你可以在外面包一层重连策略）
+
+```ts
+import * as net from "net";
+
+type EndpointInfo =
+  | { family: "pipe"; name: string }
+  | { family: "unix"; path: string };
+
+type Pending = {
+  resolve: (v: any) => void;
+  reject: (e: any) => void;
+  timer?: NodeJS.Timeout;
+};
+
+export class BrokerClient {
+  private sock: net.Socket | null = null;
+  private inbuf = "";
+  private nextId = 1;
+  private pending = new Map<number, Pending>();
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+
+  constructor(
+    private endpoint: EndpointInfo,
+    private token: string,
+    private clientId: string
+  ) {}
+
+  async connect(): Promise<void> {
+    if (this.sock) return;
+
+    const target = this.endpoint.family === "pipe" ? this.endpoint.name : this.endpoint.path;
+
+    this.sock = net.createConnection(target);
+    this.sock.setNoDelay(true);
+
+    this.sock.on("data", (buf) => this.onData(buf));
+    this.sock.on("error", (err) => this.onError(err));
+    this.sock.on("close", () => this.onClose());
+
+    await new Promise<void>((resolve, reject) => {
+      this.sock!.once("connect", () => resolve());
+      this.sock!.once("error", reject);
+    });
+
+    // 连接成功后，先 hello 验证 token & app_id
+    const hello = await this.request({ action: "hello" }, 1200);
+    if (!hello?.ok || hello.app_id !== "vix-broker") {
+      throw new Error("Broker hello failed / wrong app_id");
+    }
+
+    // 心跳续租：TTL=80s，这里 25s 一次很稳
+    this.heartbeatTimer = setInterval(() => {
+      // 心跳失败不抛出，交给 close/error 处理
+      this.request({ action: "hello" }, 1000).catch(() => {});
+    }, 25_000);
+  }
+
+  close() {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+
+    if (this.sock) {
+      try { this.sock.destroy(); } catch {}
+    }
+    this.sock = null;
+
+    // 清掉所有 pending
+    for (const [id, p] of this.pending.entries()) {
+      if (p.timer) clearTimeout(p.timer);
+      p.reject(new Error("Socket closed"));
+    }
+    this.pending.clear();
+  }
+
+  async request(payload: any, timeoutMs = 5000): Promise<any> {
+    if (!this.sock) throw new Error("Not connected");
+
+    const id = this.nextId++;
+    const msg = {
+      _id: id,
+      client_id: this.clientId,
+      token: this.token,
+      ...payload,
+    };
+
+    const line = JSON.stringify(msg) + "\n";
+
+    const p = new Promise<any>((resolve, reject) => {
+      const pending: Pending = { resolve, reject };
+      if (timeoutMs > 0) {
+        pending.timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`Timeout: ${payload?.action ?? "?"}`));
+        }, timeoutMs);
+      }
+      this.pending.set(id, pending);
+    });
+
+    this.sock.write(line, "utf8");
+    return p;
+  }
+
+  private onData(buf: Buffer) {
+    this.inbuf += buf.toString("utf8");
+    while (true) {
+      const idx = this.inbuf.indexOf("\n");
+      if (idx < 0) break;
+      const line = this.inbuf.slice(0, idx).trim();
+      this.inbuf = this.inbuf.slice(idx + 1);
+
+      if (!line) continue;
+
+      let obj: any;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const id = obj?._id;
+      if (typeof id === "number" && this.pending.has(id)) {
+        const p = this.pending.get(id)!;
+        this.pending.delete(id);
+        if (p.timer) clearTimeout(p.timer);
+        p.resolve(obj);
+      } else {
+        // broker 模式下通常不会有“无 _id 的事件”
+        // 如果未来扩展事件推送，可在这里处理
+      }
+    }
+  }
+
+  private onError(err: any) {
+    // 这里不要疯狂 reject 全部 pending，否则会重复触发 close
+    // 你也可以选择立即 close
+  }
+
+  private onClose() {
+    this.close();
+  }
+}
+```
+
+---
+
+## 7) VS Code 侧：如何读 endpoint/token（推荐写法）
+
+你可以按系统拼路径：
+
+```ts
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
+
+const DIR = "vix_audio_broker";
+
+export function getBrokerDir(): string {
+  if (process.platform === "win32") {
+    const base =
+      process.env.LOCALAPPDATA ||
+      process.env.APPDATA ||
+      os.tmpdir();
+    return path.join(base, DIR);
+  }
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
+  return path.join(base, DIR);
+}
+
+export function readTokenAndEndpoint(): { token: string; endpoint: any } {
+  const dir = getBrokerDir();
+  const token = fs.readFileSync(path.join(dir, "token.txt"), "utf8").trim();
+  const endpoint = JSON.parse(fs.readFileSync(path.join(dir, "endpoint.json"), "utf8"));
+  return { token, endpoint };
+}
+```
+
+> 注意：第一次启动 broker 前，这两个文件可能不存在。
+> 所以你的 `ensureBrokerRunning()` 里要能处理 “读不到 -> spawn -> 再读”。
+
+---
+
+## 8) VS Code 侧：具体怎么调用你的功能（action 清单 + 示例）
+
+你 Python 里 `_dispatch_action` 支持这些常用 action（按你那份代码）：
+
+### 基础
+
+* `ping`
+* `stats`（broker 扩展）
+* `hello`（broker 扩展）
+* `shutdown`（broker 扩展，优雅退出）
+
+### 文件/目录
+
+* `folder_info` / `get_folder_info`：`{ path: "xxx" }`
+* `path_size`：`{ path: "xxx" }`
+* `disk_free`：`{ drive: "C:" }`（或 `path`）
+
+### 剪贴板
+
+* `clipboard` / `paste`：`{ target_dir: "xxx" }`
+* `get_clipboard_files`
+* `set_clipboard_files` / `setFiles`：`{ paths: [...] }`
+* `hasImage`
+* `saveImage`：`{ path: "C:\\xx\\a.png" }`
+* `trigger_system_paste`：`{ path: "C:\\targetdir" }`
+
+### 音频
+
+* `check_audio_engine`
+* `play_audio`：`{ path: "xxx.mp3", count: 1 }`
+* `stop_audio`
+* `get_audio_state`
+* `play_sfx`：`{ category: "kope", idx: -1 }`
+
+### 例子：播放音频
+
+```ts
+const res = await client.request({ action: "play_audio", path: "D:\\a.mp3", count: 1 });
+if (!res.ok) console.error(res.error);
+```
+
+### 例子：保存剪贴板到目录
+
+```ts
+const res = await client.request({ action: "clipboard", target_dir: "D:\\dump" });
+console.log(res);
+```
+
+---
+
+## 9) 心跳与 TTL：VS Code 为什么要定时 hello
+
+Python broker 默认：
+
+* `HEARTBEAT_TTL_SEC = 80`
+* 如果超过 TTL 没看到 client 任何请求，就会自动退出（省资源）
+
+所以 VS Code 侧建议：
+
+* **25～30 秒发一次 `hello`**（或者 `stats` 也行）
+* 你也可以在“用户触发动作时”才发请求，但要保证 idle 时不会突然掉 broker（除非你希望它掉）
+
+---
+
+## 10) 最常见坑位（你照这个规避就稳）
+
+1. **Windows pipe 名字转义**
+   必须是 `\\\\.\\pipe\\xxx` 这种 JS 字符串；从 endpoint.json 读到的一般已经是 `\\.\pipe\xxx`，Node 可以直接用。
+
+2. **忘带 token**
+   broker 直接回 `unauthorized`，所以统一在 `request()` 自动补 token。
+
+3. **忘带 client_id**
+   TTL 续租依赖 `_touch_client(client_id)`，不带 `client_id` 可能导致 broker 误以为没人用（虽然你也可以靠 hello 带上）。所以统一补上。
+
+4. **JSONL 解析**
+   必须考虑 TCP/pipe 会拆包/粘包：用 buffer 累积，按 `\n` 切行。
+
+5. **扩展 reload / 多窗口**
+   同一机器多个 VS Code window：建议 `client_id` 带上 window 的随机后缀（比如 `vscode:${machineId}:${random}`），互不干扰。
+
+---
+
+如果你愿意，我也可以按你现有的 VS Code 扩展结构（你贴一下你现在的 Node/TS 入口文件或通信层文件）把：
+
+* `ensureBrokerRunning()`
+* `BrokerClient`
+* `actions 封装（playAudio / saveClipboard / setFiles …）`
+  直接整理成一个“能复制进项目的模块”。
+下面给你一份**“VS Code 端怎么接入全局 Broker（单例 + IPC + lease 心跳）”**的详细文档，按你现在的情况（Node 扩展 + Python 脚本）写，目标是：**15 个窗口只起 1 个 py 进程**，而且崩了能自愈。
+
+---
+
+# 1. 总体目标与分工
+
+## 你要保证的两条强保证
+
+1. **任意时刻最多只有 1 个 Broker 在工作**
+   → 由 Broker 端“独占资源 listen（Unix socket / Windows named pipe）”保证
+
+2. **只要还有任意窗口需要它，最终一定会有 1 个 Broker 活着**
+   → 由 Client 端“连不上就 spawn + 定期 ping 续租”保证
+
+## 分工（非常关键）
+
+### Broker（唯一 py 进程）负责
+
+* 监听全局唯一 endpoint（独占即单例）
+* 接受 JSONL RPC
+* 记录每个 client 的 last_seen
+* **超过 TTL 没人续租就自杀退出**（lease watchdog）
+
+### Client（每个 VS Code 窗口）负责
+
+* connect 连接 Broker
+* 连接失败就 spawn（允许并发，多窗口同时 spawn 也不怕）
+* 连接成功后定时发 `ping`（续租）
+* 窗口退出尽力发 `shutdown/bye`（但绝不依赖它一定执行）
+
+---
+
+# 2. VS Code 端你需要的“3样东西”
+
+1. **endpoint.json**（Broker 写、Client 读）
+   里面告诉你当前 broker 的 IPC 地址（unix socket path / pipe name）
+
+2. **token.txt**（Broker 写、Client 读）
+   Client 调用 RPC 时需要带上 token，避免本机其它进程乱打命令
+
+3. **IPC 连接 + JSONL 协议**（Node 扩展实现）
+   用 Node 的 `net` 模块连接本地 socket/pipe，然后按行收发 JSON
+
+> ✅ 最简单的策略：**Client 永远优先读 endpoint.json** 来连接，读不到/连不上再 spawn。
+> 不要在 Node 侧“自己算地址”，因为 Python 里算 salt 的细节很容易跟 Node 不一致（尤其 Windows）。
+
+---
+
+# 3. endpoint.json / token.txt 的位置（Client 必须会找）
+
+你的 Broker 代码里写的目录是：
+
+## Windows
+
+* `endpoint.json`：`%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
+* `token.txt`：`%LOCALAPPDATA%\vix_audio_broker\token.txt`
+
+  * 如果 `LOCALAPPDATA` 没有，会 fallback 到 `APPDATA` 或 temp（但一般都有）
+
+## Linux/macOS
+
+* `endpoint.json`：`$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`
+  若 `XDG_CACHE_HOME` 没有 → `~/.cache/vix_audio_broker/endpoint.json`
+* `token.txt`：同目录
+
+---
+
+# 4. IPC 协议（JSONL）规范
+
+**传输层**：本地 socket / named pipe
+**协议层**：一行一个 JSON（`\n` 结尾）
+
+## 请求（Client -> Broker）
+
+必带字段：
+
+* `_id`: number（请求 id，用来匹配响应）
+* `action`: string（比如 `"ping"`, `"play_sfx"`）
+* `client_id`: string（每个窗口唯一，推荐 uuid）
+* `token`: string（从 token.txt 读）
+
+可带其它业务字段（全部透传到你的 `_dispatch_action()`）：
+
+* `path`, `count`, `category` ……
+
+例子：
+
+```json
+{"_id":1,"action":"hello","client_id":"win-uuid","token":"..."}
+{"_id":2,"action":"ping","client_id":"win-uuid","token":"..."}
+{"_id":3,"action":"play_sfx","client_id":"win-uuid","token":"...","category":"kope","idx":-1}
+```
+
+## 响应（Broker -> Client）
+
+必带字段：
+
+* `_id`: number（匹配请求）
+* `ok`: boolean
+* 其它字段：你的业务返回（比如 status/error/...）
+
+---
+
+# 5. VS Code 扩展侧的接入流程（推荐实现）
+
+你在扩展里做一个 `BrokerClient`（每个窗口一个实例）：
+
+## 5.1 激活时（或第一次需要功能时）
+
+1. `ensureConnected()`
+2. 成功后 `startHeartbeat()`（比如每 20 秒 ping 一次）
+
+> 重要：不要一激活就狂启动 Broker。
+> 推荐：**第一次用户用到相关功能**（比如播放音效/监听剪贴板）再 `ensureConnected()`。
+
+## 5.2 ensureConnected() 逻辑（最稳）
+
+按这个顺序：
+
+### Step A：尝试连接现有 Broker
+
+* 读 `endpoint.json`
+* 读 `token.txt`
+* `net.connect(endpoint)` 成功后发 `hello`
+* hello 成功 → connected
+
+### Step B：连接失败就 spawn
+
+* `spawnBroker()`（允许并发，但建议每窗口做节流：3 秒内最多 spawn 一次）
+* 等 100~300ms，再回到 Step A 重试（可重试 10~30 次，带退避）
+
+### Step C：仍失败
+
+* 抛错给上层，提示用户：Python 环境不可用 / 文件缺失 / 权限等
+
+---
+
+# 6. Node/TS 端参考代码（可直接抄）
+
+下面这段代码涵盖：
+
+* 找 cache dir
+* 读 endpoint/token
+* 连接 socket/pipe（`net.connect({path})` 一把梭：Windows pipe 也用 path）
+* JSONL 编解码
+* 请求-响应匹配（基于 `_id`）
+* spawn + 重试 + 心跳 + 自动重连
+
+> 你放在 `src/brokerClient.ts` 之类即可。
+
+```ts
+import * as vscode from "vscode";
+import * as net from "net";
+import * as fs from "fs";
+import * as path from "path";
+import { spawn } from "child_process";
+import { randomUUID } from "crypto";
+
+type EndpointInfo =
+  | { family: "pipe"; pipe: string; app_id: string; protocol: number; pid?: number; token_enabled?: boolean }
+  | { family: "unix"; path: string; app_id: string; protocol: number; pid?: number; token_enabled?: boolean };
+
+type Pending = {
+  resolve: (v: any) => void;
+  reject: (e: any) => void;
+  timer: NodeJS.Timeout;
+};
+
+function getCacheDir(): string {
+  if (process.platform === "win32") {
+    return path.join(process.env.LOCALAPPDATA || process.env.APPDATA || process.env.TEMP || ".", "vix_audio_broker");
+  }
+  return path.join(process.env.XDG_CACHE_HOME || path.join(process.env.HOME || ".", ".cache"), "vix_audio_broker");
+}
+
+function readJsonFile<T>(p: string): T | null {
+  try {
+    const s = fs.readFileSync(p, "utf8");
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readTextFile(p: string): string | null {
+  try {
+    return fs.readFileSync(p, "utf8").trim();
+  } catch {
+    return null;
+  }
+}
+
+export class BrokerClient {
+  private socket: net.Socket | null = null;
+  private connected = false;
+
+  private readonly clientId = randomUUID();
+  private token: string = "";
+  private endpoint: EndpointInfo | null = null;
+
+  private lineBuf = "";
+  private nextId = 1;
+  private pending = new Map<number, Pending>();
+
+  private hbTimer: NodeJS.Timeout | null = null;
+
+  // spawn 防抖（每窗口）
+  private lastSpawnAt = 0;
+  private spawning: Promise<void> | null = null;
+
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly pythonExe: string,           // 你用的 python 路径
+    private readonly brokerScriptPath: string,    // vix_broker_singleton.py
+    private readonly implScriptPath: string       // 你的大脚本（包含 _dispatch_action）
+  ) {}
+
+  dispose() {
+    this.stopHeartbeat();
+    this.closeSocket();
+  }
+
+  // ---------- public API ----------
+  async ensureConnected(): Promise<void> {
+    if (this.connected && this.socket) return;
+
+    // 先尝试连接现有 broker
+    if (await this.tryConnectOnce()) return;
+
+    // 连接不上就 spawn（节流+并发合并）
+    await this.spawnBrokerThrottled();
+
+    // spawn 后重试连接（带退避）
+    const maxTry = 30;
+    for (let i = 0; i < maxTry; i++) {
+      await this.sleep(120 + i * 30);
+      if (await this.tryConnectOnce()) return;
+    }
+
+    throw new Error("Broker connect failed after spawn+retries. Check python/script paths, endpoint/token files, or permissions.");
+  }
+
+  startHeartbeat(intervalMs = 20000) {
+    if (this.hbTimer) return;
+    this.hbTimer = setInterval(async () => {
+      try {
+        // 如果断了，会自动重连并续租
+        await this.ensureConnected();
+        await this.call("ping", {});
+      } catch {
+        // 静默：下一轮继续自愈
+      }
+    }, intervalMs);
+  }
+
+  stopHeartbeat() {
+    if (this.hbTimer) clearInterval(this.hbTimer);
+    this.hbTimer = null;
+  }
+
+  async call(action: string, payload: Record<string, any>, timeoutMs = 5000): Promise<any> {
+    await this.ensureConnected();
+    const id = this.nextId++;
+
+    const req = {
+      _id: id,
+      action,
+      client_id: this.clientId,
+      token: this.token,
+      ...payload,
+    };
+
+    const line = JSON.stringify(req) + "\n";
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`RPC timeout: ${action}`));
+      }, timeoutMs);
+
+      this.pending.set(id, { resolve, reject, timer });
+
+      try {
+        this.socket!.write(line, "utf8");
+      } catch (e) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(e);
+      }
+    });
+  }
+
+  // ---------- internal ----------
+  private async tryConnectOnce(): Promise<boolean> {
+    const cache = getCacheDir();
+    const endpointPath = path.join(cache, "endpoint.json");
+    const tokenPath = path.join(cache, "token.txt");
+
+    const endpoint = readJsonFile<EndpointInfo>(endpointPath);
+    const token = readTextFile(tokenPath);
+
+    if (!endpoint || !token) return false;
+    if (endpoint.app_id !== "vix-broker") return false;
+
+    // 统一用 net.connect({path})：
+    // - unix: endpoint.path
+    // - windows named pipe: endpoint.pipe 形如 \\.\pipe\xxx
+    const connPath = endpoint.family === "unix" ? endpoint.path : endpoint.pipe;
+    if (!connPath) return false;
+
+    // 尝试建立 socket
+    const ok = await new Promise<boolean>((resolve) => {
+      const s = net.connect({ path: connPath });
+
+      const onError = () => {
+        try { s.destroy(); } catch {}
+        resolve(false);
+      };
+
+      s.once("error", onError);
+      s.once("connect", () => resolve(true));
+    });
+
+    if (!ok) return false;
+
+    // 真正建立连接并挂上监听（需要新建一次 socket，避免上面那次被 resolve 后丢引用）
+    return await this.openAndHello(connPath, token, endpoint);
+  }
+
+  private async openAndHello(connPath: string, token: string, endpoint: EndpointInfo): Promise<boolean> {
+    this.closeSocket();
+
+    const s = net.connect({ path: connPath });
+    this.socket = s;
+    this.token = token;
+    this.endpoint = endpoint;
+
+    s.setKeepAlive(true);
+
+    s.on("data", (buf) => this.onData(buf));
+    s.on("error", () => this.onDisconnected());
+    s.on("close", () => this.onDisconnected());
+
+    const connected = await new Promise<boolean>((resolve) => {
+      s.once("connect", () => resolve(true));
+      s.once("error", () => resolve(false));
+    });
+    if (!connected) return false;
+
+    // hello 校验
+    try {
+      const res = await this.call("hello", {}, 2000);
+      if (!res || res.ok !== true || res.app_id !== "vix-broker") {
+        this.closeSocket();
+        return false;
+      }
+      this.connected = true;
+      return true;
+    } catch {
+      this.closeSocket();
+      return false;
+    }
+  }
+
+  private onData(buf: Buffer) {
+    this.lineBuf += buf.toString("utf8");
+    while (true) {
+      const idx = this.lineBuf.indexOf("\n");
+      if (idx < 0) break;
+      const line = this.lineBuf.slice(0, idx).trim();
+      this.lineBuf = this.lineBuf.slice(idx + 1);
+      if (!line) continue;
+
+      let obj: any;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const id = obj?._id;
+      if (typeof id === "number" && this.pending.has(id)) {
+        const p = this.pending.get(id)!;
+        clearTimeout(p.timer);
+        this.pending.delete(id);
+        if (obj.ok === false) p.reject(new Error(obj.error || "rpc_error"));
+        else p.resolve(obj);
+      }
+      // 这里也可以处理 broker 主动推送事件（如果你以后要做 server push）
+    }
+  }
+
+  private onDisconnected() {
+    if (!this.connected && !this.socket) return;
+    this.connected = false;
+
+    // reject 所有 pending
+    for (const [id, p] of this.pending.entries()) {
+      clearTimeout(p.timer);
+      p.reject(new Error("disconnected"));
+      this.pending.delete(id);
+    }
+
+    this.closeSocket();
+  }
+
+  private closeSocket() {
+    const s = this.socket;
+    this.socket = null;
+    this.connected = false;
+    this.lineBuf = "";
+    if (s) {
+      try { s.removeAllListeners(); } catch {}
+      try { s.destroy(); } catch {}
+    }
+  }
+
+  private async spawnBrokerThrottled(): Promise<void> {
+    const now = Date.now();
+    if (this.spawning) return this.spawning;
+
+    // 3 秒内只 spawn 一次（每窗口）
+    if (now - this.lastSpawnAt < 3000) return;
+
+    this.lastSpawnAt = now;
+    this.spawning = new Promise<void>((resolve) => {
+      const args = [
+        this.brokerScriptPath,
+        "--impl",
+        this.implScriptPath,
+        "--broker",
+      ];
+
+      const child = spawn(this.pythonExe, args, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+
+      child.unref();
+      resolve();
+    }).finally(() => {
+      this.spawning = null;
+    });
+
+    return this.spawning;
+  }
+
+  private sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+}
+```
+
+---
+
+# 7. 扩展里怎么用它（接入点）
+
+## 7.1 选择 python 路径 & 脚本路径
+
+你通常有三种：
+
+1. 扩展自带 python（最稳）
+2. 扩展自带 venv
+3. 用系统 python（最不稳，用户环境千奇百怪）
+
+建议：**你现在既然“内置 py 环境”了，就固定用内置 python.exe**。
+
+```ts
+const pythonExe = context.asAbsolutePath("py/python.exe"); // 示例
+const brokerScript = context.asAbsolutePath("py/vix_broker_singleton.py");
+const implScript = context.asAbsolutePath("py/your_big_script.py");
+```
+
+## 7.2 在“真正需要功能时”再 ensureConnected
+
+比如用户触发 command：
+
+```ts
+const broker = new BrokerClient(context, pythonExe, brokerScript, implScript);
+
+context.subscriptions.push({ dispose: () => broker.dispose() });
+
+context.subscriptions.push(
+  vscode.commands.registerCommand("vix.playKope", async () => {
+    await broker.ensureConnected();
+    broker.startHeartbeat(20000); // 20s
+    await broker.call("play_sfx", { category: "kope", idx: -1 });
+  })
+);
+```
+
+---
+
+# 8. 心跳与 TTL 参数怎么配（你现在的 Broker：TTL=80s）
+
+推荐：
+
+* Client heartbeat：**20s**（或 15~30s）
+* Broker TTL：**80s**（你现在就是）
+* 扫描间隔：5s（你现在就是）
+
+只要满足：`TTL >= 心跳间隔 * 2` 就很稳。
+
+---
+
+# 9. 多窗口并发 spawn 会不会炸？
+
+不会。原因：
+
+* 多窗口同时 spawn：只会有 1 个 broker 抢到独占 endpoint
+* 其余进程会发现“BROKER_ALREADY_RUNNING”然后立刻退出
+
+你在 Client 侧做了 3 秒节流，会让体验更平滑，但不是必需。
+
+---
+
+# 10. 关闭策略（不要追求“最后一扇窗关立刻退出”）
+
+正确做法：
+
+* **不要依赖窗口 close 事件**（可能崩溃、被 kill、VS Code 强杀）
+* Broker 只看：**TTL 内有没有 ping**
+* 最后一个窗口关掉后：最多 TTL 秒内 Broker 自杀退出
+  这就是现实系统里“体验上完美”的最优解
+
+如果你想“尽力更快退出”，窗口退出时可以发：
+
+* `shutdown`（但千万不要依赖它一定执行）
+
+---
+
+# 11. Debug / 排错清单（最常见坑）
+
+1. **endpoint.json/token.txt 没生成**
+
+* 说明 broker 根本没跑起来
+* 检查 spawn 的 python 路径、脚本路径、权限、stderr（你现在 stdio ignore，排错时可以临时改成 pipe）
+
+2. **连上了但 hello unauthorized**
+
+* token 没读对（读错目录 or 读到旧 token）
+* token.txt 被清空或编码异常
+
+3. **连上后偶发断线**
+
+* 系统休眠/唤醒导致 socket 断
+* 你的心跳逻辑会自动重连并自愈（这是预期）
+
+4. **Windows pipe 名称/路径不一致**
+
+* 所以我强烈推荐：**永远读 endpoint.json**，不要自己算 pipe 名
+
+---
+
+# 12. 你现在这套是不是“理论最优”？
+
+在工程上，这就是业界常用的“最优范式”：
+
+* **独占资源**做单例（硬保证）
+* **IPC** 统一入口（多窗口共享）
+* **租约/心跳**决定生死（抗崩溃/强杀/休眠）
+
+这已经是“真实系统里能做到的上限”，不会再被 `ppid/stdin EOF` 那类脆弱信号拖下水。
+
+---
+
+如果你愿意，我还可以把**Windows 的 endpoint.json / token.txt 的“精确路径回退规则”**和你扩展当前打包结构对齐（比如你现在 python 放哪、impl 脚本放哪），这样你就能直接复制粘贴到项目里一把过。
+在你这份代码里，`endpoint.json` / `token.txt` 的落盘位置**跟 IDE/扩展安装目录无关**，只跟“当前用户的系统缓存目录 + 固定子目录名”有关，所以多个 AI IDE（VS Code / Cursor / Windsurf…）只要在**同一个用户会话**里跑，默认就是**共享同一份**文件。
+
+下面按你代码 `_get_endpoint_dir()` 的逻辑，把三大平台的实际路径讲清楚（含 fallback）。
+
+---
+
+## 1) Windows：优先用 LOCALAPPDATA，其次 APPDATA，再不行用 temp
+
+代码：
+
+```py
+base = LOCALAPPDATA or APPDATA or tempfile.gettempdir()
+dir  = base / "vix_audio_broker"
+files: endpoint.json / token.txt
+```
+
+所以通常是：
+
+* **endpoint.json**
+  `%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
+* **token.txt**
+  `%LOCALAPPDATA%\vix_audio_broker\token.txt`
+
+常见展开示例（按用户名不同）：
+
+* `C:\Users\<You>\AppData\Local\vix_audio_broker\endpoint.json`
+* `C:\Users\<You>\AppData\Local\vix_audio_broker\token.txt`
+
+如果某些环境没有 `LOCALAPPDATA`（少见）：
+
+* `%APPDATA%\vix_audio_broker\...`（Roaming）
+
+再不行（极端/沙盒环境）：
+
+* `C:\Temp\vix_audio_broker\...` 或系统 temp 目录下
+
+---
+
+## 2) Linux / macOS：优先 XDG_CACHE_HOME，否则 ~/.cache，再不行 temp
+
+代码：
+
+```py
+base = XDG_CACHE_HOME or ~/.cache
+dir  = base / "vix_audio_broker"
+files: endpoint.json / token.txt
+```
+
+因此：
+
+* **Linux（常见）**
+
+  * `$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`（如果设了 XDG）
+  * 否则：`~/.cache/vix_audio_broker/endpoint.json`
+  * `token.txt` 同目录
+
+* **macOS（注意）**
+  你的代码**不会自动用** `~/Library/Caches`（除非你自己把 `XDG_CACHE_HOME` 指过去），所以默认是：
+
+  * `~/.cache/vix_audio_broker/endpoint.json`
+  * `~/.cache/vix_audio_broker/token.txt`
+
+如果 `~/.cache` 创建失败才会 fallback：
+
+* `tempfile.gettempdir()/vix_audio_broker/...`（通常是 `/tmp/...`）
+
+---
+
+## 3) IPC 地址文件里写的“真正连接地址”在哪里？
+
+### (A) Linux/mac：Unix socket 本体在 tempdir
+
+你 broker 的 unix socket 路径是：
+
+```py
+/tmp/vix_audio_broker_<uid>.sock
+```
+
+准确点说是 `tempfile.gettempdir()` 下，比如：
+
+* Linux/mac：`/tmp/vix_audio_broker_501.sock`（uid=501 举例）
+
+然后 `endpoint.json` 里会写：
+
+```json
+{ "family": "unix", "path": "/tmp/vix_audio_broker_501.sock", ... }
+```
+
+### (B) Windows：现在用 TCP 127.0.0.1:port
+
+`endpoint.json` 里会是：
+
+```json
+{ "family": "tcp", "host": "127.0.0.1", "port": 38xxx, ... }
+```
+
+> 你前面提到 Named Pipe 的版本：那时 `endpoint.json` 会写 `family:"pipe"` + `name:"\\\\.\\pipe\\xxx"` 之类；但你当前这份代码是 TCP。
+
+---
+
+## 4) 多 AI IDE / 多扩展目录时，会不会各写各的、互相找不到？
+
+**只要满足这两条，默认就不会：**
+
+1. 都在同一个 OS 用户下运行（同一套 `LOCALAPPDATA` / `HOME`）
+2. `ENDPOINT_DIRNAME`（你这里是 `vix_audio_broker`）保持一致
+
+因为落盘目录完全不依赖 `__file__` / 扩展安装路径。
+
+---
+
+## 5) Node/VS Code 侧应该怎么找这些文件（必须跟 Python 一致）
+
+建议 Node 侧完全照抄 Python 的“找目录规则”，不要自作主张换成 extension storage。
+
+最小等价规则：
+
+* Windows：`process.env.LOCALAPPDATA || process.env.APPDATA || os.tmpdir()`
+* Linux/mac：`process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache")`，如果创建失败再 `os.tmpdir()`
+
+如果你要我把这个写进“接入文档”，我可以直接给你一段 Node 的 `getEndpointDir()` 代码（跟你 Python 逻辑 1:1 对齐），这样你不会踩到“不同 IDE 目录不同导致找不到”的坑。
+
+---
+
+### 一个你可能很快会遇到的坑（提前提醒）
+
+你 Windows 端口的“初始 hash salt”里含了 `sys.executable` 和 `__file__`。这会导致**不同打包方式/不同 IDE 内置 python 路径**时，“默认端口候选”不同。
+不过你现在**优先读 endpoint.json**，并且 `_create_listen_socket()` 也会优先沿用 endpoint.json 里的旧端口，所以多数情况下没事；只是“第一次同时起多个 IDE 都在抢启动”的时候，端口漂移概率会变大一点。
+
+如果你想把“启动争抢”也做到更稳，我建议后面把 salt 简化成：`APP_ID + 用户 SID/uid` 就够了。
+
+需要的话我可以给你一个“完全不受 IDE/路径影响”的 salt 方案。

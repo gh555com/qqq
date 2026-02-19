@@ -119,6 +119,8 @@ class BrokerBridge extends EventEmitter {
 	}
 
 	async start() {
+		try { const global = require('./global'); global.logMessage(`[Broker] start() called: isStarting=${this.isStarting}, available=${this.isAvailable()}`, "DEBUG"); } catch { }
+
 		if (this.isStarting) return this.startPromise;
 		if (this.isAvailable()) return true;
 
@@ -210,8 +212,13 @@ class BrokerBridge extends EventEmitter {
 	// =========================================================================
 
 	async _doStart() {
+		try { const global = require('./global'); global.logMessage("[Broker] _doStart called", "DEBUG"); } catch { }
+
 		// Step 1: Try connecting to existing Broker
-		if (await this._tryConnectOnce()) {
+		const connResult = await this._tryConnectOnce();
+		try { const global = require('./global'); global.logMessage(`[Broker] _tryConnectOnce returned: ${connResult}`, "DEBUG"); } catch { }
+
+		if (connResult) {
 			this._startHeartbeat();
 			this.emit('event', { event: 'broker_connected' }); // ★ Notify listeners
 			return true;
@@ -417,12 +424,19 @@ class BrokerBridge extends EventEmitter {
 
 	async _spawnBrokerThrottled() {
 		const now = Date.now();
-		if (this.spawning) return this.spawning;
+		if (this.spawning) {
+			try { const global = require('./global'); global.logMessage("[Broker] Spawn skipped: already spawning", "DEBUG"); } catch { }
+			return this.spawning;
+		}
 
 		// 3s cooldown per window
-		if (now - this.lastSpawnAt < 3000) return;
+		if (now - this.lastSpawnAt < 3000) {
+			try { const global = require('./global'); global.logMessage(`[Broker] Spawn skipped: cooldown (${now - this.lastSpawnAt}ms < 3000ms)`, "DEBUG"); } catch { }
+			return;
+		}
 
 		this.lastSpawnAt = now;
+		try { const global = require('./global'); global.logMessage("[Broker] Spawn starting...", "DEBUG"); } catch { }
 
 		this.spawning = new Promise(async (resolve) => {
 			// ★ OPTIMIZATION: Random delay (0-2s) to stagger multi-window spawns
@@ -442,6 +456,57 @@ class BrokerBridge extends EventEmitter {
 				}
 			}
 
+			// ★ Step 1: 跨窗口 spawn 锁 - 确保只有一个窗口尝试 spawn
+			const spawnMarkerPath = path.join(getCacheDir(), "broker_spawning.marker");
+			const markerMaxAge = 30000; // 30秒超时（spawn + Broker 启动应该足够）
+
+			try {
+				// 检查是否有其他窗口正在 spawn
+				if (fs.existsSync(spawnMarkerPath)) {
+					const stat = fs.statSync(spawnMarkerPath);
+					const age = Date.now() - stat.mtimeMs;
+					if (age < markerMaxAge) {
+						// 其他窗口正在 spawn，等待后重试连接
+						try {
+							const global = require('./global');
+							global.logMessage(`[Broker] Another window is spawning (age=${Math.round(age/1000)}s), waiting...`, "DEBUG");
+						} catch { }
+						resolve();
+						return;
+					}
+					// Marker 过期，删除它
+					try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				}
+
+				// 创建 spawn marker（原子写入）
+				const markerContent = JSON.stringify({ pid: process.pid, time: Date.now() });
+				fs.writeFileSync(spawnMarkerPath, markerContent, { flag: 'wx' }); // wx = exclusive create
+			} catch (e) {
+				if (e.code === 'EEXIST') {
+					// 另一个窗口刚刚创建了 marker，等待
+					try {
+						const global = require('./global');
+						global.logMessage("[Broker] Spawn lock contention, waiting...", "DEBUG");
+					} catch { }
+					resolve();
+					return;
+				}
+				// 其他错误，继续尝试 spawn（不阻塞）
+			}
+
+			// ★ Step 2: 完美性检查（每次 spawn 前都检查）
+			const pythonPerfect = await this._checkPythonPerfect();
+			if (!pythonPerfect.ok) {
+				try {
+					const global = require('./global');
+					global.logMessage(`[Broker] Python not ready: ${pythonPerfect.reason}`, "WARN");
+				} catch { }
+				// 清理 spawn marker
+				try { fs.unlinkSync(spawnMarkerPath); } catch { }
+				resolve();
+				return;
+			}
+
 			// Find Python executable and script
 			const { pythonPath, scriptPath } = this._findPythonAndScript();
 
@@ -456,6 +521,8 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Missing path: python=${!!pythonPath}, script=${!!scriptPath}`, "WARN");
 				} catch { }
+				// 清理 spawn marker
+				try { fs.unlinkSync(spawnMarkerPath); } catch { }
 				resolve();
 				return;
 			}
@@ -466,61 +533,104 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Script not found: ${scriptPath}`, "WARN");
 				} catch { }
+				// 清理 spawn marker
+				try { fs.unlinkSync(spawnMarkerPath); } catch { }
 				resolve();
 				return;
 			}
 
 			try {
-				// ★ 捕获 stderr 以便诊断 Python 启动失败原因
-				const child = cp.spawn(pythonPath, [scriptPath, '--broker'], {
-					detached: true,
-					stdio: ['ignore', 'ignore', 'pipe'], // stdin/stdout ignore, stderr capture
-					windowsHide: true
-				});
+				// ★ Fix: Use DaemonBridge pattern (NO detached on Windows)
+				// Old py daemon & Rust daemon work because they DON'T use detached:true
+				// detached:true changes Windows process behavior and breaks pywin32 Named Pipe
+				const isWin = process.platform === 'win32';
+				let child;
+
+				if (isWin) {
+					// ★ Windows: Match working Rust daemon spawn pattern exactly
+					child = cp.spawn(pythonPath, [scriptPath, '--broker'], {
+						stdio: ['pipe', 'pipe', 'pipe'],  // ★ Full stdio pipes like Rust
+						windowsHide: true,               // ★ Hide console window
+						// NO detached: true!  This is the key fix.
+						env: { ...process.env, Q_PARENT_PID: String(process.pid) }  // ★ For orphan detection
+					});
+				} else {
+					// Unix: detached + setsid for true daemon behavior
+					child = cp.spawn(pythonPath, [scriptPath, '--broker'], {
+						detached: true,
+						stdio: ['ignore', 'ignore', 'pipe'],
+					});
+					child.unref();  // Only unref on Unix
+				}
+
+				const actualPythonPath = pythonPath;
 
 				// ★ 诊断日志：spawn 成功
 				try {
 					const global = require('./global');
-					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}`, "DEBUG");
+					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}, exe=${actualPythonPath}`, "DEBUG");
 				} catch { }
 
-				// ★ 捕获 stderr（3秒内的错误输出）
+				// ★ 捕获 stdout 和 stderr（3秒内的输出）
 				let stderrBuf = '';
+				let stdoutBuf = '';
+				if (child.stdout) {
+					child.stdout.on('data', (chunk) => {
+						stdoutBuf += chunk.toString();
+						if (stdoutBuf.length > 2000) stdoutBuf = stdoutBuf.slice(-2000);
+					});
+				}
 				if (child.stderr) {
 					child.stderr.on('data', (chunk) => {
 						stderrBuf += chunk.toString();
-						if (stderrBuf.length > 2000) stderrBuf = stderrBuf.slice(-2000); // 限制长度
+						if (stderrBuf.length > 2000) stderrBuf = stderrBuf.slice(-2000);
 					});
 				}
 
-				// ★ 监听退出事件（只关心前 3 秒的快速失败）
-				const exitHandler = (code) => {
-					if (code !== 0 && code !== null && stderrBuf) {
-						try {
-							const global = require('./global');
-							const snippet = stderrBuf.trim().split('\n').slice(-5).join(' | ');
-							global.logMessage(`[Broker] Python exited(${code}): ${snippet}`, "WARN");
-						} catch { }
-					}
+				// ★ 监听退出事件（前 3 秒的快速失败诊断）
+				const exitHandler = (code, signal) => {
+					try {
+						const global = require('./global');
+						const errSnip = stderrBuf ? stderrBuf.trim().split('\n').slice(-5).join(' | ') : '';
+						const outSnip = stdoutBuf ? stdoutBuf.trim().split('\n').slice(-3).join(' | ') : '';
+						const combined = [errSnip, outSnip].filter(Boolean).join(' || ') || 'no output';
+						// ★ 任何退出都记录，便于诊断
+						if (code === 0) {
+							global.logMessage(`[Broker] Python exited(0): ${combined}`, "DEBUG");
+						} else if (code !== null) {
+							global.logMessage(`[Broker] Python exited(${code}): ${combined}`, "WARN");
+						} else if (signal) {
+							global.logMessage(`[Broker] Python killed by signal: ${signal}`, "WARN");
+						}
+					} catch { }
 				};
 				child.once('exit', exitHandler);
 
-				// ★ 3秒后断开 stderr 监听，让进程独立运行
+				// ★ 3秒后断开 stdout/stderr 监听，让进程独立运行，并清理 spawn marker
 				setTimeout(() => {
 					try {
+						child.stdout?.removeAllListeners();
+						child.stdout?.destroy();
 						child.stderr?.removeAllListeners();
 						child.stderr?.destroy();
 						child.removeListener('exit', exitHandler);
 					} catch { }
+					// 清理 spawn marker（Broker 应该已经启动）
+					try { fs.unlinkSync(spawnMarkerPath); } catch { }
 				}, 3000);
 
-				child.unref();
+				// ★ Note: Windows does NOT use unref() - child stays attached
+				// This means VS Code process may wait for Broker on exit
+				// But Broker has TTL auto-shutdown, so this is acceptable
+				// Unix already called unref() in the else branch above
 			} catch (e) {
 				// Spawn failed - log for debugging
 				try {
 					const global = require('./global');
 					global.logMessage(`[Broker] Spawn failed: ${e.message}`, "WARN");
 				} catch { }
+				// 清理 spawn marker
+				try { fs.unlinkSync(spawnMarkerPath); } catch { }
 			}
 
 			resolve();
@@ -529,6 +639,38 @@ class BrokerBridge extends EventEmitter {
 		});
 
 		return this.spawning;
+	}
+
+	/**
+	 * ★ 完美性检查：验证 Python 环境在 spawn 前是否就绪
+	 * 优先检查 _downloadedPythonPath（已被 onPythonReady 设置说明检查已通过）
+	 */
+	async _checkPythonPerfect() {
+		// ★ 如果 _downloadedPythonPath 已设置，说明完美性检查早已通过
+		// （它只有在 checkL1Perfect 返回 perfect 时才会被 global.js 设置）
+		if (this._downloadedPythonPath && fs.existsSync(this._downloadedPythonPath)) {
+			return { ok: true, pythonPath: this._downloadedPythonPath };
+		}
+
+		// 否则尝试调用 checkL1Perfect（可能 context 还没准备好）
+		try {
+			const global = require('./global');
+			const downloader = global.downloader;
+			const context = global.extensionContext;
+
+			if (!downloader || !downloader.python || !context) {
+				// context 未就绪，但 _downloadedPythonPath 也没设置 => Python 真的没准备好
+				return { ok: false, reason: 'python_not_downloaded' };
+			}
+
+			const result = await downloader.python.checkL1Perfect(context);
+			if (result.perfect) {
+				return { ok: true, pythonPath: result.pythonPath };
+			}
+			return { ok: false, reason: result.reason, missing: result.missing || [] };
+		} catch (e) {
+			return { ok: false, reason: `check_error: ${e.message}` };
+		}
 	}
 
 	_findPythonAndScript() {
@@ -545,33 +687,16 @@ class BrokerBridge extends EventEmitter {
 			}
 		}
 
-		// Find Python executable (priority order):
-		// 1. _downloadedPythonPath from dow.js (most reliable, respects download state)
-		// 2. Bundled python_engine directory
-		// 3. System python (fallback)
+		// Find Python executable:
+		// ★ 只认 dow.js 下载的 globalStorage/python_engine，不使用系统Python
 		let pythonPath = null;
 
-		// ★ Priority 1: Use path from dow.js if available
+		// ★ Use path from dow.js (globalStorage/python_engine)
 		if (this._downloadedPythonPath && fs.existsSync(this._downloadedPythonPath)) {
 			pythonPath = this._downloadedPythonPath;
 		}
 
-		// ★ Priority 2: Bundled python_engine
-		if (!pythonPath && this.extensionPath) {
-			const engineDir = path.join(this.extensionPath, 'python_engine');
-			if (process.platform === 'win32') {
-				const winPy = path.join(engineDir, 'python.exe');
-				if (fs.existsSync(winPy)) pythonPath = winPy;
-			} else {
-				const unixPy = path.join(engineDir, 'bin', 'python3');
-				if (fs.existsSync(unixPy)) pythonPath = unixPy;
-			}
-		}
-
-		// ★ Priority 3: System python (fallback)
-		if (!pythonPath) {
-			pythonPath = process.platform === 'win32' ? 'python' : 'python3';
-		}
+		// 如果 Python 不可用，pythonPath 为 null，调用方会处理（不启动 Broker）
 
 		return { pythonPath, scriptPath };
 	}
