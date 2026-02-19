@@ -1540,7 +1540,8 @@ class ClipboardHistorySidebarProvider {
             this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeError', e.message)}`, "WARN");
         }
 
-        this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeFail')}`, "WARN");
+        // ★ Do NOT log here - let caller (triggerSavor) handle the unified notification
+        this._pythonAudioFailed = true;
         return null; // Python unavailable, no fallback
     }
 

@@ -1828,7 +1828,9 @@ def _get_endpoint_dir() -> Path:
         p = Path(base) / ENDPOINT_DIRNAME
     try:
         p.mkdir(parents=True, exist_ok=True)
-    except:
+        _log(f"Endpoint dir ensured: {p}")
+    except Exception as e:
+        _log(f"Failed to create endpoint dir {p}: {e}")
         p = Path(tempfile.gettempdir()) / ENDPOINT_DIRNAME
         try:
             p.mkdir(parents=True, exist_ok=True)
@@ -1872,8 +1874,9 @@ def _write_endpoint_file(data: dict):
     fp = _endpoint_file_path()
     try:
         fp.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
-    except:
-        pass
+        _log(f"Endpoint file written: {fp}")
+    except Exception as e:
+        _log(f"Failed to write endpoint file: {fp}, error: {e}")
 
 def _read_endpoint_file() -> dict:
     fp = _endpoint_file_path()
@@ -2514,7 +2517,6 @@ def _pipe_accept_loop(pipe_name: str):
             hPipe = _create_named_pipe_instance(pipe_name, first_instance=first)
             first = False
             if hPipe == INVALID_HANDLE_VALUE or hPipe <= 0:
-                _log("CreateNamedPipe failed.")
                 time.sleep(0.5)
                 continue
 

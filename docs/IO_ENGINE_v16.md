@@ -163,7 +163,7 @@ pkill -f "kp.py.*--broker"
 │           (Broker 单例 + Rust 分工 + 实时广播)               │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  VS Code    Cursor     Windsurf    ...共 15 窗口             │
+│ 不同 ide：VS Code、 Cursor、 Windsurf、 Trae ... 假设开了共 15 窗口             │
 │  ┌──────┐  ┌──────┐   ┌──────┐                              │
 │  │ Rust │  │ Rust │   │ Rust │    ← 每窗口独立 Rust          │
 │  │(7MB) │  │(7MB) │   │(7MB) │      处理 IO 操作             │

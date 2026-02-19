@@ -1841,7 +1841,9 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 
 		// Compute actual frame height (including border)
 		const boxH = pxHeight + PREVIEW_BORDER;
-		let n = Math.round(boxH / pxPerLine);
+
+		// ★★★ Always round UP to prevent overlap (better to have extra space than overlap) ★★★
+		let n = Math.ceil(boxH / pxPerLine);
 
 		// extreme mode can further reduce
 		if (performanceMode === "extreme") {
