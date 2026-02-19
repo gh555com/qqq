@@ -306,7 +306,7 @@ function getConfig() {
     lineSpacing: -2,
     sidebarWidth: 100,
     sidebarRatio: 0.2,
-    qqBin: [],
+    qqiq: [],
     isPinned: false,
     szDisplayMode: "nothing",
     sortBy: "name",
@@ -331,9 +331,9 @@ function getConfig() {
 
   // Ensure array fields exist
   if (!Array.isArray(config.pinnedDirs)) config.pinnedDirs = [];
-  if (!Array.isArray(config.qqBin)) config.qqBin = [];
-  // Migrate old qqBin format (string -> object)
-  config.qqBin = config.qqBin.map(item => {
+  if (!Array.isArray(config.qqiq)) config.qqiq = [];
+  // Migrate old qqiq format (string -> object)
+  config.qqiq = config.qqiq.map(item => {
     if (typeof item === 'string') return { path: item, type: 'dir' };
     if (item && typeof item.path === 'string') return item;
     return null;
@@ -374,7 +374,7 @@ function saveConfig(
   lineSpacing,
   sidebarWidth,
   sidebarRatio,
-  qqBin,
+  qqiq,
   isPinned
 ) {
   if (!globalContext) return;
@@ -384,7 +384,7 @@ function saveConfig(
     lineSpacing,
     sidebarWidth,
     sidebarRatio,
-    qqBin,
+    qqiq,
     isPinned,
   };
 
@@ -409,7 +409,7 @@ function saveConfig(
         lineSpacing: newConfig.lineSpacing,
         sidebarWidth: newConfig.sidebarWidth,
         sidebarRatio: newConfig.sidebarRatio,
-        qqBin: newConfig.qqBin,
+        qqiq: newConfig.qqiq,
         isPinned: newConfig.isPinned,
       };
       globalContext.globalState.update("qqq_config", configToSave);
@@ -478,51 +478,51 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
 }
 
 // ==================== History Management (New) ====================
-// qqBin: [{path, type:'dir'|'file'}] up to 60 items, newest on top
+// qqiq: [{path, type:'dir'|'file'}] up to 60 items, newest on top
 // pinnedDirs: [string] up to 6 items, newest at bottom (directories only)
 
-function _qqBinKey(p) {
+function _qqiqKey(p) {
   return cacheKeyForPath(canonicalizeExistingPath(p) || p);
 }
 
-/** Remove specified path from qqBin */
-function removeFromQqBin(targetPath) {
+/** Remove specified path from qqiq */
+function removeFromqqiq(targetPath) {
   const config = getConfig();
-  const key = _qqBinKey(targetPath);
-  const newBin = (config.qqBin || []).filter(item => _qqBinKey(item.path) !== key);
-  if (newBin.length !== (config.qqBin || []).length) {
-    saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
+  const key = _qqiqKey(targetPath);
+  const newIq = (config.qqiq || []).filter(item => _qqiqKey(item.path) !== key);
+  if (newIq.length !== (config.qqiq || []).length) {
+    saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newIq, config.isPinned);
   }
 }
 
-/** Insert a record at the top of qqBin (dedup, and skip pinned dirs) */
-function _insertToQqBinTop(bin, itemPath, itemType, pinnedDirs) {
+/** Insert a record at the top of qqiq (dedup, and skip pinned dirs) */
+function _insertToqqiqTop(iq, itemPath, itemType, pinnedDirs) {
   const canon = canonicalizeExistingPath(itemPath);
-  if (!canon) return bin;
+  if (!canon) return iq;
   // If it's a dir and already in pinnedDirs, do not insert
   if (itemType === 'dir' && Array.isArray(pinnedDirs)) {
     const key = cacheKeyForPath(canon);
-    if (pinnedDirs.some(d => cacheKeyForPath(d) === key)) return bin;
+    if (pinnedDirs.some(d => cacheKeyForPath(d) === key)) return iq;
   }
   const key = cacheKeyForPath(canon);
-  const filtered = bin.filter(item => _qqBinKey(item.path) !== key);
+  const filtered = iq.filter(item => _qqiqKey(item.path) !== key);
   filtered.unshift({ path: canon, type: itemType });
   return filtered.slice(0, 60);
 }
 
-/** Record directory history (only add directories to qqBin; skip pinned ones) */
+/** Record directory history (only add directories to qqiq; skip pinned ones) */
 function recordDirHistory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon || !fs.existsSync(canon)) return;
-  // Already in pinnedDirs, do not duplicate into recycle bin
+  // Already in pinnedDirs, do not duplicate into qq iq
   const key = cacheKeyForPath(canon);
   if ((config.pinnedDirs || []).some(d => cacheKeyForPath(d) === key)) return;
-  const newBin = _insertToQqBinTop(config.qqBin || [], canon, 'dir', config.pinnedDirs);
-  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
+  const newIq = _insertToqqiqTop(config.qqiq || [], canon, 'dir', config.pinnedDirs);
+  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newIq, config.isPinned);
 }
 
-/** Record file history (add directory+file pair to qqBin, dir on top and file below) */
+/** Record file history (add directory+file pair to qqiq, dir on top and file below) */
 function recordFileHistory(filePath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(filePath);
@@ -532,8 +532,8 @@ function recordFileHistory(filePath) {
   // Remove old records for both
   const dirKey = cacheKeyForPath(dirCanon);
   const fileKey = cacheKeyForPath(canon);
-  let bin = (config.qqBin || []).filter(item => {
-    const k = _recycleBinKey(item.path);
+  let iq = (config.qqiq || []).filter(item => {
+    const k = _qqiqKey(item.path);
     return k !== dirKey && k !== fileKey;
   });
   // Insert order: dir on top, file below — but pinned dir is not inserted
@@ -543,12 +543,12 @@ function recordFileHistory(filePath) {
     toInsert.push({ path: dirCanon, type: 'dir' });
   }
   toInsert.push({ path: canon, type: 'file' });
-  bin.unshift(...toInsert);
-  bin = bin.slice(0, 60);
-  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
+  iq.unshift(...toInsert);
+  iq = iq.slice(0, 60);
+  saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
 }
 
-/** Pin directory: move from recycleBin to bottom of pinnedDirs (max 6; overflow auto-unpins oldest) */
+/** Pin directory: move from qqiq to bottom of pinnedDirs (max 6; overflow auto-unpins oldest) */
 function pinDirectory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
@@ -556,33 +556,33 @@ function pinDirectory(dirPath) {
   const key = cacheKeyForPath(canon);
   // Dedup from pinnedDirs
   let pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
-  // Remove this dir from recycleBin
-  let bin = (config.qqBin || []).filter(item => _recycleBinKey(item.path) !== key);
+  // Remove this dir from qqiq
+  let iq = (config.qqiq || []).filter(item => _qqiqKey(item.path) !== key);
   // Add to bottom of pinnedDirs
   pinned.push(canon);
-  // If exceeds 6, put oldest (first) back to top of recycleBin
+  // If exceeds 6, put oldest (first) back to top of qqiq
   while (pinned.length > 6) {
     const removed = pinned.shift();
     const removedCanon = canonicalizeExistingPath(removed);
     if (removedCanon && fs.existsSync(removedCanon)) {
-      bin = _insertToQqBinTop(bin, removedCanon, 'dir');
+      iq = _insertToqqiqTop(iq, removedCanon, 'dir');
     }
   }
-  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
+  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
 }
 
-/** Unpin: move from pinnedDirs to top of qqBin */
+/** Unpin: move from pinnedDirs to top of qqiq */
 function unpinDirectory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon) return;
   const key = cacheKeyForPath(canon);
   const pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
-  let bin = config.qqBin || [];
+  let iq = config.qqiq || [];
   if (fs.existsSync(canon)) {
-    bin = _insertToQqBinTop(bin, canon, 'dir');
+    iq = _insertToqqiqTop(iq, canon, 'dir');
   }
-  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
+  saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, iq, config.isPinned);
 }
 
 let cachedDrives = null;
@@ -714,8 +714,8 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
-// ====== QQ bin lazy load ======
-let qqBinLoading = false;
+// ====== QQ iq lazy load ======
+let qqiqLoading = false;
 const QQ_BATCH_SIZE = 20;
 
 // ====== Character-level undo/redo system ======
@@ -1035,7 +1035,7 @@ function findItemElementByPath(p, type){
 }
 
 // ====== Unified pathTooltip hover handler (covers all 4 areas) ======
-// Area 1: drive area .nav-item  Area 2: qq bin area .qq-item
+// Area 1: drive area .nav-item  Area 2: qq iq area .qq-item
 // Area 3: history area .recent-item  Area 4: resource list area .file-item
 function handlePathTooltipHover(e){
   const t = e.target;
@@ -1050,7 +1050,7 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // ---- Area 2: qq bin area (.qq-item) ----
+  // ---- Area 2: qq iq area (.qq-item) ----
   const qqItem = t.closest('.qq-item');
   if (qqItem) {
     // File row: skip here, globalTooltip handles via data-tooltip
@@ -1523,7 +1523,7 @@ function performDeleteAction(item){
   if (item.name === '..') return; // Strictly forbid deleting parent directory
   const el = findItemElementByPath(item.path);
   if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
-  vscode.postMessage({ command: 'quickDeleteToQqBin', path: item.path, type: item.type });
+  vscode.postMessage({ command: 'quickDeleteToqqiq', path: item.path, type: item.type });
   selectedItem = null;
 }
 function performCodeAction(item){
@@ -1561,7 +1561,7 @@ function handleContextMenuAction(action){
         const el = findItemElementByPath(item.path);
         if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
       });
-      vscode.postMessage({ command: 'quickDeleteMultipleToQqBin', items: targets });
+      vscode.postMessage({ command: 'quickDeleteMultipleToqqiq', items: targets });
       selectedItem = null;
       selectedItems = [];
     } else if (action === 'rename') {
@@ -1776,14 +1776,14 @@ window.addEventListener('message', event => {
     if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
   } else if (message.command === 'updateSidebar') {
       // Dynamically update sidebar area
-      const qqSec = document.querySelector('.sidebar .qq-bin-section');
+      const qqSec = document.querySelector('.sidebar .qq-iq-section');
       const divider = document.querySelector('.sidebar .divider');
-      if (message.qqBinHtml) {
+      if (message.qqiqHtml) {
         // Has content: replace or insert
         const temp = document.createElement('div');
-        temp.innerHTML = message.qqBinHtml;
+        temp.innerHTML = message.qqiqHtml;
         const newDivider = temp.querySelector('.divider');
-        const newSection = temp.querySelector('.qq-bin-section');
+        const newSection = temp.querySelector('.qq-iq-section');
         if (qqSec && divider) {
           divider.replaceWith(newDivider || document.createElement('div'));
           qqSec.replaceWith(newSection || document.createElement('div'));
@@ -1823,27 +1823,27 @@ window.addEventListener('message', event => {
     }
     // After completion, schedule next round
     scheduleDiskFreeUpdate();
-  } else if (message.command === 'appendQqBin') {
-    // QQ bin lazy load: append new items
-    const section = document.querySelector('.qq-bin-section');
+  } else if (message.command === 'appendqqiq') {
+    // QQ iq lazy load: append new items
+    const section = document.querySelector('.qq-iq-section');
     if (section && message.itemsHtml) {
       section.insertAdjacentHTML('beforeend', message.itemsHtml);
       section.dataset.loaded = message.loaded;
       section.dataset.total = message.total;
-      qqBinLoading = false;
+      qqiqLoading = false;
     }
   }
 });
 
-// ====== QQ bin scroll lazy load ======
-function initQqBinLazyLoad() {
+// ====== QQ iq scroll lazy load ======
+function initqqiqLazyLoad() {
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
 
   sidebar.addEventListener('scroll', () => {
-    if (qqBinLoading) return;
+    if (qqiqLoading) return;
 
-    const section = document.querySelector('.qq-bin-section');
+    const section = document.querySelector('.qq-iq-section');
     if (!section) return;
 
     const total = parseInt(section.dataset.total || '0', 10);
@@ -1854,9 +1854,9 @@ function initQqBinLazyLoad() {
 
     // Check if scrolled near bottom (within 100px)
     if (sidebar.scrollTop + sidebar.clientHeight > sidebar.scrollHeight - 100) {
-      qqBinLoading = true;
+      qqiqLoading = true;
       vscode.postMessage({
-        command: 'requestQqBin',
+        command: 'requestqqiq',
         offset: loaded,
         limit: QQ_BATCH_SIZE
       });
@@ -2005,7 +2005,7 @@ document.addEventListener('keydown', (e) => {
           const el = findItemElementByPath(item.path);
           if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
         });
-        vscode.postMessage({ command: 'quickDeleteMultipleToQqBin', items: targets });
+        vscode.postMessage({ command: 'quickDeleteMultipleToqqiq', items: targets });
         selectedItem = null;
         selectedItems = [];
       }
@@ -2051,7 +2051,7 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   ensurePathTooltip();
-  // ★ Recycle bin lazy loading moved to deferred initialization (3s after UI stable)
+  // ★ QQ iq lazy loading moved to deferred initialization (3s after UI stable)
 
   // ★ Disable the system default context menu
   document.addEventListener('contextmenu', (e) => {
@@ -2078,7 +2078,7 @@ document.addEventListener('DOMContentLoaded', () => {
           globalTooltip.style.whiteSpace = 'pre-wrap';
           globalTooltip.style.maxWidth = availableWidth + 'px';
 
-          // ★ Check if should render as HTML (for styled tooltips like recycle bin files)
+          // ★ Check if should render as HTML (for styled tooltips like qq iq files)
           if (currentTooltipTarget.getAttribute('data-use-html') === 'true') {
             globalTooltip.innerHTML = text; // text already escaped at generation time
           } else {
@@ -2701,8 +2701,8 @@ document.addEventListener('visibilitychange', () => {
 // ★★★ Deferred initialization: wait for UI stable then delay 3 seconds ★★★
 // These operations are non-critical for initial render, delay them to speed up startup
 function runDeferredInitialization() {
-  // 1. Recycle bin lazy loading
-  initRecycleBinLazyLoad();
+  // 1. QQ iq lazy loading
+  initqqiqLazyLoad();
 
   // 2. ResizeObserver for container
   const container = document.querySelector('.container');
@@ -2736,7 +2736,7 @@ window.navigateTo = navigateTo;
 window.navigateIntoFolder = navigateIntoFolder;
 window.unpinDir = unpinDir;
 window.pinDir = pinDir;
-window.onRecycleFileClick = onRecycleFileClick;
+window.onQqFileClick = onQqFileClick;
 window.cancel = cancel;
 window.saveFile = saveFile;
 window.createFolder = createFolder;
@@ -2917,24 +2917,24 @@ document.addEventListener('keydown', function (e) {
 }
 
 // ==================== sidebar HTML generation (shared) ====================
-const QQ_BIN_BATCH_SIZE = 20; // Items per batch
+const QQ_IQ_BATCH_SIZE = 20; // Items per batch
 
-function generateSidebarHtml(config, qqBinLimit = QQ_BIN_BATCH_SIZE) {
+function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  const safeQqBin = (config.qqBin || []).filter(
+  const safeqqiq = (config.qqiq || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const totalQqBin = safeQqBin.length;
-  const displayedQqBin = safeQqBin.slice(0, qqBinLimit);
-  const showQqBin = displayedQqBin.length > 0;
+  const totalqqiq = safeqqiq.length;
+  const displayedqqiq = safeqqiq.slice(0, qqiqLimit);
+  const showqqiq = displayedqqiq.length > 0;
 
-  const qqBinHtml = showQqBin
+  const qqiqHtml = showqqiq
     ? `
   <div class="divider"></div>
-    <div class="qq-bin-section" data-total="${totalQqBin}" data-loaded="${displayedQqBin.length}">
-      ${displayedQqBin
+    <div class="qq-iq-section" data-total="${totalqqiq}" data-loaded="${displayedqqiq.length}">
+      ${displayedqqiq
       .map((item) => {
         const escaped = escapeJsStringLiteral(item.path);
         const fullDisplay = escapeHtmlAttribute(item.path);
@@ -2971,11 +2971,11 @@ function generateSidebarHtml(config, qqBinLimit = QQ_BIN_BATCH_SIZE) {
     )
     .join("");
 
-  return { qqBinHtml, pinnedDirsHtml };
+  return { qqiqHtml, pinnedDirsHtml };
 }
 
-// Generate HTML for a single qq bin item
-function generateQqBinItemHtml(item) {
+// Generate HTML for a single qq iq item
+function generateqqiqItemHtml(item) {
   const escaped = escapeJsStringLiteral(item.path);
   const fullDisplay = escapeHtmlAttribute(item.path);
   if (item.type === 'file') {
@@ -2996,18 +2996,18 @@ function generateQqBinItemHtml(item) {
   }
 }
 
-// Get qq bin items within a specified range
-function getQqBinItems(offset, limit) {
+// Get qq iq items within a specified range
+function getqqiqItems(offset, limit) {
   const config = getConfig();
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  const safeQqBin = (config.qqBin || []).filter(
+  const safeqqiq = (config.qqiq || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const total = safeQqBin.length;
-  const items = safeQqBin.slice(offset, offset + limit);
-  const itemsHtml = items.map(generateQqBinItemHtml).join('');
+  const total = safeqqiq.length;
+  const items = safeqqiq.slice(offset, offset + limit);
+  const itemsHtml = items.map(generateqqiqItemHtml).join('');
   return { itemsHtml, total, loaded: offset + items.length };
 }
 
@@ -3015,7 +3015,7 @@ function getWebviewContent(currentPath) {
   const config = getConfig();
   const drives = getDrives();
 
-  const { qqBinHtml, pinnedDirsHtml } = generateSidebarHtml(config);
+  const { qqiqHtml, pinnedDirsHtml } = generateSidebarHtml(config);
 
   let htmlTemplate = "";
   try {
@@ -3039,7 +3039,7 @@ function getWebviewContent(currentPath) {
     .replace(/\{\{SIDEBAR_WIDTH\}\}/g, config.sidebarWidth)
     .replace(/\{\{LINE_SPACING\}\}/g, config.lineSpacing)
     .replace("{{DRIVES_HTML}}", drivesHtml)
-    .replace("{{QQ_BIN_HTML}}", qqBinHtml)
+    .replace("{{QQ_IQ_HTML}}", qqiqHtml)
     .replace("{{RECENT_DIRS_HTML}}", pinnedDirsHtml)
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
@@ -3271,7 +3271,7 @@ function showSaveAsDialog() {
   // Start directory priority:
   // 1. last visited directory (restore session)
   // 2. first item in pinnedDirs
-  // 3. first directory in recycleBin
+  // 3. first directory in qqiq
   // 4. platform default directory
   let currentPath = "";
   const lastVisited = getLastVisitedDir();
@@ -3283,7 +3283,7 @@ function showSaveAsDialog() {
     currentPath = canonicalizeExistingPath(config.pinnedDirs[0]);
   }
   if (!currentPath) {
-    const firstDir = (config.qqBin || []).find(item => item.type === 'dir');
+    const firstDir = (config.qqiq || []).find(item => item.type === 'dir');
     if (firstDir) currentPath = canonicalizeExistingPath(firstDir.path);
   }
   if (!currentPath) {
@@ -3458,11 +3458,11 @@ function showSaveAsDialog() {
         fineSCM: fineSCM,
       });
 
-      // ★ Update sidebar synchronously (history qq bin + pinned history)
+      // ★ Update sidebar synchronously (history qq iq + pinned history)
       const sidebarData = generateSidebarHtml(config);
       panel.webview.postMessage({
         command: "updateSidebar",
-        qqBinHtml: sidebarData.qqBinHtml,
+        qqiqHtml: sidebarData.qqiqHtml,
         pinnedDirsHtml: sidebarData.pinnedDirsHtml,
       });
 
@@ -3631,7 +3631,7 @@ function showSaveAsDialog() {
         }
         break;
       case "qqFileClick": {
-        // Click qq bin file: re-pin dir+file, then edit the file
+        // Click qq iq file: re-pin dir+file, then edit the file
         const clickedFile = canonicalizeExistingPath(message.path);
         if (clickedFile && fs.existsSync(clickedFile)) {
           recordFileHistory(clickedFile);
@@ -3649,14 +3649,14 @@ function showSaveAsDialog() {
         break;
       }
 
-      // QQ bin lazy load: request more items
-      case "requestQqBin": {
+      // QQ iq lazy load: request more items
+      case "requestqqiq": {
         const offset = message.offset || 0;
-        const limit = message.limit || QQ_BIN_BATCH_SIZE;
-        const result = getQqBinItems(offset, limit);
+        const limit = message.limit || QQ_IQ_BATCH_SIZE;
+        const result = getqqiqItems(offset, limit);
         if (panel && activePanelAlive) {
           panel.webview.postMessage({
-            command: 'appendQqBin',
+            command: 'appendqqiq',
             itemsHtml: result.itemsHtml,
             total: result.total,
             loaded: result.loaded
@@ -3798,7 +3798,7 @@ function showSaveAsDialog() {
           currentConfig.lineSpacing,
           currentConfig.sidebarWidth,
           message.ratio,
-          currentConfig.recycleBin,
+          currentConfig.qqiq,
           currentConfig.isPinned
         );
         if (panel && activePanelAlive)
@@ -3811,7 +3811,7 @@ function showSaveAsDialog() {
           currentConfig.lineSpacing,
           currentConfig.sidebarWidth,
           currentConfig.sidebarRatio,
-          currentConfig.recycleBin,
+          currentConfig.qqiq,
           message.isPinned
         );
         // ★ Checkmark SFX
@@ -3921,7 +3921,7 @@ function showSaveAsDialog() {
             // ★ Update sidebar immediately
             if (panel && activePanelAlive) {
               const sbData = generateSidebarHtml(getConfig());
-              panel.webview.postMessage({ command: "updateSidebar", qqBinHtml: sbData.qqBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+              panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
             }
             vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
               if (!message.isPinned && panel && activePanelAlive) panel.dispose();
@@ -3956,7 +3956,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      case "quickDeleteToQqBin": {
+      case "quickDeleteToqqiq": {
         const itemToDelete = canonicalizeExistingPath(message.path);
         // Safety guard: absolutely forbid deleting parent directory
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
@@ -3971,7 +3971,7 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
               global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
-              // ★ Move-to-qq-bin SFX
+              // ★ Move-to-qq-iq SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
@@ -3988,7 +3988,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      case "quickDeleteMultipleToQqBin": {
+      case "quickDeleteMultipleToqqiq": {
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // Second-pass filtering on extension side to ensure safety
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
@@ -4011,7 +4011,7 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
-              // ★ Move-to-qq-bin SFX
+              // ★ Move-to-qq-iq SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
