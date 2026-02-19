@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "Extremo: Manter apenas o primeiro quadro, qualidade 47.",
     "config.performanceMode.enum.accelerated": "Acelerado: Manter no máximo os primeiros 2 segundos para GIFs e vídeos, 7fps, qualidade 47, sem barra de progresso.",
     "config.performanceMode.enum.optmum": "Ótimo: Manter duração completa para GIFs, extrair 4s do início/meio/fim do vídeo, preservar fps original, qualidade 71.",
-    "config.ioEngine.desc": "☀️ Motor IO — veja os compromissos em https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md",
+    "config.ioEngine.desc": "☀️ Motor IO — veja os compromissos em https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
     "config.ioEngine.enum.auto": "Seleção automática do melhor motor",
     "config.ioEngine.enum.python": "Motor Python",
     "config.ioEngine.enum.rust": "Motor Rust (a versão oficial do gh555.com requer versão ≥ 16.0.0 para suporte ao motor Rust)",

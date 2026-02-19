@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "Extrem: Nur erstes Bild behalten, Qualität 47.",
     "config.performanceMode.enum.accelerated": "Beschleunigt: Maximal die ersten 2 Sekunden für GIFs und Videos behalten, 7fps, Qualität 47, kein Fortschrittsbalken.",
     "config.performanceMode.enum.optmum": "Optimal: Volle Dauer für GIFs behalten, 4s aus Anfang/Mitte/Ende des Videos extrahieren, Original-fps beibehalten, Qualität 71.",
-    "config.ioEngine.desc": "☀️ IO-Engine — siehe Kompromisse unter https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md",
+    "config.ioEngine.desc": "☀️ IO-Engine — siehe Kompromisse unter https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
     "config.ioEngine.enum.auto": "Beste Engine automatisch auswählen",
     "config.ioEngine.enum.python": "Python-Engine",
     "config.ioEngine.enum.rust": "Rust-Engine (gh555.com offizieller Build erfordert Version ≥ 16.0.0 für Rust-Engine-Unterstützung)",
