@@ -1428,28 +1428,29 @@ async function startDaemons() {
 		// ★ Ultimate optimal: check if already deactivated before starting
 		if (_isDeactivated) return;
 
-		// ★ Shell daemon always starts (needed for wq clipboard detection)
-		const shellPromise = ensureStarted(shellBridge);
-
 		// ★ Only start the IO engine user selected (save memory)
 		const pref = getEnginePreference();
 
 		if (pref === 'rust') {
-			// Rust (+ Shell), fallback to Python if Rust fails
-			await shellPromise;
+			// ★ Rust 优先：Rust 成功则不启动 Shell（节省 ~50MB）
 			const rustOk = await ensureStarted(rustBridge);
 			if (!rustOk) {
+				// Rust 失败：启动 Shell 作为 wq fallback，再启动 Python 处理 IO
+				logMessage("[Daemon] Rust failed, starting Shell as wq fallback", "INFO");
+				await ensureStarted(shellBridge);
 				await ensureStarted(pythonBridge);
 			}
 		} else if (pref === 'shell') {
-			// Shell only (already starting)
-			await shellPromise;
+			// Shell only mode
+			await ensureStarted(shellBridge);
 		} else {
-			// 'python' or 'auto': start Python, Rust as fallback
-			await shellPromise;
+			// 'python' or 'auto': Rust wq 优先 + Python IO
+			const rustOk = await ensureStarted(rustBridge);
 			const pyOk = await ensureStarted(pythonBridge);
-			if (!pyOk) {
-				await ensureStarted(rustBridge);
+			// 如果 Rust 和 Python 都失败，启动 Shell 作为 fallback
+			if (!rustOk && !pyOk) {
+				logMessage("[Daemon] Rust & Python failed, starting Shell as fallback", "INFO");
+				await ensureStarted(shellBridge);
 			}
 		}
 
@@ -3009,32 +3010,54 @@ const TaskCounter = {
  * - files: file list (only when hasFile)
  * - totalSize: total file size (only when hasFile)
  * - rawStatus: original status { hasFile, hasHtml, hasImage, hasText }
+ *
+ * ★ 引擎优先级：Rust > Shell > VS Code API
+ * ★ 极致优化：200ms 缓存 + 精简 timeout + 合并调用
  */
+
+// ★ wq 缓存（避免短时间内重复调用，如 q1.js 中连续两次 wq()）
+let _wqCache = null;
+let _wqCacheTime = 0;
+const WQ_CACHE_TTL = 200; // 200ms 内重复调用直接返回缓存
+
 async function wq() {
+	// ★ 缓存命中：200ms 内的重复调用直接返回
+	const now = Date.now();
+	if (_wqCache && (now - _wqCacheTime) < WQ_CACHE_TTL) {
+		return _wqCache;
+	}
+
 	let status = { hasFile: false, hasHtml: false, hasImage: false, hasText: false };
 	let handled = false;
 	let files = [];
 	let totalSize = 0;
 	let wqExecutionTime = 0;
+	let usedEngine = "none";
 
-	// 1. Try Daemon Bridge (high performance)
-	if (shellBridge && shellBridge.isAvailable()) {
+	// ★ 1. 优先尝试 Rust daemon（最快，内存最小）
+	// timeout 精简为 500ms（正常应 <50ms，500ms 足够处理极端情况）
+	if (!handled && rustBridge && rustBridge.isAvailable()) {
 		try {
-			const startTime = Date.now(); // Start timing only right before core operation
-			const res = await shellBridge.call("wq", {}, 3000);
-			wqExecutionTime = Date.now() - startTime; // Measure only core operation time
+			const startTime = Date.now();
+			const res = await rustBridge.call("wq", {}, 500);
+			wqExecutionTime = Date.now() - startTime;
 
-			if (res && !res.error) {
-				status = res;
+			if (res && !res.error && (res.hasFile !== undefined || res.hasHtml !== undefined || res.hasImage !== undefined || res.hasText !== undefined)) {
+				status = {
+					hasFile: !!res.hasFile,
+					hasHtml: !!res.hasHtml,
+					hasImage: !!res.hasImage,
+					hasText: !!res.hasText,
+				};
 				handled = true;
+				usedEngine = "rust";
 
-				// ★ If there are files, immediately fetch file list (within same Shell call window)
+				// ★ If there are files, immediately fetch file list
 				if (status.hasFile) {
 					try {
-						const filesRes = await shellBridge.call("getFiles", {}, 3000);
+						const filesRes = await rustBridge.call("getFiles", {}, 1000);
 						if (filesRes && filesRes.files) {
 							files = filesRes.files;
-							// Calculate total size
 							for (const f of files) {
 								try { totalSize += fs.statSync(f).size; } catch { }
 							}
@@ -3042,23 +3065,78 @@ async function wq() {
 					} catch (e) { }
 				}
 			}
-		} catch (e) { }
-	} else {
-		// 2. Fallback (VS Code API)
-		const startTime = Date.now(); // Start timing only right before core operation
+		} catch (e) {
+			logMessage(`[wq] Rust failed: ${e?.message || e}`, "DEBUG");
+		}
+	}
+
+	// ★ 2. Fallback: Shell daemon（稳定兜底）
+	// 如果 Shell 未启动但 Rust 失败了，按需启动 Shell
+	if (!handled && shellBridge) {
+		// 按需启动 Shell daemon（仅在 Rust 失败时触发）
+		if (!shellBridge.isAvailable() && !shellBridge.isStarting) {
+			logMessage("[wq] Rust unavailable, starting Shell daemon on-demand", "INFO");
+			try {
+				await shellBridge.start();
+			} catch (e) {
+				logMessage(`[wq] Shell on-demand start failed: ${e?.message || e}`, "WARN");
+			}
+		}
+
+		if (shellBridge.isAvailable()) {
+			try {
+				const startTime = Date.now();
+				const res = await shellBridge.call("wq", {}, 2000);
+				wqExecutionTime = Date.now() - startTime;
+
+				if (res && !res.error) {
+					status = res;
+					handled = true;
+					usedEngine = "shell";
+
+					// ★ If there are files, immediately fetch file list (within same Shell call window)
+					if (status.hasFile) {
+						try {
+							const filesRes = await shellBridge.call("getFiles", {}, 2000);
+							if (filesRes && filesRes.files) {
+								files = filesRes.files;
+								for (const f of files) {
+									try { totalSize += fs.statSync(f).size; } catch { }
+								}
+							}
+						} catch (e) { }
+					}
+				}
+			} catch (e) {
+				logMessage(`[wq] Shell failed: ${e?.message || e}`, "DEBUG");
+			}
+		}
+	}
+
+	// ★ 3. Ultimate fallback: VS Code API（仅能检测文本）
+	if (!handled) {
+		const startTime = Date.now();
 		const text = await vscode.env.clipboard.readText();
-		wqExecutionTime = Date.now() - startTime; // Measure only core operation time
+		wqExecutionTime = Date.now() - startTime;
 		if (text) status.hasText = true;
+		usedEngine = "vscode";
 	}
 
 	// --- Core classification logic ---
-	const baseResult = { rawStatus: status, files, totalSize };
+	const baseResult = { rawStatus: status, files, totalSize, _engine: usedEngine };
+
+	// ★ 辅助函数：返回结果前更新缓存
+	const cacheAndReturn = (result) => {
+		_wqCache = result;
+		_wqCacheTime = Date.now();
+		return result;
+	};
 
 	// A. Whitelist recognition (1. pure text 2. text-only HTML)
 	if (status.hasText && !status.hasFile && !status.hasImage && !status.hasHtml) {
 		// Save stats data
 		saveWqStats(wqExecutionTime);
-		return { type: 'whitelist', subType: 'text', ...baseResult };
+		return cacheAndReturn({ type: 'whitelist', subType: 'text', ...baseResult });
 	}
 
 	if (status.hasHtml && !status.hasImage && !status.hasFile) {
@@ -3071,7 +3149,7 @@ async function wq() {
 				if (!hasImg) {
 					// Save stats data
 					saveWqStats(wqExecutionTime);
-					return { type: 'whitelist', subType: 'html_text', ...baseResult };
+					return cacheAndReturn({ type: 'whitelist', subType: 'html_text', ...baseResult });
 				}
 			}
 		} catch (e) { }
@@ -3093,7 +3171,7 @@ async function wq() {
 	// Save stats data
 	saveWqStats(wqExecutionTime);
 
-	return { type: 'yellowlist', subType, ...baseResult };
+	return cacheAndReturn({ type: 'yellowlist', subType, ...baseResult });
 }
 
 // Helper function to save wq stats
@@ -3338,6 +3416,20 @@ async function triggerSystemPaste(targetDir) {
 	const normalizedPath = process.platform === 'win32' ? targetDir.replace(/\//g, '\\') : targetDir;
 	logMessage(q('q2paste.triggering', normalizedPath), "INFO");
 
+	// ★ 优先使用 Rust daemon（更快，内存更小）
+	if (rustBridge && rustBridge.isAvailable()) {
+		try {
+			const res = await rustBridge.call("trigger_system_paste", { path: normalizedPath }, 10000);
+			if (res && !res.error) {
+				logMessage(q('q2paste.shellResponse', JSON.stringify(res)) + " [Rust]", "INFO");
+				return res;
+			}
+		} catch (e) {
+			logMessage(`[triggerSystemPaste] Rust failed: ${e?.message || e}, falling back to Shell`, "DEBUG");
+		}
+	}
+
+	// ★ Fallback: Shell daemon
 	if (!shellBridge || !shellBridge.isAvailable()) {
 		logMessage(q('q2paste.shellUnavailable'), "ERROR");
 		return { success: false, error: q('q2paste.shellUnavailableError') };
