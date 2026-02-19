@@ -215,7 +215,7 @@
             "pythonCrash": "Python プロセスがクラッシュし、再生UIを停止しました",
             "pythonNoMiniaudio": "Python エンジンは接続されていますが、miniaudio 依存が検出されません",
             "pythonProbeError": "Python プローブ例外: {0}",
-            "pythonProbeFail": "Python エンジンのプローブに失敗、Webview にフォールバック",
+            "pythonProbeFail": "Python Broker 利用不可、オーディオ無効",
             "pythonPlaying": "q4 起動時に Python が再生中を検出、UI を同期",
             "audioSavor": "{0} エンジンでセイバー再生中: {1}、ループ: {2}"
         },

@@ -471,9 +471,10 @@ class BrokerBridge extends EventEmitter {
 			}
 
 			try {
+				// ★ 捕获 stderr 以便诊断 Python 启动失败原因
 				const child = cp.spawn(pythonPath, [scriptPath, '--broker'], {
 					detached: true,
-					stdio: 'ignore',
+					stdio: ['ignore', 'ignore', 'pipe'], // stdin/stdout ignore, stderr capture
 					windowsHide: true
 				});
 
@@ -482,6 +483,36 @@ class BrokerBridge extends EventEmitter {
 					const global = require('./global');
 					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}`, "DEBUG");
 				} catch { }
+
+				// ★ 捕获 stderr（3秒内的错误输出）
+				let stderrBuf = '';
+				if (child.stderr) {
+					child.stderr.on('data', (chunk) => {
+						stderrBuf += chunk.toString();
+						if (stderrBuf.length > 2000) stderrBuf = stderrBuf.slice(-2000); // 限制长度
+					});
+				}
+
+				// ★ 监听退出事件（只关心前 3 秒的快速失败）
+				const exitHandler = (code) => {
+					if (code !== 0 && code !== null && stderrBuf) {
+						try {
+							const global = require('./global');
+							const snippet = stderrBuf.trim().split('\n').slice(-5).join(' | ');
+							global.logMessage(`[Broker] Python exited(${code}): ${snippet}`, "WARN");
+						} catch { }
+					}
+				};
+				child.once('exit', exitHandler);
+
+				// ★ 3秒后断开 stderr 监听，让进程独立运行
+				setTimeout(() => {
+					try {
+						child.stderr?.removeAllListeners();
+						child.stderr?.destroy();
+						child.removeListener('exit', exitHandler);
+					} catch { }
+				}, 3000);
 
 				child.unref();
 			} catch (e) {

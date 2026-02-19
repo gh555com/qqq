@@ -215,7 +215,7 @@
             "pythonCrash": "Processus Python planté, UI de lecture arrêtée",
             "pythonNoMiniaudio": "Moteur Python connecté mais dépendance miniaudio non détectée",
             "pythonProbeError": "Exception de sonde Python: {0}",
-            "pythonProbeFail": "Sonde du moteur Python échouée, utilisation de Webview en secours",
+            "pythonProbeFail": "Python Broker indisponible, audio désactivé",
             "pythonPlaying": "q4 a détecté Python en lecture au démarrage, synchronisation de l'UI",
             "audioSavor": "Moteur {0} lecture favori: {1}, boucle: {2}"
         },

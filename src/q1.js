@@ -130,6 +130,11 @@ let currentRenderVersion = 0;
 
 let codeLensProvider = null;
 
+// ★★★ Auto-measured line height (measured by webview for precision) ★★★
+let measuredPxPerLine = null;  // Cached measured value, null = not yet measured
+let measurementPending = false;  // Prevent duplicate measurement requests
+let measurementCallback = null;  // Callback to request measurement from q4 webview
+
 const documentDecorationsMap = new Map();
 const resolutionCache = new Map();
 const RESOLUTION_CACHE_MAX_SIZE = 1000; // ★ Increased to 1000 entries
@@ -1800,12 +1805,18 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 		const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
 
 		let pxPerLine;
-		if (lineHeightRaw > 0) {
-			// User explicitly configured lineHeight
+
+		// ★★★ Priority 1: Use webview-measured value (most accurate) ★★★
+		if (measuredPxPerLine && measuredPxPerLine > 0) {
+			pxPerLine = measuredPxPerLine;
+			// Trigger async re-measurement if config changed (silent background update)
+			requestLineHeightMeasurement();
+		} else if (lineHeightRaw > 0) {
+			// Priority 2: User explicitly configured lineHeight
 			if (lineHeightRaw < 8) pxPerLine = fontSize * lineHeightRaw;
 			else pxPerLine = lineHeightRaw;
 		} else {
-			// ★ P0 fix: dynamic line-height ratio based on measured data
+			// Priority 3: Fallback to heuristic ratio (when no measurement and no explicit config)
 			// VSCode actual line height behaves differently across font sizes:
 			// - Small font (6-8): ratio ~1.2
 			// - Medium font (9-20): ratio ~1.37
@@ -1821,6 +1832,8 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 				ratio = 1.2;
 			}
 			pxPerLine = fontSize * ratio;
+			// Trigger measurement for future accuracy
+			requestLineHeightMeasurement();
 		}
 
 		// Clamp: prevent abnormal configs
@@ -1841,6 +1854,45 @@ function calculateBlankLinesExact(pxHeight, isLastItem = false) {
 	} catch (e) {
 		return 8;
 	}
+}
+
+// ★★★ Request line height measurement from webview ★★★
+function requestLineHeightMeasurement() {
+	if (measurementPending) return;  // Already pending
+	if (!measurementCallback) return;  // No webview registered yet
+
+	measurementPending = true;
+	const config = vscode.workspace.getConfiguration("editor");
+	const fontSize = Number(config.get("fontSize", 14)) || 14;
+	const lineHeightRaw = Number(config.get("lineHeight", 0)) || 0;
+	const fontFamily = config.get("fontFamily", "Consolas, 'Courier New', monospace") || "monospace";
+
+	// Request measurement from webview
+	measurementCallback({
+		fontSize,
+		lineHeight: lineHeightRaw,
+		fontFamily
+	});
+}
+
+// ★★★ Receive measurement result from webview ★★★
+function setMeasuredLineHeight(pxPerLine) {
+	if (pxPerLine && pxPerLine > 5 && pxPerLine < 200) {
+		const oldValue = measuredPxPerLine;
+		measuredPxPerLine = pxPerLine;
+		measurementPending = false;
+		if (oldValue !== pxPerLine) {
+			global.logMessage(`Line height measured: ${pxPerLine.toFixed(2)}px`, "INFO");
+		}
+	} else {
+		measurementPending = false;
+	}
+}
+
+// ★★★ Invalidate measurement cache (call when config changes) ★★★
+function invalidateLineHeightCache() {
+	measuredPxPerLine = null;
+	measurementPending = false;
 }
 
 // ★★★ Unified blank line calculation function ★★★
@@ -3225,7 +3277,9 @@ async function activate(context) {
 	context.subscriptions.push(
 		// ★ Only keep editor config listeners (these do not involve ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight")) {
+			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight") || e.affectsConfiguration("editor.fontFamily")) {
+				// ★★★ Invalidate line height cache and trigger re-measurement ★★★
+				invalidateLineHeightCache();
 				refreshConfig();
 				if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
 			}
@@ -3371,7 +3425,14 @@ const q1Utils = {
 	// ★ Callback for q4 to register when cleanFreakMode changes
 	onCleanFreakModeChange: null,
 	// ★ performGlobalClean for direct invocation from q4
-	performGlobalClean
+	performGlobalClean,
+	// ★★★ Line height measurement API for q4 webview ★★★
+	setMeasuredLineHeight,
+	invalidateLineHeightCache,
+	// Register measurement request callback (q4 will call this to receive measurement requests)
+	registerMeasurementCallback: (cb) => { measurementCallback = cb; },
+	// Trigger initial measurement
+	requestLineHeightMeasurement
 };
 
 module.exports = { activate, deactivate, ...q1Utils };

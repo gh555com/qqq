@@ -215,7 +215,7 @@
             "pythonCrash": "تعطلت عملية Python، تم إيقاف واجهة التشغيل",
             "pythonNoMiniaudio": "محرك Python متصل لكن لم يتم اكتشاف تبعية miniaudio",
             "pythonProbeError": "استثناء فحص Python: {0}",
-            "pythonProbeFail": "فشل فحص محرك Python، استخدام Webview كاحتياطي",
+            "pythonProbeFail": "Python Broker غير متاح، الصوت معطل",
             "pythonPlaying": "q4 اكتشف Python يشغل عند البدء، مزامنة الواجهة",
             "audioSavor": "محرك {0} يشغل المفضل: {1}، تكرار: {2}"
         },
