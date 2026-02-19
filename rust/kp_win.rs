@@ -1204,19 +1204,22 @@ mod win {
     // =============================================================================
 
     // ★ 缓存自定义剪贴板格式 ID（全局不变，只需注册一次）
-    static CF_HTML_CACHED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    static CF_PNG_CACHED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    // 使用 once_cell::sync::Lazy 替代 std::sync::OnceLock（Win7 build-std 兼容）
+    use once_cell::sync::Lazy;
+    
+    static CF_HTML_CACHED: Lazy<u32> = Lazy::new(|| unsafe {
+        RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr())
+    });
+    static CF_PNG_CACHED: Lazy<u32> = Lazy::new(|| unsafe {
+        RegisterClipboardFormatW(to_wide_null("PNG").as_ptr())
+    });
 
     fn get_cf_html() -> u32 {
-        *CF_HTML_CACHED.get_or_init(|| unsafe {
-            RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr())
-        })
+        *CF_HTML_CACHED
     }
 
     fn get_cf_png() -> u32 {
-        *CF_PNG_CACHED.get_or_init(|| unsafe {
-            RegisterClipboardFormatW(to_wide_null("PNG").as_ptr())
-        })
+        *CF_PNG_CACHED
     }
 
     pub fn wq() -> PyV {
