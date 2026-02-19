@@ -461,6 +461,12 @@ pythonBridge.on('event', (evt) => {
 function initPythonBrokerBridge() {
 	if (!extensionContext || pythonBridge.extensionPath !== "") return;
 
+	// ★ excludePython: skip Python Broker entirely
+	if (getEnginePreference() === 'excludePython') {
+		logMessage("[Broker] Exclude Python mode - Python Broker disabled", "INFO");
+		return;
+	}
+
 	pythonBridge.extensionPath = extensionContext.extensionPath;
 	logMessage("[Broker] pythonBridge.extensionPath initialized", "DEBUG");
 
@@ -1924,7 +1930,7 @@ const DEFAULT_CONFIG = {
 	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
 	"cleanFreak": false,
-	"ioEngine": "auto",
+	"ioEngine": "v16  auto",
 	"downloadSecurityLevel": "1: 平衡", // qq2q
 	"enhancedHtmlPasteCompatibility": false,
 	"docExportImageResolution": "原始分辨率", // qq2q
@@ -2317,8 +2323,11 @@ function cleanReason(s, maxLen = 260) {
 
 function getEnginePreference() {
 	try {
-		const v = getConfig("ioEngine") || "auto";
-		// Unified mapping: config "node" maps to internal "shell" (Shell Daemon)
+		const v = getConfig("ioEngine") || "v16  auto";
+		// ★ v16 config: "v16  auto" -> auto, "Exclude Python" -> excludePython
+		if (v === "v16  auto" || v === "auto") return "auto";
+		if (v === "Exclude Python") return "excludePython";
+		// Legacy fallback (node -> shell)
 		if (v === "node") return "shell";
 		return v;
 	} catch {

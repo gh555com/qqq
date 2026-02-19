@@ -3354,11 +3354,20 @@ async function activate(context) {
 	global.ConfigManager.onConfigUpdated((changedKeys, event) => {
 		global.logMessage(q('q1.log.configUpdateCallback', changedKeys.join(', ')), "DEBUG");
 		const oldCleanFreakMode = cleanFreakMode; // ★ Remember old value before refresh
+		const oldFrameSizeMode = frameSizeMode;   // ★ Remember old frame size mode
 		refreshConfig();
 		clearDecorations();
 		if (codeLensProvider) codeLensProvider.refresh();
 		renderVisibleEditors(10);
-		if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
+
+		// ★★★ If frameSizeMode changed, trigger full update (blank lines may need adjustment) ★★★
+		if (frameSizeMode !== oldFrameSizeMode) {
+			global.logMessage(`[Config] frameSizeMode changed: ${oldFrameSizeMode} -> ${frameSizeMode}, triggering full update.`, "DEBUG");
+			forceFullUpdateAllVisibleEditors();
+		} else if (getEffectiveCleanFreakMode() !== "never") {
+			performGlobalClean(vscode.window.activeTextEditor);
+		}
+
 		// ★ Notify q4 if cleanFreakMode changed (for weave button sync)
 		if (cleanFreakMode !== oldCleanFreakMode && q1Utils.onCleanFreakModeChange) {
 			q1Utils.onCleanFreakModeChange(cleanFreakMode);
