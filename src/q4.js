@@ -62,8 +62,7 @@ const CONSTANTS = Object.freeze({
     WATCHDOG_REFRESH_MS: 30000,
     WATCHDOG_STALE_MS: 15000,
 
-    // ★ Multi-window Savoring sync
-    SAVORING_SYNC_INTERVAL_MS: 1500,  // globalState polling interval
+    // ★ Multi-window Savoring sync (event-driven, no polling)
     SAVORING_STATE_KEY: 'qqq_savoring_state',
 
     // Time
@@ -1038,8 +1037,8 @@ class ClipboardHistorySidebarProvider {
         // ★ NEW: keep PythonBridge event handler ref for dispose unbind, avoid hot-reload listener pile-up
         this._onPythonEvent = null;
 
-        // ★ Multi-window Savoring sync
-        this._savoringSyncTimer = null;
+        // ★ Multi-window Savoring sync (event-driven, zero polling)
+        // 删除了轮询机制，改为监听 Broker 广播事件
         this._lastSyncState = null;  // Cache to avoid redundant UI updates
     }
 
@@ -1061,51 +1060,54 @@ class ClipboardHistorySidebarProvider {
         }
     }
 
-    // ★ Start multi-window sync polling (only when webview visible)
+    // ★ Start multi-window sync (event-driven - query once on panel show)
     _startSavoringSync() {
-        if (this._savoringSyncTimer) return;
-        this._savoringSyncTimer = setInterval(() => {
-            if (this._view?.visible) {
-                this._syncSavoringUI();
-            }
-        }, CONSTANTS.SAVORING_SYNC_INTERVAL_MS);
+        // 事件驱动，面板显示时查询一次当前状态
+        this._querySavoringState();
     }
 
-    // ★ Stop sync polling
+    // ★ Stop sync (no-op for event-driven)
     _stopSavoringSync() {
-        if (this._savoringSyncTimer) {
-            clearInterval(this._savoringSyncTimer);
-            this._savoringSyncTimer = null;
+        // 事件驱动模式下不需要停止轮询
+    }
+
+    // ★ Query current audio state from Broker (按需查询，零轮询)
+    async _querySavoringState() {
+        try {
+            if (this._global?.pythonBridge?.isAvailable()) {
+                const res = await this._global.pythonBridge.call('get_audio_state', {}, 3000);
+                if (res) {
+                    this._handleAudioStateChanged(res);
+                }
+            }
+        } catch (e) {
+            // Ignore query errors
         }
     }
 
-    // ★ Sync UI based on globalState
-    _syncSavoringUI() {
-        const state = this._readSavoringState();
-        const stateKey = state ? `${state.windowId}-${state.playing}-${state.fileName}-${state.loopCount}` : 'none';
+    // ★ Handle audio state change (from Broker broadcast or query)
+    _handleAudioStateChanged(state) {
+        const stateKey = state ? `${state.playing}-${state.fileName}-${state.loopCount}` : 'none';
 
         // Skip if state hasn't changed
         if (stateKey === this._lastSyncState) return;
         this._lastSyncState = stateKey;
 
         if (state && state.playing) {
-            // Another window (or this window) is playing
-            if (state.windowId !== _windowId) {
-                // Another window is playing - sync UI only
-                this._pythonPlayState = {
-                    playing: true,
-                    fileName: state.fileName,
-                    loopCount: state.loopCount,
-                    startTime: state.startTime
-                };
-            }
+            // Update Python playback state
+            this._pythonPlayState = {
+                playing: true,
+                fileName: state.fileName,
+                loopCount: state.loopCount,
+                startTime: state.startTime || Date.now()
+            };
             this._postMessage({
                 command: 'playAudio',
                 fileName: state.fileName,
                 count: state.loopCount
             });
         } else {
-            // No one is playing
+            // Not playing
             if (this._pythonPlayState.playing) {
                 this._pythonPlayState.playing = false;
                 this._postMessage({ command: 'stopAudio' });
@@ -1183,7 +1185,12 @@ class ClipboardHistorySidebarProvider {
         } catch { /* ignore */ }
 
         this._onPythonEvent = (data) => {
-            if (data && data.event === 'audio_finished') {
+            // ★ 处理 Broker 广播的播放状态变化事件 (跨窗口实时同步)
+            if (data && data.event === 'audio_state_changed') {
+                this._handleAudioStateChanged(data);
+            }
+            // ★ 兼容旧的 audio_finished 事件
+            else if (data && data.event === 'audio_finished') {
                 // ★ Update Python playback state
                 this._pythonPlayState.playing = false;
                 // ★ Clear shared state file
