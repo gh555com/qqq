@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "極限: 最初のフレームのみ保持、品質47。",
     "config.performanceMode.enum.accelerated": "加速: GIFと動画の両方で最初の2秒のみ保持、7fps、品質47、進捗バーなし。",
     "config.performanceMode.enum.optmum": "最適: GIFは完全な長さを保持、動画は先頭/中間/末尾から4秒を抽出、元のfpsを維持、品質71。",
-    "config.ioEngine.desc": "☀️ IOエンジン — トレードオフは https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md を参照",
+    "config.ioEngine.desc": "☀️ IOエンジン — トレードオフは https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md を参照",
     "config.ioEngine.enum.auto": "最適なエンジンを自動選択",
     "config.ioEngine.enum.python": "Pythonエンジン",
     "config.ioEngine.enum.rust": "Rustエンジン (gh555.com公式版はRustエンジンサポートにバージョン≥16.0.0が必要)",

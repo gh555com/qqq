@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "極限效能：只保留首幀，品質47。",
     "config.performanceMode.enum.accelerated": "加速模式：無論動圖還是影片最多保留前2秒，7fps，品質47，不顯示進度條。",
     "config.performanceMode.enum.optmum": "最佳模式：動圖保留完整時長，影片截取首中尾儱4秒，均保留原始fps，品質71。",
-    "config.ioEngine.desc": "☀️ IO 引擎，取捨請查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md",
+    "config.ioEngine.desc": "☀️ IO 引擎，取捨請查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
     "config.ioEngine.enum.auto": "自動選擇最佳引擎",
     "config.ioEngine.enum.python": "Python 引擎",
     "config.ioEngine.enum.rust": "Rust 引擎（gh555.com 官方版的版本號要 ≥ 16.0.0 才支援 Rust 引擎）",

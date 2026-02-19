@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "극한: 첫 프레임만 유지, 품질 47.",
     "config.performanceMode.enum.accelerated": "가속: GIF와 동영상 모두 최대 처음 2초만 유지, 7fps, 품질 47, 진행률 표시줄 없음.",
     "config.performanceMode.enum.optmum": "최적: GIF는 전체 길이 유지, 동영상은 시작/중간/끝에서 4초 추출, 원본 fps 유지, 품질 71.",
-    "config.ioEngine.desc": "☀️ IO 엔진 — 트레이드오프는 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md 참조",
+    "config.ioEngine.desc": "☀️ IO 엔진 — 트레이드오프는 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md 참조",
     "config.ioEngine.enum.auto": "최적의 엔진 자동 선택",
     "config.ioEngine.enum.python": "Python 엔진",
     "config.ioEngine.enum.rust": "Rust 엔진 (gh555.com 공식 버전은 Rust 엔진 지원을 위해 버전 ≥ 16.0.0 필요)",

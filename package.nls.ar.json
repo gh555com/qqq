@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "متطرف: الاحتفاظ بالإطار الأول فقط، جودة 47.",
     "config.performanceMode.enum.accelerated": "مُسرَّع: الاحتفاظ بأول ثانيتين كحد أقصى للصور المتحركة والفيديو، 7 إطار/ثانية، جودة 47، بدون شريط تقدم.",
     "config.performanceMode.enum.optmum": "الأمثل: الاحتفاظ بالمدة الكاملة للصور المتحركة، قص 4 ثوانٍ من بداية ووسط ونهاية الفيديو، الحفاظ على معدل الإطارات الأصلي، جودة 71.",
-    "config.ioEngine.desc": "☀️ محرك الإدخال/الإخراج — راجع المفاضلات على https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md",
+    "config.ioEngine.desc": "☀️ محرك الإدخال/الإخراج — راجع المفاضلات على https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
     "config.ioEngine.enum.auto": "اختيار أفضل محرك تلقائياً",
     "config.ioEngine.enum.python": "محرك Python",
     "config.ioEngine.enum.rust": "محرك Rust (يتطلب الإصدار الرسمي من gh555.com إصدار ≥ 16.0.0 لدعم محرك Rust)",

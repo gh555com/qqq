@@ -20,7 +20,7 @@
     "config.performanceMode.enum.extreme": "Экстремальный: Сохранять только первый кадр, качество 47.",
     "config.performanceMode.enum.accelerated": "Ускоренный: Сохранять максимум первые 2 секунды для GIF и видео, 7fps, качество 47, без индикатора прогресса.",
     "config.performanceMode.enum.optmum": "Оптимальный: Сохранять полную длительность GIF, извлекать 4с из начала/середины/конца видео, сохранять исходный fps, качество 71.",
-    "config.ioEngine.desc": "☀️ IO движок — см. компромиссы на https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md",
+    "config.ioEngine.desc": "☀️ IO движок — см. компромиссы на https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
     "config.ioEngine.enum.auto": "Автовыбор лучшего движка",
     "config.ioEngine.enum.python": "Python движок",
     "config.ioEngine.enum.rust": "Rust движок (официальная сборка gh555.com требует версию ≥ 16.0.0 для поддержки Rust движка)",
