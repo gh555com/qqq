@@ -2438,25 +2438,27 @@ def _create_listen_endpoint(local_token: str):
         _write_endpoint_file(info)
         return ("unix", s, info)
 
-    # Windows: Named Pipe
-    pipe_name = _get_windows_pipe_name()
-    global _PIPE_NAME
-    _PIPE_NAME = pipe_name
-
-    # 如果能连上并 hello 成功 => 已有 broker
-    if _try_connect_pipe(pipe_name, local_token):
-        raise RuntimeError("BROKER_ALREADY_RUNNING")
+    # Windows: Use TCP socket (Named Pipe fails under Node.js spawn due to pywin32/window station issues)
+    # TCP is more reliable: pure network, no pywin32, no GUI dependency
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(('127.0.0.1', 0))  # Let OS pick a free port
+    tcp_port = s.getsockname()[1]
+    s.listen(64)
+    s.settimeout(0.5)
 
     info = {
         "app_id": APP_ID,
         "protocol": BROKER_PROTOCOL,
-        "family": "pipe",
-        "name": pipe_name,
+        "family": "tcp",
+        "host": "127.0.0.1",
+        "port": tcp_port,
         "pid": os.getpid(),
         "token_enabled": bool(ENABLE_LOCAL_TOKEN),
     }
     _write_endpoint_file(info)
-    return ("pipe", pipe_name, info)
+    _log(f"TCP endpoint: 127.0.0.1:{tcp_port}")
+    return ("tcp", s, info)
 
 # ---------------- Lease state (monotonic) ----------------
 _BROKER_START_TS = _now_mono()
@@ -2582,6 +2584,7 @@ def _unix_client_loop(conn: socket.socket):
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
     conn_tag = f"unix:{id(conn)}"
+    _log(f"[TCP/Unix] Client loop started for {conn_tag}")
 
     # ★ 注册广播客户端
     def write_func(data: bytes):
@@ -2624,6 +2627,7 @@ def _unix_client_loop(conn: socket.socket):
                     cmd["client_id"] = conn_tag
 
                 action = cmd.get("action") or cmd.get("cmd") or ""
+                _log(f"[TCP/Unix] Recv: action={action}, _id={cmd.get('_id')}")
                 if action in SLOW_ACTIONS:
                     cancel_ver = _get_scan_cancel_version()
                     fut = _IO_EXECUTOR.submit(_broker_dispatch, cmd, cancel_ver)
@@ -2637,9 +2641,12 @@ def _unix_client_loop(conn: socket.socket):
                     except Exception as e:
                         res = {"_id": cmd.get("_id", 0), "ok": False, "error": str(e)}
 
+                _log(f"[TCP/Unix] Send: _id={res.get('_id')}, ok={res.get('ok')}")
                 try:
                     conn.sendall((json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8"))
-                except:
+                    _log(f"[TCP/Unix] Sent successfully")
+                except Exception as e:
+                    _log(f"[TCP/Unix] Send error: {e}")
                     break
     finally:
         # ★ 注销广播客户端
@@ -2652,16 +2659,21 @@ def _unix_client_loop(conn: socket.socket):
             pass
 
 def _unix_accept_loop(listen_sock: socket.socket):
+    _log(f"[TCP/Unix] Accept loop started, socket={listen_sock}")
     while not _SHUTDOWN_FLAG:
         try:
-            conn, _ = listen_sock.accept()
+            conn, addr = listen_sock.accept()
+            _log(f"[TCP/Unix] Client connected from {addr}")
         except socket.timeout:
             continue
-        except:
+        except Exception as e:
+            _log(f"[TCP/Unix] Accept error: {e}")
             break
         try:
             threading.Thread(target=_unix_client_loop, args=(conn,), daemon=True).start()
-        except:
+            _log(f"[TCP/Unix] Client handler thread started")
+        except Exception as e:
+            _log(f"[TCP/Unix] Thread start error: {e}")
             try:
                 conn.close()
             except:
@@ -2954,10 +2966,12 @@ def broker_mode():
     listen_sock = None
 
     try:
-        if kind == "unix":
+        if kind == "unix" or kind == "tcp":
+            # TCP and Unix sockets use the same accept loop (same Python socket API)
             listen_sock = endpoint_obj
-            accept_thread = threading.Thread(target=_unix_accept_loop, args=(listen_sock,), daemon=True, name="unix-accept")
+            accept_thread = threading.Thread(target=_unix_accept_loop, args=(listen_sock,), daemon=True, name=f"{kind}-accept")
             accept_thread.start()
+            _log(f"{kind.upper()} accept thread started")
         else:
             pipe_name = endpoint_obj
             _log(f"Starting pipe accept thread for {pipe_name}")
@@ -2979,18 +2993,19 @@ def broker_mode():
     finally:
         _safe_shutdown_cleanup()
 
-        if kind == "unix":
+        if kind == "unix" or kind == "tcp":
             try:
                 if listen_sock:
                     listen_sock.close()
             except:
                 pass
-            try:
-                p = endpoint_info.get("path")
-                if p and os.path.exists(p):
-                    os.unlink(p)
-            except:
-                pass
+            if kind == "unix":
+                try:
+                    p = endpoint_info.get("path")
+                    if p and os.path.exists(p):
+                        os.unlink(p)
+                except:
+                    pass
         else:
             try:
                 _close_all_pipe_clients()

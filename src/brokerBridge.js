@@ -267,23 +267,28 @@ class BrokerBridge extends EventEmitter {
 			return false;
 		}
 
-		// Determine connection path
-		let connPath;
+		// Determine connection options based on family
+		let connOpts;
 		if (endpoint.family === 'unix') {
-			connPath = endpoint.path;
+			connOpts = { path: endpoint.path };
 		} else if (endpoint.family === 'pipe') {
-			// Python uses 'name' field for pipe name, not 'pipe'
-			connPath = endpoint.name || endpoint.pipe;
+			// Python uses 'name' field for pipe name
+			const pipePath = endpoint.name || endpoint.pipe;
+			if (!pipePath) return false;
+			connOpts = { path: pipePath };
+		} else if (endpoint.family === 'tcp') {
+			// TCP socket (Windows replacement for Named Pipe)
+			const host = endpoint.host || '127.0.0.1';
+			const port = endpoint.port;
+			if (!port) return false;
+			connOpts = { host, port };
 		} else {
-			// Unsupported family (tcp not supported via net.connect({path}))
 			return false;
 		}
 
-		if (!connPath) return false;
-
 		// Try to connect
 		const canConnect = await new Promise((resolve) => {
-			const s = net.connect({ path: connPath });
+			const s = net.connect(connOpts);
 			s.once('error', () => {
 				try { s.destroy(); } catch { }
 				resolve(false);
@@ -302,36 +307,67 @@ class BrokerBridge extends EventEmitter {
 		if (!canConnect) return false;
 
 		// Establish real connection with event handlers
-		return await this._openAndHello(connPath, token, endpoint);
+		return await this._openAndHello(connOpts, token, endpoint);
 	}
 
-	async _openAndHello(connPath, token, endpoint) {
+	async _openAndHello(connOpts, token, endpoint) {
 		this.closeSocket();
+		try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: connecting to ${JSON.stringify(connOpts)}`, "DEBUG"); } catch { }
 
-		const s = net.connect({ path: connPath });
+		const s = net.connect(connOpts);
 		this.socket = s;
 		this.token = token;
 		this.endpoint = endpoint;
 
 		s.setKeepAlive(true);
 		s.on('data', (buf) => this._onData(buf));
-		s.on('error', () => this._onDisconnected());
+		s.on('error', (e) => { try { const global = require('./global'); global.logMessage(`[Broker] Socket error: ${e.message}`, "DEBUG"); } catch { } this._onDisconnected(); });
 		s.on('close', () => this._onDisconnected());
 
 		const connected = await new Promise((resolve) => {
-			s.once('connect', () => resolve(true));
+			s.once('connect', () => { try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: socket connected", "DEBUG"); } catch { } resolve(true); });
 			s.once('error', () => resolve(false));
-			setTimeout(() => resolve(false), 3000);
+			setTimeout(() => { try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: connect timeout", "DEBUG"); } catch { } resolve(false); }, 3000);
 		});
 
 		if (!connected) {
+			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: connection failed", "DEBUG"); } catch { }
 			this.closeSocket();
 			return false;
 		}
 
-		// Verify with hello
+		// Verify with hello - DIRECT write to avoid call() re-entrance check
 		try {
-			const res = await this.call("hello", {}, 3000);
+			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: sending hello...", "DEBUG"); } catch { }
+
+			const helloId = this.nextId++;
+			const helloReq = {
+				_id: helloId,
+				action: "hello",
+				client_id: this.clientId,
+				token: this.token
+			};
+			const helloLine = JSON.stringify(helloReq) + "\n";
+
+			const res = await new Promise((resolve, reject) => {
+				const timer = setTimeout(() => {
+					this.pending.delete(helloId);
+					reject(new Error("hello timeout"));
+				}, 3000);
+
+				this.pending.set(helloId, { resolve, reject, timer });
+
+				try {
+					this.socket.write(helloLine, 'utf8');
+					try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: wrote hello request, id=${helloId}`, "DEBUG"); } catch { }
+				} catch (e) {
+					clearTimeout(timer);
+					this.pending.delete(helloId);
+					reject(e);
+				}
+			});
+
+			try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: hello response: ${JSON.stringify(res)}`, "DEBUG"); } catch { }
 			if (!res || res.ok !== true || res.app_id !== APP_ID) {
 				this.closeSocket();
 				return false;
@@ -339,8 +375,10 @@ class BrokerBridge extends EventEmitter {
 			this.connected = true;
 			this.available = true;
 			this.lastStartError = "";
+			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: SUCCESS!", "INFO"); } catch { }
 			return true;
-		} catch {
+		} catch (e) {
+			try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: hello failed: ${e.message}`, "DEBUG"); } catch { }
 			this.closeSocket();
 			return false;
 		}
