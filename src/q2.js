@@ -306,7 +306,7 @@ function getConfig() {
     lineSpacing: -2,
     sidebarWidth: 100,
     sidebarRatio: 0.2,
-    recycleBin: [],
+    qqBin: [],
     isPinned: false,
     szDisplayMode: "nothing",
     sortBy: "name",
@@ -331,9 +331,9 @@ function getConfig() {
 
   // Ensure array fields exist
   if (!Array.isArray(config.pinnedDirs)) config.pinnedDirs = [];
-  if (!Array.isArray(config.recycleBin)) config.recycleBin = [];
-  // Migrate old recycleBin format (string -> object)
-  config.recycleBin = config.recycleBin.map(item => {
+  if (!Array.isArray(config.qqBin)) config.qqBin = [];
+  // Migrate old qqBin format (string -> object)
+  config.qqBin = config.qqBin.map(item => {
     if (typeof item === 'string') return { path: item, type: 'dir' };
     if (item && typeof item.path === 'string') return item;
     return null;
@@ -374,7 +374,7 @@ function saveConfig(
   lineSpacing,
   sidebarWidth,
   sidebarRatio,
-  recycleBin,
+  qqBin,
   isPinned
 ) {
   if (!globalContext) return;
@@ -384,7 +384,7 @@ function saveConfig(
     lineSpacing,
     sidebarWidth,
     sidebarRatio,
-    recycleBin,
+    qqBin,
     isPinned,
   };
 
@@ -409,7 +409,7 @@ function saveConfig(
         lineSpacing: newConfig.lineSpacing,
         sidebarWidth: newConfig.sidebarWidth,
         sidebarRatio: newConfig.sidebarRatio,
-        recycleBin: newConfig.recycleBin,
+        qqBin: newConfig.qqBin,
         isPinned: newConfig.isPinned,
       };
       globalContext.globalState.update("qqq_config", configToSave);
@@ -478,25 +478,25 @@ function setFineSCMValue(folderPath, szMode, sortBy) {
 }
 
 // ==================== History Management (New) ====================
-// recycleBin: [{path, type:'dir'|'file'}] up to 60 items, newest on top
+// qqBin: [{path, type:'dir'|'file'}] up to 60 items, newest on top
 // pinnedDirs: [string] up to 6 items, newest at bottom (directories only)
 
-function _recycleBinKey(p) {
+function _qqBinKey(p) {
   return cacheKeyForPath(canonicalizeExistingPath(p) || p);
 }
 
-/** Remove specified path from recycleBin */
-function removeFromRecycleBin(targetPath) {
+/** Remove specified path from qqBin */
+function removeFromQqBin(targetPath) {
   const config = getConfig();
-  const key = _recycleBinKey(targetPath);
-  const newBin = (config.recycleBin || []).filter(item => _recycleBinKey(item.path) !== key);
-  if (newBin.length !== (config.recycleBin || []).length) {
+  const key = _qqBinKey(targetPath);
+  const newBin = (config.qqBin || []).filter(item => _qqBinKey(item.path) !== key);
+  if (newBin.length !== (config.qqBin || []).length) {
     saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
   }
 }
 
-/** Insert a record at the top of recycleBin (dedup, and skip pinned dirs) */
-function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
+/** Insert a record at the top of qqBin (dedup, and skip pinned dirs) */
+function _insertToQqBinTop(bin, itemPath, itemType, pinnedDirs) {
   const canon = canonicalizeExistingPath(itemPath);
   if (!canon) return bin;
   // If it's a dir and already in pinnedDirs, do not insert
@@ -505,12 +505,12 @@ function _insertToRecycleBinTop(bin, itemPath, itemType, pinnedDirs) {
     if (pinnedDirs.some(d => cacheKeyForPath(d) === key)) return bin;
   }
   const key = cacheKeyForPath(canon);
-  const filtered = bin.filter(item => _recycleBinKey(item.path) !== key);
+  const filtered = bin.filter(item => _qqBinKey(item.path) !== key);
   filtered.unshift({ path: canon, type: itemType });
   return filtered.slice(0, 60);
 }
 
-/** Record directory history (only add directories to recycleBin; skip pinned ones) */
+/** Record directory history (only add directories to qqBin; skip pinned ones) */
 function recordDirHistory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
@@ -518,11 +518,11 @@ function recordDirHistory(dirPath) {
   // Already in pinnedDirs, do not duplicate into recycle bin
   const key = cacheKeyForPath(canon);
   if ((config.pinnedDirs || []).some(d => cacheKeyForPath(d) === key)) return;
-  const newBin = _insertToRecycleBinTop(config.recycleBin || [], canon, 'dir', config.pinnedDirs);
+  const newBin = _insertToQqBinTop(config.qqBin || [], canon, 'dir', config.pinnedDirs);
   saveConfig(config.pinnedDirs, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, newBin, config.isPinned);
 }
 
-/** Record file history (add directory+file pair to recycleBin, dir on top and file below) */
+/** Record file history (add directory+file pair to qqBin, dir on top and file below) */
 function recordFileHistory(filePath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(filePath);
@@ -532,7 +532,7 @@ function recordFileHistory(filePath) {
   // Remove old records for both
   const dirKey = cacheKeyForPath(dirCanon);
   const fileKey = cacheKeyForPath(canon);
-  let bin = (config.recycleBin || []).filter(item => {
+  let bin = (config.qqBin || []).filter(item => {
     const k = _recycleBinKey(item.path);
     return k !== dirKey && k !== fileKey;
   });
@@ -557,7 +557,7 @@ function pinDirectory(dirPath) {
   // Dedup from pinnedDirs
   let pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
   // Remove this dir from recycleBin
-  let bin = (config.recycleBin || []).filter(item => _recycleBinKey(item.path) !== key);
+  let bin = (config.qqBin || []).filter(item => _recycleBinKey(item.path) !== key);
   // Add to bottom of pinnedDirs
   pinned.push(canon);
   // If exceeds 6, put oldest (first) back to top of recycleBin
@@ -565,22 +565,22 @@ function pinDirectory(dirPath) {
     const removed = pinned.shift();
     const removedCanon = canonicalizeExistingPath(removed);
     if (removedCanon && fs.existsSync(removedCanon)) {
-      bin = _insertToRecycleBinTop(bin, removedCanon, 'dir');
+      bin = _insertToQqBinTop(bin, removedCanon, 'dir');
     }
   }
   saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
 
-/** Unpin: move from pinnedDirs to top of recycleBin */
+/** Unpin: move from pinnedDirs to top of qqBin */
 function unpinDirectory(dirPath) {
   const config = getConfig();
   const canon = canonicalizeExistingPath(dirPath);
   if (!canon) return;
   const key = cacheKeyForPath(canon);
   const pinned = (config.pinnedDirs || []).filter(d => cacheKeyForPath(d) !== key);
-  let bin = config.recycleBin || [];
+  let bin = config.qqBin || [];
   if (fs.existsSync(canon)) {
-    bin = _insertToRecycleBinTop(bin, canon, 'dir');
+    bin = _insertToQqBinTop(bin, canon, 'dir');
   }
   saveConfig(pinned, config.lineSpacing, config.sidebarWidth, config.sidebarRatio, bin, config.isPinned);
 }
@@ -714,9 +714,9 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
-// ====== Recycle bin lazy load ======
-let recycleBinLoading = false;
-const RECYCLE_BATCH_SIZE = 20;
+// ====== QQ bin lazy load ======
+let qqBinLoading = false;
+const QQ_BATCH_SIZE = 20;
 
 // ====== Character-level undo/redo system ======
 // Provide character-level Ctrl+Z / Ctrl+Y for all input boxes
@@ -1035,7 +1035,7 @@ function findItemElementByPath(p, type){
 }
 
 // ====== Unified pathTooltip hover handler (covers all 4 areas) ======
-// Area 1: drive area .nav-item  Area 2: recycle bin area .recycle-item
+// Area 1: drive area .nav-item  Area 2: qq bin area .qq-item
 // Area 3: history area .recent-item  Area 4: resource list area .file-item
 function handlePathTooltipHover(e){
   const t = e.target;
@@ -1050,19 +1050,19 @@ function handlePathTooltipHover(e){
     return;
   }
 
-  // ---- Area 2: recycle bin area (.recycle-item) ----
-  const recycleItem = t.closest('.recycle-item');
-  if (recycleItem) {
+  // ---- Area 2: qq bin area (.qq-item) ----
+  const qqItem = t.closest('.qq-item');
+  if (qqItem) {
     // File row: skip here, globalTooltip handles via data-tooltip
-    if (recycleItem.classList.contains('recycle-file')) {
+    if (qqItem.classList.contains('qq-file')) {
       if (pathTooltipVisible) { hidePathTooltip(); }
       return;
     }
     // Dir row: show only when truncated
-    const textEl = recycleItem.querySelector('.recycle-text');
-    const checkEl = textEl || recycleItem;
+    const textEl = qqItem.querySelector('.qq-text');
+    const checkEl = textEl || qqItem;
     if (isEllipsisActive(checkEl)) {
-      const tip = recycleItem.getAttribute('data-fullpath') || (textEl ? textEl.textContent : recycleItem.textContent || '').trim();
+      const tip = qqItem.getAttribute('data-fullpath') || (textEl ? textEl.textContent : qqItem.textContent || '').trim();
       showPathTooltip(tip, e.clientX, e.clientY);
     } else if (pathTooltipVisible) { hidePathTooltip(); }
     return;
@@ -1199,7 +1199,7 @@ function updateAddressDisplay(p) {
 
 function unpinDir(p){ vscode.postMessage({ command: 'unpinDirectory', path: p }); }
 function pinDir(p){ vscode.postMessage({ command: 'pinDirectory', path: p }); }
-function onRecycleFileClick(p){ vscode.postMessage({ command: 'recycleFileClick', path: p }); }
+function onQqFileClick(p){ vscode.postMessage({ command: 'qqFileClick', path: p }); }
 function cancel(){ vscode.postMessage({ command: 'cancel' }); }
 
 function togglePin(){
@@ -1523,7 +1523,7 @@ function performDeleteAction(item){
   if (item.name === '..') return; // Strictly forbid deleting parent directory
   const el = findItemElementByPath(item.path);
   if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
-  vscode.postMessage({ command: 'quickDeleteToRecycleBin', path: item.path, type: item.type });
+  vscode.postMessage({ command: 'quickDeleteToQqBin', path: item.path, type: item.type });
   selectedItem = null;
 }
 function performCodeAction(item){
@@ -1561,7 +1561,7 @@ function handleContextMenuAction(action){
         const el = findItemElementByPath(item.path);
         if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
       });
-      vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
+      vscode.postMessage({ command: 'quickDeleteMultipleToQqBin', items: targets });
       selectedItem = null;
       selectedItems = [];
     } else if (action === 'rename') {
@@ -1776,24 +1776,24 @@ window.addEventListener('message', event => {
     if (el) { el.style.opacity = ''; el.style.pointerEvents = ''; }
   } else if (message.command === 'updateSidebar') {
       // Dynamically update sidebar area
-      const recycleSec = document.querySelector('.sidebar .recycle-bin-section');
+      const qqSec = document.querySelector('.sidebar .qq-bin-section');
       const divider = document.querySelector('.sidebar .divider');
-      if (message.recycleBinHtml) {
+      if (message.qqBinHtml) {
         // Has content: replace or insert
         const temp = document.createElement('div');
-        temp.innerHTML = message.recycleBinHtml;
+        temp.innerHTML = message.qqBinHtml;
         const newDivider = temp.querySelector('.divider');
-        const newSection = temp.querySelector('.recycle-bin-section');
-        if (recycleSec && divider) {
+        const newSection = temp.querySelector('.qq-bin-section');
+        if (qqSec && divider) {
           divider.replaceWith(newDivider || document.createElement('div'));
-          recycleSec.replaceWith(newSection || document.createElement('div'));
+          qqSec.replaceWith(newSection || document.createElement('div'));
         } else if (newDivider && newSection) {
           const sidebar = document.querySelector('.sidebar');
           if (sidebar) { sidebar.appendChild(newDivider); sidebar.appendChild(newSection); }
         }
       } else {
         // No content: remove
-        if (recycleSec) recycleSec.remove();
+        if (qqSec) qqSec.remove();
         if (divider) divider.remove();
       }
       // Update pinned history area
@@ -1823,27 +1823,27 @@ window.addEventListener('message', event => {
     }
     // After completion, schedule next round
     scheduleDiskFreeUpdate();
-  } else if (message.command === 'appendRecycleBin') {
-    // Recycle bin lazy load: append new items
-    const section = document.querySelector('.recycle-bin-section');
+  } else if (message.command === 'appendQqBin') {
+    // QQ bin lazy load: append new items
+    const section = document.querySelector('.qq-bin-section');
     if (section && message.itemsHtml) {
       section.insertAdjacentHTML('beforeend', message.itemsHtml);
       section.dataset.loaded = message.loaded;
       section.dataset.total = message.total;
-      recycleBinLoading = false;
+      qqBinLoading = false;
     }
   }
 });
 
-// ====== Recycle bin scroll lazy load ======
-function initRecycleBinLazyLoad() {
+// ====== QQ bin scroll lazy load ======
+function initQqBinLazyLoad() {
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
 
   sidebar.addEventListener('scroll', () => {
-    if (recycleBinLoading) return;
+    if (qqBinLoading) return;
 
-    const section = document.querySelector('.recycle-bin-section');
+    const section = document.querySelector('.qq-bin-section');
     if (!section) return;
 
     const total = parseInt(section.dataset.total || '0', 10);
@@ -1854,11 +1854,11 @@ function initRecycleBinLazyLoad() {
 
     // Check if scrolled near bottom (within 100px)
     if (sidebar.scrollTop + sidebar.clientHeight > sidebar.scrollHeight - 100) {
-      recycleBinLoading = true;
+      qqBinLoading = true;
       vscode.postMessage({
-        command: 'requestRecycleBin',
+        command: 'requestQqBin',
         offset: loaded,
-        limit: RECYCLE_BATCH_SIZE
+        limit: QQ_BATCH_SIZE
       });
     }
   });
@@ -2005,7 +2005,7 @@ document.addEventListener('keydown', (e) => {
           const el = findItemElementByPath(item.path);
           if (el) { el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; }
         });
-        vscode.postMessage({ command: 'quickDeleteMultipleToRecycleBin', items: targets });
+        vscode.postMessage({ command: 'quickDeleteMultipleToQqBin', items: targets });
         selectedItem = null;
         selectedItems = [];
       }
@@ -2917,24 +2917,24 @@ document.addEventListener('keydown', function (e) {
 }
 
 // ==================== sidebar HTML generation (shared) ====================
-const RECYCLE_BIN_BATCH_SIZE = 20; // Items per batch
+const QQ_BIN_BATCH_SIZE = 20; // Items per batch
 
-function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
+function generateSidebarHtml(config, qqBinLimit = QQ_BIN_BATCH_SIZE) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  const safeRecycleBin = (config.recycleBin || []).filter(
+  const safeQqBin = (config.qqBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const totalRecycleBin = safeRecycleBin.length;
-  const displayedRecycleBin = safeRecycleBin.slice(0, recycleBinLimit);
-  const showRecycleBin = displayedRecycleBin.length > 0;
+  const totalQqBin = safeQqBin.length;
+  const displayedQqBin = safeQqBin.slice(0, qqBinLimit);
+  const showQqBin = displayedQqBin.length > 0;
 
-  const recycleBinHtml = showRecycleBin
+  const qqBinHtml = showQqBin
     ? `
   <div class="divider"></div>
-    <div class="recycle-bin-section" data-total="${totalRecycleBin}" data-loaded="${displayedRecycleBin.length}">
-      ${displayedRecycleBin
+    <div class="qq-bin-section" data-total="${totalQqBin}" data-loaded="${displayedQqBin.length}">
+      ${displayedQqBin
       .map((item) => {
         const escaped = escapeJsStringLiteral(item.path);
         const fullDisplay = escapeHtmlAttribute(item.path);
@@ -2950,9 +2950,9 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
           }
           // ★ Double-escape for HTML attribute: replace quotes and encode special chars
           const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-          return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="recycle-text">${fileName}</span></div>`;
+          return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
         } else {
-          return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+          return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
       })
       .join("")}
@@ -2971,11 +2971,11 @@ function generateSidebarHtml(config, recycleBinLimit = RECYCLE_BIN_BATCH_SIZE) {
     )
     .join("");
 
-  return { recycleBinHtml, pinnedDirsHtml };
+  return { qqBinHtml, pinnedDirsHtml };
 }
 
-// Generate HTML for a single recycle bin item
-function generateRecycleBinItemHtml(item) {
+// Generate HTML for a single qq bin item
+function generateQqBinItemHtml(item) {
   const escaped = escapeJsStringLiteral(item.path);
   const fullDisplay = escapeHtmlAttribute(item.path);
   if (item.type === 'file') {
@@ -2990,24 +2990,24 @@ function generateRecycleBinItemHtml(item) {
     }
     // ★ Double-escape for HTML attribute: replace quotes and encode special chars
     const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    return `<div class="recycle-item recycle-file" onclick="onRecycleFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="recycle-text">${fileName}</span></div>`;
+    return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
   } else {
-    return `<div class="recycle-item recycle-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="recycle-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+    return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
 }
 
-// Get recycle bin items within a specified range
-function getRecycleBinItems(offset, limit) {
+// Get qq bin items within a specified range
+function getQqBinItems(offset, limit) {
   const config = getConfig();
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  const safeRecycleBin = (config.recycleBin || []).filter(
+  const safeQqBin = (config.qqBin || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
   );
-  const total = safeRecycleBin.length;
-  const items = safeRecycleBin.slice(offset, offset + limit);
-  const itemsHtml = items.map(generateRecycleBinItemHtml).join('');
+  const total = safeQqBin.length;
+  const items = safeQqBin.slice(offset, offset + limit);
+  const itemsHtml = items.map(generateQqBinItemHtml).join('');
   return { itemsHtml, total, loaded: offset + items.length };
 }
 
@@ -3015,7 +3015,7 @@ function getWebviewContent(currentPath) {
   const config = getConfig();
   const drives = getDrives();
 
-  const { recycleBinHtml, pinnedDirsHtml } = generateSidebarHtml(config);
+  const { qqBinHtml, pinnedDirsHtml } = generateSidebarHtml(config);
 
   let htmlTemplate = "";
   try {
@@ -3039,7 +3039,7 @@ function getWebviewContent(currentPath) {
     .replace(/\{\{SIDEBAR_WIDTH\}\}/g, config.sidebarWidth)
     .replace(/\{\{LINE_SPACING\}\}/g, config.lineSpacing)
     .replace("{{DRIVES_HTML}}", drivesHtml)
-    .replace("{{RECYCLE_BIN_HTML}}", recycleBinHtml)
+    .replace("{{QQ_BIN_HTML}}", qqBinHtml)
     .replace("{{RECENT_DIRS_HTML}}", pinnedDirsHtml)
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
     .replace("{{PIN_CLASS}}", config.isPinned ? "pinned" : "")
@@ -3283,7 +3283,7 @@ function showSaveAsDialog() {
     currentPath = canonicalizeExistingPath(config.pinnedDirs[0]);
   }
   if (!currentPath) {
-    const firstDir = (config.recycleBin || []).find(item => item.type === 'dir');
+    const firstDir = (config.qqBin || []).find(item => item.type === 'dir');
     if (firstDir) currentPath = canonicalizeExistingPath(firstDir.path);
   }
   if (!currentPath) {
@@ -3458,11 +3458,11 @@ function showSaveAsDialog() {
         fineSCM: fineSCM,
       });
 
-      // ★ Update sidebar synchronously (history recycle bin + pinned history)
+      // ★ Update sidebar synchronously (history qq bin + pinned history)
       const sidebarData = generateSidebarHtml(config);
       panel.webview.postMessage({
         command: "updateSidebar",
-        recycleBinHtml: sidebarData.recycleBinHtml,
+        qqBinHtml: sidebarData.qqBinHtml,
         pinnedDirsHtml: sidebarData.pinnedDirsHtml,
       });
 
@@ -3630,8 +3630,8 @@ function showSaveAsDialog() {
           refreshWebview();
         }
         break;
-      case "recycleFileClick": {
-        // Click recycle bin file: re-pin dir+file, then edit the file
+      case "qqFileClick": {
+        // Click qq bin file: re-pin dir+file, then edit the file
         const clickedFile = canonicalizeExistingPath(message.path);
         if (clickedFile && fs.existsSync(clickedFile)) {
           recordFileHistory(clickedFile);
@@ -3649,14 +3649,14 @@ function showSaveAsDialog() {
         break;
       }
 
-      // Recycle bin lazy load: request more items
-      case "requestRecycleBin": {
+      // QQ bin lazy load: request more items
+      case "requestQqBin": {
         const offset = message.offset || 0;
-        const limit = message.limit || RECYCLE_BIN_BATCH_SIZE;
-        const result = getRecycleBinItems(offset, limit);
+        const limit = message.limit || QQ_BIN_BATCH_SIZE;
+        const result = getQqBinItems(offset, limit);
         if (panel && activePanelAlive) {
           panel.webview.postMessage({
-            command: 'appendRecycleBin',
+            command: 'appendQqBin',
             itemsHtml: result.itemsHtml,
             total: result.total,
             loaded: result.loaded
@@ -3921,7 +3921,7 @@ function showSaveAsDialog() {
             // ★ Update sidebar immediately
             if (panel && activePanelAlive) {
               const sbData = generateSidebarHtml(getConfig());
-              panel.webview.postMessage({ command: "updateSidebar", recycleBinHtml: sbData.recycleBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+              panel.webview.postMessage({ command: "updateSidebar", qqBinHtml: sbData.qqBinHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
             }
             vscode.window.showTextDocument(doc, getShowOptions(message.openInCurrentGroup)).then(() => {
               if (!message.isPinned && panel && activePanelAlive) panel.dispose();
@@ -3956,7 +3956,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      case "quickDeleteToRecycleBin": {
+      case "quickDeleteToQqBin": {
         const itemToDelete = canonicalizeExistingPath(message.path);
         // Safety guard: absolutely forbid deleting parent directory
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
@@ -3971,7 +3971,7 @@ function showSaveAsDialog() {
               const uri = vscode.Uri.file(itemToDelete);
               await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
               global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
-              // ★ Move-to-recycle-bin SFX
+              // ★ Move-to-qq-bin SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
@@ -3988,7 +3988,7 @@ function showSaveAsDialog() {
         break;
       }
 
-      case "quickDeleteMultipleToRecycleBin": {
+      case "quickDeleteMultipleToQqBin": {
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // Second-pass filtering on extension side to ensure safety
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
@@ -4011,7 +4011,7 @@ function showSaveAsDialog() {
             }
 
             if (deletedCount > 0) {
-              // ★ Move-to-recycle-bin SFX
+              // ★ Move-to-qq-bin SFX
               if (global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
