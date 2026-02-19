@@ -61,7 +61,7 @@
 		.folder-name-area,
 		.file-name-area,
 		.recent-item,
-		.recycle-item,
+		.qq-item,
 		.nav-item,
 		.context-menu-item,
 		.context-menu-empty-item,
@@ -209,7 +209,7 @@
 			color: var(--base3);
 		}
 
-		.empty-recycle-bin,
+		.empty-qq-bin,
 		.empty-recent-section {
 			padding: 20px 10px;
 			color: var(--text-dim);
@@ -307,17 +307,17 @@
 			margin: 8px 0;
 		}
 
-		.recycle-bin-section {
+		.qq-bin-section {
 			padding: 0;
 			margin: 0;
 			border: none;
 		}
 
-		.recycle-bin-header {
+		.qq-bin-header {
 			display: none;
 		}
 
-		.recycle-item {
+		.qq-item {
 			padding: 3px 10px;
 			color: var(--text-primary);
 			white-space: nowrap;
@@ -330,7 +330,7 @@
 			align-items: center;
 		}
 
-		.recycle-item .recycle-text {
+		.qq-item .qq-text {
 			flex: 1;
 			overflow: hidden;
 			text-overflow: ellipsis;
@@ -338,30 +338,30 @@
 		}
 
 		/* 文件行：整行 hover */
-		.recycle-file {
+		.qq-file {
 			padding-left: 18px;
 		}
 
-		.recycle-file:hover {
+		.qq-file:hover {
 			background-color: var(--bg-highlight);
 		}
 
 		/* 目录行：取消行级 padding，下沉到子元素，实现两区独立 hover */
-		.recycle-dir {
+		.qq-dir {
 			padding: 0;
 			position: relative;
 		}
 
-		.recycle-dir .recycle-text {
+		.qq-dir .qq-text {
 			padding: 3px 10px;
 			transition: background-color 0.1s;
 		}
 
-		.recycle-dir .recycle-text:hover {
+		.qq-dir .qq-text:hover {
 			background-color: var(--bg-highlight);
 		}
 
-		.recycle-dir .pin-icon {
+		.qq-dir .pin-icon {
 			flex-shrink: 0;
 			padding: 3px 10px;
 			cursor: pointer;
@@ -371,12 +371,12 @@
 			align-items: center;
 		}
 
-		.recycle-dir .pin-icon:hover {
+		.qq-dir .pin-icon:hover {
 			background-color: rgb(223, 202, 136);
 		}
 
 		/* 图钉 hover 时：暖金色下划线延伸到左边界，标识要 pin 的文件夹 */
-		.recycle-dir .pin-icon:hover::after {
+		.qq-dir .pin-icon:hover::after {
 			content: '';
 			position: absolute;
 			left: 0;
@@ -1068,7 +1068,7 @@
 			</div>
 			{{DRIVES_HTML}}
 
-			{{RECYCLE_BIN_HTML}}
+			{{QQ_BIN_HTML}}
 		</div>
 
 		<div class="sidebar-resizer" id="sidebarResizer"></div>
