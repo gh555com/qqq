@@ -34,12 +34,55 @@ import zlib
 _EVENT_SINK_LOCK = threading.Lock()
 _EVENT_SINK = None  # callable(obj:dict) -> None
 
+# =============================================================================
+#  ★ Broker Broadcast: 跨窗口实时事件推送 (零轮询)
+# =============================================================================
+_BROADCAST_CLIENTS = {}  # {client_tag: write_func}
+_BROADCAST_LOCK = threading.Lock()
+
+def _register_broadcast_client(tag: str, write_func):
+    """注册一个客户端用于接收广播事件"""
+    with _BROADCAST_LOCK:
+        _BROADCAST_CLIENTS[tag] = write_func
+
+def _unregister_broadcast_client(tag: str):
+    """注销客户端"""
+    with _BROADCAST_LOCK:
+        _BROADCAST_CLIENTS.pop(tag, None)
+
+def _broadcast_event(obj: dict):
+    """向所有已连接客户端广播事件 (非阻塞)"""
+    with _BROADCAST_LOCK:
+        clients = list(_BROADCAST_CLIENTS.items())
+
+    if not clients:
+        return
+
+    data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+    dead_clients = []
+
+    for tag, write_func in clients:
+        try:
+            write_func(data)
+        except:
+            dead_clients.append(tag)
+
+    # 清理已断开的客户端
+    if dead_clients:
+        with _BROADCAST_LOCK:
+            for tag in dead_clients:
+                _BROADCAST_CLIENTS.pop(tag, None)
+
 def _set_event_sink(fn):
     global _EVENT_SINK
     with _EVENT_SINK_LOCK:
         _EVENT_SINK = fn
 
 def _emit_event(obj: dict):
+    # ★ Broker 模式: 广播到所有客户端
+    _broadcast_event(obj)
+
+    # ★ Daemon 模式: 通过 stdout sink 发送
     with _EVENT_SINK_LOCK:
         fn = _EVENT_SINK
     if not fn:
@@ -58,6 +101,11 @@ _AUDIO_CURRENT_TOKEN = None
 _AUDIO_LOCK = None
 _AUDIO_MONITOR_THREAD = None
 _AUDIO_IS_LOOPING = False  # Flag whether it is infinite loop; infinite loop does not send finished event
+
+# ★ 播放状态追踪 (用于跨窗口同步)
+_AUDIO_CURRENT_FILE = None
+_AUDIO_LOOP_COUNT = 0
+_AUDIO_START_TIME = 0
 
 def _init_audio_engine():
     """Lazy-load audio engine, return (engine, error_msg)"""
@@ -117,6 +165,7 @@ def _check_audio_engine():
 def _play_audio(file_path, count=1):
     """Play audio, return status"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_MONITOR_THREAD, _AUDIO_IS_LOOPING
+    global _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT, _AUDIO_START_TIME
 
     engine, err = _init_audio_engine()
     if err:
@@ -147,8 +196,21 @@ def _play_audio(file_path, count=1):
             _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, True)
             _AUDIO_IS_LOOPING = False
 
+        # ★ 更新播放状态并广播
+        _AUDIO_CURRENT_FILE = os.path.basename(file_path)
+        _AUDIO_LOOP_COUNT = count
+        _AUDIO_START_TIME = time.time()
+        _emit_event({
+            "event": "audio_state_changed",
+            "playing": True,
+            "looping": _AUDIO_IS_LOOPING,
+            "fileName": _AUDIO_CURRENT_FILE,
+            "loopCount": _AUDIO_LOOP_COUNT,
+            "startTime": _AUDIO_START_TIME
+        })
+
         def _monitor_playback():
-            global _AUDIO_CURRENT_TOKEN
+            global _AUDIO_CURRENT_TOKEN, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT
             token = _AUDIO_CURRENT_TOKEN
             eng = engine
             if token is None:
@@ -165,7 +227,18 @@ def _play_audio(file_path, count=1):
                 time.sleep(0.2)
             if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
                 _AUDIO_CURRENT_TOKEN = None
-                _emit_event({"event": "audio_finished"})
+                _AUDIO_CURRENT_FILE = None
+                _AUDIO_LOOP_COUNT = 0
+                # ★ 广播播放结束事件
+                _emit_event({
+                    "event": "audio_state_changed",
+                    "playing": False,
+                    "looping": False,
+                    "fileName": None,
+                    "loopCount": 0,
+                    "startTime": 0
+                })
+                _emit_event({"event": "audio_finished"})  # 保持兼容
 
         if not _AUDIO_IS_LOOPING:
             _AUDIO_MONITOR_THREAD = threading.Thread(target=_monitor_playback, daemon=True)
@@ -178,7 +251,7 @@ def _play_audio(file_path, count=1):
 
 def _stop_audio():
     """Stop audio playback"""
-    global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING
+    global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT
 
     if _AUDIO_CURRENT_TOKEN:
         try:
@@ -188,6 +261,8 @@ def _stop_audio():
         _AUDIO_CURRENT_TOKEN = None
 
     _AUDIO_IS_LOOPING = False
+    _AUDIO_CURRENT_FILE = None
+    _AUDIO_LOOP_COUNT = 0
 
     engine, _ = _init_audio_engine()
     if engine:
@@ -196,14 +271,31 @@ def _stop_audio():
         except:
             pass
 
+    # ★ 广播停止事件
+    _emit_event({
+        "event": "audio_state_changed",
+        "playing": False,
+        "looping": False,
+        "fileName": None,
+        "loopCount": 0,
+        "startTime": 0
+    })
+
     return {"status": "stopped"}
 
 def _get_audio_state():
-    """Get current playback state"""
-    global _AUDIO_CURRENT_TOKEN
-    if _AUDIO_CURRENT_TOKEN and not _AUDIO_CURRENT_TOKEN.stopped:
-        return {"playing": True}
-    return {"playing": False}
+    """Get current playback state (用于跨窗口同步)"""
+    global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT, _AUDIO_START_TIME
+
+    playing = _AUDIO_CURRENT_TOKEN is not None and not _AUDIO_CURRENT_TOKEN.stopped
+
+    return {
+        "playing": playing,
+        "looping": _AUDIO_IS_LOOPING if playing else False,
+        "fileName": _AUDIO_CURRENT_FILE if playing else None,
+        "loopCount": _AUDIO_LOOP_COUNT if playing else 0,
+        "startTime": _AUDIO_START_TIME if playing else 0
+    }
 
 # =============================================================================
 #  ★ Sound effect system (v16 AudioHub)
@@ -2182,6 +2274,9 @@ def _broker_dispatch(cmd: dict, cancel_version: int = None) -> dict:
     return res
 
 # ---------------- POSIX socket server ----------------
+_ACTIVE_UNIX_CLIENTS = {}  # {conn_tag: socket} for broadcast
+_ACTIVE_UNIX_LOCK = threading.Lock()
+
 def _unix_client_loop(conn: socket.socket):
     try:
         conn.settimeout(0.5)
@@ -2189,7 +2284,15 @@ def _unix_client_loop(conn: socket.socket):
         pass
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
-    conn_tag = f"conn:{id(conn)}"
+    conn_tag = f"unix:{id(conn)}"
+
+    # ★ 注册广播客户端
+    def write_func(data: bytes):
+        conn.sendall(data)
+
+    _register_broadcast_client(conn_tag, write_func)
+    with _ACTIVE_UNIX_LOCK:
+        _ACTIVE_UNIX_CLIENTS[conn_tag] = conn
 
     try:
         while not _SHUTDOWN_FLAG:
@@ -2242,6 +2345,10 @@ def _unix_client_loop(conn: socket.socket):
                 except:
                     break
     finally:
+        # ★ 注销广播客户端
+        _unregister_broadcast_client(conn_tag)
+        with _ACTIVE_UNIX_LOCK:
+            _ACTIVE_UNIX_CLIENTS.pop(conn_tag, None)
         try:
             conn.close()
         except:
@@ -2277,6 +2384,13 @@ def _pipe_client_loop(hPipe: int):
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
     conn_tag = f"pipe:{hPipe}"
+
+    # ★ 注册广播客户端
+    def write_func(data: bytes):
+        _win_pipe_write(hPipe, data)
+
+    _register_broadcast_client(conn_tag, write_func)
+
     try:
         while not _SHUTDOWN_FLAG:
             chunk = _win_pipe_read_some_overlapped(hPipe, timeout_ms=300)
@@ -2320,6 +2434,8 @@ def _pipe_client_loop(hPipe: int):
                 if not _win_pipe_write(hPipe, (json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8")):
                     return
     finally:
+        # ★ 注销广播客户端
+        _unregister_broadcast_client(conn_tag)
         try:
             DisconnectNamedPipe(wintypes.HANDLE(hPipe))
         except:
