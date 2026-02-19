@@ -852,7 +852,9 @@ async function handleClipboardFast() {
 
 async function handleClipboardSlow(targetDir, qStart = Date.now(), typeHint = null, partialCallback = null, token = null) {
 	// Wrapper to match old signature if called directly, but prefer raceClipboard
-	return await h.autoDetectAndPaste(targetDir, partialCallback, token);
+	// ★ 为兼容调用也生成 transId，用于文件名前缀
+	const transId = global.TransactionManager.createTransactionId();
+	return await h.autoDetectAndPaste(targetDir, partialCallback, token, transId);
 }
 
 

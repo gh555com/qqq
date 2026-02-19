@@ -683,6 +683,7 @@ class Qvideo {
             kind: "video",
             baseDir: targetDir,
             headers: headers,
+            transId: transId,  // ★ 保存 transId 用于后续 verifyVideoFile
             _debug_originalFileName: originalFileName  // ★ For debugging
         };
     }
@@ -1616,7 +1617,7 @@ class Qvideo {
         if (this._isTaskCancelled(task)) return null;  // ★ Cancel check
 
         // Use shared function for FFmpeg validation
-        const verifiedPath = await h.verifyVideoFile(filePath);
+        const verifiedPath = await h.verifyVideoFile(filePath, task.transId);
 
         if (this._isTaskCancelled(task)) return null;  // ★ Cancel check
 

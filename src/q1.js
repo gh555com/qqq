@@ -2580,7 +2580,9 @@ async function executeClipboardCommand() {
 	}
 
 	if (mode === 'q') {
-		await h.autoDetectAndPaste(targetDir, null, null, null, snapshot).then(async (result) => {
+		// ★ 快速粘贴也要生成 transId，用于文件名前缀（4位锚点+2位索引）
+		const quickTransId = TransactionManager.createTransactionId();
+		await h.autoDetectAndPaste(targetDir, null, null, quickTransId, snapshot).then(async (result) => {
 			if (result && result.type === 'video_url') {
 				await performCurvedPaste(editor, targetDir, snapshot, result);
 				return;
