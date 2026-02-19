@@ -22,8 +22,8 @@ const _windowId = crypto.randomBytes(8).toString('hex');
 // ============================================================================
 const AUDIO_SOURCE = {
     DETECTING: 'DETECTING',
-    PYTHON: 'PYTHON',
-    WEBVIEW: 'WEBVIEW'
+    PYTHON: 'PYTHON'
+    // ★ WEBVIEW removed: Python Broker is the only audio player (single-instance, cross-window sync)
 };
 
 const CONSTANTS = Object.freeze({
@@ -1024,7 +1024,7 @@ class ClipboardHistorySidebarProvider {
 
         this._audioSource = AUDIO_SOURCE.DETECTING;
         this._pythonAudioFailed = false;
-        this._kopeSfxBase64 = null;  // ★ kope sfx base64 cache (lazy load)
+        // ★ kope sfx removed - Python Broker handles all audio
 
         // ★ NEW: track Python playback state, supports bind/unbind
         this._pythonPlayState = {
@@ -1125,27 +1125,7 @@ class ClipboardHistorySidebarProvider {
         this._global.logMessage(`[Q4] ${q('q4.log.audioReset')}`, "INFO");
     }
 
-    /**
-     * ★ Lazy-load kope sfx base64 (load once only when needed)
-     */
-    _ensureKopeSfx() {
-        if (this._kopeSfxBase64) return this._kopeSfxBase64;
-        try {
-            const extPath = this._context.extensionPath;
-            const kopeDir = path.join(extPath, 'assets', 'kope');
-            const arr = [];
-            for (let i = 1; i <= 7; i++) {
-                const p = path.join(kopeDir, `${i}.mp3`);
-                if (fs.existsSync(p)) {
-                    arr.push(fs.readFileSync(p).toString('base64'));
-                }
-            }
-            this._kopeSfxBase64 = arr.length > 0 ? arr : null;
-        } catch {
-            this._kopeSfxBase64 = null;
-        }
-        return this._kopeSfxBase64;
-    }
+    // ★ _ensureKopeSfx removed - Python Broker handles all audio (no Webview fallback)
 
     resolveWebviewView(webviewView) {
         this._view = webviewView;
@@ -1165,11 +1145,23 @@ class ClipboardHistorySidebarProvider {
             this._postMessage({ command: 'cleanFreakMode', mode: newMode });
         };
 
+        // ★★★ Register line height measurement callback ★★★
+        q1.registerMeasurementCallback((config) => {
+            this._postMessage({
+                command: 'measureLineHeight',
+                fontSize: config.fontSize,
+                lineHeight: config.lineHeight,
+                fontFamily: config.fontFamily
+            });
+        });
+
         // Load full data after 1s (clipboard history + Python state sync)
         setTimeout(() => {
             this.updateContent(null, null, null, true);
             // ★ Startup check: is Python playing in background? If yes, sync UI
             this._syncPythonStateOnStartup();
+            // ★★★ Trigger initial line height measurement ★★★
+            q1.requestLineHeightMeasurement();
         }, 1000);
 
         // Listen to Python engine async notifications (e.g., natural playback end)
@@ -1210,6 +1202,12 @@ class ClipboardHistorySidebarProvider {
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             switch (msg.command) {
+                // ★★★ Handle line height measurement result ★★★
+                case 'lineHeightMeasured':
+                    if (msg.pxPerLine) {
+                        q1.setMeasuredLineHeight(msg.pxPerLine);
+                    }
+                    break;
                 // ★ NEW: handle command history get/save
                 case 'getHistory':
                     if (msg.key) {
@@ -1244,15 +1242,8 @@ class ClipboardHistorySidebarProvider {
                         await this._historyManager.copyToClipboard(node.content);
                         await this._historyManager.recordCopyUsage();
                         await this._historyManager.addToHistory(node.content, { forceUpdate: true });
-                        // ★ Detect Python status; if unavailable, play random kope sfx via webview
-                        const source = await this._ensureAudioSource();
-                        if (source !== AUDIO_SOURCE.PYTHON) {
-                            const sfx = this._ensureKopeSfx();
-                            if (sfx && sfx.length > 0) {
-                                const b64 = sfx[Math.floor(Math.random() * sfx.length)];
-                                this._postMessage({ command: 'playCopySfx', base64: b64 });
-                            }
-                        }
+                        // ★ Python Broker only - no Webview sfx fallback
+                        // Copy sfx is handled by Python clipboard watcher
                     }
                     break;
                 }
@@ -1516,11 +1507,11 @@ class ClipboardHistorySidebarProvider {
      * @param {string} mode 'normal' or 'loop'
      */
     async _ensureAudioSource() {
+        // ★ Python Broker is the ONLY audio source (no Webview fallback)
         if (this._pythonAudioFailed) {
-            this._audioSource = AUDIO_SOURCE.WEBVIEW;
-            return AUDIO_SOURCE.WEBVIEW;
+            return null; // Python failed, no audio available
         }
-        if (this._audioSource !== AUDIO_SOURCE.DETECTING) {
+        if (this._audioSource === AUDIO_SOURCE.PYTHON) {
             return this._audioSource;
         }
 
@@ -1550,8 +1541,7 @@ class ClipboardHistorySidebarProvider {
         }
 
         this._global.logMessage(`[Audio] ${q('q4.log.pythonProbeFail')}`, "WARN");
-        this._audioSource = AUDIO_SOURCE.WEBVIEW;
-        return AUDIO_SOURCE.WEBVIEW;
+        return null; // Python unavailable, no fallback
     }
 
     _getSavorAudioInfo() {
@@ -1671,66 +1661,56 @@ class ClipboardHistorySidebarProvider {
         await this._stopAudio();
 
         const source = await this._ensureAudioSource();
-        const info = this._getSavorAudioInfo();
-        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
 
-        const loopCount = mode === 'loop' ? (source === AUDIO_SOURCE.PYTHON ? 0 : -1) : getRand(2, 7);
-        const displayCount = (loopCount === -1 || loopCount === 0) ? q('q4.ui.loopInfinite') : loopCount;
-
-        this._global.logMessage(`[Audio] ${q('q4.log.audioSavor', source === AUDIO_SOURCE.PYTHON ? 'Python' : 'Webview', info.fileName, displayCount)}`, "INFO");
-
-        if (source === AUDIO_SOURCE.PYTHON) {
-            // Python mode: send UI-only first (no base64)
-            this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
-
-            try {
-                const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
-
-                if (res && (res.status === 'playing' || res.status === 'ok')) {
-                    // ★ Update Python playback state
-                    this._pythonPlayState = {
-                        playing: true,
-                        fileName: info.fileName,
-                        loopCount: loopCount,
-                        startTime: Date.now()
-                    };
-                    // ★ Write shared state for multi-window sync
-                    this._writeSavoringState({
-                        playing: true,
-                        windowId: _windowId,
-                        fileName: info.fileName,
-                        loopCount: loopCount,
-                        startTime: Date.now()
-                    });
-                    return;
-                }
-
-                // Prefer explicit error info
-                if (res && res.error) throw new Error(res.error);
-                if (res && res.reason) throw new Error(res.reason);
-
-                throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
-            } catch (e) {
-                console.error('[Q4]', q('log.pythonPlaybackError'), e.message);
-                this._pythonAudioFailed = true;
-                this._audioSource = AUDIO_SOURCE.WEBVIEW;
-                this._pythonPlayState.playing = false;
-                // Fall back to Webview
-            }
+        // ★ Python Broker is the ONLY audio engine (no Webview fallback)
+        if (source !== AUDIO_SOURCE.PYTHON) {
+            this._global.logMessage(`[Audio] Python Broker unavailable, audio disabled`, "WARN");
+            this._postMessage({ command: 'audioUnavailable' });
+            return;
         }
 
-        // Webview mode: send once (with base64)
-        const b64 = info.base64();
-        if (b64) {
-            // ★ Write shared state for multi-window sync (Webview mode)
-            this._writeSavoringState({
-                playing: true,
-                windowId: _windowId,
-                fileName: info.fileName,
-                loopCount: loopCount,
-                startTime: Date.now()
-            });
-            this._postMessage({ command: 'playAudio', base64: b64, fileName: info.fileName, count: loopCount });
+        const info = this._getSavorAudioInfo();
+        const getRand = (min, max) => crypto.randomInt ? crypto.randomInt(min, max) : Math.floor(Math.random() * (max - min)) + min;
+        const loopCount = mode === 'loop' ? 0 : getRand(2, 7);
+        const displayCount = loopCount === 0 ? q('q4.ui.loopInfinite') : loopCount;
+
+        this._global.logMessage(`[Audio] ${q('q4.log.audioSavor', 'Python', info.fileName, displayCount)}`, "INFO");
+
+        // Python mode: send UI-only first (no base64)
+        this._postMessage({ command: 'playAudio', fileName: info.fileName, count: loopCount });
+
+        try {
+            const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+
+            if (res && (res.status === 'playing' || res.status === 'ok')) {
+                // ★ Update Python playback state
+                this._pythonPlayState = {
+                    playing: true,
+                    fileName: info.fileName,
+                    loopCount: loopCount,
+                    startTime: Date.now()
+                };
+                // ★ Write shared state for multi-window sync
+                this._writeSavoringState({
+                    playing: true,
+                    windowId: _windowId,
+                    fileName: info.fileName,
+                    loopCount: loopCount,
+                    startTime: Date.now()
+                });
+                return;
+            }
+
+            // Prefer explicit error info
+            if (res && res.error) throw new Error(res.error);
+            if (res && res.reason) throw new Error(res.reason);
+            throw new Error(`unknown_python_error: ${JSON.stringify(res)}`);
+        } catch (e) {
+            console.error('[Q4]', q('log.pythonPlaybackError'), e.message);
+            this._pythonAudioFailed = true;
+            this._pythonPlayState.playing = false;
+            // ★ No Webview fallback - just notify UI that playback failed
+            this._postMessage({ command: 'audioError', error: e.message });
         }
     }
 
@@ -2183,6 +2163,25 @@ class ClipboardHistorySidebarProvider {
                 vscode.postMessage(d);
             }
 
+            // ★★★ Measure actual line height in browser rendering ★★★
+            function measureLineHeight(fontSize, lineHeight, fontFamily) {
+                try {
+                    var div = document.createElement('div');
+                    div.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:-9999px;' +
+                        'font-family:' + (fontFamily || 'monospace') + ';' +
+                        'font-size:' + (fontSize || 14) + 'px;' +
+                        'line-height:' + (lineHeight > 0 ? (lineHeight < 8 ? lineHeight : lineHeight + 'px') : 'normal') + ';' +
+                        'white-space:pre;';
+                    div.textContent = 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X' + String.fromCharCode(10) + 'X';  // 10 lines
+                    document.body.appendChild(div);
+                    var h = div.offsetHeight;
+                    document.body.removeChild(div);
+                    return h / 10;  // Average height per line
+                } catch (e) {
+                    return 0;  // Return 0 on error, let backend fallback
+                }
+            }
+
             // Disable context menu
             window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
@@ -2542,6 +2541,13 @@ class ClipboardHistorySidebarProvider {
             window.addEventListener('message', function(e) {
                 var m = e.data;
                 if (!m) return;
+
+                // ★★★ Handle line height measurement request ★★★
+                if (m.command === 'measureLineHeight') {
+                    var result = measureLineHeight(m.fontSize, m.lineHeight, m.fontFamily);
+                    post('lineHeightMeasured', { pxPerLine: result });
+                    return;
+                }
 
                 // ★ NEW: handle received history data
                 if (m.command === 'historyData') {

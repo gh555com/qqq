@@ -1984,10 +1984,17 @@ if _IS_WINDOWS:
         CancelIoEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
         CancelIoEx.restype = wintypes.BOOL
 
+    # ★ ULONG_PTR 兼容性：Python 3.8 embed 版本可能缺少此类型
+    if hasattr(wintypes, 'ULONG_PTR'):
+        _ULONG_PTR = wintypes.ULONG_PTR
+    else:
+        import struct
+        _ULONG_PTR = ctypes.c_uint64 if struct.calcsize('P') == 8 else ctypes.c_uint32
+
     class OVERLAPPED(ctypes.Structure):
         _fields_ = [
-            ("Internal", wintypes.ULONG_PTR),
-            ("InternalHigh", wintypes.ULONG_PTR),
+            ("Internal", _ULONG_PTR),
+            ("InternalHigh", _ULONG_PTR),
             ("Offset", wintypes.DWORD),
             ("OffsetHigh", wintypes.DWORD),
             ("hEvent", wintypes.HANDLE),

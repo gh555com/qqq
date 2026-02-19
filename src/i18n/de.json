@@ -215,7 +215,7 @@
             "pythonCrash": "Python-Prozess abgestürzt, Wiedergabe-UI gestoppt",
             "pythonNoMiniaudio": "Python-Engine verbunden, aber miniaudio-Abhängigkeit nicht erkannt",
             "pythonProbeError": "Python-Probe Ausnahme: {0}",
-            "pythonProbeFail": "Python-Engine Probe fehlgeschlagen, Webview-Fallback verwendet",
+            "pythonProbeFail": "Python Broker nicht verfügbar, Audio deaktiviert",
             "pythonPlaying": "q4 erkannte laufende Python-Wiedergabe beim Start, UI synchronisiert",
             "audioSavor": "{0} Engine Genuss-Wiedergabe: {1}, Wiederholung: {2}"
         },

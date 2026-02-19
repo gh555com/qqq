@@ -215,7 +215,7 @@
             "pythonCrash": "Processo Python travou, UI de reprodução parada",
             "pythonNoMiniaudio": "Motor Python conectado mas dependência miniaudio não detectada",
             "pythonProbeError": "Exceção de sondagem Python: {0}",
-            "pythonProbeFail": "Sondagem do motor Python falhou, usando Webview como reserva",
+            "pythonProbeFail": "Python Broker indisponível, áudio desativado",
             "pythonPlaying": "q4 detectou Python reproduzindo ao iniciar, sincronizando UI",
             "audioSavor": "Motor {0} reproduzindo favorito: {1}, loop: {2}"
         },

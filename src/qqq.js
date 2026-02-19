@@ -1167,68 +1167,61 @@ async function savorMomentsCommand() {
 		// ★ Protective check: ensure extensionContext is initialized
 		if (!extensionContext || !extensionContext.extensionPath) {
 			global.logMessage(`[Audio] ${q('qqq.log.contextWaiting')}`, "WARN");
-			// Fallback to webview playback (do not open the sidebar)
-			if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-				activeSidebarProvider.triggerSavor('normal');
-				return;
-			}
-			// ★ Core principle: never change the user's sidebar layout; only show a popup prompt
-			global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
+			// ★ Python Broker only - show 9s notification
+			global.showAutoCloseNotification('warning', q('q4.log.pythonProbeFail'), 9);
 			return;
 		}
 
-		// Step 1: detect Python audio engine
+		// ★ Python Broker is the ONLY audio engine
 		const pythonAvailable = await checkPythonAudioEngine();
 
-		if (pythonAvailable) {
-			// ★ Python engine available, play directly (no webview, do not open sidebar)
-			const info = getSavorAudioInfo(extensionContext);
-			const loopCount = getRandomLoopCount();
+		if (!pythonAvailable) {
+			// ★ Python unavailable - show 9s notification (no Webview fallback)
+			global.logMessage(`[Audio] Python Broker unavailable, audio disabled`, "WARN");
+			global.showAutoCloseNotification('warning', q('q4.log.pythonProbeFail'), 9);
+			return;
+		}
 
-			global.logMessage(`[Audio] ${q('qqq.log.pythonPlay', info.fileName, loopCount)}`, "INFO");
+		// ★ Python engine available, play directly (no webview, do not open sidebar)
+		const info = getSavorAudioInfo(extensionContext);
+		const loopCount = getRandomLoopCount();
 
-			try {
-				const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
-				if (res && (res.status === 'ok' || res.status === 'playing')) {
-					// ★ Write globalState for multi-window sync (always, even if sidebar not open)
-					context.globalState.update('qqq_savoring_state', {
+		global.logMessage(`[Audio] ${q('qqq.log.pythonPlay', info.fileName, loopCount)}`, "INFO");
+
+		try {
+			const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
+			if (res && (res.status === 'ok' || res.status === 'playing')) {
+				// ★ Write globalState for multi-window sync (always, even if sidebar not open)
+				context.globalState.update('qqq_savoring_state', {
+					playing: true,
+					windowId: process.pid.toString(),
+					fileName: info.fileName,
+					loopCount: loopCount,
+					startTime: Date.now()
+				});
+
+				// ★ Record Python playback state whether or not q4 is open
+				if (activeSidebarProvider) {
+					activeSidebarProvider._pythonPlayState = {
 						playing: true,
-						windowId: process.pid.toString(),
 						fileName: info.fileName,
 						loopCount: loopCount,
 						startTime: Date.now()
-					});
-
-					// ★ Record Python playback state whether or not q4 is open
-					if (activeSidebarProvider) {
-						activeSidebarProvider._pythonPlayState = {
-							playing: true,
-							fileName: info.fileName,
-							loopCount: loopCount,
-							startTime: Date.now()
-						};
-					}
-					// ★ If q4 webview is already open, sync UI state (do not open proactively)
-					if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-						activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
-					}
-					return;
+					};
 				}
-				// Python playback failed, fallback to webview
-				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
-			} catch (e) {
-				global.logMessage(`[Audio] ${q('qqq.log.pythonPlayError', e.message)}`, "WARN");
+				// ★ If q4 webview is already open, sync UI state (do not open proactively)
+				if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
+					activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
+				}
+				return;
 			}
+			// Python playback failed
+			global.logMessage(`[Audio] ${q('qqq.log.pythonPlayFail', res?.error || 'unknown')}`, "WARN");
+		} catch (e) {
+			global.logMessage(`[Audio] ${q('qqq.log.pythonPlayError', e.message)}`, "WARN");
 		}
 
-		// Step 2: Python unavailable or failed, check webview (do not open sidebar)
-		if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-			// Webview ready, use webview playback
-			activeSidebarProvider.triggerSavor('normal');
-			return;
-		}
-
-		// Step 3: neither available, show q popup (★ Core principle: never change the user's sidebar layout)
+		// ★ Python failed - no Webview fallback, just show notification
 		global.showAutoCloseNotification('info', q('qqq.ui.clickSidebarToRelax'));
 	} catch (e) {
 		global.logMessage(q('qqq.log.audioPlayError', e.message), "ERROR");

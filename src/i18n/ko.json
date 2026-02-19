@@ -215,7 +215,7 @@
             "pythonCrash": "Python 프로세스 충돌, 재생 UI 중지됨",
             "pythonNoMiniaudio": "Python 엔진이 연결되었지만 miniaudio 종속성이 감지되지 않음",
             "pythonProbeError": "Python 프로브 예외: {0}",
-            "pythonProbeFail": "Python 엔진 프로브 실패, Webview로 폴백",
+            "pythonProbeFail": "Python Broker 사용 불가, 오디오 비활성화",
             "pythonPlaying": "q4 시작 시 Python 재생 중 감지, UI 동기화",
             "audioSavor": "{0} 엔진 세이버 재생 중: {1}, 루프: {2}"
         },

@@ -215,7 +215,7 @@
             "pythonCrash": "Процесс Python аварийно завершился, UI воспроизведения остановлен",
             "pythonNoMiniaudio": "Python-движок подключён, но зависимость miniaudio не обнаружена",
             "pythonProbeError": "Исключение при проверке Python: {0}",
-            "pythonProbeFail": "Проверка Python-движка не пройдена, резерв на Webview",
+            "pythonProbeFail": "Python Broker недоступен, аудио отключено",
             "pythonPlaying": "q4 обнаружил воспроизведение Python при запуске, синхронизация UI",
             "audioSavor": "Движок {0} воспроизводит избранное: {1}, цикл: {2}"
         },

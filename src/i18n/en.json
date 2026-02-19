@@ -215,7 +215,7 @@
             "pythonCrash": "Python process crashed, stopped playback UI",
             "pythonNoMiniaudio": "Python engine connected but miniaudio dependency not detected",
             "pythonProbeError": "Python probe exception: {0}",
-            "pythonProbeFail": "Python engine probe failed, using Webview fallback",
+            "pythonProbeFail": "Python Broker unavailable, audio disabled",
             "pythonPlaying": "q4 detected Python playing at startup, syncing UI",
             "audioSavor": "{0} engine savor playing: {1}, loop: {2}"
         },

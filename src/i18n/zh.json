@@ -215,7 +215,7 @@
             "pythonCrash": "Python 进程崩溃，已停止播放 UI",
             "pythonNoMiniaudio": "Python 引擎已连接但未检测到 miniaudio 依赖",
             "pythonProbeError": "Python 探测异常: {0}",
-            "pythonProbeFail": "Python 引擎探测未通过，使用 Webview 兜底",
+            "pythonProbeFail": "Python Broker 不在位，音频已禁用",
             "pythonPlaying": "q4 启动时检测到 Python 正在播放，同步 UI",
             "audioSavor": "{0} 引擎播放品味: {1}, 循环: {2}"
         },
