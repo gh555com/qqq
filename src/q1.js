@@ -1883,6 +1883,11 @@ function setMeasuredLineHeight(pxPerLine) {
 		measurementPending = false;
 		if (oldValue !== pxPerLine) {
 			global.logMessage(`Line height measured: ${pxPerLine.toFixed(2)}px`, "INFO");
+			// ★★★ Trigger full update when measurement changes ★★★
+			if (pendingFullUpdateAfterMeasurement) {
+				pendingFullUpdateAfterMeasurement = false;
+				forceFullUpdateAllVisibleEditors();
+			}
 		}
 	} else {
 		measurementPending = false;
@@ -1893,6 +1898,73 @@ function setMeasuredLineHeight(pxPerLine) {
 function invalidateLineHeightCache() {
 	measuredPxPerLine = null;
 	measurementPending = false;
+}
+
+// ★★★ Flag: whether to trigger full update after measurement completes ★★★
+let pendingFullUpdateAfterMeasurement = false;
+
+/**
+ * ★★★ ULTIMATE FORCE UPDATE: Complete refresh for all visible editors ★★★
+ * This is the most thorough update: decoration re-render + optional weave
+ * - Decoration re-render: ALWAYS done (to fix screen corruption)
+ * - Weave (blank line adjustment): RESPECTS user's cleanFreak preference
+ * Used when editor config changes (fontSize, lineHeight, fontFamily)
+ */
+async function forceFullUpdateAllVisibleEditors() {
+	try {
+		global.logMessage(`[ForceFullUpdate] Starting complete refresh...`, "DEBUG");
+
+		// Step 1: Clear ALL decoration caches (ALWAYS - for fixing screen corruption)
+		clearDecorations();
+
+		// Step 2: Perform weave ONLY if user's cleanFreak preference allows
+		const cleanFreakModeValue = getEffectiveCleanFreakMode();
+		if (cleanFreakModeValue !== "never") {
+			// RESPECT user's preference: use their chosen mode, not forced "add & remove"
+			const editors = vscode.window.visibleTextEditors;
+			for (const editor of editors) {
+				if (!editor || !editor.document) continue;
+				const text = editor.document.getText();
+				// Only process documents that contain qqq markers
+				if (text.includes('/\\qqq')) {
+					await performGlobalClean(editor, true, cleanFreakModeValue);
+				}
+			}
+		}
+
+		// Step 3: Wait a moment for edits to apply
+		await new Promise(resolve => setTimeout(resolve, 100));
+
+		// Step 4: Re-render all visible editors (ALWAYS - for fixing screen corruption)
+		renderVisibleEditors(50);
+
+		// Step 5: Refresh CodeLens
+		if (codeLensProvider) codeLensProvider.refresh();
+
+		global.logMessage(`[ForceFullUpdate] Complete refresh finished (cleanFreak: ${cleanFreakModeValue}).`, "DEBUG");
+	} catch (e) {
+		global.logMessage(`[ForceFullUpdate] Error: ${e.message}`, "WARN");
+	}
+}
+
+/**
+ * ★★★ Schedule full update after measurement completes ★★★
+ * Call this when config changes - it will wait for measurement result before updating
+ * RESPECTS user's cleanFreak preference: if "never", only re-renders, no weave
+ */
+function scheduleFullUpdateAfterMeasurement() {
+	// If user prefers "never", still do re-render (for screen corruption fix), but skip weave
+	pendingFullUpdateAfterMeasurement = true;
+	// Also trigger measurement request
+	requestLineHeightMeasurement();
+	// Fallback: if measurement doesn't come back in 2 seconds, force update anyway
+	setTimeout(() => {
+		if (pendingFullUpdateAfterMeasurement) {
+			pendingFullUpdateAfterMeasurement = false;
+			global.logMessage(`[ForceFullUpdate] Measurement timeout, using fallback values.`, "DEBUG");
+			forceFullUpdateAllVisibleEditors();
+		}
+	}, 2000);
 }
 
 // ★★★ Unified blank line calculation function ★★★
@@ -2553,6 +2625,15 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 						} else {
 							savePasteStats(totalSizeForStats);
 						}
+
+						// ★★★ Force refresh document to fix screen corruption (applies to all media paste) ★★★
+						// This ensures decorations are properly rendered after new frames/text films are created
+						try {
+							await forceRefreshDocument(docUri);
+							global.logMessage(`[Paste] Document force refresh completed: ${docUri.fsPath}`, "DEBUG");
+						} catch (e) {
+							global.logMessage(`[Paste] Force refresh error (non-fatal): ${e.message}`, "WARN");
+						}
 					} else {
 						const trans = (TransactionManager.getTransactions() || []).find(t => t.id === transId);
 						if (trans) await TransactionManager.rollback(trans);
@@ -2669,7 +2750,18 @@ async function executeClipboardCommand() {
 				savePasteStats(size);
 			}
 
-			debounceRender(activeEditor, 10);
+			// ★★★ Force refresh for non-text paste (frames/text films) to fix screen corruption ★★★
+			if (result && result.type !== 'text') {
+				try {
+					await forceRefreshDocument(activeEditor.document.uri);
+					global.logMessage(`[QuickPaste] Document force refresh completed.`, "DEBUG");
+				} catch (e) {
+					global.logMessage(`[QuickPaste] Force refresh error (non-fatal): ${e.message}`, "WARN");
+				}
+			} else {
+				// Plain text paste: just debounce render
+				debounceRender(activeEditor, 10);
+			}
 		});
 	} else {
 		await performCurvedPaste(editor, targetDir, snapshot);
@@ -3278,10 +3370,11 @@ async function activate(context) {
 		// ★ Only keep editor config listeners (these do not involve ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("editor.fontSize") || e.affectsConfiguration("editor.lineHeight") || e.affectsConfiguration("editor.fontFamily")) {
-				// ★★★ Invalidate line height cache and trigger re-measurement ★★★
+				// ★★★ ULTIMATE FIX: Invalidate cache, request measurement, then full update ★★★
 				invalidateLineHeightCache();
 				refreshConfig();
-				if (getEffectiveCleanFreakMode() !== "never") performGlobalClean(vscode.window.activeTextEditor);
+				// Schedule full update AFTER measurement completes (not immediately!)
+				scheduleFullUpdateAfterMeasurement();
 			}
 		}),
 		vscode.commands.registerCommand("qqq.q1", global.withReady(executeClipboardCommand)),
@@ -3432,7 +3525,10 @@ const q1Utils = {
 	// Register measurement request callback (q4 will call this to receive measurement requests)
 	registerMeasurementCallback: (cb) => { measurementCallback = cb; },
 	// Trigger initial measurement
-	requestLineHeightMeasurement
+	requestLineHeightMeasurement,
+	// ★★★ Ultimate force update API ★★★
+	forceFullUpdateAllVisibleEditors,
+	scheduleFullUpdateAfterMeasurement
 };
 
 module.exports = { activate, deactivate, ...q1Utils };

@@ -1666,6 +1666,8 @@ class ClipboardHistorySidebarProvider {
         if (source !== AUDIO_SOURCE.PYTHON) {
             this._global.logMessage(`[Audio] Python Broker unavailable, audio disabled`, "WARN");
             this._postMessage({ command: 'audioUnavailable' });
+            // ★ Show 9s notification
+            this._global.showAutoCloseNotification('warning', q('q4.log.pythonProbeFail'), 9);
             return;
         }
 
