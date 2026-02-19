@@ -880,9 +880,17 @@ mod win {
         RegisterClipboardFormatW, SetClipboardData,
     };
     #[allow(unused_imports)]
-    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalFree, GlobalLock, GlobalSize, GlobalUnlock, GHND};
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GHND};
     #[allow(unused_imports)]
     use windows_sys::Win32::UI::Shell::DragQueryFileW;
+
+    // ★ GlobalFree 不在 windows-sys 导出列表中，需要自己声明 FFI
+    // 链接 kernel32.dll，Win7-Win11 全兼容
+    type HGLOBAL = isize;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalFree(hMem: HGLOBAL) -> HGLOBAL;
+    }
 
     // Re-export or use full paths if the wildcards are failing for some reason
     // In windows-sys 0.52, these should be available in the modules above.
@@ -1206,7 +1214,7 @@ mod win {
     // ★ 缓存自定义剪贴板格式 ID（全局不变，只需注册一次）
     // 使用 once_cell::sync::Lazy 替代 std::sync::OnceLock（Win7 build-std 兼容）
     use once_cell::sync::Lazy;
-    
+
     static CF_HTML_CACHED: Lazy<u32> = Lazy::new(|| unsafe {
         RegisterClipboardFormatW(to_wide_null("HTML Format").as_ptr())
     });

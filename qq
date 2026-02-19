@@ -1,701 +1,255 @@
-下面给你一份**“VS Code 端怎么接入全局 Broker（单例 + IPC + lease 心跳）”**的详细文档，按你现在的情况（Node 扩展 + Python 脚本）写，目标是：**15 个窗口只起 1 个 py 进程**，而且崩了能自愈。
+从你贴的 Actions 运行页来看，失败的是 **Windows 三个目标**（`aarch64-pc-windows-msvc`、`x86_64-win7-windows-msvc`、`i686-win7-windows-msvc`），并且都以 **`cargo` 退出码 101** 结束（这基本就是“编译期报错/构建脚本报错”的典型信号）。([GitHub][1])
+
+结合你的 workflow：Windows 构建步骤会进入 `rust/`，把 **`Cargo_win.toml` 覆盖为 `Cargo.toml`**，然后直接 `cargo build ...`。([GitHub][2])
+所以问题大概率就在 `rust/kp_win.rs` 的 **Windows 代码编译不过**（不是 npm / 打包那边）。
 
 ---
 
-# 1. 总体目标与分工
+## 最可能的“硬错误点”（会直接导致 Windows 编译失败）
 
-## 你要保证的两条强保证
+你在 `windows-sys` 下把很多 **Windows Handle 当成指针**用了：
 
-1. **任意时刻最多只有 1 个 Broker 在工作**
-   → 由 Broker 端“独占资源 listen（Unix socket / Windows named pipe）”保证
+* `OpenClipboard` 的参数类型是 `HWND`（在 `windows-sys` 里通常是 `isize`），你传了 `std::ptr::null_mut()`
+* `GetClipboardData` 返回的是 `HANDLE`（通常也是 `isize`），你在代码里和 `std::ptr::null_mut()` 比较，还把它传给了一个参数是 `*mut c_void` 的函数
+* `SHFILEINFOW.hIcon` 这类句柄也通常是 `isize`，你拿它去和 `null_mut()` 比较
 
-2. **只要还有任意窗口需要它，最终一定会有 1 个 Broker 活着**
-   → 由 Client 端“连不上就 spawn + 定期 ping 续租”保证
-
-## 分工（非常关键）
-
-### Broker（唯一 py 进程）负责
-
-* 监听全局唯一 endpoint（独占即单例）
-* 接受 JSONL RPC
-* 记录每个 client 的 last_seen
-* **超过 TTL 没人续租就自杀退出**（lease watchdog）
-
-### Client（每个 VS Code 窗口）负责
-
-* connect 连接 Broker
-* 连接失败就 spawn（允许并发，多窗口同时 spawn 也不怕）
-* 连接成功后定时发 `ping`（续租）
-* 窗口退出尽力发 `shutdown/bye`（但绝不依赖它一定执行）
+这些在 Windows 上会直接触发类似 **E0308 mismatched types**（“期望 isize，得到 *mut T”）从而让 `cargo` 以 101 失败退出。
 
 ---
 
-# 2. VS Code 端你需要的“3样东西”
+## 你该怎么改（核心补丁）
 
-1. **endpoint.json**（Broker 写、Client 读）
-   里面告诉你当前 broker 的 IPC 地址（unix socket path / pipe name）
+### 1) 所有 “null handle” 用 `0`，别用 `null_mut()`
 
-2. **token.txt**（Broker 写、Client 读）
-   Client 调用 RPC 时需要带上 token，避免本机其它进程乱打命令
+把这种：
 
-3. **IPC 连接 + JSONL 协议**（Node 扩展实现）
-   用 Node 的 `net` 模块连接本地 socket/pipe，然后按行收发 JSON
-
-> ✅ 最简单的策略：**Client 永远优先读 endpoint.json** 来连接，读不到/连不上再 spawn。
-> 不要在 Node 侧“自己算地址”，因为 Python 里算 salt 的细节很容易跟 Node 不一致（尤其 Windows）。
-
----
-
-# 3. endpoint.json / token.txt 的位置（Client 必须会找）
-
-你的 Broker 代码里写的目录是：
-
-## Windows
-
-* `endpoint.json`：`%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
-* `token.txt`：`%LOCALAPPDATA%\vix_audio_broker\token.txt`
-
-  * 如果 `LOCALAPPDATA` 没有，会 fallback 到 `APPDATA` 或 temp（但一般都有）
-
-## Linux/macOS
-
-* `endpoint.json`：`$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`
-  若 `XDG_CACHE_HOME` 没有 → `~/.cache/vix_audio_broker/endpoint.json`
-* `token.txt`：同目录
-
----
-
-# 4. IPC 协议（JSONL）规范
-
-**传输层**：本地 socket / named pipe
-**协议层**：一行一个 JSON（`\n` 结尾）
-
-## 请求（Client -> Broker）
-
-必带字段：
-
-* `_id`: number（请求 id，用来匹配响应）
-* `action`: string（比如 `"ping"`, `"play_sfx"`）
-* `client_id`: string（每个窗口唯一，推荐 uuid）
-* `token`: string（从 token.txt 读）
-
-可带其它业务字段（全部透传到你的 `_dispatch_action()`）：
-
-* `path`, `count`, `category` ……
-
-例子：
-
-```json
-{"_id":1,"action":"hello","client_id":"win-uuid","token":"..."}
-{"_id":2,"action":"ping","client_id":"win-uuid","token":"..."}
-{"_id":3,"action":"play_sfx","client_id":"win-uuid","token":"...","category":"kope","idx":-1}
+```rust
+OpenClipboard(std::ptr::null_mut())
+...
+if h_mem != std::ptr::null_mut() { ... }
 ```
 
-## 响应（Broker -> Client）
+改成：
 
-必带字段：
+```rust
+OpenClipboard(0)
+...
+if h_mem != 0 { ... }
+```
 
-* `_id`: number（匹配请求）
-* `ok`: boolean
-* 其它字段：你的业务返回（比如 status/error/...）
+### 2) `read_global_data` 也别用指针入参，改成 handle（`isize`）
+
+把：
+
+```rust
+unsafe fn read_global_data(h_mem: *mut core::ffi::c_void) -> Option<Vec<u8>> {
+    if h_mem.is_null() { return None; }
+    let ptr = GlobalLock(h_mem) as *const u8;
+    ...
+}
+```
+
+改成（最稳妥的写法之一）：
+
+```rust
+unsafe fn read_global_data(h_mem: isize) -> Option<Vec<u8>> {
+    if h_mem == 0 {
+        return None;
+    }
+    let ptr = GlobalLock(h_mem) as *const u8;
+    if ptr.is_null() {
+        return None;
+    }
+    let size = GlobalSize(h_mem) as usize;
+    if size == 0 {
+        let _ = GlobalUnlock(h_mem);
+        return None;
+    }
+    let data = std::slice::from_raw_parts(ptr, size).to_vec();
+    let _ = GlobalUnlock(h_mem);
+    Some(data)
+}
+```
+
+然后所有调用点统一按 handle 传递、按 `0` 判断空值。
 
 ---
 
-# 5. VS Code 扩展侧的接入流程（推荐实现）
+## 怎么快速“证伪/证实”我说的点
 
-你在扩展里做一个 `BrokerClient`（每个窗口一个实例）：
+Actions 的详细编译报错日志在 GitHub UI 里通常要点进失败的 job（你那边可能因为未登录在页面上看不到完整日志）。你只要在日志里搜：
 
-## 5.1 激活时（或第一次需要功能时）
+* `error[E0308]`
+* `mismatched types`
+* `expected isize` / `found *mut`
 
-1. `ensureConnected()`
-2. 成功后 `startHeartbeat()`（比如每 20 秒 ping 一次）
 
-> 重要：不要一激活就狂启动 Broker。
-> 推荐：**第一次用户用到相关功能**（比如播放音效/监听剪贴板）再 `ensureConnected()`。
 
-## 5.2 ensureConnected() 逻辑（最稳）
+ Your build is failing on this line:
 
-按这个顺序：
+```rust
+use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalFree, ...};
+```
 
-### Step A：尝试连接现有 Broker
+because **`GlobalFree` is not exported by `windows-sys`’s Win32::System::Memory bindings** (same story even in newer versions). You can see the `windows-sys 0.61.2` Memory module lists `Global Alloc`, `Global Lock`, `Global Size`, `Global Unlock`, etc., but **no `Global Free`**. ([Docs.rs][1])
 
-* 读 `endpoint.json`
-* 读 `token.txt`
-* `net.connect(endpoint)` 成功后发 `hello`
-* hello 成功 → connected
+### Fix (recommended): declare `GlobalFree` yourself (FFI)
 
-### Step B：连接失败就 spawn
+Patch around where you import the memory APIs (your `kp_win.rs:883` area):
 
-* `spawnBroker()`（允许并发，但建议每窗口做节流：3 秒内最多 spawn 一次）
-* 等 100~300ms，再回到 Step A 重试（可重试 10~30 次，带退避）
-
-### Step C：仍失败
-
-* 抛错给上层，提示用户：Python 环境不可用 / 文件缺失 / 权限等
-
----
-
-# 6. Node/TS 端参考代码（可直接抄）
-
-下面这段代码涵盖：
-
-* 找 cache dir
-* 读 endpoint/token
-* 连接 socket/pipe（`net.connect({path})` 一把梭：Windows pipe 也用 path）
-* JSONL 编解码
-* 请求-响应匹配（基于 `_id`）
-* spawn + 重试 + 心跳 + 自动重连
-
-> 你放在 `src/brokerClient.ts` 之类即可。
-
-```ts
-import * as vscode from "vscode";
-import * as net from "net";
-import * as fs from "fs";
-import * as path from "path";
-import { spawn } from "child_process";
-import { randomUUID } from "crypto";
-
-type EndpointInfo =
-  | { family: "pipe"; pipe: string; app_id: string; protocol: number; pid?: number; token_enabled?: boolean }
-  | { family: "unix"; path: string; app_id: string; protocol: number; pid?: number; token_enabled?: boolean };
-
-type Pending = {
-  resolve: (v: any) => void;
-  reject: (e: any) => void;
-  timer: NodeJS.Timeout;
+```rust
+use windows_sys::Win32::Foundation::HGLOBAL;
+use windows_sys::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GHND,
 };
 
-function getCacheDir(): string {
-  if (process.platform === "win32") {
-    return path.join(process.env.LOCALAPPDATA || process.env.APPDATA || process.env.TEMP || ".", "vix_audio_broker");
-  }
-  return path.join(process.env.XDG_CACHE_HOME || path.join(process.env.HOME || ".", ".cache"), "vix_audio_broker");
-}
-
-function readJsonFile<T>(p: string): T | null {
-  try {
-    const s = fs.readFileSync(p, "utf8");
-    return JSON.parse(s) as T;
-  } catch {
-    return null;
-  }
-}
-
-function readTextFile(p: string): string | null {
-  try {
-    return fs.readFileSync(p, "utf8").trim();
-  } catch {
-    return null;
-  }
-}
-
-export class BrokerClient {
-  private socket: net.Socket | null = null;
-  private connected = false;
-
-  private readonly clientId = randomUUID();
-  private token: string = "";
-  private endpoint: EndpointInfo | null = null;
-
-  private lineBuf = "";
-  private nextId = 1;
-  private pending = new Map<number, Pending>();
-
-  private hbTimer: NodeJS.Timeout | null = null;
-
-  // spawn 防抖（每窗口）
-  private lastSpawnAt = 0;
-  private spawning: Promise<void> | null = null;
-
-  constructor(
-    private readonly context: vscode.ExtensionContext,
-    private readonly pythonExe: string,           // 你用的 python 路径
-    private readonly brokerScriptPath: string,    // vix_broker_singleton.py
-    private readonly implScriptPath: string       // 你的大脚本（包含 _dispatch_action）
-  ) {}
-
-  dispose() {
-    this.stopHeartbeat();
-    this.closeSocket();
-  }
-
-  // ---------- public API ----------
-  async ensureConnected(): Promise<void> {
-    if (this.connected && this.socket) return;
-
-    // 先尝试连接现有 broker
-    if (await this.tryConnectOnce()) return;
-
-    // 连接不上就 spawn（节流+并发合并）
-    await this.spawnBrokerThrottled();
-
-    // spawn 后重试连接（带退避）
-    const maxTry = 30;
-    for (let i = 0; i < maxTry; i++) {
-      await this.sleep(120 + i * 30);
-      if (await this.tryConnectOnce()) return;
-    }
-
-    throw new Error("Broker connect failed after spawn+retries. Check python/script paths, endpoint/token files, or permissions.");
-  }
-
-  startHeartbeat(intervalMs = 20000) {
-    if (this.hbTimer) return;
-    this.hbTimer = setInterval(async () => {
-      try {
-        // 如果断了，会自动重连并续租
-        await this.ensureConnected();
-        await this.call("ping", {});
-      } catch {
-        // 静默：下一轮继续自愈
-      }
-    }, intervalMs);
-  }
-
-  stopHeartbeat() {
-    if (this.hbTimer) clearInterval(this.hbTimer);
-    this.hbTimer = null;
-  }
-
-  async call(action: string, payload: Record<string, any>, timeoutMs = 5000): Promise<any> {
-    await this.ensureConnected();
-    const id = this.nextId++;
-
-    const req = {
-      _id: id,
-      action,
-      client_id: this.clientId,
-      token: this.token,
-      ...payload,
-    };
-
-    const line = JSON.stringify(req) + "\n";
-
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`RPC timeout: ${action}`));
-      }, timeoutMs);
-
-      this.pending.set(id, { resolve, reject, timer });
-
-      try {
-        this.socket!.write(line, "utf8");
-      } catch (e) {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(e);
-      }
-    });
-  }
-
-  // ---------- internal ----------
-  private async tryConnectOnce(): Promise<boolean> {
-    const cache = getCacheDir();
-    const endpointPath = path.join(cache, "endpoint.json");
-    const tokenPath = path.join(cache, "token.txt");
-
-    const endpoint = readJsonFile<EndpointInfo>(endpointPath);
-    const token = readTextFile(tokenPath);
-
-    if (!endpoint || !token) return false;
-    if (endpoint.app_id !== "vix-broker") return false;
-
-    // 统一用 net.connect({path})：
-    // - unix: endpoint.path
-    // - windows named pipe: endpoint.pipe 形如 \\.\pipe\xxx
-    const connPath = endpoint.family === "unix" ? endpoint.path : endpoint.pipe;
-    if (!connPath) return false;
-
-    // 尝试建立 socket
-    const ok = await new Promise<boolean>((resolve) => {
-      const s = net.connect({ path: connPath });
-
-      const onError = () => {
-        try { s.destroy(); } catch {}
-        resolve(false);
-      };
-
-      s.once("error", onError);
-      s.once("connect", () => resolve(true));
-    });
-
-    if (!ok) return false;
-
-    // 真正建立连接并挂上监听（需要新建一次 socket，避免上面那次被 resolve 后丢引用）
-    return await this.openAndHello(connPath, token, endpoint);
-  }
-
-  private async openAndHello(connPath: string, token: string, endpoint: EndpointInfo): Promise<boolean> {
-    this.closeSocket();
-
-    const s = net.connect({ path: connPath });
-    this.socket = s;
-    this.token = token;
-    this.endpoint = endpoint;
-
-    s.setKeepAlive(true);
-
-    s.on("data", (buf) => this.onData(buf));
-    s.on("error", () => this.onDisconnected());
-    s.on("close", () => this.onDisconnected());
-
-    const connected = await new Promise<boolean>((resolve) => {
-      s.once("connect", () => resolve(true));
-      s.once("error", () => resolve(false));
-    });
-    if (!connected) return false;
-
-    // hello 校验
-    try {
-      const res = await this.call("hello", {}, 2000);
-      if (!res || res.ok !== true || res.app_id !== "vix-broker") {
-        this.closeSocket();
-        return false;
-      }
-      this.connected = true;
-      return true;
-    } catch {
-      this.closeSocket();
-      return false;
-    }
-  }
-
-  private onData(buf: Buffer) {
-    this.lineBuf += buf.toString("utf8");
-    while (true) {
-      const idx = this.lineBuf.indexOf("\n");
-      if (idx < 0) break;
-      const line = this.lineBuf.slice(0, idx).trim();
-      this.lineBuf = this.lineBuf.slice(idx + 1);
-      if (!line) continue;
-
-      let obj: any;
-      try {
-        obj = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      const id = obj?._id;
-      if (typeof id === "number" && this.pending.has(id)) {
-        const p = this.pending.get(id)!;
-        clearTimeout(p.timer);
-        this.pending.delete(id);
-        if (obj.ok === false) p.reject(new Error(obj.error || "rpc_error"));
-        else p.resolve(obj);
-      }
-      // 这里也可以处理 broker 主动推送事件（如果你以后要做 server push）
-    }
-  }
-
-  private onDisconnected() {
-    if (!this.connected && !this.socket) return;
-    this.connected = false;
-
-    // reject 所有 pending
-    for (const [id, p] of this.pending.entries()) {
-      clearTimeout(p.timer);
-      p.reject(new Error("disconnected"));
-      this.pending.delete(id);
-    }
-
-    this.closeSocket();
-  }
-
-  private closeSocket() {
-    const s = this.socket;
-    this.socket = null;
-    this.connected = false;
-    this.lineBuf = "";
-    if (s) {
-      try { s.removeAllListeners(); } catch {}
-      try { s.destroy(); } catch {}
-    }
-  }
-
-  private async spawnBrokerThrottled(): Promise<void> {
-    const now = Date.now();
-    if (this.spawning) return this.spawning;
-
-    // 3 秒内只 spawn 一次（每窗口）
-    if (now - this.lastSpawnAt < 3000) return;
-
-    this.lastSpawnAt = now;
-    this.spawning = new Promise<void>((resolve) => {
-      const args = [
-        this.brokerScriptPath,
-        "--impl",
-        this.implScriptPath,
-        "--broker",
-      ];
-
-      const child = spawn(this.pythonExe, args, {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-
-      child.unref();
-      resolve();
-    }).finally(() => {
-      this.spawning = null;
-    });
-
-    return this.spawning;
-  }
-
-  private sleep(ms: number) {
-    return new Promise((r) => setTimeout(r, ms));
-  }
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalFree(hmem: HGLOBAL) -> HGLOBAL;
 }
 ```
 
+Then keep your existing logic, but call the FFI `GlobalFree(...)` instead of importing it from `windows_sys`.
+
+Notes:
+
+* `GlobalFree` returns `NULL` on success; non-null means it failed (and returns the handle).
+* For clipboard code: **only call `GlobalFree` on error paths**. If `SetClipboardData` succeeds, Windows owns the `HGLOBAL` and you must not free it.
+
+### Alternative: use `winapi` just for `GlobalFree`
+
+Add `winapi` and import `winapi::um::winbase::GlobalFree` (works, but adds another Windows binding crate).
+
 ---
 
-# 7. 扩展里怎么用它（接入点）
+The warnings (`unused import`, `unused variable`) aren’t stopping the build; the missing `GlobalFree` symbol is the blocker.
 
-## 7.1 选择 python 路径 & 脚本路径
+[1]: https://docs.rs/windows-sys/0.61.2/windows_sys/Win32/System/Memory/index.html "windows_sys::Win32::System::Memory - Rust"
+的梦，日志里已经把原因钉死了：**不是 Win7 兼容/WaitOnAddress 那条线**，而是你在 `kp_win.rs` 里 `use windows_sys::Win32::System::Memory::GlobalFree` ——但在你当前实际参与编译的 `windows-sys` 版本/特性组合下，`Win32::System::Memory` 这个模块里 **根本没有导出 `GlobalFree`**，所以直接 E0432。你贴的错误是：
 
-你通常有三种：
-
-1. 扩展自带 python（最稳）
-2. 扩展自带 venv
-3. 用系统 python（最不稳，用户环境千奇百怪）
-
-建议：**你现在既然“内置 py 环境”了，就固定用内置 python.exe**。
-
-```ts
-const pythonExe = context.asAbsolutePath("py/python.exe"); // 示例
-const brokerScript = context.asAbsolutePath("py/vix_broker_singleton.py");
-const implScript = context.asAbsolutePath("py/your_big_script.py");
 ```
-
-## 7.2 在“真正需要功能时”再 ensureConnected
-
-比如用户触发 command：
-
-```ts
-const broker = new BrokerClient(context, pythonExe, brokerScript, implScript);
-
-context.subscriptions.push({ dispose: () => broker.dispose() });
-
-context.subscriptions.push(
-  vscode.commands.registerCommand("vix.playKope", async () => {
-    await broker.ensureConnected();
-    broker.startHeartbeat(20000); // 20s
-    await broker.call("play_sfx", { category: "kope", idx: -1 });
-  })
-);
+error[E0432]: unresolved import `windows_sys::Win32::System::Memory::GlobalFree`
+--> kp_win.rs:883:59
+no `GlobalFree` in `Win32::System::Memory`
 ```
 
 ---
 
-# 8. 心跳与 TTL 参数怎么配（你现在的 Broker：TTL=80s）
+## 为什么会这样（最关键点）
 
-推荐：
+你 `Cargo.toml` 里声明的是：
 
-* Client heartbeat：**20s**（或 15~30s）
-* Broker TTL：**80s**（你现在就是）
-* 扫描间隔：5s（你现在就是）
-
-只要满足：`TTL >= 心跳间隔 * 2` 就很稳。
-
----
-
-# 9. 多窗口并发 spawn 会不会炸？
-
-不会。原因：
-
-* 多窗口同时 spawn：只会有 1 个 broker 抢到独占 endpoint
-* 其余进程会发现“BROKER_ALREADY_RUNNING”然后立刻退出
-
-你在 Client 侧做了 3 秒节流，会让体验更平滑，但不是必需。
-
----
-
-# 10. 关闭策略（不要追求“最后一扇窗关立刻退出”）
-
-正确做法：
-
-* **不要依赖窗口 close 事件**（可能崩溃、被 kill、VS Code 强杀）
-* Broker 只看：**TTL 内有没有 ping**
-* 最后一个窗口关掉后：最多 TTL 秒内 Broker 自杀退出
-  这就是现实系统里“体验上完美”的最优解
-
-如果你想“尽力更快退出”，窗口退出时可以发：
-
-* `shutdown`（但千万不要依赖它一定执行）
-
----
-
-# 11. Debug / 排错清单（最常见坑）
-
-1. **endpoint.json/token.txt 没生成**
-
-* 说明 broker 根本没跑起来
-* 检查 spawn 的 python 路径、脚本路径、权限、stderr（你现在 stdio ignore，排错时可以临时改成 pipe）
-
-2. **连上了但 hello unauthorized**
-
-* token 没读对（读错目录 or 读到旧 token）
-* token.txt 被清空或编码异常
-
-3. **连上后偶发断线**
-
-* 系统休眠/唤醒导致 socket 断
-* 你的心跳逻辑会自动重连并自愈（这是预期）
-
-4. **Windows pipe 名称/路径不一致**
-
-* 所以我强烈推荐：**永远读 endpoint.json**，不要自己算 pipe 名
-
----
-
-# 12. 你现在这套是不是“理论最优”？
-
-在工程上，这就是业界常用的“最优范式”：
-
-* **独占资源**做单例（硬保证）
-* **IPC** 统一入口（多窗口共享）
-* **租约/心跳**决定生死（抗崩溃/强杀/休眠）
-
-这已经是“真实系统里能做到的上限”，不会再被 `ppid/stdin EOF` 那类脆弱信号拖下水。
-
-
-
-在你这份代码里，`endpoint.json` / `token.txt` 的落盘位置**跟 IDE/扩展安装目录无关**，只跟“当前用户的系统缓存目录 + 固定子目录名”有关，所以多个 AI IDE（VS Code / Cursor / Windsurf…）只要在**同一个用户会话**里跑，默认就是**共享同一份**文件。
-
-下面按你代码 `_get_endpoint_dir()` 的逻辑，把三大平台的实际路径讲清楚（含 fallback）。
-
----
-
-## 1) Windows：优先用 LOCALAPPDATA，其次 APPDATA，再不行用 temp
-
-代码：
-
-```py
-base = LOCALAPPDATA or APPDATA or tempfile.gettempdir()
-dir  = base / "vix_audio_broker"
-files: endpoint.json / token.txt
+```toml
+windows-sys = { version = "0.59", features = [ ... "Win32_System_Memory", ... ] }
 ```
 
-所以通常是：
+但日志里显示你这次编译时同时出现了：
 
-* **endpoint.json**
-  `%LOCALAPPDATA%\vix_audio_broker\endpoint.json`
-* **token.txt**
-  `%LOCALAPPDATA%\vix_audio_broker\token.txt`
+* `Compiling windows-sys v0.61.2`
+* `Compiling windows-sys v0.59.0`
 
-常见展开示例（按用户名不同）：
+也就是说：**依赖树里拉进来了两个 windows-sys**（0.59 和 0.61.2），而且你的代码 `use windows_sys::...` 只会绑定到 *Cargo 最终解析到的那个 crate 实例*（通常是你直接依赖的 0.59），但某些模块的 re-export / cfg / feature 在不同版本里确实会有差异。
 
-* `C:\Users\<You>\AppData\Local\vix_audio_broker\endpoint.json`
-* `C:\Users\<You>\AppData\Local\vix_audio_broker\token.txt`
-
-如果某些环境没有 `LOCALAPPDATA`（少见）：
-
-* `%APPDATA%\vix_audio_broker\...`（Roaming）
-
-再不行（极端/沙盒环境）：
-
-* `C:\Temp\vix_audio_broker\...` 或系统 temp 目录下
+更关键的是：在 `windows-sys` / `windows` 系列里，有些 Win32 API 的函数符号**并不总是以你想的名字出现在那个路径里**（可能在 `Win32::Foundation`、或者需要额外 feature，或者干脆该版本的 sys crate没生成该符号）。
 
 ---
 
-## 2) Linux / macOS：优先 XDG_CACHE_HOME，否则 ~/.cache，再不行 temp
+## 你应该怎么修（给你 3 个稳的方案，按推荐顺序）
 
-代码：
+### 方案 A（最推荐）：别 import GlobalFree；用 `GlobalAlloc(GHND)` 分配的内存 **不需要你手动 GlobalFree**
 
-```py
-base = XDG_CACHE_HOME or ~/.cache
-dir  = base / "vix_audio_broker"
-files: endpoint.json / token.txt
+在 Win32 剪贴板里有个经典规则：
+
+* 你 `SetClipboardData(CF_HDROP, hMem)` 成功后，**系统接管该内存句柄的所有权**，你不能再 free 它。
+* 只有在 `SetClipboardData` 失败时，你才应该释放你自己分配的内存。
+
+你现在的代码里也写了这句注释：
+
+```rust
+// Note: Don't GlobalFree after successful SetClipboardData - system owns it now
 ```
 
-因此：
+因此你对 `GlobalFree` 的唯一用途就是“失败时清理”。
+那你可以直接改成：失败时调用 `GlobalUnlock` + `GlobalFree` 的逻辑，换成 **`GlobalFree` 用 FFI 自己声明**（见方案 B），或者更简单：**失败时用 `windows_sys::Win32::Foundation::LocalFree` / 或者直接 `GlobalFree` 的 extern**。
 
-* **Linux（常见）**
-
-  * `$XDG_CACHE_HOME/vix_audio_broker/endpoint.json`（如果设了 XDG）
-  * 否则：`~/.cache/vix_audio_broker/endpoint.json`
-  * `token.txt` 同目录
-
-* **macOS（注意）**
-  你的代码**不会自动用** `~/Library/Caches`（除非你自己把 `XDG_CACHE_HOME` 指过去），所以默认是：
-
-  * `~/.cache/vix_audio_broker/endpoint.json`
-  * `~/.cache/vix_audio_broker/token.txt`
-
-如果 `~/.cache` 创建失败才会 fallback：
-
-* `tempfile.gettempdir()/vix_audio_broker/...`（通常是 `/tmp/...`）
+但如果你想完全避免 `GlobalFree`：也可以在失败分支直接调用 `windows_sys::Win32::System::Memory::GlobalFree` 的替代 API ——不过你现在就是找不到这个符号，所以要么换路径，要么自己声明。
 
 ---
 
-## 3) IPC 地址文件里写的“真正连接地址”在哪里？
+### 方案 B（最稳、最不依赖 windows-sys 生成）：自己声明 `GlobalFree`，别从 windows-sys import
 
-### (A) Linux/mac：Unix socket 本体在 tempdir
+在 `#[cfg(windows)] mod win { ... }` 里加一个 extern，直接链接 `kernel32`（Win7/Win10 都有）：
 
-你 broker 的 unix socket 路径是：
+```rust
+#[cfg(windows)]
+mod win {
+    use super::*;
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GHND};
+    use windows_sys::Win32::Foundation::HGLOBAL;
 
-```py
-/tmp/vix_audio_broker_<uid>.sock
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalFree(hMem: HGLOBAL) -> HGLOBAL;
+    }
+
+    ...
+    // 失败时：
+    unsafe { GlobalFree(h_mem as HGLOBAL); }
+}
 ```
 
-准确点说是 `tempfile.gettempdir()` 下，比如：
+注意 `windows_sys` 里 `HGLOBAL` 通常在 `Win32::Foundation`，你别从 Memory 里拿类型。
 
-* Linux/mac：`/tmp/vix_audio_broker_501.sock`（uid=501 举例）
+这招的优点：
 
-然后 `endpoint.json` 里会写：
+* 不管 windows-sys 版本怎么变，你都能拿到 GlobalFree。
+* Win7 也没问题（kernel32 里一直有）。
 
-```json
-{ "family": "unix", "path": "/tmp/vix_audio_broker_501.sock", ... }
+---
+
+### 方案 C（你想保持“全 windows-sys 方式”）：改导入路径/特性并统一版本
+
+如果你坚持 `windows_sys::...::GlobalFree`，那要做两件事：
+
+1. **锁死依赖树只用一个 windows-sys 版本**（否则很容易出现“你以为有，实际上那版没有”的分裂）
+   在 Cargo.toml 加 patch（把所有 windows-sys 统一到 0.59.0 或 0.61.2 之一）：
+
+```toml
+[patch.crates-io]
+windows-sys = "=0.59.0"
 ```
 
-### (B) Windows：现在用 TCP 127.0.0.1:port
+或统一到 `=0.61.2`，但你自己代码要跟着调整。
 
-`endpoint.json` 里会是：
+2. 找到 `GlobalFree` 在该版本对应的真实导出位置（有时在 `Win32::Foundation` 或者根本不导出，需要自己 extern）
+   由于你现在日志已经证明 `Win32::System::Memory` 下没有 `GlobalFree`，所以这个方案通常最终也会逼你走回方案 B。
 
-```json
-{ "family": "tcp", "host": "127.0.0.1", "port": 38xxx, ... }
+---
+
+## 顺便：你 workflow 里还有一个逻辑小坑（但这次不是它导致失败）
+
+你 job 名是 “Build aarch64-pc-windows-msvc”，但是脚本里：
+
+```bash
+if [[ "aarch64-pc-windows-msvc" == *"win7"* ]]; then
+  # Win7 target...
+elif [[ "windows-2022" == *"windows"* ]]; then
+  # ARM64 Windows stable ...
 ```
 
-> 你前面提到 Named Pipe 的版本：那时 `endpoint.json` 会写 `family:"pipe"` + `name:"\\\\.\\pipe\\xxx"` 之类；但你当前这份代码是 TCP。
+也就是说 **ARM64 job 永远走 stable 分支**，不会走 nightly+build-std 分支（这倒是合理）。
+这次失败就是 stable 编译阶段的 `GlobalFree` 导入错误。
 
 ---
 
-## 4) 多 AI IDE / 多扩展目录时，会不会各写各的、互相找不到？
+## 你现在该做的最小改动（我建议你直接用 B）
 
-**只要满足这两条，默认就不会：**
+把 `GlobalFree` 从 `use windows_sys::Win32::System::Memory::{... GlobalFree ...}` 里去掉，然后按 **方案 B** 在 `mod win` 里加 extern 的 `GlobalFree`，并且只在 `SetClipboardData` 失败时调用它。
 
-1. 都在同一个 OS 用户下运行（同一套 `LOCALAPPDATA` / `HOME`）
-2. `ENDPOINT_DIRNAME`（你这里是 `vix_audio_broker`）保持一致
+这样你：
 
-因为落盘目录完全不依赖 `__file__` / 扩展安装路径。
+* ARM64 Windows（aarch64-pc-windows-msvc）立刻能过编译；
+* x64/i686 也能过；
+* Win7 target 那条线之后再继续处理（build-std / target add 等）。
 
----
-
-## 5) Node/VS Code 侧应该怎么找这些文件（必须跟 Python 一致）
-
-建议 Node 侧完全照抄 Python 的“找目录规则”，不要自作主张换成 extension storage。
-
-最小等价规则：
-
-* Windows：`process.env.LOCALAPPDATA || process.env.APPDATA || os.tmpdir()`
-* Linux/mac：`process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache")`，如果创建失败再 `os.tmpdir()`
-
-如果你要我把这个写进“接入文档”，我可以直接给你一段 Node 的 `getEndpointDir()` 代码（跟你 Python 逻辑 1:1 对齐），这样你不会踩到“不同 IDE 目录不同导致找不到”的坑。
-
----
-
-### 一个你可能很快会遇到的坑（提前提醒）
-
-你 Windows 端口的“初始 hash salt”里含了 `sys.executable` 和 `__file__`。这会导致**不同打包方式/不同 IDE 内置 python 路径**时，“默认端口候选”不同。
-不过你现在**优先读 endpoint.json**，并且 `_create_listen_socket()` 也会优先沿用 endpoint.json 里的旧端口，所以多数情况下没事；只是“第一次同时起多个 IDE 都在抢启动”的时候，端口漂移概率会变大一点。
-
-如果你想把“启动争抢”也做到更稳，我建议后面把 salt 简化成：`APP_ID + 用户 SID/uid` 就够了。
-
-需要的话我可以给你一个“完全不受 IDE/路径影响”的 salt 方案。
-
-
+如果你愿意，把你 `kp_win.rs` 里 `set_files()` 这一段（从 `GlobalAlloc` 到 `SetClipboardData` 的部分）贴出来，我可以按你“对齐 Python 行为”的要求，把失败清理、Unlock/Free、错误返回字段顺序都给你一起整理干净。
