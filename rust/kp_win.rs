@@ -1372,9 +1372,9 @@ mod win {
             let content_size = content_bytes.len() * 2; // UTF-16 = 2 bytes per char
             let total_size = offset + content_size;
 
-            // Allocate global memory
-            let h_mem = GlobalAlloc(GHND, total_size);
-            if h_mem == std::ptr::null_mut() {
+            // Allocate global memory (h_mem is handle, not pointer)
+            let h_mem: isize = GlobalAlloc(GHND, total_size) as isize;
+            if h_mem == 0 {
                 CloseClipboard();
                 return PyV::Obj(vec![
                     ("success".to_string(), PyV::Bool(false)),
@@ -1382,9 +1382,10 @@ mod win {
                 ]);
             }
 
-            let ptr = GlobalLock(h_mem);
-            if ptr == std::ptr::null_mut() {
-                GlobalFree(h_mem as isize);
+            // Lock to get pointer (separate from handle)
+            let ptr = GlobalLock(h_mem as *mut core::ffi::c_void);
+            if ptr.is_null() {
+                GlobalFree(h_mem);
                 CloseClipboard();
                 return PyV::Obj(vec![
                     ("success".to_string(), PyV::Bool(false)),
@@ -1409,11 +1410,11 @@ mod win {
                 content_size,
             );
 
-            GlobalUnlock(h_mem);
+            GlobalUnlock(h_mem as *mut core::ffi::c_void);
 
             // Set clipboard data
-            if SetClipboardData(CF_HDROP, h_mem) == std::ptr::null_mut() {
-                GlobalFree(h_mem as isize);
+            if SetClipboardData(CF_HDROP, h_mem as *mut core::ffi::c_void) == std::ptr::null_mut() {
+                GlobalFree(h_mem);
                 CloseClipboard();
                 return PyV::Obj(vec![
                     ("success".to_string(), PyV::Bool(false)),
