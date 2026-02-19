@@ -1384,7 +1384,7 @@ mod win {
 
             let ptr = GlobalLock(h_mem);
             if ptr == std::ptr::null_mut() {
-                GlobalFree(h_mem);
+                GlobalFree(h_mem as isize);
                 CloseClipboard();
                 return PyV::Obj(vec![
                     ("success".to_string(), PyV::Bool(false)),
@@ -1413,7 +1413,7 @@ mod win {
 
             // Set clipboard data
             if SetClipboardData(CF_HDROP, h_mem) == std::ptr::null_mut() {
-                GlobalFree(h_mem);
+                GlobalFree(h_mem as isize);
                 CloseClipboard();
                 return PyV::Obj(vec![
                     ("success".to_string(), PyV::Bool(false)),
