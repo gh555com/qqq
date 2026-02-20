@@ -1952,10 +1952,12 @@ def _get_unix_socket_path() -> str:
     name = f"{ENDPOINT_DIRNAME}_{uid}.sock"
     return str(Path(tempfile.gettempdir()) / name)
 
-# ---------------- Windows Named Pipe (rock-solid singleton) -------------------
+# ---------------- Windows Named Pipe (pywin32 only) -------------------
 _PIPE_NAME = None
 
-if _IS_WINDOWS and _HAS_PYWIN32:
+if _IS_WINDOWS:
+    if not _HAS_PYWIN32:
+        _log("[FATAL] pywin32 required for Windows Named Pipe IPC")
     # pywin32 constants
     INVALID_HANDLE_VALUE = -1
     ERROR_IO_PENDING = 997
@@ -1964,133 +1966,32 @@ if _IS_WINDOWS and _HAS_PYWIN32:
     ERROR_NO_DATA = 232
     WAIT_OBJECT_0 = 0
     WAIT_TIMEOUT = 258
-elif _IS_WINDOWS:
-    # Fallback: ctypes definitions (less stable in daemon threads)
-    INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
-    ERROR_IO_PENDING = 997
-    ERROR_PIPE_CONNECTED = 535
-    ERROR_BROKEN_PIPE = 109
-    ERROR_NO_DATA = 232
-    WAIT_OBJECT_0 = 0
-    WAIT_TIMEOUT = 258
-
-    kernel32.GetLastError.restype = wintypes.DWORD
-    CreateNamedPipeW = kernel32.CreateNamedPipeW
-    CreateNamedPipeW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
-    CreateNamedPipeW.restype = wintypes.HANDLE
-    ConnectNamedPipe = kernel32.ConnectNamedPipe
-    ConnectNamedPipe.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-    ConnectNamedPipe.restype = wintypes.BOOL
-    DisconnectNamedPipe = kernel32.DisconnectNamedPipe
-    DisconnectNamedPipe.argtypes = [wintypes.HANDLE]
-    DisconnectNamedPipe.restype = wintypes.BOOL
-    ReadFile = kernel32.ReadFile
-    ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
-    ReadFile.restype = wintypes.BOOL
-    WriteFile = kernel32.WriteFile
-    WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
-    WriteFile.restype = wintypes.BOOL
-    CloseHandle = kernel32.CloseHandle
-    CloseHandle.argtypes = [wintypes.HANDLE]
-    CloseHandle.restype = wintypes.BOOL
-    CreateFileW = kernel32.CreateFileW
-    CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    CreateFileW.restype = wintypes.HANDLE
-    WaitNamedPipeW = kernel32.WaitNamedPipeW
-    WaitNamedPipeW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
-    WaitNamedPipeW.restype = wintypes.BOOL
-    CreateEventW = kernel32.CreateEventW
-    CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
-    CreateEventW.restype = wintypes.HANDLE
-    WaitForSingleObject = kernel32.WaitForSingleObject
-    WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-    WaitForSingleObject.restype = wintypes.DWORD
-    GetOverlappedResult = kernel32.GetOverlappedResult
-    GetOverlappedResult.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), wintypes.BOOL]
-    GetOverlappedResult.restype = wintypes.BOOL
-    CancelIoEx = getattr(kernel32, "CancelIoEx", None)
-    if CancelIoEx:
-        CancelIoEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-        CancelIoEx.restype = wintypes.BOOL
-    # ULONG_PTR compat
-    if hasattr(wintypes, 'ULONG_PTR'):
-        _ULONG_PTR = wintypes.ULONG_PTR
-    else:
-        import struct
-        _ULONG_PTR = ctypes.c_uint64 if struct.calcsize('P') == 8 else ctypes.c_uint32
-    class OVERLAPPED(ctypes.Structure):
-        _fields_ = [("Internal", _ULONG_PTR), ("InternalHigh", _ULONG_PTR), ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
 
 def _get_current_user_sid() -> str:
     """
     Get current user's SID (Security Identifier) - unique and immutable
     Falls back to USERNAME if SID cannot be obtained
     """
-    if _HAS_PYWIN32:
-        try:
-            import win32security
-            import win32api
-            # Get current process token
-            token = win32security.OpenProcessToken(
-                win32api.GetCurrentProcess(),
-                win32security.TOKEN_QUERY
-            )
-            # Get user SID from token
-            user_sid, _ = win32security.GetTokenInformation(
-                token,
-                win32security.TokenUser
-            )
-            # Convert SID to string (e.g., "S-1-5-21-xxx-xxx-xxx-1001")
-            sid_str = win32security.ConvertSidToStringSid(user_sid)
-            # Use last part of SID (the user RID) for shorter pipe name
-            # e.g., "S-1-5-21-123-456-789-1001" -> "1001"
-            return sid_str.split('-')[-1]
-        except Exception as e:
-            _log(f"[SID] Failed to get SID via pywin32: {e}")
-
-    # ctypes fallback
     try:
-        import ctypes
-        from ctypes import wintypes
-
-        advapi32 = ctypes.windll.advapi32
-        kernel32 = ctypes.windll.kernel32
-
+        import win32security
+        import win32api
         # Get current process token
-        TOKEN_QUERY = 0x0008
-        token = wintypes.HANDLE()
-        if not advapi32.OpenProcessToken(
-            kernel32.GetCurrentProcess(),
-            TOKEN_QUERY,
-            ctypes.byref(token)
-        ):
-            raise OSError("OpenProcessToken failed")
-
-        try:
-            # Get token user info size
-            TokenUser = 1
-            size = wintypes.DWORD(0)
-            advapi32.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
-
-            # Get token user info
-            buffer = ctypes.create_string_buffer(size.value)
-            if not advapi32.GetTokenInformation(token, TokenUser, buffer, size, ctypes.byref(size)):
-                raise OSError("GetTokenInformation failed")
-
-            # Extract SID pointer (first field of TOKEN_USER structure)
-            sid_ptr = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents
-
-            # Convert SID to string
-            sid_str_ptr = ctypes.c_wchar_p()
-            if advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(sid_str_ptr)):
-                sid_str = sid_str_ptr.value
-                kernel32.LocalFree(sid_str_ptr)
-                # Use last part (RID)
-                return sid_str.split('-')[-1]
-        finally:
-            kernel32.CloseHandle(token)
+        token = win32security.OpenProcessToken(
+            win32api.GetCurrentProcess(),
+            win32security.TOKEN_QUERY
+        )
+        # Get user SID from token
+        user_sid, _ = win32security.GetTokenInformation(
+            token,
+            win32security.TokenUser
+        )
+        # Convert SID to string (e.g., "S-1-5-21-xxx-xxx-xxx-1001")
+        sid_str = win32security.ConvertSidToStringSid(user_sid)
+        # Use last part of SID (the user RID) for shorter pipe name
+        # e.g., "S-1-5-21-123-456-789-1001" -> "1001"
+        return sid_str.split('-')[-1]
     except Exception as e:
-        _log(f"[SID] Failed to get SID via ctypes: {e}")
+        _log(f"[SID] Failed to get SID via pywin32: {e}")
 
     # Ultimate fallback: use USERNAME (less stable but works)
     return _sanitize_id(os.environ.get("USERNAME") or os.environ.get("USER") or "user")
@@ -2126,168 +2027,89 @@ def _try_connect_unix(sock_path: str, token: str) -> bool:
         return False
 
 def _win_pipe_write(h, b: bytes) -> bool:
-    """Write to Named Pipe using pywin32 (no ctypes deadlock)"""
+    """Write to Named Pipe using pywin32"""
     if not b:
         return True
-    if _HAS_PYWIN32:
-        try:
-            win32file.WriteFile(h, b)
-            return True
-        except:
-            return False
-    else:
-        # ctypes fallback
-        sent = wintypes.DWORD(0)
-        ok = WriteFile(wintypes.HANDLE(h), ctypes.c_char_p(b), len(b), ctypes.byref(sent), None)
-        return bool(ok) and int(sent.value) == len(b)
+    try:
+        win32file.WriteFile(h, b)
+        return True
+    except:
+        return False
 
 def _win_pipe_read_some_overlapped(h, timeout_ms: int = 500):
-    """Read from Named Pipe using pywin32 (simplified, no overlapped for stability)"""
-    if _HAS_PYWIN32:
+    """Read from Named Pipe using pywin32"""
+    try:
+        # Use PeekNamedPipe to check data availability (non-blocking check)
         try:
-            # Use PeekNamedPipe to check data availability (non-blocking check)
-            try:
+            _, avail, _ = win32pipe.PeekNamedPipe(h, 0)
+            if avail == 0:
+                # No data available, wait a bit and return empty
+                time.sleep(timeout_ms / 1000.0)
                 _, avail, _ = win32pipe.PeekNamedPipe(h, 0)
                 if avail == 0:
-                    # No data available, wait a bit and return empty
-                    time.sleep(timeout_ms / 1000.0)
-                    _, avail, _ = win32pipe.PeekNamedPipe(h, 0)
-                    if avail == 0:
-                        return b""
-            except pywintypes.error as e:
-                if e.winerror in (ERROR_BROKEN_PIPE, ERROR_NO_DATA, 6):  # 6=ERROR_INVALID_HANDLE
-                    return None
+                    return b""
+        except pywintypes.error as e:
+            if e.winerror in (ERROR_BROKEN_PIPE, ERROR_NO_DATA, 6):  # 6=ERROR_INVALID_HANDLE
                 return None
-
-            # Data available, read it
-            try:
-                hr, data = win32file.ReadFile(h, min(avail, 65536))
-                if hr == 0:
-                    return data
-                return None
-            except pywintypes.error as e:
-                if e.winerror in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
-                    return None
-                return None
-        except:
             return None
-    else:
-        # ctypes fallback (may deadlock in daemon threads)
-        nread = wintypes.DWORD(0)
-        buf = ctypes.create_string_buffer(65536)
-        ov = OVERLAPPED()
-        ov.hEvent = CreateEventW(None, True, False, None)
-        if not ov.hEvent:
-            return b""
+
+        # Data available, read it
         try:
-            ok = ReadFile(wintypes.HANDLE(h), buf, 65536, ctypes.byref(nread), ctypes.byref(ov))
-            if ok:
-                return buf.raw[:int(nread.value)]
-            err = int(kernel32.GetLastError())
-            if err == ERROR_BROKEN_PIPE or err == ERROR_NO_DATA:
+            hr, data = win32file.ReadFile(h, min(avail, 65536))
+            if hr == 0:
+                return data
+            return None
+        except pywintypes.error as e:
+            if e.winerror in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
                 return None
-            if err != ERROR_IO_PENDING:
-                return None
-            rc = int(WaitForSingleObject(ov.hEvent, timeout_ms))
-            if rc == WAIT_TIMEOUT:
-                if CancelIoEx:
-                    try:
-                        CancelIoEx(wintypes.HANDLE(h), ctypes.byref(ov))
-                    except:
-                        pass
-                return b""
-            if rc != WAIT_OBJECT_0:
-                return None
-            ok2 = GetOverlappedResult(wintypes.HANDLE(h), ctypes.byref(ov), ctypes.byref(nread), False)
-            if not ok2:
-                return None
-            return buf.raw[:int(nread.value)]
-        finally:
-            try:
-                CloseHandle(ov.hEvent)
-            except:
-                pass
+            return None
+    except:
+        return None
 
 def _try_connect_pipe(pipe_name: str, token: str) -> bool:
     """Try to connect to existing Named Pipe broker using pywin32"""
-    if _HAS_PYWIN32:
+    try:
         try:
-            try:
-                win32pipe.WaitNamedPipe(pipe_name, 250)
-            except pywintypes.error:
-                return False
-            try:
-                h = win32file.CreateFile(
-                    pipe_name,
-                    win32file.GENERIC_READ | win32file.GENERIC_WRITE,
-                    0, None,
-                    win32file.OPEN_EXISTING,
-                    0, None
-                )
-            except pywintypes.error:
-                return False
-            try:
-                req = {"_id": 0, "action": "hello", "client_id": "probe", "token": token}
-                if not _win_pipe_write(h, (json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8")):
-                    return False
-                inbuf = bytearray()
-                t0 = _now_mono()
-                while (_now_mono() - t0) < 0.35:
-                    chunk = _win_pipe_read_some_overlapped(h, timeout_ms=80)
-                    if chunk is None:
-                        return False
-                    if chunk:
-                        inbuf += chunk
-                        idx = inbuf.find(b"\n")
-                        if idx >= 0:
-                            line = bytes(inbuf[:idx]).decode("utf-8", errors="ignore").strip()
-                            if not line:
-                                return False
-                            obj = json.loads(line)
-                            return bool(obj.get("ok")) and obj.get("app_id") == APP_ID
-                return False
-            finally:
-                try:
-                    win32api.CloseHandle(h)
-                except:
-                    pass
-        except:
+            win32pipe.WaitNamedPipe(pipe_name, 250)
+        except pywintypes.error:
             return False
-    else:
-        # ctypes fallback
         try:
-            if not WaitNamedPipeW(pipe_name, 250):
-                return False
-            h = CreateFileW(pipe_name, 0x80000000 | 0x40000000, 0, None, 3, 0, None)  # GENERIC_READ|WRITE, OPEN_EXISTING
-            if int(h) == INVALID_HANDLE_VALUE:
-                return False
-            try:
-                req = {"_id": 0, "action": "hello", "client_id": "probe", "token": token}
-                if not _win_pipe_write(int(h), (json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8")):
-                    return False
-                inbuf = bytearray()
-                t0 = _now_mono()
-                while (_now_mono() - t0) < 0.35:
-                    chunk = _win_pipe_read_some_overlapped(int(h), timeout_ms=80)
-                    if chunk is None:
-                        return False
-                    if chunk:
-                        inbuf += chunk
-                        idx = inbuf.find(b"\n")
-                        if idx >= 0:
-                            line = bytes(inbuf[:idx]).decode("utf-8", errors="ignore").strip()
-                            if not line:
-                                return False
-                            obj = json.loads(line)
-                            return bool(obj.get("ok")) and obj.get("app_id") == APP_ID
-                return False
-            finally:
-                try:
-                    CloseHandle(h)
-                except:
-                    pass
-        except:
+            h = win32file.CreateFile(
+                pipe_name,
+                win32file.GENERIC_READ | win32file.GENERIC_WRITE,
+                0, None,
+                win32file.OPEN_EXISTING,
+                0, None
+            )
+        except pywintypes.error:
             return False
+        try:
+            req = {"_id": 0, "action": "hello", "client_id": "probe", "token": token}
+            if not _win_pipe_write(h, (json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8")):
+                return False
+            inbuf = bytearray()
+            t0 = _now_mono()
+            while (_now_mono() - t0) < 0.35:
+                chunk = _win_pipe_read_some_overlapped(h, timeout_ms=80)
+                if chunk is None:
+                    return False
+                if chunk:
+                    inbuf += chunk
+                    idx = inbuf.find(b"\n")
+                    if idx >= 0:
+                        line = bytes(inbuf[:idx]).decode("utf-8", errors="ignore").strip()
+                        if not line:
+                            return False
+                        obj = json.loads(line)
+                        return bool(obj.get("ok")) and obj.get("app_id") == APP_ID
+            return False
+        finally:
+            try:
+                win32api.CloseHandle(h)
+            except:
+                pass
+    except:
+        return False
 
 # ---- OS-level singleton mutex ----
 _BROKER_MUTEX_HANDLE = None  # Windows: Named Mutex handle
@@ -2306,48 +2128,25 @@ def _acquire_broker_mutex() -> bool:
 
     if platform.system() == "Windows":
         # Windows: Named Mutex
-        if _HAS_PYWIN32:
-            try:
-                import win32event
-                import win32api
-                import winerror
-                # CreateMutex: if mutex exists and is owned, we get ERROR_ALREADY_EXISTS
-                _BROKER_MUTEX_HANDLE = win32event.CreateMutex(None, True, _BROKER_MUTEX_NAME)
-                last_error = win32api.GetLastError()
-                if last_error == winerror.ERROR_ALREADY_EXISTS:
-                    # Another instance owns the mutex
-                    try:
-                        win32api.CloseHandle(_BROKER_MUTEX_HANDLE)
-                    except:
-                        pass
-                    _BROKER_MUTEX_HANDLE = None
-                    return False
-                return True
-            except Exception as e:
-                _log(f"[Mutex] pywin32 CreateMutex failed: {e}")
-                return True  # 失败时不阻塞，继续尝试
-        else:
-            # ctypes fallback
-            try:
-                CreateMutexW = ctypes.windll.kernel32.CreateMutexW
-                CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
-                CreateMutexW.restype = wintypes.HANDLE
-                GetLastError = ctypes.windll.kernel32.GetLastError
-                CloseHandle = ctypes.windll.kernel32.CloseHandle
-
-                ERROR_ALREADY_EXISTS = 183
-                h = CreateMutexW(None, True, _BROKER_MUTEX_NAME)
-                if h:
-                    last_error = GetLastError()
-                    if last_error == ERROR_ALREADY_EXISTS:
-                        CloseHandle(h)
-                        return False
-                    _BROKER_MUTEX_HANDLE = h
-                    return True
-                return True  # CreateMutex 失败，不阻塞
-            except Exception as e:
-                _log(f"[Mutex] ctypes CreateMutex failed: {e}")
-                return True
+        try:
+            import win32event
+            import win32api
+            import winerror
+            # CreateMutex: if mutex exists and is owned, we get ERROR_ALREADY_EXISTS
+            _BROKER_MUTEX_HANDLE = win32event.CreateMutex(None, True, _BROKER_MUTEX_NAME)
+            last_error = win32api.GetLastError()
+            if last_error == winerror.ERROR_ALREADY_EXISTS:
+                # Another instance owns the mutex
+                try:
+                    win32api.CloseHandle(_BROKER_MUTEX_HANDLE)
+                except:
+                    pass
+                _BROKER_MUTEX_HANDLE = None
+                return False
+            return True
+        except Exception as e:
+            _log(f"[Mutex] pywin32 CreateMutex failed: {e}")
+            return True  # Fail open to avoid blocking
     else:
         # Unix: flock
         try:
@@ -2378,11 +2177,8 @@ def _release_broker_mutex():
     if platform.system() == "Windows":
         if _BROKER_MUTEX_HANDLE:
             try:
-                if _HAS_PYWIN32:
-                    import win32api
-                    win32api.CloseHandle(_BROKER_MUTEX_HANDLE)
-                else:
-                    ctypes.windll.kernel32.CloseHandle(_BROKER_MUTEX_HANDLE)
+                import win32api
+                win32api.CloseHandle(_BROKER_MUTEX_HANDLE)
             except:
                 pass
             _BROKER_MUTEX_HANDLE = None
@@ -2438,33 +2234,52 @@ def _create_listen_endpoint(local_token: str):
         _write_endpoint_file(info)
         return ("unix", s, info)
 
-    # Windows: Named Pipe (now that _openAndHello direct-write bug is fixed)
+    # Windows: Named Pipe first, TCP fallback
     rid = _get_current_user_sid()
     pipe_name = f"\\\\.\\pipe\\{ENDPOINT_DIRNAME}_{rid}"
     global _PIPE_NAME
     _PIPE_NAME = pipe_name
 
-    _log(f"Creating Named Pipe: {pipe_name}")
+    _log(f"Trying Named Pipe: {pipe_name}")
     # Test create first pipe instance to verify we're the sole owner
     hPipe = _create_named_pipe_instance(pipe_name, first_instance=True)
-    if _is_invalid_handle(hPipe):
-        _log(f"[FATAL] Failed to create Named Pipe: {pipe_name}")
-        return None
+    if not _is_invalid_handle(hPipe):
+        _log(f"Named Pipe created successfully: {pipe_name}")
+        # Close the test handle - _pipe_accept_loop will create instances
+        _pipe_close_handle(hPipe)
 
-    _log(f"Named Pipe created successfully: {pipe_name}")
-    # Close the test handle - _pipe_accept_loop will create instances
-    _pipe_close_handle(hPipe)
+        info = {
+            "app_id": APP_ID,
+            "protocol": BROKER_PROTOCOL,
+            "family": "pipe",
+            "name": pipe_name,
+            "pid": os.getpid(),
+            "token_enabled": bool(ENABLE_LOCAL_TOKEN),
+        }
+        _write_endpoint_file(info)
+        return ("pipe", pipe_name, info)
+
+    # Named Pipe failed, fallback to TCP
+    _log(f"Named Pipe failed, fallback to TCP socket")
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(('127.0.0.1', 0))  # Let OS pick a free port
+    tcp_port = s.getsockname()[1]
+    s.listen(64)
+    s.settimeout(0.5)
 
     info = {
         "app_id": APP_ID,
         "protocol": BROKER_PROTOCOL,
-        "family": "pipe",
-        "name": pipe_name,
+        "family": "tcp",
+        "host": "127.0.0.1",
+        "port": tcp_port,
         "pid": os.getpid(),
         "token_enabled": bool(ENABLE_LOCAL_TOKEN),
     }
     _write_endpoint_file(info)
-    return ("pipe", pipe_name, info)  # Return pipe_name for accept loop
+    _log(f"TCP endpoint: 127.0.0.1:{tcp_port}")
+    return ("tcp", s, info)
 
 # ---------------- Lease state (monotonic) ----------------
 _BROKER_START_TS = _now_mono()
@@ -2692,20 +2507,14 @@ _ACTIVE_PIPE_LOCK = threading.Lock()
 def _pipe_close_handle(h):
     """Close pipe handle using pywin32"""
     try:
-        if _HAS_PYWIN32:
-            win32api.CloseHandle(h)
-        else:
-            CloseHandle(wintypes.HANDLE(h))
+        win32api.CloseHandle(h)
     except:
         pass
 
 def _disconnect_named_pipe(h):
     """Disconnect Named Pipe using pywin32"""
     try:
-        if _HAS_PYWIN32:
-            win32pipe.DisconnectNamedPipe(h)
-        else:
-            DisconnectNamedPipe(wintypes.HANDLE(h))
+        win32pipe.DisconnectNamedPipe(h)
     except:
         pass
 
@@ -2772,106 +2581,58 @@ def _pipe_client_loop(hPipe):
 
 def _create_named_pipe_instance(pipe_name: str, first_instance: bool):
     """Create Named Pipe instance using pywin32"""
-    if _HAS_PYWIN32:
-        openmode = win32pipe.PIPE_ACCESS_DUPLEX | win32file.FILE_FLAG_OVERLAPPED
-        if first_instance:
-            openmode |= 0x00080000  # FILE_FLAG_FIRST_PIPE_INSTANCE
-        pipemode = win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT
-        try:
-            h = win32pipe.CreateNamedPipe(
-                pipe_name,
-                openmode,
-                pipemode,
-                win32pipe.PIPE_UNLIMITED_INSTANCES,
-                65536,
-                65536,
-                0,
-                None
-            )
-            return h
-        except pywintypes.error:
-            return INVALID_HANDLE_VALUE
-    else:
-        # ctypes fallback
-        PIPE_ACCESS_DUPLEX = 0x00000003
-        FILE_FLAG_OVERLAPPED = 0x40000000
-        FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000
-        PIPE_TYPE_BYTE = 0x00000000
-        PIPE_READMODE_BYTE = 0x00000000
-        PIPE_WAIT = 0x00000000
-        PIPE_UNLIMITED_INSTANCES = 255
-        openmode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED
-        if first_instance:
-            openmode |= FILE_FLAG_FIRST_PIPE_INSTANCE
-        pipemode = PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT
-        h = CreateNamedPipeW(pipe_name, openmode, pipemode, PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, None)
-        return int(h)
+    openmode = win32pipe.PIPE_ACCESS_DUPLEX | win32file.FILE_FLAG_OVERLAPPED
+    if first_instance:
+        openmode |= 0x00080000  # FILE_FLAG_FIRST_PIPE_INSTANCE
+    pipemode = win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT
+    try:
+        h = win32pipe.CreateNamedPipe(
+            pipe_name,
+            openmode,
+            pipemode,
+            win32pipe.PIPE_UNLIMITED_INSTANCES,
+            65536,
+            65536,
+            0,
+            None
+        )
+        return h
+    except pywintypes.error:
+        return INVALID_HANDLE_VALUE
 
 def _pipe_wait_connect(hPipe, timeout_ms: int) -> int:
     """
     Wait for client connection (simplified, no overlapped for stability).
     Returns: 1=connected, 0=timeout, -1=error
     """
-    if _HAS_PYWIN32:
-        try:
-            # Use non-overlapped ConnectNamedPipe with short polling
-            start = time.monotonic()
-            while (time.monotonic() - start) * 1000 < timeout_ms:
-                try:
-                    win32pipe.ConnectNamedPipe(hPipe, None)
-                    return 1
-                except pywintypes.error as e:
-                    if e.winerror == ERROR_PIPE_CONNECTED:
-                        return 1
-                    if e.winerror == ERROR_IO_PENDING:
-                        # Pipe is in connecting state, wait a bit
-                        time.sleep(0.05)
-                        continue
-                    # Other error
-                    return -1
-            return 0  # Timeout
-        except:
-            return -1
-    else:
-        # ctypes fallback
-        ov = OVERLAPPED()
-        ov.hEvent = CreateEventW(None, True, False, None)
-        if not ov.hEvent:
-            return -1
-        try:
-            ok = ConnectNamedPipe(wintypes.HANDLE(hPipe), ctypes.byref(ov))
-            if ok:
-                return 1
-            err = int(kernel32.GetLastError())
-            if err == ERROR_PIPE_CONNECTED:
-                return 1
-            if err != ERROR_IO_PENDING:
-                return -1
-            rc = int(WaitForSingleObject(ov.hEvent, timeout_ms))
-            if rc == WAIT_TIMEOUT:
-                return 0
-            if rc != WAIT_OBJECT_0:
-                return -1
-            dummy = wintypes.DWORD(0)
-            ok2 = GetOverlappedResult(wintypes.HANDLE(hPipe), ctypes.byref(ov), ctypes.byref(dummy), False)
-            return 1 if ok2 else -1
-        finally:
+    try:
+        # Use non-overlapped ConnectNamedPipe with short polling
+        start = time.monotonic()
+        while (time.monotonic() - start) * 1000 < timeout_ms:
             try:
-                CloseHandle(ov.hEvent)
-            except:
-                pass
+                win32pipe.ConnectNamedPipe(hPipe, None)
+                return 1
+            except pywintypes.error as e:
+                if e.winerror == ERROR_PIPE_CONNECTED:
+                    return 1
+                if e.winerror == ERROR_IO_PENDING:
+                    # Pipe is in connecting state, wait a bit
+                    time.sleep(0.05)
+                    continue
+                # Other error
+                return -1
+        return 0  # Timeout
+    except:
+        return -1
 
 def _is_invalid_handle(h) -> bool:
-    """Check if handle is invalid (works with both pywin32 PyHANDLE and ctypes int)"""
+    """Check if handle is invalid"""
     if h is None:
         return True
-    if _HAS_PYWIN32:
-        try:
-            return int(h) == INVALID_HANDLE_VALUE or int(h) <= 0
-        except:
-            return True
-    else:
-        return h == INVALID_HANDLE_VALUE or h <= 0
+    try:
+        return int(h) == INVALID_HANDLE_VALUE or int(h) <= 0
+    except:
+        return True
 
 def _pipe_accept_loop(pipe_name: str):
     _log(f"[Accept] Starting accept loop for {pipe_name}")
@@ -2916,13 +2677,10 @@ def _pipe_accept_loop(pipe_name: str):
 
     if hPipe is not None:
         try:
-            if _HAS_PYWIN32:
-                try:
-                    win32file.CancelIoEx(hPipe, None)
-                except:
-                    pass
-            elif CancelIoEx:
-                CancelIoEx(wintypes.HANDLE(hPipe), None)
+            try:
+                win32file.CancelIoEx(hPipe, None)
+            except:
+                pass
         except:
             pass
         _disconnect_named_pipe(hPipe)
