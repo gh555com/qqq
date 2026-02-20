@@ -96,6 +96,18 @@ function escapeHtmlAttr(text) {
 }
 
 // ============================================================================
+// Thousand separator (locale-independent, avoid toLocaleString pitfalls)
+// ============================================================================
+function addThousandSep(num) {
+    const s = String(Math.floor(num));
+    const parts = [];
+    for (let i = s.length; i > 0; i -= 3) {
+        parts.unshift(s.slice(Math.max(0, i - 3), i));
+    }
+    return parts.join(',');
+}
+
+// ============================================================================
 // msgpack (optional) lazy load
 // ============================================================================
 let _msgpack = null;
@@ -2125,6 +2137,17 @@ class ClipboardHistorySidebarProvider {
             // --------------------------------------------------
 
             var vscode = acquireVsCodeApi();
+
+            // Thousand separator for webview (must be defined here, not in Extension Host)
+            function addThousandSep(num) {
+                var s = String(Math.floor(num));
+                var parts = [];
+                for (var i = s.length; i > 0; i -= 3) {
+                    parts.unshift(s.slice(Math.max(0, i - 3), i));
+                }
+                return parts.join(',');
+            }
+
             var el = {
                 historyContainer: document.getElementById('historyContainer'),
                 historyList: document.getElementById('historyList'),
@@ -2355,7 +2378,7 @@ class ClipboardHistorySidebarProvider {
                     var btnDel = document.createElement('button');
                     btnDel.className = 'action-mini-btn';
                     btnDel.dataset.action = 'delete';
-                    btnDel.textContent = '🗑️ ' + (item.size || 0).toLocaleString();
+                    btnDel.textContent = '🗑️ ' + addThousandSep(item.size || 0);
 
                     actions.appendChild(btnPin);
                     actions.appendChild(btnDel);
@@ -2840,7 +2863,7 @@ async function searchHistoryCommand(historyManager) {
             items.push({ label: q('q4.quickPick.separatorHistory'), kind: vscode.QuickPickItemKind.Separator });
             items.push(...results.map(it => ({
                 label: it.preview,
-                detail: ` ${formatTime(it.timestamp)}   📏 ${(it.size || 0).toLocaleString()}`,
+                detail: ` ${formatTime(it.timestamp)}   📏 ${addThousandSep(it.size || 0)}`,
                 id: it.id,
                 content: it.content,
                 isHistory: true

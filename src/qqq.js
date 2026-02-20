@@ -1023,6 +1023,63 @@ async function getDiskFree(drive = "C:") {
 }
 
 /**
+ * Batch get disk free space for multiple drives (single IPC call)
+ * @param {string[]} [drives] - drive letters, e.g. ["C:", "D:"]. If omitted, auto-detect.
+ * @returns {Promise<{success: boolean, data?: {[drive: string]: {free: number, total: number}}}>}
+ */
+async function getDiskFreeBatch(drives = null) {
+	const res = await tryEngineCall({
+		python: "disk_free_batch",
+		rust: "disk_free_batch"
+	}, { drives: drives }, 3000);
+
+	if (res && res.success && res.data) {
+		return res;
+	}
+
+	// Fallback: call getDiskFree for each drive
+	return getDiskFreeBatchFallback(drives);
+}
+
+/**
+ * Fallback: batch get disk free by calling JS native method directly (no IPC)
+ */
+async function getDiskFreeBatchFallback(drives = null) {
+	try {
+		// Auto-detect drives if not provided
+		if (!drives || drives.length === 0) {
+			if (process.platform === 'win32') {
+				const { execSync } = require('child_process');
+				const out = execSync('wmic logicaldisk get name', { encoding: 'utf8' });
+				drives = out.match(/[A-Z]:/g) || ['C:'];
+			} else {
+				drives = ['/'];
+			}
+		}
+
+		// Parallel query all drives using JS native method (no IPC, avoid cascade timeout)
+		const results = await Promise.all(
+			drives.map(async (d) => {
+				const info = await getDiskFreeJS(d); // ★ Use JS directly, not getDiskFree (which tries IPC again)
+				const letter = d.toUpperCase().replace(/[^A-Z]/g, '') || 'X';
+				return { letter, info };
+			})
+		);
+
+		const data = {};
+		for (const { letter, info } of results) {
+			if (info && info.success) {
+				data[letter] = { free: info.free, total: info.total };
+			}
+		}
+
+		return { success: true, data };
+	} catch (e) {
+		return { success: false, error: e.message };
+	}
+}
+
+/**
  * JS fallback: get remaining disk space
  */
 async function getDiskFreeJS(drive = "C:") {
@@ -2028,6 +2085,7 @@ const exported = {
 	getFolderInfo,
 	getPathSize,  // Extreme optimized version: only get size, do not count extensions
 	getDiskFree,  // Get remaining disk space
+	getDiskFreeBatch,  // Batch get disk free for all drives (single IPC call)
 	cancelScansJS,  // Cancel in-progress JS scans
 
 	// Delegate to h.js

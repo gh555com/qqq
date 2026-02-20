@@ -958,6 +958,28 @@ def get_disk_free(drive: str = None):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+def get_disk_free_batch(drives: list = None):
+    """
+    Batch query disk free space for multiple drives.
+    Returns: { "C": {free, total}, "D": {free, total}, ... }
+    """
+    result = {}
+    if not drives:
+        # Auto-detect drives on Windows
+        if _IS_WINDOWS:
+            import string
+            drives = [f"{d}:" for d in string.ascii_uppercase if os.path.exists(f"{d}:\\")]
+        else:
+            drives = ["/"]
+
+    for drive in drives:
+        letter = drive.upper().replace(":", "").replace("\\", "").replace("/", "") or "X"
+        info = get_disk_free(drive)
+        if info.get("success"):
+            result[letter] = {"free": info["free"], "total": info["total"]}
+
+    return {"success": True, "data": result}
+
 def get_path_size(path: str, cancel_version: int = None):
     if not path or not isinstance(path, str):
         return {"success": False, "error": "empty path"}
@@ -1571,6 +1593,10 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
 
     if action == "disk_free":
         out.update(get_disk_free(cmd.get("drive", cmd.get("path", ""))))
+        return out
+
+    if action == "disk_free_batch":
+        out.update(get_disk_free_batch(cmd.get("drives")))
         return out
 
     if action == "extract_icon":
@@ -2519,6 +2545,7 @@ def _disconnect_named_pipe(h):
         pass
 
 def _pipe_client_loop(hPipe):
+    _log(f"[Pipe] Client loop started for pipe:{hPipe}")
     inbuf = bytearray()
     SLOW_ACTIONS = {"path_size", "folder_info", "get_folder_info"}
     conn_tag = f"pipe:{hPipe}"
@@ -2533,6 +2560,7 @@ def _pipe_client_loop(hPipe):
         while not _SHUTDOWN_FLAG:
             chunk = _win_pipe_read_some_overlapped(hPipe, timeout_ms=300)
             if chunk is None:
+                _log(f"[Pipe] Client disconnected (chunk=None)")
                 break
             if not chunk:
                 continue
@@ -2551,27 +2579,35 @@ def _pipe_client_loop(hPipe):
                     _win_pipe_write(hPipe, (json.dumps({"_id": 0, "ok": False, "error": f"bad_json: {e}"}, ensure_ascii=False) + "\n").encode("utf-8"))
                     continue
 
+                action = cmd.get("action") or cmd.get("cmd") or ""
+                _id = cmd.get("_id", 0)
+                _log(f"[Pipe] Recv: action={action}, _id={_id}")
+
                 # 连接级兜底：客户端没带 client_id 时，用连接标识，避免 TTL 误判
                 if not (cmd.get("client_id") or cmd.get("clientId") or cmd.get("cid")):
                     cmd["client_id"] = conn_tag
 
-                action = cmd.get("action") or cmd.get("cmd") or ""
                 if action in SLOW_ACTIONS:
                     cancel_ver = _get_scan_cancel_version()
                     fut = _IO_EXECUTOR.submit(_broker_dispatch, cmd, cancel_ver)
                     try:
                         res = fut.result()
                     except Exception as e:
-                        res = {"_id": cmd.get("_id", 0), "ok": False, "error": str(e)}
+                        res = {"_id": _id, "ok": False, "error": str(e)}
                 else:
                     try:
                         res = _broker_dispatch(cmd, None)
                     except Exception as e:
-                        res = {"_id": cmd.get("_id", 0), "ok": False, "error": str(e)}
+                        res = {"_id": _id, "ok": False, "error": str(e)}
 
+                _log(f"[Pipe] Send: _id={_id}, ok={res.get('ok')}")
                 if not _win_pipe_write(hPipe, (json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8")):
+                    _log(f"[Pipe] Write failed, closing")
                     return
+    except Exception as e:
+        _log(f"[Pipe] Client loop error: {e}")
     finally:
+        _log(f"[Pipe] Client loop ended for pipe:{hPipe}")
         # ★ 注销广播客户端
         _unregister_broadcast_client(conn_tag)
         _disconnect_named_pipe(hPipe)
