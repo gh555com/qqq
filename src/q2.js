@@ -45,6 +45,8 @@ let sRequestVersion = 0; // sRequest version number, used to cancel stale reques
 const usePanelReveal = 1;
 
 
+
+
 let globalContext = null;
 
 // Global refresh function reference (set by showSaveAsDialog)
@@ -237,16 +239,26 @@ function getFileSizeSync(filePath) {
 const SZ_GB_THRESHOLD = 1000000000; // 1GB
 const SZ_GB_COLOR = 'rgb(248, 48, 0)';
 
+// Pure implementation: add thousand separator (no toLocaleString dependency)
+function addThousandSep(num) {
+  const s = String(Math.floor(num));
+  const parts = [];
+  for (let i = s.length; i > 0; i -= 3) {
+    parts.unshift(s.slice(Math.max(0, i - 3), i));
+  }
+  return parts.join(',');
+}
+
 // Return formatted result: { text, gbPart, restPart }
 function formatFileSizeEx(bytes) {
-  const formatted = bytes.toLocaleString();
+  const formatted = addThousandSep(bytes);
 
-  // Check if it exceeds 1GB
+  // Check if it exceeds 1GB (>= 1,000,000,000 means 4+ comma-separated parts)
   if (bytes >= SZ_GB_THRESHOLD) {
     const parts = formatted.split(',');
     if (parts.length >= 4) {
-      // GB part is the first (parts.length - 3) parts
-      // Example: "14,111,222,999" -> GB part is "14"
+      // GB part = first (parts.length - 3) parts
+      // Example: "14,111,222,999" -> gbPart = "14"
       const gbParts = parts.slice(0, parts.length - 3);
       const restParts = parts.slice(parts.length - 3);
       return {
@@ -260,8 +272,7 @@ function formatFileSizeEx(bytes) {
 }
 
 function formatFileSize(bytes) {
-  // Simple version, return text only
-  return bytes.toLocaleString();
+  return addThousandSep(bytes);
 }
 
 function formatDateTime(date) {
@@ -815,9 +826,9 @@ function resetInputUndoState(input, initialValue) {
 // - Batch request: one request returns full answers for all drives
 // - Compare final answers: update UI only when different from last answer
 // - When free space < 1% or < 2GB show red warning (and show decimals)
-const DISK_FREE_INTERVAL_MS = 6000;
+const DISK_FREE_INTERVAL_MS = 30000; // 30 seconds
 const DISK_FREE_WARNING_PERCENT = 0.01; // 1%
-const DISK_FREE_WARNING_BYTES = 2 * 1024 * 1024 * 1024; // 2GB
+const DISK_FREE_WARNING_BYTES = 2147483648; // 2GB
 const DISK_FREE_WARNING_COLOR = 'rgb(248, 48, 0)';
 let diskFreeTimer = null;
 let lastDiskFreeSnapshot = ''; // Last answer JSON string, used for compare
@@ -3475,11 +3486,9 @@ function showSaveAsDialog() {
     }
   }
 
-  // File watcher setup (smart debounce to avoid repeated triggers)
-  let watcherDebounceTimer = null;
-  let lastWatcherTriggerTime = 0;
-  const WATCHER_DEBOUNCE_MS = 500; // Debounce time
-  const WATCHER_COOLDOWN_MS = 1000; // Cooldown time to avoid multiple triggers in a short period
+  // File watcher setup (6s cooldown - ignore events within 6s after refresh)
+  let lastWatcherRefreshTime = 0;
+  const WATCHER_COOLDOWN_MS = 6000;
 
   function setupFileWatcher(watchPath) {
     // Clean up old watcher
@@ -3489,30 +3498,18 @@ function showSaveAsDialog() {
     }
 
     try {
-      // Smart debounced refresh function
+      // Cooldown refresh: first event triggers refresh, then ignore for 6s
       const smartRefresh = () => {
         const now = Date.now();
-
-        // Do not trigger within cooldown window
-        if (now - lastWatcherTriggerTime < WATCHER_COOLDOWN_MS) {
+        // Within cooldown period → ignore
+        if (now - lastWatcherRefreshTime < WATCHER_COOLDOWN_MS) {
           return;
         }
-
-        // Clear previous timer
-        if (watcherDebounceTimer) {
-          clearTimeout(watcherDebounceTimer);
+        // Outside cooldown → refresh and start new cooldown
+        lastWatcherRefreshTime = now;
+        if (activePanel && activePanelAlive && globalRefreshWebview) {
+          globalRefreshWebview();
         }
-
-        // Set new debounce timer
-        watcherDebounceTimer = setTimeout(() => {
-          watcherDebounceTimer = null;
-          lastWatcherTriggerTime = Date.now();
-
-          // Ensure panel is still active
-          if (activePanel && activePanelAlive && globalRefreshWebview) {
-            globalRefreshWebview();
-          }
-        }, WATCHER_DEBOUNCE_MS);
       };
 
       // Use VS Code FileSystemWatcher
@@ -3665,23 +3662,18 @@ function showSaveAsDialog() {
         break;
       }
 
-      // Drive free space request (batched)
+      // Drive free space request (batched) - single IPC call for all drives
       case "getDiskFree": {
         (async () => {
           try {
-            const result = {}; // { 'C': {free, total}, 'D': {free, total}, ... }
+            // ★ Use batch API: single IPC call instead of N calls for N drives
             const drives = getDrives();
-            for (const drive of drives) {
-              const driveLetter = drive.toUpperCase().replace(/[^A-Z]/g, '') || 'X';
-              const res = await geq().getDiskFree(driveLetter + ':');
-              if (res && res.success) {
-                result[driveLetter] = { free: res.free, total: res.total };
-              }
-            }
-            if (panel && activePanelAlive) {
+            const res = await geq().getDiskFreeBatch(drives);
+
+            if (res && res.success && res.data && panel && activePanelAlive) {
               panel.webview.postMessage({
                 command: "diskFreeResult",
-                data: result // Return complete answer for all drives at once
+                data: res.data // { 'C': {free, total}, 'D': {free, total}, ... }
               });
             }
           } catch (e) {
