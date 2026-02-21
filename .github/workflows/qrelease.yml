@@ -227,6 +227,15 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+      - name: Publish to Open VSX
+        run: |
+          npm install -g ovsx
+          for vsix in dist/*.vsix; do
+            ovsx publish "$vsix" --pat ${{ secrets.OVSX_PAT }} || echo "Open VSX发布 $vsix 失败"
+          done
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
       - name: Feedback
         if: github.event.issue.number
         uses: peter-evans/create-or-update-comment@v3
