@@ -150,6 +150,7 @@
             "scanning": "Analyse des fichiers...",
             "scannedFiles": "{0} fichiers analysés...",
             "deletingFiles": "Suppression de {0}/{1} fichiers...",
+            "deletingDirs": "Suppression de {0}/{1} répertoires...",
             "deletingItem": "Suppression de {0}/{1}: {2}",
             "finalizingDelete": "Finalisation...",
             "movingToTrash": "Déplacement vers la corbeille: {0}",

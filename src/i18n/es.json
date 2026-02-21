@@ -150,6 +150,7 @@
             "scanning": "Escaneando archivos...",
             "scannedFiles": "{0} archivos escaneados...",
             "deletingFiles": "Eliminando {0}/{1} archivos...",
+            "deletingDirs": "Eliminando {0}/{1} directorios...",
             "deletingItem": "Eliminando {0}/{1}: {2}",
             "finalizingDelete": "Finalizando...",
             "movingToTrash": "Moviendo a la papelera: {0}",
