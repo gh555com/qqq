@@ -159,9 +159,9 @@
             "permanentlyDeletingMultiple": "Excluindo permanentemente {0} itens",
             "deleteCancelled": "Exclusão cancelada, {0} itens processados",
             "deleteErrors": "{0} itens não puderam ser excluídos",
-            "needAdminPermission": "{0} itens não puderam ser excluídos por falta de permissão. Privilégios de administrador necessários.",
-            "copyAdminCommand": "Copiar comando",
-            "adminCommandCopied": "Comando de admin copiado para a área de transferência. Cole em um terminal de administrador para executar."
+            "needAdminPermission": "qqq: {0} itens não puderam ser excluídos por falta de permissão. Privilégios de administrador necessários.",
+            "copyAdminCommand": "Copiar comando de exclusão permanente",
+            "adminCommandCopied": "qqq: Comando de admin copiado para a área de transferência. Por favor cole em um terminal de administrador para executar."
         },
         "fsError": {
             "fileNotFound": "Arquivo não encontrado",

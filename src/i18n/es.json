@@ -159,9 +159,9 @@
             "permanentlyDeletingMultiple": "Eliminando permanentemente {0} elementos",
             "deleteCancelled": "Eliminación cancelada, {0} elementos procesados",
             "deleteErrors": "{0} elementos no se pudieron eliminar",
-            "needAdminPermission": "{0} elementos no se pudieron eliminar por falta de permisos. Se requieren privilegios de administrador.",
-            "copyAdminCommand": "Copiar comando",
-            "adminCommandCopied": "Comando de admin copiado al portapapeles. Péguelo en una terminal de administrador para ejecutar."
+            "needAdminPermission": "qqq: {0} elementos no se pudieron eliminar por falta de permisos. Se requieren privilegios de administrador.",
+            "copyAdminCommand": "Copiar comando de eliminación permanente",
+            "adminCommandCopied": "qqq: Comando de admin copiado al portapapeles. Por favor péguelo en una terminal de administrador para ejecutar."
         },
         "fsError": {
             "fileNotFound": "Archivo no encontrado",
