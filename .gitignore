@@ -59,9 +59,6 @@ gtk3-runtime-3.24.31-2022-01-04-ts-win64.exe
 # 核心构建资产 (Core Build Assets - Local Only)
 # 集中存放在 qqqworkflow/ 中，永不推送到云端
 # ==========================================
-# ★ 但 workflow 文件必须推送用于 CI/CD
-qqqworkflow/*
-!qqqworkflow/*.yml
-!qqqworkflow/*.js
+qqqworkflow/
 
 Tue, Feb 17, 2026  3:21:37 PM
