@@ -128,9 +128,29 @@ function yieldToEventLoop() {
 }
 
 /**
+ * Log delete errors with limit (avoid blocking with 200k+ errors)
+ * @param {Array} errors - Array of {path, error} objects
+ * @param {number} maxLogs - Maximum number of errors to log (default 100)
+ */
+function logDeleteErrors(errors, maxLogs = 100) {
+  if (!errors || errors.length === 0) return;
+
+  // Log limited number asynchronously to avoid blocking
+  const toLog = errors.slice(0, maxLogs);
+  setImmediate(() => {
+    for (const e of toLog) {
+      global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN");
+    }
+    if (errors.length > maxLogs) {
+      global.logMessage(`... and ${errors.length - maxLogs} more errors (truncated)`, "WARN");
+    }
+  });
+}
+
+/**
  * Non-blocking recursive directory walk
  * @param {string} dir - directory to walk
- * @param {object} ctx - context: { files: [], scanned: 0, cancelled: false }
+ * @param {object} ctx - context: { files: [], dirs: [], scanned: 0, cancelled: false }
  * @param {function} onProgress - callback(scanned) for progress updates
  * @returns {Promise<void>}
  */
@@ -151,8 +171,10 @@ async function walkDirNonBlocking(dir, ctx, onProgress) {
     const fullPath = path.join(dir, entry.name);
 
     if (entry.isDirectory()) {
-      // Recurse into subdirectory
+      // Recurse into subdirectory first (depth-first)
       await walkDirNonBlocking(fullPath, ctx, onProgress);
+      // Add directory AFTER processing its contents (so deeper dirs come first in reverse)
+      ctx.dirs.push(fullPath);
     } else {
       ctx.files.push(fullPath);
     }
@@ -168,28 +190,29 @@ async function walkDirNonBlocking(dir, ctx, onProgress) {
 }
 
 /**
- * Expand a path (file or directory) to list of all files inside
+ * Expand a path (file or directory) to list of all files and directories inside
  * @param {string} targetPath - file or directory path
- * @param {object} ctx - context with cancelled flag
+ * @param {object} ctx - context with cancelled flag, files[], dirs[]
  * @param {function} onProgress - progress callback
- * @returns {Promise<string[]>} - list of file paths
+ * @returns {Promise<void>}
  */
 async function expandPathNonBlocking(targetPath, ctx, onProgress) {
   const stat = fs.statSync(targetPath, { throwIfNoEntry: false });
-  if (!stat) return [];
+  if (!stat) return;
 
   if (stat.isFile()) {
-    return [targetPath];
+    ctx.files = [targetPath];
+    ctx.dirs = [];
+    return;
   }
 
   // It's a directory, walk it
   ctx.files = [];
+  ctx.dirs = [];
   ctx.scanned = 0;
   await walkDirNonBlocking(targetPath, ctx, onProgress);
-
-  // Also include the directory itself (to delete after contents)
-  // We'll handle directory deletion separately
-  return ctx.files;
+  // Note: ctx.dirs is in depth-first order (deepest subdirs at the END)
+  // We'll reverse it when deleting to delete deepest first
 }
 
 /**
@@ -205,7 +228,7 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
     title: useTrash ? q('q2.ui.movingToTrash', displayName) : q('q2.ui.permanentlyDeleting', displayName),
     cancellable: true
   }, async (progress, token) => {
-    const ctx = { files: [], scanned: 0, cancelled: false };
+    const ctx = { files: [], dirs: [], scanned: 0, cancelled: false };
     const errors = [];
     let deleted = 0;
 
@@ -214,7 +237,7 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
       ctx.cancelled = true;
     });
 
-    // Phase 1: Expand (scan all files)
+    // Phase 1: Expand (scan all files and directories)
     progress.report({ message: q('q2.ui.scanning'), increment: 0 });
 
     const stat = fs.statSync(targetPath, { throwIfNoEntry: false });
@@ -235,6 +258,7 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
     }
 
     const totalFiles = isDir ? ctx.files.length : 1;
+    const totalDirs = isDir ? ctx.dirs.length : 0;
 
     // Phase 2: Delete files (for directories, delete contents first)
     if (isDir && ctx.files.length > 0) {
@@ -250,12 +274,15 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
           deleted++;
         } catch (e) {
           errors.push({ path: filePath, error: mapFsErrorToI18n(e) });
+          // Log first 5 errors with full details for debugging
+          if (errors.length <= 5) {
+            global.logMessage(`[DELETE DEBUG] File delete failed: ${filePath}, code=${e.code}, name=${e.name}, msg=${e.message}`, "WARN");
+          }
         }
 
         // Yield every batch
         if ((i + 1) % DELETE_BATCH_SIZE === 0) {
-          const pct = Math.floor((i + 1) / totalFiles * 80); // 0-80% for file deletion
-          progress.report({ message: q('q2.ui.deletingFiles', i + 1, totalFiles), increment: pct / (i / DELETE_BATCH_SIZE + 1) });
+          progress.report({ message: q('q2.ui.deletingFiles', i + 1, totalFiles) });
           await yieldToEventLoop();
         }
       }
@@ -265,12 +292,47 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
       return { success: deleted > 0, deleted, errors, cancelled: true };
     }
 
-    // Phase 3: Delete the directory/file itself
-    progress.report({ message: q('q2.ui.finalizingDelete'), increment: 10 });
+    // Phase 3: Delete subdirectories bottom-up (deepest first)
+    if (isDir && ctx.dirs.length > 0) {
+      // Sort by path depth descending (deepest directories first)
+      const dirsToDelete = ctx.dirs.slice().sort((a, b) => {
+        const depthA = a.split(path.sep).length;
+        const depthB = b.split(path.sep).length;
+        return depthB - depthA; // Deeper paths first
+      });
+
+      progress.report({ message: q('q2.ui.deletingDirs', 0, totalDirs) });
+
+      for (let i = 0; i < dirsToDelete.length; i++) {
+        if (ctx.cancelled) break;
+
+        const dirPath = dirsToDelete[i];
+        try {
+          const uri = vscode.Uri.file(dirPath);
+          await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
+        } catch (e) {
+          errors.push({ path: dirPath, error: mapFsErrorToI18n(e) });
+        }
+
+        // Yield every batch
+        if ((i + 1) % DELETE_BATCH_SIZE === 0) {
+          progress.report({ message: q('q2.ui.deletingDirs', i + 1, totalDirs) });
+          await yieldToEventLoop();
+        }
+      }
+    }
+
+    if (ctx.cancelled) {
+      return { success: deleted > 0, deleted, errors, cancelled: true };
+    }
+
+    // Phase 4: Delete the root directory/file itself (should be empty now)
+    progress.report({ message: q('q2.ui.finalizingDelete') });
 
     try {
       const uri = vscode.Uri.file(targetPath);
-      await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: useTrash });
+      // Use recursive:false since we've already deleted all contents
+      await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
       if (!isDir) deleted++;
     } catch (e) {
       // If directory deletion fails, it might be because some files couldn't be deleted
@@ -285,7 +347,7 @@ async function deleteWithProgressUI(targetPath, useTrash, displayName) {
 }
 
 /**
- * Delete multiple items with progress
+ * Delete multiple items with progress (each item goes through expand-then-delete)
  * @param {Array} items - array of {path, type} objects
  * @param {boolean} useTrash - true for recycle bin
  * @returns {Promise<{deleted: number, errors: Array}>}
@@ -299,9 +361,11 @@ async function deleteMultipleWithProgressUI(items, useTrash) {
     const errors = [];
     let deleted = 0;
     let cancelled = false;
+    const ctx = { files: [], dirs: [], scanned: 0, cancelled: false };
 
     token.onCancellationRequested(() => {
       cancelled = true;
+      ctx.cancelled = true;
     });
 
     for (let i = 0; i < items.length; i++) {
@@ -309,24 +373,104 @@ async function deleteMultipleWithProgressUI(items, useTrash) {
 
       const item = items[i];
       const itemPath = canonicalizeExistingPath(item.path);
+      const itemName = path.basename(itemPath);
 
+      // Check if path exists
+      const stat = fs.statSync(itemPath, { throwIfNoEntry: false });
+      if (!stat) {
+        errors.push({ path: itemPath, error: q('q2.fsError.fileNotFound') });
+        continue;
+      }
+
+      const isDir = stat.isDirectory();
+
+      // Phase 1: Expand directory (if applicable)
+      if (isDir) {
+        progress.report({ message: q('q2.ui.deletingItem', i + 1, items.length, itemName) + ' - ' + q('q2.ui.scanning') });
+        ctx.files = [];
+        ctx.dirs = [];
+        ctx.scanned = 0;
+        await expandPathNonBlocking(itemPath, ctx, (scanned) => {
+          progress.report({ message: q('q2.ui.deletingItem', i + 1, items.length, itemName) + ' - ' + q('q2.ui.scannedFiles', scanned) });
+        });
+
+        if (ctx.cancelled) break;
+
+        // Phase 2: Delete files inside directory
+        const totalFiles = ctx.files.length;
+        for (let j = 0; j < ctx.files.length; j++) {
+          if (ctx.cancelled) break;
+
+          const filePath = ctx.files[j];
+          try {
+            const uri = vscode.Uri.file(filePath);
+            await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
+          } catch (e) {
+            errors.push({ path: filePath, error: mapFsErrorToI18n(e) });
+          }
+
+          // Yield every batch
+          if ((j + 1) % DELETE_BATCH_SIZE === 0) {
+            progress.report({ message: q('q2.ui.deletingItem', i + 1, items.length, itemName) + ' - ' + q('q2.ui.deletingFiles', j + 1, totalFiles) });
+            await yieldToEventLoop();
+          }
+        }
+
+        if (ctx.cancelled) break;
+
+        // Phase 3: Delete subdirectories bottom-up (deepest first)
+        if (ctx.dirs.length > 0) {
+          // Sort by path depth descending (deepest directories first)
+          const dirsToDelete = ctx.dirs.slice().sort((a, b) => {
+            const depthA = a.split(path.sep).length;
+            const depthB = b.split(path.sep).length;
+            return depthB - depthA; // Deeper paths first
+          });
+          const totalDirs = dirsToDelete.length;
+
+          for (let j = 0; j < dirsToDelete.length; j++) {
+            if (ctx.cancelled) break;
+
+            const dirPath = dirsToDelete[j];
+            try {
+              const uri = vscode.Uri.file(dirPath);
+              await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
+            } catch (e) {
+              errors.push({ path: dirPath, error: mapFsErrorToI18n(e) });
+            }
+
+            // Yield every batch
+            if ((j + 1) % DELETE_BATCH_SIZE === 0) {
+              progress.report({ message: q('q2.ui.deletingItem', i + 1, items.length, itemName) + ' - ' + q('q2.ui.deletingDirs', j + 1, totalDirs) });
+              await yieldToEventLoop();
+            }
+          }
+        }
+      }
+
+      if (ctx.cancelled) break;
+
+      // Phase 4: Delete the item itself (should be empty now)
       progress.report({
-        message: q('q2.ui.deletingItem', i + 1, items.length, path.basename(itemPath)),
+        message: q('q2.ui.deletingItem', i + 1, items.length, itemName),
         increment: 100 / items.length
       });
 
       try {
         const uri = vscode.Uri.file(itemPath);
-        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: useTrash });
+        // Use recursive:false since we've already deleted all contents
+        await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
         deleted++;
       } catch (e) {
-        errors.push({ path: itemPath, error: mapFsErrorToI18n(e) });
+        // Only add error if we haven't already recorded file errors for this item
+        const hasItemErrors = errors.some(err => err.path.startsWith(itemPath));
+        if (!hasItemErrors) {
+          errors.push({ path: itemPath, error: mapFsErrorToI18n(e) });
+        }
       }
 
-      // Yield every batch
-      if ((i + 1) % DELETE_BATCH_SIZE === 0) {
-        await yieldToEventLoop();
-      }
+      // Yield between items
+      await yieldToEventLoop();
     }
 
     return { deleted, errors, cancelled };
@@ -4219,7 +4363,7 @@ function showSaveAsDialog() {
                 global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
               } else if (result.errors.length > 0) {
                 global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
-                result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+                logDeleteErrors(result.errors);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
                 // ★ Move-to-qq-iq SFX
@@ -4264,7 +4408,7 @@ function showSaveAsDialog() {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
 
-              result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+              logDeleteErrors(result.errors);
             } finally {
               // No matter what errors happen during deletion, must force refresh at end to restore UI
               if (activePanel && activePanelAlive) refreshWebview();
@@ -4294,7 +4438,7 @@ function showSaveAsDialog() {
                 global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
               } else if (result.errors.length > 0) {
                 global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
-                result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+                logDeleteErrors(result.errors);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
                 // ★ Permanent delete SFX
@@ -4338,7 +4482,7 @@ function showSaveAsDialog() {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
               }
 
-              result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+              logDeleteErrors(result.errors);
             } finally {
               if (activePanel && activePanelAlive) refreshWebview();
             }

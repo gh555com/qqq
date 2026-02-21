@@ -150,6 +150,7 @@
             "scanning": "جاري فحص الملفات...",
             "scannedFiles": "تم فحص {0} ملفات...",
             "deletingFiles": "جاري حذف {0}/{1} ملفات...",
+            "deletingDirs": "جاري حذف {0}/{1} مجلدات...",
             "deletingItem": "جاري حذف {0}/{1}: {2}",
             "finalizingDelete": "جاري الإنهاء...",
             "movingToTrash": "نقل إلى سلة المهملات: {0}",
