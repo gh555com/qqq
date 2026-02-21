@@ -146,7 +146,28 @@
             "enterFolderName": "Por favor digite um nome de pasta",
             "selectSingleForRename": "qqq: Por favor selecione um único item para renomear",
             "imageSaved": "Imagem salva",
-            "noPasteContent": "{0} Nenhum conteúdo colável detectado"
+            "noPasteContent": "{0} Nenhum conteúdo colável detectado",
+            "scanning": "Verificando arquivos...",
+            "scannedFiles": "{0} arquivos verificados...",
+            "deletingFiles": "Excluindo {0}/{1} arquivos...",
+            "deletingItem": "Excluindo {0}/{1}: {2}",
+            "finalizingDelete": "Finalizando...",
+            "movingToTrash": "Movendo para a lixeira: {0}",
+            "permanentlyDeleting": "Excluindo permanentemente: {0}",
+            "movingMultipleToTrash": "Movendo {0} itens para a lixeira",
+            "permanentlyDeletingMultiple": "Excluindo permanentemente {0} itens",
+            "deleteCancelled": "Exclusão cancelada, {0} itens processados",
+            "deleteErrors": "{0} itens não puderam ser excluídos"
+        },
+        "fsError": {
+            "fileNotFound": "Arquivo não encontrado",
+            "fileExists": "O arquivo já existe",
+            "fileNotADirectory": "O caminho não é um diretório",
+            "fileIsADirectory": "O caminho é um diretório",
+            "noPermissions": "Permissão negada",
+            "unavailable": "Recurso indisponível",
+            "fileBusy": "Arquivo em uso",
+            "dirNotEmpty": "O diretório não está vazio"
         },
         "paste": {
             "plainTextOnly": "qqq: a área de transferência contém apenas texto, não é possível colar no gerenciador de arquivos"

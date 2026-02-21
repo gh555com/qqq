@@ -146,7 +146,28 @@
             "enterFolderName": "폴더 이름을 입력하세요",
             "selectSingleForRename": "qqq: 이름 바꾸기는 단일 선택으로 해주세요",
             "imageSaved": "이미지 저장됨",
-            "noPasteContent": "{0} 붙여넣기 가능한 콘텐츠가 없습니다"
+            "noPasteContent": "{0} 붙여넣기 가능한 콘텐츠가 없습니다",
+            "scanning": "파일 스캔 중...",
+            "scannedFiles": "{0}개 파일 스캔됨...",
+            "deletingFiles": "{0}/{1}개 파일 삭제 중...",
+            "deletingItem": "{0}/{1} 삭제 중: {2}",
+            "finalizingDelete": "완료 중...",
+            "movingToTrash": "휴지통으로 이동 중: {0}",
+            "permanentlyDeleting": "영구 삭제 중: {0}",
+            "movingMultipleToTrash": "{0}개 항목을 휴지통으로 이동 중",
+            "permanentlyDeletingMultiple": "{0}개 항목 영구 삭제 중",
+            "deleteCancelled": "삭제가 취소되었습니다. {0}개 항목 처리됨",
+            "deleteErrors": "{0}개 항목 삭제 실패"
+        },
+        "fsError": {
+            "fileNotFound": "파일을 찾을 수 없음",
+            "fileExists": "파일이 이미 존재함",
+            "fileNotADirectory": "경로가 디렉터리가 아님",
+            "fileIsADirectory": "경로가 디렉터리임",
+            "noPermissions": "권한 없음",
+            "unavailable": "리소스를 사용할 수 없음",
+            "fileBusy": "파일이 사용 중",
+            "dirNotEmpty": "디렉터리가 비어있지 않음"
         },
         "paste": {
             "plainTextOnly": "qqq: 클립보드에 일반 텍스트만 있습니다. 파일 관리자에 붙여넣기할 수 없습니다"

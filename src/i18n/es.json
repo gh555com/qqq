@@ -146,7 +146,28 @@
             "enterFolderName": "Por favor ingrese un nombre de carpeta",
             "selectSingleForRename": "qqq: Por favor seleccione un solo elemento para renombrar",
             "imageSaved": "Imagen guardada",
-            "noPasteContent": "{0} No se detectó contenido para pegar"
+            "noPasteContent": "{0} No se detectó contenido para pegar",
+            "scanning": "Escaneando archivos...",
+            "scannedFiles": "{0} archivos escaneados...",
+            "deletingFiles": "Eliminando {0}/{1} archivos...",
+            "deletingItem": "Eliminando {0}/{1}: {2}",
+            "finalizingDelete": "Finalizando...",
+            "movingToTrash": "Moviendo a la papelera: {0}",
+            "permanentlyDeleting": "Eliminando permanentemente: {0}",
+            "movingMultipleToTrash": "Moviendo {0} elementos a la papelera",
+            "permanentlyDeletingMultiple": "Eliminando permanentemente {0} elementos",
+            "deleteCancelled": "Eliminación cancelada, {0} elementos procesados",
+            "deleteErrors": "{0} elementos no se pudieron eliminar"
+        },
+        "fsError": {
+            "fileNotFound": "Archivo no encontrado",
+            "fileExists": "El archivo ya existe",
+            "fileNotADirectory": "La ruta no es un directorio",
+            "fileIsADirectory": "La ruta es un directorio",
+            "noPermissions": "Permiso denegado",
+            "unavailable": "Recurso no disponible",
+            "fileBusy": "Archivo en uso",
+            "dirNotEmpty": "El directorio no está vacío"
         },
         "paste": {
             "plainTextOnly": "qqq: el portapapeles solo contiene texto, no se puede pegar en el administrador de archivos"

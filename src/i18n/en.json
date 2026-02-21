@@ -146,7 +146,28 @@
             "enterFolderName": "Please enter a folder name",
             "selectSingleForRename": "qqq: Please select single item for rename",
             "imageSaved": "Image saved",
-            "noPasteContent": "{0} No pasteable content detected"
+            "noPasteContent": "{0} No pasteable content detected",
+            "scanning": "Scanning files...",
+            "scannedFiles": "Scanned {0} files...",
+            "deletingFiles": "Deleting {0}/{1} files...",
+            "deletingItem": "Deleting {0}/{1}: {2}",
+            "finalizingDelete": "Finalizing...",
+            "movingToTrash": "Moving to Recycle Bin: {0}",
+            "permanentlyDeleting": "Permanently deleting: {0}",
+            "movingMultipleToTrash": "Moving {0} items to Recycle Bin",
+            "permanentlyDeletingMultiple": "Permanently deleting {0} items",
+            "deleteCancelled": "Delete cancelled, {0} items processed",
+            "deleteErrors": "{0} items failed to delete"
+        },
+        "fsError": {
+            "fileNotFound": "File not found",
+            "fileExists": "File already exists",
+            "fileNotADirectory": "Path is not a directory",
+            "fileIsADirectory": "Path is a directory",
+            "noPermissions": "Permission denied",
+            "unavailable": "Resource unavailable",
+            "fileBusy": "File is in use",
+            "dirNotEmpty": "Directory is not empty"
         },
         "paste": {
             "plainTextOnly": "qqq: Clipboard contains plain text only, cannot paste to file manager"

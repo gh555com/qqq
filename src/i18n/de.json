@@ -146,7 +146,28 @@
             "enterFolderName": "Bitte Ordnername eingeben",
             "selectSingleForRename": "qqq: Zum Umbenennen bitte einzeln auswählen",
             "imageSaved": "Bild gespeichert",
-            "noPasteContent": "{0} Kein einfügbarer Inhalt erkannt"
+            "noPasteContent": "{0} Kein einfügbarer Inhalt erkannt",
+            "scanning": "Dateien werden gescannt...",
+            "scannedFiles": "{0} Dateien gescannt...",
+            "deletingFiles": "{0}/{1} Dateien werden gelöscht...",
+            "deletingItem": "{0}/{1} wird gelöscht: {2}",
+            "finalizingDelete": "Abschließen...",
+            "movingToTrash": "In Papierkorb verschieben: {0}",
+            "permanentlyDeleting": "Endgültig löschen: {0}",
+            "movingMultipleToTrash": "{0} Elemente in Papierkorb verschieben",
+            "permanentlyDeletingMultiple": "{0} Elemente endgültig löschen",
+            "deleteCancelled": "Löschen abgebrochen, {0} Elemente verarbeitet",
+            "deleteErrors": "{0} Elemente konnten nicht gelöscht werden"
+        },
+        "fsError": {
+            "fileNotFound": "Datei nicht gefunden",
+            "fileExists": "Datei existiert bereits",
+            "fileNotADirectory": "Pfad ist kein Verzeichnis",
+            "fileIsADirectory": "Pfad ist ein Verzeichnis",
+            "noPermissions": "Keine Berechtigung",
+            "unavailable": "Ressource nicht verfügbar",
+            "fileBusy": "Datei wird verwendet",
+            "dirNotEmpty": "Verzeichnis ist nicht leer"
         },
         "paste": {
             "plainTextOnly": "qqq: Nur Text in Zwischenablage, kann nicht in Dateimanager eingefügt werden"
