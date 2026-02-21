@@ -1510,7 +1510,7 @@ const DURATION_FLUSH_INTERVAL = 60 * 1000; // 每60秒自动持久化一次
 // ============================================================================
 const DEFAULT_CONFIG = {
 	"showHistoryRecycleBin": true,
-	"enlargeSmallImages": true,
+	"enlargeSmallImages": false,
 	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
 	"cleanFreak": false,

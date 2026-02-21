@@ -148,6 +148,39 @@ function logDeleteErrors(errors, maxLogs = 100) {
 }
 
 /**
+ * Check if errors contain permission denied (EPERM) and offer admin command
+ * @param {Array} errors - Array of {path, error} objects
+ * @param {string} targetPath - The root path being deleted
+ */
+async function handlePermissionErrors(errors, targetPath) {
+  if (!errors || errors.length === 0 || process.platform !== 'win32') return;
+
+  // Check if any errors are permission-related
+  const permissionErrors = errors.filter(e =>
+    e.error.includes('权限不足') ||
+    e.error.includes('Permission denied') ||
+    e.error.includes('EPERM')
+  );
+
+  if (permissionErrors.length === 0) return;
+
+  // Show prompt with copy command option
+  const choice = await vscode.window.showWarningMessage(
+    q('q2.ui.needAdminPermission', permissionErrors.length),
+    q('q2.ui.copyAdminCommand')
+  );
+
+  if (choice === q('q2.ui.copyAdminCommand')) {
+    // Generate admin command: takeown + icacls + rd
+    const escapedPath = targetPath.replace(/'/g, "''");
+    const cmd = `takeown /F "${escapedPath}" /R /D Y && icacls "${escapedPath}" /grant Administrators:F /T && rd /s /q "${escapedPath}"`;
+
+    await vscode.env.clipboard.writeText(cmd);
+    vscode.window.showInformationMessage(q('q2.ui.adminCommandCopied'));
+  }
+}
+
+/**
  * Non-blocking recursive directory walk
  * @param {string} dir - directory to walk
  * @param {object} ctx - context: { files: [], dirs: [], scanned: 0, cancelled: false }
@@ -4364,6 +4397,7 @@ function showSaveAsDialog() {
               } else if (result.errors.length > 0) {
                 global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
                 logDeleteErrors(result.errors);
+                await handlePermissionErrors(result.errors, itemToDelete);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
                 // ★ Move-to-qq-iq SFX
@@ -4409,6 +4443,9 @@ function showSaveAsDialog() {
               }
 
               logDeleteErrors(result.errors);
+              // For multi-select, use first failed item's path or currentPath
+              const firstFailedPath = result.errors.length > 0 ? result.errors[0].path : currentPath;
+              await handlePermissionErrors(result.errors, firstFailedPath);
             } finally {
               // No matter what errors happen during deletion, must force refresh at end to restore UI
               if (activePanel && activePanelAlive) refreshWebview();
@@ -4439,6 +4476,7 @@ function showSaveAsDialog() {
               } else if (result.errors.length > 0) {
                 global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
                 logDeleteErrors(result.errors);
+                await handlePermissionErrors(result.errors, itemToDelete);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
                 // ★ Permanent delete SFX
@@ -4483,6 +4521,9 @@ function showSaveAsDialog() {
               }
 
               logDeleteErrors(result.errors);
+              // For multi-select, use first failed item's path or currentPath
+              const firstFailedPath = result.errors.length > 0 ? result.errors[0].path : currentPath;
+              await handlePermissionErrors(result.errors, firstFailedPath);
             } finally {
               if (activePanel && activePanelAlive) refreshWebview();
             }

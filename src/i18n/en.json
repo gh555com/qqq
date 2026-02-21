@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "Moving {0} items to Recycle Bin",
             "permanentlyDeletingMultiple": "Permanently deleting {0} items",
             "deleteCancelled": "Delete cancelled, {0} items processed",
-            "deleteErrors": "{0} items failed to delete"
+            "deleteErrors": "{0} items failed to delete",
+            "needAdminPermission": "{0} items failed due to permission denied. Administrator privileges required.",
+            "copyAdminCommand": "Copy Command",
+            "adminCommandCopied": "Admin command copied to clipboard. Paste in an Administrator terminal to execute."
         },
         "fsError": {
             "fileNotFound": "File not found",

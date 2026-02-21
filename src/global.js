@@ -1926,7 +1926,7 @@ let _durationTimer = null;
 // ★ ConfigGate (ULTIMATE VIP/Trial Config System)
 // ============================================================================
 const DEFAULT_CONFIG = {
-	"enlargeSmallImages": true,
+	"enlargeSmallImages": false,
 	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
 	"cleanFreak": false,

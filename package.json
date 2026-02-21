@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.76",
+  "version": "15.73.77",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -194,7 +194,7 @@
           "qqq.enlargeSmallImages": {
             "order": 30,
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%config.enlargeSmallImages.desc%"
           },
           "qqq.textSlideColorScheme": {

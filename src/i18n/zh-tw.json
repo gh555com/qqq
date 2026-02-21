@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "正在移動 {0} 個項目到資源回收筒",
             "permanentlyDeletingMultiple": "正在永久刪除 {0} 個項目",
             "deleteCancelled": "刪除已取消，已處理 {0} 個項目",
-            "deleteErrors": "{0} 個項目刪除失敗"
+            "deleteErrors": "{0} 個項目刪除失敗",
+            "needAdminPermission": "{0} 個項目因權限不足刪除失敗，需要管理員權限。",
+            "copyAdminCommand": "複製命令",
+            "adminCommandCopied": "管理員命令已複製到剪貼簿，請在管理員終端機中貼上執行。"
         },
         "fsError": {
             "fileNotFound": "檔案不存在",
