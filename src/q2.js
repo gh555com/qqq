@@ -81,6 +81,258 @@ function cacheKeyForPath(p) {
   return geq().cacheKeyForPath(p);
 }
 
+// =============================================================================
+// Non-blocking delete utilities (yield every N items to prevent Extension Host freeze)
+// =============================================================================
+
+const DELETE_BATCH_SIZE = 50; // yield every 50 items
+
+/**
+ * Map FileSystemError code to i18n key
+ * @param {Error} error - the error object
+ * @returns {string} - localized error message
+ */
+function mapFsErrorToI18n(error) {
+  // VS Code FileSystemError codes
+  const errorCodeMap = {
+    'FileNotFound': 'q2.fsError.fileNotFound',
+    'FileExists': 'q2.fsError.fileExists',
+    'FileNotADirectory': 'q2.fsError.fileNotADirectory',
+    'FileIsADirectory': 'q2.fsError.fileIsADirectory',
+    'NoPermissions': 'q2.fsError.noPermissions',
+    'Unavailable': 'q2.fsError.unavailable',
+    // Node.js errno codes (for fallback paths)
+    'ENOENT': 'q2.fsError.fileNotFound',
+    'EEXIST': 'q2.fsError.fileExists',
+    'EACCES': 'q2.fsError.noPermissions',
+    'EPERM': 'q2.fsError.noPermissions',
+    'EBUSY': 'q2.fsError.fileBusy',
+    'ENOTEMPTY': 'q2.fsError.dirNotEmpty',
+  };
+
+  const code = error.code || error.name;
+  const i18nKey = errorCodeMap[code];
+
+  if (i18nKey) {
+    return q(i18nKey);
+  }
+  // Fallback to original message if code unknown
+  return error.message;
+}
+
+/**
+ * Yield to event loop using setImmediate
+ */
+function yieldToEventLoop() {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+/**
+ * Non-blocking recursive directory walk
+ * @param {string} dir - directory to walk
+ * @param {object} ctx - context: { files: [], scanned: 0, cancelled: false }
+ * @param {function} onProgress - callback(scanned) for progress updates
+ * @returns {Promise<void>}
+ */
+async function walkDirNonBlocking(dir, ctx, onProgress) {
+  if (ctx.cancelled) return;
+
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    // Permission denied or other error, skip this directory
+    return;
+  }
+
+  for (const entry of entries) {
+    if (ctx.cancelled) return;
+
+    const fullPath = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      // Recurse into subdirectory
+      await walkDirNonBlocking(fullPath, ctx, onProgress);
+    } else {
+      ctx.files.push(fullPath);
+    }
+
+    ctx.scanned++;
+
+    // Yield every DELETE_BATCH_SIZE items
+    if (ctx.scanned % DELETE_BATCH_SIZE === 0) {
+      if (onProgress) onProgress(ctx.scanned);
+      await yieldToEventLoop();
+    }
+  }
+}
+
+/**
+ * Expand a path (file or directory) to list of all files inside
+ * @param {string} targetPath - file or directory path
+ * @param {object} ctx - context with cancelled flag
+ * @param {function} onProgress - progress callback
+ * @returns {Promise<string[]>} - list of file paths
+ */
+async function expandPathNonBlocking(targetPath, ctx, onProgress) {
+  const stat = fs.statSync(targetPath, { throwIfNoEntry: false });
+  if (!stat) return [];
+
+  if (stat.isFile()) {
+    return [targetPath];
+  }
+
+  // It's a directory, walk it
+  ctx.files = [];
+  ctx.scanned = 0;
+  await walkDirNonBlocking(targetPath, ctx, onProgress);
+
+  // Also include the directory itself (to delete after contents)
+  // We'll handle directory deletion separately
+  return ctx.files;
+}
+
+/**
+ * Delete items with progress, cancellation support, and error tolerance
+ * @param {string} targetPath - single file/directory to delete
+ * @param {boolean} useTrash - true for recycle bin, false for permanent delete
+ * @param {string} displayName - name to show in progress
+ * @returns {Promise<{success: boolean, deleted: number, errors: Array}>}
+ */
+async function deleteWithProgressUI(targetPath, useTrash, displayName) {
+  return vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: useTrash ? q('q2.ui.movingToTrash', displayName) : q('q2.ui.permanentlyDeleting', displayName),
+    cancellable: true
+  }, async (progress, token) => {
+    const ctx = { files: [], scanned: 0, cancelled: false };
+    const errors = [];
+    let deleted = 0;
+
+    // Listen for cancellation
+    token.onCancellationRequested(() => {
+      ctx.cancelled = true;
+    });
+
+    // Phase 1: Expand (scan all files)
+    progress.report({ message: q('q2.ui.scanning'), increment: 0 });
+
+    const stat = fs.statSync(targetPath, { throwIfNoEntry: false });
+    if (!stat) {
+      return { success: false, deleted: 0, errors: [{ path: targetPath, error: 'not_found' }] };
+    }
+
+    const isDir = stat.isDirectory();
+
+    if (isDir) {
+      await expandPathNonBlocking(targetPath, ctx, (scanned) => {
+        progress.report({ message: q('q2.ui.scannedFiles', scanned) });
+      });
+    }
+
+    if (ctx.cancelled) {
+      return { success: false, deleted: 0, errors: [], cancelled: true };
+    }
+
+    const totalFiles = isDir ? ctx.files.length : 1;
+
+    // Phase 2: Delete files (for directories, delete contents first)
+    if (isDir && ctx.files.length > 0) {
+      progress.report({ message: q('q2.ui.deletingFiles', 0, totalFiles), increment: 0 });
+
+      for (let i = 0; i < ctx.files.length; i++) {
+        if (ctx.cancelled) break;
+
+        const filePath = ctx.files[i];
+        try {
+          const uri = vscode.Uri.file(filePath);
+          await vscode.workspace.fs.delete(uri, { recursive: false, useTrash: useTrash });
+          deleted++;
+        } catch (e) {
+          errors.push({ path: filePath, error: mapFsErrorToI18n(e) });
+        }
+
+        // Yield every batch
+        if ((i + 1) % DELETE_BATCH_SIZE === 0) {
+          const pct = Math.floor((i + 1) / totalFiles * 80); // 0-80% for file deletion
+          progress.report({ message: q('q2.ui.deletingFiles', i + 1, totalFiles), increment: pct / (i / DELETE_BATCH_SIZE + 1) });
+          await yieldToEventLoop();
+        }
+      }
+    }
+
+    if (ctx.cancelled) {
+      return { success: deleted > 0, deleted, errors, cancelled: true };
+    }
+
+    // Phase 3: Delete the directory/file itself
+    progress.report({ message: q('q2.ui.finalizingDelete'), increment: 10 });
+
+    try {
+      const uri = vscode.Uri.file(targetPath);
+      await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: useTrash });
+      if (!isDir) deleted++;
+    } catch (e) {
+      // If directory deletion fails, it might be because some files couldn't be deleted
+      // Only add error if we haven't already recorded file errors
+      if (errors.length === 0) {
+        errors.push({ path: targetPath, error: mapFsErrorToI18n(e) });
+      }
+    }
+
+    return { success: errors.length === 0, deleted: isDir ? deleted : 1, errors };
+  });
+}
+
+/**
+ * Delete multiple items with progress
+ * @param {Array} items - array of {path, type} objects
+ * @param {boolean} useTrash - true for recycle bin
+ * @returns {Promise<{deleted: number, errors: Array}>}
+ */
+async function deleteMultipleWithProgressUI(items, useTrash) {
+  return vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: useTrash ? q('q2.ui.movingMultipleToTrash', items.length) : q('q2.ui.permanentlyDeletingMultiple', items.length),
+    cancellable: true
+  }, async (progress, token) => {
+    const errors = [];
+    let deleted = 0;
+    let cancelled = false;
+
+    token.onCancellationRequested(() => {
+      cancelled = true;
+    });
+
+    for (let i = 0; i < items.length; i++) {
+      if (cancelled) break;
+
+      const item = items[i];
+      const itemPath = canonicalizeExistingPath(item.path);
+
+      progress.report({
+        message: q('q2.ui.deletingItem', i + 1, items.length, path.basename(itemPath)),
+        increment: 100 / items.length
+      });
+
+      try {
+        const uri = vscode.Uri.file(itemPath);
+        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: useTrash });
+        deleted++;
+      } catch (e) {
+        errors.push({ path: itemPath, error: mapFsErrorToI18n(e) });
+      }
+
+      // Yield every batch
+      if ((i + 1) % DELETE_BATCH_SIZE === 0) {
+        await yieldToEventLoop();
+      }
+    }
+
+    return { deleted, errors, cancelled };
+  });
+}
+
 let activeAbortController = new AbortController();
 
 const globalScheduler = new global.TaskScheduler(MAX_CONCURRENT_TASKS);
@@ -3949,6 +4201,7 @@ function showSaveAsDialog() {
       }
 
       case "quickDeleteToqqiq": {
+        // Delete to recycle bin (non-blocking with progress)
         const itemToDelete = canonicalizeExistingPath(message.path);
         // Safety guard: absolutely forbid deleting parent directory
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
@@ -3960,12 +4213,19 @@ function showSaveAsDialog() {
           recordDirHistory(currentPath);
           (async () => {
             try {
-              const uri = vscode.Uri.file(itemToDelete);
-              await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-              global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
-              // ★ Move-to-qq-iq SFX
-              if (global.pythonBridge?.isAvailable()) {
-                global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
+              const result = await deleteWithProgressUI(itemToDelete, true, path.basename(itemToDelete));
+
+              if (result.cancelled) {
+                global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
+              } else if (result.errors.length > 0) {
+                global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
+                result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+              } else {
+                global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
+                // ★ Move-to-qq-iq SFX
+                if (global.pythonBridge?.isAvailable()) {
+                  global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
+                }
               }
             } catch (error) {
               global.showAutoCloseNotification('error', q('q2.ui.deleteFailed', error.message));
@@ -3981,43 +4241,34 @@ function showSaveAsDialog() {
       }
 
       case "quickDeleteMultipleToqqiq": {
+        // Delete multiple items to recycle bin (non-blocking with progress)
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..'); // Second-pass filtering on extension side to ensure safety
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
           (async () => {
-            let deletedCount = 0;
-            let errorCount = 0;
+            try {
+              const result = await deleteMultipleWithProgressUI(itemsToDelete, true);
 
-            for (const item of itemsToDelete) {
-              const itemPath = canonicalizeExistingPath(item.path);
-              if (fs.existsSync(itemPath)) {
-                try {
-                  const uri = vscode.Uri.file(itemPath);
-                  await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-                  deletedCount++;
-                } catch (error) {
-                  errorCount++;
-                  global.logMessage(q('q2.ui.deleteItemFailed', itemPath, error.message), "WARN");
-                }
+              if (result.cancelled) {
+                global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
+              } else if (result.deleted > 0 && result.errors.length === 0) {
+                global.showAutoCloseNotification('info', q('q2.ui.multiDeleteSuccess', result.deleted));
+              } else if (result.deleted > 0 && result.errors.length > 0) {
+                global.showAutoCloseNotification('warning', q('q2.ui.multiDeletePartial', result.deleted, result.errors.length));
+              } else if (result.errors.length > 0) {
+                global.showAutoCloseNotification('error', q('q2.ui.multiDeleteFailed', result.errors.length));
               }
-            }
 
-            if (deletedCount > 0) {
               // ★ Move-to-qq-iq SFX
-              if (global.pythonBridge?.isAvailable()) {
+              if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
               }
-              if (errorCount > 0) {
-                global.showAutoCloseNotification('info', q('q2.ui.multiDeletePartial', deletedCount, errorCount));
-              } else {
-                global.showAutoCloseNotification('info', q('q2.ui.multiDeleteSuccess', deletedCount));
-              }
-            } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', q('q2.ui.multiDeleteFailed', errorCount));
-            }
 
-            // No matter what errors happen during deletion, must force refresh at end to restore UI (grayed items will disappear or recover)
-            if (activePanel && activePanelAlive) refreshWebview();
+              result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+            } finally {
+              // No matter what errors happen during deletion, must force refresh at end to restore UI
+              if (activePanel && activePanelAlive) refreshWebview();
+            }
           })();
         } else {
           refreshWebview();
@@ -4026,7 +4277,7 @@ function showSaveAsDialog() {
       }
 
       case "quickPermanentDelete": {
-        // Shift+Delete permanently delete a single item
+        // Shift+Delete permanently delete a single item (non-blocking with progress)
         const itemToDelete = canonicalizeExistingPath(message.path);
         if (path.basename(itemToDelete) === '..' || message.name === '..') {
           global.showAutoCloseNotification('error', q('q2.error.deleteParentForbidden'));
@@ -4037,12 +4288,19 @@ function showSaveAsDialog() {
           recordDirHistory(currentPath);
           (async () => {
             try {
-              const uri = vscode.Uri.file(itemToDelete);
-              await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-              global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
-              // ★ Permanent delete SFX
-              if (global.pythonBridge?.isAvailable()) {
-                global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
+              const result = await deleteWithProgressUI(itemToDelete, false, path.basename(itemToDelete));
+
+              if (result.cancelled) {
+                global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
+              } else if (result.errors.length > 0) {
+                global.showAutoCloseNotification('warning', q('q2.ui.deleteErrors', result.errors.length));
+                result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+              } else {
+                global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
+                // ★ Permanent delete SFX
+                if (global.pythonBridge?.isAvailable()) {
+                  global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
+                }
               }
             } catch (error) {
               global.showAutoCloseNotification('error', q('q2.ui.permanentDeleteFailed', error.message));
@@ -4057,42 +4315,33 @@ function showSaveAsDialog() {
       }
 
       case "quickPermanentDeleteMultiple": {
-        // Shift+Delete permanently delete multiple items
+        // Shift+Delete permanently delete multiple items (non-blocking with progress)
         const itemsToDelete = (message.items || []).filter(item => item.name !== '..');
         if (itemsToDelete.length > 0) {
           recordDirHistory(currentPath);
           (async () => {
-            let deletedCount = 0;
-            let errorCount = 0;
+            try {
+              const result = await deleteMultipleWithProgressUI(itemsToDelete, false);
 
-            for (const item of itemsToDelete) {
-              const itemPath = canonicalizeExistingPath(item.path);
-              if (fs.existsSync(itemPath)) {
-                try {
-                  const uri = vscode.Uri.file(itemPath);
-                  await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
-                  deletedCount++;
-                } catch (error) {
-                  errorCount++;
-                  global.logMessage(q('q2.ui.permanentDeleteItemFailed', itemPath, error.message), "WARN");
-                }
+              if (result.cancelled) {
+                global.showAutoCloseNotification('info', q('q2.ui.deleteCancelled', result.deleted));
+              } else if (result.deleted > 0 && result.errors.length === 0) {
+                global.showAutoCloseNotification('info', q('q2.ui.multiPermanentDeleteSuccess', result.deleted));
+              } else if (result.deleted > 0 && result.errors.length > 0) {
+                global.showAutoCloseNotification('warning', q('q2.ui.multiPermanentDeletePartial', result.deleted, result.errors.length));
+              } else if (result.errors.length > 0) {
+                global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', result.errors.length));
               }
-            }
 
-            if (deletedCount > 0 && errorCount === 0) {
-              global.showAutoCloseNotification('info', q('q2.ui.multiPermanentDeleteSuccess', deletedCount));
-            } else if (deletedCount > 0 && errorCount > 0) {
-              global.showAutoCloseNotification('warning', q('q2.ui.multiPermanentDeletePartial', deletedCount, errorCount));
-            } else if (errorCount > 0) {
-              global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', errorCount));
-            }
+              // ★ Permanent delete SFX
+              if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
+                global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
+              }
 
-            // ★ Permanent delete SFX
-            if (deletedCount > 0 && global.pythonBridge?.isAvailable()) {
-              global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
+              result.errors.forEach(e => global.logMessage(`Delete error: ${e.path} - ${e.error}`, "WARN"));
+            } finally {
+              if (activePanel && activePanelAlive) refreshWebview();
             }
-
-            if (activePanel && activePanelAlive) refreshWebview();
           })();
         } else {
           refreshWebview();

@@ -146,7 +146,28 @@
             "enterFolderName": "Veuillez entrer un nom de dossier",
             "selectSingleForRename": "qqq: Veuillez sélectionner un seul élément pour renommer",
             "imageSaved": "Image enregistrée",
-            "noPasteContent": "{0} Aucun contenu collable détecté"
+            "noPasteContent": "{0} Aucun contenu collable détecté",
+            "scanning": "Analyse des fichiers...",
+            "scannedFiles": "{0} fichiers analysés...",
+            "deletingFiles": "Suppression de {0}/{1} fichiers...",
+            "deletingItem": "Suppression de {0}/{1}: {2}",
+            "finalizingDelete": "Finalisation...",
+            "movingToTrash": "Déplacement vers la corbeille: {0}",
+            "permanentlyDeleting": "Suppression définitive: {0}",
+            "movingMultipleToTrash": "Déplacement de {0} éléments vers la corbeille",
+            "permanentlyDeletingMultiple": "Suppression définitive de {0} éléments",
+            "deleteCancelled": "Suppression annulée, {0} éléments traités",
+            "deleteErrors": "{0} éléments n'ont pas pu être supprimés"
+        },
+        "fsError": {
+            "fileNotFound": "Fichier introuvable",
+            "fileExists": "Le fichier existe déjà",
+            "fileNotADirectory": "Le chemin n'est pas un répertoire",
+            "fileIsADirectory": "Le chemin est un répertoire",
+            "noPermissions": "Permission refusée",
+            "unavailable": "Ressource non disponible",
+            "fileBusy": "Fichier en cours d'utilisation",
+            "dirNotEmpty": "Le répertoire n'est pas vide"
         },
         "paste": {
             "plainTextOnly": "qqq: le presse-papiers ne contient que du texte, impossible de coller dans le gestionnaire de fichiers"

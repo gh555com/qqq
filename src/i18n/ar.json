@@ -146,7 +146,28 @@
             "enterFolderName": "الرجاء إدخال اسم المجلد",
             "selectSingleForRename": "qqq: الرجاء تحديد عنصر واحد لإعادة التسمية",
             "imageSaved": "تم حفظ الصورة",
-            "noPasteContent": "{0} لم يتم اكتشاف محتوى قابل للصق"
+            "noPasteContent": "{0} لم يتم اكتشاف محتوى قابل للصق",
+            "scanning": "جاري فحص الملفات...",
+            "scannedFiles": "تم فحص {0} ملفات...",
+            "deletingFiles": "جاري حذف {0}/{1} ملفات...",
+            "deletingItem": "جاري حذف {0}/{1}: {2}",
+            "finalizingDelete": "جاري الإنهاء...",
+            "movingToTrash": "نقل إلى سلة المهملات: {0}",
+            "permanentlyDeleting": "حذف نهائي: {0}",
+            "movingMultipleToTrash": "نقل {0} عناصر إلى سلة المهملات",
+            "permanentlyDeletingMultiple": "حذف {0} عناصر نهائياً",
+            "deleteCancelled": "تم إلغاء الحذف، تمت معالجة {0} عناصر",
+            "deleteErrors": "فشل حذف {0} عناصر"
+        },
+        "fsError": {
+            "fileNotFound": "الملف غير موجود",
+            "fileExists": "الملف موجود بالفعل",
+            "fileNotADirectory": "المسار ليس مجلداً",
+            "fileIsADirectory": "المسار هو مجلد",
+            "noPermissions": "تم رفض الإذن",
+            "unavailable": "المورد غير متاح",
+            "fileBusy": "الملف قيد الاستخدام",
+            "dirNotEmpty": "المجلد ليس فارغاً"
         },
         "paste": {
             "plainTextOnly": "qqq: الحافظة تحتوي على نص فقط، لا يمكن اللصق في مدير الملفات"

@@ -146,7 +146,28 @@
             "enterFolderName": "請輸入資料夾名稱",
             "selectSingleForRename": "qqq: 請單選再做重新命名",
             "imageSaved": "圖片已儲存",
-            "noPasteContent": "{0} 未偵測到可貼上內容"
+            "noPasteContent": "{0} 未偵測到可貼上內容",
+            "scanning": "正在掃描檔案...",
+            "scannedFiles": "已掃描 {0} 個檔案...",
+            "deletingFiles": "正在刪除 {0}/{1} 個檔案...",
+            "deletingItem": "正在刪除 {0}/{1}: {2}",
+            "finalizingDelete": "正在完成...",
+            "movingToTrash": "正在移到資源回收筒: {0}",
+            "permanentlyDeleting": "正在永久刪除: {0}",
+            "movingMultipleToTrash": "正在移動 {0} 個項目到資源回收筒",
+            "permanentlyDeletingMultiple": "正在永久刪除 {0} 個項目",
+            "deleteCancelled": "刪除已取消，已處理 {0} 個項目",
+            "deleteErrors": "{0} 個項目刪除失敗"
+        },
+        "fsError": {
+            "fileNotFound": "檔案不存在",
+            "fileExists": "檔案已存在",
+            "fileNotADirectory": "路徑不是目錄",
+            "fileIsADirectory": "路徑是目錄",
+            "noPermissions": "權限不足",
+            "unavailable": "資源不可用",
+            "fileBusy": "檔案被佔用",
+            "dirNotEmpty": "目錄不為空"
         },
         "paste": {
             "plainTextOnly": "qqq: 剪貼簿中是純文字，無法貼上到檔案管理器"
