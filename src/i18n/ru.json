@@ -146,7 +146,28 @@
             "enterFolderName": "Пожалуйста, введите имя папки",
             "selectSingleForRename": "qqq: Для переименования выберите один элемент",
             "imageSaved": "Изображение сохранено",
-            "noPasteContent": "{0} Не обнаружено содержимое для вставки"
+            "noPasteContent": "{0} Не обнаружено содержимое для вставки",
+            "scanning": "Сканирование файлов...",
+            "scannedFiles": "Отсканировано {0} файлов...",
+            "deletingFiles": "Удаление {0}/{1} файлов...",
+            "deletingItem": "Удаление {0}/{1}: {2}",
+            "finalizingDelete": "Завершение...",
+            "movingToTrash": "Перемещение в корзину: {0}",
+            "permanentlyDeleting": "Безвозвратное удаление: {0}",
+            "movingMultipleToTrash": "Перемещение {0} элементов в корзину",
+            "permanentlyDeletingMultiple": "Безвозвратное удаление {0} элементов",
+            "deleteCancelled": "Удаление отменено, обработано {0} элементов",
+            "deleteErrors": "Не удалось удалить {0} элементов"
+        },
+        "fsError": {
+            "fileNotFound": "Файл не найден",
+            "fileExists": "Файл уже существует",
+            "fileNotADirectory": "Путь не является каталогом",
+            "fileIsADirectory": "Путь является каталогом",
+            "noPermissions": "Доступ запрещён",
+            "unavailable": "Ресурс недоступен",
+            "fileBusy": "Файл используется",
+            "dirNotEmpty": "Каталог не пуст"
         },
         "paste": {
             "plainTextOnly": "qqq: в буфере только текст, невозможно вставить в файловый менеджер"
