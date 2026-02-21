@@ -150,6 +150,7 @@
             "scanning": "Verificando arquivos...",
             "scannedFiles": "{0} arquivos verificados...",
             "deletingFiles": "Excluindo {0}/{1} arquivos...",
+            "deletingDirs": "Removendo {0}/{1} diretórios...",
             "deletingItem": "Excluindo {0}/{1}: {2}",
             "finalizingDelete": "Finalizando...",
             "movingToTrash": "Movendo para a lixeira: {0}",

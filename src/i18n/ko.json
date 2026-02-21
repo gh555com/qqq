@@ -150,6 +150,7 @@
             "scanning": "파일 스캔 중...",
             "scannedFiles": "{0}개 파일 스캔됨...",
             "deletingFiles": "{0}/{1}개 파일 삭제 중...",
+            "deletingDirs": "{0}/{1}개 디렉터리 삭제 중...",
             "deletingItem": "{0}/{1} 삭제 중: {2}",
             "finalizingDelete": "완료 중...",
             "movingToTrash": "휴지통으로 이동 중: {0}",

@@ -150,6 +150,7 @@
             "scanning": "正在扫描文件...",
             "scannedFiles": "已扫描 {0} 个文件...",
             "deletingFiles": "正在删除 {0}/{1} 个文件...",
+            "deletingDirs": "正在移除 {0}/{1} 个目录...",
             "deletingItem": "正在删除 {0}/{1}: {2}",
             "finalizingDelete": "正在完成...",
             "movingToTrash": "正在移到回收站: {0}",

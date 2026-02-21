@@ -150,6 +150,7 @@
             "scanning": "Dateien werden gescannt...",
             "scannedFiles": "{0} Dateien gescannt...",
             "deletingFiles": "{0}/{1} Dateien werden gelöscht...",
+            "deletingDirs": "{0}/{1} Verzeichnisse werden entfernt...",
             "deletingItem": "{0}/{1} wird gelöscht: {2}",
             "finalizingDelete": "Abschließen...",
             "movingToTrash": "In Papierkorb verschieben: {0}",
