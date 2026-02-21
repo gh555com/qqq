@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "正在移动 {0} 个项目到回收站",
             "permanentlyDeletingMultiple": "正在永久删除 {0} 个项目",
             "deleteCancelled": "删除已取消，已处理 {0} 个项目",
-            "deleteErrors": "{0} 个项目删除失败"
+            "deleteErrors": "{0} 个项目删除失败",
+            "needAdminPermission": "{0} 个项目因权限不足删除失败，需要管理员权限。",
+            "copyAdminCommand": "复制命令",
+            "adminCommandCopied": "管理员命令已复制到剪贴板，请在管理员终端中粘贴执行。"
         },
         "fsError": {
             "fileNotFound": "文件不存在",

@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "{0} Elemente in Papierkorb verschieben",
             "permanentlyDeletingMultiple": "{0} Elemente endgültig löschen",
             "deleteCancelled": "Löschen abgebrochen, {0} Elemente verarbeitet",
-            "deleteErrors": "{0} Elemente konnten nicht gelöscht werden"
+            "deleteErrors": "{0} Elemente konnten nicht gelöscht werden",
+            "needAdminPermission": "{0} Elemente konnten wegen fehlender Berechtigung nicht gelöscht werden. Administratorrechte erforderlich.",
+            "copyAdminCommand": "Befehl kopieren",
+            "adminCommandCopied": "Admin-Befehl in Zwischenablage kopiert. In Administrator-Terminal einfügen und ausführen."
         },
         "fsError": {
             "fileNotFound": "Datei nicht gefunden",

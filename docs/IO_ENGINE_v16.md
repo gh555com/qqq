@@ -278,7 +278,7 @@ pkill -f "kp.py.*--broker"
 | 🟡 中等 | Named Pipe 可能被安全软件拦截 | 提示用户添加白名单 |
 | 🟢 轻微 | 首次连接需等待 Broker 启动 | 6 秒延迟启动 |
 
-> ✅ **已解决**：`windowsHide: true` 和 `pythonw.exe` 都会导致 pywin32 Named Pipe 挂起 → 使用 `python.exe` + `detached: true`（接受短暂黑窗闪烁）
+> ✅ **已解决**：`detached: true` 会导致 pywin32 Named Pipe 挂起 → Windows 上使用 `python.exe` + `windowsHide: true` + **不使用 detached**（与 Rust daemon 保持一致）
 
 > ✅ **设计决策**：Rust daemon per-window 是有意为之，确保窗口隔离性和独立文件处理能力。
 

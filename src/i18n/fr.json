@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "Déplacement de {0} éléments vers la corbeille",
             "permanentlyDeletingMultiple": "Suppression définitive de {0} éléments",
             "deleteCancelled": "Suppression annulée, {0} éléments traités",
-            "deleteErrors": "{0} éléments n'ont pas pu être supprimés"
+            "deleteErrors": "{0} éléments n'ont pas pu être supprimés",
+            "needAdminPermission": "{0} éléments n'ont pas pu être supprimés en raison d'un manque de permissions. Droits administrateur requis.",
+            "copyAdminCommand": "Copier la commande",
+            "adminCommandCopied": "Commande admin copiée dans le presse-papiers. Collez dans un terminal administrateur pour exécuter."
         },
         "fsError": {
             "fileNotFound": "Fichier introuvable",

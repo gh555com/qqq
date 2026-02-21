@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "{0} 個の項目をごみ箱に移動中",
             "permanentlyDeletingMultiple": "{0} 個の項目を完全に削除中",
             "deleteCancelled": "削除がキャンセルされました。{0} 個の項目を処理済み",
-            "deleteErrors": "{0} 個の項目の削除に失敗しました"
+            "deleteErrors": "{0} 個の項目の削除に失敗しました",
+            "needAdminPermission": "{0} 個の項目が権限不足で削除できませんでした。管理者権限が必要です。",
+            "copyAdminCommand": "コマンドをコピー",
+            "adminCommandCopied": "管理者コマンドをクリップボードにコピーしました。管理者ターミナルで貼り付けて実行してください。"
         },
         "fsError": {
             "fileNotFound": "ファイルが見つかりません",

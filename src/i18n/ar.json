@@ -158,7 +158,10 @@
             "movingMultipleToTrash": "نقل {0} عناصر إلى سلة المهملات",
             "permanentlyDeletingMultiple": "حذف {0} عناصر نهائياً",
             "deleteCancelled": "تم إلغاء الحذف، تمت معالجة {0} عناصر",
-            "deleteErrors": "فشل حذف {0} عناصر"
+            "deleteErrors": "فشل حذف {0} عناصر",
+            "needAdminPermission": "فشل حذف {0} عناصر بسبب نقص الصلاحيات. مطلوب صلاحيات المسؤول.",
+            "copyAdminCommand": "نسخ الأمر",
+            "adminCommandCopied": "تم نسخ أمر المسؤول إلى الحافظة. الصقه في محطة المسؤول للتنفيذ."
         },
         "fsError": {
             "fileNotFound": "الملف غير موجود",
