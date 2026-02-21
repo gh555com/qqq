@@ -167,7 +167,7 @@ const folderSizeCache = new Map();
 
 const editorDebounceTimers = new Map();
 
-let enlargeSmallImages = true;
+let enlargeSmallImages = false;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
 let cleanFreakMode = false;
@@ -246,7 +246,7 @@ function loadWatermarkResource() {
 function refreshConfig() {
 	try {
 		const config = vscode.workspace.getConfiguration("qqq");
-		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", true));
+		enlargeSmallImages = config.get("enlargeSmallImages", config.get("stretchSmallImages", false));
 
 		const extremePerformance = config.get("extremePerformance", false);
 		if (extremePerformance) performanceMode = "extreme";
@@ -259,7 +259,7 @@ function refreshConfig() {
 		codelensLevel = String(config.get("codelensLevel", "3"));
 		PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
 	} catch (e) {
-		enlargeSmallImages = true;
+		enlargeSmallImages = false;
 		performanceMode = "optmum";
 		frameSizeMode = "fix";
 		cleanFreakMode = false;

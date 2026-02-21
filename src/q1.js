@@ -143,7 +143,7 @@ const FOLDER_SIZE_CACHE_MAX_ENTRIES = 500; // ★ Adjusted to 500 entries to mat
 
 const editorDebounceTimers = new Map();
 
-let enlargeSmallImages = true;
+let enlargeSmallImages = false;
 let performanceMode = "optmum";
 let frameSizeMode = "fix";
 let cleanFreakMode = "add"; // "never" | "add" | "add & remove"
@@ -219,7 +219,7 @@ function refreshConfig() {
 	try {
 		// ★ Read config via ConfigGate (do not read settings.json directly)
 		enlargeSmallImages = getConfig("enlargeSmallImages");
-		if (enlargeSmallImages === undefined) enlargeSmallImages = true;
+		if (enlargeSmallImages === undefined) enlargeSmallImages = false;
 
 		const extremePerformance = getConfig("extremePerformance");
 		if (extremePerformance) performanceMode = "extreme";
@@ -232,7 +232,7 @@ function refreshConfig() {
 		codelensLevel = String(getConfig("codelensLevel") || "3");
 		PREVIEW_BG_COLOR = textSlideColorScheme === "dark" ? "#1B1411" : "#fef6e3";
 	} catch (e) {
-		enlargeSmallImages = true;
+		enlargeSmallImages = false;
 		performanceMode = "optmum";
 		frameSizeMode = "fix";
 		cleanFreakMode = "add";
