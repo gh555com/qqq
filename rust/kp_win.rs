@@ -1751,58 +1751,6 @@ mod win {
         bmiColors: [u32; 3],
     }
 
-    // =============================================================================
-    //  disk_free —— 获取磁盘剩余空间 (Windows: GetDiskFreeSpaceExW)
-    // =============================================================================
-
-    pub fn get_disk_free(drive: &str) -> PyV {
-        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-
-        // 处理盘符格式：C -> C:\, C: -> C:\
-        let drive_path = if drive.is_empty() {
-            "C:\\".to_string()
-        } else {
-            let d = drive.trim().to_uppercase();
-            if d.len() == 1 && d.chars().next().map(|c| c.is_ascii_alphabetic()).unwrap_or(false) {
-                format!("{}:\\", d)
-            } else if d.len() == 2 && d.ends_with(':') {
-                format!("{}\\" , d)
-            } else if !d.ends_with('\\') && !d.ends_with('/') {
-                format!("{}\\" , d)
-            } else {
-                d
-            }
-        };
-
-        let wide_path = to_wide_null(&drive_path);
-
-        let mut free_bytes_available: u64 = 0;
-        let mut total_bytes: u64 = 0;
-        let mut total_free_bytes: u64 = 0;
-
-        let result = unsafe {
-            GetDiskFreeSpaceExW(
-                wide_path.as_ptr(),
-                &mut free_bytes_available,
-                &mut total_bytes,
-                &mut total_free_bytes,
-            )
-        };
-
-        if result != 0 {
-            PyV::Obj(vec![
-                ("success".to_string(), PyV::Bool(true)),
-                ("free".to_string(), py_num_u64(free_bytes_available)),
-                ("total".to_string(), py_num_u64(total_bytes)),
-                ("used".to_string(), py_num_u64(total_bytes.saturating_sub(free_bytes_available))),
-            ])
-        } else {
-            PyV::Obj(vec![
-                ("success".to_string(), PyV::Bool(false)),
-                ("error".to_string(), PyV::Str(format!("GetDiskFreeSpaceExW failed for: {}", drive_path))),
-            ])
-        }
-    }
 
     pub fn get_file_icon_base64(file_path: &str) -> Option<String> {
         // Python 逻辑：
@@ -2114,16 +2062,6 @@ fn dispatch_action(cmd_v: &Value) -> (PyV, bool, bool) {
             // 极限优化版：只获取文件/目录大小，不统计后缀名
             let path = cmd.get("path").and_then(|v| v.as_str()).unwrap_or("");
             if let PyV::Obj(extra) = get_path_size(path, None) {
-                out_pairs.extend(extra);
-            }
-            (PyV::Obj(out_pairs), false, false)
-        }
-        "disk_free" => {
-            // 获取磁盘剩余空间
-            let drive = cmd.get("drive").and_then(|v| v.as_str())
-                .or_else(|| cmd.get("path").and_then(|v| v.as_str()))
-                .unwrap_or("");
-            if let PyV::Obj(extra) = win::get_disk_free(drive) {
                 out_pairs.extend(extra);
             }
             (PyV::Obj(out_pairs), false, false)
