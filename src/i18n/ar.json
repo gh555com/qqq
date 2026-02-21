@@ -159,9 +159,9 @@
             "permanentlyDeletingMultiple": "حذف {0} عناصر نهائياً",
             "deleteCancelled": "تم إلغاء الحذف، تمت معالجة {0} عناصر",
             "deleteErrors": "فشل حذف {0} عناصر",
-            "needAdminPermission": "فشل حذف {0} عناصر بسبب نقص الصلاحيات. مطلوب صلاحيات المسؤول.",
-            "copyAdminCommand": "نسخ الأمر",
-            "adminCommandCopied": "تم نسخ أمر المسؤول إلى الحافظة. الصقه في محطة المسؤول للتنفيذ."
+            "needAdminPermission": "qqq: فشل حذف {0} عناصر بسبب نقص الصلاحيات. مطلوب صلاحيات المسؤول.",
+            "copyAdminCommand": "نسخ أمر الحذف الدائم",
+            "adminCommandCopied": "qqq: تم نسخ أمر المسؤول إلى الحافظة. يرجى لصقه في محطة المسؤول للتنفيذ."
         },
         "fsError": {
             "fileNotFound": "الملف غير موجود",

@@ -177,6 +177,10 @@ async function handlePermissionErrors(errors, targetPath) {
 
     await vscode.env.clipboard.writeText(cmd);
     vscode.window.showInformationMessage(q('q2.ui.adminCommandCopied'));
+
+    // Auto-open admin terminal (CMD for Windows, since command uses CMD syntax)
+    const parentDir = path.dirname(targetPath);
+    openAdminTerminal(parentDir, 'cmd');
   }
 }
 
