@@ -159,9 +159,9 @@
             "permanentlyDeletingMultiple": "Suppression définitive de {0} éléments",
             "deleteCancelled": "Suppression annulée, {0} éléments traités",
             "deleteErrors": "{0} éléments n'ont pas pu être supprimés",
-            "needAdminPermission": "{0} éléments n'ont pas pu être supprimés en raison d'un manque de permissions. Droits administrateur requis.",
-            "copyAdminCommand": "Copier la commande",
-            "adminCommandCopied": "Commande admin copiée dans le presse-papiers. Collez dans un terminal administrateur pour exécuter."
+            "needAdminPermission": "qqq: {0} éléments n'ont pas pu être supprimés en raison d'un manque de permissions. Droits administrateur requis.",
+            "copyAdminCommand": "Copier la commande de suppression permanente",
+            "adminCommandCopied": "qqq: Commande admin copiée dans le presse-papiers. Veuillez coller dans un terminal administrateur pour exécuter."
         },
         "fsError": {
             "fileNotFound": "Fichier introuvable",

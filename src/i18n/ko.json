@@ -159,9 +159,9 @@
             "permanentlyDeletingMultiple": "{0}개 항목 영구 삭제 중",
             "deleteCancelled": "삭제가 취소되었습니다. {0}개 항목 처리됨",
             "deleteErrors": "{0}개 항목 삭제 실패",
-            "needAdminPermission": "{0}개 항목이 권한 부족으로 삭제 실패했습니다. 관리자 권한이 필요합니다.",
-            "copyAdminCommand": "명령 복사",
-            "adminCommandCopied": "관리자 명령이 클립보드에 복사되었습니다. 관리자 터미널에서 붙여넣기하여 실행하세요."
+            "needAdminPermission": "qqq: {0}개 항목이 권한 부족으로 삭제 실패했습니다. 관리자 권한이 필요합니다.",
+            "copyAdminCommand": "영구 삭제 명령 복사",
+            "adminCommandCopied": "qqq: 관리자 명령이 클립보드에 복사되었습니다. 관리자 터미널에서 붙여넣기하여 실행하세요."
         },
         "fsError": {
             "fileNotFound": "파일을 찾을 수 없음",
