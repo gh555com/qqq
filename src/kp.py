@@ -958,11 +958,25 @@ def get_disk_free(drive: str = None):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+# Global cache for disk_free_batch (shared across all windows)
+_disk_free_cache = None
+_disk_free_cache_time = 0
+_DISK_FREE_CACHE_TTL = 30  # 30 seconds cache
+
 def get_disk_free_batch(drives: list = None):
     """
     Batch query disk free space for multiple drives.
     Returns: { "C": {free, total}, "D": {free, total}, ... }
+    Uses 30-second cache to avoid redundant queries from multiple windows.
     """
+    global _disk_free_cache, _disk_free_cache_time
+
+    now = time.time()
+    # Return cached result if still valid
+    if _disk_free_cache and (now - _disk_free_cache_time) < _DISK_FREE_CACHE_TTL:
+        return _disk_free_cache
+
+    # Cache expired or not exists, do real query
     result = {}
     if not drives:
         # Auto-detect drives on Windows
@@ -978,7 +992,11 @@ def get_disk_free_batch(drives: list = None):
         if info.get("success"):
             result[letter] = {"free": info["free"], "total": info["total"]}
 
-    return {"success": True, "data": result}
+    # Update cache
+    _disk_free_cache = {"success": True, "data": result}
+    _disk_free_cache_time = now
+
+    return _disk_free_cache
 
 def get_path_size(path: str, cancel_version: int = None):
     if not path or not isinstance(path, str):
