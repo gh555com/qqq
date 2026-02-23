@@ -308,7 +308,7 @@ class BrokerBridge extends EventEmitter {
 
 	async _openAndHello(connOpts, token, endpoint) {
 		this.closeSocket();
-		try { const global = require('./global'); global.logMessage(`[Broker] Connecting to ${JSON.stringify(connOpts)}`, "DEBUG"); } catch { }
+		try { const global = require('./global'); global.logMessage(() => `[Broker] Connecting to ${JSON.stringify(connOpts)}`, "DEBUG"); } catch { }
 
 		const s = net.connect(connOpts);
 		this.socket = s;
@@ -378,7 +378,7 @@ class BrokerBridge extends EventEmitter {
 				}
 			});
 
-			try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: hello response: ${JSON.stringify(res)}`, "DEBUG"); } catch { }
+			try { const global = require('./global'); global.logMessage(() => `[Broker] _openAndHello: hello response: ${JSON.stringify(res)}`, "DEBUG"); } catch { }
 			if (!res || res.ok !== true || res.app_id !== APP_ID) {
 				this.closeSocket();
 				return false;
