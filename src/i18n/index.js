@@ -56,7 +56,7 @@ const VSCODE_LANG_MAP = {
 };
 
 /**
- * 加载所有语言包
+ * 加载所有语言包（优化版：只预加载 zh 和 en，其他延迟加载）
  */
 function loadAllLocales() {
     // 如果已经成功加载了语言包，直接返回
@@ -74,7 +74,8 @@ function loadAllLocales() {
         path.dirname(__filename || ''),
     ].filter(Boolean);
 
-    const langFiles = ['zh', 'en', 'ja', 'ar', 'de', 'ru', 'ko', 'es', 'fr', 'pt-br', 'zh-tw'];
+    // ★ Optimization: only preload essential languages (zh, en), others lazy-load
+    const preloadLangs = ['zh', 'en'];
     let foundDir = null;
 
     for (const dir of possibleDirs) {
@@ -94,21 +95,45 @@ function loadAllLocales() {
         return;
     }
 
-    console.log('[i18n] Found i18n directory:', foundDir);
+    // ★ Store foundDir for lazy loading
+    _i18nDir = foundDir;
 
-    for (const lang of langFiles) {
+    // ★ Only preload zh and en for fast startup
+    for (const lang of preloadLangs) {
         const filePath = path.join(foundDir, `${lang}.json`);
         try {
             if (fs.existsSync(filePath)) {
                 const content = fs.readFileSync(filePath, 'utf8');
                 locales[lang] = JSON.parse(content);
-                console.log(`[i18n] Loaded ${lang}.json, keys:`, Object.keys(locales[lang]));
             }
         } catch (e) {
-            console.error(`[i18n] Failed to load ${lang}.json:`, e.message);
             locales[lang] = {};
         }
     }
+}
+
+// ★ i18n directory for lazy loading
+let _i18nDir = null;
+
+/**
+ * Lazy load a language pack (called when switching language)
+ */
+function _lazyLoadLocale(lang) {
+    if (locales[lang]) return locales[lang];
+    if (!_i18nDir) return {};
+
+    const filePath = path.join(_i18nDir, `${lang}.json`);
+    try {
+        if (fs.existsSync(filePath)) {
+            const content = fs.readFileSync(filePath, 'utf8');
+            locales[lang] = JSON.parse(content);
+            return locales[lang];
+        }
+    } catch (e) {
+        console.error(`[i18n] Failed to lazy-load ${lang}.json:`, e.message);
+    }
+    locales[lang] = {};
+    return locales[lang];
 }
 
 /**
@@ -138,7 +163,8 @@ function getNestedValue(obj, keyPath) {
 function q(key, ...args) {
     loadAllLocales();
 
-    const locale = locales[currentLang] || {};
+    // ★ Lazy load current language if not preloaded
+    const locale = locales[currentLang] || _lazyLoadLocale(currentLang);
     const fallback = locales['zh'] || {};
 
     let value = getNestedValue(locale, key);
