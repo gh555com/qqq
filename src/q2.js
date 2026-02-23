@@ -3801,6 +3801,10 @@ function showSaveAsDialog() {
     try {
       if (!panel || !activePanelAlive) return;
 
+      // ★ Key fix: sync cooldown timestamp on every refresh (manual or watcher-triggered)
+      // This prevents duplicate refreshes and ensures consistent cooldown behavior
+      markWatcherRefreshTime();
+
       // Record current directory for detecting directory changes
       if (currentPath !== lastResourceExplorerPath) {
         lastResourceExplorerPath = currentPath;
@@ -3813,11 +3817,8 @@ function showSaveAsDialog() {
       activeAbortController = new AbortController();
       const currentSignal = activeAbortController.signal;
 
-      // Clean up old file watcher
-      if (currentWatcher) {
-        currentWatcher.dispose();
-        currentWatcher = null;
-      }
+      // ★ Note: file watcher cleanup moved to end of function (unified with setup logic)
+      // This minimizes the gap where no watcher is active during directory read
 
       const config = getConfig();
 
@@ -3911,8 +3912,15 @@ function showSaveAsDialog() {
       });
 
       // ★ Smart file watcher: only enable when user has autoWatchChanges enabled
+      // Cleanup/setup is unified here to minimize monitoring gap during async operations
       if (config.autoWatchChanges) {
         setupFileWatcher(currentPath);
+      } else {
+        // User disabled autoWatch: clean up any existing watcher
+        if (currentWatcher) {
+          currentWatcher.dispose();
+          currentWatcher = null;
+        }
       }
     } catch (error) {
       geq().logMessage(q('q2.log.updatePreviewError', error), "ERROR");
@@ -3923,6 +3931,11 @@ function showSaveAsDialog() {
   let lastWatcherRefreshTime = 0;
   const WATCHER_COOLDOWN_MS = 6000;
 
+  // ★ Exported function: update cooldown timestamp (called by both manual refresh and watcher)
+  function markWatcherRefreshTime() {
+    lastWatcherRefreshTime = Date.now();
+  }
+
   function setupFileWatcher(watchPath) {
     // Clean up old watcher
     if (currentWatcher) {
@@ -3931,7 +3944,7 @@ function showSaveAsDialog() {
     }
 
     try {
-      // Cooldown refresh: first event triggers refresh, then ignore for 6s
+      // Cooldown refresh: first event triggers refresh, then ignore for cooldown period
       const smartRefresh = () => {
         const now = Date.now();
         // Within cooldown period → ignore

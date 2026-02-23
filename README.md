@@ -33,3 +33,10 @@
      你好你好你好  ![GH HEALTH](https://i.imgur.com/Tm1WwC0.png)   ![GH HEALqH](https://i.imgur.com/XKDPUjX.png)
 
 <img src="https://i.imgur.com/Tm1WwC0.png">  我好我好我好
+
+
+
+  <video controls playsinline style="max-width: 100%; height: auto;">
+  <source src="https://res.cloudinary.com/dweax6kcb/video/upload/v1771857556/q1_szm9xt.mp4" type="video/mp4">
+</video>
+
