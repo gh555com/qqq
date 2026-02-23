@@ -4385,7 +4385,9 @@ function showSaveAsDialog() {
 
       case "openWithDefault": {
         const p = canonicalizeExistingPath(message.path);
-        // Do not record history for w-key open
+        // ★ Record parent directory to qqiq (not the item itself)
+        // Logic: user pressed w in this directory, so record where they were working
+        recordDirHistory(path.dirname(p));
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
