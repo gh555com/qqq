@@ -1445,6 +1445,7 @@ let extensionContext = null;
 let ffmpegPath = null;
 let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
+let _ffmpegInitPromise = null; // ★ Async FFmpeg init promise
 
 // ★ Ultimate optimal: global deactivation flag
 let _isDeactivated = false;
@@ -1497,6 +1498,116 @@ function withReady(fn) {
 	};
 }
 
+// ============================================================================
+// ★ FFmpeg async initialization (non-blocking startup optimization)
+// ============================================================================
+
+/**
+ * Internal: async FFmpeg initialization
+ * Called immediately at startup, runs in background without blocking activate()
+ */
+function _initFFmpegAsync(context) {
+	if (_ffmpegInitPromise) return _ffmpegInitPromise;
+
+	// ★ Set immediate fallback (system PATH) so q1.js works even before async completes
+	const isWin = process.platform === "win32";
+	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
+	const ffprobeName = isWin ? "ffprobe.exe" : "ffprobe";
+	ffmpegPath = ffName;   // Immediate fallback to system PATH
+	ffprobePath = ffprobeName;
+
+	_ffmpegInitPromise = (async () => {
+		const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
+		const globalStoragePath = context.globalStorageUri?.fsPath;
+		const ffInAssets = path.join(extensionPath, "assets", ffName);
+		const ffprobeInAssets = path.join(extensionPath, "assets", ffprobeName);
+		const ffInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffName) : null;
+		const ffprobeInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffprobeName) : null;
+
+		// Ensure globalStorage directory exists (async-friendly check)
+		if (globalStoragePath) {
+			try {
+				await fs.promises.mkdir(globalStoragePath, { recursive: true });
+			} catch { }
+		}
+
+		// Check globalStorage first
+		if (ffInGlobalStorage) {
+			try {
+				await fs.promises.access(ffInGlobalStorage);
+				ffmpegPath = ffInGlobalStorage;
+				ffprobePath = ffprobeInGlobalStorage;
+				ffmpegSource = "GLOBAL_STORAGE";
+				logMessage(`FFmpeg Path: ${ffInGlobalStorage}`, "INFO");
+				return;
+			} catch { }
+		}
+
+		// Check assets and move to globalStorage
+		try {
+			await fs.promises.access(ffInAssets);
+			if (ffInGlobalStorage) {
+				try {
+					await fs.promises.rename(ffInAssets, ffInGlobalStorage);
+					if (ffprobeInGlobalStorage) {
+						try { await fs.promises.rename(ffprobeInAssets, ffprobeInGlobalStorage); } catch { }
+					}
+					ffmpegPath = ffInGlobalStorage;
+					ffprobePath = ffprobeInGlobalStorage;
+					ffmpegSource = "GLOBAL_STORAGE";
+					logMessage(`FFmpeg moved to globalStorage: ${ffInGlobalStorage}`, "INFO");
+					return;
+				} catch {
+					// Cross-disk: copy + delete
+					try {
+						await fs.promises.copyFile(ffInAssets, ffInGlobalStorage);
+						await fs.promises.unlink(ffInAssets);
+						if (ffprobeInGlobalStorage) {
+							try {
+								await fs.promises.copyFile(ffprobeInAssets, ffprobeInGlobalStorage);
+								await fs.promises.unlink(ffprobeInAssets);
+							} catch { }
+						}
+						ffmpegPath = ffInGlobalStorage;
+						ffprobePath = ffprobeInGlobalStorage;
+						ffmpegSource = "GLOBAL_STORAGE";
+						logMessage(`FFmpeg copied to globalStorage: ${ffInGlobalStorage}`, "INFO");
+						return;
+					} catch (cpErr) {
+						logMessage(`FFmpeg move failed: ${cpErr.message}`, "WARN");
+					}
+				}
+			}
+			// Fallback to assets
+			ffmpegPath = ffInAssets;
+			ffprobePath = ffprobeInAssets;
+			ffmpegSource = "ASSETS";
+			logMessage(`FFmpeg Path: ${ffInAssets}`, "INFO");
+			return;
+		} catch { }
+
+		// Not found, fallback to system PATH
+		ffmpegSource = "NOT_FOUND";
+		ffmpegPath = ffName;
+		ffprobePath = ffprobeName;
+		logMessage("FFmpeg not found, fallback to system PATH", "DEBUG");
+	})();
+
+	return _ffmpegInitPromise;
+}
+
+/**
+ * Ensure FFmpeg is ready before use
+ * Call this before any FFmpeg operation (e.g., decorators, video processing)
+ * Returns immediately if already initialized
+ */
+async function ensureFFmpegReady() {
+	if (_ffmpegInitPromise) {
+		await _ffmpegInitPromise;
+	}
+	return { ffmpegPath, ffprobePath, ffmpegSource };
+}
+
 function init(context) {
 	_isDeactivated = false; // Reset on startup
 	extensionContext = context;
@@ -1504,90 +1615,9 @@ function init(context) {
 	// ★ Initialize BrokerBridge with extension path (for IPC Broker singleton)
 	initPythonBrokerBridge();
 
-	// ★ FFmpeg: 统一存放在 globalStorage（与 yt-dlp.exe 同目录）
-	const isWin = process.platform === "win32";
-	const ffName = isWin ? "ffmpeg.exe" : "ffmpeg";
-	const ffprobeName = isWin ? "ffprobe.exe" : "ffprobe";
-	const extensionPath = context.extensionUri?.fsPath || context.extensionPath;
-	const globalStoragePath = context.globalStorageUri?.fsPath;
-	const ffInAssets = path.join(extensionPath, "assets", ffName);
-	const ffprobeInAssets = path.join(extensionPath, "assets", ffprobeName);
-	const ffInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffName) : null;
-	const ffprobeInGlobalStorage = globalStoragePath ? path.join(globalStoragePath, ffprobeName) : null;
-
-	// 确保 globalStorage 目录存在
-	if (globalStoragePath && !fs.existsSync(globalStoragePath)) {
-		try { fs.mkdirSync(globalStoragePath, { recursive: true }); } catch { }
-	}
-
-	// 检查 globalStorage 是否已有 ffmpeg
-	if (ffInGlobalStorage && fs.existsSync(ffInGlobalStorage)) {
-		// 已在 globalStorage，直接使用
-		ffmpegPath = ffInGlobalStorage;
-		ffprobePath = ffprobeInGlobalStorage;
-		ffmpegSource = "GLOBAL_STORAGE";
-		logMessage(`FFmpeg initialized from globalStorage: ${ffInGlobalStorage}`, "INFO");
-	} else if (fs.existsSync(ffInAssets) && ffInGlobalStorage) {
-		// assets 有但 globalStorage 没有，执行剪切（移动）
-		try {
-			fs.renameSync(ffInAssets, ffInGlobalStorage);
-			logMessage(`FFmpeg moved from assets to globalStorage: ${ffInGlobalStorage}`, "INFO");
-			// 同时移动 ffprobe（如果存在）
-			if (fs.existsSync(ffprobeInAssets) && ffprobeInGlobalStorage) {
-				try { fs.renameSync(ffprobeInAssets, ffprobeInGlobalStorage); } catch { }
-			}
-			ffmpegPath = ffInGlobalStorage;
-			ffprobePath = ffprobeInGlobalStorage;
-			ffmpegSource = "GLOBAL_STORAGE";
-		} catch (moveErr) {
-			// 跨磁盘无法 rename，改用复制+删除
-			try {
-				fs.copyFileSync(ffInAssets, ffInGlobalStorage);
-				fs.unlinkSync(ffInAssets);
-				if (fs.existsSync(ffprobeInAssets) && ffprobeInGlobalStorage) {
-					fs.copyFileSync(ffprobeInAssets, ffprobeInGlobalStorage);
-					fs.unlinkSync(ffprobeInAssets);
-				}
-				ffmpegPath = ffInGlobalStorage;
-				ffprobePath = ffprobeInGlobalStorage;
-				ffmpegSource = "GLOBAL_STORAGE";
-				logMessage(`FFmpeg copied+deleted to globalStorage: ${ffInGlobalStorage}`, "INFO");
-			} catch (cpErr) {
-				// 完全失败，回退使用 assets
-				ffmpegPath = ffInAssets;
-				ffprobePath = ffprobeInAssets;
-				ffmpegSource = "ASSETS (fallback)";
-				logMessage(`FFmpeg move failed, using assets: ${cpErr.message}`, "WARN");
-			}
-		}
-	} else if (fs.existsSync(ffInAssets)) {
-		// 没有 globalStorage，直接用 assets
-		ffmpegPath = ffInAssets;
-		ffprobePath = ffprobeInAssets;
-		ffmpegSource = "ASSETS";
-		logMessage(`FFmpeg using assets (no globalStorage): ${ffInAssets}`, "INFO");
-	} else {
-		// 都没有，回退到系统 PATH
-		ffmpegSource = "NOT_FOUND";
-		ffmpegPath = ffName; // System PATH fallback
-		ffprobePath = ffprobeName;
-		logMessage(`FFmpeg not found, fallback to system PATH`, "DEBUG");
-	}
-
-	// 异步验证 ffmpeg 可用性
-	if (ffmpegPath && ffmpegPath !== ffName) {
-		(async () => {
-			try {
-				const { spawn } = require('child_process');
-				const cp = spawn(ffmpegPath, ["-version"], { windowsHide: true });
-				cp.on('error', (e) => {
-					logMessage(q('ffmpeg.validateFailed', e.message), "WARN");
-				});
-			} catch (e) {
-				logMessage(q('ffmpeg.validateException', e.message), "WARN");
-			}
-		})();
-	}
+	// ★ FFmpeg: async initialization (non-blocking, but starts immediately)
+	// Use ensureFFmpegReady() to wait for completion when needed
+	_initFFmpegAsync(context);
 
 	// Start assets sentinel
 	startAssetsSentinel(context);
@@ -1672,10 +1702,14 @@ function rotateLogIfNeeded() {
 }
 
 function logMessage(message, level = "INFO") {
-	// ★ Filter by log level
+	// ★ Filter by log level (early return before any string processing)
 	const msgPriority = LOG_LEVEL_PRIORITY[level] ?? 1;
 	const minPriority = LOG_LEVEL_PRIORITY[LOG_LEVEL] ?? 0;
 	if (msgPriority < minPriority) return;
+
+	// ★ Lazy evaluation: if message is a function, call it only when needed
+	// This avoids expensive JSON.stringify or string concatenation when log is filtered out
+	const msg = typeof message === 'function' ? message() : message;
 
 	const now = new Date();
 	// ★ Use client local time + timezone offset
@@ -1691,7 +1725,7 @@ function logMessage(message, level = "INFO") {
 		String(now.getSeconds()).padStart(2, '0') + '.' +
 		String(now.getMilliseconds()).padStart(3, '0') +
 		tzSign + tzHours + ':' + tzMins;
-	const line = `[${localISO}][${level}] ${message} `;
+	const line = `[${localISO}][${level}] ${msg} `;
 	outputChannel.appendLine(line);
 
 	if ((level === "ERROR" || level === "WARN") && LOG_PATH) {
@@ -4063,6 +4097,7 @@ module.exports = {
 	extensionPath: () => extensionContext?.extensionPath,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
+	ensureFFmpegReady,
 
 	// Formatting helpers (for CodeLens etc.)
 	formatBytes,
