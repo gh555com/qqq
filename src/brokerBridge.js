@@ -119,8 +119,6 @@ class BrokerBridge extends EventEmitter {
 	}
 
 	async start() {
-		try { const global = require('./global'); global.logMessage(`[Broker] start() called: isStarting=${this.isStarting}, available=${this.isAvailable()}`, "DEBUG"); } catch { }
-
 		if (this.isStarting) return this.startPromise;
 		if (this.isAvailable()) return true;
 
@@ -212,11 +210,9 @@ class BrokerBridge extends EventEmitter {
 	// =========================================================================
 
 	async _doStart() {
-		try { const global = require('./global'); global.logMessage("[Broker] _doStart called", "DEBUG"); } catch { }
-
 		// Step 1: Try connecting to existing Broker
 		const connResult = await this._tryConnectOnce();
-		try { const global = require('./global'); global.logMessage(`[Broker] _tryConnectOnce returned: ${connResult}`, "DEBUG"); } catch { }
+		try { const global = require('./global'); global.logMessage(`[Broker] Connect attempt: ${connResult ? 'connected to existing' : 'need spawn'}`, "DEBUG"); } catch { }
 
 		if (connResult) {
 			this._startHeartbeat();
@@ -251,19 +247,19 @@ class BrokerBridge extends EventEmitter {
 		const token = readTextFile(tokenPath);
 
 		if (!endpoint || !token) {
-			// ★ 诊断：endpoint.json 或 token.txt 不存在
-			// 只在首次失败时打印，避免刷屏
+			// ★ 诊断：endpoint.json 或 token.txt 不存在（首次打印）
 			if (!this._diagPrinted) {
 				this._diagPrinted = true;
 				try {
 					const global = require('./global');
-					global.logMessage(`[Broker] Connect check: endpoint=${!!endpoint}, token=${!!token}, dir=${cacheDir}`, "DEBUG");
+					global.logMessage(`[Broker] No existing broker: endpoint=${!!endpoint}, token=${!!token}`, "DEBUG");
 				} catch { }
 			}
 			return false;
 		}
 
 		if (endpoint.app_id !== APP_ID) {
+			try { const global = require('./global'); global.logMessage(`[Broker] app_id mismatch: expected=${APP_ID}, got=${endpoint.app_id}`, "WARN"); } catch { }
 			return false;
 		}
 
@@ -312,7 +308,7 @@ class BrokerBridge extends EventEmitter {
 
 	async _openAndHello(connOpts, token, endpoint) {
 		this.closeSocket();
-		try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: connecting to ${JSON.stringify(connOpts)}`, "DEBUG"); } catch { }
+		try { const global = require('./global'); global.logMessage(`[Broker] Connecting to ${JSON.stringify(connOpts)}`, "DEBUG"); } catch { }
 
 		const s = net.connect(connOpts);
 		this.socket = s;
@@ -321,25 +317,41 @@ class BrokerBridge extends EventEmitter {
 
 		s.setKeepAlive(true);
 		s.on('data', (buf) => this._onData(buf));
-		s.on('error', (e) => { try { const global = require('./global'); global.logMessage(`[Broker] Socket error: ${e.message}`, "DEBUG"); } catch { } this._onDisconnected(); });
+		s.on('error', (e) => { try { const global = require('./global'); global.logMessage(`[Broker] Socket error: ${e.message}`, "WARN"); } catch { } this._onDisconnected(); });
 		s.on('close', () => this._onDisconnected());
 
 		const connected = await new Promise((resolve) => {
-			s.once('connect', () => { try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: socket connected", "DEBUG"); } catch { } resolve(true); });
-			s.once('error', () => resolve(false));
-			setTimeout(() => { try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: connect timeout", "DEBUG"); } catch { } resolve(false); }, 3000);
+			let resolved = false;
+			const timeoutId = setTimeout(() => {
+				if (!resolved) {
+					resolved = true;
+					try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: connect timeout", "WARN"); } catch { }
+					resolve(false);
+				}
+			}, 3000);
+			s.once('connect', () => {
+				if (!resolved) {
+					resolved = true;
+					clearTimeout(timeoutId);
+					resolve(true);
+				}
+			});
+			s.once('error', () => {
+				if (!resolved) {
+					resolved = true;
+					clearTimeout(timeoutId);
+					resolve(false);
+				}
+			});
 		});
 
 		if (!connected) {
-			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: connection failed", "DEBUG"); } catch { }
 			this.closeSocket();
 			return false;
 		}
 
 		// Verify with hello - DIRECT write to avoid call() re-entrance check
 		try {
-			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: sending hello...", "DEBUG"); } catch { }
-
 			const helloId = this.nextId++;
 			const helloReq = {
 				_id: helloId,
@@ -359,7 +371,6 @@ class BrokerBridge extends EventEmitter {
 
 				try {
 					this.socket.write(helloLine, 'utf8');
-					try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: wrote hello request, id=${helloId}`, "DEBUG"); } catch { }
 				} catch (e) {
 					clearTimeout(timer);
 					this.pending.delete(helloId);
@@ -375,10 +386,10 @@ class BrokerBridge extends EventEmitter {
 			this.connected = true;
 			this.available = true;
 			this.lastStartError = "";
-			try { const global = require('./global'); global.logMessage("[Broker] _openAndHello: SUCCESS!", "INFO"); } catch { }
+			try { const global = require('./global'); global.logMessage("[Broker] Connected successfully", "INFO"); } catch { }
 			return true;
 		} catch (e) {
-			try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello: hello failed: ${e.message}`, "DEBUG"); } catch { }
+			try { const global = require('./global'); global.logMessage(`[Broker] _openAndHello failed: ${e.message}`, "WARN"); } catch { }
 			this.closeSocket();
 			return false;
 		}
@@ -463,18 +474,15 @@ class BrokerBridge extends EventEmitter {
 	async _spawnBrokerThrottled() {
 		const now = Date.now();
 		if (this.spawning) {
-			try { const global = require('./global'); global.logMessage("[Broker] Spawn skipped: already spawning", "DEBUG"); } catch { }
 			return this.spawning;
 		}
 
 		// 3s cooldown per window
 		if (now - this.lastSpawnAt < 3000) {
-			try { const global = require('./global'); global.logMessage(`[Broker] Spawn skipped: cooldown (${now - this.lastSpawnAt}ms < 3000ms)`, "DEBUG"); } catch { }
 			return;
 		}
 
 		this.lastSpawnAt = now;
-		try { const global = require('./global'); global.logMessage("[Broker] Spawn starting...", "DEBUG"); } catch { }
 
 		this.spawning = new Promise(async (resolve) => {
 			// ★ OPTIMIZATION: Random delay (0-2s) to stagger multi-window spawns
@@ -505,10 +513,6 @@ class BrokerBridge extends EventEmitter {
 					const age = Date.now() - stat.mtimeMs;
 					if (age < markerMaxAge) {
 						// 其他窗口正在 spawn，等待后重试连接
-						try {
-							const global = require('./global');
-							global.logMessage(`[Broker] Another window is spawning (age=${Math.round(age/1000)}s), waiting...`, "DEBUG");
-						} catch { }
 						resolve();
 						return;
 					}
@@ -522,10 +526,6 @@ class BrokerBridge extends EventEmitter {
 			} catch (e) {
 				if (e.code === 'EEXIST') {
 					// 另一个窗口刚刚创建了 marker，等待
-					try {
-						const global = require('./global');
-						global.logMessage("[Broker] Spawn lock contention, waiting...", "DEBUG");
-					} catch { }
 					resolve();
 					return;
 				}
@@ -547,12 +547,6 @@ class BrokerBridge extends EventEmitter {
 
 			// Find Python executable and script
 			const { pythonPath, scriptPath } = this._findPythonAndScript();
-
-			// ★ 诊断日志：打印找到的路径
-			try {
-				const global = require('./global');
-				global.logMessage(`[Broker] Spawn paths: python=${pythonPath}, script=${scriptPath}`, "DEBUG");
-			} catch { }
 
 			if (!pythonPath || !scriptPath) {
 				try {
@@ -603,7 +597,7 @@ class BrokerBridge extends EventEmitter {
 
 				const actualPythonPath = pythonPath;
 
-				// ★ 诊断日志：spawn 成功
+				// ★ Spawn 成功日志
 				try {
 					const global = require('./global');
 					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}, exe=${actualPythonPath}`, "DEBUG");
@@ -632,10 +626,8 @@ class BrokerBridge extends EventEmitter {
 						const errSnip = stderrBuf ? stderrBuf.trim().split('\n').slice(-5).join(' | ') : '';
 						const outSnip = stdoutBuf ? stdoutBuf.trim().split('\n').slice(-3).join(' | ') : '';
 						const combined = [errSnip, outSnip].filter(Boolean).join(' || ') || 'no output';
-						// ★ 任何退出都记录，便于诊断
-						if (code === 0) {
-							global.logMessage(`[Broker] Python exited(0): ${combined}`, "DEBUG");
-						} else if (code !== null) {
+						// ★ 只记录异常退出
+						if (code !== 0 && code !== null) {
 							global.logMessage(`[Broker] Python exited(${code}): ${combined}`, "WARN");
 						} else if (signal) {
 							global.logMessage(`[Broker] Python killed by signal: ${signal}`, "WARN");
@@ -763,7 +755,7 @@ class BrokerBridge extends EventEmitter {
 					// Avoid circular require at top level
 					try {
 						const global = require('./global');
-						global.logMessage(`[Broker] Heartbeat failed (count=${this._heartbeatFailCount}): ${e.message}`, "DEBUG");
+						global.logMessage(`[Broker] Heartbeat failed (count=${this._heartbeatFailCount}): ${e.message}`, "WARN");
 					} catch { }
 				}
 			}

@@ -526,7 +526,6 @@ function initPythonBrokerBridge() {
 			const pythonPath = await downloader.ensurePythonReady(extensionContext);
 			if (pythonPath) {
 				pythonBridge._downloadedPythonPath = pythonPath;
-				logMessage(`[Broker] Python path from downloader: ${pythonPath}`, "DEBUG");
 			} else {
 				logMessage("[Broker] Python L1 imperfect, waiting for download...", "INFO");
 			}
@@ -1613,6 +1612,22 @@ function init(context) {
 let LOG_PATH = null;
 const outputChannel = vscode.window.createOutputChannel("qqq");
 
+// ★ Log level filter: DEBUG < INFO < WARN < ERROR
+// Set to "WARN" to only show warnings and errors in Output panel
+// let LOG_LEVEL = "DEBUG";
+let LOG_LEVEL = "WARN";
+const LOG_LEVEL_PRIORITY = { "DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3 };
+
+function setLogLevel(level) {
+	if (LOG_LEVEL_PRIORITY[level] !== undefined) {
+		LOG_LEVEL = level;
+	}
+}
+
+function getLogLevel() {
+	return LOG_LEVEL;
+}
+
 function setLogPath(p) {
 	LOG_PATH = p;
 }
@@ -1657,6 +1672,11 @@ function rotateLogIfNeeded() {
 }
 
 function logMessage(message, level = "INFO") {
+	// ★ Filter by log level
+	const msgPriority = LOG_LEVEL_PRIORITY[level] ?? 1;
+	const minPriority = LOG_LEVEL_PRIORITY[LOG_LEVEL] ?? 0;
+	if (msgPriority < minPriority) return;
+
 	const now = new Date();
 	// ★ Use client local time + timezone offset
 	const tzOffset = -now.getTimezoneOffset();
@@ -3982,6 +4002,8 @@ module.exports = {
 	// Logs
 	setLogPath,
 	getLogPath,
+	setLogLevel,
+	getLogLevel,
 	logMessage,
 	logMessageRateLimited,
 	bridgeStderrKey,
