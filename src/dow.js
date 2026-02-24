@@ -2559,14 +2559,14 @@ class YtDlpDownloader {
                 windowsHide: true,
                 timeout: 5000
             });
-            
+
             // ★ Check for spawn error (ENOENT, EACCES, not a valid executable, etc.)
             if (r.error) {
                 const fileSize = fs.existsSync(installPath) ? fs.statSync(installPath).size : 0;
                 global.logMessage(`[yt-dlp] Spawn error: ${r.error.message}, fileSize=${fileSize}`, "ERROR");
                 throw new Error(q('dow.downloadVerifyFailed'));
             }
-            
+
             if (r.status !== 0 || !(r.stdout || '').match(/^\d+/)) {
                 // ★ Log detailed verification failure info
                 const fileSize = fs.existsSync(installPath) ? fs.statSync(installPath).size : 0;
