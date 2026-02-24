@@ -4388,6 +4388,11 @@ function showSaveAsDialog() {
         // ★ Record parent directory to qqiq (not the item itself)
         // Logic: user pressed w in this directory, so record where they were working
         recordDirHistory(path.dirname(p));
+        // ★ Update sidebar immediately (same as q-key behavior)
+        if (panel && activePanelAlive) {
+          const sbData = generateSidebarHtml(getConfig());
+          panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+        }
         try {
           global.openExternal(vscode.Uri.file(p));
         } catch (error) {
@@ -4663,6 +4668,26 @@ async function activate(context) {
       globalRefreshWebview();
     }
   });
+
+  // ★ Multi-window sync: refresh sidebar (qq area + history) when window gains focus
+  // This ensures cross-window consistency since globalState is shared but UI is per-window
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((e) => {
+      if (e.focused && activePanel && activePanelAlive) {
+        // Clear config cache to force re-read from globalState (may have been modified by other windows)
+        cachedInMemoryConfig = null;
+        const config = getConfig();
+        const sbData = generateSidebarHtml(config);
+        try {
+          activePanel.webview.postMessage({
+            command: "updateSidebar",
+            qqiqHtml: sbData.qqiqHtml,
+            pinnedDirsHtml: sbData.pinnedDirsHtml,
+          });
+        } catch { }
+      }
+    })
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("qqq.q2", global.withReady(showSaveAsDialog)),
