@@ -820,11 +820,11 @@
         "engineStartFailed": "{0}: فشل البدء / غير متاح",
         "unknownReason": "سبب غير معروف",
         "mismatchExpected": "المتوقع {0}، سبب فشل البدء: {1}",
-        "tooltipAvgLatency": "متوسط التأخير",
-        "tooltipMax": "الحد الأقصى {0}",
-        "tooltipCompanionTime": "وقت الاستخدام",
-        "tooltipDiskCache": "ذاكرة القرص المؤقتة",
-        "tooltipCacheHit": "إصابة الذاكرة المؤقتة",
-        "tooltipIOEngine": "محرك IO"
+        "tooltipAvgLatency": "متوسط التأخير\u200E",
+        "tooltipMax": "\u200Eالحد الأقصى\u200E {0}",
+        "tooltipCompanionTime": "وقت الاستخدام\u200E",
+        "tooltipDiskCache": "ذاكرة القرص المؤقتة\u200E",
+        "tooltipCacheHit": "إصابة الذاكرة المؤقتة\u200E",
+        "tooltipIOEngine": "\u200Eمحرك IO\u200E"
     }
 }
