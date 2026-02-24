@@ -46,17 +46,11 @@ node_modules/**
 !dist/kp.py
 esbuild.config.js
 
-# 平台二进制处理 (唯一真理原则)
-# 1. 默认忽略 assets 下所有以 q_ 开头的文件和 ffmpeg 相关的原始文件
-assets/q_win_*
-assets/q_linux_*
-assets/q_mac_*
-assets/q_x64
-assets/q_arm64
-assets/q_win_x86.exe
-# 2. 显式允许打包时生成的"真理"文件
-!assets/q_engine
-!assets/q_engine.exe
+# 平台二进制处理 - 排除根目录下的 .dll 和 .exe 文件
+# assets/runtimes/ 中的 DLL 由 CI/CD workflow 按平台动态管理
+assets/*.dll
+assets/*.exe
+assets/q_*
 
 # 其他开发文件
 .eslintrc.json
