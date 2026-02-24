@@ -2408,6 +2408,54 @@ class YtDlpDownloader {
                 fs.unlinkSync(installPath);
             }
 
+            // ★ CROSS-PROCESS LOCK: Prevent multiple windows from downloading simultaneously
+            const lockResult = await acquireDownloadLock(installPath, {
+                downloadLockWaitMs: 120000,  // Wait up to 120s for other window to finish
+                downloadLockStaleMs: 300000, // Lock expires after 300s (safety)
+                downloadLockPollMs: 500
+            });
+
+            if (!lockResult.ok) {
+                // Another window is downloading, wait and check if it completed
+                global.logMessage('[yt-dlp] Another window is downloading, waiting...', 'INFO');
+                await sleep(5000);
+                // Re-check if file now exists and is valid
+                if (fs.existsSync(installPath)) {
+                    const stat = fs.statSync(installPath);
+                    if (stat.size > MIN_SIZE) {
+                        const { spawnSync } = require('child_process');
+                        const r = spawnSync(installPath, ['--version'], {
+                            encoding: 'utf8',
+                            windowsHide: true,
+                            timeout: 5000
+                        });
+                        if (r.status === 0 && (r.stdout || '').match(/^\d+/)) {
+                            this.ytdlpPath = installPath;
+                            return { success: true, path: installPath };
+                        }
+                    }
+                }
+                return { success: false, error: 'lock_timeout' };
+            }
+
+            // ★ Double-check after acquiring lock (another window may have completed)
+            if (fs.existsSync(installPath)) {
+                const stat = fs.statSync(installPath);
+                if (stat.size > MIN_SIZE) {
+                    const { spawnSync } = require('child_process');
+                    const r = spawnSync(installPath, ['--version'], {
+                        encoding: 'utf8',
+                        windowsHide: true,
+                        timeout: 5000
+                    });
+                    if (r.status === 0 && (r.stdout || '').match(/^\d+/)) {
+                        this.ytdlpPath = installPath;
+                        lockResult.release();
+                        return { success: true, path: installPath };
+                    }
+                }
+            }
+
             // ★ Key fix 2: use temp file to avoid concurrent overwrite
             const tmpPath = installPath + '.tmp';
             if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
@@ -2516,8 +2564,10 @@ class YtDlpDownloader {
             }
 
             this.ytdlpPath = installPath;
+            lockResult.release(); // ★ Release lock on success
             return { success: true, path: installPath };
         } catch (error) {
+            if (lockResult && lockResult.release) lockResult.release(); // ★ Release lock on failure
             return { success: false, error: error.message };
         }
     }
