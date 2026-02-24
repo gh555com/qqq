@@ -55,13 +55,14 @@ assets/msvcp140_2.dll
 assets/vccorlib140.dll
 assets/vcruntime140.dll
 assets/vcruntime140_1.dll
-# 2. 排除平台特定二进制文件 (不排除 ffmpeg.exe 和 q.gif/q.mp3/q4.png)
+# 2. 排除平台特定源二进制文件 (q_engine.exe 由 CI 构建时动态生成，不排除)
 assets/q_win_*
 assets/q_linux_*
 assets/q_mac_*
 assets/q_x64
 assets/q_arm64
-assets/q_engine.exe
+# 3. 排除备份文件
+assets/*.bak
 
 # 其他开发文件
 .eslintrc.json
