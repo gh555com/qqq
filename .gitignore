@@ -22,6 +22,9 @@ dist/
 
 # 本地 ffmpeg 二进制（由打包脚本动态处理）
 assets/ffmpeg.exe
+assets/ffmpeg
+assets/q_engine.exe
+assets/q_engine
 
 # 操作系统文件
 .DS_Store
