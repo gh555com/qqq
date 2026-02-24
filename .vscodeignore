@@ -46,11 +46,22 @@ node_modules/**
 !dist/kp.py
 esbuild.config.js
 
-# 平台二进制处理 - 排除根目录下的 .dll 和 .exe 文件
-# assets/runtimes/ 中的 DLL 由 CI/CD workflow 按平台动态管理
-assets/*.dll
-assets/*.exe
-assets/q_*
+# 平台二进制处理
+# 1. 排除 assets 根目录下的重复 DLL (运行时由 runtimes/ 提供)
+assets/concrt140.dll
+assets/msvcp140.dll
+assets/msvcp140_1.dll
+assets/msvcp140_2.dll
+assets/vccorlib140.dll
+assets/vcruntime140.dll
+assets/vcruntime140_1.dll
+# 2. 排除平台特定二进制文件 (不排除 ffmpeg.exe 和 q.gif/q.mp3/q4.png)
+assets/q_win_*
+assets/q_linux_*
+assets/q_mac_*
+assets/q_x64
+assets/q_arm64
+assets/q_engine.exe
 
 # 其他开发文件
 .eslintrc.json
