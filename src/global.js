@@ -3163,8 +3163,20 @@ async function wq() {
 					saveWqStats(wqExecutionTime);
 					return cacheAndReturn({ type: 'whitelist', subType: 'html_text', ...baseResult });
 				}
+			} else if (status.hasText) {
+				// ★ HTML 检测失败但有文本，safe fallback 到 whitelist（避免不必要的事务粘贴）
+				logMessage("[wq] HTML detection failed, fallback to text whitelist", "DEBUG");
+				saveWqStats(wqExecutionTime);
+				return cacheAndReturn({ type: 'whitelist', subType: 'text', ...baseResult });
 			}
-		} catch (e) { }
+		} catch (e) {
+			// ★ 异常时 safe fallback：如果同时有文本，返回 whitelist
+			if (status.hasText) {
+				logMessage(`[wq] HTML detection exception, fallback to text whitelist: ${e?.message || e}`, "DEBUG");
+				saveWqStats(wqExecutionTime);
+				return cacheAndReturn({ type: 'whitelist', subType: 'text', ...baseResult });
+			}
+		}
 	}
 
 	// B. Yellowlist recognition (everything else)
