@@ -2531,9 +2531,9 @@ class YtDlpDownloader {
             let lastError = null;
             for (const { url, timeout, name } of downloadUrls) {
                 try {
-                    global.logMessage(q('dow.tryDownload', name), "INFO");
+                    global.logMessage(q('dow.tryDownload', name), "WARN"); // ★ Changed to WARN so user can see fallback attempts
                     await tryDownload(url, timeout);
-                    global.logMessage(q('dow.downloadSuccess', name), "INFO");
+                    global.logMessage(q('dow.downloadSuccess', name), "WARN"); // ★ Changed to WARN
                     break; // Break on success
                 } catch (e) {
                     lastError = e;
@@ -2559,7 +2559,18 @@ class YtDlpDownloader {
                 windowsHide: true,
                 timeout: 5000
             });
+            
+            // ★ Check for spawn error (ENOENT, EACCES, not a valid executable, etc.)
+            if (r.error) {
+                const fileSize = fs.existsSync(installPath) ? fs.statSync(installPath).size : 0;
+                global.logMessage(`[yt-dlp] Spawn error: ${r.error.message}, fileSize=${fileSize}`, "ERROR");
+                throw new Error(q('dow.downloadVerifyFailed'));
+            }
+            
             if (r.status !== 0 || !(r.stdout || '').match(/^\d+/)) {
+                // ★ Log detailed verification failure info
+                const fileSize = fs.existsSync(installPath) ? fs.statSync(installPath).size : 0;
+                global.logMessage(`[yt-dlp] Verification failed: status=${r.status}, stdout="${(r.stdout || '').slice(0, 100)}", stderr="${(r.stderr || '').slice(0, 200)}", fileSize=${fileSize}`, "ERROR");
                 throw new Error(q('dow.downloadVerifyFailed'));
             }
 
