@@ -2715,6 +2715,12 @@ async function executeClipboardCommand() {
 	}
 
 	if (mode === 'q') {
+		// ★ 对于 whitelist（纯文本或无媒体HTML），直接调用原生粘贴（更快，保留空行）
+		if (snapshot.type === 'whitelist' && (snapshot.subType === 'text' || snapshot.subType === 'html_text')) {
+			await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+			return;
+		}
+
 		// ★ 快速粘贴也要生成 transId，用于文件名前缀（4位锚点+2位索引）
 		const quickTransId = TransactionManager.createTransactionId();
 		await h.autoDetectAndPaste(targetDir, null, null, quickTransId, snapshot).then(async (result) => {
