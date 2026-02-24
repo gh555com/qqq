@@ -204,6 +204,11 @@ jobs:
         run: |
           node qqqworkflow/git_help.js package
 
+      - name: Cleanup temporary build artifacts
+        run: |
+          # Remove q_engine.exe/q_engine (temporary files from packaging)
+          rm -f assets/q_engine assets/q_engine.exe
+
       - name: Get version
         id: get_version
         run: |
