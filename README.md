@@ -13,9 +13,7 @@
  Full source code transparency, security, and auditability are guaranteed.
 
 
- introduction  v1:
-
-   👇  Please wait for the picture to load.  👇
+   👇  Images now accessible globally, please just wait.  👇
 
 
 <p align="center">
