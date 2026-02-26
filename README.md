@@ -18,8 +18,6 @@
 
 
 
-
-
    ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything
 
 
@@ -38,7 +36,7 @@
 </p>
 
 
-   Let me be honest, you can paste txt, exe, psd, mp3, mp4...if you want, why not？
+   Let me be honest, you can paste txt, exe, psd, mp3, mp4....if you want.    Why not？
 
 
 <p align="left">
@@ -46,7 +44,7 @@
 </p>
 
 
-   Direct paste, Direct show, Direct open, that’s real. On the other hand, if you don’t like key combinations, try F2.
+   Direct paste, Direct show, Direct open. On the other hand, if you don’t like key combinations, try F2.
 
 
 
