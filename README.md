@@ -44,7 +44,7 @@
 </p>
 
 
-   Direct paste, Direct display, Direct open, that’s real. On the other hand, if you don’t like key combinations, try F2.
+   Direct paste, Direct show, Direct open, that’s real. On the other hand, if you don’t like key combinations, try F2.
 
 
 
