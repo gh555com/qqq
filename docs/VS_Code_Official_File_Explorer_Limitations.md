@@ -14,9 +14,11 @@
 
 
 
+
+
 ## VS Code Official File Explorer Limitations （下方有中文版）
 
-### Summary of Findings
+### Based on research
 
 **VS Code's built-in file explorer:**
 
@@ -35,8 +37,6 @@
 * Avoid complex overwrite confirmation UI
 * Avoid progress bars
 * Let the operating system handle these complex file-operation behaviors
-
-This matches the earlier conclusion: **don't build a full "complete version"**—it's too complex  (though in the end, qqq already did it) . Even the VS Code team doesn't want to take it on.
 
 ---
 
@@ -134,11 +134,11 @@ From VS Code issue #111022 (official developer response):
 
 ---
 
-## QQQ File Explorer: Transaction-Based Architecture
+## qqq Roam File Explorer: Transaction-Based Architecture
 
-### How QQQ Implements Transactions
+### How qqq Roam Implements Transactions
 
-QQQ's file explorer (`q2.js`) uses a **TransactionManager** system that provides:
+qqq Roam's file explorer (`q2.js`) uses a **TransactionManager** system that provides:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -165,9 +165,9 @@ QQQ's file explorer (`q2.js`) uses a **TransactionManager** system that provides
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Feature Comparison: QQQ vs VS Code
+### Feature Comparison: qqq Roam vs VS Code
 
-| Feature | VS Code | QQQ |
+| Feature | VS Code | qqq Roam |
 |---------|---------|-----|
 | **Transaction support** | ❌ None | ✅ Full TransactionManager with unique transId |
 | **Atomic operations** | ❌ Partial failures leave inconsistent state | ✅ All-or-nothing semantics with rollback |
@@ -182,7 +182,7 @@ QQQ's file explorer (`q2.js`) uses a **TransactionManager** system that provides
 | **Delete performance** | ❌ 5-10s per file (Linux) | ✅ Non-blocking with `yieldToEventLoop()` |
 | **Undo folder delete** | ❌ Restores empty folder | ✅ Transaction snapshot enables proper recovery |
 
-### QQQ Delete Operation: Non-Blocking with Full Error Handling
+### qqq Roam Delete Operation: Non-Blocking with Full Error Handling
 
 ```
 Phase 1: SCAN
@@ -206,7 +206,7 @@ Phase 4: FINALIZE
   └─ Offer admin command if permission errors detected
 ```
 
-### QQQ Paste Operation: Full Transaction Lifecycle
+### qqq Roam Paste Operation: Full Transaction Lifecycle
 
 ```javascript
 // 1. Create transaction with unique ID
@@ -238,7 +238,7 @@ try {
 
 ## Summary: Why Transaction Support Matters
 
-| Aspect | Without Transactions (VS Code) | With Transactions (QQQ) |
+| Aspect | Without Transactions (VS Code) | With Transactions (qqq Roam) |
 |--------|--------------------------------|-------------------------|
 | **Reliability** | Partial failures corrupt state | Atomic: all-or-nothing |
 | **Recoverability** | Manual cleanup required | Automatic rollback |
@@ -247,7 +247,7 @@ try {
 | **Performance** | UI freezes on large operations | Non-blocking with progress |
 | **Data Safety** | Risk of data loss | Snapshot-based protection |
 
-**Bottom line:** VS Code's file explorer is designed for simplicity, not reliability. For bulk file operations—especially delete and copy—the lack of transaction support creates real risks of data loss and inconsistent states. QQQ's transaction-based architecture addresses these fundamental limitations.
+**Bottom line:** VS Code's file explorer is designed for simplicity, not reliability. For bulk file operations—especially delete and copy—the lack of transaction support creates real risks of data loss and inconsistent states. qqq Roam's transaction-based architecture addresses these fundamental limitations.
 
  (end)
 
@@ -263,9 +263,10 @@ try {
 
 ## VS Code 官方文件管理器缺陷
 
-### 搜索结果总结
+### 基于调研
 
  VS Code 自带文件管理器：
+
 默认行为：同名文件自动重命名（加后缀）
 设置 explorer.incrementalNaming: disabled 可以弹出覆盖确认
 但用户请求的"完整覆盖确认 UI"被标记为 "out-of-scope" 或 "closed as not planned"
@@ -276,12 +277,12 @@ Issue #73996 和 #124505 请求进度条功能，都被标记为 "closed" 或 "o
 
 
  VS Code 的策略：
+
 保持简单
 不做复杂的覆盖确认 UI
 不做进度条
 让操作系统处理这些复杂问题
 
-这正好印证了我之前的建议：不要做完整版，太复杂了 （但最终 qqq 已经做了），连 VS Code 官方都不愿意做。
 
  默认行为：复制粘贴同名文件时，自动重命名（加 " copy" 或 ".1" 后缀）
 设置选项：explorer.incrementalNaming
@@ -370,11 +371,11 @@ GitHub issue：用户请求覆盖功能被标记为 "out-of-scope" 或 "closed a
 
 ---
 
-## QQQ 文件管理器：基于事务的架构
+## qqq Roam 文件管理器：基于事务的架构
 
-### QQQ 如何实现事务
+### qqq Roam 如何实现事务
 
-QQQ 的文件管理器（`q2.js`）使用 **TransactionManager** 系统提供：
+qqq Roam 的文件管理器（`q2.js`）使用 **TransactionManager** 系统提供：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -401,9 +402,9 @@ QQQ 的文件管理器（`q2.js`）使用 **TransactionManager** 系统提供：
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 功能对比：QQQ vs VS Code
+### 功能对比：qqq Roam vs VS Code
 
-| 功能 | VS Code | QQQ |
+| 功能 | VS Code | qqq Roam |
 |------|---------|-----|
 | **事务支持** | ❌ 无 | ✅ 完整 TransactionManager，带唯一 transId |
 | **原子操作** | ❌ 部分失败导致状态不一致 | ✅ 全有或全无语义，带回滚 |
@@ -418,7 +419,7 @@ QQQ 的文件管理器（`q2.js`）使用 **TransactionManager** 系统提供：
 | **删除性能** | ❌ 每文件 5-10 秒 (Linux) | ✅ 非阻塞，使用 `yieldToEventLoop()` |
 | **撤销文件夹删除** | ❌ 恢复空文件夹 | ✅ 事务快照支持正确恢复 |
 
-### QQQ 删除操作：非阻塞 + 完整错误处理
+### qqq Roam 删除操作：非阻塞 + 完整错误处理
 
 ```
 阶段 1: 扫描
@@ -442,7 +443,7 @@ QQQ 的文件管理器（`q2.js`）使用 **TransactionManager** 系统提供：
   └─ 如检测到权限错误，提供管理员命令
 ```
 
-### QQQ 粘贴操作：完整事务生命周期
+### qqq Roam 粘贴操作：完整事务生命周期
 
 ```javascript
 // 1. 创建带唯一 ID 的事务
@@ -474,7 +475,7 @@ try {
 
 ## 总结：为什么事务支持很重要
 
-| 方面 | 无事务（VS Code） | 有事务（QQQ） |
+| 方面 | 无事务（VS Code） | 有事务（qqq Roam） |
 |------|------------------|--------------|
 | **可靠性** | 部分失败破坏状态 | 原子操作：全有或全无 |
 | **可恢复性** | 需手动清理 | 自动回滚 |
@@ -483,7 +484,7 @@ try {
 | **性能** | 大操作时 UI 冻结 | 非阻塞带进度显示 |
 | **数据安全** | 有数据丢失风险 | 基于快照的保护 |
 
-**底线：** VS Code 的文件管理器设计追求简单，而非可靠。对于批量文件操作——特别是删除和复制——缺乏事务支持会造成数据丢失和状态不一致的真实风险。QQQ 基于事务的架构解决了这些根本性的限制。
+**底线：** VS Code 的文件管理器设计追求简单，而非可靠。对于批量文件操作——特别是删除和复制——缺乏事务支持会造成数据丢失和状态不一致的真实风险。qqq Roam 基于事务的架构解决了这些根本性的限制。
 
  (end)
 
