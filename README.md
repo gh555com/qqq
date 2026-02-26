@@ -21,7 +21,7 @@
    ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything
 
 
-   Paste memory screenshot  👇  Images now accessible globally, please just wait.  👇
+   Paste memory screenshot  👇   wait for pic loading...  👇
 
 
 <p align="left">
@@ -59,6 +59,13 @@ Before 2026, Tab helped you code fast.
 
 Now, I advocate for tab (=Roam) to help you expand rapidly: reaching any location at the speed of thought.
 
+
+
+<p align="left">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772109236/q4_1_n0qpnz.gif" width="100%" alt="Paste any file">
+</p>
+
+
 Roam, from qqq, is a file explorer:
 
 
@@ -75,8 +82,28 @@ So, find the faster version of yourself.
 
 
 
-   ✦q✦
+    ✦q✦ Premium features are permanently free.
 
 
 
+ All features mentioned above are available in the free version.
+
+
+ Leave a one-time tip of about $7, and as a thank-you, you’ll get a lifetime Premium license — built to last across generations.
+
+ However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are: 1. Removal of watermarks; 2. Persistence (cloud storage) of preferences. Apart from these, both versions are completely identical in terms of functionality and usage.
+
+ Premium features include:
+
+ Pasting HTML
+
+ Export to DOC
+
+ Export to ZIP
+
+ Embed online videos
+
+ Clean up orphaned files
+
+ Clipboard history cards
 
