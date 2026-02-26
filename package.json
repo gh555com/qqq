@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.94",
+  "version": "15.73.95",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -383,12 +383,11 @@
       {
         "command": "qqq.q2",
         "key": "tab",
-        "when": "editorTextFocus && !editorReadonly"
+        "when": "!editorTextFocus"
       },
       {
         "command": "qqq.q2",
-        "key": "f6",
-        "when": "editorTextFocus && !editorReadonly"
+        "key": "f6"
       }
     ]
   },
