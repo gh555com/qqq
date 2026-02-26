@@ -416,7 +416,8 @@
   ],
   "keywords": [
     "paste images",
-    "Rich Note"
+    "Rich Note",
+    "navigat"
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",
