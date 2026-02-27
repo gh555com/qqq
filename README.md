@@ -1,27 +1,77 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 那是我的梦境。
+
+ ещё whisper for my daughter的梦0.
+
+
+<p align="center">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772173093/loq1_rrpdks.jpg" width="100%" alt="Paste any file">
+</p>
+
+
+
+<p align="center">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772173110/loq2_niyddt.png" width="100%" alt="Paste any file">
+</p>
+
+
+© 2005 gh555.com All rights reserved.
+
+
+
 > Full source code transparency, security, and auditability are guaranteed.
 
 [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 ---
 
-## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything
+## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything  anywhere in any document
 
-Paste memory screenshot 👇 wait for pic loading... 👇
+ 👇 wait for pic loading... 👇
 
 <p align="left">
   <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771865477/q1_4_tohdus.gif" width="100%" alt="Paste Screenshot">
 </p>
 
-Paste image files directly
+ Works with any document: ".txt", ".1", any file extension, or no extension.
 
 <p align="left">
   <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771911801/q23_yi9vsm.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, you can paste txt, exe, psd, mp3, mp4... if you want. Why not?
+Let me be honest, Via  qqq you can paste txt, exe, psd, mp3, mp4... if you want. Why not?
 
 <p align="left">
   <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772026194/q3_3_w27v8k.gif" width="100%" alt="Paste any file">
@@ -69,9 +119,27 @@ Apart from these, both versions are completely identical in terms of functionali
 
 **Premium features include:**
 
-- Pasting HTML
-- Export to DOC
-- Export to ZIP
-- Embed online videos
-- Clean up orphaned files
-- Clipboard history cards
+ Paste HTML
+
+<p align="left">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772171686/q5_2_sum6hx.gif" width="100%" alt="Paste HTML">
+</p>
+
+ Test URL: https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
+
+This URL contains a mix of 3 videos and multiple images. Test objectives: 1. All 3 videos have been downloaded. 2. The positions (order) of text, images, and videos are correct. 3. No garbled characters should appear. 4. After repeated operations, the same resources should only be saved once on the hard drive (identical images and videos will be deduplicated by fingerprinting).
+
+
+
+
+ Export to DOC
+ Export to ZIP
+ Embed online videos
+ Clean up orphaned files
+ Clipboard history cards
+
+
+
+
+
+
