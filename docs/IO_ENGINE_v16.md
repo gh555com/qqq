@@ -1,3 +1,323 @@
+
+
+
+
+
+
+
+
+# IO Engine v16 Architecture （下方有中文版）
+
+## Overview
+
+**Core change in v16 architecture: Users no longer need to select an IO engine; the system automatically collaborates.**
+
+| Engine | Responsibility | Lifecycle | Memory |
+|--------|----------------|-----------|--------|
+| **Rust daemon** | IO operations (clipboard, files, paste) | per-window | ~7 MB |
+| **Python Broker** | Audio playback, clipboard monitoring | System-wide singleton | ~50 MB |
+| **Shell fallback** | Fallback (only when Rust fails) | per-window | ~70 MB |
+
+**Extreme scenario with 15 windows**: v16 uses only **~155 MB**, compared to ~855 MB in the old architecture, saving **82%**.
+
+---
+
+## Process Identification Specification
+
+### Process Hierarchy Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    PROCESS HIERARCHY                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  VS Code / Cursor / Windsurf (Host Process)                  │
+│      │                                                       │
+│      ├── Extension Host Process                              │
+│      │       │                                               │
+│      │       ├── q_engine.exe [per-window, ~7MB]             │
+│      │       │       ↓ stdio (JSON-RPC)                      │
+│      │       │                                               │
+│      │       └── [fallback] powershell.exe / bash            │
+│      │               ↓ stdio (JSON-RPC)                      │
+│      │                                                       │
+│      └── (IPC) ──────────────────────────────────────────┐   │
+│                                                          │   │
+│                                                          ↓   │
+│              python.exe kp.py --broker [global, ~50MB]       │
+│                      ↑                                       │
+│                      │ Named Pipe / Unix Socket              │
+│                      │                                       │
+│              (Shared by all windows)                        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 1. Rust Daemon (Primary IO Engine)
+
+| Attribute | Value |
+|-----------|-------|
+| **Process Name** | `q_engine.exe` (Windows) / `q_engine` (macOS/Linux) |
+| **File Location** | `{extensionPath}/assets/q_engine.exe` |
+| **Startup Arguments** | `--daemon` |
+| **Environment Variable** | `Q_PARENT_PID={Parent PID}` |
+| **Lifecycle** | per-window, auto-exits when VS Code window closes |
+| **Memory Footprint** | ~7 MB |
+| **Number of Processes** | 1 per window |
+
+```bash
+# Identification Method
+# Windows
+tasklist | findstr q_engine
+
+# macOS/Linux
+ps aux | grep q_engine
+```
+
+### 2. Python Broker (Global Audio Engine)
+
+| Attribute | Value |
+|-----------|-------|
+| **Process Name** | `python.exe` / `python3` |
+| **Python Path** | `{globalStorage}/python_engine/python.exe` (Built-in only, system Python disabled) |
+| **Script File** | `{extensionPath}/dist/kp.py` or `src/kp.py` |
+| **Startup Arguments** | `--broker` |
+| **Lifecycle** | System-wide singleton, auto-exits after 80s TTL without heartbeat |
+| **Memory Footprint** | ~50 MB |
+| **Number of Processes** | **1** globally |
+
+**IPC Communication Paths**:
+
+| Platform | IPC Type | Path Format |
+|----------|----------|-------------|
+| Windows | Named Pipe | `\\.\pipe\vix_audio_broker_{RID}` (e.g., `vix_audio_broker_1001`) |
+| macOS/Linux | Unix Socket | `/tmp/vix_audio_broker_{uid}.sock` |
+
+**Config File Directory**:
+
+| Platform | Directory Path |
+|----------|----------------|
+| Windows | `%LOCALAPPDATA%\vix_audio_broker\` |
+| macOS/Linux | `~/.cache/vix_audio_broker/` |
+
+**Config Files**:
+- `endpoint.json` - IPC endpoint info (pipe/socket path, protocol version)
+- `token.txt` - Authentication token (Base64 encoded)
+
+```bash
+# Identification Method
+# Windows
+wmic process where "commandline like '%kp.py%'" get processid,commandline
+
+# macOS/Linux
+ps aux | grep "kp.py.*--broker"
+```
+
+### 3. Shell Daemon (Fallback Engine)
+
+Only automatically enabled when Rust daemon fails to start (e.g., binary corruption, blocked by antivirus, etc.).
+
+> ⚠️ Since v16, Rust daemon is compiled with Win7-specific targets. Under normal circumstances, **all Windows versions (Win7+) use Rust**; no Shell fallback is needed.
+
+| Platform | Process Name | Startup Command |
+|----------|--------------|-----------------|
+| Windows | `powershell.exe` / `pwsh.exe` | `-STA -NoProfile -NoLogo -NonInteractive -ExecutionPolicy Bypass -Command {script}` |
+| macOS/Linux | `bash` | `bash -c {script}` |
+
+| Attribute | Value |
+|-----------|-------|
+| **Lifecycle** | per-window |
+| **Memory Footprint** | ~70 MB (PowerShell) / ~20 MB (Bash) |
+| **Number of Processes** | 0 (normal) / 1 per window (fallback) |
+
+```bash
+# Identification Method
+# Windows
+wmic process where "name='powershell.exe'" get processid,commandline | findstr /i "qqq\|vix"
+
+# macOS/Linux
+ps aux | grep "bash.*qqq"
+```
+
+### Common Troubleshooting Commands
+
+```bash
+# === Windows ===
+tasklist | findstr /i "q_engine python powershell"
+wmic process where "name='q_engine.exe'" get processid,commandline
+dir \\.\pipe\ | findstr vix_audio_broker
+
+# Force terminate (use with caution)
+taskkill /f /im q_engine.exe
+
+# === macOS / Linux ===
+ps aux | grep -E "q_engine|kp.py|vix"
+ls -la /tmp/*vix_audio_broker*
+
+# Force terminate (use with caution)
+pkill -f q_engine
+pkill -f "kp.py.*--broker"
+```
+
+---
+
+## Architecture Comparison
+
+### v16 Architecture: Broker Singleton + Division of Labor
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   v16 ARCHITECTURE                           │
+│           (Broker Singleton + Rust Division + Real-time Broadcast)               │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Different IDEs: VS Code, Cursor, Windsurf, Trae... Assume 15 windows are open             │
+│  ┌──────┐  ┌──────┐   ┌──────┐                              │
+│  │ Rust │  │ Rust │   │ Rust │    ← Per-window independent Rust          │
+│  │(7MB) │  │(7MB) │   │(7MB) │      Handles IO operations             │
+│  └──┬───┘  └──┬───┘   └──┬───┘                              │
+│     │         │          │                                   │
+│     │    IPC (Named Pipe / Unix Socket)                      │
+│     │         │          │                                   │
+│     └─────────┼──────────┘                                   │
+│               ↓                                              │
+│     ┌─────────────────────┐                                  │
+│     │   Python Broker     │  ← System-wide unique, shared by all windows        │
+│     │      (~50 MB)       │                                  │
+│     │  • Audio playback         │                                  │
+│     │  • Clipboard monitoring       │                                  │
+│     │  • Status broadcast ────────┼──→ Real-time push to all windows            │
+│     └─────────────────────┘                                  │
+│                                                              │
+│  Advantages: Real-time status sync, 82% memory savings, zero configuration                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Old Architecture: Per-window Independent Daemons
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    OLD ARCHITECTURE                          │
+│              (Per-window independent daemons, no communication)                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  VS Code Window 1          VS Code Window 2                  │
+│  ┌────────────────┐        ┌────────────────┐               │
+│  │ Python daemon  │        │ Python daemon  │    ...×15     │
+│  │   (~50 MB)     │        │   (~50 MB)     │               │
+│  │ Rust daemon    │        │ Rust daemon    │               │
+│  │   (~7 MB)      │        │   (~7 MB)      │               │
+│  └────────────────┘        └────────────────┘               │
+│                                                              │
+│  Problems: Status out of sync, memory explosion, users need to manually select engine               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+> 📖 Further Reading: [IO_ENGINE.md](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md)
+
+---
+
+## Performance Comparison
+
+### Memory Footprint
+
+| Scenario | Old Architecture | v16 Architecture | Savings |
+|----------|------------------|------------------|---------|
+| 1 window | ~57 MB | ~57 MB | 0% |
+| 5 windows | ~285 MB | ~85 MB | **70%** |
+| **15 windows** | **~855 MB** | **~155 MB** | **82%** |
+| 20 windows | ~1140 MB | ~190 MB | **83%** |
+
+**Formulas**:
+- Old Architecture: `N × 57MB`
+- v16: `N × 7MB + 50MB`
+
+### Other Metrics
+
+| Metric | Old Architecture | v16 Architecture |
+|--------|------------------|------------------|
+| Startup Time | ~2-3s per window | ~50ms after first window |
+| Status Sync | ~1.5s polling | <10ms broadcast |
+| Idle CPU | Continuous polling | **Zero polling** |
+
+---
+
+## Stability & Platform Support
+
+### Fault Isolation
+
+| Scenario | Old Architecture | v16 Architecture |
+|----------|------------------|------------------|
+| Python crash | All window functions fail | Only audio unavailable |
+| Rust crash | Window IO fails | Same |
+| Process leak | N possible leaks | Only 1, auto-recycled via TTL |
+
+### Cross-platform
+
+| Platform | v16 Strategy |
+|----------|--------------|
+| Windows 10+ | ✅ Rust daemon + Named Pipe IPC |
+| Windows 7/8 | ✅ Rust daemon (Win7 target compile) + Named Pipe IPC |
+| macOS/Linux | ✅ Rust daemon + Unix Socket IPC |
+| ARM64 | ✅ Rust cross-platform compile |
+
+> Win7 compatibility achieved via `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` target compilation; no Shell fallback needed.
+
+---
+
+## Known Issues
+
+### Old Architecture Issues (Resolved)
+
+| Severity | Problem | v16 Solution |
+|----------|---------|--------------|
+| 🔴 Critical | Linear memory growth (~855MB for 15 windows) | Broker singleton, reduced to ~155MB |
+| 🔴 Critical | Multi-window status out of sync | IPC broadcast, <10ms real-time sync |
+| 🟠 High | Users need to manually select IO engine | Automatic collaboration, zero configuration |
+| 🟠 High | Continuous polling consumes CPU when idle | Event-driven, zero polling |
+| 🟡 Medium | Python startup takes 2-3s per window | Direct connection ~50ms after first |
+| 🟡 Medium | No cross-IDE collaboration | Broker unified management |
+| 🟢 Low | Hot reload leaves zombie processes | Auto-recycled via 80s TTL |
+
+### v16 Current Issues
+
+| Severity | Problem | Mitigation |
+|----------|---------|------------|
+| 🟡 Medium | Named Pipe may be blocked by security software | Prompt user to add to whitelist |
+| 🟢 Low | First connection needs to wait for Broker startup | 6-second delayed startup |
+
+> ✅ **Resolved**: `detached: true` causes pywin32 Named Pipe to hang → On Windows, use `python.exe` + `windowsHide: true` + **do not use detached** (consistent with Rust daemon)
+
+> ✅ **Design Decision**: Rust daemon per-window is intentional to ensure window isolation and independent file processing capabilities.
+
+---
+
+## Summary
+
+| Dimension | Old Architecture | v16 Architecture | Improvement |
+|-----------|------------------|------------------|-------------|
+| Memory (15 windows) | ~855 MB | ~155 MB | **-82%** |
+| CPU (idle) | Continuous polling | Zero polling | **-100%** |
+| Status Sync | ~750ms | <10ms | **-99%** |
+| User Configuration | Manual selection | Zero configuration | **Automated** |
+| Cross-IDE Collaboration | Not supported | Fully supported | **New capability** |
+
+**v16 is an architectural upgrade, evolving from "going it alone" to "division of labor and collaboration".**
+
+
+
+
+ (end)
+
+
+
+
+
+
+//===================================================================================
+
+
+
 # IO Engine v16 Architecture
 
 ## 概述
@@ -295,3 +615,11 @@ pkill -f "kp.py.*--broker"
 | 跨 IDE 协作 | 不支持 | 完全支持 | **新能力** |
 
 **v16 是架构级升级，从"单打独斗"进化为"分工协作"。**
+
+
+ (end)
+
+
+
+
+
