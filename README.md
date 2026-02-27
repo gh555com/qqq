@@ -47,7 +47,6 @@
 
 [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
----
 
 ## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything  anywhere in any document
 
@@ -71,7 +70,6 @@ Let me be honest, Via  qqq you can paste txt, exe, psd, mp3, mp4... if you want.
 
 Direct paste, Direct show, Direct open. On the other hand, if you don't like key combinations, try F2.
 
----
 
 ## ✦q✦ A Revolution of the Tab Key
 
@@ -95,7 +93,6 @@ Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any loc
 
 So, find the faster version of yourself.
 
----
 
 ## ✦q✦ Premium features are permanently free
 
