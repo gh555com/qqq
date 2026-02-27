@@ -85,7 +85,7 @@ Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any loc
 
 1. **Nice**: It can reach any location, no longer limited to project folders. You can even map remote disks locally, skip ssh.
 
-2. **Fast**: It is the most responsive resource manager I have ever seen; you won't need to curse while waiting.
+2. **Fast**: I'm no expert at reviewing file explorers, but of all the file managers I've ever used, Roam's responsiveness is hands down the most satisfying for me. I don't curse anymore just waiting for a list to load, not even on my servers and VMs with maxed-out system resources.
 
 3. **Rock-solid**: Based on transactional file operations, it compensates for VS Code's inherent shortcomings in large-scale file deletion and copying. For details on VS Code's official file manager flaws, see: [VS_Code_Official_File_Explorer_Limitations.md](https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md)
 

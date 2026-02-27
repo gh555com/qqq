@@ -291,7 +291,7 @@ The question is not what I did wrong. The question is: **Did anyone at Microsoft
 *Document created: February 27, 2026*
 *Case reference: rep:34d03ee3*
 *All timestamps verified from original email headers*
-
+https://res.cloudinary.com/dweax6kcb/image/upload/v1772191153/34d03ee3_kg0ftc.png
 
 
  (end)
@@ -631,7 +631,7 @@ Microsoft 声称“未能找到任何澄清”，但事实上：
 *文档创建时间：2026 年 2 月 27 日*
 *案例编号：rep:34d03ee3*
 *所有时间戳均来自原始邮件头部验证*
-
+https://res.cloudinary.com/dweax6kcb/image/upload/v1772191153/34d03ee3_kg0ftc.png
 
 
 
