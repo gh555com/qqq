@@ -36,18 +36,9 @@
 
  ещё whisper for my daughter的梦0.
 
-
 <p align="center">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772173093/loq1_rrpdks.jpg" width="100%" alt="GH HEALTH">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772175555/loq_lxxyny.gif" width="100%" alt="的梦gaea">
 </p>
-
-
-
-<p align="center">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772173110/loq2_niyddt.png" width="100%" alt="的梦gaea">
-</p>
-
-
 © 2005 gh555.com All rights reserved.
 
 
@@ -66,7 +57,7 @@
   <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771865477/q1_4_tohdus.gif" width="100%" alt="Paste Screenshot">
 </p>
 
- Works with any document: ".txt", ".1", any file extension, or no extension.
+ Works with any document e.g. ".txt", ".1", any file extension, or no extension.
 
 <p align="left">
   <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771911801/q23_yi9vsm.gif" width="100%" alt="Paste image files directly">
