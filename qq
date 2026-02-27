@@ -1,82 +1,417 @@
- https://open-vsx.org/extension/gh555/qqq 我是扩展滴作者, 但该页面上显示 This version of the “qqq” extension was published by kkn1n. That user account is not a verified publisher of the namespace “gh555” of this extension. See the documentation to learn how we handle namespaces and what you can do to eliminate this warning.
-qqq
-qqq
-Preview
- gh555
-Published by
-kkn1n
-Provided license
 
 
 
-的梦，你看到这个黄条**不是说你的扩展“被判定有问题”**，而是在提示：**这个版本是用 Open VSX 上的账号 `kkn1n` 发布的，但 `kkn1n` 不是 `gh555` 这个命名空间（namespace）的“已验证发布者/成员”**，所以页面给了“未验证”的警告。
 
-## 这条警告在 Open VSX 里到底是什么意思
 
-在 Open VSX 里：
+ Action Required for gh555.qqq
+发件人：VS Marketplace Support <vsmagent@microsoft.com>
+时   间：2026年2月20日（星期五）上午1 : 20
+纯文本 |
+收件人：
+29492511 <29492511@qq.com>
+抄   送：
+Visual Studio Marketplace Support <VSMarketplace@microsoft.com>
 
-* 扩展发布到哪个“命名空间”，由你扩展 `package.json` 里的 **`publisher` 字段**决定（你的就是 `gh555`）。([npm][1])
-* 一个扩展版本要显示“Verified/盾牌”，需要同时满足：
 
-  1. 这个 namespace **至少有一个 owner（被认领/验证）**
-  2. **发布该版本的用户**（这里是 `kkn1n`）是这个 namespace 的成员（owner 或 contributor）
-     否则就会显示你看到的⚠️警告横幅。([GitHub][2])
 
-所以你现在的情况通常是以下几种之一（Open VSX 官方也列了这些原因）：
 
-* namespace 创建了、扩展也发了，但**还没认领 owner**（常见）
-* 这个版本确实是 `kkn1n` 发的，但 `kkn1n` **不在 `gh555` 的成员列表里**
-  -（较少）某些情况下由特殊账号发布也会触发类似警告（比如 `@open-vsx`）。([GitHub][2])
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
 
-## 你该怎么处理（按你的真实情况选一条）
+Re:Action Required for gh555.qqq
+发件人：的梦 <29492511@qq.com>
+时   间：2026年2月20日（星期五）上午10 : 46
+纯文本 |
+收件人：
+VS Marketplace Support <vsmagent@microsoft.com>
 
-### A）如果 `kkn1n` 其实就是你自己的发布账号
 
-那多半只是 **namespace 还没“认领/验证”**。解决办法是：**认领 `gh555` 命名空间**。
 
-Open VSX 的“认领 namespace”是通过在他们的 GitHub 仓库提 issue 完成的。([GitHub][2])
-通常 issue 内容会像这样（官方社区常用格式）：
 
-* 标题：`Namespace Claim Request: gh555`
-* 内容提供：
 
-  * 你的 GitHub 账号链接
-  * 一个用于验证的仓库（public）
-  * 仓库里放一个文件：`.open-vsx/namespace`，文件内容一行写 `gh555`
+https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE%20v16.md
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
 
-这个“.open-vsx/namespace”验证文件的写法，在他们的 namespace 认领案例里就是这么做的。([GitHub][3])
 
-认领通过后，你的 namespace 会变成 verified，然后警告会消失（或至少变成盾牌显示）。([GitHub][2])
+Re:Action Required for gh555.qqq
+发件人：的梦 <29492511@qq.com>
+时   间：2026年2月20日（星期五）上午10 : 56
+纯文本 |
+收件人：
+VS Marketplace Support <vsmagent@microsoft.com>
 
----
 
-### B）如果 `kkn1n` 不是你、你也没用它发布过（更要紧）
 
-那就要当成一次“发布身份不对/可能被别人发了版本”来处理：
 
-1. **先核对页面上的版本内容**是不是你的代码/你的包（下载 vsix 比对）
-2. 如果不是你的，去扩展页的 **Report Abuse** 入口提交举报（Open VSX FAQ 里明确说扩展页有“Report Abuse”用于这种情况）。([Eclipse Foundation][4])
-3. 同时你仍然可以按上面 A 的流程去**认领 `gh555` namespace**，认领后你可以控制谁能在这个 namespace 下发布。([GitHub][2])
+The entire qqq extension source code, including all distributed binaries, is fully open and publicly auditable.
+Simply put, my plugin supports directly pasting and displaying images inside VS Code.The core implementation is based on Decorations and CodeLens.
+For more details, please refer to:
+https://github.com/gh555com/qqq/tree/qq/docs
+New IO Engine Architecture:
+https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
+Old IO Engine Architecture
+https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE.md
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
 
----
 
-### C）如果你确实是你发布的，但用了“另一个账号/CI 机器人账号”发包
+Re:Action Required for gh555.qqq
+发件人：的梦 <29492511@qq.com>
+时   间：2026年2月20日（星期五）下午2 : 15
+纯文本 |
+收件人：
+VS Marketplace Support <vsmagent@microsoft.com>
 
-那你要做两件事：
 
-1. **认领 `gh555` namespace**（同 A）
-2. 认领后到 Open VSX 的 namespace 成员管理里，把用于发布的账号（比如 `kkn1n` 或 CI 机器人）加为 contributor，这样它发布的版本也会变成 verified。([GitHub][2])
 
-## 顺手帮你定位一下：最快判断你属于 A/B/C 哪种
 
-你回忆一下当时发布 Open VSX 时用的 GitHub 登录/Token 是谁的就行：
 
-* 你登录 open-vsx.org 时，显示的用户名就是 `kkn1n` 吗？→ **大概率 A 或 C**
-* 你从来没见过 `kkn1n`，也没用过它的 token？→ **优先按 B 处理**
 
-如果你愿意，把你发布用的命令（你本机或 CI 里那段 `ovsx publish ...` 的配置片段，注意把 token 打码）贴出来，我可以帮你一眼判断：到底是“没认领 namespace”的正常情况，还是“发布账号搞错/可能被人顶包”。
+To verify the latest version, please refer to:
+https://github.com/gh555com/qqq/releases/tag/v15.73.71
+q_engine.exe:
+https://github.com/gh555com/qqq/blob/qq/rust/kp_win.rs
+On the other hand, I am an independent developer with very limited time and resources. My current focus is on eliminating potential bugs as much as possible. Matters such as tags, and especially the introduction of qqq, are all included in my development roadmap.
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
 
-[1]: https://www.npmjs.com/package/ovsx?utm_source=chatgpt.com "ovsx - npm"
-[2]: https://github.com/eclipse/openvsx/wiki/Namespace-Access "Namespace Access · eclipse/openvsx Wiki · GitHub"
-[3]: https://github.com/eclipse/openvsx/issues/1490 "Namespace Claim Request: marsman · Issue #1490 · eclipse/openvsx · GitHub"
-[4]: https://www.eclipse.org/legal/open-vsx-registry-faq/?utm_source=chatgpt.com "Eclipse Foundation Open VSX Registry Frequently Asked Questions (FAQ)"
+(rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+发件人：的梦 <29492511@qq.com>
+时   间：2026年2月24日（星期二）上午1 : 04
+纯文本 |
+收件人：
+VS Marketplace Support <vsmagent@microsoft.com>
+抄   送：
+Visual Studio Marketplace Support <VSMarketplace@microsoft.com>
+
+
+
+
+
+
+We have made targeted revisions to the two issues you raised as follows:
+package.json: https://github.com/gh555com/qqq/blob/qq/package.json
+README.md: https://github.com/gh555com/qqq/blob/qq/README.md
+On the other hand, for q_engine.exe, since no substantive issues have been specified by your side, we first provide a functional summary as requested (the specific architecture and source code have been replied to in our previous emails).
+q_engine.exe is essentially a clipboard daemon/utility designed with a minimalist dumb saver architecture. Simply put, it acts as an intelligent clipboard manager that processes the following types of clipboard content:
+1. Plain text: Reads and records text content from the system clipboard
+2. Files/Folders: Copies files/folders from the clipboard to a designated directory (supports batch and parallel copying)
+3. Images: Extracts screenshots in CF_DIB/CF_DIBV5 format from the clipboard and saves them as PNG files
+4. HTML content: Reads HTML-formatted content from the clipboard (with optional Base64 encoding)
+In addition to the core clipboard processing, it also provides a full set of auxiliary features:
+1. Folder size & file type statistics (with cancelable time-consuming scanning)
+2. File icon extraction and conversion to Base64 encoding
+3. Reading/setting of clipboard file lists
+4. System-level file pasting (supports background copying of large files and special path processing)
+5. Communication with external programs (e.g., Node.js/VS Code) via a specific JSON protocol
+We hereby request a re-review of the qqq extension. Please point out any existing issues, and we will attach great importance to and follow up on them promptly.
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+
+
+
+Re: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+发件人：VS Marketplace Support <vsmagent@microsoft.com>
+时   间：2026年2月24日（星期二）下午9 : 04
+纯文本 |
+收件人：
+29492511 <29492511@qq.com>
+抄   送：
+Visual Studio Marketplace Support <VSMarketplace@microsoft.com>; VS Marketplace Support <vsmagent@microsoft.com>
+
+
+
+
+
+
+
+
+Thank you for the response. We will review the provided details and get back to you with an update.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+From: 29492511 <29492511@qq.com>
+Sent: Monday, February 23, 2026 10:34 PM
+To: VS Marketplace Support <vsmagent@microsoft.com>
+Cc: Visual Studio Marketplace Support <VSMarketplace@microsoft.com>
+Subject: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+Some people who received this message don't often get email from 29492511@qq.com. Learn why this is important
+We have made targeted revisions to the two issues you raised as follows:
+package.json: https://github.com/gh555com/qqq/blob/qq/package.json
+README.md: https://github.com/gh555com/qqq/blob/qq/README.md
+On the other hand, for q_engine.exe, since no substantive issues have been specified by your side, we first provide a functional summary as requested (the specific architecture and source code have been replied to in our previous emails).
+q_engine.exe is essentially a clipboard daemon/utility designed with a minimalist dumb saver architecture. Simply put, it acts as an intelligent clipboard manager that processes the following types of clipboard content:
+1. Plain text: Reads and records text content from the system clipboard
+2. Files/Folders: Copies files/folders from the clipboard to a designated directory (supports batch and parallel copying)
+3. Images: Extracts screenshots in CF_DIB/CF_DIBV5 format from the clipboard and saves them as PNG files
+4. HTML content: Reads HTML-formatted content from the clipboard (with optional Base64 encoding)
+In addition to the core clipboard processing, it also provides a full set of auxiliary features:
+1. Folder size & file type statistics (with cancelable time-consuming scanning)
+2. File icon extraction and conversion to Base64 encoding
+3. Reading/setting of clipboard file lists
+4. System-level file pasting (supports background copying of large files and special path processing)
+5. Communication with external programs (e.g., Node.js/VS Code) via a specific JSON protocol
+We hereby request a re-review of the qqq extension. Please point out any existing issues, and we will attach great importance to and follow up on them promptly.
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+
+Re: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+发件人：VS Marketplace Support <vsmagent@microsoft.com>
+时   间：2026年2月26日（星期四）下午4 : 31
+纯文本 |
+收件人：
+29492511 <29492511@qq.com>
+抄   送：
+Visual Studio Marketplace Support <VSMarketplace@microsoft.com>; VS Marketplace Support <vsmagent@microsoft.com>
+
+
+
+
+
+
+
+We have reviewed your response, but we could not find any clarification regarding the several unrelated tags and the bundled q_engine.exe file. Could you please provide clarification on these points?
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+From: VS Marketplace Support <vsmagent@microsoft.com>
+Sent: Tuesday, February 24, 2026 6:34 PM
+To: 29492511 <29492511@qq.com>
+Cc: Visual Studio Marketplace Support <VSMarketplace@microsoft.com>; VS Marketplace Support <vsmagent@microsoft.com>
+Subject: Re: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+Thank you for the response. We will review the provided details and get back to you with an update.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+From: 29492511 <29492511@qq.com>
+Sent: Monday, February 23, 2026 10:34 PM
+To: VS Marketplace Support <vsmagent@microsoft.com>
+Cc: Visual Studio Marketplace Support <VSMarketplace@microsoft.com>
+Subject: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+Some people who received this message don't often get email from 29492511@qq.com. Learn why this is important
+We have made targeted revisions to the two issues you raised as follows:
+package.json: https://github.com/gh555com/qqq/blob/qq/package.json
+README.md: https://github.com/gh555com/qqq/blob/qq/README.md
+On the other hand, for q_engine.exe, since no substantive issues have been specified by your side, we first provide a functional summary as requested (the specific architecture and source code have been replied to in our previous emails).
+q_engine.exe is essentially a clipboard daemon/utility designed with a minimalist dumb saver architecture. Simply put, it acts as an intelligent clipboard manager that processes the following types of clipboard content:
+1. Plain text: Reads and records text content from the system clipboard
+2. Files/Folders: Copies files/folders from the clipboard to a designated directory (supports batch and parallel copying)
+3. Images: Extracts screenshots in CF_DIB/CF_DIBV5 format from the clipboard and saves them as PNG files
+4. HTML content: Reads HTML-formatted content from the clipboard (with optional Base64 encoding)
+In addition to the core clipboard processing, it also provides a full set of auxiliary features:
+1. Folder size & file type statistics (with cancelable time-consuming scanning)
+2. File icon extraction and conversion to Base64 encoding
+3. Reading/setting of clipboard file lists
+4. System-level file pasting (supports background copying of large files and special path processing)
+5. Communication with external programs (e.g., Node.js/VS Code) via a specific JSON protocol
+We hereby request a re-review of the qqq extension. Please point out any existing issues, and we will attach great importance to and follow up on them promptly.
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+
+Re: [EXTERNAL] (rep:34d03ee3) qqq Extension Review : Please point out any existing issues, and we will attach great importance to and follow up on them promptly.
+发件人：的梦 <29492511@qq.com>
+时   间：2026年2月26日（星期四）下午5 : 58
+纯文本 |
+收件人：
+VS Marketplace Support <vsmagent@microsoft.com>
+抄   送：
+Visual Studio Marketplace Support <VSMarketplace@microsoft.com>; VS Marketplace Support <vsmagent@microsoft.com>
+
+
+
+
+
+
+
+1、  unrelated tags
+package.json: https://github.com/gh555com/qqq/blob/qq/package.json
+If you open the file, you’ll see we’re currently using only 3 tabs: “paste images”, “Rich Note”, “navigate”. Here’s what the 3 tabs are for:  https://open-vsx.org/extension/gh555/qqq
+If you can’t access this URL, please refer to the text below:“
+Feedback: https://github.com/gh555com/qqq/issues
+Full source code transparency, security, and auditability are guaranteed.
+✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything
+Paste memory screenshot  ��   wait for pic loading...  ��
+<p align="left">
+<img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771865477/q1_4_tohdus.gif" width="100%" alt="Paste Screenshot">
+</p>
+Paste image files directly
+<p align="left">
+<img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771911801/q23_yi9vsm.gif" width="100%" alt="Paste image files directly">
+</p>
+Let me be honest, you can paste txt, exe, psd, mp3, mp4....if you want.    Why not？
+<p align="left">
+<img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772026194/q3_3_w27v8k.gif" width="100%" alt="Paste any file">
+</p>
+Direct paste, Direct show, Direct open. On the other hand, if you don’t like key combinations, try F2.
+✦q✦ A Revolution of the Tab Key
+Before 2026, Tab helped you code fast.
+Now, I advocate for tab (=Roam) to help you expand rapidly: reaching any location at the speed of thought.
+Roam, from qqq, is a file explorer:
+1. Nice: It can reach any location, no longer limited to project folders. You can even map remote disks locally, skip ssh.
+2. Fast: It is the most responsive resource manager I have ever seen; you won't need to curse while waiting.
+3. Rock-solid: Based on transactional file operations, it compensates for vs code's inherent shortcomings in large-scale file deletion and copying. For details on vs code's official file manager flaws, see: https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md
+4. User-friendly: Displays recent visits for quick jumps; a, x keys open the administrator terminal; supports quick filtering; remembers fine-grained list and sorting preferences; fully operable via keyboard: tab opens Roam → focus enters the filename edit box → filename → enter → focus enters the newly created file (already in edit stance) �� I want you to expand faster; a large close button - if you don't like Roam, that's what I prepared for you, but more likely, you'll get a resource manager that will eventually merge with your consciousness.
+So, find the faster version of yourself.
+”
+2、q_engine.exe
+I first need you to answer two questions: 1. Have you already or can you access https://github.com/gh555com/qqq/blob/qq/rust/kp_win.rs to view the source code? 2. Can you understand the description I provide below, and based on that description, are there any issueson:“
+On the other hand, for q_engine.exe, since no substantive issues have been specified by your side, we first provide a functional summary as requested (the specific architecture and source code have been replied to in our previous emails).
+q_engine.exe is essentially a clipboard daemon/utility designed with a minimalist dumb saver architecture. Simply put, it acts as an intelligent clipboard manager that processes the following types of clipboard content:
+1. Plain text: Reads and records text content from the system clipboard
+2. Files/Folders: Copies files/folders from the clipboard to a designated directory (supports batch and parallel copying)
+3. Images: Extracts screenshots in CF_DIB/CF_DIBV5 format from the clipboard and saves them as PNG files
+4. HTML content: Reads HTML-formatted content from the clipboard (with optional Base64 encoding)
+In addition to the core clipboard processing, it also provides a full set of auxiliary features:
+1. Folder size & file type statistics (with cancelable time-consuming scanning)
+2. File icon extraction and conversion to Base64 encoding
+3. Reading/setting of clipboard file lists
+4. System-level file pasting (supports background copying of large files and special path processing)
+5. Communication with external programs (e.g., Node.js/VS Code) via a specific JSON protocol
+”
+Regards,
+gh555.com
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Thu, Feb 26, 2026 04:31 PM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;"VSMarketplace Support"<vsmagent@microsoft.com>;
+Subject: Re: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+We have reviewed your response, but we could not find any clarification regarding the several unrelated tags and the bundled q_engine.exe file. Could you please provide clarification on these points?
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+From: VS Marketplace Support <vsmagent@microsoft.com>
+Sent: Tuesday, February 24, 2026 6:34 PM
+To: 29492511 <29492511@qq.com>
+Cc: Visual Studio Marketplace Support <VSMarketplace@microsoft.com>; VS Marketplace Support <vsmagent@microsoft.com>
+Subject: Re: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+Thank you for the response. We will review the provided details and get back to you with an update.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+From: 29492511 <29492511@qq.com>
+Sent: Monday, February 23, 2026 10:34 PM
+To: VS Marketplace Support <vsmagent@microsoft.com>
+Cc: Visual Studio Marketplace Support <VSMarketplace@microsoft.com>
+Subject: [EXTERNAL] (rep:34d03ee3) Response to qqq Extension Review & q_engine.exe Function Summary
+Some people who received this message don't often get email from 29492511@qq.com. Learn why this is important
+We have made targeted revisions to the two issues you raised as follows:
+package.json: https://github.com/gh555com/qqq/blob/qq/package.json
+README.md: https://github.com/gh555com/qqq/blob/qq/README.md
+On the other hand, for q_engine.exe, since no substantive issues have been specified by your side, we first provide a functional summary as requested (the specific architecture and source code have been replied to in our previous emails).
+q_engine.exe is essentially a clipboard daemon/utility designed with a minimalist dumb saver architecture. Simply put, it acts as an intelligent clipboard manager that processes the following types of clipboard content:
+1. Plain text: Reads and records text content from the system clipboard
+2. Files/Folders: Copies files/folders from the clipboard to a designated directory (supports batch and parallel copying)
+3. Images: Extracts screenshots in CF_DIB/CF_DIBV5 format from the clipboard and saves them as PNG files
+4. HTML content: Reads HTML-formatted content from the clipboard (with optional Base64 encoding)
+In addition to the core clipboard processing, it also provides a full set of auxiliary features:
+1. Folder size & file type statistics (with cancelable time-consuming scanning)
+2. File icon extraction and conversion to Base64 encoding
+3. Reading/setting of clipboard file lists
+4. System-level file pasting (supports background copying of large files and special path processing)
+5. Communication with external programs (e.g., Node.js/VS Code) via a specific JSON protocol
+We hereby request a re-review of the qqq extension. Please point out any existing issues, and we will attach great importance to and follow up on them promptly.
+------------------ Original ------------------
+From: "VS Marketplace Support" <vsmagent@microsoft.com>;
+Date: Fri, Feb 20, 2026 01:20 AM
+To: "29492511"<29492511@qq.com>;
+Cc: "Visual Studio Marketplace Support"<VSMarketplace@microsoft.com>;
+Subject: Action Required for gh555.qqq
+Hi @29492511@qq.com,
+As part of the Visual Studio Marketplace team, we are reaching out to address an important matter related to your extension qqq - Visual Studio Marketplace.
+We have observed that the extension currently includes several unrelated tags. Additionally, we would like clarification on the purpose and functionality of the extension, including the use of these tags and the bundled q_engine.exe file.
+To help us maintain a positive experience for all users, we kindly request that you provide a detailed explanation of the extension’s intended purpose and functionality. Please ensure that this information clearly aligns with the extension’s actual behavior.
+At this time, we have temporarily locked the extension. Please update the required details and share the information with us by March 5 to avoid further interruption or additional actions.
+If you have any questions, please feel free to reach out.
+Regards,
+VS Marketplace Support Team
+(representative:34d03ee3)
+
+
+
