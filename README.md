@@ -111,12 +111,12 @@ Apart from these, both versions are completely identical in terms of functionali
  Paste HTML
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772171686/q5_2_sum6hx.gif" width="100%" alt="Paste HTML">
+  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772179946/q5_3_bor4tj.gif" width="100%" alt="Paste HTML">
 </p>
 
  Test URL: https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
 
-This URL contains a mix of 3 videos and multiple images. Test objectives: 1. All 3 videos have been downloaded. 2. The positions (order) of text, images, and videos are correct. 3. No garbled characters should appear. 4. After repeated operations, the same resources should only be saved once on the hard drive (identical images and videos will be deduplicated by fingerprinting).
+This URL contains a mix of 3 videos and multiple images. Select all on the web page, Copy → Paste. Test objectives: 1. All 3 videos have been downloaded. 2. The positions (order) of text, images, and videos are correct. 3. No garbled characters should appear. 4. After repeated operations, the same resources should only be saved once on the hard drive (identical images and videos will be deduplicated by fingerprinting).
 
 
 
