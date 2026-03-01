@@ -30,10 +30,6 @@
 
 
 
-
-
-
-
  那是我的梦境。
 
  ещё whisper for my daughter的梦0.
@@ -73,7 +69,7 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3,   folder, mp4....
 Direct paste, Direct show, Direct open. On the other hand, if you don't like key combinations, try F2.
 
 
-## ✦q✦ A Revolution of the Tab Key
+## ✦q✦ A Revolution of the Tab Key (But without breaking the default Tab behavior.)
 
 Before 2026, Tab helped you code fast.
 
