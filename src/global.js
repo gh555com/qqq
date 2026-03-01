@@ -3157,8 +3157,32 @@ async function wq() {
 			const res = await hModule._getSmartHtmlFromClipboard();
 			if (res && res.$) {
 				const $ = res.$;
-				const hasImg = $('img, video, iframe, embed, object').length > 0;
-				if (!hasImg) {
+				// ★ 方案A：有效媒体标签检测（过滤无意义的空标签、追踪像素等）
+				const hasValidMedia = $('img, video, iframe, embed, object').filter((i, el) => {
+					const $el = $(el);
+					const tag = el.tagName?.toLowerCase() || el.name?.toLowerCase();
+					const src = $el.attr('src') || '';
+					const dataSrc = $el.attr('data-src') || '';
+
+					// 1. 无 src 且无 data-src 的标签视为无效
+					if (!src && !dataSrc) return false;
+
+					// 2. 过滤 javascript:/about:blank 等无效 src
+					if (src && /^(javascript:|about:blank|#)/i.test(src)) return false;
+
+					// 3. 过滤小型 data URI（追踪像素、占位符，通常 < 500 字符）
+					if (src && src.startsWith('data:')) {
+						// 允许较大的 base64 图片（可能是实际内容）
+						if (src.length < 500) return false;
+					}
+
+					// 4. 对于 video/iframe/embed/object，必须有有效 src
+					if (tag !== 'img' && !src) return false;
+
+					return true;
+				}).length > 0;
+
+				if (!hasValidMedia) {
 					// Save stats data
 					saveWqStats(wqExecutionTime);
 					return cacheAndReturn({ type: 'whitelist', subType: 'html_text', ...baseResult });
