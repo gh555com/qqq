@@ -32,12 +32,14 @@
 
 
 
+
+
  那是我的梦境。
 
  ещё whisper for my daughter的梦0.
 
 <p align="center">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772175555/loq_lxxyny.gif" width="100%" alt="的梦gaea">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
 </p>
 © 2005 gh555.com All rights reserved.
 
@@ -53,19 +55,19 @@
  👇 wait for pic loading... 👇
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771865477/q1_4_tohdus.gif" width="100%" alt="Paste Screenshot">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q1_4.gif" width="100%" alt="Paste Screenshot">
 </p>
 
  Works with any document e.g. ".txt", ".1", any file extension, or no extension.
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1771911801/q23_yi9vsm.gif" width="100%" alt="Paste image files directly">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, Via  qqq you can paste txt, exe, psd, mp3, mp4... if you want. Why not?
+Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4... if you want. Why not?
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772026194/q3_3_w27v8k.gif" width="100%" alt="Paste any file">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
 </p>
 
 Direct paste, Direct show, Direct open. On the other hand, if you don't like key combinations, try F2.
@@ -78,7 +80,7 @@ Before 2026, Tab helped you code fast.
 Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any location at the speed of thought.
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772109236/q4_1_n0qpnz.gif" width="100%" alt="Roam file explorer">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q4_1.gif" width="100%" alt="Roam file explorer">
 </p>
 
 **Roam**, from qqq, is a file explorer:
@@ -103,6 +105,7 @@ Leave a one-time tip of about **$7**, and as a thank-you, you'll get a lifetime 
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
 1. Removal of watermarks
 2. Persistence (cloud storage) of preferences
+3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 15802858204 (Emergency & Chinese Language Only)
 
 Apart from these, both versions are completely identical in terms of functionality and usage.
 
@@ -111,7 +114,7 @@ Apart from these, both versions are completely identical in terms of functionali
  Paste HTML
 
 <p align="left">
-  <img src="https://res.cloudinary.com/dweax6kcb/image/upload/v1772179946/q5_3_bor4tj.gif" width="100%" alt="Paste HTML">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q5_3.gif" width="100%" alt="Paste HTML">
 </p>
 
  Test URL: https://mbd.baidu.com/newspage/data/landingsuper?context=%7B%22nid%22%3A%22news_9166282253401607575%22%7D&n_type=1
