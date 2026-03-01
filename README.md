@@ -64,7 +64,7 @@
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
+Let me be honest, via  qqq you can paste txt, exe, psd, mp3,  folder , mp4.... if you want. Why not?
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
@@ -87,13 +87,30 @@ Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any loc
 
 1. **Nice**: It can reach any location, no longer limited to project folders. You can even map remote disks locally, skip ssh.
 
-2. **Fast**: I'm no expert at reviewing file explorers, but of all the file managers I've ever used, Roam's responsiveness is hands down the most satisfying for me. I don't curse anymore just waiting for a list to load, not even on my servers and VMs with maxed-out system resources.
+2. **Fast**: There’s no need to rage because you’re waiting for just a list — not even on my servers and VMs with maxed-out system resources.
 
 3. **Rock-solid**: Based on transactional file operations, it compensates for VS Code's inherent shortcomings in large-scale file deletion and copying. For details on VS Code's official file manager flaws, see: [VS_Code_Official_File_Explorer_Limitations.md](https://github.com/gh555com/qqq/blob/qq/docs/VS_Code_Official_File_Explorer_Limitations.md)
 
 4. **User-friendly**: Displays recent visits for quick jumps; `a`, `x` keys open the administrator terminal; supports quick filtering; remembers fine-grained list and sorting preferences; fully operable via keyboard: tab opens Roam → focus enters the filename edit box → filename → enter → focus enters the newly created file (already in edit stance) 🡺 I want you to expand faster; a large close button - if you don't like Roam, that's what I prepared for you, but more likely, you'll get a resource manager that will eventually merge with your consciousness.
 
 So, find the faster version of yourself.
+
+With something helpful:
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q6_1.gif" width="100%" alt="How to select a folder？">
+</p>
+
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q7.gif" width="100%" alt="Most visited always closest to you">
+</p>
+
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="I’m trying to use qqq Roam directly as the welcome window: navigate anywhere fast, open any project/file fast. ">
+</p>
+
 
 
 ## ✦q✦ Premium features are permanently free
