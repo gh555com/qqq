@@ -64,7 +64,7 @@
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, via  qqq you can paste txt, exe, psd, mp3,  folder , mp4.... if you want. Why not?
+Let me be honest, via  qqq you can paste txt, exe, psd, mp3,   folder  , mp4.... if you want. Why not?
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
@@ -95,12 +95,15 @@ Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any loc
 
 So, find the faster version of yourself.
 
-With something helpful:
+
+
+A little hint
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q6_1.gif" width="100%" alt="How to select a folder？">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q6.gif" width="100%" alt="How to select a folder？">
 </p>
 
+ With this trick, you can multi-select folders (or a mix of files and folders) to copy, delete, and get size in bulk.
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q7.gif" width="100%" alt="Most visited always closest to you">
@@ -111,13 +114,14 @@ With something helpful:
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="I’m trying to use qqq Roam directly as the welcome window: navigate anywhere fast, open any project/file fast. ">
 </p>
 
+Press Space on selected item: ignore any preferences, request its size.
 
 
 ## ✦q✦ Premium features are permanently free
 
 All features mentioned above are available in the free version.
 
-Leave a one-time tip of about **$7**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
+Leave a one-time tip of around **$15**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
 
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
 1. Removal of watermarks
