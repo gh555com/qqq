@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Interpretador Python não instalado",
             "pythonInvalid": "Interpretador Python não disponível",
             "pythonDepsMissing": "Dependências faltando: {0}",
-            "pythonNoContext": "Ambiente não pronto"
+            "pythonNoContext": "Ambiente não pronto",
+            "emptyWindowAutoRover": "Janela vazia abriu automaticamente o rover q2"
         },
         "ui": {
             "fileCopyProgress": "qqq: Copiando arquivos...",
