@@ -3376,40 +3376,6 @@ function invalidateEngineCache() {
 	_cachedEffectiveOrder = null;
 }
 
-function collectMismatchReasons(pref, activeState, pythonBridge, rustBridge, shellBridge) {
-	const reasons = [];
-
-	const pyReason = cleanReason(pythonBridge?.lastStartError || pythonBridge?.lastCrashReason || pythonBridge?.lastStderrSnippet);
-	const rsReason = cleanReason(rustBridge?.lastStartError || rustBridge?.lastCrashReason || rustBridge?.lastStderrSnippet);
-	const shReason = cleanReason(shellBridge?.lastStartError || shellBridge?.lastCrashReason || shellBridge?.lastStderrSnippet);
-
-	if (activeState.code === "N" && activeState.nodeMode === "S") {
-		if (shReason) reasons.push(q('global.engineReason', 'Shell daemon', shReason));
-		else reasons.push(q('global.engineStartFailed', 'Shell daemon'));
-	}
-
-	if (pref === "python" && activeState.code !== "P") {
-		if (pyReason) reasons.unshift(q('global.engineReason', 'Python', pyReason));
-		else if (!pythonBridge.isAvailable()) reasons.unshift(q('global.engineStartFailed', 'Python')); // Only report if truly unavailable
-
-		// Rust only report if it was actually tried and failed
-		if (activeState.code === "N" && rustBridge.lastStartError) {
-			if (rsReason) reasons.push(q('global.engineReason', 'Rust', rsReason));
-			else reasons.push(q('global.engineStartFailed', 'Rust'));
-		}
-	}
-
-	if (pref === "rust" && activeState.code !== "R") {
-		if (rsReason) reasons.unshift(q('global.engineReason', 'Rust', rsReason));
-		else reasons.unshift(q('global.engineStartFailed', 'Rust'));
-		if (activeState.code === "N") {
-			if (pyReason) reasons.push(q('global.engineReason', 'Python', pyReason));
-			else reasons.push(q('global.engineStartFailed', 'Python'));
-		}
-	}
-
-	return reasons;
-}
 
 // ★ 生成引擎状态详情（用于 tooltip 显示每个引擎的对接状态和失败原因）
 function getEngineStatusDetails(pythonBridge, rustBridge, shellBridge) {
@@ -3454,7 +3420,7 @@ function getEngineStatusDetails(pythonBridge, rustBridge, shellBridge) {
 		details.push(`⬜ **N** (Shell): not started`);
 	}
 
-	return details.join('\n\n');
+	return details.join('<br>');
 }
 
 function getActiveEngineState(pythonBridge, rustBridge, shellBridge) {
@@ -3701,9 +3667,6 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	}
 	const averageTime = wqStats.count > 0 ? Math.round(wqStats.totalTime / wqStats.count) : 0;
 
-	const pref = getEnginePreference();
-	const active = getActiveEngineState(pythonBridge, rustBridge, shellBridge);
-
 	// ★ v16 逻辑：按检测顺序显示引擎标签（R/P/N），不再区分 nd/ns
 	const engineTag = getEngineTagByOrder();
 
@@ -3717,16 +3680,6 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 	} else {
 		statusBarItem.text = ` ▪  qqq${h}h     ${cacheMB.toFixed(0)}m     ${hitRate.toFixed(0)}%    ${engineTag} ▪ `;
 	}
-
-	const mismatchReasons = collectMismatchReasons(pref, active, pythonBridge, rustBridge, shellBridge);
-	let mismatchText = "";
-	if ((pref === "python" && active.code !== "P") || (pref === "rust" && active.code !== "R")) {
-		const expectedName = pref === "python" ? "Python" : "Rust";
-		const reasonStr = mismatchReasons.length ? mismatchReasons.join("；") : q('global.unknownReason');
-		mismatchText = ` ▬ ${q('global.mismatchExpected', expectedName, reasonStr)} `;
-	}
-
-	const ioLine = `${active.name}${mismatchText}`;
 
 	// Format wq time display
 	const recentTimesStr = wqStats.recentTimes.join(', ');
@@ -3744,13 +3697,7 @@ function updateStatusBar(cacheStatsSnapshot, pythonBridge, rustBridge, shellBrid
 
 ${wqLine}
 
-⚡ **${q('global.tooltipIOEngine')}：** ${ioLine}
-
----
-
-🔌 **Engine Status:**
-
-${engineStatusDetails}`
+🔌 **Engine Status:**<br>${engineStatusDetails}`
 	);
 
 	tooltip.isTrusted = true;

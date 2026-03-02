@@ -825,7 +825,6 @@
         "tooltipMax": "макс {0}",
         "tooltipCompanionTime": "Время использования",
         "tooltipDiskCache": "Дисковый кэш",
-        "tooltipCacheHit": "Попадание кэша",
-        "tooltipIOEngine": "IO-движок"
+        "tooltipCacheHit": "Попадание кэша"
     }
 }
