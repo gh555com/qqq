@@ -60,7 +60,7 @@
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q23.gif" width="100%" alt="Paste image files directly">
 </p>
 
-Let me be honest, via  qqq you can paste txt, exe, psd, mp3,   folder, mp4.... if you want. Why not?
+Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if you want. Why not?
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
@@ -99,7 +99,7 @@ A little hint:
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q6.gif" width="100%" alt="How to select a folder？">
 </p>
 
- With this trick, you can multi-select folders (or a mix of files and folders) to copy, delete, and get size in bulk.
+ With this trick, you can multi-select folders (or a mix of files and folders) to copy, delete, get size in bulk.
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q7.gif" width="100%" alt="Most visited always closest to you">
@@ -108,7 +108,7 @@ A little hint:
  try the shortcut key of Roam:
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="100%" alt="Paste Screenshot">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="80%" alt="Paste Screenshot">
 </p>
 
 Press Space on selected item: ignore any preferences, request its size.
@@ -117,7 +117,7 @@ Press 1 to scroll to list top.
 Press 2 to scroll to list bottom.
 
 
-  qqq Roam serves as your default start page for blank windows. Make the most of the **Q** key to open projects or documents; make the most of the **W** key to open your music, videos, and games.
+  qqq Roam serves as your default start page for blank windows. Make the most of the **Q** key to open projects or documents;  make the most of the **W** key to open your music, videos, and games.
 
 
 
@@ -125,7 +125,28 @@ Press 2 to scroll to list bottom.
 
 All features mentioned above are available in the free version.
 
-Leave a one-time tip of around **$15**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
+Leave a one-time tip of around **$15 (~100 ge)**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
+
+Additionally, there are 2 ways to obtain a Premium license key:
+
+#### Method 1: Earn It in 100 Days
+Register as a **的梦gaea member** to automatically receive **1 ge per day**—no login, no check-in, no tasks required.
+Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
+
+#### Method 2: Contribute a Video
+On the other hand, you can create and publish an independent qqq introduction video, and receive rewards based on the video quality:
+
+| Video Quality | Rewards |
+|---------------|---------|
+| ★ | 3 Premium license keys, or the equivalent of 300 ge |
+| ★★ | 10 Premium license keys, or the equivalent of 1,000 ge |
+| ★★★ | 30 Premium license keys, or the equivalent of 3,000 ge |
+| ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
+| ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
+
+Post the link to your published video to info@gh555.com.
+
+
 
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
 1. Removal of watermarks & Turn off qqq Roam as the default start page for blank windows.

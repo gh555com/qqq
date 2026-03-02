@@ -825,7 +825,6 @@
         "tooltipMax": "최대 {0}",
         "tooltipCompanionTime": "사용 시간",
         "tooltipDiskCache": "디스크 캐시",
-        "tooltipCacheHit": "캐시 히트",
-        "tooltipIOEngine": "IO 엔진"
+        "tooltipCacheHit": "캐시 히트"
     }
 }

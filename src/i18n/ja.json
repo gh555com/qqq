@@ -825,7 +825,6 @@
         "tooltipMax": "最大 {0}",
         "tooltipCompanionTime": "使用時間",
         "tooltipDiskCache": "ディスクキャッシュ",
-        "tooltipCacheHit": "キャッシュヒット",
-        "tooltipIOEngine": "IO エンジン"
+        "tooltipCacheHit": "キャッシュヒット"
     }
 }
