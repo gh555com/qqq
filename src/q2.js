@@ -2249,9 +2249,6 @@ window.addEventListener('message', event => {
   } else if (message.command === 'focusInput') {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
-  } else if (message.command === 'ensureFocus') {
-    // ★ Technique 6 response: extension sent focus command when panel became active
-    ensureWebviewFocus();
   } else if (message.command === 'diskFreeResult') {
     // Batch answer returned: { data: { 'C': {free, total}, 'D': {free, total}, ... } }
     diskFreeInFlight = false;
@@ -3175,65 +3172,11 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     // Became visible: request once immediately and start polling
     requestDiskFree();
-    // ★★★ Fix click-to-focus issue: proactively acquire focus when webview becomes visible ★★★
-    ensureWebviewFocus();
   } else {
     // Stop polling when hidden
     stopDiskFreePolling();
   }
 });
-
-// ★★★ Multi-layer zero-risk fix for "first click swallowed" issue ★★★
-// Root cause: When VS Code window regains focus, webview iframe needs separate activation.
-// The first click is consumed to activate the iframe, not triggering the actual click event.
-// Solution: Multiple safe techniques to proactively acquire focus.
-
-let lastFocusAttempt = 0;
-const FOCUS_THROTTLE_MS = 100; // Throttle to avoid excessive focus calls
-
-function ensureWebviewFocus() {
-  const now = Date.now();
-  if (now - lastFocusAttempt < FOCUS_THROTTLE_MS) return;
-  lastFocusAttempt = now;
-
-  // Technique 1: Ensure body is focusable and focus it
-  if (document.body) {
-    if (!document.body.hasAttribute('tabindex')) {
-      document.body.setAttribute('tabindex', '-1');
-    }
-    // Use RAF to ensure we're in a stable frame
-    requestAnimationFrame(() => {
-      // Only focus body if no input is currently focused (avoid disrupting user input)
-      if (!isInputFocused()) {
-        document.body.focus({ preventScroll: true });
-      }
-    });
-  }
-
-  // Technique 2: window.focus() as fallback
-  try { window.focus(); } catch (e) { /* safe ignore */ }
-}
-
-// Technique 3: Listen for window focus event (when VS Code window gains focus)
-window.addEventListener('focus', () => {
-  // Small delay to let the browser settle
-  setTimeout(ensureWebviewFocus, 10);
-}, { passive: true });
-
-// Technique 4: Listen for mouseenter on document (user's mouse enters webview area)
-// This is a zero-risk way to prepare focus before any click
-let mouseEnterFocusScheduled = false;
-document.addEventListener('mouseenter', () => {
-  if (mouseEnterFocusScheduled) return;
-  mouseEnterFocusScheduled = true;
-  requestAnimationFrame(() => {
-    mouseEnterFocusScheduled = false;
-    // Check if document doesn't have focus and no input is focused
-    if (!document.hasFocus() || document.activeElement === document.body || document.activeElement === document.documentElement) {
-      ensureWebviewFocus();
-    }
-  });
-}, { passive: true, capture: true });
 
 // ★★★ Deferred initialization: wait for UI stable then delay 3 seconds ★★★
 // These operations are non-critical for initial render, delay them to speed up startup
@@ -3872,21 +3815,6 @@ function showSaveAsDialog() {
     if (currentWatcher) {
       currentWatcher.dispose();
       currentWatcher = null;
-    }
-  });
-
-  // ★★★ Extension-side fix: send focus command when webview becomes active ★★★
-  // This is Technique 6: VS Code API level focus restoration
-  panel.onDidChangeViewState((e) => {
-    if (e.webviewPanel.visible && e.webviewPanel.active) {
-      // Panel became visible and active, send focus command to webview
-      setTimeout(() => {
-        try {
-          if (panel && activePanelAlive) {
-            panel.webview.postMessage({ command: 'ensureFocus' });
-          }
-        } catch { /* safe ignore */ }
-      }, 50);
     }
   });
 
