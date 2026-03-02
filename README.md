@@ -41,6 +41,9 @@
 
 
 
+ To users on version 15.73.109: Please upgrade urgently. We have fixed the critical bug where Roam hijacks cursor focus in build 109.
+
+
 > Full source code transparency, security, and auditability are guaranteed.
 
 [Feedback & Issues](https://github.com/gh555com/qqq/issues)
@@ -66,7 +69,7 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
 </p>
 
-Direct paste, Direct show, Direct open. On the other hand, if you don't like key combinations, try F2.
+Direct paste, Direct show, Direct open everything. On the other hand, if you don't like key combinations, try F2.
 
 
 ## ✦q✦ A Revolution of the Tab Key (But without breaking the default Tab behavior.)
@@ -156,9 +159,9 @@ However, there's no need to worry, as the free version also provides unlimited a
 Apart from these, both versions are completely identical in terms of functionality and usage.
 
 
-**Premium features include:**
+### **Premium features include:**
 
- Paste HTML
+ #### Paste HTML
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q5_3.gif" width="100%" alt="Paste HTML">
@@ -171,11 +174,31 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
- Export to DOC
- Export to ZIP
- Embed online videos
- Clean up orphaned files
- Clipboard history cards
+
+
+
+
+ #### Export Doc
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="export doc">
+</p>
+
+ .doc: Compatible with Word 2003.
+ .docx: Smaller size.
+
+ #### Export Zip: The best way to create portable resources and presentation resources.
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q9.gif" width="100%" alt="export Zip">
+</p>
+
+
+ #### Embed online videos
+
+ ####  Clean up orphaned files
+
+ #### Clipboard history cards
 
 
 
