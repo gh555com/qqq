@@ -825,7 +825,6 @@
         "tooltipMax": "max {0}",
         "tooltipCompanionTime": "Companion Time",
         "tooltipDiskCache": "Disk Cache",
-        "tooltipCacheHit": "Cache Hit",
-        "tooltipIOEngine": "IO Engine"
+        "tooltipCacheHit": "Cache Hit"
     }
 }

@@ -825,7 +825,6 @@
         "tooltipMax": "最大{0}",
         "tooltipCompanionTime": "陪伴时间",
         "tooltipDiskCache": "磁盘缓存",
-        "tooltipCacheHit": "缓存命中",
-        "tooltipIOEngine": "IO 引擎"
+        "tooltipCacheHit": "缓存命中"
     }
 }
