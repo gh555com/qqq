@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python インタープリターがインストールされていません",
             "pythonInvalid": "Python インタープリターが利用できません",
             "pythonDepsMissing": "依存関係が不足: {0}",
-            "pythonNoContext": "環境が準備できていません"
+            "pythonNoContext": "環境が準備できていません",
+            "emptyWindowAutoRover": "空のウィンドウで q2 ローバーを自動で開きました"
         },
         "ui": {
             "fileCopyProgress": "qqq: ファイルをコピー中...",

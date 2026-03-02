@@ -1832,6 +1832,19 @@ function _registerCommands(context) {
 		} finally {
 			// ★ No matter success or failure, open the gate so commands can run
 			global.markReady();
+
+			// ★ 空白窗口自动打开 q2 漫游器 + q4 侧边栏（仅当勾选了 roamAsStartPage）
+			const isEmptyWindow = !vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0;
+			const roamAsStartPage = global.getConfig('roamAsStartPage');
+			if (isEmptyWindow && roamAsStartPage) {
+				setTimeout(() => {
+					// 打开 q2 漫游器
+					vscode.commands.executeCommand('qqq.q2');
+					// 展开侧边栏并进入 q4
+					vscode.commands.executeCommand('workbench.view.extension.qqqView');
+					global.logMessage(q('qqq.log.emptyWindowAutoRover'), 'INFO');
+				}, 500);
+			}
 		}
 	})();
 

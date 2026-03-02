@@ -36,6 +36,7 @@
     "config.sortBy.enum.ctime": "Ordenar por hora de creación (carpetas arriba descendente, archivos abajo descendente)",
     "config.sortBy.enum.mtime": "Ordenar por hora de modificación (carpetas arriba descendente, archivos abajo descendente)",
     "config.autoWatchChanges.desc": "🛸 Detectar automáticamente cambios externos.\n  Marcado: Actualizar automáticamente la lista de archivos (incluyendo columna sz y orden) cuando programas externos modifiquen archivos en el directorio actual.\n Desmarcado: Cero sobrecarga de rendimiento, cero parpadeo visual. Desmarcado por defecto. ",
+    "config.roamAsStartPage.desc": "🛸 Usar qqq Roam como página de inicio",
     "config.frameSizeMode.desc": "👁️ Modo de tamaño de marco: controla el tamaño de visualización de imágenes de vista previa.",
     "config.frameSizeMode.enum.large": "Marco grande: 512×288",
     "config.frameSizeMode.enum.small": "Marco pequeño: 256×144",

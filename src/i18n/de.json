@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python-Interpreter nicht installiert",
             "pythonInvalid": "Python-Interpreter nicht verfügbar",
             "pythonDepsMissing": "Fehlende Abhängigkeiten: {0}",
-            "pythonNoContext": "Umgebung nicht bereit"
+            "pythonNoContext": "Umgebung nicht bereit",
+            "emptyWindowAutoRover": "Leeres Fenster hat q2 Rover automatisch geöffnet"
         },
         "ui": {
             "fileCopyProgress": "qqq: Dateien werden kopiert...",

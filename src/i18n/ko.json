@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python 인터프리터가 설치되지 않음",
             "pythonInvalid": "Python 인터프리터를 사용할 수 없음",
             "pythonDepsMissing": "종속성 누락: {0}",
-            "pythonNoContext": "환경이 준비되지 않음"
+            "pythonNoContext": "환경이 준비되지 않음",
+            "emptyWindowAutoRover": "빈 창에서 q2 로버가 자동으로 열렸습니다"
         },
         "ui": {
             "fileCopyProgress": "qqq: 파일 복사 중...",
