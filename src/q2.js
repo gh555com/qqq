@@ -2876,12 +2876,48 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sidebarEl) {
     sidebarEl.addEventListener('mousemove', handlePathTooltipHover);
     sidebarEl.addEventListener('mouseleave', hidePathTooltip);
+
+    // ★★★ Fix QQ area first-click-swallowed: use mousedown (fires before focus transfer) ★★★
+    sidebarEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return; // Only left click
+      const qqItem = e.target.closest('.qq-item');
+      if (qqItem) {
+        if (e.target.closest('.pin-icon')) return; // pin-icon has its own handler
+        e.preventDefault(); // Prevent default to avoid focus issues
+        const isFile = qqItem.classList.contains('qq-file');
+        const fullpath = qqItem.dataset.fullpath;
+        if (fullpath) {
+          if (isFile) {
+            onQqFileClick(fullpath);
+          } else {
+            navigateTo(fullpath);
+          }
+        }
+      }
+    });
   }
 
   const kyEl = document.getElementById('kyContent');
   if (kyEl) {
     kyEl.addEventListener('mousemove', handlePathTooltipHover);
     kyEl.addEventListener('mouseleave', hidePathTooltip);
+
+    // ★★★ Fix history area first-click-swallowed: use mousedown ★★★
+    const recentSection = kyEl.querySelector('.recent-section');
+    if (recentSection) {
+      recentSection.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // Only left click
+        if (e.target.closest('.delete-button')) return; // delete button has its own handler
+        const recentItem = e.target.closest('.recent-item');
+        if (recentItem) {
+          e.preventDefault(); // Prevent default to avoid focus issues
+          const pathSpan = recentItem.querySelector('span:not(.delete-button)');
+          if (pathSpan) {
+            navigateTo(pathSpan.textContent);
+          }
+        }
+      });
+    }
   }
 
   document.addEventListener('scroll', hidePathTooltip, true);
