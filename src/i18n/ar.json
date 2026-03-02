@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "مفسر Python غير مثبت",
             "pythonInvalid": "مفسر Python غير متاح",
             "pythonDepsMissing": "تبعيات مفقودة: {0}",
-            "pythonNoContext": "البيئة غير جاهزة"
+            "pythonNoContext": "البيئة غير جاهزة",
+            "emptyWindowAutoRover": "نافذة فارغة فتحت متصفح q2 تلقائيًا"
         },
         "ui": {
             "fileCopyProgress": "qqq: جاري نسخ الملفات...",

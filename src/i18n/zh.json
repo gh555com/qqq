@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python 解释器未安装",
             "pythonInvalid": "Python 解释器不可用",
             "pythonDepsMissing": "缺少依赖: {0}",
-            "pythonNoContext": "环境未就绪"
+            "pythonNoContext": "环境未就绪",
+            "emptyWindowAutoRover": "空白窗口已自动打开 q2 漫游器"
         },
         "ui": {
             "fileCopyProgress": "qqq: 文件复制...",
