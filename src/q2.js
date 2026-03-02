@@ -2876,51 +2876,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sidebarEl) {
     sidebarEl.addEventListener('mousemove', handlePathTooltipHover);
     sidebarEl.addEventListener('mouseleave', hidePathTooltip);
-
-    // ★★★ Event delegation for QQ area (fixes first-click-swallowed issue) ★★★
-    sidebarEl.addEventListener('click', (e) => {
-      // Handle qq-item clicks via delegation instead of inline onclick
-      const qqItem = e.target.closest('.qq-item');
-      if (qqItem) {
-        // Check if it's the pin-icon (has its own handler)
-        if (e.target.closest('.pin-icon')) return;
-
-        const isFile = qqItem.classList.contains('qq-file');
-        const fullpath = qqItem.dataset.fullpath;
-        if (fullpath) {
-          if (isFile) {
-            onQqFileClick(fullpath);
-          } else {
-            navigateTo(fullpath);
-          }
-        }
-      }
-    });
   }
 
   const kyEl = document.getElementById('kyContent');
   if (kyEl) {
     kyEl.addEventListener('mousemove', handlePathTooltipHover);
     kyEl.addEventListener('mouseleave', hidePathTooltip);
-
-    // ★★★ Event delegation for recent/history area (fixes first-click-swallowed issue) ★★★
-    const recentSection = kyEl.querySelector('.recent-section');
-    if (recentSection) {
-      recentSection.addEventListener('click', (e) => {
-        // Handle delete button
-        if (e.target.closest('.delete-button')) return; // Has its own inline handler
-
-        // Handle recent-item clicks
-        const recentItem = e.target.closest('.recent-item');
-        if (recentItem) {
-          // Get path from the span text (not the delete button)
-          const pathSpan = recentItem.querySelector('span:not(.delete-button)');
-          if (pathSpan) {
-            navigateTo(pathSpan.textContent);
-          }
-        }
-      });
-    }
   }
 
   document.addEventListener('scroll', hidePathTooltip, true);
@@ -3238,54 +3199,6 @@ document.addEventListener('mouseenter', () => {
   });
 }, { passive: true, capture: true });
 
-// Technique 5: Limited focus check after visibility change (safe for multi-group)
-// Only checks for 3 seconds after becoming visible, then stops
-// This prevents stealing focus from other editor groups
-let focusCheckTimer = null;
-let focusCheckCount = 0;
-const FOCUS_CHECK_MAX = 3;      // Check at most 3 times
-const FOCUS_CHECK_INTERVAL = 1000; // 1 second apart
-
-function startLimitedFocusCheck() {
-  // Reset counter and start fresh
-  stopLimitedFocusCheck();
-  focusCheckCount = 0;
-
-  function doCheck() {
-    focusCheckCount++;
-    if (document.visibilityState === 'visible' && !document.hasFocus()) {
-      ensureWebviewFocus();
-    }
-    // Continue checking if under limit and still visible
-    if (focusCheckCount < FOCUS_CHECK_MAX && document.visibilityState === 'visible') {
-      focusCheckTimer = setTimeout(doCheck, FOCUS_CHECK_INTERVAL);
-    } else {
-      focusCheckTimer = null;
-    }
-  }
-
-  // Start first check after a short delay
-  focusCheckTimer = setTimeout(doCheck, 100);
-}
-
-function stopLimitedFocusCheck() {
-  if (focusCheckTimer) {
-    clearTimeout(focusCheckTimer);
-    focusCheckTimer = null;
-  }
-}
-
-// Start limited check when page becomes visible
-// ★ DISABLED FOR TESTING: Technique 5 is temporarily disabled.
-//    Uncomment below to re-enable if Techniques 3,4,6 are insufficient.
-// document.addEventListener('visibilitychange', () => {
-//   if (document.visibilityState === 'visible') {
-//     startLimitedFocusCheck();
-//   } else {
-//     stopLimitedFocusCheck();
-//   }
-// }, { passive: true });
-
 // ★★★ Deferred initialization: wait for UI stable then delay 3 seconds ★★★
 // These operations are non-critical for initial render, delay them to speed up startup
 function runDeferredInitialization() {
@@ -3538,9 +3451,9 @@ function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
           }
           // ★ Double-escape for HTML attribute: replace quotes and encode special chars
           const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-          return `<div class="qq-item qq-file" tabindex="-1" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
+          return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
         } else {
-          return `<div class="qq-item qq-dir" tabindex="-1" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+          return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
       })
       .join("")}
@@ -3550,7 +3463,7 @@ function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
   const pinnedDirsHtml = safePinnedDirs
     .map(
       (dir) => `
-      <div class="recent-item" tabindex="-1" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
+      <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
   <span class="delete-button" onclick="event.stopPropagation(); unpinDir('${escapeJsStringLiteral(
         dir
       )}')">\u00d7</span>
@@ -3578,9 +3491,9 @@ function generateqqiqItemHtml(item) {
     }
     // ★ Double-escape for HTML attribute: replace quotes and encode special chars
     const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    return `<div class="qq-item qq-file" tabindex="-1" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
+    return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
   } else {
-    return `<div class="qq-item qq-dir" tabindex="-1" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+    return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
 }
 
