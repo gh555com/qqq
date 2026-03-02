@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python 直譯器未安裝",
             "pythonInvalid": "Python 直譯器不可用",
             "pythonDepsMissing": "缺少依賴: {0}",
-            "pythonNoContext": "環境未就緒"
+            "pythonNoContext": "環境未就緒",
+            "emptyWindowAutoRover": "空白視窗已自動開啟 q2 漫遊器"
         },
         "ui": {
             "fileCopyProgress": "qqq: 檔案複製中...",

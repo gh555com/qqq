@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Python interpreter not installed",
             "pythonInvalid": "Python interpreter not available",
             "pythonDepsMissing": "Missing dependencies: {0}",
-            "pythonNoContext": "Environment not ready"
+            "pythonNoContext": "Environment not ready",
+            "emptyWindowAutoRover": "Empty window auto-opened q2 rover"
         },
         "ui": {
             "fileCopyProgress": "qqq: Copying files...",

@@ -328,7 +328,8 @@
             "pythonNoInterpreter": "Интерпретатор Python не установлен",
             "pythonInvalid": "Интерпретатор Python недоступен",
             "pythonDepsMissing": "Отсутствуют зависимости: {0}",
-            "pythonNoContext": "Среда не готова"
+            "pythonNoContext": "Среда не готова",
+            "emptyWindowAutoRover": "В пустом окне автоматически открыт q2 ровер"
         },
         "ui": {
             "fileCopyProgress": "qqq: Копирование файлов...",

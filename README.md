@@ -105,12 +105,20 @@ A little hint:
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q7.gif" width="100%" alt="Most visited always closest to you">
 </p>
 
+ try the shortcut key of Roam:
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="I’m trying to use qqq Roam directly as the welcome window: navigate anywhere fast, open any project/file fast. ">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="100%" alt="Paste Screenshot">
 </p>
 
 Press Space on selected item: ignore any preferences, request its size.
+
+Press 1 to scroll to list top.
+Press 2 to scroll to list bottom.
+
+
+  qqq Roam serves as your default start page for blank windows. Make the most of the **Q** key to open projects or documents; make the most of the **W** key to open your music, videos, and games.
+
 
 
 ## ✦q✦ Premium features are permanently free
@@ -120,11 +128,12 @@ All features mentioned above are available in the free version.
 Leave a one-time tip of around **$15**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
 
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
-1. Removal of watermarks
+1. Removal of watermarks & Turn off qqq Roam as the default start page for blank windows.
 2. Persistence (cloud storage) of preferences
 3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 15802858204 (Emergency & Chinese Language Only)
 
 Apart from these, both versions are completely identical in terms of functionality and usage.
+
 
 **Premium features include:**
 

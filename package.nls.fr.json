@@ -36,6 +36,7 @@
     "config.sortBy.enum.ctime": "Trier par heure de création (dossiers en haut décroissants, fichiers en bas décroissants)",
     "config.sortBy.enum.mtime": "Trier par heure de modification (dossiers en haut décroissants, fichiers en bas décroissants)",
     "config.autoWatchChanges.desc": "🛸 Détection automatique des modifications externes.\n  Coché: Actualiser automatiquement la liste des fichiers (y compris la colonne sz et l'ordre de tri) lorsque des programmes externes modifient des fichiers dans le répertoire actuel.\n Décoché: Zéro surcharge de performance, zéro scintillement visuel. Décoché par défaut. ",
+    "config.roamAsStartPage.desc": "🛸 Utiliser qqq Roam comme page de démarrage",
     "config.frameSizeMode.desc": "👁️ Mode de taille de cadre: contrôle la taille d'affichage des images de prévisualisation.",
     "config.frameSizeMode.enum.large": "Grand cadre: 512×288",
     "config.frameSizeMode.enum.small": "Petit cadre: 256×144",

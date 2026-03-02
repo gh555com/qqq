@@ -36,6 +36,7 @@
     "config.sortBy.enum.ctime": "按建立時間排序（資料夾在上按時間倒序，檔案在下按時間倒序）",
     "config.sortBy.enum.mtime": "按修改時間排序（資料夾在上按時間倒序，檔案在下按時間倒序）",
     "config.autoWatchChanges.desc": "🛸 自動感知外部變化。\n  勾選：當外部程式修改當前目錄中的檔案時，自動更新檔案列表（包括 sz 區和排序）。\n 不勾選：0效能開銷、0視界抖動。預設不勾選。 ",
+    "config.roamAsStartPage.desc": "🛸 嘗試用 qqq Roam 做開始頁面",
     "config.frameSizeMode.desc": "👁️ 相框尺寸模式：控制預覽影像的顯示尺寸。",
     "config.frameSizeMode.enum.large": "大相框：512x288",
     "config.frameSizeMode.enum.small": "小相框：256x144",
