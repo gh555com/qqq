@@ -195,14 +195,15 @@ class PythonEngineDownloader {
 
     /**
      * Get locked-version dependency list
-     * ★ Version lock: pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22
+     * ★ Version lock: pywin32==311, Pillow==10.4.0, miniaudio==1.61, cffi==1.16.0, pycparser==2.22, pynput==1.7.7
      */
     _getLockedDeps() {
         const baseDeps = [
             'miniaudio==1.61',
             'Pillow==10.4.0',
             'cffi==1.16.0',
-            'pycparser==2.22'
+            'pycparser==2.22',
+            'pynput==1.7.7'  // ★ Global hotkey support (Space+Q)
         ];
         // Windows-only dependency: pywin32==311 (no postinstall)
         return process.platform === 'win32'
@@ -212,30 +213,32 @@ class PythonEngineDownloader {
 
     /**
      * Get dependency check list (without versions)
+     * ★ All 4 deps are REQUIRED: miniaudio, Pillow, pynput, pywin32(Windows)
+     * ★ Missing ANY one = delete python_engine and reinstall from scratch
      */
     _getDepsForCheck() {
-        const baseDeps = ['miniaudio', 'Pillow'];
+        const baseDeps = ['miniaudio', 'Pillow', 'pynput'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
     }
 
     /**
-     * ★ Get required dependencies (excluding optional Pillow)
-     * Pillow in embed builds can easily fail due to missing msvcp140.dll
+     * ★ Get required dependencies - ALL are required now
+     * Missing any = imperfect = delete and reinstall
      */
     _getRequiredDeps() {
-        const baseDeps = ['miniaudio'];
+        const baseDeps = ['miniaudio', 'Pillow', 'pynput'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
     }
 
     /**
-     * ★ Get optional dependencies
+     * ★ Get optional dependencies - none now, all are required
      */
     _getOptionalDeps() {
-        return ['Pillow'];
+        return [];
     }
 
     /**
