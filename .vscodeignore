@@ -91,7 +91,6 @@ version-manager/**
 # Development & Test
 .vscode-test.js
 package-lock.json
-CHANGELOG.md
 test/**
 docs/*
 !docs/expert_cookies.txt
