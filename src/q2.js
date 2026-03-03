@@ -1260,6 +1260,8 @@ const vscode = acquireVsCodeApi();
 // i18n strings injected from extension
 const I18N_ENTER_FILE_NAME = '${escapeJsStringLiteral(q('q2.ui.enterFileName'))}';
 const I18N_ENTER_FOLDER_NAME = '${escapeJsStringLiteral(q('q2.ui.enterFolderName'))}';
+const I18N_DESKTOP = '${escapeJsStringLiteral(q('q2.ui.desktop'))}';
+const I18N_RECYCLE_BIN = '${escapeJsStringLiteral(q('q2.ui.recycleBin'))}';
 
 let currentPath = '${escapedCurrentPath}';
 let sidebarRatio = ${escapedSidebarRatio};
@@ -2368,7 +2370,7 @@ window.addEventListener('message', event => {
     const f = document.getElementById('filenameInput');
     if (f) { f.focus(); f.select(); }
   } else if (message.command === 'diskFreeResult') {
-    // Batch answer returned: { data: { 'C': {free, total}, 'D': {free, total}, ... } }
+    // Batch answer returned: { data: { 'C': {free, total}, 'D': {free, total}, 'DESKTOP': {used}, 'RECYCLE': {used}, ... } }
     diskFreeInFlight = false;
     const data = message.data;
     if (data && typeof data === 'object') {
@@ -2376,10 +2378,9 @@ window.addEventListener('message', event => {
       const snapshot = JSON.stringify(data);
       if (snapshot !== lastDiskFreeSnapshot) {
         lastDiskFreeSnapshot = snapshot;
-        // Batch update all drive displays
+        // Batch update all drive displays (including special entries)
         for (const drive in data) {
-          const info = data[drive];
-          updateDriveDisplay(drive, info.free, info.total);
+          updateDriveDisplay(drive, data[drive]);
         }
       }
     }
@@ -3221,13 +3222,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
 /**
  * Update drive display text
- * @param {string} drive - drive letter, e.g. 'C', 'D'
- * @param {number} freeBytes - free bytes
- * @param {number} totalBytes - total bytes
+ * @param {string} drive - drive letter, e.g. 'C', 'D', or special keys 'DESKTOP', 'RECYCLE'
+ * @param {object} info - { free, total } for drives, or { used } for special entries
  */
-function updateDriveDisplay(drive, freeBytes, totalBytes) {
+function updateDriveDisplay(drive, info) {
+  // ★ Handle special entries: Desktop and Recycle Bin (show used space)
+  if (drive === 'DESKTOP') {
+    const el = document.getElementById('special-desktop-text');
+    if (!el) return;
+    const usedGB = (info.used || 0) / (1024 * 1024 * 1024);
+    // ★ Show "0" instead of "0.00" when near zero
+    const gbText = usedGB < 0.01 ? '0' : (usedGB >= 1 ? Math.floor(usedGB).toString() : usedGB.toFixed(2));
+    el.textContent = I18N_DESKTOP + ' ' + gbText;
+    return;
+  }
+  if (drive === 'RECYCLE') {
+    const el = document.getElementById('special-recycle-text');
+    if (!el) return;
+    const usedGB = (info.used || 0) / (1024 * 1024 * 1024);
+    // ★ Show "0" instead of "0.00" when near zero
+    const gbText = usedGB < 0.01 ? '0' : (usedGB >= 1 ? Math.floor(usedGB).toString() : usedGB.toFixed(2));
+    el.textContent = I18N_RECYCLE_BIN + ' ' + gbText;
+    return;
+  }
+
+  // ★ Normal drives: show free space
   const el = document.getElementById('drive-' + drive.toLowerCase() + '-text');
   if (!el) return;
+  const freeBytes = info.free || 0;
+  const totalBytes = info.total || 0;
   const freeGB = freeBytes / (1024 * 1024 * 1024);
 
   // Check if red warning is needed: space < 1% or < 2GB
@@ -3238,6 +3261,13 @@ function updateDriveDisplay(drive, freeBytes, totalBytes) {
   const gbText = isLow ? freeGB.toFixed(2) : Math.floor(freeGB).toString();
   el.textContent = drive.toUpperCase() + ':\\  ' + gbText;
   el.style.color = isLow ? DISK_FREE_WARNING_COLOR : '';
+}
+
+/**
+ * Open Recycle Bin (Windows only)
+ */
+function openRecycleBin() {
+  vscode.postMessage({ command: 'openRecycleBin' });
 }
 
 /**
@@ -3339,6 +3369,7 @@ window.cancel = cancel;
 window.saveFile = saveFile;
 window.createFolder = createFolder;
 window.togglePin = togglePin;
+window.openRecycleBin = openRecycleBin;
 
 // ====== Custom scrollbar (exactly matches q4 outer scrollbar)======
 function setupCustomScrollbar() {
@@ -3517,12 +3548,42 @@ document.addEventListener('keydown', function (e) {
 // ==================== sidebar HTML generation (shared) ====================
 const QQ_IQ_BATCH_SIZE = 20; // Items per batch
 
+// ★ Desktop & Recycle Bin paths for exclusion (already shown in drive bar)
+const _desktopPathForExclusion = process.platform === 'win32'
+  ? path.join(process.env.USERPROFILE || os.homedir(), 'Desktop')
+  : path.join(os.homedir(), 'Desktop');
+const _recycleBinPathForExclusion = process.platform === 'darwin'
+  ? path.join(os.homedir(), '.Trash')
+  : process.platform !== 'win32'
+    ? path.join(os.homedir(), '.local/share/Trash/files')
+    : null; // Windows: virtual folder, no real path to exclude
+
+// ★ Build exclusion set (using cacheKeyForPath for case-insensitive comparison)
+const _driveBarExclusionKeys = new Set();
+_driveBarExclusionKeys.add(cacheKeyForPath(_desktopPathForExclusion));
+if (_recycleBinPathForExclusion) {
+  _driveBarExclusionKeys.add(cacheKeyForPath(_recycleBinPathForExclusion));
+  // Also exclude parent Trash folder on Linux
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    _driveBarExclusionKeys.add(cacheKeyForPath(path.join(os.homedir(), '.local/share/Trash')));
+  }
+}
+
+function _isExcludedFromSidebar(pathStr) {
+  return _driveBarExclusionKeys.has(cacheKeyForPath(pathStr));
+}
+
 function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
-  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
+  // ★ Filter out Desktop & Recycle Bin from pinned dirs (already shown in drive bar)
+  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) =>
+    dir && fs.existsSync(dir) && !_isExcludedFromSidebar(dir)
+  );
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
+  // ★ Filter out Desktop & Recycle Bin from qq iq (already shown in drive bar)
   const safeqqiq = (config.qqiq || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
+      && !_isExcludedFromSidebar(item.path)
   );
   const totalqqiq = safeqqiq.length;
   const displayedqqiq = safeqqiq.slice(0, qqiqLimit);
@@ -3597,11 +3658,16 @@ function generateqqiqItemHtml(item) {
 // Get qq iq items within a specified range
 function getqqiqItems(offset, limit) {
   const config = getConfig();
-  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) => dir && fs.existsSync(dir));
+  // ★ Filter out Desktop & Recycle Bin from pinned dirs (already shown in drive bar)
+  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) =>
+    dir && fs.existsSync(dir) && !_isExcludedFromSidebar(dir)
+  );
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
+  // ★ Filter out Desktop & Recycle Bin from qq iq (already shown in drive bar)
   const safeqqiq = (config.qqiq || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
+      && !_isExcludedFromSidebar(item.path)
   );
   const total = safeqqiq.length;
   const items = safeqqiq.slice(offset, offset + limit);
@@ -3631,12 +3697,33 @@ function getWebviewContent(currentPath) {
     })
     .join("");
 
+  // ★ Special entries: Desktop and Recycle Bin (after drives)
+  const desktopPath = process.platform === 'win32'
+    ? path.join(process.env.USERPROFILE || os.homedir(), 'Desktop')
+    : path.join(os.homedir(), 'Desktop');
+  const desktopExists = fs.existsSync(desktopPath);
+
+  // ★ Recycle Bin path: Windows uses virtual folder (must open externally), macOS/Linux have real paths
+  const recycleBinPath = process.platform === 'darwin'
+    ? path.join(os.homedir(), '.Trash')
+    : process.platform !== 'win32'
+      ? path.join(os.homedir(), '.local/share/Trash/files')
+      : null; // Windows: no direct path
+  const recycleBinExists = recycleBinPath && fs.existsSync(recycleBinPath);
+
+  const specialEntriesHtml = (desktopExists
+    ? '<button class="nav-item nav-special" id="special-desktop-btn" onclick="navigateTo(\'' + escapeJsStringLiteral(desktopPath) + '\')"><span id="special-desktop-text">' + escapeHtmlAttribute(q('q2.ui.desktop')) + '</span></button>'
+    : '')
+    + (recycleBinExists
+      ? '<button class="nav-item nav-special" id="special-recycle-btn" onclick="navigateTo(\'' + escapeJsStringLiteral(recycleBinPath) + '\')"><span id="special-recycle-text">' + escapeHtmlAttribute(q('q2.ui.recycleBin')) + '</span></button>'
+      : '<button class="nav-item nav-special" id="special-recycle-btn" onclick="openRecycleBin()"><span id="special-recycle-text">' + escapeHtmlAttribute(q('q2.ui.recycleBin')) + '</span></button>');
+
   const inlineScript = generateWebviewScript(currentPath, config.sidebarRatio);
 
   let finalHtml = htmlTemplate
     .replace(/\{\{SIDEBAR_WIDTH\}\}/g, config.sidebarWidth)
     .replace(/\{\{LINE_SPACING\}\}/g, config.lineSpacing)
-    .replace("{{DRIVES_HTML}}", drivesHtml)
+    .replace("{{DRIVES_HTML}}", drivesHtml + specialEntriesHtml)
     .replace("{{QQ_IQ_HTML}}", qqiqHtml)
     .replace("{{RECENT_DIRS_HTML}}", pinnedDirsHtml)
     .replace("{{CURRENT_PATH}}", escapeHtmlAttribute(currentPath))
@@ -3935,7 +4022,62 @@ function showSaveAsDialog() {
       currentWatcher.dispose();
       currentWatcher = null;
     }
+    // ★ Unregister q2 window when panel closes
+    if (global.pythonBridge?.isAvailable()) {
+      global.pythonBridge.call("unregister_q2_window", { pid: process.pid }, 1000).catch(() => {});
+    }
   });
+
+  // ★ q2 visibility tracking for Space+Q hotkey
+  let _q2Registered = false;
+  const _registerQ2 = () => {
+    if (!_q2Registered && global.pythonBridge?.isAvailable()) {
+      global.pythonBridge.call("register_q2_window", { pid: process.pid }, 1000)
+        .then(r => console.log("[q2] Registered for hotkey:", r))
+        .catch(e => console.log("[q2] Register failed:", e));
+      _q2Registered = true;
+    }
+  };
+  const _unregisterQ2 = () => {
+    if (_q2Registered && global.pythonBridge?.isAvailable()) {
+      global.pythonBridge.call("unregister_q2_window", { pid: process.pid }, 1000).catch(() => {});
+      _q2Registered = false;
+    }
+  };
+  const _updateFocus = () => {
+    if (_q2Registered && global.pythonBridge?.isAvailable()) {
+      global.pythonBridge.call("update_window_focus", { pid: process.pid }, 1000).catch(() => {});
+    }
+  };
+
+  // ★ Register with retry until pythonBridge is ready
+  const _tryRegister = () => {
+    if (_q2Registered) return;
+    if (global.pythonBridge?.isAvailable()) {
+      _registerQ2();
+    } else {
+      // Retry after 500ms, up to 20 times (10 seconds total)
+      setTimeout(_tryRegister, 500);
+    }
+  };
+  _tryRegister();
+
+  // Track visibility changes
+  panel.onDidChangeViewState(e => {
+    if (e.webviewPanel.visible) {
+      _registerQ2();
+    } else {
+      _unregisterQ2();
+    }
+  });
+
+  // Track window focus changes
+  const focusDisposable = vscode.window.onDidChangeWindowState(e => {
+    if (e.focused && _q2Registered) {
+      _updateFocus();
+    }
+  });
+  panel.onDidDispose(() => focusDisposable.dispose());
 
   // ★ Listen for language changes and refresh Webview in real time
   const langChangeDisposable = onLanguageChange(() => {
@@ -4271,16 +4413,42 @@ function showSaveAsDialog() {
             const drives = getDrives();
             const res = await geq().getDiskFreeBatch(drives);
 
-            if (res && res.success && res.data && panel && activePanelAlive) {
+            if (panel && activePanelAlive) {
+              // ★ Always send response to unblock frontend polling, even on failure
               panel.webview.postMessage({
                 command: "diskFreeResult",
-                data: res.data // { 'C': {free, total}, 'D': {free, total}, ... }
+                data: (res && res.success && res.data) ? res.data : {} // Empty object on failure
               });
             }
           } catch (e) {
             geq().logMessage(q('q2.log.diskFreeError', e.message), "WARN");
+            // ★ Send empty response on exception to unblock frontend
+            if (panel && activePanelAlive) {
+              panel.webview.postMessage({ command: "diskFreeResult", data: {} });
+            }
           }
         })();
+        break;
+      }
+
+      // ★ Open Recycle Bin/Trash (cross-platform)
+      case "openRecycleBin": {
+        try {
+          if (process.platform === 'win32') {
+            require('child_process').exec('explorer.exe shell:RecycleBinFolder');
+          } else if (process.platform === 'darwin') {
+            // macOS: open ~/.Trash
+            require('child_process').exec('open ~/.Trash');
+          } else {
+            // Linux: open ~/.local/share/Trash
+            const trashPath = path.join(os.homedir(), '.local/share/Trash');
+            if (fs.existsSync(trashPath)) {
+              require('child_process').exec('xdg-open "' + trashPath + '"');
+            }
+          }
+        } catch (e) {
+          geq().logMessage('Failed to open Recycle Bin: ' + e.message, 'WARN');
+        }
         break;
       }
 

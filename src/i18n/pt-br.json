@@ -130,6 +130,8 @@
             "sortSize": "Ordenar: por tamanho",
             "sortCtime": "Ordenar: por data de criação",
             "sortMtime": "Ordenar: Por data de modificação",
+            "desktop": "Área de Trabalho:",
+            "recycleBin": "Lixeira:",
             "movedToRecycleBin": "{0} movido para a lixeira",
             "deleteFailed": "qqq: exclusão falhou: {0}",
             "deleteItemFailed": "Exclusão de item falhou: {0} - {1}",

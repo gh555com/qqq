@@ -130,6 +130,8 @@
             "sortSize": "並び替え: ファイルサイズ順",
             "sortCtime": "並び替え: 作成時刻順",
             "sortMtime": "並び替え: 更新時刻順",
+            "desktop": "デスクトップ:",
+            "recycleBin": "ごみ箱:",
             "movedToRecycleBin": "{0} をごみ箱に移動しました",
             "deleteFailed": "qqq: 削除に失敗: {0}",
             "deleteItemFailed": "アイテムの削除に失敗: {0} - {1}",

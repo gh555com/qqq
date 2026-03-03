@@ -130,6 +130,8 @@
             "sortSize": "ترتيب: حسب الحجم",
             "sortCtime": "ترتيب: حسب تاريخ الإنشاء",
             "sortMtime": "ترتيب: حسب تاريخ التعديل",
+            "desktop": "سطح المكتب:",
+            "recycleBin": "سلة المحذوفات:",
             "movedToRecycleBin": "{0} تم نقله إلى سلة المهملات",
             "deleteFailed": "qqq: فشل الحذف: {0}",
             "deleteItemFailed": "فشل حذف العنصر: {0} - {1}",
