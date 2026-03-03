@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.110",
+  "version": "15.73.111",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -415,7 +415,6 @@
     "ui"
   ],
   "categories": [
-    "Other",
     "Visualization",
     "Keymaps"
   ],
