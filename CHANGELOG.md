@@ -4,6 +4,125 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.117] - 2026-03-03
+
+### Changed
+- **Desktop & Recycle Bin excluded from sidebar**: These paths are now filtered out from QQ area and pinned history
+  - Already permanently shown in drive bar, no need to duplicate
+  - Cross-platform filtering:
+    - **Windows**: Desktop (`%USERPROFILE%\Desktop`)
+    - **macOS**: Desktop (`~/Desktop`), Trash (`~/.Trash`)
+    - **Linux**: Desktop (`~/Desktop`), Trash (`~/.local/share/Trash`, `~/.local/share/Trash/files`)
+  - Uses `cacheKeyForPath()` for case-insensitive path comparison
+
+- **Zero display optimization**: Values < 0.01 GB now show `0` instead of `0.00`
+  - Applies to Desktop and Recycle Bin used space display
+  - Example: Empty recycle bin shows `Trash: 0` instead of `Trash: 0.00`
+
+### Technical
+- JavaScript `q2.js`:
+  - Added `_driveBarExclusionKeys` Set for path filtering
+  - Added `_isExcludedFromSidebar()` function
+  - Modified `generateSidebarHtml()` and `getqqiqItems()` to exclude drive bar paths
+
+---
+
+## [15.73.116] - 2026-03-03
+
+### Added
+- **Global hotkey Space+Q**: Activate IDE window from anywhere with keyboard shortcut
+  - Press and hold `Space`, then tap `Q` to bring IDE window to foreground
+  - Works system-wide regardless of current focused application
+  - Plays sound effect (`kj3.mp3`) only when window actually activated (silent if no IDE found)
+  - 300ms debounce to prevent accidental double-triggers
+  - Supports multiple IDEs: VS Code, Cursor, Qoder, Trae (by process name matching)
+  - Window activation sequence: SW_RESTORE → Alt trick → SetForegroundWindow → BringWindowToTop
+
+### Changed
+- **Python dependency check**: Added `pynput==1.7.7` to required dependencies
+  - All 4 dependencies now mandatory (miniaudio, Pillow, pynput, pywin32 on Windows)
+  - Missing any dependency triggers full venv reinstall
+
+### Technical
+- Python `kp.py`:
+  - Added `pynput.keyboard` global listener with `_hotkey_on_press` / `_hotkey_on_release`
+  - Added `_test_activate_vscode()` using `EnumWindows` + `GetModuleBaseNameW` for process matching
+  - Added `_activate_window()` with Alt key trick to bypass foreground window restrictions
+- JavaScript `qvenv.js`:
+  - Added `pynput==1.7.7` to `_getLockedDeps()`
+  - Moved `pynput` to `_getRequiredDeps()` (mandatory)
+
+---
+
+## [15.73.115] - 2026-03-03
+
+### Performance
+- **Broker log optimization**: Reduced log volume by ~90%+ for massive storage savings
+  - High-frequency routine actions now silent (no logging):
+    - `ping` (every 20s heartbeat)
+    - `disk_free_batch` (every 30s disk space poll)
+    - `update_window_focus` (every focus change)
+    - `register_q2_window` / `unregister_q2_window` (window lifecycle)
+  - Only meaningful actions (play_sfx, scan_folder, etc.) are logged
+  - Applies to both TCP/Unix socket and Windows Named Pipe handlers
+
+- **Broker log rotation**: Auto-rotate at 2MB to prevent unbounded growth
+  - `LOG_MAX_SIZE = 2MB` hard limit
+  - Rotation check before every log write
+  - Old log deleted, fresh file created with rotation marker
+  - Previous issue: broker.log grew to 28MB+ over time
+
+### Technical
+- Python `kp.py`:
+  - Added `LOG_MAX_SIZE` constant (2 * 1024 * 1024)
+  - Added `_LOG_PATH` global for rotation tracking
+  - Added `_rotate_log_if_needed()` function
+  - Added `_QUIET_ACTIONS` set in both TCP/Unix and Pipe handlers
+  - Modified `_log()` to call rotation check before each write
+
+---
+
+## [15.73.114] - 2026-03-03
+
+### Added
+- **Desktop & Recycle Bin in drive bar**: Added two special entries after drive letters (C:\, D:\, etc.)
+  - Desktop: Shows used space (not free space), click to navigate directly
+  - Recycle Bin/Trash: Shows used space, platform-specific behavior:
+    - **Windows**: Opens external Explorer (`shell:RecycleBinFolder`) - virtual folder cannot be browsed directly
+    - **macOS**: Navigates to `~/.Trash` within q2 Roam
+    - **Linux**: Navigates to `~/.local/share/Trash/files` within q2 Roam
+  - Display format: `Desktop: 0.30` / `Trash: 1` (with colon, i18n supported)
+  - Uses same 30-second cache polling mechanism as drive free space
+
+### Fixed
+- **Disk space polling resilience**: Backend now always sends response to frontend even on failure
+  - Previously: If Python engine failed, no response was sent, causing `diskFreeInFlight` to stay true forever
+  - Now: Empty response `{}` sent on failure, allowing polling to continue
+
+### i18n
+- Added `desktop` and `recycleBin` keys to all 10 languages:
+  - zh: 桌面: / 回收站:
+  - zh-tw: 桌面: / 回收站:
+  - en: Desktop: / Trash:
+  - ja: デスクトップ: / ごみ箱:
+  - ko: 바탕 화면: / 휴지통:
+  - de: Desktop: / Papierkorb:
+  - fr: Bureau: / Corbeille:
+  - es: Escritorio: / Papelera:
+  - pt-br: Área de Trabalho: / Lixeira:
+  - ru: Рабочий стол: / Корзина:
+  - ar: سطح المكتب: / سلة المحذوفات:
+
+### Technical
+- Python `kp.py`: Added `_get_folder_size_fast()`, `_get_desktop_path()`, `_get_recycle_bin_size()`
+- Cross-platform recycle bin size calculation:
+  - Windows: Sum of all `X:\$Recycle.Bin` directories
+  - macOS: `~/.Trash` directory size
+  - Linux: `~/.local/share/Trash/files` directory size
+- Desktop path detection: `%USERPROFILE%\Desktop` (Windows) or `~/Desktop` (macOS/Linux)
+
+---
+
 ## [15.73.113] - 2026-03-03
 
 ### Added

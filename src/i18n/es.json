@@ -130,6 +130,8 @@
             "sortSize": "Ordenar: por tamaño",
             "sortCtime": "Ordenar: por fecha de creación",
             "sortMtime": "Ordenar: Por fecha de modificación",
+            "desktop": "Escritorio:",
+            "recycleBin": "Papelera:",
             "movedToRecycleBin": "{0} movido a papelera",
             "deleteFailed": "qqq: eliminación falló: {0}",
             "deleteItemFailed": "Eliminación de elemento falló: {0} - {1}",

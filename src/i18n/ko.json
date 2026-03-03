@@ -130,6 +130,8 @@
             "sortSize": "정렬: 파일 크기순",
             "sortCtime": "정렬: 생성 시간순",
             "sortMtime": "정렬: 수정 시간순",
+            "desktop": "바탕 화면:",
+            "recycleBin": "휴지통:",
             "movedToRecycleBin": "{0}이(가) 휴지통으로 이동됨",
             "deleteFailed": "qqq: 삭제 실패: {0}",
             "deleteItemFailed": "항목 삭제 실패: {0} - {1}",

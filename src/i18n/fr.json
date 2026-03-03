@@ -130,6 +130,8 @@
             "sortSize": "Trier: par taille",
             "sortCtime": "Trier: par date de création",
             "sortMtime": "Trier: par date de modification",
+            "desktop": "Bureau:",
+            "recycleBin": "Corbeille:",
             "movedToRecycleBin": "{0} déplacé vers la corbeille",
             "deleteFailed": "qqq: suppression échouée: {0}",
             "deleteItemFailed": "Suppression de l'élément échouée: {0} - {1}",
