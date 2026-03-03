@@ -41,6 +41,14 @@ if platform.system() == "Windows":
     except ImportError:
         pass
 
+# ---- pynput for global keyboard hook ----
+_HAS_PYNPUT = False
+try:
+    from pynput import keyboard as pynput_keyboard
+    _HAS_PYNPUT = True
+except ImportError:
+    pynput_keyboard = None
+
 # =============================================================================
 #  Event sink (stdout events)  ★ Broker 模式下必须禁用，避免污染协议/日志
 # =============================================================================
@@ -465,6 +473,237 @@ def _stop_clipboard_watcher():
 def _get_clipboard_watcher_state():
     with _CLIPBOARD_STATE_LOCK:
         return {"started": bool(_CLIPBOARD_WATCHER_STARTED)}
+
+# =============================================================================
+#  ★ Global Keyboard Hook (pynput) - Space+Q to restore q2 visible window
+# =============================================================================
+_HOTKEY_LISTENER = None
+_HOTKEY_PRESSED_KEYS = set()
+_HOTKEY_LOCK = threading.Lock()
+_HOTKEY_ENABLED = True
+_HOTKEY_LAST_TRIGGER = 0
+_HOTKEY_DEBOUNCE_MS = 400
+
+# ★ q2 visible window tracking: {hwnd: last_focus_timestamp}
+# Only windows with q2 VISIBLE are tracked
+_Q2_WINDOWS = OrderedDict()
+_Q2_WINDOWS_LOCK = threading.Lock()
+
+def _find_hwnd_by_pid(pid: int):
+    """Find main window hwnd by process id."""
+    if platform.system() != "Windows":
+        return None
+    user32 = ctypes.windll.user32
+    result = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def callback(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        window_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+        if window_pid.value == pid:
+            # Check if it's a main window (has title)
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length > 0:
+                result.append(hwnd)
+        return True
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return result[0] if result else None
+
+def _register_q2_window(pid: int = 0, hwnd: int = 0):
+    """Register window when q2 becomes visible. Called from JS with pid."""
+    if not hwnd and pid:
+        hwnd = _find_hwnd_by_pid(pid)
+    if not hwnd:
+        return {"status": "error", "error": "cannot find hwnd"}
+    with _Q2_WINDOWS_LOCK:
+        if hwnd not in _Q2_WINDOWS:
+            _Q2_WINDOWS[hwnd] = time.time()
+            _Q2_WINDOWS.move_to_end(hwnd)
+            _log(f"[Hotkey] Registered q2 window hwnd={hwnd} (pid={pid})")
+    return {"status": "ok", "hwnd": hwnd}
+
+def _unregister_q2_window(pid: int = 0, hwnd: int = 0):
+    """Unregister window when q2 becomes invisible or window closes."""
+    if not hwnd and pid:
+        hwnd = _find_hwnd_by_pid(pid)
+    if not hwnd:
+        return {"status": "ok"}  # Already gone
+    with _Q2_WINDOWS_LOCK:
+        if hwnd in _Q2_WINDOWS:
+            del _Q2_WINDOWS[hwnd]
+            _log(f"[Hotkey] Unregistered q2 window hwnd={hwnd}")
+    return {"status": "ok"}
+
+def _update_window_focus(pid: int = 0, hwnd: int = 0):
+    """Update focus timestamp when window gains focus (only if q2 visible)."""
+    if not hwnd and pid:
+        hwnd = _find_hwnd_by_pid(pid)
+    if not hwnd:
+        return {"status": "ok"}
+    with _Q2_WINDOWS_LOCK:
+        if hwnd in _Q2_WINDOWS:
+            _Q2_WINDOWS[hwnd] = time.time()
+            _Q2_WINDOWS.move_to_end(hwnd)
+            _log(f"[Hotkey] Updated focus for hwnd={hwnd}")
+    return {"status": "ok"}
+
+def _activate_window(hwnd):
+    """Activate window: restore if minimized, then bring to foreground."""
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.keybd_event(0x12, 0, 0, 0)  # Alt down (bypass foreground lock)
+    user32.SetForegroundWindow(hwnd)
+    user32.keybd_event(0x12, 0, 2, 0)  # Alt up
+    user32.BringWindowToTop(hwnd)
+
+def _restore_q2_window():
+    """
+    Restore the most recently focused window that has q2 visible.
+    If that window is already focused, do nothing.
+    """
+    if platform.system() != "Windows":
+        _log("[Hotkey] Not Windows, skip")
+        return {"status": "error", "error": "Windows only"}
+
+    user32 = ctypes.windll.user32
+    current_hwnd = user32.GetForegroundWindow()
+    _log(f"[Hotkey] Current foreground hwnd={current_hwnd}")
+
+    with _Q2_WINDOWS_LOCK:
+        # Clean up dead windows
+        dead = [h for h in _Q2_WINDOWS if not user32.IsWindow(h)]
+        for h in dead:
+            del _Q2_WINDOWS[h]
+            _log(f"[Hotkey] Removed dead window hwnd={h}")
+
+        _log(f"[Hotkey] After cleanup, tracked: {list(_Q2_WINDOWS.keys())}")
+
+        if not _Q2_WINDOWS:
+            _log("[Hotkey] No q2 visible window to restore")
+            return {"status": "no_window"}
+
+        # Get most recently focused (last in OrderedDict)
+        target_hwnd = list(_Q2_WINDOWS.keys())[-1]
+        _log(f"[Hotkey] Target hwnd={target_hwnd}")
+
+        # If already focused, do nothing
+        if target_hwnd == current_hwnd:
+            _log(f"[Hotkey] Window hwnd={target_hwnd} already focused, no action")
+            return {"status": "already_focused", "hwnd": target_hwnd}
+
+    # Activate the window (outside lock)
+    try:
+        _activate_window(target_hwnd)
+        _log(f"[Hotkey] Activated window hwnd={target_hwnd}")
+        return {"status": "ok", "hwnd": target_hwnd}
+    except Exception as e:
+        _log(f"[Hotkey] Activate failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+def _test_activate_vscode():
+    """Find and activate any IDE window by process name. Returns True if activated."""
+    if platform.system() != 'Windows':
+        return False
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    psapi = ctypes.windll.psapi
+    PROCESS_QUERY_INFORMATION = 0x0400
+    PROCESS_VM_READ = 0x0010
+    IDE_EXES = ['code.exe', 'cursor.exe', 'qoder.exe', 'trae.exe']
+    result = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def callback(hwnd, _):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        h = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
+        if h:
+            buf = ctypes.create_unicode_buffer(260)
+            psapi.GetModuleBaseNameW(h, None, buf, 260)
+            kernel32.CloseHandle(h)
+            if buf.value.lower() in IDE_EXES:
+                result.append(hwnd)
+        return True
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    if result:
+        _activate_window(result[0])
+        return True
+    return False
+
+def _hotkey_on_press(key):
+    """pynput key press callback"""
+    global _HOTKEY_PRESSED_KEYS, _HOTKEY_LAST_TRIGGER
+    if not _HOTKEY_ENABLED or not _HAS_PYNPUT:
+        return
+
+    with _HOTKEY_LOCK:
+        _HOTKEY_PRESSED_KEYS.add(key)
+
+        # Check Space + Q
+        space = pynput_keyboard.Key.space in _HOTKEY_PRESSED_KEYS
+        q = any(hasattr(k, 'char') and k.char and k.char.lower() == 'q' for k in _HOTKEY_PRESSED_KEYS)
+
+        if space and q:
+            now = time.time() * 1000
+            if now - _HOTKEY_LAST_TRIGGER < _HOTKEY_DEBOUNCE_MS:
+                return
+            _HOTKEY_LAST_TRIGGER = now
+            # ★ Only play sound if window was actually activated
+            if _test_activate_vscode():
+                _play_sfx("yz", name="kj3.mp3")
+
+def _hotkey_on_release(key):
+    """pynput key release callback"""
+    if not _HAS_PYNPUT:
+        return
+    with _HOTKEY_LOCK:
+        _HOTKEY_PRESSED_KEYS.discard(key)
+
+def _start_hotkey_listener():
+    """Start global keyboard hook"""
+    global _HOTKEY_LISTENER
+    if not _HAS_PYNPUT:
+        _log("[Hotkey] pynput not available")
+        return {"status": "error", "error": "pynput not installed"}
+    if _HOTKEY_LISTENER is not None:
+        return {"status": "already_running"}
+    try:
+        _HOTKEY_LISTENER = pynput_keyboard.Listener(on_press=_hotkey_on_press, on_release=_hotkey_on_release)
+        _HOTKEY_LISTENER.start()
+        _log("[Hotkey] Started (Space+Q to restore q2 window)")
+        return {"status": "started"}
+    except Exception as e:
+        _log(f"[Hotkey] Failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+def _stop_hotkey_listener():
+    """Stop global keyboard hook"""
+    global _HOTKEY_LISTENER
+    if _HOTKEY_LISTENER:
+        try:
+            _HOTKEY_LISTENER.stop()
+        except:
+            pass
+        _HOTKEY_LISTENER = None
+    with _HOTKEY_LOCK:
+        _HOTKEY_PRESSED_KEYS.clear()
+    _log("[Hotkey] Stopped")
+    return {"status": "stopped"}
+
+def _get_hotkey_state():
+    """Get hotkey state"""
+    with _Q2_WINDOWS_LOCK:
+        window_count = len(_Q2_WINDOWS)
+    return {
+        "running": _HOTKEY_LISTENER is not None and _HOTKEY_LISTENER.is_alive() if _HOTKEY_LISTENER else False,
+        "enabled": _HOTKEY_ENABLED,
+        "pynput_available": _HAS_PYNPUT,
+        "tracked_windows": window_count
+    }
 
 # =============================================================================
 #  Configuration
@@ -963,10 +1202,70 @@ _disk_free_cache = None
 _disk_free_cache_time = 0
 _DISK_FREE_CACHE_TTL = 30  # 30 seconds cache
 
+def _get_folder_size_fast(folder_path: str, max_depth: int = 50) -> int:
+    """Fast folder size calculation with depth limit for safety."""
+    total = 0
+    try:
+        for entry in os.scandir(folder_path):
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+                elif entry.is_dir(follow_symlinks=False) and max_depth > 0:
+                    total += _get_folder_size_fast(entry.path, max_depth - 1)
+            except (PermissionError, OSError):
+                pass
+    except (PermissionError, OSError):
+        pass
+    return total
+
+def _get_desktop_path() -> str:
+    """Get current user's Desktop path."""
+    if _IS_WINDOWS:
+        # Try USERPROFILE first, fallback to expanduser
+        userprofile = os.environ.get('USERPROFILE', '')
+        if userprofile:
+            desktop = os.path.join(userprofile, 'Desktop')
+            if os.path.isdir(desktop):
+                return desktop
+        # Fallback
+        desktop = os.path.expanduser('~/Desktop')
+        if os.path.isdir(desktop):
+            return desktop
+    else:
+        desktop = os.path.expanduser('~/Desktop')
+        if os.path.isdir(desktop):
+            return desktop
+    return None
+
+def _get_recycle_bin_size(drives: list = None) -> int:
+    """Get total Recycle Bin/Trash size (cross-platform)."""
+    total = 0
+    if _IS_WINDOWS:
+        # Windows: $Recycle.Bin on each drive
+        if drives:
+            for drive in drives:
+                letter = drive.upper().replace(":", "").replace("\\", "").replace("/", "")
+                if not letter:
+                    continue
+                recycle_path = f"{letter}:\\$Recycle.Bin"
+                if os.path.isdir(recycle_path):
+                    total += _get_folder_size_fast(recycle_path)
+    elif platform.system() == "Darwin":
+        # macOS: ~/.Trash
+        trash_path = os.path.expanduser("~/.Trash")
+        if os.path.isdir(trash_path):
+            total += _get_folder_size_fast(trash_path)
+    else:
+        # Linux: ~/.local/share/Trash/files
+        trash_path = os.path.expanduser("~/.local/share/Trash/files")
+        if os.path.isdir(trash_path):
+            total += _get_folder_size_fast(trash_path)
+    return total
+
 def get_disk_free_batch(drives: list = None):
     """
-    Batch query disk free space for multiple drives.
-    Returns: { "C": {free, total}, "D": {free, total}, ... }
+    Batch query disk free space for multiple drives + desktop/recycle bin used space.
+    Returns: { "C": {free, total}, "D": {free, total}, "DESKTOP": {used}, "RECYCLE": {used}, ... }
     Uses 30-second cache to avoid redundant queries from multiple windows.
     """
     global _disk_free_cache, _disk_free_cache_time
@@ -991,6 +1290,14 @@ def get_disk_free_batch(drives: list = None):
         info = get_disk_free(drive)
         if info.get("success"):
             result[letter] = {"free": info["free"], "total": info["total"]}
+
+    # ★ Add Desktop used space
+    desktop_path = _get_desktop_path()
+    if desktop_path:
+        result["DESKTOP"] = {"used": _get_folder_size_fast(desktop_path), "path": desktop_path}
+
+    # ★ Add Recycle Bin/Trash used space (cross-platform)
+    result["RECYCLE"] = {"used": _get_recycle_bin_size(drives)}
 
     # Update cache
     _disk_free_cache = {"success": True, "data": result}
@@ -1733,6 +2040,68 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
         out["status"] = "played"
         return out
 
+    # ★ Hotkey listener commands
+    if action == "start_hotkey_listener":
+        out.update(_start_hotkey_listener())
+        return out
+
+    if action == "stop_hotkey_listener":
+        out.update(_stop_hotkey_listener())
+        return out
+
+    if action == "register_q2_window":
+        pid = cmd.get("pid", 0)
+        hwnd = cmd.get("hwnd", 0)
+        try:
+            pid = int(pid)
+        except:
+            pid = 0
+        try:
+            hwnd = int(hwnd)
+        except:
+            hwnd = 0
+        if pid or hwnd:
+            out.update(_register_q2_window(pid, hwnd))
+        else:
+            out["error"] = "need pid or hwnd"
+        return out
+
+    if action == "unregister_q2_window":
+        pid = cmd.get("pid", 0)
+        hwnd = cmd.get("hwnd", 0)
+        try:
+            pid = int(pid)
+        except:
+            pid = 0
+        try:
+            hwnd = int(hwnd)
+        except:
+            hwnd = 0
+        out.update(_unregister_q2_window(pid, hwnd))
+        return out
+
+    if action == "update_window_focus":
+        pid = cmd.get("pid", 0)
+        hwnd = cmd.get("hwnd", 0)
+        try:
+            pid = int(pid)
+        except:
+            pid = 0
+        try:
+            hwnd = int(hwnd)
+        except:
+            hwnd = 0
+        out.update(_update_window_focus(pid, hwnd))
+        return out
+
+    if action == "restore_q2_window":
+        out.update(_restore_q2_window())
+        return out
+
+    if action == "get_hotkey_state":
+        out.update(_get_hotkey_state())
+        return out
+
     out["error"] = f"unknown action: {action}"
     return out
 
@@ -1863,19 +2232,36 @@ ENDPOINT_DIRNAME = "vix_audio_broker"
 ENDPOINT_FILENAME = "endpoint.json"
 TOKEN_FILENAME = "token.txt"
 LOG_FILENAME = "broker.log"
+LOG_MAX_SIZE = 2 * 1024 * 1024  # 2MB max log size
 
 ENABLE_LOCAL_TOKEN = True
 
 # Global log file handle (set in broker mode)
 _LOG_FILE = None
+_LOG_PATH = None
 
 def _init_log_file():
     """Initialize log file for broker mode (needed for pythonw.exe which has no stderr)"""
-    global _LOG_FILE
+    global _LOG_FILE, _LOG_PATH
     try:
         log_dir = _get_endpoint_dir_simple()
-        log_path = log_dir / LOG_FILENAME
-        _LOG_FILE = open(log_path, 'a', encoding='utf-8')
+        _LOG_PATH = log_dir / LOG_FILENAME
+        _LOG_FILE = open(_LOG_PATH, 'a', encoding='utf-8')
+    except:
+        pass
+
+def _rotate_log_if_needed():
+    """Rotate log file if it exceeds LOG_MAX_SIZE (2MB)"""
+    global _LOG_FILE, _LOG_PATH
+    if not _LOG_PATH or not _LOG_FILE:
+        return
+    try:
+        if _LOG_PATH.exists() and _LOG_PATH.stat().st_size > LOG_MAX_SIZE:
+            _LOG_FILE.close()
+            _LOG_PATH.unlink()  # Delete old log
+            _LOG_FILE = open(_LOG_PATH, 'w', encoding='utf-8')
+            _LOG_FILE.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}][{APP_ID}][INFO] Log rotated (exceeded 2MB)\n")
+            _LOG_FILE.flush()
     except:
         pass
 
@@ -1891,12 +2277,20 @@ def _get_endpoint_dir_simple() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
-def _log(msg: str):
+def _log(msg: str, level: str = "INFO"):
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}][{APP_ID}] {msg}\n"
-    # Try log file first (for pythonw.exe)
+    line = f"[{ts}][{APP_ID}][{level}] {msg}\n"
+    # ★ Always write to stderr for JS capture (WARN logs)
+    if level == "WARN":
+        try:
+            sys.stderr.write(line)
+            sys.stderr.flush()
+        except:
+            pass
+    # Write to log file with rotation check
     if _LOG_FILE:
         try:
+            _rotate_log_if_needed()  # ★ Check rotation before write
             _LOG_FILE.write(line)
             _LOG_FILE.flush()
             return
@@ -2492,7 +2886,9 @@ def _unix_client_loop(conn: socket.socket):
                     cmd["client_id"] = conn_tag
 
                 action = cmd.get("action") or cmd.get("cmd") or ""
-                _log(f"[TCP/Unix] Recv: action={action}, _id={cmd.get('_id')}")
+                _QUIET_ACTIONS = {'ping', 'disk_free_batch', 'update_window_focus', 'register_q2_window', 'unregister_q2_window'}
+                if action not in _QUIET_ACTIONS:
+                    _log(f"[TCP/Unix] Recv: action={action}, _id={cmd.get('_id')}")
                 if action in SLOW_ACTIONS:
                     cancel_ver = _get_scan_cancel_version()
                     fut = _IO_EXECUTOR.submit(_broker_dispatch, cmd, cancel_ver)
@@ -2506,10 +2902,10 @@ def _unix_client_loop(conn: socket.socket):
                     except Exception as e:
                         res = {"_id": cmd.get("_id", 0), "ok": False, "error": str(e)}
 
-                _log(f"[TCP/Unix] Send: _id={res.get('_id')}, ok={res.get('ok')}")
+                if action not in _QUIET_ACTIONS:
+                    _log(f"[TCP/Unix] Send: _id={res.get('_id')}, ok={res.get('ok')}")
                 try:
                     conn.sendall((json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8"))
-                    _log(f"[TCP/Unix] Sent successfully")
                 except Exception as e:
                     _log(f"[TCP/Unix] Send error: {e}")
                     break
@@ -2599,7 +2995,10 @@ def _pipe_client_loop(hPipe):
 
                 action = cmd.get("action") or cmd.get("cmd") or ""
                 _id = cmd.get("_id", 0)
-                _log(f"[Pipe] Recv: action={action}, _id={_id}")
+                # ★ Skip logging for high-frequency routine actions
+                _QUIET_ACTIONS = {'ping', 'disk_free_batch', 'update_window_focus', 'register_q2_window', 'unregister_q2_window'}
+                if action not in _QUIET_ACTIONS:
+                    _log(f"[Pipe] Recv: action={action}, _id={_id}")
 
                 # 连接级兜底：客户端没带 client_id 时，用连接标识，避免 TTL 误判
                 if not (cmd.get("client_id") or cmd.get("clientId") or cmd.get("cid")):
@@ -2618,7 +3017,8 @@ def _pipe_client_loop(hPipe):
                     except Exception as e:
                         res = {"_id": _id, "ok": False, "error": str(e)}
 
-                _log(f"[Pipe] Send: _id={_id}, ok={res.get('ok')}")
+                if action not in _QUIET_ACTIONS:
+                    _log(f"[Pipe] Send: _id={_id}, ok={res.get('ok')}")
                 if not _win_pipe_write(hPipe, (json.dumps(res, ensure_ascii=False) + "\n").encode("utf-8")):
                     _log(f"[Pipe] Write failed, closing")
                     return
@@ -2778,6 +3178,12 @@ def broker_mode():
 
     _log(f"Broker started. PID={os.getpid()} endpoint={endpoint_info}")
 
+    # ★ Auto-start global keyboard hook (Space+Q)
+    if _HAS_PYNPUT:
+        _start_hotkey_listener()
+    else:
+        _log("[Hotkey] pynput not available, install with: pip install pynput")
+
     threading.Thread(target=_lease_watchdog, daemon=True, name="lease-watchdog").start()
 
     accept_thread = None
@@ -2809,6 +3215,9 @@ def broker_mode():
         _log(f"Broker loop error: {e}")
         _SHUTDOWN_FLAG = True
     finally:
+        # ★ Stop hotkey listener on shutdown
+        _stop_hotkey_listener()
+
         _safe_shutdown_cleanup()
 
         if kind == "unix" or kind == "tcp":

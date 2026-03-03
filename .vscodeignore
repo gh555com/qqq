@@ -74,11 +74,12 @@ res/
 # 未使用的图片文件
 assets/al.gif
 
-# 文档和测试文件 (保留 expert_cookies.txt)
+# 文档和测试文件 (保留 expert_cookies.txt 和 CHANGELOG.md)
 docs/*
 !docs/expert_cookies.txt
 test/
 *.md
+!CHANGELOG.md
 
 # CI/CD & Release Tools
 **/workflows/**

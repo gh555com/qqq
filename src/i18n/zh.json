@@ -130,6 +130,8 @@
             "sortSize": "排序: 按文件大小",
             "sortCtime": "排序: 按创建时间",
             "sortMtime": "排序: 按修改时间",
+            "desktop": "桌面:",
+            "recycleBin": "回收站:",
             "movedToRecycleBin": "{0} 已移至回收站",
             "deleteFailed": "qqq: 删除失败: {0}",
             "deleteItemFailed": "删除项失败: {0} - {1}",

@@ -130,6 +130,8 @@
             "sortSize": "Sort: By file size",
             "sortCtime": "Sort: By creation time",
             "sortMtime": "Sort: By modification time",
+            "desktop": "Desktop:",
+            "recycleBin": "Trash:",
             "movedToRecycleBin": "{0} moved to Recycle Bin",
             "deleteFailed": "qqq: Delete failed: {0}",
             "deleteItemFailed": "Delete item failed: {0} - {1}",

@@ -130,6 +130,8 @@
             "sortSize": "Sortieren: Nach Dateigröße",
             "sortCtime": "Sortieren: Nach Erstellungszeit",
             "sortMtime": "Sortieren: Nach Änderungszeit",
+            "desktop": "Desktop:",
+            "recycleBin": "Papierkorb:",
             "movedToRecycleBin": "{0} in Papierkorb verschoben",
             "deleteFailed": "qqq: Löschen fehlgeschlagen: {0}",
             "deleteItemFailed": "Element löschen fehlgeschlagen: {0} - {1}",
