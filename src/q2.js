@@ -82,6 +82,124 @@ function cacheKeyForPath(p) {
 }
 
 // =============================================================================
+// Windows .lnk shortcut parser (pure Node.js Buffer, no daemon/shell dependency)
+// Spec: MS-SHLLINK (Shell Link Binary File Format)
+// =============================================================================
+
+/**
+ * Parse Windows .lnk shortcut file and extract target path
+ * @param {string} lnkPath - Path to .lnk file
+ * @returns {string|null} - Target path or null if parsing fails
+ */
+function parseLnkTarget(lnkPath) {
+  try {
+    const buf = fs.readFileSync(lnkPath);
+
+    // Minimum valid .lnk size: 76 bytes header
+    if (buf.length < 76) return null;
+
+    // Verify magic number: 4C 00 00 00
+    if (buf.readUInt32LE(0) !== 0x4C) return null;
+
+    // Read LinkFlags at offset 0x14 (20)
+    const linkFlags = buf.readUInt32LE(0x14);
+    const hasLinkTargetIDList = (linkFlags & 0x01) !== 0;
+    const hasLinkInfo = (linkFlags & 0x02) !== 0;
+
+    // Start after 76-byte header
+    let offset = 76;
+
+    // Skip LinkTargetIDList if present
+    if (hasLinkTargetIDList) {
+      if (offset + 2 > buf.length) return null;
+      const idListSize = buf.readUInt16LE(offset);
+      offset += 2 + idListSize;
+    }
+
+    // Try to get path from LinkInfo first (works for pure ASCII paths)
+    let ansiPath = null;
+    if (hasLinkInfo) {
+      if (offset + 28 <= buf.length) {
+        const linkInfoStart = offset;
+        const linkInfoSize = buf.readUInt32LE(offset);
+        const linkInfoHeaderSize = buf.readUInt32LE(offset + 4);
+        const linkInfoFlags = buf.readUInt32LE(offset + 8);
+        const hasVolumeIDAndLocalBasePath = (linkInfoFlags & 0x01) !== 0;
+
+        if (hasVolumeIDAndLocalBasePath && linkInfoSize >= 28) {
+          const localBasePathOffset = buf.readUInt32LE(offset + 16);
+
+          // Try Unicode path first (header size >= 0x24)
+          if (linkInfoHeaderSize >= 0x24 && offset + 32 <= buf.length) {
+            const localBasePathOffsetUnicode = buf.readUInt32LE(offset + 28);
+            if (localBasePathOffsetUnicode > 0 && localBasePathOffsetUnicode < linkInfoSize) {
+              const unicodeStart = linkInfoStart + localBasePathOffsetUnicode;
+              let unicodeEnd = unicodeStart;
+              while (unicodeEnd + 1 < buf.length && !(buf[unicodeEnd] === 0 && buf[unicodeEnd + 1] === 0)) {
+                unicodeEnd += 2;
+              }
+              if (unicodeEnd > unicodeStart) {
+                const targetPath = buf.slice(unicodeStart, unicodeEnd).toString('utf16le');
+                if (targetPath && targetPath.length > 2 && fs.existsSync(targetPath)) {
+                  return targetPath;
+                }
+              }
+            }
+          }
+
+          // Try ANSI path (save for later validation)
+          if (localBasePathOffset > 0 && localBasePathOffset < linkInfoSize) {
+            const ansiStart = linkInfoStart + localBasePathOffset;
+            let ansiEnd = ansiStart;
+            while (ansiEnd < buf.length && buf[ansiEnd] !== 0) {
+              ansiEnd++;
+            }
+            if (ansiEnd > ansiStart) {
+              ansiPath = buf.slice(ansiStart, ansiEnd).toString('latin1');
+              // If ANSI path exists and is valid, use it
+              if (ansiPath && ansiPath.length > 2 && fs.existsSync(ansiPath)) {
+                return ansiPath;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Fallback: Scan entire file for Unicode path pattern "X:\" (works for non-ASCII paths)
+    // Pattern: [A-Z] 00 3A 00 5C 00 (drive letter : \)
+    for (let i = 0; i < buf.length - 10; i++) {
+      const byte0 = buf[i];
+      // Check for drive letter (A-Z) followed by 00 3A 00 5C 00 (:\)
+      if (byte0 >= 0x41 && byte0 <= 0x5A && buf[i + 1] === 0 &&
+          buf[i + 2] === 0x3A && buf[i + 3] === 0 &&
+          buf[i + 4] === 0x5C && buf[i + 5] === 0) {
+        // Found potential Unicode path, extract it
+        let end = i;
+        while (end + 1 < buf.length && !(buf[end] === 0 && buf[end + 1] === 0)) {
+          end += 2;
+        }
+        if (end > i + 4) {
+          const unicodePath = buf.slice(i, end).toString('utf16le');
+          // Validate: must be absolute path and longer than ANSI path (more specific)
+          if (unicodePath && unicodePath.length > 3 && /^[A-Z]:\\.+/.test(unicodePath)) {
+            // Prefer longer paths (more complete) and existing paths
+            if (fs.existsSync(unicodePath)) {
+              return unicodePath;
+            }
+          }
+        }
+      }
+    }
+
+    // Last resort: return ANSI path even if it doesn't exist (let caller handle)
+    return ansiPath;
+  } catch (e) {
+    return null;
+  }
+}
+
+// =============================================================================
 // Non-blocking delete utilities (yield every N items to prevent Extension Host freeze)
 // =============================================================================
 
@@ -3754,6 +3872,7 @@ function showSaveAsDialog() {
   // 3. first directory in qqiq
   // 4. platform default directory
   let currentPath = "";
+  let lnkJumpFromPath = null; // ★ Record source directory when jumping via .lnk shortcut
   const lastVisited = getLastVisitedDir();
   if (lastVisited) {
     const canon = canonicalizeExistingPath(lastVisited);
@@ -4034,7 +4153,7 @@ function showSaveAsDialog() {
   globalRefreshWebview = refreshWebview;
 
   function getShowOptions(openInCurrentGroup) {
-    const options = { preserveFocus: false, preview: false };
+    const options = { preserveFocus: false, preview: true };
     if (!activePanel) {
       options.viewColumn = vscode.ViewColumn.One;
       return options;
@@ -4241,6 +4360,8 @@ function showSaveAsDialog() {
           newPath = canonicalizeExistingPath(newPath);
 
           if (fs.existsSync(newPath) && fs.statSync(newPath).isDirectory()) {
+            // ★ Clear lnk jump source on normal navigation (user navigated elsewhere)
+            lnkJumpFromPath = null;
             currentPath = newPath;
             refreshWebview();
             // ★ After successful navigation, send success message so frontend can save history and blur
@@ -4258,6 +4379,15 @@ function showSaveAsDialog() {
       case "navigateUp": {
         sRequestVersion++; // Invalidate in-flight sRequest when switching directories
         cancelAllScans(); // Cancel long-running scans in all engines
+
+        // ★ If we jumped here via .lnk, return to the source directory instead of parent
+        if (lnkJumpFromPath && fs.existsSync(lnkJumpFromPath)) {
+          currentPath = lnkJumpFromPath;
+          lnkJumpFromPath = null; // Clear after use (one-time return)
+          refreshWebview();
+          break;
+        }
+
         const parentDir = canonicalizeExistingPath(path.dirname(currentPath));
         if (parentDir && parentDir !== currentPath) {
           currentPath = parentDir;
@@ -4428,6 +4558,24 @@ function showSaveAsDialog() {
         if (panel && activePanelAlive) {
           const sbData = generateSidebarHtml(getConfig());
           panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+        }
+        // ★ Special handling for .lnk files pointing to folders: navigate in q2 instead of opening in Explorer
+        // Uses pure Node.js Buffer parsing (no PowerShell/daemon dependency, <1ms)
+        if (process.platform === "win32" && path.extname(p).toLowerCase() === ".lnk") {
+          const target = parseLnkTarget(p);
+          if (target && fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+            // Target is a folder: navigate in q2
+            // ★ Save source directory for backspace to return here
+            lnkJumpFromPath = currentPath;
+            sRequestVersion++;
+            cancelAllScans();
+            currentPath = canonicalizeExistingPath(target);
+            refreshWebview();
+            if (panel && activePanelAlive) {
+              panel.webview.postMessage({ command: 'navigateSuccess', path: target });
+            }
+            break;
+          }
         }
         try {
           global.openExternal(vscode.Uri.file(p));
