@@ -12,14 +12,14 @@ All notable changes to this project will be documented in this file.
     - **Coral** (`#e8d0c0`): 30% probability - light coral background with black text
     - **Warm Apricot** (`#e8d0b0`): 30% probability - light warm apricot background with black text
     - **Bean Paste Bun** (`#e7e4c2`): 30% probability - light bean paste background with black text
-    - **Bright Red** (`#cb4b16`): 10% probability - original bright red background with white text
+    - **Vivid Red** (`#cb4b16`): 10% probability - original vivid red background with white text
   - Automatically selects on each webview load
   - Console log displays selected scheme name and colors
   - Eye-friendly pastel tones for reduced visual fatigue
 
 ### Technical
 - HTML `q2.html`:
-  - Added IIFE-based random color scheme selector in `<style>` block
+  - Added IIFE-based random color scheme selector in `<script>` block before `</head>`
   - Weighted random algorithm using `Math.random()` and cumulative weights
   - Dynamic CSS variable assignment via `document.documentElement.style.setProperty()`
 
