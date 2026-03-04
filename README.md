@@ -154,7 +154,7 @@ Post the link to your published video to info@gh555.com.
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
 1. Removal of watermarks
 2. Persistence (cloud storage) of preferences
-3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 15802858204 (Emergency & Chinese Language Only)
+3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 15802858204 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement)  )
 
 Apart from these, both versions are completely identical in terms of functionality and usage.
 
@@ -187,7 +187,10 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
  .doc: Compatible with Word 2003.
  .docx: Smaller size.
 
- #### Export Zip: The best way to create portable resources and presentation resources.
+
+
+
+ #### Export Zip: The best way for portable and presentation resources.
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q9.gif" width="100%" alt="export Zip">
@@ -202,6 +205,10 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
+
+
+
+  the whisper is: I miss you.
 
 
 
