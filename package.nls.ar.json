@@ -37,6 +37,7 @@
     "config.sortBy.enum.mtime": "ترتيب بوقت التعديل (المجلدات في الأعلى تنازلياً، الملفات في الأسفل تنازلياً)",
     "config.autoWatchChanges.desc": "🛸 الكشف التلقائي عن التغييرات الخارجية.\n  مُفعّل: تحديث قائمة الملفات تلقائياً (بما في ذلك عمود sz والترتيب) عندما تُعدّل برامج خارجية الملفات في الدليل الحالي.\n مُعطّل: صفر استهلاك للأداء، صفر اهتزاز بصري. مُعطّل افتراضياً. ",
     "config.roamAsStartPage.desc": "🛸 استخدام qqq Roam كصفحة بداية",
+    "config.roamName.desc": "🛸 سمّوا Roam",
     "config.frameSizeMode.desc": "👁️ وضع حجم الإطار: التحكم في حجم عرض الصور المصغرة.",
     "config.frameSizeMode.enum.large": "إطار كبير: 512×288",
     "config.frameSizeMode.enum.small": "إطار صغير: 256×144",

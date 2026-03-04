@@ -37,6 +37,7 @@
     "config.sortBy.enum.mtime": "更新時刻順 (フォルダは上で降順、ファイルは下で降順)",
     "config.autoWatchChanges.desc": "🛸 外部変更を自動検出。\n  チェック: 外部プログラムが現在のディレクトリ内のファイルを変更したとき、ファイルリスト(sz列とソート順を含む)を自動更新。\n チェックなし: パフォーマンスオーバーヘッドゼロ、視覚的ジッターゼロ。デフォルトはチェックなし。 ",
     "config.roamAsStartPage.desc": "🛸 qqq Roam をスタートページとして使用",
+    "config.roamName.desc": "🛸 Roam 命名",
     "config.frameSizeMode.desc": "👁️ フレームサイズモード: プレビュー画像の表示サイズを制御。",
     "config.frameSizeMode.enum.large": "大フレーム: 512×288",
     "config.frameSizeMode.enum.small": "小フレーム: 256×144",
