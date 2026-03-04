@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.119] - 2026-03-04
+
+### Added
+- **Random color scheme system**: File list selection now uses randomized pastel color schemes with weighted probabilities
+  - 4 color schemes with different appearance rates:
+    - **Coral** (`#e8d0c0`): 30% probability - light coral background with black text
+    - **Warm Apricot** (`#e8d0b0`): 30% probability - light warm apricot background with black text
+    - **Bean Paste Bun** (`#e7e4c2`): 30% probability - light bean paste background with black text
+    - **Bright Red** (`#cb4b16`): 10% probability - original bright red background with white text
+  - Automatically selects on each webview load
+  - Console log displays selected scheme name and colors
+  - Eye-friendly pastel tones for reduced visual fatigue
+
+### Technical
+- HTML `q2.html`:
+  - Added IIFE-based random color scheme selector in `<style>` block
+  - Weighted random algorithm using `Math.random()` and cumulative weights
+  - Dynamic CSS variable assignment via `document.documentElement.style.setProperty()`
+
+---
+
 ## [15.73.118] - 2026-03-04
 
 ### Added
