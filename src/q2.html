@@ -8,38 +8,6 @@
 		  content="default-src 'none'; script-src 'unsafe-inline' vscode-webview-resource:; style-src 'unsafe-inline' vscode-webview-resource:; img-src vscode-webview-resource: data:; font-src vscode-webview-resource:;">
 	<title>的梦gaea</title>
 	<style>
-		// Random color scheme system - automatically selects a color scheme on each load
-		(function() {
-			const colorSchemes = [
-				{ bg: '#e8d0c0', text: '#000000', name: 'Coral', weight: 30 },    // Light coral
-				{ bg: '#e8d0b0', text: '#000000', name: 'Warm Apricot', weight: 30 },    // Light warm apricot
-				{ bg: '#e7e4c2', text: '#000000', name: 'Bean Paste Bun', weight: 30 },    // Light bean paste color
-				{ bg: '#cb4b16', text: '#fdf6e3', name: 'Bright Red', weight: 10 }     // Original bright red
-			];
-
-			// Randomly select color scheme based on weight
-			function selectColorScheme() {
-				const totalWeight = colorSchemes.reduce((sum, scheme) => sum + scheme.weight, 0);
-				let random = Math.random() * totalWeight;
-
-				for (const scheme of colorSchemes) {
-					if (random < scheme.weight) {
-						return scheme;
-					}
-					random -= scheme.weight;
-				}
-				return colorSchemes[0];
-			}
-
-			const selectedScheme = selectColorScheme();
-
-			// Set CSS variables
-			document.documentElement.style.setProperty('--selection-bg', selectedScheme.bg);
-			document.documentElement.style.setProperty('--selection-text', selectedScheme.text);
-
-			console.log(`🎨 Selected color scheme: ${selectedScheme.name} (Background: ${selectedScheme.bg}, Text: ${selectedScheme.text})`);
-		})();
-
 		:root {
 			--base03: #002b36;
 			--base02: #073642;
@@ -65,6 +33,8 @@
 			--text-dim: var(--base1);
 			--border-color: var(--base2);
 			--border-strong: var(--base1);
+			--selection-bg: #e8a090;
+			--selection-text: #000000;
 			--button-primary: var(--blue);
 			--button-text: var(--base3);
 
@@ -1088,6 +1058,29 @@
 			max-width: calc(100vw - 20px); /* ★ Fallback: ensure background covers all text */
 		}
 	</style>
+	<script>
+		// Random color scheme selector for file list selection
+		// 4 schemes with weighted probabilities: Coral(30%), Warm Apricot(30%), Bean Paste(30%), Vivid Red(10%)
+		(function() {
+			const schemes = [
+				{ name: 'Coral', bg: '#e8d0c0', text: '#000000', weight: 30 },
+				{ name: 'Warm Apricot', bg: '#e8d0b0', text: '#000000', weight: 30 },
+				{ name: 'Bean Paste', bg: '#e7e4c2', text: '#000000', weight: 30 },
+				{ name: 'Vivid Red', bg: '#cb4b16', text: '#fdf6e3', weight: 10 }
+			];
+			const totalWeight = schemes.reduce((sum, s) => sum + s.weight, 0);
+			const rand = Math.random() * totalWeight;
+			let cumulative = 0;
+			let selected = schemes[0];
+			for (const s of schemes) {
+				cumulative += s.weight;
+				if (rand < cumulative) { selected = s; break; }
+			}
+			document.documentElement.style.setProperty('--selection-bg', selected.bg);
+			document.documentElement.style.setProperty('--selection-text', selected.text);
+			console.log('[Color Scheme] ' + selected.name + ': bg=' + selected.bg + ', text=' + selected.text);
+		})();
+	</script>
 </head>
 
 <body>
