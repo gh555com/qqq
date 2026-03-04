@@ -37,6 +37,7 @@
     "config.sortBy.enum.mtime": "Ordenar por hora de modificação (pastas no topo decrescentes, arquivos abaixo decrescentes)",
     "config.autoWatchChanges.desc": "🛸 Detectar automaticamente mudanças externas.\n  Marcado: Atualizar automaticamente a lista de arquivos (incluindo coluna sz e ordem de classificação) quando programas externos modificarem arquivos no diretório atual.\n Desmarcado: Zero sobrecarga de desempenho, zero tremulação visual. Desmarcado por padrão. ",
     "config.roamAsStartPage.desc": "🛸 Usar qqq Roam como página inicial",
+    "config.roamName.desc": "🛸 Nomeie Roam",
     "config.frameSizeMode.desc": "👁️ Modo de tamanho de moldura: controla o tamanho de exibição das imagens de visualização.",
     "config.frameSizeMode.enum.large": "Moldura grande: 512×288",
     "config.frameSizeMode.enum.small": "Moldura pequena: 256×144",

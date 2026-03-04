@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.118",
+  "version": "15.73.119",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -158,6 +158,12 @@
             "type": "boolean",
             "default": true,
             "markdownDescription": "%config.roamAsStartPage.desc%"
+          },
+          "qqq.roamName": {
+            "order": 15,
+            "type": "string",
+            "default": "的梦gaea",
+            "markdownDescription": "%config.roamName.desc%"
           }
         }
       },
