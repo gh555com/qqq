@@ -37,6 +37,7 @@
     "config.sortBy.enum.mtime": "Nach Änderungszeit sortieren (Ordner oben absteigend, Dateien unten absteigend)",
     "config.autoWatchChanges.desc": "🛸 Externe Änderungen automatisch erkennen.\n  Aktiviert: Dateiliste automatisch aktualisieren (einschließlich sz-Spalte und Sortierreihenfolge), wenn externe Programme Dateien im aktuellen Verzeichnis ändern.\n Deaktiviert: Null Leistungsaufwand, null visuelles Zittern. Standardmäßig deaktiviert.",
     "config.roamAsStartPage.desc": "🛸 qqq Roam als Startseite verwenden",
+    "config.roamName.desc": "🛸 Benenne Roam",
     "config.frameSizeMode.desc": "👁️ Rahmengrößenmodus: steuert die Anzeigegröße von Vorschaubildern.",
     "config.frameSizeMode.enum.large": "Großer Rahmen: 512×288",
     "config.frameSizeMode.enum.small": "Kleiner Rahmen: 256×144",

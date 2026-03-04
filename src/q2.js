@@ -37,6 +37,39 @@ const MAX_CONCURRENT_TASKS = 6;
 
 const UNSUPPORTED_CODE_EXTENSIONS = global.NON_TEXT_EXTS;
 
+// ==================== Utility Functions ====================
+
+/**
+ * Sanitize a string for use as webview panel tab title
+ * @param {string} str - Raw title string
+ * @param {number} maxBytes - Maximum byte length (default 222)
+ * @returns {string} Sanitized title safe for VS Code tab display
+ */
+function sanitizeTabTitle(str, maxBytes = 222) {
+  if (!str || typeof str !== "string") return "的梦gaea";
+
+  let s = str
+    // 1) Remove newlines (DESTRUCTIVE: break tab display)
+    .replace(/[\r\n]/g, "")
+    // 2) Remove control characters ASCII 0-31 except space (DESTRUCTIVE: break rendering)
+    .replace(/[\x00-\x1F]/g, "")
+    // 3) Strip HTML tags (DESTRUCTIVE: potential injection / settings.json corruption)
+    .replace(/<[^>]*>/g, "")
+    .trim();
+
+  // 4) Limit byte length (DESTRUCTIVE: excessive memory / settings.json bloat)
+  const encoder = new TextEncoder();
+  let bytes = encoder.encode(s);
+  if (bytes.length > maxBytes) {
+    // Truncate and ensure valid UTF-8 (avoid cutting in middle of multi-byte char)
+    bytes = bytes.slice(0, maxBytes);
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    s = decoder.decode(bytes).replace(/\uFFFD$/, ""); // Remove trailing replacement char
+  }
+
+  return s || "的梦gaea"; // Fallback if everything was stripped
+}
+
 // ==================== Global Variables ====================
 let activePanel = null;
 let activePanelAlive = false;
@@ -3996,9 +4029,19 @@ function showSaveAsDialog() {
 
   const extensionUri = globalContext.extensionUri;
 
+  // ★ Read roam name from config (defaults to "的梦gaea")
+  const rawRoamName = global.getConfig("roamName") || "的梦gaea";
+  // ★ Sanitize tab title to prevent UI issues and potential security risks
+  // - Remove newlines (\r, \n) that break tab display
+  // - Remove control characters (ASCII 0-31 except space) that cause rendering issues
+  // - Strip HTML tags to prevent injection (though VS Code escapes them)
+  // - Remove zero-width characters that can cause confusion
+  // - Limit to 222 bytes to prevent excessive memory usage
+  const roamName = sanitizeTabTitle(rawRoamName, 222);
+
   const panel = vscode.window.createWebviewPanel(
     "q2",
-    "的梦gaea",
+    roamName,
     vscode.ViewColumn.Active,
     {
       enableScripts: true,
