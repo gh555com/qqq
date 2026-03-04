@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.118] - 2026-03-04
+
+### Added
+- **Roam Name configuration**: New setting `qqq.roamName` to customize q2 Roam webview tab title
+  - Default value: `的梦gaea`
+  - i18n: `漫游器命名` (zh), `漫遊器命名` (zh-tw), `Name Roam` (en), `Roam 命名` (ja), `Benenne Roam` (de), `Roam 이름을 지어주세요` (ko), `Имя Roam` (ru), `سمّوا Roam` (ar), `Nombra Roam` (es), `Nommez Roam` (fr), `Nomeie Roam` (pt-br)
+  - Follows license persistence policy (unlicensed: session-only, reset on restart)
+
+### Security
+- **Tab title sanitization**: Added `sanitizeTabTitle()` to prevent UI issues and potential risks
+  - Remove newlines (`\r`, `\n`) that break tab display
+  - Remove control characters (ASCII 0-31) that cause rendering issues
+  - Strip HTML tags to prevent injection / settings.json corruption
+  - Limit to 222 bytes to prevent memory / settings.json bloat
+  - UTF-8 aware truncation (no mid-character cuts)
+
+### Fixed
+- **Nunlicensed config read timing**: Fixed race condition where q2 Roam opens before settings.json is cleared
+  - Added `_bootstrapResetDone` flag to guard config reads during bootstrap
+  - Nunlicensed users now get default values until `nonVipBootstrapResetAll()` completes
+  - Zero startup delay (q2 Roam opens immediately with safe defaults)
+- **Nunlicensed config modification**: Users can now modify settings in current session
+  - Previously: Nunlicensed `get()` always returned defaults, ignoring settings.json
+  - Now: After bootstrap, `get()` reads settings.json (cleared or user-modified)
+  - Behavior: Session-effective, reset on restart (unchanged)
+
+### Technical
+- JavaScript `global.js`:
+  - Added `_bootstrapResetDone` flag with dual-safety for license users
+  - Modified `ConfigManager.get()` with bootstrap guard (step 2)
+  - Modified `setVipMode()` to mark `_bootstrapResetDone = true` for license
+  - Modified `nonVipBootstrapResetAll()` to set flag after clearing
+- JavaScript `q2.js`:
+  - Added `sanitizeTabTitle(str, maxBytes)` utility function
+  - Modified panel creation to use sanitized `roamName` config
+
+---
+
 ## [15.73.117] - 2026-03-03
 
 ### Changed

@@ -1981,6 +1981,7 @@ let _durationTimer = null;
 // ============================================================================
 const DEFAULT_CONFIG = {
 	"roamAsStartPage": true,
+	"roamName": "的梦gaea",
 	"enlargeSmallImages": false,
 	"performanceMode": "optmum",
 	"frameSizeMode": "fix",
@@ -2011,10 +2012,21 @@ let _suppressConfigEcho = 0; // Prevent "we echo settings back" from causing inf
 let _trialHintShown = false;
 let _configChangeCallback = null;
 let _configUpdateCallbacks = []; // ★ List of callbacks after config update completes (fix race conditions)
+// ★ Bootstrap reset completion flag (non-VIP only)
+// Purpose: Prevent race condition where q2 opens before settings.json is cleared
+// - false: non-VIP get() returns DEFAULT_CONFIG directly (safe startup)
+// - true: non-VIP get() can read settings.json (cleared or user-modified in session)
+// Note: This flag ONLY affects non-VIP users. VIP users bypass this check entirely.
+let _bootstrapResetDone = false;
 
 function setVipMode(v) {
 	_isVip = !!v;
 	_sessionOverrides = Object.create(null); // Clear session overrides on mode switch to avoid cross-contamination
+	// ★ VIP users don't need bootstrap reset, mark as done immediately
+	// This ensures VIP users can always read settings.json without waiting
+	if (_isVip) {
+		_bootstrapResetDone = true;
+	}
 	// logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO"); // qq2q
 }
 function isVip() { return _isVip; }
@@ -2054,23 +2066,27 @@ const ConfigManager = {
 			return _sessionOverrides[key];
 		}
 
-		// 2) Non-VIP: never read any persisted storage (DB/settings.json treated as non-existent)
-		if (!_isVip) return DEFAULT_CONFIG[key];
+		// 2) Non-VIP bootstrap guard: return default until settings.json is cleared
+		// ★ This check is SKIPPED for VIP users (_isVip=true makes condition false)
+		// ★ VIP users always proceed to step 3 immediately
+		if (!_isVip && !_bootstrapResetDone) {
+			return DEFAULT_CONFIG[key];
+		}
 
-		// 3) VIP: read DB (globalState)
-		if (extensionContext) {
+		// 3) Try to read settings.json (both VIP and non-VIP can read after bootstrap)
+		try {
+			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
+			if (wsVal !== undefined) return wsVal;
+		} catch { }
+
+		// 4) VIP only: read DB (globalState) for persisted configs
+		if (_isVip && extensionContext) {
 			// Backward compatible old trailing-space key
 			const v1 = extensionContext.globalState.get(`cfg_${key}`);
 			if (v1 !== undefined) return v1;
 			const v2 = extensionContext.globalState.get(`cfg_${key} `);
 			if (v2 !== undefined) return v2;
 		}
-
-		// 4) VIP: optionally read settings for migration
-		try {
-			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
-			if (wsVal !== undefined) return wsVal;
-		} catch { }
 
 		// 5) Fallback to hardcoded default
 		return DEFAULT_CONFIG[key];
@@ -2118,11 +2134,15 @@ const ConfigManager = {
 
 	// On non-VIP startup: clear all qqq.* settings once to ensure "reset on restart"
 	async nonVipBootstrapResetAll() {
-		if (_isVip) return;
+		if (_isVip) {
+			_bootstrapResetDone = true; // VIP: no clearing needed, mark ready immediately
+			return;
+		}
 		// logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO"); // qq2q
 		for (const k of Object.keys(DEFAULT_CONFIG)) {
 			await _clearVscodeSettingEverywhere(k);
 		}
+		_bootstrapResetDone = true; // ★ Clearing done, now get() can read settings.json
 	},
 
 	// VS Code settings change entry (single entry)
