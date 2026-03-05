@@ -562,77 +562,31 @@ def _activate_window(hwnd):
 def _restore_q2_window():
     """
     Restore the most recently focused window that has q2 visible.
-    If that window is already focused, do nothing.
+    Traverses from most recent to oldest, skipping dead windows.
+    Returns: {"status": "ok"/"no_window"/"already_focused", ...}
     """
     if platform.system() != "Windows":
-        _log("[Hotkey] Not Windows, skip")
         return {"status": "error", "error": "Windows only"}
 
     user32 = ctypes.windll.user32
     current_hwnd = user32.GetForegroundWindow()
-    _log(f"[Hotkey] Current foreground hwnd={current_hwnd}")
 
     with _Q2_WINDOWS_LOCK:
-        # Clean up dead windows
-        dead = [h for h in _Q2_WINDOWS if not user32.IsWindow(h)]
-        for h in dead:
-            del _Q2_WINDOWS[h]
-            _log(f"[Hotkey] Removed dead window hwnd={h}")
+        # Traverse from most recent (last) to oldest (first), find first alive
+        for hwnd in reversed(list(_Q2_WINDOWS.keys())):
+            if not user32.IsWindow(hwnd):
+                del _Q2_WINDOWS[hwnd]
+                _log(f"[Hotkey] Removed dead hwnd={hwnd}")
+                continue
+            if hwnd == current_hwnd:
+                return {"status": "already_focused", "hwnd": hwnd}
+            # Found a live window, activate it
+            _activate_window(hwnd)
+            _log(f"[Hotkey] Activated hwnd={hwnd}")
+            return {"status": "ok", "hwnd": hwnd}
 
-        _log(f"[Hotkey] After cleanup, tracked: {list(_Q2_WINDOWS.keys())}")
-
-        if not _Q2_WINDOWS:
-            _log("[Hotkey] No q2 visible window to restore")
-            return {"status": "no_window"}
-
-        # Get most recently focused (last in OrderedDict)
-        target_hwnd = list(_Q2_WINDOWS.keys())[-1]
-        _log(f"[Hotkey] Target hwnd={target_hwnd}")
-
-        # If already focused, do nothing
-        if target_hwnd == current_hwnd:
-            _log(f"[Hotkey] Window hwnd={target_hwnd} already focused, no action")
-            return {"status": "already_focused", "hwnd": target_hwnd}
-
-    # Activate the window (outside lock)
-    try:
-        _activate_window(target_hwnd)
-        _log(f"[Hotkey] Activated window hwnd={target_hwnd}")
-        return {"status": "ok", "hwnd": target_hwnd}
-    except Exception as e:
-        _log(f"[Hotkey] Activate failed: {e}")
-        return {"status": "error", "error": str(e)}
-
-def _test_activate_vscode():
-    """Find and activate any IDE window by process name. Returns True if activated."""
-    if platform.system() != 'Windows':
-        return False
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    psapi = ctypes.windll.psapi
-    PROCESS_QUERY_INFORMATION = 0x0400
-    PROCESS_VM_READ = 0x0010
-    IDE_EXES = ['code.exe', 'cursor.exe', 'qoder.exe', 'trae.exe']
-    result = []
-    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def callback(hwnd, _):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        h = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
-        if h:
-            buf = ctypes.create_unicode_buffer(260)
-            psapi.GetModuleBaseNameW(h, None, buf, 260)
-            kernel32.CloseHandle(h)
-            if buf.value.lower() in IDE_EXES:
-                result.append(hwnd)
-        return True
-    user32.EnumWindows(WNDENUMPROC(callback), 0)
-    if result:
-        _activate_window(result[0])
-        return True
-    return False
+        _log("[Hotkey] No q2 window alive")
+        return {"status": "no_window"}
 
 def _hotkey_on_press(key):
     """pynput key press callback"""
@@ -653,7 +607,7 @@ def _hotkey_on_press(key):
                 return
             _HOTKEY_LAST_TRIGGER = now
             # ★ Only play sound if window was actually activated
-            if _test_activate_vscode():
+            if _restore_q2_window().get("status") == "ok":
                 _play_sfx("yz", name="kj3.mp3")
 
 def _hotkey_on_release(key):
