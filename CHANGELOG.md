@@ -89,7 +89,7 @@ All notable changes to this project will be documented in this file.
 ## [15.73.116] - 2026-03-03
 
 ### Added
-- **Global hotkey Space+Q**: Activate IDE window from anywhere with keyboard shortcut
+- **Experimental function: Global hotkey Space+Q**: Activate IDE window from anywhere with keyboard shortcut
   - Press and hold `Space`, then tap `Q` to bring IDE window to foreground
   - Works system-wide regardless of current focused application
   - Plays sound effect (`kj3.mp3`) only when window actually activated (silent if no IDE found)
