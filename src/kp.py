@@ -16,7 +16,6 @@ from pathlib import Path
 from datetime import datetime
 import random
 import concurrent.futures
-from collections import OrderedDict
 import re
 import base64
 import importlib.util
@@ -484,70 +483,6 @@ _HOTKEY_ENABLED = True
 _HOTKEY_LAST_TRIGGER = 0
 _HOTKEY_DEBOUNCE_MS = 400
 
-# ★ q2 visible window tracking: {hwnd: last_focus_timestamp}
-# Only windows with q2 VISIBLE are tracked
-_Q2_WINDOWS = OrderedDict()
-_Q2_WINDOWS_LOCK = threading.Lock()
-
-def _find_hwnd_by_pid(pid: int):
-    """Find main window hwnd by process id."""
-    if platform.system() != "Windows":
-        return None
-    user32 = ctypes.windll.user32
-    result = []
-    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def callback(hwnd, _):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        window_pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
-        if window_pid.value == pid:
-            # Check if it's a main window (has title)
-            length = user32.GetWindowTextLengthW(hwnd)
-            if length > 0:
-                result.append(hwnd)
-        return True
-    user32.EnumWindows(WNDENUMPROC(callback), 0)
-    return result[0] if result else None
-
-def _register_q2_window(pid: int = 0, hwnd: int = 0):
-    """Register window when q2 becomes visible. Called from JS with pid."""
-    if not hwnd and pid:
-        hwnd = _find_hwnd_by_pid(pid)
-    if not hwnd:
-        return {"status": "error", "error": "cannot find hwnd"}
-    with _Q2_WINDOWS_LOCK:
-        if hwnd not in _Q2_WINDOWS:
-            _Q2_WINDOWS[hwnd] = time.time()
-            _Q2_WINDOWS.move_to_end(hwnd)
-            _log(f"[Hotkey] Registered q2 window hwnd={hwnd} (pid={pid})")
-    return {"status": "ok", "hwnd": hwnd}
-
-def _unregister_q2_window(pid: int = 0, hwnd: int = 0):
-    """Unregister window when q2 becomes invisible or window closes."""
-    if not hwnd and pid:
-        hwnd = _find_hwnd_by_pid(pid)
-    if not hwnd:
-        return {"status": "ok"}  # Already gone
-    with _Q2_WINDOWS_LOCK:
-        if hwnd in _Q2_WINDOWS:
-            del _Q2_WINDOWS[hwnd]
-            _log(f"[Hotkey] Unregistered q2 window hwnd={hwnd}")
-    return {"status": "ok"}
-
-def _update_window_focus(pid: int = 0, hwnd: int = 0):
-    """Update focus timestamp when window gains focus (only if q2 visible)."""
-    if not hwnd and pid:
-        hwnd = _find_hwnd_by_pid(pid)
-    if not hwnd:
-        return {"status": "ok"}
-    with _Q2_WINDOWS_LOCK:
-        if hwnd in _Q2_WINDOWS:
-            _Q2_WINDOWS[hwnd] = time.time()
-            _Q2_WINDOWS.move_to_end(hwnd)
-            _log(f"[Hotkey] Updated focus for hwnd={hwnd}")
-    return {"status": "ok"}
-
 def _activate_window(hwnd):
     """Activate window: restore if minimized, then bring to foreground."""
     user32 = ctypes.windll.user32
@@ -559,35 +494,82 @@ def _activate_window(hwnd):
     user32.keybd_event(0x12, 0, 2, 0)  # Alt up
     user32.BringWindowToTop(hwnd)
 
-def _restore_q2_window():
+def _test_activate_vscode():
     """
-    Restore the most recently focused window that has q2 visible.
-    Traverses from most recent to oldest, skipping dead windows.
-    Returns: {"status": "ok"/"no_window"/"already_focused", ...}
+    Find and activate IDE window with visible q2. Returns True if activated.
+    Reads hwnd directly from temp file written by JS side.
     """
-    if platform.system() != "Windows":
-        return {"status": "error", "error": "Windows only"}
+    if platform.system() != 'Windows':
+        return False
 
+    import tempfile
+    import json
+
+    tracking_file = os.path.join(tempfile.gettempdir(), 'vix_q2_windows.json')
     user32 = ctypes.windll.user32
-    current_hwnd = user32.GetForegroundWindow()
+    current = user32.GetForegroundWindow()
 
-    with _Q2_WINDOWS_LOCK:
-        _log(f"[Hotkey] _Q2_WINDOWS={list(_Q2_WINDOWS.keys())}, current={current_hwnd}")
-        # Traverse from most recent (last) to oldest (first), find first alive
-        for hwnd in reversed(list(_Q2_WINDOWS.keys())):
-            if not user32.IsWindow(hwnd):
-                del _Q2_WINDOWS[hwnd]
-                _log(f"[Hotkey] Removed dead hwnd={hwnd}")
-                continue
-            if hwnd == current_hwnd:
-                return {"status": "already_focused", "hwnd": hwnd}
-            # Found a live window, activate it
-            _activate_window(hwnd)
-            _log(f"[Hotkey] Activated hwnd={hwnd}")
-            return {"status": "ok", "hwnd": hwnd}
+    # Read tracking file (contains {hwnd: timestamp})
+    records = {}
+    try:
+        if os.path.exists(tracking_file):
+            with open(tracking_file, 'r', encoding='utf-8') as f:
+                records = json.load(f)
+    except Exception as e:
+        _log(f"[Hotkey] Failed to read tracking file: {e}")
+        return False
 
-        _log("[Hotkey] No q2 window alive")
-        return {"status": "no_window"}
+    if not records:
+        _log("[Hotkey] No q2 windows in tracking file")
+        return False
+
+    # Sort by timestamp (most recent first)
+    sorted_hwnds = sorted(records.items(), key=lambda x: x[1], reverse=True)
+    _log(f"[Hotkey] Tracking file: {sorted_hwnds}, current={current}")
+
+    # Try each hwnd (most recent first), find alive one
+    dead_hwnds = []
+    for hwnd_str, timestamp in sorted_hwnds:
+        try:
+            hwnd = int(hwnd_str)
+        except:
+            continue
+
+        # Check if window still exists
+        if not user32.IsWindow(hwnd):
+            dead_hwnds.append(hwnd_str)
+            continue
+
+        if hwnd == current:
+            return False  # Already focused
+
+        # Activate the window
+        _activate_window(hwnd)
+        _log(f"[Hotkey] Activated window hwnd={hwnd}")
+        return True
+
+    # Clean up dead windows from tracking file
+    if dead_hwnds:
+        try:
+            for hwnd_str in dead_hwnds:
+                records.pop(hwnd_str, None)
+            with open(tracking_file, 'w', encoding='utf-8') as f:
+                json.dump(records, f)
+            _log(f"[Hotkey] Cleaned up dead hwnds: {dead_hwnds}")
+        except:
+            pass
+
+    _log("[Hotkey] No alive q2 window to activate")
+    return False
+
+def _get_foreground_hwnd():
+    """Get current foreground window hwnd. Called from JS to register q2 window."""
+    if platform.system() != 'Windows':
+        return {"status": "error", "error": "not windows"}
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
+    _log(f"[Hotkey] GetForegroundWindow -> {hwnd}")
+    return {"status": "ok", "hwnd": hwnd}
 
 def _hotkey_on_press(key):
     """pynput key press callback"""
@@ -595,7 +577,6 @@ def _hotkey_on_press(key):
     if not _HOTKEY_ENABLED or not _HAS_PYNPUT:
         return
 
-    should_trigger = False
     with _HOTKEY_LOCK:
         _HOTKEY_PRESSED_KEYS.add(key)
 
@@ -605,17 +586,12 @@ def _hotkey_on_press(key):
 
         if space and q:
             now = time.time() * 1000
-            if now - _HOTKEY_LAST_TRIGGER >= _HOTKEY_DEBOUNCE_MS:
-                _HOTKEY_LAST_TRIGGER = now
-                should_trigger = True
-
-    # ★ Call outside lock to avoid potential deadlock/exception swallowing
-    if should_trigger:
-        try:
-            if _restore_q2_window().get("status") == "ok":
+            if now - _HOTKEY_LAST_TRIGGER < _HOTKEY_DEBOUNCE_MS:
+                return
+            _HOTKEY_LAST_TRIGGER = now
+            # ★ Only play sound if window was actually activated
+            if _test_activate_vscode():
                 _play_sfx("yz", name="kj3.mp3")
-        except Exception as e:
-            _log(f"[Hotkey] Error in restore: {e}")
 
 def _hotkey_on_release(key):
     """pynput key release callback"""
@@ -657,13 +633,10 @@ def _stop_hotkey_listener():
 
 def _get_hotkey_state():
     """Get hotkey state"""
-    with _Q2_WINDOWS_LOCK:
-        window_count = len(_Q2_WINDOWS)
     return {
         "running": _HOTKEY_LISTENER is not None and _HOTKEY_LISTENER.is_alive() if _HOTKEY_LISTENER else False,
         "enabled": _HOTKEY_ENABLED,
-        "pynput_available": _HAS_PYNPUT,
-        "tracked_windows": window_count
+        "pynput_available": _HAS_PYNPUT
     }
 
 # =============================================================================
@@ -1945,6 +1918,10 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
         out["_should_exit_process"] = bool(allow_process_exit)
         return out
 
+    if action == "get_foreground_hwnd":
+        out.update(_get_foreground_hwnd())
+        return out
+
     if action == "trigger_system_paste":
         target_dir = cmd.get("path") or cmd.get("target_dir")
         out.update(trigger_system_paste(target_dir))
@@ -2008,55 +1985,6 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
 
     if action == "stop_hotkey_listener":
         out.update(_stop_hotkey_listener())
-        return out
-
-    if action == "register_q2_window":
-        pid = cmd.get("pid", 0)
-        hwnd = cmd.get("hwnd", 0)
-        try:
-            pid = int(pid)
-        except:
-            pid = 0
-        try:
-            hwnd = int(hwnd)
-        except:
-            hwnd = 0
-        if pid or hwnd:
-            out.update(_register_q2_window(pid, hwnd))
-        else:
-            out["error"] = "need pid or hwnd"
-        return out
-
-    if action == "unregister_q2_window":
-        pid = cmd.get("pid", 0)
-        hwnd = cmd.get("hwnd", 0)
-        try:
-            pid = int(pid)
-        except:
-            pid = 0
-        try:
-            hwnd = int(hwnd)
-        except:
-            hwnd = 0
-        out.update(_unregister_q2_window(pid, hwnd))
-        return out
-
-    if action == "update_window_focus":
-        pid = cmd.get("pid", 0)
-        hwnd = cmd.get("hwnd", 0)
-        try:
-            pid = int(pid)
-        except:
-            pid = 0
-        try:
-            hwnd = int(hwnd)
-        except:
-            hwnd = 0
-        out.update(_update_window_focus(pid, hwnd))
-        return out
-
-    if action == "restore_q2_window":
-        out.update(_restore_q2_window())
         return out
 
     if action == "get_hotkey_state":
