@@ -77,6 +77,30 @@ let currentWatcher = null; // Used to watch current directory changes
 let sRequestVersion = 0; // sRequest version number, used to cancel stale requests
 const usePanelReveal = 1;
 
+// ★ q2 window tracking via temp file (for Space+Q hotkey, cross-IDE)
+const Q2_TRACKING_FILE = path.join(os.tmpdir(), 'vix_q2_windows.json');
+const _updateQ2TrackingFile = (action) => {
+  // action: 'register' - add/update this window in tracking file
+  if (!activePanelAlive || action !== 'register') return;
+  if (!global.pythonBridge?.isAvailable()) return;
+
+  // Get current foreground window hwnd via Python and write to file
+  global.pythonBridge.call("get_foreground_hwnd", {}, 1000)
+    .then(r => {
+      if (r?.hwnd) {
+        try {
+          let records = {};
+          if (fs.existsSync(Q2_TRACKING_FILE)) {
+            try { records = JSON.parse(fs.readFileSync(Q2_TRACKING_FILE, 'utf8')); } catch {}
+          }
+          records[String(r.hwnd)] = Date.now();
+          fs.writeFileSync(Q2_TRACKING_FILE, JSON.stringify(records), 'utf8');
+        } catch {}
+      }
+    })
+    .catch(() => {});
+};
+
 
 
 
@@ -3968,6 +3992,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
 // ==================== Main logic ====================
 function showSaveAsDialog() {
+  console.log('[q2] showSaveAsDialog called, activePanel=' + !!activePanel + ', activePanelAlive=' + activePanelAlive);
   if (!global.isValid()) {
     global.showAutoCloseNotification('error', q('q2.error.integrityFailed'));
     return;
@@ -4053,6 +4078,9 @@ function showSaveAsDialog() {
   activePanel = panel;
   activePanelAlive = true;
 
+  // ★ Immediately register this window as having visible q2
+  _updateQ2TrackingFile('register')
+
   const iconPath = path.join(globalContext.extensionPath, "assets", "icon.png");
   if (fs.existsSync(iconPath)) panel.iconPath = vscode.Uri.file(iconPath);
 
@@ -4065,59 +4093,22 @@ function showSaveAsDialog() {
       currentWatcher.dispose();
       currentWatcher = null;
     }
-    // ★ Unregister q2 window when panel closes
-    if (global.pythonBridge?.isAvailable()) {
-      global.pythonBridge.call("unregister_q2_window", { pid: process.pid }, 1000).catch(() => {});
-    }
+    // Note: tracking file cleanup happens automatically when Python detects dead windows
   });
 
-  // ★ q2 visibility tracking for Space+Q hotkey
-  let _q2Registered = false;
-  const _registerQ2 = () => {
-    if (!_q2Registered && global.pythonBridge?.isAvailable()) {
-      global.pythonBridge.call("register_q2_window", { pid: process.pid }, 1000)
-        .then(r => console.log("[q2] Registered for hotkey:", r))
-        .catch(e => console.log("[q2] Register failed:", e));
-      _q2Registered = true;
-    }
-  };
-  const _unregisterQ2 = () => {
-    if (_q2Registered && global.pythonBridge?.isAvailable()) {
-      global.pythonBridge.call("unregister_q2_window", { pid: process.pid }, 1000).catch(() => {});
-      _q2Registered = false;
-    }
-  };
-  const _updateFocus = () => {
-    if (_q2Registered && global.pythonBridge?.isAvailable()) {
-      global.pythonBridge.call("update_window_focus", { pid: process.pid }, 1000).catch(() => {});
-    }
-  };
-
-  // ★ Register with retry until pythonBridge is ready
-  const _tryRegister = () => {
-    if (_q2Registered) return;
-    if (global.pythonBridge?.isAvailable()) {
-      _registerQ2();
-    } else {
-      // Retry after 500ms, up to 20 times (10 seconds total)
-      setTimeout(_tryRegister, 500);
-    }
-  };
-  _tryRegister();
-
-  // Track visibility changes
+  // ★ Track panel visibility: remove from tracking when q2 becomes hidden
   panel.onDidChangeViewState(e => {
     if (e.webviewPanel.visible) {
-      _registerQ2();
-    } else {
-      _unregisterQ2();
+      _updateQ2TrackingFile('register');  // Visible again, re-register
     }
+    // Note: when hidden, Python will clean up dead windows automatically
   });
 
-  // Track window focus changes
+  // ★ Track window focus: when losing focus with visible q2, write to tracking file
   const focusDisposable = vscode.window.onDidChangeWindowState(e => {
-    if (e.focused && _q2Registered) {
-      _updateFocus();
+    if (e.focused && activePanelAlive) {
+      // Window gained focus while q2 is visible - register this window
+      _updateQ2TrackingFile('register')
     }
   });
   panel.onDidDispose(() => focusDisposable.dispose());

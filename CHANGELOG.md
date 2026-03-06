@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.124] - 2026-03-06
+
+### Fixed
+- **Space+Q hotkey reliability**: Fixed "only works once" issue and incorrect window activation
+  - Changed from PID-based window lookup to direct hwnd tracking
+  - Fixed timing bug: hwnd now captured on window **focus gain**, not focus loss
+  - Previously: `GetForegroundWindow()` called on focus loss returned the *other* window's hwnd
+  - Now: Correct hwnd captured when q2 panel opens or window gains focus
+  - Cross-IDE tracking via temp file (`%TEMP%/vix_q2_windows.json`)
+
+### Changed
+- **Code cleanup**: Removed ~160 lines of deprecated window tracking code
+  - Removed: `_Q2_WINDOWS` OrderedDict, `_Q2_WINDOWS_LOCK`
+  - Removed: `_find_hwnd_by_pid()`, `_register_q2_window()`, `_unregister_q2_window()`
+  - Removed: `_update_window_focus()`, `_restore_q2_window()`
+  - Removed: Corresponding action handlers (register_q2_window, unregister_q2_window, etc.)
+  - Simplified `_updateQ2TrackingFile()` in JS to only handle 'register' action
+
+### Technical
+- Python `kp.py`:
+  - `_test_activate_vscode()`: Reads hwnd directly from temp file, activates with `IsWindow()` validation
+  - `_get_foreground_hwnd()`: New action to get current foreground window hwnd
+  - Automatic cleanup of dead windows (invalid hwnd) from tracking file
+- JavaScript `q2.js`:
+  - `_updateQ2TrackingFile('register')`: Calls Python to get hwnd, writes to temp file
+  - Triggers: panel open, panel visible, window focus gain
+
+---
+
+## [15.73.124] - 2026-03-06
+
+### Added
+- **Q4 right-click to Explorer**: Right-click anywhere in q4 sidebar to open VS Code built-in file explorer
+  - Quick navigation from clipboard history panel to file tree
+  - Uses `workbench.view.explorer` command
+
+### Technical
+- JavaScript `q4.js`:
+  - Modified `contextmenu` event listener to post `executeCommand` message
+  - Leverages existing message handler infrastructure
+
+---
+
 ## [15.73.119] - 2026-03-04
 
 ### Added
