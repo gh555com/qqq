@@ -2215,8 +2215,11 @@ class ClipboardHistorySidebarProvider {
                 }
             }
 
-            // Disable context menu
-            window.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+            // Right-click to open VS Code built-in file explorer
+            window.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                post('executeCommand', { cmd: 'workbench.view.explorer' });
+            });
 
             function initDynamicSizing() {
                 var containerH = el.historyContainer.clientHeight;
@@ -2335,7 +2338,7 @@ class ClipboardHistorySidebarProvider {
                 el.tooltip.style.display = 'none';
 
                 if (currentHistory.length === 0) {
-                    el.historyList.innerHTML = '<div class="empty-hint">' + q('q4.ui.emptyHint') + '</div>';
+                    el.historyList.innerHTML = '<div class="empty-hint">${q('q4.ui.emptyHint')}</div>';
                     selectedId = '';
                     selectedIndex = -1;
                     setTimeout(updateAllScrollbars, 50);
