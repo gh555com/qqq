@@ -41,9 +41,6 @@
 
 
 
- To users on version 15.73.109: Please upgrade urgently. We have fixed the critical bug where Roam hijacks cursor focus in build 109.
-
-
 > Full source code transparency, security, and auditability are guaranteed.
 
 [Feedback & Issues](https://github.com/gh555com/qqq/issues)
