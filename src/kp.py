@@ -572,6 +572,7 @@ def _restore_q2_window():
     current_hwnd = user32.GetForegroundWindow()
 
     with _Q2_WINDOWS_LOCK:
+        _log(f"[Hotkey] _Q2_WINDOWS={list(_Q2_WINDOWS.keys())}, current={current_hwnd}")
         # Traverse from most recent (last) to oldest (first), find first alive
         for hwnd in reversed(list(_Q2_WINDOWS.keys())):
             if not user32.IsWindow(hwnd):
@@ -594,6 +595,7 @@ def _hotkey_on_press(key):
     if not _HOTKEY_ENABLED or not _HAS_PYNPUT:
         return
 
+    should_trigger = False
     with _HOTKEY_LOCK:
         _HOTKEY_PRESSED_KEYS.add(key)
 
@@ -603,12 +605,17 @@ def _hotkey_on_press(key):
 
         if space and q:
             now = time.time() * 1000
-            if now - _HOTKEY_LAST_TRIGGER < _HOTKEY_DEBOUNCE_MS:
-                return
-            _HOTKEY_LAST_TRIGGER = now
-            # ★ Only play sound if window was actually activated
+            if now - _HOTKEY_LAST_TRIGGER >= _HOTKEY_DEBOUNCE_MS:
+                _HOTKEY_LAST_TRIGGER = now
+                should_trigger = True
+
+    # ★ Call outside lock to avoid potential deadlock/exception swallowing
+    if should_trigger:
+        try:
             if _restore_q2_window().get("status") == "ok":
                 _play_sfx("yz", name="kj3.mp3")
+        except Exception as e:
+            _log(f"[Hotkey] Error in restore: {e}")
 
 def _hotkey_on_release(key):
     """pynput key release callback"""
