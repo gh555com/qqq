@@ -66,14 +66,9 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
 </p>
 
- If you don't like key combinations, try F2.
+ qqq in, ctrl + v. If you don't like key combinations, try F2.
 
- Direct paste, Direct show, Direct open everything, organize your resource collection in any way you like, that make your records more comprehensive and your creativity more robust — there is no other solution that can deliver this for you without qqq. qqq was launched in December 2025. Even if there are copycat products in the future, qqq will always be the cleanest and healthiest one, vs code is deficient without qqq.
-For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555.qqq. This download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
-<p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/i18.png" alt="i18n">
-</p>
-
+ You can organize your resources now.
 
 ## ✦q✦ A Revolution of the Tab Key (But without breaking the default Tab behavior.)
 
@@ -207,6 +202,15 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
  #### Clipboard history cards
 
 
+
+
+
+
+ Direct paste, Direct show, Direct open everything, organize your resource collection in any way you like, that make your records more comprehensive and your creativity more robust — there is no other solution that can deliver this for you without qqq. qqq was launched in December 2025. Even if there are copycat products in the future, qqq will always be the cleanest and healthiest one, vs code is deficient without qqq.
+For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555.qqq, this download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/i18.png" alt="i18n">
+</p>
 
 
 
