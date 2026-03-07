@@ -540,6 +540,21 @@ def _test_activate_vscode():
             dead_hwnds.append(hwnd_str)
             continue
 
+        # ★ Verify hwnd belongs to IDE process (防止激活错误窗口)
+        try:
+            import psutil
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value:
+                proc = psutil.Process(pid.value)
+                proc_name = proc.name().lower()
+                if proc_name not in _IDE_PROCESS_NAMES:
+                    _log(f"[Hotkey] hwnd={hwnd} belongs to {proc_name}, not IDE, skipping")
+                    dead_hwnds.append(hwnd_str)  # Clean it up
+                    continue
+        except:
+            pass  # If check fails, proceed anyway
+
         if hwnd == current:
             return False  # Already focused
 
@@ -562,13 +577,34 @@ def _test_activate_vscode():
     _log("[Hotkey] No alive q2 window to activate")
     return False
 
+# IDE process names for hwnd validation (lowercase)
+_IDE_PROCESS_NAMES = {'code.exe', 'cursor.exe', 'qoder.exe', 'trae.exe', 'code - insiders.exe'}
+
 def _get_foreground_hwnd():
-    """Get current foreground window hwnd. Called from JS to register q2 window."""
+    """
+    Get current foreground window hwnd, but ONLY if it belongs to an IDE process.
+    This prevents race condition: user switches away before Python responds.
+    """
     if platform.system() != 'Windows':
         return {"status": "error", "error": "not windows"}
     user32 = ctypes.windll.user32
     hwnd = user32.GetForegroundWindow()
-    _log(f"[Hotkey] GetForegroundWindow -> {hwnd}")
+
+    # Validate: only return hwnd if it belongs to IDE process
+    try:
+        import psutil
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value:
+            proc = psutil.Process(pid.value)
+            proc_name = proc.name().lower()
+            if proc_name not in _IDE_PROCESS_NAMES:
+                _log(f"[Hotkey] GetForegroundWindow -> {hwnd}, but {proc_name} is not IDE, rejected")
+                return {"status": "error", "error": f"not IDE: {proc_name}"}
+    except Exception as e:
+        _log(f"[Hotkey] Process check failed: {e}, allowing hwnd anyway")
+
+    _log(f"[Hotkey] GetForegroundWindow -> {hwnd} (IDE verified)")
     return {"status": "ok", "hwnd": hwnd}
 
 def _hotkey_on_press(key):
