@@ -828,5 +828,12 @@
         "tooltipCompanionTime": "Tiempo de uso",
         "tooltipDiskCache": "Caché de disco",
         "tooltipCacheHit": "Acierto de caché"
+    },
+    "wq": {
+        "syncSuccess": "Configuración sincronizada correctamente",
+        "notFound": "Cuenta no encontrada o no activada",
+        "rateLimit": "Demasiadas solicitudes, inténtelo más tarde",
+        "syncFailed": "Error al sincronizar la configuración",
+        "networkError": "Error de red, verifique su conexión"
     }
 }

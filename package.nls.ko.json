@@ -1,5 +1,6 @@
 {
     "config.title.core": "☀️ 코어",
+    "config.phone.desc": "☀️ 귀하의 계정 (국가 코드가 포함된 휴대폰 번호, 플러스 기호 불필요)",
     "config.title.rover": "🛸 로버",
     "config.title.observe": "👁️ 관찰",
     "config.title.html": "🍌 HTML과 리치 텍스트",

@@ -828,5 +828,12 @@
         "tooltipCompanionTime": "陪伴時間",
         "tooltipDiskCache": "磁碟快取",
         "tooltipCacheHit": "快取命中"
+    },
+    "wq": {
+        "syncSuccess": "配置同步成功",
+        "notFound": "帳號未找到或未啟用",
+        "rateLimit": "請求太頻繁，請稍後再試",
+        "syncFailed": "配置同步失敗",
+        "networkError": "網路錯誤，請檢查網路連接"
     }
 }
