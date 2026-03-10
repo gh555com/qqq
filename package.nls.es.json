@@ -1,5 +1,6 @@
 {
     "config.title.core": "☀️ Núcleo",
+    "config.phone.desc": "☀️ Su cuenta (número de teléfono con código de país, sin signo más)",
     "config.title.rover": "🛸 Explorador",
     "config.title.observe": "👁️ Observación",
     "config.title.html": "🍌 HTML y texto enriquecido",

@@ -2280,6 +2280,206 @@ function finishUserTracking() {
 			extensionContext.globalState.update(KEY_CACHE_MISS_TOTAL, _cacheMissTotal);
 		} catch { }
 	}
+	// ★ 停止 WqReporter
+	if (_wqReporter) {
+		_wqReporter.stop();
+		_wqReporter = null;
+	}
+}
+
+// ============================================================================
+// ★ WqReporter: 统计上报模块 (device_id + total_seconds + user_id)
+// ============================================================================
+const KEY_DEVICE_ID = 'qqq_device_id';
+const WQ_API_BASE = 'https://gh555.com/api';
+const WQ_GOOD_SLG = 'qqq';
+
+/**
+ * 获取 device_id：IDE 实例级别的唯一标识
+ * 每个 IDE（VS Code/Cursor/Trae）独立生成 UUID，存在各自的 globalState
+ */
+function getDeviceId() {
+	if (!extensionContext) return null;
+	let deviceId = extensionContext.globalState.get(KEY_DEVICE_ID);
+	if (!deviceId) {
+		deviceId = crypto.randomUUID();
+		extensionContext.globalState.update(KEY_DEVICE_ID, deviceId);
+		logMessage(`[wq] Generated new device_id: ${deviceId}`, 'INFO');
+	}
+	return deviceId;
+}
+
+/**
+ * 获取 user_id：从设置中读取手机号
+ */
+function getUserPhone() {
+	try {
+		const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+		if (phone && typeof phone === 'string' && phone.trim()) {
+			return phone.trim();
+		}
+	} catch { }
+	return undefined;
+}
+
+/**
+ * 获取 IDE 类型
+ */
+function getIDEFamily() {
+	try {
+		const appName = (vscode.env.appName || '').toLowerCase();
+		if (appName.includes('cursor')) return 'cursor';
+		if (appName.includes('trae')) return 'trae';
+		if (appName.includes('insiders')) return 'vscode-insiders';
+	} catch { }
+	return 'vscode';
+}
+
+/**
+ * 获取插件版本
+ */
+function getClientVersion() {
+	try {
+		return vscode.extensions.getExtension('gh555.qqq')?.packageJSON?.version || 'unknown';
+	} catch { }
+	return 'unknown';
+}
+
+let _wqReporter = null;
+
+class WqReporter {
+	constructor() {
+		this.retryDelay = 60 * 1000;
+		this._initialTimer = null;
+		this._intervalTimer = null;
+		this._stopped = false;
+	}
+
+	start() {
+		if (this._stopped) return;
+		// 1. 启动后随机抖动 30~120 秒发一次
+		const initialDelay = 30000 + Math.random() * 90000;
+		this._initialTimer = setTimeout(() => this._ping(), initialDelay);
+		// 2. 每 12 小时兖底发一次
+		this._intervalTimer = setInterval(() => this._ping(), 12 * 60 * 60 * 1000);
+		logMessage(`[wq] Reporter started, initial ping in ${Math.round(initialDelay/1000)}s`, 'INFO');
+	}
+
+	stop() {
+		this._stopped = true;
+		if (this._initialTimer) {
+			clearTimeout(this._initialTimer);
+			this._initialTimer = null;
+		}
+		if (this._intervalTimer) {
+			clearInterval(this._intervalTimer);
+			this._intervalTimer = null;
+		}
+	}
+
+	async _ping() {
+		if (this._stopped || !extensionContext) return;
+		try {
+			const deviceId = getDeviceId();
+			const userId = getUserPhone();
+			const totalSeconds = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
+
+			const body = {
+				good_slg: WQ_GOOD_SLG,
+				device_id: deviceId,
+				total_seconds: totalSeconds,
+				event_time: Math.floor(Date.now() / 1000),
+				ide_family: getIDEFamily(),
+				client_ver: getClientVersion()
+			};
+			if (userId) body.user_id = userId;
+
+			const response = await fetch(`${WQ_API_BASE}/wq/ping`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+
+			const data = await response.json();
+
+			if (data.ok) {
+				this.retryDelay = 60 * 1000; // 重置重试延迟
+				logMessage(`[wq] Ping ok, server_total=${data.server_total_seconds}, delta=${data.delta_seconds}`, 'DEBUG');
+				// 服务端纠正
+				if (data.force_reset && typeof data.server_total_seconds === 'number') {
+					extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.server_total_seconds);
+					logMessage(`[wq] Force reset local total to ${data.server_total_seconds}`, 'INFO');
+				}
+			} else {
+				logMessage(`[wq] Ping failed: ${JSON.stringify(data)}`, 'WARN');
+			}
+		} catch (e) {
+			logMessage(`[wq] Ping error: ${e.message}, retry in ${this.retryDelay/1000}s`, 'WARN');
+			if (!this._stopped) {
+				setTimeout(() => this._ping(), this.retryDelay);
+				this.retryDelay = Math.min(this.retryDelay * 2, 60 * 60 * 1000); // 最大 1 小时
+			}
+		}
+	}
+}
+
+function startWqReporter() {
+	if (_wqReporter) return;
+	_wqReporter = new WqReporter();
+	_wqReporter.start();
+}
+
+// ============================================================================
+// ★ Phone 配置变化监听：失焦时静默验证并拉取配置
+// ============================================================================
+let _phoneVerifyDebounce = null;
+
+async function verifyPhoneAndSyncConfig(phone) {
+	if (!phone || !extensionContext) return;
+
+	const deviceId = getDeviceId();
+	if (!deviceId) return;
+
+	try {
+		const response = await fetch(`${WQ_API_BASE}/gaea/qqq/config`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ phone, device_id: deviceId })
+		});
+
+		const data = await response.json();
+
+		if (data.ok && data.settings) {
+			// 写入配置到 globalState（不写 settings.json）
+			for (const [key, value] of Object.entries(data.settings)) {
+				await extensionContext.globalState.update(`cfg_${key}`, value);
+			}
+			showAutoCloseNotification('info', q('wq.syncSuccess'));
+			logMessage(`[wq] Config synced for phone: ${phone.slice(0, 4)}****`, 'INFO');
+		} else if (data.error === 'not_found') {
+			showAutoCloseNotification('warning', q('wq.notFound'));
+		} else if (data.error === 'rate_limit') {
+			showAutoCloseNotification('warning', q('wq.rateLimit'));
+		} else {
+			showAutoCloseNotification('warning', q('wq.syncFailed'));
+		}
+	} catch (e) {
+		logMessage(`[wq] Verify phone error: ${e.message}`, 'WARN');
+		showAutoCloseNotification('error', q('wq.networkError'));
+	}
+}
+
+function onPhoneConfigChanged(phone) {
+	// 防抖：等 500ms 确保用户输完
+	if (_phoneVerifyDebounce) {
+		clearTimeout(_phoneVerifyDebounce);
+	}
+	_phoneVerifyDebounce = setTimeout(() => {
+		_phoneVerifyDebounce = null;
+		if (phone && phone.trim()) {
+			verifyPhoneAndSyncConfig(phone.trim());
+		}
+	}, 500);
 }
 
 function getTotalSecondsIncludingSession() {
@@ -4068,6 +4268,13 @@ module.exports = {
 	getPersistentCacheStatsSnapshot,
 	setCacheStatsGetter,
 	finishUserTracking,
+
+	// ★ WqReporter
+	startWqReporter,
+	getDeviceId,
+	getUserPhone,
+	onPhoneConfigChanged,
+	verifyPhoneAndSyncConfig,
 
 	// Status bar related
 	initStatusBar,
