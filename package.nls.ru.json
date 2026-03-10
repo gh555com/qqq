@@ -1,5 +1,6 @@
 {
     "config.title.core": "☀️ Ядро",
+    "config.phone.desc": "☀️ Ваш аккаунт (номер телефона с кодом страны, без знака плюс)",
     "config.title.rover": "🛸 Ровер",
     "config.title.observe": "👁️ Наблюдение",
     "config.title.html": "🍌 HTML и форматированный текст",

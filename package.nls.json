@@ -1,5 +1,6 @@
 {
     "config.title.core": "☀️ Kernel",
+    "config.phone.desc": "☀️ Your account (phone number with country code, no plus sign needed)",
     "config.title.rover": "🛸 Roam",
     "config.title.observe": "👁️ observer",
     "config.title.html": "🍌 HTML & Rich Text",

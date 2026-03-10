@@ -828,5 +828,12 @@
         "tooltipCompanionTime": "陪伴时间",
         "tooltipDiskCache": "磁盘缓存",
         "tooltipCacheHit": "缓存命中"
+    },
+    "wq": {
+        "syncSuccess": "配置同步成功",
+        "notFound": "账号未找到或未激活",
+        "rateLimit": "请求太频繁，请稍后再试",
+        "syncFailed": "配置同步失败",
+        "networkError": "网络错误，请检查网络连接"
     }
 }

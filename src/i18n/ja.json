@@ -828,5 +828,12 @@
         "tooltipCompanionTime": "使用時間",
         "tooltipDiskCache": "ディスクキャッシュ",
         "tooltipCacheHit": "キャッシュヒット"
+    },
+    "wq": {
+        "syncSuccess": "設定の同期が完了しました",
+        "notFound": "アカウントが見つからないか有効化されていません",
+        "rateLimit": "リクエストが多すぎます。後でお試しください",
+        "syncFailed": "設定の同期に失敗しました",
+        "networkError": "ネットワークエラー。接続を確認してください"
     }
 }
