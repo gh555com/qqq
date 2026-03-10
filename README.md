@@ -68,9 +68,12 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
 
  qqq in, ctrl + v. If you don't like key combinations, try F2.
 
- You can organize your resources now.
+ You can organize your ideas now.
 
-## ✦q✦ A Revolution of the Tab Key (But without breaking the default Tab behavior.)
+And you’ll be faster:
+
+
+## ✦q✦ A Revolution of the Tab Key (without breaking the default Tab behavior)
 
 Before 2026, Tab helped you code fast.
 
