@@ -1,5 +1,6 @@
 {
     "config.title.core": "☀️ Kern",
+    "config.phone.desc": "☀️ Ihr Konto (Telefonnummer mit Ländercode, kein Pluszeichen erforderlich)",
     "config.title.rover": "🛸 Roaming",
     "config.title.observe": "👁️ Beobachter",
     "config.title.html": "🍌 HTML & Rich Text",

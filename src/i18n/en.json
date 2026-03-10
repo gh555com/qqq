@@ -828,5 +828,12 @@
         "tooltipCompanionTime": "Companion Time",
         "tooltipDiskCache": "Disk Cache",
         "tooltipCacheHit": "Cache Hit"
+    },
+    "wq": {
+        "syncSuccess": "Configuration synced successfully",
+        "notFound": "Account not found or not activated",
+        "rateLimit": "Too many requests, please try later",
+        "syncFailed": "Configuration sync failed",
+        "networkError": "Network error, please check your connection"
     }
 }

@@ -22,7 +22,10 @@ const {
 	tryEngineCall,
 	updateStatusBarNow,
 	pasteQueue,
-	metaSaveQueue
+	metaSaveQueue,
+	// ★ WqReporter 统计上报
+	startWqReporter,
+	onPhoneConfigChanged,
 } = global;
 
 function createPathRegex() {
@@ -1587,6 +1590,9 @@ async function _delayedActivate(context) {
 		startDaemons();
 	}, 3000);
 
+	// ★ 启动 WqReporter 统计上报（启动后 30~120s 抖动 + 每 12h 兜底）
+	startWqReporter();
+
 	// Set CodeLens style (read via ConfigGate)
 	function updateCodeLensStyle() {
 		const takeOver = global.getConfig("takeOverCodelensStyle");
@@ -1764,6 +1770,12 @@ function _registerCommands(context) {
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			// ★ Only handle qqq. configuration changes
 			if (!event.affectsConfiguration("qqq")) return;
+
+			// ★ 手机号变化时静默验证并拉取配置
+			if (event.affectsConfiguration("qqq.phone")) {
+				const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+				onPhoneConfigChanged(phone);
+			}
 
 			global.ConfigManager.handleVscodeConfigChanged(event).then((changedKeys) => {
 				// ★ Sound: only play in focused window to avoid multi-window spam

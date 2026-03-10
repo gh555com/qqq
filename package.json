@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "15.73.125",
+  "version": "15.73.126",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
@@ -29,6 +29,12 @@
         "title": "%config.title.core%",
         "order": 10,
         "properties": {
+          "qqq.phone": {
+            "order": 1,
+            "type": "string",
+            "default": "",
+            "markdownDescription": "%config.phone.desc%"
+          },
           "qqq.language": {
             "order": 5,
             "type": "string",
