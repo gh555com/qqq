@@ -65,15 +65,14 @@
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/loq.gif" width="100%" alt="的梦gaea">
-</p>
-© 2005 gh555.com All rights reserved.
-
+  © 2005 gh555.com All Rights Reserved.
+</p>  © 2005 gh555.com All Rights Reserved.
 
 
 > Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 
-VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. How? Install qqq.
+   • VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. How? Install qqq.
 
 
 
