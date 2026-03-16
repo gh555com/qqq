@@ -43,6 +43,9 @@ test-config-fix.js
 # 配置文件（个人配置）
 E:/r/pz.ini
 
+# 敏感文档（含 API/数据库设计）
+qqq-wq-integration.md
+
 # Python 缓存
 __pycache__/
 *.pyc

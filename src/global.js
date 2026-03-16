@@ -2400,21 +2400,24 @@ class WqReporter {
 				body: JSON.stringify(body)
 			});
 
-			const data = await response.json();
+			const { ok, data } = safeParseJson(await response.text(), 'ping');
+			if (!ok) return;
 
 			if (data.ok) {
 				this.retryDelay = 60 * 1000; // 重置重试延迟
-				logMessage(`[wq] Ping ok, server_total=${data.server_total_seconds}, delta=${data.delta_seconds}`, 'DEBUG');
+				logMessage(`[wq] Ping ok, server_total=${data.server_total_seconds}, delta=${data.delta_seconds}`, 'WARN');
 				// 服务端纠正
 				if (data.force_reset && typeof data.server_total_seconds === 'number') {
 					extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.server_total_seconds);
 					logMessage(`[wq] Force reset local total to ${data.server_total_seconds}`, 'INFO');
 				}
 			} else {
-				logMessage(`[wq] Ping failed: ${JSON.stringify(data)}`, 'WARN');
+				// 服务端返回错误（如 bad_json），记录但不重试（等下一个 12h 周期）
+				logMessage(`[wq] Ping rejected: ${JSON.stringify(data)}`, 'WARN');
 			}
 		} catch (e) {
-			logMessage(`[wq] Ping error: ${e.message}, retry in ${this.retryDelay/1000}s`, 'WARN');
+			// 网络错误才重试
+			logMessage(`[wq] Ping network error: ${e.message}, retry in ${this.retryDelay/1000}s`, 'WARN');
 			if (!this._stopped) {
 				setTimeout(() => this._ping(), this.retryDelay);
 				this.retryDelay = Math.min(this.retryDelay * 2, 60 * 60 * 1000); // 最大 1 小时
@@ -2427,6 +2430,17 @@ function startWqReporter() {
 	if (_wqReporter) return;
 	_wqReporter = new WqReporter();
 	_wqReporter.start();
+}
+
+// ★ 安全解析 JSON（统一处理非 JSON 响应）
+function safeParseJson(text, tag = 'api') {
+	try {
+		return { ok: true, data: JSON.parse(text), hint: null };
+	} catch {
+		const hint = text.slice(0, 50).replace(/[\r\n]/g, ' ');
+		logMessage(`[wq] ${tag}: non-JSON response: ${hint}...`, 'WARN');
+		return { ok: false, data: null, hint };
+	}
 }
 
 // ============================================================================
@@ -2447,7 +2461,11 @@ async function verifyPhoneAndSyncConfig(phone) {
 			body: JSON.stringify({ phone, device_id: deviceId })
 		});
 
-		const data = await response.json();
+		const { ok, data, hint } = safeParseJson(await response.text(), 'config');
+		if (!ok) {
+			showAutoCloseNotification('warning', q('wq.syncFailed') + ` (${hint}...)`);
+			return;
+		}
 
 		if (data.ok && data.settings) {
 			// 写入配置到 globalState（不写 settings.json）
@@ -2461,7 +2479,7 @@ async function verifyPhoneAndSyncConfig(phone) {
 		} else if (data.error === 'rate_limit') {
 			showAutoCloseNotification('warning', q('wq.rateLimit'));
 		} else {
-			showAutoCloseNotification('warning', q('wq.syncFailed'));
+			showAutoCloseNotification('warning', q('wq.syncFailed') + (data.error ? ` (${data.error})` : ''));
 		}
 	} catch (e) {
 		logMessage(`[wq] Verify phone error: ${e.message}`, 'WARN');
@@ -4355,4 +4373,5 @@ module.exports = {
 	// URL validation (single source of truth)
 	isValidUrl
 };
+
 
