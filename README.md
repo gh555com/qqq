@@ -71,14 +71,11 @@
 > Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 
-   • VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. How? Enable qqq.
+   **√ VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. How? Enable qqq.**
 
 
 
 ## ✦q✦ Enhanced Ctrl+V: Without changing any original features, Paste everything  anywhere in any document
-
- 👇 wait for pic loading... 👇
-
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q1_4.gif" width="100%" alt="Paste Screenshot">
 </p>
