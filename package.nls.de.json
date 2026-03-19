@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ Kern",
-    "config.phone.desc": "☀️ Ihr Konto (Telefonnummer mit Ländercode, kein Pluszeichen erforderlich)",
+    "config.phone.desc": "☀️ Ihr Konto (Telefonnummer mit Ländercode, kein Pluszeichen erforderlich) [Konto abrufen](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 Roaming",
     "config.title.observe": "👁️ Beobachter",
     "config.title.html": "🍌 HTML & Rich Text",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "Extrem: Nur erstes Bild behalten, Qualität 47.",
     "config.performanceMode.enum.accelerated": "Beschleunigt: Maximal die ersten 2 Sekunden für GIFs und Videos behalten, 7fps, Qualität 47, kein Fortschrittsbalken.",
     "config.performanceMode.enum.optmum": "Optimal: Volle Dauer für GIFs behalten, 4s aus Anfang/Mitte/Ende des Videos extrahieren, Original-fps beibehalten, Qualität 71.",
-    "config.ioEngine.desc": "☀️ IO-Engine — siehe Kompromisse unter https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ IO-Engine — [Kompromisse ansehen](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "Gewinn: Ruhe; ~50MB Speicher sparen.",
     "config.transactionLevel.desc": "☀️ Transaktions-Wrapping-Stufe:",
     "config.transactionLevel.enum.full": "Vollständig umhüllen (Resilienz zuerst): Alle \"zeitaufwändigen Operationen\" (Video-Downloads, Batch-Dateien, gemischter Rich Text usw.) werden in Transaktionen umhüllt — Fortschrittsbalken, Rückgängig-Unterstützung, extreme Ausnahme-Resilienz, automatisches Rollback.",

@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ コア",
-    "config.phone.desc": "☀️ あなたのアカウント（国コード付き電話番号、プラス記号不要）",
+    "config.phone.desc": "☀️ あなたのアカウント（国コード付き電話番号、プラス記号不要）[アカウント取得](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 ローバー",
     "config.title.observe": "👁️ 観察",
     "config.title.html": "🍌 HTMLとリッチテキスト",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "極限: 最初のフレームのみ保持、品質47。",
     "config.performanceMode.enum.accelerated": "加速: GIFと動画の両方で最初の2秒のみ保持、7fps、品質47、進捗バーなし。",
     "config.performanceMode.enum.optmum": "最適: GIFは完全な長さを保持、動画は先頭/中間/末尾から4秒を抽出、元のfpsを維持、品質71。",
-    "config.ioEngine.desc": "☀️ IOエンジン — トレードオフは https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md を参照",
+    "config.ioEngine.desc": "☀️ IOエンジン — [トレードオフを見る](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "得られるもの：静音；メモリ約50MB削減。",
     "config.transactionLevel.desc": "☀️ トランザクションラッピングレベル:",
     "config.transactionLevel.enum.full": "フルラップ (耐障害性優先): すべての「時間のかかる操作」(動画ダウンロード、バッチファイル、混合リッチテキストなど)をトランザクションでラップ — 進捗バー、元に戻すサポート、極端な例外への耐性、自動ロールバック。",

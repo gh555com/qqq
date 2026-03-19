@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ Noyau",
-    "config.phone.desc": "☀️ Votre compte (numéro de téléphone avec indicatif pays, sans signe plus)",
+    "config.phone.desc": "☀️ Votre compte (numéro de téléphone avec indicatif pays, sans signe plus) [Obtenir un compte](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 Explorateur",
     "config.title.observe": "👁️ Observation",
     "config.title.html": "🍌 HTML et texte enrichi",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "Extrême: Conserver uniquement la première image, qualité 47.",
     "config.performanceMode.enum.accelerated": "Accéléré: Conserver au maximum les 2 premières secondes pour les GIFs et vidéos, 7fps, qualité 47, sans barre de progression.",
     "config.performanceMode.enum.optmum": "Optimal: Conserver la durée complète pour les GIFs, extraire 4s du début/milieu/fin de la vidéo, préserver le fps original, qualité 71.",
-    "config.ioEngine.desc": "☀️ Moteur IO — voir les compromis sur https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ Moteur IO — [voir les compromis](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "Gain: Silence; économie ~50MB de mémoire.",
     "config.transactionLevel.desc": "☀️ Niveau d'enveloppe de transaction:",
     "config.transactionLevel.enum.full": "Enveloppe complète (résilience d'abord): Toutes les \"opérations chronophages\" (téléchargements vidéo, fichiers batch, texte enrichi mixte, etc.) sont enveloppées dans des transactions — barre de progression, support d'annulation, résilience aux exceptions extrêmes, rollback automatique.",

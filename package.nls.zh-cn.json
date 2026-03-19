@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ 核心",
-    "config.phone.desc": "☀️ 您的账号（带国家码的手机号码，不用带加号）",
+    "config.phone.desc": "☀️ 您的账号（带国家码的手机号码，不用带加号）[获取账号](https://www.gh555.com/gaea/d/qqq) ",
     "config.title.rover": "🛸 漫游器",
     "config.title.observe": "👁️ 观察",
     "config.title.html": "🍌 html与富文本",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "极限性能：只保留首帧，质量47。",
     "config.performanceMode.enum.accelerated": "加速模式：无论动图还是视频最多保留前2秒，7fps，质量47，不显示进度条。",
     "config.performanceMode.enum.optmum": "最优模式：动图保留完整时长，视频截取首中尾共4秒，均保留原始fps ，质量71。",
-    "config.ioEngine.desc": "☀️ IO 引擎，取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ IO 引擎，[取舍请查看](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "你收获：安静；减少50MB 内存占用。",
     "config.transactionLevel.desc": "☀️ 事务包裹级别：",
     "config.transactionLevel.enum.full": "全包（抗造优先）：一切\u201c耗时操作\u201d（如视频下载、批量文件、混合富文本等）都用事物包裹：显示进度条，支持反悔，抗极端异常，自动回滚。",

@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ Kernel",
-    "config.phone.desc": "☀️ Your account (phone number with country code, no plus sign needed)",
+    "config.phone.desc": "☀️ Your account (phone number with country code, no plus sign needed) [Get Account](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 Roam",
     "config.title.observe": "👁️ observer",
     "config.title.html": "🍌 HTML & Rich Text",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "Extreme: Keep first frame only, quality 47.",
     "config.performanceMode.enum.accelerated": "Accelerated: Keep at most the first 2 seconds for both GIFs and videos, 7fps, quality 47, no progress bar.",
     "config.performanceMode.enum.optmum": "Optimum: Keep full duration for GIFs, extract 4s from start/middle/end of video, preserve original fps, quality 71.",
-    "config.ioEngine.desc": "☀️ IO Engine — see tradeoffs at https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ IO Engine — [see tradeoffs](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "Gain: Silence; save ~50MB memory.",
     "config.transactionLevel.desc": "☀️ Transaction Wrapping Level:",
     "config.transactionLevel.enum.full": "Full wrap (resilience first): All \"time-consuming operations\" (video downloads, batch files, mixed rich text, etc.) are wrapped in transactions — progress bar, undo support, extreme-exception resilience, automatic rollback.",

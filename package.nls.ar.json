@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ الأساسي",
-    "config.phone.desc": "☀️ حسابك (رقم الهاتف مع رمز الدولة، بدون علامة الزائد)",
+    "config.phone.desc": "☀️ حسابك (رقم الهاتف مع رمز الدولة، بدون علامة الزائد) [احصل على حساب](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 المتصفح",
     "config.title.observe": "👁️ المراقبة",
     "config.title.html": "🍌 HTML والنص المنسق",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "متطرف: الاحتفاظ بالإطار الأول فقط، جودة 47.",
     "config.performanceMode.enum.accelerated": "مُسرَّع: الاحتفاظ بأول ثانيتين كحد أقصى للصور المتحركة والفيديو، 7 إطار/ثانية، جودة 47، بدون شريط تقدم.",
     "config.performanceMode.enum.optmum": "الأمثل: الاحتفاظ بالمدة الكاملة للصور المتحركة، قص 4 ثوانٍ من بداية ووسط ونهاية الفيديو، الحفاظ على معدل الإطارات الأصلي، جودة 71.",
-    "config.ioEngine.desc": "☀️ محرك الإدخال/الإخراج — راجع المفاضلات على https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ محرك الإدخال/الإخراج — [راجع المفاضلات](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "الفائدة: الهدوء؛ توفير ~50 م.ب من الذاكرة.",
     "config.transactionLevel.desc": "☀️ مستوى تغليف المعاملات:",
     "config.transactionLevel.enum.full": "تغليف كامل (الأولوية للمتانة): جميع \"العمليات المستهلكة للوقت\" (تنزيل الفيديو، الملفات المجمعة، النص المنسق المختلط، إلخ) مغلفة بمعاملات — شريط تقدم، دعم التراجع، مقاومة الاستثناءات القصوى، تراجع تلقائي.",
