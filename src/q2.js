@@ -4093,7 +4093,7 @@ function showSaveAsDialog() {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [extensionUri],
-      contentSecurityPolicy: `default -src 'none'; script - src 'unsafe-inline' vscode - webview - resource: ; style - src 'unsafe-inline' vscode - webview - resource: ; img - src vscode - webview - resource: data: ; font - src vscode - webview - resource: ; `
+
     }
   );
   activePanel = panel;
