@@ -523,8 +523,9 @@ def _test_activate_vscode():
         _log("[Hotkey] No q2 windows in tracking file")
         return False
 
-    # Sort by timestamp (most recent first)
-    sorted_hwnds = sorted(records.items(), key=lambda x: x[1], reverse=True)
+    # Filter for new format and sort by timestamp. Legacy/corrupt entries are ignored.
+    valid_items = [item for item in records.items() if isinstance(item[1], dict) and 'ts' in item[1]]
+    sorted_hwnds = sorted(valid_items, key=lambda item: item[1]['ts'], reverse=True)
     _log(f"[Hotkey] Tracking file: {sorted_hwnds}, current={current}")
 
     # Try each hwnd (most recent first), find alive one
@@ -540,20 +541,28 @@ def _test_activate_vscode():
             dead_hwnds.append(hwnd_str)
             continue
 
-        # ★ Verify hwnd belongs to IDE process (防止激活错误窗口)
+        # ★ Verify hwnd belongs to the process name expected by the client
         try:
             import psutil
+            expected_proc = data.get('proc')
+            if not expected_proc:
+                _log(f"[Hotkey] hwnd={hwnd} has no expected process name in tracking file, skipping")
+                dead_hwnds.append(hwnd_str)
+                continue
+
             pid = ctypes.c_ulong()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value:
                 proc = psutil.Process(pid.value)
-                proc_name = proc.name().lower()
-                if proc_name not in _IDE_PROCESS_NAMES:
-                    _log(f"[Hotkey] hwnd={hwnd} belongs to {proc_name}, not IDE, skipping")
+                actual_proc_name = proc.name().lower()
+                if actual_proc_name != expected_proc.lower():
+                    _log(f"[Hotkey] hwnd={hwnd} process mismatch: expected '{expected_proc}', got '{actual_proc_name}', skipping")
                     dead_hwnds.append(hwnd_str)  # Clean it up
                     continue
-        except:
-            pass  # If check fails, proceed anyway
+        except Exception as e:
+            _log(f"[Hotkey] hwnd={hwnd} process check failed: {e}, skipping")
+            dead_hwnds.append(hwnd_str) # Clean it up
+            continue
 
         if hwnd == current:
             return False  # Already focused
@@ -577,34 +586,37 @@ def _test_activate_vscode():
     _log("[Hotkey] No alive q2 window to activate")
     return False
 
-# IDE process names for hwnd validation (lowercase)
-_IDE_PROCESS_NAMES = {'code.exe', 'cursor.exe', 'qoder.exe', 'trae.exe', 'code - insiders.exe'}
-
-def _get_foreground_hwnd():
+def _get_foreground_hwnd(cmd: dict):
     """
-    Get current foreground window hwnd, but ONLY if it belongs to an IDE process.
+    Get current foreground window hwnd, but ONLY if it belongs to the expected process.
     This prevents race condition: user switches away before Python responds.
     """
     if platform.system() != 'Windows':
         return {"status": "error", "error": "not windows"}
+
+    expected_proc = cmd.get("expected_proc")
+    if not expected_proc:
+        return {"status": "error", "error": "expected_proc not provided"}
+
     user32 = ctypes.windll.user32
     hwnd = user32.GetForegroundWindow()
 
-    # Validate: only return hwnd if it belongs to IDE process
+    # Validate: only return hwnd if it belongs to the expected process
     try:
         import psutil
         pid = ctypes.c_ulong()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         if pid.value:
             proc = psutil.Process(pid.value)
-            proc_name = proc.name().lower()
-            if proc_name not in _IDE_PROCESS_NAMES:
-                _log(f"[Hotkey] GetForegroundWindow -> {hwnd}, but {proc_name} is not IDE, rejected")
-                return {"status": "error", "error": f"not IDE: {proc_name}"}
+            actual_proc_name = proc.name().lower()
+            if actual_proc_name != expected_proc.lower():
+                _log(f"[Hotkey] GetForegroundWindow -> {hwnd}, but process mismatch. Expected '{expected_proc}', got '{actual_proc_name}'. Rejected.")
+                return {"status": "error", "error": f"process mismatch: expected {expected_proc}, got {actual_proc_name}"}
     except Exception as e:
-        _log(f"[Hotkey] Process check failed: {e}, allowing hwnd anyway")
+        _log(f"[Hotkey] Process check failed for hwnd {hwnd}: {e}, rejecting.")
+        return {"status": "error", "error": f"process check failed: {e}"}
 
-    _log(f"[Hotkey] GetForegroundWindow -> {hwnd} (IDE verified)")
+    _log(f"[Hotkey] GetForegroundWindow -> {hwnd} (Process '{expected_proc}' verified)")
     return {"status": "ok", "hwnd": hwnd}
 
 def _hotkey_on_press(key):
@@ -1955,7 +1967,7 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
         return out
 
     if action == "get_foreground_hwnd":
-        out.update(_get_foreground_hwnd())
+        out.update(_get_foreground_hwnd(cmd))
         return out
 
     if action == "trigger_system_paste":

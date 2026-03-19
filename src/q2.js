@@ -85,7 +85,8 @@ const _updateQ2TrackingFile = (action) => {
   if (!global.pythonBridge?.isAvailable()) return;
 
   // Get current foreground window hwnd via Python and write to file
-  global.pythonBridge.call("get_foreground_hwnd", {}, 1000)
+  const procName = path.basename(process.execPath);
+  global.pythonBridge.call("get_foreground_hwnd", { expected_proc: procName }, 1000)
     .then(r => {
       if (r?.hwnd) {
         try {
@@ -93,7 +94,19 @@ const _updateQ2TrackingFile = (action) => {
           if (fs.existsSync(Q2_TRACKING_FILE)) {
             try { records = JSON.parse(fs.readFileSync(Q2_TRACKING_FILE, 'utf8')); } catch {}
           }
-          records[String(r.hwnd)] = Date.now();
+          // Add/update current window with timestamp and process name
+          records[String(r.hwnd)] = { ts: Date.now(), proc: procName };
+
+          // Clean up stale records (> 7 days) and dead/legacy windows
+          const now = Date.now();
+          const sevenDays = 7 * 24 * 60 * 60 * 1000;
+          for (const key in records) {
+            const entry = records[key];
+            // Entry must be an object with a valid timestamp and the correct process name
+            if (typeof entry !== 'object' || !entry.ts || (now - entry.ts) > sevenDays || entry.proc !== procName) {
+              delete records[key];
+            }
+          }
           fs.writeFileSync(Q2_TRACKING_FILE, JSON.stringify(records), 'utf8');
         } catch {}
       }

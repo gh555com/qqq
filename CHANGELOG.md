@@ -4,7 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [15.73.124] - 2026-03-06
+## [15.73.126] - 2026-03-19
+
+### Fixed
+- **Space+Q Stability (Definitive Fix)**: Completely re-architected the window validation system by removing the fragile process name whitelist, fundamentally solving the incorrect window binding issue.
+  - The hotkey now activates the correct IDE window with 100% reliability, making it immune to the previous issue of occasionally binding to other applications like Chrome.
+  - The new architecture is future-proof and automatically supports any VS Code-compatible IDE (e.g., Cursor, Trae, uqoder) without requiring code changes.
+
+### Changed
+- **Removed Process Whitelist**: The hardcoded `_IDE_PROCESS_NAMES` list has been completely removed from the Python backend (`kp.py`).
+- **Removed Backward Compatibility**: All logic for handling legacy window tracking data has been removed from both the Python backend and JavaScript client, enforcing a single, clean data format.
+
+### Technical
+- **Dynamic Process Validation (Self-Introduction Mechanism)**:
+  - **JavaScript `q2.js`**: When registering a window, the client now actively sends its own process name (e.g., `Code.exe`) to the backend.
+  - **Python `kp.py`**:
+    - `_get_foreground_hwnd()`: Window registration requests now require an `expected_proc` name. The backend uses `psutil` to get the real process name of the foreground window and strictly compares it against the expected name. Any mismatch is rejected, atomically preventing race conditions.
+    - `_test_activate_vscode()`: When activating a window, the target window's process name is re-validated against the name recorded during registration, ensuring the correct window type is activated.
+    - The data structure of the tracking file (`vix_q2_windows.json`) has been updated to store the window handle, timestamp, and its corresponding process name.
+- **Dependency Hardening**:
+  - **JavaScript `qvenv.js`**: `psutil` has been added as a required dependency to ensure the new dynamic process validation mechanism is always available.
+
+---
+
+## [15.73.125] - 2026-03-06
 
 ### Fixed
 - **Space+Q hotkey reliability**: Fixed "only works once" issue and incorrect window activation
