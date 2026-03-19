@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ 核心",
-    "config.phone.desc": "☀️ 您的帳號（帶國家碼的手機號碼，不用帶加號）",
+    "config.phone.desc": "☀️ 您的帳號（帶國家碼的手機號碼，不用帶加號）[獲取帳號](https://www.gh555.com/gaea/d/qqq) ",
     "config.title.rover": "🛸 漫遊器",
     "config.title.observe": "👁️ 觀察",
     "config.title.html": "🍌 html與富文字",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "極限效能：只保留首幀，品質47。",
     "config.performanceMode.enum.accelerated": "加速模式：無論動圖還是影片最多保留前2秒，7fps，品質47，不顯示進度條。",
     "config.performanceMode.enum.optmum": "最佳模式：動圖保留完整時長，影片截取首中尾儱4秒，均保留原始fps，品質71。",
-    "config.ioEngine.desc": "☀️ IO 引擎，取捨請查看 https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ IO 引擎，[取捨請查看](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "你收穫：安靜；減少50MB 記憶體佔用。",
     "config.transactionLevel.desc": "☀️ 交易包裹層級：",
     "config.transactionLevel.enum.full": "全包（耐操優先）：一切「耗時操作」（如影片下載、批次檔案、混合富文字等）都用交易包裹：顯示進度條，支援反悔，抗極端異常，自動回滾。",

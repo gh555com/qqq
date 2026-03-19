@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ Núcleo",
-    "config.phone.desc": "☀️ Sua conta (número de telefone com código do país, sem sinal de mais)",
+    "config.phone.desc": "☀️ Sua conta (número de telefone com código do país, sem sinal de mais) [Obter conta](https://www.gh555.com/gaea/d/qqq)",
     "config.title.rover": "🛸 Explorador",
     "config.title.observe": "👁️ Observação",
     "config.title.html": "🍌 HTML e texto formatado",
@@ -21,7 +21,7 @@
     "config.performanceMode.enum.extreme": "Extremo: Manter apenas o primeiro quadro, qualidade 47.",
     "config.performanceMode.enum.accelerated": "Acelerado: Manter no máximo os primeiros 2 segundos para GIFs e vídeos, 7fps, qualidade 47, sem barra de progresso.",
     "config.performanceMode.enum.optmum": "Ótimo: Manter duração completa para GIFs, extrair 4s do início/meio/fim do vídeo, preservar fps original, qualidade 71.",
-    "config.ioEngine.desc": "☀️ Motor IO — veja os compromissos em https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md",
+    "config.ioEngine.desc": "☀️ Motor IO — [ver os compromissos](https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md)",
     "config.ioEngine.enum.excludePython": "Ganho: Silêncio; economia de ~50MB de memória.",
     "config.transactionLevel.desc": "☀️ Nível de empacotamento de transação:",
     "config.transactionLevel.enum.full": "Empacotamento completo (resiliência primeiro): Todas as \"operações demoradas\" (downloads de vídeo, arquivos em lote, texto formatado misto, etc.) são empacotadas em transações — barra de progresso, suporte a desfazer, resiliência a exceções extremas, rollback automático.",
