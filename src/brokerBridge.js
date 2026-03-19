@@ -178,12 +178,12 @@ class BrokerBridge extends EventEmitter {
 
 		const id = this.nextId++;
 		const req = {
-			_id: id,
-			action,
-			client_id: this.clientId,
-			token: this.token,
-			...payload
-		};
+      _id: id,
+      action,
+      client_id: this.clientId,
+      token: this.token,
+      ...payload
+    };
 
 		const line = JSON.stringify(req) + "\n";
 

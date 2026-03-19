@@ -108,10 +108,18 @@ const _updateQ2TrackingFile = (action) => {
             }
           }
           fs.writeFileSync(Q2_TRACKING_FILE, JSON.stringify(records), 'utf8');
-        } catch {}
+        } catch (e) {
+          console.error('[q2.js] _updateQ2TrackingFile write error:', e);
+        }
+      } else {
+        // ★ Log if python returns an error or no hwnd
+        console.error('[q2.js] get_foreground_hwnd call failed. Response:', r);
       }
     })
-    .catch(() => {});
+    .catch(err => {
+      // ★ Log if the python call itself fails
+      console.error('[q2.js] get_foreground_hwnd call threw an error:', err);
+    });
 };
 
 
