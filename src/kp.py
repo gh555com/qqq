@@ -530,7 +530,7 @@ def _test_activate_vscode():
 
     # Try each hwnd (most recent first), find alive one
     dead_hwnds = []
-    for hwnd_str, timestamp in sorted_hwnds:
+    for hwnd_str, data in sorted_hwnds:
         try:
             hwnd = int(hwnd_str)
         except:
@@ -2169,7 +2169,7 @@ ENDPOINT_DIRNAME = "vix_audio_broker"
 ENDPOINT_FILENAME = "endpoint.json"
 TOKEN_FILENAME = "token.txt"
 LOG_FILENAME = "broker.log"
-LOG_MAX_SIZE = 2 * 1024 * 1024  # 2MB max log size
+LOG_MAX_SIZE = 1048576  # 1MB max log size
 
 ENABLE_LOCAL_TOKEN = True
 
@@ -2188,7 +2188,7 @@ def _init_log_file():
         pass
 
 def _rotate_log_if_needed():
-    """Rotate log file if it exceeds LOG_MAX_SIZE (2MB)"""
+    """Rotate log file if it exceeds LOG_MAX_SIZE (1MB)"""
     global _LOG_FILE, _LOG_PATH
     if not _LOG_PATH or not _LOG_FILE:
         return

@@ -192,7 +192,7 @@ All notable changes to this project will be documented in this file.
   - Applies to both TCP/Unix socket and Windows Named Pipe handlers
 
 - **Broker log rotation**: Auto-rotate at 2MB to prevent unbounded growth
-  - `LOG_MAX_SIZE = 2MB` hard limit
+  - `LOG_MAX_SIZE = 1MB` hard limit
   - Rotation check before every log write
   - Old log deleted, fresh file created with rotation marker
   - Previous issue: broker.log grew to 28MB+ over time
