@@ -2387,33 +2387,62 @@ class WqReporter {
 			const body = {
 				good_slg: WQ_GOOD_SLG,
 				device_id: deviceId,
-				total_seconds: totalSeconds,
+				total_seconds: Math.floor(totalSeconds),
 				event_time: Math.floor(Date.now() / 1000),
 				ide_family: getIDEFamily(),
 				client_ver: getClientVersion()
 			};
 			if (userId) body.user_id = userId;
 
-			const response = await fetch(`${WQ_API_BASE}/wq/ping`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(body)
-			});
+			const bodyStr = JSON.stringify(body);
 
-			const { ok, data } = safeParseJson(await response.text(), 'ping');
-			if (!ok) return;
+			// 使用 Node.js https 模块，避免 VS Code 环境下 fetch 可能的问题
+			const data = await new Promise((resolve, reject) => {
+				const url = new URL(`${WQ_API_BASE}/wq/ping`);
+				const options = {
+					hostname: url.hostname,
+					port: 443,
+					path: url.pathname,
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'Content-Length': Buffer.byteLength(bodyStr)
+					}
+				};
+
+				const req = require('https').request(options, (res) => {
+					let chunks = [];
+					res.on('data', chunk => chunks.push(chunk));
+					res.on('end', () => {
+						try {
+							resolve(JSON.parse(Buffer.concat(chunks).toString()));
+						} catch (e) {
+							reject(new Error('Invalid JSON response'));
+						}
+					});
+				});
+
+				req.on('error', reject);
+				req.setTimeout(10000, () => {
+					req.destroy();
+					reject(new Error('Request timeout'));
+				});
+
+				req.write(bodyStr);
+				req.end();
+			});
 
 			if (data.ok) {
 				this.retryDelay = 60 * 1000; // 重置重试延迟
-				logMessage(`[wq] Ping ok, server_total=${data.server_total_seconds}, delta=${data.delta_seconds}`, 'WARN');
+				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s`, 'INFO');
 				// 服务端纠正
 				if (data.force_reset && typeof data.server_total_seconds === 'number') {
 					extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.server_total_seconds);
 					logMessage(`[wq] Force reset local total to ${data.server_total_seconds}`, 'INFO');
 				}
 			} else {
-				// 服务端返回错误（如 bad_json），记录但不重试（等下一个 12h 周期）
-				logMessage(`[wq] Ping rejected: ${JSON.stringify(data)}`, 'WARN');
+				// 服务端返回错误，打印详情以便调试
+				logMessage(`[wq] Ping rejected: ${JSON.stringify(data)}, body: ${bodyStr}`, 'WARN');
 			}
 		} catch (e) {
 			// 网络错误才重试
@@ -4242,7 +4271,50 @@ WScript.Quit 0
 	});
 }
 
+async function getQqqStats() {
+    try {
+        const data = await new Promise((resolve, reject) => {
+            const url = new URL(`${WQ_API_BASE}/goods/qqq/stats`);
+            const options = {
+                hostname: url.hostname,
+                port: 443,
+                path: url.pathname,
+                method: 'GET',
+                timeout: 5000
+            };
+
+            const req = require('https').request(options, (res) => {
+                let chunks = [];
+                res.on('data', chunk => chunks.push(chunk));
+                res.on('end', () => {
+                    try {
+                        resolve(JSON.parse(Buffer.concat(chunks).toString()));
+                    } catch (e) {
+                        resolve(null);
+                    }
+                });
+            });
+
+            req.on('error', () => resolve(null));
+            req.on('timeout', () => {
+                req.destroy();
+                resolve(null);
+            });
+
+            req.end();
+        });
+
+        if (data && typeof data.active_12h === 'number') {
+            return data.active_12h;
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
 module.exports = {
+    getQqqStats,
 	init,
 	getIcon,
 

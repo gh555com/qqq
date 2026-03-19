@@ -1167,6 +1167,13 @@ class ClipboardHistorySidebarProvider {
             });
         });
 
+        // --- Online Count ---
+        this._onlineCount = null;
+        this._onlineCountUpdateInterval = null;
+        this._updateOnlineCount(); // Initial fetch
+        this._onlineCountUpdateInterval = setInterval(() => this._updateOnlineCount(), 300000);
+        // --- End Online Count ---
+
         // Load full data after 1s (clipboard history + Python state sync)
         setTimeout(() => {
             this.updateContent(null, null, null, true);
@@ -1428,7 +1435,11 @@ class ClipboardHistorySidebarProvider {
             });
 
             const ver = this._context.extension.packageJSON.version;
-            this._view.title = `v${ver}`;
+            if (typeof this._onlineCount === 'number') {
+                this._view.title = `v${ver}; ${this._onlineCount}`;
+            } else {
+                this._view.title = `v${ver}`;
+            }
         } catch (e) {
             console.error('[Q4-UI] Update failed:', e);
         }
@@ -2810,7 +2821,17 @@ class ClipboardHistorySidebarProvider {
     }
 
     // ★ NEW: safe for activate() subscriptions call, and unbind pythonBridge listener to avoid hot-reload listener pile-up
+    async _updateOnlineCount() {
+        this._onlineCount = await this._global.getQqqStats();
+        this.updateContent('online_count_update');
+    }
+
     dispose() {
+        if (this._onlineCountUpdateInterval) {
+            clearInterval(this._onlineCountUpdateInterval);
+            this._onlineCountUpdateInterval = null;
+        }
+
         try { this._stopPeriodicUpdate(); } catch { }
         try {
             if (this._onPythonEvent && this._global?.pythonBridge) {

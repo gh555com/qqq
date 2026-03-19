@@ -4,12 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.130] - 2026-03-19
+
+### Fixed
+- **wq ping upload**: Fixed `bad_json` error caused by VS Code fetch sending empty body
+  - Replaced `fetch()` with Node.js `https.request()` for reliable POST body
+  - Added `Math.floor()` for `total_seconds` (server requires integer, not float)
+  - Log level: success=INFO (no disk write), failure=WARN (with full context)
+
+---
+
+## [15.73.127] - 2026-03-19
+
+### Added
+- **Q4 online count display**: Show active device count (12h) in q4 sidebar title
+  - Format: `v15.73.xxx; N` where N is online count
+  - Auto-refresh every 5 minutes (matches server update cycle)
+  - Uses `GET /api/goods/qqq/stats` endpoint
+
+### Fixed
+- **Online stats fetch**: Replaced non-existent `Downloader.downloadToString()` with native `fetch` API
+- **Online count initialization**: Moved from `onDidChangeVisibility` (never fires on initial load) to `resolveWebviewView`
+
+---
+
 ## [15.73.126] - 2026-03-19
 
 ### Fixed
-- **Space+Q Stability (Definitive Fix)**: Completely re-architected the window validation system by removing the fragile process name whitelist, fundamentally solving the incorrect window binding issue.
-  - The hotkey now activates the correct IDE window with 100% reliability, making it immune to the previous issue of occasionally binding to other applications like Chrome.
-  - The new architecture is future-proof and automatically supports any VS Code-compatible IDE (e.g., Cursor, Trae, uqoder) without requiring code changes.
+- **Space+Q Stability (Recovery and Hardening)**: After a series of critical fixes, the feature's stability has been restored and significantly improved. The root cause of the total failure was identified and resolved, and the underlying validation logic is now working as intended.
 
 ### Changed
 - **Removed Process Whitelist**: The hardcoded `_IDE_PROCESS_NAMES` list has been completely removed from the Python backend (`kp.py`).
@@ -22,8 +44,14 @@ All notable changes to this project will be documented in this file.
     - `_get_foreground_hwnd()`: Window registration requests now require an `expected_proc` name. The backend uses `psutil` to get the real process name of the foreground window and strictly compares it against the expected name. Any mismatch is rejected, atomically preventing race conditions.
     - `_test_activate_vscode()`: When activating a window, the target window's process name is re-validated against the name recorded during registration, ensuring the correct window type is activated.
     - The data structure of the tracking file (`vix_q2_windows.json`) has been updated to store the window handle, timestamp, and its corresponding process name.
+- **Critical Bug Fixes**:
+  - **Python `kp.py`**: Fixed a fatal `NameError` in `_test_activate_vscode` caused by incorrect variable unpacking in a loop. This bug had previously caused all window validations to fail, leading to a complete feature outage.
+  - **JavaScript `q2.js`**: Replaced a silent error-swallowing `.catch()` block with `console.error` in the `get_foreground_hwnd` call chain. This change was crucial for exposing the underlying Python errors and enabling effective debugging.
 - **Dependency Hardening**:
   - **JavaScript `qvenv.js`**: `psutil` has been added as a required dependency to ensure the new dynamic process validation mechanism is always available.
+- **Webview Security Hardening**:
+  - The q2 Roam webview is now created with a stricter security policy, explicitly disabling same-origin access.
+  - This mitigates potential cross-site scripting (XSS) risks and aligns with modern web security best practices by ensuring all communication between the webview and the extension host occurs exclusively through the official `postMessage` API.
 
 ---
 

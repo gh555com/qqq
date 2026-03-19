@@ -1,0 +1,1980 @@
+# GH555 网络架构与运维规范
+
+## 一、架构总览
+
+```
+                        ┌─────────────────────────────────────┐
+                        │         Cloudflare Worker           │
+                        │    (智能路由 + 写请求定向 US)        │
+                        └──────────────┬──────────────────────┘
+                                       │
+               ┌───────────────────────┴───────────────────────┐
+               │                                               │
+               ▼                                               ▼
+       ┌───────────────┐        WireGuard VPN          ┌───────────────┐
+       │  CN (青岛)    │◄─────────────────────────────►│  US (洛杉矶)  │
+       │  10.0.0.2     │                               │  10.0.0.1     │
+       ├───────────────┤                               ├───────────────┤
+       │ Nginx :443    │                               │ Nginx :443    │
+       │ api :8080     │                               │ api :8080     │
+       │               │                               │               │
+       │ ┌───────────┐ │      所有写操作               │ ┌───────────┐ │
+       │ │ 从库(只读)│ │ ─────────────────────────────►│ │ 主库(读写)│ │
+       │ │ PG :5432  │ │◄──────── WAL 流复制 ─────────│ │ PG :5432  │ │
+       │ └───────────┘ │                               │ └───────────┘ │
+       │               │                               │               │
+       │ Redis :6379   │                               │ Redis :6379   │
+       └───────────────┘                               └───────────────┘
+```
+
+## 二、核心配置
+
+| 组件 | CN (青岛) | US (洛杉矶) |
+|------|-----------|-------------|
+| 公网 IP | 47.105.67.51 | 74.48.182.213 |
+| 内网 IP | 10.0.0.2 | 10.0.0.1 |
+| DATABASE_URL | 10.0.0.1:5432 (写→US主库) | localhost:5432 |
+| DATABASE_READ_URL | localhost:5432 (读→本地从库) | - |
+| ANALYTICS_DATABASE_URL | 10.0.0.1:5432/analytics | localhost:5432/analytics |
+| PostgreSQL 角色 | **从库 (只读)** | **主库 (读写)** |
+
+## 三、铁律：写操作永远在 US
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🔴 绝对禁止：CN 从库永远不能提升为主库（防脑裂）              │
+│  🔴 绝对禁止：任何自动化切主操作                               │
+│  🟢 US 故障时：系统进入只读/维护模式，等待人工恢复             │
+│  🟢 提升 CN 为主：仅作灾难级手工操作，需强栅栏确认             │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## 三.1、铁律：用词规范（支付/打赏场景）
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🔴 禁止用词：充值、售后、购买、消费、商品                     │
+│  🟢 允许用词：打赏、支援、获得、ge                             │
+│  📝 标准标题："打赏。正版"        │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## 四、金融账本系统 ✅ 已实现
+
+### 4.1 货币基础
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  货币单位: ge（1 人民币 = 1 ge）                                  │
+│  存储单位: wge（1 ge = 10,000 wge，4 位小数精度）                  │
+│  数据类型: BIGINT 存 wge（禁止 float）                             │
+│  总量: 无上限（按需铸造，由 MINT 钱包追踪负债）                     │
+└─────────────────────────────────────────────────────────────────┘
+
+系统钱包（不可转让）：
+  ├── MINT (id=1)  铸币源，balance ≤ 0（负债 = 已发行总量）
+  └── FEE  (id=2)  手续费池，balance ≥ 0（收取的费用）
+
+用户钱包：
+  └── 每用户一个，balance ≥ 0（不允许透支）
+```
+
+**wge 精度规范**：
+```go
+const GE_SCALE int64 = 10_000  // 1 ge = 10,000 wge
+
+// 所有账本计算只用 int64，禁止 float
+type MoneyWGE int64
+
+// 显示时转换：10000 wge -> "1"，12345 wge -> "1.2345"
+func (w MoneyWGE) FormatGe() string
+
+// 余数规则：分成产生的余数归平台/手续费钱包
+```
+
+### 4.2 货币流转全景
+
+```
+                    ┌─────────────────┐
+                    │   MINT 钱包     │
+                    │   (系统铸币源)   │
+                    │   balance ≤ 0   │
+                    └────────┬────────┘
+                             │
+               每日自动发放 1 ge（定时任务）
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                        用户钱包                                   │
+│                       balance ≥ 0                                │
+├──────────────────────────────────────────────────────────────────┤
+│  收入:                      │  支出:                              │
+│    +1 ge  每日福利           │    -10 ge  发布文章                 │
+│    +N ge  收到打赏           │    -1 ge   点赞文章                 │
+│    +N ge  收到点赞           │    -N ge   打赏文章                 │
+│    +N ge  充值获得           │    -N ge   购买商品                 │
+└──────────────────────────────────────────────────────────────────┘
+                             │
+              发布文章 / 购买商品 费用
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │    FEE 钱包     │
+                    │   (系统收入)    │
+                    │   balance ≥ 0   │
+                    └─────────────────┘
+```
+
+### 4.3 每日铸币机制 ✅ 已实现
+
+**设计原则**：极简、稳定、长期可维护
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  触发源: 唯一（Go Ticker 定时任务）                               │
+│  触发间隔: 15 分钟                                                │
+│  账本日: UTC 时区（全球统一，无时区歧义）                         │
+│  幂等栅栏: UNIQUE(user_id, ledger_day)                           │
+│  并发控制: Advisory Lock（多实例安全）                            │
+│  宕机恢复: 启动时立即补发                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**定时任务流程**：
+```
+Go Ticker (每 15 分钟)
+    │
+    ▼
+尝试获取 Advisory Lock ──► 失败 ──► 跳过（其他实例在跑）
+    │ 成功
+    ▼
+查询到期用户 (next_daily_mint_at <= now)
+    │
+    ▼ 分批处理 (≤2000/批)
+    │
+    ├─► INSERT daily_mints ON CONFLICT DO NOTHING（幂等栅栏）
+    │       │ 成功（首次领取）
+    │       ▼
+    │   MINT → 用户钱包 转账 1 ge（复式记账）
+    │       │
+    │       ▼
+    │   推进 next_daily_mint_at 到明天 UTC 00:00
+    │
+    └─► 冲突 ──► 跳过（今天已领）
+```
+
+**Advisory Lock 规范**：
+```go
+const DailyMintLockKey int64 = 739182341234  // 固定常量，全项目唯一
+
+// 获取锁
+SELECT pg_try_advisory_lock($1)  // 非阻塞，立即返回
+
+// 释放锁（用 Background ctx，确保释放）
+defer d.Pools.Write.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", key)
+```
+
+### 4.4 复式记账引擎
+
+**核心原则**：每笔资金移动创建两条分录（借 + 贷），账本永远平衡
+
+```
+交易表 (transactions)
+    │
+    ├── id: 交易ID
+    ├── tx_type: 类型 (daily_mint/publish_fee/like/tip/purchase)
+    ├── ref_type: 关联类型 (article/good)
+    ├── ref_id: 关联ID
+    └── description: 描述
+
+分录表 (ledger_entries)
+    │
+    ├── tx_id: 关联交易
+    ├── wallet_id: 钱包ID
+    ├── amount: 金额 (正=贷/收入, 负=借/支出)
+    └── balance_after: 交易后余额（审计用）
+
+钱包表 (wallets)
+    │
+    ├── id: 钱包ID
+    ├── user_id: 用户ID（系统钱包为空）
+    ├── wtype: 类型 (mint/fee/user)
+    └── balance: 当前余额
+```
+
+**转账流程**（单个 SERIALIZABLE 事务内）：
+```go
+1. ensureWritable()           // 检查连接主库，防误写从库
+2. 按钱包ID顺序锁定 (FOR UPDATE)  // 防死锁
+3. 检查余额（MINT 钱包可负，用户钱包不可负）
+4. INSERT transactions        // 创建交易记录
+5. INSERT ledger_entries ×2   // 借方 + 贷方分录
+6. UPDATE wallets ×2          // 更新双方余额
+7. COMMIT                     // 原子提交
+```
+
+**序列化冲突重试**：
+```go
+for retry := 0; retry < 3; retry++ {
+    err = doTransfer(...)
+    if err == nil || !isSerializationError(err) {
+        break
+    }
+    time.Sleep(10ms * (retry + 1))  // 指数退避
+}
+```
+
+### 4.5 业务场景
+
+| 场景 | 费用 | 流向 | 事务类型 |
+|------|------|------|----------|
+| 每日福利 | +1 ge | MINT → 用户 | daily_mint |
+| 发布文章 | -10 ge | 用户 → FEE | publish_fee |
+| 点赞文章 | -1 ge | 点赞者 → 作者 | like |
+| 打赏文章 | -N ge | 打赏者 → 作者 | tip |
+| 购买商品 | -N ge | 买家 → FEE | purchase |
+| 购买配额 | -N ge | 用户 → FEE | quota_buy |
+
+### 4.6 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| internal/ledger/ledger.go | 复式记账引擎（transfer/DailyMint/Publish/Like/Tip/Purchase）|
+| internal/ledger/money.go | wge 精度支持（GE_SCALE/MoneyWGE/ParseGe/FormatGe）|
+| internal/http/daily_mint.go | 定时任务 + Advisory Lock |
+| migrations/0002_merge.up.sql | wallets/transactions/ledger_entries/daily_mints 表 |
+| migrations/0016_daily_mint_v2.up.sql | next_daily_mint_at + ledger_day 重命名 |
+| migrations/0017_wge_precision.up.sql | wge 精度迁移（数据×10000 + 防重复执行）|
+
+---
+
+## 五、读操作一致性分级 ✅ 已实现
+
+### 强一致读 → 走主库 (pools.Write / d.Q)
+- 余额查询 `ledger.GetBalance()` ✅
+- 钱包ID查询 `ledger.GetWalletID()` ✅
+- 幂等性校验（充值状态检查）✅
+- 用户验证 `GetUserByPhone` ✅
+- 兑换码校验 `GetRedeemCodeByLookup` ✅
+- 支付前产品验证 `GetProductBySlug` ✅
+
+### 可容忍陈旧读 → 走从库 (pools.ReaderPool(false) / d.QRead)
+- 产品列表 `ListProducts` ✅
+- 用户产品列表 `ListUserProducts` ✅
+- 分类列表 `ListCategories` ✅
+- 交易历史 `ledger.History()` ✅
+- 页面展示数据 ✅
+
+### 代码示例
+```go
+// 强一致读 - 余额必须准确（直接用 WritePool）
+balance := pools.Write.QueryRow(ctx, "SELECT balance FROM wallets...")
+
+// 可容忍陈旧读 - 自动降级（延迟>30s 切回主库）
+list := pools.ReaderPool(false).Query(ctx, "SELECT * FROM products...")
+
+// 强制一致读 - 支付相关校验
+rows := pools.ReaderPool(true).Query(ctx, "SELECT status FROM recharges...")
+```
+
+### Replica Lag 自动降级 ✅ 已实现
+```
+复制延迟监控（每 10 秒检测）
+  │
+  ├── 延迟 < 30s ──► 正常：可陈旧读走从库
+  │
+  └── 延迟 > 30s ──► 降级：所有读切回主库
+```
+
+### Read-your-write 粘滞 ✅ 已实现
+```
+写操作响应 ──► 返回 X-Write-At header
+                    │
+                    ▼
+前端收到后 5秒内 ──► 请求带 X-Force-Primary: 1
+                    │
+                    ▼
+后端收到 ──► 强制走主库（ForceConsistentRead）
+```
+
+## 六、Cloudflare 能力（q.py 管理工具）
+
+### 6.1 架构位置
+```
+用户请求 ──► Cloudflare Edge (全球 300+ 节点)
+                    │
+                    ▼
+            ┌───────────────┐
+            │  Worker: q3   │  ← q.py 部署
+            │  智能路由引擎  │
+            └───────┬───────┘
+                    │
+        ┌───────────┴───────────┐
+        ▼                       ▼
+   cnk.gh555.com           usk.gh555.com
+   (CN 源站)                (US 源站)
+```
+
+### 6.2 DNS 记录（q.py 自动管理）
+
+| 记录 | 指向 | Proxied | 说明 |
+|------|------|:-------:|------|
+| gh555.com | US IP | ✅ 橙云 | 主站入口，Worker 接管 |
+| www.gh555.com | US IP | ✅ 橙云 | 主站入口，Worker 接管 |
+| cnk.gh555.com | CN IP | 可选 | 源站（protect_origins=True 时橙云隐藏 IP） |
+| usk.gh555.com | US IP | 可选 | 源站（protect_origins=True 时橙云隐藏 IP） |
+
+**protect_origins 选项**：启用后源站也走 Cloudflare 代理，彻底隐藏真实 IP
+
+### 6.3 Worker 智能路由算法
+
+```
+                  ┌─────────────────────┐
+                  │     用户请求到达     │
+                  └──────────┬──────────┘
+                             ▼
+                  ┌─────────────────────┐
+                  │  检查请求来源国家   │
+                  └──────────┬──────────┘
+                             ▼
+              ┌──────────────┴──────────────┐
+              │ country == CN ?             │
+              └──────────────┬──────────────┘
+                    是 │           │ 否
+                       ▼           ▼
+              ┌────────────┐  ┌────────────────┐
+              │ 强制走 CN  │  │ EWMA RTT 选择  │
+              └────────────┘  │ 延迟最低的源站 │
+                              └────────────────┘
+                                      │
+                             ┌────────┴────────┐
+                             ▼                 ▼
+                      ┌──────────┐       ┌──────────┐
+                      │ 熔断检查 │       │ 探针检测 │
+                      │ 是否拉黑 │       │ /__lbprobe│
+                      └──────────┘       └──────────┘
+                             │
+                             ▼
+                  ┌─────────────────────┐
+                  │  选择 primary 源站  │
+                  │  失败则 fallback    │
+                  └─────────────────────┘
+```
+
+### 6.4 Worker 核心参数
+
+| 参数 | 值 | 说明 |
+|------|:--:|------|
+| PROBE_TIMEOUT_MS | 1200 | 探针超时（毫秒） |
+| ORIGIN_TIMEOUT_MS | 5000 | 读请求回源超时（毫秒） |
+| WRITE_TIMEOUT_MS | 15000 | 写请求超时（发短信等需更长） |
+| EWMA_ALPHA | 0.30 | 平滑系数（越大越看最新） |
+| FAIL_THRESHOLD | 3 | 连续失败几次触发熔断 |
+| CIRCUIT_OPEN_SEC | 120 | 熔断持续时间（秒） |
+| DECISION_TTL_SEC | 600 | 决策缓存时间（秒） |
+| RATE_LIMIT_PER_MIN | 40 | 全局 IP 限流阈值（次/分钟） |
+
+### 6.5 熔断机制
+
+```
+正常 ──► 失败1次 ──► 失败2次 ──► 失败3次 ──► 熔断(拉黑120秒)
+  ▲                                              │
+  └──────────── 120秒后自动恢复 ◄────────────────┘
+```
+
+### 6.6 路由规则（Worker Routes）
+
+| Pattern | Worker | Fail Open |
+|---------|:------:|:---------:|
+| gh555.com/* | q3 | ✅ |
+| www.gh555.com/* | q3 | ✅ |
+
+**Fail Open = true**：Worker 超限时跳过，走 DNS 兜底（不会 503）
+
+### 6.7 调试响应头
+
+| Header | 值 | 说明 |
+|--------|-----|------|
+| x-q3-worker | 1 | 确认请求经过 Worker |
+| x-q3-origin | cn/us | 实际使用的源站 |
+| x-request-id | UUID | 全链路追踪 ID |
+
+### 6.8 q.py GUI 工具功能
+
+```bash
+# 位置
+cf/q.py
+
+# 启动
+python cf/q.py
+```
+
+| 功能 | 说明 |
+|------|------|
+| **一键部署** | DNS + Worker + Routes 全自动 |
+| **智能测试** | DNS/TCP/HTTPS 全链路诊断 |
+| **用量查询** | Worker 当日请求数/错误/CPU/剩余额度 |
+| **WAF 配置** | 反 IP 欺骗规则一键部署 |
+| **Dry Run** | 预览模式，不实际修改 |
+| **保护源站** | 源站也走 Cloudflare（隐藏真实 IP） |
+| **记住凭证** | 本地保存 Email + API Key |
+
+### 6.9 源站访问控制
+
+使用 nftables 限制 8080 端口只允许 Cloudflare IP 访问：
+
+```bash
+# 查看当前规则
+nft list table inet cf_filter
+```
+
+```
+table inet cf_filter {
+    set cloudflare_ips {
+        type ipv4_addr
+        flags interval
+        elements = { 103.21.244.0/22, 103.22.200.0/22,
+                     103.31.4.0/22, 104.16.0.0/13,
+                     104.24.0.0/14, 108.162.192.0/18,
+                     131.0.72.0/22, 141.101.64.0/18,
+                     162.158.0.0/15, 172.64.0.0/13,
+                     173.245.48.0/20, 188.114.96.0/20,
+                     190.93.240.0/20, 197.234.240.0/22,
+                     198.41.128.0/17 }
+    }
+
+    chain input {
+        type filter hook input priority filter; policy accept;
+        tcp dport 8080 ip saddr 127.0.0.1 accept       # localhost
+        tcp dport 8080 ip saddr 10.0.0.0/24 accept     # WireGuard 内网
+        tcp dport 8080 ip saddr @cloudflare_ips accept # Cloudflare
+        tcp dport 8080 drop                            # 拒绝其他
+    }
+}
+```
+
+**配置文件**：`/etc/nftables.conf`（已持久化，重启后自动生效）
+
+**效果**：
+- ✅ 通过 Cloudflare 访问：正常
+- ❌ 直连源站 IP:8080：被拒绝（攻击者无法绕过 Worker）
+
+---
+
+## 七、故障处理
+
+### CN 源站故障
+Worker 自动切换到 US，恢复后自动回切
+
+### US 主库故障
+系统进入只读/维护模式，等待人工恢复。**禁止自动将 CN 提升为主库**
+
+### WireGuard 隧道断开
+```bash
+wg show                              # 检查状态
+systemctl restart wg-quick@wg0       # 重启
+ping 10.0.0.1 / ping 10.0.0.2        # 验证
+```
+
+### WAL 复制断开（CN 从库重建）
+```bash
+# 1. CN 停止 PostgreSQL
+systemctl stop postgresql
+
+# 2. CN 清空数据目录并从主库拉取
+rm -rf /var/lib/postgresql/18/main/*
+PGPASSWORD=repliGaea2026 pg_basebackup -h 10.0.0.1 -U replicator -D /var/lib/postgresql/18/main -Fp -Xs -P -R
+
+# 3. CN 修复权限并启动
+chown -R postgres:postgres /var/lib/postgresql/18/main
+systemctl start postgresql
+
+# 4. 验证 (CN 应返回 t)
+su - postgres -c "psql -c 'SELECT pg_is_in_recovery();'"
+```
+
+## 八、关键文件路径
+
+| 服务器 | 文件 | 说明 |
+|--------|------|------|
+| **本地** | cf/q.py | Cloudflare 管理工具（GUI） |
+| **本地** | cf/ky.py | 一键部署工具（GUI） |
+| **本地** | scripts/provision.sh | 服务器初始化（含 Nginx + SSL 证书） |
+| CN/US | /etc/nginx/sites-available/gh555 | Nginx 反向代理配置（443 → 8080） |
+| CN/US | /etc/nginx/ssl/gh555.* | 自签名 SSL 证书（Cloudflare Full 模式） |
+| CN | /opt/dgs/.env | 应用环境变量 |
+| CN | /etc/wireguard/wg0.conf | VPN 配置 |
+| CN | /var/lib/postgresql/18/main/postgresql.auto.conf | 复制配置 |
+| US | /opt/dgs/.env | 应用环境变量 |
+| US | /etc/wireguard/wg0.conf | VPN 配置 |
+
+## 九、运维命令速查
+
+```bash
+# 查看复制状态 (CN) - 详见 14.12 复制延迟监控
+PGPASSWORD=dgs psql -h 127.0.0.1 -U dgs -d dgs -c "SELECT pg_is_in_recovery(), pg_last_xact_replay_timestamp();"
+
+# 查看复制状态 (US)
+PGPASSWORD=dgs psql -h 127.0.0.1 -U dgs -d dgs -c "SELECT * FROM pg_stat_replication;"
+
+# 重启应用
+systemctl restart dgs
+
+# 检查 VPN
+wg show
+
+# 部署 Worker（本地执行）
+python cf/q.py  # GUI 工具
+```
+
+## 十、/api/geo 地理信息接口
+
+### 功能
+为前端提供用户地理信息，用于登录页自动选择国家。
+
+### 返回示例
+```json
+{"ip":"223.85.214.249","country":"China","country_code":"CN","city":"Chengdu","colo":"SJC"}
+```
+
+### 前端显示
+登录页显示三个可点击复制的标签：
+```
+┌─────────────────┐  ┌────────────┐  ┌───────────┐
+│ IP: 74.48.182.213 │  │ Los Angeles │  │ Edge: LAX │
+└─────────────────┘  └────────────┘  └───────────┘
+```
+- 点击任意标签可复制内容（复制后变绿 0.5 秒）
+- 优先显示城市，无城市时 fallback 到国家
+- VPN/代理流量可能无城市信息（Cloudflare 限制）
+
+### 实现细节
+
+#### 多层代理下的头透传
+```
+用户 → Cloudflare Edge → Worker → 源站域名(proxied) → Cloudflare → 源站
+         │                 │
+         │                 └─ 设置 X-Original-* 自定义头
+         └─ 设置 CF-Connecting-IP, CF-IPCountry, CF-Ray
+```
+
+**问题**：源站域名也是 proxied=True 时，CF-* 头会被 Cloudflare 覆盖
+
+**解决方案**：
+1. Worker 读取原始 CF-* 头，通过 X-Original-* 自定义头传递
+2. Worker 从 `request.cf.city` 读取城市，通过 X-Original-City 传递
+3. 源站优先读取 X-Original-*，回退到 CF-*
+4. 边缘节点从 CF-Ray 尾部提取（格式：`rayid-COLO`）
+
+#### Nginx 配置要求
+```nginx
+# 必须显式传递 Cloudflare 和 Worker 的头
+proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+proxy_set_header CF-IPCountry $http_cf_ipcountry;
+proxy_set_header CF-Ray $http_cf_ray;
+proxy_set_header X-Original-Client-IP $http_x_original_client_ip;
+proxy_set_header X-Original-Country $http_x_original_country;
+proxy_set_header X-Original-Colo $http_x_original_colo;
+proxy_set_header X-Original-City $http_x_original_city;
+```
+
+### 相关文件
+| 文件 | 说明 |
+|------|------|
+| internal/http/handlers_geo.go | 后端接口实现 + GetClientIP 公共函数 |
+| cf/q.py (cloneWithHost) | Worker 头透传逻辑（含 city）|
+| web/templates/login.html | 前端地理信息显示 + 点击复制 |
+
+### GetClientIP 公共函数 ✅ 已实现
+供所有 handler 获取客户端真实 IP，内置 CF-Ray 验证：
+```go
+func GetClientIP(c *fiber.Ctx) string {
+    // 1. 优先 X-Original-Client-IP（Worker 透传）
+    // 2. 有 CF-Ray 时信任 CF-Connecting-IP
+    // 3. 降级 X-Real-IP / X-Forwarded-For
+}
+```
+
+**CF-Ray 验证逻辑**：
+- 有 CF-Ray → 请求经过 Cloudflare → CF-Connecting-IP 可信
+- 无 CF-Ray → 可能直连源站 → 降级到传统 IP 获取
+
+---
+
+## 十一、安全配置
+
+### 11.1 访问策略
+```
+┌────────────────────────────────────────────────────────────────┐
+│  ✅ 无真人验证（无 CAPTCHA / reCAPTCHA）                       │
+│  ✅ 无 IP 限制（允许任意 IP / VPN / 代理）                     │
+│  ✅ 无地区限制（全球可访问）                                   │
+│  ✅ 全局 IP 限流: 40次/分钟（Worker 层实现）                   │
+│  ✅ fail_open=True（限流出错时放行，不阻断请求）               │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 11.2 全局 IP 限流 ✅ 已实现（Worker 层）
+
+**实现方式**：在 Worker 代码中实现，无需 Cloudflare 付费套餐
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  每个 IP 每分钟最多 40 次请求                                │
+│  超限返回 429 Too Many Requests                             │
+│  响应头包含 Retry-After、X-RateLimit-Limit/Remaining        │
+│  限流出错时放行（fail-open）                                │
+│  使用 Cache API 存储计数（不消耗请求额度）                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**相关参数**（Worker 代码）：
+| 参数 | 值 | 说明 |
+|------|:--:|------|
+| RATE_LIMIT_PER_MIN | 40 | 每 IP 每分钟最大请求数 |
+| RATE_LIMIT_WINDOW_SEC | 60 | 窗口大小（秒）|
+
+**429 响应示例**：
+```json
+{"error": "Too Many Requests", "retry_after": 60}
+```
+
+### 11.3 统一短信限流 ✅ 已实现（新架构）
+
+**判定标准**：`同一设备或IP` —— 两者任一超限即拒绝（不再区分手机号）
+
+**架构**：
+```
+用户请求 ──► Cloudflare Worker（边缘冷却检查）
+                       │
+              检查 IP 或 device_token 冷却
+                       │ 通过
+              转发到后端 ──► 后端 Go（统一限流器 - 唯一真理源）
+                                 │
+                    检查：冷却 + 免费额度（按国家配置）
+                                 │ 通过
+                            发送短信
+```
+
+**配置表**（环境变量，格式：窗口小时数,免费次数,冷却秒数）：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `SMS_QUOTA_CN` | 24,2,30 | 中国：24h/2次/30秒冷却 |
+| `SMS_QUOTA_MO` | 24,1,30 | 澳门：24h/1次/30秒冷却 |
+| `SMS_QUOTA_INTL` | 24,1,30 | 国际区：24h/1次/30秒冷却 |
+| `SMS_GLOBAL_RATE_PER_MIN` | 80 | 全局 IP 限流（次/分钟）|
+
+**限流逻辑**：
+```
+来源判定：device_token 或 IP（两者都检查）
+限流条件：device_token超限 OR IP超限 → 拒绝
+```
+
+**关键特性**：
+- ✅ 统一判定标准：不再区分手机号维度
+- ✅ 按国家配置免费额度（可自定义任意国家）
+- ✅ 环境变量配置，改参数无需改代码
+- ✅ Worker 层只做冷却检查，后端是唯一真理源
+- ✅ 对家庭/公司共享 IP 更友好（device_token 独立配额）
+- ✅ 限流出错时不阻断请求（fail-open）
+
+**实现文件**：
+| 文件 | 说明 |
+|------|------|
+| internal/smsratelimit/ratelimit.go | 统一限流器（唯一真理源）|
+| internal/http/handlers_auth_v3.go | 免费短信接口 |
+| cf/q.py (WORKER_JS_TEMPLATE) | Worker 层冷却检查（简化版）|
+| migrations/0011_sms_unified_ratelimit.up.sql | 审计日志表 |
+| .env.example | 配置示例 |
+
+### 11.3.1 SMS 审计统计 (/op/exg) ✅ 已实现
+
+**数据流**：
+```
+短信发送成功 → sms_rate_log (审计日志，立即写入)
+                    │
+                    ▼ Go 每小时调用
+            refresh_sms_audit_stats()
+                    │
+                    ▼
+            sms_audit_stats (聚合缓存表)
+                    │
+                    ▼ Go 内存缓存
+              /api/stats/sms-audit
+                    │
+                    ▼
+              /op/exg (运维页面)
+```
+
+**更新频率**：
+| 层级 | 频率 | 说明 |
+|------|------|------|
+| sms_rate_log | 实时 | 每次短信发送成功立即写入 |
+| sms_audit_stats | 1 小时 | Go 调用 refresh_sms_audit_stats() |
+| Go 内存缓存 | 1 小时 | 服务启动时立即更新 + 每小时定时更新 |
+
+**实现文件**：
+| 文件 | 说明 |
+|------|------|
+| internal/http/stats_sms_audit.go | API + 定时更新 + 聚合调用 |
+| migrations/0012_sms_audit_stats.up.sql | 聚合函数 + 缓存表 |
+
+### 11.3.2 统一安全审计系统 (/op/exg) ✅ 已实现
+
+**功能**：记录所有敏感接口（P0-P2）的请求，支持多维度攻击分析
+
+**敏感接口定义**：
+| 级别 | 接口 | endpoint_key |
+|------|------|--------------|
+| P0 | `/api/auth/v3/free-sms` | auth_sms |
+| P0 | `/api/auth/v3/verify` | auth_verify |
+| P0 | `/api/auth/v3/start` | auth_start |
+| P1 | `/api/auth/refresh/verify` | refresh_verify |
+| P1 | `/api/auth/auto-session` | auto_session |
+| P1 | `/api/tip/create` | tip_create |
+| P2 | `/api/redeem` | redeem |
+| P2 | `/api/purchase` | purchase |
+| P2 | `/api/articles/:id/like` | like |
+| P2 | `/api/articles/:id/tip` | tip_article |
+
+**数据流**：
+```
+敏感接口请求 → SecurityAuditMiddleware（异步记录）
+                        │
+                        ▼
+              security_audit_log（明细表）
+                        │
+                        ▼ Go 每小时聚合
+              security_audit_stats（统计表）
+                        │
+                        ▼
+              /op/exg（运维页面 - 多维度）
+```
+
+**统计维度**：
+| 维度 | 说明 | 示例 |
+|------|------|------|
+| ip | 客户端 IP | 47.76.xx.xx |
+| device | 设备 token（前16字符）| a1b2c3... |
+| endpoint | 接口标识 | auth_sms |
+| country | 国家代码 | CN / US |
+
+**计数字段**：
+| 字段 | 说明 |
+|------|------|
+| total_count | 全量历史请求数 |
+| error_count | 错误数（status >= 400）|
+| rate_limited_count | 限流数（status = 429）|
+| count_24h | 最近 24 小时 |
+| count_7d | 最近 7 天 |
+| last_seen | 最后活跃时间 |
+
+**排序与筛选**：
+| 操作 | 说明 |
+|------|------|
+| 点击表头 | TOTAL/ERRORS/429/LAST SEEN 可点击排序 |
+| 升降序 | 再次点击切换（▲升序/▼降序）|
+| Time: All | 显示全部，按 total_count 排序 |
+| Time: 24h | 只显示 count_24h > 0 的记录 |
+| Time: 7d | 只显示 count_7d > 0 的记录 |
+| LIMIT | top 255 条 |
+
+**数据保留**：
+- security_audit_log: 180 天（Go 定时清理）
+- security_audit_stats: 每小时 TRUNCATE + 重建
+
+**实现文件**：
+| 文件 | 说明 |
+|------|------|
+| internal/http/middleware_security_audit.go | 安全审计中间件 |
+| internal/http/stats_security_audit.go | API + 聚合 + 清理 |
+| migrations/0020_security_audit.up.sql | 表 + 索引 + 聚合函数 |
+| web/templates/op-exg.html | 运维页面（多标签页）|
+
+### 11.4 验证码安全机制 ✅ 已实现
+
+#### 验证码配置
+
+| 参数 | 环境变量 | 默认值 | 说明 |
+|------|----------|--------|------|
+| 有效期 | `OTP_EXPIRES_HOURS` | 24 | 验证码有效时长（小时） |
+| 尝试次数 | `OTP_MAX_ATTEMPTS` | 5 | 每个验证码最多尝试次数 |
+
+**注**：重发冷却由 `SMS_QUOTA_*` 统一控制（见 10.3 节）
+
+#### 暴力破解防护
+```
+每个 charge_id 最多尝试 5 次（可配置）
+│
+├── 尝试次数存 Redis，key: otp:attempt:{charge_id}
+├── TTL 与验证码有效期一致
+├── 超限后返回 429 "尝试次数过多，请重新获取验证码"
+└── 错误时提示剩余次数："验证码错误，还剩 N 次机会"
+```
+
+#### client_ip 审计
+```
+login_charges 表新增 client_ip 字段
+├── 发起登录时记录客户端 IP
+└── 用于审计追溯 + IP 一致性校验
+```
+
+#### IP 一致性校验（防验证码转发）
+```
+发起登录 ──► 记录 client_ip ──► 支付 ──► 发短信
+                    │
+                    ▼
+验证时 ──► 获取当前 IP ──► 比对 ──┬─ 一致 ──► 登录成功
+                                 │
+                                 └─ 不一致 ──► 403 "网络环境变化"
+```
+
+**目的**：防止用户 A 收到验证码后转发给用户 B 使用
+
+### 11.5 支付配置（虎皮椒 H5 单通道）
+
+| 配置项 | 值 |
+|--------|----|
+| 文档 | https://www.xunhupay.com/ |
+| 支付方式 | 微信 H5（手机扫码）|
+| 登录金额 | ¥0.50 |
+| 打赏金额 | ¥5 / ¥50 / ¥500（固定三档）|
+
+**支付流程**：
+```
+用户点击"发送验证码" / 打赏
+    │
+    ├── CN/MO 且有免费额度 → 免费发送
+    │
+    └── 无免费额度 / 海外 → 弹出虎皮椒微信二维码
+```
+
+**配置环境变量** (.env)：
+```
+XUNHUPAY_APP_ID=xxx
+XUNHUPAY_APP_SECRET=xxx
+```
+
+**实现文件**：
+| 文件 | 说明 |
+|------|------|
+| internal/xunhupay/xunhupay.go | 虎皮椒 H5 支付客户端 |
+| internal/http/handlers_tip.go | 打赏接口 |
+| web/templates/login.html | 登录页面 |
+
+### 11.6 短信通道配置
+
+#### 国内短信（仅中国大陆 86）
+| 配置项 | 值 |
+|--------|----||
+| 接口 | SendSms (2017-05-25) |
+| 区域 | cn-hangzhou |
+| 签名 | 四川的梦科技 |
+| 模板 | SMS_501800952 |
+| AK | LTAI5tLyVis... |
+
+#### 国际短信（含澳门 853）
+
+**免费/付费分离策略** ✅ 已实现
+
+| 短信类型 | 通道选择 | 说明 |
+|----------|----------|------|
+| **免费短信** | 永远 Skynoo | 成本控制 |
+| **付费短信** | Skynoo ↔ 阿里云国际Plus 交替 | 保证到达率 |
+
+**交替逻辑 + 主备切换**（付费短信）：
+
+| 次序 | 主通道 | 备用通道 | 说明 |
+|:----:|--------|----------|------|
+| 第1次 | Skynoo | 阿里云国际 Plus | 主失败自动 fallback |
+| 第2次 | 阿里云国际 Plus | Skynoo | 主失败自动 fallback |
+| 第3次 | Skynoo | 阿里云国际 Plus | ... |
+| 第4次 | 阿里云国际 Plus | Skynoo | ... |
+
+**主备切换机制**：
+```
+生成验证码 "123456"
+    │
+    ▼
+主通道发送 (Skynoo)
+    ├── 成功 → 结束 ✅
+    │
+    └── 失败 → 备用通道发送 (阿里云国际Plus，同一个验证码)
+               ├── 成功 → 结束 ✅
+               └── 失败 → 返回错误
+```
+- 同一个验证码，事务性完美
+- 最多发出 2 条短信，保证到达率
+
+**Skynoo 配置**：
+| 配置项 | 值 |
+|--------|----|
+| API 端点 | https://api.skynoo.com/api/sms/v1/send |
+| 认证 | Basic Base64(apiKey:apiToken) |
+| apiKey | 11210 |
+
+**阿里云国际 Plus 配置**：
+| 配置项 | 值 |
+|--------|----|
+| 接口 | SendMessageToGlobe (2018-05-01) |
+| 区域 | ap-southeast-1 |
+| Endpoint | dysmsapi.ap-southeast-1.aliyuncs.com |
+| AK | LTAI5tQj4sDb... (独立 AK) |
+
+**路由逻辑**：
+```
+手机号
+  ├── 86xxx (中国大陆) → 阿里云国内 SendSms
+  └── 其他所有 (含澳门853) → 国际通道
+        ├── 免费 → 永远 Skynoo
+        └── 付费 → Skynoo ↔ 阿里云国际Plus 交替
+```
+
+**配置环境变量** (.env)：
+```
+# 国内短信
+ALIYUN_ACCESS_KEY_ID=xxx
+ALIYUN_ACCESS_KEY_SECRET=xxx
+ALIYUN_SIGN_NAME=四川的梦科技
+ALIYUN_TEMPLATE_CODE=SMS_501800952
+
+# 阿里云国际 Plus（独立凭证）
+ALIYUN_INTL_ACCESS_KEY_ID=xxx
+ALIYUN_INTL_ACCESS_KEY_SECRET=xxx
+ALIYUN_INTL_MESSAGE=verify: {code}, faom gaea.
+
+# Skynoo 国际短信
+SKYNOO_API_KEY=11210
+SKYNOO_API_TOKEN=xxx
+SKYNOO_MESSAGE=verify: {code}, fsom gaea.
+```
+
+**实现文件**：
+| 文件 | 说明 |
+|------|------|
+| internal/sms/router.go | 交替路由 + 主备切换 (sync.Map 记录通道 + fallback) |
+| internal/sms/aliyun.go | 阿里云国内 + AliyunIntl 国际 Plus |
+| internal/sms/skynoo.go | Skynoo 国际短信 |
+| internal/config/config.go | 短信配置加载 |
+
+### 11.7 代码仓库安全
+| 措施 | 状态 | 说明 |
+|------|:----:|------|
+| .gitignore | ✅ | 保护 .env、密钥、证书等敏感文件 |
+| .env.example | ✅ | 提供安全的配置模板（仅占位符） |
+| Git 历史清理 | ✅ | .env 已从所有历史记录中彻底删除 |
+| 远程仓库 | ✅ | 私密仓库 + 历史已 force push 清理 |
+
+**敏感信息保护**：
+- 阿里云 AK/SK
+- JWT Secret
+- 数据库密码
+- Admin API Key
+
+### 11.8 API 响应规范
+
+#### 统一错误响应格式
+```go
+// 所有 API 错误必须使用 util.JSONErr
+import "gaea/internal/util"
+
+// 标准错误响应
+util.JSONErr(c, 400, "bad request")     // {"ok": false, "error": "bad request"}
+util.JSONErr(c, 401, "unauthorized")    // {"ok": false, "error": "unauthorized"}
+util.JSONErr(c, 404, "not found")       // {"ok": false, "error": "not found"}
+util.JSONErr(c, 500, "internal error")  // {"ok": false, "error": "internal error"}
+```
+
+#### 响应标准
+
+| 场景 | 响应方式 | 示例 |
+|------|----------|------|
+| **API 错误** | `util.JSONErr(c, code, msg)` | 统一 JSON 格式 |
+| **API 成功** | `c.JSON(fiber.Map{"ok": true, ...})` | 带业务数据 |
+| **限流响应** | `c.Status(429).JSON(fiber.Map{...})` | 带 retry_after 等额外字段 |
+| **支付回调** | `c.SendString("success/fail")` | 第三方约定格式 |
+| **内部错误** | `fmt.Errorf("context: %w", err)` | 错误包装不暴露 |
+
+#### 禁止做法
+```go
+// ❌ 禁止：原始错误暴露给客户端
+return c.Status(500).SendString(err.Error())
+
+// ❌ 禁止：不统一的 JSON 格式
+return c.Status(400).JSON(fiber.Map{"error": "..."})
+
+// ✅ 正确：使用统一函数
+return util.JSONErr(c, 500, "internal error")
+```
+
+---
+
+## 十二、Analytics 统计系统架构 ✅ 已实现
+
+### 12.1 底部统计显示开关
+
+```javascript
+// web/static/site-layout.js
+const STATS_MODE = 2;  // 1=显示 PV, 2=显示 UV (默认)
+```
+
+| 开关值 | 显示内容 | 格式示例 |
+|:------:|----------|----------|
+| 1 | 页面浏览量 (PV) | `pv: 12, 8, 1,234` |
+| 2 | 独立访客数 (UV) | `uv: 5, 3, 456` |
+
+**国家排行榜**：https://www.gh555.com/stats/countries
+- 支持 PV/UV 标签页切换
+- 默认显示 UV 排行
+
+### 12.2 数据库物理隔离
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  US 主库 (PostgreSQL)                                            │
+│  ├── dgs (主业务库)                                              │
+│  │     └── 用户/钱包/交易/产品                                   │
+│  │                                                               │
+│  └── analytics (统计库) ◄── 独立 database，物理隔离              │
+│        ├── analytics.page_hits (按月分区，保留120天)            │
+│        ├── analytics.metrics_hourly (永久)                      │
+│        ├── analytics.metrics_daily (永久)                       │
+│        ├── analytics.dimensions_daily (TopN永久)                │
+│        ├── analytics.debug_samples (14天)                       │
+│        ├── analytics.config_history (永久)                      │
+│        ├── page_stats_total (快速PV查询)                        │
+│        └── country_stats (国家排行榜 PV+UV，30分钟更新)           │
+│                                                                  │
+│  WAL 流复制 ──────────────────────────────────────► CN 从库      │
+│  (dgs + analytics 两库同步复制)                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 数据分层策略
+
+| 层级 | 表 | 保留策略 | 用途 |
+|------|-----|---------|------|
+| **永久层** | metrics_hourly | 永不删除 | 小时 PV/UV/Sessions |
+| **永久层** | metrics_daily | 永不删除 | 日 PV/UV/Sessions |
+| **永久层** | dimensions_daily | 永不删除 | TopN 维度（path/ref_host/country/city/colo/device_type） |
+| **缓存层** | page_stats_total | 覆盖更新 | 路径 PV 快速查询 |
+| **缓存层** | country_stats | 30分钟更新 | 国家访问量排行榜 (PV+UV) |
+| **明细层** | page_hits | 120天，DROP PARTITION | 原始访问明细 |
+| **调试层** | debug_samples | 14天，DELETE | 调试样本 |
+
+### 12.4 分区表架构（按月自动创建）
+```
+analytics.page_hits (父表，PARTITION BY RANGE ts)
+    ├── analytics.page_hits_202603 (2026-03)
+    ├── analytics.page_hits_202604 (2026-04)
+    ├── analytics.page_hits_202605 (2026-05)
+    └── ... (ensure_page_hits_partitions 自动补充未来3个月)
+```
+
+**删除策略**：永远用 `DROP TABLE analytics.page_hits_YYYYMM`（秒级、不卡表、不 bloat）
+
+### 12.5 pg_cron 定时任务（US 主库）
+
+| 任务 | 时间 | 说明 |
+|------|------|------|
+| analytics_hourly | 每小时 :05 | 分区创建 + 小时聚合 (gaea+main) |
+| analytics_daily | 每天 03:20 | 日聚合 + TopN 维度 (gaea+main) |
+| analytics_retention | 每天 03:40 | 分级删除（debug 14天 / hits 120天）|
+| analytics_maintenance | 每周日 04:10 | VACUUM ANALYZE |
+| analytics_country_refresh | 每 30 分钟 | 国家访问量排行榜聚合 (PV+UV) |
+
+### 12.6 数据采集流程
+```
+前端 (site-layout.js)
+    │
+    │  sendBeacon('/api/stats/hit', {path, ref, w, vid, sid})
+    │  ├── vid: localStorage 持久 (visitor_id)
+    │  └── sid: sessionStorage 会话 (session_id)
+    │
+    ▼
+Cloudflare Worker
+    │
+    │  透传 CF-* 头 → X-Original-*
+    │  (country/city/colo)
+    │
+    ▼
+后端 (stats.go)
+    │
+    │  计算：site_id (path判断)、ref_host (url.Parse)、is_bot (UA检测)
+    │
+    ▼
+INSERT INTO analytics.page_hits (...)
+```
+
+### 12.7 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| scripts/analytics_ultimate.sql | 终极架构 SQL（表+函数+pg_cron）|
+| internal/http/stats.go | 统计 API（StatsHit/StatsPV/StatsCountries + UV 支持）|
+| web/static/site-layout.js | 前端埋点（vid/sid 生成）+ 底部统计显示（STATS_MODE 开关） |
+| web/templates/stats-countries.html | 国家访问量排行榜页面（PV/UV 标签切换） |
+| cf/ky.py | 部署工具 |
+
+### 12.8 部署命令
+
+```bash
+# 确保 pg_cron 已安装
+psql -d analytics -c "CREATE EXTENSION IF NOT EXISTS pg_cron;"
+
+# 执行终极架构 SQL
+psql -d analytics -f scripts/analytics_ultimate.sql
+
+# 添加 UV 列（如果表已存在）
+psql -d analytics -c "ALTER TABLE country_stats ADD COLUMN IF NOT EXISTS total_uv BIGINT NOT NULL DEFAULT 0;"
+
+# 验证定时任务
+psql -d analytics -c "SELECT jobname, schedule FROM cron.job WHERE jobname LIKE 'analytics%';"
+```
+
+### 12.9 多维度统计仪表盘 (/stats) ✅ 已实现
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  9 维度排行榜（各维度可切换 PV/UV）                        │
+├────────────────────────────────────────────────────────────────┤
+│  国家 | 页面 | 宽度 | 系统 | 语言 | 时区 | 架构 | 浏览器 | 浏览器版本  │
+├────────────────────────────────────────────────────────────────┤
+│  数据源: dimension_stats 聚合表（30分钟全量刷新）             │
+│  缓存: Go 内存 + pg_cron 定时聚合                          │
+│  前端: sendBeacon 埋点（复用 DeviceInfo 解析）               │
+└────────────────────────────────────────────────────────────────┘
+```
+
+| 维度 | 字段 | 示例 |
+|------|------|------|
+| 国家 | country | CN, US, JP |
+| 页面 | path | /, /article, /stats |
+| 宽度 | screen_w | 1920, 1440, 390 |
+| 系统 | os | Win10, macOS14.1 |
+| 语言 | lang | zh-CN, ja, en-US |
+| 时区 | tz | Asia/Shanghai |
+| 架构 | arch | x64, arm64 |
+| 浏览器 | browser | Chrome, Firefox |
+| 浏览器版本 | browser_ver | Chrome135, Safari17 |
+
+**相关文件**：
+| 文件 | 说明 |
+|------|------|
+| migrations_analytics/0004_dimension_stats.up.sql | 聚合表 + pg_cron |
+| internal/http/stats.go | StatsDimensions API + 缓存 |
+| web/templates/stats.html | 统一仪表盘页面 |
+| web/static/site-layout.js | recordHit() 埋点 |
+
+### 12.10 国家 ge 排行条 ✅ 已实现
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  site-header 顶部显示各国家 ge 总量排行                        │
+│                                                                │
+│  🇨🇳 45.2%   🇺🇸 23.1% (1,234ge)   🇯🇵 12.0%  ...             │
+│        ↑ hover 显示具体 ge 数                                  │
+│                                                                │
+│  数据源: wallets + users 表 (主业务库)                         │
+│  缓存: Go 内存，30分钟整站刷新（走从库）                       │
+│  第二名额外显示 ge 数（方便推算市场规模）                      │
+│  最多显示前 8 名                                               │
+└────────────────────────────────────────────────────────────────┘
+```
+
+| 文件 | 说明 |
+|------|------|
+| internal/http/stats.go | StatsCountryGe API + 缓存逻辑 |
+| web/static/site-layout.js | SiteHeader.loadCountryGeRank() |
+
+### 12.11 国家 ge 排行榜页面 ✅ 已实现
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  /stats/ge 国家 ge 排行榜页面                                 │
+├────────────────────────────────────────────────────────────────┤
+│  点击顶栏第二行（国家 ge 排行条）整行→ 新标签页打开            │
+│  国家列表：点击展开/收起该国 top 100 玩家                    │
+│  玩家显示：完整手机号 + ge 数（需用户开启显示）               │
+│  隐私控制：users.show_in_ge_rank 默认 false                  │
+│  开关位置：/viewer 个人中心「在国家排行榜中显示」               │
+└────────────────────────────────────────────────────────────────┘
+```
+
+| API | 说明 |
+|------|------|
+| GET /api/stats/ge-rank | 国家列表 |
+| GET /api/stats/ge-rank?country=CN | 该国 top 100 玩家 |
+| GET/PUT /api/viewer/privacy | 隐私设置开关 |
+
+| 文件 | 说明 |
+|------|------|
+| migrations/0026_show_in_ge_rank.up.sql | users 加 show_in_ge_rank 字段 |
+| internal/http/handlers_settings.go | GetPrivacy / SetPrivacy |
+| web/templates/stats-country-ge.html | 排行榜页面 |
+| web/templates/center.html | 个人中心隐私开关 |
+
+---
+
+## 十三、永久登录 + 设备认证架构 ✅ 已实现
+
+### 13.1 架构总览
+
+```
+前端 (login.html)
+    │
+    ├── FingerprintJS (开源版) ──► visitorId (软信号)
+    │
+    ├── device-auth.js
+    │     ├── WebCrypto ECDSA P-256 密钥对生成
+    │     ├── IndexedDB 密钥存储
+    │     ├── 自动续期逻辑
+    │     └── 跨浏览器自动登录 (relaxlv=2)
+    │
+    └── 登录流程
+          │
+          ▼
+POST /api/auth/v3/verify
+    │
+    ├── 创建 device 记录
+    ├── 创建 refresh_session
+    ├── 签发 access token (可配置，默认 15 分钟)
+    └── 签发 refresh token (可配置，默认 10 年)
+```
+
+### 13.2 双 Token 机制
+
+| Token | 有效期 | 存储位置 | 用途 |
+|-------|----------|----------|------|
+| **Access Token** | 可配置（默认 15 分钟） | Cookie (token) + localStorage | API 访问认证 |
+| **Refresh Token** | 可配置（默认 10 年） | Cookie (rt, httpOnly) | 续期 access token |
+| **Device Token** | 10 年 | Cookie (dt, httpOnly) | 设备识别 |
+
+**环境变量配置**：
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ACCESS_TTL_MINUTES` | 15 | Access Token 有效期（分钟）|
+| `REFRESH_TTL_DAYS` | 3650 | Refresh Token 有效期（10年）|
+| `RELAXLV` | 2 | 登录宽松等级（见 13.9）|
+
+### 13.3 设备签名验证流程
+
+```
+前端请求续期
+    │
+    ▼
+POST /api/auth/refresh/challenge
+    │
+    ├── 验证 refresh token 有效
+    ├── 检查设备未被撤销
+    └── 返回 challenge + device_id
+          │
+          ▼
+前端 WebCrypto 签名
+    │
+    ├── digest = SHA-256(challenge || deviceId)
+    └── sig = ECDSA.sign(digest, privateKey)
+          │
+          ▼
+POST /api/auth/refresh/verify
+    │
+    ├── 验证设备签名（密钥丢失时跳过，记录警告）
+    ├── Rotate refresh token (family_id 保持)
+    ├── 签发新 access token
+    └── 更新 device.last_seen_at + last_seen_ip
+```
+
+### 13.4 安全特性
+
+| 特性 | 状态 | 说明 |
+|------|:----:|------|
+| 设备签名验证 | ✅ | Token 被盗无法在其他设备使用 |
+| Refresh Token 轮换 | ✅ | 每次续期生成新 token，旧的失效 |
+| Family ID | ✅ | 检测重放攻击，异常时撤销整个家族 |
+| 设备管理 | ✅ | 用户可查看/强制下线设备 |
+| FingerprintJS | ✅ | 设备指纹辅助识别 |
+| Cloudflare Bot Fight | ✅ | 边缘 Bot 防护 |
+| 密钥丢失容错 | ✅ | IndexedDB 清除后仍可无签名续期 |
+| 设备上限控制 | ✅ | 最多 22 台设备，超限自动踢掉最久未活跃 |
+| 设备自动清理 | ✅ | 7 天无活动自动撤销 |
+
+### 13.4.1 设备生命周期管理
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│  心跳更新：每次 token 刷新 → 更新 last_seen_at + last_seen_ip     │
+│  跨浏览器自动登录：同 IP + 24h 内有活跃设备 → 自动签发 session   │
+│                                                                   │
+│  上限控制：22 台设备，超限踢最久未活跃                           │
+│  自动清理：7 天无活动自动撤销（每 6h 执行）                       │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### 13.5 数据库表结构
+
+```sql
+-- 设备表
+CREATE TABLE devices (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  device_token_hash BYTEA NOT NULL,
+  fp_visitor_id TEXT,              -- FingerprintJS visitorId
+  platform TEXT DEFAULT 'web',
+  device_key_id TEXT,              -- WebCrypto 公钥 ID
+  device_pub_jwk JSONB,            -- WebCrypto 公钥 JWK
+  last_seen_ip TEXT,               -- 最后访问 IP（跨浏览器自动登录用）
+  created_at TIMESTAMPTZ DEFAULT now(),
+  last_seen_at TIMESTAMPTZ DEFAULT now(),
+  revoked_at TIMESTAMPTZ
+);
+
+-- 续期会话表
+CREATE TABLE refresh_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  device_id TEXT NOT NULL REFERENCES devices(id),
+  family_id TEXT NOT NULL,         -- 用于检测重放攻击
+  token_hash BYTEA NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  replaced_by_hash BYTEA           -- 轮换后指向新 token
+);
+```
+
+### 13.6 API 端点
+
+| 端点 | 方法 | 说明 |
+|------|:----:|------|
+| `/api/device/bootstrap` | POST | 初始化 device_token cookie |
+| `/api/auth/refresh/challenge` | POST | 获取签名挑战 |
+| `/api/auth/refresh/verify` | POST | 验证签名并续期 |
+| `/api/auth/auto-session` | POST | 跨浏览器自动登录（relaxlv=2）|
+| `/api/devices` | GET | 设备列表（需认证） |
+| `/api/devices/:id/revoke` | POST | 下线指定设备（需认证） |
+| `/api/logout` | POST | 登出当前设备（需认证） |
+
+### 13.7 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| migrations/0009_device_auth.up.sql | 数据库迁移 |
+| migrations/0019_device_ip.up.sql | 添加 last_seen_ip 字段 |
+| internal/devicekey/devicekey.go | ECDSA P-256 公钥解析 + 签名验证 |
+| internal/fingerprint/fingerprint.go | FingerprintJS visitorId 处理 |
+| internal/tokens/jwt.go | 扩展 Claims + refresh token 工具 |
+| internal/http/handlers_device_auth.go | 设备认证 handlers + AutoSession + 上限控制 |
+| internal/http/handlers_auth_v3.go | 登录集成设备创建 |
+| internal/http/device_cleanup.go | 设备清理定时任务（7天无活动自动撤销）|
+| web/static/device-auth.js | WebCrypto 密钥管理 + 自动续期 + 跨浏览器登录 |
+| web/templates/login.html | FingerprintJS + 设备公钥上传 |
+| web/templates/devices.html | 已登录设备页面（活跃/非活跃状态显示）|
+| web/static/site-layout.js | AUTH_CONFIG（含 RELAXLV）+ 页面加载时自动续期 |
+
+### 13.8 部署命令（ky.py GUI）
+
+| 按钮 | 功能 |
+|------|------|
+| 🗄️ 执行DB迁移 | 执行所有迁移（含 0019_device_ip）|
+
+### 13.9 跨浏览器自动登录 (relaxlv) ✅ 已实现
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  AUTH_CONFIG.RELAXLV (唯一真理源: site-layout.js)                │
+├─────────────────────────────────────────────────────────────────┤
+│  1 = 严格模式                                                    │
+│      · 每个浏览器独立会话                                        │
+│      · 需要设备密钥签名验证                                      │
+│      · 跨浏览器需要重新登录                                      │
+│                                                                  │
+│  2 = 宽松模式（默认）                                            │
+│      · 同一台电脑，不同浏览器自动共享登录                        │
+│      · 基于 IP 识别：同 IP + 24h内有活跃设备 → 自动登录         │
+│      · 无需重新登录，永久在线                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**跨浏览器自动登录流程**：
+```
+新浏览器打开网站
+    │
+    ▼
+检查 localStorage 是否有 token?
+    │ 没有
+    ▼
+检查 AUTH_CONFIG.RELAXLV == 2?
+    │ 是
+    ▼
+POST /api/auth/auto-session
+    │
+    ├── body: { fp_visitor_id, device_key_id, device_pub_jwk }
+    │
+    ▼
+后端查询: 同 IP 且 24h 内有活跃设备?
+    │
+    ├── 找到 ──► 自动签发 session → 登录成功 ✅
+    │              └── 返回: { ok: true, access_token, phone: "****1234" }
+    │
+    └── 未找到 ──► 返回: { ok: false }
+                      └── 用户需手动登录
+```
+
+**安全考量**：
+- 仅基于 IP 匹配，同一台电脑的不同浏览器 IP 相同
+- 要求 24 小时内有活跃设备，防止 IP 复用攻击
+- 自动登录成功会记录日志，便于审计
+
+### 13.10 个人中心与设备管理 ✅ 已实现
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  /viewer          → 个人信息                                    │
+│  /viewer/devices  → 已登录设备（≤22台，整行点选，批量下线）     │
+│  /viewer/history  → 登录历史（≤180条，轮转删除）                │
+│                                                                  │
+│  <viewer-sidebar> Web Component 统一管理左侧菜单                 │
+│  顶部导航 hover 下拉菜单：至少保持1秒，防误失焦                  │
+│  头像显示：国旗（flagcdn.com + country_iso2）                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**登录历史表**：
+```sql
+CREATE TABLE login_history (
+    id SERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    city TEXT,                    -- X-Original-City
+    ip TEXT,                      -- CF-Connecting-IP
+    login_at TIMESTAMPTZ DEFAULT now()
+);
+-- 每用户最多保留 180 条（轮转删除）
+```
+
+**city/ip 数据流**：
+```
+Worker request.cf.city → X-Original-City → 后端写入 login_history.city / devices.last_seen_city
+```
+
+**空值保护**：新 city 为空时不覆盖，保留上一次有效值
+
+---
+
+## 十四、wq 统计系统架构 ✅ 已实现
+
+### 14.1 功能概述
+
+wq 统计系统用于跟踪 goods（商品/插件）的使用情况：
+- **total_installations**: 累计安装数
+- **total_companion_seconds**: 累计陪伴时长
+- **active_12h**: 12小时内活跃设备数（每小时快照）
+
+### 14.2 数据库架构
+
+```
+analytics 库 (独立 database)
+└── wq schema
+    ├── goods_snapshot       # 商品快照（避免跨库 join）
+    ├── device_state         # 设备状态（真理源，含 user_id 绑定）
+    ├── device_user_binding  # 设备-用户绑定历史（追踪时长归属）
+    ├── user_stats           # 用户统计快照（聚合贡献时长）
+    ├── stats_bucket         # 小时级增量桶
+    ├── bucket_cursor        # 消费进度
+    ├── stats_daily          # 日聚合
+    ├── stats_total          # 全量累计
+    ├── good_stats           # 展示快照（API 读取）
+    └── ping_log             # 调试日志（可选）
+```
+
+### 14.3 API 端点
+
+| 端点 | 方法 | 路由规则 | 说明 |
+|------|:----:|----------|------|
+| `/api/wq/ping` | POST | 强制 US | 客户端上报使用数据（支持 user_id 绑定）|
+| `/api/goods/:slg/stats` | GET | CN 优先 + Edge Cache 60s | 读取商品统计 |
+| `/api/wq/user/:user_id/stats` | GET | CN 优先 | 读取用户维度统计 |
+
+### 14.4 Worker 路由策略（已整合到 q.py）
+
+```
+POST /api/wq/ping
+    │
+    └──► 强制路由 US（写入 analytics 主库）
+
+GET /api/goods/:slg/stats
+    │
+    ├── X-Force-Primary: 1 ──► 强制走 US 主库
+    │
+    └── 默认 ──► CN 优先 + Edge Cache 60s
+              └── CN 失败/lag>30s ──► 回退 US
+```
+
+### 14.5 主从降级规则
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ANALYTICS_DATABASE_URL      → US 主库（写 + 强一致读兜底）   │
+│  ANALYTICS_DATABASE_READ_URL → CN 从库（可陈旧读）           │
+│                                                              │
+│  若 READ_URL 缺失 → 等于 URL（无从库，读也走主）             │
+│                                                              │
+│  降级规则：                                                   │
+│    forcePrimary = (X-Force-Primary == 1)                     │
+│    if forcePrimary or lag > 30s → read from primary          │
+│    else → read from replica                                   │
+│                                                              │
+│  lag 计算：now() - pg_last_xact_replay_timestamp()           │
+│  lag 为空（主库/非 recovery）视为 0                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 14.6 Active_12h 展示时效 SLA
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  active_12h 是每小时更新一次的展示快照，不是实时计数         │
+│                                                              │
+│  SLA: wq.good_stats.updated_at 陈旧度 ≤ 2 小时               │
+│       (1 小时更新 + 1 小时容错)                              │
+│                                                              │
+│  Edge Cache 额外引入 ≤ 60 秒延迟                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 14.7 Worker 聚合任务
+
+| 任务 | 频率 | 说明 |
+|------|------|------|
+| WqWorkerRun | 每 1 小时 | 聚合 stats_bucket → stats_total/daily + 更新 good_stats + 更新 user_stats |
+
+### 14.8 环境变量
+
+| 变量 | 说明 |
+|------|------|
+| `ANALYTICS_DATABASE_URL` | analytics US 主库（必须） |
+| `ANALYTICS_DATABASE_READ_URL` | analytics CN 从库（可选，默认等于主库）|
+| `WQ_SECRET` | HMAC 签名密钥（可选，空则不验证）|
+
+### 14.9 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| migrations_analytics/0001_wq_schema.up.sql | wq schema 全表 |
+| migrations_analytics/0002_wq_safety.up.sql | CHECK 约束 + ping_log 清理函数 |
+| migrations_analytics/0003_wq_user_binding.up.sql | 用户绑定增强（device_user_binding + user_stats）|
+| internal/http/handlers_wq.go | ping + stats + user_stats + worker + 启动自检 |
+| internal/db/db.go | AnalyticsRead 池 + lag 降级 |
+| cf/q.py (WORKER_JS_TEMPLATE) | Worker 路由逻辑 |
+| docs/qqq-wq-integration.md | VS Code 扩展接入文档 |
+
+### 14.10 安全阀与软防机制 ✅ 已实现
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  安全阀常量（handlers_wq.go）                             │
+├─────────────────────────────────────────────────────────────┤
+│  wqMaxBodySize         = 16KB    （body 上限）              │
+│  wqMaxTotalSeconds     = 10年    （防溢出）                │
+│  wqDeviceRateLimitSecs = 60秒    （同 device 写入间隔）    │
+│  wqEventTimeSkewMins   = 10分钟  （event_time 漂移阈值）  │
+│  wqAnomalyDeltaHours   = 13小时  （delta 异常阈值）       │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  软防机制（只标记，不截断，不破坏最终精准）                │
+├─────────────────────────────────────────────────────────────┤
+│  1. event_time 漂移校验                                  │
+│     - |server_now - event_time| > 10分钟 → 标记            │
+│     - 写入 ping_log.event_time_skewed = true              │
+│     - 累计照常，不影响统计数字                            │
+│                                                             │
+│  2. delta 异常标记                                         │
+│     - delta > 13小时 → 标记为 is_anomaly                   │
+│     - 累计照常，不截断（实现“最终精准”实法）                │
+│     - 可观测日志赢出异常详情                              │
+│                                                             │
+│  3. 设备限速                                                │
+│     - 同 (good_int, device_id) 1分钟内只接受一次写入          │
+│     - 限速命中返回 200 但不写桶（不影响精准）               │
+│     - 下次成功仍带累计总秒，数据不丢                       │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  数据一致性约束（CHECK）                                     │
+├─────────────────────────────────────────────────────────────┤
+│  device_state.total_seconds_server >= 0                    │
+│  stats_bucket.seconds_delta >= 0                           │
+│  stats_bucket.installs_delta >= 0                          │
+│  stats_total.seconds >= 0                                  │
+│  stats_total.installs >= 0                                 │
+│                                                             │
+│  作用：出 bug 时立即报错，而非默默写坏数据                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 14.11 客户端上报规范（qqq 插件）
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Q5: 上报策略（必须遵守）                                   │
+├─────────────────────────────────────────────────────────────┤
+│  1. 启动后随机抖动 30~120 秒发一次 /api/wq/ping            │
+│  2. 每 12 小时兜底发一次                                    │
+│  3. 失败后指数退避重试（1m/2m/4m/8m/16m/...max 1h）         │
+│  4. 带累计总秒 total_seconds（服务器用 GREATEST 裁决）       │
+│  5. 可选带 event_time 和 signature                         │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  Q6: device_id 跨 IDE 策略（必须遵守）                      │
+├─────────────────────────────────────────────────────────────┤
+│  优先级存储（十年级持久性）：                               │
+│    macOS: Keychain Services                                │
+│    Windows: Windows Credential Manager (via keytar)        │
+│    Linux: libsecret (via keytar)                           │
+│                                                             │
+│  回退存储（级联）：                                         │
+│    1. VS Code SecretStorage API (安全，年级持久)            │
+│    2. globalState (普通持久，重装可能丢失)                  │
+│    3. 构造新 UUID (最后兜底)                                │
+│                                                             │
+│  不要用：                                                    │
+│    - localStorage (浏览器专属)                              │
+│    - 明文文件存储                                             │
+│    - 纯内存变量                                               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 14.12 复制延迟监控 (Runbook)
+
+```sql
+-- 查看当前复制延迟（在 CN 从库执行）
+SELECT
+  CASE
+    WHEN pg_is_in_recovery() THEN
+      EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))
+    ELSE 0
+  END AS lag_seconds;
+
+-- 阈值: lag_seconds > 30 时自动降级到主库
+-- 告警: lag_seconds > 60 时应检查网络/复制状态
+```
+
+### 14.13 启动自检
+
+```go
+// 服务启动时调用 WqHealthCheck()
+// 失败则拒绝启动，检查项：
+//   1. ANALYTICS_DATABASE_URL 已配置
+//   2. wq.good_stats 可读
+//   3. wq.device_state 可读
+//   4. wq.stats_bucket 可读
+```
+
+### 14.14 ping_log 清理
+
+```
+保留期: 14 天
+清理时机: 每小时 Worker 运行时自动执行
+清理函数: wq.cleanup_ping_log(14)
+```
+
+---
+
+## 十五、Gatekeeper v2 限流中枢 ✅ 已实现
+
+### 15.1 架构总览
+
+```
+打赏请求 ──► Cloudflare Worker (全局 IP 限流 60/min)
+                              │
+                              ▼
+                     US 源站 (Gatekeeper 唯一真理源)
+                              │
+                   ┌──────────┴──────────┐
+                   ▼                     ▼
+            ┌───────────┐         ┌───────────┐
+            │  LOCAL     │         │  GLOBAL    │
+            │ 14/min    │         │ 200/min   │
+            │ 280/day   │         │ 20k/day   │
+            └───────────┘         └───────────┘
+            保护第三方账号           保护全站配额
+```
+
+### 15.2 核心概念
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  individual = Device ∪ IP（OR 判定：任一超限即拒绝）          │
+│                                                                │
+│  Device: device_token (Cookie dt) → SHA-256 hash              │
+│  IP: client_ip (Cloudflare CF-Connecting-IP)                   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 15.3 三层限流规则
+
+| 层级 | 规则 | 阈值 | 失败策略 | 保护目标 |
+|------|------|------|----------|----------|
+| **LOCAL** | device + ip | 14/min + 280/day | fail-closed | 虎皮椒账号 |
+| **GLOBAL** | xunhupay | 200/min + 20k/day | fail-closed | 全站配额 |
+
+### 15.4 固定金额 + 订单复用策略
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  固定金额：¥5 / ¥50 / ¥500 三档（禁止任意金额）               │
+│  订单复用：8分钟内同 user_id + purpose 复用订单               │
+│  force=true：跳过复用，强制创建新订单（刷新二维码按钮用）     │
+│  效果：正常用户几乎永远复用，0 次第三方调用                   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**purpose 映射**：
+| 金额 | purpose | 说明 |
+|------|---------|------|
+| ¥5 | tip_5 | 打赏 5 元 |
+| ¥50 | tip_50 | 打赏 50 元 |
+| ¥500 | tip_500 | 打赏 500 元 |
+
+**订单有效期**：10 分钟（匹配虎皮椒二维码实际有效期）
+
+### 15.5 请求处理流程
+
+```
+用户点击打赏金额（¥5/¥50/¥500）
+    │
+    ▼
+1. 订单复用查询 (8min 内同 user_id + purpose)
+    ├── 找到可复用 + force=false → 直接返回二维码 ✅
+    │
+    └── 无可复用 或 force=true
+           │
+           ▼
+2. LOCAL 限流检查 (14/min + 280/day, fail-closed)
+    │ 通过
+    ▼
+3. GLOBAL BUDGET 检查 (200/min + 20k/day, fail-closed)
+    │ 通过
+    ▼
+4. 调用虎皮椒创建订单 → 返回二维码 ✅
+
+刷新二维码按钮：
+    └── 传 force=true → 跳过复用 → 扣减 LOCAL 配额 → 创建新订单
+```
+
+### 15.6 配额计数递增机制
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  CheckGlobalBudget vs GetProviderQuota                         │
+├────────────────────────────────────────────────────────────────┤
+│  CheckGlobalBudget(provider)  → 检查 + 递增计数器              │
+│  GetProviderQuota(provider)   → 只读取剩余配额（不递增）       │
+│                                                                │
+│  调用时机：调用第三方支付 API 前，必须先 CheckGlobalBudget     │
+│  否则：配额显示永远不变（只读不写）                            │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 15.7 银行级 CAS 原子入账
+
+```
+问题：并发 webhook 可能导致重复入账
+┌──────────────────────────────────────────────────────────┐
+│  请求A: SELECT → NULL ✓   请求B: SELECT → NULL ✓        │
+│  请求A: Credit 入账       请求B: Credit 入账            │
+│  💀 双重入账                                             │
+└──────────────────────────────────────────────────────────┘
+
+解决：CAS（Compare-And-Swap）原子操作
+┌──────────────────────────────────────────────────────────┐
+│  UPDATE tips                                             │
+│  SET payment_channel = COALESCE(payment_channel, $chan)  │
+│  WHERE id = $1                                           │
+│    AND (payment_channel IS NULL                          │
+│         OR payment_channel != $chan)  ← 原子条件         │
+│  RETURNING ge_amount, (已有其他渠道)                     │
+│                                                          │
+│  RowsAffected=0 → 幂等返回                               │
+│  RowsAffected=1 → CAS 成功，安全入账                     │
+└──────────────────────────────────────────────────────────┘
+```
+
+### 15.8 Redis Lua 原子扣减
+
+```
+滑动窗口计数器（ZSET 实现）
+    │
+    ├── ZREMRANGEBYSCORE 清理过期记录
+    ├── ZCARD 获取当前计数
+    ├── 超限 → 返回 [count, 0, 0, ttl]
+    └── 未超限 → ZADD + EXPIRE，返回 [count, 1, remaining, 0]
+```
+
+### 15.9 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| internal/gatekeeper/policy.go | 唯一真理源：LOCAL/REMOTE/GLOBAL 规则表 |
+| internal/gatekeeper/engine.go | Redis Lua 原子扣减 + OR 判定逻辑 |
+| internal/http/handlers_tip.go | 打赏接口（固定金额 + 订单复用 + 三层限流）|
+| migrations/0016_gatekeeper_reuse.up.sql | tips 表增加 purpose/expire_at/device_hash/client_ip |
+| web/static/site-layout.js | 前端打赏弹窗（¥5/¥50/¥500 固定选择）|
+
+### 15.10 tips 表结构（增强后）
+
+```sql
+CREATE TABLE tips (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  amount_cny INTEGER NOT NULL,
+  ge_amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending/paid/credited
+  payment_channel TEXT,                     -- 'wechat' (虎皮椒)
+  purpose TEXT,                             -- tip_5/tip_50/tip_500
+  expire_at TIMESTAMPTZ,                    -- 10分钟后过期
+  device_hash TEXT,                         -- individual 标识
+  client_ip TEXT,                           -- individual 标识
+  trade_no TEXT,                            -- 虎皮椒订单号
+  mobile_url TEXT,                          -- 虎皮椒 H5 支付链接
+  paid_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 复用查询索引
+CREATE INDEX idx_tips_reuse_device ON tips(device_hash, purpose, status, expire_at);
+CREATE INDEX idx_tips_reuse_ip ON tips(client_ip, purpose, status, expire_at);
+```
+
+---
+
+## 十六、全局查询配额系统 ✅ 已实现
+
+### 16.1 架构总览
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  全局查询配额（QueryQuota）                                    │
+├────────────────────────────────────────────────────────────────┤
+│  额度: 1000万行/周（免费）                                     │
+│  重置: 每周一 00:00 UTC                                        │
+│  存储: Redis  quota:rows:{user_id}:{year}:{week}              │
+│  超限: 可用 ge 购买（1 ge = 100 行）                           │
+│  触发: 所有数据库查询返回行数累计                              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 16.2 配置常量
+
+| 常量 | 值 | 说明 |
+|------|:--:|------|
+| WeeklyQuota | 10,000,000 | 每周免费行数 |
+| RowsPerGe | 100 | 1 ge 可购买行数 |
+| QuotaTTL | 8 天 | Redis key 过期时间 |
+
+### 16.3 API 端点
+
+| 端点 | 方法 | 说明 |
+|------|:----:|------|
+| `/api/viewer/quota` | GET | 获取配额信息（不扣减）|
+| `/api/viewer/quota/buy` | POST | 用 ge 购买配额 |
+
+### 16.4 个人信息页显示
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  个人信息                                                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  剩余请求：9,998,234 行（下次回满：142h:08m）  [购买]        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- 数字不自动刷新，用户手动刷新页面更新
+- 购买弹窗：输入 ge 数量 → 预览行数 → 确认购买
+
+### 16.5 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| internal/quota/quota.go | 配额管理器（Redis 存储 + 周重置）|
+| internal/quota/tracked.go | TrackedPool 包装层（自动感知查询行数）|
+| internal/http/handlers_quota.go | 配额 API |
+| internal/ledger/tx_types.go | 新增 TxQuotaBuy 常量 |
+| web/templates/center.html | 个人信息页（只显示配额）|
+
+### 16.6 TrackedPool 使用方式
+
+```go
+// 1. 在需要追踪的 handler 中，将 user_id 注入 context
+ctx := quota.WithUserID(c.Context(), userID)
+
+// 2. 使用 TrackedPool 执行查询
+rows, err := trackedPool.Query(ctx, "SELECT * FROM ...")
+defer rows.Close()
+
+for rows.Next() {
+    // 每读一行自动 +1
+    rows.Scan(...)
+}
+// Close 时异步上报 Redis
+
+// 3. 单行查询（QueryRow）自动计 1 行
+row := trackedPool.QueryRow(ctx, "SELECT ...")
+```
+
+**特性**：
+- fail-open：计数失败不阻断查询
+- 异步上报：不影响响应延迟
+- 未登录用户不计数
+
+### 16.7 ge 流水分页
+
+**分页策略**：OFFSET + 区间筛选（每页固定 1000 行）
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  API: GET /api/viewer/ge-history                                   │
+│                                                                    │
+│  参数：                                                            │
+│  - page: 页码（1-based）                                           │
+│  - after: 开始时间（RFC3339）                                       │
+│  - before: 结束时间（RFC3339）                                      │
+│  - min_amount: 最小金额（ge）                                       │
+│                                                                    │
+│  返回：                                                            │
+│  - entries: 流水列表                                               │
+│  - total_count: 总条数                                             │
+│  - total_pages: 总页数                                             │
+│  - page: 当前页                                                    │
+│  - page_size: 每页条数（固定 1000）                                 │
+│  - has_more: 是否有下一页                                          │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**交易详情 API**：
+
+```
+GET /api/viewer/ge-history/:tx_id
+
+返回双方分录：
+- party: 参与方（user_id 或 MINT/FEE）
+- amount: 金额变动
+- balance_after: 变动后余额
+- is_me: 是否为当前用户
+```
+
+**前端交互**：
+- 点击流水行 → 弹窗显示交易详情
+- 支持上/下页翻页
+- 支持时间区间筛选
+
+---
+
+你只用开发和写代码, 编译相关会自动用 E:\s\wol\py\gaea\cf\ky.py , 如果你有必要手动编译做测试, 也可以调用 E:\s\wol\py\gaea\cf\ky.py, 否则你不用调用
+
+**最后更新**: 2026-03-19 (新增 Nginx 反向代理配置)
+**维护者**: q
+
