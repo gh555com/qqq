@@ -203,7 +203,8 @@ class PythonEngineDownloader {
             'Pillow==10.4.0',
             'cffi==1.16.0',
             'pycparser==2.22',
-            'pynput==1.7.7'  // ★ Global hotkey support (Space+Q)
+            'pynput==1.7.7',  // ★ Global hotkey support (Space+Q)
+            'psutil==5.9.8'   // ★ Hotkey hwnd validation
         ];
         // Windows-only dependency: pywin32==311 (no postinstall)
         return process.platform === 'win32'
@@ -217,7 +218,7 @@ class PythonEngineDownloader {
      * ★ Missing ANY one = delete python_engine and reinstall from scratch
      */
     _getDepsForCheck() {
-        const baseDeps = ['miniaudio', 'Pillow', 'pynput'];
+        const baseDeps = ['miniaudio', 'Pillow', 'pynput', 'psutil'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
@@ -228,7 +229,7 @@ class PythonEngineDownloader {
      * Missing any = imperfect = delete and reinstall
      */
     _getRequiredDeps() {
-        const baseDeps = ['miniaudio', 'Pillow', 'pynput'];
+        const baseDeps = ['miniaudio', 'Pillow', 'pynput', 'psutil'];
         return process.platform === 'win32'
             ? [...baseDeps, 'pywin32']
             : baseDeps;
