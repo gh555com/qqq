@@ -538,6 +538,20 @@ class BrokerBridge extends EventEmitter {
 				try {
 					const global = require('./global');
 					global.logMessage(`[Broker] Python not ready: ${pythonPerfect.reason}`, "WARN");
+
+					// ★ FIX: 如果 Python 正在安装中，启动定时检查等待安装完成
+					if (pythonPerfect.reason === 'install_in_progress' || pythonPerfect.reason === 'python_not_downloaded') {
+						try {
+							const { getSharedDownloader } = require('./dow');
+							const downloader = getSharedDownloader();
+							if (downloader && downloader._scheduleInstallCheck && global.extensionContext) {
+								global.logMessage("[Broker] Scheduling install check for Python readiness...", "INFO");
+								downloader._scheduleInstallCheck(global.extensionContext, 5000, 180000); // 3分钟超时
+							}
+						} catch (scheduleErr) {
+							global.logMessage(`[Broker] Failed to schedule install check: ${scheduleErr.message}`, "WARN");
+						}
+					}
 				} catch { }
 				// 清理 spawn marker
 				try { fs.unlinkSync(spawnMarkerPath); } catch { }
