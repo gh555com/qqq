@@ -658,6 +658,7 @@ def _start_hotkey_listener():
         return {"status": "already_running"}
     try:
         _HOTKEY_LISTENER = pynput_keyboard.Listener(on_press=_hotkey_on_press, on_release=_hotkey_on_release)
+        _HOTKEY_LISTENER.daemon = True  # ★ Critical: daemon线程不会阻止进程退出
         _HOTKEY_LISTENER.start()
         _log("[Hotkey] Started (Space+Q to restore q2 window)")
         return {"status": "started"}
