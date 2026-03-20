@@ -311,7 +311,7 @@ fn unique_path_in_dir(output_dir: &Path, name: &str) -> PathBuf {
 }
 
 // =============================================================================
-//  PNG 编码（图标/图片统一用 PNG 输出）
+//  PNG 编码（图标/图片统一用 PNG 打印）
 // =============================================================================
 
 fn png_bytes_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
@@ -1800,7 +1800,7 @@ fn daemon_mode() {
         }
     }
 
-    // 结果输出通道
+    // 结果打印通道
     let (result_tx, result_rx) = mpsc::channel::<(String, bool)>();
 
     // stdout 写入线程

@@ -2147,7 +2147,7 @@ $of = $vi.OriginalFilename;
 
                     const out = String(stdout || '').trim();
                     if (!out) {
-                        // 输出为空，用文件检查备选
+                        // 打印为空，用文件检查备选
                         const fileCheck = this._validateChromiumByFiles(exePath);
                         if (fileCheck.valid) {
                             resolve({ valid: true, version: 'Chromium (file-verified)', raw: '' });

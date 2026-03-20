@@ -617,7 +617,7 @@ class BrokerBridge extends EventEmitter {
 					global.logMessage(`[Broker] Spawned Python Broker, PID=${child.pid}, exe=${actualPythonPath}`, "DEBUG");
 				} catch { }
 
-				// ★ 捕获 stdout 和 stderr（3秒内的输出）
+				// ★ 捕获 stdout 和 stderr（3秒内的打印）
 				let stderrBuf = '';
 				let stdoutBuf = '';
 				if (child.stdout) {

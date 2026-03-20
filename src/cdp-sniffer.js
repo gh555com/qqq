@@ -211,7 +211,7 @@ function validateBrowserPath(exePath) {
         proc.on('error', () => resolve(false));
 
         proc.on('close', (code) => {
-            // 只要能运行且返回0，或者输出包含 Chrome/Edge/Chromium 字样
+            // 只要能运行且返回0，或者打印包含 Chrome/Edge/Chromium 字样
             if (code === 0 || output.includes('Chrome') || output.includes('Edge') || output.includes('Chromium')) {
                 resolve(true);
             } else {
@@ -222,7 +222,7 @@ function validateBrowserPath(exePath) {
         // 2秒超时
         setTimeout(() => {
             try { proc.kill(); } catch { }
-            // 超时也算失败，或者如果已经有输出了就算成功？保守点算失败
+            // 超时也算失败，或者如果已经有打印了就算成功？保守点算失败
             resolve(output.length > 0);
         }, 2000);
     });

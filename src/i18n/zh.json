@@ -813,7 +813,7 @@
         "cannotStartPowerShell": "无法启动任何 PowerShell 进程",
         "pressKeyToClose": "按任意键关闭此终端...",
         "xclipInstallSuccess": "qqq: xclip 安装成功！剪切板功能现已可用。",
-        "xclipInstallMayFailed": "qqq: xclip 安装可能未成功，请检查终端输出或手动安装。",
+        "xclipInstallMayFailed": "qqq: xclip 安装可能未成功，请检查终端打印或手动安装。",
         "cmdCopied": "qqq: 安装命令已复制到剪切板: {0}",
         "elapsed": "耗时",
         "cannotOpenFile": "无法打开文件: {0}",

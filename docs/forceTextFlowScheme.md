@@ -34,7 +34,7 @@ for (const node of flatNodes) {
 ### 方案二 (`handleClipboardNodeScheme2`) - "原范式"
 
 ```
-CF_HTML 原始字节 ──▶ 智能编码检测 ──▶ 解码 ──▶ DOM 遍历 ──▶ 按序输出
+CF_HTML 原始字节 ──▶ 智能编码检测 ──▶ 解码 ──▶ DOM 遍历 ──▶ 按序打印
 ```
 
 **核心思想**：直接从 HTML 提取一切，完整保留 DOM 顺序
@@ -45,7 +45,7 @@ const sliced = _sliceCfHtmlPayload(rawBuf);     // 按 CF_HTML 字节偏移切�
 htmlText = _decodeHtmlBytesSmart(payload);       // 智能编码检测(UTF-8/UTF-16/Latin1)
 htmlText = _repairBrokenAngleTags(htmlText);     // 修复 "?/span>" 等乱码标签
 
-// DOM 遍历，按顺序输出
+// DOM 遍历，按顺序打印
 function walk(node) {
     if (node.type === "text") {
         textBuf += node.data;  // 直接用 HTML 文本
@@ -96,7 +96,7 @@ function walk(node) {
 │                        方案二会失败                              │
 ├─────────────────────────────────────────────────────────────────┤
 │ 1. CF_HTML 编码检测失败                                         │
-│    某些应用输出非标准编码（如 GB2312 混合）                      │
+│    某些应用打印非标准编码（如 GB2312 混合）                      │
 │    → 中文变成 ??? 或 \uFFFD                                     │
 │                                                                 │
 │ 2. HTML 严重畸形                                                │

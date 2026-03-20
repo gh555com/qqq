@@ -32,7 +32,7 @@ extension.js
 .DS_Store
 Thumbs.db
 
-# 编译输出
+# 编译打印
 out/**
 build-artifacts/**
 build/**

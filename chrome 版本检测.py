@@ -72,7 +72,7 @@ try:
             print(f"检查版本 {rev} 时出错: {str(e)}，跳过")
             continue
 
-    # 4. 输出结果
+    # 4. 打印结果
     if found_rev:
         print(f"\n✅ 找到符合条件的版本: {found_rev}")
         print(f"📥 下载链接: {download_url}")

@@ -2517,7 +2517,7 @@ async function verifyPhoneAndSyncConfig(phone) {
 }
 
 function onPhoneConfigChanged(phone) {
-	// 防抖：等 500ms 确保用户输完
+	// 防抖：等 500ms 确保用户键入完
 	if (_phoneVerifyDebounce) {
 		clearTimeout(_phoneVerifyDebounce);
 	}

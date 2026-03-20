@@ -147,7 +147,7 @@ def main():
     wanted_all = sorted(set([x.lower() for x in (TARGETS_X64 + TARGETS_X86)]))
     print("将要搜的 DLL（去重后）:", wanted_all)
     print("扫描 roots:", roots)
-    print("输出目录:", str(out_x64), "和", str(out_x86))
+    print("打印目录:", str(out_x64), "和", str(out_x86))
 
     hits = find_candidates(roots, set(wanted_all))
 

@@ -130,7 +130,7 @@ fn pyv_from_json(v: &Value) -> PyV {
         Value::String(s) => PyV::Str(s.clone()),
         Value::Array(a) => PyV::Arr(a.iter().map(pyv_from_json).collect()),
         Value::Object(o) => {
-            // 键入对象字段顺序不重要；这里只做“尽量保留”，但不会用于“严格顺序对齐”的输出对象
+            // 键入对象字段顺序不重要；这里只做“尽量保留”，但不会用于“严格顺序对齐”的打印对象
             let mut out = Vec::with_capacity(o.len());
             for (k, v) in o {
                 out.push((k.clone(), pyv_from_json(v)));
@@ -2102,7 +2102,7 @@ fn daemon_mode() {
         }
     }
 
-    // 结果输出通道
+    // 结果打印通道
     let (result_tx, result_rx) = mpsc::channel::<(String, bool)>();
 
     // stdout 写入线程

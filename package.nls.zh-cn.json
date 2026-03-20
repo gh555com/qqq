@@ -58,7 +58,7 @@
     "config.downloadSecurityLevel.desc": "🍌 如果下载视频失败，可以在此尝试更宽松滴策略。取舍请查看 https://github.com/gh555com/qqq/blob/qq/docs/downloadSecurityLevel.md",
     "config.downloadSecurityLevel.enum.0": "11项安全开关全部关闭。",
     "config.downloadSecurityLevel.enum.1": "11项安全开关开4项，关7项。 \n  \n    开启项包括: \n   ◉  http/https协议限制; \n ◉  重定向协议限制; \n ◉  下载锁; \n ◉  Header注入清洗。 ",
-    "config.downloadSecurityLevel.enum.2": "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe输出限制; \n ◉  Fail-fast。",
+    "config.downloadSecurityLevel.enum.2": "11项安全开关全部开启。 \n  \n  额外开启滴 7项是: \n  ◉  SSRF防护; \n ◉  路径越界防护; \n ◉  content-length/content-range预检; \n ◉  严格断点续传; \n ◉  符号链接防护; \n ◉  yt-dlp probe打印限制; \n ◉  Fail-fast。",
     "config.forceTextFlowScheme.desc": "🍌 强制消除 html 乱码。仅在遇到顽固 html（或富文本）乱码时勾选，其余时候确保无脑关闭（请无脑取消勾选）原因是，代价：牺牲排版精度。",
     "config.autoDownload.desc": "🍌 是否在检测到视频时自动下载",
     "config.docExportImageResolution.desc": "📦 图片使用何种分辨率：",
