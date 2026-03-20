@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.132] - 2026-03-20
+
+### Fixed
+- **Python process won't exit**: `_HOTKEY_LISTENER` missing `daemon=True`, blocking process termination
+- **Broker auto-start after Python reinstall**: Added `_scheduleInstallCheck` in `_spawnBrokerThrottled` when Python unavailable
+
+### Technical
+- Python `kp.py`: Added `_HOTKEY_LISTENER.daemon = True`
+- JavaScript `brokerBridge.js`: Schedule periodic check (5s interval, 3min timeout) when `python_not_downloaded`
+
+---
+
 ## [15.73.130] - 2026-03-19
 
 ### Fixed
