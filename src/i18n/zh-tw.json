@@ -344,7 +344,7 @@
             "videoDownloadFailed": "影片下載失敗: {0}",
             "plainPasteOnly": "qqq: 只能使用原始貼上。解決方案：儲存檔案。",
             "clickSidebarToRelax": "qqq: 請點擊側邊欄按鈕開始放鬆。",
-            "cooldownCleared": "qqq: 依賴下載冷卻時間已清除，可以重新下載依賴。 已抹除：{0}",
+            "cooldownCleared": "qqq: 已抹除 {0}。依賴下載冷卻時間已清除，可以重新下載依賴。",
             "cooldownClearError": "qqq: 清除冷卻時間失敗: {0}",
             "cacheNotInit": "qqq: 快取目錄未初始化",
             "openCacheDirError": "qqq: 開啟快取目錄失敗: {0}",

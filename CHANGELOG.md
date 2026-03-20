@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.133] - 2026-03-20
+
+### Fixed
+- **Input focus on inactive window**: Fixed "first click swallowed" issue for filename, address, and filter input boxes
+  - Added `mousedown` + `click` dual event listeners to ensure focus on first click
+- **Pin/Unpin button reliability**: Disabled pin-icon (arrow) and delete-button (×) when window is inactive
+  - Prevents complex state issues caused by processing clicks during window activation
+  - Uses `document.hasFocus()` to check window focus state
+  - Removed inline `onclick` handlers, now fully controlled by `mousedown` event delegation
+
+### Technical
+- JavaScript `q2.js`:
+  - `filenameInput`, `addressInput`, `fileFilterInput`: Added `mousedown` + `click` focus handlers
+  - Sidebar `mousedown` handler: Added `!document.hasFocus()` guard for pin-icon
+  - Recent section `mousedown` handler: Added `!document.hasFocus()` guard for delete-button
+  - Removed inline `onclick` from pin-icon and delete-button HTML generation
+
+---
+
 ## [15.73.132] - 2026-03-20
 
 ### Fixed

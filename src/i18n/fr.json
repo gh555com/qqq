@@ -344,7 +344,7 @@
             "videoDownloadFailed": "Téléchargement vidéo échoué: {0}",
             "plainPasteOnly": "qqq: seul le collage simple est disponible. Solution: Enregistrez le fichier.",
             "clickSidebarToRelax": "qqq: cliquez sur le bouton de la barre latérale pour vous détendre.",
-            "cooldownCleared": "qqq: période d'attente de téléchargement des dépendances effacée. Effacé: {0}",
+            "cooldownCleared": "qqq: Effacé {0}. période d'attente de téléchargement des dépendances effacée.",
             "cooldownClearError": "qqq: effacement de la période d'attente échoué: {0}",
             "cacheNotInit": "qqq: répertoire de cache non initialisé",
             "openCacheDirError": "qqq: échec d'ouverture du répertoire de cache: {0}",

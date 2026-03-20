@@ -344,7 +344,7 @@
             "videoDownloadFailed": "Video download failed: {0}",
             "plainPasteOnly": "qqq: Can only use plain paste. Solution: Save the file.",
             "clickSidebarToRelax": "qqq: Please click sidebar button to start relaxing.",
-            "cooldownCleared": "qqq: Dependency download cooldown cleared, can re-download dependencies. Erased: {0}",
+            "cooldownCleared": "qqq: Erased {0}. Dependency download cooldown cleared, can re-download dependencies.",
             "cooldownClearError": "qqq: Clear cooldown failed: {0}",
             "cacheNotInit": "qqq: Cache directory not initialized",
             "openCacheDirError": "qqq: Open cache directory failed: {0}",

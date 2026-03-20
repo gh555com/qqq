@@ -344,7 +344,7 @@
             "videoDownloadFailed": "Descarga de video falló: {0}",
             "plainPasteOnly": "qqq: solo disponible pegado simple. Solución: Guarde el archivo.",
             "clickSidebarToRelax": "qqq: haga clic en el botón de la barra lateral para relajarse.",
-            "cooldownCleared": "qqq: período de espera de descarga de dependencias limpiado. Borrado: {0}",
+            "cooldownCleared": "qqq: Borrado {0}. período de espera de descarga de dependencias limpiado.",
             "cooldownClearError": "qqq: limpieza de período de espera falló: {0}",
             "cacheNotInit": "qqq: directorio de caché no inicializado",
             "openCacheDirError": "qqq: fallo al abrir directorio de caché: {0}",

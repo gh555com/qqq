@@ -344,7 +344,7 @@
             "videoDownloadFailed": "Video-Download fehlgeschlagen: {0}",
             "plainPasteOnly": "qqq: Nur Roh-Einfügen möglich. Lösung: Datei speichern.",
             "clickSidebarToRelax": "qqq: Klicken Sie auf die Seitenleisten-Schaltfläche zum Entspannen.",
-            "cooldownCleared": "qqq: Abhängigkeits-Download Abkühlzeit gelöscht, erneuter Download möglich. Gelöscht: {0}",
+            "cooldownCleared": "qqq: Gelöscht {0}. Abhängigkeits-Download Abkühlzeit gelöscht, erneuter Download möglich.",
             "cooldownClearError": "qqq: Abkühlzeit löschen fehlgeschlagen: {0}",
             "cacheNotInit": "qqq: Cache-Verzeichnis nicht initialisiert",
             "openCacheDirError": "qqq: Cache-Verzeichnis öffnen fehlgeschlagen: {0}",

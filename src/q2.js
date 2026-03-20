@@ -2799,6 +2799,17 @@ document.addEventListener('DOMContentLoaded', () => {
     filenameInput.focus();
     // ★ Initialize per-character undo/redo
     initInputUndoRedo(filenameInput);
+
+    // ★★★ Fix first-click-swallowed when window loses focus: use mousedown + click ★★★
+    filenameInput.addEventListener('mousedown', (e) => {
+      setTimeout(() => filenameInput.focus(), 0);
+    });
+    filenameInput.addEventListener('click', (e) => {
+      if (document.activeElement !== filenameInput) {
+        filenameInput.focus();
+      }
+    });
+
     filenameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         saveFile();
@@ -2870,6 +2881,16 @@ document.addEventListener('DOMContentLoaded', () => {
       updateAddressEditingState();
       if (addressInput.value === '') {
         vscode.postMessage({ command: 'getHistory', key: 'address' });
+      }
+    });
+
+    // ★★★ Fix first-click-swallowed when window loses focus: use mousedown + click ★★★
+    addressInput.addEventListener('mousedown', (e) => {
+      setTimeout(() => addressInput.focus(), 0);
+    });
+    addressInput.addEventListener('click', (e) => {
+      if (document.activeElement !== addressInput) {
+        addressInput.focus();
       }
     });
 
@@ -2986,10 +3007,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Ensure focus on click (use mousedown to trigger earlier)
+    // ★★★ Fix first-click-swallowed when window loses focus: use mousedown + click ★★★
     fileFilterInput.addEventListener('mousedown', (e) => {
-      // Delay a bit to ensure focus transfer
       setTimeout(() => fileFilterInput.focus(), 0);
+    });
+    fileFilterInput.addEventListener('click', (e) => {
+      if (document.activeElement !== fileFilterInput) {
+        fileFilterInput.focus();
+      }
     });
 
     // Hide dropdown immediately on blur
@@ -3076,7 +3101,17 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.button !== 0) return; // Only left click
       const qqItem = e.target.closest('.qq-item');
       if (qqItem) {
-        if (e.target.closest('.pin-icon')) return; // pin-icon has its own handler
+        // ★ Handle pin-icon click
+        const pinIcon = e.target.closest('.pin-icon');
+        if (pinIcon) {
+          e.preventDefault();
+          e.stopPropagation();
+          // ★ CRITICAL: Ignore pin-icon click when window is not focused (avoids complex state issues)
+          if (!document.hasFocus()) return;
+          const fullpath = qqItem.dataset.fullpath;
+          if (fullpath) pinDir(fullpath);
+          return;
+        }
         e.preventDefault(); // Prevent default to avoid focus issues
         const isFile = qqItem.classList.contains('qq-file');
         const fullpath = qqItem.dataset.fullpath;
@@ -3101,9 +3136,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (recentSection) {
       recentSection.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return; // Only left click
-        if (e.target.closest('.delete-button')) return; // delete button has its own handler
         const recentItem = e.target.closest('.recent-item');
         if (recentItem) {
+          // ★ Handle delete-button click
+          const deleteBtn = e.target.closest('.delete-button');
+          if (deleteBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            // ★ CRITICAL: Ignore delete-button click when window is not focused (avoids complex state issues)
+            if (!document.hasFocus()) return;
+            const pathSpan = recentItem.querySelector('span:not(.delete-button)');
+            if (pathSpan) unpinDir(pathSpan.textContent);
+            return;
+          }
           e.preventDefault(); // Prevent default to avoid focus issues
           const pathSpan = recentItem.querySelector('span:not(.delete-button)');
           if (pathSpan) {
@@ -3689,7 +3734,7 @@ function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
           const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
           return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
         } else {
-          return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+          return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
         }
       })
       .join("")}
@@ -3700,9 +3745,7 @@ function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
     .map(
       (dir) => `
       <div class="recent-item" onclick="navigateTo('${escapeJsStringLiteral(dir)}')">
-  <span class="delete-button" onclick="event.stopPropagation(); unpinDir('${escapeJsStringLiteral(
-        dir
-      )}')">\u00d7</span>
+  <span class="delete-button">\u00d7</span>
   <span>${escapeHtmlAttribute(dir)}</span>
 </div>`
     )
@@ -3729,7 +3772,7 @@ function generateqqiqItemHtml(item) {
     const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
   } else {
-    return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon" onclick="event.stopPropagation(); pinDir('${escaped}')"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
+    return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
 }
 
@@ -4415,12 +4458,22 @@ function showSaveAsDialog() {
       case "unpinDirectory":
         if (message.path) {
           unpinDirectory(message.path);
+          // ★ Update sidebar immediately (don't wait for refreshWebview async operations)
+          if (panel && activePanelAlive) {
+            const sbData = generateSidebarHtml(getConfig());
+            panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+          }
           refreshWebview();
         }
         break;
       case "pinDirectory":
         if (message.path) {
           pinDirectory(message.path);
+          // ★ Update sidebar immediately (don't wait for refreshWebview async operations)
+          if (panel && activePanelAlive) {
+            const sbData = generateSidebarHtml(getConfig());
+            panel.webview.postMessage({ command: "updateSidebar", qqiqHtml: sbData.qqiqHtml, pinnedDirsHtml: sbData.pinnedDirsHtml });
+          }
           currentPath = canonicalizeExistingPath(message.path);
           refreshWebview();
         }
