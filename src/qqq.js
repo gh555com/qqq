@@ -26,6 +26,7 @@ const {
 	// ★ WqReporter 统计上报
 	startWqReporter,
 	onPhoneConfigChanged,
+	syncCloudConfig,
 } = global;
 
 function createPathRegex() {
@@ -1614,6 +1615,19 @@ async function _delayedActivate(context) {
 			}
 		})
 	);
+
+	// ★ 窗口重启时静默同步云端配置（延迟 3 秒，成功不弹窗，失败才弹窗）
+	setTimeout(async () => {
+		try {
+			const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+			if (phone && phone.trim()) {
+				// silent=true: 成功不弹窗，失败才弹窗
+				await syncCloudConfig(phone.trim(), { silent: true });
+			}
+		} catch (e) {
+			global.logMessage(`[wq] Startup sync error: ${e.message}`, 'WARN');
+		}
+	}, 3000);
 }
 
 // ★ Extract command registration into a separate function (register immediately, no delay)

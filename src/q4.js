@@ -1255,6 +1255,12 @@ class ClipboardHistorySidebarProvider {
                         }
                     }
                     break;
+                case 'syncCloudConfig': {
+                    // ★ 齿轮按钮长按拉取云端配置
+                    const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+                    global.syncCloudConfig(phone, { silent: false });
+                    break;
+                }
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
@@ -2450,10 +2456,31 @@ class ClipboardHistorySidebarProvider {
                 post('copyToClipboard', { itemId: id });
             });
 
+            // ★ 齿轮按钮长按检测（长按超过 1 秒拉取云端配置）
+            var allSettingsMouseDownTime = 0;
+            document.addEventListener('mousedown', function(e) {
+                var cmdBtn = e.target.closest('.cmd-btn');
+                if (cmdBtn && cmdBtn.dataset.cmd === 'qqq.allSettings') {
+                    allSettingsMouseDownTime = Date.now();
+                }
+            });
+
             document.addEventListener('click', function(e) {
                 var cmdBtn = e.target.closest('.cmd-btn');
                 if (cmdBtn && cmdBtn.dataset.cmd) {
                     var cmd = cmdBtn.dataset.cmd;
+
+                    // ★ 齿轮按钮长按检测：超过 1 秒则拉取云端配置，否则打开设置
+                    if (cmd === 'qqq.allSettings') {
+                        var pressDuration = Date.now() - allSettingsMouseDownTime;
+                        allSettingsMouseDownTime = 0;
+                        if (pressDuration >= 1000) {
+                            // 长按超过 1 秒，拉取云端配置
+                            post('syncCloudConfig', {});
+                            return; // 不执行后续逻辑
+                        }
+                    }
+
                     post('executeCommand', { cmd: cmd });
 
                     // ★ Show weave inline buttons when weave main button is clicked

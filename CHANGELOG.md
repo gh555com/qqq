@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [15.73.134] - 2026-03-21
+
+### Added
+- **Cloud config sync**: Fetch user preferences from server on 3 triggers
+  - Window restart: Silent sync (success=no popup, failure=popup)
+  - Long-press gear button ≥1s: Show popup for both success/failure
+  - Phone field blur: Show popup
+  - Uses `https.request` instead of `fetch` (VS Code fetch has restrictions)
+  - 21 config items synced to globalState (not settings.json)
+
+### Technical
+- JavaScript `global.js`: Added `syncCloudConfig(phone, {silent})` with `https.request`
+- JavaScript `q4.js`: Added mousedown/click long-press detection for gear button
+- JavaScript `qqq.js`: Added 3s delayed silent sync on startup
+- i18n: Added error messages for `phone_not_registered`, `not_purchased`, `rate_limit`, etc.
+
+---
+
 ## [15.73.133] - 2026-03-20
 
 ### Fixed
