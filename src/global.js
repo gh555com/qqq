@@ -2477,43 +2477,114 @@ function safeParseJson(text, tag = 'api') {
 // ============================================================================
 let _phoneVerifyDebounce = null;
 
-async function verifyPhoneAndSyncConfig(phone) {
-	if (!phone || !extensionContext) return;
+/**
+ * 抓取云端配置并应用到本地
+ * @param {string} phone - 手机号
+ * @param {object} options - 选项
+ * @param {boolean} options.silent - 是否静默模式（成功不弹窗，只在失败时弹窗）
+ * @returns {Promise<{success: boolean, message: string}>}
+ */
+async function syncCloudConfig(phone, options = {}) {
+	const { silent = false } = options;
+
+	// 未填写账号
+	if (!phone || !phone.trim()) {
+		const msg = q('wq.noPhone');
+		if (!silent) showAutoCloseNotification('warning', msg);
+		return { success: false, message: msg };
+	}
+
+	phone = phone.trim();
+
+	if (!extensionContext) {
+		const msg = q('wq.notReady');
+		if (!silent) showAutoCloseNotification('warning', msg);
+		return { success: false, message: msg };
+	}
 
 	const deviceId = getDeviceId();
-	if (!deviceId) return;
+	if (!deviceId) {
+		const msg = q('wq.noDevice');
+		if (!silent) showAutoCloseNotification('warning', msg);
+		return { success: false, message: msg };
+	}
 
 	try {
-		const response = await fetch(`${WQ_API_BASE}/gaea/qqq/config`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ phone, device_id: deviceId })
+		// 使用 https.request 代替 fetch，因为 VS Code 对 fetch 有诸多限制
+		const url = new URL(`${WQ_API_BASE}/gaea/qqq/config`);
+		const postData = JSON.stringify({ phone, device_id: deviceId });
+
+		const data = await new Promise((resolve, reject) => {
+			const options = {
+				hostname: url.hostname,
+				port: 443,
+				path: url.pathname,
+				method: 'POST',
+				timeout: 10000,
+				headers: {
+					'Content-Type': 'application/json',
+					'Content-Length': Buffer.byteLength(postData)
+				}
+			};
+
+			const req = require('https').request(options, (res) => {
+				let chunks = [];
+				res.on('data', chunk => chunks.push(chunk));
+				res.on('end', () => {
+					try {
+						resolve(JSON.parse(Buffer.concat(chunks).toString()));
+					} catch (e) {
+						reject(new Error('Invalid JSON response'));
+					}
+				});
+			});
+
+			req.on('error', (e) => reject(e));
+			req.on('timeout', () => {
+				req.destroy();
+				reject(new Error('Request timeout'));
+			});
+
+			req.write(postData);
+			req.end();
 		});
 
-		const { ok, data, hint } = safeParseJson(await response.text(), 'config');
-		if (!ok) {
-			showAutoCloseNotification('warning', q('wq.syncFailed') + ` (${hint}...)`);
-			return;
-		}
-
-		if (data.ok && data.settings) {
+		if (data.ok && data.profile) {
 			// 写入配置到 globalState（不写 settings.json）
-			for (const [key, value] of Object.entries(data.settings)) {
+			for (const [key, value] of Object.entries(data.profile)) {
 				await extensionContext.globalState.update(`cfg_${key}`, value);
 			}
-			showAutoCloseNotification('info', q('wq.syncSuccess'));
+			const displayPhone = data.phone || phone.slice(0, 3) + '****' + phone.slice(-4);
+			const msg = q('wq.syncSuccessFmt', displayPhone);
+			if (!silent) showAutoCloseNotification('success', msg);
 			logMessage(`[wq] Config synced for phone: ${phone.slice(0, 4)}****`, 'INFO');
-		} else if (data.error === 'not_found') {
-			showAutoCloseNotification('warning', q('wq.notFound'));
-		} else if (data.error === 'rate_limit') {
-			showAutoCloseNotification('warning', q('wq.rateLimit'));
+			return { success: true, message: msg };
 		} else {
-			showAutoCloseNotification('warning', q('wq.syncFailed') + (data.error ? ` (${data.error})` : ''));
+			// 根据错误类型返回对应消息
+			const displayPhone = data.phone || phone.slice(0, 3) + '****' + phone.slice(-4);
+			let reason = data.error || 'unknown';
+			if (data.error === 'phone_not_registered') reason = q('wq.errPhoneNotRegistered');
+			else if (data.error === 'not_purchased') reason = q('wq.errNotPurchased');
+			else if (data.error === 'rate_limit') reason = q('wq.errRateLimit');
+			else if (data.error === 'too_many_accounts') reason = q('wq.errTooManyAccounts');
+			else if (data.error === 'invalid_phone') reason = q('wq.errInvalidPhone');
+
+			const msg = q('wq.syncFailedFmt', displayPhone, reason);
+			showAutoCloseNotification('warning', msg);
+			return { success: false, message: msg };
 		}
 	} catch (e) {
-		logMessage(`[wq] Verify phone error: ${e.message}`, 'WARN');
-		showAutoCloseNotification('error', q('wq.networkError'));
+		logMessage(`[wq] Sync config error: ${e.message}`, 'WARN');
+		const displayPhone = phone.slice(0, 3) + '****' + phone.slice(-4);
+		const msg = q('wq.syncFailedFmt', displayPhone, q('wq.errNetwork'));
+		showAutoCloseNotification('error', msg);
+		return { success: false, message: msg };
 	}
+}
+
+// ★ 旧函数保留兼容，内部调用 syncCloudConfig
+async function verifyPhoneAndSyncConfig(phone) {
+	await syncCloudConfig(phone, { silent: false });
 }
 
 function onPhoneConfigChanged(phone) {
@@ -2524,7 +2595,7 @@ function onPhoneConfigChanged(phone) {
 	_phoneVerifyDebounce = setTimeout(() => {
 		_phoneVerifyDebounce = null;
 		if (phone && phone.trim()) {
-			verifyPhoneAndSyncConfig(phone.trim());
+			syncCloudConfig(phone.trim(), { silent: false });
 		}
 	}, 500);
 }
@@ -4365,6 +4436,7 @@ module.exports = {
 	getUserPhone,
 	onPhoneConfigChanged,
 	verifyPhoneAndSyncConfig,
+	syncCloudConfig,
 
 	// Status bar related
 	initStatusBar,
