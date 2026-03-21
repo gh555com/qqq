@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "长按该齿轮一秒 可拉取云端配置 ▶ 覆盖本地配置",
         "export": {
             "success": "📦 历史记录已全量导出",
             "error": "导出失败: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: 安装命令已复制到剪切板: {0}",
         "elapsed": "耗时",
         "cannotOpenFile": "无法打开文件: {0}",
-        "trialModeHint": "试用模式：设置仅本次有效，重启后恢复默认。",
+        "trialModeHint": "本地修改偏好都不会被保存（仅做体验），要保存偏好只能购买正版，进入官网，在网页中修改和保存。",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}：{1}",
         "engineStartFailed": "{0}：启动失败 / 不可用",

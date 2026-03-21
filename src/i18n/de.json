@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "Dieses Zahnrad 1 Sekunde gedrückt halten, um Cloud-Konfiguration abzurufen ▶ Lokale Konfiguration überschreiben",
         "export": {
             "success": "📦 Verlauf vollständig exportiert",
             "error": "Export fehlgeschlagen: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: Installationsbefehl in Zwischenablage kopiert: {0}",
         "elapsed": "Dauer",
         "cannotOpenFile": "Datei kann nicht geöffnet werden: {0}",
-        "trialModeHint": "Testmodus: Einstellungen gelten nur für diese Sitzung und werden nach Neustart zurückgesetzt.",
+        "trialModeHint": "Lokale Einstellungsänderungen werden nicht gespeichert (nur Testversion). Um Einstellungen zu speichern, kaufen Sie bitte die Vollversion und bearbeiten Sie diese auf der offiziellen Website.",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}: {1}",
         "engineStartFailed": "{0}: Start fehlgeschlagen / nicht verfügbar",
@@ -831,6 +832,17 @@
     },
     "wq": {
         "syncSuccess": "Konfiguration erfolgreich synchronisiert",
+        "syncSuccessFmt": "{0} Konfiguration erfolgreich abgerufen",
+        "syncFailedFmt": "{0} Abruf fehlgeschlagen: {1}",
+        "noPhone": "Kein Konto eingegeben",
+        "notReady": "Erweiterung nicht bereit",
+        "noDevice": "Geräte-ID nicht generiert",
+        "errPhoneNotRegistered": "Diese Telefonnummer ist nicht registriert",
+        "errNotPurchased": "Cloud-Sync für dieses Konto nicht aktiviert",
+        "errRateLimit": "Zu viele Anfragen, bitte später versuchen",
+        "errTooManyAccounts": "Zu viele Kontowechsel heute, bitte morgen versuchen",
+        "errInvalidPhone": "Ungültiges Telefonnummernformat",
+        "errNetwork": "Netzwerkfehler",
         "notFound": "Konto nicht gefunden oder nicht aktiviert",
         "rateLimit": "Zu viele Anfragen, bitte später versuchen",
         "syncFailed": "Konfigurationssynchronisierung fehlgeschlagen",

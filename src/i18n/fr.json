@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "Appuyez longuement sur cet engrenage pendant 1 seconde pour récupérer la config cloud ▶ écraser la config locale",
         "export": {
             "success": "📦 Historique exporté intégralement",
             "error": "Exportation échouée: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: Commande d'installation copiée dans le presse-papiers: {0}",
         "elapsed": "Durée",
         "cannotOpenFile": "Impossible d'ouvrir le fichier: {0}",
-        "trialModeHint": "Mode d'essai: Les paramètres ne sont valides que pour cette session et seront réinitialisés au redémarrage.",
+        "trialModeHint": "Les modifications locales des préférences ne seront pas enregistrées (version d'essai uniquement). Pour enregistrer vos préférences, veuillez acheter la version complète et les modifier sur le site officiel.",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}: {1}",
         "engineStartFailed": "{0}: Échec du démarrage / indisponible",
@@ -831,6 +832,17 @@
     },
     "wq": {
         "syncSuccess": "Configuration synchronisée avec succès",
+        "syncSuccessFmt": "{0} configuration récupérée avec succès",
+        "syncFailedFmt": "{0} échec de la récupération : {1}",
+        "noPhone": "Aucun compte saisi",
+        "notReady": "Extension non prête",
+        "noDevice": "ID d'appareil non généré",
+        "errPhoneNotRegistered": "Ce numéro de téléphone n'est pas enregistré",
+        "errNotPurchased": "La synchronisation cloud n'est pas activée pour ce compte",
+        "errRateLimit": "Trop de requêtes, veuillez réessayer plus tard",
+        "errTooManyAccounts": "Trop de changements de compte aujourd'hui, veuillez réessayer demain",
+        "errInvalidPhone": "Format de numéro de téléphone invalide",
+        "errNetwork": "Erreur réseau",
         "notFound": "Compte non trouvé ou non activé",
         "rateLimit": "Trop de requêtes, veuillez réessayer plus tard",
         "syncFailed": "Échec de la synchronisation de la configuration",

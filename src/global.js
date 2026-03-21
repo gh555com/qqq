@@ -1857,11 +1857,11 @@ const AUTO_CLOSE_SECONDS = 9; // ★ Global default seconds; change this one num
  */
 function showAutoCloseNotification(type, message, seconds) {
 	const sec = (typeof seconds === 'number' && seconds > 0) ? seconds : AUTO_CLOSE_SECONDS;
-	const prefixMap = { 'success': '✅ ', 'cancel': '❌ ', 'error': '⚠️ ', 'warning': '⚠️ ', 'info': '' };
-	const prefix = prefixMap[type] || '';
-	// ★ Single source of truth: auto-prepend "qqq: " prefix if missing
-	const qPrefix = /^qqq[:\uff1a]/i.test(message) ? '' : 'qqq: ';
-	const text = `${prefix}${qPrefix}${message}`;
+	const prefixMap = { 'success': '✅', 'cancel': '❌', 'error': '⚠️', 'warning': '⚠️', 'info': '' };
+	const emoji = prefixMap[type] || '';
+	// ★ 格式：qqq: ✅message 或 qqq: ⚠️message（qqq 是播报者，放在最前）
+	const qPrefix = /^qqq[:：]/i.test(message) ? '' : 'qqq: ';
+	const text = `${qPrefix}${emoji}${message}`;
 	vscode.window.withProgress({
 		location: vscode.ProgressLocation.Notification,
 		title: '',
@@ -2156,8 +2156,10 @@ const ConfigManager = {
 			if (!event.affectsConfiguration(fullKey)) continue;
 
 			const val = vscode.workspace.getConfiguration("qqq").get(key);
-			const cur = this.get(key);
-			if (val === cur) continue;
+			// ★ 比较 session 缓存而不是 get()，因为 get() 会读 settings.json 导致永远相等
+			const sessionVal = _sessionOverrides[key];
+			const compareVal = sessionVal !== undefined ? sessionVal : DEFAULT_CONFIG[key];
+			if (val === compareVal) continue;
 
 			// VIP: persist; non-VIP: session + bounce-clear
 			await this.set(key, val, { persist: _isVip });
@@ -2554,14 +2556,12 @@ async function syncCloudConfig(phone, options = {}) {
 			for (const [key, value] of Object.entries(data.profile)) {
 				await extensionContext.globalState.update(`cfg_${key}`, value);
 			}
-			const displayPhone = data.phone || phone.slice(0, 3) + '****' + phone.slice(-4);
-			const msg = q('wq.syncSuccessFmt', displayPhone);
+			const msg = q('wq.syncSuccessFmt', phone);
 			if (!silent) showAutoCloseNotification('success', msg);
-			logMessage(`[wq] Config synced for phone: ${phone.slice(0, 4)}****`, 'INFO');
+			logMessage(`[wq] Config synced for phone: ${phone}`, 'INFO');
 			return { success: true, message: msg };
 		} else {
 			// 根据错误类型返回对应消息
-			const displayPhone = data.phone || phone.slice(0, 3) + '****' + phone.slice(-4);
 			let reason = data.error || 'unknown';
 			if (data.error === 'phone_not_registered') reason = q('wq.errPhoneNotRegistered');
 			else if (data.error === 'not_purchased') reason = q('wq.errNotPurchased');
@@ -2569,14 +2569,13 @@ async function syncCloudConfig(phone, options = {}) {
 			else if (data.error === 'too_many_accounts') reason = q('wq.errTooManyAccounts');
 			else if (data.error === 'invalid_phone') reason = q('wq.errInvalidPhone');
 
-			const msg = q('wq.syncFailedFmt', displayPhone, reason);
+			const msg = q('wq.syncFailedFmt', phone, reason);
 			showAutoCloseNotification('warning', msg);
 			return { success: false, message: msg };
 		}
 	} catch (e) {
 		logMessage(`[wq] Sync config error: ${e.message}`, 'WARN');
-		const displayPhone = phone.slice(0, 3) + '****' + phone.slice(-4);
-		const msg = q('wq.syncFailedFmt', displayPhone, q('wq.errNetwork'));
+		const msg = q('wq.syncFailedFmt', phone, q('wq.errNetwork'));
 		showAutoCloseNotification('error', msg);
 		return { success: false, message: msg };
 	}
