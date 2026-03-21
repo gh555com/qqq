@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "配置同步成功",
-        "syncSuccessFmt": "{0} 拉取配置 成功",
+        "syncSuccessFmt": "{0} 拉取配置成功，已覆蓋本地 {1} 條目",
         "syncFailedFmt": "{0} 拉取失敗：{1}",
         "noPhone": "未填寫帳號",
+        "fetching": "拉取雲端配置中...",
         "notReady": "擴充功能未就緒",
         "noDevice": "設備標識未生成",
         "errPhoneNotRegistered": "該手機號未註冊",

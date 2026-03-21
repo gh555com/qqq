@@ -4,6 +4,60 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.0.0] - 2026-03-21
+
+### Added
+- **Server-controlled watermark removal**: Watermark removal is now controlled by server-side `removeWatermark` field
+  - Client has NO local option to remove watermark
+  - Only `removeWatermark: true` from server removes watermark
+  - Purchased users can toggle this option on web portal
+  - Network failure / unpurchased = watermark shown (fail-safe)
+
+### Changed
+- **Separated concerns**: `isPro()` controls config persistence, `shouldRemoveWatermark()` controls watermark display
+
+---
+
+## [15.73.136] - 2026-03-21
+
+### Changed
+- **Gear long-press popup sequence**: Two-stage notification for better feedback
+  - Stage 1 (immediate): "Fetching cloud config..." popup + sound effect
+  - Stage 2 (after response): Success or failure result popup
+  - If instant error (no phone, not ready): Only stage 1 popup with error message
+  - Both popups auto-dismiss after 9 seconds
+
+### i18n
+- Added `wq.fetching` ("Fetching cloud config...") to all 11 languages
+
+---
+
+## [15.73.135] - 2026-03-21
+
+### Changed
+- **Gear button interaction**: Long-press triggers immediately at 1 second (no need to release)
+  - Long-press ≥1s: Plays `pas2.mp3` + silent cloud config fetch (no popup, no settings panel)
+  - Single click: Opens settings + shows 9s hint popup
+- **Trial mode popup**: Decoupled from cloud sync, only triggers on manual Settings UI changes
+  - Shows once per window lifecycle, resets on restart
+  - Updated text: explains local changes are trial-only, directs to official website
+- **Notification format**: Fixed `⚠️ qqq: msg` → `qqq: ⚠️msg` (qqq as announcer prefix)
+- **Phone display**: No masking in popups/logs, show full original number
+- **Sound effects**: q2 unpin button changed from `pas2.mp3` to `kj2.mp3`
+
+### i18n
+- **config.phone.desc**: Full 11-language coverage with links and fetch methods explanation
+- **Cloud sync messages**: Added `syncSuccessFmt`, `syncFailedFmt`, `noPhone`, `errPhoneNotRegistered`, `errNotPurchased`, `errRateLimit`, `errTooManyAccounts`, `errInvalidPhone`, `errNetwork` to all 11 languages
+- **Gear click hint**: Added `q4.gearClickHint` to all 11 languages
+- **Trial mode hint**: Updated `trialModeHint` in all 11 languages
+
+### Technical
+- JavaScript `q4.js`: Gear button uses `setTimeout` for immediate 1s trigger, `mouseup` cancels timer
+- JavaScript `global.js`: Fixed `showAutoCloseNotification` emoji/prefix order
+- JavaScript `global.js`: `handleVscodeConfigChanged` compares against session cache instead of `get()`
+
+---
+
 ## [15.73.134] - 2026-03-21
 
 ### Added

@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "설정 동기가 완료되었습니다",
-        "syncSuccessFmt": "{0} 설정 가져오기 성공",
+        "syncSuccessFmt": "{0} 설정 가져오기 성공, {1}개 항목 덮어쓰기",
         "syncFailedFmt": "{0} 가져오기 실패: {1}",
         "noPhone": "계정이 입력되지 않았습니다",
+        "fetching": "클라우드 설정 가져오는 중...",
         "notReady": "확장 프로그램이 준비되지 않았습니다",
         "noDevice": "장치 ID가 생성되지 않았습니다",
         "errPhoneNotRegistered": "이 전화번호는 등록되지 않았습니다",

@@ -2227,12 +2227,14 @@ async function renderImages(editor) {
 				if (webpDuration > 0.1 && performanceMode === "optmum")
 					progressBarUrl = `url("${createProgressSvg(webpDuration, previewWidth)}")`;
 
-				// Select watermark based on frame size
+				// Select watermark based on frame size (only remove if server says so)
 				let selectedWatermark = null;
-				if (previewWidth === LARGE_PREVIEW_WIDTH && previewHeight === LARGE_PREVIEW_HEIGHT) {
-					selectedWatermark = largeWatermarkBase64;
-				} else if (previewWidth === SMALL_PREVIEW_WIDTH && previewHeight === SMALL_PREVIEW_HEIGHT) {
-					selectedWatermark = smallWatermarkBase64;
+				if (!global.shouldRemoveWatermark()) {
+					if (previewWidth === LARGE_PREVIEW_WIDTH && previewHeight === LARGE_PREVIEW_HEIGHT) {
+						selectedWatermark = largeWatermarkBase64;
+					} else if (previewWidth === SMALL_PREVIEW_WIDTH && previewHeight === SMALL_PREVIEW_HEIGHT) {
+						selectedWatermark = smallWatermarkBase64;
+					}
 				}
 
 				deco.renderOptions.after = buildAfterStyle({
@@ -3380,6 +3382,12 @@ async function activate(context) {
 		if (cleanFreakMode !== oldCleanFreakMode && q1Utils.onCleanFreakModeChange) {
 			q1Utils.onCleanFreakModeChange(cleanFreakMode);
 		}
+	});
+
+	// ★ 水印状态变化时刷新所有已渲染的相框
+	global.onWatermarkChange((shouldRemove) => {
+		global.logMessage(`[Watermark] Status changed: removeWatermark=${shouldRemove}, refreshing all frames...`, "INFO");
+		forceFullUpdateAllVisibleEditors();
 	});
 
 	// ★ Ultimate optimal: privilege boost, never await before registration

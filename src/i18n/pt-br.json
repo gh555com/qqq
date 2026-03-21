@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "Configuração sincronizada com sucesso",
-        "syncSuccessFmt": "{0} configuração obtida com sucesso",
+        "syncSuccessFmt": "{0} configuração obtida, {1} itens sobrescritos",
         "syncFailedFmt": "{0} falha ao obter: {1}",
         "noPhone": "Nenhuma conta inserida",
+        "fetching": "Obtendo configuração da nuvem...",
         "notReady": "Extensão não pronta",
         "noDevice": "ID do dispositivo não gerado",
         "errPhoneNotRegistered": "Este número de telefone não está registrado",

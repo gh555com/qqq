@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "Konfiguration erfolgreich synchronisiert",
-        "syncSuccessFmt": "{0} Konfiguration erfolgreich abgerufen",
+        "syncSuccessFmt": "{0} Konfiguration abgerufen, {1} Einträge überschrieben",
         "syncFailedFmt": "{0} Abruf fehlgeschlagen: {1}",
         "noPhone": "Kein Konto eingegeben",
+        "fetching": "Cloud-Konfiguration wird abgerufen...",
         "notReady": "Erweiterung nicht bereit",
         "noDevice": "Geräte-ID nicht generiert",
         "errPhoneNotRegistered": "Diese Telefonnummer ist nicht registriert",

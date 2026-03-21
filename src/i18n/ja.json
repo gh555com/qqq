@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "設定の同期が完了しました",
-        "syncSuccessFmt": "{0} 設定の取得に成功",
+        "syncSuccessFmt": "{0} 設定取得成功、{1} 項目を上書き",
         "syncFailedFmt": "{0} 取得失敗：{1}",
         "noPhone": "アカウントが入力されていません",
+        "fetching": "クラウド設定を取得中...",
         "notReady": "拡張機能が準備できていません",
         "noDevice": "デバイスIDが生成されていません",
         "errPhoneNotRegistered": "この電話番号は登録されていません",
