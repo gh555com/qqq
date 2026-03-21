@@ -1261,6 +1261,20 @@ class ClipboardHistorySidebarProvider {
                     global.syncCloudConfig(phone, { silent: false });
                     break;
                 }
+                case 'syncCloudConfigSilentWithSfx': {
+                    // ★ 长按齿轮 1 秒：播放音效 + 静默拉取云端配置
+                    if (global.pythonBridge?.isAvailable()) {
+                        global.pythonBridge.call('play_sfx', { category: 'yz', name: 'pas2.mp3' }, 1000).catch(() => { });
+                    }
+                    const phone2 = vscode.workspace.getConfiguration('qqq').get('phone');
+                    global.syncCloudConfig(phone2, { silent: true });
+                    break;
+                }
+                case 'showGearClickHint': {
+                    // ★ 单击齿轮按钮时提示
+                    global.showAutoCloseNotification('info', global.q('q4.gearClickHint'));
+                    break;
+                }
                 case 'copyToClipboard': {
                     const node = this._historyManager.getItemById(msg.itemId);
                     if (node) {
@@ -2456,12 +2470,25 @@ class ClipboardHistorySidebarProvider {
                 post('copyToClipboard', { itemId: id });
             });
 
-            // ★ 齿轮按钮长按检测（长按超过 1 秒拉取云端配置）
-            var allSettingsMouseDownTime = 0;
+            // ★ 齿轮按钮长按检测（长按到达 1 秒立即触发，无需等待抬起）
+            var gearLongPressTimer = null;
+            var gearLongPressTriggered = false;
             document.addEventListener('mousedown', function(e) {
                 var cmdBtn = e.target.closest('.cmd-btn');
                 if (cmdBtn && cmdBtn.dataset.cmd === 'qqq.allSettings') {
-                    allSettingsMouseDownTime = Date.now();
+                    gearLongPressTriggered = false;
+                    gearLongPressTimer = setTimeout(function() {
+                        gearLongPressTriggered = true;
+                        // ★ 长按 1 秒立即触发：播放音效 + 静默拉取云端配置
+                        post('syncCloudConfigSilentWithSfx', {});
+                    }, 1000);
+                }
+            });
+            document.addEventListener('mouseup', function(e) {
+                // 抬起时取消定时器（如果还未触发）
+                if (gearLongPressTimer) {
+                    clearTimeout(gearLongPressTimer);
+                    gearLongPressTimer = null;
                 }
             });
 
@@ -2470,15 +2497,14 @@ class ClipboardHistorySidebarProvider {
                 if (cmdBtn && cmdBtn.dataset.cmd) {
                     var cmd = cmdBtn.dataset.cmd;
 
-                    // ★ 齿轮按钮长按检测：超过 1 秒则拉取云端配置，否则打开设置
+                    // ★ 齿轮按钮：如果长按已触发，跳过单击逻辑
                     if (cmd === 'qqq.allSettings') {
-                        var pressDuration = Date.now() - allSettingsMouseDownTime;
-                        allSettingsMouseDownTime = 0;
-                        if (pressDuration >= 1000) {
-                            // 长按超过 1 秒，拉取云端配置
-                            post('syncCloudConfig', {});
-                            return; // 不执行后续逻辑
+                        if (gearLongPressTriggered) {
+                            gearLongPressTriggered = false;
+                            return; // 长按已触发，不执行单击逻辑
                         }
+                        // ★ 单击时弹出提示
+                        post('showGearClickHint', {});
                     }
 
                     post('executeCommand', { cmd: cmd });

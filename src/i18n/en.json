@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "Long-press this gear for 1 second to fetch cloud config \u25b6 override local config",
         "export": {
             "success": "📦 History exported successfully",
             "error": "Export failed: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: Install command copied to clipboard: {0}",
         "elapsed": "Elapsed",
         "cannotOpenFile": "Cannot open file: {0}",
-        "trialModeHint": "Trial mode: Settings only valid for this session, will reset on restart.",
+        "trialModeHint": "Local preference changes won't be saved (trial only). To save preferences, please purchase the full version and edit on the official website.",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}: {1}",
         "engineStartFailed": "{0}: Start failed / unavailable",

@@ -4696,7 +4696,7 @@ function showSaveAsDialog() {
         );
         // ★ Checkmark SFX
         if (global.pythonBridge?.isAvailable()) {
-          const sfxName = message.isPinned ? "a1.mp3" : "pas2.mp3";
+          const sfxName = message.isPinned ? "a1.mp3" : "kj2.mp3";
           global.pythonBridge.call("play_sfx", { category: "yz", name: sfxName }, 1000).catch(() => { });
         }
         break;

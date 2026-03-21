@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "この歯車を1秒長押しでクラウド設定を取得 ▶ ローカル設定を上書き",
         "export": {
             "success": "📦 履歴のエクスポートが完了しました",
             "error": "エクスポートに失敗: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: インストールコマンドをクリップボードにコピーしました: {0}",
         "elapsed": "経過時間",
         "cannotOpenFile": "ファイルを開けません: {0}",
-        "trialModeHint": "試用モード：設定は今回のみ有効で、再起動後にデフォルトに戻ります。",
+        "trialModeHint": "ローカルでの設定変更は保存されません（体験版のみ）。設定を保存するには正規版を購入し、公式サイトのページで変更・保存してください。",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}: {1}",
         "engineStartFailed": "{0}: 起動失敗 / 利用不可",
@@ -831,6 +832,17 @@
     },
     "wq": {
         "syncSuccess": "設定の同期が完了しました",
+        "syncSuccessFmt": "{0} 設定の取得に成功",
+        "syncFailedFmt": "{0} 取得失敗：{1}",
+        "noPhone": "アカウントが入力されていません",
+        "notReady": "拡張機能が準備できていません",
+        "noDevice": "デバイスIDが生成されていません",
+        "errPhoneNotRegistered": "この電話番号は登録されていません",
+        "errNotPurchased": "このアカウントはクラウド同期が有効化されていません",
+        "errRateLimit": "リクエストが多すぎます。後でお試しください",
+        "errTooManyAccounts": "今日のアカウント切り替えが多すぎます。明日お試しください",
+        "errInvalidPhone": "電話番号の形式が無効です",
+        "errNetwork": "ネットワークエラー",
         "notFound": "アカウントが見つからないか有効化されていません",
         "rateLimit": "リクエストが多すぎます。後でお試しください",
         "syncFailed": "設定の同期に失敗しました",

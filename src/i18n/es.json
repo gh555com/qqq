@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "Mantenga presionado este engranaje 1 segundo para obtener config en la nube ▶ sobrescribir config local",
         "export": {
             "success": "📦 Historial exportado completamente",
             "error": "Exportación falló: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: Comando de instalación copiado al portapapeles: {0}",
         "elapsed": "Tiempo",
         "cannotOpenFile": "No se puede abrir el archivo: {0}",
-        "trialModeHint": "Modo de prueba: La configuración solo es válida para esta sesión y se restablecerá al reiniciar.",
+        "trialModeHint": "Los cambios de preferencias locales no se guardarán (solo versión de prueba). Para guardar las preferencias, compre la versión completa y edítelas en el sitio web oficial.",
         "taskPrefix": "qqq: '{0}{1}{2}'",
         "engineReason": "{0}: {1}",
         "engineStartFailed": "{0}: Fallo de inicio / no disponible",
@@ -831,6 +832,17 @@
     },
     "wq": {
         "syncSuccess": "Configuración sincronizada correctamente",
+        "syncSuccessFmt": "{0} configuración obtenida exitosamente",
+        "syncFailedFmt": "{0} error al obtener: {1}",
+        "noPhone": "No se ingresó cuenta",
+        "notReady": "Extensión no lista",
+        "noDevice": "ID de dispositivo no generado",
+        "errPhoneNotRegistered": "Este número de teléfono no está registrado",
+        "errNotPurchased": "La sincronización en la nube no está activada para esta cuenta",
+        "errRateLimit": "Demasiadas solicitudes, inténtelo más tarde",
+        "errTooManyAccounts": "Demasiados cambios de cuenta hoy, inténtelo mañana",
+        "errInvalidPhone": "Formato de número de teléfono inválido",
+        "errNetwork": "Error de red",
         "notFound": "Cuenta no encontrada o no activada",
         "rateLimit": "Demasiadas solicitudes, inténtelo más tarde",
         "syncFailed": "Error al sincronizar la configuración",

@@ -217,6 +217,7 @@
         }
     },
     "q4": {
+        "gearClickHint": "長按該齒輪一秒 可拉取雲端配置 ▶ 覆蓋本地配置",
         "export": {
             "success": "📦 歷史記錄已全量匯出",
             "error": "匯出失敗: {0}"
@@ -817,7 +818,7 @@
         "cmdCopied": "qqq: 安裝命令已複製到剪貼簿: {0}",
         "elapsed": "耗時",
         "cannotOpenFile": "無法開啟檔案: {0}",
-        "trialModeHint": "試用模式：設定僅本次有效，重啟後恢復預設。",
+        "trialModeHint": "本地修改偏好都不會被儲存（僅做體驗），要儲存偏好只能購買正版，進入官網，在網頁中修改和儲存。",
         "taskPrefix": "qqq：'{0}{1}{2}'",
         "engineReason": "{0}：{1}",
         "engineStartFailed": "{0}：啟動失敗 / 不可用",
@@ -831,6 +832,17 @@
     },
     "wq": {
         "syncSuccess": "配置同步成功",
+        "syncSuccessFmt": "{0} 拉取配置 成功",
+        "syncFailedFmt": "{0} 拉取失敗：{1}",
+        "noPhone": "未填寫帳號",
+        "notReady": "擴充功能未就緒",
+        "noDevice": "設備標識未生成",
+        "errPhoneNotRegistered": "該手機號未註冊",
+        "errNotPurchased": "該帳號未啟用雲同步",
+        "errRateLimit": "請求太頻繁，請稍後再試",
+        "errTooManyAccounts": "今日切換帳號太多，請明天再試",
+        "errInvalidPhone": "手機號格式錯誤",
+        "errNetwork": "網路錯誤",
         "notFound": "帳號未找到或未啟用",
         "rateLimit": "請求太頻繁，請稍後再試",
         "syncFailed": "配置同步失敗",
