@@ -1977,7 +1977,7 @@ const KEY_CACHE_MISS_TOTAL = "qqq_stats_cache_miss_total";
 let _durationTimer = null;
 
 // ============================================================================
-// ★ ConfigGate (ULTIMATE VIP/Trial Config System)
+// ★ ConfigGate (ULTIMATE Pro/Trial Config System)
 // ============================================================================
 const DEFAULT_CONFIG = {
 	"roamAsStartPage": true,
@@ -1994,7 +1994,7 @@ const DEFAULT_CONFIG = {
 	"transactionLevel": "half",
 	"textSlideColorScheme": "light",
 	"textSlideFontSize": 14,
-	// ★ Add missing config items (ensure VIP Gate fully covers)
+	// ★ Add missing config items (ensure Pro Gate fully covers)
 	"szDisplayMode": "nothing",
 	"sortBy": "name",
 	"autoWatchChanges": false,
@@ -2005,31 +2005,46 @@ const DEFAULT_CONFIG = {
 };
 
 
-// ===================== VIP / Trial ConfigGate (ULTIMATE) =====================
-let _isVip = true; // ★ Default true = VIP behavior (backward compatible until setVipMode is called)
+// ===================== Pro / Trial ConfigGate (ULTIMATE) =====================
+let _isPro = true; // ★ Default true = Pro behavior (backward compatible until setProMode is called)
+let _removeWatermark = false; // ★ 水印去除状态，只能由服务器返回的 removeWatermark 字段控制
 let _sessionOverrides = Object.create(null);
 let _suppressConfigEcho = 0; // Prevent "we echo settings back" from causing infinite loop
 let _trialHintShown = false;
 let _configChangeCallback = null;
 let _configUpdateCallbacks = []; // ★ List of callbacks after config update completes (fix race conditions)
-// ★ Bootstrap reset completion flag (non-VIP only)
+// ★ Bootstrap reset completion flag (non-Pro only)
 // Purpose: Prevent race condition where q2 opens before settings.json is cleared
-// - false: non-VIP get() returns DEFAULT_CONFIG directly (safe startup)
-// - true: non-VIP get() can read settings.json (cleared or user-modified in session)
-// Note: This flag ONLY affects non-VIP users. VIP users bypass this check entirely.
+// - false: non-Pro get() returns DEFAULT_CONFIG directly (safe startup)
+// - true: non-Pro get() can read settings.json (cleared or user-modified in session)
+// Note: This flag ONLY affects non-Pro users. Pro users bypass this check entirely.
 let _bootstrapResetDone = false;
 
-function setVipMode(v) {
-	_isVip = !!v;
+function setProMode(v) {
+	_isPro = !!v;
 	_sessionOverrides = Object.create(null); // Clear session overrides on mode switch to avoid cross-contamination
-	// ★ VIP users don't need bootstrap reset, mark as done immediately
-	// This ensures VIP users can always read settings.json without waiting
-	if (_isVip) {
+	// ★ Pro users don't need bootstrap reset, mark as done immediately
+	// This ensures Pro users can always read settings.json without waiting
+	if (_isPro) {
 		_bootstrapResetDone = true;
 	}
-	// logMessage(`[ConfigGate] VIP 模式设置为: ${_isVip}`, "INFO"); // qq2q
 }
-function isVip() { return _isVip; }
+function isPro() { return _isPro; }
+
+// ★ 水印去除状态：只有服务器返回 removeWatermark === true 时才去除水印
+let _watermarkChangeCallback = null;
+function setRemoveWatermark(v) {
+	const newVal = !!v;
+	if (_removeWatermark !== newVal) {
+		_removeWatermark = newVal;
+		// ★ 水印状态变化时触发回调（用于刷新已渲染的相框）
+		if (_watermarkChangeCallback) {
+			try { _watermarkChangeCallback(newVal); } catch (e) { }
+		}
+	}
+}
+function shouldRemoveWatermark() { return _removeWatermark; }
+function onWatermarkChange(cb) { _watermarkChangeCallback = cb; }
 
 // Hard bounce: delete qqq.xxx from settings.json (clear Global/Workspace/WorkspaceFolder)
 async function _clearVscodeSettingEverywhere(key) {
@@ -2061,26 +2076,26 @@ async function _clearVscodeSettingEverywhere(key) {
 
 const ConfigManager = {
 	get(key) {
-		// 1) Session overrides always win (VIP/non-VIP can both use for "instant override")
+		// 1) Session overrides always win (Pro/non-Pro can both use for "instant override")
 		if (Object.prototype.hasOwnProperty.call(_sessionOverrides, key)) {
 			return _sessionOverrides[key];
 		}
 
-		// 2) Non-VIP bootstrap guard: return default until settings.json is cleared
-		// ★ This check is SKIPPED for VIP users (_isVip=true makes condition false)
-		// ★ VIP users always proceed to step 3 immediately
-		if (!_isVip && !_bootstrapResetDone) {
+		// 2) Non-Pro bootstrap guard: return default until settings.json is cleared
+		// ★ This check is SKIPPED for Pro users (_isPro=true makes condition false)
+		// ★ Pro users always proceed to step 3 immediately
+		if (!_isPro && !_bootstrapResetDone) {
 			return DEFAULT_CONFIG[key];
 		}
 
-		// 3) Try to read settings.json (both VIP and non-VIP can read after bootstrap)
+		// 3) Try to read settings.json (both Pro and non-Pro can read after bootstrap)
 		try {
 			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
 			if (wsVal !== undefined) return wsVal;
 		} catch { }
 
-		// 4) VIP only: read DB (globalState) for persisted configs
-		if (_isVip && extensionContext) {
+		// 4) Pro only: read DB (globalState) for persisted configs
+		if (_isPro && extensionContext) {
 			// Backward compatible old trailing-space key
 			const v1 = extensionContext.globalState.get(`cfg_${key}`);
 			if (v1 !== undefined) return v1;
@@ -2092,27 +2107,27 @@ const ConfigManager = {
 		return DEFAULT_CONFIG[key];
 	},
 
-	// Ultimate set: VIP can persist; non-VIP session-only
+	// Ultimate set: Pro can persist; non-Pro session-only
 	async set(key, value, opts = {}) {
 		const persist = opts.persist !== false; // default true
 		_sessionOverrides[key] = value;
 
 		if (_configChangeCallback) _configChangeCallback(key, value);
 
-		if (!_isVip || !persist) {
-			// Non-VIP: never write DB
+		if (!_isPro || !persist) {
+			// Non-Pro: never write DB
 			// ★ Ultimate fix: no longer aggressively clear settings.json in real time
 			// Because VS Code won't fire events for "choose default" (if settings.json doesn't have it)
 			// Keep settings.json value so VS Code can detect changes normally
-			// Reset on restart is done via nonVipBootstrapResetAll() during startup
-			if (!_isVip && !_trialHintShown) {
+			// Reset on restart is done via nonProBootstrapResetAll() during startup
+			if (!_isPro && !_trialHintShown) {
 				_trialHintShown = true;
 				try { showAutoCloseNotification('info', q('global.trialModeHint')); } catch { }
 			}
 			return;
 		}
 
-		// VIP: write DB (globalState) with new key (no trailing space), and clear old key
+		// Pro: write DB (globalState) with new key (no trailing space), and clear old key
 		if (extensionContext) {
 			await extensionContext.globalState.update(`cfg_${key}`, value);
 			await extensionContext.globalState.update(`cfg_${key} `, undefined); // Clear old
@@ -2132,13 +2147,13 @@ const ConfigManager = {
 		_configChangeCallback = cb;
 	},
 
-	// On non-VIP startup: clear all qqq.* settings once to ensure "reset on restart"
-	async nonVipBootstrapResetAll() {
-		if (_isVip) {
-			_bootstrapResetDone = true; // VIP: no clearing needed, mark ready immediately
+	// On non-Pro startup: clear all qqq.* settings once to ensure "reset on restart"
+	async nonProBootstrapResetAll() {
+		if (_isPro) {
+			_bootstrapResetDone = true; // Pro: no clearing needed, mark ready immediately
 			return;
 		}
-		// logMessage("[ConfigGate] 非 VIP 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO"); // qq2q
+		// logMessage("[ConfigGate] 非 Pro 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO"); // qq2q
 		for (const k of Object.keys(DEFAULT_CONFIG)) {
 			await _clearVscodeSettingEverywhere(k);
 		}
@@ -2161,8 +2176,8 @@ const ConfigManager = {
 			const compareVal = sessionVal !== undefined ? sessionVal : DEFAULT_CONFIG[key];
 			if (val === compareVal) continue;
 
-			// VIP: persist; non-VIP: session + bounce-clear
-			await this.set(key, val, { persist: _isVip });
+			// Pro: persist; non-Pro: session + bounce-clear
+			await this.set(key, val, { persist: _isPro });
 			changedKeys.push(key);
 		}
 
@@ -2196,7 +2211,7 @@ function getConfig(key) {
 }
 
 async function setConfig(key, value) {
-	await ConfigManager.set(key, value, { persist: _isVip });
+	await ConfigManager.set(key, value, { persist: _isPro });
 }
 
 let _cacheHitTotal = 0;
@@ -2480,19 +2495,20 @@ function safeParseJson(text, tag = 'api') {
 let _phoneVerifyDebounce = null;
 
 /**
- * 抓取云端配置并应用到本地
+ * 拉取云端配置并应用到本地
  * @param {string} phone - 手机号
  * @param {object} options - 选项
  * @param {boolean} options.silent - 是否静默模式（成功不弹窗，只在失败时弹窗）
+ * @param {boolean} options.showFetching - 是否先显示"拉取中..."弹窗（用于长按齿轮场景）
  * @returns {Promise<{success: boolean, message: string}>}
  */
 async function syncCloudConfig(phone, options = {}) {
-	const { silent = false } = options;
+	const { silent = false, showFetching = false } = options;
 
-	// 未填写账号
+	// 未填写账号 - 立即返回，只弹一号弹窗
 	if (!phone || !phone.trim()) {
 		const msg = q('wq.noPhone');
-		if (!silent) showAutoCloseNotification('warning', msg);
+		if (!silent || showFetching) showAutoCloseNotification('warning', msg);
 		return { success: false, message: msg };
 	}
 
@@ -2500,15 +2516,20 @@ async function syncCloudConfig(phone, options = {}) {
 
 	if (!extensionContext) {
 		const msg = q('wq.notReady');
-		if (!silent) showAutoCloseNotification('warning', msg);
+		if (!silent || showFetching) showAutoCloseNotification('warning', msg);
 		return { success: false, message: msg };
 	}
 
 	const deviceId = getDeviceId();
 	if (!deviceId) {
 		const msg = q('wq.noDevice');
-		if (!silent) showAutoCloseNotification('warning', msg);
+		if (!silent || showFetching) showAutoCloseNotification('warning', msg);
 		return { success: false, message: msg };
+	}
+
+	// ★ 需要网络请求，先弹出"拉取中..."一号弹窗
+	if (showFetching) {
+		showAutoCloseNotification('info', q('wq.fetching'));
 	}
 
 	try {
@@ -2552,13 +2573,22 @@ async function syncCloudConfig(phone, options = {}) {
 		});
 
 		if (data.ok && data.profile) {
-			// 写入配置到 globalState（不写 settings.json）
+			// ★ 已购买用户，激活 Pro 模式（配置可持久化）
+			setProMode(true);
+			// ★ 水印去除状态由服务器 removeWatermark 字段控制
+			setRemoveWatermark(data.profile.removeWatermark === true);
+			// ★ 比对本地与云端配置差异，统计覆盖条目数
+			let overwriteCount = 0;
 			for (const [key, value] of Object.entries(data.profile)) {
+				const localVal = extensionContext.globalState.get(`cfg_${key}`);
+				if (localVal !== value) {
+					overwriteCount++;
+				}
 				await extensionContext.globalState.update(`cfg_${key}`, value);
 			}
-			const msg = q('wq.syncSuccessFmt', phone);
+			const msg = q('wq.syncSuccessFmt', phone, overwriteCount);
 			if (!silent) showAutoCloseNotification('success', msg);
-			logMessage(`[wq] Config synced for phone: ${phone}`, 'INFO');
+			logMessage(`[wq] Config synced for phone: ${phone}, Pro mode activated, removeWatermark=${data.profile.removeWatermark}, overwritten=${overwriteCount}`, 'INFO');
 			return { success: true, message: msg };
 		} else {
 			// 根据错误类型返回对应消息
@@ -4409,6 +4439,7 @@ module.exports = {
 	// Dialogs
 	showInformationMessage,
 	showAutoCloseNotification,
+	q,  // ★ i18n 翻译函数
 	showErrorMessage,
 	showWarningMessage,
 	showInputBox,
@@ -4449,8 +4480,10 @@ module.exports = {
 	ConfigManager,
 	getConfig,
 	setConfig,
-	setVipMode,
-	isVip,
+	setProMode,
+	isPro,
+	shouldRemoveWatermark,
+	onWatermarkChange,  // ★ 水印状态变化回调（用于刷新相框）
 
 	pythonBridge,
 	rustBridge,

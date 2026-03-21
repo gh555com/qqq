@@ -1262,12 +1262,12 @@ class ClipboardHistorySidebarProvider {
                     break;
                 }
                 case 'syncCloudConfigSilentWithSfx': {
-                    // ★ 长按齿轮 1 秒：播放音效 + 静默拉取云端配置
+                    // ★ 长按齿轮 1 秒：播放音效 + 拉取云端配置（先弹"拉取中..."，拉取完再弹结果）
                     if (global.pythonBridge?.isAvailable()) {
                         global.pythonBridge.call('play_sfx', { category: 'yz', name: 'pas2.mp3' }, 1000).catch(() => { });
                     }
                     const phone2 = vscode.workspace.getConfiguration('qqq').get('phone');
-                    global.syncCloudConfig(phone2, { silent: true });
+                    global.syncCloudConfig(phone2, { silent: false, showFetching: true });
                     break;
                 }
                 case 'showGearClickHint': {

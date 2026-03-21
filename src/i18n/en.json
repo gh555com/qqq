@@ -832,9 +832,10 @@
     },
     "wq": {
         "syncSuccess": "Configuration synced successfully",
-        "syncSuccessFmt": "{0} fetched config successfully",
+        "syncSuccessFmt": "{0} config fetched, {1} items overwritten",
         "syncFailedFmt": "{0} fetch failed: {1}",
         "noPhone": "No account provided",
+        "fetching": "Fetching cloud config...",
         "notReady": "Extension not ready",
         "noDevice": "Device ID not generated",
         "errPhoneNotRegistered": "This phone number is not registered",

@@ -1531,13 +1531,13 @@ async function activate(context) {
 
 	global.logMessage(q('qqq.log.activating'), "INFO");
 
-	// ★ Ultimate version: inject VIP mode (after you verify, replace false with actual isVip variable)
-	const isVip = false; // ★ Currently non-VIP mode; all configs cannot be saved
-	global.setVipMode(isVip);
+	// ★ Ultimate version: inject Pro mode (after you verify, replace false with actual isPro variable)
+	const isPro = false; // ★ Currently non-Pro mode; all configs cannot be saved
+	global.setProMode(isPro);
 
-	// ★ On non-VIP startup, clear all qqq.* configs in settings.json to ensure "restart resets"
-	if (!isVip) {
-		global.ConfigManager.nonVipBootstrapResetAll().catch(() => { });
+	// ★ On non-Pro startup, clear all qqq.* configs in settings.json to ensure "restart resets"
+	if (!isPro) {
+		global.ConfigManager.nonProBootstrapResetAll().catch(() => { });
 	}
 
 	// ★ Cache must be initialized immediately (no delay), otherwise user actions will trigger SETUP_FAIL

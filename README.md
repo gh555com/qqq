@@ -160,8 +160,12 @@ Leave a one-time tip of around **$15 (~100 ge)**, and as a thank-you, you'll get
 Additionally, there are 2 ways to obtain a Premium license key:
 
 #### Method 1: Earn It in 100 Days
-Register as a **的梦gaea member** to automatically receive **1 ge per day**—no login, no check-in, no tasks required.
+Register as a part of **的梦gaea** to automatically receive **1 ge per day**—no login, no check-in, no tasks required.
 Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
+
+[Get Account](https://www.gh555.com/login)　[Buy License](https://www.gh555.com/gaea/d/qqq#price)　[▶Save Preferences](https://www.gh555.com/gaea/d/qqq#profile)
+
+
 
 #### Method 2: Contribute a Video
 On the other hand, you can create and publish an independent qqq introduction video, and receive rewards based on the video quality:
