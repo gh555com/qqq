@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.0.2] - 2026-03-21
+
+### Added
+- **Real-time watermark refresh**: When watermark status changes, all rendered frames refresh immediately
+  - Added `onWatermarkChange()` callback mechanism in `global.js`
+  - `q1.js` registers callback to trigger `forceFullUpdateAllVisibleEditors()`
+  - No need to reopen files - existing frames update in-place
+
+### Fixed
+- **Gear click hint not showing**: Exported `q` function from `global.js` (was missing)
+- **Cloud config not taking effect**: Config now applies immediately after fetch
+  - Updates `_sessionOverrides` (in-memory, instant effect)
+  - Writes to VS Code settings.json (Settings UI updates immediately)
+  - Triggers `_configUpdateCallbacks` (q1/q2/q4 components refresh)
+  - Filters special fields (`removeWatermark`) and non-config keys
+
+### Changed
+- **Overwrite count accuracy**: Only counts keys in `DEFAULT_CONFIG`, logs changed keys for debugging
+
+---
+
 ## [16.0.0] - 2026-03-21
 
 ### Added
