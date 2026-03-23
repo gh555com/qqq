@@ -2579,16 +2579,41 @@ async function syncCloudConfig(phone, options = {}) {
 			setRemoveWatermark(data.profile.removeWatermark === true);
 			// ★ 比对本地与云端配置差异，统计覆盖条目数
 			let overwriteCount = 0;
+			const changedKeys = [];
 			for (const [key, value] of Object.entries(data.profile)) {
-				const localVal = extensionContext.globalState.get(`cfg_${key}`);
+				// ★ 跳过特殊字段（不是 qqq 配置项）
+				if (key === 'removeWatermark') continue;
+				// ★ 只处理 DEFAULT_CONFIG 中存在的配置项
+				if (!(key in DEFAULT_CONFIG)) continue;
+
+				const localVal = ConfigManager.get(key);
 				if (localVal !== value) {
 					overwriteCount++;
+					changedKeys.push(key);
 				}
+				// ★ 保存到 globalState（持久化）
 				await extensionContext.globalState.update(`cfg_${key}`, value);
+				// ★ 更新 sessionOverrides（立即生效）
+				_sessionOverrides[key] = value;
+				// ★ 写入 VS Code settings.json（Settings UI 显示）
+				try {
+					_suppressConfigEcho++;
+					await vscode.workspace.getConfiguration('qqq').update(key, value, vscode.ConfigurationTarget.Global);
+				} catch (e) {
+					logMessage(`[wq] Failed to write settings.json for ${key}: ${e.message}`, 'WARN');
+				} finally {
+					_suppressConfigEcho--;
+				}
+			}
+			// ★ 触发配置变更回调（让 q1/q2/q4 等组件刷新）
+			if (changedKeys.length > 0 && _configUpdateCallbacks.length > 0) {
+				for (const cb of _configUpdateCallbacks) {
+					try { cb(changedKeys, null); } catch (e) { }
+				}
 			}
 			const msg = q('wq.syncSuccessFmt', phone, overwriteCount);
 			if (!silent) showAutoCloseNotification('success', msg);
-			logMessage(`[wq] Config synced for phone: ${phone}, Pro mode activated, removeWatermark=${data.profile.removeWatermark}, overwritten=${overwriteCount}`, 'INFO');
+			logMessage(`[wq] Config synced for phone: ${phone}, Pro mode activated, removeWatermark=${data.profile.removeWatermark}, overwritten=${overwriteCount}, keys=[${changedKeys.join(',')}]`, 'INFO');
 			return { success: true, message: msg };
 		} else {
 			// 根据错误类型返回对应消息

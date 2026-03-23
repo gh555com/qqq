@@ -185,7 +185,7 @@ Post the link to your published video to info@gh555.com.
 However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
 1. Removal of watermarks
 2. Persistence (cloud storage) of preferences
-3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 15802858204 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement)  )
+3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement)  )
 
 Apart from these, both versions are completely identical in terms of functionality and usage.
 
