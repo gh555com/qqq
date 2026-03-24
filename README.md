@@ -96,10 +96,13 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
 
  You can organize your ideas now.
 
-And you’ll be faster:
+ There’s just one more small thing - you need to be able to jump between arbitrary directories:
+
 
 
 ## ✦q✦ A Revolution of the Tab Key (without breaking the default Tab behavior)
+
+ Trigger: Press Tab while the window has focus but is not in editing mode, or directly click the Roam command/button.
 
 Before 2026, Tab helped you code fast.
 
@@ -239,8 +242,8 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
- Direct paste, Direct show, Direct open everything, organize your resource collection in any way you like, that make your records more comprehensive and your creativity more robust — there is no other solution that can deliver this for you without qqq. qqq was launched in December 2025. Even if there are copycat products in the future, qqq will always be the cleanest and healthiest one, vs code is deficient without qqq.
-For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555.qqq, this download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
+
+For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555.qqq. Or, actually, the best way is to simply open any of your IDEs, type "qqq" directly into the official extension marketplace in the sidebar, and install it. that download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/i18.png" alt="i18n">
 </p>
