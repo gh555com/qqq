@@ -249,6 +249,12 @@ For the best practice, download qqq from the official Marketplace at https://mar
 </p>
 
 
+ ## About qqq Resource Footprint
+Built on a highly efficient Rust-based underlying architecture with extreme performance optimization, qqq's idle CPU and disk IO overhead approach absolute zero. Its ultra-low memory footprint is also remarkably prominent, especially in scenarios where multiple IDEs (Cursor, Antigravity, etc.) are running simultaneously with a large number of open windows. For architectural details: https://github.com/gh555com/qqq/blob/qq/docs/IO_ENGINE_v16.md
+
+
+ ## Security
+The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md
 
 
 
