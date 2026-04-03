@@ -2369,7 +2369,7 @@ function getIDEFamily() {
  */
 function getClientVersion() {
 	try {
-		return vscode.extensions.getExtension('gh555com.qqq')?.packageJSON?.version || 'unknown';
+		return extensionContext?.extension?.packageJSON?.version || 'unknown';
 	} catch { }
 	return 'unknown';
 }
@@ -4576,6 +4576,7 @@ module.exports = {
 	getActiveEngineName,
 	invalidateEngineCache,  // ★ Refresh engine cache
 	extensionPath: () => extensionContext?.extensionPath,
+	extensionId: () => extensionContext?.extension?.id,
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 	ensureFFmpegReady,

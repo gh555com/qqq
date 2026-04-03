@@ -4716,7 +4716,7 @@ function showSaveAsDialog() {
 
             // Link Q4 stats: accumulate created file count
             try {
-              const q4 = vscode.extensions.getExtension('gh555com.qqq')?.exports;
+              const q4 = vscode.extensions.getExtension(global.extensionId())?.exports;
               if (q4 && typeof q4.recordRoamUsage === 'function') {
                 q4.recordRoamUsage({ filesCreated: 1 });
               }
