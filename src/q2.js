@@ -5149,9 +5149,22 @@ async function activate(context) {
     })
   );
 
+  // ★ 防御性命令注册：防止开发环境热重载或新旧版本共存时命令重复注册
+  const safeRegisterCommand = (commandId, handler) => {
+    try {
+      return vscode.commands.registerCommand(commandId, handler);
+    } catch (e) {
+      if (e.message?.includes('already exists')) {
+        global.logMessage(`[Q2] Command ${commandId} already exists, skipping`, 'WARN');
+        return { dispose: () => {} };
+      }
+      throw e;
+    }
+  };
+
   context.subscriptions.push(
-    vscode.commands.registerCommand("qqq.q2", global.withReady(showSaveAsDialog)),
-    vscode.commands.registerCommand("qqq.saveAsDialog", global.withReady(showSaveAsDialog))
+    safeRegisterCommand("qqq.q2", global.withReady(showSaveAsDialog)),
+    safeRegisterCommand("qqq.saveAsDialog", global.withReady(showSaveAsDialog))
   );
 }
 
