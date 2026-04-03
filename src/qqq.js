@@ -1632,18 +1632,31 @@ async function _delayedActivate(context) {
 
 // ★ Extract command registration into a separate function (register immediately, no delay)
 function _registerCommands(context) {
+	// ★ 防御性命令注册：防止开发环境热重载或新旧版本共存时命令重复注册导致激活失败
+	const safeRegisterCommand = (commandId, handler) => {
+		try {
+			return vscode.commands.registerCommand(commandId, handler);
+		} catch (e) {
+			if (e.message?.includes('already exists')) {
+				global.logMessage(`[Command] ${commandId} already exists, skipping registration`, 'WARN');
+				return { dispose: () => {} }; // 返回空的 disposable，不影响 subscriptions 数组
+			}
+			throw e; // 其他错误继续抛出
+		}
+	};
+
 	context.subscriptions.push(
-		vscode.commands.registerCommand("qqq.showStatusPanel", global.withReady(() => {
+		safeRegisterCommand("qqq.showStatusPanel", global.withReady(() => {
 			// Focus the sidebar view
 			vscode.commands.executeCommand('workbench.view.extension.qqqView');
 		})),
-		vscode.commands.registerCommand("qqq.pure", global.withReady(q3.pureCommand)),
-		vscode.commands.registerCommand("qqq.allSettings", global.withReady(() => {
+		safeRegisterCommand("qqq.pure", global.withReady(q3.pureCommand)),
+		safeRegisterCommand("qqq.allSettings", global.withReady(() => {
 			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
 		})),
-		vscode.commands.registerCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
-		vscode.commands.registerCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
-		vscode.commands.registerCommand("qqq.clearCache", global.withReady(async () => {
+		safeRegisterCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
+		safeRegisterCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),
+		safeRegisterCommand("qqq.clearCache", global.withReady(async () => {
 			// ★ 9-second auto-close popup → unify using global.showAutoCloseNotification (single source of truth)
 
 			const options = [
@@ -1779,13 +1792,13 @@ function _registerCommands(context) {
 		})),
 
 		// ★ gh555.com URL 打开命令（带追踪参数）
-		vscode.commands.registerCommand('qqq.openLogin', () => {
+		safeRegisterCommand('qqq.openLogin', () => {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/login')));
 		}),
-		vscode.commands.registerCommand('qqq.openBuy', () => {
+		safeRegisterCommand('qqq.openBuy', () => {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'price')));
 		}),
-		vscode.commands.registerCommand('qqq.openProfile', () => {
+		safeRegisterCommand('qqq.openProfile', () => {
 			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
 		}),
 
