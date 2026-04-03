@@ -2344,10 +2344,21 @@ function getUserPhone() {
  */
 function getIDEFamily() {
 	try {
+		const scheme = (vscode.env.uriScheme || '').toLowerCase();
+		if (scheme === 'cursor') return 'cursor';
+		if (scheme === 'trae') return 'trae';
+		if (scheme === 'antigravity') return 'antigravity';
+		if (scheme === 'qoder') return 'qoder';
+		if (scheme === 'windsurf') return 'windsurf';
+		if (scheme === 'vscode-insiders') return 'vscode-insiders';
+		if (scheme === 'vscode') return 'vscode';
+
 		const appName = (vscode.env.appName || '').toLowerCase();
 		if (appName.includes('cursor')) return 'cursor';
 		if (appName.includes('trae')) return 'trae';
 		if (appName.includes('antigravity')) return 'antigravity';
+		if (appName.includes('qoder')) return 'qoder';
+		if (appName.includes('windsurf')) return 'windsurf';
 		if (appName.includes('insiders')) return 'vscode-insiders';
 	} catch { }
 	return 'vscode';
