@@ -1916,7 +1916,7 @@ class ClipboardHistorySidebarProvider {
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
-        .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 10px; display: flex; flex-direction: column; overflow: hidden; margin-top: -9px; }
+        .history-container { flex: 1; min-height: 400px; position: relative; margin-bottom: 0; display: flex; flex-direction: column; overflow: hidden; margin-top: -9px; }
 
         /* Extreme: Gold Blade Rage 4.0 (Hyper-Gold Storm Max) */
         .history-container.storm::after {
@@ -2025,8 +2025,8 @@ class ClipboardHistorySidebarProvider {
         .scrollbar-inner-thumb:hover { width: 6px; right: 0; opacity: 1; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
-        .footer-hint { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; cursor: pointer; transition: opacity 0.15s ease, background-color 0.15s ease; }
-        .footer-hint:hover { opacity: 0.9; background-color: rgba(128, 128, 128, 0.1); }
+        .footer-hint { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 19px 0 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; cursor: pointer; transition: opacity 0.15s ease, background-color 0.15s ease; }
+
 
         /* ★ NEW: command history dropdown styles */
         .history-dropdown {
@@ -2150,7 +2150,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-            <div class="footer-hint" id="ghHealthLink" title="Open GH HEALTH">GH HEALTH</div>
+            <div class="footer-hint" id="ghHealthLink">GH HEALTH</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
         <div id="tooltip"></div>

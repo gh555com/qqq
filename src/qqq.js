@@ -1652,7 +1652,7 @@ function _registerCommands(context) {
 		})),
 		safeRegisterCommand("qqq.pure", global.withReady(q3.pureCommand)),
 		safeRegisterCommand("qqq.allSettings", global.withReady(() => {
-			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555.qqq");
+			vscode.commands.executeCommand("workbench.action.openSettings", "@ext:gh555com.qqq");
 		})),
 		safeRegisterCommand("qqq.downloadVideosFromUrl", global.withReady(downloadVideosFromUrlCommand)),
 		safeRegisterCommand("qqq.savorMoments", global.withReady(savorMomentsCommand)),

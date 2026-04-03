@@ -285,10 +285,10 @@ class CdpSniffer {
         const port = 9222 + Math.floor(Math.random() * 100);
 
         // 使用固定的用户数据目录，以便保存登录状态 (Cookie, LocalStorage 等)
-        // 路径: %APPDATA%/Code/User/globalStorage/gh555.qqq/chrome-user-data
+        // 路径: %APPDATA%/Code/User/globalStorage/gh555com.qqq/chrome-user-data
         const userDateDir = path.join(
             process.env.APPDATA || process.env.HOME,
-            "Code", "User", "globalStorage", "gh555.qqq", "chrome-user-data"
+            "Code", "User", "globalStorage", "gh555com.qqq", "chrome-user-data"
         );
 
         // 确保目录存在
