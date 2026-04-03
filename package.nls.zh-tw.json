@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ 核心",
-    "config.phone.desc": "☀️ 您的帳號（帶國家碼的手機號碼，不用帶加號）[獲取帳號](https://www.gh555.com/login)　[購買正版](https://www.gh555.com/gaea/d/qqq#price)　[▶儲存偏好](https://www.gh555.com/gaea/d/qqq#profile) \n \n  拉取雲端配置的方式（時機）：1、在此處修改完帳號會自動拉取一次。2、長按齒輪按鈕。3、窗口重啟時。  ",
+    "config.phone.desc": "☀️ 您的帳號（帶國家碼的手機號碼，不用帶加號）[獲取帳號](command:qqq.openLogin)　[購買正版](command:qqq.openBuy)　[▶儲存偏好](command:qqq.openProfile) \n \n  拉取雲端配置的方式（時機）：1、在此處修改完帳號會自動拉取一次。2、長按齒輪按鈕。3、窗口重啟時。  ",
     "config.title.rover": "🛸 漫遊器",
     "config.title.observe": "👁️ 觀察",
     "config.title.html": "🍌 html與富文字",

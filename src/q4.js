@@ -1361,6 +1361,11 @@ class ClipboardHistorySidebarProvider {
                     // ★ Execute weave with "add & remove" mode (both add and remove empty lines)
                     q1.performGlobalClean(vscode.window.activeTextEditor, true, "add & remove");
                     break;
+                case 'openGh555': {
+                    // ★ Open GH HEALTH link with tracking parameters
+                    vscode.env.openExternal(vscode.Uri.parse(this._global.buildGh555Url('/')));
+                    break;
+                }
             }
         });
 
@@ -2020,7 +2025,8 @@ class ClipboardHistorySidebarProvider {
         .scrollbar-inner-thumb:hover { width: 6px; right: 0; opacity: 1; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
-        .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; }
+        .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; cursor: pointer; }
+        .footer-hint:hover { opacity: 0.8; }
 
         /* ★ NEW: command history dropdown styles */
         .history-dropdown {
@@ -2144,7 +2150,7 @@ class ClipboardHistorySidebarProvider {
                 </div>
                 <div class="scrollbar-inner" id="innerScrollbar"><div class="scrollbar-inner-thumb" id="innerThumb"></div></div>
             </div>
-            <div class="footer-hint">GH HEALTH</div>
+            <div class="footer-hint" id="ghHealthLink" title="Open GH HEALTH">GH HEALTH</div>
         </div>
         <div class="scrollbar-outer" id="outerScrollbar"><div class="scrollbar-outer-thumb" id="outerThumb"></div></div>
         <div id="tooltip"></div>
@@ -2866,6 +2872,10 @@ class ClipboardHistorySidebarProvider {
             setTimeout(initDynamicSizing, 100);
             window.addEventListener('focus', function() { post('focusState', { focused: true }); });
             window.addEventListener('blur', function() { post('focusState', { focused: false }); });
+            // ★ GH HEALTH link click handler
+            document.getElementById('ghHealthLink').addEventListener('click', function() {
+                post('openGh555');
+            });
             post('ready');
         })();
     </script>
@@ -2875,7 +2885,8 @@ class ClipboardHistorySidebarProvider {
 
     // ★ NEW: safe for activate() subscriptions call, and unbind pythonBridge listener to avoid hot-reload listener pile-up
     async _updateOnlineCount() {
-        this._onlineCount = await this._global.getQqqStats();
+        const stats = await this._global.getQqqStats();
+        this._onlineCount = stats && typeof stats.active_12h === 'number' ? stats.active_12h : null;
         this.updateContent('online_count_update');
     }
 

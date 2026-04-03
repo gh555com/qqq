@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ الأساسي",
-    "config.phone.desc": "☀️ حسابك (رقم الهاتف مع رمز الدولة، بدون علامة الزائد) [احصل على حساب](https://www.gh555.com/login)　[شراء الترخيص](https://www.gh555.com/gaea/d/qqq#price)　[▶حفظ التفضيلات](https://www.gh555.com/gaea/d/qqq#profile) \n \n  طرق جلب التكوين السحابي: 1. تلقائي بعد تغيير الحساب هنا. 2. الضغط المطول على زر الترس. 3. عند إعادة تشغيل النافذة.  ",
+    "config.phone.desc": "☀️ حسابك (رقم الهاتف مع رمز الدولة، بدون علامة الزائد) [احصل على حساب](command:qqq.openLogin)　[شراء الترخيص](command:qqq.openBuy)　[▶حفظ التفضيلات](command:qqq.openProfile) \n \n  طرق جلب التكوين السحابي: 1. تلقائي بعد تغيير الحساب هنا. 2. الضغط المطول على زر الترس. 3. عند إعادة تشغيل النافذة.  ",
     "config.title.rover": "🛸 المتصفح",
     "config.title.observe": "👁️ المراقبة",
     "config.title.html": "🍌 HTML والنص المنسق",
