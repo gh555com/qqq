@@ -3391,6 +3391,19 @@ async function activate(context) {
 	});
 
 	// ★ Ultimate optimal: privilege boost, never await before registration
+	// ★ 防御性命令注册：防止开发环境热重载或新旧版本共存时命令重复注册
+	const safeRegisterCommand = (commandId, handler) => {
+		try {
+			return vscode.commands.registerCommand(commandId, handler);
+		} catch (e) {
+			if (e.message?.includes('already exists')) {
+				global.logMessage(`[Q1] Command ${commandId} already exists, skipping`, 'WARN');
+				return { dispose: () => {} };
+			}
+			throw e;
+		}
+	};
+
 	context.subscriptions.push(
 		// ★ Only keep editor config listeners (these do not involve ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((e) => {
@@ -3402,19 +3415,19 @@ async function activate(context) {
 				scheduleFullUpdateAfterMeasurement();
 			}
 		}),
-		vscode.commands.registerCommand("qqq.q1", global.withReady(executeClipboardCommand)),
-		vscode.commands.registerCommand("qqq.openFile", global.withReady(openFileCommand)),
-		vscode.commands.registerCommand("qqq.openFileInRightGroup", global.withReady(openFileInRightGroupCommand)),
-		vscode.commands.registerCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
-		vscode.commands.registerCommand("qqq.renameFile", global.withReady(renameFileCommand)),
-		vscode.commands.registerCommand("qqq.weave", global.withReady(() => {
+		safeRegisterCommand("qqq.q1", global.withReady(executeClipboardCommand)),
+		safeRegisterCommand("qqq.openFile", global.withReady(openFileCommand)),
+		safeRegisterCommand("qqq.openFileInRightGroup", global.withReady(openFileInRightGroupCommand)),
+		safeRegisterCommand("qqq.revealFileInFolder", global.withReady(revealFileInFolder)),
+		safeRegisterCommand("qqq.renameFile", global.withReady(renameFileCommand)),
+		safeRegisterCommand("qqq.weave", global.withReady(() => {
 			// weave only adds, never removes
 			performGlobalClean(vscode.window.activeTextEditor, true, "add");
 		})),
-		vscode.commands.registerCommand("qqq.exportDoc", global.withReady(() => {
+		safeRegisterCommand("qqq.exportDoc", global.withReady(() => {
 			q3.executeExportDocCommand(global.isValid());
 		})),
-		vscode.commands.registerCommand("qqq.exportZip", global.withReady(() => {
+		safeRegisterCommand("qqq.exportZip", global.withReady(() => {
 			q3.executeExportZipCommand(global.isValid());
 		})),
 		vscode.languages.registerCodeLensProvider({ scheme: "file" }, codeLensProvider),
