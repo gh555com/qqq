@@ -1,6 +1,6 @@
 {
     "config.title.core": "☀️ Núcleo",
-    "config.phone.desc": "☀️ Su cuenta (número de teléfono con código de país, sin signo más) [Obtener cuenta](https://www.gh555.com/login)　[Comprar licencia](https://www.gh555.com/gaea/d/qqq#price)　[▶Guardar preferencias](https://www.gh555.com/gaea/d/qqq#profile) \n \n  Métodos para obtener config en la nube: 1. Auto tras cambiar cuenta aquí. 2. Mantener pulsado botón engranaje. 3. Al reiniciar ventana.  ",
+    "config.phone.desc": "☀️ Su cuenta (número de teléfono con código de país, sin signo más) [Obtener cuenta](command:qqq.openLogin)　[Comprar licencia](command:qqq.openBuy)　[▶Guardar preferencias](command:qqq.openProfile) \n \n  Métodos para obtener config en la nube: 1. Auto tras cambiar cuenta aquí. 2. Mantener pulsado botón engranaje. 3. Al reiniciar ventana.  ",
     "config.title.rover": "🛸 Explorador",
     "config.title.observe": "👁️ Observación",
     "config.title.html": "🍌 HTML y texto enriquecido",

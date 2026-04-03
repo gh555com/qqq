@@ -1778,6 +1778,17 @@ function _registerCommands(context) {
 			}
 		})),
 
+		// ★ gh555.com URL 打开命令（带追踪参数）
+		vscode.commands.registerCommand('qqq.openLogin', () => {
+			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/login')));
+		}),
+		vscode.commands.registerCommand('qqq.openBuy', () => {
+			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'price')));
+		}),
+		vscode.commands.registerCommand('qqq.openProfile', () => {
+			vscode.env.openExternal(vscode.Uri.parse(global.buildGh555Url('/gaea/d/qqq', 'profile')));
+		}),
+
 
 
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)

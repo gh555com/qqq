@@ -2305,7 +2305,7 @@ function finishUserTracking() {
 }
 
 // ============================================================================
-// ★ WqReporter: 统计上报模块 (device_id + total_seconds + user_id)
+// ★ WqReporter: 统计上报模块 (device_id + total_seconds + doer_id)
 // ============================================================================
 const KEY_DEVICE_ID = 'qqq_device_id';
 const WQ_API_BASE = 'https://gh555.com/api';
@@ -2327,7 +2327,7 @@ function getDeviceId() {
 }
 
 /**
- * 获取 user_id：从设置中读取手机号
+ * 获取 doer_id：从设置中读取手机号
  */
 function getUserPhone() {
 	try {
@@ -2347,6 +2347,7 @@ function getIDEFamily() {
 		const appName = (vscode.env.appName || '').toLowerCase();
 		if (appName.includes('cursor')) return 'cursor';
 		if (appName.includes('trae')) return 'trae';
+		if (appName.includes('antigravity')) return 'antigravity';
 		if (appName.includes('insiders')) return 'vscode-insiders';
 	} catch { }
 	return 'vscode';
@@ -2357,18 +2358,28 @@ function getIDEFamily() {
  */
 function getClientVersion() {
 	try {
-		return vscode.extensions.getExtension('gh555.qqq')?.packageJSON?.version || 'unknown';
+		return vscode.extensions.getExtension('gh555com.qqq')?.packageJSON?.version || 'unknown';
 	} catch { }
 	return 'unknown';
+}
+
+/**
+ * 构建 gh555.com URL（带追踪参数）
+ */
+function buildGh555Url(path, fragment) {
+	const ide = getIDEFamily();
+	const ver = getClientVersion();
+	const base = `https://www.gh555.com${path}?ref=qqq-${ide}&ver=${ver}`;
+	return fragment ? `${base}#${fragment}` : base;
 }
 
 let _wqReporter = null;
 
 class WqReporter {
 	constructor() {
-		this.retryDelay = 60 * 1000;
+		this.retryDelay = 60000;
 		this._initialTimer = null;
-		this._intervalTimer = null;
+		this._nextPingTimer = null;
 		this._stopped = false;
 	}
 
@@ -2377,9 +2388,15 @@ class WqReporter {
 		// 1. 启动后随机抖动 30~120 秒发一次
 		const initialDelay = 30000 + Math.random() * 90000;
 		this._initialTimer = setTimeout(() => this._ping(), initialDelay);
-		// 2. 每 12 小时兖底发一次
-		this._intervalTimer = setInterval(() => this._ping(), 12 * 60 * 60 * 1000);
 		logMessage(`[wq] Reporter started, initial ping in ${Math.round(initialDelay/1000)}s`, 'INFO');
+	}
+
+	_scheduleNextPing(delaySec) {
+		if (this._stopped) return;
+		if (this._nextPingTimer) clearTimeout(this._nextPingTimer);
+		const delayMs = Math.max(60, delaySec) * 1000; // 至少 60 秒
+		this._nextPingTimer = setTimeout(() => this._ping(), delayMs);
+		logMessage(`[wq] Next ping scheduled in ${Math.round(delayMs/1000)}s`, 'INFO');
 	}
 
 	stop() {
@@ -2388,9 +2405,9 @@ class WqReporter {
 			clearTimeout(this._initialTimer);
 			this._initialTimer = null;
 		}
-		if (this._intervalTimer) {
-			clearInterval(this._intervalTimer);
-			this._intervalTimer = null;
+		if (this._nextPingTimer) {
+			clearTimeout(this._nextPingTimer);
+			this._nextPingTimer = null;
 		}
 	}
 
@@ -2409,7 +2426,7 @@ class WqReporter {
 				ide_family: getIDEFamily(),
 				client_ver: getClientVersion()
 			};
-			if (userId) body.user_id = userId;
+			if (userId) body.doer_id = userId;
 
 			const bodyStr = JSON.stringify(body);
 
@@ -2449,24 +2466,35 @@ class WqReporter {
 				req.end();
 			});
 
-			if (data.ok) {
-				this.retryDelay = 60 * 1000; // 重置重试延迟
-				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s`, 'INFO');
+				if (data.ok) {
+				this.retryDelay = 60000; // 重置重试延迟
+				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s, accepted=${data.accepted_total_seconds}, server_now=${data.server_now}`, 'INFO');
 				// 服务端纠正
 				if (data.force_reset && typeof data.server_total_seconds === 'number') {
 					extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.server_total_seconds);
 					logMessage(`[wq] Force reset local total to ${data.server_total_seconds}`, 'INFO');
 				}
+				// ★ 用服务端返回的 min_next_ping_at 调度下次 ping
+				if (typeof data.min_next_ping_at === 'number' && data.min_next_ping_at > 0) {
+					const nowSec = Math.floor(Date.now() / 1000);
+					const delaySec = Math.max(60, data.min_next_ping_at - nowSec);
+					this._scheduleNextPing(delaySec);
+				} else {
+					// 服务端未返回调度时间，兜底 12 小时
+					this._scheduleNextPing(43200);
+				}
 			} else {
 				// 服务端返回错误，打印详情以便调试
 				logMessage(`[wq] Ping rejected: ${JSON.stringify(data)}, body: ${bodyStr}`, 'WARN');
+				// 被拒也兜底 12 小时后重试
+				this._scheduleNextPing(43200);
 			}
 		} catch (e) {
-			// 网络错误才重试
+			// 网络错误才重试（指数退避）
 			logMessage(`[wq] Ping network error: ${e.message}, retry in ${this.retryDelay/1000}s`, 'WARN');
 			if (!this._stopped) {
 				setTimeout(() => this._ping(), this.retryDelay);
-				this.retryDelay = Math.min(this.retryDelay * 2, 60 * 60 * 1000); // 最大 1 小时
+				this.retryDelay = Math.min(this.retryDelay * 2, 3600000); // 最大 1 小时
 			}
 		}
 	}
@@ -3157,7 +3185,7 @@ const TransactionManager = {
 					if (BINARY_EXTS.has(ext)) continue;
 
 					const stat = fs.statSync(fullPath);
-					if (!stat.isFile() || stat.size > 60 * 1048576) continue; // Narrow scope to improve speed
+					if (!stat.isFile() || stat.size > 62914560) continue; // Narrow scope to improve speed
 
 					const content = fs.readFileSync(fullPath, "utf-8");
 					this._extractReferences(content, referencedItems);
@@ -4429,8 +4457,17 @@ async function getQqqStats() {
             req.end();
         });
 
+        if (data && data.ok) {
+            return {
+                active_12h: typeof data.active_12h === 'number' ? data.active_12h : null,
+                total_installations: typeof data.total_installations === 'number' ? data.total_installations : null,
+                total_companion_seconds: typeof data.total_companion_seconds === 'number' ? data.total_companion_seconds : null,
+                updated_at: data.updated_at || null
+            };
+        }
+        // 兼容旧逻辑：如果只有 active_12h 也接受
         if (data && typeof data.active_12h === 'number') {
-            return data.active_12h;
+            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null };
         }
         return null;
     } catch (e) {
@@ -4489,6 +4526,9 @@ module.exports = {
 	startWqReporter,
 	getDeviceId,
 	getUserPhone,
+	getIDEFamily,
+	getClientVersion,
+	buildGh555Url,
 	onPhoneConfigChanged,
 	verifyPhoneAndSyncConfig,
 	syncCloudConfig,
