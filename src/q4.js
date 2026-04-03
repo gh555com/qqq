@@ -2025,8 +2025,8 @@ class ClipboardHistorySidebarProvider {
         .scrollbar-inner-thumb:hover { width: 6px; right: 0; opacity: 1; }
 
         .empty-hint { text-align: center; padding: 20px; opacity: 0.5; }
-        .footer-hint { text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; cursor: pointer; }
-        .footer-hint:hover { opacity: 0.8; }
+        .footer-hint { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 9px 0; font-family: Tahoma, sans-serif; font-size: 9px; opacity: 0.5; cursor: pointer; transition: opacity 0.15s ease, background-color 0.15s ease; }
+        .footer-hint:hover { opacity: 0.9; background-color: rgba(128, 128, 128, 0.1); }
 
         /* ★ NEW: command history dropdown styles */
         .history-dropdown {
@@ -3159,12 +3159,25 @@ function activate(context) {
     context.subscriptions.push(statusBarManager);
 
     // Command registration
+    // ★ 防御性命令注册：防止开发环境热重载或新旧版本共存时命令重复注册
+    const safeRegisterCommand = (commandId, handler) => {
+        try {
+            return vscode.commands.registerCommand(commandId, handler);
+        } catch (e) {
+            if (e.message?.includes('already exists')) {
+                console.log(`[Q4] Command ${commandId} already exists, skipping`);
+                return { dispose: () => {} };
+            }
+            throw e;
+        }
+    };
+
     context.subscriptions.push(
-        vscode.commands.registerCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.showStats', () => showStatsCommand(historyManager)),
-        vscode.commands.registerCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager))
+        safeRegisterCommand('qqq.clipboardHistory', () => searchHistoryCommand(historyManager)),
+        safeRegisterCommand('qqq.exportHistory', () => exportHistoryCommand(historyManager)),
+        safeRegisterCommand('qqq.importHistory', () => importHistoryCommand(historyManager)),
+        safeRegisterCommand('qqq.showStats', () => showStatsCommand(historyManager)),
+        safeRegisterCommand('qqq.copyToHistory', () => copyToHistoryCommand(historyManager))
     );
 
     // Cleanup
