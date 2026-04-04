@@ -245,7 +245,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555com.q3. or, actually, the best way is to simply open any of your IDEs, type "q3" directly into the official extension marketplace in the sidebar, and install it:
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/install.png" width="100%" alt="How to install">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/install.png" alt="How to install">
 </p>
 
 and then you can switch languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR:
