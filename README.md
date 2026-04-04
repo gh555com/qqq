@@ -241,9 +241,9 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
+  ## How to install ##
 
-
-For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555.qqq. Or, actually, the best way is to simply open any of your IDEs, type "qqq" directly into the official extension marketplace in the sidebar, and install it. that download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
+For the best practice, download qqq from the official Marketplace at https://marketplace.visualstudio.com/items?itemName=gh555com.qqqrich. Or, actually, the best way is to simply open any of your IDEs, type "qqq" directly into the official extension marketplace in the sidebar, and install it. that download will automatically adapt to your operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), and comes with 11 languages: zh、zh-tw、en、ja、de、ko、ru、ar、es、fr、pt-BR.
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/i18.png" alt="i18n">
 </p>
