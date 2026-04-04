@@ -276,7 +276,7 @@ class CdpSniffer {
     }
 
     // 启动监听模式
-    async start(targetUrl, onLog) {
+    async start(targetUrl, onLog, options = {}) {
         // 优先使用自定义路径
         const browserPath = customBrowserPath || findBrowserPath();
         if (!browserPath) throw new Error('未找到 Chrome 或 Edge 浏览器');
@@ -285,13 +285,17 @@ class CdpSniffer {
         const port = 9222 + Math.floor(Math.random() * 100);
 
         // 使用固定的用户数据目录，以便保存登录状态 (Cookie, LocalStorage 等)
-        // 路径动态获取，避免硬编码 publisher ID
-        const globalExt = require('./global');
-        const extId = globalExt.extensionId() || 'gh555.qqq';
-        const userDateDir = path.join(
-            process.env.APPDATA || process.env.HOME,
-            "Code", "User", "globalStorage", extId, "chrome-user-data"
-        );
+        // 优先使用外部传入的 userDataDir（从 context.globalStorageUri 获得，完全动态）
+        let userDateDir = options.userDataDir;
+        if (!userDateDir) {
+            // fallback: 动态获取扩展 ID
+            const globalExt = require('./global');
+            const extId = globalExt.extensionId() || 'gh555.qqq';
+            userDateDir = path.join(
+                process.env.APPDATA || process.env.HOME,
+                "Code", "User", "globalStorage", extId, "chrome-user-data"
+            );
+        }
 
         // 确保目录存在
         if (!fs.existsSync(userDateDir)) {
