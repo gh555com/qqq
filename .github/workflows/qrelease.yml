@@ -288,6 +288,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 🛡️ Checkout Private Workflow Assets
+        uses: actions/checkout@v4
+        with:
+          repository: kkn1n/qqqworkflow
+          token: ${{ secrets.GH_PAT }}
+          path: qqqworkflow
+          ref: qq
+
       - name: Download Win64 binary
         uses: actions/download-artifact@v4
         with:
