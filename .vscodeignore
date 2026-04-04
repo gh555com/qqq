@@ -82,6 +82,7 @@ test/
 !CHANGELOG.md
 
 # CI/CD & Release Tools
+qqqworkflow/**
 **/workflows/**
 .github/**
 .release-please-manifest.json
@@ -106,6 +107,18 @@ rust/**
 qq
 时间参数提前
 *.vsix
+13dll.py
+chrome 版本检测.py
+git_status.txt
+q4-history-*.json
+uninstall_packages.bat
+*.json.bak
+err.log
+vscode-app-*.log
+rep_*.md
+DISPOSABLE_*.md
+REPAIR_BLUEPRINT.md
+qqq-wq-integration.md
 
 # ★ 中文文件名 (微软市场编码问题导致重复键冲突)
 qqq滴登录设计
