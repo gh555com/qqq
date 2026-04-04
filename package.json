@@ -1,8 +1,8 @@
 {
-  "name": "q3",
-  "displayName": "q3",
-  "publisher": "gh555com",
-  "version": "16.0.9",
+  "name": "gaeaq3",
+  "displayName": "gaeaq3",
+  "publisher": "gaea99",
+  "version": "16.0.10",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
