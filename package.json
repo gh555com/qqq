@@ -1,8 +1,8 @@
 {
-  "name": "qqq",
-  "displayName": "qqq",
+  "name": "qqq-rich",
+  "displayName": "qqq Rich",
   "publisher": "gh555com",
-  "version": "16.0.6",
+  "version": "16.0.8",
   "description": "soldier",
   "icon": "assets/q.gif",
   "engines": {
