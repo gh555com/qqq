@@ -262,12 +262,10 @@ Built on a highly efficient Rust-based underlying architecture with extreme perf
 
 
  ## Security
-The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md
+The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md.
 
 
 
-
-    qqq, never or forever.
 
   the whisper is: I miss you.
 
