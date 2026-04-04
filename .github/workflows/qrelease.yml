@@ -312,7 +312,12 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          npm install @ffmpeg-installer/win32-x64@4.1.0 --no-save --force
+
+      - name: Embed FFmpeg (Win64)
+        run: cp node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe assets/ffmpeg.exe
 
       - name: Bundle
         run: npm run bundle
