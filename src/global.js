@@ -2422,6 +2422,79 @@ class WqReporter {
 		}
 	}
 
+	_collectResume() {
+		if (!extensionContext) return null;
+		const gs = extensionContext.globalState;
+		const resume = {};
+
+		// savor 音乐播放 - 独立 KEY
+		const savorN = gs.get('qqq_savor_count', 0);
+		if (savorN > 0) {
+			const item = { n: savorN };
+			const ms = gs.get('qqq_savor_total_ms', 0);
+			if (ms > 0) item.ms = ms;
+			const t0 = gs.get('qqq_savor_first_use');
+			if (t0) item.t0 = Math.floor(t0 / 1000);
+			resume.savor = item;
+		}
+
+		// paste - {count, totalSize, firstUse}
+		const pasteStats = gs.get('qqq_paste_stats');
+		if (pasteStats && pasteStats.count > 0) {
+			const item = { n: pasteStats.count };
+			if (pasteStats.totalSize > 0) item.b = pasteStats.totalSize;
+			if (pasteStats.firstUse) item.t0 = Math.floor(pasteStats.firstUse / 1000);
+			resume.paste = item;
+		}
+
+		// video - {count, totalSize, firstUse}
+		const videoStats = gs.get('qqq_video_stats');
+		if (videoStats && videoStats.count > 0) {
+			const item = { n: videoStats.count };
+			if (videoStats.totalSize > 0) item.b = videoStats.totalSize;
+			if (videoStats.firstUse) item.t0 = Math.floor(videoStats.firstUse / 1000);
+			resume.video = item;
+		}
+
+		// roam - {count, filesCreated, firstUse}
+		const roamStats = gs.get('qqq_roam_stats');
+		if (roamStats && roamStats.count > 0) {
+			const item = { n: roamStats.count };
+			if (roamStats.filesCreated > 0) item.fc = roamStats.filesCreated;
+			if (roamStats.firstUse) item.t0 = Math.floor(roamStats.firstUse / 1000);
+			resume.roam = item;
+		}
+
+		// weave, exportDoc, exportZip, pure - generic {count, firstUse}
+		const genericModules = [
+			{ key: 'weave', field: 'weave' },
+			{ key: 'exportDoc', field: 'export_doc' },
+			{ key: 'exportZip', field: 'export_zip' },
+			{ key: 'pure', field: 'pure' }
+		];
+		for (const { key, field } of genericModules) {
+			const stats = gs.get(`qqq_${key}_stats`);
+			if (stats && stats.count > 0) {
+				const item = { n: stats.count };
+				if (stats.firstUse) item.t0 = Math.floor(stats.firstUse / 1000);
+				resume[field] = item;
+			}
+		}
+
+		// copy - 独立 KEY
+		const copyN = gs.get('qqq_copy_total_count', 0);
+		if (copyN > 0) resume.copy = { n: copyN };
+
+		// cache
+		const cacheHit = gs.get(KEY_CACHE_HIT_TOTAL, 0);
+		const cacheMiss = gs.get(KEY_CACHE_MISS_TOTAL, 0);
+		if (cacheHit > 0 || cacheMiss > 0) {
+			resume.cache = { hit: cacheHit, miss: cacheMiss };
+		}
+
+		return Object.keys(resume).length > 0 ? resume : null;
+	}
+
 	async _ping() {
 		if (this._stopped || !extensionContext) return;
 		try {
@@ -2438,6 +2511,9 @@ class WqReporter {
 				client_ver: getClientVersion()
 			};
 			if (userId) body.doer_id = userId;
+
+			const resume = this._collectResume();
+			if (resume) body.resume = resume;
 
 			const bodyStr = JSON.stringify(body);
 
