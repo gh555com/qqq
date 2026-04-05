@@ -132,11 +132,13 @@ class PythonEngineDownloader {
             if (!ts) {
                 ts = context.globalState.get('python_cooldown_ts', 0);
             }
-            return { installTimestamp: ts || 0 };
+            // ★ Read attempt count (3-chance system)
+            let attemptCount = context.globalState.get('pythonInstallAttemptCount', 0);
+            return { installTimestamp: ts || 0, attemptCount: attemptCount || 0 };
         } catch (e) {
             console.error('[PythonCheck] _readState error:', e.message);
         }
-        return { installTimestamp: 0 };
+        return { installTimestamp: 0, attemptCount: 0 };
     }
 
     /**
@@ -149,19 +151,42 @@ class PythonEngineDownloader {
             context.globalState.update('pythonInstallTimestamp', state.installTimestamp);
             // ★ Also write a backup key to ensure persistence
             context.globalState.update('python_cooldown_ts', state.installTimestamp);
+            // ★ Persist attempt count (3-chance system)
+            if (state.attemptCount !== undefined) {
+                context.globalState.update('pythonInstallAttemptCount', state.attemptCount);
+            }
         } catch (e) {
             console.error('[PythonCheck] _saveState error:', e.message);
         }
     }
 
     /**
+     * ★ Maximum independent attempts before cooldown
+     */
+    static get MAX_ATTEMPTS() { return 3; }
+
+    /**
      * Check whether within 72-hour cooldown
+     * ★ 3-chance system: only enters cooldown after MAX_ATTEMPTS independent tries
+     * ★ When cooldown expires, attempt counter auto-resets (new 3 chances)
      */
     _isInCooldown(context) {
         const COOLDOWN_MS = 259200000; // 72 hours
         const state = this._readState(context);
         const now = Date.now();
-        return (now - state.installTimestamp) < COOLDOWN_MS;
+
+        // ★ Haven't used all 3 chances yet → not in cooldown
+        if (state.attemptCount < PythonEngineDownloader.MAX_ATTEMPTS) {
+            return false;
+        }
+
+        // ★ All 3 chances used, check if 72h has passed
+        const inCooldown = (now - state.installTimestamp) < COOLDOWN_MS;
+        if (!inCooldown && state.attemptCount >= PythonEngineDownloader.MAX_ATTEMPTS) {
+            // ★ Cooldown expired → reset counter, grant new 3 chances
+            this._saveState(context, { installTimestamp: 0, attemptCount: 0 });
+        }
+        return inCooldown;
     }
 
     /**
@@ -171,14 +196,48 @@ class PythonEngineDownloader {
         const COOLDOWN_MS = 259200000; // 72 hours
         const state = this._readState(context);
         const now = Date.now();
+        const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
+        const remainingAttempts = Math.max(0, maxAttempts - state.attemptCount);
+
+        // ★ Still have remaining chances → not in cooldown
+        if (state.attemptCount < maxAttempts) {
+            return {
+                inCooldown: false,
+                remainingHours: 0,
+                remainingMinutes: 0,
+                remainingMs: 0,
+                attemptCount: state.attemptCount,
+                maxAttempts,
+                remainingAttempts
+            };
+        }
+
+        // ★ All chances exhausted, calculate cooldown remaining
         const elapsed = now - state.installTimestamp;
         const remainingMs = Math.max(0, COOLDOWN_MS - elapsed);
 
+        // ★ Cooldown expired → reset and grant new chances
+        if (remainingMs === 0) {
+            this._saveState(context, { installTimestamp: 0, attemptCount: 0 });
+            return {
+                inCooldown: false,
+                remainingHours: 0,
+                remainingMinutes: 0,
+                remainingMs: 0,
+                attemptCount: 0,
+                maxAttempts,
+                remainingAttempts: maxAttempts
+            };
+        }
+
         return {
-            inCooldown: remainingMs > 0,
+            inCooldown: true,
             remainingHours: Math.floor(remainingMs / 3600000),
             remainingMinutes: Math.floor((remainingMs % 3600000) / 60000),
-            remainingMs
+            remainingMs,
+            attemptCount: state.attemptCount,
+            maxAttempts,
+            remainingAttempts: 0
         };
     }
 
@@ -1030,13 +1089,35 @@ for p in [os.path.join(site_packages, 'win32'), os.path.join(site_packages, 'win
                 }
             }
 
-            // Save state
-            this._saveState(context, { installTimestamp: Date.now() });
+            // ★ 3-chance system: increment attempt count
+            const currentState = this._readState(context);
+            const newAttemptCount = (currentState.attemptCount || 0) + 1;
+            const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
+
+            // ★ Only start 72h cooldown when all chances exhausted
+            if (newAttemptCount >= maxAttempts) {
+                this._saveState(context, { installTimestamp: Date.now(), attemptCount: newAttemptCount });
+                global.logMessage(`[PythonInstall] All ${maxAttempts} chances used, 72h cooldown started`, "INFO");
+            } else {
+                this._saveState(context, { installTimestamp: currentState.installTimestamp, attemptCount: newAttemptCount });
+                global.logMessage(`[PythonInstall] Attempt ${newAttemptCount}/${maxAttempts} succeeded, ${maxAttempts - newAttemptCount} chance(s) remaining`, "INFO");
+            }
             this.clearL1ImperfectCache();
 
             return { success: true, path: installPath, fromScratch: true };
         } catch (e) {
-            this._saveState(context, { installTimestamp: Date.now() });
+            // ★ 3-chance system: increment attempt count on failure too
+            const currentState = this._readState(context);
+            const newAttemptCount = (currentState.attemptCount || 0) + 1;
+            const maxAttempts = PythonEngineDownloader.MAX_ATTEMPTS;
+
+            if (newAttemptCount >= maxAttempts) {
+                this._saveState(context, { installTimestamp: Date.now(), attemptCount: newAttemptCount });
+                global.logMessage(`[PythonInstall] All ${maxAttempts} chances used (last failed), 72h cooldown started`, "WARN");
+            } else {
+                this._saveState(context, { installTimestamp: currentState.installTimestamp, attemptCount: newAttemptCount });
+                global.logMessage(`[PythonInstall] Attempt ${newAttemptCount}/${maxAttempts} failed, ${maxAttempts - newAttemptCount} chance(s) remaining`, "WARN");
+            }
             global.logMessage(q('qvenv.installFailed', e.message), 'ERROR');
             return { success: false, error: e.message };
         } finally {

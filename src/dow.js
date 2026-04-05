@@ -2784,7 +2784,7 @@ class UnifiedMediaDownloader {
                 // 2. Check 72-hour cooldown
                 const cooldownStatus = this.python._getCooldownStatus(context);
                 if (cooldownStatus.inCooldown) {
-                    global.logMessage(q('dow.inCooldown', cooldownStatus.remainingHours, cooldownStatus.remainingMinutes), "INFO");
+                    global.logMessage(q('dow.inCooldown', cooldownStatus.remainingHours, cooldownStatus.remainingMinutes) + ` [${cooldownStatus.attemptCount}/${cooldownStatus.maxAttempts} attempts used]`, "INFO");
                     // In cooldown: do not start daemon, return null
                     return null;
                 }
@@ -2792,7 +2792,7 @@ class UnifiedMediaDownloader {
                 // 3. Trigger L4: wait 20 seconds then silently download in background
                 // ★ Note: _pyInstallPromise check moved to function start to ensure singleton
 
-                global.logMessage(q('dow.triggerL4'), "INFO");
+                global.logMessage(q('dow.triggerL4') + ` [attempt ${cooldownStatus.attemptCount + 1}/${cooldownStatus.maxAttempts}, ${cooldownStatus.remainingAttempts} chance(s) left]`, "INFO");
 
                 this._pyInstallPromise = new Promise((resolve) => {
                     // ★ 20s delay to stagger startup peak
