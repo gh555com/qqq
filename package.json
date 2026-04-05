@@ -1,7 +1,7 @@
 {
-  "name": "q3",
-  "displayName": "q3",
-  "publisher": "gh555com",
+  "name": "qqq",
+  "displayName": "qqq",
+  "publisher": "gh555",
   "version": "16.0.6",
   "description": "Paste everything  anywhere in any document. VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. ",
   "icon": "assets/q.gif",
@@ -431,7 +431,7 @@
   ],
   "keywords": [
     "paste image",
-    "Rich Note",
+    "Rich Note"
   ],
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "1.1.0",
