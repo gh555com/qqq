@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.1.0] - 2026-04-05
+
+### Fixed
+- **Open VSX publishing restored**: Fixed all issues preventing automatic publishing to Open VSX Registry
+  - Resolved namespace mismatch that caused rejections since v16.0.4
+  - Fixed VSIX zip format compliance: stripped unsupported zip extra fields to pass Open VSX malware scanner
+  - Replaced `adm-zip` with system zip/unzip to avoid producing malformed archives (overlapped components)
+  - All 7 platform packages (Linux x64, Linux ARM64, Windows x64, Windows ARM64, macOS Intel, macOS Apple Silicon, Universal) now publish successfully
+
+### Added
+- **Resume protocol**: Client-side usage statistics collection for user profile/resume feature
+  - Tracks cumulative usage across all features (paste, video download, roam, music, export, etc.)
+  - Piggybacks on existing ping channel — no additional network requests
+  - Full-snapshot idempotent design: server simply overwrites, no merge logic needed
+
+### Changed
+- **Dynamic extension ID**: Removed last hardcoded extension identifier fallback, now derived from `package.json` at runtime
+- **CI pipeline hardening**: Added zip extra fields stripping step before Open VSX publishing
+
+### Security
+- **Build artifact isolation**: Private workflow assets excluded from published VSIX packages
+
+---
+
 ## [16.0.2] - 2026-03-21
 
 ### Added
