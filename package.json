@@ -2,7 +2,7 @@
   "name": "qqq",
   "displayName": "qqq",
   "publisher": "gh555",
-  "version": "16.1.0",
+  "version": "16.0.7",
   "description": "Paste everything  anywhere in any document. VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app. ",
   "icon": "assets/q.gif",
   "engines": {
