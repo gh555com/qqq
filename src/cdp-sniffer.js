@@ -288,9 +288,10 @@ class CdpSniffer {
         // 优先使用外部传入的 userDataDir（从 context.globalStorageUri 获得，完全动态）
         let userDateDir = options.userDataDir;
         if (!userDateDir) {
-            // fallback: 动态获取扩展 ID
+            // fallback: 动态获取扩展 ID，无硬编码
             const globalExt = require('./global');
-            const extId = globalExt.extensionId() || 'gh555.qqq';
+            const pkg = require('../package.json');
+            const extId = globalExt.extensionId() || `${pkg.publisher}.${pkg.name}`;
             userDateDir = path.join(
                 process.env.APPDATA || process.env.HOME,
                 "Code", "User", "globalStorage", extId, "chrome-user-data"
