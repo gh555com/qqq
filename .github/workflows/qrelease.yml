@@ -233,6 +233,18 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+      - name: Strip zip extra fields from VSIX (Open VSX requirement)
+        if: "!contains(github.event.head_commit.message, '(q5)')"
+        run: |
+          for vsix in dist/*.vsix; do
+            tmpdir=$(mktemp -d)
+            unzip -q "$vsix" -d "$tmpdir"
+            rm "$vsix"
+            (cd "$tmpdir" && zip -X -r "$OLDPWD/$vsix" .)
+            rm -rf "$tmpdir"
+            echo "✅ Stripped extra fields: $vsix"
+          done
+
       - name: Publish to Open VSX
         if: "!contains(github.event.head_commit.message, '(q5)')"
         run: |
