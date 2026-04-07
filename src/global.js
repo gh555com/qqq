@@ -1442,6 +1442,10 @@ async function startDaemons() {
 // ★ Global context
 // ============================================================================
 let extensionContext = null;
+// ★ 动态配置命名空间：从 package.json 的 name 字段读取（运行时），
+//   使 getConfiguration() 自动适配 "qqq"（Open VSX）或 "q3"（微软商城）
+let _cfgNs = 'qqq'; // fallback，init() 时会被覆盖
+function cfgNs() { return _cfgNs; }
 let ffmpegPath = null;
 let ffprobePath = null;
 let ffmpegSource = "NOT_FOUND";
@@ -1611,6 +1615,7 @@ async function ensureFFmpegReady() {
 function init(context) {
 	_isDeactivated = false; // Reset on startup
 	extensionContext = context;
+	_cfgNs = context.extension?.packageJSON?.name || 'qqq'; // ★ 动态配置命名空间
 
 	// ★ Initialize BrokerBridge with extension path (for IPC Broker singleton)
 	initPythonBrokerBridge();
@@ -2050,7 +2055,7 @@ function onWatermarkChange(cb) { _watermarkChangeCallback = cb; }
 async function _clearVscodeSettingEverywhere(key) {
 	_suppressConfigEcho++;
 	try {
-		const cfg = vscode.workspace.getConfiguration("qqq");
+		const cfg = vscode.workspace.getConfiguration(cfgNs());
 		const ins = cfg.inspect(key);
 		if (ins?.globalValue !== undefined) {
 			await cfg.update(key, undefined, vscode.ConfigurationTarget.Global);
@@ -2061,7 +2066,7 @@ async function _clearVscodeSettingEverywhere(key) {
 		// WorkspaceFolder (clear per folder)
 		const folders = vscode.workspace.workspaceFolders || [];
 		for (const wf of folders) {
-			const folderCfg = vscode.workspace.getConfiguration("qqq", wf.uri);
+			const folderCfg = vscode.workspace.getConfiguration(cfgNs(), wf.uri);
 			const fin = folderCfg.inspect(key);
 			if (fin?.workspaceFolderValue !== undefined) {
 				await folderCfg.update(key, undefined, vscode.ConfigurationTarget.WorkspaceFolder);
@@ -2502,13 +2507,17 @@ class WqReporter {
 			const userId = getUserPhone();
 			const totalSeconds = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
 
+			const pkg = extensionContext.extension?.packageJSON || {};
 			const body = {
 				good_slg: WQ_GOOD_SLG,
 				device_id: deviceId,
 				total_seconds: Math.floor(totalSeconds),
 				event_time: Math.floor(Date.now() / 1000),
 				ide_family: getIDEFamily(),
-				client_ver: getClientVersion()
+				client_ver: getClientVersion(),
+				pkg_name: pkg.name || '',
+				pkg_display_name: pkg.displayName || '',
+				pkg_publisher: pkg.publisher || ''
 			};
 			if (userId) body.doer_id = userId;
 
