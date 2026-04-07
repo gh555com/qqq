@@ -340,6 +340,17 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           npx @vscode/vsce package --allow-missing-repository --allow-star-activation --no-dependencies -o "dist/${PKG_NAME}-${VERSION}-universal.vsix"
 
+      - name: Strip zip extra fields from VSIX
+        run: |
+          for vsix in dist/*.vsix; do
+            tmpdir=$(mktemp -d)
+            unzip -q "$vsix" -d "$tmpdir"
+            rm "$vsix"
+            (cd "$tmpdir" && zip -X -r "$OLDPWD/$vsix" .)
+            rm -rf "$tmpdir"
+            echo "✅ Stripped extra fields: $vsix"
+          done
+
       - name: Get version
         id: get_version
         run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
