@@ -1619,7 +1619,7 @@ async function _delayedActivate(context) {
 	// ★ 窗口重启时静默同步云端配置（延迟 3 秒，成功不弹窗，失败才弹窗）
 	setTimeout(async () => {
 		try {
-			const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+			const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
 			if (phone && phone.trim()) {
 				// silent=true: 成功不弹窗，失败才弹窗
 				await syncCloudConfig(phone.trim(), { silent: true });
@@ -1807,11 +1807,11 @@ function _registerCommands(context) {
 		// ★ Ultimate version: unified settings change entry point (via ConfigGate)
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			// ★ Only handle qqq. configuration changes
-			if (!event.affectsConfiguration("qqq")) return;
+			if (!event.affectsConfiguration(global.cfgNs())) return;
 
 			// ★ 手机号变化时静默验证并拉取配置
-			if (event.affectsConfiguration("qqq.phone")) {
-				const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+			if (event.affectsConfiguration(`${global.cfgNs()}.phone`)) {
+				const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
 				onPhoneConfigChanged(phone);
 			}
 

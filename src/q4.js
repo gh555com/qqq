@@ -883,7 +883,13 @@ class ClipboardHistoryManager {
         } catch { return false; }
     }
 
-    _notifyChange(reason) { if (this._onChange) this._onChange(reason); }
+    _notifyChange(reason) {
+        if (this._onChange) this._onChange(reason);
+        // 同步 history count 到 globalState，供 resume 上报使用
+        try {
+            this.context.globalState.update('qqq_clipboard_history_count', this._size);
+        } catch { /* ignore */ }
+    }
 
     getStatsSnapshot() {
         const ops = Math.max(1, this.perfStats.operations || 1);
@@ -1257,7 +1263,7 @@ class ClipboardHistorySidebarProvider {
                     break;
                 case 'syncCloudConfig': {
                     // ★ 齿轮按钮长按拉取云端配置
-                    const phone = vscode.workspace.getConfiguration('qqq').get('phone');
+                    const phone = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
                     global.syncCloudConfig(phone, { silent: false });
                     break;
                 }
@@ -1266,7 +1272,7 @@ class ClipboardHistorySidebarProvider {
                     if (global.pythonBridge?.isAvailable()) {
                         global.pythonBridge.call('play_sfx', { category: 'yz', name: 'pas2.mp3' }, 1000).catch(() => { });
                     }
-                    const phone2 = vscode.workspace.getConfiguration('qqq').get('phone');
+                    const phone2 = vscode.workspace.getConfiguration(global.cfgNs()).get('phone');
                     global.syncCloudConfig(phone2, { silent: false, showFetching: true });
                     break;
                 }

@@ -18,6 +18,9 @@ let extensionPath = null;
 // ★ Extension context for globalState access
 let extensionContext = null;
 
+// ★ 动态配置命名空间（与 global.js 同逻辑）
+function _cfgNs() { return extensionContext?.extension?.packageJSON?.name || 'qqq'; }
+
 // ★ Key for tracking first-time language initialization
 const LANG_INIT_KEY = 'qqq_language_initialized';
 
@@ -225,7 +228,7 @@ function init(extPath, context) {
     // ★ Check if language was already initialized (persisted in globalState)
     const alreadyInitialized = extensionContext?.globalState?.get(LANG_INIT_KEY, false);
 
-    const config = vscode.workspace.getConfiguration('qqq');
+    const config = vscode.workspace.getConfiguration(_cfgNs());
     const langInspect = config.inspect('language');
 
     // Check if user has explicitly set the language
@@ -280,8 +283,8 @@ function init(extPath, context) {
 
     // 监听配置变更
     vscode.workspace.onDidChangeConfiguration(e => {
-        if (e.affectsConfiguration('qqq.language')) {
-            const newLang = vscode.workspace.getConfiguration('qqq').get('language');
+        if (e.affectsConfiguration(`${_cfgNs()}.language`)) {
+            const newLang = vscode.workspace.getConfiguration(_cfgNs()).get('language');
             if (newLang && LANG_MAP[newLang]) {
                 setLanguage(newLang);
                 onLanguageChange.fire(currentLang);
