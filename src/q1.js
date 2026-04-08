@@ -3548,7 +3548,7 @@ const q1Utils = {
 		if (["never", "add", "add & remove"].includes(mode)) {
 			// ★ Sync to VS Code settings for UI consistency (both sides are "试玩")
 			// Real config will come from cloud in the future
-			vscode.workspace.getConfiguration('qqq').update('cleanFreak', mode, vscode.ConfigurationTarget.Global);
+			vscode.workspace.getConfiguration(global.cfgNs()).update('cleanFreak', mode, vscode.ConfigurationTarget.Global);
 			return true;
 		}
 		return false;

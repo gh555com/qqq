@@ -334,6 +334,9 @@ jobs:
       - name: Bundle
         run: npm run bundle
 
+      - name: Transform config keys for Settings UI grouping
+        run: node -e "require('./qqqworkflow/esbuild.config').transformPackageJsonConfigKeys()"
+
       - name: Package universal VSIX
         run: |
           PKG_NAME=$(node -p "require('./package.json').name")

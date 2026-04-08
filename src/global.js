@@ -2095,7 +2095,7 @@ const ConfigManager = {
 
 		// 3) Try to read settings.json (both Pro and non-Pro can read after bootstrap)
 		try {
-			const wsVal = vscode.workspace.getConfiguration("qqq").get(key);
+			const wsVal = vscode.workspace.getConfiguration(cfgNs()).get(key);
 			if (wsVal !== undefined) return wsVal;
 		} catch { }
 
@@ -2172,10 +2172,10 @@ const ConfigManager = {
 
 		const changedKeys = [];
 		for (const key of Object.keys(DEFAULT_CONFIG)) {
-			const fullKey = `qqq.${key}`;
+			const fullKey = `${cfgNs()}.${key}`;
 			if (!event.affectsConfiguration(fullKey)) continue;
 
-			const val = vscode.workspace.getConfiguration("qqq").get(key);
+			const val = vscode.workspace.getConfiguration(cfgNs()).get(key);
 			// ★ 比较 session 缓存而不是 get()，因为 get() 会读 settings.json 导致永远相等
 			const sessionVal = _sessionOverrides[key];
 			const compareVal = sessionVal !== undefined ? sessionVal : DEFAULT_CONFIG[key];
@@ -2336,9 +2336,11 @@ function getDeviceId() {
  */
 function getUserPhone() {
 	try {
-		const phone = vscode.workspace.getConfiguration('qqq').get('phone');
-		if (phone && typeof phone === 'string' && phone.trim()) {
-			return phone.trim();
+		const phone = vscode.workspace.getConfiguration(cfgNs()).get('phone');
+		if (phone && typeof phone === 'string') {
+			const trimmed = phone.trim();
+			if (/^[+\d]{3,20}$/.test(trimmed)) return trimmed;
+			if (trimmed) logMessage(`[wq] Invalid phone format, skipping doer_id`, 'WARN');
 		}
 	} catch { }
 	return undefined;
@@ -2374,7 +2376,8 @@ function getIDEFamily() {
  */
 function getClientVersion() {
 	try {
-		return extensionContext?.extension?.packageJSON?.version || 'unknown';
+		const ver = extensionContext?.extension?.packageJSON?.version;
+		if (ver && typeof ver === 'string') return ver.substring(0, 50);
 	} catch { }
 	return 'unknown';
 }
@@ -2387,6 +2390,18 @@ function buildGh555Url(path, fragment) {
 	const ver = getClientVersion();
 	const base = `https://www.gh555.com${path}?ref=qqq-${ide}&ver=${ver}`;
 	return fragment ? `${base}#${fragment}` : base;
+}
+
+// ★ P0 上报数据校验工具
+function _clampInt(val, min, max) {
+	const n = Number(val) || 0;
+	if (!Number.isFinite(n)) return min;
+	return Math.floor(Math.max(min, Math.min(n, max)));
+}
+
+function _sanitizeStr(val, maxLen) {
+	if (!val || typeof val !== 'string') return '';
+	return val.replace(/[\x00-\x1F]/g, '').substring(0, maxLen);
 }
 
 let _wqReporter = null;
@@ -2431,43 +2446,52 @@ class WqReporter {
 		if (!extensionContext) return null;
 		const gs = extensionContext.globalState;
 		const resume = {};
+		const nowSec = Math.floor(Date.now() / 1000);
 
 		// savor 音乐播放 - 独立 KEY
-		const savorN = gs.get('qqq_savor_count', 0);
+		const savorN = _clampInt(gs.get('qqq_savor_count', 0), 0, 1000000);
 		if (savorN > 0) {
 			const item = { n: savorN };
-			const ms = gs.get('qqq_savor_total_ms', 0);
+			const ms = _clampInt(gs.get('qqq_savor_total_ms', 0), 0, Number.MAX_SAFE_INTEGER);
 			if (ms > 0) item.ms = ms;
-			const t0 = gs.get('qqq_savor_first_use');
-			if (t0) item.t0 = Math.floor(t0 / 1000);
+			const t0Raw = gs.get('qqq_savor_first_use');
+			if (t0Raw && typeof t0Raw === 'number') {
+				item.t0 = _clampInt(Math.floor(t0Raw / 1000), 1577836800, nowSec);
+			}
 			resume.savor = item;
 		}
 
 		// paste - {count, totalSize, firstUse}
 		const pasteStats = gs.get('qqq_paste_stats');
 		if (pasteStats && pasteStats.count > 0) {
-			const item = { n: pasteStats.count };
-			if (pasteStats.totalSize > 0) item.b = pasteStats.totalSize;
-			if (pasteStats.firstUse) item.t0 = Math.floor(pasteStats.firstUse / 1000);
-			resume.paste = item;
+			const item = { n: _clampInt(pasteStats.count, 0, 1000000) };
+			if (pasteStats.totalSize > 0) item.b = _clampInt(pasteStats.totalSize, 0, Number.MAX_SAFE_INTEGER);
+			if (pasteStats.firstUse && typeof pasteStats.firstUse === 'number') {
+				item.t0 = _clampInt(Math.floor(pasteStats.firstUse / 1000), 1577836800, nowSec);
+			}
+			if (item.n > 0) resume.paste = item;
 		}
 
 		// video - {count, totalSize, firstUse}
 		const videoStats = gs.get('qqq_video_stats');
 		if (videoStats && videoStats.count > 0) {
-			const item = { n: videoStats.count };
-			if (videoStats.totalSize > 0) item.b = videoStats.totalSize;
-			if (videoStats.firstUse) item.t0 = Math.floor(videoStats.firstUse / 1000);
-			resume.video = item;
+			const item = { n: _clampInt(videoStats.count, 0, 1000000) };
+			if (videoStats.totalSize > 0) item.b = _clampInt(videoStats.totalSize, 0, Number.MAX_SAFE_INTEGER);
+			if (videoStats.firstUse && typeof videoStats.firstUse === 'number') {
+				item.t0 = _clampInt(Math.floor(videoStats.firstUse / 1000), 1577836800, nowSec);
+			}
+			if (item.n > 0) resume.video = item;
 		}
 
 		// roam - {count, filesCreated, firstUse}
 		const roamStats = gs.get('qqq_roam_stats');
 		if (roamStats && roamStats.count > 0) {
-			const item = { n: roamStats.count };
-			if (roamStats.filesCreated > 0) item.fc = roamStats.filesCreated;
-			if (roamStats.firstUse) item.t0 = Math.floor(roamStats.firstUse / 1000);
-			resume.roam = item;
+			const item = { n: _clampInt(roamStats.count, 0, 1000000) };
+			if (roamStats.filesCreated > 0) item.fc = _clampInt(roamStats.filesCreated, 0, 1000000);
+			if (roamStats.firstUse && typeof roamStats.firstUse === 'number') {
+				item.t0 = _clampInt(Math.floor(roamStats.firstUse / 1000), 1577836800, nowSec);
+			}
+			if (item.n > 0) resume.roam = item;
 		}
 
 		// weave, exportDoc, exportZip, pure - generic {count, firstUse}
@@ -2480,19 +2504,24 @@ class WqReporter {
 		for (const { key, field } of genericModules) {
 			const stats = gs.get(`qqq_${key}_stats`);
 			if (stats && stats.count > 0) {
-				const item = { n: stats.count };
-				if (stats.firstUse) item.t0 = Math.floor(stats.firstUse / 1000);
-				resume[field] = item;
+				const item = { n: _clampInt(stats.count, 0, 1000000) };
+				if (stats.firstUse && typeof stats.firstUse === 'number') {
+					item.t0 = _clampInt(Math.floor(stats.firstUse / 1000), 1577836800, nowSec);
+				}
+				if (item.n > 0) resume[field] = item;
 			}
 		}
 
-		// copy - 独立 KEY
-		const copyN = gs.get('qqq_copy_total_count', 0);
-		if (copyN > 0) resume.copy = { n: copyN };
+		// card - 剪贴板历史卡片统计
+		const cardTimes = _clampInt(gs.get('qqq_copy_total_count', 0), 0, 1000000);
+		const cardCount = _clampInt(gs.get('qqq_clipboard_history_count', 0), 0, 1000000);
+		if (cardTimes > 0 || cardCount > 0) {
+			resume.card = { times: cardTimes, count: cardCount };
+		}
 
 		// cache
-		const cacheHit = gs.get(KEY_CACHE_HIT_TOTAL, 0);
-		const cacheMiss = gs.get(KEY_CACHE_MISS_TOTAL, 0);
+		const cacheHit = _clampInt(gs.get(KEY_CACHE_HIT_TOTAL, 0), 0, 10000000);
+		const cacheMiss = _clampInt(gs.get(KEY_CACHE_MISS_TOTAL, 0), 0, 10000000);
 		if (cacheHit > 0 || cacheMiss > 0) {
 			resume.cache = { hit: cacheHit, miss: cacheMiss };
 		}
@@ -2508,16 +2537,17 @@ class WqReporter {
 			const totalSeconds = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
 
 			const pkg = extensionContext.extension?.packageJSON || {};
+			const nowSec = Math.floor(Date.now() / 1000);
 			const body = {
 				good_slg: WQ_GOOD_SLG,
 				device_id: deviceId,
-				total_seconds: Math.floor(totalSeconds),
-				event_time: Math.floor(Date.now() / 1000),
+				total_seconds: _clampInt(totalSeconds, 0, 315360000),
+				event_time: _clampInt(nowSec, 1577836800, nowSec + 86400),
 				ide_family: getIDEFamily(),
 				client_ver: getClientVersion(),
-				pkg_name: pkg.name || '',
-				pkg_display_name: pkg.displayName || '',
-				pkg_publisher: pkg.publisher || ''
+				pkg_name: _sanitizeStr(pkg.name, 100),
+				pkg_display_name: _sanitizeStr(pkg.displayName, 100),
+				pkg_publisher: _sanitizeStr(pkg.publisher, 50)
 			};
 			if (userId) body.doer_id = userId;
 
@@ -2722,7 +2752,7 @@ async function syncCloudConfig(phone, options = {}) {
 				// ★ 写入 VS Code settings.json（Settings UI 显示）
 				try {
 					_suppressConfigEcho++;
-					await vscode.workspace.getConfiguration('qqq').update(key, value, vscode.ConfigurationTarget.Global);
+					await vscode.workspace.getConfiguration(cfgNs()).update(key, value, vscode.ConfigurationTarget.Global);
 				} catch (e) {
 					logMessage(`[wq] Failed to write settings.json for ${key}: ${e.message}`, 'WARN');
 				} finally {
@@ -4662,6 +4692,7 @@ module.exports = {
 	invalidateEngineCache,  // ★ Refresh engine cache
 	extensionPath: () => extensionContext?.extensionPath,
 	extensionId: () => extensionContext?.extension?.id,
+	cfgNs,  // ★ 动态配置命名空间（"qqq" 或 "q3"，取决于 package.json name）
 	ffmpegPath: () => ffmpegPath,
 	ffprobePath: () => ffprobePath,
 	ensureFFmpegReady,
