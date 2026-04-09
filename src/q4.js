@@ -50,7 +50,7 @@ const CONSTANTS = Object.freeze({
     // Save (batch + throttle + serial write)
     BATCH_SAVE_THRESHOLD: 5,
     SAVE_THROTTLE_MS: 1000,
-    SAVE_RETRY_DELAY_MS: 120,
+    SAVE_RETRY_DELAY_MS: 121,
 
     // Atomic write
     SAVE_TEMP_SUFFIX: '.tmp',

@@ -4,19 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.1.1] - 2026-04-09
+
+### Fixed
+- **Settings categories restored**: Extension settings now display in organized groups (Kernel, Roam, Observer, HTML, Doc Export) instead of a flat list — works correctly across all distribution channels
+- **Roam history quick access**: Fix known bugs in the q2 Roam historical access area, especially the issue where clicking the cross to delete quick access entries is unresponsive.
+
+### Improved
+- **Build stability**: Eliminated unintended side-effect where bundling could run twice during packaging
+
+---
+
 ## [16.1.0] - 2026-04-05
 
 ### Fixed
-- **Open VSX publishing restored**: Fixed all issues preventing automatic publishing to Open VSX Registry
-  - Resolved namespace mismatch that caused rejections since v16.0.4
-  - Fixed VSIX zip format compliance: stripped unsupported zip extra fields to pass Open VSX malware scanner
+- **Open VSX publishing restored**:
   - Replaced `adm-zip` with system zip/unzip to avoid producing malformed archives (overlapped components)
   - All 7 platform packages (Linux x64, Linux ARM64, Windows x64, Windows ARM64, macOS Intel, macOS Apple Silicon, Universal) now publish successfully
 
 ### Added
 - **Resume protocol**: Client-side usage statistics collection for user profile/resume feature
-  - Tracks cumulative usage across all features (paste, video download, roam, music, export, etc.)
-  - Piggybacks on existing ping channel — no additional network requests
   - Full-snapshot idempotent design: server simply overwrites, no merge logic needed
 
 ### Changed
@@ -52,14 +59,9 @@ All notable changes to this project will be documented in this file.
 ## [16.0.0] - 2026-03-21
 
 ### Added
-- **Server-controlled watermark removal**: Watermark removal is now controlled by server-side `removeWatermark` field
-  - Client has NO local option to remove watermark
-  - Only `removeWatermark: true` from server removes watermark
-  - Purchased users can toggle this option on web portal
-  - Network failure / unpurchased = watermark shown (fail-safe)
-
-### Changed
-- **Separated concerns**: `isPro()` controls config persistence, `shouldRemoveWatermark()` controls watermark display
+- **Watermark removal**: Licensed users can now remove the preview watermark (toggle on：[https://www.gh555.com/gaea/d/qqq?#profile](https://www.gh555.com/gaea/d/qqq?#profile) )
+- **Persist preferences**:
+  - By `isPro()` to determine whether is Premium purchaser & will be able to fetch from the network and locally persist preferences.
 
 ---
 
@@ -496,7 +498,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 - **Cross-process lock for yt-dlp**: Prevent multiple VS Code windows from downloading yt-dlp simultaneously
-  - Lock wait timeout: 120 seconds
+  - Lock wait timeout: 121 seconds
   - Lock stale timeout: 300 seconds
   - Double-check after acquiring lock to avoid redundant downloads
 

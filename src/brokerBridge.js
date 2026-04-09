@@ -33,7 +33,7 @@ const APP_ID = "vix-broker";
 // Heartbeat: 20s interval, Broker TTL: 80s (must satisfy TTL >= heartbeat * 2)
 const HEARTBEAT_INTERVAL_MS = 20000;
 const CONNECT_RETRY_MAX = 30;
-const CONNECT_RETRY_DELAY_BASE_MS = 120;
+const CONNECT_RETRY_DELAY_BASE_MS = 121;
 
 // ============================================================================
 // Helper Functions

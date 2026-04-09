@@ -3106,8 +3106,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pinIcon) {
           e.preventDefault();
           e.stopPropagation();
-          // ★ CRITICAL: Ignore pin-icon click when window is not focused (avoids complex state issues)
-          if (!document.hasFocus()) return;
           const fullpath = qqItem.dataset.fullpath;
           if (fullpath) pinDir(fullpath);
           return;
@@ -3124,6 +3122,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     });
+
+    // ★★★ Intercept click event on pin-icon to prevent inline onclick="navigateTo()" from firing ★★★
+    sidebarEl.addEventListener('click', (e) => {
+      if (e.target.closest('.pin-icon')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
   }
 
   const kyEl = document.getElementById('kyContent');
@@ -3143,8 +3149,6 @@ document.addEventListener('DOMContentLoaded', () => {
           if (deleteBtn) {
             e.preventDefault();
             e.stopPropagation();
-            // ★ CRITICAL: Ignore delete-button click when window is not focused (avoids complex state issues)
-            if (!document.hasFocus()) return;
             const pathSpan = recentItem.querySelector('span:not(.delete-button)');
             if (pathSpan) unpinDir(pathSpan.textContent);
             return;
@@ -3156,6 +3160,14 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       });
+
+      // ★★★ Intercept click event on delete-button to prevent inline onclick="navigateTo()" from firing ★★★
+      recentSection.addEventListener('click', (e) => {
+        if (e.target.closest('.delete-button')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
     }
   }
 
@@ -5131,20 +5143,27 @@ async function activate(context) {
 
   // ★ Multi-window sync: refresh sidebar (qq area + history) when window gains focus
   // This ensures cross-window consistency since globalState is shared but UI is per-window
+  // ★ Use debounce to avoid overwriting in-flight pin/unpin operations when clicking unfocused window
+  let focusSyncTimer = null;
   context.subscriptions.push(
     vscode.window.onDidChangeWindowState((e) => {
       if (e.focused && activePanel && activePanelAlive) {
-        // Clear config cache to force re-read from globalState (may have been modified by other windows)
-        cachedInMemoryConfig = null;
-        const config = getConfig();
-        const sbData = generateSidebarHtml(config);
-        try {
-          activePanel.webview.postMessage({
-            command: "updateSidebar",
-            qqiqHtml: sbData.qqiqHtml,
-            pinnedDirsHtml: sbData.pinnedDirsHtml,
-          });
-        } catch { }
+        if (focusSyncTimer) clearTimeout(focusSyncTimer);
+        focusSyncTimer = setTimeout(() => {
+          focusSyncTimer = null;
+          if (!activePanel || !activePanelAlive) return;
+          // Clear config cache to force re-read from globalState (may have been modified by other windows)
+          cachedInMemoryConfig = null;
+          const config = getConfig();
+          const sbData = generateSidebarHtml(config);
+          try {
+            activePanel.webview.postMessage({
+              command: "updateSidebar",
+              qqiqHtml: sbData.qqiqHtml,
+              pinnedDirsHtml: sbData.pinnedDirsHtml,
+            });
+          } catch { }
+        }, 1400);
       }
     })
   );

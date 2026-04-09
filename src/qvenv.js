@@ -1038,7 +1038,7 @@ sys.exit(0)
 
                 cp.execSync(`"${installPath}" "${getPipPath}" --index-url https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com`, {
                     windowsHide: true,
-                    timeout: 120000,
+                    timeout: 121000,
                     stdio: ['pipe', 'pipe', 'pipe'],
                     // ★ 绕过代理，避免 ProxyError
                     env: { ...process.env, PYTHONNOUSERSITE: '1', NO_PROXY: '*', http_proxy: '', https_proxy: '', HTTP_PROXY: '', HTTPS_PROXY: '' }

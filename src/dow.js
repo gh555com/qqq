@@ -2410,7 +2410,7 @@ class YtDlpDownloader {
 
             // ★ CROSS-PROCESS LOCK: Prevent multiple windows from downloading simultaneously
             const lockResult = await acquireDownloadLock(installPath, {
-                downloadLockWaitMs: 120000,  // Wait up to 120s for other window to finish
+                downloadLockWaitMs: 121000,  // Wait up to 121s for other window to finish
                 downloadLockStaleMs: 300000, // Lock expires after 300s (safety)
                 downloadLockPollMs: 500
             });
@@ -2774,7 +2774,7 @@ class UnifiedMediaDownloader {
                 // ★ If another window is installing, schedule periodic check
                 if (l1Result.installInProgress) {
                     global.logMessage("[PythonCheck] Another window is installing, scheduling periodic check...", "INFO");
-                    this._scheduleInstallCheck(context, 5000, 120000);
+                    this._scheduleInstallCheck(context, 5000, 121000);
                     return null;
                 }
 
@@ -2829,7 +2829,7 @@ class UnifiedMediaDownloader {
                             } else if (res.skipped) {
                                 // ★ Another window is installing, schedule periodic check
                                 global.logMessage("[PythonInstall] Install skipped (another window installing), scheduling periodic check...", "INFO");
-                                this._scheduleInstallCheck(context, 5000, 120000);
+                                this._scheduleInstallCheck(context, 5000, 121000);
                                 resolve(null);
                             } else {
                                 global.logMessage(q('dow.l4Failed', res.error), "ERROR");
@@ -2863,9 +2863,9 @@ class UnifiedMediaDownloader {
      * ★ Schedule periodic check for install completion (for windows that skipped install)
      * @param {Object} context - VS Code extension context
      * @param {number} intervalMs - Check interval in ms (default 5s)
-     * @param {number} timeoutMs - Total timeout in ms (default 120s)
+     * @param {number} timeoutMs - Total timeout in ms (default 121)
      */
-    _scheduleInstallCheck(context, intervalMs = 5000, timeoutMs = 120000) {
+    _scheduleInstallCheck(context, intervalMs = 5000, timeoutMs = 121000) {
         const global = require('./global');
 
         // Prevent multiple schedulers
