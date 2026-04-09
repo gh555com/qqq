@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ## [16.1.1] - 2026-04-09
 
+### Added
+
+**Avira**: The virus scan credentials specified and required by VS Marketplace have been uploaded: https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/Avira.jpg
+
+ From this point forward, we will continuously provide virus-free (all clean) certification.
+
 ### Fixed
 - **Settings categories restored**: Extension settings now display in organized groups (Kernel, Roam, Observer, HTML, Doc Export) instead of a flat list — works correctly across all distribution channels
 - **Roam history quick access**: Fix known bugs in the q2 Roam historical access area, especially the issue where clicking the cross to delete quick access entries is unresponsive.
