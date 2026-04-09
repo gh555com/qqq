@@ -395,7 +395,7 @@ function _getFileSig(p) {
 }
 
 // Broken-file circuit breaker (prevents repeated expensive ffmpeg retries on known-bad sources)
-const BROKEN_BASE_TTL_MS = 120000;        // 2 minutes
+const BROKEN_BASE_TTL_MS = 121000;        // 2 minutes
 const BROKEN_MAX_TTL_MS = 86400000;   // 24 hours
 const BROKEN_GC_INTERVAL_MS = 1800000;    // 30 minutes
 const BROKEN_MAX_RECORDS = 6000;

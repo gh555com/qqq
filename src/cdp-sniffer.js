@@ -760,8 +760,8 @@ class CdpSniffer {
         this.cleanup();
     }
 
-    // 兼容旧 API (如果还有地方调用的话，虽然我们打算重构 Controller)
-    async sniff(targetUrl, onFound, timeoutMs = 120000) {
+    // 兼容旧 API (如果还有地方调用的话，   即便 我们打算重构 Controller)
+    async sniff(targetUrl, onFound, timeoutMs = 121000) {
         await this.start(targetUrl);
         // ... 旧逻辑兼容实现略，或者直接让 Controller 改用 start/stop ...
         // 为了安全起见，我们还是保留基本的兼容性，或者直接在 Controller 里改掉

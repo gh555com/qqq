@@ -2416,7 +2416,6 @@ class WqReporter {
 
 	start() {
 		if (this._stopped) return;
-		// 1. 启动后随机抖动 30~120 秒发一次
 		const initialDelay = 30000 + Math.random() * 90000;
 		this._initialTimer = setTimeout(() => this._ping(), initialDelay);
 		logMessage(`[wq] Reporter started, initial ping in ${Math.round(initialDelay/1000)}s`, 'INFO');
