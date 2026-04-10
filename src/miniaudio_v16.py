@@ -193,10 +193,11 @@ class _MiniaudioCompat:
 
 
 class PlaybackToken:
-    __slots__ = ("stop_event",)
+    __slots__ = ("stop_event", "last_data_pull",)
 
     def __init__(self):
         self.stop_event = threading.Event()
+        self.last_data_pull = time.time()  # ★ 追踪设备最后一次拉取数据的时间
 
     def stop(self):
         self.stop_event.set()
@@ -205,12 +206,21 @@ class PlaybackToken:
     def stopped(self):
         return self.stop_event.is_set()
 
+    def touch(self):
+        """★ 由 stream generator 在 yield 有效数据时调用，证明设备仍在拉取"""
+        self.last_data_pull = time.time()
+
+    def device_silent_seconds(self):
+        """★ 返回设备停止拉取数据的秒数（0 = 正常工作中）"""
+        return time.time() - self.last_data_pull
+
 
 class NonBlockingAudioEngine:
-    def __init__(self, asset_folder="assets", max_workers=32, silent=False):
+    def __init__(self, asset_folder="assets", max_workers=32, silent=False, on_device_lost=None):
         self.silent = silent
         self._log("非阻塞音频引擎初始化中...")
         self.asset_folder = asset_folder
+        self._on_device_lost = on_device_lost  # ★ 设备丢失回调
 
         self._compat = _MiniaudioCompat()
         if not self._compat.ok:
@@ -505,6 +515,7 @@ class NonBlockingAudioEngine:
             if want < want_total:
                 audio += b"\x00" * ((want_total - want) * self._frame_bytes)
 
+            token.touch()  # ★ 证明设备仍在拉取数据
             framecount = yield audio
 
     def _prepare_pcm_loop_crossfade(self, pcm_bytes: bytes, crossfade_ms: float):
@@ -617,6 +628,221 @@ class NonBlockingAudioEngine:
 
         return pcm2, xfade_frames
 
+    # =========================================================================
+    #  ★ intro (前奏) + 主循环 支持
+    # =========================================================================
+
+    def _build_xfade_buffer(self, tail_pcm: bytes, tail_total_frames: int,
+                            head_pcm: bytes, head_start_frame: int,
+                            xfade_frames: int, out_g, in_g) -> bytes:
+        """构建交叉淡化缓冲区：tail 尾部 × fadeout  +  head 头部 × fadein"""
+        fb = self._frame_bytes
+        ch = self.REQUESTED_CHANNELS
+        ts = (tail_total_frames - xfade_frames) * fb
+        tail_b = tail_pcm[ts: tail_total_frames * fb]
+        hs = head_start_frame * fb
+        head_b = head_pcm[hs: hs + xfade_frames * fb]
+        t_arr = array.array("h"); t_arr.frombytes(tail_b)
+        h_arr = array.array("h"); h_arr.frombytes(head_b)
+        if sys.byteorder != "little":
+            t_arr.byteswap(); h_arr.byteswap()
+        mixed = array.array("h", [0] * (xfade_frames * ch))
+        for i in range(xfade_frames):
+            og = out_g[i]; ig = in_g[i]; base = i * ch
+            for c in range(ch):
+                v = int(t_arr[base + c] * og + h_arr[base + c] * ig)
+                mixed[base + c] = 32767 if v > 32767 else -32768 if v < -32768 else v
+        if sys.byteorder != "little":
+            mixed.byteswap()
+        return mixed.tobytes()
+
+    def _apply_fade_out(self, pcm_bytes: bytes, fade_seconds: float) -> bytes:
+        """对 PCM 尾部应用余弦淡出"""
+        fb = self._frame_bytes
+        ch = self.REQUESTED_CHANNELS
+        total_frames = len(pcm_bytes) // fb
+        fade_frames = int(min(fade_seconds, total_frames / self.REQUESTED_RATE) * self.REQUESTED_RATE)
+        if fade_frames <= 0:
+            return pcm_bytes
+        fade_gains = _cosine_fade_table(fade_frames)
+        if not fade_gains:
+            return pcm_bytes
+        samples = array.array("h"); samples.frombytes(pcm_bytes)
+        if sys.byteorder != "little":
+            samples.byteswap()
+        fade_start = total_frames - fade_frames
+        for i in range(fade_frames):
+            g = fade_gains[i]; base = (fade_start + i) * ch
+            for c in range(ch):
+                samples[base + c] = int(samples[base + c] * g)
+        if sys.byteorder != "little":
+            samples.byteswap()
+        return samples.tobytes()
+
+    def _pcm_intro_loop_stream(self, intro_pcm: bytes, main_pcm: bytes,
+                               token: PlaybackToken, xfade_frames: int):
+        """★ intro 播放一次 → 无缝交叉淡化 → main 无限循环"""
+        fb = self._frame_bytes
+        intro_frames = len(intro_pcm) // fb
+        main_frames = len(main_pcm) // fb
+        if intro_frames <= 0 or main_frames <= 0:
+            framecount = yield b""
+            return
+
+        xf = min(xfade_frames, intro_frames // 4, main_frames // 4)
+        if xf < 1:
+            xf = 0
+
+        # 构建交叉淡化缓冲区
+        if xf > 0:
+            out_g, in_g = _raised_cosine_crossfade_gains(xf)
+            i2m = self._build_xfade_buffer(intro_pcm, intro_frames, main_pcm, 0, xf, out_g, in_g)
+            m2m = self._build_xfade_buffer(main_pcm, main_frames, main_pcm, 0, xf, out_g, in_g)
+        else:
+            i2m = b""
+            m2m = b""
+
+        # 构建片段序列
+        intro_segs = []
+        ib = intro_pcm[: (intro_frames - xf) * fb] if xf > 0 else intro_pcm
+        if ib:
+            intro_segs.append(ib)
+        if i2m:
+            intro_segs.append(i2m)
+
+        loop_segs = []
+        mb = main_pcm[xf * fb: (main_frames - xf) * fb] if xf > 0 else main_pcm
+        if mb:
+            loop_segs.append(mb)
+        if m2m:
+            loop_segs.append(m2m)
+
+        if not loop_segs:
+            framecount = yield b""
+            return
+
+        cur_segs = intro_segs if intro_segs else loop_segs
+        in_loop = not intro_segs
+        seg_idx = 0
+        pos = 0
+        framecount = yield b""
+        while True:
+            if token.stopped:
+                return
+            want = int(framecount) if framecount else 0
+            if want <= 0:
+                framecount = yield b""
+                continue
+            out = bytearray(want * fb)
+            filled = 0
+            while filled < want:
+                if token.stopped:
+                    return
+                seg = cur_segs[seg_idx]
+                sf = len(seg) // fb
+                take = min(sf - pos, want - filled)
+                s = pos * fb
+                out[filled * fb: (filled + take) * fb] = seg[s: s + take * fb]
+                filled += take
+                pos += take
+                if pos >= sf:
+                    pos = 0
+                    seg_idx += 1
+                    if seg_idx >= len(cur_segs):
+                        if not in_loop:
+                            in_loop = True
+                            cur_segs = loop_segs
+                        seg_idx = 0
+            token.touch()
+            framecount = yield bytes(out)
+
+    def _pcm_intro_nloop_stream(self, intro_pcm: bytes, main_pcm: bytes,
+                                loop_times: int, token: PlaybackToken,
+                                xfade_frames: int, final_fade_seconds: float):
+        """★ intro 播放一次 → main 播放 loop_times 次（含交叉淡化和尾部淡出）"""
+        fb = self._frame_bytes
+        intro_frames = len(intro_pcm) // fb
+        main_frames = len(main_pcm) // fb
+        if main_frames <= 0 or loop_times <= 0:
+            framecount = yield b""
+            return
+
+        # intro 为空时跳过前奏
+        has_intro = intro_frames > 0
+
+        if has_intro:
+            xf = min(xfade_frames, intro_frames // 4, main_frames // 4)
+        else:
+            xf = min(xfade_frames, main_frames // 4)
+        if xf < 1:
+            xf = 0
+
+        if xf > 0:
+            out_g, in_g = _raised_cosine_crossfade_gains(xf)
+            i2m = self._build_xfade_buffer(intro_pcm, intro_frames, main_pcm, 0, xf, out_g, in_g) if has_intro else b""
+            m2m = self._build_xfade_buffer(main_pcm, main_frames, main_pcm, 0, xf, out_g, in_g)
+        else:
+            i2m = b""
+            m2m = b""
+
+        # 主循环体（去头去尾 / 去头保尾）
+        main_body_short = main_pcm[xf * fb: (main_frames - xf) * fb] if xf > 0 else main_pcm
+        main_body_full = main_pcm[xf * fb:] if xf > 0 else main_pcm
+
+        # 最后一段带淡出
+        try:
+            fos = float(final_fade_seconds or 0)
+        except Exception:
+            fos = 0.0
+        main_body_last = self._apply_fade_out(main_body_full, fos) if fos > 0 else main_body_full
+
+        # 组装完整片段序列
+        segments = []
+        if has_intro:
+            ib = intro_pcm[: (intro_frames - xf) * fb] if xf > 0 else intro_pcm
+            if ib:
+                segments.append(ib)
+            if i2m:
+                segments.append(i2m)
+
+        for i in range(loop_times):
+            is_last = (i == loop_times - 1)
+            if is_last:
+                segments.append(main_body_last)
+            else:
+                segments.append(main_body_short)
+                if m2m:
+                    segments.append(m2m)
+
+        # 播放
+        seg_idx = 0
+        pos = 0
+        framecount = yield b""
+        while seg_idx < len(segments):
+            if token.stopped:
+                return
+            want = int(framecount) if framecount else 0
+            if want <= 0:
+                framecount = yield b""
+                continue
+            out = bytearray(want * fb)
+            filled = 0
+            while filled < want and seg_idx < len(segments):
+                if token.stopped:
+                    return
+                seg = segments[seg_idx]
+                sf = len(seg) // fb
+                take = min(sf - pos, want - filled)
+                s = pos * fb
+                out[filled * fb: (filled + take) * fb] = seg[s: s + take * fb]
+                filled += take
+                pos += take
+                if pos >= sf:
+                    pos = 0
+                    seg_idx += 1
+            token.touch()
+            framecount = yield bytes(out)
+
     def _pcm_loop_stream(self, pcm_bytes: bytes, token: PlaybackToken, xfade_frames: int = 0):
         total_frames = len(pcm_bytes) // self._frame_bytes
         if total_frames <= 0:
@@ -648,6 +874,7 @@ class NonBlockingAudioEngine:
                 pos += take
                 if pos >= total_frames:
                     pos = xfade_frames if xfade_frames > 0 else 0
+            token.touch()  # ★ 证明设备仍在拉取数据
             framecount = yield bytes(out)
 
     def _pcm_nloop_stream(self, pcm_bytes: bytes, loop_times: int, token: PlaybackToken, between_loop_crossfade_ms: float, final_fade_seconds: float):
@@ -763,6 +990,7 @@ class NonBlockingAudioEngine:
             if loops_left <= 0 and filled <= 0:
                 return
 
+            token.touch()  # ★ 证明设备仍在拉取数据
             framecount = yield bytes(out)
 
     def _register_token(self, token: PlaybackToken):
@@ -819,8 +1047,36 @@ class NonBlockingAudioEngine:
                     stream.send(None)
                     device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                     device.start(stream)
+                    token.touch()  # ★ 重置计时器
                     while not token.stopped:
                         time.sleep(0.1)
+                        # ★ 检测设备是否已死（屏保/音频设备切换等场景）
+                        if token.device_silent_seconds() > 3.0:
+                            self._log("【!!】 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换导致。正在尝试恢复...")
+                            # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
+                            if self._on_device_lost:
+                                try: self._on_device_lost()
+                                except: pass
+                            try: device.stop()
+                            except Exception: pass
+                            try: device.close()
+                            except Exception: pass
+                            device = None
+                            # ★ 短暂等待让系统音频恢复
+                            time.sleep(0.5)
+                            if token.stopped:
+                                return
+                            # ★ 尝试重建设备恢复播放
+                            try:
+                                stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
+                                stream.send(None)
+                                device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                                device.start(stream)
+                                token.touch()
+                                self._log("【OK】 音频设备恢复成功，继续播放")
+                            except Exception as re_err:
+                                self._log(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                                return
                     return
 
                 while not token.stopped:
@@ -831,9 +1087,16 @@ class NonBlockingAudioEngine:
                     stream.send(None)
                     device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                     device.start(stream)
+                    token.touch()  # ★ 重置计时器
                     t_end = time.time() + seg_duration + 0.25
+                    device_dead = False
                     while (time.time() < t_end) and (not token.stopped):
                         time.sleep(0.05)
+                        # ★ 检测设备是否已死
+                        if token.device_silent_seconds() > 3.0:
+                            self._log("【!!】 streaming loop: 音频设备停止响应，中断当前段")
+                            device_dead = True
+                            break
                     try: device.stop()
                     except Exception: pass
                     try: device.close()
@@ -842,6 +1105,10 @@ class NonBlockingAudioEngine:
                     try: decoder.close()
                     except Exception: pass
                     decoder = None
+                    # ★ 如果设备死了，等待系统音频恢复后再重试下一个循环
+                    if device_dead:
+                        time.sleep(0.5)
+                        token.touch()  # 重置计时器给下一次循环机会
                 return
 
             fos = max(0.0, min(float(fade_out_seconds or 0.0), seg_duration))
@@ -856,9 +1123,14 @@ class NonBlockingAudioEngine:
             device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
             device.start(stream)
 
+            token.touch()  # ★ 重置计时器
             t_end = time.time() + seg_duration + 0.25
             while (time.time() < t_end) and (not token.stopped):
                 time.sleep(0.05)
+                # ★ 检测设备是否已死（单次播放直接退出即可）
+                if token.device_silent_seconds() > 3.0:
+                    self._log("【!!】 单次播放: 音频设备停止响应，结束播放")
+                    break
 
         except Exception:
             self._log("【!!】 音频播放失败:")
@@ -936,9 +1208,49 @@ class NonBlockingAudioEngine:
 
                 total_out_frames = seg_frames + (loop_times - 1) * (seg_frames - xfade_frames) if (loop_times > 1 and xfade_frames > 0) else seg_frames * loop_times
                 total_out_sec = total_out_frames / float(rate)
+                token.touch()  # ★ 重置计时器
                 t_end = time.time() + total_out_sec + 0.25
                 while (time.time() < t_end) and (not token.stopped):
                     time.sleep(0.05)
+                    # ★ 检测设备是否已死
+                    if token.device_silent_seconds() > 3.0:
+                        self._log("【!!】 多次循环播放: 音频设备停止响应（>3s无数据拉取），尝试恢复...")
+                        # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
+                        if self._on_device_lost:
+                            try: self._on_device_lost()
+                            except: pass
+                        try: device.stop()
+                        except Exception: pass
+                        try: device.close()
+                        except Exception: pass
+                        device = None
+                        time.sleep(0.5)
+                        if token.stopped:
+                            return
+                        # ★ 重建设备恢复播放（重新开始剩余循环）
+                        try:
+                            elapsed = time.time() - (t_end - total_out_sec - 0.25)
+                            elapsed_frames = int(elapsed * rate)
+                            # 简化处理：从头开始剩余的播放时间
+                            remaining_sec = max(0, t_end - time.time())
+                            if remaining_sec <= 0.5:
+                                return
+                            remaining_loops = max(1, int(remaining_sec / seg_duration))
+                            new_stream = self._pcm_nloop_stream(
+                                pcm_bytes=pcm, loop_times=remaining_loops, token=token,
+                                between_loop_crossfade_ms=between_loop_crossfade_ms,
+                                final_fade_seconds=final_fade_seconds
+                            )
+                            new_stream.send(None)
+                            device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                            device.start(new_stream)
+                            token.touch()
+                            # 更新结束时间
+                            t_end = time.time() + remaining_sec
+                            self._log(f"【OK】 音频设备恢复成功，继续播放约{remaining_sec:.1f}s")
+                        except Exception as re_err:
+                            self._log(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                            return
                 return
 
             for i in range(loop_times):
@@ -958,9 +1270,16 @@ class NonBlockingAudioEngine:
                 device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                 device.start(stream)
 
+                token.touch()  # ★ 重置计时器
                 t_end = time.time() + seg_duration + 0.25
+                device_dead = False
                 while (time.time() < t_end) and (not token.stopped):
                     time.sleep(0.05)
+                    # ★ 检测设备是否已死
+                    if token.device_silent_seconds() > 3.0:
+                        self._log(f"【!!】 streaming循环第{i+1}/{loop_times}: 音频设备停止响应")
+                        device_dead = True
+                        break
 
                 try: device.stop()
                 except Exception: pass
@@ -970,6 +1289,10 @@ class NonBlockingAudioEngine:
                 try: decoder.close()
                 except Exception: pass
                 decoder = None
+                # ★ 如果设备死了，等待恢复后继续下一个循环
+                if device_dead:
+                    time.sleep(0.5)
+                    token.touch()
 
         except Exception:
             self._log("【!!】 音频播放失败:")
@@ -1024,6 +1347,224 @@ class NonBlockingAudioEngine:
             play_range=None,
             trim_silence=bool(trim_silence),
             between_loop_crossfade_ms=LOOP_CROSSFADE_MS_DEFAULT,
+        )
+
+    # =========================================================================
+    #  ★ play_with_intro: 前奏 + 主文件无缝播放
+    # =========================================================================
+
+    def _play_intro_worker(self, intro_path: str, main_path: str, loop: bool,
+                           loop_times: int, final_fade_seconds: float,
+                           trim_silence: bool, token: PlaybackToken,
+                           crossfade_ms: float):
+        """★ 播放前奏一次，然后无缝过渡到主文件循环/N次播放"""
+        device = None
+        try:
+            for fp in (intro_path, main_path):
+                if not os.path.exists(fp):
+                    self._log(f"【!!】 文件不存在: {fp}")
+                    return
+
+            rate = self.REQUESTED_RATE
+
+            # 解码 intro
+            info_i = miniaudio.get_file_info(intro_path)
+            dur_i = float(info_i.duration or 0)
+            if dur_i <= 0:
+                return
+            sf_i, ef_i = 0, int(dur_i * rate)
+            if trim_silence and not token.stopped:
+                sf_i, ef_i = self._trim_silence_edges(intro_path, sf_i, ef_i, token)
+            if token.stopped:
+                return
+            intro_pcm, _ = self._get_pcm_cached_or_decode(intro_path, sf_i, ef_i, token, crossfade_ms=0.0)
+            if token.stopped or not intro_pcm:
+                return
+
+            # 解码 main
+            info_m = miniaudio.get_file_info(main_path)
+            dur_m = float(info_m.duration or 0)
+            if dur_m <= 0:
+                return
+            sf_m, ef_m = 0, int(dur_m * rate)
+            if trim_silence and not token.stopped:
+                sf_m, ef_m = self._trim_silence_edges(main_path, sf_m, ef_m, token)
+            if token.stopped:
+                return
+            main_pcm, _ = self._get_pcm_cached_or_decode(main_path, sf_m, ef_m, token, crossfade_ms=0.0)
+            if token.stopped or not main_pcm:
+                return
+
+            # 交叉淡化帧数
+            try:
+                xms = float(crossfade_ms or 0)
+            except Exception:
+                xms = 0.0
+            xfade_frames = int((xms / 1000.0) * rate) if xms > 0 else 0
+
+            fb = self._frame_bytes
+
+            if loop:
+                # ★ 无限循环模式
+                stream = self._pcm_intro_loop_stream(intro_pcm, main_pcm, token, xfade_frames)
+                stream.send(None)
+                device = self.PlaybackDevice(
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE)
+                device.start(stream)
+                token.touch()
+
+                while not token.stopped:
+                    time.sleep(0.1)
+                    if token.device_silent_seconds() > 3.0:
+                        self._log("【!!】 intro+loop: 音频设备停止响应，尝试恢复...")
+                        if self._on_device_lost:
+                            try:
+                                self._on_device_lost()
+                            except Exception:
+                                pass
+                        try:
+                            device.stop()
+                        except Exception:
+                            pass
+                        try:
+                            device.close()
+                        except Exception:
+                            pass
+                        device = None
+                        time.sleep(0.5)
+                        if token.stopped:
+                            return
+                        try:
+                            # 恢复时跳过 intro，直接从主文件循环
+                            main_pcm_xf, mxf = self._get_pcm_cached_or_decode(
+                                main_path, sf_m, ef_m, token, crossfade_ms=xms)
+                            if token.stopped or not main_pcm_xf:
+                                return
+                            stream = self._pcm_loop_stream(main_pcm_xf, token, xfade_frames=mxf)
+                            stream.send(None)
+                            device = self.PlaybackDevice(
+                                output_format=self.REQUESTED_FORMAT,
+                                nchannels=self.REQUESTED_CHANNELS,
+                                sample_rate=self.REQUESTED_RATE)
+                            device.start(stream)
+                            token.touch()
+                            self._log("【OK】 intro+loop: 设备恢复，从主循环继续")
+                        except Exception as e:
+                            self._log(f"【!!】 intro+loop: 恢复失败: {_short_exc(e)}")
+                            return
+            else:
+                # ★ N 次循环模式
+                stream = self._pcm_intro_nloop_stream(
+                    intro_pcm, main_pcm, loop_times, token, xfade_frames, final_fade_seconds)
+                stream.send(None)
+                device = self.PlaybackDevice(
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE)
+                device.start(stream)
+
+                # 计算总时长（估算）
+                intro_f = len(intro_pcm) // fb
+                main_f = len(main_pcm) // fb
+                xf = min(xfade_frames, intro_f // 4, main_f // 4) if xfade_frames > 0 else 0
+                # intro_body + i2m_xfade + (main_body_short + m2m_xfade)*(N-1) + main_body_last
+                if loop_times > 1 and xf > 0:
+                    total_f = (intro_f - xf) + xf + (main_f - 2 * xf + xf) * (loop_times - 1) + (main_f - xf)
+                else:
+                    total_f = intro_f + main_f * loop_times
+                total_sec = total_f / float(rate)
+
+                token.touch()
+                t_end = time.time() + total_sec + 0.5
+                while (time.time() < t_end) and (not token.stopped):
+                    time.sleep(0.05)
+                    if token.device_silent_seconds() > 3.0:
+                        self._log("【!!】 intro+nloop: 音频设备停止响应，尝试恢复...")
+                        if self._on_device_lost:
+                            try:
+                                self._on_device_lost()
+                            except Exception:
+                                pass
+                        try:
+                            device.stop()
+                        except Exception:
+                            pass
+                        try:
+                            device.close()
+                        except Exception:
+                            pass
+                        device = None
+                        time.sleep(0.5)
+                        if token.stopped:
+                            return
+                        remaining = max(0, t_end - time.time())
+                        if remaining <= 0.5:
+                            return
+                        try:
+                            rem_loops = max(1, int(remaining / (main_f / float(rate))))
+                            rs = self._pcm_intro_nloop_stream(
+                                b"", main_pcm, rem_loops, token, xfade_frames, final_fade_seconds)
+                            rs.send(None)
+                            device = self.PlaybackDevice(
+                                output_format=self.REQUESTED_FORMAT,
+                                nchannels=self.REQUESTED_CHANNELS,
+                                sample_rate=self.REQUESTED_RATE)
+                            device.start(rs)
+                            token.touch()
+                            t_end = time.time() + remaining
+                            self._log(f"【OK】 intro+nloop: 设备恢复，继续约{remaining:.1f}s")
+                        except Exception as e:
+                            self._log(f"【!!】 intro+nloop: 恢复失败: {_short_exc(e)}")
+                            return
+        finally:
+            if device:
+                try:
+                    device.stop()
+                except Exception:
+                    pass
+                try:
+                    device.close()
+                except Exception:
+                    pass
+
+    def _play_wrapper_intro(self, intro_path, main_path, loop, loop_times,
+                            final_fade_seconds, trim_silence, token, crossfade_ms):
+        try:
+            self._play_intro_worker(intro_path, main_path, loop, loop_times,
+                                    final_fade_seconds, trim_silence, token, crossfade_ms)
+        finally:
+            self._unregister_token(token)
+
+    def play_with_intro(self, intro_path: str, main_path: str,
+                        loop: bool = False, loop_times: int = 1,
+                        final_fade_seconds: float = 0.0,
+                        trim_silence: bool = True,
+                        crossfade_ms: float = None):
+        """★ 播放前奏一次，然后无缝过渡到主文件循环/N次播放"""
+        if crossfade_ms is None:
+            crossfade_ms = LOOP_CROSSFADE_MS_DEFAULT
+        token = PlaybackToken()
+        self._register_token(token)
+        self.executor.submit(
+            self._play_wrapper_intro,
+            intro_path, main_path, bool(loop), int(loop_times),
+            float(final_fade_seconds or 0.0), bool(trim_silence),
+            token, float(crossfade_ms or 0.0),
+        )
+        return token
+
+    def az_with_intro(self, intro_path: str, main_path: str,
+                      loop_times: int, final_fade_seconds: float,
+                      trim_silence: bool = True):
+        """★ 便捷方法：前奏 + 主文件 N 次循环"""
+        return self.play_with_intro(
+            intro_path=intro_path, main_path=main_path,
+            loop=False, loop_times=loop_times,
+            final_fade_seconds=final_fade_seconds,
+            trim_silence=trim_silence,
+            crossfade_ms=LOOP_CROSSFADE_MS_DEFAULT,
         )
 
     def stop_all(self):

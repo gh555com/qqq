@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.1.2] - 2026-04-10
+
+### Fixed
+- **Audio survives screensaver**: Fixed the bug where savorMoments and all sound effects would be interrupted by the screensaver.
+
+---
+
 ## [16.1.1] - 2026-04-09
 
 ### Added

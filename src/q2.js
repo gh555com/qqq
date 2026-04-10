@@ -112,13 +112,11 @@ const _updateQ2TrackingFile = (action) => {
           console.error('[q2.js] _updateQ2TrackingFile write error:', e);
         }
       } else {
-        // ★ Log if python returns an error or no hwnd
-        console.error('[q2.js] get_foreground_hwnd call failed. Response:', r);
+        // ★ process mismatch 是正常行为（用户切走了窗口），静默忽略
       }
     })
-    .catch(err => {
-      // ★ Log if the python call itself fails
-      console.error('[q2.js] get_foreground_hwnd call threw an error:', err);
+    .catch(() => {
+      // ★ 调用失败（bridge 未就绪等），静默忽略
     });
 };
 
