@@ -127,6 +127,12 @@ _AUDIO_CURRENT_FILE = None
 _AUDIO_LOOP_COUNT = 0
 _AUDIO_START_TIME = 0
 
+def _on_audio_device_lost():
+    """★ 当音乐引擎检测到设备丢失时触发，联动重置 SFX 引擎"""
+    _log("[Audio] Device lost detected by music engine, resetting SFX hub...")
+    _reset_audio_hub()
+
+
 def _init_audio_engine():
     """Lazy-load audio engine, return (engine, error_msg)"""
     global _AUDIO_ENGINE, _AUDIO_ENGINE_ERROR, _AUDIO_LOCK
@@ -151,7 +157,10 @@ def _init_audio_engine():
             ma_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(ma_module)
 
-            _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(asset_folder=".", max_workers=8, silent=True)
+            _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(
+                asset_folder=".", max_workers=8, silent=True,
+                on_device_lost=_on_audio_device_lost  # ★ 设备丢失时联动重置 SFX
+            )
             return _AUDIO_ENGINE, None
         except Exception as e:
             import traceback
@@ -182,92 +191,148 @@ def _check_audio_engine():
     except Exception as e:
         return {"has_miniaudio": True, "miniaudio_version": "unknown", "error": str(e)}
 
+
+def _reset_audio_engine():
+    """★ 强制重置音频引擎（用于设备丢失后恢复）"""
+    global _AUDIO_ENGINE, _AUDIO_ENGINE_ERROR
+    if _AUDIO_LOCK is None:
+        return
+    with _AUDIO_LOCK:
+        if _AUDIO_ENGINE is not None:
+            try:
+                _AUDIO_ENGINE.stop_all()
+            except:
+                pass
+            try:
+                _AUDIO_ENGINE.cleanup()
+            except:
+                pass
+        _AUDIO_ENGINE = None
+        _AUDIO_ENGINE_ERROR = None
+    _log("[Audio] Engine reset complete, will re-initialize on next play")
+
 def _play_audio(file_path, count=1):
-    """Play audio, return status"""
+    """Play audio, return status. ★ 包含引擎重置重试机制"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_MONITOR_THREAD, _AUDIO_IS_LOOPING
     global _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT, _AUDIO_START_TIME
-
-    engine, err = _init_audio_engine()
-    if err:
-        return {"status": "error", "error": err}
 
     if not os.path.exists(file_path):
         return {"status": "error", "error": f"file not found: {file_path}"}
 
-    try:
-        if _AUDIO_CURRENT_TOKEN:
-            try:
-                _AUDIO_CURRENT_TOKEN.stop()
-            except:
-                pass
-            _AUDIO_CURRENT_TOKEN = None
+    # ★ 尝试最多2次（第一次正常，第二次重置引擎后重试）
+    for attempt in range(2):
+        engine, err = _init_audio_engine()
+        if err:
+            if attempt == 0:
+                _log(f"[Audio] Engine init failed (attempt 1), resetting and retrying: {err}")
+                _reset_audio_engine()
+                _reset_audio_hub()  # ★ 联动重置 SFX 引擎
+                continue
+            return {"status": "error", "error": err}
 
-        if count == 0 or count == -1:
-            _AUDIO_CURRENT_TOKEN = engine.play_sound_file(
-                file_path=file_path,
-                loop=True,
-                trim_silence=True
-            )
-            _AUDIO_IS_LOOPING = True
-        elif count == 1:
-            _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, True)
-            _AUDIO_IS_LOOPING = False
-        else:
-            _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, True)
-            _AUDIO_IS_LOOPING = False
-
-        # ★ 更新播放状态并广播
-        _AUDIO_CURRENT_FILE = os.path.basename(file_path)
-        _AUDIO_LOOP_COUNT = count
-        _AUDIO_START_TIME = time.time()
-        _emit_event({
-            "event": "audio_state_changed",
-            "playing": True,
-            "looping": _AUDIO_IS_LOOPING,
-            "fileName": _AUDIO_CURRENT_FILE,
-            "loopCount": _AUDIO_LOOP_COUNT,
-            "startTime": _AUDIO_START_TIME
-        })
-
-        def _monitor_playback():
-            global _AUDIO_CURRENT_TOKEN, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT
-            token = _AUDIO_CURRENT_TOKEN
-            eng = engine
-            if token is None:
-                return
-            while True:
-                if token.stopped:
-                    break
+        try:
+            if _AUDIO_CURRENT_TOKEN:
                 try:
-                    with eng._tokens_lock:
-                        if token not in eng._active_tokens:
-                            break
+                    _AUDIO_CURRENT_TOKEN.stop()
                 except:
-                    break
-                time.sleep(0.2)
-            if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
+                    pass
                 _AUDIO_CURRENT_TOKEN = None
-                _AUDIO_CURRENT_FILE = None
-                _AUDIO_LOOP_COUNT = 0
-                # ★ 广播播放结束事件
-                _emit_event({
-                    "event": "audio_state_changed",
-                    "playing": False,
-                    "looping": False,
-                    "fileName": None,
-                    "loopCount": 0,
-                    "startTime": 0
-                })
-                _emit_event({"event": "audio_finished"})  # 保持兼容
 
-        if not _AUDIO_IS_LOOPING:
-            _AUDIO_MONITOR_THREAD = threading.Thread(target=_monitor_playback, daemon=True)
-            _AUDIO_MONITOR_THREAD.start()
+            # ★ 检测是否需要前奏（仅 2.mp3 → 前奏 a2.mp3）
+            _intro_path = None
+            _basename = os.path.basename(file_path)
+            if _basename == "2.mp3":
+                _candidate = os.path.join(os.path.dirname(file_path), "a2.mp3")
+                if os.path.isfile(_candidate):
+                    _intro_path = _candidate
 
-        return {"status": "ok"}
-    except Exception as e:
-        import traceback
-        return {"status": "error", "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
+            if count == 0 or count == -1:
+                if _intro_path:
+                    _AUDIO_CURRENT_TOKEN = engine.play_with_intro(
+                        intro_path=_intro_path,
+                        main_path=file_path,
+                        loop=True,
+                        trim_silence=True
+                    )
+                else:
+                    _AUDIO_CURRENT_TOKEN = engine.play_sound_file(
+                        file_path=file_path,
+                        loop=True,
+                        trim_silence=True
+                    )
+                _AUDIO_IS_LOOPING = True
+            elif count == 1:
+                if _intro_path:
+                    _AUDIO_CURRENT_TOKEN = engine.az_with_intro(_intro_path, file_path, 1, 2.0, True)
+                else:
+                    _AUDIO_CURRENT_TOKEN = engine.az(file_path, 1, 2.0, True)
+                _AUDIO_IS_LOOPING = False
+            else:
+                if _intro_path:
+                    _AUDIO_CURRENT_TOKEN = engine.az_with_intro(_intro_path, file_path, count, 2.0, True)
+                else:
+                    _AUDIO_CURRENT_TOKEN = engine.az(file_path, count, 2.0, True)
+                _AUDIO_IS_LOOPING = False
+
+            # ★ 更新播放状态并广播
+            _AUDIO_CURRENT_FILE = os.path.basename(file_path)
+            _AUDIO_LOOP_COUNT = count
+            _AUDIO_START_TIME = time.time()
+            _emit_event({
+                "event": "audio_state_changed",
+                "playing": True,
+                "looping": _AUDIO_IS_LOOPING,
+                "fileName": _AUDIO_CURRENT_FILE,
+                "loopCount": _AUDIO_LOOP_COUNT,
+                "startTime": _AUDIO_START_TIME
+            })
+
+            def _monitor_playback():
+                global _AUDIO_CURRENT_TOKEN, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT
+                token = _AUDIO_CURRENT_TOKEN
+                eng = engine
+                if token is None:
+                    return
+                while True:
+                    if token.stopped:
+                        break
+                    try:
+                        with eng._tokens_lock:
+                            if token not in eng._active_tokens:
+                                break
+                    except:
+                        break
+                    time.sleep(0.2)
+                if not _AUDIO_IS_LOOPING and token == _AUDIO_CURRENT_TOKEN:
+                    _AUDIO_CURRENT_TOKEN = None
+                    _AUDIO_CURRENT_FILE = None
+                    _AUDIO_LOOP_COUNT = 0
+                    # ★ 广播播放结束事件
+                    _emit_event({
+                        "event": "audio_state_changed",
+                        "playing": False,
+                        "looping": False,
+                        "fileName": None,
+                        "loopCount": 0,
+                        "startTime": 0
+                    })
+                    _emit_event({"event": "audio_finished"})  # 保持兼容
+
+            if not _AUDIO_IS_LOOPING:
+                _AUDIO_MONITOR_THREAD = threading.Thread(target=_monitor_playback, daemon=True)
+                _AUDIO_MONITOR_THREAD.start()
+
+            return {"status": "ok"}
+        except Exception as e:
+            import traceback
+            if attempt == 0:
+                _log(f"[Audio] Play failed (attempt 1), resetting engine and retrying: {e}")
+                _reset_audio_engine()
+                _reset_audio_hub()  # ★ 联动重置 SFX 引擎
+                continue
+            return {"status": "error", "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()}
+
+    return {"status": "error", "error": "play failed after retries"}
 
 def _stop_audio():
     """Stop audio playback"""
@@ -402,10 +467,8 @@ def _get_audio_hub():
             return None
 
 def _play_sfx(category: str, idx: int = -1, name: str = None):
+    """★ 播放 SFX 音效，带引擎重置重试机制"""
     global _SFX_LAST_IDX
-    hub = _get_audio_hub()
-    if not hub:
-        return
 
     _init_sfx_paths()
     paths = _SFX_REGISTRY.get(category, [])
@@ -416,14 +479,16 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     if not valid_paths:
         return
 
+    # 确定要播放的文件
     if name:
+        path = None
         for p in valid_paths:
             if os.path.basename(p) == name:
-                hub.play_sfx(p)
-                return
-        return
-
-    if idx < 0:
+                path = p
+                break
+        if not path:
+            return
+    elif idx < 0:
         last = _SFX_LAST_IDX.get(category, -1)
         if len(valid_paths) > 1:
             choices = [i for i in range(len(valid_paths)) if i != last]
@@ -435,7 +500,25 @@ def _play_sfx(category: str, idx: int = -1, name: str = None):
     else:
         path = valid_paths[idx % len(valid_paths)]
 
-    hub.play_sfx(path)
+    # ★ 尝试最多2次（第一次正常，第二次重置 hub 后重试）
+    for attempt in range(2):
+        hub = _get_audio_hub()
+        if not hub:
+            if attempt == 0:
+                _log("[SFX] AudioHub unavailable, resetting and retrying...")
+                _reset_audio_hub()
+                continue
+            return
+
+        try:
+            hub.play_sfx(path)
+            return
+        except Exception as e:
+            if attempt == 0:
+                _log(f"[SFX] play_sfx failed, resetting hub and retrying: {e}")
+                _reset_audio_hub()
+                continue
+            _log(f"[SFX] play_sfx failed after retry: {e}")
 
 def _start_clipboard_watcher():
     global _CLIPBOARD_WATCHER_STARTED
@@ -472,6 +555,48 @@ def _stop_clipboard_watcher():
 def _get_clipboard_watcher_state():
     with _CLIPBOARD_STATE_LOCK:
         return {"started": bool(_CLIPBOARD_WATCHER_STARTED)}
+
+
+def _reset_audio_hub():
+    """★ 重置 AudioHub（SFX 音效引擎），用于设备丢失后恢复"""
+    global _AUDIO_HUB, _SFX_PRIMED, _CLIPBOARD_WATCHER_STARTED
+    with _AUDIO_HUB_LOCK:
+        if _AUDIO_HUB is not None:
+            try:
+                _AUDIO_HUB.close()
+            except:
+                pass
+        _AUDIO_HUB = None
+        _SFX_PRIMED = False
+    with _CLIPBOARD_STATE_LOCK:
+        _CLIPBOARD_WATCHER_STARTED = False
+    _log("[Audio] AudioHub (SFX engine) reset complete")
+
+
+def _reset_all_audio():
+    """★ 重置所有音频引擎（音乐 + SFX），并恢复剪贴板监听"""
+    global _CLIPBOARD_WATCHER_STARTED
+
+    # 1) 记住剪贴板监听状态
+    with _CLIPBOARD_STATE_LOCK:
+        was_clipboard_watching = _CLIPBOARD_WATCHER_STARTED
+
+    # 2) 重置音乐引擎
+    _reset_audio_engine()
+
+    # 3) 重置 SFX 引擎
+    _reset_audio_hub()
+
+    # 4) 如果之前剪贴板监听在运行，重新启动
+    if was_clipboard_watching:
+        _log("[Audio] Re-starting clipboard watcher after audio reset...")
+        try:
+            result = _start_clipboard_watcher()
+            _log(f"[Audio] Clipboard watcher restart: {result.get('status', 'unknown')}")
+        except Exception as e:
+            _log(f"[Audio] Clipboard watcher restart failed: {e}")
+
+    return {"status": "ok"}
 
 # =============================================================================
 #  ★ Global Keyboard Hook (pynput) - Space+Q to restore q2 visible window
@@ -556,8 +681,7 @@ def _test_activate_vscode():
                 proc = psutil.Process(pid.value)
                 actual_proc_name = proc.name().lower()
                 if actual_proc_name != expected_proc.lower():
-                    _log(f"[Hotkey] hwnd={hwnd} process mismatch: expected '{expected_proc}', got '{actual_proc_name}', skipping")
-                    dead_hwnds.append(hwnd_str)  # Clean it up
+                    dead_hwnds.append(hwnd_str)  # Clean it up (process mismatch = window reused)
                     continue
         except Exception as e:
             _log(f"[Hotkey] hwnd={hwnd} process check failed: {e}, skipping")
@@ -610,13 +734,11 @@ def _get_foreground_hwnd(cmd: dict):
             proc = psutil.Process(pid.value)
             actual_proc_name = proc.name().lower()
             if actual_proc_name != expected_proc.lower():
-                _log(f"[Hotkey] GetForegroundWindow -> {hwnd}, but process mismatch. Expected '{expected_proc}', got '{actual_proc_name}'. Rejected.")
+                # ★ 静默返回错误（process mismatch 是正常行为：用户切走了窗口）
                 return {"status": "error", "error": f"process mismatch: expected {expected_proc}, got {actual_proc_name}"}
     except Exception as e:
-        _log(f"[Hotkey] Process check failed for hwnd {hwnd}: {e}, rejecting.")
         return {"status": "error", "error": f"process check failed: {e}"}
 
-    _log(f"[Hotkey] GetForegroundWindow -> {hwnd} (Process '{expected_proc}' verified)")
     return {"status": "ok", "hwnd": hwnd}
 
 def _hotkey_on_press(key):
@@ -1997,6 +2119,11 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
 
     if action == "stop_audio":
         out.update(_stop_audio())
+        return out
+
+    if action == "reset_audio_engine":
+        _reset_all_audio()  # ★ 重置所有音频引擎（音乐+SFX+剪贴板监听）
+        out["status"] = "ok"
         return out
 
     if action == "get_audio_state":
