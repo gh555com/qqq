@@ -131,6 +131,14 @@ def _on_audio_device_lost():
     """★ 当音乐引擎检测到设备丢失时触发，联动重置 SFX 引擎"""
     _log("[Audio] Device lost detected by music engine, resetting SFX hub...")
     _reset_audio_hub()
+    # ★ 埋点：记录当前音频状态，供下次排查
+    try:
+        import datetime
+        _log(f"[Audio] Diagnostic: time={datetime.datetime.now().isoformat()}, "
+             f"file={_AUDIO_CURRENT_FILE}, looping={_AUDIO_IS_LOOPING}, "
+             f"engine_alive={_AUDIO_ENGINE is not None}")
+    except Exception:
+        pass
 
 
 def _init_audio_engine():
@@ -218,6 +226,9 @@ def _play_audio(file_path, count=1):
 
     if not os.path.exists(file_path):
         return {"status": "error", "error": f"file not found: {file_path}"}
+
+    # ★ 埋点：记录每次播放请求，方便屏保后对比时间线
+    _log(f"[Audio] play_audio: file={os.path.basename(file_path)}, count={count}")
 
     # ★ 尝试最多2次（第一次正常，第二次重置引擎后重试）
     for attempt in range(2):

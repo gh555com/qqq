@@ -251,6 +251,14 @@ class NonBlockingAudioEngine:
         if not self.silent:
             print(msg)
 
+    def _log_critical(self, msg: str):
+        """设备恢复等关键场景，无论 silent 与否都输出（供外部回调捞取）。"""
+        if self._on_device_lost:
+            # 外部已注册回调 → 通过回调 channel 输出（kp.py 的 _log 会写 broker.log）
+            try: self._on_device_lost.__self__  # noqa – just probing
+            except AttributeError: pass
+        print(f"[miniaudio] {msg}")
+
     def _send_primed(self, gen, value):
         try:
             return gen.send(value)
@@ -1052,7 +1060,7 @@ class NonBlockingAudioEngine:
                         time.sleep(0.1)
                         # ★ 检测设备是否已死（屏保/音频设备切换等场景）
                         if token.device_silent_seconds() > 3.0:
-                            self._log("【!!】 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换导致。正在尝试恢复...")
+                            self._log_critical("【!!】 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换导致。正在尝试恢复...")
                             # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
                             if self._on_device_lost:
                                 try: self._on_device_lost()
@@ -1073,9 +1081,9 @@ class NonBlockingAudioEngine:
                                 device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                                 device.start(stream)
                                 token.touch()
-                                self._log("【OK】 音频设备恢复成功，继续播放")
+                                self._log_critical("【OK】 音频设备恢复成功，继续播放")
                             except Exception as re_err:
-                                self._log(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                                self._log_critical(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
                                 return
                     return
 
@@ -1214,7 +1222,7 @@ class NonBlockingAudioEngine:
                     time.sleep(0.05)
                     # ★ 检测设备是否已死
                     if token.device_silent_seconds() > 3.0:
-                        self._log("【!!】 多次循环播放: 音频设备停止响应（>3s无数据拉取），尝试恢复...")
+                        self._log_critical("【!!】 多次循环播放: 音频设备停止响应（>3s无数据拉取），尝试恢复...")
                         # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
                         if self._on_device_lost:
                             try: self._on_device_lost()
@@ -1247,9 +1255,9 @@ class NonBlockingAudioEngine:
                             token.touch()
                             # 更新结束时间
                             t_end = time.time() + remaining_sec
-                            self._log(f"【OK】 音频设备恢复成功，继续播放约{remaining_sec:.1f}s")
+                            self._log_critical(f"【OK】 音频设备恢复成功，继续播放约{remaining_sec:.1f}s")
                         except Exception as re_err:
-                            self._log(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                            self._log_critical(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
                             return
                 return
 
@@ -1418,7 +1426,7 @@ class NonBlockingAudioEngine:
                 while not token.stopped:
                     time.sleep(0.1)
                     if token.device_silent_seconds() > 3.0:
-                        self._log("【!!】 intro+loop: 音频设备停止响应，尝试恢复...")
+                        self._log_critical("【!!】 intro+loop: 音频设备停止响应，尝试恢复...")
                         if self._on_device_lost:
                             try:
                                 self._on_device_lost()
@@ -1450,9 +1458,9 @@ class NonBlockingAudioEngine:
                                 sample_rate=self.REQUESTED_RATE)
                             device.start(stream)
                             token.touch()
-                            self._log("【OK】 intro+loop: 设备恢复，从主循环继续")
+                            self._log_critical("【OK】 intro+loop: 设备恢复，从主循环继续")
                         except Exception as e:
-                            self._log(f"【!!】 intro+loop: 恢复失败: {_short_exc(e)}")
+                            self._log_critical(f"【!!】 intro+loop: 恢复失败: {_short_exc(e)}")
                             return
             else:
                 # ★ N 次循环模式

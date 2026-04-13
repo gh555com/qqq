@@ -71,6 +71,8 @@
 > Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
 
+ You need not have opened a note-taking application specially.
+
    **√** VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app.  How?  Enable qqq.
 
 
