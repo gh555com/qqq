@@ -386,7 +386,9 @@ class ClipboardHistoryManager {
         this.sessionStartedAt = Date.now();
 
         this._initStorage();
-        this._loadHistory().catch(() => { });
+        // ★ _loadReady gate: all write operations (add/pin/remove/clear) must await this
+        // to prevent race condition where save fires before load completes and overwrites pin state
+        this._loadReady = this._loadHistory().catch(() => { });
     }
 
     // ★ NEW: manage command history
@@ -476,7 +478,15 @@ class ClipboardHistoryManager {
                 }
             });
 
-            while (this._size > CONSTANTS.MAX_HISTORY_ITEMS) this._popTail();
+            // Trim excess items but protect pinned items
+            if (this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+                let cur = this._tail;
+                while (cur && this._size > CONSTANTS.MAX_HISTORY_ITEMS) {
+                    const prev = cur.prev;
+                    if (!cur.pinned) this._removeNode(cur);
+                    cur = prev;
+                }
+            }
             this._touch();
             this._notifyChange();
         } catch (e) {
@@ -682,6 +692,7 @@ class ClipboardHistoryManager {
     }
 
     async togglePin(id) {
+        await this._loadReady;
         const node = this._idMap.get(String(id || ''));
         if (!node) return false;
         node.pinned = !node.pinned;
@@ -697,6 +708,7 @@ class ClipboardHistoryManager {
     getItemById(id) { return this._idMap.get(String(id || '')); }
 
     async addToHistory(content, { forceUpdate = false } = {}) {
+        await this._loadReady;
         const t0 = performance.now();
         try {
             if (typeof content !== 'string' || !content.trim()) return;
@@ -728,11 +740,18 @@ class ClipboardHistoryManager {
                 this._idMap.set(node.id, node);
                 this._hashMap.set(hash, node);
 
-                // Batch capacity cleanup: when reaching 2000, remove the oldest 1000
+                // Batch capacity cleanup: when reaching 2000, remove the oldest 1000 (skip pinned)
                 if (this._size >= CONSTANTS.MAX_HISTORY_ITEMS) {
                     console.log('[Q4]', q('log.capacityFuse'));
-                    for (let i = 0; i < CONSTANTS.CLEANUP_BATCH_SIZE; i++) {
-                        if (this._tail) this._popTail();
+                    let removed = 0;
+                    let cur = this._tail;
+                    while (cur && removed < CONSTANTS.CLEANUP_BATCH_SIZE) {
+                        const prev = cur.prev;
+                        if (!cur.pinned) {
+                            this._removeNode(cur);
+                            removed++;
+                        }
+                        cur = prev;
                     }
                 }
             }
@@ -747,6 +766,7 @@ class ClipboardHistoryManager {
     }
 
     async removeItem(id) {
+        await this._loadReady;
         const t0 = performance.now();
         try {
             const node = this._idMap.get(String(id || ''));
@@ -762,6 +782,7 @@ class ClipboardHistoryManager {
     }
 
     async clearHistory({ deleteFiles = true } = {}) {
+        await this._loadReady;
         const t0 = performance.now();
         try {
             this._head = null; this._tail = null; this._size = 0;
