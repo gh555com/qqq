@@ -2392,6 +2392,35 @@ function buildGh555Url(path, fragment) {
 	return fragment ? `${base}#${fragment}` : base;
 }
 
+// ★ 服务器下发的动态跳转 URL（a=q4豆腐块, z=状态栏按钮）
+let _dynamicUrls = { url_a: null, url_z: null };
+
+/**
+ * 更新服务器下发的动态 URL
+ */
+function setDynamicUrls(urlA, urlZ) {
+	if (typeof urlA === 'string' && urlA) _dynamicUrls.url_a = urlA;
+	if (typeof urlZ === 'string' && urlZ) _dynamicUrls.url_z = urlZ;
+}
+
+/**
+ * 构建动态 gh555 URL：优先使用服务器下发地址，兜底默认
+ * @param {'a'|'z'} which - a=q4豆腐块, z=状态栏按钮
+ * @param {string} [fragment] - 可选 hash fragment
+ */
+function buildDynamicGh555Url(which, fragment) {
+	const serverUrl = which === 'a' ? _dynamicUrls.url_a : _dynamicUrls.url_z;
+	const ide = getIDEFamily();
+	const ver = getClientVersion();
+	if (serverUrl) {
+		const sep = serverUrl.includes('?') ? '&' : '?';
+		const full = `${serverUrl}${sep}ref=qqq-${ide}&ver=${ver}`;
+		return fragment ? `${full}#${fragment}` : full;
+	}
+	// 兜底：默认 gh555.com 首页
+	return buildGh555Url('/', fragment);
+}
+
 // ★ P0 上报数据校验工具
 function _clampInt(val, min, max) {
 	const n = Number(val) || 0;
@@ -4587,12 +4616,14 @@ async function getQqqStats() {
                 active_12h: typeof data.active_12h === 'number' ? data.active_12h : null,
                 total_installations: typeof data.total_installations === 'number' ? data.total_installations : null,
                 total_companion_seconds: typeof data.total_companion_seconds === 'number' ? data.total_companion_seconds : null,
-                updated_at: data.updated_at || null
+                updated_at: data.updated_at || null,
+                url_a: typeof data.url_a === 'string' && data.url_a ? data.url_a : null,
+                url_z: typeof data.url_z === 'string' && data.url_z ? data.url_z : null
             };
         }
         // 兼容旧逻辑：如果只有 active_12h 也接受
         if (data && typeof data.active_12h === 'number') {
-            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null };
+            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null };
         }
         return null;
     } catch (e) {
@@ -4654,6 +4685,8 @@ module.exports = {
 	getIDEFamily,
 	getClientVersion,
 	buildGh555Url,
+	setDynamicUrls,
+	buildDynamicGh555Url,
 	onPhoneConfigChanged,
 	verifyPhoneAndSyncConfig,
 	syncCloudConfig,

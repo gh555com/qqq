@@ -1647,8 +1647,8 @@ function _registerCommands(context) {
 
 	context.subscriptions.push(
 		safeRegisterCommand("qqq.showStatusPanel", global.withReady(() => {
-			// Focus the sidebar view
-			vscode.commands.executeCommand('workbench.view.extension.qqqView');
+			// Open status bar link: prefer server-provided url_z, fallback to default
+			vscode.env.openExternal(vscode.Uri.parse(global.buildDynamicGh555Url('z')));
 		})),
 		safeRegisterCommand("qqq.pure", global.withReady(q3.pureCommand)),
 		safeRegisterCommand("qqq.allSettings", global.withReady(() => {
