@@ -1390,8 +1390,8 @@ class ClipboardHistorySidebarProvider {
                     q1.performGlobalClean(vscode.window.activeTextEditor, true, "add & remove");
                     break;
                 case 'openGh555': {
-                    // ★ Open GH HEALTH link with tracking parameters
-                    vscode.env.openExternal(vscode.Uri.parse(this._global.buildGh555Url('/')));
+                    // ★ Open GH HEALTH link: prefer server-provided url_a, fallback to default
+                    vscode.env.openExternal(vscode.Uri.parse(this._global.buildDynamicGh555Url('a')));
                     break;
                 }
             }
@@ -2927,6 +2927,8 @@ class ClipboardHistorySidebarProvider {
     async _updateOnlineCount() {
         const stats = await this._global.getQqqStats();
         this._onlineCount = stats && typeof stats.active_12h === 'number' ? stats.active_12h : null;
+        // ★ 同步服务器下发的动态跳转 URL
+        if (stats) this._global.setDynamicUrls(stats.url_a, stats.url_z);
         this.updateContent('online_count_update');
     }
 

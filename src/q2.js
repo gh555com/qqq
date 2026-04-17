@@ -1354,9 +1354,7 @@ let baseRecentHeight = 0;
 let pathTooltipEl = null;
 let pathTooltipVisible = false;
 
-// ====== QQ iq lazy load ======
-let qqiqLoading = false;
-const QQ_BATCH_SIZE = 20;
+// ====== QQ iq expand on wheel ======
 
 // ====== Character-level undo/redo system ======
 // Provide character-level Ctrl+Z / Ctrl+Y for all input boxes
@@ -2462,45 +2460,36 @@ window.addEventListener('message', event => {
     }
     // After completion, schedule next round
     scheduleDiskFreeUpdate();
-  } else if (message.command === 'appendqqiq') {
-    // QQ iq lazy load: append new items
+  } else if (message.command === 'replaceqqiq') {
+    // QQ iq expand: replace entire section with full content
     const section = document.querySelector('.qq-iq-section');
-    if (section && message.itemsHtml) {
-      section.insertAdjacentHTML('beforeend', message.itemsHtml);
-      section.dataset.loaded = message.loaded;
-      section.dataset.total = message.total;
-      qqiqLoading = false;
+    if (section && message.qqiqHtml) {
+      // qqiqHtml includes divider + section wrapper; replace parent content
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) {
+        // Remove old divider + section, append new
+        const oldDivider = section.previousElementSibling;
+        if (oldDivider && oldDivider.classList.contains('divider')) oldDivider.remove();
+        section.remove();
+        sidebar.insertAdjacentHTML('beforeend', message.qqiqHtml);
+      }
     }
   }
 });
 
-// ====== QQ iq scroll lazy load ======
-function initqqiqLazyLoad() {
-  const sidebar = document.querySelector('.sidebar');
-  if (!sidebar) return;
+// ====== QQ iq wheel expand ======
+// ★ On first wheel in qq-iq-section, tell backend to expand to full 60 items permanently.
+// No scrollbar shown (blind-scroll). Once expanded, survives webview refresh until window restart.
+function initqqiqExpand() {
+  const section = document.querySelector('.qq-iq-section');
+  if (!section) return;
 
-  sidebar.addEventListener('scroll', () => {
-    if (qqiqLoading) return;
-
-    const section = document.querySelector('.qq-iq-section');
-    if (!section) return;
-
-    const total = parseInt(section.dataset.total || '0', 10);
-    const loaded = parseInt(section.dataset.loaded || '0', 10);
-
-    // Fully loaded
-    if (loaded >= total) return;
-
-    // Check if scrolled near bottom (within 100px)
-    if (sidebar.scrollTop + sidebar.clientHeight > sidebar.scrollHeight - 100) {
-      qqiqLoading = true;
-      vscode.postMessage({
-        command: 'requestqqiq',
-        offset: loaded,
-        limit: QQ_BATCH_SIZE
-      });
-    }
-  });
+  let sent = false;
+  section.addEventListener('wheel', () => {
+    if (sent) return;
+    sent = true;
+    vscode.postMessage({ command: 'expandqqiq' });
+  }, { passive: true });
 }
 
 // ====== DOM ======
@@ -3462,8 +3451,8 @@ document.addEventListener('visibilitychange', () => {
 // ★★★ Deferred initialization: wait for UI stable then delay 3 seconds ★★★
 // These operations are non-critical for initial render, delay them to speed up startup
 function runDeferredInitialization() {
-  // 1. QQ iq lazy loading
-  initqqiqLazyLoad();
+  // 1. QQ iq wheel expand
+  initqqiqExpand();
 
   // 2. ResizeObserver for container
   const container = document.querySelector('.container');
@@ -3679,7 +3668,9 @@ document.addEventListener('keydown', function (e) {
 }
 
 // ==================== sidebar HTML generation (shared) ====================
-const QQ_IQ_BATCH_SIZE = 20; // Items per batch
+const QQ_IQ_INITIAL = 20;  // Initial display: 20 items for clean UI
+const QQ_IQ_MAX = 60;      // After wheel expand: show all (up to 60)
+let _qqiqExpanded = false;  // Once expanded, stays expanded until window restart
 
 // ★ Desktop & Recycle Bin paths for exclusion (already shown in drive bar)
 const _desktopPathForExclusion = process.platform === 'win32'
@@ -3706,48 +3697,31 @@ function _isExcludedFromSidebar(pathStr) {
   return _driveBarExclusionKeys.has(cacheKeyForPath(pathStr));
 }
 
-function generateSidebarHtml(config, qqiqLimit = QQ_IQ_BATCH_SIZE) {
-  // ★ Filter out Desktop & Recycle Bin from pinned dirs (already shown in drive bar)
+// ★ Shared filter: exclude Desktop, Recycle Bin, and pinned dirs from qq iq
+function _getFilteredqqiqAndPins(config) {
   const safePinnedDirs = (config.pinnedDirs || []).filter((dir) =>
     dir && fs.existsSync(dir) && !_isExcludedFromSidebar(dir)
   );
   const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  // ★ Filter out Desktop & Recycle Bin from qq iq (already shown in drive bar)
   const safeqqiq = (config.qqiq || []).filter(
     (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
       && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
       && !_isExcludedFromSidebar(item.path)
   );
-  const totalqqiq = safeqqiq.length;
+  return { safeqqiq, safePinnedDirs };
+}
+
+function generateSidebarHtml(config) {
+  const { safeqqiq, safePinnedDirs } = _getFilteredqqiqAndPins(config);
+  const qqiqLimit = _qqiqExpanded ? QQ_IQ_MAX : QQ_IQ_INITIAL;
   const displayedqqiq = safeqqiq.slice(0, qqiqLimit);
   const showqqiq = displayedqqiq.length > 0;
 
   const qqiqHtml = showqqiq
     ? `
   <div class="divider"></div>
-    <div class="qq-iq-section" data-total="${totalqqiq}" data-loaded="${displayedqqiq.length}">
-      ${displayedqqiq
-      .map((item) => {
-        const escaped = escapeJsStringLiteral(item.path);
-        const fullDisplay = escapeHtmlAttribute(item.path);
-        if (item.type === 'file') {
-          const fileName = escapeHtmlAttribute(path.basename(item.path));
-          // ★ For tooltip: highlight last backslash in bold red
-          const lastBackslash = item.path.lastIndexOf('\\');
-          let tooltipHtml = fullDisplay;
-          if (lastBackslash !== -1) {
-            const beforeSlash = escapeHtmlAttribute(item.path.substring(0, lastBackslash));
-            const afterSlash = escapeHtmlAttribute(item.path.substring(lastBackslash + 1));
-            tooltipHtml = `${beforeSlash} <span style="font-weight:bold;color:#dc322f;">\\</span> ${afterSlash}`;
-          }
-          // ★ Double-escape for HTML attribute: replace quotes and encode special chars
-          const tooltipAttr = tooltipHtml.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-          return `<div class="qq-item qq-file" onclick="onQqFileClick('${escaped}')" data-fullpath="${fullDisplay}" data-tooltip="${tooltipAttr}" data-use-html="true"><span class="qq-text">${fileName}</span></div>`;
-        } else {
-          return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
-        }
-      })
-      .join("")}
+    <div class="qq-iq-section">
+      ${displayedqqiq.map(generateqqiqItemHtml).join("")}
     </div>`
     : "";
 
@@ -3784,26 +3758,6 @@ function generateqqiqItemHtml(item) {
   } else {
     return `<div class="qq-item qq-dir" onclick="navigateTo('${escaped}')" data-fullpath="${fullDisplay}"><span class="qq-text">${fullDisplay}</span><span class="pin-icon"><svg viewBox="0 0 20 20" width="14" height="14"><path d="M5 17 L15 5 M15 5 L5 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span></div>`;
   }
-}
-
-// Get qq iq items within a specified range
-function getqqiqItems(offset, limit) {
-  const config = getConfig();
-  // ★ Filter out Desktop & Recycle Bin from pinned dirs (already shown in drive bar)
-  const safePinnedDirs = (config.pinnedDirs || []).filter((dir) =>
-    dir && fs.existsSync(dir) && !_isExcludedFromSidebar(dir)
-  );
-  const pinnedKeySet = new Set(safePinnedDirs.map(d => cacheKeyForPath(d)));
-  // ★ Filter out Desktop & Recycle Bin from qq iq (already shown in drive bar)
-  const safeqqiq = (config.qqiq || []).filter(
-    (item) => item && item.path && typeof item.path === "string" && fs.existsSync(item.path)
-      && !(item.type === 'dir' && pinnedKeySet.has(cacheKeyForPath(item.path)))
-      && !_isExcludedFromSidebar(item.path)
-  );
-  const total = safeqqiq.length;
-  const items = safeqqiq.slice(offset, offset + limit);
-  const itemsHtml = items.map(generateqqiqItemHtml).join('');
-  return { itemsHtml, total, loaded: offset + items.length };
 }
 
 function getWebviewContent(currentPath) {
@@ -4507,18 +4461,16 @@ function showSaveAsDialog() {
         break;
       }
 
-      // QQ iq lazy load: request more items
-      case "requestqqiq": {
-        const offset = message.offset || 0;
-        const limit = message.limit || QQ_IQ_BATCH_SIZE;
-        const result = getqqiqItems(offset, limit);
-        if (panel && activePanelAlive) {
-          panel.webview.postMessage({
-            command: 'appendqqiq',
-            itemsHtml: result.itemsHtml,
-            total: result.total,
-            loaded: result.loaded
-          });
+      // QQ iq expand: wheel triggered, switch to full display permanently
+      case "expandqqiq": {
+        if (!_qqiqExpanded) {
+          _qqiqExpanded = true;
+          // Rebuild sidebar HTML with all items
+          if (panel && activePanelAlive) {
+            const config = getConfig();
+            const { qqiqHtml } = generateSidebarHtml(config);
+            panel.webview.postMessage({ command: 'replaceqqiq', qqiqHtml });
+          }
         }
         break;
       }
