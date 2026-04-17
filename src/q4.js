@@ -1034,6 +1034,7 @@ class ClipboardHistoryManager {
 
     async dispose() {
         this.stopWatching();
+        await this._loadReady; // Ensure pending writes gated on loadReady complete before saving
         if (this._saveTimer) clearTimeout(this._saveTimer);
         if (this._dirty) await this.forceSave();
     }
@@ -1978,7 +1979,7 @@ class ClipboardHistorySidebarProvider {
             100% { transform: translate(40%, -40%) rotate(10deg) scale(3); opacity: 0; }
         }
 
-        .history-list { flex: 1; overflow-x: hidden; overflow-y: scroll; padding: 4px 0; scrollbar-width: none; }
+        .history-list { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 4px 0; scrollbar-width: none; overscroll-behavior: contain; }
         .history-list::-webkit-scrollbar { display: none; }
         .history-item { background: var(--base3); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; margin-bottom: 8px; transition: 0.2s; cursor: pointer; color: #8e8e8e; margin-right: 2px; position: relative; overflow: hidden; }
         /* Hover: border becomes dashed, turns red, text becomes black, border width unchanged to prevent layout jitter */
@@ -2252,6 +2253,7 @@ class ClipboardHistorySidebarProvider {
             var currentHistory = [];
             var currentLimit = 0;
             var batchSize = 20;
+            var isLoadingMore = false;
             var currentStats = '${savorStats}';
 
             function post(cmd, data) {
@@ -2380,8 +2382,9 @@ class ClipboardHistorySidebarProvider {
 
             el.historyList.onscroll = function() {
                 var list = el.historyList;
-                if (list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
+                if (!isLoadingMore && list.scrollTop + list.clientHeight > list.scrollHeight - 100) {
                     if (currentHistory.length >= currentLimit) {
+                        isLoadingMore = true;
                         currentLimit += batchSize;
                         post('requestData', { limit: currentLimit, keyword: el.searchBox.value });
                     }
@@ -2396,6 +2399,11 @@ class ClipboardHistorySidebarProvider {
                     void el.historyContainer.offsetWidth;
                     el.historyContainer.classList.add('storm');
                 }
+
+                // ★ Preserve scroll position during loadMore re-render to prevent jarring jump to top
+                var prevScrollTop = el.historyList.scrollTop;
+                var wasLoadingMore = isLoadingMore;
+                isLoadingMore = false;
 
                 currentHistory = newHistory;
                 el.historyList.innerHTML = '';
@@ -2454,6 +2462,11 @@ class ClipboardHistorySidebarProvider {
                     frag.appendChild(div);
                 });
                 el.historyList.appendChild(frag);
+
+                // ★ Restore scroll position if this was a loadMore re-render
+                if (wasLoadingMore && prevScrollTop > 0) {
+                    el.historyList.scrollTop = prevScrollTop;
+                }
 
                 if (selectedId) {
                     setSelectedById(selectedId);

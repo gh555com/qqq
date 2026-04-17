@@ -4,10 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.1.3] - 2026-04-17
+
+### Fixed
+- **Pinned cards now survive restart**: Previously, pinned clipboard history items would disappear after restarting the IDE. Pin state is now reliably persisted and restored.
+- **Pinned items protected from cleanup**: Pinned cards will no longer be silently deleted when clipboard history reaches capacity — they are always kept safe.
+- **History list scroll freeze fixed**: Scrolling to the bottom of the clipboard history would cause the panel to freeze — only a few cards visible, scrollbar gone, and no further scrolling possible. Now scrolling is smooth and stable at all times.
+
+---
+
 ## [16.1.2] - 2026-04-10
 
 ### Fixed
-- **Audio survives screensaver**: Fixed the bug where savorMoments and all sound effects would be interrupted by the screensaver.
+- **Audio survives screensaver**: Partial repair the bug where savorMoments and all sound effects would be interrupted by the screensaver.
 
 ---
 
