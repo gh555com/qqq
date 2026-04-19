@@ -995,7 +995,7 @@ class Qvideo {
         if (result && result.doneMessage && !result.cancelled) {
             global.TaskMessage.showSimpleToast(result.doneMessage, 15000, 'success');
             // ★ Report stats (only when started independently; headless mode is reported by q1.js)
-            if (result.finalTotalBytes) {
+            if (result.finalTotalBytes >= 0) {
                 global.saveVideoStats(result.finalTotalBytes);
             }
         }

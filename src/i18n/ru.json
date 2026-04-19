@@ -60,7 +60,7 @@
         "ytdlpNotInstalledPrompt": "yt-dlp не установлен, автоматически загружить и установить?",
         "yes": "Да",
         "no": "Нет",
-        "downloadingVideoEngine": "qqq: Загружка видеодвигателя...",
+        "downloadingVideoEngine": "Загружка видеодвигателя..."
         "ytdlpInstallSuccess": "qqq: yt-dlp установлен сработало",
         "ytdlpInstallFailedMsg": "qqq: Загружка видеодвигателя (yt-dlp) не удалась: {0}",
         "ytdlpNotInstalledWarning": "yt-dlp не установлен, невозможно скачать видео платформы. Пожалуйста, установите yt-dlp и попытайте ещё.",

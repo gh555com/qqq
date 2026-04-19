@@ -2526,6 +2526,9 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 							files: downloadRes.landedFiles,
 							fingerprints: {}
 						};
+						// ★ 视频下载成功即记录统计（不依赖锚点替换是否成功）
+						const videoBytes = downloadRes.finalTotalBytes || 0;
+						saveVideoStats(videoBytes);
 					} else {
 						result = null;
 					}
@@ -2624,9 +2627,7 @@ async function performCurvedPaste(editor, targetDir, typeInfo, preComputedResult
 						}
 
 						// ★ Unified stats reporting
-						if (taskType === 'video') {
-							saveVideoStats(totalSizeForStats);
-						} else {
+						if (taskType !== 'video') {
 							savePasteStats(totalSizeForStats);
 						}
 

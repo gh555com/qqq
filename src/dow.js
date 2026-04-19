@@ -3016,7 +3016,7 @@ class UnifiedMediaDownloader {
                     if (!background && vscode) {
                         vscode.window.withProgress({
                             location: vscode.ProgressLocation.Notification,
-                            title: q('dow.downloadingVideoEngine'),
+                            title: 'qqq: ' + q('dow.downloadingVideoEngine'),
                             cancellable: false
                         }, async () => {
                             await this._installPromise;
