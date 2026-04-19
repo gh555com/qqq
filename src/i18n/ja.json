@@ -60,7 +60,7 @@
         "ytdlpNotInstalledPrompt": "yt-dlp 未インストール、自動ダウンロードインストールしますか?",
         "yes": "はい",
         "no": "いいえ",
-        "downloadingVideoEngine": "ビデオエンジンをダウンロード中..."
+        "downloadingVideoEngine": "ビデオエンジンをダウンロード中...",
         "ytdlpInstallSuccess": "qqq: yt-dlp インストール成功",
         "ytdlpInstallFailedMsg": "qqq: ビデオエンジン (yt-dlp) ダウンロード失敗: {0}",
         "ytdlpNotInstalledWarning": "yt-dlp が未インストールのため、プラットフォーム動画をダウンロードできません。yt-dlp をインストールして、もう一度試してください。",

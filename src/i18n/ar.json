@@ -60,7 +60,7 @@
         "ytdlpNotInstalledPrompt": "لم يتم تثبيت yt-dlp، تحميل وتثبيت تلقائيا؟",
         "yes": "نعم",
         "no": "لا",
-        "downloadingVideoEngine": "جاري تحميل محرك الفيديو..."
+        "downloadingVideoEngine": "جاري تحميل محرك الفيديو...",
         "ytdlpInstallSuccess": "qqq: تم تثبيت yt-dlp بنجاح",
         "ytdlpInstallFailedMsg": "qqq: فشل تحميل محرك الفيديو (yt-dlp): {0}",
         "ytdlpNotInstalledWarning": "لم يتم تثبيت yt-dlp، لا يمكن تنزيل مقاطع الفيديو من المنصة. يرجى تثبيت yt-dlp والمحاولة مرة أخرى.",

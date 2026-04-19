@@ -60,7 +60,7 @@
         "ytdlpNotInstalledPrompt": "yt-dlp non installé, télécharger et installer automatiquement?",
         "yes": "Oui",
         "no": "Non",
-        "downloadingVideoEngine": "Téléchargement du moteur vidéo..."
+        "downloadingVideoEngine": "Téléchargement du moteur vidéo...",
         "ytdlpInstallSuccess": "qqq: yt-dlp installé avec succès",
         "ytdlpInstallFailedMsg": "qqq: Téléchargement du moteur vidéo (yt-dlp) échoué: {0}",
         "ytdlpNotInstalledWarning": "yt-dlp non installé, impossible de télécharger les vidéos de plateforme. Veuillez installer yt-dlp et réessayer.",
