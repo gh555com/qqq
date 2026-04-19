@@ -60,7 +60,7 @@
         "ytdlpNotInstalledPrompt": "yt-dlp 未安裝，是否自動下載安裝？",
         "yes": "是",
         "no": "否",
-        "downloadingVideoEngine": "qqq: 正在下載影片引擎...",
+        "downloadingVideoEngine": "正在下載影片引擎..."
         "ytdlpInstallSuccess": "qqq: yt-dlp 安裝成功",
         "ytdlpInstallFailedMsg": "qqq: 影片引擎 (yt-dlp) 下載失敗: {0}",
         "ytdlpNotInstalledWarning": "yt-dlp 未安裝，無法下載平台影片。請安裝 yt-dlp 後重試。",

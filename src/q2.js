@@ -12,7 +12,7 @@ const h = require("./h");
 const { q, onLanguageChange } = require("./i18n");
 
 // ★★★ Paste feature core module: import transaction manager, task counter, clipboard snapshot, etc. from global.js ★★★
-const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, cancelScans } = require("./global");
+const { TransactionManager, TaskCounter, TaskMessage, wq, savePasteStats, saveVideoStats, cancelScans } = require("./global");
 
 // ==================== Import core interfaces from geq().js ====================
 // Lazy-load qqq to avoid circular dependency
@@ -3987,7 +3987,7 @@ async function performQ2Paste(targetDir, refreshCallback) {
 
         // ★ Stats reporting
         if (taskType === 'video') {
-          global.saveVideoStats(totalSizeForStats);
+          saveVideoStats(totalSizeForStats);
         } else {
           savePasteStats(totalSizeForStats);
         }
