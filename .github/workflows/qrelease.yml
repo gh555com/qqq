@@ -161,6 +161,7 @@ jobs:
               export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
               # ARM64 交叉编译禁用 icons feature（避免 GTK arm64 依赖）
               cargo build --release --target ${{ matrix.target }} --no-default-features
             else
