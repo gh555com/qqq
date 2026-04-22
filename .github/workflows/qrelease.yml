@@ -269,9 +269,29 @@ jobs:
         if: "!contains(github.event.head_commit.message, '(q5)')"
         run: |
           npm install -g ovsx
+          # 发布所有平台包到 Open VSX（带重试+延时，防止服务端过载 502）
+          failed_list=""
           for vsix in dist/*.vsix; do
-            ovsx publish "$vsix" --pat ${{ secrets.OVSX_PAT }} || echo "Open VSX发布 $vsix 失败"
+            pkg_ok=false
+            for attempt in 1 2 3; do
+              echo "📦 Publishing $vsix (attempt $attempt/3)..."
+              if ovsx publish "$vsix" --pat ${{ secrets.OVSX_PAT }}; then
+                pkg_ok=true
+                break
+              fi
+              echo "⚠️ Attempt $attempt failed, waiting 15s before retry..."
+              sleep 15
+            done
+            if [ "$pkg_ok" = false ]; then
+              echo "❌ Open VSX publish $vsix failed after 3 attempts"
+              failed_list="$failed_list $vsix"
+            fi
+            # 每个包之间间隔 5 秒，避免服务端过载
+            sleep 5
           done
+          if [ -n "$failed_list" ]; then
+            echo "::warning::Open VSX 发布失败的包:$failed_list"
+          fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
 
