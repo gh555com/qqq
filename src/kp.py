@@ -167,7 +167,8 @@ def _init_audio_engine():
 
             _AUDIO_ENGINE = ma_module.NonBlockingAudioEngine(
                 asset_folder=".", max_workers=8, silent=True,
-                on_device_lost=_on_audio_device_lost  # ★ 设备丢失时联动重置 SFX
+                on_device_lost=_on_audio_device_lost,  # ★ 设备丢失时联动重置 SFX
+                on_log=_log  # ★ 关键日志写入 broker.log
             )
             return _AUDIO_ENGINE, None
         except Exception as e:

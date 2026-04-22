@@ -2470,10 +2470,10 @@ class WqReporter {
 		}
 	}
 
-	_collectResume() {
+	_collectVig() {
 		if (!extensionContext) return null;
 		const gs = extensionContext.globalState;
-		const resume = {};
+		const vig = {};
 		const nowSec = Math.floor(Date.now() / 1000);
 
 		// savor 音乐播放 - 独立 KEY
@@ -2486,7 +2486,7 @@ class WqReporter {
 			if (t0Raw && typeof t0Raw === 'number') {
 				item.t0 = _clampInt(Math.floor(t0Raw / 1000), 1577836800, nowSec);
 			}
-			resume.savor = item;
+			vig.savor = item;
 		}
 
 		// paste - {count, totalSize, firstUse}
@@ -2497,7 +2497,7 @@ class WqReporter {
 			if (pasteStats.firstUse && typeof pasteStats.firstUse === 'number') {
 				item.t0 = _clampInt(Math.floor(pasteStats.firstUse / 1000), 1577836800, nowSec);
 			}
-			if (item.n > 0) resume.paste = item;
+			if (item.n > 0) vig.paste = item;
 		}
 
 		// video - {count, totalSize, firstUse}
@@ -2508,18 +2508,32 @@ class WqReporter {
 			if (videoStats.firstUse && typeof videoStats.firstUse === 'number') {
 				item.t0 = _clampInt(Math.floor(videoStats.firstUse / 1000), 1577836800, nowSec);
 			}
-			if (item.n > 0) resume.video = item;
+			if (item.n > 0) vig.video = item;
 		}
 
-		// roam - {count, filesCreated, firstUse}
+		// roam - {count, filesCreated, firstUse, q, w, x, k, f, fc}
 		const roamStats = gs.get('qqq_roam_stats');
-		if (roamStats && roamStats.count > 0) {
-			const item = { n: _clampInt(roamStats.count, 0, 1000000) };
-			if (roamStats.filesCreated > 0) item.fc = _clampInt(roamStats.filesCreated, 0, 1000000);
-			if (roamStats.firstUse && typeof roamStats.firstUse === 'number') {
-				item.t0 = _clampInt(Math.floor(roamStats.firstUse / 1000), 1577836800, nowSec);
+		if (roamStats) {
+			const rn = _clampInt(roamStats.count || 0, 0, 1000000);
+			const rf = _clampInt(roamStats.f || roamStats.filesCreated || 0, 0, 1000000);
+			const rfc = _clampInt(roamStats.fc || 0, 0, 1000000);
+			const rq = _clampInt(roamStats.q || 0, 0, 1000000);
+			const rw = _clampInt(roamStats.w || 0, 0, 1000000);
+			const rx = _clampInt(roamStats.x || 0, 0, 1000000);
+			const rk = _clampInt(roamStats.k || 0, 0, 1000000);
+			if (rn > 0 || rq > 0 || rw > 0 || rx > 0 || rk > 0 || rfc > 0) {
+				const item = { n: rn };
+				if (rf > 0) item.f = rf;
+				if (rfc > 0) item.fc = rfc;
+				if (rq > 0) item.q = rq;
+				if (rw > 0) item.w = rw;
+				if (rx > 0) item.x = rx;
+				if (rk > 0) item.k = rk;
+				if (roamStats.firstUse && typeof roamStats.firstUse === 'number') {
+					item.t0 = _clampInt(Math.floor(roamStats.firstUse / 1000), 1577836800, nowSec);
+				}
+				vig.roam = item;
 			}
-			if (item.n > 0) resume.roam = item;
 		}
 
 		// weave, exportDoc, exportZip, pure - generic {count, firstUse}
@@ -2536,7 +2550,7 @@ class WqReporter {
 				if (stats.firstUse && typeof stats.firstUse === 'number') {
 					item.t0 = _clampInt(Math.floor(stats.firstUse / 1000), 1577836800, nowSec);
 				}
-				if (item.n > 0) resume[field] = item;
+				if (item.n > 0) vig[field] = item;
 			}
 		}
 
@@ -2544,17 +2558,17 @@ class WqReporter {
 		const cardTimes = _clampInt(gs.get('qqq_copy_total_count', 0), 0, 1000000);
 		const cardCount = _clampInt(gs.get('qqq_clipboard_history_count', 0), 0, 1000000);
 		if (cardTimes > 0 || cardCount > 0) {
-			resume.card = { times: cardTimes, count: cardCount };
+			vig.card = { times: cardTimes, count: cardCount };
 		}
 
 		// cache
 		const cacheHit = _clampInt(gs.get(KEY_CACHE_HIT_TOTAL, 0), 0, 10000000);
 		const cacheMiss = _clampInt(gs.get(KEY_CACHE_MISS_TOTAL, 0), 0, 10000000);
 		if (cacheHit > 0 || cacheMiss > 0) {
-			resume.cache = { hit: cacheHit, miss: cacheMiss };
+			vig.cache = { hit: cacheHit, miss: cacheMiss };
 		}
 
-		return Object.keys(resume).length > 0 ? resume : null;
+		return Object.keys(vig).length > 0 ? vig : null;
 	}
 
 	async _ping() {
@@ -2579,8 +2593,8 @@ class WqReporter {
 			};
 			if (userId) body.doer_id = userId;
 
-			const resume = this._collectResume();
-			if (resume) body.resume = resume;
+			const vig = this._collectVig();
+			if (vig) body.vig = vig;
 
 			const bodyStr = JSON.stringify(body);
 

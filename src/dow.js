@@ -334,7 +334,7 @@ function resolveSecurityProfile(level) {
             enableDownloadLock: true,
             enableHeaderSanitize: true,
             enableContentLengthRangePrecheck: true,
-            enableStrictResumeChecks: true,
+            enableStrictRangeChecks: true,
             enableSymlinkGuard: true,
             enableProbeOutputLimit: true,
             enableFailFast: true,
@@ -351,7 +351,7 @@ function resolveSecurityProfile(level) {
             enableDownloadLock: true,
             enableHeaderSanitize: true,
             enableContentLengthRangePrecheck: false,
-            enableStrictResumeChecks: false,
+            enableStrictRangeChecks: false,
             enableSymlinkGuard: false,
             enableProbeOutputLimit: false,
             enableFailFast: false,
@@ -367,7 +367,7 @@ function resolveSecurityProfile(level) {
         enableDownloadLock: false,
         enableHeaderSanitize: false,
         enableContentLengthRangePrecheck: false,
-        enableStrictResumeChecks: false,
+        enableStrictRangeChecks: false,
         enableSymlinkGuard: false,
         enableProbeOutputLimit: false,
         enableFailFast: false,
@@ -879,7 +879,7 @@ class SmartHttpDownloader {
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 onProgress && onProgress(task, { type: "start", attempt, protocolHint: ctx.protocolHint });
 
-                const resumeInfo = this._getResumeInfo(task);
+                const rangeInfo = this._getRangeInfo(task);
 
                 const useAntiHotlink =
                     usedAntiHotlinkBoost ||
@@ -889,14 +889,14 @@ class SmartHttpDownloader {
                 let r;
                 try {
                     if (ctx.protocolHint === "h2") {
-                        r = await this._attemptH2(ctx, task, attempt, useAntiHotlink, resumeInfo);
+                        r = await this._attemptH2(ctx, task, attempt, useAntiHotlink, rangeInfo);
                         if (r?._h2SessionBroken) {
                             this._breakH2Session(ctx.origin, ctx.session);
                             ctx.session = await this._getOrCreateH2Session(ctx.origin);
                             if (!ctx.session) ctx.protocolHint = "h1";
                         }
                     } else {
-                        r = await this._attemptH1(task, attempt, useAntiHotlink, resumeInfo);
+                        r = await this._attemptH1(task, attempt, useAntiHotlink, rangeInfo);
                     }
                 } catch (e) {
                     r = this._resultFail(task, e.message || "attempt_error");
@@ -952,17 +952,17 @@ class SmartHttpDownloader {
         }
     }
 
-    _getResumeInfo(task) {
+    _getRangeInfo(task) {
         const destPath = task.destPath;
         const tmpPath = destPath + ".part";
 
         try {
             const st = fs.statSync(tmpPath);
             if (st.isFile() && st.size > 0) {
-                return { tmpPath, resumeBytes: st.size, canResume: true };
+                return { tmpPath, rangeBytes: st.size, canRange: true };
             }
         } catch { }
-        return { tmpPath, resumeBytes: 0, canResume: false };
+        return { tmpPath, rangeBytes: 0, canRange: false };
     }
 
     _breakH2Session(origin, session) {
@@ -1080,7 +1080,7 @@ class SmartHttpDownloader {
         return { ok: true };
     }
 
-    _buildHeaders(urlObj, task, { useAntiHotlink, resumeBytes }) {
+    _buildHeaders(urlObj, task, { useAntiHotlink, rangeBytes }) {
         const failFast = !!this.security.enableFailFast;
 
 
@@ -1110,8 +1110,8 @@ class SmartHttpDownloader {
         }
 
 
-        if (resumeBytes > 0) {
-            headers["range"] = `bytes=${resumeBytes}-`;
+        if (rangeBytes > 0) {
+            headers["range"] = `bytes=${rangeBytes}-`;
             headers["accept-encoding"] = "identity";
         }
 
@@ -1143,7 +1143,7 @@ class SmartHttpDownloader {
         return { ok: true, headers };
     }
 
-    async _attemptH2(ctx, task, attempt, useAntiHotlink, resumeInfo) {
+    async _attemptH2(ctx, task, attempt, useAntiHotlink, rangeInfo) {
         const failFast = !!this.security.enableFailFast;
 
 
@@ -1169,7 +1169,7 @@ class SmartHttpDownloader {
             ctx.session = session;
             if (!session) {
                 ctx.protocolHint = "h1";
-                return await this._attemptH1(task, attempt, useAntiHotlink, resumeInfo);
+                return await this._attemptH1(task, attempt, useAntiHotlink, rangeInfo);
             }
         }
 
@@ -1179,8 +1179,8 @@ class SmartHttpDownloader {
         const destPath = task.destPath;
         const maxBytes = Number(task.maxBytes ?? this.config.maxBytesDefault) || this.config.maxBytesDefault;
 
-        const { tmpPath, resumeBytes, canResume } = resumeInfo || {};
-        const willResume = canResume && resumeBytes > 0;
+        const { tmpPath, rangeBytes, canRange } = rangeInfo || {};
+        const willRange = canRange && rangeBytes > 0;
 
         ensureDirForFile(tmpPath);
 
@@ -1194,7 +1194,7 @@ class SmartHttpDownloader {
 
         const bh = this._buildHeaders(urlObj, task, {
             useAntiHotlink,
-            resumeBytes: willResume ? resumeBytes : 0,
+            rangeBytes: willRange ? rangeBytes : 0,
         });
         if (!bh.ok) return this._resultFail(task, bh.error);
         const headers = bh.headers;
@@ -1283,7 +1283,7 @@ class SmartHttpDownloader {
                             nextTask,
                             attempt,
                             useAntiHotlink,
-                            { tmpPath, resumeBytes: 0, canResume: false }
+                            { tmpPath, rangeBytes: 0, canRange: false }
                         );
                         finish(rr);
                     } else {
@@ -1306,18 +1306,18 @@ class SmartHttpDownloader {
                 }
 
 
-                let resumeMode = willResume;
-                if (resumeMode) {
+                let rangeMode = willRange;
+                if (rangeMode) {
                     const contentEncoding = h["content-encoding"];
 
-                    const wantStrict = !!this.security.enableStrictResumeChecks;
+                    const wantStrict = !!this.security.enableStrictRangeChecks;
 
                     if (wantStrict) {
 
                         if (status !== 206) {
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
-                            const r = this._resultFail(task, "resume_not_supported");
+                            const r = this._resultFail(task, "range_not_supported");
                             r.httpStatus = status;
                             finish(r);
                             return;
@@ -1326,7 +1326,7 @@ class SmartHttpDownloader {
                         if (contentEncoding && String(contentEncoding).toLowerCase() !== "identity") {
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
-                            const r = this._resultFail(task, "resume_with_encoding_unsupported");
+                            const r = this._resultFail(task, "range_with_encoding_unsupported");
                             r.httpStatus = status;
                             finish(r);
                             return;
@@ -1334,7 +1334,7 @@ class SmartHttpDownloader {
 
                         if (this.security.enableContentLengthRangePrecheck) {
                             const cr = parseContentRange(h["content-range"]);
-                            if (!cr || cr.start !== resumeBytes) {
+                            if (!cr || cr.start !== rangeBytes) {
                                 try { req.close(); } catch { }
                                 safeUnlink(tmpPath);
                                 const r = this._resultFail(task, "content_range_mismatch");
@@ -1350,7 +1350,7 @@ class SmartHttpDownloader {
                         let badRange = false;
                         if (this.security.enableContentLengthRangePrecheck) {
                             const cr = parseContentRange(h["content-range"]);
-                            badRange = !cr || cr.start !== resumeBytes;
+                            badRange = !cr || cr.start !== rangeBytes;
                         }
                         if (bad206 || badEnc || badRange) {
 
@@ -1361,7 +1361,7 @@ class SmartHttpDownloader {
                                 { ...task },
                                 attempt,
                                 useAntiHotlink,
-                                { tmpPath, resumeBytes: 0, canResume: false }
+                                { tmpPath, rangeBytes: 0, canRange: false }
                             );
                             finish(rr);
                             return;
@@ -1374,10 +1374,10 @@ class SmartHttpDownloader {
 
 
                 if (this.security.enableContentLengthRangePrecheck) {
-                    const decoder = resumeMode ? null : pickDecoder(contentEncoding);
+                    const decoder = rangeMode ? null : pickDecoder(contentEncoding);
 
                     if (!decoder && declaredLen > 0) {
-                        const initial = resumeMode ? resumeBytes : 0;
+                        const initial = rangeMode ? rangeBytes : 0;
                         if (initial + declaredLen > maxBytes) {
                             try { req.close(); } catch { }
                             safeUnlink(tmpPath);
@@ -1390,12 +1390,12 @@ class SmartHttpDownloader {
                     }
                 }
 
-                const initialBytes = resumeMode ? resumeBytes : 0;
+                const initialBytes = rangeMode ? rangeBytes : 0;
                 const limiter = new ByteLimitTransform(maxBytes, initialBytes);
-                const decoder = resumeMode ? null : pickDecoder(contentEncoding);
+                const decoder = rangeMode ? null : pickDecoder(contentEncoding);
 
 
-                const out = fs.createWriteStream(tmpPath, { flags: resumeMode ? "a" : "w" });
+                const out = fs.createWriteStream(tmpPath, { flags: rangeMode ? "a" : "w" });
 
                 try {
                     if (decoder) await pipelineAsync(req, decoder, limiter, out);
@@ -1419,7 +1419,7 @@ class SmartHttpDownloader {
                         httpStatus: status,
                         contentType: String(h["content-type"] || ""),
                         declaredLen,
-                        resumed: resumeMode,
+                        ranged: rangeMode
                     });
                     finish(ok);
                 } catch (e) {
@@ -1440,7 +1440,7 @@ class SmartHttpDownloader {
         });
     }
 
-    async _attemptH1(task, attempt, useAntiHotlink, resumeInfo) {
+    async _attemptH1(task, attempt, useAntiHotlink, rangeInfo) {
         const failFast = !!this.security.enableFailFast;
 
         let urlObj;
@@ -1464,8 +1464,8 @@ class SmartHttpDownloader {
         const destPath = task.destPath;
         const maxBytes = Number(task.maxBytes ?? this.config.maxBytesDefault) || this.config.maxBytesDefault;
 
-        const { tmpPath, resumeBytes, canResume } = resumeInfo || {};
-        const willResume = canResume && resumeBytes > 0;
+        const { tmpPath, rangeBytes, canRange } = rangeInfo || {};
+        const willRange = canRange && rangeBytes > 0;
 
         ensureDirForFile(tmpPath);
 
@@ -1479,7 +1479,7 @@ class SmartHttpDownloader {
 
         const bh = this._buildHeaders(urlObj, task, {
             useAntiHotlink,
-            resumeBytes: willResume ? resumeBytes : 0,
+            rangeBytes: willRange ? rangeBytes : 0,
         });
         if (!bh.ok) return this._resultFail(task, bh.error);
         const headers = bh.headers;
@@ -1532,7 +1532,7 @@ class SmartHttpDownloader {
                             nextTask,
                             attempt,
                             useAntiHotlink,
-                            { tmpPath, resumeBytes: 0, canResume: false }
+                            { tmpPath, rangeBytes: 0, canRange: false }
                         );
                         resolve(rr);
                     } else {
@@ -1553,16 +1553,16 @@ class SmartHttpDownloader {
                 }
 
 
-                let resumeMode = willResume;
-                if (resumeMode) {
+                let rangeMode = willRange;
+                if (rangeMode) {
                     const contentEncoding = res.headers["content-encoding"];
-                    const wantStrict = !!this.security.enableStrictResumeChecks;
+                    const wantStrict = !!this.security.enableStrictRangeChecks;
 
                     if (wantStrict) {
                         if (res.statusCode !== 206) {
                             res.destroy();
                             safeUnlink(tmpPath);
-                            const r = this._resultFail(task, "resume_not_supported");
+                            const r = this._resultFail(task, "range_not_supported");
                             r.httpStatus = res.statusCode;
                             resolve(r);
                             return;
@@ -1571,7 +1571,7 @@ class SmartHttpDownloader {
                         if (contentEncoding && String(contentEncoding).toLowerCase() !== "identity") {
                             res.destroy();
                             safeUnlink(tmpPath);
-                            const r = this._resultFail(task, "resume_with_encoding_unsupported");
+                            const r = this._resultFail(task, "range_with_encoding_unsupported");
                             r.httpStatus = res.statusCode;
                             resolve(r);
                             return;
@@ -1579,7 +1579,7 @@ class SmartHttpDownloader {
 
                         if (this.security.enableContentLengthRangePrecheck) {
                             const cr = parseContentRange(res.headers["content-range"]);
-                            if (!cr || cr.start !== resumeBytes) {
+                            if (!cr || cr.start !== rangeBytes) {
                                 res.destroy();
                                 safeUnlink(tmpPath);
                                 const r = this._resultFail(task, "content_range_mismatch");
@@ -1594,7 +1594,7 @@ class SmartHttpDownloader {
                         let badRange = false;
                         if (this.security.enableContentLengthRangePrecheck) {
                             const cr = parseContentRange(res.headers["content-range"]);
-                            badRange = !cr || cr.start !== resumeBytes;
+                            badRange = !cr || cr.start !== rangeBytes;
                         }
 
                         if (bad206 || badEnc || badRange) {
@@ -1605,7 +1605,7 @@ class SmartHttpDownloader {
                                 { ...task },
                                 attempt,
                                 useAntiHotlink,
-                                { tmpPath, resumeBytes: 0, canResume: false }
+                                { tmpPath, rangeBytes: 0, canRange: false }
                             );
                             resolve(rr);
                             return;
@@ -1618,9 +1618,9 @@ class SmartHttpDownloader {
 
 
                 if (this.security.enableContentLengthRangePrecheck) {
-                    const decoder = resumeMode ? null : pickDecoder(contentEncoding);
+                    const decoder = rangeMode ? null : pickDecoder(contentEncoding);
                     if (!decoder && declaredLen > 0) {
-                        const initial = resumeMode ? resumeBytes : 0;
+                        const initial = rangeMode ? rangeBytes : 0;
                         if (initial + declaredLen > maxBytes) {
                             res.destroy();
                             safeUnlink(tmpPath);
@@ -1633,11 +1633,11 @@ class SmartHttpDownloader {
                     }
                 }
 
-                const initialBytes = resumeMode ? resumeBytes : 0;
+                const initialBytes = rangeMode ? rangeBytes : 0;
                 const limiter = new ByteLimitTransform(maxBytes, initialBytes);
 
-                const decoder = resumeMode ? null : pickDecoder(contentEncoding);
-                const out = fs.createWriteStream(tmpPath, { flags: resumeMode ? "a" : "w" });
+                const decoder = rangeMode ? null : pickDecoder(contentEncoding);
+                const out = fs.createWriteStream(tmpPath, { flags: rangeMode ? "a" : "w" });
 
                 try {
                     if (decoder) await pipelineAsync(res, decoder, limiter, out);
@@ -1662,7 +1662,7 @@ class SmartHttpDownloader {
                             httpStatus: res.statusCode,
                             contentType: String(res.headers["content-type"] || ""),
                             declaredLen,
-                            resumed: resumeMode,
+                            ranged: rangeMode
                         })
                     );
                 } catch (e) {
