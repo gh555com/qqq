@@ -10,14 +10,14 @@ All notable changes to this project will be documented in this file.
 - **Pinned cards now survive restart**: Previously, pinned clipboard history items would disappear after restarting the IDE. Pin state is now reliably persisted and restored.
 - **Pinned items protected from cleanup**: Pinned cards will no longer be silently deleted when clipboard history reaches capacity — they are always kept safe.
 - **History list scroll freeze fixed**: Scrolling to the bottom of the clipboard history would cause the panel to freeze — only a few cards visible, scrollbar gone, and no further scrolling possible. Now scrolling is smooth and stable at all times.
-- **Roam Left QQ area now shows all history**: Previously only 20 items were visible and scrolling couldn't load more. Now all entries (up to 60) are accessible — the first 20 show immediately for a clean look, and a single scroll wheel action reveals the rest.
+- **Roam Left QQ area now shows all history**: Previously only 20 items were visible and scrolling couldn’t load more. Now all entries (up to 60) are accessible — the first 20 show immediately for a clean look, and a single scroll wheel action reveals the rest.
 
 ---
 
 ## [16.1.2] - 2026-04-10
 
 ### Fixed
-- **Audio survives screensaver**: Partial repair the bug where savorMoments and all sound effects would be interrupted by the screensaver.
+- **Audio survives screensaver**: Fixed the long-standing bug where music and sound effects would permanently stop after the screensaver activated. The audio engine now patiently waits for the system to recover (with progressive backoff) instead of giving up after one failed attempt. Recovery status is now fully visible in the diagnostic log.
 
 ---
 
@@ -46,7 +46,7 @@ All notable changes to this project will be documented in this file.
   - All 7 platform packages (Linux x64, Linux ARM64, Windows x64, Windows ARM64, macOS Intel, macOS Apple Silicon, Universal) now publish successfully
 
 ### Added
-- **Resume protocol**: Client-side usage statistics collection for user profile/resume feature
+- **Vig protocol**: Client-side usage statistics collection for user profile/vig feature
   - Full-snapshot idempotent design: server simply overwrites, no merge logic needed
 
 ### Changed

@@ -2508,11 +2508,15 @@ function isInputFocused() {
   return tag === 'input' || tag === 'textarea' || active.isContentEditable || active.classList.contains('rename-input');
 }
 
+// ★ Roam interaction tracking: q=edit, w=open, x=total shortcuts+clicks, k=left-click
+function roamTick(t) { vscode.postMessage({ command: 'roamTick', t: t }); }
+
 document.addEventListener('keydown', (e) => {
   if (isInputFocused()) return;
 
   if (e.key === 'Backspace') {
     e.preventDefault();
+    roamTick('x');
     vscode.postMessage({ command: 'navigateUp' });
   }
 });
@@ -2525,6 +2529,7 @@ document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey) {
     if (key === 'c') {
       e.preventDefault(); e.stopPropagation();
+      roamTick('x');
       if (selectedItems.length > 1) {
         // Multi-select copy: auto-filter out parent directory to avoid accidental inclusion via select-all, etc.
         const paths = selectedItems
@@ -2542,11 +2547,13 @@ document.addEventListener('keydown', (e) => {
     }
     if (key === 'v') {
       e.preventDefault(); e.stopPropagation();
+      roamTick('x');
       performPasteAction();
       return;
     }
     if (key === 'a') {
       e.preventDefault(); e.stopPropagation();
+      roamTick('x');
       // Select all file items (exclude ".." parent directory item)
       const prevSelectedItems = document.querySelectorAll('.file-item.selected');
       prevSelectedItems.forEach(item => {
@@ -2582,6 +2589,7 @@ document.addEventListener('keydown', (e) => {
   // ★ Space key: s request (get size info for selected items or all items)
   if (key === ' ' || e.key === ' ') {
     e.preventDefault(); e.stopPropagation();
+    roamTick('x');
 
     let itemsToRequest = [];
 
@@ -2617,14 +2625,17 @@ document.addEventListener('keydown', (e) => {
 
   if (key === 'q') {
     e.preventDefault(); e.stopPropagation();
+    roamTick('qx');
     performCodeAction(selectedItem);
     vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (key === 'w') {
     e.preventDefault(); e.stopPropagation();
+    roamTick('wx');
     performOpenAction(selectedItem);
     vscode.postMessage({ command: 'playEnterSfx' }); // ★ Keypress SFX
   } else if (key === 'd') {
     e.preventDefault(); e.stopPropagation();
+    roamTick('x');
     if (selectedItems.length > 1) {
       // Multi-select delete: filter out parent directory
       const targets = selectedItems.filter(item => item.name !== '..');
@@ -2643,6 +2654,7 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (key === 'e') {
     e.preventDefault(); e.stopPropagation();
+    roamTick('x');
     if (selectedItems.length > 1) {
       // Renaming is forbidden in multi-select
       vscode.postMessage({ command: 'showAutoCloseMessage', type: 'warning', message: '${escapeJsStringLiteral(q('q2.ui.selectSingleForRename'))}' });
@@ -2655,6 +2667,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'Delete' && e.shiftKey) {
     // Shift+Delete: permanent delete, no confirmation prompt
     e.preventDefault(); e.stopPropagation();
+    roamTick('x');
     if (selectedItems.length > 1) {
       // Multi-select permanent delete
       const targets = selectedItems.filter(item => item.name !== '..');
@@ -3098,6 +3111,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
         e.preventDefault(); // Prevent default to avoid focus issues
+        roamTick('k')
         const isFile = qqItem.classList.contains('qq-file');
         const fullpath = qqItem.dataset.fullpath;
         if (fullpath) {
@@ -3141,6 +3155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           e.preventDefault(); // Prevent default to avoid focus issues
+          roamTick('k')
           const pathSpan = recentItem.querySelector('span:not(.delete-button)');
           if (pathSpan) {
             navigateTo(pathSpan.textContent);
@@ -3192,6 +3207,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const isSzArea = event.target.classList.contains('sz-area');
       const itemPath = fileItem.dataset.path;
       const itemName = fileItem.dataset.name;
+
+      // ★ Track left-click on any item
+      roamTick('k')
 
       // Exclude parent directory
       if (itemName === '..') {
@@ -3627,6 +3645,7 @@ function setupCustomScrollbar() {
     const tolerance = 10; // Tolerance to avoid floating-point precision issues
     if (e.key === '1') {
       e.preventDefault();
+      roamTick('x');
       if (currentPos <= midPoint + tolerance) {
         // At midpoint or upper half: go directly to top
         container.scrollTop = 0;
@@ -3637,6 +3656,7 @@ function setupCustomScrollbar() {
       vscode.postMessage({ command: 'playEnterSfx' });
     } else if (e.key === '2') {
       e.preventDefault();
+      roamTick('x');
       if (currentPos >= midPoint - tolerance) {
         // At midpoint or lower half: go directly to bottom
         container.scrollTop = maxScroll;
@@ -3658,9 +3678,11 @@ document.addEventListener('keydown', function (e) {
   const key = (e.key || '').toLowerCase();
   if (key === 'a' && !e.ctrlKey && !e.metaKey) { // ★ 排除 Ctrl+A 全选
     e.preventDefault();
+    roamTick('x');
     vscode.postMessage({ command: 'openAdminCmd', path: currentPath });
   } else if (key === 'x' && isWindows) {
     e.preventDefault();
+    roamTick('x');
     vscode.postMessage({ command: 'openAdminPowershell', path: currentPath });
   }
 }, true);
@@ -4575,6 +4597,8 @@ function showSaveAsDialog() {
           } else {
             fs.renameSync(oldCanon, newPath);
             recordDirHistory(path.dirname(oldCanon));
+            // ★ Track file op: rename → fc+1
+            try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
             setTimeout(() => {
               if (panel && activePanelAlive) refreshWebview();
             }, 100);
@@ -4728,6 +4752,8 @@ function showSaveAsDialog() {
         } else {
           fs.mkdirSync(newFolderPath);
           recordDirHistory(currentPath);
+          // ★ Track file op: create folder → f+1, fc+1
+          try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 1); } catch (e) { }
           refreshWebview();
           if (panel && activePanelAlive) panel.webview.postMessage({ command: "clearFilenameInput" });
         }
@@ -4846,6 +4872,8 @@ function showSaveAsDialog() {
                 await handlePermissionErrors(result.errors, itemToDelete);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
+                // ★ Track file op: delete → fc+1
+                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
                 // ★ Move-to-qq-iq SFX
                 if (global.pythonBridge?.isAvailable()) {
                   global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
@@ -4883,6 +4911,10 @@ function showSaveAsDialog() {
                 global.showAutoCloseNotification('error', q('q2.ui.multiDeleteFailed', result.errors.length));
               }
 
+              // ★ Track file op: batch delete → fc += deleted count
+              if (result.deleted > 0) {
+                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(result.deleted, 0); } catch (e) { }
+              }
               // ★ Move-to-qq-iq SFX
               if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
@@ -4925,6 +4957,8 @@ function showSaveAsDialog() {
                 await handlePermissionErrors(result.errors, itemToDelete);
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
+                // ★ Track file op: permanent delete → fc+1
+                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
                 // ★ Permanent delete SFX
                 if (global.pythonBridge?.isAvailable()) {
                   global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
@@ -4961,6 +4995,10 @@ function showSaveAsDialog() {
                 global.showAutoCloseNotification('error', q('q2.ui.multiPermanentDeleteFailed', result.errors.length));
               }
 
+              // ★ Track file op: batch permanent delete → fc += deleted count
+              if (result.deleted > 0) {
+                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(result.deleted, 0); } catch (e) { }
+              }
               // ★ Permanent delete SFX
               if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
                 global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
@@ -4986,6 +5024,8 @@ function showSaveAsDialog() {
           const safePaths = message.paths.filter(p => p !== '..' && !p.endsWith(path.sep + '..'));
           if (safePaths.length > 0) {
             await h.copyFilesToClipboard(safePaths);
+            // ★ Track file op: copy → fc += copied count
+            try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(safePaths.length, 0); } catch (e) { }
           }
         }
         break;
@@ -4993,6 +5033,8 @@ function showSaveAsDialog() {
       case "paste":
         // ★★★ Q2 paste feature: fully ported from Q1, transaction-based, with progress bar, cancellable ★★★
         await performQ2Paste(message.destDir, refreshWebview);
+        // ★ Track file op: paste → fc+1
+        try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
         break;
 
       case "setFineSCM": {
@@ -5040,6 +5082,17 @@ function showSaveAsDialog() {
         if (global.pythonBridge?.isAvailable()) {
           global.pythonBridge.call("play_sfx", { category: "yz", name: "a2.mp3" }, 1000).catch(() => { });
         }
+        break;
+      }
+
+      case "roamTick": {
+        // ★ Roam interaction tracking: q=edit, w=open, x=total, k=click
+        try {
+          const q4 = vscode.extensions.getExtension(global.extensionId())?.exports;
+          if (q4 && typeof q4.recordRoamTick === 'function') {
+            q4.recordRoamTick(message.t);
+          }
+        } catch (e) { }
         break;
       }
     }

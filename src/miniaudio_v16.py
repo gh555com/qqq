@@ -216,8 +216,9 @@ class PlaybackToken:
 
 
 class NonBlockingAudioEngine:
-    def __init__(self, asset_folder="assets", max_workers=32, silent=False, on_device_lost=None):
+    def __init__(self, asset_folder="assets", max_workers=32, silent=False, on_device_lost=None, on_log=None):
         self.silent = silent
+        self._on_log = on_log  # ★ 外部日志回调（写入 broker.log）
         self._log("非阻塞音频引擎初始化中...")
         self.asset_folder = asset_folder
         self._on_device_lost = on_device_lost  # ★ 设备丢失回调
@@ -252,12 +253,14 @@ class NonBlockingAudioEngine:
             print(msg)
 
     def _log_critical(self, msg: str):
-        """设备恢复等关键场景，无论 silent 与否都输出（供外部回调捞取）。"""
-        if self._on_device_lost:
-            # 外部已注册回调 → 通过回调 channel 输出（kp.py 的 _log 会写 broker.log）
-            try: self._on_device_lost.__self__  # noqa – just probing
-            except AttributeError: pass
-        print(f"[miniaudio] {msg}")
+        """设备恢复等关键场景，无论 silent 与否都输出到 broker.log + stdout。"""
+        full = f"[Audio] {msg}"
+        if self._on_log:
+            try:
+                self._on_log(full)
+            except Exception:
+                pass
+        print(full)
 
     def _send_primed(self, gen, value):
         try:
@@ -1060,8 +1063,7 @@ class NonBlockingAudioEngine:
                         time.sleep(0.1)
                         # ★ 检测设备是否已死（屏保/音频设备切换等场景）
                         if token.device_silent_seconds() > 3.0:
-                            self._log_critical("【!!】 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换导致。正在尝试恢复...")
-                            # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
+                            self._log_critical("【!!】 loop: 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换")
                             if self._on_device_lost:
                                 try: self._on_device_lost()
                                 except: pass
@@ -1070,20 +1072,35 @@ class NonBlockingAudioEngine:
                             try: device.close()
                             except Exception: pass
                             device = None
-                            # ★ 短暂等待让系统音频恢复
-                            time.sleep(0.5)
-                            if token.stopped:
-                                return
-                            # ★ 尝试重建设备恢复播放
-                            try:
-                                stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
-                                stream.send(None)
-                                device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
-                                device.start(stream)
-                                token.touch()
-                                self._log_critical("【OK】 音频设备恢复成功，继续播放")
-                            except Exception as re_err:
-                                self._log_critical(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                            # ★ 渐进退避重试，直到设备恢复或被停止
+                            backoff = 0.5
+                            recovered = False
+                            while not token.stopped:
+                                time.sleep(backoff)
+                                if token.stopped:
+                                    return
+                                try:
+                                    stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
+                                    stream.send(None)
+                                    device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                                    device.start(stream)
+                                    token.touch()
+                                    # 等 0.5s 验证设备确实在拉取数据
+                                    time.sleep(0.5)
+                                    if token.device_silent_seconds() < 1.0:
+                                        self._log_critical(f"【OK】 loop: 设备恢复成功（退避{backoff:.1f}s后）")
+                                        recovered = True
+                                        break
+                                    else:
+                                        try: device.stop()
+                                        except Exception: pass
+                                        try: device.close()
+                                        except Exception: pass
+                                        device = None
+                                except Exception:
+                                    pass
+                                backoff = min(backoff * 2, 30.0)
+                            if not recovered:
                                 return
                     return
 
@@ -1113,9 +1130,26 @@ class NonBlockingAudioEngine:
                     try: decoder.close()
                     except Exception: pass
                     decoder = None
-                    # ★ 如果设备死了，等待系统音频恢复后再重试下一个循环
+                    # ★ 如果设备死了，渐进退避等待系统音频恢复
                     if device_dead:
-                        time.sleep(0.5)
+                        if self._on_device_lost:
+                            try: self._on_device_lost()
+                            except: pass
+                        self._log_critical("【!!】 streaming loop: 设备停止响应，等待恢复")
+                        backoff = 0.5
+                        while not token.stopped:
+                            time.sleep(backoff)
+                            if token.stopped:
+                                return
+                            # 尝试创建设备验证是否恢复
+                            try:
+                                test_dev = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                                test_dev.close()
+                                self._log_critical(f"【OK】 streaming loop: 设备恢复（退避{backoff:.1f}s后）")
+                                break
+                            except Exception:
+                                pass
+                            backoff = min(backoff * 2, 30.0)
                         token.touch()  # 重置计时器给下一次循环机会
                 return
 
@@ -1222,8 +1256,7 @@ class NonBlockingAudioEngine:
                     time.sleep(0.05)
                     # ★ 检测设备是否已死
                     if token.device_silent_seconds() > 3.0:
-                        self._log_critical("【!!】 多次循环播放: 音频设备停止响应（>3s无数据拉取），尝试恢复...")
-                        # ★ 通知外部（kp.py）设备丢失，联动重置 SFX 引擎
+                        self._log_critical("【!!】 nloop: 音频设备停止响应（>3s无数据拉取）")
                         if self._on_device_lost:
                             try: self._on_device_lost()
                             except: pass
@@ -1232,32 +1265,43 @@ class NonBlockingAudioEngine:
                         try: device.close()
                         except Exception: pass
                         device = None
-                        time.sleep(0.5)
-                        if token.stopped:
-                            return
-                        # ★ 重建设备恢复播放（重新开始剩余循环）
-                        try:
-                            elapsed = time.time() - (t_end - total_out_sec - 0.25)
-                            elapsed_frames = int(elapsed * rate)
-                            # 简化处理：从头开始剩余的播放时间
+                        # ★ 渐进退避重试
+                        backoff = 0.5
+                        recovered = False
+                        while not token.stopped:
+                            time.sleep(backoff)
+                            if token.stopped:
+                                return
                             remaining_sec = max(0, t_end - time.time())
                             if remaining_sec <= 0.5:
                                 return
-                            remaining_loops = max(1, int(remaining_sec / seg_duration))
-                            new_stream = self._pcm_nloop_stream(
-                                pcm_bytes=pcm, loop_times=remaining_loops, token=token,
-                                between_loop_crossfade_ms=between_loop_crossfade_ms,
-                                final_fade_seconds=final_fade_seconds
-                            )
-                            new_stream.send(None)
-                            device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
-                            device.start(new_stream)
-                            token.touch()
-                            # 更新结束时间
-                            t_end = time.time() + remaining_sec
-                            self._log_critical(f"【OK】 音频设备恢复成功，继续播放约{remaining_sec:.1f}s")
-                        except Exception as re_err:
-                            self._log_critical(f"【!!】 音频设备恢复失败: {_short_exc(re_err)}")
+                            try:
+                                remaining_loops = max(1, int(remaining_sec / seg_duration))
+                                new_stream = self._pcm_nloop_stream(
+                                    pcm_bytes=pcm, loop_times=remaining_loops, token=token,
+                                    between_loop_crossfade_ms=between_loop_crossfade_ms,
+                                    final_fade_seconds=final_fade_seconds
+                                )
+                                new_stream.send(None)
+                                device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                                device.start(new_stream)
+                                token.touch()
+                                time.sleep(0.5)
+                                if token.device_silent_seconds() < 1.0:
+                                    t_end = time.time() + remaining_sec
+                                    self._log_critical(f"【OK】 nloop: 设备恢复，继续播放约{remaining_sec:.1f}s（退避{backoff:.1f}s后）")
+                                    recovered = True
+                                    break
+                                else:
+                                    try: device.stop()
+                                    except Exception: pass
+                                    try: device.close()
+                                    except Exception: pass
+                                    device = None
+                            except Exception:
+                                pass
+                            backoff = min(backoff * 2, 30.0)
+                        if not recovered:
                             return
                 return
 
@@ -1297,9 +1341,25 @@ class NonBlockingAudioEngine:
                 try: decoder.close()
                 except Exception: pass
                 decoder = None
-                # ★ 如果设备死了，等待恢复后继续下一个循环
+                # ★ 如果设备死了，渐进退避等待恢复
                 if device_dead:
-                    time.sleep(0.5)
+                    if self._on_device_lost:
+                        try: self._on_device_lost()
+                        except: pass
+                    self._log_critical(f"【!!】 streaming nloop 第{i+1}/{loop_times}: 设备停止响应，等待恢复")
+                    backoff = 0.5
+                    while not token.stopped:
+                        time.sleep(backoff)
+                        if token.stopped:
+                            return
+                        try:
+                            test_dev = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
+                            test_dev.close()
+                            self._log_critical(f"【OK】 streaming nloop: 设备恢复（退避{backoff:.1f}s后）")
+                            break
+                        except Exception:
+                            pass
+                        backoff = min(backoff * 2, 30.0)
                     token.touch()
 
         except Exception:
@@ -1426,41 +1486,52 @@ class NonBlockingAudioEngine:
                 while not token.stopped:
                     time.sleep(0.1)
                     if token.device_silent_seconds() > 3.0:
-                        self._log_critical("【!!】 intro+loop: 音频设备停止响应，尝试恢复...")
+                        self._log_critical("【!!】 intro+loop: 音频设备停止响应")
                         if self._on_device_lost:
                             try:
                                 self._on_device_lost()
                             except Exception:
                                 pass
-                        try:
-                            device.stop()
-                        except Exception:
-                            pass
-                        try:
-                            device.close()
-                        except Exception:
-                            pass
+                        try: device.stop()
+                        except Exception: pass
+                        try: device.close()
+                        except Exception: pass
                         device = None
-                        time.sleep(0.5)
-                        if token.stopped:
-                            return
-                        try:
-                            # 恢复时跳过 intro，直接从主文件循环
-                            main_pcm_xf, mxf = self._get_pcm_cached_or_decode(
-                                main_path, sf_m, ef_m, token, crossfade_ms=xms)
-                            if token.stopped or not main_pcm_xf:
+                        # ★ 渐进退避重试，直到设备恢复或被停止
+                        backoff = 0.5
+                        recovered = False
+                        while not token.stopped:
+                            time.sleep(backoff)
+                            if token.stopped:
                                 return
-                            stream = self._pcm_loop_stream(main_pcm_xf, token, xfade_frames=mxf)
-                            stream.send(None)
-                            device = self.PlaybackDevice(
-                                output_format=self.REQUESTED_FORMAT,
-                                nchannels=self.REQUESTED_CHANNELS,
-                                sample_rate=self.REQUESTED_RATE)
-                            device.start(stream)
-                            token.touch()
-                            self._log_critical("【OK】 intro+loop: 设备恢复，从主循环继续")
-                        except Exception as e:
-                            self._log_critical(f"【!!】 intro+loop: 恢复失败: {_short_exc(e)}")
+                            try:
+                                main_pcm_xf, mxf = self._get_pcm_cached_or_decode(
+                                    main_path, sf_m, ef_m, token, crossfade_ms=xms)
+                                if token.stopped or not main_pcm_xf:
+                                    return
+                                stream = self._pcm_loop_stream(main_pcm_xf, token, xfade_frames=mxf)
+                                stream.send(None)
+                                device = self.PlaybackDevice(
+                                    output_format=self.REQUESTED_FORMAT,
+                                    nchannels=self.REQUESTED_CHANNELS,
+                                    sample_rate=self.REQUESTED_RATE)
+                                device.start(stream)
+                                token.touch()
+                                time.sleep(0.5)
+                                if token.device_silent_seconds() < 1.0:
+                                    self._log_critical(f"【OK】 intro+loop: 设备恢复，从主循环继续（退避{backoff:.1f}s后）")
+                                    recovered = True
+                                    break
+                                else:
+                                    try: device.stop()
+                                    except Exception: pass
+                                    try: device.close()
+                                    except Exception: pass
+                                    device = None
+                            except Exception:
+                                pass
+                            backoff = min(backoff * 2, 30.0)
+                        if not recovered:
                             return
             else:
                 # ★ N 次循环模式
@@ -1489,42 +1560,54 @@ class NonBlockingAudioEngine:
                 while (time.time() < t_end) and (not token.stopped):
                     time.sleep(0.05)
                     if token.device_silent_seconds() > 3.0:
-                        self._log("【!!】 intro+nloop: 音频设备停止响应，尝试恢复...")
+                        self._log_critical("【!!】 intro+nloop: 音频设备停止响应")
                         if self._on_device_lost:
                             try:
                                 self._on_device_lost()
                             except Exception:
                                 pass
-                        try:
-                            device.stop()
-                        except Exception:
-                            pass
-                        try:
-                            device.close()
-                        except Exception:
-                            pass
+                        try: device.stop()
+                        except Exception: pass
+                        try: device.close()
+                        except Exception: pass
                         device = None
-                        time.sleep(0.5)
-                        if token.stopped:
-                            return
-                        remaining = max(0, t_end - time.time())
-                        if remaining <= 0.5:
-                            return
-                        try:
-                            rem_loops = max(1, int(remaining / (main_f / float(rate))))
-                            rs = self._pcm_intro_nloop_stream(
-                                b"", main_pcm, rem_loops, token, xfade_frames, final_fade_seconds)
-                            rs.send(None)
-                            device = self.PlaybackDevice(
-                                output_format=self.REQUESTED_FORMAT,
-                                nchannels=self.REQUESTED_CHANNELS,
-                                sample_rate=self.REQUESTED_RATE)
-                            device.start(rs)
-                            token.touch()
-                            t_end = time.time() + remaining
-                            self._log(f"【OK】 intro+nloop: 设备恢复，继续约{remaining:.1f}s")
-                        except Exception as e:
-                            self._log(f"【!!】 intro+nloop: 恢复失败: {_short_exc(e)}")
+                        # ★ 渐进退避重试
+                        backoff = 0.5
+                        recovered = False
+                        while not token.stopped:
+                            time.sleep(backoff)
+                            if token.stopped:
+                                return
+                            remaining = max(0, t_end - time.time())
+                            if remaining <= 0.5:
+                                return
+                            try:
+                                rem_loops = max(1, int(remaining / (main_f / float(rate))))
+                                rs = self._pcm_intro_nloop_stream(
+                                    b"", main_pcm, rem_loops, token, xfade_frames, final_fade_seconds)
+                                rs.send(None)
+                                device = self.PlaybackDevice(
+                                    output_format=self.REQUESTED_FORMAT,
+                                    nchannels=self.REQUESTED_CHANNELS,
+                                    sample_rate=self.REQUESTED_RATE)
+                                device.start(rs)
+                                token.touch()
+                                time.sleep(0.5)
+                                if token.device_silent_seconds() < 1.0:
+                                    t_end = time.time() + remaining
+                                    self._log_critical(f"【OK】 intro+nloop: 设备恢复，继续约{remaining:.1f}s（退避{backoff:.1f}s后）")
+                                    recovered = True
+                                    break
+                                else:
+                                    try: device.stop()
+                                    except Exception: pass
+                                    try: device.close()
+                                    except Exception: pass
+                                    device = None
+                            except Exception:
+                                pass
+                            backoff = min(backoff * 2, 30.0)
+                        if not recovered:
                             return
         finally:
             if device:

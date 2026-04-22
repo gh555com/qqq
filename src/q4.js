@@ -906,7 +906,7 @@ class ClipboardHistoryManager {
 
     _notifyChange(reason) {
         if (this._onChange) this._onChange(reason);
-        // 同步 history count 到 globalState，供 resume 上报使用
+        // 同步 history count 到 globalState，供 vig 上报使用
         try {
             this.context.globalState.update('qqq_clipboard_history_count', this._size);
         } catch { /* ignore */ }
@@ -984,7 +984,8 @@ class ClipboardHistoryManager {
         return gs.get('qqq_roam_stats', {
             count: 0,
             filesCreated: 0,
-            firstUse: Date.now()
+            firstUse: Date.now(),
+            q: 0, w: 0, x: 0, k: 0, f: 0, fc: 0
         });
     }
 
@@ -1022,13 +1023,53 @@ class ClipboardHistoryManager {
 
     async recordRoamUsage({ filesCreated = 0 } = {}) {
         const gs = this.context.globalState;
-        const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now() });
+        const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now(), q: 0, w: 0, x: 0, k: 0, f: 0, fc: 0 });
         const newStats = {
             count: (Number(stats.count) || 0) + 1,
             filesCreated: (Number(stats.filesCreated) || 0) + filesCreated,
-            firstUse: Number(stats.firstUse) || Date.now()
+            firstUse: Number(stats.firstUse) || Date.now(),
+            q: Number(stats.q) || 0,
+            w: Number(stats.w) || 0,
+            x: Number(stats.x) || 0,
+            k: Number(stats.k) || 0,
+            f: (Number(stats.f) || 0) + filesCreated,
+            fc: (Number(stats.fc) || 0) + (filesCreated > 0 ? 1 : 0)
         };
         await gs.update('qqq_roam_stats', JSON.parse(JSON.stringify(newStats)));
+        this._notifyChange('roam_stats');
+    }
+
+    /**
+     * 记录 Roam 交互埋点
+     * @param {string} types - 包含 q/w/x/k 的字符串，如 'qx' 表示 q+1, x+1
+     */
+    async recordRoamTick(types) {
+        if (!types) return;
+        const gs = this.context.globalState;
+        const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now(), q: 0, w: 0, x: 0, k: 0, f: 0, fc: 0 });
+        if (!stats.firstUse) stats.firstUse = Date.now();
+        for (const ch of types) {
+            if (ch === 'q') stats.q = (Number(stats.q) || 0) + 1;
+            else if (ch === 'w') stats.w = (Number(stats.w) || 0) + 1;
+            else if (ch === 'x') stats.x = (Number(stats.x) || 0) + 1;
+            else if (ch === 'k') stats.k = (Number(stats.k) || 0) + 1;
+        }
+        await gs.update('qqq_roam_stats', JSON.parse(JSON.stringify(stats)));
+        this._notifyChange('roam_stats');
+    }
+
+    /**
+     * 记录 Roam 文件操作（新建/删除/重命名/复制/粘贴等）
+     * @param {number} ops - 操作次数，累加到 fc
+     * @param {number} creates - 其中新建操作次数，累加到 f
+     */
+    async recordRoamFileOp(ops = 1, creates = 0) {
+        const gs = this.context.globalState;
+        const stats = gs.get('qqq_roam_stats', { count: 0, filesCreated: 0, firstUse: Date.now(), q: 0, w: 0, x: 0, k: 0, f: 0, fc: 0 });
+        if (!stats.firstUse) stats.firstUse = Date.now();
+        stats.fc = (Number(stats.fc) || 0) + ops;
+        if (creates > 0) stats.f = (Number(stats.f) || 0) + creates;
+        await gs.update('qqq_roam_stats', JSON.parse(JSON.stringify(stats)));
         this._notifyChange('roam_stats');
     }
 
@@ -1525,8 +1566,17 @@ class ClipboardHistorySidebarProvider {
     _formatRoamStats(s) {
         if (!s) return '';
         const days = Math.max(1, Math.ceil((Date.now() - (s.firstUse || Date.now())) / 86400000));
-        const avgCount = Math.round(s.count / days);
-        return `${s.count} times, ${s.filesCreated || 0} files; Avg per day: ${avgCount} times`;
+        const fc = (s.fc || 0);
+        const f = (s.f || s.filesCreated || 0);
+        const x = (s.x || 0);
+        const k = (s.k || 0);
+        const parts = [];
+        if (fc > 0) parts.push(`${fc} ops${f > 0 ? ` (${f} new)` : ''}`);
+        if (x > 0) parts.push(`${x} keys`);
+        if (k > 0) parts.push(`${k} clicks`);
+        if (parts.length === 0) parts.push(`${s.count || 0} times`);
+        const avgOps = Math.round((fc + x + k) / days);
+        return `${parts.join(', ')}; Avg/day: ${avgOps}`;
     }
 
     _formatVideoStats(s) {
@@ -3240,6 +3290,8 @@ function activate(context) {
         clearHistory: () => historyManager.clearHistory(),
         getStats: () => historyManager.getStatsSnapshot(),
         recordRoamUsage: (args) => historyManager.recordRoamUsage(args),
+        recordRoamTick: (types) => historyManager.recordRoamTick(types),
+        recordRoamFileOp: (ops, creates) => historyManager.recordRoamFileOp(ops, creates),
         sidebarProvider: sidebarProvider // ★ Return sidebarProvider instance
     };
 }
