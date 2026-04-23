@@ -2480,13 +2480,17 @@ window.addEventListener('message', event => {
 // ====== QQ iq wheel expand ======
 // ★ On first wheel in qq-iq-section, tell backend to expand to full 60 items permanently.
 // No scrollbar shown (blind-scroll). Once expanded, survives webview refresh until window restart.
+// ★ FIX: Use event delegation on .sidebar (which is never replaced) so the listener
+//   survives updateSidebar DOM replacements that destroy the .qq-iq-section element.
 function initqqiqExpand() {
-  const section = document.querySelector('.qq-iq-section');
-  if (!section) return;
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
 
   let sent = false;
-  section.addEventListener('wheel', () => {
+  sidebar.addEventListener('wheel', (e) => {
     if (sent) return;
+    // Only react when the wheel happens inside .qq-iq-section
+    if (!e.target.closest('.qq-iq-section')) return;
     sent = true;
     vscode.postMessage({ command: 'expandqqiq' });
   }, { passive: true });
@@ -4598,7 +4602,7 @@ function showSaveAsDialog() {
             fs.renameSync(oldCanon, newPath);
             recordDirHistory(path.dirname(oldCanon));
             // ★ Track file op: rename → fc+1
-            try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
+            try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(1, 0); } catch (e) { }
             setTimeout(() => {
               if (panel && activePanelAlive) refreshWebview();
             }, 100);
@@ -4702,9 +4706,9 @@ function showSaveAsDialog() {
 
             // Link Q4 stats: accumulate created file count
             try {
-              const q4 = vscode.extensions.getExtension(global.extensionId())?.exports;
-              if (q4 && typeof q4.recordRoamUsage === 'function') {
-                q4.recordRoamUsage({ filesCreated: 1 });
+              const cm = global.clipboardHistoryManager;
+              if (cm && typeof cm.recordRoamUsage === 'function') {
+                cm.recordRoamUsage({ filesCreated: 1 });
               }
             } catch (e) { }
 
@@ -4753,7 +4757,7 @@ function showSaveAsDialog() {
           fs.mkdirSync(newFolderPath);
           recordDirHistory(currentPath);
           // ★ Track file op: create folder → f+1, fc+1
-          try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 1); } catch (e) { }
+          try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(1, 1); } catch (e) { }
           refreshWebview();
           if (panel && activePanelAlive) panel.webview.postMessage({ command: "clearFilenameInput" });
         }
@@ -4873,7 +4877,7 @@ function showSaveAsDialog() {
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.movedToRecycleBin', path.basename(itemToDelete)));
                 // ★ Track file op: delete → fc+1
-                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
+                try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(1, 0); } catch (e) { }
                 // ★ Move-to-qq-iq SFX
                 if (global.pythonBridge?.isAvailable()) {
                   global.pythonBridge.call("play_sfx", { category: "yz", name: "4.mp3" }, 1000).catch(() => { });
@@ -4913,7 +4917,7 @@ function showSaveAsDialog() {
 
               // ★ Track file op: batch delete → fc += deleted count
               if (result.deleted > 0) {
-                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(result.deleted, 0); } catch (e) { }
+                try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(result.deleted, 0); } catch (e) { }
               }
               // ★ Move-to-qq-iq SFX
               if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
@@ -4958,7 +4962,7 @@ function showSaveAsDialog() {
               } else {
                 global.showAutoCloseNotification('info', q('q2.ui.permanentDeleted', path.basename(itemToDelete)));
                 // ★ Track file op: permanent delete → fc+1
-                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
+                try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(1, 0); } catch (e) { }
                 // ★ Permanent delete SFX
                 if (global.pythonBridge?.isAvailable()) {
                   global.pythonBridge.call("play_sfx", { category: "yz", name: "rou1.mp3" }, 1000).catch(() => { });
@@ -4997,7 +5001,7 @@ function showSaveAsDialog() {
 
               // ★ Track file op: batch permanent delete → fc += deleted count
               if (result.deleted > 0) {
-                try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(result.deleted, 0); } catch (e) { }
+                try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(result.deleted, 0); } catch (e) { }
               }
               // ★ Permanent delete SFX
               if (result.deleted > 0 && global.pythonBridge?.isAvailable()) {
@@ -5025,7 +5029,7 @@ function showSaveAsDialog() {
           if (safePaths.length > 0) {
             await h.copyFilesToClipboard(safePaths);
             // ★ Track file op: copy → fc += copied count
-            try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(safePaths.length, 0); } catch (e) { }
+            try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(safePaths.length, 0); } catch (e) { }
           }
         }
         break;
@@ -5034,7 +5038,7 @@ function showSaveAsDialog() {
         // ★★★ Q2 paste feature: fully ported from Q1, transaction-based, with progress bar, cancellable ★★★
         await performQ2Paste(message.destDir, refreshWebview);
         // ★ Track file op: paste → fc+1
-        try { const q4 = vscode.extensions.getExtension(global.extensionId())?.exports; if (q4?.recordRoamFileOp) q4.recordRoamFileOp(1, 0); } catch (e) { }
+        try { const cm = global.clipboardHistoryManager; if (cm?.recordRoamFileOp) cm.recordRoamFileOp(1, 0); } catch (e) { }
         break;
 
       case "setFineSCM": {
@@ -5088,9 +5092,9 @@ function showSaveAsDialog() {
       case "roamTick": {
         // ★ Roam interaction tracking: q=edit, w=open, x=total, k=click
         try {
-          const q4 = vscode.extensions.getExtension(global.extensionId())?.exports;
-          if (q4 && typeof q4.recordRoamTick === 'function') {
-            q4.recordRoamTick(message.t);
+          const cm = global.clipboardHistoryManager;
+          if (cm && typeof cm.recordRoamTick === 'function') {
+            cm.recordRoamTick(message.t);
           }
         } catch (e) { }
         break;

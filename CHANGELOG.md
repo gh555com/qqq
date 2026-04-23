@@ -4,13 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.1.7] - 2026-04-23
+
+### Fixed
+- **Roam left qq area wheel-expand broken after navigation**: Previously, scrolling to expand from 20 to 60 items would stop working entirely after switching directories. The root cause was that every directory switch replaced the sidebar DOM, destroying the scroll event listener. Now uses event delegation so wheel-expand works reliably regardless of how many times you navigate.
+
+### Improved
+- **Audio fully survives screensaver/sleep**: Fixed a critical bug where the recovery mechanism falsely believed the device had resumed (verification always passed regardless of actual device state). Now the engine waits for the device to genuinely pull audio data before confirming recovery. Combined with progressive backoff retry, music and sound effects reliably resume after any duration of sleep or lock.
+- **Linux ARM64 platform now supported**: CI pipeline added `aarch64-unknown-linux-gnu` build target — Linux users on ARM64 hardware can now run the native engine.
+
+---
+
 ## [16.1.3] - 2026-04-17
 
 ### Fixed
 - **Pinned cards now survive restart**: Previously, pinned clipboard history items would disappear after restarting the IDE. Pin state is now reliably persisted and restored.
 - **Pinned items protected from cleanup**: Pinned cards will no longer be silently deleted when clipboard history reaches capacity — they are always kept safe.
 - **History list scroll freeze fixed**: Scrolling to the bottom of the clipboard history would cause the panel to freeze — only a few cards visible, scrollbar gone, and no further scrolling possible. Now scrolling is smooth and stable at all times.
-- **Roam Left QQ area now shows all history**: Previously only 20 items were visible and scrolling couldn’t load more. Now all entries (up to 60) are accessible — the first 20 show immediately for a clean look, and a single scroll wheel action reveals the rest.
+- **Roam Left qq area now shows all history**: Previously only 20 items were visible and scrolling couldn’t load more. Now all entries (up to 60) are accessible — the first 20 show immediately for a clean look, and a single scroll wheel action reveals the rest.
 
 ---
 
@@ -25,7 +36,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-**Avira**: The virus scan credentials specified and required by VS Marketplace have been uploaded: https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/Avira.jpg
+**Avira**: The virus scan credentials specified and required by VS Marketplace have been uploaded: https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/4ILW3YA72W6PQ.jpg
 
  From this point forward, we will continuously provide virus-free (all clean) certification.
 
@@ -333,7 +344,7 @@ All notable changes to this project will be documented in this file.
 ## [15.73.117] - 2026-03-03
 
 ### Changed
-- **Desktop & Recycle Bin excluded from sidebar**: These paths are now filtered out from QQ area and pinned history
+- **Desktop & Recycle Bin excluded from sidebar**: These paths are now filtered out from qq area and pinned history
   - Already permanently shown in drive bar, no need to duplicate
   - Cross-platform filtering:
     - **Windows**: Desktop (`%USERPROFILE%\Desktop`)
@@ -476,7 +487,7 @@ All notable changes to this project will be documented in this file.
 ## [15.73.107] - 2026-03-02
 
 ### Features
-- **Event delegation for sidebar**: QQ items and recent/history items now use event delegation instead of inline onclick
+- **Event delegation for sidebar**: qq items and recent/history items now use event delegation instead of inline onclick
 - **Multi-layer webview focus fix**: Added 6 techniques to prevent "first click swallowed" issue
   - Body focus with tabindex
   - Window focus fallback

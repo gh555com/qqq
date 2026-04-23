@@ -1084,10 +1084,9 @@ class NonBlockingAudioEngine:
                                     stream.send(None)
                                     device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                                     device.start(stream)
-                                    token.touch()
-                                    # 等 0.5s 验证设备确实在拉取数据
-                                    time.sleep(0.5)
-                                    if token.device_silent_seconds() < 1.0:
+                                    # 不手动 touch — 让设备真正拉取数据来证明自己
+                                    time.sleep(2.0)
+                                    if token.device_silent_seconds() < 1.5:
                                         self._log_critical(f"【OK】 loop: 设备恢复成功（退避{backoff:.1f}s后）")
                                         recovered = True
                                         break
@@ -1285,9 +1284,9 @@ class NonBlockingAudioEngine:
                                 new_stream.send(None)
                                 device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                                 device.start(new_stream)
-                                token.touch()
-                                time.sleep(0.5)
-                                if token.device_silent_seconds() < 1.0:
+                                # 不手动 touch — 让设备真正拉取数据来证明自己
+                                time.sleep(2.0)
+                                if token.device_silent_seconds() < 1.5:
                                     t_end = time.time() + remaining_sec
                                     self._log_critical(f"【OK】 nloop: 设备恢复，继续播放约{remaining_sec:.1f}s（退避{backoff:.1f}s后）")
                                     recovered = True
@@ -1516,9 +1515,9 @@ class NonBlockingAudioEngine:
                                     nchannels=self.REQUESTED_CHANNELS,
                                     sample_rate=self.REQUESTED_RATE)
                                 device.start(stream)
-                                token.touch()
-                                time.sleep(0.5)
-                                if token.device_silent_seconds() < 1.0:
+                                # 不手动 touch — 让设备真正拉取数据来证明自己
+                                time.sleep(2.0)
+                                if token.device_silent_seconds() < 1.5:
                                     self._log_critical(f"【OK】 intro+loop: 设备恢复，从主循环继续（退避{backoff:.1f}s后）")
                                     recovered = True
                                     break
@@ -1591,9 +1590,9 @@ class NonBlockingAudioEngine:
                                     nchannels=self.REQUESTED_CHANNELS,
                                     sample_rate=self.REQUESTED_RATE)
                                 device.start(rs)
-                                token.touch()
-                                time.sleep(0.5)
-                                if token.device_silent_seconds() < 1.0:
+                                # 不手动 touch — 让设备真正拉取数据来证明自己
+                                time.sleep(2.0)
+                                if token.device_silent_seconds() < 1.5:
                                     t_end = time.time() + remaining
                                     self._log_critical(f"【OK】 intro+nloop: 设备恢复，继续约{remaining:.1f}s（退避{backoff:.1f}s后）")
                                     recovered = True
