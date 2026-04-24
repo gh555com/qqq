@@ -1075,10 +1075,12 @@ class NonBlockingAudioEngine:
                             # ★ 渐进退避重试，直到设备恢复或被停止
                             backoff = 0.5
                             recovered = False
+                            retry_n = 0
                             while not token.stopped:
                                 time.sleep(backoff)
                                 if token.stopped:
                                     return
+                                retry_n += 1
                                 try:
                                     stream = self._pcm_loop_stream(pcm, token, xfade_frames=xfade_frames)
                                     stream.send(None)
@@ -1086,18 +1088,21 @@ class NonBlockingAudioEngine:
                                     device.start(stream)
                                     # 不手动 touch — 让设备真正拉取数据来证明自己
                                     time.sleep(2.0)
-                                    if token.device_silent_seconds() < 1.5:
-                                        self._log_critical(f"【OK】 loop: 设备恢复成功（退避{backoff:.1f}s后）")
+                                    silent = token.device_silent_seconds()
+                                    if silent < 1.5:
+                                        self._log_critical(f"【OK】 loop: 设备恢复成功（第{retry_n}次尝试，退避{backoff:.1f}s，silent={silent:.2f}s）")
                                         recovered = True
                                         break
                                     else:
+                                        self._log_critical(f"【??】 loop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
                                         try: device.stop()
                                         except Exception: pass
                                         try: device.close()
                                         except Exception: pass
                                         device = None
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    if retry_n <= 2:
+                                        self._log_critical(f"【!!】 loop: 恢复第{retry_n}次失败: {e}")
                                 backoff = min(backoff * 2, 30.0)
                             if not recovered:
                                 return
@@ -1136,18 +1141,21 @@ class NonBlockingAudioEngine:
                             except: pass
                         self._log_critical("【!!】 streaming loop: 设备停止响应，等待恢复")
                         backoff = 0.5
+                        retry_n = 0
                         while not token.stopped:
                             time.sleep(backoff)
                             if token.stopped:
                                 return
                             # 尝试创建设备验证是否恢复
+                            retry_n += 1
                             try:
                                 test_dev = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                                 test_dev.close()
-                                self._log_critical(f"【OK】 streaming loop: 设备恢复（退避{backoff:.1f}s后）")
+                                self._log_critical(f"【OK】 streaming loop: 设备恢复（第{retry_n}次，退避{backoff:.1f}s）")
                                 break
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                if retry_n <= 2:
+                                    self._log_critical(f"【!!】 streaming loop: 恢复第{retry_n}次失败: {e}")
                             backoff = min(backoff * 2, 30.0)
                         token.touch()  # 重置计时器给下一次循环机会
                 return
@@ -1267,6 +1275,7 @@ class NonBlockingAudioEngine:
                         # ★ 渐进退避重试
                         backoff = 0.5
                         recovered = False
+                        retry_n = 0
                         while not token.stopped:
                             time.sleep(backoff)
                             if token.stopped:
@@ -1274,6 +1283,7 @@ class NonBlockingAudioEngine:
                             remaining_sec = max(0, t_end - time.time())
                             if remaining_sec <= 0.5:
                                 return
+                            retry_n += 1
                             try:
                                 remaining_loops = max(1, int(remaining_sec / seg_duration))
                                 new_stream = self._pcm_nloop_stream(
@@ -1284,21 +1294,23 @@ class NonBlockingAudioEngine:
                                 new_stream.send(None)
                                 device = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                                 device.start(new_stream)
-                                # 不手动 touch — 让设备真正拉取数据来证明自己
                                 time.sleep(2.0)
-                                if token.device_silent_seconds() < 1.5:
+                                silent = token.device_silent_seconds()
+                                if silent < 1.5:
                                     t_end = time.time() + remaining_sec
-                                    self._log_critical(f"【OK】 nloop: 设备恢复，继续播放约{remaining_sec:.1f}s（退避{backoff:.1f}s后）")
+                                    self._log_critical(f"【OK】 nloop: 设备恢复，继续约{remaining_sec:.1f}s（第{retry_n}次，silent={silent:.2f}s）")
                                     recovered = True
                                     break
                                 else:
+                                    self._log_critical(f"【??】 nloop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
                                     try: device.stop()
                                     except Exception: pass
                                     try: device.close()
                                     except Exception: pass
                                     device = None
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                if retry_n <= 2:
+                                    self._log_critical(f"【!!】 nloop: 恢复第{retry_n}次失败: {e}")
                             backoff = min(backoff * 2, 30.0)
                         if not recovered:
                             return
@@ -1347,17 +1359,20 @@ class NonBlockingAudioEngine:
                         except: pass
                     self._log_critical(f"【!!】 streaming nloop 第{i+1}/{loop_times}: 设备停止响应，等待恢复")
                     backoff = 0.5
+                    retry_n = 0
                     while not token.stopped:
                         time.sleep(backoff)
                         if token.stopped:
                             return
+                        retry_n += 1
                         try:
                             test_dev = self.PlaybackDevice(output_format=self.REQUESTED_FORMAT, nchannels=self.REQUESTED_CHANNELS, sample_rate=self.REQUESTED_RATE)
                             test_dev.close()
-                            self._log_critical(f"【OK】 streaming nloop: 设备恢复（退避{backoff:.1f}s后）")
+                            self._log_critical(f"【OK】 streaming nloop: 设备恢复（第{retry_n}次，退避{backoff:.1f}s）")
                             break
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            if retry_n <= 2:
+                                self._log_critical(f"【!!】 streaming nloop: 恢复第{retry_n}次失败: {e}")
                         backoff = min(backoff * 2, 30.0)
                     token.touch()
 
@@ -1499,10 +1514,12 @@ class NonBlockingAudioEngine:
                         # ★ 渐进退避重试，直到设备恢复或被停止
                         backoff = 0.5
                         recovered = False
+                        retry_n = 0
                         while not token.stopped:
                             time.sleep(backoff)
                             if token.stopped:
                                 return
+                            retry_n += 1
                             try:
                                 main_pcm_xf, mxf = self._get_pcm_cached_or_decode(
                                     main_path, sf_m, ef_m, token, crossfade_ms=xms)
@@ -1515,20 +1532,22 @@ class NonBlockingAudioEngine:
                                     nchannels=self.REQUESTED_CHANNELS,
                                     sample_rate=self.REQUESTED_RATE)
                                 device.start(stream)
-                                # 不手动 touch — 让设备真正拉取数据来证明自己
                                 time.sleep(2.0)
-                                if token.device_silent_seconds() < 1.5:
-                                    self._log_critical(f"【OK】 intro+loop: 设备恢复，从主循环继续（退避{backoff:.1f}s后）")
+                                silent = token.device_silent_seconds()
+                                if silent < 1.5:
+                                    self._log_critical(f"【OK】 intro+loop: 设备恢复（第{retry_n}次，silent={silent:.2f}s）")
                                     recovered = True
                                     break
                                 else:
+                                    self._log_critical(f"【??】 intro+loop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
                                     try: device.stop()
                                     except Exception: pass
                                     try: device.close()
                                     except Exception: pass
                                     device = None
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                if retry_n <= 2:
+                                    self._log_critical(f"【!!】 intro+loop: 恢复第{retry_n}次失败: {e}")
                             backoff = min(backoff * 2, 30.0)
                         if not recovered:
                             return
@@ -1573,6 +1592,7 @@ class NonBlockingAudioEngine:
                         # ★ 渐进退避重试
                         backoff = 0.5
                         recovered = False
+                        retry_n = 0
                         while not token.stopped:
                             time.sleep(backoff)
                             if token.stopped:
@@ -1580,6 +1600,7 @@ class NonBlockingAudioEngine:
                             remaining = max(0, t_end - time.time())
                             if remaining <= 0.5:
                                 return
+                            retry_n += 1
                             try:
                                 rem_loops = max(1, int(remaining / (main_f / float(rate))))
                                 rs = self._pcm_intro_nloop_stream(
@@ -1590,21 +1611,23 @@ class NonBlockingAudioEngine:
                                     nchannels=self.REQUESTED_CHANNELS,
                                     sample_rate=self.REQUESTED_RATE)
                                 device.start(rs)
-                                # 不手动 touch — 让设备真正拉取数据来证明自己
                                 time.sleep(2.0)
-                                if token.device_silent_seconds() < 1.5:
+                                silent = token.device_silent_seconds()
+                                if silent < 1.5:
                                     t_end = time.time() + remaining
-                                    self._log_critical(f"【OK】 intro+nloop: 设备恢复，继续约{remaining:.1f}s（退避{backoff:.1f}s后）")
+                                    self._log_critical(f"【OK】 intro+nloop: 设备恢复（第{retry_n}次，silent={silent:.2f}s）")
                                     recovered = True
                                     break
                                 else:
+                                    self._log_critical(f"【??】 intro+nloop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
                                     try: device.stop()
                                     except Exception: pass
                                     try: device.close()
                                     except Exception: pass
                                     device = None
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                if retry_n <= 2:
+                                    self._log_critical(f"【!!】 intro+nloop: 恢复第{retry_n}次失败: {e}")
                             backoff = min(backoff * 2, 30.0)
                         if not recovered:
                             return
