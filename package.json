@@ -1,13 +1,8 @@
 {
-
-
-  "name": "Image-Preview-Directly",
-  "displayName": "Image preview Directly",
-
-
-
-  "publisher": "gh555com",
-  "version": "16.1.7",
+  "name": "qqq",
+  "displayName": "qqq",
+  "publisher": "gh555",
+  "version": "16.1.8",
   "description": "soldier. ",
   "icon": "assets/q.gif",
   "engines": {
@@ -432,7 +427,8 @@
     "ui"
   ],
   "categories": [
-    "Visualization"
+    "Visualization",
+    "Other"
   ],
   "keywords": [
     "Paste Image",
