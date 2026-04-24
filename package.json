@@ -1,9 +1,9 @@
 {
-  "name": "q3",
-  "displayName": "q3",
+  "name": "Paste Image qqq",
+  "displayName": "Paste Image qqq",
   "publisher": "gh555com",
   "version": "16.1.7",
-  "description": "soldier.",
+  "description": "soldier. ",
   "icon": "assets/q.gif",
   "engines": {
     "vscode": "^1.61.0"
@@ -430,7 +430,16 @@
     "Visualization"
   ],
   "keywords": [
+    "Paste Image",
+    "Image preview",
+    "video",
+    "html",
+    "notebook",
+    "File Explorer",
+    "Browser",
     "paste image",
+    "Roam",
+    "Navigator",
     "Rich Note"
   ],
   "dependencies": {

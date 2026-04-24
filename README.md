@@ -73,7 +73,7 @@
 
  You need not have opened a note-taking application specially.
 
-   **√** VS Code (Cursor, Antigravity, etc.) can also serve as a rich note app.  How?  Enable qqq.
+ **√**  VS Code (Cursor, Antigravity, etc.) can also serve as an all-media paste-friendly notebook. How? Enable qqq.
 
 
 
@@ -143,7 +143,7 @@ A little hint:
  try the shortcut key of Roam:
 
 <p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="80%" alt="Paste Screenshot">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="80%" alt="shortcut key">
 </p>
 
 Press Space on selected item: ignore any preferences, request its size.
@@ -256,7 +256,7 @@ and then you can switch languages: zh、zh-tw、en、ja、de、ko、ru、ar、es
 </p>
 
 
- For all  operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon), please visit: https://github.com/gh555com/qqq/releases
+ All  operating system (Windows, Linux, macOS) and processor architecture (x64, ARM, ARM64, Apple Silicon) in: https://github.com/gh555com/qqq/releases or https://open-vsx.org/extension/gh555/qqq
 
 
  ## About qqq Resource Footprint
@@ -265,6 +265,16 @@ Built on a highly efficient Rust-based underlying architecture with extreme perf
 
  ## Security
 The source code is fully open source and available for self-compilation: https://github.com/gh555com/qqq, Windows 7 is supported, for key compilation notes: https://github.com/gh555com/qqq/blob/qq/docs/Rust%20win7.md.
+
+The company undertakes never to collect clipboard content or any sensitive user information, and welcomes public supervision:
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/MSNRJ5YUR7YY6.jpg" width="100%" alt="company">
+</p>
+
+<p align="left">
+  <img src="https://cdn.gh555.com/u/01KK1SAAR5B53SJXGNVQWP5EB6/ZAVTVRFVTJ6ME.png " width="60%" alt="company">
+</p>
+
 
 Virus detection or submission: https://www.avira.com/en/analysis/submit
 
