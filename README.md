@@ -70,6 +70,8 @@
 
  Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
 
+ Original name: qqq
+
  Open VSX: https://open-vsx.org/extension/gh555/qqq
 
 
@@ -148,13 +150,15 @@ A little hint:
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/key.gif" width="80%" alt="shortcut key">
 </p>
 
-Press Space on selected item: ignore any preferences, request its size.
+Press `Space` on selected item: ignore any preferences, request its size.
 
-Press 1 to scroll to list top.
-Press 2 to scroll to list bottom.
+Press `1` to scroll to list top.
+Press `2` to scroll to list bottom.
 
 
-  qqq Roam serves as your default start page for blank windows. Make the most of the **Q** key to open projects or documents;  make the most of the **W** key to open your music, videos, and games.
+  qqq Roam serves as your default start page for blank windows. Make the most of the **`Q`** key to open projects or documents;  make the most of the **`W`** key to open your music, videos, and games.
+
+ As of v16.1, we’re thrilled to introduce the `Space + Q` keyboard shortcut to invoke Roam. Enjoy!
 
 
 
