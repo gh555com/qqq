@@ -68,7 +68,9 @@
   © 2005 gh555.com All Rights Reserved.
 </p>
 
-> Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
+ Full source code transparency, security, and auditability are guaranteed. [Feedback & Issues](https://github.com/gh555com/qqq/issues)
+
+ Open VSX: https://open-vsx.org/extension/gh555/qqq
 
 
  You need not have opened a note-taking application specially.
