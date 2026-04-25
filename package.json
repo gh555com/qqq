@@ -3,8 +3,11 @@
 
 
 
-  "name": "notebook-qqq",
-  "displayName": "Notebook qqq",
+  "name": "File-Explorer-qqq",
+  "displayName": "File Explorer qqq",
+
+
+
 
   "publisher": "gh555com",
 
@@ -433,8 +436,7 @@
     "ui"
   ],
   "categories": [
-    "Other",
-    "Visualization"
+    "Other"
   ],
   "keywords": [
     "Paste Image",
