@@ -162,46 +162,7 @@ Press `2` to scroll to list bottom.
 
 
 
-## ✦q✦ Premium features are permanently free
-
-All features mentioned above are available in the free version.
-
-Leave a one-time tip of around **$15 (~100 ge)**, and as a thank-you, you'll get a lifetime Premium license — built to last across generations.
-
-Additionally, there are 2 ways to obtain a Premium license key:
-
-#### Method 1: Earn It in 100 Days
-Register as a part of **的梦gaea** to automatically receive **1 ge per day**—no login, no check-in, no tasks required.
-Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
-
-[Get Account](https://www.gh555.com/login)　[Buy License](https://www.gh555.com/gaea/d/qqq#price)　[▶Save Preferences](https://www.gh555.com/gaea/d/qqq#profile)
-
-
-
-#### Method 2: Contribute a Video
-On the other hand, you can create and publish an independent qqq introduction video, and receive rewards based on the video quality:
-
-| Video Quality | Rewards |
-|---------------|---------|
-| ★ | 3 Premium license keys, or the equivalent of 300 ge |
-| ★★ | 10 Premium license keys, or the equivalent of 1,000 ge |
-| ★★★ | 30 Premium license keys, or the equivalent of 3,000 ge |
-| ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
-| ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
-
-Post the link to your published video to info@gh555.com.
-
-
-
-However, there's no need to worry, as the free version also provides unlimited access to all premium features (in essence). The only differences between the licensed and free versions are:
-1. Removal of watermarks
-2. Persistence (cloud storage) of preferences
-3. VIP Care: 📧 ky@gh555.com (Primary); 📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement)  )
-
-Apart from these, both versions are completely identical in terms of functionality and usage.
-
-
-### **Premium features include:**
+## ✦q✦ Hot features
 
  #### Paste HTML
 
@@ -215,20 +176,15 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
 
 
-
-
-
-
-
  #### Export Doc
 
 <p align="left">
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="export doc">
 </p>
 
- .doc: Compatible with Word 2003.
- .docx: Smaller size.
+ .doc: compatible with Word 2003, RTF. RTF encoding. Better compatibility.
 
+ .docx: supports Google Docs/Tencent Docs. Office Open XML encoding. More powerful functions and higher compression ratio.
 
 
 
@@ -239,7 +195,13 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 </p>
 
 
- #### Embed online videos
+ #### Paste stream videos
+
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q_video.gif" width="100%" alt="Network stream video">
+</p>
+
+
 
  ####  Clean up orphaned files
 

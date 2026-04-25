@@ -262,6 +262,17 @@ class NonBlockingAudioEngine:
                 pass
         print(full)
 
+    @staticmethod
+    def _kill_device_async(dev):
+        """★ 非阻塞销毁设备 — device.stop() 在设备被系统挂起时可能永久阻塞"""
+        def _do():
+            try: dev.stop()
+            except Exception: pass
+            try: dev.close()
+            except Exception: pass
+        t = threading.Thread(target=_do, daemon=True)
+        t.start()
+
     def _send_primed(self, gen, value):
         try:
             return gen.send(value)
@@ -1066,11 +1077,10 @@ class NonBlockingAudioEngine:
                             self._log_critical("【!!】 loop: 音频设备停止响应（>3s无数据拉取），可能因屏保/设备切换")
                             if self._on_device_lost:
                                 try: self._on_device_lost()
-                                except: pass
-                            try: device.stop()
-                            except Exception: pass
-                            try: device.close()
-                            except Exception: pass
+                                except Exception: pass
+                            # ★ 异步销毁旧设备（stop可能阻塞）
+                            if device:
+                                self._kill_device_async(device)
                             device = None
                             # ★ 渐进退避重试，直到设备恢复或被停止
                             backoff = 0.5
@@ -1095,10 +1105,7 @@ class NonBlockingAudioEngine:
                                         break
                                     else:
                                         self._log_critical(f"【??】 loop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
-                                        try: device.stop()
-                                        except Exception: pass
-                                        try: device.close()
-                                        except Exception: pass
+                                        self._kill_device_async(device)
                                         device = None
                                 except Exception as e:
                                     if retry_n <= 2:
@@ -1123,13 +1130,18 @@ class NonBlockingAudioEngine:
                         time.sleep(0.05)
                         # ★ 检测设备是否已死
                         if token.device_silent_seconds() > 3.0:
-                            self._log("【!!】 streaming loop: 音频设备停止响应，中断当前段")
+                            self._log_critical("【!!】 streaming loop: 音频设备停止响应，中断当前段")
                             device_dead = True
                             break
-                    try: device.stop()
-                    except Exception: pass
-                    try: device.close()
-                    except Exception: pass
+                    # ★ 清理设备：设备死亡时异步销毁（stop可能阻塞），正常结束时同步
+                    if device:
+                        if device_dead:
+                            self._kill_device_async(device)
+                        else:
+                            try: device.stop()
+                            except Exception: pass
+                            try: device.close()
+                            except Exception: pass
                     device = None
                     try: decoder.close()
                     except Exception: pass
@@ -1186,10 +1198,7 @@ class NonBlockingAudioEngine:
             self._log(traceback.format_exc())
         finally:
             if device:
-                try: device.stop()
-                except Exception: pass
-                try: device.close()
-                except Exception: pass
+                self._kill_device_async(device)
             if decoder:
                 try: decoder.close()
                 except Exception: pass
@@ -1266,11 +1275,10 @@ class NonBlockingAudioEngine:
                         self._log_critical("【!!】 nloop: 音频设备停止响应（>3s无数据拉取）")
                         if self._on_device_lost:
                             try: self._on_device_lost()
-                            except: pass
-                        try: device.stop()
-                        except Exception: pass
-                        try: device.close()
-                        except Exception: pass
+                            except Exception: pass
+                        # ★ 异步销毁旧设备（stop可能阻塞）
+                        if device:
+                            self._kill_device_async(device)
                         device = None
                         # ★ 渐进退避重试
                         backoff = 0.5
@@ -1303,10 +1311,7 @@ class NonBlockingAudioEngine:
                                     break
                                 else:
                                     self._log_critical(f"【??】 nloop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
-                                    try: device.stop()
-                                    except Exception: pass
-                                    try: device.close()
-                                    except Exception: pass
+                                    self._kill_device_async(device)
                                     device = None
                             except Exception as e:
                                 if retry_n <= 2:
@@ -1340,14 +1345,19 @@ class NonBlockingAudioEngine:
                     time.sleep(0.05)
                     # ★ 检测设备是否已死
                     if token.device_silent_seconds() > 3.0:
-                        self._log(f"【!!】 streaming循环第{i+1}/{loop_times}: 音频设备停止响应")
+                        self._log_critical(f"【!!】 streaming循环第{i+1}/{loop_times}: 音频设备停止响应")
                         device_dead = True
                         break
 
-                try: device.stop()
-                except Exception: pass
-                try: device.close()
-                except Exception: pass
+                # ★ 清理设备：设备死亡时异步销毁（stop可能阻塞），正常结束时同步
+                if device:
+                    if device_dead:
+                        self._kill_device_async(device)
+                    else:
+                        try: device.stop()
+                        except Exception: pass
+                        try: device.close()
+                        except Exception: pass
                 device = None
                 try: decoder.close()
                 except Exception: pass
@@ -1381,10 +1391,7 @@ class NonBlockingAudioEngine:
             self._log(traceback.format_exc())
         finally:
             if device:
-                try: device.stop()
-                except Exception: pass
-                try: device.close()
-                except Exception: pass
+                self._kill_device_async(device)
             if decoder:
                 try: decoder.close()
                 except Exception: pass
@@ -1506,10 +1513,9 @@ class NonBlockingAudioEngine:
                                 self._on_device_lost()
                             except Exception:
                                 pass
-                        try: device.stop()
-                        except Exception: pass
-                        try: device.close()
-                        except Exception: pass
+                        # ★ 异步销毁旧设备（stop可能阻塞）
+                        if device:
+                            self._kill_device_async(device)
                         device = None
                         # ★ 渐进退避重试，直到设备恢复或被停止
                         backoff = 0.5
@@ -1540,10 +1546,7 @@ class NonBlockingAudioEngine:
                                     break
                                 else:
                                     self._log_critical(f"【??】 intro+loop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
-                                    try: device.stop()
-                                    except Exception: pass
-                                    try: device.close()
-                                    except Exception: pass
+                                    self._kill_device_async(device)
                                     device = None
                             except Exception as e:
                                 if retry_n <= 2:
@@ -1584,10 +1587,9 @@ class NonBlockingAudioEngine:
                                 self._on_device_lost()
                             except Exception:
                                 pass
-                        try: device.stop()
-                        except Exception: pass
-                        try: device.close()
-                        except Exception: pass
+                        # ★ 异步销毁旧设备（stop可能阻塞）
+                        if device:
+                            self._kill_device_async(device)
                         device = None
                         # ★ 渐进退避重试
                         backoff = 0.5
@@ -1620,10 +1622,7 @@ class NonBlockingAudioEngine:
                                     break
                                 else:
                                     self._log_critical(f"【??】 intro+nloop: 设备已创建但未拉取数据（silent={silent:.2f}s），继续重试")
-                                    try: device.stop()
-                                    except Exception: pass
-                                    try: device.close()
-                                    except Exception: pass
+                                    self._kill_device_async(device)
                                     device = None
                             except Exception as e:
                                 if retry_n <= 2:
@@ -1633,14 +1632,7 @@ class NonBlockingAudioEngine:
                             return
         finally:
             if device:
-                try:
-                    device.stop()
-                except Exception:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
+                self._kill_device_async(device)
 
     def _play_wrapper_intro(self, intro_path, main_path, loop, loop_times,
                             final_fade_seconds, trim_silence, token, crossfade_ms):
@@ -2085,39 +2077,11 @@ class AudioHub:
 
 
 if __name__ == "__main__":
-    print("AudioHub 启动...")
-
-    hub = AudioHub(
-        asset_folder="assets",
-        music_workers=16,
-        sfx_workers=24,
-        sfx_use_music_engine=False,
-        silent=False
-    )
-
-    sfx_list = [
-        r"D:\sounds\1.wav",
-        r"D:\sounds\2.mp3",
-        r"D:\sounds\q1.wav",
-        r"D:\sounds\z1.mp3",
-    ]
-
-    hub.bind_clipboard_to_random_sfx(sfx_list, debounce_ms=0, prewarm=True)
-    hub.start_clipboard()
-
-    def on_order_paid(order_id):
-        hub.play_sfx(random.choice(sfx_list))
-        print(f"order paid -> sfx played, order_id={order_id}")
-
-    hub.on("order_paid", on_order_paid)
-    hub.trigger("order_paid", 9527)
-
-    print("运行中：剪切板变化会触发音效；Ctrl+C 退出")
+    hub = AudioHub(asset_folder="assets", silent=False)
+    print("AudioHub ready. Ctrl+C to exit.")
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("退出中...")
         hub.close()
-        print("已退出")
 
