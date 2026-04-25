@@ -2276,6 +2276,7 @@ function getPersistentCacheStatsSnapshot() {
 function initUserTracking(context) {
 	_loadPersistentStats(context);
 	_startDurationTimer();
+	_trackInstallAndSession();
 }
 
 function _startDurationTimer() {
@@ -2285,10 +2286,49 @@ function _startDurationTimer() {
 		if (!extensionContext) return;
 		const total = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
 		extensionContext.globalState.update(KEY_TOTAL_SECONDS, total + 60);
+
+		// ★ 同步追踪今日活跃秒数
+		const todayStr = new Date().toISOString().slice(0, 10);
+		const storedDate = extensionContext.globalState.get(KEY_SESSION_DATE, '');
+		if (storedDate === todayStr) {
+			const todaySec = extensionContext.globalState.get(KEY_TODAY_SECONDS, 0) || 0;
+			extensionContext.globalState.update(KEY_TODAY_SECONDS, todaySec + 60);
+		} else {
+			// 跨天了，重置今日计数
+			extensionContext.globalState.update(KEY_SESSION_DATE, todayStr);
+			extensionContext.globalState.update(KEY_SESSION_COUNT, 1);
+			extensionContext.globalState.update(KEY_TODAY_SECONDS, 60);
+		}
+
 		_durationTimer = setTimeout(tick, 60000); // Schedule the next run after finishing
 	};
 
 	_durationTimer = setTimeout(tick, 60000);
+}
+
+/**
+ * 记录首次安装时间 + 每日会话计数
+ */
+function _trackInstallAndSession() {
+	if (!extensionContext) return;
+	const gs = extensionContext.globalState;
+	try {
+		// 首次安装时间戳（Unix 秒）
+		if (!gs.get(KEY_FIRST_INSTALL)) {
+			gs.update(KEY_FIRST_INSTALL, Math.floor(Date.now() / 1000));
+		}
+		// 今日会话计数
+		const todayStr = new Date().toISOString().slice(0, 10);
+		const storedDate = gs.get(KEY_SESSION_DATE, '');
+		if (storedDate === todayStr) {
+			const cnt = gs.get(KEY_SESSION_COUNT, 0) || 0;
+			gs.update(KEY_SESSION_COUNT, cnt + 1);
+		} else {
+			gs.update(KEY_SESSION_DATE, todayStr);
+			gs.update(KEY_SESSION_COUNT, 1);
+			gs.update(KEY_TODAY_SECONDS, 0);
+		}
+	} catch { }
 }
 
 function finishUserTracking() {
@@ -2313,6 +2353,10 @@ function finishUserTracking() {
 // ★ WqReporter: 统计上报模块 (device_id + total_seconds + doer_id)
 // ============================================================================
 const KEY_DEVICE_ID = 'qqq_device_id';
+const KEY_FIRST_INSTALL = 'qqq_first_install_ts';
+const KEY_SESSION_DATE = 'qqq_today_date';
+const KEY_SESSION_COUNT = 'qqq_today_open_count';
+const KEY_TODAY_SECONDS = 'qqq_today_active_seconds';
 const WQ_API_BASE = 'https://gh555.com/api';
 const WQ_GOOD_SLG = 'qqq';
 
@@ -2431,6 +2475,17 @@ function _clampInt(val, min, max) {
 function _sanitizeStr(val, maxLen) {
 	if (!val || typeof val !== 'string') return '';
 	return val.replace(/[\x00-\x1F]/g, '').substring(0, maxLen);
+}
+
+function _getThemeKind() {
+	try {
+		const kind = vscode.window.activeColorTheme?.kind;
+		if (kind === 1) return 'light';
+		if (kind === 2) return 'dark';
+		if (kind === 3) return 'hc-dark';
+		if (kind === 4) return 'hc-light';
+	} catch { }
+	return 'unknown';
 }
 
 let _wqReporter = null;
@@ -2589,7 +2644,31 @@ class WqReporter {
 				client_ver: getClientVersion(),
 				pkg_name: _sanitizeStr(pkg.name, 100),
 				pkg_display_name: _sanitizeStr(pkg.displayName, 100),
-				pkg_publisher: _sanitizeStr(pkg.publisher, 50)
+				pkg_publisher: _sanitizeStr(pkg.publisher, 50),
+
+				// ★ OS 信息
+				os_platform: process.platform,               // 'win32' | 'darwin' | 'linux'
+				os_arch: os.arch(),                           // 'x64' | 'arm64' | 'arm'
+				os_ver: _sanitizeStr(os.release(), 50),       // '10.0.19045'
+
+				// ★ 语言 & 时区
+				locale: _sanitizeStr(vscode.env.language, 20),        // 'zh-cn' | 'en'
+				tz_offset: -(new Date().getTimezoneOffset()),          // 分钟，中国=+480
+				tz_name: _sanitizeStr((() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ''; } })(), 50),
+
+				// ★ IDE 详细
+				ide_ver: _sanitizeStr(vscode.version, 30),            // '1.95.3'
+				ui_theme: _getThemeKind(),                             // 'dark' | 'light' | 'hc-dark' | 'hc-light'
+				ext_count: _clampInt(vscode.extensions.all.length, 0, 9999),
+
+				// ★ 硬件
+				cpu_cores: _clampInt(os.cpus().length, 0, 512),
+				mem_mb: _clampInt(Math.round(os.totalmem() / (1024 * 1024)), 0, 10000000),
+
+				// ★ 使用习惯
+				first_install: _clampInt(extensionContext.globalState.get(KEY_FIRST_INSTALL, 0) || 0, 0, nowSec),
+				daily_active_h: +(((extensionContext.globalState.get(KEY_TODAY_SECONDS, 0) || 0) / 3600).toFixed(1)),
+				open_today: _clampInt(extensionContext.globalState.get(KEY_SESSION_COUNT, 0) || 0, 0, 9999)
 			};
 			if (userId) body.doer_id = userId;
 

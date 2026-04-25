@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
 - **Roam left qq area wheel-expand broken after navigation**: Previously, scrolling to expand from 20 to 60 items would stop working entirely after switching directories. The root cause was that every directory switch replaced the sidebar DOM, destroying the scroll event listener. Now uses event delegation so wheel-expand works reliably regardless of how many times you navigate.
 
 ### Improved
-- **Audio fully survives screensaver/sleep**: Fixed a critical bug where the recovery mechanism falsely believed the device had resumed (verification always passed regardless of actual device state). Now the engine waits for the device to genuinely pull audio data before confirming recovery. Combined with progressive backoff retry, music and sound effects reliably resume after any duration of sleep or lock.
+- **Audio fully survives screensaver/sleep**: Fixed a long-standing bug where music and sound effects would permanently stop after the screensaver or lock screen activated. The root cause was that the system audio device cleanup call would hang indefinitely when the device was suspended by Windows, freezing the entire audio thread. Now uses non-blocking device cleanup so audio playback continues uninterrupted through any duration of sleep or lock.
 - **Linux ARM64 platform now supported**: CI pipeline added `aarch64-unknown-linux-gnu` build target — Linux users on ARM64 hardware can now run the native engine.
 
 ---
