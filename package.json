@@ -3,11 +3,8 @@
 
 
 
-
-  "name": "Browser",
-  "displayName": "Browser",
-
-
+  "name": "Paste-everything",
+  "displayName": "Paste everything",
 
 
 
@@ -438,7 +435,8 @@
     "ui"
   ],
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
   "keywords": [
     "Paste Image",
