@@ -47,17 +47,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-
+![](https://gh555.com/px?g=qqq&s=readme)
 
  那是我的梦境。
 
@@ -254,34 +244,5 @@ Virus detection or submission: https://www.avira.com/en/analysis/submit
 
 
   the whisper is: I miss you 的梦0.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
