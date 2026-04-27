@@ -7,8 +7,10 @@
 
 
 
-  "name": "notebook",
-  "displayName": "Notebook",
+  "name": "Browser",
+  "displayName": "Browser",
+
+
 
   "publisher": "gh555",
 
