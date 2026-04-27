@@ -1181,6 +1181,8 @@ async function savorMomentsCommand() {
 				if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
 					activeSidebarProvider.syncPythonPlayState(displayName, displayCount, true);
 				}
+				// ★ 偿还 ping：通知服务器用户正在偿还给自己（5min 防抖）
+				global.triggerPlayingPing();
 				return;
 			}
 			// Python playback failed

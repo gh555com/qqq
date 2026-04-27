@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const global = require('./global');
 const { q } = require('./i18n');
@@ -421,14 +422,42 @@ class ClipboardHistoryManager {
 
     _initStorage() {
         try {
-            const root = this.context.globalStorageUri?.fsPath;
-            if (!root) return;
-            this._storageDir = path.join(root, CONSTANTS.STORAGE_DIR);
+            // ★ Primary storage: user home directory (~/.qqq/clipboard-history/)
+            // Survives IDE uninstall/reinstall, shared across all IDEs (VS Code, Cursor, Windsurf, etc.)
+            const homeDir = os.homedir();
+            this._storageDir = path.join(homeDir, '.qqq', CONSTANTS.STORAGE_DIR);
             if (!fs.existsSync(this._storageDir)) fs.mkdirSync(this._storageDir, { recursive: true });
             this._fileBinGz = path.join(this._storageDir, CONSTANTS.FILE_BIN_GZ);
 
-            // ★ Ultimate self-heal warning: if history.json.gz (legacy) is found, migrate or clean it (optional; keep pure here for now)
+            // ★ Auto-migration: if user home has no data but old globalStorageUri does, migrate it
+            this._migrateFromGlobalStorage();
         } catch { }
+    }
+
+    /**
+     * ★ One-time migration: copy history.bin.gz from old globalStorageUri to new user home location.
+     * Only runs when:
+     *   1. New location file does NOT exist (fresh install or first upgrade)
+     *   2. Old globalStorageUri location DOES have a file
+     * After successful copy, the old file is kept as a safety net (not deleted).
+     */
+    _migrateFromGlobalStorage() {
+        try {
+            // If new location already has data, no migration needed
+            if (this._fileBinGz && fs.existsSync(this._fileBinGz)) return;
+
+            const legacyRoot = this.context.globalStorageUri?.fsPath;
+            if (!legacyRoot) return;
+
+            const legacyFile = path.join(legacyRoot, CONSTANTS.STORAGE_DIR, CONSTANTS.FILE_BIN_GZ);
+            if (!fs.existsSync(legacyFile)) return;
+
+            // Copy old data to new location
+            fs.copyFileSync(legacyFile, this._fileBinGz);
+            console.log('[Q4] ★ Migrated clipboard history from globalStorageUri to user home directory');
+        } catch (e) {
+            console.error('[Q4] Migration from globalStorageUri failed (non-fatal):', e.message);
+        }
     }
 
     async _loadHistory() {
@@ -1848,6 +1877,8 @@ class ClipboardHistorySidebarProvider {
                 if (isRadio) {
                     this._postMessage({ command: 'playAudio', fileName: 'Radio', count: 0, isRadio: true });
                 }
+                // ★ 偿还 ping：通知服务器用户正在偿还给自己（5min 防抖）
+                this._global.triggerPlayingPing();
                 return;
             }
 

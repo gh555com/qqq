@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [16.2.0] - 2026-04-22
+
+### Added
+- **Network Radio**: When radio is live, pressing play automatically tunes in to the live stream — no extra steps needed
+- **Clipboard history now survives IDE reinstall**: History is stored in your home directory (`~/.qqq/`) instead of IDE internal storage, so it persists across uninstalls, reinstalls, and even switching between different IDEs
+
+---
+
 ## [16.1.7] - 2026-04-23
 
 ### Fixed
