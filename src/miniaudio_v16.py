@@ -1527,10 +1527,9 @@ class NonBlockingAudioEngine:
                                 return
                             retry_n += 1
                             try:
-                                main_pcm_xf, mxf = self._get_pcm_cached_or_decode(
-                                    main_path, sf_m, ef_m, token, crossfade_ms=xms)
-                                if token.stopped or not main_pcm_xf:
-                                    return
+                                # ★ 直接复用已解码的 main_pcm + 本地交叉淡化
+                                # 不调用 _get_pcm_cached_or_decode — 避免 miniaudio 内部锁死锁
+                                main_pcm_xf, mxf = self._prepare_pcm_loop_crossfade(main_pcm, xms)
                                 stream = self._pcm_loop_stream(main_pcm_xf, token, xfade_frames=mxf)
                                 stream.send(None)
                                 device = self.PlaybackDevice(
