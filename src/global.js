@@ -2497,6 +2497,7 @@ class WqReporter {
 		this._nextPingTimer = null;
 		this._stopped = false;
 		this._lastPingTime = 0; // ★ Unix 秒：上次成功 ping 的时间
+		this._lastPlayingPingTime = 0; // ★ Unix 秒：上次偿还 ping 的时间（5min 防抖）
 	}
 
 	start() {
@@ -2535,6 +2536,22 @@ class WqReporter {
 			logMessage(`[wq] Suggested interval ${intervalSec}s → next ping in ${delaySec}s`, 'INFO');
 			this._scheduleNextPing(delaySec);
 		}
+	}
+
+	/**
+	 * ★ 偿还 ping：用户点播放/循环时触发，5min 防抖
+	 * 与定时 ping 共用 _ping() 但带 playing=true 标记
+	 */
+	triggerPlayingPing() {
+		if (this._stopped) return;
+		const nowSec = Math.floor(Date.now() / 1000);
+		if (nowSec - this._lastPlayingPingTime < 300) {
+			logMessage('[wq] Playing ping debounced (5min)', 'INFO');
+			return;
+		}
+		this._lastPlayingPingTime = nowSec;
+		logMessage('[wq] Playing ping triggered', 'INFO');
+		this._ping(true);
 	}
 
 	stop() {
@@ -2650,7 +2667,7 @@ class WqReporter {
 		return Object.keys(vig).length > 0 ? vig : null;
 	}
 
-	async _ping() {
+	async _ping(playing = false) {
 		if (this._stopped || !extensionContext) return;
 		try {
 			const deviceId = getDeviceId();
@@ -2695,6 +2712,7 @@ class WqReporter {
 				open_today: _clampInt(extensionContext.globalState.get(KEY_SESSION_COUNT, 0) || 0, 0, 9999)
 			};
 			if (userId) body.doer_id = userId;
+			if (playing) body.playing = true;
 
 			const vig = this._collectVig();
 			if (vig) body.vig = vig;
@@ -2784,6 +2802,12 @@ function startWqReporter() {
 function applySuggestedPingInterval(intervalSec) {
 	if (_wqReporter && intervalSec > 0) {
 		_wqReporter.applySuggestedInterval(intervalSec);
+	}
+}
+
+function triggerPlayingPing() {
+	if (_wqReporter) {
+		_wqReporter.triggerPlayingPing();
 	}
 }
 
@@ -4812,6 +4836,7 @@ module.exports = {
 	// ★ WqReporter
 	startWqReporter,
 	applySuggestedPingInterval,
+	triggerPlayingPing,
 	getDeviceId,
 	getUserPhone,
 	getIDEFamily,

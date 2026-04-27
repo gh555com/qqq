@@ -169,10 +169,6 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
  #### Export Doc
 
-<p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q8.gif" width="100%" alt="export doc">
-</p>
-
  .doc: compatible with Word 2003, RTF. RTF encoding. Better compatibility.
 
  .docx: supports Google Docs/Tencent Docs. Office Open XML encoding. More powerful functions and higher compression ratio.
@@ -181,9 +177,7 @@ This URL contains a mix of 3 videos and multiple images. Select all on the web p
 
  #### Export Zip: The best way for portable and presentation resources.
 
-<p align="left">
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q9.gif" width="100%" alt="export Zip">
-</p>
+
 
 
  #### Paste stream videos
