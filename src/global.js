@@ -2284,23 +2284,35 @@ function _startDurationTimer() {
 
 	const tick = () => {
 		if (!extensionContext) return;
-		const total = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
-		extensionContext.globalState.update(KEY_TOTAL_SECONDS, total + 60);
 
-		// ★ 同步追踪今日活跃秒数
-		const todayStr = new Date().toISOString().slice(0, 10);
-		const storedDate = extensionContext.globalState.get(KEY_SESSION_DATE, '');
-		if (storedDate === todayStr) {
-			const todaySec = extensionContext.globalState.get(KEY_TODAY_SECONDS, 0) || 0;
-			extensionContext.globalState.update(KEY_TODAY_SECONDS, todaySec + 60);
-		} else {
-			// 跨天了，重置今日计数
-			extensionContext.globalState.update(KEY_SESSION_DATE, todayStr);
-			extensionContext.globalState.update(KEY_SESSION_COUNT, 1);
-			extensionContext.globalState.update(KEY_TODAY_SECONDS, 60);
+		// ★ 多窗口去重：用 globalState 共享时间戳，只有距上次 tick ≥30s 的窗口才写入
+		const nowSec = Math.floor(Date.now() / 1000);
+		const lastTickTs = extensionContext.globalState.get('qqq_last_tick_ts', 0) || 0;
+		const elapsed = nowSec - lastTickTs;
+
+		if (elapsed >= 30) {
+			// ★ 用真实流逝时间（上限 120s 防跳变），而非固定 +60
+			const increment = Math.min(Math.max(elapsed, 60), 120);
+			extensionContext.globalState.update('qqq_last_tick_ts', nowSec);
+
+			const total = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
+			extensionContext.globalState.update(KEY_TOTAL_SECONDS, total + increment);
+
+			// ★ 同步追踪今日活跃秒数
+			const todayStr = new Date().toISOString().slice(0, 10);
+			const storedDate = extensionContext.globalState.get(KEY_SESSION_DATE, '');
+			if (storedDate === todayStr) {
+				const todaySec = extensionContext.globalState.get(KEY_TODAY_SECONDS, 0) || 0;
+				extensionContext.globalState.update(KEY_TODAY_SECONDS, todaySec + increment);
+			} else {
+				// 跨天了，重置今日计数
+				extensionContext.globalState.update(KEY_SESSION_DATE, todayStr);
+				extensionContext.globalState.update(KEY_SESSION_COUNT, 1);
+				extensionContext.globalState.update(KEY_TODAY_SECONDS, increment);
+			}
 		}
 
-		_durationTimer = setTimeout(tick, 60000); // Schedule the next run after finishing
+		_durationTimer = setTimeout(tick, 60000);
 	};
 
 	_durationTimer = setTimeout(tick, 60000);
@@ -2669,6 +2681,20 @@ class WqReporter {
 
 	async _ping(playing = false) {
 		if (this._stopped || !extensionContext) return;
+
+		// ★ 多窗口去重：检查 globalState 共享时间戳，60s 内只允许一个窗口 ping
+		if (!playing) {
+			const nowSec = Math.floor(Date.now() / 1000);
+			const lastGlobalPing = extensionContext.globalState.get('qqq_last_ping_ts', 0) || 0;
+			if (nowSec - lastGlobalPing < 60) {
+				logMessage(`[wq] Ping skipped (another window pinged ${nowSec - lastGlobalPing}s ago)`, 'INFO');
+				// 仍然按服务端建议调度下次 ping，避免完全放弃
+				this._scheduleNextPing(300);
+				return;
+			}
+			extensionContext.globalState.update('qqq_last_ping_ts', nowSec);
+		}
+
 		try {
 			const deviceId = getDeviceId();
 			const userId = getUserPhone();
