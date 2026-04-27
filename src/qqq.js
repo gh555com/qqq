@@ -1153,27 +1153,33 @@ async function savorMomentsCommand() {
 		try {
 			const res = await pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 			if (res && (res.status === 'ok' || res.status === 'playing')) {
+				const isRadio = res.source === 'radio';
+				const displayName = isRadio ? 'Radio' : info.fileName;
+				const displayCount = isRadio ? 0 : loopCount;
+
 				// ★ Write globalState for multi-window sync (always, even if sidebar not open)
 				context.globalState.update('qqq_savoring_state', {
 					playing: true,
 					windowId: process.pid.toString(),
-					fileName: info.fileName,
-					loopCount: loopCount,
-					startTime: Date.now()
+					fileName: displayName,
+					loopCount: displayCount,
+					startTime: Date.now(),
+					isRadio: isRadio
 				});
 
 				// ★ Record Python playback state whether or not q4 is open
 				if (activeSidebarProvider) {
 					activeSidebarProvider._pythonPlayState = {
 						playing: true,
-						fileName: info.fileName,
-						loopCount: loopCount,
-						startTime: Date.now()
+						fileName: displayName,
+						loopCount: displayCount,
+						startTime: Date.now(),
+						isRadio: isRadio
 					};
 				}
 				// ★ If q4 webview is already open, sync UI state (do not open proactively)
 				if (activeSidebarProvider && activeSidebarProvider.isWebviewReady) {
-					activeSidebarProvider.syncPythonPlayState(info.fileName, loopCount, true);
+					activeSidebarProvider.syncPythonPlayState(displayName, displayCount, true);
 				}
 				return;
 			}

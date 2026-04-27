@@ -1671,6 +1671,288 @@ class NonBlockingAudioEngine:
             crossfade_ms=LOOP_CROSSFADE_MS_DEFAULT,
         )
 
+    # ================================================================
+    #  HLS Radio Playback
+    # ================================================================
+
+    def play_radio_hls(self, m3u8_url: str):
+        """★ 接入 HLS 网络电台流并播放（非阻塞）"""
+        token = PlaybackToken()
+        self._register_token(token)
+        self.executor.submit(self._radio_hls_wrapper, m3u8_url, token)
+        return token
+
+    def _radio_hls_wrapper(self, m3u8_url, token: PlaybackToken):
+        try:
+            self._radio_hls_worker(m3u8_url, token)
+        finally:
+            self._unregister_token(token)
+
+    def _radio_hls_worker(self, m3u8_url, token: PlaybackToken):
+        """HLS 电台播放：循环拉取 playlist → 下载新段 → 解码 → 无缝播放"""
+        import urllib.request
+        import tempfile
+
+        device = None
+        device_dead = False
+        base_url = m3u8_url.rsplit('/', 1)[0] + '/'
+        last_seq = -1
+        retry_delay = 1.0
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 10
+
+        try:
+            while not token.stopped:
+                # --- 1. 拉取 m3u8 ---
+                segments = self._hls_fetch_playlist(m3u8_url, base_url)
+                if segments is None:
+                    consecutive_errors += 1
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        self._log_critical("【!!】 Radio: too many playlist errors, stopping")
+                        break
+                    time.sleep(retry_delay)
+                    continue
+                consecutive_errors = 0
+
+                if not segments:
+                    # 空 playlist（可能还没有新段），等待后重试
+                    time.sleep(1.0)
+                    continue
+
+                # --- 2. 序号跳变保护（服务端重启后序号会跳到远大于 last_seq 的值）---
+                min_seq = segments[0][0]
+                if last_seq != -1 and min_seq > last_seq + 100:
+                    self._log_critical(f"【!!】 Radio: seq jump detected {last_seq} → {min_seq}, resetting")
+                    last_seq = min_seq - 1
+
+                # --- 3. 播放新段 ---
+                played_any = False
+                for seq, seg_url, duration in segments:
+                    if token.stopped:
+                        break
+                    if seq <= last_seq:
+                        continue
+                    last_seq = seq
+
+                    # 下载段
+                    seg_pcm = self._hls_download_and_decode(seg_url)
+                    if seg_pcm is None:
+                        continue
+
+                    played_any = True
+
+                    # 创建/重建设备
+                    if device is None or device_dead:
+                        if device and device_dead:
+                            self._kill_device_async(device)
+                        device_dead = False
+                        try:
+                            gen = self._pcm_once_stream(seg_pcm, token)
+                            device = self.PlaybackDevice(
+                                output_format=self.REQUESTED_FORMAT,
+                                nchannels=self.REQUESTED_CHANNELS,
+                                sample_rate=self.REQUESTED_RATE,
+                            )
+                            device.start(gen)
+                        except Exception as e:
+                            self._log_critical(f"【!!】 Radio: device create failed: {e}")
+                            device = None
+                            time.sleep(2.0)
+                            continue
+                    else:
+                        # 设备存在，直接喂 PCM 到队列
+                        self._radio_feed_pcm(token, seg_pcm)
+
+                    # 等待段播完（近似 duration）
+                    wait_end = time.monotonic() + max(duration - 0.3, 0.5)
+                    while time.monotonic() < wait_end and not token.stopped:
+                        # 检测设备静默（屏保保护）
+                        if token.device_silent_seconds() > 3.0:
+                            self._log_critical("【!!】 Radio: device silent detected")
+                            if self._on_device_lost:
+                                try: self._on_device_lost()
+                                except Exception: pass
+                            device_dead = True
+                            break
+                        time.sleep(0.1)
+
+                    if device_dead:
+                        # 设备挂了，销毁并尝试在下一段重建
+                        if device:
+                            self._kill_device_async(device)
+                            device = None
+                        time.sleep(1.0)
+
+                if not played_any and not token.stopped:
+                    # 没有新段可播，等待 playlist 更新
+                    time.sleep(1.0)
+
+        finally:
+            if device:
+                if device_dead:
+                    self._kill_device_async(device)
+                else:
+                    try: device.stop()
+                    except Exception: pass
+                    try: device.close()
+                    except Exception: pass
+
+    def _hls_fetch_playlist(self, m3u8_url, base_url):
+        """拉取 m3u8 并解析，返回 [(seq, url, duration), ...] 或 None（错误）"""
+        import urllib.request
+        try:
+            req = urllib.request.Request(m3u8_url, method='GET')
+            req.add_header('User-Agent', 'qqq-radio/1')
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                text = resp.read().decode('utf-8', errors='replace')
+        except Exception as e:
+            self._log_critical(f"【!!】 Radio playlist fetch error: {e}")
+            return None
+
+        # 解析 m3u8
+        lines = text.strip().splitlines()
+        media_seq = 0
+        segments = []
+        duration = 3.0
+        is_end = False
+
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if line.startswith('#EXT-X-MEDIA-SEQUENCE:'):
+                try:
+                    media_seq = int(line.split(':')[1])
+                except (ValueError, IndexError):
+                    pass
+            elif line.startswith('#EXTINF:'):
+                try:
+                    duration = float(line.split(':')[1].rstrip(','))
+                except (ValueError, IndexError):
+                    duration = 3.0
+            elif line.startswith('#EXT-X-ENDLIST'):
+                is_end = True
+            elif line and not line.startswith('#'):
+                # 段 URL
+                seg_url = line if line.startswith('http') else base_url + line
+                seg_seq = media_seq + len(segments)
+                segments.append((seg_seq, seg_url, duration))
+                duration = 3.0  # reset for next
+
+        return segments
+
+    def _hls_download_and_decode(self, seg_url):
+        """下载一个 HLS 段并解码为 PCM array。
+        支持 MP3/FLAC/WAV（miniaudio 原生）+ AAC/fMP4（ffmpeg 兑底）。
+        失败返回 None。
+        """
+        import urllib.request
+        import tempfile
+        import subprocess
+        tmp_path = None
+        try:
+            req = urllib.request.Request(seg_url, method='GET')
+            req.add_header('User-Agent', 'qqq-radio/1')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = resp.read()
+
+            # 根据 URL 后缀决定临时文件后缀
+            ext = '.mp3'
+            lower = seg_url.lower().split('?')[0]
+            if lower.endswith('.m4s') or lower.endswith('.mp4'):
+                ext = '.m4s'
+            elif lower.endswith('.aac'):
+                ext = '.aac'
+            elif lower.endswith('.ts'):
+                ext = '.ts'
+
+            fd, tmp_path = tempfile.mkstemp(suffix=ext)
+            os.write(fd, data)
+            os.close(fd)
+
+            # ★ 先尝试 miniaudio 原生解码（MP3/FLAC/WAV/Vorbis）
+            try:
+                decoded = miniaudio.decode_file(
+                    tmp_path,
+                    output_format=self.REQUESTED_FORMAT,
+                    nchannels=self.REQUESTED_CHANNELS,
+                    sample_rate=self.REQUESTED_RATE,
+                )
+                return decoded.samples
+            except Exception:
+                pass
+
+            # ★ miniaudio 不支持（AAC/fMP4/TS）→ ffmpeg subprocess 兑底
+            wav_path = tmp_path + '.wav'
+            try:
+                subprocess.run(
+                    ['ffmpeg', '-y', '-i', tmp_path,
+                     '-f', 'wav', '-acodec', 'pcm_s16le',
+                     '-ar', str(self.REQUESTED_RATE),
+                     '-ac', str(self.REQUESTED_CHANNELS),
+                     wav_path],
+                    capture_output=True, timeout=10
+                )
+                if os.path.exists(wav_path):
+                    decoded = miniaudio.decode_file(
+                        wav_path,
+                        output_format=self.REQUESTED_FORMAT,
+                        nchannels=self.REQUESTED_CHANNELS,
+                        sample_rate=self.REQUESTED_RATE,
+                    )
+                    return decoded.samples
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass  # ffmpeg 不可用或超时
+            finally:
+                try: os.unlink(wav_path)
+                except Exception: pass
+
+            self._log_critical(f"【!!】 Radio: unable to decode segment: {seg_url}")
+            return None
+        except Exception as e:
+            self._log_critical(f"【!!】 Radio segment download error: {e}")
+            return None
+        finally:
+            if tmp_path:
+                try: os.unlink(tmp_path)
+                except Exception: pass
+
+    def _pcm_once_stream(self, pcm_data, token: PlaybackToken):
+        """生成器：播放一段 PCM 数据，支持外部喂入新段"""
+        # 使用 queue 实现段间无缝衔接
+        if not hasattr(token, '_radio_q'):
+            token._radio_q = queue.Queue(maxsize=8)
+        required = yield b''  # prime
+        mv = memoryview(pcm_data).cast('B')
+        offset = 0
+        while not token.stopped:
+            if offset < len(mv):
+                end = min(offset + required, len(mv))
+                chunk = bytes(mv[offset:end])
+                offset += len(chunk)
+                token.touch()
+                required = yield chunk
+            else:
+                # 当前段播完，尝试从队列取下一段
+                try:
+                    next_pcm = token._radio_q.get(timeout=0.5)
+                    if next_pcm is None:
+                        break
+                    mv = memoryview(next_pcm).cast('B')
+                    offset = 0
+                except queue.Empty:
+                    if token.stopped:
+                        break
+                    # 没有新段，输出静音保持设备活跃
+                    token.touch()
+                    required = yield b'\x00' * required
+
+    def _radio_feed_pcm(self, token: PlaybackToken, pcm_data):
+        """喂入新段 PCM 到播放队列"""
+        if hasattr(token, '_radio_q'):
+            try:
+                token._radio_q.put(pcm_data, timeout=5.0)
+            except queue.Full:
+                pass
+
     def stop_all(self):
         with self._tokens_lock:
             for t in list(self._active_tokens):

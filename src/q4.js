@@ -1238,6 +1238,7 @@ class ClipboardHistorySidebarProvider {
 
         // --- Online Count ---
         this._onlineCount = null;
+        this._activePlayingCount = null;
         this._onlineCountUpdateInterval = null;
         this._updateOnlineCount(); // Initial fetch
         this._onlineCountUpdateInterval = setInterval(() => this._updateOnlineCount(), 300000);
@@ -1530,7 +1531,11 @@ class ClipboardHistorySidebarProvider {
 
             const ver = this._context.extension.packageJSON.version;
             if (typeof this._onlineCount === 'number') {
-                this._view.title = `v${ver}; ${this._onlineCount}`;
+                let title = `v${ver}; ${this._onlineCount}`;
+                if (typeof this._activePlayingCount === 'number') {
+                    title += `: ${this._activePlayingCount}`;
+                }
+                this._view.title = title;
             } else {
                 this._view.title = `v${ver}`;
             }
@@ -1816,21 +1821,33 @@ class ClipboardHistorySidebarProvider {
             const res = await this._global.pythonBridge.call('play_audio', { path: info.path, count: loopCount });
 
             if (res && (res.status === 'playing' || res.status === 'ok')) {
+                // ★ Radio source detection
+                const isRadio = res.source === 'radio';
+                const displayName = isRadio ? 'Radio' : info.fileName;
+                const displayCount = isRadio ? 0 : loopCount;
+
                 // ★ Update Python playback state
                 this._pythonPlayState = {
                     playing: true,
-                    fileName: info.fileName,
-                    loopCount: loopCount,
-                    startTime: Date.now()
+                    fileName: displayName,
+                    loopCount: displayCount,
+                    startTime: Date.now(),
+                    isRadio: isRadio
                 };
                 // ★ Write shared state for multi-window sync
                 this._writeSavoringState({
                     playing: true,
                     windowId: _windowId,
-                    fileName: info.fileName,
-                    loopCount: loopCount,
-                    startTime: Date.now()
+                    fileName: displayName,
+                    loopCount: displayCount,
+                    startTime: Date.now(),
+                    isRadio: isRadio
                 });
+
+                // ★ If radio, update UI with radio indicator
+                if (isRadio) {
+                    this._postMessage({ command: 'playAudio', fileName: 'Radio', count: 0, isRadio: true });
+                }
                 return;
             }
 
@@ -2977,8 +2994,18 @@ class ClipboardHistorySidebarProvider {
     async _updateOnlineCount() {
         const stats = await this._global.getQqqStats();
         this._onlineCount = stats && typeof stats.active_12h === 'number' ? stats.active_12h : null;
+        this._activePlayingCount = stats && typeof stats.active_playing === 'number' ? stats.active_playing : null;
         // ★ 同步服务器下发的动态跳转 URL
         if (stats) this._global.setDynamicUrls(stats.url_a, stats.url_z);
+        // ★ 将服务器建议的 ping 间隔传递给 WqReporter
+        if (stats && stats.ping_interval_s) this._global.applySuggestedPingInterval(stats.ping_interval_s);
+        // ★ 电台状态搭便车：下发给 broker 缓存，播放时零延迟判断
+        if (stats && this._global.pythonBridge) {
+            this._global.pythonBridge.call('set_radio_status', {
+                live: !!stats.radio_live,
+                m3u8: stats.radio_m3u8 || ''
+            }).catch(() => {});
+        }
         this.updateContent('online_count_update');
     }
 
