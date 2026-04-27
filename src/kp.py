@@ -220,6 +220,57 @@ def _reset_audio_engine():
         _AUDIO_ENGINE_ERROR = None
     _log("[Audio] Engine reset complete, will re-initialize on next play")
 
+# ---- Radio (网络电台) ----
+# 状态由 JS 侧 stats 轮询搭便车下发，零额外 HTTP 请求
+_RADIO_LIVE = False
+_RADIO_M3U8 = ""
+
+def _set_radio_status(live: bool, m3u8: str):
+    """由 JS 侧 set_radio_status action 调用，缓存电台状态"""
+    global _RADIO_LIVE, _RADIO_M3U8
+    _RADIO_LIVE = bool(live)
+    _RADIO_M3U8 = str(m3u8) if m3u8 else ""
+    _log(f"[Radio] status updated: live={_RADIO_LIVE}, m3u8={_RADIO_M3U8}")
+
+def _play_radio(m3u8_url):
+    """接入电台 HLS 流播放，返回状态"""
+    global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING
+    global _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT, _AUDIO_START_TIME
+
+    _log(f"[Audio] Radio is live, switching to radio stream: {m3u8_url}")
+
+    engine, err = _init_audio_engine()
+    if err:
+        _log(f"[Audio] Radio: engine init failed: {err}")
+        return {"status": "error", "error": err}
+
+    try:
+        if _AUDIO_CURRENT_TOKEN:
+            try:
+                _AUDIO_CURRENT_TOKEN.stop()
+            except Exception:
+                pass
+            _AUDIO_CURRENT_TOKEN = None
+
+        _AUDIO_CURRENT_TOKEN = engine.play_radio_hls(m3u8_url)
+        _AUDIO_IS_LOOPING = True
+        _AUDIO_CURRENT_FILE = "Radio"
+        _AUDIO_LOOP_COUNT = 0
+        _AUDIO_START_TIME = time.time()
+        _emit_event({
+            "event": "audio_state_changed",
+            "playing": True,
+            "looping": True,
+            "fileName": "Radio",
+            "loopCount": 0,
+            "startTime": _AUDIO_START_TIME,
+            "source": "radio"
+        })
+        return {"status": "ok", "source": "radio"}
+    except Exception as e:
+        _log(f"[Audio] Radio play failed: {e}")
+        return {"status": "error", "error": str(e)}
+
 def _play_audio(file_path, count=1):
     """Play audio, return status. ★ 包含引擎重置重试机制"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_MONITOR_THREAD, _AUDIO_IS_LOOPING
@@ -230,6 +281,10 @@ def _play_audio(file_path, count=1):
 
     # ★ 埋点：记录每次播放请求，方便屏保后对比时间线
     _log(f"[Audio] play_audio: file={os.path.basename(file_path)}, count={count}")
+
+    # ★ 电台接入点：仅在无限循环模式下、读内存缓存状态（0ms）
+    if count in (0, -1) and _RADIO_LIVE and _RADIO_M3U8:
+        return _play_radio(_RADIO_M3U8)
 
     # ★ 尝试最多2次（第一次正常，第二次重置引擎后重试）
     for attempt in range(2):
@@ -2140,6 +2195,11 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
 
     if action == "get_audio_state":
         out.update(_get_audio_state())
+        return out
+
+    if action == "set_radio_status":
+        _set_radio_status(cmd.get("live", False), cmd.get("m3u8", ""))
+        out["status"] = "ok"
         return out
 
     if action == "start_clipboard_watcher":

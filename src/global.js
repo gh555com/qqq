@@ -2496,6 +2496,7 @@ class WqReporter {
 		this._initialTimer = null;
 		this._nextPingTimer = null;
 		this._stopped = false;
+		this._lastPingTime = 0; // ★ Unix 秒：上次成功 ping 的时间
 	}
 
 	start() {
@@ -2511,6 +2512,29 @@ class WqReporter {
 		const delayMs = Math.max(60, delaySec) * 1000; // 至少 60 秒
 		this._nextPingTimer = setTimeout(() => this._ping(), delayMs);
 		logMessage(`[wq] Next ping scheduled in ${Math.round(delayMs/1000)}s`, 'INFO');
+	}
+
+	/**
+	 * ★ 由 stats 拉取调用：根据服务器建议的间隔重新调度 ping
+	 * 核心公式: next_ping = _lastPingTime + intervalSec
+	 * _lastPingTime 是固定的（上次成功 ping 时间），不会被 stats 重置 → 永不会无限推迟
+	 */
+	applySuggestedInterval(intervalSec) {
+		if (this._stopped || !intervalSec || intervalSec <= 0) return;
+		const nowSec = Math.floor(Date.now() / 1000);
+		// 首次启动还没 ping 过 → 不干预，让 start() 的初始 timer 生效
+		if (this._lastPingTime <= 0) return;
+		const nextPingAt = this._lastPingTime + intervalSec;
+		const delaySec = nextPingAt - nowSec;
+		if (delaySec <= 0) {
+			// 已过期 → 立即 ping
+			logMessage(`[wq] Suggested interval ${intervalSec}s → overdue by ${-delaySec}s, pinging now`, 'INFO');
+			this._scheduleNextPing(1); // 1 秒后触发，避免同步调用
+		} else {
+			// 未到时间 → 重新调度
+			logMessage(`[wq] Suggested interval ${intervalSec}s → next ping in ${delaySec}s`, 'INFO');
+			this._scheduleNextPing(delaySec);
+		}
 	}
 
 	stop() {
@@ -2714,6 +2738,7 @@ class WqReporter {
 			});
 
 				if (data.ok) {
+				this._lastPingTime = Math.floor(Date.now() / 1000); // ★ 记录本次成功 ping 时间
 				this.retryDelay = 60000; // 重置重试延迟
 				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s, accepted=${data.accepted_total_seconds}, server_now=${data.server_now}`, 'INFO');
 				// 服务端纠正
@@ -2751,6 +2776,15 @@ function startWqReporter() {
 	if (_wqReporter) return;
 	_wqReporter = new WqReporter();
 	_wqReporter.start();
+}
+
+/**
+ * ★ 由 stats 拉取调用：将服务器建议的 ping 间隔传递给 WqReporter
+ */
+function applySuggestedPingInterval(intervalSec) {
+	if (_wqReporter && intervalSec > 0) {
+		_wqReporter.applySuggestedInterval(intervalSec);
+	}
 }
 
 // ★ 安全解析 JSON（统一处理非 JSON 响应）
@@ -4711,12 +4745,16 @@ async function getQqqStats() {
                 total_companion_seconds: typeof data.total_companion_seconds === 'number' ? data.total_companion_seconds : null,
                 updated_at: data.updated_at || null,
                 url_a: typeof data.url_a === 'string' && data.url_a ? data.url_a : null,
-                url_z: typeof data.url_z === 'string' && data.url_z ? data.url_z : null
+                url_z: typeof data.url_z === 'string' && data.url_z ? data.url_z : null,
+                ping_interval_s: typeof data.ping_interval_s === 'number' && data.ping_interval_s > 0 ? data.ping_interval_s : null,
+                radio_live: !!data.radio_live,
+                radio_m3u8: typeof data.radio_m3u8 === 'string' && data.radio_m3u8 ? data.radio_m3u8 : null,
+                active_playing: typeof data.active_playing === 'number' ? data.active_playing : null
             };
         }
         // 兼容旧逻辑：如果只有 active_12h 也接受
         if (data && typeof data.active_12h === 'number') {
-            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null };
+            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null, ping_interval_s: null, radio_live: false, radio_m3u8: null, active_playing: null };
         }
         return null;
     } catch (e) {
@@ -4773,6 +4811,7 @@ module.exports = {
 
 	// ★ WqReporter
 	startWqReporter,
+	applySuggestedPingInterval,
 	getDeviceId,
 	getUserPhone,
 	getIDEFamily,
