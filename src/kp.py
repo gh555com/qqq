@@ -224,20 +224,24 @@ def _reset_audio_engine():
 # 状态由 JS 侧 stats 轮询搭便车下发，零额外 HTTP 请求
 _RADIO_LIVE = False
 _RADIO_M3U8 = ""
+_RADIO_STREAM = ""  # 直推流 URL（优先使用）
 
-def _set_radio_status(live: bool, m3u8: str):
+def _set_radio_status(live: bool, m3u8: str, stream: str = ""):
     """由 JS 侧 set_radio_status action 调用，缓存电台状态"""
-    global _RADIO_LIVE, _RADIO_M3U8
+    global _RADIO_LIVE, _RADIO_M3U8, _RADIO_STREAM
     _RADIO_LIVE = bool(live)
     _RADIO_M3U8 = str(m3u8) if m3u8 else ""
-    _log(f"[Radio] status updated: live={_RADIO_LIVE}, m3u8={_RADIO_M3U8}")
+    _RADIO_STREAM = str(stream) if stream else ""
+    _log(f"[Radio] status updated: live={_RADIO_LIVE}, stream={_RADIO_STREAM or 'N/A'}, m3u8={_RADIO_M3U8}")
 
-def _play_radio(m3u8_url):
-    """接入电台 HLS 流播放，返回状态"""
+def _play_radio(m3u8_url, timeout_sec=0, stream_url=""):
+    """接入电台流播放。优先用直推流（stream_url），fallback 到 HLS（m3u8_url）"""
     global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING
     global _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT, _AUDIO_START_TIME
 
-    _log(f"[Audio] Radio is live, switching to radio stream: {m3u8_url}")
+    use_stream = bool(stream_url)
+    url_display = stream_url if use_stream else m3u8_url
+    _log(f"[Audio] Radio is live, switching to {'stream' if use_stream else 'HLS'}: {url_display}" + (f" (auto-stop in {timeout_sec}s)" if timeout_sec > 0 else ""))
 
     engine, err = _init_audio_engine()
     if err:
@@ -252,11 +256,23 @@ def _play_radio(m3u8_url):
                 pass
             _AUDIO_CURRENT_TOKEN = None
 
-        _AUDIO_CURRENT_TOKEN = engine.play_radio_hls(m3u8_url)
+        _AUDIO_CURRENT_TOKEN = engine.play_radio_stream(stream_url) if use_stream else engine.play_radio_hls(m3u8_url)
         _AUDIO_IS_LOOPING = True
         _AUDIO_CURRENT_FILE = "Radio"
         _AUDIO_LOOP_COUNT = 0
         _AUDIO_START_TIME = time.time()
+
+        # ★ 普通播放模式：随机时间后自动停止
+        if timeout_sec > 0:
+            _token_ref = _AUDIO_CURRENT_TOKEN
+            def _radio_auto_stop():
+                if _token_ref and not _token_ref.stopped:
+                    _log(f"[Audio] Radio auto-stop after {timeout_sec}s")
+                    _token_ref.stop()
+            t = threading.Timer(timeout_sec, _radio_auto_stop)
+            t.daemon = True
+            t.start()
+
         _emit_event({
             "event": "audio_state_changed",
             "playing": True,
@@ -282,9 +298,16 @@ def _play_audio(file_path, count=1):
     # ★ 埋点：记录每次播放请求，方便屏保后对比时间线
     _log(f"[Audio] play_audio: file={os.path.basename(file_path)}, count={count}")
 
-    # ★ 电台接入点：仅在无限循环模式下、读内存缓存状态（0ms）
-    if count in (0, -1) and _RADIO_LIVE and _RADIO_M3U8:
-        return _play_radio(_RADIO_M3U8)
+    # ★ 电台接入点：读内存缓存状态（0ms）
+    # 循环播放(count=0/-1) → 电台无限播放直到服务器停播
+    # 普通播放(count>0) → 电台随机 5~15 分钟后自动停止
+    if _RADIO_LIVE and (_RADIO_STREAM or _RADIO_M3U8):
+        if count in (0, -1):
+            return _play_radio(_RADIO_M3U8, stream_url=_RADIO_STREAM)
+        else:
+            import random
+            timeout = random.randint(300, 900)  # 5~15 分钟
+            return _play_radio(_RADIO_M3U8, timeout_sec=timeout, stream_url=_RADIO_STREAM)
 
     # ★ 尝试最多2次（第一次正常，第二次重置引擎后重试）
     for attempt in range(2):
@@ -2198,7 +2221,7 @@ def _dispatch_action(cmd, cancel_version: int = None, allow_process_exit: bool =
         return out
 
     if action == "set_radio_status":
-        _set_radio_status(cmd.get("live", False), cmd.get("m3u8", ""))
+        _set_radio_status(cmd.get("live", False), cmd.get("m3u8", ""), cmd.get("stream", ""))
         out["status"] = "ok"
         return out
 

@@ -1268,9 +1268,12 @@ class ClipboardHistorySidebarProvider {
         // --- Online Count ---
         this._onlineCount = null;
         this._activePlayingCount = null;
+        this._radioLive = false;
         this._onlineCountUpdateInterval = null;
         this._updateOnlineCount(); // Initial fetch
         this._onlineCountUpdateInterval = setInterval(() => this._updateOnlineCount(), 300000);
+        // ★ ping 成功时也做电台嗅探
+        this._global.onPingSuccess(() => this._fetchRadioStatus().catch(() => { }));
         // --- End Online Count ---
 
         // Load full data after 1s (clipboard history + Python state sync)
@@ -1547,6 +1550,7 @@ class ClipboardHistorySidebarProvider {
                 history: history,
                 triggerStorm: (reason === 'add' || reason === 'pin'),
                 savorStats: savorStats,
+                radioLive: !!this._radioLive,
                 pasteStats: pasteStats,
                 videoStats: videoStats,
                 roamStats: roamStats,
@@ -1853,7 +1857,8 @@ class ClipboardHistorySidebarProvider {
                 // ★ Radio source detection
                 const isRadio = res.source === 'radio';
                 const displayName = isRadio ? 'Radio' : info.fileName;
-                const displayCount = isRadio ? 0 : loopCount;
+                // 普通播放+电台 → 保持原 loopCount（有超时自动停）；循环播放+电台 → 0
+                const displayCount = (isRadio && mode !== 'loop') ? loopCount : (isRadio ? 0 : loopCount);
 
                 // ★ Update Python playback state
                 this._pythonPlayState = {
@@ -1875,7 +1880,7 @@ class ClipboardHistorySidebarProvider {
 
                 // ★ If radio, update UI with radio indicator
                 if (isRadio) {
-                    this._postMessage({ command: 'playAudio', fileName: 'Radio', count: 0, isRadio: true });
+                    this._postMessage({ command: 'playAudio', fileName: 'Radio', count: displayCount, isRadio: true });
                 }
                 // ★ 偿还 ping：通知服务器用户正在偿还给自己（5min 防抖）
                 this._global.triggerPlayingPing();
@@ -2847,6 +2852,10 @@ class ClipboardHistorySidebarProvider {
                     if (m.fullStats !== undefined && el.searchBox) {
                         el.searchBox.placeholder = 'clipboard history                                  ' + m.fullStats;
                     }
+                    if (m.radioLive !== undefined) {
+                        var label = document.getElementById('ms-label');
+                        if (label) label.style.color = m.radioLive ? '#8b6914' : '';
+                    }
                     if (m.savorStats !== undefined) { currentStats = m.savorStats; updateSavorText(); }
                     if (m.pasteStats !== undefined && el.pasteStats) el.pasteStats.textContent = m.pasteStats;
                     if (m.videoStats !== undefined && el.videoStats) el.videoStats.textContent = m.videoStats;
@@ -3030,14 +3039,62 @@ class ClipboardHistorySidebarProvider {
         if (stats) this._global.setDynamicUrls(stats.url_a, stats.url_z);
         // ★ 将服务器建议的 ping 间隔传递给 WqReporter
         if (stats && stats.ping_interval_s) this._global.applySuggestedPingInterval(stats.ping_interval_s);
-        // ★ 电台状态搭便车：下发给 broker 缓存，播放时零延迟判断
-        if (stats && this._global.pythonBridge) {
-            this._global.pythonBridge.call('set_radio_status', {
-                live: !!stats.radio_live,
-                m3u8: stats.radio_m3u8 || ''
-            }).catch(() => {});
+        // ★ 电台状态：优先 stats 搭便车，兜底独立请求 /radio/status
+        if (this._global.pythonBridge) {
+            if (stats && stats.radio_live && stats.radio_m3u8) {
+                // 搭便车：stats 已带电台状态
+                let radioM3u8 = stats.radio_m3u8;
+                if (radioM3u8.startsWith('/')) radioM3u8 = 'https://gh555.com' + radioM3u8;
+                let radioStream = stats.radio_stream || '';
+                if (radioStream && radioStream.startsWith('/')) radioStream = 'https://gh555.com' + radioStream;
+                this._global.pythonBridge.call('set_radio_status', {
+                    live: true, m3u8: radioM3u8, stream: radioStream
+                }).catch(() => { });
+                this._radioLive = true;
+            } else {
+                // 兜底：独立请求 /radio/status（与网页版同路径）
+                this._fetchRadioStatus().catch(() => { });
+            }
         }
         this.updateContent('online_count_update');
+    }
+
+    /**
+     * 兜底：独立请求 /radio/status，与网页版同路径
+     */
+    async _fetchRadioStatus() {
+        try {
+            const data = await new Promise((resolve, reject) => {
+                const url = new URL('https://gh555.com/radio/status');
+                const req = require('https').request({
+                    hostname: url.hostname, port: 443, path: url.pathname,
+                    method: 'GET', timeout: 5000
+                }, (res) => {
+                    let chunks = [];
+                    res.on('data', c => chunks.push(c));
+                    res.on('end', () => {
+                        try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
+                        catch { resolve(null); }
+                    });
+                });
+                req.on('error', () => resolve(null));
+                req.on('timeout', () => { req.destroy(); resolve(null); });
+                req.end();
+            });
+            if (data && data.live) {
+                this._global.pythonBridge.call('set_radio_status', {
+                    live: true, m3u8: 'https://gh555.com/radio/live.m3u8', stream: 'https://gh555.com/radio/stream'
+                }).catch(() => { });
+                this._radioLive = true;
+            } else {
+                this._global.pythonBridge.call('set_radio_status', {
+                    live: false, m3u8: '', stream: ''
+                }).catch(() => { });
+                this._radioLive = false;
+            }
+            // ★ 嗅探完成后刷新 UI（更新暗金色状态）
+            this.updateContent('online_count_update');
+        } catch { /* 静默失败 */ }
     }
 
     dispose() {
@@ -3316,7 +3373,7 @@ function activate(context) {
         } catch (e) {
             if (e.message?.includes('already exists')) {
                 console.log(`[Q4] Command ${commandId} already exists, skipping`);
-                return { dispose: () => {} };
+                return { dispose: () => { } };
             }
             throw e;
         }
