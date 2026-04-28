@@ -192,12 +192,81 @@ class _MiniaudioCompat:
         return "not ok\n\n--- diagnostics ---\n" + diag
 
 
+class _RadioStreamSource(miniaudio.StreamableSource):
+    """流式音频源，作为 miniaudio stream_any 的输入。
+    后台线程 HTTP 下载 + 内部缓冲区 + Condition 即时唤醒。"""
+    BUFFER_SIZE = 131072  # 128KB 内部缓冲 = 20+ 秒 @ 48kbps
+    BLOCK_SIZE = 16384    # 16KB 每次网络读取，加速初始填充
+
+    def __init__(self, url):
+        import urllib.request
+        self._buf = bytearray()
+        self._cond = threading.Condition()
+        self._stop = threading.Event()
+        self._eof = False
+        req = urllib.request.Request(url, method='GET')
+        req.add_header('User-Agent', 'qqq-radio/1')
+        self._resp = urllib.request.urlopen(req, timeout=30)
+        self._thread = threading.Thread(target=self._download, daemon=True)
+        self._thread.start()
+
+    def _download(self):
+        try:
+            while not self._stop.is_set():
+                with self._cond:
+                    while len(self._buf) >= self.BUFFER_SIZE and not self._stop.is_set():
+                        self._cond.wait(timeout=0.1)
+                if self._stop.is_set():
+                    break
+                data = self._resp.read(self.BLOCK_SIZE)
+                if not data:
+                    self._eof = True
+                    with self._cond:
+                        self._cond.notify_all()
+                    break
+                with self._cond:
+                    self._buf.extend(data)
+                    self._cond.notify_all()  # 立即唤醒 read()
+        except Exception:
+            self._eof = True
+            with self._cond:
+                self._cond.notify_all()
+
+    def read(self, num_bytes):
+        """解码器调用。数据到达时由 Condition 即时唤醒，零轮询。"""
+        with self._cond:
+            deadline = time.time() + 10.0
+            while not self._buf:
+                if self._eof or self._stop.is_set():
+                    return b''
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return b''
+                self._cond.wait(timeout=min(remaining, 0.5))
+            n = min(num_bytes, len(self._buf))
+            data = bytes(self._buf[:n])
+            del self._buf[:n]
+            self._cond.notify_all()  # 唤醒 _download 继续填充
+            return data
+
+    def seek(self, offset, origin):
+        return False
+
+    def close(self):
+        self._stop.set()
+        with self._cond:
+            self._cond.notify_all()
+        try: self._resp.close()
+        except Exception: pass
+
+
 class PlaybackToken:
-    __slots__ = ("stop_event", "last_data_pull",)
+    __slots__ = ("stop_event", "last_data_pull", "_radio_q",)
 
     def __init__(self):
         self.stop_event = threading.Event()
         self.last_data_pull = time.time()  # ★ 追踪设备最后一次拉取数据的时间
+        self._radio_q = None  # ★ 电台段间队列，由 _pcm_once_stream 懒初始化
 
     def stop(self):
         self.stop_event.set()
@@ -1682,6 +1751,121 @@ class NonBlockingAudioEngine:
         self.executor.submit(self._radio_hls_wrapper, m3u8_url, token)
         return token
 
+    def play_radio_stream(self, stream_url: str):
+        """★ 接入直推流电台（单 HTTP 连接持续接收 MP3 字节，替代 HLS）"""
+        token = PlaybackToken()
+        self._register_token(token)
+        self.executor.submit(self._radio_stream_wrapper, stream_url, token)
+        return token
+
+    def _radio_stream_wrapper(self, stream_url, token: PlaybackToken):
+        try:
+            self._radio_stream_worker(stream_url, token)
+        finally:
+            self._unregister_token(token)
+
+    def _radio_stream_worker(self, stream_url, token: PlaybackToken):
+        """直推流电台：使用自定义 StreamableSource + stream_any 实现
+        单解码器实例连续解码整条 MP3 流，彻底消除段切换卡顿。
+        架构：后台线程 HTTP 下载+缓冲 → stream_any 持久解码器 → device 回调消费。"""
+        device = None
+        device_dead = False
+        reconnect_delay = 3.0
+
+        try:
+            while not token.stopped:
+                source = None
+                try:
+                    source = _RadioStreamSource(stream_url)
+
+                    # stream_any：单解码器实例连续解码 MP3→PCM，零段边界
+                    source_stream = miniaudio.stream_any(
+                        source,
+                        source_format=miniaudio.FileFormat.MP3,
+                        output_format=self.REQUESTED_FORMAT,
+                        nchannels=self.REQUESTED_CHANNELS,
+                        sample_rate=self.REQUESTED_RATE,
+                    )
+
+                    gen = self._radio_stream_gen(source_stream, token)
+                    next(gen)  # prime
+
+                    reconnect_delay = 3.0
+
+                    if device and device_dead:
+                        self._kill_device_async(device)
+                        device = None
+                    device_dead = False
+
+                    device = self.PlaybackDevice(
+                        output_format=self.REQUESTED_FORMAT,
+                        nchannels=self.REQUESTED_CHANNELS,
+                        sample_rate=self.REQUESTED_RATE,
+                    )
+                    device.start(gen)
+
+                    # 监控循环：检测设备静音/断流
+                    while not token.stopped:
+                        time.sleep(0.5)
+                        if device and token.device_silent_seconds() > 5.0:
+                            self._log_critical("【!!】 Radio stream: device silent, will reconnect")
+                            if self._on_device_lost:
+                                try: self._on_device_lost()
+                                except Exception: pass
+                            device_dead = True
+                            self._kill_device_async(device)
+                            device = None
+                            break
+
+                except Exception as e:
+                    self._log_critical(f"【!!】 Radio stream error: {e}")
+                finally:
+                    if source:
+                        try: source.close()
+                        except Exception: pass
+
+                if not token.stopped:
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 1.5, 30.0)
+
+        finally:
+            if device:
+                if device_dead:
+                    self._kill_device_async(device)
+                else:
+                    try: device.stop()
+                    except Exception: pass
+                    try: device.close()
+                    except Exception: pass
+
+    def _radio_stream_gen(self, source_stream, token: PlaybackToken):
+        """包装 stream_any 的 generator，添加 stop 检测和 touch 心跳。
+        miniaudio generator 协议：send(required_frames) → yield PCM data。"""
+        next(source_stream)  # prime the source decoder
+        required_frames = yield b''  # prime our wrapper for device
+        while not token.stopped:
+            try:
+                data = source_stream.send(required_frames)
+                if not data or len(data) == 0:
+                    break
+                token.touch()
+                required_frames = yield data
+            except StopIteration:
+                break
+
+    def _decode_mp3_buffer(self, mp3_bytes):
+        """将原始 MP3 字节直接在内存中解码为 PCM，零磁盘 I/O"""
+        try:
+            decoded = miniaudio.decode(
+                mp3_bytes,
+                output_format=self.REQUESTED_FORMAT,
+                nchannels=self.REQUESTED_CHANNELS,
+                sample_rate=self.REQUESTED_RATE,
+            )
+            return decoded.samples
+        except Exception:
+            return None
+
     def _radio_hls_wrapper(self, m3u8_url, token: PlaybackToken):
         try:
             self._radio_hls_worker(m3u8_url, token)
@@ -1725,6 +1909,10 @@ class NonBlockingAudioEngine:
                     self._log_critical(f"【!!】 Radio: seq jump detected {last_seq} → {min_seq}, resetting")
                     last_seq = min_seq - 1
 
+                # --- 2.5 首次进入：只取最新 1 段，跳过旧段避免高延迟下 404 ---
+                if last_seq == -1 and len(segments) > 1:
+                    last_seq = segments[-2][0]  # 只播最后一段
+
                 # --- 3. 播放新段 ---
                 played_any = False
                 for seq, seg_url, duration in segments:
@@ -1748,6 +1936,7 @@ class NonBlockingAudioEngine:
                         device_dead = False
                         try:
                             gen = self._pcm_once_stream(seg_pcm, token)
+                            next(gen)  # prime the generator before device.start()
                             device = self.PlaybackDevice(
                                 output_format=self.REQUESTED_FORMAT,
                                 nchannels=self.REQUESTED_CHANNELS,
@@ -1803,7 +1992,7 @@ class NonBlockingAudioEngine:
         try:
             req = urllib.request.Request(m3u8_url, method='GET')
             req.add_header('User-Agent', 'qqq-radio/1')
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 text = resp.read().decode('utf-8', errors='replace')
         except Exception as e:
             self._log_critical(f"【!!】 Radio playlist fetch error: {e}")
@@ -1831,8 +2020,16 @@ class NonBlockingAudioEngine:
             elif line.startswith('#EXT-X-ENDLIST'):
                 is_end = True
             elif line and not line.startswith('#'):
-                # 段 URL
-                seg_url = line if line.startswith('http') else base_url + line
+                # 段 URL：绝对路径(/开头)用域名根拼接，相对路径用 base_url
+                if line.startswith('http'):
+                    seg_url = line
+                elif line.startswith('/'):
+                    # /radio/seg/xxx.mp3 → https://gh555.com/radio/seg/xxx.mp3
+                    from urllib.parse import urlparse
+                    parsed = urlparse(m3u8_url)
+                    seg_url = f"{parsed.scheme}://{parsed.netloc}{line}"
+                else:
+                    seg_url = base_url + line
                 seg_seq = media_seq + len(segments)
                 segments.append((seg_seq, seg_url, duration))
                 duration = 3.0  # reset for next
@@ -1851,7 +2048,7 @@ class NonBlockingAudioEngine:
         try:
             req = urllib.request.Request(seg_url, method='GET')
             req.add_header('User-Agent', 'qqq-radio/1')
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 data = resp.read()
 
             # 根据 URL 后缀决定临时文件后缀
@@ -1916,24 +2113,28 @@ class NonBlockingAudioEngine:
                 except Exception: pass
 
     def _pcm_once_stream(self, pcm_data, token: PlaybackToken):
-        """生成器：播放一段 PCM 数据，支持外部喂入新段"""
-        # 使用 queue 实现段间无缝衔接
-        if not hasattr(token, '_radio_q'):
+        """生成器：播放 PCM 数据，支持外部喂入新段。
+        miniaudio generator 协议：required 是帧数（frames），不是字节数。
+        音频回调线程零阻塞：队列空时立即 yield 静音，不等待。"""
+        FRAME_SIZE = self.REQUESTED_CHANNELS * 2  # int16 stereo = 4 bytes/frame
+        if token._radio_q is None:
             token._radio_q = queue.Queue(maxsize=8)
-        required = yield b''  # prime
+        required_frames = yield b''  # prime
+        silence = None  # 懒初始化静音缓冲区
         mv = memoryview(pcm_data).cast('B')
         offset = 0
         while not token.stopped:
             if offset < len(mv):
-                end = min(offset + required, len(mv))
+                nbytes = required_frames * FRAME_SIZE
+                end = min(offset + nbytes, len(mv))
                 chunk = bytes(mv[offset:end])
                 offset += len(chunk)
                 token.touch()
-                required = yield chunk
+                required_frames = yield chunk
             else:
-                # 当前段播完，尝试从队列取下一段
+                # 当前段播完，非阻塞尝试取下一段
                 try:
-                    next_pcm = token._radio_q.get(timeout=0.5)
+                    next_pcm = token._radio_q.get_nowait()
                     if next_pcm is None:
                         break
                     mv = memoryview(next_pcm).cast('B')
@@ -1941,13 +2142,15 @@ class NonBlockingAudioEngine:
                 except queue.Empty:
                     if token.stopped:
                         break
-                    # 没有新段，输出静音保持设备活跃
+                    # 队列空 → 立即 yield 一帧静音（~23ms@44100Hz），不阻塞音频线程
+                    if silence is None or len(silence) != required_frames * FRAME_SIZE:
+                        silence = b'\x00' * (required_frames * FRAME_SIZE)
                     token.touch()
-                    required = yield b'\x00' * required
+                    required_frames = yield silence
 
     def _radio_feed_pcm(self, token: PlaybackToken, pcm_data):
         """喂入新段 PCM 到播放队列"""
-        if hasattr(token, '_radio_q'):
+        if token._radio_q is not None:
             try:
                 token._radio_q.put(pcm_data, timeout=5.0)
             except queue.Full:
