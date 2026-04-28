@@ -2158,9 +2158,32 @@ const ConfigManager = {
 			_bootstrapResetDone = true; // Pro: no clearing needed, mark ready immediately
 			return;
 		}
-		// logMessage("[ConfigGate] 非 Pro 启动，清除所有 settings.json 中的 qqq.* 配置", "INFO"); // qq2q
+		// ★ Pre-scan: collect only keys that actually exist in settings.json
+		// This avoids unnecessary writes and prevents the settings.json conflict dialog
+		// that appears when the extension is reinstalled from a different distribution.
+		const keysToClear = [];
+		const cfg = vscode.workspace.getConfiguration(cfgNs());
+		const folders = vscode.workspace.workspaceFolders || [];
 		for (const k of Object.keys(DEFAULT_CONFIG)) {
-			await _clearVscodeSettingEverywhere(k);
+			const ins = cfg.inspect(k);
+			if (ins?.globalValue !== undefined || ins?.workspaceValue !== undefined) {
+				keysToClear.push(k);
+				continue;
+			}
+			// Check workspace folder level
+			for (const wf of folders) {
+				const fin = vscode.workspace.getConfiguration(cfgNs(), wf.uri).inspect(k);
+				if (fin?.workspaceFolderValue !== undefined) {
+					keysToClear.push(k);
+					break;
+				}
+			}
+		}
+		// Only write if there's actually something to clear (zero writes = zero conflict)
+		if (keysToClear.length > 0) {
+			for (const k of keysToClear) {
+				await _clearVscodeSettingEverywhere(k);
+			}
 		}
 		_bootstrapResetDone = true; // ★ Clearing done, now get() can read settings.json
 	},
