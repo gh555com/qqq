@@ -149,7 +149,69 @@ Press `2` to scroll to list bottom.
 
 
 
-## ✦q✦ Hot features
+## ✦q✦ Premium vs Free
+
+
+ All features mentioned above are fully available in the free version.
+
+In addition, qqq comes with essential premium capabilities, including HTML pasting, DOC export, streaming video pasting, and more...
+
+However, qqq only includes the simplest billing model: a one-time purchase.
+
+**One-time purchase, permanent ownership.**
+
+More importantly, all advanced features of qqq are permanently free and unlimited.
+
+**This means the most powerful version of qqq is available in the free edition.**
+
+Still, we hope you will purchase the genuine version. The genuine version offers just two additional benefits: 1. Watermark removal; 2. Cloud storage for preferences.
+
+
+ ↓ How to Get a Genuine License ↓
+
+Sponsor [GH Health](https://www.gh555.com/gaea/d/qqq#price) to receive ge as a gift. You can purchase the official version with 100ge (approximately equivalent to 100 RMB or 15 USD).
+
+Additionally, there are 3 other ways to get a genuine activation code for free:
+
+#### Method 1: Earn It in 100 Days
+
+Register as a part of **GH Health** to automatically receive **1 ge per day** — no login, no check-in, no tasks required.
+Since qqq is priced at 100 ge: **Sign up → Wait 100 days → Get qqq for free**.
+
+[Register](https://www.gh555.com/login)　[Buy License](https://www.gh555.com/gaea/d/qqq#price)　[▶Save Preferences](https://www.gh555.com/gaea/d/qqq#profile)
+
+
+
+#### Method 2: Contribute a Video
+
+Independently produce and publish an introductory video for qqq. Depending on video quality, you can earn:
+
+| Video Quality | Rewards |
+|---------------|---------|
+| ★ | 3 Premium license keys, or the equivalent of 300 ge |
+| ★★ | 10 Premium license keys, or the equivalent of 1,000 ge |
+| ★★★ | 30 Premium license keys, or the equivalent of 3,000 ge |
+| ★★★★ | 100 Premium license keys, or the equivalent of 10,000 ge |
+| ★★★★★ | 300 Premium license keys, or the equivalent of 30,000 ge |
+
+Simply email the video link to: info@gh555.com.
+
+
+#### Method 3. Submit bugs at https://github.com/gh555com/qqq/issues.
+
+
+Share 3 Premium license keys:
+
+DG-JACEJ-CE23F-3ANIZ-DEIRU-AC3AE7
+
+DG-7FFAB-7M5H6-BWNDP-SH3ME-D2GBU7
+
+DG-RQUPI-DFOIN-NITZG-5RI3R-4MASF2
+
+Premium Help: ky@gh555.com (Primary)；📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement) )
+
+
+### **Premium features include:**
 
  #### Paste HTML
 

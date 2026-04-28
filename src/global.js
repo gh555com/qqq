@@ -2808,10 +2808,13 @@ class WqReporter {
 				this._lastPingTime = Math.floor(Date.now() / 1000); // ★ 记录本次成功 ping 时间
 				this.retryDelay = 60000; // 重置重试延迟
 				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s, accepted=${data.accepted_total_seconds}, server_now=${data.server_now}`, 'INFO');
-				// 服务端纠正
-				if (data.force_reset && typeof data.server_total_seconds === 'number') {
-					extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.server_total_seconds);
-					logMessage(`[wq] Force reset local total to ${data.server_total_seconds}`, 'INFO');
+				// ★ 每次 ping 成功都用服务端 accepted_total 覆盖本地，防止脑裂
+				if (typeof data.accepted_total_seconds === 'number' && data.accepted_total_seconds >= 0) {
+					const localTotal = extensionContext.globalState.get(KEY_TOTAL_SECONDS, 0) || 0;
+					if (localTotal !== data.accepted_total_seconds) {
+						extensionContext.globalState.update(KEY_TOTAL_SECONDS, data.accepted_total_seconds);
+						logMessage(`[wq] Sync local total: ${localTotal} → ${data.accepted_total_seconds}`, 'INFO');
+					}
 				}
 				// ★ 用服务端返回的 min_next_ping_at 调度下次 ping
 				if (typeof data.min_next_ping_at === 'number' && data.min_next_ping_at > 0) {
