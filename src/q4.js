@@ -1562,7 +1562,7 @@ class ClipboardHistorySidebarProvider {
             if (typeof this._onlineCount === 'number') {
                 let title = `v${ver}; ${this._onlineCount}`;
                 if (typeof this._activePlayingCount === 'number') {
-                    title += `: ${this._activePlayingCount}`;
+                    title += `; ${this._activePlayingCount}`;
                 }
                 this._view.title = title;
             } else {
