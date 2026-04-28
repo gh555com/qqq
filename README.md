@@ -202,11 +202,12 @@ Simply email the video link to: info@gh555.com.
 
 Share 3 Premium license keys:
 
-DG-JACEJ-CE23F-3ANIZ-DEIRU-AC3AE7
+DG-7J4OA-4H7CX-K3F2I-D377P-HU22GI
 
-DG-7FFAB-7M5H6-BWNDP-SH3ME-D2GBU7
+DG-GHPCV-L7EFH-22EBK-IDBCY-GHYXRD
 
-DG-RQUPI-DFOIN-NITZG-5RI3R-4MASF2
+DG-F3HJ5-UBVX3-4HBV2-QQIXL-ZZRSJ7
+
 
 Premium Help: ky@gh555.com (Primary)；📞 +86 19232854249 (Emergency & Chinese Language Only (Priority: IDE integration; merchant & group procurement) )
 

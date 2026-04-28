@@ -2539,7 +2539,7 @@ class WqReporter {
 		if (this._stopped) return;
 		const initialDelay = 30000 + Math.random() * 90000;
 		this._initialTimer = setTimeout(() => this._ping(), initialDelay);
-		logMessage(`[wq] Reporter started, initial ping in ${Math.round(initialDelay/1000)}s`, 'INFO');
+		logMessage(`[wq] Reporter started, initial ping in ${Math.round(initialDelay / 1000)}s`, 'INFO');
 	}
 
 	_scheduleNextPing(delaySec) {
@@ -2547,7 +2547,7 @@ class WqReporter {
 		if (this._nextPingTimer) clearTimeout(this._nextPingTimer);
 		const delayMs = Math.max(60, delaySec) * 1000; // 至少 60 秒
 		this._nextPingTimer = setTimeout(() => this._ping(), delayMs);
-		logMessage(`[wq] Next ping scheduled in ${Math.round(delayMs/1000)}s`, 'INFO');
+		logMessage(`[wq] Next ping scheduled in ${Math.round(delayMs / 1000)}s`, 'INFO');
 	}
 
 	/**
@@ -2804,7 +2804,7 @@ class WqReporter {
 				req.end();
 			});
 
-				if (data.ok) {
+			if (data.ok) {
 				this._lastPingTime = Math.floor(Date.now() / 1000); // ★ 记录本次成功 ping 时间
 				this.retryDelay = 60000; // 重置重试延迟
 				logMessage(`[wq] Ping ok, delta=${data.delta_seconds}s, accepted=${data.accepted_total_seconds}, server_now=${data.server_now}`, 'INFO');
@@ -2825,6 +2825,8 @@ class WqReporter {
 					// 服务端未返回调度时间，兜底 12 小时
 					this._scheduleNextPing(43200);
 				}
+				// ★ 触发 ping 成功回调（电台嘗探等）
+				_firePingSuccess();
 			} else {
 				// 服务端返回错误，打印详情以便调试
 				logMessage(`[wq] Ping rejected: ${JSON.stringify(data)}, body: ${bodyStr}`, 'WARN');
@@ -2833,7 +2835,7 @@ class WqReporter {
 			}
 		} catch (e) {
 			// 网络错误才重试（指数退避）
-			logMessage(`[wq] Ping network error: ${e.message}, retry in ${this.retryDelay/1000}s`, 'WARN');
+			logMessage(`[wq] Ping network error: ${e.message}, retry in ${this.retryDelay / 1000}s`, 'WARN');
 			if (!this._stopped) {
 				setTimeout(() => this._ping(), this.retryDelay);
 				this.retryDelay = Math.min(this.retryDelay * 2, 3600000); // 最大 1 小时
@@ -2860,6 +2862,17 @@ function applySuggestedPingInterval(intervalSec) {
 function triggerPlayingPing() {
 	if (_wqReporter) {
 		_wqReporter.triggerPlayingPing();
+	}
+}
+
+// ★ ping 成功回调（供 q4 注册电台嗅探等）
+let _onPingSuccessCallbacks = [];
+function onPingSuccess(cb) {
+	if (typeof cb === 'function') _onPingSuccessCallbacks.push(cb);
+}
+function _firePingSuccess() {
+	for (const cb of _onPingSuccessCallbacks) {
+		try { cb(); } catch { }
 	}
 }
 
@@ -4782,64 +4795,65 @@ WScript.Quit 0
 }
 
 async function getQqqStats() {
-    try {
-        const data = await new Promise((resolve, reject) => {
-            const url = new URL(`${WQ_API_BASE}/goods/qqq/stats`);
-            const options = {
-                hostname: url.hostname,
-                port: 443,
-                path: url.pathname,
-                method: 'GET',
-                timeout: 5000
-            };
+	try {
+		const data = await new Promise((resolve, reject) => {
+			const url = new URL(`${WQ_API_BASE}/goods/qqq/stats`);
+			const options = {
+				hostname: url.hostname,
+				port: 443,
+				path: url.pathname,
+				method: 'GET',
+				timeout: 5000
+			};
 
-            const req = require('https').request(options, (res) => {
-                let chunks = [];
-                res.on('data', chunk => chunks.push(chunk));
-                res.on('end', () => {
-                    try {
-                        resolve(JSON.parse(Buffer.concat(chunks).toString()));
-                    } catch (e) {
-                        resolve(null);
-                    }
-                });
-            });
+			const req = require('https').request(options, (res) => {
+				let chunks = [];
+				res.on('data', chunk => chunks.push(chunk));
+				res.on('end', () => {
+					try {
+						resolve(JSON.parse(Buffer.concat(chunks).toString()));
+					} catch (e) {
+						resolve(null);
+					}
+				});
+			});
 
-            req.on('error', () => resolve(null));
-            req.on('timeout', () => {
-                req.destroy();
-                resolve(null);
-            });
+			req.on('error', () => resolve(null));
+			req.on('timeout', () => {
+				req.destroy();
+				resolve(null);
+			});
 
-            req.end();
-        });
+			req.end();
+		});
 
-        if (data && data.ok) {
-            return {
-                active_12h: typeof data.active_12h === 'number' ? data.active_12h : null,
-                total_installations: typeof data.total_installations === 'number' ? data.total_installations : null,
-                total_companion_seconds: typeof data.total_companion_seconds === 'number' ? data.total_companion_seconds : null,
-                updated_at: data.updated_at || null,
-                url_a: typeof data.url_a === 'string' && data.url_a ? data.url_a : null,
-                url_z: typeof data.url_z === 'string' && data.url_z ? data.url_z : null,
-                ping_interval_s: typeof data.ping_interval_s === 'number' && data.ping_interval_s > 0 ? data.ping_interval_s : null,
-                radio_live: !!data.radio_live,
-                radio_m3u8: typeof data.radio_m3u8 === 'string' && data.radio_m3u8 ? data.radio_m3u8 : null,
-                active_playing: typeof data.active_playing === 'number' ? data.active_playing : null
-            };
-        }
-        // 兼容旧逻辑：如果只有 active_12h 也接受
-        if (data && typeof data.active_12h === 'number') {
-            return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null, ping_interval_s: null, radio_live: false, radio_m3u8: null, active_playing: null };
-        }
-        return null;
-    } catch (e) {
-        return null;
-    }
+		if (data && data.ok) {
+			return {
+				active_12h: typeof data.active_12h === 'number' ? data.active_12h : null,
+				total_installations: typeof data.total_installations === 'number' ? data.total_installations : null,
+				total_companion_seconds: typeof data.total_companion_seconds === 'number' ? data.total_companion_seconds : null,
+				updated_at: data.updated_at || null,
+				url_a: typeof data.url_a === 'string' && data.url_a ? data.url_a : null,
+				url_z: typeof data.url_z === 'string' && data.url_z ? data.url_z : null,
+				ping_interval_s: typeof data.ping_interval_s === 'number' && data.ping_interval_s > 0 ? data.ping_interval_s : null,
+				radio_live: !!data.radio_live,
+				radio_m3u8: typeof data.radio_m3u8 === 'string' && data.radio_m3u8 ? data.radio_m3u8 : null,
+				radio_stream: typeof data.radio_stream === 'string' && data.radio_stream ? data.radio_stream : null,
+				active_playing: typeof data.active_playing === 'number' ? data.active_playing : null
+			};
+		}
+		// 兼容旧逻辑：如果只有 active_12h 也接受
+		if (data && typeof data.active_12h === 'number') {
+			return { active_12h: data.active_12h, total_installations: null, total_companion_seconds: null, updated_at: null, url_a: null, url_z: null, ping_interval_s: null, radio_live: false, radio_m3u8: null, radio_stream: null, active_playing: null };
+		}
+		return null;
+	} catch (e) {
+		return null;
+	}
 }
 
 module.exports = {
-    getQqqStats,
+	getQqqStats,
 	init,
 	getIcon,
 
@@ -4888,6 +4902,7 @@ module.exports = {
 	// ★ WqReporter
 	startWqReporter,
 	applySuggestedPingInterval,
+	onPingSuccess,
 	triggerPlayingPing,
 	getDeviceId,
 	getUserPhone,
