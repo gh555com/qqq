@@ -93,7 +93,7 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
 
 
 
-## ✦q✦ A Revolution of the Tab Key (without breaking the default Tab behavior)
+## ✦q✦ File Explorer
 
  Trigger: Press Tab while the window has focus but is not in editing mode, or directly click the Roam command/button.
 
@@ -115,7 +115,7 @@ Now, I advocate for tab (=**Roam**) to help you expand rapidly: reaching any loc
 
 4. **User-friendly**: Displays recent visits for quick jumps; `a`, `x` keys open the administrator terminal; supports quick filtering; remembers fine-grained list and sorting preferences; fully operable via keyboard: tab opens Roam → focus enters the filename edit box → filename → enter → focus enters the newly created file (already in edit stance) 🡺 I want you to expand faster; a large close button - if you don't like Roam, that's what I prepared for you, but more likely, you'll get a resource manager that will eventually merge with your consciousness.
 
-So, find the faster version of yourself.
+So fast.
 
 
 
@@ -290,10 +290,10 @@ The company undertakes never to collect clipboard content or any sensitive user 
 
 Virus detection or submission: https://www.avira.com/en/analysis/submit
 
- Detection result based on v16.1.0:
-
-
-  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/Avira.jpg" alt="Avira">
+ Detection result based on v16.2.2:
+<p align="left">
+  <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/Avira.jpg" width="60%" alt="Avira">
+</p>
 
 
 

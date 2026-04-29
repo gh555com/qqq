@@ -266,9 +266,20 @@ def _play_radio(m3u8_url, timeout_sec=0, stream_url=""):
         if timeout_sec > 0:
             _token_ref = _AUDIO_CURRENT_TOKEN
             def _radio_auto_stop():
+                global _AUDIO_CURRENT_TOKEN, _AUDIO_IS_LOOPING, _AUDIO_CURRENT_FILE, _AUDIO_LOOP_COUNT
                 if _token_ref and not _token_ref.stopped:
                     _log(f"[Audio] Radio auto-stop after {timeout_sec}s")
                     _token_ref.stop()
+                # ★ 重置状态 + 广播停止事件，让 JS 端还原 UI
+                _AUDIO_IS_LOOPING = False
+                _AUDIO_CURRENT_TOKEN = None
+                _AUDIO_CURRENT_FILE = None
+                _AUDIO_LOOP_COUNT = 0
+                _emit_event({
+                    "event": "audio_state_changed",
+                    "playing": False, "looping": False,
+                    "fileName": None, "loopCount": 0, "startTime": 0
+                })
             t = threading.Timer(timeout_sec, _radio_auto_stop)
             t.daemon = True
             t.start()
