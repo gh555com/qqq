@@ -1204,6 +1204,8 @@ class ClipboardHistorySidebarProvider {
         this._lastSyncState = stateKey;
 
         if (state && state.playing) {
+            // ★ 同步播放标志 → 让常规 ping 也携带 playing=true
+            this._global.setCurrentlyPlaying(true);
             // Update Python playback state
             this._pythonPlayState = {
                 playing: true,
@@ -1218,6 +1220,7 @@ class ClipboardHistorySidebarProvider {
             });
         } else {
             // Not playing
+            this._global.setCurrentlyPlaying(false);
             if (this._pythonPlayState.playing) {
                 this._pythonPlayState.playing = false;
                 this._postMessage({ command: 'stopAudio' });
@@ -1774,6 +1777,7 @@ class ClipboardHistorySidebarProvider {
 
         // ★ Clear Python playback state
         this._pythonPlayState.playing = false;
+        this._global.setCurrentlyPlaying(false);
 
         // ★ Clear shared state file for multi-window sync
         this._clearSavoringState();
@@ -3057,6 +3061,11 @@ class ClipboardHistorySidebarProvider {
             }
         }
         this.updateContent('online_count_update');
+        // ★ 正在播放时，每次 stats 轮询（5min）顺手补一次 playing ping
+        // 确保服务端 active_playing 窗口内始终有 playing=true 的心跳
+        if (this._pythonPlayState.playing) {
+            this._global.triggerPlayingPing();
+        }
     }
 
     /**

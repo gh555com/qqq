@@ -1183,6 +1183,7 @@ async function savorMomentsCommand() {
 				}
 				// ★ 偿还 ping：通知服务器用户正在偿还给自己（5min 防抖）
 				global.triggerPlayingPing();
+				global.setCurrentlyPlaying(true);
 				return;
 			}
 			// Python playback failed

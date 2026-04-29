@@ -2761,7 +2761,7 @@ class WqReporter {
 				open_today: _clampInt(extensionContext.globalState.get(KEY_SESSION_COUNT, 0) || 0, 0, 9999)
 			};
 			if (userId) body.doer_id = userId;
-			if (playing) body.playing = true;
+			if (playing || _isCurrentlyPlaying) body.playing = true;
 
 			const vig = this._collectVig();
 			if (vig) body.vig = vig;
@@ -2863,6 +2863,12 @@ function triggerPlayingPing() {
 	if (_wqReporter) {
 		_wqReporter.triggerPlayingPing();
 	}
+}
+
+// ★ 播放状态标志：让常规 ping 也携带 playing=true（解决电台在线人数归零问题）
+let _isCurrentlyPlaying = false;
+function setCurrentlyPlaying(val) {
+	_isCurrentlyPlaying = !!val;
 }
 
 // ★ ping 成功回调（供 q4 注册电台嗅探等）
@@ -4904,6 +4910,7 @@ module.exports = {
 	applySuggestedPingInterval,
 	onPingSuccess,
 	triggerPlayingPing,
+	setCurrentlyPlaying,
 	getDeviceId,
 	getUserPhone,
 	getIDEFamily,

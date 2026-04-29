@@ -4,7 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [16.2.0] - 2026-04-22
+
+## [16.2.2] - 2026-04-29
+
+### Added
+- Avira virus scan report updated to version 16.2.2
+
+### Fixed
+- **IO Engine** Known bugs at the IO low level primarily originate from the Python broker - miniaudio_v16
+- **Cross Publisher problem in settings.json**  Fixed the issue where cross publisher installation packages caused a conflict in the settings.json file.
+
+---
+
+## [16.2.0] - 2026-04-24
 
 ### Added
 - **Network Radio**: When radio is live, pressing play automatically tunes in to the live stream — no extra steps needed
