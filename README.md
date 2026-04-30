@@ -85,11 +85,11 @@ Let me be honest, via  qqq you can paste txt, exe, psd, mp3, folder, mp4.... if 
   <img src="https://cdn.jsdelivr.net/gh/kkn1n/res@qq/qqq/q3_3.gif" width="100%" alt="Paste any file">
 </p>
 
- qqq in, ctrl + v. If you don't like key combinations, try F2.
+ qqq in, ctrl + v. If you don't like key combinations, try `F2`.
 
  You can organize your ideas now.
 
- There’s just one more small thing - you need to be able to jump between arbitrary directories:
+ There’s just one more small problem - you need to be able to jump between arbitrary directories:
 
 
 

@@ -52,6 +52,7 @@ const CONSTANTS = Object.freeze({
     BATCH_SAVE_THRESHOLD: 5,
     SAVE_THROTTLE_MS: 1000,
     SAVE_RETRY_DELAY_MS: 121,
+    PERIODIC_MERGE_SAVE_MS: 300000, // ★ Periodic merge-save every 5min — each window runs its own timer
 
     // Atomic write
     SAVE_TEMP_SUFFIX: '.tmp',
@@ -373,10 +374,17 @@ class ClipboardHistoryManager {
         this._saveTimer = null;
         this._dirty = false;
 
+        // ★ Multi-window merge-on-save: track explicit user actions this session
+        // so merge doesn't re-pin something user unpinned, or re-add something user removed
+        this._sessionUnpinnedHashes = new Set();
+        this._sessionRemovedHashes = new Set();
+        this._sessionCleared = false; // if user cleared all history, skip merge entirely
+
         this._clipboardTimer = null;
         this._isWatching = false;
         this._watcherBusy = false;
         this._lastClipboardContent = '';
+        this._periodicMergeSaveTimer = null; // ★ periodic merge-save interval
 
         this._onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 
@@ -390,6 +398,13 @@ class ClipboardHistoryManager {
         // ★ _loadReady gate: all write operations (add/pin/remove/clear) must await this
         // to prevent race condition where save fires before load completes and overwrites pin state
         this._loadReady = this._loadHistory().catch(() => { });
+
+        // ★ Periodic merge-save: even if process is force-killed, at most 30s of data is at risk
+        this._loadReady.then(() => {
+            this._periodicMergeSaveTimer = setInterval(() => {
+                if (this._dirty) this.forceSave().catch(() => { });
+            }, CONSTANTS.PERIODIC_MERGE_SAVE_MS);
+        });
     }
 
     // ★ NEW: manage command history
@@ -587,6 +602,15 @@ class ClipboardHistoryManager {
         this._head = node;
     }
 
+    _insertTail(node) {
+        node.next = null;
+        node.prev = this._tail;
+        if (this._tail) this._tail.next = node;
+        this._tail = node;
+        if (!this._head) this._head = node;
+        this._size++;
+    }
+
     _popTail() {
         if (!this._tail) return null;
         const node = this._tail;
@@ -728,6 +752,13 @@ class ClipboardHistoryManager {
         // Record pin moment for sorting
         node.pinTimestamp = node.pinned ? Date.now() : 0;
 
+        // ★ Multi-window merge tracking: record explicit pin/unpin actions
+        if (node.pinned) {
+            this._sessionUnpinnedHashes.delete(node.hash); // re-pinned → no longer "unpinned"
+        } else {
+            this._sessionUnpinnedHashes.add(node.hash);    // explicitly unpinned
+        }
+
         this._touch();
         this._notifyChange('pin');
         this.requestSave();
@@ -800,6 +831,8 @@ class ClipboardHistoryManager {
         try {
             const node = this._idMap.get(String(id || ''));
             if (!node) return false;
+            // ★ Multi-window merge tracking: remember explicit removals
+            if (node.hash) this._sessionRemovedHashes.add(node.hash);
             this._removeNode(node);
             this._touch();
             this._notifyChange('remove');
@@ -816,6 +849,8 @@ class ClipboardHistoryManager {
         try {
             this._head = null; this._tail = null; this._size = 0;
             this._idMap.clear(); this._hashMap.clear();
+            // ★ Multi-window merge tracking: prevent merge from re-adding everything
+            this._sessionCleared = true;
             this._touch();
             this._notifyChange('clear');
             if (deleteFiles && this._fileBinGz && fs.existsSync(this._fileBinGz)) {
@@ -845,6 +880,10 @@ class ClipboardHistoryManager {
         this._dirty = false;
         const t0 = performance.now();
         try {
+            // ★★★ Multi-window merge-on-save: merge disk state before writing
+            // This prevents "last writer wins" from destroying other windows' changes
+            await this._mergeFromDisk();
+
             const payload = { version: CONSTANTS.VERSION, savedAt: Date.now(), history: this._toArrayAll() };
 
             const mp = getMsgpack();
@@ -860,6 +899,79 @@ class ClipboardHistoryManager {
         } finally {
             this.perfStats.saveTimeMs += (performance.now() - t0);
             this.perfStats.operations++;
+        }
+    }
+
+    /**
+     * ★★★ Multi-window merge-on-save ★★★
+     * Before overwriting the shared file, read what's on disk and merge:
+     *   - Pin state from disk is preserved unless user explicitly unpinned this session
+     *   - Items only on disk (added by another window) are adopted unless explicitly removed this session
+     *   - Items only in memory are kept as-is
+     * This guarantees no pin state or card data is ever silently lost due to multi-window races.
+     */
+    async _mergeFromDisk() {
+        if (!this._fileBinGz || !fs.existsSync(this._fileBinGz)) return;
+        // ★ If user explicitly cleared history this session, do NOT merge anything back
+        if (this._sessionCleared) return;
+        try {
+            const dataBuf = await fs.promises.readFile(this._fileBinGz);
+            const raw = await gunzipAsync(dataBuf);
+            if (!raw || raw.length === 0) return;
+
+            const mp = getMsgpack();
+            if (!mp) return;
+
+            const parsed = mp.decode(raw);
+            const diskItems = Array.isArray(parsed) ? parsed : (parsed?.history || []);
+            if (!Array.isArray(diskItems) || diskItems.length === 0) return;
+
+            let mergedPins = 0;
+            let mergedItems = 0;
+
+            for (const diskItem of diskItems) {
+                if (!diskItem.content) continue;
+                const hash = diskItem.hash || md5Hex(diskItem.content);
+
+                // Skip items we explicitly removed this session
+                if (this._sessionRemovedHashes.has(hash)) continue;
+
+                const memNode = this._hashMap.get(hash);
+                if (memNode) {
+                    // ★ Item exists in both memory and disk — merge pin state
+                    // Adopt disk's pin if: disk says pinned AND we didn't explicitly unpin it this session
+                    if (diskItem.pinned && !memNode.pinned && !this._sessionUnpinnedHashes.has(hash)) {
+                        memNode.pinned = true;
+                        memNode.pinTimestamp = diskItem.pinTimestamp || Date.now();
+                        mergedPins++;
+                    }
+                } else {
+                    // ★ Item only on disk (another window added it) — adopt it
+                    const node = {
+                        id: diskItem.id || randomId(),
+                        content: diskItem.content,
+                        timestamp: diskItem.timestamp || Date.now(),
+                        preview: diskItem.preview || makePreview(diskItem.content),
+                        size: diskItem.size || Buffer.byteLength(diskItem.content, 'utf8'),
+                        pinned: !!diskItem.pinned,
+                        pinTimestamp: diskItem.pinTimestamp || 0,
+                        hash: hash,
+                        prev: null, next: null
+                    };
+                    this._insertTail(node);
+                    this._idMap.set(node.id, node);
+                    this._hashMap.set(hash, node);
+                    mergedItems++;
+                }
+            }
+
+            if (mergedPins > 0 || mergedItems > 0) {
+                this._touch(); // invalidate snapshot cache so _toArrayAll() rebuilds
+                console.log(`[Q4] ★ merge-on-save: recovered ${mergedPins} pin(s), ${mergedItems} item(s) from disk`);
+            }
+        } catch (e) {
+            // Merge failed — proceed with current in-memory state (don't block save)
+            console.error('[Q4] merge-from-disk failed (non-fatal):', e.message);
         }
     }
 
@@ -1104,6 +1216,8 @@ class ClipboardHistoryManager {
 
     async dispose() {
         this.stopWatching();
+        if (this._periodicMergeSaveTimer) clearInterval(this._periodicMergeSaveTimer);
+        this._periodicMergeSaveTimer = null;
         await this._loadReady; // Ensure pending writes gated on loadReady complete before saving
         if (this._saveTimer) clearTimeout(this._saveTimer);
         if (this._dirty) await this.forceSave();
