@@ -1487,8 +1487,8 @@ mod platform {
         {
             // macOS: clipboard-rs set_image
             if let Ok(ctx) = setup_clipboard() {
-                use clipboard_rs::common::RustImage;
-                if let Ok(rust_img) = <dyn RustImage>::from_png(&png_bytes) {
+                use clipboard_rs::RustImageData;
+                if let Ok(rust_img) = RustImageData::from_png(&png_bytes) {
                     if ctx.set_image(rust_img).is_ok() {
                         return PyV::Obj(vec![
                             ("success".to_string(), PyV::Bool(true)),
